@@ -1,7 +1,7 @@
 //! Relaying a spawned child's stdio over a unix socket the caller owns.
 //!
-//! The ACP driver talks to a coding agent over stdin/stdout, and on a supervised host the daemon
-//! cannot start that agent as another OS user itself. [`SpawnRelayed`](crate::request::SpawnRelayedRequest)
+//! The daemon talks to a spawned child over stdin/stdout, and on a supervised host the daemon
+//! cannot start that child as another OS user itself. [`SpawnRelayed`](crate::request::SpawnRelayedRequest)
 //! starts it here instead and this module carries its bytes: the caller listens on a socket *path*
 //! (a path crosses a process boundary, a file descriptor does not), the supervisor connects to it,
 //! and the child's stdout goes out over that connection while whatever comes in goes to its stdin.

@@ -5,6 +5,7 @@
 //! Resolved once, at the top of the start, so every session type's own route resolution reads an
 //! ordinary request.
 
+use tddy_coding_agent_specs::CodingAgentRegistry;
 use tddy_core::provider_route::{choose_route, RouteSources};
 use tddy_discovery::harness_profile::{load_harness_profiles, HarnessProfile};
 use tddy_rpc::{Response, Status};
@@ -79,7 +80,7 @@ impl LaunchSessions {
             return Ok(req);
         };
         let access = self.host.session_account_access(&req.session_token);
-        request_on_profile(req, &profile, &access)
+        request_on_profile(req, &profile, &access, self.coding_agents.agents())
     }
 }
 
@@ -90,8 +91,9 @@ pub fn request_on_profile(
     req: StartSessionRequest,
     profile: &HarnessProfile,
     access: &SessionAccountAccess,
+    agents: &CodingAgentRegistry,
 ) -> Result<StartSessionRequest, Status> {
-    let start = profile_start(profile).map_err(Status::invalid_argument)?;
+    let start = profile_start(profile, agents).map_err(Status::invalid_argument)?;
     let sources = RouteSources {
         agent_definition: Some(start.choice),
         ..session_route_sources(&req)
@@ -120,7 +122,7 @@ pub fn request_on_profile(
 }
 
 /// A caller-sent start may not name a standing role; see [`LaunchSessions::start_session_core`].
-fn refuse_a_requested_role(req: &StartSessionRequest) -> Result<(), Status> {
+pub(crate) fn refuse_a_requested_role(req: &StartSessionRequest) -> Result<(), Status> {
     if req.session_role.trim().is_empty() {
         return Ok(());
     }

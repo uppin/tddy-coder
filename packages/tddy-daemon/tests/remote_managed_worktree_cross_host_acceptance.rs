@@ -33,7 +33,6 @@ use async_trait::async_trait;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::common_room_key_directory::{advertised_signing_key, CommonRoomKeyDirectory};
-use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::runtime::{spawn_common_room_discovery_task, split_room_hosting};
 use tddy_daemon_auth::{DaemonSigningKey, SessionTokens};
 use tddy_daemon_livekit::livekit_peer_discovery::{
@@ -171,7 +170,6 @@ fn write_livekit_daemon_yaml(
     ws_url: &str,
     daemon_instance_id: &str,
     os_user: &str,
-    claude_binary: &str,
 ) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
@@ -180,14 +178,9 @@ fn write_livekit_daemon_yaml(
     let yaml = format!(
         r#"
 daemon_instance_id: {daemon_instance_id}
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
 allowed_tools:
   - path: {true_path}
     label: t
-claude_cli:
-  binary_path: {claude_binary}
 livekit:
   enabled: true
   url: {ws_url}
@@ -197,6 +190,11 @@ livekit:
 "#
     );
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     (dir, path)
 }
 
@@ -250,9 +248,8 @@ async fn a_daemon(
     claude_binary: &str,
     codebase_provisioner: Option<Arc<dyn WorkspaceSandboxProvisioner>>,
 ) -> Daemon {
-    let (config_dir, config_path) =
-        write_livekit_daemon_yaml(ws_url, instance_id, os_user, claude_binary);
-    let config = DaemonConfig::load(&config_path).unwrap();
+    let (config_dir, config_path) = write_livekit_daemon_yaml(ws_url, instance_id, os_user);
+    let config = tddy_daemon_kernel::config::DaemonConfig::load(&config_path).unwrap();
 
     let sessions = tempfile::tempdir().unwrap();
     register_project(&sessions.path().join("projects"), repo);
@@ -294,7 +291,11 @@ async fn a_daemon(
             }),
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+            "claude",
+            Path::new(claude_binary),
+        )]),
     )
     .with_session_tokens(tokens);
     let rooms = Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new());
@@ -1194,8 +1195,16 @@ async fn a_split_sessions_linked_claude_md_still_leads_with_the_managed_codebase
     );
     let text = std::fs::read_to_string(&claude_md).expect("CLAUDE.md must be readable");
     assert!(
-        text.starts_with(tddy_sandbox::managed_codebase_preamble(&[]).trim_start())
-            && text.contains("# Project rules"),
+        text.starts_with(
+            tddy_sandbox::managed_codebase_preamble(
+                &[],
+                &[
+                    std::path::PathBuf::from("CLAUDE.md"),
+                    std::path::PathBuf::from("AGENTS.md")
+                ]
+            )
+            .trim_start()
+        ) && text.contains("# Project rules"),
         "CLAUDE.md must lead with the preamble and carry AGENTS.md's text: {text}"
     );
 }

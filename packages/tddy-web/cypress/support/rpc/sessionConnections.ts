@@ -6,7 +6,7 @@
  * doing (`status`). These builders state one of those in the terms a spec cares about: a session
  * carried over its own room, or one its host serves itself.
  *
- * Model: `src/rpc/connections/session.ts`.
+ * Model: `src/app/rpc/connections/session.ts`.
  */
 
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
@@ -14,13 +14,13 @@ import type { DescService } from "@bufbuild/protobuf";
 import type {
   SessionAttachmentHint,
   SessionConnection,
-} from "../../../src/rpc/connections/session";
+} from "tddy-client-web/connections/session";
 import type {
   TerminalFeed,
   TerminalFrame,
   TerminalOptions,
-} from "../../../src/rpc/connections/terminal";
-import type { ConnectionCapability, ConnectionStatus } from "../../../src/rpc/connections/types";
+} from "tddy-client-web/connections/terminal";
+import type { ConnectionCapability, ConnectionStatus } from "tddy-client-web/connections/types";
 
 const A_HOST = "local";
 

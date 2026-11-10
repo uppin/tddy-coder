@@ -1,55 +1,34 @@
 //! Coding backend abstraction for LLM-based coders.
 
-mod acp;
 pub mod acp_driver;
 mod claude;
-mod codex;
+pub(crate) mod codex;
 pub mod codex_acp;
-mod context_globs;
-mod cursor;
 pub mod headless_driver;
 mod mock;
 pub mod model_catalog;
-mod opencode_acp;
 mod routed;
+pub mod spec_backend;
+pub mod spec_headless;
+pub use spec_headless::SpecHeadlessBackend;
+pub(crate) mod turn_process;
 pub use routed::codex_acp_route_args;
+pub use turn_process::{kill_running_turns, RunningGroup};
 mod stub;
 mod tool_executor;
 
-pub use acp::ClaudeAcpBackend;
-pub use claude::{
-    build_claude_args, read_claude_subagent_usages, read_claude_transcript_usage,
-    ClaudeCodeBackend, ClaudeInvokeConfig, PermissionMode,
-};
+pub use claude::{read_claude_subagent_usages, read_claude_transcript_usage};
 pub use codex::write_codex_thread_id_file;
-pub use codex::{CodexBackend, CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_ID_FILENAME};
-pub use codex_acp::CodexAcpBackend;
-pub use context_globs::context_globs_for_agent;
-pub use cursor::CursorBackend;
-pub use mock::MockBackend;
-pub use model_catalog::{
-    render_models_json, resolve_agent_models, BackendCliPaths, CLAUDE_CLI_AGENT, CURSOR_CLI_AGENT,
+pub use codex::{
+    spawn_codex_oauth_login, CODEX_DEFAULT_CLI_BINARY, CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
+    CODEX_THREAD_ID_FILENAME,
 };
-pub use opencode_acp::OpenCodeAcpBackend;
+pub use mock::MockBackend;
+pub use model_catalog::render_models_json;
 pub use stub::StubBackend;
 pub use tddy_workflow::questions::{ClarificationQuestion, QuestionOption};
 use tddy_workflow::{GoalHints, GoalId};
 pub use tool_executor::{InMemoryToolExecutor, ProcessToolExecutor, ToolExecutor};
-
-/// Enum dispatch for CLI backend selection (avoids trait object overhead).
-/// tddy-coder uses claude/cursor only. tddy-demo uses stub (via lib, not CLI).
-#[derive(Debug)]
-pub enum AnyBackend {
-    Claude(ClaudeCodeBackend),
-    ClaudeAcp(ClaudeAcpBackend),
-    Cursor(CursorBackend),
-    /// OpenAI Codex CLI (`codex exec`, `codex exec resume`, `--json`).
-    Codex(CodexBackend),
-    /// OpenAI Codex via `codex-acp` (ACP over stdio).
-    CodexAcp(CodexAcpBackend),
-    Stub(StubBackend),
-    OpenCode(OpenCodeAcpBackend),
-}
 
 /// Shared backend wrapper for "create once at startup" pattern.
 /// Wraps `Arc<dyn CodingBackend>` so the same backend can be reused across multiple Workflows.
@@ -86,11 +65,6 @@ impl CodingBackend for SharedBackend {
 }
 
 impl SharedBackend {
-    /// Create a SharedBackend from an AnyBackend (or any CodingBackend).
-    pub fn from_any(backend: AnyBackend) -> Self {
-        Self(std::sync::Arc::new(backend))
-    }
-
     /// Create SharedBackend from an Arc<dyn CodingBackend> (e.g. for MockBackend in tests).
     pub fn from_arc(inner: std::sync::Arc<dyn CodingBackend>) -> Self {
         Self(inner)
@@ -102,100 +76,8 @@ impl SharedBackend {
     }
 }
 
-#[async_trait::async_trait]
-impl CodingBackend for AnyBackend {
-    async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
-        match self {
-            AnyBackend::Claude(b) => b.invoke(request).await,
-            AnyBackend::ClaudeAcp(b) => b.invoke(request).await,
-            AnyBackend::Cursor(b) => b.invoke(request).await,
-            AnyBackend::Codex(b) => b.invoke(request).await,
-            AnyBackend::CodexAcp(b) => b.invoke(request).await,
-            AnyBackend::Stub(b) => b.invoke(request).await,
-            AnyBackend::OpenCode(b) => b.invoke(request).await,
-        }
-    }
-
-    fn name(&self) -> &str {
-        match self {
-            AnyBackend::Claude(b) => b.name(),
-            AnyBackend::ClaudeAcp(b) => b.name(),
-            AnyBackend::Cursor(b) => b.name(),
-            AnyBackend::Codex(b) => b.name(),
-            AnyBackend::CodexAcp(b) => b.name(),
-            AnyBackend::Stub(b) => b.name(),
-            AnyBackend::OpenCode(b) => b.name(),
-        }
-    }
-
-    fn submit_channel(&self) -> Option<&crate::toolcall::SubmitResultChannel> {
-        match self {
-            AnyBackend::Claude(b) => b.submit_channel(),
-            AnyBackend::ClaudeAcp(b) => b.submit_channel(),
-            AnyBackend::Cursor(b) => b.submit_channel(),
-            AnyBackend::Codex(b) => b.submit_channel(),
-            AnyBackend::CodexAcp(b) => b.submit_channel(),
-            AnyBackend::Stub(b) => b.submit_channel(),
-            AnyBackend::OpenCode(b) => b.submit_channel(),
-        }
-    }
-
-    fn action_invoke_cache_eligible(&self) -> bool {
-        match self {
-            AnyBackend::Claude(b) => b.action_invoke_cache_eligible(),
-            AnyBackend::ClaudeAcp(b) => b.action_invoke_cache_eligible(),
-            AnyBackend::Cursor(b) => b.action_invoke_cache_eligible(),
-            AnyBackend::Codex(b) => b.action_invoke_cache_eligible(),
-            AnyBackend::CodexAcp(b) => b.action_invoke_cache_eligible(),
-            AnyBackend::Stub(b) => b.action_invoke_cache_eligible(),
-            AnyBackend::OpenCode(b) => b.action_invoke_cache_eligible(),
-        }
-    }
-
-    async fn list_models(&self) -> Result<BackendModels, BackendError> {
-        match self {
-            AnyBackend::Claude(b) => b.list_models().await,
-            AnyBackend::ClaudeAcp(b) => b.list_models().await,
-            AnyBackend::Cursor(b) => b.list_models().await,
-            AnyBackend::Codex(b) => b.list_models().await,
-            AnyBackend::CodexAcp(b) => b.list_models().await,
-            AnyBackend::Stub(b) => b.list_models().await,
-            AnyBackend::OpenCode(b) => b.list_models().await,
-        }
-    }
-}
-
 use crate::error::BackendError;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
-
-static CHILD_PID: AtomicU32 = AtomicU32::new(0);
-
-/// Record the PID of a spawned child process so the SIGINT handler can kill it.
-pub fn set_child_pid(pid: u32) {
-    CHILD_PID.store(pid, Ordering::SeqCst);
-}
-
-/// Clear the child PID after the child has exited.
-pub fn clear_child_pid() {
-    CHILD_PID.store(0, Ordering::SeqCst);
-}
-
-/// Return the currently tracked child PID, or 0 if none.
-pub fn get_child_pid() -> u32 {
-    CHILD_PID.load(Ordering::SeqCst)
-}
-
-/// Kill the tracked child process. Returns true if the kill signal was delivered.
-#[cfg(unix)]
-pub fn kill_child_process() -> bool {
-    let pid = CHILD_PID.swap(0, Ordering::SeqCst);
-    if pid == 0 {
-        return false;
-    }
-    unsafe { libc::kill(pid as i32, libc::SIGKILL) == 0 }
-}
-
 /// Format binary + args as a shell-like command for debug logging.
 /// Truncates args longer than max_arg_len to keep logs readable.
 pub(crate) fn format_command_for_log(
@@ -227,20 +109,6 @@ pub(crate) fn format_command_for_log(
         parts.push(escaped);
     }
     parts.join(" ")
-}
-
-/// Non-unix stub: clears the tracked PID but cannot actually kill the process.
-#[cfg(not(unix))]
-pub fn kill_child_process() -> bool {
-    let pid = CHILD_PID.swap(0, Ordering::SeqCst);
-    if pid == 0 {
-        return false;
-    }
-    log::warn!(
-        "[tddy-core] kill_child_process: cannot kill pid {} on non-unix platform",
-        pid
-    );
-    false
 }
 
 /// Gather the full per-conversation token-usage snapshot for a session by merging every source,
@@ -343,7 +211,7 @@ impl AgentOutputSink {
 }
 
 /// Session mode for backend invocation: fresh session or resume existing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionMode {
     /// Start a new session with this ID.
     Fresh(String),
@@ -522,47 +390,6 @@ pub(crate) fn path_with_exe_dir() -> std::ffi::OsString {
     std::env::join_paths(dirs).unwrap_or_default()
 }
 
-/// Build a clarification question for interactive coding backend selection at session start.
-#[must_use]
-pub fn backend_selection_question() -> ClarificationQuestion {
-    ClarificationQuestion {
-        header: "Backend".to_string(),
-        question: "Select the coding backend".to_string(),
-        options: vec![
-            QuestionOption {
-                label: "Claude".to_string(),
-                description: "Claude Code CLI (default model: opus)".to_string(),
-            },
-            QuestionOption {
-                label: "Claude ACP".to_string(),
-                description: "Claude Agent Control Protocol (default model: opus)".to_string(),
-            },
-            QuestionOption {
-                label: "Cursor".to_string(),
-                description: "Cursor agent CLI (default model: composer-2.5)".to_string(),
-            },
-            QuestionOption {
-                label: "Codex".to_string(),
-                description: "OpenAI Codex CLI (default model: gpt-5)".to_string(),
-            },
-            QuestionOption {
-                label: "Codex ACP".to_string(),
-                description: "OpenAI Codex via codex-acp (default model: gpt-5)".to_string(),
-            },
-            QuestionOption {
-                label: "Stub".to_string(),
-                description: "Test backend with simulated responses".to_string(),
-            },
-            QuestionOption {
-                label: "OpenCode".to_string(),
-                description: format!("OpenCode over ACP (default model: {OPENCODE_DEFAULT_MODEL})"),
-            },
-        ],
-        multi_select: false,
-        allow_other: false,
-    }
-}
-
 /// Single-select question for switching workflow recipe after `/recipe` from the feature slash menu.
 #[must_use]
 pub fn workflow_recipe_selection_question() -> ClarificationQuestion {
@@ -615,72 +442,6 @@ pub fn recipe_cli_name_from_selection_label(label: &str) -> Option<&'static str>
     }
 }
 
-/// Map a display label from [`backend_selection_question`] to `(agent_name, default_model)`.
-#[must_use]
-pub fn backend_from_label(label: &str) -> (&'static str, &'static str) {
-    match label {
-        "Claude" => ("claude", "opus"),
-        "Claude ACP" => ("claude-acp", "opus"),
-        "Cursor" => ("cursor", "composer-2.5"),
-        "Codex" => ("codex", "gpt-5"),
-        "Codex ACP" => ("codex-acp", "gpt-5"),
-        "Stub" => ("stub", "stub"),
-        "OpenCode" => ("opencode", OPENCODE_DEFAULT_MODEL),
-        _ => ("claude", "opus"),
-    }
-}
-
-/// Versionless Claude aliases, in dropdown order. `claude --model` resolves each to the newest
-/// model in that tier, so a session started today and one started next quarter both run the current
-/// best model without a code change here. Shared by every Claude catalog below — adding a tier here
-/// adds it everywhere.
-const CLAUDE_MODEL_ALIASES: &[(&str, &str)] = &[
-    ("opus", "Claude Opus (latest)"),
-    ("sonnet", "Claude Sonnet (latest)"),
-    ("haiku", "Claude Haiku (latest)"),
-];
-
-/// The model an OpenCode session runs with when it names none: an OpenCode `provider/model` id, the
-/// form `opencode models` lists. Shared by every OpenCode catalog below.
-const OPENCODE_DEFAULT_MODEL: &str = "fireworks/kimi-k2";
-
-/// Version-pinned Claude ids, offered after [`CLAUDE_MODEL_ALIASES`] for a run that must not drift
-/// between releases (a reproduction, or a benchmark comparing two generations). Labelled `(pinned)`
-/// so the choice reads as deliberate.
-const CLAUDE_PINNED_MODELS: &[(&str, &str)] = &[
-    ("claude-opus-5", "Claude Opus 5 (pinned)"),
-    ("claude-sonnet-5", "Claude Sonnet 5 (pinned)"),
-    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5 (pinned)"),
-];
-
-/// The alias every Claude backend preselects. Versionless on purpose: a pinned default would
-/// silently keep new sessions on an old generation once the next model ships.
-pub const CLAUDE_DEFAULT_MODEL: &str = "opus";
-
-/// Default model name for a given agent identifier (e.g. `claude`, `cursor`).
-#[must_use]
-pub fn default_model_for_agent(agent: &str) -> &'static str {
-    match agent {
-        "cursor" => "composer-2.5",
-        "codex" => "gpt-5",
-        "codex-acp" => "gpt-5",
-        "stub" => "stub",
-        "opencode" => OPENCODE_DEFAULT_MODEL,
-        _ => CLAUDE_DEFAULT_MODEL,
-    }
-}
-
-/// Build a catalog from `(id, label)` pairs and the id to preselect.
-fn catalog_from(pairs: &[(&str, &str)], default_model: &str) -> BackendModels {
-    BackendModels {
-        models: pairs
-            .iter()
-            .map(|(id, label)| BackendModel::new(*id, *label))
-            .collect(),
-        default_model: default_model.to_string(),
-    }
-}
-
 /// A model a backend can run with, for UI selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendModel {
@@ -707,62 +468,8 @@ pub struct BackendModels {
     pub default_model: String,
 }
 
-/// Curated model list for backends whose command cannot enumerate models (`claude`, `codex`).
-/// Single source of truth for those catalogs; kept in sync with [`default_model_for_agent`].
-#[must_use]
-pub fn curated_models_for_agent(agent: &str) -> BackendModels {
-    let (models, default_model): (&[(&str, &str)], &str) = match agent {
-        "codex" | "codex-acp" => (&[("gpt-5", "GPT-5")], "gpt-5"),
-        "cursor" => (&[("composer-2.5", "Composer 2.5")], "composer-2.5"),
-        "stub" => (&[("stub", "Stub")], "stub"),
-        "opencode" => (
-            &[(OPENCODE_DEFAULT_MODEL, "Kimi K2")],
-            OPENCODE_DEFAULT_MODEL,
-        ),
-        _ => (CLAUDE_MODEL_ALIASES, CLAUDE_DEFAULT_MODEL),
-    };
-    catalog_from(models, default_model)
-}
-
-/// Curated model catalog for the `claude-cli` session type (ids passed to `claude --model`). Single
-/// source of truth — the web sources this over `ListAgentModels` rather than keeping its own list.
-///
-/// The versionless aliases lead, so the preselected choice tracks each Claude release on its own;
-/// the version-pinned ids follow for a run that must not drift. See [`CLAUDE_MODEL_ALIASES`] and
-/// [`CLAUDE_PINNED_MODELS`].
-#[must_use]
-pub fn claude_cli_models() -> BackendModels {
-    let pairs: Vec<(&str, &str)> = CLAUDE_MODEL_ALIASES
-        .iter()
-        .chain(CLAUDE_PINNED_MODELS)
-        .copied()
-        .collect();
-    catalog_from(&pairs, CLAUDE_DEFAULT_MODEL)
-}
-
-/// Curated model catalog for the `cursor-cli` session type (ids passed to `agent --model`).
-#[must_use]
-pub fn cursor_cli_models() -> BackendModels {
-    BackendModels {
-        models: vec![
-            BackendModel::new("gpt-5.3-codex", "GPT-5.3 Codex"),
-            BackendModel::new(
-                "claude-4.6-sonnet-medium-thinking",
-                "Claude 4.6 Sonnet (thinking)",
-            ),
-            BackendModel::new(
-                "claude-sonnet-5-thinking-high",
-                "Claude Sonnet 5 (thinking high)",
-            ),
-            BackendModel::new("composer-2.5", "Composer 2.5"),
-            BackendModel::new("glm-5.2-high", "GLM 5.2 High"),
-        ],
-        default_model: "claude-4.6-sonnet-medium-thinking".to_string(),
-    }
-}
-
-/// Map an ACP agent's advertised [`agent_client_protocol::SessionModelState`] into [`BackendModels`].
-/// Errors when the agent advertised no models (an unavailable backend must not look available).
+/// The model catalogue an ACP agent's session state advertises: its available models, with the
+/// current one as the default.
 pub fn acp_models_from_session_state(
     state: Option<&agent_client_protocol::SessionModelState>,
 ) -> Result<BackendModels, BackendError> {
@@ -782,21 +489,6 @@ pub fn acp_models_from_session_state(
             .collect(),
         default_model: state.current_model_id.to_string(),
     })
-}
-
-/// Index into [`backend_selection_question`] options for a given agent name.
-#[must_use]
-pub fn preselected_index_for_agent(agent: &str) -> usize {
-    match agent {
-        "claude" => 0,
-        "claude-acp" => 1,
-        "cursor" => 2,
-        "codex" => 3,
-        "codex-acp" => 4,
-        "stub" => 5,
-        "opencode" => 6,
-        _ => 0,
-    }
 }
 
 /// Response from the coding backend.
@@ -834,304 +526,12 @@ pub trait CodingBackend: Send + Sync {
         true
     }
 
-    /// Enumerate the models this backend can run with, for UI selection. The default returns the
-    /// curated catalog for the backend's [`CodingBackend::name`]; backends whose command can
-    /// enumerate its own models (cursor, ACP) override this to query the agent at runtime.
+    /// Enumerate the models this backend can run with, for UI selection. The default is an
+    /// empty catalogue: a backend's models are its spec's `coding_agent.models`, supplied by the
+    /// caller that built it from that spec; backends whose command enumerates its own models
+    /// override this to query the agent at runtime.
     async fn list_models(&self) -> Result<BackendModels, BackendError> {
-        Ok(curated_models_for_agent(self.name()))
-    }
-
-    /// Worktree-root-relative globs naming what this agent reads from the target repo. The default
-    /// resolves the table by [`CodingBackend::name`], so a caller holding a backend and a caller
-    /// holding only an agent name see the same allow-list.
-    fn context_globs(&self) -> &'static [&'static str] {
-        context_globs_for_agent(self.name())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Mutex;
-
-    // Serialize tests that mutate global CHILD_PID.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn lock_and_reset() -> std::sync::MutexGuard<'static, ()> {
-        let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        CHILD_PID.store(0, Ordering::SeqCst);
-        guard
-    }
-
-    #[test]
-    fn set_child_pid_stores_pid() {
-        let _lock = lock_and_reset();
-        set_child_pid(12345);
-        assert_eq!(get_child_pid(), 12345);
-    }
-
-    #[test]
-    fn clear_child_pid_resets_to_zero() {
-        let _lock = lock_and_reset();
-        set_child_pid(99999);
-        clear_child_pid();
-        assert_eq!(get_child_pid(), 0);
-    }
-
-    fn ids(models: &BackendModels) -> Vec<&str> {
-        models.models.iter().map(|m| m.id.as_str()).collect()
-    }
-
-    #[test]
-    fn curated_claude_models_offer_opus_sonnet_and_haiku_defaulting_to_opus() {
-        // When
-        let catalog = curated_models_for_agent("claude");
-
-        // Then
-        assert_eq!(ids(&catalog), vec!["opus", "sonnet", "haiku"]);
-        assert_eq!(catalog.default_model, "opus");
-    }
-
-    #[test]
-    fn curated_codex_models_offer_gpt5_defaulting_to_gpt5() {
-        // When
-        let catalog = curated_models_for_agent("codex");
-
-        // Then
-        assert_eq!(ids(&catalog), vec!["gpt-5"]);
-        assert_eq!(catalog.default_model, "gpt-5");
-    }
-
-    #[test]
-    fn claude_cli_models_lead_with_the_versionless_aliases_defaulting_to_opus() {
-        // When
-        let catalog = claude_cli_models();
-
-        // Then — the aliases come first so the dropdown preselects one, and `opus` is the default
-        assert_eq!(
-            ids(&catalog)[..3],
-            ["opus", "sonnet", "haiku"],
-            "the versionless aliases must lead the catalog"
-        );
-        assert_eq!(catalog.default_model, "opus");
-    }
-
-    #[test]
-    fn claude_cli_models_also_offer_version_pinned_ids_after_the_aliases() {
-        // When
-        let catalog = claude_cli_models();
-
-        // Then — pinning a generation stays available for a run that must not drift
-        assert_eq!(
-            ids(&catalog)[3..],
-            [
-                "claude-opus-5",
-                "claude-sonnet-5",
-                "claude-haiku-4-5-20251001"
-            ]
-        );
-    }
-
-    #[test]
-    fn claude_cli_aliases_match_the_curated_claude_catalog() {
-        // Given — the two Claude catalogs are built from one alias table
-        let cli = claude_cli_models();
-        let curated = curated_models_for_agent("claude");
-
-        // Then — an alias added in one place appears in both
-        assert_eq!(ids(&curated), ids(&cli)[..curated.models.len()]);
-        assert_eq!(curated.default_model, cli.default_model);
-    }
-
-    #[test]
-    fn claude_cli_labels_distinguish_a_moving_alias_from_a_pinned_generation() {
-        // When
-        let catalog = claude_cli_models();
-
-        // Then — the operator can tell which choice drifts with each release
-        let labels: Vec<&str> = catalog.models.iter().map(|m| m.label.as_str()).collect();
-        assert_eq!(
-            labels,
-            vec![
-                "Claude Opus (latest)",
-                "Claude Sonnet (latest)",
-                "Claude Haiku (latest)",
-                "Claude Opus 5 (pinned)",
-                "Claude Sonnet 5 (pinned)",
-                "Claude Haiku 4.5 (pinned)",
-            ]
-        );
-    }
-
-    #[test]
-    fn every_claude_cli_default_is_selectable_in_its_own_catalog() {
-        // Given / When
-        let catalog = claude_cli_models();
-
-        // Then — a default absent from its own list would leave the dropdown unselected
-        assert!(ids(&catalog).contains(&catalog.default_model.as_str()));
-    }
-
-    #[test]
-    fn acp_session_state_maps_available_models_with_the_current_one_as_default() {
-        // Given — the agent advertises two models and names the current one
-        use agent_client_protocol::{ModelInfo, SessionModelState};
-        let state = SessionModelState::new(
-            "gpt-5.2",
-            vec![
-                ModelInfo::new("auto", "Auto"),
-                ModelInfo::new("gpt-5.2", "GPT-5.2"),
-            ],
-        );
-
-        // When
-        let catalog = acp_models_from_session_state(Some(&state)).expect("should map models");
-
-        // Then
-        assert_eq!(ids(&catalog), vec!["auto", "gpt-5.2"]);
-        assert_eq!(catalog.default_model, "gpt-5.2");
-    }
-
-    #[test]
-    fn acp_enumeration_errors_when_the_agent_advertises_no_models() {
-        // When / Then — no SessionModelState at all is an error, not an empty list
-        let result = acp_models_from_session_state(None);
-
-        assert!(matches!(result, Err(BackendError::InvocationFailed(_))));
-    }
-
-    #[test]
-    fn kill_child_process_returns_false_when_no_child() {
-        let _lock = lock_and_reset();
-        assert!(!kill_child_process());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn kill_child_process_kills_running_child() {
-        let _lock = lock_and_reset();
-
-        let mut child = std::process::Command::new("sleep")
-            .arg("60")
-            .spawn()
-            .expect("failed to spawn sleep");
-        let pid = child.id();
-        set_child_pid(pid);
-
-        assert!(kill_child_process());
-        assert_eq!(get_child_pid(), 0);
-
-        // Reap the child so it doesn't remain a zombie, then verify it was killed.
-        let status = child.wait().expect("failed to wait on child");
-        assert!(!status.success());
-    }
-
-    #[test]
-    fn backend_selection_question_returns_seven_options_including_codex_and_opencode() {
-        let q = backend_selection_question();
-        assert_eq!(q.options.len(), 7);
-        assert!(!q.multi_select);
-        assert!(!q.allow_other);
-    }
-
-    #[test]
-    fn codex_backend_selection_question_labels_order() {
-        let q = backend_selection_question();
-        let labels: Vec<&str> = q.options.iter().map(|o| o.label.as_str()).collect();
-        assert_eq!(
-            labels,
-            vec![
-                "Claude",
-                "Claude ACP",
-                "Cursor",
-                "Codex",
-                "Codex ACP",
-                "Stub",
-                "OpenCode"
-            ]
-        );
-    }
-
-    #[test]
-    fn backend_selection_includes_codex_option() {
-        let q = backend_selection_question();
-        let codex = q
-            .options
-            .iter()
-            .find(|o| o.label == "Codex")
-            .expect("Codex option must be present for codex agent support");
-        assert!(
-            codex.description.to_lowercase().contains("codex"),
-            "Codex option should describe Codex CLI, got {:?}",
-            codex.description
-        );
-    }
-
-    #[test]
-    fn backend_from_label_claude() {
-        assert_eq!(backend_from_label("Claude"), ("claude", "opus"));
-    }
-
-    #[test]
-    fn backend_from_label_cursor() {
-        assert_eq!(backend_from_label("Cursor"), ("cursor", "composer-2.5"));
-    }
-
-    #[test]
-    fn backend_from_label_claude_acp() {
-        assert_eq!(backend_from_label("Claude ACP"), ("claude-acp", "opus"));
-    }
-
-    #[test]
-    fn backend_from_label_stub() {
-        assert_eq!(backend_from_label("Stub"), ("stub", "stub"));
-    }
-
-    #[test]
-    fn backend_from_label_codex() {
-        assert_eq!(backend_from_label("Codex"), ("codex", "gpt-5"));
-    }
-
-    #[test]
-    fn backend_from_label_codex_acp() {
-        assert_eq!(backend_from_label("Codex ACP"), ("codex-acp", "gpt-5"));
-    }
-
-    #[test]
-    fn backend_from_label_unknown_defaults_to_claude() {
-        assert_eq!(backend_from_label("Unknown"), ("claude", "opus"));
-    }
-
-    #[test]
-    fn default_model_for_agent_cursor() {
-        assert_eq!(default_model_for_agent("cursor"), "composer-2.5");
-    }
-
-    #[test]
-    fn default_model_for_agent_codex() {
-        assert_eq!(default_model_for_agent("codex"), "gpt-5");
-    }
-
-    #[test]
-    fn default_model_for_agent_codex_acp() {
-        assert_eq!(default_model_for_agent("codex-acp"), "gpt-5");
-    }
-
-    #[test]
-    fn default_model_for_agent_claude() {
-        assert_eq!(default_model_for_agent("claude"), "opus");
-    }
-
-    #[test]
-    fn codex_preselected_index_for_agent_order() {
-        assert_eq!(preselected_index_for_agent("claude"), 0);
-        assert_eq!(preselected_index_for_agent("claude-acp"), 1);
-        assert_eq!(preselected_index_for_agent("cursor"), 2);
-        assert_eq!(preselected_index_for_agent("codex"), 3);
-        assert_eq!(preselected_index_for_agent("codex-acp"), 4);
-        assert_eq!(preselected_index_for_agent("stub"), 5);
-        assert_eq!(preselected_index_for_agent("opencode"), 6);
-        assert_eq!(preselected_index_for_agent("unknown"), 0);
+        Ok(BackendModels::default())
     }
 }
 

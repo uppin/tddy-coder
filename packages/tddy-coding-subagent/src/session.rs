@@ -1,27 +1,34 @@
 //! `CodingAgentSession` — a `SubagentSession` whose turns a coding agent takes, over ACP or headless.
 
+pub(crate) mod cancel;
+mod message_shape;
+mod subagent_session;
+mod turn_rules;
+
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
+use tddy_agent_backend::adapters::PreparedAcpHooks;
 use tddy_agent_backend::{
-    AcpAgentCommand, AcpConversation, AcpDriver, AcpStopReason, AcpToolStatus, AcpTurnEnd,
-    AcpUpdate, AcpUpdateSink, ConversationDriver, HeadlessCommand, HeadlessDriver, HeadlessHarness,
-    NoHooks, OpenSession,
+    AcpAgentCommand, AcpConversation, AcpDriver, AcpTurnEnd, AcpUpdate, AcpUpdateSink,
+    ConversationDriver, HeadlessCommand, HeadlessDriver, OpenSession,
 };
 use tddy_discovery::openai::TokenUsage;
 use tddy_discovery::subagent::{
-    preview_of, AnsweredBy, ContentBlock, MessageDescriptor, MessageId, MessageRole,
-    PermissionAnswering, PermissionRequestView, PromptOutcome, StopReason, SubagentError,
-    SubagentSession, ToolCallDescriptor, TurnCancelling, TurnRequest,
+    preview_of, AnsweredBy, ContentBlock, MessageDescriptor, MessageId, PermissionAnswering,
+    PermissionRequestView, PromptOutcome, SubagentError, TurnRequest,
 };
 use tokio::sync::broadcast;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::parked_permissions::{nothing_pending, nothing_pending_to_defer, ParkedPermissions};
-use crate::permission_records::{deferred_request_record, record_answer};
+use crate::parked_permissions::{nothing_pending_to_defer, ParkedPermissions};
+use crate::permission_records::record_answer;
+use crate::session::cancel::CancelHandle;
+use crate::session::message_shape::collect_tool_calls;
+use crate::session::message_shape::MessageShape;
+use crate::session::turn_rules::refused_while_pending;
+use crate::session::turn_rules::stop_reason_of;
 
 /// The prompt a conversation is answering, shared with its cancel handles. A turn holds the slot
 /// for as long as it runs, so a cancel waits for the turn to end before it returns.
@@ -50,6 +57,9 @@ pub struct CodingAgentSession {
     /// the agent process id. `None` for a headless session, whose CLI runs once per turn.
     acp: Option<Arc<AcpConversation>>,
     permissions: Arc<ParkedPermissions>,
+    /// The hooks the agent's launch prepared, held for exactly this session's lifetime: they own
+    /// whatever the launch wrote for the agent. `None` for a headless session.
+    _launch_hooks: Option<PreparedAcpHooks>,
     /// The prompt the agent is still answering, held across the turns a permission request pauses
     /// it for. `None` when no prompt is in flight.
     in_flight: Arc<InFlightSlot>,
@@ -90,16 +100,20 @@ enum Settled {
 }
 
 impl CodingAgentSession {
-    /// Spawn the agent from `command`, open (or resume) its ACP session, and hold both.
+    /// Spawn the agent from `command`, open (or resume) its ACP session, and hold both — and
+    /// `hooks`, the ones its launch prepared ([`crate::LaunchedAgent`]): the driver runs with
+    /// `hooks.hooks`, the open is bracketed by `hooks.opens` (a login that failed during it is the
+    /// error reported), and both are held for exactly the session's lifetime.
     pub async fn start(
         command: AcpAgentCommand,
         open: OpenSession,
         model: String,
+        hooks: PreparedAcpHooks,
     ) -> Result<Self, SubagentError> {
         let permissions = Arc::new(ParkedPermissions::default());
-        let driver = AcpDriver::spawn(command, permissions.clone(), Arc::new(NoHooks))
+        let driver = AcpDriver::spawn(command, permissions.clone(), hooks.hooks.clone())
             .map_err(|e| SubagentError::from(format!("could not start the coding agent: {e}")))?;
-        Self::opened(driver, permissions, open, model).await
+        Self::opened(driver, permissions, open, model, hooks).await
     }
 
     /// [`Self::start`] for an agent already running behind `stream` (started by the supervisor as
@@ -108,40 +122,55 @@ impl CodingAgentSession {
         stream: std::os::unix::net::UnixStream,
         open: OpenSession,
         model: String,
+        hooks: PreparedAcpHooks,
     ) -> Result<Self, SubagentError> {
         let permissions = Arc::new(ParkedPermissions::default());
-        let driver = AcpDriver::spawn_over(stream, permissions.clone(), Arc::new(NoHooks))
+        let driver = AcpDriver::spawn_over(stream, permissions.clone(), hooks.hooks.clone())
             .map_err(|e| SubagentError::from(format!("could not reach the coding agent: {e}")))?;
-        Self::opened(driver, permissions, open, model).await
+        Self::opened(driver, permissions, open, model, hooks).await
     }
 
     /// A headless conversation: `command` runs the harness's CLI once per turn, and every turn after
     /// the first resumes the session the CLI named on the first. Nothing runs until a turn is taken.
     pub async fn start_headless(
-        harness: HeadlessHarness,
         command: HeadlessCommand,
         model: String,
     ) -> Result<Self, SubagentError> {
-        let conversation: Arc<dyn ConversationDriver> =
-            Arc::new(HeadlessDriver::new(harness, command));
+        let conversation: Arc<dyn ConversationDriver> = Arc::new(HeadlessDriver::new(command));
         Ok(Self::with_conversation(
             conversation,
             None,
             Arc::new(ParkedPermissions::default()),
             model,
+            None,
         ))
     }
 
+    /// Open the session over `driver`, bracketed by `hooks.opens`: handed the session's directory —
+    /// the one the agent works in, which is where a `codex login` the hooks run writes its authorize
+    /// URL — before the open, and asked afterwards for a failure of their own, which is the error
+    /// reported in place of the session error it followed.
     async fn opened(
         driver: AcpDriver,
         permissions: Arc<ParkedPermissions>,
         open: OpenSession,
         model: String,
+        hooks: PreparedAcpHooks,
     ) -> Result<Self, SubagentError> {
-        let opened = driver
-            .open_session(open)
-            .await
-            .map_err(|e| SubagentError::from(format!("could not open the coding agent: {e}")))?;
+        let session_dir = open.cwd.clone();
+        if let Some(scope) = &hooks.opens {
+            scope.begin_open(Some(session_dir)).await;
+        }
+        let opened = driver.open_session(open).await;
+        let hook_failure = match &hooks.opens {
+            Some(scope) => scope.end_open().await,
+            None => None,
+        };
+        let opened = match (opened, hook_failure) {
+            (Err(_), Some(failure)) => Err(failure),
+            (opened, _) => opened,
+        }
+        .map_err(|e| SubagentError::from(format!("could not open the coding agent: {e}")))?;
         let acp = Arc::new(AcpConversation {
             driver,
             session_id: opened.session_id,
@@ -151,6 +180,7 @@ impl CodingAgentSession {
             Some(acp),
             permissions,
             model,
+            Some(hooks),
         ))
     }
 
@@ -159,11 +189,13 @@ impl CodingAgentSession {
         acp: Option<Arc<AcpConversation>>,
         permissions: Arc<ParkedPermissions>,
         model: String,
+        launch_hooks: Option<PreparedAcpHooks>,
     ) -> Self {
         Self {
             conversation,
             acp,
             permissions,
+            _launch_hooks: launch_hooks,
             in_flight: Arc::new(AsyncMutex::new(None)),
             model,
             next_ordinal: 1,
@@ -409,323 +441,5 @@ async fn settle(
                 }
             }
         }
-    }
-}
-
-/// The new prompt a turn that starts a prompt carries, or why it cannot start one.
-fn new_prompt(request: &TurnRequest) -> Result<String, SubagentError> {
-    if let Some(answer) = request.permission_answer() {
-        return Err(SubagentError::from(nothing_pending(answer)));
-    }
-    if let Some(deferred) = request.permission_deferred_to_user() {
-        return Err(SubagentError::from(nothing_pending_to_defer(deferred)));
-    }
-    request.prompt_text().map(str::to_string).ok_or_else(|| {
-        SubagentError::from("a coding agent has nothing to resume: it takes a new prompt each turn")
-    })
-}
-
-fn refused_while_pending(request_id: &str) -> SubagentError {
-    SubagentError::from(format!(
-        "permission request '{request_id}' is pending: answer it before the coding agent takes another turn"
-    ))
-}
-
-/// Why an answer that was delivered is not continued by this call: the turn holding the request
-/// is still running, and it carries on with the answer. The wording is the shared one.
-fn answer_delivered_while_held(request_id: &str) -> SubagentError {
-    SubagentError::from(tddy_discovery::subagent::answer_delivered_while_held(
-        request_id,
-    ))
-}
-
-/// One tool call a turn made, folded from its `tool_call` and `tool_call_update`s.
-struct ToolCallRecord {
-    id: String,
-    name: String,
-    arguments: String,
-    failed: bool,
-}
-
-/// The turn's tool calls in the order the agent made them, each marked failed when any of its
-/// updates said so.
-fn collect_tool_calls(updates: Vec<AcpUpdate>) -> Vec<ToolCallRecord> {
-    let mut calls: Vec<ToolCallRecord> = Vec::new();
-    for update in updates {
-        match update {
-            AcpUpdate::ToolCall {
-                id,
-                title,
-                raw_input,
-                ..
-            } => calls.push(ToolCallRecord {
-                id,
-                name: title,
-                arguments: raw_input.map(|input| input.to_string()).unwrap_or_default(),
-                failed: false,
-            }),
-            AcpUpdate::ToolCallUpdate { id, status, .. } => {
-                if let Some(call) = calls.iter_mut().find(|call| call.id == id) {
-                    call.failed |= status == Some(AcpToolStatus::Failed);
-                }
-            }
-            // A permission request's record is the session's account of the request, not a call the agent made.
-            AcpUpdate::Text(_) | AcpUpdate::Thought(_) | AcpUpdate::Plan(_) => {}
-            AcpUpdate::ToolCallRecord { .. } => {}
-        }
-    }
-    calls
-}
-
-/// A message descriptor before it has an id; its preview not yet cut.
-struct MessageShape {
-    role: MessageRole,
-    tool: Option<String>,
-    tool_calls: Vec<ToolCallDescriptor>,
-    is_error: bool,
-    preview: String,
-}
-
-impl MessageShape {
-    fn tool_call(call: ToolCallRecord) -> Self {
-        Self {
-            role: MessageRole::Tool,
-            tool: Some(call.name.clone()),
-            tool_calls: vec![ToolCallDescriptor {
-                name: call.name,
-                arguments: preview_of(&call.arguments),
-            }],
-            is_error: call.failed,
-            preview: call.arguments,
-        }
-    }
-
-    fn assistant(text: &str) -> Self {
-        Self {
-            role: MessageRole::Assistant,
-            tool: None,
-            tool_calls: Vec::new(),
-            is_error: false,
-            preview: text.to_string(),
-        }
-    }
-}
-
-/// How long [`CancelHandle::cancel`] waits for the cancelled turn to end. Past it the call returns
-/// `Ok` and the turn is left to the session's drop, which stops the agent process, so an agent that
-/// never ends its turn cannot hang `subagent_cancel`.
-pub const CANCEL_SETTLE_DEADLINE: Duration = Duration::from_secs(10);
-
-/// Cancels a [`CodingAgentSession`]'s running turn. Every permission request the turn is parked on
-/// is answered as cancelled first, then the turn is cancelled (`session/cancel` over ACP). The call
-/// returns once the turn has ended, or after [`CANCEL_SETTLE_DEADLINE`]; the turn then ends as
-/// cancelled. Cloneable and `Send`, so it can be held apart from the session. It does not keep the
-/// agent process alive: once the session is dropped there is nothing left to cancel.
-#[derive(Clone)]
-pub struct CancelHandle {
-    conversation: Weak<dyn ConversationDriver>,
-    permissions: Weak<ParkedPermissions>,
-    in_flight: Weak<InFlightSlot>,
-}
-
-impl CancelHandle {
-    pub async fn cancel(&self) -> Result<(), SubagentError> {
-        // The session owns all three; once it is gone there is no turn left to cancel.
-        let (Some(conversation), Some(permissions), Some(in_flight)) = (
-            self.conversation.upgrade(),
-            self.permissions.upgrade(),
-            self.in_flight.upgrade(),
-        ) else {
-            return Ok(());
-        };
-        permissions.cancel_pending();
-        conversation
-            .cancel_turn()
-            .await
-            .map_err(|e| SubagentError::from(format!("could not cancel the coding agent: {e}")))?;
-        // A turn that is running holds the slot, so this waits for it to end. A turn paused on a
-        // request is driven to its end here, and its result waits for the next turn to take.
-        let mut slot = in_flight.lock().await;
-        if let Some(flight) = slot.as_mut().filter(|flight| flight.result.is_none()) {
-            drive_cancelled_turn_to_its_end(flight, &permissions).await;
-        }
-        Ok(())
-    }
-}
-
-/// The turn's stop reason as a subagent outcome spells it; a refusal is an error, not an outcome.
-fn stop_reason_of(reason: AcpStopReason) -> Result<StopReason, SubagentError> {
-    match reason {
-        AcpStopReason::EndTurn => Ok(StopReason::EndTurn),
-        AcpStopReason::MaxTokens => Ok(StopReason::MaxTokens),
-        AcpStopReason::MaxTurnRequests => Ok(StopReason::MaxTurnRequests),
-        AcpStopReason::Cancelled => Ok(StopReason::Cancelled),
-        AcpStopReason::Refusal => Err(SubagentError::from("the coding agent refused the turn")),
-    }
-}
-
-/// Refuse the request options that act on an OpenAI-loop transcript, naming the first one set.
-fn refuse_loop_only(request: &TurnRequest) -> Result<(), SubagentError> {
-    let refused = [
-        (request.requested_max_turns().is_some(), "maxTurns"),
-        (!request.yield_conditions().is_empty(), "yieldConditions"),
-        (request.rewind_point().is_some(), "fromMessageId"),
-        (request.correction().is_some(), "correction"),
-        (request.replacement().is_some(), "replacement"),
-    ];
-    match refused.iter().find(|(set, _)| *set) {
-        Some((_, option)) => Err(SubagentError::unsupported_by_coding_agent(option)),
-        None => Ok(()),
-    }
-}
-
-/// Wait, up to [`CANCEL_SETTLE_DEADLINE`], for a cancelled prompt to end, keeping its result for
-/// the next turn to take. Past the deadline the prompt is left to the session's drop.
-async fn drive_cancelled_turn_to_its_end(
-    flight: &mut InFlightPrompt,
-    permissions: &ParkedPermissions,
-) {
-    let waited = tokio::time::timeout(CANCEL_SETTLE_DEADLINE, async {
-        loop {
-            // A request the agent parks while it winds down is answered as cancelled too, so the
-            // wait cannot stall on a question nothing will answer.
-            permissions.cancel_pending();
-            tokio::select! {
-                end = flight.ended.as_mut() => break end,
-                () = permissions.parked() => {}
-            }
-        }
-    })
-    .await;
-    match waited {
-        Ok(end) => flight.result = Some(end),
-        Err(_) => log::warn!(
-            "the coding agent did not end its cancelled turn within {CANCEL_SETTLE_DEADLINE:?}; \
-             the turn is left to the session's drop"
-        ),
-    }
-}
-
-#[async_trait]
-impl SubagentSession for CodingAgentSession {
-    async fn take_turn(&mut self, request: TurnRequest) -> Result<PromptOutcome, SubagentError> {
-        refuse_loop_only(&request)?;
-        let answered = self.deliver_main_agent_answer(&request)?;
-        let in_flight = Arc::clone(&self.in_flight);
-        let mut slot = match answered {
-            // Not waited on. A turn holding the slot is the one waiting for this answer, so waiting
-            // behind it would never return; the answer is already with the coding agent.
-            Some(request_id) => in_flight
-                .try_lock()
-                .map_err(|_| answer_delivered_while_held(request_id))?,
-            None => in_flight.lock().await,
-        };
-        let mut flight = match slot.take() {
-            // A turn a cancel drove to its end is over, not open: a new prompt closes it into the
-            // history and starts the next turn. Its cancelled outcome was the cancel's to report.
-            Some(ended) if ended.result.is_some() && answered.is_none() && request.prompt_text().is_some() => {
-                self.close_cancelled_turn(ended);
-                let prompt = new_prompt(&request)?;
-                self.begin_prompt(prompt)
-            }
-            Some(flight) => {
-                if answered.is_none() {
-                    match self.resume(&request) {
-                        Ok(Some(held)) => (flight.sink)(deferred_request_record(&held)),
-                        Ok(None) => {}
-                        Err(refusal) => {
-                            *slot = Some(flight);
-                            return Err(refusal);
-                        }
-                    }
-                }
-                flight
-            }
-            None => match answered {
-                Some(request_id) => {
-                    return Err(SubagentError::from(format!(
-                        "permission request '{request_id}' was answered, but no prompt is in flight to continue"
-                    )))
-                }
-                None => {
-                    let prompt = new_prompt(&request)?;
-                    self.begin_prompt(prompt)
-                }
-            },
-        };
-        // The answer this call delivered is recorded on the stream by the turn it continues. A turn holding a
-        // deferred request records that answer itself, when it is given (see `settle`).
-        if let Some(request_id) = answered {
-            record_answer(&flight.sink, &self.permissions, request_id);
-        }
-        match settle(
-            &mut flight,
-            &self.permissions,
-            request.permission_deferred_to_user(),
-        )
-        .await
-        {
-            Settled::Paused(pending) => {
-                *slot = Some(flight);
-                let mut outcome = PromptOutcome::new(
-                    StopReason::PermissionRequested,
-                    Vec::new(),
-                    TokenUsage::default(),
-                );
-                outcome.permission_request = Some(pending);
-                Ok(outcome)
-            }
-            Settled::Ended(end) => {
-                drop(slot);
-                let InFlightPrompt {
-                    prompt, updates, ..
-                } = flight;
-                let updates =
-                    std::mem::take(&mut *updates.lock().unwrap_or_else(|e| e.into_inner()));
-                self.finish(&prompt, updates, end?)
-            }
-        }
-    }
-
-    async fn prompt(&mut self, text: &str) -> Result<PromptOutcome, SubagentError> {
-        self.take_turn(TurnRequest::prompting(text)).await
-    }
-
-    fn model(&self) -> &str {
-        &self.model
-    }
-
-    /// ACP reports no token usage, so there is nothing to total.
-    fn cumulative_usage(&self) -> TokenUsage {
-        TokenUsage::default()
-    }
-
-    /// ACP reports no context occupancy.
-    fn context_tokens(&self) -> u64 {
-        0
-    }
-
-    fn tail(&self, max_messages: usize) -> Vec<String> {
-        let skip = self.history.len().saturating_sub(max_messages);
-        self.history[skip..].to_vec()
-    }
-
-    fn updates(&self) -> Option<broadcast::Receiver<AcpUpdate>> {
-        Some(self.update_stream.subscribe())
-    }
-
-    fn permission_answerer(&self) -> Option<Arc<dyn PermissionAnswering>> {
-        Some(self.permission_answering())
-    }
-
-    fn turn_canceller(&self) -> Option<Arc<dyn TurnCancelling>> {
-        Some(Arc::new(self.cancel_handle()))
-    }
-}
-
-#[async_trait]
-impl TurnCancelling for CancelHandle {
-    async fn cancel_turn(&self) -> Result<(), SubagentError> {
-        self.cancel().await
     }
 }

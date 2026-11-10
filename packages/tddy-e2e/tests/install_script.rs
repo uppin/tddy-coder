@@ -161,6 +161,9 @@ fn write_fake_release_binaries(root: &Path) {
         // Spawned by the daemon as a sibling of its own executable, so `install` requires it for
         // the same reason and with the same preflight.
         "tddy-index-daemon",
+        // The clone helper a supervised daemon runs as the session user; `install` requires it
+        // beside the daemon for the same sibling-resolution reason.
+        "tddy-git-clone",
     ] {
         let p = rel.join(name);
         fs::write(&p, b"fake-binary\n").unwrap();

@@ -47,10 +47,9 @@ spawns remove the same four variables.
 
 ## Operator consequence
 
-The supervisor's `spawn_policy.allowed_env_keys` refuses a request naming an unlisted key, so on a
-supervised host the four keys must be listed ([host sockets](../../tddy-supervisor/docs/host-sockets.md#configuration)),
-and `TDDY_GITHUB_SOURCE` too for projects that use Local gh (`dev.supervisor.yaml` and the rendered
-configs list it).
+None on a supervised host. The four keys, and `TDDY_GITHUB_SOURCE` for projects that use Local gh, pass
+whole under the supervisor's one env rule, which refuses only loader variables
+([architecture](../../tddy-supervisor/docs/architecture.md#the-childs-environment-one-rule)).
 
 ## Tests
 

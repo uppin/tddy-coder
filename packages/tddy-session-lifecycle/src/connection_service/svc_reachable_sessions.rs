@@ -34,7 +34,10 @@ impl ReachableSessions for DaemonSessionHost {
             .launch_sessions()
             .resolve_session_for_token(session_token, session_id)?;
         // The rule `ConnectSession` applies before it reaches a session.
-        let worktree_root = match facilitated_checkout(&metadata) {
+        let worktree_root = match facilitated_checkout(
+            &metadata,
+            self.launch_sessions().coding_agents.agents(),
+        ) {
             // A room for a session whose agent runs elsewhere would sit on a daemon that serves
             // nobody.
             FacilitatedCheckout::NotFacilitated => {

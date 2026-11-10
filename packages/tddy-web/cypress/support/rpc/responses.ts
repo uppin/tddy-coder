@@ -9,12 +9,14 @@
 
 import { create, toBinary } from "@bufbuild/protobuf";
 
+import { servedAgentWire } from "../servedAgents";
+
 import {
   ListProjectBranchesResponseSchema,
   ListProjectsResponseSchema,
   ProjectEntrySchema,
   type ProjectEntry,
-} from "../../../src/gen/project_pb";
+} from "tddy-client-web/gen/project_pb";
 import {
   ConnectSessionResponseSchema,
   ListSessionsResponseSchema,
@@ -25,7 +27,7 @@ import {
   type ResumeSessionResponse,
   type SessionEntry,
   type StartSessionResponse,
-} from "../../../src/gen/session_pb";
+} from "tddy-client-web/gen/session_pb";
 import {
   AgentInfoSchema,
   ListAgentModelsResponseSchema,
@@ -34,19 +36,19 @@ import {
   ModelInfoSchema,
   ToolInfoSchema,
   type AgentInfo,
-} from "../../../src/gen/catalog_pb";
+} from "tddy-client-web/gen/catalog_pb";
 import {
   EligibleDaemonEntrySchema,
   ListEligibleDaemonsResponseSchema,
   type EligibleDaemonEntry,
-} from "../../../src/gen/host_pb";
-import { GetAuthStatusResponseSchema, GitHubUserSchema, type GitHubUser } from "../../../src/gen/auth_pb";
+} from "tddy-client-web/gen/host_pb";
+import { GetAuthStatusResponseSchema, GitHubUserSchema, type GitHubUser } from "tddy-client-web/gen/auth_pb";
 import {
   GenerateTokenResponseSchema,
   RefreshTokenResponseSchema,
   type GenerateTokenResponse,
   type RefreshTokenResponse,
-} from "../../../src/gen/token_pb";
+} from "tddy-client-web/gen/token_pb";
 
 import { toArrayBuffer } from "./protoRpc";
 
@@ -170,6 +172,9 @@ export function listAgents(agents: Partial<AgentInfo>[]): Uint8Array {
         create(AgentInfoSchema, {
           id: "claude",
           label: "Claude (opus)",
+          // The spec-derived fields a daemon serves for this id; an explicit field on
+          // the fixture overrides them.
+          ...servedAgentWire(a.id ?? "claude"),
           ...a,
         }),
       ),
@@ -307,9 +312,10 @@ export function listDefaultAgents(): Uint8Array {
 }
 
 /**
- * The `claude-cli` catalog a stubbed daemon advertises, mirroring `tddy_core::backend::
- * claude_cli_models` — versionless aliases first, version-pinned ids after. The production catalog
- * lives in Rust; this is the fixture that stands in for it, so a change there is mirrored here.
+ * The `claude-cli` catalog a stubbed daemon advertises, mirroring the `claude` spec's curated
+ * models (`packages/tddy-coding-agent-specs/specs/claude.yaml`) — versionless aliases first,
+ * version-pinned ids after. The production catalog lives in that YAML; this is the fixture that
+ * stands in for it, so a change there is mirrored here.
  */
 export const DEFAULT_CLAUDE_CLI_MODELS: Array<{ id: string; label: string }> = [
   { id: "opus", label: "Claude Opus (latest)" },

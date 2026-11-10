@@ -92,11 +92,8 @@ github:
   # absent = 604800 (seven days, the refresh-token lifetime), which is also the maximum.
   open_vault_idle_ttl_seconds: 604800
 
-users:
-  - github_user: "testuser"
-    os_user: "CURRENT_USER"  # Replaced by web-dev with $USER
-  - github_user: "uppin"
-    os_user: "mantasi"
+# The GitHub → OS-user mapping lives in users.yaml beside this file: web-dev renders one
+# mapping "testuser" to $USER (and "uppin" to mantasi) beside the temp config it launches.
 
 # When true (default), pass --mouse to spawned tddy-* (browser / touch terminals).
 spawn_mouse: true
@@ -119,18 +116,12 @@ telegram:
 # Production: `sudo ./install --systemd` copies the native binary to INSTALL_BIN_DIR/codex-acp; spawned
 # users need that dir on PATH or `spawn_path_extra` in `~/.tddy/config.yaml`.
 # Overrides: `TDDY_CODEX_ACP_CLI`, `--codex-acp-cli-path`, or YAML from `-c` / `sessions/<id>/coder-config.yaml`.
-# Enables the "Claude Code CLI" session type in ConnectionScreen (spawns `claude` CLI in a PTY).
-# binary_path: a path (contains '/') is used verbatim; a bare name like "claude" (default) is
-# auto-resolved to the real host binary — ~/.local/bin/claude, then $PATH skipping wrapper-shim dirs
-# (e.g. Superset's ~/.superset/bin, which can't resolve inside the sandbox). Override the resolution
-# with the TDDY_CLAUDE_BINARY env var, or by setting an absolute binary_path here.
-# fullscreen (default true): force Claude's fullscreen renderer (CLAUDE_CODE_NO_FLICKER=1), which the
-# web terminal needs to wheel-scroll Claude; it also overrides Claude's own fall back to the classic
-# renderer after a failed fullscreen launch. false leaves the renderer to Claude.
-# Commented out: with the section absent, binary_path defaults to "claude" and is auto-resolved.
-# claude_cli:
-#   binary_path: claude
-#   fullscreen: true
+# The agent sections `claude_cli:`, `cursor_cli:` and `cli_harnesses:` are removed (#agent-tools 12/19)
+# and so are their types and readers (#agent-tools 19/19): the daemon refuses to start with one. An
+# agent's binary, home, renderer env and answer wait live in its tool file, `<tddyhome>/tools/<id>.yaml`
+# (an override of the built-in spec). A binary is found through the spec's `binary.env`
+# (e.g. TDDY_CLAUDE_BINARY), then ~/.local/bin, then $PATH skipping wrapper-shim dirs such as
+# ~/.superset/bin; one found nowhere is refused, naming every place searched.
 
 # Git behavior for the daemon's remote fetches (resolving/updating integration bases on StartSession).
 # ssh_command overrides GIT_SSH_COMMAND for those fetches ONLY — it is not exported to the process

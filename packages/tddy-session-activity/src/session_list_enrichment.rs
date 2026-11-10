@@ -165,16 +165,16 @@ pub fn session_list_status_from_session_dir(
     // agent/model/activity_status from metadata. The agent is the session type. A start that
     // creates a worktree still writes a changeset recording the branch it created; sessions
     // started before that have none, and list without a branch.
-    if let Some(harness) = meta
-        .session_type
-        .as_deref()
-        .and_then(tddy_core::cli_harness::cli_harness)
-    {
+    // A CLI session's type is its agent's `<id>-cli` (the spec registry's session-type
+    // spelling), so the suffix is the test — any agent's CLI session, dropped-in included,
+    // runs no workflow.
+    let session_type = meta.session_type.as_deref().unwrap_or_default();
+    if session_type.ends_with(tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX) {
         return Ok(SessionListStatusDisplay {
             workflow_goal: String::new(),
             workflow_state: String::new(),
             elapsed_display: String::new(),
-            agent: harness.session_type.to_string(),
+            agent: session_type.to_string(),
             model: meta.model.clone().unwrap_or_default(),
             activity_status: meta.activity_status.clone().unwrap_or_default(),
             orchestrator_session_id: String::new(),

@@ -57,9 +57,6 @@ const STREAM_WENT_TO_THE_PEER: &str =
 
 const CONFIG_YAML: &str = r#"
 daemon_instance_id: "agent-host"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 "#;
 
 // ---------------------------------------------------------------------------
@@ -199,6 +196,14 @@ impl ADaemonInTheCommonRoom {
 fn a_daemon_in_the_common_room(sessions: tempfile::TempDir) -> ADaemonInTheCommonRoom {
     let config_path = sessions.path().join("config.yaml");
     std::fs::write(&config_path, CONFIG_YAML).expect("write daemon config");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testdev\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("load daemon config");
 
     let sessions_base = sessions.path().to_path_buf();
@@ -224,6 +229,7 @@ fn a_daemon_in_the_common_room(sessions: tempfile::TempDir) -> ADaemonInTheCommo
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     );
 
     ADaemonInTheCommonRoom {

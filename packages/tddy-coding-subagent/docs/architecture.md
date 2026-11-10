@@ -14,12 +14,12 @@ the daemon implements (`tddy-session-lifecycle::coding_agent_launcher`).
 
 | Module | Role |
 |---|---|
-| `catalog` | `CodingAgentDef { name, label, harness, model, provider_account }` from ACP harness profiles (`coding_agent_defs_in`) and ACP `allowed_agents` ids, profiles first; a profile shadows an allowed id of the same name. `ACP_HARNESSES = [CLAUDE_ACP, CODEX_ACP, OPENCODE]` |
-| `confinement` | `confinement_for(harness)` — `WithdrawsNativeTools` or `CannotWithdraw`; `refuse_unless_confinable(harness, managed)` is the one refusal both attach and launch use; `withdrawal_session_meta` (claude) and `opencode_withdrawal_config` (opencode) are the withdrawal itself |
-| `launcher` | `CodingAgentLauncher` port and `CodingAgentLaunch` (def, session id/user/token, worktree, managed) |
+| `catalog` | `CodingAgentDef { name, label, harness, model, provider_account }` read from the host's `CodingAgentRegistry` (`coding_agent_defs_from(registry, profiles, allowed)`, `coding_agent_defs_in(registry, agents_dir, allowed)`): a harness profile on an agent the registry declares with a transport, then a bare `allowed_agents` id the registry declares an ACP agent, on that spec's default model; profiles first, a profile shadows an allowed id of the same name, an undeclared harness is never offered. `coding_agent_defs` is the same over the built-in specs, for a caller with no host |
+| `confinement` | `confinement_of_spec(spec)` — `WithdrawsNativeTools` or `CannotWithdraw`, from the spec's ACP deny slot (`tool_deny: unsupported` is `CannotWithdraw`); `refuse_unless_registry_confinable(registry, harness, managed)` is the one refusal attach and the headless launch use — it refuses a headless agent (a headless flag for its own tools is not an ACP withdrawal) and an undeclared harness too; `refuse_unless_spec_confinable(spec, managed, confinable)` is the ACP launch's; `confinable_acp_agents(registry)` names the alternatives a refusal offers. The crate names no agent (`tests/no_agent_names.rs`); `OPENCODE_CONFIG_CONTENT` stays for the inline route. `CodingAgentLauncher::session_meta_for(launch)` is the ACP `_meta` the session opens with — a required method, answered from the specs the launcher holds |
+| `launcher` | `CodingAgentLauncher` port and `CodingAgentLaunch` (def, session id/user/token, worktree, managed); `LaunchedAgent { transport, hooks: PreparedAcpHooks }` and `no_launch_hooks()` |
 | `permissions` | `DenyAndRecord` — the ACP `PermissionHandler` that rejects every request and records it for the turn's messages |
 | `session` | `CodingAgentSession` — one `dyn ConversationDriver` per conversation: an `AcpConversation` (one ACP agent process) or a `HeadlessDriver` (one CLI invocation per turn) |
-| `transports` | `HEADLESS_HARNESSES = ["claude", "cursor", "codex", "oz"]`; `transport_of(harness)` (`Acp` / `Headless` / `None` for PTY-only), `permission_policy_of(harness)` (`AsksCaller` / `Fixed(text)`), `transport_and_policy_wire` — the catalog row's `transport` / `permission_policy` spellings, derived from the harness id so `CodingAgentDef` is unchanged |
+| `transports` | `transport_of_spec(spec)` (`Acp` for a `coding_agent.acp` section, `Headless` for a `coding_agent.headless` one, `None` for PTY-only), `permission_policy_of_spec(spec)` (`AsksCaller` for ACP; a headless agent's `headless.permission_policy`, `None` when it declares none), `transport_and_policy_wire_of_spec` — the catalog row's `transport` / `permission_policy` spellings. `transport_of` / `permission_policy_of` / `transport_and_policy_wire` answer the same by id over the built-in specs, for a caller with no host |
 | `approval_routes` | `ApprovalRoutes` — the daemon's map of headless conversations to the launch that owns them and the `ParkedPermissions` their approvals park on |
 | `parked_permissions` | `ParkedPermissions` — the agent's permission requests, parked oldest first until answered; `answer` (the main agent's), `answer_recording(answer, by)` (first answer wins, a later one refused naming who answered), `defer_to_user`, `cancel_request`, `cancel_pending` |
 | `user_permission_answers` | `PermissionAnswering` for `ParkedPermissions` — the handle the daemon answers a deferred request through. The trait and `AnsweredBy { MainAgent, User(login) }` live in `tddy_discovery::subagent` and are re-exported here |
@@ -30,12 +30,20 @@ the daemon implements (`tddy-session-lifecycle::coding_agent_launcher`).
 ```rust
 trait CodingAgentLauncher {
     async fn command_for(&self, launch) -> Result<AcpAgentCommand, SubagentError>;   // driver spawns it
-    async fn launch_transport(&self, launch) -> Result<AgentTransport, SubagentError>; // production path
+    async fn launch_transport(&self, launch) -> Result<AgentTransport, SubagentError>;
+    async fn launch_agent(&self, launch) -> Result<LaunchedAgent, SubagentError>;     // production path; default: transport + no_launch_hooks()
+    async fn session_meta_for(&self, launch) -> Result<Option<Map>, SubagentError>;   // required
     async fn mcp_servers_for(&self, launch) -> Result<Vec<McpServerSpec>, SubagentError>;
     async fn headless_command_for(&self, launch) -> Result<HeadlessCommand, SubagentError>; // default: refused
 }
 enum AgentTransport { Command(AcpAgentCommand), Stream(UnixStream) }
 ```
+
+`launch_agent` is what the daemon opens an ACP conversation through: the transport plus the hooks
+the agent's declared `coding_agent.acp.hooks_adapter` prepared. `CodingAgentSession::start(command,
+open, model, hooks)` / `start_over(stream, open, model, hooks)` run the driver with `hooks.hooks`,
+bracket the open with `hooks.opens` (handed the open's `cwd`; a login failure during the open is the
+error reported in place of the session error), and hold the hooks for exactly the session's lifetime.
 
 `launch_transport` returns either a command the ACP driver spawns itself (the daemon's own user,
 or a privileged daemon behind `setpriv`) or an already-connected stream (a relayed spawn through
@@ -98,8 +106,8 @@ missing `headless/` is not an error.
 
 ## Headless sessions
 
-`CodingAgentSession::start_headless(harness, command, model)` holds a `HeadlessDriver`; it is asked
-for when `transport_of(def.harness)` is `Headless` (`tddy-session-agents` calls the launcher's
+`CodingAgentSession::start_headless(command, model)` holds a `HeadlessDriver` (the agent is the command's renderer); it is asked
+for when the host spec of `def.harness` declares a headless transport (`transport_of_spec`) (`tddy-session-agents` calls the launcher's
 `headless_command_for`). Turns, outcome mapping and transcript recording are the ACP session's.
 `permissions()` returns the session's `ParkedPermissions`, which the opener registers in
 `ApprovalRoutes` (`register_permissions`) so a headless claude's approval parks where the yield

@@ -84,7 +84,7 @@ impl BuildContext {
         self.manage_index_daemon(&mount.config_arc);
         let askpass_endpoint = self.bind_askpass(&shared, &served).await?;
         let connection_impl =
-            self.build_session_host(&mut mount, &shared, &served, askpass_endpoint);
+            self.build_session_host(&mut mount, &shared, &served, askpass_endpoint)?;
         let hosted = self.install_session_host(connection_impl);
         self.register_code_intelligence(&hosted.task_registry);
         let livekit_service = livekit_service(&mount);

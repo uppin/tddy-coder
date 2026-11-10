@@ -92,9 +92,8 @@ github:
   # absent = 604800 (seven days, the refresh-token lifetime), which is also the maximum.
   open_vault_idle_ttl_seconds: 604800
 
-users:
-  - github_user: "testuser"
-    os_user: "CURRENT_USER" # Replaced with the OS user at load (same as ./web-dev)
+# The GitHub → OS-user mapping lives in users.yaml beside this file: desktop-dev renders one
+# mapping "testuser" to $USER.
 
 spawn_mouse: true
 

@@ -30,6 +30,7 @@ pub mod restructure_tools;
 pub mod server;
 pub mod session_actions_cli;
 pub mod session_hook;
+pub mod session_source;
 mod subagent_diff;
 mod subagent_end;
 mod subagent_pull;

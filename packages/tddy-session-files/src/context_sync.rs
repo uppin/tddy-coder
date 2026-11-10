@@ -69,12 +69,17 @@ pub use crate::context_sync::sources::{LocalWorktreeSource, PrefetchedContext};
 /// PRD § Continuous re-sync, AC25-AC30.
 pub struct ContextSyncer {
     context_dir: PathBuf,
-    globs: &'static [&'static str],
+    globs: Vec<String>,
+    guidance_files: Vec<PathBuf>,
 }
 
 impl ContextSyncer {
-    pub fn new(context_dir: PathBuf, globs: &'static [&'static str]) -> Self {
-        Self { context_dir, globs }
+    pub fn new(context_dir: PathBuf, globs: Vec<String>, guidance_files: Vec<PathBuf>) -> Self {
+        Self {
+            context_dir,
+            globs,
+            guidance_files,
+        }
     }
 
     /// One re-sync: fetch the source manifest, apply the difference, clear the staleness warning.
@@ -88,7 +93,7 @@ impl ContextSyncer {
     pub fn tick(&self, source: &dyn ContextSource) -> Result<(), Status> {
         match self.synchronize(source) {
             Ok(()) => {
-                if let Err(e) = clear_context_stale(&self.context_dir) {
+                if let Err(e) = clear_context_stale(&self.context_dir, &self.guidance_files) {
                     log::error!(
                         "context_sync: clearing the staleness marker in {:?} failed: {e}",
                         self.context_dir
@@ -103,7 +108,7 @@ impl ContextSyncer {
                 // Best-effort on purpose: the tick already failed, and a directory that cannot be
                 // written is reported through `failure` rather than replaced by a second error
                 // about the warning nobody could write.
-                if let Err(e) = mark_context_stale(&self.context_dir) {
+                if let Err(e) = mark_context_stale(&self.context_dir, &self.guidance_files) {
                     log::error!(
                         "context_sync: marking {:?} stale after {failure} failed too: {e}",
                         self.context_dir
@@ -115,7 +120,13 @@ impl ContextSyncer {
     }
 
     fn synchronize(&self, source: &dyn ContextSource) -> Result<(), Status> {
-        synchronize_directory(&self.context_dir, self.globs, None, source)
+        synchronize_directory(
+            &self.context_dir,
+            &self.globs,
+            &self.guidance_files,
+            None,
+            source,
+        )
     }
 
     /// Populates a context directory and records what it now holds.
@@ -131,10 +142,11 @@ impl ContextSyncer {
     pub fn populate(
         context_dir: &Path,
         preamble: &str,
-        globs: &[&str],
+        globs: &[String],
+        guidance_files: &[PathBuf],
         source: &dyn ContextSource,
     ) -> Result<(), Status> {
-        synchronize_directory(context_dir, globs, Some(preamble), source)
+        synchronize_directory(context_dir, globs, guidance_files, Some(preamble), source)
     }
 }
 
@@ -156,16 +168,19 @@ impl ContextSyncer {
 /// one", which is a tick.
 fn synchronize_directory(
     context_dir: &Path,
-    globs: &[&str],
+    globs: &[String],
+    guidance_files: &[PathBuf],
     preamble_override: Option<&str>,
     source: &dyn ContextSource,
 ) -> Result<(), Status> {
+    let glob_refs: Vec<&str> = globs.iter().map(String::as_str).collect();
+    let globs: &[&str] = &glob_refs;
     let state = SyncState::read(context_dir)?;
     let preamble = preamble_override.unwrap_or(&state.preamble).to_string();
     let served = source.manifest()?;
-    let served_links = refuse_unlisted_paths(&served, globs)?;
-    let held_links = state.links(globs);
-    let held = state.held_manifest(context_dir, globs, &held_links);
+    let served_links = refuse_unlisted_paths(&served, globs, guidance_files)?;
+    let held_links = state.links(globs, guidance_files);
+    let held = state.held_manifest(context_dir, globs, guidance_files, &held_links);
     let diff = diff_manifests(&held, &served);
 
     // The recorded preamble is as much a part of what the directory holds as the hashes are: the
@@ -199,7 +214,14 @@ fn synchronize_directory(
         .chain(served_links.iter().cloned())
         .collect();
     for rel_path in &diff.delete {
-        remove_context_file(context_dir, rel_path, globs, &deletable_links, &preamble)?;
+        remove_context_file(
+            context_dir,
+            rel_path,
+            globs,
+            guidance_files,
+            &deletable_links,
+            &preamble,
+        )?;
     }
     let served_entries: std::collections::BTreeMap<&str, &ContextEntry> = served
         .entries()
@@ -215,7 +237,13 @@ fn synchronize_directory(
             Some(target) => write_context_link(context_dir, rel_path.as_str(), target)?,
             None => {
                 let bytes = source.read(rel_path.as_str())?;
-                write_context_file(context_dir, rel_path.as_str(), &bytes, &preamble)?;
+                write_context_file(
+                    context_dir,
+                    rel_path.as_str(),
+                    &bytes,
+                    &preamble,
+                    guidance_files,
+                )?;
             }
         }
     }
@@ -337,6 +365,7 @@ impl SyncState {
         &self,
         context_dir: &Path,
         globs: &[&str],
+        guidance_files: &[PathBuf],
         links: &[ContextLink],
     ) -> ContextManifest {
         ContextManifest::from_entries(
@@ -345,7 +374,8 @@ impl SyncState {
                 .filter(|entry| match &entry.symlink_target {
                     Some(target) => {
                         validate_rel_path_shape(&entry.rel_path).is_ok()
-                            && allow_listed_link(&entry.rel_path, target, globs).is_some()
+                            && allow_listed_link(&entry.rel_path, target, globs, guidance_files)
+                                .is_some()
                             && std::fs::symlink_metadata(context_dir.join(&entry.rel_path))
                                 .is_ok_and(|metadata| metadata.file_type().is_symlink())
                     }
@@ -366,12 +396,12 @@ impl SyncState {
 
     /// The links this record holds that pass [`allow_listed_link`] — the gate a served link
     /// passes, applied to a record that is as peer-writable as a manifest.
-    fn links(&self, globs: &[&str]) -> Vec<ContextLink> {
+    fn links(&self, globs: &[&str], guidance_files: &[PathBuf]) -> Vec<ContextLink> {
         self.entries
             .iter()
             .filter_map(|entry| {
                 let target = entry.symlink_target.as_deref()?;
-                allow_listed_link(&entry.rel_path, target, globs)
+                allow_listed_link(&entry.rel_path, target, globs, guidance_files)
             })
             .collect()
     }

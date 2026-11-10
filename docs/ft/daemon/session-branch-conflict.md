@@ -115,24 +115,23 @@ See [Session Drawer § Create Session](../web/session-drawer.md#create-session).
 
 ### Telegram
 
-Telegram spawns sessions without going through `StartSession` — `/start-claude` picks a project,
-intent, base branch and model, then calls `setup_worktree_for_session_with_optional_chain_base`
-directly — so it needs the same ownership check at its own call site, sharing the daemon's detection
-helper.
+A Telegram CLI start (`/start-agent`, `/start-claude`, `/start-cursor`) goes through the generic
+`StartSession` path with `on_branch_conflict = "reject"`, so this guard answers for it — Telegram
+keeps no check of its own.
 
-The branch name is derived, never typed: `feature/<slug(changeset.name)>` for claude-cli sessions,
-so two sessions named the same collide. Cursor-cli sessions derive `cursor-cli/<short-id>` from the
-session id and cannot collide.
+The branch name is derived, never typed: `feature/<slug(changeset.name)>` for an agent whose spec
+declares `branch_name_required` (claude), so two sessions named the same collide. Any other agent
+leaves the name to the start, which generates `<session-type>/<short-id>` from the session id and cannot
+collide.
 
-The check runs when the base-branch choice resolves `new_branch_name`
-(`handle_telegram_branch_callback`), not at spawn time, so the operator is asked before the model
-picker rather than after committing to a model. When the branch is owned, an inline keyboard offers:
+The start reports the conflict once the model is chosen, and creates nothing. Telegram then offers an
+inline keyboard:
 
 | Button | Action |
 |---|---|
-| `Switch to <label>` | Enters the owning session (binds the chat to it, same as tapping its Enter button). The half-configured pending session is left un-spawned, exactly as abandoning any picker mid-flow does today. |
+| `Switch to <label>` | Enters the owning session (binds the chat to it, same as tapping its Enter button). The pending session is left un-started, exactly as abandoning any picker mid-flow does today. |
 | `New agent on <branch>` | Rewrites the changeset to `work_on_selected_branch` on that branch, clears `new_branch_name`, and continues to the model picker. |
-| `Use <suggested>` | Keeps `new_branch_from_base` with `suggested_branch_name` and continues to the model picker. |
+| `Use <suggested>` | Keeps `new_branch_from_base` with the first free suffixed name and continues to the model picker. |
 
 Telegram gets a one-tap suffixed name rather than the web's editable field: `callback_data` is capped
 at 64 bytes, so a branch name cannot be carried in a callback, and free-text branch entry would need

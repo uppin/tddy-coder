@@ -1,37 +1,22 @@
 //! Product-specific sandbox recipes and plan assembly.
 //!
-//! `tddy-sandbox` stays generic; this crate composes reads/copies/policy/env overlays for
-//! known workloads (Claude CLI, shell, …). Orchestrators (`tddy-daemon`, `tddy-actions`) build
-//! a [`RunnerPlanRequest`] or [`ProcessPlanRequest`] and call [`build_runner_plan`] /
+//! `tddy-sandbox` stays generic; this crate composes reads/copies/policy/env overlays for generic
+//! shapes of process (a shell, a runner hosting a PTY) and lowers a declared tool's jail sections
+//! ([`tool_grants`]). It names no coding agent: what an agent needs of a jail is declared in its
+//! tool file (`#agent-tools 10/12`). Orchestrators (`tddy-daemon`, `tddy-actions`) build a
+//! [`RunnerPlanRequest`] or [`ProcessPlanRequest`] and call [`build_runner_plan`] /
 //! [`build_process_plan`] — the sandbox crate never sees action types.
 
-pub mod claude_cli;
-pub mod cursor_cli;
-pub mod muse_cli;
-pub mod opencode_cli;
+pub mod homes;
 pub mod plan;
 mod route_files;
+pub mod tool_grants;
 
-#[cfg(unix)]
-pub use claude_cli::seed_claude_local_install;
-pub use claude_cli::{
-    append_claude_mcp_args, append_host_agent_mcp_args, build_claude_allowlist,
-    build_claude_disallowlist, build_host_agent_disallowlist, claude_credentials_copies,
-    claude_interactive_policy, claude_runner_env_overlay, claude_scratch_mcp_dir,
-    effective_replaced_tools, process_claude_exec_reads, seed_claude_credentials,
-    write_claude_mcp_config, PERMISSION_PROMPT_TOOL,
-};
-#[cfg(unix)]
-pub use cursor_cli::seed_cursor_local_install;
-pub use cursor_cli::{
-    append_cursor_mcp_args, build_cursor_sandbox_argv, cursor_agent_prerequisite_reads,
-    cursor_credentials_copies, cursor_interactive_policy, cursor_runner_env_overlay,
-    prepare_cursor_mcp_config, process_cursor_exec_reads, seed_cursor_credentials,
-    write_cursor_mcp_config,
-};
-pub use muse_cli::muse_interactive_policy;
-pub use opencode_cli::{opencode_interactive_policy, process_opencode_exec_reads};
 pub use plan::{
-    build_process_plan, build_runner_plan, detect_recipe_from_argv, recipe_from_name,
-    route_secrets, shell_interactive_policy, ProcessPlanRequest, RunnerPlanRequest, SandboxRecipe,
+    build_process_plan, build_runner_plan, recipe_from_name, route_secrets, runner_pty_policy,
+    shell_interactive_policy, ProcessPlanRequest, RunnerPlanRequest, SandboxRecipe,
+};
+pub use tool_grants::{
+    lower_files, lower_home, lower_network, lower_policy, lower_secrets, lower_tools,
+    BinaryLibraries, FileGrants, HomeGrant, HostBinaryLibraries, JailPaths, ToolGrants,
 };

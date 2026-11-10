@@ -30,23 +30,30 @@ pub fn is_daemon_managed_worktree(worktree: &Path) -> bool {
 /// Whether a session of this type owns the worktree its `.session.yaml` records, and therefore
 /// whether `DeleteSession` should remove it.
 ///
-/// `claude-cli`, `opencode-cli`, `muse-cli` and `workspace` sessions each get a worktree cut for them
-/// alone — a workspace session *is* its worktree and nothing else, so leaving it behind leaks the
-/// only thing the session was for (see `docs/ft/daemon/remote-managed-worktree.md` § Teardown). A
+/// An agent session (`<id>-cli`) and a `workspace` session each get a worktree cut for them alone —
+/// a workspace session *is* its worktree and nothing else, so leaving it behind leaks the only
+/// thing the session was for (see `docs/ft/daemon/remote-managed-worktree.md` § Teardown). A
 /// `tool` (tddy-coder) session records the project's shared checkout instead, and an empty type is a
 /// legacy file predating `session_type`; removing either would delete a tree other sessions depend
 /// on.
 ///
-/// `cursor-cli` leaks its worktree the same way `workspace` did, but it predates this rule:
-/// including it here would change behaviour for sessions that already exist, so it is tracked in
-/// `docs/dev/TODO.md` rather than fixed in passing. `opencode-cli` and `muse-cli` are new, and each
-/// is cut a worktree for it alone, so it is removed with its session from the start.
-pub fn worktree_removal_applies_to(session_type: &str) -> bool {
-    matches!(
-        session_type,
-        "claude-cli" | "opencode-cli" | "muse-cli" | "warp-cli" | "workspace"
-    )
+/// An agent that declares `keep_worktree_on_delete` (Cursor, which predates this rule: including
+/// it would change behaviour for sessions that already exist, so it is tracked in
+/// `docs/dev/TODO.md` rather than fixed in passing) leaves its worktree on disk.
+pub fn worktree_removal_applies_to(
+    agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
+    session_type: &str,
+) -> bool {
+    if session_type == WORKSPACE_SESSION_TYPE {
+        return true;
+    }
+    agents
+        .and_then(|agents| agents.for_session_type(session_type))
+        .is_some_and(|spec| !spec.has(tddy_coding_agent_specs::Capability::KeepWorktreeOnDelete))
 }
+
+/// The session type of a worktree-only session.
+const WORKSPACE_SESSION_TYPE: &str = "workspace";
 
 /// After SIGKILL the child may be a zombie until its parent reaps it; `kill(pid, 0)` still succeeds.
 #[cfg(all(unix, target_os = "linux"))]
@@ -236,11 +243,14 @@ pub fn close_session_room(rooms: &dyn tddy_daemon_extensions::SessionRooms, sess
 /// `projects_dir` is optional but recommended for sessions that own a worktree
 /// ([`worktree_removal_applies_to`]): when provided, the linked git worktree is removed via
 /// `git worktree remove` (git-aware). When absent, the directory is removed with
-/// `std::fs::remove_dir_all` (leaving a dangling git worktree registration).
+/// `std::fs::remove_dir_all` (leaving a dangling git worktree registration). `agents` says which
+/// agent sessions own a worktree; `None` for a caller with no registry, whose agent sessions are then
+/// treated as owning none.
 pub fn delete_session_directory(
     sessions_base: &Path,
     session_id: &str,
     projects_dir: Option<&Path>,
+    agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
 ) -> Result<(), Status> {
     let session_id = session_id.trim();
     let session_dir = resolve_session_directory_for_delete(sessions_base, session_id)?;
@@ -276,7 +286,9 @@ pub fn delete_session_directory(
     // Extract the session-owned worktree path before the cfg blocks consume or shadow `metadata`.
     let session_worktree = metadata
         .as_ref()
-        .filter(|m| worktree_removal_applies_to(m.session_type.as_deref().unwrap_or_default()))
+        .filter(|m| {
+            worktree_removal_applies_to(agents, m.session_type.as_deref().unwrap_or_default())
+        })
         .and_then(|m| m.repo_path.clone());
 
     #[cfg(unix)]
@@ -530,7 +542,7 @@ mod tests {
         let dir = unified_session_dir_path(&base, sid);
         std::fs::create_dir_all(dir.join("logs")).unwrap();
 
-        let r = delete_session_directory(&base, sid, None);
+        let r = delete_session_directory(&base, sid, None, None);
         assert!(r.is_ok(), "expected delete to succeed without metadata");
         assert!(!dir.exists(), "directory should be removed");
     }
@@ -549,7 +561,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         write_dead_pid_session(&dir, sid, pid);
 
-        let r = delete_session_directory(&base, sid, None);
+        let r = delete_session_directory(&base, sid, None, None);
         assert!(r.is_ok(), "expected delete to succeed for inactive session");
         assert!(!dir.exists(), "directory should be removed");
     }
@@ -572,8 +584,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let base = temp.path().join("sessions_this_daemon");
         std::fs::create_dir_all(&base).unwrap();
-        let err =
-            delete_session_directory(&base, "session-owned-on-another-daemon", None).unwrap_err();
+        let err = delete_session_directory(&base, "session-owned-on-another-daemon", None, None)
+            .unwrap_err();
         assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
     }
 
@@ -668,7 +680,7 @@ mod tests {
         };
         tddy_core::write_session_metadata(&dir, &metadata).unwrap();
 
-        let r = delete_session_directory(base, sid, None);
+        let r = delete_session_directory(base, sid, None, None);
         assert!(r.is_ok(), "delete should succeed: {r:?}");
         assert!(!dir.exists(), "session directory should be removed");
 
@@ -730,7 +742,7 @@ mod tests {
         tddy_core::write_session_metadata(&dir, &metadata).unwrap();
 
         // When — the session is deleted with no projects dir (external checkout, no project)
-        let r = delete_session_directory(&base, sid, None);
+        let r = delete_session_directory(&base, sid, None, None);
 
         // Then — the session dir is gone but the user's checkout is left intact
         assert!(r.is_ok(), "expected delete to succeed");

@@ -66,12 +66,33 @@ impl LaunchSessions {
             return Err(Status::invalid_argument("session_id is required"));
         }
         log::debug!("DeleteSession: requested session_id={}", session_id);
-        let github_user = (self.user_resolver)(&req.session_token)
+        let os_user = self.os_user_of_session_token(&req.session_token)?;
+        self.delete_session_as(&os_user, session_id, &req.session_token)
+            .await
+    }
+
+    /// The OS user a session token's caller is mapped to.
+    pub(crate) fn os_user_of_session_token(&self, session_token: &str) -> Result<String, Status> {
+        let github_user = (self.user_resolver)(session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = &self
-            .config
+        self.config
             .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))
+    }
+
+    /// The teardown [`Self::delete_session_at_session_coordinate`] runs once the caller is resolved
+    /// to `os_user`, so a start that carried no session token (an operator start) can remove what it
+    /// created by its OS user.
+    ///
+    /// `session_token` is the credential the session's start carried. The split codebase half and the
+    /// agent clones are deleted on the peers that hold them, and a peer authenticates that delete by
+    /// this token: a start that carried none gets its peer-held parts refused, never skipped.
+    pub(crate) async fn delete_session_as(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        session_token: &str,
+    ) -> Result<Response<DeleteSessionResponse>, Status> {
         let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
             os_user,
             Some(&self.tddy_data_dir),
@@ -82,6 +103,10 @@ impl LaunchSessions {
             sessions_base,
             os_user
         );
+        // Every part a peer holds is checked before anything here is torn down: a delete one of
+        // them would refuse is refused with the session and its agent still running.
+        self.refuse_a_delete_a_peer_would_refuse(&sessions_base, session_id)
+            .await?;
         // The agent of a tmux-run session lives in its tmux session, so that is killed before
         // anything else of the session is torn down: a refused kill refuses the delete with the
         // session intact, and a retry kills whatever is left.
@@ -91,19 +116,29 @@ impl LaunchSessions {
             &unified_session_dir_path(&sessions_base, session_id),
         )
         .await?;
+        // A worktree kept after the delete (`keep_worktree_on_delete`) must not keep pointing a
+        // shell-run `tddy-tools` at a session that is gone.
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        if let Err(e) = tokio::task::spawn_blocking(move || {
+            remove_recorded_session_pointer(&session_dir, Path::new("ssh"))
+        })
+        .await
+        {
+            log::warn!("the session pointer's removal did not finish: {e}");
+        }
         let projects_dir_opt = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
         // A split session's worktree lives on another daemon, which must lose it first: deleting
         // this side alone would leave a checkout on a host with no session left to reclaim it. A
         // failure to reach that daemon fails the delete rather than silently dropping its half.
         self.split_sessions
-            .delete_paired_codebase_session(&sessions_base, session_id, &req.session_token)
+            .delete_paired_codebase_session(&sessions_base, session_id, session_token)
             .await?;
         // Every clone this session's roster created, on every host that built one — including hosts
         // the operator never looked at. Refused rather than continued if one cannot be reached, for
         // the same reason the paired workspace above is: a delete that succeeded here while a
         // checkout survived elsewhere is exactly the silent leak this is for.
         self.agent_roster
-            .tear_down_every_agent_clone(session_id, &req.session_token)
+            .tear_down_every_agent_clone(session_id, session_token)
             .await?;
         // Every admission this session minted is void with the session: a mirror that re-admits
         // after the delete must be refused, and `revoke_all_for_session` is the bulk revocation
@@ -141,9 +176,48 @@ impl LaunchSessions {
             &sessions_base,
             session_id,
             projects_dir_opt.as_deref(),
+            Some(self.coding_agents.agents()),
         )?;
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
+    }
+
+    /// Refuses a delete of `session_id` that one of its peer-held parts would refuse, before
+    /// [`Self::delete_session_as`] tears anything down: a codebase half on another daemon
+    /// (`SplitSessions::refuse_an_unreachable_paired_codebase`) or
+    /// an agent clone (`AgentRoster::refuse_an_unreachable_clone_host`) while
+    /// this daemon cannot reach the common room. What only the peer can answer — reachable now,
+    /// failing at the delete — still fails after the local teardown began (`#agent-tools 30/32`).
+    pub(crate) async fn refuse_a_delete_a_peer_would_refuse(
+        &self,
+        sessions_base: &Path,
+        session_id: &str,
+    ) -> Result<(), Status> {
+        self.split_sessions
+            .refuse_an_unreachable_paired_codebase(sessions_base, session_id)
+            .await?;
+        self.agent_roster
+            .refuse_an_unreachable_clone_host(session_id)
+            .await?;
+        Ok(())
+    }
+}
+
+/// Remove the session pointer ([`crate::cli_session_pointer`]) from the worktree the session in
+/// `session_dir` records, if it records one — on the ssh target it records
+/// (`ssh_config_host`, reached through the ssh client `ssh`) when it records one.
+pub(crate) fn remove_recorded_session_pointer(session_dir: &Path, ssh: &Path) {
+    let Ok(metadata) = read_session_metadata(session_dir) else {
+        return;
+    };
+    if let Some(worktree) = metadata.repo_path {
+        crate::cli_session_pointer::remove_session_pointer(
+            Path::new(&worktree),
+            &crate::cli_session_pointer::PointerHost::through(
+                ssh,
+                metadata.ssh_config_host.as_deref(),
+            ),
+        );
     }
 }
 

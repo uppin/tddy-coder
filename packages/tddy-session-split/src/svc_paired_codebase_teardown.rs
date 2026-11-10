@@ -69,6 +69,40 @@ impl SplitSessions {
             }
     }
 
+    /// Refuses, as [`Self::delete_paired_codebase_session`] would, the delete of a session paired
+    /// with a codebase half on **another** daemon while this daemon has no common room configured or
+    /// joined — read-only, so `DeleteSession` can refuse before it tears anything down. A
+    /// co-located session, or a jailed codebase on this daemon, needs no room and is never refused
+    /// here (`#agent-tools 30/32`).
+    pub async fn refuse_an_unreachable_paired_codebase(
+        &self,
+        sessions_base: &Path,
+        session_id: &str,
+    ) -> Result<(), Status> {
+        let session_dir = unified_session_dir_path(sessions_base, session_id);
+        let Ok(meta) = read_session_metadata(&session_dir) else {
+            return Ok(());
+        };
+        let Some((codebase_daemon, codebase_session)) =
+            tddy_session_agents::peer_session_answer::split_pairing(&meta)
+        else {
+            return Ok(());
+        };
+        if codebase_daemon == local_instance_id_for_config(&self.config) {
+            return Ok(());
+        }
+        let slot = self.peer_routing.common_room_slot("DeleteSession")?;
+        if !slot.is_connected().await {
+            return Err(Status::failed_precondition(format!(
+                "cannot reach the common room to delete the paired workspace session \
+                 {codebase_session} on daemon {codebase_daemon}, so its worktree's fate is unknown; \
+                 this session was left in place — retry once the daemons can see each other, or \
+                 delete that session on {codebase_daemon} directly and retry"
+            )));
+        }
+        Ok(())
+    }
+
     /// Delete the `workspace` session paired with a split session, on the daemon that holds its
     /// worktree. A no-op for a co-located session, which records no pairing.
     ///

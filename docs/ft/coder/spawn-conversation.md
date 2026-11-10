@@ -19,14 +19,18 @@ plan to a fresh agent that starts on a new branch/worktree — surfaced to the u
 
 ### Design Rationale
 
-The daemon already materializes "a new worktree + a new `claude` conversation tagged with a parent"
+The daemon already materializes "a new worktree + a new agent conversation tagged with a parent"
 for the **PR-stack orchestrator** via `spawn-child` (`ChildSpawnHandler` →
-`spawn_claude_cli_session_inner(stack_parent = Some(...))`). That mechanism is PR-stack-specific: it
+`LaunchSessions::start_spawned_cli_child(stack_parent = Some(...))`). That mechanism is PR-stack-specific: it
 resolves a *planned-PR node* from the orchestrator's `changeset.stack`, which a grill-me session does
 not have. Rather than widen the PR-stack path (and risk its live behavior), we add a **parallel,
 additive** capability: a generic `spawn_conversation` tool + `ConversationSpawnHandler` that takes an
 explicit **prompt** (and optional **branch**/**base_ref**) instead of a node id, reusing the same
-`spawn_claude_cli_session_inner` spawn path and the same `orchestrator_session_id` discovery contract.
+`start_spawned_cli_child` spawn path and the same `orchestrator_session_id` discovery contract. Either
+child runs the orchestrator's own agent (`harness_from_spec::child_session_type`: a claude-cli
+orchestrator spawns a claude-cli child, a cursor-cli one a cursor-cli child) through the one generic
+CLI launch; a host without coding agents, or an orchestrator recording no CLI session type, refuses
+the spawn `FAILED_PRECONDITION`.
 
 Because a spawned conversation is a real child session, the web needs no new RPC to discover it: the
 existing `ListSessions` poll already returns `SessionEntry.orchestrator_session_id`. The parent
@@ -38,7 +42,7 @@ session's runtime derives its child tabs by filtering the session list on
 - **grill-me recipe (`tddy-workflow-recipes`)** — its **Create plan** prompt instructs the agent to
   call `spawn_conversation` after writing the brief.
 - **tddy-daemon** — binds a `GrillMeConversationSpawnHandler` on a grill-me managed session's
-  per-session toolcall listener; the handler calls `spawn_claude_cli_session_inner`.
+  per-session toolcall listener; the handler calls `start_spawned_cli_child`.
 - **tddy-web `SessionRuntime`** — renders discovered child sessions as tabs and attaches the child
   session's runtime when its tab is selected.
 
@@ -81,7 +85,7 @@ session's runtime derives its child tabs by filtering the session list on
   recording it in the orchestrator's start ledger (`StartLedger::recovered_in_session_dir`). Status
   reads that ledger; cancel is `LaunchSessions::cancel_recorded_start` (local task registry or the
   peer's `CancelTask`). The legacy `spawn_conversation(prompt, branch, base_ref)` still calls
-  `spawn_claude_cli_session_inner` directly.
+  `start_spawned_cli_child` directly.
 - **Child-as-tab rendering** (`tddy-web`): the parent `SessionRuntime` derives
   `childSessions = sessions.filter(s => s.orchestratorSessionId === parentSessionId)`, renders a tab
   per child, and attaches the child session's runtime when its tab is active.
@@ -129,7 +133,8 @@ session's runtime derives its child tabs by filtering the session list on
 - **`tddy-tools`** `server.rs`: `SpawnConversationInput` + `spawn_conversation` tool; the request-JSON
   builder is a pure fn for unit testing.
 - **`tddy-daemon`**: `GrillMeConversationSpawnHandler` in `connection_service.rs`; a
-  `conversation_spawn_handler` parameter threaded through `spawn_claude_cli_session_inner` →
+  `conversation_spawn_handler` bound through the generic CLI launch's managed wiring
+  (`LaunchSessions::managed_spawn_handlers`) →
   `prepare_managed_workflow_inner` → `set_up_managed_workflow`/`resume_managed_workflow`/
   `build_managed_workflow` → `start_session_toolcall_listener` (bound via
   `.with_conversation_spawn_handler`). A `recipe_spawn_handlers(recipe, …)` helper selects the
@@ -137,7 +142,7 @@ session's runtime derives its child tabs by filtering the session list on
   child handler).
 - **`tddy-workflow-recipes`** `grill_me/prompt.rs`: **Create plan** prompt gains a required final step
   to call `spawn_conversation` after the brief files exist (and to commit `plans/<slug>.md` first).
-- **`tddy-web`** `components/sessions/`: `useChildSessions` derives child tabs from the session list;
+- **`tddy-web`** `packages/tddy-session-web/src/`: `useChildSessions` derives child tabs from the session list;
   `SessionTerminalTabs` renders them; `SessionRuntime` mounts a selected child's runtime pane.
 
 ## Acceptance Criteria

@@ -65,7 +65,8 @@ impl RecordingLauncher {
                     )],
                 ))
             }),
-        );
+        )
+        .with_coding_agents(tddy_session_lifecycle::test_util::builtin_coding_agents());
         Arc::new(Self {
             launches: Mutex::new(Vec::new()),
             served: Mutex::new(Vec::new()),
@@ -84,6 +85,16 @@ impl RecordingLauncher {
 
 #[async_trait::async_trait]
 impl CodingAgentLauncher for RecordingLauncher {
+    async fn session_meta_for(
+        &self,
+        _launch: &tddy_coding_subagent::CodingAgentLaunch,
+    ) -> Result<
+        Option<serde_json::Map<String, serde_json::Value>>,
+        tddy_discovery::subagent::SubagentError,
+    > {
+        Ok(None)
+    }
+
     async fn command_for(
         &self,
         launch: &CodingAgentLaunch,

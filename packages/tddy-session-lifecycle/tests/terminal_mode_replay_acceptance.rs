@@ -16,7 +16,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
-use tddy_session_lifecycle::claude_cli_session::{ClaudeCliSessionManager, PtyHandle};
+use tddy_session_lifecycle::claude_cli_session::{CliSessionManager, PtyHandle};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     StreamReplayMode, StreamTerminalOutputRequest,
@@ -47,16 +47,24 @@ const MOUSE_TRACKING_PROLOGUE: &[u8] = b"\x1b[?1000h\x1b[?1002h\x1b[?1006h";
 
 fn test_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = "users:\n  - github_user: \"testuser\"\n    os_user: \"testuser\"\n";
+    let yaml = "";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
     (dir, config)
 }
 
 /// Build a service wired to `manager`, returning temp-dir guards that must stay alive.
 fn make_service(
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> (
     tddy_terminal_rpc::TerminalSessionServiceImpl,
     tempfile::TempDir,
@@ -85,6 +93,7 @@ fn make_service(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     );
     (service.terminal_session_service(), cfg_dir, sessions)
 }
@@ -120,17 +129,21 @@ fn write_mouse_tracking_stub(dir: &std::path::Path) -> PathBuf {
 /// client can only learn the modes from a prologue. Returns the worktree guard (keeps the dir
 /// alive).
 async fn start_main_terminal_whose_mouse_modes_have_been_trimmed_away(
-    manager: &ClaudeCliSessionManager,
+    manager: &CliSessionManager,
 ) -> tempfile::TempDir {
     let worktree = tempfile::tempdir().unwrap();
     let stub = write_mouse_tracking_stub(worktree.path());
     let handle = manager
-        .start(
+        .start_with_options(
             SESSION_ID,
             worktree.path().to_path_buf(),
             "claude-opus-4-8",
-            stub.to_str().unwrap(),
+            vec![stub.to_str().unwrap().to_string()],
+            "claude-cli",
             None,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await
@@ -212,7 +225,7 @@ fn readable(bytes: &[u8]) -> String {
 async fn sends_the_mouse_tracking_prologue_first_to_a_browser_client_that_supplies_dimensions() {
     // Given a running agent terminal whose TUI enabled SGR mouse tracking at startup and has
     // since written far more output than the capture ring retains
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let _worktree = start_main_terminal_whose_mouse_modes_have_been_trimmed_away(&manager).await;
     let (service, _cfg_dir, _sessions) = make_service(Arc::clone(&manager));
 

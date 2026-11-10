@@ -3,10 +3,10 @@
 //! PRD: docs/ft/daemon/session-notifications.md (FR1, AC1, AC2).
 //!
 //! The rule is the one `tddy-web`'s session drawer already applies
-//! (`packages/tddy-web/src/utils/sessionDrawerLabel.ts`): the basename of `repo_path`, falling
+//! (`packages/tddy-session-web/src/utils/sessionDrawerLabel.ts`): the basename of `repo_path`, falling
 //! back to `workflow_goal`, falling back to the first eight characters of `session_id`. These
 //! tests are the Rust half of that parity — each case mirrors a case in
-//! `packages/tddy-web/src/utils/sessionDrawerLabel.test.ts`.
+//! `packages/tddy-session-web/src/utils/sessionDrawerLabel.test.ts`.
 
 use tddy_changeset::session_label::session_display_label;
 

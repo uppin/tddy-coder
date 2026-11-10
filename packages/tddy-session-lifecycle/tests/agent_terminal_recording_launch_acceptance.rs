@@ -15,7 +15,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::session::{
     ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::session_dir_recorded_history::main_capture_recording_path;
 use tddy_task::CaptureRecording;
@@ -39,31 +39,42 @@ fn current_os_user() -> String {
         .into_owned()
 }
 
-fn write_config_with_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+/// A daemon config, and the coding agents the host installs: `claude` is the stub.
+type AConfigAndItsAgents = (
+    DaemonConfig,
+    Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+);
+
+fn write_config_with_binary(stub_binary: &str) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
-claude_cli:
-  binary_path: {stub_binary}
-"#
-    );
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
-    (dir, config)
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+        "claude",
+        std::path::Path::new(stub_binary),
+    )]);
+    (dir, (config, agents))
 }
 
 fn minimal_service_with_manager(
-    config: DaemonConfig,
+    (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -86,6 +97,7 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
 }
 
@@ -134,8 +146,8 @@ fn write_staying_alive_stub(dir: &std::path::Path) -> PathBuf {
     script_path
 }
 
-fn a_manager_recording_every_50_ms() -> Arc<ClaudeCliSessionManager> {
-    Arc::new(ClaudeCliSessionManager::new().with_recording_interval(Duration::from_millis(50)))
+fn a_manager_recording_every_50_ms() -> Arc<CliSessionManager> {
+    Arc::new(CliSessionManager::new().with_recording_interval(Duration::from_millis(50)))
 }
 
 /// A safety net for the stub to print and the periodic write to land, not a prediction.

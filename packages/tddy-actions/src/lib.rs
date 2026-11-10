@@ -10,6 +10,7 @@ pub mod pipeline;
 pub mod process_runtime;
 pub mod result_kind;
 pub mod spec;
+pub mod tool;
 
 pub use catalog::ActionCatalog;
 pub use convert::{

@@ -24,7 +24,15 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use tddy_actions::tool::{render_argv, TemplateParams};
+use tddy_coding_agent_specs::claude_tools::{
+    build_claude_allowlist, build_claude_disallowlist, PERMISSION_PROMPT_TOOL,
+};
+use tddy_coding_agent_specs::slots::{self, McpServerCommand, SlotInputs};
+use tddy_coding_agent_specs::{McpSlot, HOST_AGENT_VARIANT};
+
+use crate::agent_spec::ChosenAgent;
 
 /// `RUST_LOG` for the host `tddy-tools --mcp` server when the session names no level, matching what
 /// the in-jail server defaults to — the two are the same program answering the same tool calls, so
@@ -33,7 +41,8 @@ const DEFAULT_MCP_RUST_LOG: &str = "info,tddy_tools=debug,tddy_discovery=debug";
 
 /// What a host-run agent is spawned with.
 pub struct HostAgentArgs {
-    pub claude_binary: String,
+    /// The agent that runs on this host — its spec's `host_agent` variant is the argv's shape.
+    pub agent: ChosenAgent,
     pub model: String,
     pub permission_mode: String,
     pub session_id: String,
@@ -92,8 +101,8 @@ pub(crate) fn host_mcp_env(
     // every other mode. One overlay builder for both placements, so a def resolved here means what
     // it means there.
     env.extend(crate::spawn::subagent_env_overlay(specialized_defs));
-    // Same two files the in-jail server writes (`tddy_sandbox_runner::runner::spawn_claude_pty`),
-    // under the same session egress dir: a dispatch that never reached the jail leaves a record
+    // Same two files the in-jail server writes (`spawn::agent_exec_plan_for_jail`), under the same
+    // session egress dir: a dispatch that never reached the jail leaves a record
     // here instead of vanishing into the stderr the agent captured from its MCP child.
     if let Some(egress_dir) = egress_dir {
         env.insert(
@@ -120,12 +129,15 @@ pub(crate) fn host_mcp_env(
 
 /// Build the argv for the host-run agent, MCP block included.
 ///
-/// The fixed flags are the shared `claude` base argv, so a host-run agent is configured the way
-/// every other one is; what differs is the tail, where `append_host_agent_mcp_args` withdraws the
-/// natives that would otherwise reach this host's filesystem directly.
+/// Rendered from the agent's spec like every other launch: the run template, then the spec's
+/// `host_agent` variant (the flags that keep the *checkout's own* configuration from executing on
+/// this host — `--strict-mcp-config` loads only the servers named by the registration below, and
+/// `--setting-sources user` drops the checkout's hooks — and every native filesystem and shell tool
+/// withdrawn, which on this host would reach the checkout directly), the pass-through args, and the
+/// slots.
 pub fn build_host_agent_argv(args: HostAgentArgs) -> Result<Vec<String>> {
     let HostAgentArgs {
-        claude_binary,
+        agent,
         model,
         permission_mode,
         session_id,
@@ -139,37 +151,23 @@ pub fn build_host_agent_argv(args: HostAgentArgs) -> Result<Vec<String>> {
         specialized_defs,
     } = args;
 
-    let mut argv = tddy_core::claude_argv::build_claude_base_argv(
-        &claude_binary,
-        &model,
-        &session_id,
-        &permission_mode,
-        false,
-        false,
-    );
-
-    // The two flags that keep the *checkout's own* configuration from executing on this host, and
-    // the only mitigations that reach it: neither of the things they block is a tool, so
-    // `--disallowedTools` never sees either.
-    //
-    // `--strict-mcp-config` — use only the MCP servers named by `--mcp-config` below. A `.mcp.json`
-    // in the repository would otherwise register servers that Claude launches as **unconfined host
-    // processes**, with the repository's choice of command and env.
-    //
-    // `--setting-sources user` — load settings from this user's own home and from nowhere else,
-    // dropping the `project` and `local` sources that read the checkout's `.claude/settings.json`.
-    // That file can declare **hooks**: shell commands the CLI runs itself, on this host, around the
-    // agent's turns. In every other mode the checkout's settings are read by an agent already
-    // inside the jail; here the agent is not, and the premise of the mode is that the checkout is
-    // unaudited — so a repository must not be able to hand this host a command to run.
-    argv.push("--strict-mcp-config".to_string());
-    argv.push("--setting-sources".to_string());
-    argv.push("user".to_string());
+    let mut spec = agent.spec.clone();
+    let mut slot_args = spec.variant_args(HOST_AGENT_VARIANT)?;
+    let natives = spec
+        .agent
+        .variants
+        .get(HOST_AGENT_VARIANT)
+        .map(|variant| variant.withdraw_native.clone())
+        .unwrap_or_default();
+    // The variant passes the strict flag; the slot must not pass it a second time.
+    if let McpSlot::File { strict_flag, .. } = &mut spec.agent.mcp {
+        *strict_flag = None;
+    }
 
     // Pass-through args go after the fixed flags but BEFORE the MCP block, which ends in the
     // variadic `--mcp-config`: a bare positional (a trailing prompt) placed after it would be
     // greedily swallowed as another config path. The in-jail spawn lives under the same rule.
-    argv.extend(claude_args);
+    slot_args.extend(claude_args);
 
     let mcp_env = host_mcp_env(
         &tool_ipc_socket,
@@ -178,20 +176,58 @@ pub fn build_host_agent_argv(args: HostAgentArgs) -> Result<Vec<String>> {
         &specialized_defs,
     );
     let replaced: Vec<&str> = replaced_tools.iter().map(String::as_str).collect();
-    tddy_sandbox_recipes::append_host_agent_mcp_args(
-        &mut argv,
-        &host_config_dir,
-        &tddy_tools_path,
-        // The conversation tools are advertised exactly when there is someone to converse with —
-        // the same condition the roster's own server applies, expressed here because the argv is
-        // fixed before that server exists. A def's `replaces:` applies either way: a tool the
-        // session took away stays taken away wherever the agent happens to run.
-        !specialized_defs.is_empty(),
-        &replaced,
-        &mcp_env,
+    // A tool a subagent replaced is withdrawn in both its forms, minus what the variant already
+    // names, so no tool is named twice.
+    let denied_tools: Vec<String> = build_claude_disallowlist(&replaced)
+        .into_iter()
+        .filter(|tool| !natives.contains(tool))
+        .collect();
+    let rendered = slots::render(
+        &spec,
+        &SlotInputs {
+            workdir: host_config_dir.clone(),
+            scratch_dir: host_config_dir.clone(),
+            mcp_server: Some(McpServerCommand {
+                name: crate::agent_spec::TOOL_SERVER_DEP.to_string(),
+                command: tddy_tools_path,
+                args: vec!["--mcp".to_string()],
+                env: mcp_env,
+                cwd: None,
+            }),
+            // The conversation tools are advertised exactly when there is someone to converse with
+            // — the same condition the roster's own server applies, expressed here because the argv
+            // is fixed before that server exists. A def's `replaces:` applies either way: a tool
+            // the session took away stays taken away wherever the agent happens to run.
+            allowed_tools: build_claude_allowlist(!specialized_defs.is_empty(), &replaced),
+            denied_tools,
+            permission_prompt_tool: Some(PERMISSION_PROMPT_TOOL.to_string()),
+            preamble: None,
+            append_system_prompt_file: None,
+            hooks: None,
+            home: None,
+        },
     )?;
+    for (path, contents) in &rendered.files {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)
+                .with_context(|| format!("create MCP config dir {}", dir.display()))?;
+        }
+        tddy_core::atomic_file::write_atomic(path, contents)
+            .with_context(|| format!("write MCP config: {}", path.display()))?;
+    }
+    slot_args.extend(rendered.argv_extra);
 
-    Ok(argv)
+    let permission_mode = Some(permission_mode.trim())
+        .filter(|mode| !mode.is_empty())
+        .unwrap_or("auto");
+    let mut params = TemplateParams::new()
+        .with("session_id", &session_id)
+        .with("permission_mode", permission_mode)
+        .with_list("slots", slot_args);
+    if !model.trim().is_empty() {
+        params = params.with("model", model.trim());
+    }
+    Ok(render_argv(&spec.run, &agent.tool, &params)?)
 }
 
 #[cfg(test)]
@@ -206,9 +242,27 @@ mod tests {
 
     const TOOL_SOCKET: &str = "/tmp/tddy-sandboxed-codebase.sock";
 
+    /// Claude as its embedded spec declares it, resolved to a binary that exists nowhere: the argv is
+    /// rendered, never run.
+    fn a_claude_agent() -> ChosenAgent {
+        ChosenAgent {
+            id: "claude".to_string(),
+            spec: tddy_coding_agent_specs::embedded_spec("claude").expect("claude's embedded spec"),
+            defs: Vec::new(),
+            tool: tddy_actions::tool::ResolvedTool {
+                id: "claude".to_string(),
+                command: "claude".to_string(),
+                binary: PathBuf::from("/usr/local/bin/claude"),
+                reads: Vec::new(),
+                network: Default::default(),
+            },
+            deps: Vec::new(),
+        }
+    }
+
     fn a_host_agent(host_config_dir: &Path) -> HostAgentArgs {
         HostAgentArgs {
-            claude_binary: "/usr/local/bin/claude".to_string(),
+            agent: a_claude_agent(),
             model: "opus".to_string(),
             permission_mode: "auto".to_string(),
             session_id: "sandboxed-codebase-session".to_string(),
@@ -389,7 +443,7 @@ mod tests {
 
         // Then
         let allowed = values_after(&argv, "--allowedTools");
-        for tool in tddy_sandbox::workspace_exec_tool_names() {
+        for tool in tddy_coding_agent_specs::claude_tools::workspace_exec_tool_names() {
             let prefixed = format!("mcp__tddy-tools__{tool}");
             assert!(
                 allowed.contains(&prefixed),

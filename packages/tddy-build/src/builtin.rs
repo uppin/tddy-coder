@@ -6,8 +6,10 @@
 //! from the target's open [`crate::manifest::TargetConfig`] fields.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use serde::Deserialize;
+use tddy_actions::tool::{ToolDef, ToolError};
 
 use crate::error::BuildError;
 use crate::proto::{ActionType, BuildAction};
@@ -32,12 +34,81 @@ struct ScriptTarget {
     working_dir_rel: Vec<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct ToolTarget {
-    bin_dir: String,
-    #[allow(dead_code)]
-    commands: HashMap<String, String>,
+/// A `type: tool` target's config (`#agent-tools 4/12`): a tool definition written inline, or a
+/// reference to one the tool registry already holds.
+///
+/// An action names the **target** in `tool_dep_ids`; the executor maps it to a tool id — the inline
+/// definition's `id`, or `ref` — and resolves that id's closure through
+/// [`tddy_actions::tool::ToolRegistry::resolve_closure`]. An inline id that the registry already
+/// holds is refused as a duplicate, never silently preferred.
+///
+/// The legacy `{bin_dir, commands}` shape is refused by [`tool_target`] with a message naming the
+/// target and the replacement: a directory on `PATH` grants every binary in it, which is exactly
+/// what a hermetic action must not get.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolTarget {
+    /// The target's config fields (all but `type`) are a whole [`ToolDef`] (boxed: it dwarfs a
+    /// `Ref`).
+    Inline(Box<ToolDef>),
+    /// `ref: <tool id>` — a built-in or a `<tddyhome>/tools/<id>.yaml` override.
+    Ref { ref_: String },
+}
+
+/// Parse `target_id`'s `type: tool` config into a [`ToolTarget`].
+///
+/// The legacy `{bin_dir, commands}` shape is a [`BuildError::Manifest`] reading
+/// `tool target <id>: the {bin_dir, commands} tool shape is no longer supported — declare a tool
+/// definition (schema_version, id, summary, binary) or ref: <tool id> instead`.
+pub fn tool_target(target_id: &str, fields: &serde_yaml::Value) -> Result<ToolTarget, BuildError> {
+    const LEGACY_SHAPE: &str = "the {bin_dir, commands} tool shape is no longer supported — \
+        declare a tool definition (schema_version, id, summary, binary) or ref: <tool id> instead";
+    let refuse =
+        |reason: String| BuildError::Manifest(format!("tool target {target_id}: {reason}"));
+    let keys: Vec<&str> = fields
+        .as_mapping()
+        .ok_or_else(|| refuse("its config is not a mapping".to_string()))?
+        .keys()
+        .filter_map(serde_yaml::Value::as_str)
+        .collect();
+
+    if keys
+        .iter()
+        .any(|key| matches!(*key, "bin_dir" | "commands"))
+    {
+        return Err(refuse(LEGACY_SHAPE.to_string()));
+    }
+    if keys.contains(&"ref") {
+        let others: Vec<&str> = keys.iter().copied().filter(|key| *key != "ref").collect();
+        if !others.is_empty() {
+            return Err(refuse(format!(
+                "`ref` names a registry tool and takes no other fields, but this config also has {}",
+                others.join(", ")
+            )));
+        }
+        let ref_ = fields
+            .get("ref")
+            .and_then(serde_yaml::Value::as_str)
+            .ok_or_else(|| refuse("`ref` must name a tool id".to_string()))?;
+        return Ok(ToolTarget::Ref {
+            ref_: ref_.to_string(),
+        });
+    }
+    Ok(ToolTarget::Inline(Box::new(tool_definition(
+        target_id, fields,
+    )?)))
+}
+
+/// The config's fields parsed as one whole [`ToolDef`], by the same rule a registry file follows.
+fn tool_definition(target_id: &str, fields: &serde_yaml::Value) -> Result<ToolDef, BuildError> {
+    let yaml = serde_yaml::to_string(fields)
+        .map_err(|e| BuildError::Manifest(format!("tool target {target_id}: {e}")))?;
+    ToolDef::parse(Path::new(target_id), &yaml).map_err(|error| {
+        let reason = match error {
+            ToolError::Parse { message, .. } => message,
+            other => other.to_string(),
+        };
+        BuildError::Manifest(format!("tool target {target_id}: {reason}"))
+    })
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -70,12 +141,6 @@ pub fn script_action(fields: &serde_yaml::Value) -> Result<BuildAction, BuildErr
     })
 }
 
-/// The `bin_dir` a `tool` target prepends onto dependents' `PATH`.
-pub fn tool_bin_dir(fields: &serde_yaml::Value) -> Result<String, BuildError> {
-    let tool: ToolTarget = parse(fields, TOOL)?;
-    Ok(tool.bin_dir)
-}
-
 /// The member target ids a `group` aggregates (build-order predecessors).
 pub fn group_member_ids(fields: &serde_yaml::Value) -> Result<Vec<String>, BuildError> {
     let group: GroupTarget = parse(fields, GROUP)?;
@@ -84,6 +149,11 @@ pub fn group_member_ids(fields: &serde_yaml::Value) -> Result<Vec<String>, Build
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use pretty_assertions::assert_eq;
+    use tddy_actions::tool::{NetworkSection, TargetBinary, ToolBinary};
+
     use super::*;
 
     fn yaml(text: &str) -> serde_yaml::Value {
@@ -106,15 +176,91 @@ mod tests {
     }
 
     #[test]
-    fn tool_extracts_bin_dir() {
-        // Given
-        let config = yaml("bin_dir: tools/bin\ncommands: { greet: greet }\n");
+    fn an_inline_tool_config_is_a_whole_tool_definition() {
+        // Given — a tool built by another target
+        let config = yaml(
+            "schema_version: 1\n\
+             id: stamp\n\
+             summary: stamps its input\n\
+             binary:\n  \
+               command: stamp\n  \
+               target: { target: \"tools:stamp-build\", path: tools/out/stamp }\n",
+        );
 
         // When
-        let bin_dir = tool_bin_dir(&config).expect("tool parses");
+        let tool = tool_target("tools:stamp", &config).expect("an inline tool parses");
 
         // Then
-        assert_eq!(bin_dir, "tools/bin");
+        assert_eq!(
+            tool,
+            ToolTarget::Inline(Box::new(ToolDef {
+                schema_version: 1,
+                id: "stamp".into(),
+                summary: "stamps its input".into(),
+                binary: ToolBinary {
+                    command: "stamp".into(),
+                    env: None,
+                    target: Some(TargetBinary {
+                        target: "tools:stamp-build".into(),
+                        path: "tools/out/stamp".into(),
+                    }),
+                    sibling_of: None,
+                },
+                deps: vec![],
+                reads: vec![],
+                run: None,
+                extensions: BTreeMap::new(),
+                network: NetworkSection::default(),
+                home: Default::default(),
+                files: vec![],
+                secrets: vec![],
+                policy: Default::default(),
+            }))
+        );
+    }
+
+    #[test]
+    fn a_ref_tool_config_names_a_registry_tool() {
+        // Given
+        let config = yaml("ref: rg\n");
+
+        // When
+        let tool = tool_target("tools:rg", &config).expect("a ref parses");
+
+        // Then
+        assert_eq!(tool, ToolTarget::Ref { ref_: "rg".into() });
+    }
+
+    #[test]
+    fn the_legacy_tool_shape_is_refused_naming_the_target_and_the_migration() {
+        // Given
+        let config = yaml("bin_dir: tools/bin\ncommands: { stamp: stamp }\n");
+
+        // When
+        let err = tool_target("tools:bin", &config).expect_err("the legacy shape is refused");
+
+        // Then
+        assert_eq!(
+            err.to_string(),
+            "manifest error: tool target tools:bin: the {bin_dir, commands} tool shape is no \
+             longer supported — declare a tool definition (schema_version, id, summary, binary) \
+             or ref: <tool id> instead"
+        );
+    }
+
+    #[test]
+    fn a_ref_with_inline_definition_fields_is_refused_naming_the_target() {
+        // Given — `ref` and a `binary` together are neither shape
+        let config = yaml("ref: rg\nbinary: { command: rg }\n");
+
+        // When
+        let err = tool_target("tools:rg", &config).expect_err("a mixed shape is refused");
+
+        // Then
+        assert!(
+            matches!(&err, BuildError::Manifest(m) if m.starts_with("tool target tools:rg: ")),
+            "the refusal names the target: {err}"
+        );
     }
 
     #[test]

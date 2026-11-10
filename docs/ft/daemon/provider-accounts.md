@@ -59,7 +59,10 @@ run on the account follow.
 ## Running a harness on an account
 
 A session's harness can run on a provider account instead of its vendor. Which harness can run on
-which account is one **capability matrix**, held by the daemon for every harness:
+which account is read from its coding-agent spec's `coding_agent.route` section — `providers`
+(`anthropic`, `openai_responses`, `openai_chat`, `meta`), `shape` (`env`, `toml_args`,
+`json_config_file`, `inline_config`), `key_env` and `config_env` — never from its name. The daemon answers that **capability
+matrix** from the coding agents its host loaded, once at start. For the built-in specs it is:
 
 | Harness (agent id / session type) | Runs on an account that |
 |---|---|
@@ -70,7 +73,22 @@ which account is one **capability matrix**, held by the daemon for every harness
 | Cursor — `cursor`, `cursor-cli` | — never: Cursor's agent cannot be pointed at another provider |
 | Warp — `warp-cli` | — never: Warp runs on the person's own Warp sign-in ([Warp CLI session](warp-cli-session.md)) |
 
-An unsupported pair is refused with the reason, never silently ignored. Of the harnesses the matrix
+An unsupported pair is refused with the reason, never silently ignored. A route body is chosen by
+the spec's (shape, provider served): `(env, anthropic)` puts the Anthropic Messages endpoint and key
+in the environment, `(env, meta)` hands the key alone in the spec's `key_env`, `(toml_args,
+openai_responses)` declares a Responses provider through `-c` overrides, `(json_config_file,
+openai_responses | openai_chat)` writes a JSON configuration file, and `(inline_config,
+openai_responses | openai_chat)` carries that configuration inline in the variable the spec's
+`config_env` names, writing no file. An `inline_config` route without a `config_env`, naming a
+`TDDY_*` one, or with a `files_dir` fails loading, naming the spec. So an agent dropped into
+`<tddyhome>/tools/` whose spec declares `route: { providers: [anthropic], shape: env }` runs on an
+Anthropic-serving account with that account's endpoint in its environment. A spec with no `route`
+section is refused, naming its product ("Acme Code cannot be pointed at another provider; it always
+runs on its own vendor"); it is never routed as Claude Code. A declared pair no body serves, or a body
+whose spec names no `key_env`, is refused as not routable in this build. The key is handed in a
+variable the spec names — never a `TDDY_*` one. An override file still writing a removed shape word
+(`args`, `config_file`) is refused at load, naming its replacement (`toml_args`,
+`json_config_file`). Of the harnesses the matrix
 admits, **`claude-cli`**, **`opencode-cli`** and **`muse-cli`** started unsandboxed are run on an account today
 ([Claude Code CLI session § Running on a provider account](claude-cli-session.md#running-on-a-provider-account),
 [OpenCode CLI session § Running on a provider account](opencode-cli-session.md#running-on-a-provider-account),
@@ -91,10 +109,11 @@ because the spawned process's environment carries no credential:
   route; the session does not start on the vendor instead.
 - Claude agents get the same Anthropic route as a claude-cli session. Codex agents get the account
   declared as a Responses provider (`tddy-route`) through `-c` overrides and the model through `-m`
-  (`codex exec`) or `-c model=` (`codex-acp`); the key is in the child's `TDDY_ROUTE_API_KEY`.
-- The OpenCode agent (`opencode acp`) gets the same generated `opencode.json` as an opencode-cli
-  session, written owner-only into a directory the agent's worker removes when it ends and named by
-  `OPENCODE_CONFIG`, with the key in `TDDY_OPENCODE_PROVIDER_KEY`. The route's `--model` is not passed:
+  (`codex exec`) or `-c model=` (`codex-acp`); the key is in the child's `CODEX_PROVIDER_KEY` (`codex.yaml`'s
+  `route.key_env`), which the overrides name as the provider's `env_key`.
+- The OpenCode agent (`opencode acp`) gets the same generated configuration as an opencode-cli
+  session, inline in `OPENCODE_CONFIG_CONTENT` (no file is written, `OPENCODE_CONFIG` is not set),
+  with the key in `OPENCODE_PROVIDER_KEY` (`opencode.yaml`'s `route.key_env`). The route's `--model` is not passed:
   the configuration selects the model ([OpenCode ACP backend](../coder/opencode-acp-backend.md)).
 - An account with no agent, a `cursor` agent, the `stub` or a specialized agent definition is
   refused with the reason. A tool session started from Telegram cannot choose an account
@@ -106,11 +125,12 @@ because the spawned process's environment carries no credential:
 
 `accounts.AccountsService/ListProviderRoutes(session_token, harness)` answers, for one harness, the
 caller's provider accounts in vault order, each with `supported` and — when not — the `reason`, in the
-matrix's words. `harness_routable` is false for a harness no account can run — Cursor, the one
-harness this build has no route for; every account is then
+matrix's words. `harness_routable` is false for a harness no account can run — one whose spec
+declares no `route` (Cursor, Warp); every account is then
 unsupported and `harness_reason` says why, once. `harness` is a tool-session agent id or a CLI
-session type; an id that names no harness is answered the same way, `harness_routable` false with
-"unknown harness". The web
+session type, and both spellings name the same spec (`claude` and `claude-cli`); an agent dropped
+into `<tddyhome>/tools/` is listed by what its spec's providers serve. An id the host's coding agents
+do not hold is answered the same way, `harness_routable` false with "unknown harness". The web
 never re-derives the matrix; a daemon that has not wired it answers `FAILED_PRECONDITION` rather than
 guessing.
 

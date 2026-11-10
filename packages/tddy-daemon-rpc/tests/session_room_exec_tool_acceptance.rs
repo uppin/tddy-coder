@@ -22,7 +22,6 @@ use prost::Message;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_extensions::IntegrationStatusBoard;
-use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::session_room::{session_room_name, SessionRoomRegistry};
 use tddy_daemon_livekit::{LiveKitSessionReach, LIVEKIT_INTEGRATION_ID};
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
@@ -154,32 +153,27 @@ fn livekit_yaml_block(ws_url: &str) -> String {
     )
 }
 
-fn write_daemon_yaml(
-    ws_url: &str,
-    os_user: &str,
-    claude_binary: &Path,
-) -> (tempfile::TempDir, PathBuf) {
+fn write_daemon_yaml(ws_url: &str, os_user: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
     let true_path = true_bin();
     let livekit = livekit_yaml_block(ws_url);
-    let claude_binary = claude_binary.display();
     let yaml = format!(
         r#"
 daemon_instance_id: {INSTANCE_ID}
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
 allowed_tools:
   - path: {true_path}
     label: t
-claude_cli:
-  binary_path: {claude_binary}
 session_room:
   poll_interval_ms: {POLL_INTERVAL_MS}
 {livekit}"#
     );
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     (dir, path)
 }
 
@@ -230,8 +224,17 @@ impl FacilitatingDaemon {
             .then_reading_stdin()
             .build();
 
-        let (config_dir, config_path) = write_daemon_yaml(&ws_url, &os_user, &claude_stub);
-        let config = DaemonConfig::load(&config_path).expect("daemon.yaml must load");
+        let (config_dir, config_path) = write_daemon_yaml(&ws_url, &os_user);
+        std::fs::write(
+            std::path::Path::new(&(config_path))
+                .parent()
+                .expect("a config directory")
+                .join("users.yaml"),
+            format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+        )
+        .unwrap();
+        let config = tddy_daemon_kernel::config::DaemonConfig::load(&config_path)
+            .expect("daemon.yaml must load");
 
         let sessions = tempfile::tempdir().unwrap();
         register_project(&sessions.path().join("projects"), repo_dir.path());
@@ -260,7 +263,11 @@ impl FacilitatingDaemon {
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+            tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+                "claude",
+                &claude_stub,
+            )]),
         )
         .with_staging_base_dir(staging.path().to_path_buf())
         .with_session_rooms(rooms)

@@ -13,12 +13,14 @@
 
 mod client;
 mod mapping;
+mod permission;
 mod session;
 mod worker;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
 
@@ -46,6 +48,9 @@ pub struct McpServerSpec {
     pub command: PathBuf,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// The directory an inline registration starts the server in, where its session pointer lives
+    /// (`#agent-tools 21/28`); the agent's own working directory when `None`.
+    pub cwd: Option<PathBuf>,
 }
 
 /// What [`AcpDriver::open_session`] opens.
@@ -137,64 +142,7 @@ pub enum AcpUpdate {
 /// Receives every [`AcpUpdate`] of a turn, in order.
 pub type AcpUpdateSink = Arc<dyn Fn(AcpUpdate) + Send + Sync>;
 
-/// One option the agent offers on a permission request.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PermissionOptionView {
-    pub option_id: String,
-    pub name: String,
-    /// `allow_once`, `allow_always`, `reject_once` or `reject_always`.
-    pub kind: String,
-}
-
-/// A `session/request_permission` from the agent.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PermissionRequest {
-    pub session_id: String,
-    pub tool_call_id: String,
-    pub title: Option<String>,
-    pub raw_input: Option<serde_json::Value>,
-    /// ACP's tool kind of the call asking, by its wire name (`edit`, `execute`, `read`, …) — the
-    /// spelling [`PermissionOptionView::kind`] uses for an option's kind. `None` when the agent named
-    /// none.
-    pub kind: Option<String>,
-    pub options: Vec<PermissionOptionView>,
-}
-
-/// The answer to a [`PermissionRequest`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PermissionDecision {
-    Selected { option_id: String },
-    Cancelled,
-}
-
-/// Answers the agent's permission requests. The driver asks it and sends its decision verbatim.
-#[async_trait::async_trait]
-pub trait PermissionHandler: Send + Sync {
-    async fn decide(&self, request: PermissionRequest) -> PermissionDecision;
-}
-
-/// Picks the first `allow_once` option — what the workflow backends have always answered.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct AllowOnce;
-
-/// The kind ACP gives an option that allows one call.
-const ALLOW_ONCE_KIND: &str = "allow_once";
-
-#[async_trait::async_trait]
-impl PermissionHandler for AllowOnce {
-    async fn decide(&self, request: PermissionRequest) -> PermissionDecision {
-        match request
-            .options
-            .into_iter()
-            .find(|option| option.kind == ALLOW_ONCE_KIND)
-        {
-            Some(option) => PermissionDecision::Selected {
-                option_id: option.option_id,
-            },
-            None => PermissionDecision::Cancelled,
-        }
-    }
-}
+pub use crate::backend::acp_driver::permission::*;
 
 /// What the driver does after a session call failed, as an agent's hooks decide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,6 +167,20 @@ pub trait AcpAgentHooks: Send + Sync {
 pub struct NoHooks;
 
 impl AcpAgentHooks for NoHooks {}
+
+/// How long one session open — the connection's `initialize` when it is the first request, then
+/// `session/new` or `session/load` and any `session/set_model` — may take before it is refused
+/// (`#agent-tools 16/19`): an agent that never answers is never waited on forever.
+pub const SESSION_OPEN_DEADLINE: Duration = Duration::from_secs(120);
+
+/// A deadline as a refusal spells it: whole seconds as `2s`, otherwise milliseconds.
+pub(crate) fn humantime_deadline(deadline: Duration) -> String {
+    if deadline.subsec_nanos() == 0 {
+        format!("{}s", deadline.as_secs())
+    } else {
+        format!("{}ms", deadline.as_millis())
+    }
+}
 
 /// How many requests may wait for the worker before a caller waits to send one.
 const COMMAND_QUEUE_DEPTH: usize = 16;
@@ -392,9 +354,39 @@ impl AcpDriver {
     }
 
     /// `session/new` (or `session/load` for `open.resume`), then `session/set_model` if asked.
+    ///
+    /// Bounded by [`SESSION_OPEN_DEADLINE`]: [`Self::open_session_within`].
     pub async fn open_session(&self, open: OpenSession) -> Result<AcpSession, BackendError> {
-        self.request(|reply| worker::Command::OpenSession { open, reply })
-            .await
+        self.open_session_within(open, SESSION_OPEN_DEADLINE).await
+    }
+
+    /// [`Self::open_session`], refused once it has not answered within `deadline` — the agent
+    /// never answering `initialize`, `session/new` or `session/load` included. The refusal names
+    /// the program and the deadline (`the ACP agent <program> did not open a session within 2s`);
+    /// the driver is unusable afterwards and its child is ended when it is dropped.
+    pub async fn open_session_within(
+        &self,
+        open: OpenSession,
+        deadline: Duration,
+    ) -> Result<AcpSession, BackendError> {
+        match self.open_session_until(open, deadline).await {
+            Some(opened) => opened,
+            None => Err(BackendError::InvocationFailed(format!(
+                "the ACP agent {} did not open a session within {}",
+                self.program.display(),
+                humantime_deadline(deadline)
+            ))),
+        }
+    }
+
+    /// The session open, or `None` once `deadline` has passed without an answer.
+    pub(crate) async fn open_session_until(
+        &self,
+        open: OpenSession,
+        deadline: Duration,
+    ) -> Option<Result<AcpSession, BackendError>> {
+        let opening = self.request(|reply| worker::Command::OpenSession { open, reply });
+        tokio::time::timeout(deadline, opening).await.ok()
     }
 
     /// One `session/prompt` with `prompt` as its text. Every update goes to `updates` and, mapped

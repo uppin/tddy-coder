@@ -30,6 +30,7 @@ pub async fn run(argv: Vec<String>, cwd: PathBuf, env: Vec<(String, String)>) ->
         terminal_id: "local".to_string(),
         kind: "local".to_string(),
         env,
+        env_base: tddy_pty::PtyEnvBase::Inherited,
     };
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     let task = PtyRuntime::spawn(&registry, &pty_registry, spec, ready_tx).await;

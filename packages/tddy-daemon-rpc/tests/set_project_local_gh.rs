@@ -130,9 +130,13 @@ fn a_daemon_with_a_project_row(
 fn a_daemon(os_user: &str, tddy_data_dir: PathBuf) -> TestDaemon {
     let config_dir = tempfile::tempdir().unwrap();
     let config_path = config_dir.path().join("config.yaml");
+    std::fs::write(&config_path, "").unwrap();
     std::fs::write(
-        &config_path,
-        format!("users:\n  - github_user: \"testuser\"\n    os_user: \"{os_user}\"\n"),
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
     )
     .unwrap();
     let config = DaemonConfig::load(&config_path).unwrap();
@@ -154,7 +158,8 @@ fn a_daemon(os_user: &str, tddy_data_dir: PathBuf) -> TestDaemon {
             }),
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     ))
 }
 

@@ -115,28 +115,43 @@ pub fn read_backend_selection_plain(question: &ClarificationQuestion) -> anyhow:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tddy_core::backend::backend_selection_question;
+    use tddy_core::{ClarificationQuestion, QuestionOption};
+
+    /// A selection question whose options are agent ids, as the registry builds it.
+    fn a_backend_question() -> ClarificationQuestion {
+        let option = |label: &str| QuestionOption {
+            label: label.to_string(),
+            description: String::new(),
+        };
+        ClarificationQuestion {
+            header: "Backend".to_string(),
+            question: "Select the coding backend".to_string(),
+            options: vec![option("claude"), option("codex"), option("cursor")],
+            multi_select: false,
+            allow_other: false,
+        }
+    }
 
     #[test]
     fn resolve_backend_selection_index_claude() {
         // Given
-        let q = backend_selection_question();
+        let q = a_backend_question();
         // When / Then
-        assert_eq!(resolve_backend_selection_index(1, &q), "Claude");
+        assert_eq!(resolve_backend_selection_index(1, &q), "claude");
     }
 
     #[test]
     fn resolve_backend_selection_index_cursor() {
         // Given
-        let q = backend_selection_question();
+        let q = a_backend_question();
         // When / Then
-        assert_eq!(resolve_backend_selection_index(3, &q), "Cursor");
+        assert_eq!(resolve_backend_selection_index(3, &q), "cursor");
     }
 
     #[test]
     fn resolve_backend_selection_index_out_of_bounds_clamps_to_the_last_option() {
         // Given
-        let q = backend_selection_question();
+        let q = a_backend_question();
         let last = &q.options.last().expect("backends are listed").label;
         // When / Then
         assert_eq!(&resolve_backend_selection_index(99, &q), last);

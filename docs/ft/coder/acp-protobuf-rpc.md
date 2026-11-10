@@ -53,7 +53,7 @@ at both `WorkflowComplete` and the free-prompting turn boundary (signalled by
 
 ## Client (web)
 
-`useAcpSession` (in `packages/tddy-web/src/components/chat/`) is the ACP counterpart of
+`useAcpSession` (in `packages/tddy-chat-web/src/`) is the ACP counterpart of
 `useAgentChat`, returning the identical `UseAgentChatResult`. `AgentChat` selects it via an `acp`
 prop; both render the same UI (shared `AgentChatView`) and ride the same LiveKit room. **The
 pr-stack chat (`PrStackChat`) uses ACP** (`acp`), at full behavior parity with the old `TddyRemote`

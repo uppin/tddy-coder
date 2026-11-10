@@ -21,16 +21,13 @@ impl ProjectHomeNotifyPort for DaemonProjectHome {
         let session_dir = unified_session_dir_path(&self.sessions_base, &home.session_id);
         let metadata = tddy_core::read_session_metadata(&session_dir)
             .map_err(|e| format!("cannot read session {}'s record ({e})", home.session_id))?;
-        let can_notify = matches!(
-            metadata.session_type.as_deref(),
-            Some("claude-cli" | "cursor-cli")
-        );
+        // Whether the session's agent declares `operator_notify` is the activity service's to say:
+        // it refuses a notification from a session whose agent does not, before the token.
         let hook_token = metadata
             .hook_token
             .filter(|token| !token.is_empty())
-            .filter(|_| can_notify)
             .ok_or_else(|| {
-                "this session has no hook token (only claude-cli and cursor-cli sessions can notify)"
+                "this session has no hook token (only an agent that declares operator_notify can notify)"
                     .to_string()
             })?;
         self.activity

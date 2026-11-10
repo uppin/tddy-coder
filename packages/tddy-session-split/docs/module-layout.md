@@ -14,7 +14,7 @@ module's `SessionTokenMinter` and `RemoteSnapshotSource`.
 
 The topic runs over `SplitSessions` (`split_ports.rs`), an owned handle over the host's split fields
 (`config`, `tddy_data_dir`, `staging_base_dir`, `peer_routing`, `split_rooms`, `reachable_sessions`, `workspace_sandboxes`,
-`workspace_sandbox_provisioner`, `claude_cli_manager`, `session_tokens`), plus the agent topic's
+`workspace_sandbox_provisioner`, `claude_cli_manager`, `session_tokens`, `agent_tool_sockets`), plus the agent topic's
 `AgentRoster` handle and `host: Arc<dyn SplitHost>`. `SplitSessions` is `Clone` and built per call by
 `DaemonSessionHost::split_sessions()` in `tddy-session-lifecycle`. `trait SplitHost: AgentHostCallbacks`
 has `start_workspace_session`, `delete_session`, `session_files` and `session_agents`; the host
@@ -24,7 +24,7 @@ implements it once.
 |---|---|
 | `split_ports.rs` | `SplitSessions`, `trait SplitHost`, and the two aliases of the service surfaces its callbacks return (`SplitSessionFiles`, `SplitSessionAgents`) |
 | `svc_spawn_split_agent.rs` | `spawn_split_agent` (the agent half of a split session), cut into `host_split_room` (the session room over the remote checkout, through `SplitRoomHosting::host_remote_worktree`; a jailed-codebase start opens none), `split_agent_context_and_args` and `write_split_agent_metadata`, with `SplitAgentProcess<'a>`; `SplitSessions::agent_session_token_for` (`pub`) mints an agent's own credential from the verified caller — split and jailed-codebase agents, and the project-home main |
-| `svc_paired_codebase_teardown.rs` | `delete_paired_codebase_session`: tearing down the paired codebase session through `SplitHost::delete_session` |
+| `svc_paired_codebase_teardown.rs` | `delete_paired_codebase_session`: tearing down the paired codebase session through `SplitHost::delete_session`; `refuse_an_unreachable_paired_codebase`: its read-only pre-check, refusing `FAILED_PRECONDITION` a session paired with a half on another daemon while no common room is configured or joined, so `DeleteSession` refuses before it tears anything down |
 | `split_claude_cli_start.rs`, `split_start.rs` | `start_split_claude_cli_session(…, cancel)` (brackets the local agent spawn with `STEP_AGENT`; races the forward against the start's `CancellationToken` and checks it again before the agent spawn, and on cancel calls `cancel_codebase_half`, which forwards `CancelTask` for the codebase host's reported task (`peer_calls::forward_cancel_task`) and tears the workspace session down under the id this daemon chose (`PeerSilent`), returning `CANCELLED`; `CodebaseHalf` names that half); `SplitStartFailure::{PeerAnswered, PeerSilent}` (from the kernel's `ForwardedStartFailure`; only `PeerSilent` keeps the orphan warning at teardown) and split-placement resolution |
 | `split_forward_stream.rs` | `forward_split_start(…, task)`: the codebase half of a split start, forwarded with `forward_start_session_relaying` so the codebase host's `started`, worktree step and keep-alives reach the caller's sink; no overall deadline. The codebase host's `started` is relayed as it came (its own task id) and remembered in `CodebaseStartTask` (`reported()`) |
 | `svc_split_context_from_codebase_host.rs` | the split agent's context read from the codebase host |
@@ -32,10 +32,12 @@ implements it once.
 | `svc_resume_split_wiring.rs` | the split half of a resume: `resume_split_wiring` and `split_roster_from_codebase_host` (reads the roster through `SplitHost::session_agents`) |
 | `svc_provision_workspace_tool_sandbox.rs` | `provision_workspace_tool_sandbox` |
 | `attached_initial_prompt.rs` | `attached_initial_prompt`, over `AttachmentState`; the split agent and the launch topic's CLI starts call it |
-| `svc_resolve_tddy_tools_path.rs` | `resolve_tddy_tools_path` and `agent_tool_socket_for_embedded_host`, both on the handle |
+| `svc_resolve_tddy_tools_path.rs` | `resolve_tddy_tools_path` and `agent_tool_socket_of(os_user)`, both on the handle. `agent_tool_socket_of` is `AgentToolSockets::ensure_bound` for the session's OS user — the socket a split, jailed-codebase or co-located agent reports its hooks and makes its tool calls over (`TDDY_REMOTE_DAEMON_SOCKET`, the hooks' `--daemon-socket`); a user the daemon cannot give one (under the supervisor, one `users.yaml` does not map) fails the start `FAILED_PRECONDITION` naming `users.yaml`. `spawn_split_agent`, `resume_split_wiring` and `start_sandboxed_codebase_session` take the `os_user` for it |
+| `coding_agent_wiring.rs` | `CodingAgentToolHost { config, tddy_data_dir, agent_tool_sockets, tokens }::tool_server(session_id, os_user, caller_token)`: a managed ACP agent's `tddy-tools --mcp` server and its `TDDY_REMOTE_*` env, reaching the daemon over `os_user`'s agent-tool socket (`ensure_bound_blocking`, since the tool-server resolver is synchronous) |
 | `service_util.rs` | the helpers several start, resume and spawn paths share |
 | `workspace_session.rs` | `workspace_sandbox_spec`, which sandbox provisioning and the jail rebuild both call, and the workspace session's own `.session.yaml` reads |
-| `split_session.rs`, `agent_argv.rs`, `agent_credentials.rs` | split-session start; native-tool constants, roster withdrawals, `split_claude_extra_args` and `tddy_tools_only_mcp_args` (writes a session's `claude-mcp-config.json` registering `tddy-tools --mcp` and returns `--mcp-config` + `--strict-mcp-config`; shared with the project-home main's launch); the token TTL, `mint_agent_session_token`, `verified_caller` (refuses as "cannot sign for the caller") and `RoomPollTokenMinter` |
+| `split_session.rs`, `agent_argv.rs`, `agent_credentials.rs` | split-session start; native-tool constants, roster withdrawals and `split_claude_extra_args`. The split agent's spec is read from the host's registry, operator overrides included: `split_agent_spec(&CodingAgentRegistry)` (`SplitSessions.coding_agents`) resolves it once per call and every renderer takes the spec. `split_claude_extra_args(spec, session_dir, tddy_tools_path, tool_server_env, withdrawals)` takes the spec's `host_agent` variant (`--strict-mcp-config --setting-sources user`, the natives withdrawn through `tool_deny`), then the slots, with the roster's withdrawals added to `--disallowedTools` without repeats; it registers `tddy-tools --mcp` with `tool_server_env` — the `TDDY_REMOTE_*` transport and the roster seed — so the agent process itself carries no `TDDY_*` variable. `split_session_pointer(remote, context_dir, session_dir)` builds the `.tddy/session.json` the agent's context dir holds while it runs (the same transport by variable name, owned by this daemon, no socket); `SplitAgentWiring.session_pointer` carries it. `SplitSessionPointers` (`split_ports.rs`) is the port that places it, returning the exit hook that removes it, and `remove`s it when a spawn fails after placing; `tddy-agent-launch::split_session_pointers::HostSplitSessionPointers` implements it with the generic launch's helpers. The resume places the pointer its wiring was re-derived with, and refuses a split session whose wiring carries none. `NATIVE_FILESYSTEM_TOOLS` is pinned equal to the variant's `withdraw_native` by a test; the token TTL, `mint_agent_session_token`, `verified_caller` (refuses as "cannot sign for the caller") and `RoomPollTokenMinter` |
+| `svc_split_agent_metadata.rs` | `write_split_agent_metadata`: the split agent's `.session.yaml` once it has spawned |
 
 ## `service_util.rs`
 
@@ -45,9 +47,10 @@ and `project_repo_root` (the project registered for an OS user, and its checkout
 deadline); `index_session_worktree` (blocks until the index is terminal; a missing embedder or failed index
 is an error, with no unindexed fallback); `spawn_blocking_with_timeout` and `await_supervised_with_timeout`
 (public, for the RPC handlers above the wiring crate); `push_new_branch_to_origin_if_requested`;
-`resume_agent_and_recipe`; and `write_claude_hooks_settings` and `resolve_start_session_claude_binary`
-(through `config::resolve_claude_binary_path`, so the interactive and sandboxed paths never pick
-differently). The "trim, and treat empty as unset" conversion is `tddy_daemon_kernel::trim_to_option`.
+`resume_agent_and_recipe`; and `write_claude_hooks_settings`. A split agent's `claude` binary is
+`SplitSessions.claude_binary` — the host's `claude` coding agent as it resolves on that host, refused
+when found nowhere (`#agent-tools` 19/19) — so the interactive and sandboxed paths never pick
+differently. The "trim, and treat empty as unset" conversion is `tddy_daemon_kernel::trim_to_option`.
 
 ## Edges
 
@@ -55,3 +58,11 @@ differently). The "trim, and treat empty as unset" conversion is `tddy_daemon_ke
 `tddy-session-activity`, `tddy-daemon-kernel`, `tddy-daemon-livekit` and `tddy-daemon-sandbox` among the
 receivers. It does not depend on `tddy-agent-launch` (that crate depends on it) or on
 `tddy-session-lifecycle`.
+
+## The split agent's environment
+
+`svc_spawn_split_agent::split_agent_pty` holds `spawn_split_agent_pty` and `SplitAgentPty`: the split
+agent's PTY starts from the registry's computed agent env (`AgentEnvBase::agent_env` over the spec's
+`pass_env`), spawned on `PtyEnvBase::Cleared`, so no daemon variable outside the base set, the spec's
+`pass_env` and what the launch sets reaches the agent. Test:
+`split_agent_pty_tests.rs::the_split_agents_pty_sees_no_unlisted_daemon_variable`.

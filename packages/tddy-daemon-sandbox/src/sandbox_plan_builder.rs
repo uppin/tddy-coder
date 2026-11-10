@@ -130,11 +130,6 @@ pub fn build_action_sandbox_plan(
         &ipc_stub,
         &sandbox.output_dir,
     );
-    if recipe == SandboxRecipe::ClaudeCli {
-        env.extend(tddy_sandbox_recipes::claude_runner_env_overlay(
-            &scratch_tmp,
-        ));
-    }
     env.extend(extra_env);
 
     build_process_plan(ProcessPlanRequest {
@@ -218,8 +213,6 @@ pub fn build_action_runner_plan(
         grpc_port.to_string(),
         "--egress-shim-port".into(),
         shim_port.to_string(),
-        "--model".into(),
-        String::new(),
     ];
     for arg in &spec.command {
         runner_argv.push(format!("--pty-command={arg}"));
@@ -245,6 +238,8 @@ pub fn build_action_runner_plan(
         host_home: std::env::var_os("HOME").map(PathBuf::from),
         // The jail runs an action's command and hosts no agent, so it takes no provider route.
         route: None,
+        context_dir: Some(context_dir.clone()),
+        stdio: false,
     })?;
 
     Ok(ActionRunnerArtifacts {
@@ -291,6 +286,38 @@ mod tests {
         assert!(
             plan.reads.iter().any(|r| r.host == Path::new("/usr/bin")),
             "extra_read_paths must appear in plan reads"
+        );
+    }
+
+    /// A PTY-mode action: its command runs under `tddy-sandbox-runner`, whose argv is the plan's.
+    fn a_pty_action_runner_argv(tmp: &Path) -> Vec<String> {
+        let layout = ActionSandboxLayout::under_output_dir(tmp, "test-action");
+        let spec = minimal_spec(tmp);
+        build_action_runner_plan(&spec, &layout, "sess", BTreeMap::new())
+            .expect("runner plan must build")
+            .plan
+            .spec
+            .command
+    }
+
+    /// The runner reads no model (`#agent-tools 24/28`): a jail that runs an action's command
+    /// describes no agent, so its argv names no `--model`.
+    #[test]
+    fn the_sandbox_plan_argv_carries_no_model_flag() {
+        // Given
+        let tmp = tempfile::tempdir().expect("tmpdir");
+
+        // When
+        let argv = a_pty_action_runner_argv(tmp.path());
+
+        // Then
+        assert!(
+            argv.iter().any(|arg| arg == "--session-id"),
+            "the plan's command must be the runner's argv; argv was: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|arg| arg == "--model"),
+            "the sandbox runner has no --model flag; argv was: {argv:?}"
         );
     }
 }

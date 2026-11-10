@@ -14,8 +14,11 @@ use tddy_tool_engine::project_home_tools::session_offered_catalog_for;
 use tddy_tool_engine::start_session_args::{HostChoice, StartChoices};
 
 /// What `StartSession`'s schema offers on this daemon: every eligible host on `routing`'s roster,
-/// and every workflow recipe this daemon supports.
-pub fn start_choices(routing: &PeerRouting) -> StartChoices {
+/// every workflow recipe this daemon supports, and every coding agent `agents` starts.
+pub fn start_choices(
+    routing: &PeerRouting,
+    agents: &tddy_coding_agent_specs::CodingAgentRegistry,
+) -> StartChoices {
     StartChoices {
         hosts: routing
             .eligible_daemon_source()
@@ -29,6 +32,34 @@ pub fn start_choices(routing: &PeerRouting) -> StartChoices {
         recipes: tddy_workflow_recipes::approval_policy::supported_workflow_recipe_cli_names()
             .iter()
             .map(|recipe| recipe.to_string())
+            .collect(),
+        // Every PTY agent this daemon starts, from its specs: the session type it is started
+        // as, the toggle's label (its `product`), whether a start must name a model, and the
+        // permission modes its launch takes.
+        agents: agents
+            .all()
+            .into_iter()
+            .filter_map(|spec| {
+                let session_type = format!(
+                    "{}{}",
+                    spec.id,
+                    tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX
+                );
+                agents.for_session_type(&session_type).map(|_| {
+                    tddy_tool_engine::start_session_args::AgentChoice {
+                        session_type,
+                        label: spec
+                            .agent
+                            .product
+                            .clone()
+                            .unwrap_or_else(|| spec.id.clone()),
+                        requires_model: spec
+                            .has(tddy_coding_agent_specs::Capability::RequiresModel),
+                        permission_modes: spec.agent.permission_modes.clone(),
+                        routable: !spec.route_support().providers.is_empty(),
+                    }
+                })
+            })
             .collect(),
     }
 }
@@ -108,6 +139,7 @@ mod tests {
         let choices = StartChoices {
             hosts: Vec::new(),
             recipes: Vec::new(),
+            agents: Vec::new(),
         };
         list_exec_tools_from_jail(bound, &request.encode_to_vec(), &choices).map(|bytes| {
             ListExecToolsResponse::decode(bytes.as_slice())

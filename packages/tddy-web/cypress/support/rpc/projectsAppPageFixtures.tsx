@@ -1,3 +1,4 @@
+import type { RoomHandle } from "tddy-client-web";
 /**
  * Fixtures for specs that mount the Projects screen with its data container (`ProjectsAppPage`):
  * the hosts it can choose between, a project row, the Projects RPCs answering normally, and the
@@ -5,14 +6,14 @@
  */
 
 import React from "react";
-import { Room } from "livekit-client";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ProjectsAppPage } from "../../../src/components/projects/ProjectsAppPage";
-import { ProjectService, type ProjectEntry } from "../../../src/gen/project_pb";
-import { AccountsService } from "../../../src/gen/accounts_pb";
-import type { DaemonHost } from "../../../src/lib/participantRole";
-import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../../src/hooks/authProvider";
+import { ProjectService, type ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { AccountsService } from "tddy-client-web/gen/accounts_pb";
+import type { DaemonHost } from "tddy-client-web";
+import { SelectedDaemonProvider } from "../../../src/app/rpc/selectedDaemon";
+import { AuthProvider } from "../../../src/app/auth/authProvider";
 
 /** The host that served the page, and the one selected. */
 export const PROJECTS_LOCAL_HOST = "workstation-1";
@@ -64,7 +65,7 @@ export function aProjectsBackend(
 }
 
 /** The Projects page under its providers. `room: null` mounts no LiveKit wire, so no client reaches any host. */
-export function projectsAppPage(room: Room | null = new Room()) {
+export function projectsAppPage(room: RoomHandle | null = aDisconnectedRoom()) {
   return (
     <AuthProvider>
       <SelectedDaemonProvider

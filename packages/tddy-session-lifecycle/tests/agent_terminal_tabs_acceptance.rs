@@ -4,7 +4,7 @@
 //!
 //! Feature: docs/ft/web/session-terminal-tabs.md, docs/ft/daemon/terminal-sessions.md
 //!
-//! The harnesses are stub scripts named in `cli_harnesses.<type>.binary_path`, each recording its
+//! The harnesses are stub scripts the host's coding agents resolve as each agent spec's binary, each recording its
 //! argv and working directory and then holding its PTY open. PTY-spawning tests run serially.
 
 use std::path::{Path, PathBuf};
@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
-use tddy_session_lifecycle::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID};
+use tddy_session_lifecycle::claude_cli_session::{CliSessionManager, MAIN_TERMINAL_ID};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     ListTerminalSessionsRequest, StartTerminalSessionRequest, StopTerminalSessionRequest,
@@ -98,20 +98,21 @@ async fn a_daemon_with_a_running_session() -> AgentTabDaemon {
     let muse = a_stub_harness(stub_dir.path(), "muse");
     let opencode = a_stub_harness(stub_dir.path(), "opencode");
     let claude = a_stub_harness(stub_dir.path(), "claude");
-    let (config_dir, config) = a_config_naming(&[
-        ("muse-cli", &muse.binary),
-        ("opencode-cli", &opencode.binary),
-        ("claude-cli", &claude.binary),
+    let (config_dir, config) = a_config();
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[
+        ("muse", &muse.binary),
+        ("opencode", &opencode.binary),
+        ("claude", &claude.binary),
     ]);
 
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let worktree_dir = tempfile::tempdir().unwrap();
     let worktree = worktree_dir.path().canonicalize().unwrap();
     start_main_terminal(&manager, &worktree).await;
 
     let sessions_dir = tempfile::tempdir().unwrap();
-    let service =
-        session_host(config, sessions_dir.path().to_path_buf(), manager).terminal_session_service();
+    let service = session_host(config, agents, sessions_dir.path().to_path_buf(), manager)
+        .terminal_session_service();
     AgentTabDaemon {
         service,
         worktree,
@@ -244,7 +245,7 @@ async fn an_agent_terminal_resolves_its_binary_from_the_harness_config() {
     // When
     daemon.start_terminal("opencode-cli").await.unwrap();
 
-    // Then the binary `cli_harnesses.opencode-cli.binary_path` names is the one run
+    // Then the binary the opencode agent spec resolves on the host is the one run
     assert_eq!(
         daemon.opencode.last_spawn_args().await,
         Vec::<String>::new()
@@ -337,27 +338,28 @@ async fn stopping_an_agent_terminal_kills_it_and_removes_it_from_the_list() {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-fn a_config_naming(harnesses: &[(&str, &Path)]) -> (tempfile::TempDir, DaemonConfig) {
+fn a_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
-    let entries: String = harnesses
-        .iter()
-        .map(|(session_type, binary)| {
-            format!("  {session_type}:\n    binary_path: {}\n", binary.display())
-        })
-        .collect();
-    let yaml = format!(
-        "users:\n  - github_user: \"testuser\"\n    os_user: \"testuser\"\ncli_harnesses:\n{entries}"
-    );
+    let yaml = "";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
     (dir, config)
 }
 
 fn session_host(
     config: DaemonConfig,
+    agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -374,21 +376,26 @@ fn session_host(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
 }
 
 /// Registers the session's main terminal — a stub that holds its PTY open — in `worktree`.
-async fn start_main_terminal(manager: &ClaudeCliSessionManager, worktree: &Path) {
+async fn start_main_terminal(manager: &CliSessionManager, worktree: &Path) {
     let main = a_stub_agent_script(worktree, "stub_main.sh")
         .then_reading_stdin()
         .build();
     manager
-        .start(
+        .start_with_options(
             SESSION_ID,
             worktree.to_path_buf(),
             "claude-opus-4-8",
-            main.to_str().unwrap(),
+            vec![main.to_str().unwrap().to_string()],
+            "claude-cli",
             None,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await

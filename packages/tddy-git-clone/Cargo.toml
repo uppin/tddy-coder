@@ -1,0 +1,12 @@
+[package]
+name = "tddy-git-clone"
+version = "0.1.0"
+edition = "2021"
+description = "The clone helper a supervised daemon runs as the session user: git clone into a partial sibling, rename into place, clean up on failure"
+
+[[bin]]
+name = "tddy-git-clone"
+path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = "3"

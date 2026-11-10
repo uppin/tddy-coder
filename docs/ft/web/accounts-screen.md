@@ -94,5 +94,5 @@ both rows update; a harness the account cannot drive is refused with the daemon'
 - [App shell § Navigation menu](app-shell.md#navigation-menu)
 - [Provider accounts](../daemon/provider-accounts.md)
 - [Cross-daemon session authentication](../daemon/session-auth.md)
-- Implementation: [tddy-web accounts screen](../../../packages/tddy-web/docs/accounts-screen.md),
+- Implementation: [tddy-workspace-web accounts screen](../../../packages/tddy-workspace-web/docs/accounts-screen.md),
   [tddy-accounts service](../../../packages/tddy-accounts/docs/accounts-service.md)

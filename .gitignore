@@ -77,6 +77,8 @@ changeset.yaml
 .local-install/
 tmp
 local.bun.lock
+# Rendered by ./desktop-dev beside dev.desktop.yaml; carries this machine's account name.
+/users.yaml
 
 
 # Cursor MCP config is generated per checkout and embeds an absolute target/ path.
@@ -93,3 +95,6 @@ local.bun.lock
 /coverage/
 .codegraph
 
+
+# tddy-build action cache and tool link dirs
+.tddy-build/

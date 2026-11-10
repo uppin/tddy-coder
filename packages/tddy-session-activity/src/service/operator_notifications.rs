@@ -12,6 +12,7 @@ use crate::service::ActivityServiceImpl;
 use crate::session_notifications::{
     SessionNotification, SessionNotificationKind, SessionNotificationSource,
 };
+use tddy_coding_agent_specs::Capability;
 use tddy_daemon_kernel::agent_notification_limits::validate_agent_notification;
 use tddy_daemon_kernel::session_notification::{AgentNotification, NotificationLevel};
 use tddy_rpc::{Response, Status};
@@ -36,10 +37,10 @@ impl ActivityServiceImpl {
         // Refused before the credential, as `ReportSessionStatus` does: a notify run in a session
         // of the wrong type is told that rather than that its token is bad.
         let session_type = meta.session_type.as_deref().unwrap_or("");
-        if session_type != "claude-cli" && session_type != "cursor-cli" {
-            return Err(Status::failed_precondition(
-                "session_type is not claude-cli or cursor-cli",
-            ));
+        if !self.session_offers(session_type, Capability::OperatorNotify) {
+            return Err(Status::failed_precondition(format!(
+                "session_type {session_type:?} is not an agent session that declares operator_notify"
+            )));
         }
         if !hook_token_matches(meta.hook_token.as_deref(), &req.hook_token) {
             return Err(Status::permission_denied("invalid hook_token"));

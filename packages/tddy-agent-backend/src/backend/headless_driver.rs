@@ -1,88 +1,60 @@
-//! A coding agent driven headless — `claude -p`, `cursor agent -p`, `codex exec --json` — behind the
-//! same conversation shape the ACP driver gives.
+//! A coding agent driven headless — `claude -p`, `cursor agent -p`, `codex exec --json`, `oz agent
+//! run`, or any agent a spec declares — behind the same conversation shape the ACP driver gives.
 //!
 //! One turn is one CLI invocation resuming the conversation's own CLI session (`--resume <id>`,
 //! `exec resume <thread>`); its streamed events become the same [`AcpUpdate`]s an ACP turn
 //! produces, so a caller cannot tell which transport took the turn. ACP is preferred wherever a
 //! harness offers both.
 //!
+//! What a turn is spawned with comes from the agent's [`HeadlessRenderer`] — its spec — and what its
+//! stdout means from the adapter the spec names ([`crate::adapters::StreamAdapter::transcript`]); this
+//! driver names no agent. It spawns as the workflow backend does ([`super::turn_process`]): a process
+//! group of its own, no inherited `TDDY_*` variable, killed with its group on a cancel.
+//!
 //! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
-
-mod argv;
-mod codex_jsonl;
-mod oz_ndjson;
-mod stream_json;
-mod transcript;
 
 use std::collections::VecDeque;
 use std::io;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, ChildStderr, Command};
+use tokio::process::{Child, ChildStderr};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
+use crate::adapters::headless::{
+    render_env, turn_workdir, write_rendered_files, EnvTemplate, HeadlessMcpServer, HeadlessTurn,
+};
+use crate::adapters::{HeadlessRenderer, TurnTranscript};
 use crate::error::BackendError;
 
-use super::acp_driver::{AcpDriver, AcpTurnEnd, AcpUpdateSink};
-use transcript::{Ending, Finished, Transcript};
+use super::acp_driver::{AcpDriver, AcpTurnEnd, AcpUpdateSink, McpServerSpec};
+use super::spec_headless::DEFAULT_TURN_DEADLINE;
+use super::turn_process::{
+    describe_deadline, kill_process_group, spawn_turn_command, RunningGroup, TurnCommand,
+    STDERR_GRACE,
+};
+use super::SessionMode;
+use transcript::{Ending, Finished};
 
-/// How long a failed turn waits for its stderr to close before it reads the tail it kept.
-const STDERR_GRACE: Duration = Duration::from_secs(2);
+pub(crate) mod codex_jsonl;
+pub(crate) mod oz_ndjson;
+pub(crate) mod stream_json;
+pub(crate) mod transcript;
+
 /// The last stderr lines a failed turn keeps for its error message.
 const STDERR_TAIL_LINES: usize = 20;
-
-/// The CLIs this driver runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HeadlessHarness {
-    /// `claude -p --output-format stream-json --verbose`
-    Claude,
-    /// `agent -p --output-format stream-json --stream-partial-output`
-    Cursor,
-    /// `codex exec --json`
-    Codex,
-    /// Warp's headless runner: `oz agent run -p <prompt> --output-format ndjson -C <dir>`, a later turn
-    /// adding `--conversation <id>` from the run's `conversation_started` event. Distinct from the
-    /// interactive `warp-cli` session type, which runs the `warp` TUI.
-    Oz,
-}
-
-impl HeadlessHarness {
-    /// The harness id a profile or `allowed_agents` entry names it by.
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Cursor => "cursor",
-            Self::Codex => "codex",
-            Self::Oz => "oz",
-        }
-    }
-
-    pub fn from_id(id: &str) -> Option<Self> {
-        match id {
-            "claude" => Some(Self::Claude),
-            "cursor" => Some(Self::Cursor),
-            "codex" => Some(Self::Codex),
-            "oz" => Some(Self::Oz),
-            _ => None,
-        }
-    }
-}
 
 /// How to run the CLI for every turn of one conversation.
 #[derive(Debug, Clone, Default)]
 pub struct HeadlessCommand {
-    pub program: PathBuf,
-    /// Added to the inherited environment (a provider route's variables).
+    /// Added to the inherited environment (a provider route's variables), on every turn, before the
+    /// spec's own `headless.env`.
     pub env: Vec<(String, String)>,
     pub cwd: Option<PathBuf>,
     pub model: Option<String>,
-    /// An MCP config handed to the CLI (`--mcp-config` / `.cursor/mcp.json`).
-    pub mcp_config: Option<PathBuf>,
     /// claude only: the MCP tool its permission prompts are routed to (`--permission-prompt-tool`).
     pub permission_prompt_tool: Option<String>,
     /// Native tools withdrawn from the CLI, where it can withdraw them.
@@ -90,16 +62,25 @@ pub struct HeadlessCommand {
     /// oz only: the agent profile the run executes under (`--profile`) — what decides its
     /// permissions, since a headless `oz` run never asks.
     pub profile: Option<String>,
-    /// codex only: an MCP server handed to the CLI inline (`-c mcp_servers.<name>.*`), for a CLI that
-    /// reads no MCP config file. Its environment is the launcher's to put in [`Self::env`]: the argv
-    /// names its variables, never their values.
-    pub mcp_server: Option<super::acp_driver::McpServerSpec>,
+    /// The tool server handed to the CLI through the spec's MCP slot; the renderer's own
+    /// ([`HeadlessRenderer::tool_server`]) when `None`.
+    pub mcp_server: Option<McpServerSpec>,
+    /// Where each turn's rendered registration files (the MCP config) are written — the
+    /// conversation's own directory, never the worktree, since the registration carries the agent's
+    /// credential. A turn without one is refused. It is also the `{session_dir}` the spec's
+    /// `headless.env` values name.
+    pub scratch_dir: Option<PathBuf>,
+    /// The agent's declaration each turn's argv is rendered from (`coding_agent.headless`), and the
+    /// adapter its stream is read through. A turn without one is refused: no argv is built by hand.
+    pub renderer: Option<Arc<dyn HeadlessRenderer>>,
+    /// How long one turn may run before its process group is killed and the turn fails;
+    /// [`DEFAULT_TURN_DEADLINE`] when `None`. No headless wait is unbounded.
+    pub turn_deadline: Option<Duration>,
 }
 
 /// One headless conversation: its CLI, and the CLI's own session id once the first turn named it.
 #[derive(Debug)]
 pub struct HeadlessDriver {
-    harness: HeadlessHarness,
     command: HeadlessCommand,
     session_id: Mutex<Option<String>>,
     /// The turn in flight, if any. At most one: a second prompt is refused, never queued.
@@ -115,17 +96,21 @@ struct RunningTurn {
 }
 
 impl HeadlessDriver {
-    pub fn new(harness: HeadlessHarness, command: HeadlessCommand) -> Self {
+    /// A conversation run as `command` says.
+    pub fn new(command: HeadlessCommand) -> Self {
         Self {
-            harness,
             command,
             session_id: Mutex::new(None),
             running: Mutex::new(None),
         }
     }
 
-    pub fn harness(&self) -> HeadlessHarness {
-        self.harness
+    /// The agent's id (`claude`); `headless` for a command that names no renderer.
+    pub fn agent_id(&self) -> &str {
+        self.command
+            .renderer
+            .as_ref()
+            .map_or("headless", |renderer| renderer.agent_id())
     }
 
     /// The CLI's session (claude, cursor) or thread (codex) id, once a turn has named it.
@@ -143,7 +128,7 @@ impl HeadlessDriver {
         if running.is_some() {
             return Err(BackendError::InvocationFailed(format!(
                 "a {} turn is already running on this conversation",
-                self.harness.id()
+                self.agent_id()
             )));
         }
         let cancel = Arc::new(Notify::new());
@@ -167,32 +152,11 @@ impl HeadlessDriver {
             .unwrap_or_else(PoisonError::into_inner) = Some(id);
     }
 
-    fn spawn(&self, argv: &[String]) -> Result<Child, BackendError> {
-        let mut command = Command::new(&self.command.program);
-        command
-            .args(argv)
-            .envs(self.command.env.iter().map(|(key, value)| (key, value)))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        // Its own process group, so a cancel kills the CLI's children too.
-        #[cfg(unix)]
-        command.process_group(0);
-        if let Some(cwd) = &self.command.cwd {
-            command.current_dir(cwd);
-        }
-        command.spawn().map_err(|e| {
-            let program = self.command.program.display();
-            if e.kind() == io::ErrorKind::NotFound {
-                BackendError::BinaryNotFound(format!("{program}: {e}"))
-            } else {
-                BackendError::InvocationFailed(format!("could not start {program}: {e}"))
-            }
-        })
-    }
-
-    /// One turn: spawn the CLI for it, map its stream as it arrives, and end it on exit or cancel.
+    /// One turn rendered from the agent's spec: the prompt, the command's model, `resume` as a
+    /// `Resume` session, the command's permission-prompt tool, withdrawn tools and MCP server as the
+    /// slots' inputs, its `cwd` as the workdir and its `scratch_dir` as the scratch directory; the
+    /// rendered files written, the program spawned in a process group of its own, and its stdout
+    /// decoded by the transcript the spec's adapter makes.
     async fn run_turn(
         &self,
         prompt: &str,
@@ -200,37 +164,131 @@ impl HeadlessDriver {
         cancel: Arc<Notify>,
     ) -> Result<AcpTurnEnd, BackendError> {
         let resume = self.session_id();
-        let argv = argv::turn_argv(self.harness, &self.command, resume.as_deref(), prompt);
-        let mut child = self.spawn(&argv)?;
-        let pgid = child.id();
-        self.set_pgid(pgid);
+        let agent = self.agent_id().to_string();
+        let renderer = self.command.renderer.as_ref().ok_or_else(|| {
+            BackendError::InvocationFailed(format!(
+                "a headless {agent} turn is rendered from the agent's spec, and the conversation names none"
+            ))
+        })?;
+        let scratch_dir = self.command.scratch_dir.clone().ok_or_else(|| {
+            BackendError::InvocationFailed(format!(
+                "a rendered {agent} turn writes its registration files to a scratch directory, and the conversation names none"
+            ))
+        })?;
+        let workdir = turn_workdir(self.command.cwd.as_deref())?;
+        let turn = HeadlessTurn {
+            prompt: prompt.to_string(),
+            model: self.command.model.clone(),
+            session: resume.clone().map(SessionMode::Resume),
+            permission_mode: None,
+            append_system_prompt_file: None,
+            allowed_tools: Vec::new(),
+            denied_tools: self.command.disallowed_tools.clone(),
+            permission_prompt_tool: self.command.permission_prompt_tool.clone(),
+            mcp_server: self
+                .command
+                .mcp_server
+                .as_ref()
+                .map(headless_server)
+                .or_else(|| renderer.tool_server()),
+            workdir: workdir.clone(),
+            scratch_dir: scratch_dir.clone(),
+            params: self
+                .command
+                .profile
+                .iter()
+                .map(|profile| ("profile".to_string(), profile.clone()))
+                .collect(),
+            route_args: Vec::new(),
+        };
+        let invocation = renderer.render(&turn)?;
+        let transcript = invocation.adapter.transcript(updates).ok_or_else(|| {
+            BackendError::InvocationFailed(format!(
+                "the {} adapter reads no conversation transcript",
+                invocation.adapter.name()
+            ))
+        })?;
+        write_rendered_files(&invocation.files)?;
+        let self_exe = std::env::current_exe().map_err(|e| {
+            BackendError::InvocationFailed(format!("this executable cannot be named: {e}"))
+        })?;
+        let env: Vec<(String, String)> = self
+            .command
+            .env
+            .iter()
+            .cloned()
+            .chain(render_env(
+                &invocation.env,
+                &EnvTemplate {
+                    session_dir: Some(scratch_dir),
+                    self_exe,
+                },
+            )?)
+            .collect();
         log::debug!(
-            "[headless] {} turn started, resuming: {}",
-            self.harness.id(),
+            "[headless] {agent} turn started, resuming: {}",
             resume.is_some()
         );
-
-        let stdout = child.stdout.take().ok_or_else(|| {
-            BackendError::InvocationFailed(format!("{} turn has no stdout", self.harness.id()))
+        let child = tokio::process::Command::from(spawn_turn_command(&TurnCommand {
+            program: &invocation.program,
+            argv: &invocation.argv,
+            env: &env,
+            cwd: &workdir,
+            inherit_stdin: false,
+        }))
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| {
+            let program = invocation.program.display();
+            if e.kind() == io::ErrorKind::NotFound {
+                BackendError::BinaryNotFound(format!("{program}: {e}"))
+            } else {
+                BackendError::InvocationFailed(format!("could not start {program}: {e}"))
+            }
         })?;
+        self.read_turn(&agent, transcript, child, cancel).await
+    }
+
+    /// Maps a spawned turn's stdout as it arrives, through `transcript`, and ends the turn on exit or
+    /// cancel.
+    async fn read_turn(
+        &self,
+        agent: &str,
+        mut transcript: Box<dyn TurnTranscript>,
+        mut child: Child,
+        cancel: Arc<Notify>,
+    ) -> Result<AcpTurnEnd, BackendError> {
+        let pgid = child.id();
+        self.set_pgid(pgid);
+        // Registered as running, so a Ctrl+C in the TUI reaches this CLI's group too.
+        let _running_group = pgid.map(RunningGroup::new);
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| BackendError::InvocationFailed(format!("{agent} turn has no stdout")))?;
         let stderr_reader = child
             .stderr
             .take()
             .map(|stderr| tokio::spawn(drain_stderr(stderr)));
         let mut lines = BufReader::new(stdout).lines();
-        let mut transcript = Transcript::new(self.harness, updates);
+        let deadline = self.command.turn_deadline.unwrap_or(DEFAULT_TURN_DEADLINE);
+        let overrun = tokio::time::sleep(deadline);
+        tokio::pin!(overrun);
 
         let mut cancelled = loop {
             tokio::select! {
                 biased;
                 () = cancel.notified() => break true,
+                () = &mut overrun => {
+                    return Err(self.end_overrun(agent, &mut child, pgid, deadline).await);
+                }
                 line = lines.next_line() => match line {
                     Ok(Some(line)) => transcript.push_line(&line),
                     Ok(None) => break false,
                     Err(e) => {
                         return Err(BackendError::InvocationFailed(format!(
-                            "reading {} output: {e}",
-                            self.harness.id()
+                            "reading {agent} output: {e}"
                         )));
                     }
                 },
@@ -241,6 +299,9 @@ impl HeadlessDriver {
             tokio::select! {
                 biased;
                 () = cancel.notified() => cancelled = true,
+                () = &mut overrun => {
+                    return Err(self.end_overrun(agent, &mut child, pgid, deadline).await);
+                }
                 _ = child.wait() => {}
             }
         }
@@ -250,7 +311,7 @@ impl HeadlessDriver {
         }
         // Reaps the child (or returns its cached status when it has already exited).
         let status = child.wait().await.map_err(|e| {
-            BackendError::InvocationFailed(format!("waiting for {} turn: {e}", self.harness.id()))
+            BackendError::InvocationFailed(format!("waiting for {agent} turn: {e}"))
         })?;
         self.set_pgid(None);
 
@@ -272,6 +333,35 @@ impl HeadlessDriver {
             self.store_session(id);
         }
         result
+    }
+
+    /// Ends a turn that outlived its deadline: its process group killed, its child reaped, the
+    /// turn slot's group cleared. Returns the error the turn fails with.
+    async fn end_overrun(
+        &self,
+        agent: &str,
+        child: &mut Child,
+        pgid: Option<u32>,
+        deadline: Duration,
+    ) -> BackendError {
+        kill_turn(child, pgid);
+        let _ = child.wait().await;
+        self.set_pgid(None);
+        BackendError::InvocationFailed(format!(
+            "{agent} turn did not end within its {} deadline; its process group was killed",
+            describe_deadline(deadline)
+        ))
+    }
+}
+
+/// `server` as the port's MCP server: its name, program, arguments and environment.
+fn headless_server(server: &McpServerSpec) -> HeadlessMcpServer {
+    HeadlessMcpServer {
+        name: server.name.clone(),
+        command: server.command.clone(),
+        args: server.args.clone(),
+        env: server.env.iter().cloned().collect(),
+        cwd: server.cwd.clone(),
     }
 }
 
@@ -313,23 +403,6 @@ fn kill_turn(child: &mut Child, pgid: Option<u32>) {
         log::debug!("[headless] kill of the turn's child failed: {e}");
     }
 }
-
-/// SIGKILLs every process in the group `pgid`.
-#[cfg(unix)]
-fn kill_process_group(pgid: u32) {
-    // SAFETY: `killpg` takes a process-group id and a signal and touches no memory. A group that
-    // has already gone makes the call fail with ESRCH, which is logged and otherwise ignored.
-    let rc = unsafe { libc::killpg(pgid as libc::pid_t, libc::SIGKILL) };
-    if rc != 0 {
-        log::debug!(
-            "[headless] killpg({pgid}) failed: {}",
-            io::Error::last_os_error()
-        );
-    }
-}
-
-#[cfg(not(unix))]
-fn kill_process_group(_pgid: u32) {}
 
 /// Reads a CLI's stderr to its end, keeping the last few lines.
 async fn drain_stderr(stderr: ChildStderr) -> Vec<String> {

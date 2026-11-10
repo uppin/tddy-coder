@@ -10,7 +10,7 @@ use tddy_core::read_session_metadata;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 const VALID_TOKEN: &str = "valid-token";
@@ -29,28 +29,41 @@ fn current_os_user() -> String {
         .into_owned()
 }
 
-fn write_config_with_claude_cli_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+/// A daemon config, and the coding agents the host installs: `claude` is the stub.
+type AConfigAndItsAgents = (
+    DaemonConfig,
+    Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+);
+
+fn write_config_with_claude_cli_binary(
+    stub_binary: &str,
+) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
-claude_cli:
-  binary_path: {stub_binary}
-"#
-    );
+    let yaml = r#"
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
-    (dir, config)
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+        "claude",
+        std::path::Path::new(stub_binary),
+    )]);
+    (dir, (config, agents))
 }
 
 fn minimal_service_with_manager(
-    config: DaemonConfig,
+    (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -73,6 +86,7 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
 }
 
@@ -142,7 +156,7 @@ async fn start_with_ssh_config_host_materializes_a_remote_worktree_path_on_metad
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     );
 
     // When

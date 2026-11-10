@@ -47,6 +47,11 @@ pub(super) fn prepare_jail_dirs(session_dir: &Path) -> Result<JailDirs, Status> 
 }
 
 pub(super) fn prepare_jail_context_dir(
+    // The context-file allow-list the jail is served: its agent's spec `context_globs`,
+    // resolved by the caller from the session's type.
+    globs: &[String],
+    // The agent's guidance files: its spec's `instructions.files`.
+    guidance_files: &[std::path::PathBuf],
     started_agents: &[tddy_core::SessionAgentRecord],
     worktree_path: &Path,
     context_dir: &Path,
@@ -64,10 +69,12 @@ pub(super) fn prepare_jail_context_dir(
             replaced: refs,
         })
         .collect();
+    let glob_refs: Vec<&str> = globs.iter().map(String::as_str).collect();
     let ctx = tddy_daemon_sandbox::sandbox_session::prepare_context_dir_with_subagent(
         worktree_path,
         &replacements,
-        tddy_session_files::context_files::context_globs_for_session_type("claude-cli"),
+        &glob_refs,
+        guidance_files,
     )
     .map_err(Status::internal)?;
     tddy_daemon_sandbox::sandbox_session::copy_dir_all(ctx.path(), context_dir)
@@ -75,13 +82,25 @@ pub(super) fn prepare_jail_context_dir(
     Ok(())
 }
 
+/// What a jailed CLI session's first `.session.yaml` records beyond the jail's own.
+pub(super) struct JailRecord<'a> {
+    /// The CLI session type the jail runs.
+    pub session_type: &'a str,
+    pub model: &'a str,
+    pub managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
+    pub started_agents: Vec<tddy_core::SessionAgentRecord>,
+    pub pid: u32,
+    pub managed_codebase: bool,
+    pub session_role: &'a str,
+    /// The conversation the daemon minted for the session, when the spec's conversation is minted.
+    pub chat_id: Option<&'a str>,
+    /// The per-session token the agent's hooks report with, when the jail's hooks were written.
+    pub hook_token: Option<String>,
+}
+
 pub(super) fn write_jail_session_metadata(
     jail: &JailSession<'_>,
-    model: &str,
-    managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
-    started_agents: Vec<tddy_core::SessionAgentRecord>,
-    pid: u32,
-    managed_codebase: bool,
+    record: JailRecord<'_>,
 ) -> Result<(), Status> {
     let JailSession {
         session_id,
@@ -92,17 +111,23 @@ pub(super) fn write_jail_session_metadata(
     } = *jail;
     let meta = tddy_core::SessionMetadata {
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
-        pid: Some(pid),
-        model: Some(model.to_string()),
+        pid: Some(record.pid),
+        model: Some(record.model.to_string()),
         sandbox: Some(true),
-        managed_codebase,
-        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-        agents_rev: agent_roster::started_roster_rev(&started_agents),
-        agents: started_agents,
+        managed_codebase: record.managed_codebase,
+        session_role: Some(record.session_role.to_string()).filter(|role| !role.is_empty()),
+        recipe: record
+            .managed_recipe
+            .as_ref()
+            .map(|recipe| recipe.name().to_string()),
+        cursor_chat_id: record.chat_id.map(str::to_string),
+        hook_token: record.hook_token,
+        agents_rev: agent_roster::started_roster_rev(&record.started_agents),
+        agents: record.started_agents,
         ..tddy_session_split::service_util::starting_session_metadata(
             session_id,
             project_id,
-            "claude-cli",
+            record.session_type,
         )
     };
     tddy_core::write_session_metadata(session_dir, &meta)

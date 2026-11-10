@@ -129,6 +129,8 @@ async fn an_open_session_room(suffix: &str) -> AnOpenSessionRoom {
     let config_dir = tempfile::tempdir().expect("tempdir");
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(&config_path, a_daemon_yaml(&ws_url)).expect("write daemon.yaml");
+    // Every load needs a users.yaml beside the config; this daemon maps nobody.
+    std::fs::write(config_dir.path().join("users.yaml"), "[]\n").expect("write users.yaml");
     let config = DaemonConfig::load(&config_path).expect("daemon.yaml must load");
 
     let rooms = SessionRoomRegistry::new();

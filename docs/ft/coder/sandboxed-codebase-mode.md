@@ -263,7 +263,7 @@ session_dir=~/.tddy/sessions/019d…
 codebase_mode=sandboxed: the codebase and its build are confined; the agent runs on this host
 codebase_home_dir=~/.tddy/sandbox-codebase-home/Users--dev--code--app (the jail's $HOME for this repo, persistent across sessions)
 jail: tddy-sandbox-runner --workspace-tools ~/code/app (egress via host CONNECT relay)
-host tools withdrawn: Read, Write, Edit, MultiEdit, NotebookEdit, Grep, Glob, Bash, BashOutput, KillShell
+host tools withdrawn: Read, Write, Edit, MultiEdit, NotebookEdit, Bash, BashOutput, KillShell, Glob, Grep, LS
 
 [claude starts in your terminal]
 ```
@@ -290,8 +290,7 @@ the other macOS paths.
    inherits it. Only `TMPDIR` stays in the session tree. (`managed` mounts only the jail home;
    `mounted` mounts both.)
 3. **Runner argv.** The jail is spawned in the no-agent form: `--workspace-tools <repo>`, with an
-   egress shim port, and **without** `--claude-binary`, `--model`, `--permission-mode` or any
-   `--claude-arg`.
+   egress shim port. The runner has no agent flag to pass.
 4. **Runner transport.** `--workspace-tools` is served over the app's existing loopback-gRPC
    transport, not only over `--stdio`. Started with neither transport it still fails fast.
 5. **Jailed egress.** A `--workspace-tools` jail given `--egress-shim-port` starts the CONNECT
@@ -300,13 +299,18 @@ the other macOS paths.
 6. **In-jail dispatch.** The host relay exposes an in-jail tool dispatcher that keeps one call
    outstanding at a time. A jail started *without* `--workspace-tools` answers `is_error` naming the
    cause, rather than leaving the host waiting.
-7. **Host agent argv.** Every `mcp__tddy-tools__*` exec tool stays in `--allowedTools`, and every
-   native filesystem/shell tool (`Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Grep`,
-   `Glob`, `Bash`, `BashOutput`, `KillShell`) is withdrawn via `--disallowedTools`. The
-   `mcp__tddy-tools__` forms are **not** withdrawn — they are the only route left. The argv also
-   carries `--strict-mcp-config` and `--setting-sources user`, so the unaudited checkout's
-   `.mcp.json` servers and `.claude/settings.json` hooks — neither of which is a tool — never run on
-   this host.
+7. **Host agent argv.** The argv is rendered from the agent's spec. First comes its run template,
+   then its `host_agent` variant (`coding_agent.variants.host_agent` in `claude.yaml`), the
+   pass-through args, and the slots. The variant carries `--strict-mcp-config` and
+   `--setting-sources user`, so the unaudited checkout's `.mcp.json` servers and
+   `.claude/settings.json` hooks, neither of which is a tool, never run on this host. It also
+   withdraws every native filesystem and shell tool through the `tool_deny` slot
+   (`--disallowedTools`): `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`,
+   `BashOutput`, `KillShell`, `Glob`, `Grep` and `LS`. The variant's natives come first, and a
+   subagent's `replaces:` adds its tools after them, without repeats. Every `mcp__tddy-tools__*` exec
+   tool stays in `--allowedTools`. The `mcp__tddy-tools__` forms are **not** withdrawn, because they
+   are the only route left. A split session's host agent runs the same variant
+   ([Split sandbox orchestration](../daemon/amendments/PRD-2026-08-31-split-sandbox-orchestration.md)).
 8. **Host MCP config.** The written MCP config registers `tddy-tools --mcp` with
    `TDDY_SANDBOX_TOOL_IPC` set to the app-served socket path, so the host MCP server dispatches
    through the app rather than executing on the host.
@@ -355,9 +359,10 @@ the other macOS paths.
   cannot provision the `--workspace-tools` jail this mode needs on that path. The mode is refused
   there rather than half-wired. The daemon-served placement has no such limit and is reachable from
   the web on both platforms.
-- **Cursor.** `--agent-kind cursor` keeps today's placement. Cursor's own tool surface is not
-  withdrawable the way Claude's `--disallowedTools` makes Claude's, so an inverted placement could
-  not make the confinement claim.
+- **An agent whose spec cannot withdraw its tools.** `--agent <id>` is served in this mode only when
+  the agent's spec has a `tool_deny` flag and declares a `host_agent` variant. Today only `claude`
+  does. Every other agent, `cursor` included, keeps the `mounted` / `managed` placement and is refused
+  here: an inverted placement could not make the confinement claim.
 - **Consolidating the daemon's own in-jail dispatch.** `tddy_daemon::workspace_tool_sandbox`
   implements the one-call-at-a-time exchange on its own raw channel. Moving it onto the relay's new
   dispatcher is a follow-up, not a prerequisite.

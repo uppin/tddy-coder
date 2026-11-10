@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-agent-backend/src/backend/mod.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-23 — `/pr-wrap` step 3.5 file-length gate on #522 (`#carve` 12/14), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **850 production lines** (2026-10-24; 877 at detection, first `#[cfg(test)]` then at line 878; two test modules with no production code after the first) · budget 500 · **1.7× over**
-**Thresholds breached:** length 850 > 500
+**Metrics:** **537 production lines** (2026-11-06; 850 at the last row) · budget 500 · **1.07× over**
+**Thresholds breached:** length 537 > 500
 **Restructure:** not designed
-**Status:** Open — partially fixed 2026-10-24 (906 → 850 by `#warp-agent` 1/2, #717, which moved `context_globs_for_agent` out); seams A–D remain — **unclaimed**
+**Status:** Open — partially fixed 2026-11-06 (850 → 537 by the `#agent-tools` sweep, #828, which deleted the curated-model and context-glob tables and the bespoke backends' dispatch); seams A–D remain — **unclaimed**
 **Moved:** 2026-09-23 — from `packages/tddy-core/src/backend/mod.rs` by `#carve` 12/14 (PR #522), with `git mv`
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
@@ -22,6 +22,7 @@
 | 2026-10-24 | 850 | `#warp-agent` 1/2 (#717): 906 → 908 with the `warp` row of `context_globs_for_agent` (one comment, one arm), then 908 → 850 by moving `SHARED_CONTEXT_GLOBS` and `context_globs_for_agent` into `backend/context_globs.rs` (60 production lines) with `tddy-tools restructure` (`move_item`, then a named `pub use context_globs::context_globs_for_agent` so every path is kept). **Partially fixed**: still 1.7× over |
 | 2026-10-24 | 850 → 851 | **worse** by 1 in PR #721 (`#coagents` 2/8): the `codex_acp_route_args` re-export the coding-agent launcher uses. Not split here: the stack's parent (#720) and `#coagents` 7/8 (`headless-driver`) also edit this file |
 | 2026-10-25 | 850 → 851 | **worse** by 1 in PR #726 (`#coagents` 7/8): `pub mod headless_driver;` — the driver itself lives in the new `backend/headless_driver.rs` and its five submodules. Not split: stack-shared (#720, #721 edit this file); deferred to the `#coagents` sweep node by the developer (2026-10-25) |
+| 2026-11-06 | 851 → 537 | **partially fixed** by the `#agent-tools` sweep (#828, `#agent-tools` 20/28): `curated_models_for_agent` / `claude_cli_models` / `cursor_cli_models`, `context_globs_for_agent`'s callers and the bespoke ACP backends' dispatch deleted — models and globs are read from the agent's spec (`curated_models()`, `context_globs`), and every ACP agent runs through `SpecAcpBackend`. Counted to the first `#[cfg(test)]` on the sweep branch. Still 37 lines over: seams A–D remain |
 
 ## What would close it — candidate seams (not proven)
 
@@ -33,3 +34,15 @@
 | D | request and sink types: `AgentOutputSink`, `ProgressSink`, `SessionMode`, `RemoteToolEnv`, `InvokeRequest` (L283–493) | ~210 |
 
 `context_globs_for_agent` is out (`backend/context_globs.rs`); seams A–C leave about 470 lines, under budget, and D takes it further. Line numbers above predate that move. `pub use` at the module root keeps every path. Prove the seams with `restructure check --deep` before applying them.
+
+## Measurement update 2026-11-02 — #agent-tools 6/12 (#795)
+
+**Unchanged:** 851 production lines. #795 touched one line (`SessionMode` derives `PartialEq, Eq`).
+
+## Measurement update 2026-11-05 — #agent-tools 15/19 (#821)
+
+**Partly fixed:** 851 → **815 production lines** (seam A closed): the global child-process slot (`CHILD_PID`, `set_child_pid`, `clear_child_pid`, `get_child_pid`, both `kill_child_process` variants) is gone, replaced by per-turn process groups in `backend/turn_process.rs` (`kill_running_turns`); the `AnyBackend` arms for Claude, Cursor and Codex now hold the one `SpecHeadlessBackend`. Seams B–D remain. **Status:** Open — partially fixed 2026-11-05; unclaimed.
+
+## Measurement update 2026-11-05 — #agent-tools 16/19 (#822)
+
+**Partly fixed:** 815 → **728 production lines**: `AnyBackend` and its five delegating matches are gone, replaced by `SpecBackend` in its own file (`backend/spec_backend.rs`); `SharedBackend::from_any` went with it. Seams B–D remain. **Status:** Open — partially fixed 2026-11-05; unclaimed.

@@ -13,8 +13,8 @@
 
 import React, { useEffect } from "react";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
-import { AuthService } from "../../src/gen/auth_pb";
+import { AuthProvider, useAuthContext } from "../../src/app/auth/authProvider";
+import { AuthService } from "tddy-client-web/gen/auth_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { TEST_IDS } from "../support/testIds";
 import { redirectLoginPage } from "../support/pages/redirectLoginPage";

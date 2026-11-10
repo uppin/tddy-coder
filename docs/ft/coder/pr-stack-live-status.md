@@ -439,7 +439,7 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   the ordering guard: if a non-merged parent owns no `branch`, it errors (`failed_precondition`)
   with a message naming that parent. The guard never consults a parent's `session_id` — a closed or
   never-linked child session must not wedge a stack whose branch exists. Both spawn paths reach
-  this via `spawn_claude_cli_session_inner`.
+  this via the generic CLI start (`opencode_cli_spawn::start_cli_harness_session`).
 - **Remote-branch leg (added 2026-07-26)** — `tddy_core::worktree::remote_branch_ref_sha(repo_root,
   branch) -> Option<String>`, the public form of the private `remote_ref_exists`, backs
   `BranchResolution.remote`.
@@ -763,7 +763,7 @@ Both handlers carry the standard prologue ending in `require_pr_stack_orchestrat
 **non-erroring like every other `QueryBranch` leg** — an absent base, an unknown repo root, a probe failure
 or a `spawn_blocking` timeout all degrade that leg alone and the RPC still succeeds.
 
-Web (`tddy-web`), all under `src/components/sessions/prstack/`:
+Web (`tddy-prstack-web` since #850; was `tddy-web`'s `src/components/sessions/prstack/`), all under `packages/tddy-prstack-web/src/`:
 
 - `orderStackNodes` — persisted order when every node has one, else `topoSortStackNodes` wholesale (D25).
   `topoSortStackNodes` is unchanged and remains the legacy fallback.

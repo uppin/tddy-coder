@@ -31,11 +31,8 @@ pub const TEST_TOKEN: &str = "valid-token";
 /// OS user returned for [`TEST_TOKEN`] by [`test_service`].
 pub const TEST_USER: &str = "testuser";
 
-const CONFIG_YAML: &str = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
-"#;
+const CONFIG_YAML: &str = "";
+const USERS_YAML: &str = "- github_user: \"testuser\"\n  os_user: \"testdev\"\n";
 
 /// Build a minimal [`DaemonConfig`] suitable for unit/acceptance tests.
 pub fn test_config() -> DaemonConfig {
@@ -46,6 +43,7 @@ fn config_from(yaml: &str) -> DaemonConfig {
     let dir = tempfile::tempdir().expect("create temp dir for test config");
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).expect("write test config");
+    std::fs::write(dir.path().join("users.yaml"), USERS_YAML).expect("write test users");
     DaemonConfig::load(&path).expect("load test config")
 }
 
@@ -55,7 +53,100 @@ fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
     service
 }
 
-/// The host [`test_service`] wraps, before it goes behind its `Arc` — for a suite above this crate
+/// The coding agents of a fixture host: every built-in spec, with no `<tddyhome>/tools` overrides,
+/// resolved the way the daemon resolves them ([`tddy_agent_launch::host_coding_agents`]) — so
+/// `tddy-tools` is the build's own (`CARGO_BIN_EXE_tddy-tools`, or the sibling of the test binary in
+/// `target/debug`), never whichever one the developer's `PATH` happens to hold. What a suite that
+/// never wires its own coding agents gets, so the capability gates have agents to read.
+///
+/// # Panics
+/// When the built-in specs do not load, which no build passes.
+#[must_use]
+pub fn builtin_coding_agents() -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
+    tddy_agent_launch::host_coding_agents::host_coding_agents(std::path::Path::new(
+        "/nonexistent-tddy-home",
+    ))
+    .expect("the built-in coding agents load")
+}
+
+/// The built-in coding agents on a fixture host that maps each `(agent id, binary)` of `binaries`
+/// through that agent's spec — its `binary.env` (`TDDY_CLAUDE_BINARY`, `TDDY_CURSOR_AGENT`,
+/// `TDDY_TOOLS_BINARY`, …) answers `binary` on this host alone, never in the process environment.
+/// The host's `PATH` is empty, so an agent `binaries` does not name is unavailable rather than
+/// found on the machine running the test (`#agent-tools 19/19`) — except `tddy-tools`, which the
+/// daemon's host finds beside the daemon binary, here the build's own. What a fixture installs its stub
+/// agents with in place of a daemon.yaml `claude_cli.binary_path`.
+///
+/// # Panics
+/// When the built-in specs do not load, or `binaries` names an id that is not a built-in tool or
+/// whose spec declares no `binary.env`.
+#[must_use]
+pub fn coding_agents_with_binaries(
+    binaries: &[(&str, &std::path::Path)],
+) -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
+    coding_agents_with_binaries_over(
+        std::path::Path::new("/nonexistent-tddy-home/tools"),
+        binaries,
+    )
+}
+
+/// [`coding_agents_with_binaries`] over the operator overrides in `overrides_dir` (a host's
+/// `<tddyhome>/tools`): what a fixture whose operator re-configured an agent installs.
+///
+/// # Panics
+/// As [`coding_agents_with_binaries`], and when an override does not load.
+#[must_use]
+pub fn coding_agents_with_binaries_over(
+    overrides_dir: &std::path::Path,
+    binaries: &[(&str, &std::path::Path)],
+) -> Arc<tddy_agent_launch::spec_launch::HostCodingAgents> {
+    let registry = tddy_coding_agent_specs::load_agent_registry(overrides_dir)
+        .expect("the coding agents and their overrides load");
+    let env = binaries
+        .iter()
+        .map(|(id, binary)| {
+            let def = registry
+                .get(id)
+                .unwrap_or_else(|| panic!("{id} is a built-in tool"));
+            let var = def
+                .binary
+                .env
+                .clone()
+                .unwrap_or_else(|| panic!("{id}'s spec names its binary's variable"));
+            (var, binary.to_string_lossy().into_owned())
+        })
+        .collect();
+    Arc::new(tddy_agent_launch::spec_launch::HostCodingAgents::new(
+        registry,
+        tddy_agent_launch::host_coding_agents::daemon_tool_host(Arc::new(AHostOfBinaries { env })),
+    ))
+}
+
+/// [`coding_agents_with_binaries`]' host: its environment is the binaries' variables, its `PATH`
+/// is empty, its filesystem is the real one.
+struct AHostOfBinaries {
+    env: std::collections::BTreeMap<String, String>,
+}
+
+impl tddy_actions::tool::ToolHost for AHostOfBinaries {
+    fn env_var(&self, name: &str) -> Option<String> {
+        self.env.get(name).cloned()
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    fn is_executable_file(&self, path: &std::path::Path) -> bool {
+        tddy_actions::tool::ToolHost::is_executable_file(&tddy_actions::tool::ProcessToolHost, path)
+    }
+
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+}
+
+/// The host [`test_service`] wraps,/// The host [`test_service`] wraps, before it goes behind its `Arc` — for a suite above this crate
 /// that must install more on it first (`tddy-daemon-rpc`'s families), and then calls
 /// [`DaemonSessionHost::install_sandbox_rpc_bridge`] itself, as [`test_service`] does.
 #[must_use]
@@ -81,6 +172,7 @@ pub fn test_host(sessions_base: PathBuf) -> DaemonSessionHost {
         PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        builtin_coding_agents(),
     )
 }
 
@@ -148,6 +240,7 @@ pub fn signing_test_host(sessions_base: PathBuf) -> (DaemonSessionHost, SignedTe
         PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        builtin_coding_agents(),
     )
     .with_session_tokens(tokens);
     (host, credentials)
@@ -155,9 +248,6 @@ pub fn signing_test_host(sessions_base: PathBuf) -> (DaemonSessionHost, SignedTe
 
 /// [`CONFIG_YAML`] with a (stub) GitHub provider, which is what gives a daemon its token wiring.
 const SIGNING_CONFIG_YAML: &str = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 github:
   stub: true
 "#;

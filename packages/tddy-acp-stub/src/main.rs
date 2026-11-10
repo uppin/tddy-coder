@@ -1,4 +1,4 @@
-//! ACP agent stub for testing ClaudeAcpBackend without real Claude.
+//! ACP agent stub for testing `SpecAcpBackend` (the spec-built ACP driver) without real Claude.
 //!
 //! Communicates over stdio using the Agent Client Protocol. Reads scenario from
 //! `--scenario <path>` or `TDDY_ACP_SCENARIO` env var. Default: echo prompt back as text.

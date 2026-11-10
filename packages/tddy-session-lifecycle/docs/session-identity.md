@@ -5,8 +5,8 @@ its commits and for the agent's GitHub tools — from one resolution
 ([resolution rules](../../tddy-accounts/docs/github-identity-resolution.md)). This document is where
 that resolution is taken, what it is bound to, and how the token reaches the agent.
 
-Code: `src/connection_service/session_acting_identity.rs`, `host_session_socket.rs`,
-`inherited_host_sockets.rs`.
+Code: `src/connection_service/session_acting_identity.rs`, `tddy-agent-launch`'s
+`host_session_socket.rs`.
 
 ## One lookup, two halves
 
@@ -103,11 +103,9 @@ forwarded source, and carry no `github-source.yaml`; see
 
 | Path | Commit pairs | Token handler | Where the pairs go |
 |---|---|---|---|
-| co-located claude-cli start / resume | yes | yes | the agent's `env_extra` |
-| sandboxed claude-cli start and relaunch | yes | yes | `session_env` |
-| sandboxed cursor-cli start | yes | yes | `session_env` |
-| plain cursor-cli start / resume | yes | none — runs no toolcall listener | the cursor process env |
-| agent-spawned children (`spawn-child`, `spawn-conversation`) | yes | yes, via the child's own start | as the claude-cli start |
+| co-located CLI start / resume (claude-cli, cursor-cli, every `*-cli` agent — one launch) | yes | yes, when the session runs a toolcall listener (a managed workflow); none otherwise | the agent's process env |
+| sandboxed CLI start and relaunch | yes | yes | `session_env` |
+| agent-spawned children (`spawn-child`, `spawn-conversation`) | yes | yes, via the child's own start | as the co-located CLI start |
 | tool session (`tddy-coder`) start / resume | yes | yes — over the per-OS-user host-session socket | the child's environment, over the spawn wire |
 | split-agent | not applicable | none | — |
 
@@ -126,9 +124,6 @@ The token stays in daemon memory; the child gets pairs and, via its own handler,
 child spawned after the orchestrator's token expired is refused with `NoSuchSession` and starts under
 the checkout's identity.
 
-**Not supported.** Sandboxed cursor-cli resume (`resume_cursor_cli_session` ignores `sandbox`), so
-there is no relaunch to carry an identity.
-
 ## Tool sessions: the token over the per-OS-user host-session socket
 
 Every tool session the daemon starts or resumes gets `--host-session-socket`, whichever recipe. What
@@ -137,8 +132,13 @@ handler, so another recipe's request is refused (`this session's recipe does not
 conversations`).
 
 **One long-lived socket per OS user**, bound lazily by the first session that needs it, kept for the
-daemon's lifetime, and bound again by the next session after a restart. Path:
-`<data dir>/run/<os user>/host.sock` (`host_session_socket_path`). `run/` is `0o711` (traversable, not
+daemon's lifetime, and bound again by the next session after a restart. On a **server daemon** (the
+`tddy-daemon` binary) the host-session service is served on that user's one **daemon socket**, beside
+the agent-tool roster: `HostSessionSockets::serve_on` registers it as a `UserScopedService` on the
+host's `AgentToolSockets` (`DaemonSessionHost::with_host_sessions_merged(true)`), and `ensure_bound`
+answers that socket's path — `<data dir>/run/<os user>/daemon.sock` when the daemon binds it, or the one
+`tddy-supervisor` handed over. An **embedded host** (Tddy Desktop) binds a host-session socket of its
+own at `<data dir>/run/<os user>/host.sock` (`host_session_socket_path`). `run/` is `0o711` (traversable, not
 listable), `<os user>/` is `0o700`, `host.sock` is `0o600`. The path is under the data dir rather
 than the session's directory because that nests too deep for AF_UNIX's ~104-byte limit; a data dir
 deep enough that the path exceeds 100 bytes is refused with that reason.
@@ -186,13 +186,14 @@ bound, and otherwise stops it and binds again. A session registers at start and 
   design. Until a session of that OS user is started or resumed after a restart, the socket is not
   bound and the coder reports that the socket could not be reached, with the hint to resume.
 
-### Supervisor-declared sockets
+### Supervisor-created sockets
 
 Where the daemon cannot `chown` to the session's OS user (it is an unprivileged child of
-`tddy-supervisor`), the supervisor creates the socket and hands it over; the daemon adopts it
-(`inherited_host_sockets.rs`, `HostSessionSockets::adopt_inherited`) and never binds, replaces or
-removes it. See [host sockets](../../tddy-supervisor/docs/host-sockets.md). An OS user that is not
-declared keeps the explicit refusal, which names `host_sockets:` in `supervisor.yaml`.
+`tddy-supervisor`), the supervisor creates each mapped OS user's daemon socket and hands it over
+(`user.<os user>`); the daemon adopts it through `AgentToolSockets` and never binds, replaces or removes
+it, and the host-session service is served on it like on a self-bound one. See
+[host sockets](../../tddy-supervisor/docs/host-sockets.md). An OS user `users.yaml` does not map gets no
+socket, and a session start for them is refused, naming `users.yaml`.
 
 The self-binding path is unchanged for a daemon that can `chown` (root, same user, embedded,
 desktop).
@@ -212,7 +213,8 @@ records its environment), `tests/tool_session_host_socket.rs` (every recipe gets
 socket, token over the real socket, two sessions two accounts, no cross-session token, verbatim
 refusals, `GITHUB_TOKEN` rescues nothing, delete unregisters, stop and restart),
 `src/connection_service/session_acting_identity_tests.rs` (pinning), `host_session_socket_tests.rs`,
-`inherited_host_sockets_tests.rs`. Local gh: `tests/tool_session_local_gh.rs` (the real start and
+`inherited_host_sockets_tests.rs` (`a_supervised_daemon_serves_host_session_and_agent_tool_calls_on_one_user_socket`,
+`a_supervised_host_session_refusal_names_users_yaml`, the cross-crate prefix pin). Local gh: `tests/tool_session_local_gh.rs` (the real start and
 resume into a recording tool, driven by the `a_gh_cli` stub: the `gh` login's commit pairs, an
 Enterprise host, the source entry, a logged-out `gh`, a start naming the source on a host whose row was
 never set, resume from the recorded source and from the row, and no daemon token variable reaching

@@ -245,6 +245,10 @@ pub struct NetworkSpec {
     pub loopback_allow_ports: Vec<u16>,
     /// Allow inbound on ephemeral loopback ports (Claude OAuth callback server).
     pub allow_oauth_inbound: bool,
+    /// Which hosts the jail may reach through its egress shim and host relay (`#agent-tools 3/12`).
+    /// A plan lowered from tools carries the union of their declarations; a recipe-built agent jail
+    /// carries [`crate::EgressPolicy::Any`], today's behaviour, until its own node declares hosts.
+    pub egress: crate::EgressPolicy,
 }
 
 /// cgroup v2 / resource limits (Linux).
@@ -288,6 +292,18 @@ pub struct SandboxPlan {
     pub stdin: Option<Vec<u8>>,
     /// cgroup v2 delegation parameters (Linux backend only; ignored elsewhere).
     pub cgroup: CgroupConfig,
+    /// The directory inside the writable tree that holds the confined process's guidance files, and
+    /// that the jail must keep read-only to it (`#agent-tools 10/12`). `None` for a plan with nothing
+    /// to protect.
+    ///
+    /// The backends read the carve-out from here instead of sniffing `--context-dir` out of
+    /// [`SandboxSpec::command`], so a jail no longer has to run `tddy-sandbox-runner` to get one.
+    // TODO(jail-agnostic): the cgroups backend carries the field but adds no read-only bind for it
+    // (docs/dev/todo/2026-11-03-cgroups-has-no-context-dir-carve-out.md).
+    pub context_dir: Option<PathBuf>,
+    /// The confined process speaks RPC over its stdin/stdout, so both are piped back to the caller
+    /// instead of stdout going to the egress log (`#agent-tools 10/12`).
+    pub stdio: bool,
 }
 
 /// Assembles a [`SandboxPlan`] from explicit, caller-supplied grants.
@@ -310,6 +326,8 @@ pub struct SandboxBuilder {
     limits: ResourceLimits,
     cwd: Option<PathBuf>,
     stdin: Option<Vec<u8>>,
+    context_dir: Option<PathBuf>,
+    stdio: bool,
 }
 
 impl SandboxBuilder {
@@ -338,7 +356,21 @@ impl SandboxBuilder {
             limits: ResourceLimits::default(),
             cwd: None,
             stdin: None,
+            context_dir: None,
+            stdio: false,
         }
+    }
+
+    /// The directory the jail keeps read-only to the confined process — [`SandboxPlan::context_dir`].
+    pub fn context_dir(mut self, context_dir: Option<PathBuf>) -> Self {
+        self.context_dir = context_dir;
+        self
+    }
+
+    /// Pipe the confined process's stdin/stdout back to the caller — [`SandboxPlan::stdio`].
+    pub fn stdio(mut self, stdio: bool) -> Self {
+        self.stdio = stdio;
+        self
     }
 
     pub fn stdin(mut self, stdin: Option<Vec<u8>>) -> Self {
@@ -447,6 +479,8 @@ impl SandboxBuilder {
             limits,
             cwd,
             stdin,
+            context_dir,
+            stdio,
         } = self;
 
         // Dedup reads by (host, kind), preserving first-seen order.
@@ -516,11 +550,8 @@ impl SandboxBuilder {
         // value itself never enters the env var map (only the file path does).
         let mut vars = env;
         for sec in &secrets {
-            let path = scratch_dir.join(".secrets").join(&sec.env_name);
-            vars.insert(
-                format!("TDDY_SECRET_{}", sec.env_name),
-                path.to_string_lossy().into_owned(),
-            );
+            let (name, path) = secret_file_var(&scratch_dir, &sec.env_name);
+            vars.insert(name, path);
         }
 
         let allow_read_paths: Vec<PathBuf> = reads
@@ -557,7 +588,31 @@ impl SandboxBuilder {
             limits,
             stdin,
             cgroup: CgroupConfig::default(),
+            context_dir,
+            stdio,
         })
+    }
+}
+
+/// The env var that names `env_name`'s scratch secret file, and that file's path.
+fn secret_file_var(scratch_dir: &std::path::Path, env_name: &str) -> (String, String) {
+    let path = scratch_dir.join(".secrets").join(env_name);
+    (
+        format!("TDDY_SECRET_{env_name}"),
+        path.to_string_lossy().into_owned(),
+    )
+}
+
+impl SandboxPlan {
+    /// Deliver `secret` out of band, as [`SandboxBuilder::secret`] does: a `0600` scratch file the
+    /// runner resolves into `secret.env_name` on the confined child alone, referenced by
+    /// `TDDY_SECRET_<NAME>`. For a plan that was assembled before its secrets were known (one whose
+    /// secrets come from a tool's own definition).
+    pub fn add_secret(&mut self, secret: SecretSpec) {
+        let (name, path) = secret_file_var(&self.spec.scratch_dir, &secret.env_name);
+        self.env.vars.insert(name.clone(), path.clone());
+        self.spec.env.insert(name, path);
+        self.env.secrets.push(secret);
     }
 }
 

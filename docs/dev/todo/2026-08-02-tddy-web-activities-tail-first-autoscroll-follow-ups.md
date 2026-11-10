@@ -6,7 +6,7 @@
 - **The live, interactive chat surfaces still never scroll.** `AgentChatView` gains sticky-bottom
   follow only in `readOnly` mode; `AgentChat`, `WorkflowChatScreen` and the PR-Stack chat render the
   same unmanaged `overflow-y-auto` list and stay pinned to the top. The same helpers
-  (`src/lib/scrollFollow.ts`) apply, but the live surfaces add composer focus, the elicitation
+  (`packages/tddy-chat-web/src/scrollFollow.ts`) apply, but the live surfaces add composer focus, the elicitation
   composer and the send round-trip to reason about, so they were deliberately left out of scope.
 - **The loaded range is not virtualized.** Paging bounds what is *fetched*; once an operator has
   paged back several thousand entries, every one of them is still mounted. Windowing the rendered

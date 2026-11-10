@@ -12,7 +12,7 @@
  */
 
 import React from "react";
-import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { SessionsDrawerScreen } from "tddy-session-web";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";

@@ -2,10 +2,16 @@
 //!
 //! Changeset: docs/dev/1-WIP/2026-10-18-provider-route-agent-def-route.md
 
+use tddy_coding_agent_specs::CodingAgentRegistry;
 use tddy_core::provider_route::{choose_route, RouteChoice, RouteSources};
 use tddy_discovery::harness_profile::HarnessProfile;
 
-use crate::harness_profile_start::{profile_start, ProfileStart};
+use crate::harness_profile_start::{profile_spec_id, profile_start, ProfileStart};
+
+/// The built-in coding agents, as a host without overrides has them.
+fn the_agents() -> CodingAgentRegistry {
+    CodingAgentRegistry::builtin().expect("the built-ins load")
+}
 
 fn a_profile(harness: &str) -> HarnessProfile {
     HarnessProfile {
@@ -21,7 +27,7 @@ fn a_profile(harness: &str) -> HarnessProfile {
 fn a_claude_cli_profile_starts_claude_cli_on_its_account_and_model() {
     // Then
     assert_eq!(
-        profile_start(&a_profile("claude-cli")),
+        profile_start(&a_profile("claude-cli"), &the_agents()),
         Ok(ProfileStart {
             session_type: Some("claude-cli".to_string()),
             agent: None,
@@ -34,7 +40,7 @@ fn a_claude_cli_profile_starts_claude_cli_on_its_account_and_model() {
 #[test]
 fn a_codex_profile_starts_a_tool_session_with_the_codex_agent() {
     // When
-    let start = profile_start(&a_profile("codex")).expect("codex is a harness");
+    let start = profile_start(&a_profile("codex"), &the_agents()).expect("codex is a harness");
 
     // Then
     assert_eq!(start.session_type, None);
@@ -44,13 +50,13 @@ fn a_codex_profile_starts_a_tool_session_with_the_codex_agent() {
 #[test]
 fn a_profile_naming_no_known_harness_is_refused() {
     // Then
-    assert!(profile_start(&a_profile("vim")).is_err());
+    assert!(profile_start(&a_profile("vim"), &the_agents()).is_err());
 }
 
 #[test]
 fn a_session_level_account_overrides_the_profiles() {
     // Given
-    let start = profile_start(&a_profile("claude-cli")).expect("starts");
+    let start = profile_start(&a_profile("claude-cli"), &the_agents()).expect("starts");
     let sources = RouteSources {
         session: Some(RouteChoice::Account("fireworks-main".to_string())),
         agent_definition: Some(start.choice),
@@ -108,11 +114,16 @@ mod through_the_tool_session_route {
             Arc::new(|t: &str| (t == "tok").then(|| "ada".to_string())),
             "tok",
         );
-        let start = profile_start(&a_profile("codex")).expect("starts");
+        let agents = crate::host_coding_agents::host_coding_agents(std::path::Path::new(
+            "/nonexistent-tddy-home",
+        ))
+        .expect("the built-in coding agents load");
+        let start = profile_start(&a_profile("codex"), agents.agents()).expect("starts");
 
         // When the profile's tool session is started with no session-level choice
         let json = tool_session_route_json(
             &access,
+            Some(&agents),
             start.agent.as_deref().expect("a tool-session agent"),
             &RouteSources {
                 agent_definition: Some(start.choice),
@@ -132,4 +143,35 @@ mod through_the_tool_session_route {
         assert!(route.args.iter().any(|a| a == "muse-wonder-1.0"));
         assert_eq!(route.secret_env[0].1.expose(), "a-meta-key");
     }
+}
+
+#[test]
+fn a_cli_harness_profile_names_the_spec_its_session_type_launches_from() {
+    // When
+    let agents = the_agents();
+    let ids: Vec<Option<String>> = ["opencode-cli", "muse-cli", "warp-cli", "claude-cli"]
+        .into_iter()
+        .map(|harness| profile_spec_id(&a_profile(harness), &agents))
+        .collect();
+
+    // Then
+    assert_eq!(
+        ids,
+        ["opencode", "muse", "warp", "claude"]
+            .map(|id| Some(id.to_string()))
+            .to_vec()
+    );
+}
+
+#[test]
+fn a_tool_session_profile_names_no_spec_while_its_cli_twin_does() {
+    // When
+    let agents = the_agents();
+    let ids = (
+        profile_spec_id(&a_profile("opencode"), &agents),
+        profile_spec_id(&a_profile("opencode-cli"), &agents),
+    );
+
+    // Then — `opencode` starts a tool session, which no CLI spec stands for
+    assert_eq!(ids, (None, Some("opencode".to_string())));
 }

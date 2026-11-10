@@ -5,6 +5,7 @@
   "scripts": {
     "generate": "../../scripts/generated-code.sh write packages/tddy-rust-typescript-tests",
     "test": "bun test",
+    "test:ci": "bun test --reporter=junit --reporter-outfile=../../reports/junit/rust-typescript-tests.xml",
     "test:verbose": "bun test --verbose"
   },
   "dependencies": {
@@ -17,5 +18,11 @@
     "@bufbuild/protoc-gen-es": "^2.2.0",
     "typescript": "^5.6.0",
     "@types/bun": "latest"
+  },
+  "tddyCi": {
+    "needs": [
+      "web-bundle",
+      "tddy-coder"
+    ]
   }
 }

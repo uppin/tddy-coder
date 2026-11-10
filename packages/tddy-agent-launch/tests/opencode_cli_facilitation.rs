@@ -31,7 +31,10 @@ fn an_opencode_session_is_facilitated_over_its_worktree() {
 
     // When / Then
     assert_eq!(
-        facilitated_checkout(&session),
+        facilitated_checkout(
+            &session,
+            tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+        ),
         FacilitatedCheckout::Checkout(PathBuf::from("/work/opencode-session"))
     );
 }
@@ -43,7 +46,10 @@ fn an_opencode_session_with_no_worktree_is_facilitated_over_no_checkout() {
 
     // When / Then
     assert_eq!(
-        facilitated_checkout(&session),
+        facilitated_checkout(
+            &session,
+            tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+        ),
         FacilitatedCheckout::NoCheckout
     );
 }
@@ -55,7 +61,10 @@ fn a_workspace_session_is_still_not_facilitated() {
 
     // When / Then
     assert_eq!(
-        facilitated_checkout(&session),
+        facilitated_checkout(
+            &session,
+            tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+        ),
         FacilitatedCheckout::NotFacilitated
     );
 }

@@ -2,10 +2,7 @@
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
-use crate::catalog::ACP_HARNESSES;
-
-/// The headless harnesses, run one CLI invocation per turn.
-pub const HEADLESS_HARNESSES: &[&str] = &["claude", "cursor", "codex", "oz"];
+use tddy_coding_agent_specs::{CodingAgentRegistry, CodingAgentSpec, HeadlessPermissionPolicy};
 
 /// The transport a harness's turns take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,43 +40,63 @@ impl PermissionPolicy {
     }
 }
 
-/// The transport of `harness`; `None` for a harness this crate cannot run as a subagent.
+/// The transport of `harness` among the built-in agents' specs; `None` for a harness they do not
+/// declare as a subagent. For a caller with no host registry ([`transport_of_spec`] is what a host's
+/// registry is read through).
 pub fn transport_of(harness: &str) -> Option<Transport> {
-    if ACP_HARNESSES.contains(&harness) {
+    CodingAgentRegistry::builtin_cached()
+        .get(harness)
+        .and_then(transport_of_spec)
+}
+
+/// The permission policy `harness` runs under among the built-in agents' specs; `None` exactly where
+/// [`transport_of`] is `None`, and for a headless agent that declares none.
+pub fn permission_policy_of(harness: &str) -> Option<PermissionPolicy> {
+    CodingAgentRegistry::builtin_cached()
+        .get(harness)
+        .and_then(permission_policy_of_spec)
+}
+
+/// The `(transport, permission_policy)` wire spellings of `harness` among the built-in agents, both
+/// empty for a harness that is no subagent. A host's catalog rows read its own registry
+/// ([`transport_and_policy_wire_of_spec`]).
+pub fn transport_and_policy_wire(harness: &str) -> (String, String) {
+    CodingAgentRegistry::builtin_cached()
+        .get(harness)
+        .map(transport_and_policy_wire_of_spec)
+        .unwrap_or_default()
+}
+
+/// The transport `spec`'s turns take, from its declaration (`#agent-tools 27/28`): ACP for an agent
+/// with a `coding_agent.acp` section, headless for one with a `coding_agent.headless` section, `None`
+/// for one with neither (a PTY-only agent), which this crate cannot run as a subagent.
+pub fn transport_of_spec(spec: &CodingAgentSpec) -> Option<Transport> {
+    if spec.acp().is_some() {
         Some(Transport::Acp)
-    } else if HEADLESS_HARNESSES.contains(&harness) {
+    } else if spec.headless().is_some() {
         Some(Transport::Headless)
     } else {
         None
     }
 }
 
-/// The permission policy `harness` runs under as a subagent; `None` exactly where [`transport_of`]
-/// is `None`.
-pub fn permission_policy_of(harness: &str) -> Option<PermissionPolicy> {
-    if ACP_HARNESSES.contains(&harness) {
+/// The permission policy `spec` runs under as a subagent, from its declaration: an ACP agent asks
+/// its caller; a headless one runs under its `coding_agent.headless.permission_policy`. `None`
+/// exactly where [`transport_of_spec`] is `None`, and for a headless agent that declares no policy.
+pub fn permission_policy_of_spec(spec: &CodingAgentSpec) -> Option<PermissionPolicy> {
+    if spec.acp().is_some() {
         return Some(PermissionPolicy::AsksCaller);
     }
-    match harness {
-        "claude" => Some(PermissionPolicy::AsksCaller),
-        "cursor" => Some(PermissionPolicy::Fixed(
-            "read-only; the CLI cannot ask mid-turn".to_string(),
-        )),
-        "codex" => Some(PermissionPolicy::Fixed(
-            "workspace-write sandbox; the CLI cannot ask mid-turn".to_string(),
-        )),
-        "oz" => Some(PermissionPolicy::Fixed(
-            "the agent profile decides; its default profile auto-approves commands and edits"
-                .to_string(),
-        )),
-        _ => None,
+    match spec.headless()?.permission_policy.as_ref()? {
+        HeadlessPermissionPolicy::AsksCaller => Some(PermissionPolicy::AsksCaller),
+        HeadlessPermissionPolicy::Fixed(text) => Some(PermissionPolicy::Fixed(text.clone())),
     }
 }
 
-/// The `(transport, permission_policy)` wire spellings of `harness`, both empty for a harness this
-/// crate cannot run as a subagent. Every coding-agent catalog row calls this, so they cannot disagree.
-pub fn transport_and_policy_wire(harness: &str) -> (String, String) {
-    match (transport_of(harness), permission_policy_of(harness)) {
+/// The `(transport, permission_policy)` wire spellings of `spec`, both empty for an agent this crate
+/// cannot run as a subagent. What every coding-agent catalog row calls once it reads the registry.
+pub fn transport_and_policy_wire_of_spec(spec: &CodingAgentSpec) -> (String, String) {
+    match (transport_of_spec(spec), permission_policy_of_spec(spec)) {
         (Some(transport), Some(policy)) => (transport.as_str().to_string(), policy.as_wire()),
         _ => (String::new(), String::new()),
     }
@@ -88,14 +105,6 @@ pub fn transport_and_policy_wire(harness: &str) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn every_harness_with_a_transport_has_a_permission_policy() {
-        for harness in ACP_HARNESSES.iter().chain(HEADLESS_HARNESSES) {
-            assert!(transport_of(harness).is_some(), "{harness}");
-            assert!(permission_policy_of(harness).is_some(), "{harness}");
-        }
-    }
 
     #[test]
     fn a_policy_spells_its_wire_form() {

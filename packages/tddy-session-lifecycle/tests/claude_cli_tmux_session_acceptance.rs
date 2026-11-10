@@ -6,6 +6,7 @@
 //! identity maps to the OS user running the test, and the agent is a stub `claude` that records how
 //! it was launched. Serial — the tmux socket directory is process-wide environment.
 
+mod agent_registry_support;
 mod support;
 
 use std::path::{Path, PathBuf};
@@ -17,7 +18,7 @@ use tddy_service::proto::session::{
     DeleteSessionRequest, ListSessionsRequest, ResumeSessionRequest,
     SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_testing_commons::stub_scripts::{
     a_stub_agent_script, read_last_appended_argv, read_recorded_env,
@@ -39,7 +40,7 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// A daemon whose `claude` is a stub that records what it was launched with, then holds its pane.
 struct TmuxAgentDaemon {
     host: Arc<DaemonSessionHost>,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
     sessions_base: PathBuf,
     launches: PathBuf,
     environment: PathBuf,
@@ -79,7 +80,7 @@ async fn a_daemon_whose_agent(temperament: AgentTemperament) -> TmuxAgentDaemon 
         .build();
     let repo = a_registered_project(sessions_dir.path());
     let (config_dir, config) = a_config_running(&stub);
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config,
         sessions_dir.path().to_path_buf(),
@@ -98,23 +99,36 @@ async fn a_daemon_whose_agent(temperament: AgentTemperament) -> TmuxAgentDaemon 
     }
 }
 
-fn a_config_running(stub_agent: &Path) -> (tempfile::TempDir, DaemonConfig) {
+/// A daemon config, and the coding agents the host installs: `claude` is the stub.
+type AConfigAndItsAgents = (
+    DaemonConfig,
+    Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+);
+
+fn a_config_running(stub_agent: &Path) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
     let user = this_os_user();
-    let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nallowed_tools:\n  - path: /bin/true\n    label: true\nclaude_cli:\n  binary_path: {}\n",
-        stub_agent.display()
-    );
+    let yaml = "allowed_tools:\n  - path: /bin/true\n    label: true\n";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
-    (dir, config)
+    let agents =
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("claude", stub_agent)]);
+    (dir, (config, agents))
 }
 
 fn a_session_host(
-    config: DaemonConfig,
+    (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> Arc<DaemonSessionHost> {
     let data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -132,6 +146,7 @@ fn a_session_host(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     ));
     host.install_sandbox_rpc_bridge();
     host
@@ -387,7 +402,8 @@ async fn the_pane_environment_file_is_gone_once_the_agent_runs_and_no_value_was_
             .ok_or_else(|| format!("still there: {left:?}"))
     })
     .await;
-    // and the pane's command names a file, never a value
+    // and the pane's command names a file and the variables it keeps, never a value
+    // (`#agent-tools 28/28`: names only reach the pane's argv, never values)
     let start_command = daemon.tmux.tmux(&[
         "display-message",
         "-p",
@@ -397,7 +413,7 @@ async fn the_pane_environment_file_is_gone_once_the_agent_runs_and_no_value_was_
     ]);
     let start_command = String::from_utf8_lossy(&start_command.stdout);
     assert!(
-        !start_command.contains("CLAUDE_CODE_NO_FLICKER"),
+        !start_command.contains("CLAUDE_CODE_NO_FLICKER="),
         "{start_command}"
     );
 }
@@ -630,4 +646,105 @@ fn a_tmux_session_reads_alive_while_it_runs_and_not_alive_once_killed() {
     assert!(!tmux.has_session("alpha"));
     assert!(!tmux_session_alive(&user, "alpha"));
     kill_tmux_session(&user, "alpha").expect("killing an absent session is not an error");
+}
+
+// ---------------------------------------------------------------------------
+// The claude spec's argv in tmux (`#agent-tools 17/19`)
+// ---------------------------------------------------------------------------
+
+/// The argument an override of claude.yaml adds after its binary, which no hand-built claude argv
+/// carries: an argv holding it was rendered from the spec.
+const SPEC_MARK: &str = "--rendered-from-claude-yaml";
+
+/// The built-in claude.yaml run as the stub, its argv marked with [`SPEC_MARK`] — an operator's
+/// override, launched as `claude-cli`.
+fn claude_yaml_marked_as_rendered_from_the_spec() -> String {
+    let claude = agent_registry_support::builtin_yaml_run_as_the_stub("claude");
+    let binary = "    - \"{binary}\"\n";
+    assert!(
+        claude.contains(binary),
+        "claude.yaml's argv starts with its binary"
+    );
+    claude.replacen(binary, &format!("{binary}    - {SPEC_MARK}\n"), 1)
+}
+
+/// The argv the marked claude spec renders for a host start of `session_id` on `model`, with no
+/// prompt and no permission mode chosen — and for its resume, `--resume` with the same id.
+fn the_marked_claude_argv(
+    stub: &str,
+    model: &str,
+    conversation: &str,
+    session_id: &str,
+) -> Vec<String> {
+    [
+        stub,
+        SPEC_MARK,
+        "--model",
+        model,
+        conversation,
+        session_id,
+        "--permission-mode",
+        "auto",
+    ]
+    .map(str::to_string)
+    .to_vec()
+}
+
+/// `argv` without the system-prompt file the operator-notify guidance is appended with: the claude
+/// spec's `append_system_prompt` flag renders it, beyond what this test pins of the argv.
+fn without_the_notify_guidance(argv: Vec<String>) -> Vec<String> {
+    let mut kept = Vec::with_capacity(argv.len());
+    let mut rest = argv.into_iter();
+    while let Some(arg) = rest.next() {
+        if arg == "--append-system-prompt-file" {
+            rest.next();
+        } else {
+            kept.push(arg);
+        }
+    }
+    kept
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_claude_cli_start_in_tmux_runs_the_argv_the_claude_spec_renders_and_resumes_the_same_way()
+{
+    // Given — a private tmux, and claude.yaml overridden with a marked argv
+    let _tmux = PrivateTmux::started();
+    let daemon = agent_registry_support::a_daemon_with_tools(&[(
+        "claude.yaml",
+        &claude_yaml_marked_as_rendered_from_the_spec(),
+    )]);
+
+    // When — started in tmux, stopped, then resumed
+    let (session_id, _host) = daemon
+        .start(StartSessionRequest {
+            new_branch_name: "claude-in-tmux".to_string(),
+            ..daemon.a_tmux_start("claude-cli")
+        })
+        .await
+        .expect("a tmux claude-cli start succeeds");
+    let started = daemon.stub_report(&session_id).await;
+    daemon.stop(&session_id).await;
+    daemon
+        .resume(&session_id)
+        .await
+        .expect("the stopped claude-cli session resumes");
+    let resumed = daemon.stub_report(&session_id).await;
+
+    // Then — the spec's argv in tmux on both, the conversation being the session id
+    let stub = daemon.stub_path();
+    let model = agent_registry_support::ACME_MODEL;
+    assert_eq!(
+        (
+            without_the_notify_guidance(started.argv()),
+            without_the_notify_guidance(resumed.argv()),
+            daemon.metadata_of(&session_id).tmux_session.is_some(),
+        ),
+        (
+            the_marked_claude_argv(&stub, model, "--session-id", &session_id),
+            the_marked_claude_argv(&stub, model, "--resume", &session_id),
+            true,
+        )
+    );
 }

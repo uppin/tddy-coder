@@ -28,8 +28,6 @@ uuid = { version = "1", features = ["v4", "v7"] }
 # session updates onto the protobuf mirror; the version is pinned to `tddy-acp`'s.
 tddy-acp = { path = "../tddy-acp" }
 agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }
-# `store.rs` refuses an assistant name that collides with a builtin coding backend's agent id.
-tddy-coder = { path = "../tddy-coder" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-rpc = { path = "../tddy-rpc" }

@@ -1026,8 +1026,9 @@ reports merged:
    scripts/ci-status.sh --failures <PR#>    # failing test names, files, assertions, log tails
    ```
 
-   The four required checks are `Rust lint`, `Rust build`, `Rust tests`, `Web tests`. **Do not treat
-   *skipped* as green** — that is what a never-built draft reports. **Do not treat
+   The required checks are `Rust lint`, `Rust build`, `Rust tests`, and the web checks
+   `Web build`, `Web lint` and `Web tests shard 1/3`…`3/3` (`docs/dev/guides/ci.md` § Web checks). **Do not treat
+   *skipped* as green** — that is what a never-built draft reports. A web test shard that ran nothing on a *ready* PR had no affected package in its share and is green. **Do not treat
    "zero pending checks" as green** — a check is registered on the rollup a moment *after* a push, so
    "no checks pending" is true before CI has even started. That false positive is worst right after a
    force-push, which is exactly when a stack is being repaired. `--watch` exists so you do not have
@@ -1059,9 +1060,11 @@ reports merged:
    > node **only** once its base is `master` (i.e. it is a root, or it has already been repointed
    > after its parents merged).
 
-   `#forcemerge` is held to the same `write` bar as `#automerge` and leaves a durable trace: before
-   merging, the workflow comments naming who asked, linking their comment, and quoting the full check
-   state. Use it for a known-irrelevant red check, never to outrun a failure you have not read.
+   `#forcemerge` is held to the same `write` bar as `#automerge` and leaves a durable trace: after
+   the merge succeeds, the workflow comments naming who asked, linking their comment, and quoting the
+   check state read just before it; before merging it completes each required check that has not passed with a
+   run titled *Forced by @actor* (no bypass actor needed — see `docs/dev/guides/ci.md` § Automerge);
+   a failed force merge posts a ❌ comment with the error instead. Use it for a known-irrelevant red check, never to outrun a failure you have not read.
 4. **Repoint every dependent** — `/repoint` per dependent PR. Then verify: each
    dependent should now report the new base, be mergeable, and show **only its own file count**
    (`gh pr view <N> --json changedFiles,baseRefName,mergeable`). If it does not, repair it (below).
@@ -1169,6 +1172,10 @@ A worktree in this repo is expensive — a populated `target/` plus `node_module
 gigabytes, and half a dozen of them will exhaust a disk. Create per-node worktrees only when a child
 session actually runs, and only for the nodes being worked. A node's worktree can always be
 recreated later from its branch.
+
+Under `/yolo-pr-stack`, `/fix-pr` runs in **one reusable worktree** that `git switch`es up the line
+and `rm -rf target`s between nodes. A branch checked out in another worktree cannot be switched to, so
+a node's per-node worktree is freed (clean and fully pushed) before the fixer needs it.
 
 ### Delete a temporary worktree as soon as its branch is pushed
 
@@ -1386,7 +1393,7 @@ scripts/ci-status.sh --watch <N>
 Two things to know about arming it again:
 
 - `#automerge` asks the **checks API** (`gh pr checks --required`), not `mergeStateStatus`, because
-  that field answers "is this blocked *for you*" and the Actions app is a bypass actor. So re-arming
+  that field answers "is this blocked *for you*", not what the ruleset requires. So re-arming
   it after a force-push is safe: it will queue rather than merge while checks are re-running.
 - It is still a merge **into this PR's base**. On a non-bottom stacked PR, that base is a parent's
   branch. Re-read golden rule 2 before arming anything.

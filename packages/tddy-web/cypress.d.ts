@@ -43,10 +43,10 @@ declare global {
       startTddyCoderApp(opts: { flow: "connect" }): Chainable<{ baseUrl: string }>;
 
       /**
-       * Navigate to a GhosttyTerminal Storybook iframe story with LiveKit
+       * Navigate to a TerminalView Storybook iframe story with LiveKit
        * connection params encoded in the query string.
        */
-      visitGhosttyStory(opts: {
+      visitTerminalStory(opts: {
         storyId: string;
         url: string;
         token: string;
@@ -56,7 +56,7 @@ declare global {
 
       /**
        * Wait for the full LiveKit terminal connection:
-       * status-dot connected + livekit-status hidden + ghostty-terminal exists
+       * status-dot connected + livekit-status hidden + terminal exists
        * + first-output-received exists.
        */
       connectAndWaitForTerminal(): Chainable<void>;

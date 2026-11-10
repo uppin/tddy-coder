@@ -257,11 +257,13 @@ impl LinkedAccountStore for VaultLinkedAccountStore {
 /// `FAILED_PRECONDITION` rather than linking a credential that could never work (a stub's token is
 /// synthetic). Nothing is substituted for the missing provider.
 ///
-/// The session token resolves to the GitHub login, which is the vault's subject.
+/// The session token resolves to the GitHub login, which is the vault's subject. `coding_agents` is
+/// the registry the host already loaded: the route matrix reads each agent's spec from it.
 pub fn accounts_service_over(
     vaults: &Arc<SessionVaults>,
     subject_of: SessionSubjectResolver,
     config: &DaemonConfig,
+    coding_agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
 ) -> AccountsServiceImpl<SessionVaultAccountStore> {
     let linking_provider = tddy_daemon_auth::github_account_linking_provider(config);
     let store = Arc::new(SessionVaultAccountStore::new(
@@ -274,7 +276,9 @@ pub fn accounts_service_over(
             store,
             Arc::new(HttpProviderModelProbe::new(reqwest::Client::new())),
         )
-        .with_route_support(Arc::new(crate::provider_route_support::HarnessRouteSupport));
+        .with_route_support(Arc::new(
+            crate::provider_route_support::HarnessRouteSupport::new(Some(coding_agents)),
+        ));
     match linking_provider {
         Some(provider) => service.with_linking(
             Arc::new(GitHubAccountLinker::new(provider)),

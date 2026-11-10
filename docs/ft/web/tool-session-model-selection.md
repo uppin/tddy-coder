@@ -88,11 +88,11 @@ pub struct BackendModels { pub models: Vec<BackendModel>, pub default_model: Str
 async fn list_models(&self) -> Result<BackendModels, BackendError>;
 ```
 
-- `CursorBackend::list_models` — spawns `<binary> --list-models`, parses the text catalog.
+- A headless agent whose spec declares a model listing (Cursor's `models.list_command: ["{binary}", --list-models]`, `adapter: cursor-models`) — `SpecHeadlessBackend::list_models` runs it with the spec-resolved binary under a 30 s deadline and parses the text catalog.
 - `ClaudeAcpBackend` / `CodexAcpBackend::list_models` — runs an ephemeral ACP `initialize` +
   `new_session` and reads `SessionModelState.available_models` (the handshake already exists; it
   currently discards `.models`).
-- `ClaudeCodeBackend` / `CodexBackend::list_models` — return the curated list from a
+- A headless agent whose spec declares no listing (`claude`, `codex`) — returns the curated list from a
   `curated_models_for_agent(name)` helper (single source of truth, kept in sync with
   `default_model_for_agent`).
 - A free function `claude_cli_models() -> BackendModels` for the claude-cli pseudo-agent.
@@ -100,20 +100,26 @@ async fn list_models(&self) -> Result<BackendModels, BackendError>;
 ### tddy-tools subcommand
 
 ```
-tddy-tools list-models --agent <id> [--cursor-cli-path P] [--opencode-cli-path P] [--codex-acp-cli-path P] …
+tddy-tools list-models --agent <id> [--binary-path P] [--tools-dir D]
 ```
 
 Constructs the backend for `<agent>` (same binary-resolution rules as `tddy-coder`), calls
 `list_models()`, prints `{ "models": [{"id","label"}], "default_model": "<id>" }` JSON on stdout.
 A CLI session type is answered from its harness descriptor: `--agent claude-cli` and
 `--agent cursor-cli` return their curated catalogs, `--agent opencode-cli` runs `opencode models`
-(the binary `--opencode-cli-path` names, else `opencode`) and returns one model per printed line. The
-daemon forwards the binary it resolved for the harness (`cli_harnesses.opencode-cli.binary_path`)
-when that is an absolute path, as it does Cursor's.
+(the binary `--binary-path` names, else `opencode`) and returns one model per printed line. The
+daemon forwards the binary it resolved for the harness (the `binary.command` of a
+`<tddyhome>/tools/opencode.yaml` override, or the environment variable the spec's `binary.env`
+names) when that is an absolute path, as it does Cursor's.
+
+`--tools-dir D` makes the catalogue the host's coding-agent registry — the built-in specs with the
+overrides in `D` applied — so an operator's `tools/<agent>.yaml` model list is the one listed; a
+directory that does not load is refused (non-zero exit, naming the file). Absent, the built-in specs
+alone are listed.
 
 ### Daemon
 
-- `ListAgentModels` handler shells out to `tddy-tools list-models --agent <agent>` (via the
+- `ListAgentModels` handler shells out to `tddy-tools list-models --agent <agent> --tools-dir <tddyhome>/tools` (via the
   configured tool path / spawn worker), parses the JSON, returns `ListAgentModelsResponse`. Result
   is cached per (agent, daemon, **OS user**) with a short TTL to avoid re-probing on every agent
   toggle — the cache is keyed by OS user because cursor/ACP catalogs are account-specific, so a
@@ -215,11 +221,6 @@ must not silently look available.
   catalogs all originate from the daemon/`tddy-core`.
 
 ## Known limitations
-
-- **The built-in option is labelled "Anthropic (built in)" for every harness**, including a Codex tool
-  session (whose vendor is OpenAI), and a specialized agent definition shows the daemon's "unknown
-  harness" reason in the field. Both need harness metadata from the daemon
-  (`docs/dev/todo/2026-10-22-tool-session-provider-picker-needs-harness-metadata.md`).
 
 - **Retained `CLAUDE_CLI_MODELS` for the legacy `ConnectionScreen`** — `CreateSessionPane` no longer
   reads the hardcoded `packages/tddy-web/src/constants/claudeCliModels.ts` `CLAUDE_CLI_MODELS`

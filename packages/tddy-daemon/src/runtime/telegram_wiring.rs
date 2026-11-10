@@ -89,6 +89,7 @@ pub(super) fn build_telegram(
     options: &RuntimeOptions,
     registries: &Registries,
     plugins: &Plugins,
+    coding_agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
 ) -> TelegramWiring {
     // No block, switched off, or no token: no bot. Which of the three it is was already reported
     // on the status board from the same block (`tddy_telegram::status::configured_state`).
@@ -165,7 +166,7 @@ pub(super) fn build_telegram(
             elicitation_select_options: elicitation_select_options.clone(),
             elicitation_multi_select_meta: elicitation_multi_select_meta.clone(),
             pending_elicitation_other: Arc::new(StdMutex::new(HashMap::new())),
-            claude_cli_manager: Arc::clone(&registries.shared_claude_cli_manager),
+            cli_manager: Arc::clone(&registries.shared_cli_manager),
         },
     ));
     let harness = Arc::new(Mutex::new(
@@ -178,12 +179,19 @@ pub(super) fn build_telegram(
             Some(telegram_tracked),
         )
         .with_session_rooms(registries.shared_session_rooms.clone())
-        .with_terminal_exposure(Arc::clone(&plugins.terminal_exposure)),
+        .with_coding_agents(Arc::clone(&coding_agents))
+        .with_session_starter(
+            Arc::clone(&registries.session_starter) as Arc<dyn tddy_daemon_extensions::SessionStarter>
+        ),
     ));
 
     TelegramWiring {
         hooks: Some(hooks),
         identity_check,
-        inbound: Some(TelegramInbound { bot, harness }),
+        inbound: Some(TelegramInbound {
+            bot,
+            harness,
+            coding_agents,
+        }),
     }
 }

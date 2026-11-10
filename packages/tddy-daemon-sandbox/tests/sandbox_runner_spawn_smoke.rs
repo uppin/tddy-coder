@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 use std::time::Duration;
+use tddy_testing_commons::sandbox_fixtures::write_exec_plan;
 
 use tddy_daemon_sandbox::sandbox_session::{
     pick_free_loopback_port, spawn_sandbox_runner, SandboxRunnerSpawn,
@@ -106,12 +107,10 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
         tools.to_string_lossy().to_string(),
         "--ready-marker".into(),
         ready_marker.to_string_lossy().to_string(),
-        "--claude-binary".into(),
-        "/bin/sleep".into(),
-        "--model".into(),
-        "claude-opus-4-8".into(),
-        "--permission-mode".into(),
-        "auto".into(),
+        "--exec-plan".into(),
+        write_exec_plan(&project, &["/bin/sleep", "--model", "claude-opus-4-8"])
+            .to_string_lossy()
+            .to_string(),
         "--grpc-listen-port".into(),
         grpc_port.to_string(),
         "--egress-shim-port".into(),
@@ -148,6 +147,8 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
             host_home: None,
             cgroup: Default::default(),
             route: None,
+            context_dir: Some(context.clone()),
+            stdio: false,
         })
         .expect("spawn sandbox-runner"),
     );
@@ -214,8 +215,6 @@ async fn generic_pty_runner_writes_ready_marker_inside_seatbelt() {
         grpc_port.to_string(),
         "--egress-shim-port".into(),
         shim_port.to_string(),
-        "--model".into(),
-        String::new(),
         "--pty-command=/bin/sleep".into(),
         "--pty-command=30".into(),
     ];
@@ -247,6 +246,8 @@ async fn generic_pty_runner_writes_ready_marker_inside_seatbelt() {
             host_home: None,
             cgroup: Default::default(),
             route: None,
+            context_dir: Some(context.clone()),
+            stdio: false,
         })
         .expect("spawn generic pty sandbox-runner"),
     );
@@ -313,8 +314,6 @@ async fn generic_pty_host_relay_streams_command_output() {
         grpc_port.to_string(),
         "--egress-shim-port".into(),
         shim_port.to_string(),
-        "--model".into(),
-        String::new(),
         "--pty-command=/bin/sh".into(),
         "--pty-command=-c".into(),
         "--pty-command=printf pty_ok".into(),
@@ -346,6 +345,8 @@ async fn generic_pty_host_relay_streams_command_output() {
             host_home: None,
             cgroup: Default::default(),
             route: None,
+            context_dir: Some(context.clone()),
+            stdio: false,
         })
         .expect("spawn generic pty sandbox-runner"),
     );

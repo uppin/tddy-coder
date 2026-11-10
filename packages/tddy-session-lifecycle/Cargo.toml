@@ -105,6 +105,11 @@ tddy-cli-sessions = { path = "../tddy-cli-sessions" }
 tddy-session-split = { path = "../tddy-session-split" }
 tddy-demo-vm-service = { path = "../tddy-demo-vm-service" }
 tddy-agent-launch = { path = "../tddy-agent-launch" }
+# The headless `claude` conversation is rendered from its declaration (`#agent-tools 6/12`).
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
+# `test_util::coding_agents_with_binaries` hosts the fixture binaries behind a `ToolHost` (`#agent-tools 19/19`);
+# the `claude_cli_from_spec_acceptance.rs` suite resolves against one too.
+tddy-actions = { path = "../tddy-actions" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

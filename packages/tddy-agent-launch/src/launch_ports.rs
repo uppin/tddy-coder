@@ -87,12 +87,15 @@ pub struct LaunchSessions {
     pub tddy_data_dir: PathBuf,
     pub staging_base_dir: PathBuf,
     pub peer_routing: PeerRouting,
-    pub claude_cli_manager: Arc<CliSessionManager>,
+    pub cli_manager: Arc<CliSessionManager>,
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     pub sandbox_manager: Arc<tddy_daemon_sandbox::sandbox_session::SandboxSessionManager>,
     pub task_registry: TaskRegistry,
     /// The per-OS-user host-session sockets and the tool sessions they answer.
     pub host_session_sockets: Arc<HostSessionSockets>,
+    /// The agent-tool socket of each session's OS user (`#agent-tools` 26/28): what a session's
+    /// hooks, `tddy-tools notify` and tool calls are pointed at.
+    pub agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     pub agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
     /// The agent topic's handle: a jail start claims its seeded clones and resolves its agent defs
     /// through it.
@@ -125,6 +128,10 @@ pub struct LaunchSessions {
     /// Told of each started session's worktree. `None` on a host whose embedder acts on nothing of
     /// the kind.
     pub worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
+    /// The coding agents declared as tools (`#agent-tools 2/12`). Every launch has them
+    /// (`#agent-tools 19/19`): a host that installed none is given an empty registry, whose every
+    /// agent session is refused for naming no spec — nothing is launched by hand.
+    pub coding_agents: Arc<crate::spec_launch::HostCodingAgents>,
     /// The host's capabilities that are not fields.
     pub host: Arc<dyn LaunchHost>,
     /// What extends a session's reach beyond this host when it is connected to.

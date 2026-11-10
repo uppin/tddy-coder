@@ -7,11 +7,45 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use tddy_sandbox::builder::{CopySpec, MachPolicy, PolicySpec};
 use tddy_sandbox::format_egress_logs;
-use tddy_sandbox::{NetworkSpec, SandboxBuilder, SandboxPlan};
-use tddy_sandbox_recipes::{
-    claude_credentials_copies, claude_interactive_policy, process_claude_exec_reads,
-};
+use tddy_sandbox::{process_exec_reads, NetworkSpec, SandboxBuilder, SandboxPlan};
+
+/// Policy of an interactive Node/V8 CLI with a PTY: JIT, fork, every Mach service, and the system
+/// and package-manager directories it shells into.
+fn an_interactive_node_cli_policy() -> PolicySpec {
+    PolicySpec {
+        allow_dynamic_code_generation: true,
+        allow_process_fork: true,
+        mach_lookup: MachPolicy::All,
+        sysctl_read: true,
+        pseudo_tty: true,
+        exec_paths: [
+            "/usr/bin",
+            "/usr/libexec",
+            "/bin",
+            "/sbin",
+            "/System",
+            "/Library",
+            "/Applications",
+            "/opt/homebrew",
+            "/opt/local",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect(),
+    }
+}
+
+/// The host's `~/.claude/.credentials.json` copied into the scratch `HOME` for each session.
+fn the_hosts_credentials_copied_into(host_home: &Path, scratch_home: &Path) -> Vec<CopySpec> {
+    vec![CopySpec {
+        src: host_home.join(".claude").join(".credentials.json"),
+        dest: scratch_home.join(".claude").join(".credentials.json"),
+        optional: true,
+        mode: Some(0o600),
+    }]
+}
 
 /// Locate the real `claude` binary, canonicalized. Prefers the newest versioned binary under
 /// `~/.local/share/claude/versions` because the `claude` on PATH may be a wrapper script that
@@ -71,12 +105,13 @@ fn strict_claude_plan(
 
     SandboxBuilder::new(project_root, scratch, egress, command)
         .profile_path(project_root.join("profile.sb"))
-        .reads(process_claude_exec_reads(claude_bin))
-        .copies(claude_credentials_copies(&host_home, &scratch_home))
-        .policy(claude_interactive_policy())
+        .reads(process_exec_reads(claude_bin))
+        .copies(the_hosts_credentials_copied_into(&host_home, &scratch_home))
+        .policy(an_interactive_node_cli_policy())
         .network(NetworkSpec {
             loopback_allow_ports: vec![],
             allow_oauth_inbound: true,
+            egress: Default::default(),
         })
         .env_map(env)
         .build()
@@ -346,27 +381,21 @@ fn a_context_dir_holding_agent_guidance(project_root: &Path) -> PathBuf {
     context_dir
 }
 
-/// Like [`strict_system_plan`], but the confined command also carries `--context-dir <path>` — the
-/// flag every real `tddy-sandbox-runner` argv uses to name the agent's context dir, and the one the
-/// profile renderer derives its carve-out from. `/bin/sh -c <script>` assigns trailing operands to
-/// `$0`/`$1` and still runs the script unchanged, so the flag rides along without altering the probe.
+/// Like [`strict_system_plan`], but the plan declares `context_dir` as the directory the jail keeps
+/// read-only to the confined process (`SandboxPlan::context_dir`), whatever the command says.
 fn strict_system_plan_declaring_a_context_dir(
     project_root: &Path,
     egress: &Path,
     script: String,
     context_dir: &Path,
 ) -> SandboxPlan {
-    strict_system_plan(
+    let mut plan = strict_system_plan(
         project_root,
         egress,
-        vec![
-            "/bin/sh".into(),
-            "-c".into(),
-            script,
-            "--context-dir".into(),
-            context_dir.to_string_lossy().into_owned(),
-        ],
-    )
+        vec!["/bin/sh".into(), "-c".into(), script],
+    );
+    plan.context_dir = Some(context_dir.to_path_buf());
+    plan
 }
 
 /// **seatbelt_denies_a_confined_process_overwriting_the_guidance_in_its_context_dir**: the context

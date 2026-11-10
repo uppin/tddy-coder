@@ -30,6 +30,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
+use tddy_testing_commons::sandbox_fixtures::write_exec_plan;
 
 use prost::Message as _;
 use tddy_core::session_lifecycle::unified_session_dir_path;
@@ -270,20 +271,13 @@ async fn a_seatbelt_jail_bridged_to(daemon: &DaemonServingOneAgent) -> BridgedJa
     let tools = a_built_binary("tddy-tools");
 
     // The agent must outlive the relayed calls: the host stops collecting the jail's frames once
-    // the PTY command has exited (`SessionEnded`). `/bin/sleep` handed claude's argv rejects it and
-    // exits at once, so the fake agent is a script that ignores its arguments and stays alive until
-    // the jail is torn down — the same leader `sandbox_session_stdio_acceptance` uses.
-    let fake_agent = project.join("fake-agent.sh");
-    std::fs::write(&fake_agent, "#!/bin/sh\nexec /bin/sleep 600\n").expect("write the fake agent");
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&fake_agent, std::fs::Permissions::from_mode(0o755))
-            .expect("make the fake agent executable");
-    }
+    // the PTY command has exited (`SessionEnded`). The exec plan names `/bin/sleep 600`, which stays
+    // alive until the jail is torn down — the same leader `sandbox_session_stdio_acceptance` uses.
 
     let ready_marker = project.join("sandbox.ready");
     let tool_ipc_socket = project.join("tool_ipc.sock");
     let session_id = daemon.session_id.as_str();
+    let shim_port = pick_free_loopback_port().expect("egress shim port");
     let runner_argv = vec![
         runner.to_string_lossy().to_string(),
         "--session-id".into(),
@@ -299,12 +293,12 @@ async fn a_seatbelt_jail_bridged_to(daemon: &DaemonServingOneAgent) -> BridgedJa
         // The jailed agent process itself is not the subject: what is relayed out of the jail is.
         // The same PTY leader `sandbox_session_stdio_acceptance` uses, so the two real-jail
         // fixtures differ in exactly one thing: the host RPC handler behind the relay.
-        "--claude-binary".into(),
-        fake_agent.to_string_lossy().to_string(),
-        "--model".into(),
-        "claude-opus-4-8".into(),
-        "--permission-mode".into(),
-        "auto".into(),
+        "--exec-plan".into(),
+        write_exec_plan(&project, &["/bin/sleep", "600"])
+            .to_string_lossy()
+            .to_string(),
+        "--egress-shim-port".into(),
+        shim_port.to_string(),
         "--stdio".into(),
     ];
 
@@ -320,7 +314,6 @@ async fn a_seatbelt_jail_bridged_to(daemon: &DaemonServingOneAgent) -> BridgedJa
         egress.to_string_lossy().to_string(),
     );
 
-    let shim_port = pick_free_loopback_port().expect("egress shim port");
     let mut handle = spawn_sandbox_runner(SandboxRunnerSpawn {
         project_root: project.clone(),
         scratch_dir: scratch,
@@ -334,6 +327,8 @@ async fn a_seatbelt_jail_bridged_to(daemon: &DaemonServingOneAgent) -> BridgedJa
         host_home: None,
         cgroup: Default::default(),
         route: None,
+        context_dir: Some(context.clone()),
+        stdio: true,
     })
     .expect("spawn the Seatbelt-jailed sandbox-runner");
     let jail = TerminateJailOnDrop(handle.pid());

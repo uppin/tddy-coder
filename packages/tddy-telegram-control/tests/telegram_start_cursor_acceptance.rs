@@ -1,45 +1,27 @@
-//! Acceptance tests: Telegram `/start-cursor` → project → branch → model → PTY spawn.
+//! Acceptance tests: Telegram `/start-cursor` → project → branch → model keyboards
+//! (`#agent-tools 18/19`). The launch itself — argv, hooks, the minted chat — is
+//! `telegram_start_agent_from_spec.rs`'s.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use tddy_core::read_session_metadata;
+use tddy_coding_agent_specs::CodingAgentRegistry;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon_kernel::config::{CursorCliConfig, DaemonConfig};
+use tddy_daemon_extensions::{OperatorSessionStart, OperatorStartOutcome, SessionStarter};
+use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_telegram_control::telegram_notifier::InMemoryTelegramSender;
-
 use tddy_telegram_control::telegram_session_control::{
-    collect_outbound_messages, read_changeset_routing_snapshot, StartCursorCommand,
-    TelegramSessionControlHarness, TelegramWorkflowSpawn, CURSOR_CLI_MODELS,
+    collect_outbound_messages, read_changeset_routing_snapshot, telegram_model_choices,
+    StartCursorCommand, TelegramSessionControlHarness, TelegramWorkflowSpawn,
 };
-use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
 const AUTHORIZED_CHAT: i64 = 777_002;
 const TEST_USER_ID: u64 = 43;
 const TEST_PROJECT_ID: &str = "tg-cursor-project";
+const STARTED_SESSION: &str = "019d6392-3cff-7018-8000-000000000002";
 
-/// The chat id the stub `cursor-agent` mints for `create-chat`.
-const STUB_CHAT_ID: &str = "f8db82db-e154-41d0-ae72-312bdf6d4d80";
-
-/// A stub agent that echoes its argv, and mints [`STUB_CHAT_ID`] when asked for a chat.
-fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
-    let script_path = dir.join("stub_agent.sh");
-    std::fs::write(
-        &script_path,
-        format!(
-            "#!/bin/sh\nif [ \"$1\" = \"create-chat\" ]; then echo \"{STUB_CHAT_ID}\"; exit 0; fi\necho \"ARGV: $@\"\n"
-        ),
-    )
-    .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    script_path
-}
-
+/// Create a git repo with a self-hosted origin remote.
 fn create_test_repo_with_origin(dir: &std::path::Path) {
     let run = |args: &[&str], envs: &[(&str, &str)]| {
         let mut cmd = std::process::Command::new("git");
@@ -63,41 +45,50 @@ fn create_test_repo_with_origin(dir: &std::path::Path) {
     run(&["push", "-u", "origin", "main"], &[]);
 }
 
+/// Write `projects.yaml` registering the repo under `TEST_PROJECT_ID`, on `origin/main`.
 fn register_project(projects_dir: &std::path::Path, repo_path: &std::path::Path) {
     std::fs::create_dir_all(projects_dir).unwrap();
     let yaml = format!(
-        "projects:\n  - project_id: {}\n    name: tg-cursor-project\n    git_url: \"\"\n    main_repo_path: {}\n    main_branch_ref: origin/main\n",
+        "projects:\n  - project_id: {}\n    name: {}\n    git_url: \"\"\n    main_repo_path: {}\n    main_branch_ref: origin/main\n",
+        TEST_PROJECT_ID,
         TEST_PROJECT_ID,
         repo_path.to_str().unwrap()
     );
     std::fs::write(projects_dir.join("projects.yaml"), yaml).unwrap();
 }
 
-fn daemon_config_with_stub_binary(stub_binary: &str) -> DaemonConfig {
-    DaemonConfig {
-        cursor_cli: Some(CursorCliConfig {
-            binary_path: stub_binary.to_string(),
-            tddy_tools_path: None,
-            daemon_url: None,
-            cursor_home_dir: None,
-        }),
-        ..Default::default()
+/// The built-in coding agents, as a host without `<tddyhome>/tools` has them.
+fn the_builtin_agents() -> Arc<CodingAgentRegistry> {
+    Arc::new(CodingAgentRegistry::builtin().expect("the built-in agents load"))
+}
+
+/// The daemon's generic start, answering every start as session `started_id`.
+struct AStarterAnswering {
+    started_id: String,
+}
+
+#[async_trait::async_trait]
+impl SessionStarter for AStarterAnswering {
+    async fn start_for_operator(
+        &self,
+        _start: OperatorSessionStart,
+    ) -> Result<OperatorStartOutcome, tddy_rpc::Status> {
+        Ok(OperatorStartOutcome::Started {
+            session_id: self.started_id.clone(),
+        })
     }
 }
 
 fn build_harness(
     sessions_base: std::path::PathBuf,
-    stub_binary: &str,
     projects_dir: std::path::PathBuf,
-    manager: Arc<CliSessionManager>,
 ) -> (
     TelegramSessionControlHarness<InMemoryTelegramSender>,
     Arc<InMemoryTelegramSender>,
 ) {
     let sender = Arc::new(InMemoryTelegramSender::new());
-    let config = daemon_config_with_stub_binary(stub_binary);
     let workflow_spawn = Arc::new(TelegramWorkflowSpawn {
-        config: Arc::new(config),
+        config: Arc::new(DaemonConfig::default()),
         spawn_client: None,
         spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         os_user: "testuser".to_string(),
@@ -108,7 +99,7 @@ fn build_harness(
         elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
         elicitation_multi_select_meta: Arc::new(Mutex::new(HashMap::new())),
         pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
-        claude_cli_manager: manager,
+        cli_manager: Arc::new(CliSessionManager::new()),
     });
     let harness = TelegramSessionControlHarness::with_workflow_spawn(
         vec![AUTHORIZED_CHAT],
@@ -116,7 +107,11 @@ fn build_harness(
         sender.clone(),
         Some(workflow_spawn),
         None,
-    );
+    )
+    .with_coding_agents(the_builtin_agents())
+    .with_session_starter(Arc::new(AStarterAnswering {
+        started_id: STARTED_SESSION.to_string(),
+    }));
     (harness, sender)
 }
 
@@ -128,14 +123,9 @@ async fn start_cursor_creates_session_with_initial_prompt_and_marker() {
     create_test_repo_with_origin(repo_dir.path());
     let projects_tmp = tempfile::tempdir().unwrap();
     register_project(projects_tmp.path(), repo_dir.path());
-    let stub_dir = tempfile::tempdir().unwrap();
-    let stub_path = write_echo_argv_script(stub_dir.path());
-    let manager = Arc::new(CliSessionManager::new());
     let (mut harness, sender) = build_harness(
         sessions_tmp.path().to_path_buf(),
-        stub_path.to_str().unwrap(),
         projects_tmp.path().to_path_buf(),
-        Arc::clone(&manager),
     );
 
     // When
@@ -149,57 +139,45 @@ async fn start_cursor_creates_session_with_initial_prompt_and_marker() {
         .expect("handle_start_cursor must succeed");
 
     // Then
-    assert!(!outcome.session_id.is_empty());
     let session_dir = unified_session_dir_path(sessions_tmp.path(), &outcome.session_id);
     let snap = read_changeset_routing_snapshot(&session_dir).unwrap();
-    assert_eq!(snap.initial_prompt.as_deref(), Some("fix the flaky test"));
-    assert_eq!(snap.session_type.as_deref(), Some("cursor-cli"));
-
+    assert_eq!(
+        (snap.initial_prompt.as_deref(), snap.session_type.as_deref()),
+        (Some("fix the flaky test"), Some("cursor-cli"))
+    );
     let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
-    assert!(!sent.is_empty());
-    let kb_flat: Vec<&String> = sent[0]
-        .inline_keyboard
-        .iter()
-        .flatten()
-        .map(|(l, _)| l)
-        .collect();
-    assert!(!kb_flat.is_empty(), "project keyboard must be sent");
+    assert!(
+        !sent[0].inline_keyboard.is_empty(),
+        "project keyboard must be sent"
+    );
 }
 
 #[tokio::test]
 #[serial_test::serial]
-async fn start_cursor_project_then_branch_routes_to_cursor_model_keyboard() {
+async fn start_cursor_project_then_branch_routes_to_the_cursor_specs_model_keyboard() {
     // Given
     let sessions_tmp = tempfile::tempdir().unwrap();
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
     let projects_tmp = tempfile::tempdir().unwrap();
     register_project(projects_tmp.path(), repo_dir.path());
-    let stub_dir = tempfile::tempdir().unwrap();
-    let stub_path = write_echo_argv_script(stub_dir.path());
-    let manager = Arc::new(CliSessionManager::new());
     let (mut harness, sender) = build_harness(
         sessions_tmp.path().to_path_buf(),
-        stub_path.to_str().unwrap(),
         projects_tmp.path().to_path_buf(),
-        Arc::clone(&manager),
     );
-
-    let outcome = harness
+    let session_id = harness
         .handle_start_cursor(StartCursorCommand {
             chat_id: AUTHORIZED_CHAT,
             user_id: TEST_USER_ID,
             prompt: "add logging".to_string(),
         })
         .await
-        .unwrap();
-    let session_id = outcome.session_id.clone();
-
+        .unwrap()
+        .session_id;
     harness
         .handle_telegram_project_callback(AUTHORIZED_CHAT, 0, &session_id)
         .await
         .unwrap();
-
     let msg_count_before_branch = sender.len();
 
     // When
@@ -209,83 +187,22 @@ async fn start_cursor_project_then_branch_routes_to_cursor_model_keyboard() {
         .unwrap();
 
     // Then
-    let all_msgs = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
-    let sent_after_branch: Vec<_> = all_msgs.into_iter().skip(msg_count_before_branch).collect();
-    assert!(!sent_after_branch.is_empty());
+    let sent_after_branch: Vec<_> = collect_outbound_messages(&sender, AUTHORIZED_CHAT)
+        .into_iter()
+        .skip(msg_count_before_branch)
+        .collect();
     let kb_data: Vec<&String> = sent_after_branch[0]
         .inline_keyboard
         .iter()
         .flatten()
         .map(|(_, d)| d)
         .collect();
-    assert!(kb_data.iter().all(|d| d.starts_with("tcur:")));
-    assert_eq!(kb_data.len(), CURSOR_CLI_MODELS.len());
-}
-
-#[tokio::test]
-#[serial_test::serial]
-async fn start_cursor_model_callback_launches_cursor_cli_with_hooks() {
-    // Given
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    let repo_dir = tempfile::tempdir().unwrap();
-    create_test_repo_with_origin(repo_dir.path());
-    let projects_tmp = tempfile::tempdir().unwrap();
-    register_project(projects_tmp.path(), repo_dir.path());
-    let stub_dir = tempfile::tempdir().unwrap();
-    let stub_path = write_echo_argv_script(stub_dir.path());
-    let manager = Arc::new(CliSessionManager::new());
-    let (mut harness, _sender) = build_harness(
-        sessions_tmp.path().to_path_buf(),
-        stub_path.to_str().unwrap(),
-        projects_tmp.path().to_path_buf(),
-        Arc::clone(&manager),
+    let registry = CodingAgentRegistry::builtin().unwrap();
+    let offered = telegram_model_choices(registry.get("cursor").unwrap())
+        .unwrap()
+        .len();
+    assert_eq!(
+        (kb_data.iter().all(|d| d.starts_with("tcm:")), kb_data.len()),
+        (true, offered)
     );
-
-    let outcome = harness
-        .handle_start_cursor(StartCursorCommand {
-            chat_id: AUTHORIZED_CHAT,
-            user_id: TEST_USER_ID,
-            prompt: "ship feature".to_string(),
-        })
-        .await
-        .unwrap();
-    let session_id = outcome.session_id.clone();
-
-    harness
-        .handle_telegram_project_callback(AUTHORIZED_CHAT, 0, &session_id)
-        .await
-        .unwrap();
-    harness
-        .handle_telegram_branch_callback(AUTHORIZED_CHAT, 0, 0, 0, &session_id)
-        .await
-        .unwrap();
-
-    // When
-    harness
-        .handle_telegram_cursor_model_callback(AUTHORIZED_CHAT, 0, 0, &session_id)
-        .await
-        .expect("model callback must spawn cursor-cli");
-
-    // Then
-    let session_dir = unified_session_dir_path(sessions_tmp.path(), &session_id);
-    let meta = read_session_metadata(&session_dir).unwrap();
-    assert_eq!(meta.session_type.as_deref(), Some("cursor-cli"));
-    assert!(meta.pid.is_some());
-    assert!(meta.hook_token.is_some());
-
-    let worktree_path = std::path::PathBuf::from(meta.repo_path.unwrap());
-    let hooks_path = worktree_path.join(".cursor/hooks.json");
-    assert!(
-        hooks_path.exists(),
-        "Telegram spawn must write .cursor/hooks.json"
-    );
-
-    let expected_model_id = CURSOR_CLI_MODELS[0].id.as_str();
-    assert_eq!(meta.model.as_deref(), Some(expected_model_id));
-
-    let handle = manager
-        .get(&session_id)
-        .await
-        .expect("session must be registered in CliSessionManager");
-    a_capture_showing(&handle.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 }

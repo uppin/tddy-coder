@@ -21,7 +21,6 @@ use tddy_core::toolcall::{
     InvokeActionRelayResponse, ListActionsRelayRequest, ListActionsRelayResponse, SubmitRequest,
     SubmitResponse, TransitionRequest,
 };
-use tddy_workflow_recipes::review::persist_review_md_to_session_dir;
 use tddy_workflow_recipes::schema;
 
 /// Maximum bytes read from stdin or accepted inline `--data` for `submit` / `ask` (DoS guard).
@@ -196,16 +195,13 @@ pub async fn run_submit(args: SubmitArgs) -> Result<()> {
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
         relay_submit(std::path::Path::new(&socket_path), &goal, &data).await?;
     } else {
-        if goal == "branch-review" {
-            if let Ok(session_dir) = std::env::var("TDDY_SESSION_DIR") {
-                if let Err(e) =
-                    persist_review_md_to_session_dir(std::path::Path::new(&session_dir), &json_str)
-                {
-                    output_error(&e, 1);
-                }
-            }
-        }
-        output_success(&goal);
+        // Nothing to report to: a validated submission that reached no session is not a success.
+        //
+        // TODO(headless-driver): this branch used to persist a `branch-review` submission's
+        // `review.md` into `TDDY_SESSION_DIR` and report success with no socket — deleted with the
+        // local no-session success path; see
+        // `docs/dev/changesets/2026-11-05-agent-tools-headless-driver.md`.
+        output_error(&no_session_message(), 1);
     }
 
     Ok(())
@@ -269,6 +265,16 @@ fn output_success(goal: &str) {
         "goal": goal
     });
     println!("{}", serde_json::to_string(&out).unwrap());
+}
+
+/// What a command that needs a session says when none is named: all three places one can be.
+pub(crate) fn no_session_message() -> String {
+    crate::session_source::resolve_current_session(None)
+        .err()
+        .map_or_else(
+            || "no session to report to".to_string(),
+            |missing| missing.to_string(),
+        )
 }
 
 fn output_error(msg: &str, code: i32) {
@@ -336,11 +342,7 @@ pub async fn run_ask(args: AskArgs) -> Result<()> {
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
         relay_ask(std::path::Path::new(&socket_path), &questions).await?;
     } else {
-        let out = serde_json::json!({
-            "status": "ok",
-            "message": "TDDY_SOCKET not set; questions not relayed"
-        });
-        println!("{}", serde_json::to_string(&out).unwrap());
+        output_error(&no_session_message(), 1);
     }
 
     Ok(())
@@ -361,11 +363,7 @@ pub async fn run_transition(args: TransitionArgs) -> Result<()> {
         )
         .await?;
     } else {
-        let out = serde_json::json!({
-            "status": "error",
-            "message": "TDDY_SOCKET not set; transition not relayed"
-        });
-        println!("{}", serde_json::to_string(&out).unwrap());
+        output_error(&no_session_message(), 1);
     }
     Ok(())
 }

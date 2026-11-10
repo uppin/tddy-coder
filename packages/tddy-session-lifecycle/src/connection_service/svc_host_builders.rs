@@ -11,10 +11,9 @@ use crate::{
     CliSessionManager,
 };
 use tddy_daemon_extensions::{
-    NoRoomAdmission, NoRoomBroadcast, NoRoomDirectory, NoRoomTokens, NoSessionRooms, RoomAdmission,
-    RoomBroadcast, RoomDirectory, RoomTokenMinter, SessionRooms,
+    NoRoomAdmission, NoRoomBroadcast, NoRoomDirectory, NoRoomTokens, NoSessionRooms, SessionRooms,
 };
-use tddy_session_agents::agent_host_callbacks::{NoRoomTransport, RoomConnector};
+use tddy_session_agents::agent_host_callbacks::NoRoomTransport;
 
 use std::sync::Arc;
 
@@ -25,6 +24,11 @@ use std::path::PathBuf;
 use crate::config::DaemonConfig;
 
 impl DaemonSessionHost {
+    /// A session host over `coding_agents`: the daemon's one coding-agent registry, loaded once at
+    /// start and shared with every other consumer (Telegram, the reserved-ids step, the model
+    /// probe). A host that legitimately has none is given an empty one
+    /// (`tddy_agent_launch::host_coding_agents::no_coding_agents`), whose every agent start is
+    /// refused `FAILED_PRECONDITION`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: DaemonConfig,
@@ -35,10 +39,16 @@ impl DaemonSessionHost {
         spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice,
         peer_routing: PeerRouting,
         operator_channel: SharedOperatorChannel,
-        claude_cli_manager: Arc<CliSessionManager>,
+        cli_manager: Arc<CliSessionManager>,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
-        let task_registry = claude_cli_manager.task_registry();
+        // Declared tools resolve from `<tddyhome>/tools` at each jail start (`#agent-tools 1/12`).
+        let workspace_sandbox_provisioner =
+            tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner::for_tddy_home(
+                &tddy_data_dir,
+            );
+        let task_registry = cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let host_session_sockets =
             Arc::new(super::host_session_socket::HostSessionSockets::default());
@@ -62,16 +72,14 @@ impl DaemonSessionHost {
             spawn_backend,
             peer_routing,
             operator_channel,
-            claude_cli_manager,
+            cli_manager,
             sandbox_manager: Arc::new(
                 tddy_daemon_sandbox::sandbox_session::SandboxSessionManager::new(),
             ),
             workspace_sandboxes: Arc::new(
                 tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry::new(),
             ),
-            workspace_sandbox_provisioner: Arc::new(
-                tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,
-            ),
+            workspace_sandbox_provisioner: Arc::new(workspace_sandbox_provisioner),
             jail_relaunch: Arc::new(super::jail_relaunch::JailRelaunch::default()),
             task_registry,
             rpc_activity: crate::relay_idle::RpcActivity::default(),
@@ -83,6 +91,13 @@ impl DaemonSessionHost {
             roster_keepalive_interval: ROSTER_KEEPALIVE_INTERVAL,
             demo_vm_state,
             host_session_sockets,
+            // A server daemon's placement; `runtime::build` replaces it on an embedded host
+            // (`with_agent_tool_sockets`).
+            agent_tool_sockets: Arc::new(
+                tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(
+                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser,
+                ),
+            ),
             agent_activity_hub: Arc::new(tddy_daemon_kernel::AgentActivityHub::default()),
             agent_conversation_frames: Arc::new(
                 tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
@@ -104,6 +119,7 @@ impl DaemonSessionHost {
                 crate::session_agent_roster::SessionAgentRosterStore::new(
                     Arc::clone(&session_agent_clones),
                     Arc::new(crate::session_agent_status::SessionAgentActivityStore::new()),
+                    tddy_agent_launch::host_coding_agents::no_coding_agents().agents_shared(),
                 ),
             ),
             session_agent_clones,
@@ -119,6 +135,7 @@ impl DaemonSessionHost {
             // from this host (`with_rpc_families`).
             rpc_families: None,
             worktree_observer: None,
+            coding_agents,
             session_reach: Arc::new(tddy_daemon_extensions::NoSessionReach),
             terminal_exposure: Arc::new(tddy_daemon_extensions::NoTerminalExposure),
             split_rooms: Arc::new(tddy_daemon_extensions::NoSplitRooms),
@@ -237,51 +254,6 @@ impl DaemonSessionHost {
         self.approval_routes.clone()
     }
 
-    /// Install which owning daemons are admitted to the rooms this daemon hosts (builder). Without
-    /// it no admission is ever recorded.
-    #[must_use]
-    pub fn with_room_admission(mut self, admission: Arc<dyn RoomAdmission>) -> Self {
-        self.debug_assert_rpc_families_not_installed("with_room_admission");
-        self.session_admissions = admission;
-        self
-    }
-
-    /// Install the reader of who is in a room (builder). Without it, reading a room's participants
-    /// is a failed precondition.
-    #[must_use]
-    pub fn with_room_directory(mut self, directory: Arc<dyn RoomDirectory>) -> Self {
-        self.debug_assert_rpc_families_not_installed("with_room_directory");
-        self.room_directory = directory;
-        self
-    }
-
-    /// Install what publishes to everyone in a session's room (builder). Without it a broadcast
-    /// reaches nobody.
-    #[must_use]
-    pub fn with_room_broadcast(mut self, broadcast: Arc<dyn RoomBroadcast>) -> Self {
-        self.debug_assert_rpc_families_not_installed("with_room_broadcast");
-        self.room_broadcast = broadcast;
-        self
-    }
-
-    /// Install what mints a room access token (builder). Without it every mint is a failed
-    /// precondition.
-    #[must_use]
-    pub fn with_room_tokens(mut self, tokens: Arc<dyn RoomTokenMinter>) -> Self {
-        self.debug_assert_rpc_families_not_installed("with_room_tokens");
-        self.room_tokens = tokens;
-        self
-    }
-
-    /// Install how this daemon joins a room as a client (builder). Without it every join is
-    /// refused.
-    #[must_use]
-    pub fn with_room_connector(mut self, connector: Arc<dyn RoomConnector>) -> Self {
-        self.debug_assert_rpc_families_not_installed("with_room_connector");
-        self.room_connector = connector;
-        self
-    }
-
     /// Install the delta rings of the session rooms this daemon hosts (builder). Without it every
     /// session has no room here, so no delta.
     #[must_use]
@@ -345,16 +317,36 @@ impl DaemonSessionHost {
         self
     }
 
-    /// Serve the per-OS-user host-session sockets `tddy-supervisor` created and handed this daemon
-    /// (builder), instead of binding them here: an unprivileged daemon cannot give a socket to
-    /// another OS user. Call it after [`Self::with_host_session_stop_watch_interval`], which
-    /// replaces the sockets.
-    pub fn with_inherited_host_session_sockets(
-        self,
-        sockets: Vec<super::inherited_host_sockets::InheritedHostSocket>,
-    ) -> Self {
-        self.host_session_sockets.adopt_inherited(sockets);
+    /// Serve the host-session service on this host's per-user daemon sockets (`#agent-tools`
+    /// 31/32) when `merged` — a binary host — instead of binding host sockets of its own. An
+    /// embedded host serves its one socket itself, so it keeps binding its own host sockets. Call
+    /// after [`Self::with_agent_tool_sockets`], whose set this registers on.
+    pub fn with_host_sessions_merged(self, merged: bool) -> Self {
+        if merged {
+            self.host_session_sockets
+                .serve_on(Arc::clone(&self.agent_tool_sockets));
+        }
         self
+    }
+
+    /// Tell this host's sessions about these agent-tool sockets (builder) — the runtime's, whose
+    /// placement matches its host and whose roster it installs once assembled. Call it before any
+    /// session starts.
+    #[must_use]
+    pub fn with_agent_tool_sockets(
+        mut self,
+        sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
+    ) -> Self {
+        self.agent_tool_sockets = sockets;
+        self
+    }
+
+    /// The agent-tool sockets this host's sessions are told about, shared rather than copied.
+    #[must_use]
+    pub fn agent_tool_sockets(
+        &self,
+    ) -> Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets> {
+        Arc::clone(&self.agent_tool_sockets)
     }
 
     /// Sign agents' credentials with this daemon's key and verify callers' through its key
@@ -498,3 +490,4 @@ impl DaemonSessionHost {
 }
 
 mod rpc_activity;
+mod svc_room_builders;

@@ -13,9 +13,7 @@ use tonic::transport::Server;
 
 #[cfg(feature = "livekit")]
 use tddy_core::ViewConnection;
-use tddy_core::{
-    AgentOutputActivityLogMerge, AnyBackend, Presenter, PresenterHandle, SharedBackend, StubBackend,
-};
+use tddy_core::{AgentOutputActivityLogMerge, Presenter, PresenterHandle, SharedBackend};
 use tddy_service::gen::tddy_remote_server::TddyRemoteServer;
 use tddy_service::TddyRemoteService;
 use tddy_tui::{render::draw, virtual_tui::drain_presenter_broadcast, TuiView};
@@ -49,7 +47,7 @@ pub fn spawn_presenter_with_grpc(
     let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx);
-    let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+    let backend = SharedBackend::stub();
     let output_dir = temp_dir_with_git_repo("grpc");
     let session_dir =
         std::env::temp_dir().join(format!("tddy-e2e-grpc-session-{}", uuid::Uuid::new_v4()));
@@ -159,7 +157,7 @@ pub fn spawn_presenter_with_grpc_and_tui(
     let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
         .with_broadcast(event_tx.clone())
         .with_intent_sender(intent_tx.clone());
-    let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+    let backend = SharedBackend::stub();
     let output_dir = temp_dir_with_git_repo("grpc-tui");
     let session_dir = std::env::temp_dir().join(format!(
         "tddy-e2e-grpc-tui-session-{}",
@@ -287,7 +285,7 @@ pub fn spawn_presenter_with_view_connection_factory(
         .with_broadcast(event_tx.clone())
         .with_intent_sender(intent_tx.clone())
         .with_worktree_dir(output_dir.clone());
-    let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+    let backend = SharedBackend::stub();
     presenter.start_workflow(
         backend,
         output_dir,
@@ -376,7 +374,7 @@ fn spawn_presenter_stub_workflow(
     let session_dir =
         std::env::temp_dir().join(format!("tddy-e2e-vt-session-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&session_dir).unwrap();
-    let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+    let backend = SharedBackend::stub();
     let mut presenter = presenter.with_worktree_dir(output_dir.clone());
     presenter.start_workflow(
         backend,

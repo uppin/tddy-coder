@@ -1,0 +1,148 @@
+# Claude Code CLI — the interactive coding agent behind `claude-cli` sessions (`#agent-tools 2/12`).
+#
+# The argv renders byte-for-byte what the launch built by hand before:
+#   claude [--model M] (--resume|--session-id) ID (--dangerously-skip-permissions|--permission-mode P)
+#          <slot flags> [PROMPT]
+# Slot flags go before the prompt: `--mcp-config` is variadic and would swallow a bare positional.
+#
+# Override whole with `<tddyhome>/tools/claude.yaml`. `TDDY_CLAUDE_BINARY` names the binary.
+schema_version: 1
+id: claude
+summary: Claude Code CLI — the interactive coding agent behind claude-cli sessions
+binary:
+  command: claude
+  env: TDDY_CLAUDE_BINARY
+deps: [tddy-tools]
+reads: []
+run:
+  transport: pty
+  argv:
+    - "{binary}"
+    - { if: model, then: ["--model", "{model}"] }
+    - { if: resume, then: ["--resume", "{session_id}"], else: ["--session-id", "{session_id}"] }
+    - if: dangerously_skip_permissions
+      then: ["--dangerously-skip-permissions"]
+      else:
+        - { if: permission_mode, then: ["--permission-mode", "{permission_mode}"], else: ["--permission-mode", "auto"] }
+    - { splice: slots }
+    - { if: prompt, then: ["{prompt}"] }
+  # Claude's fullscreen renderer (`#agent-tools 19/19`; was daemon.yaml `claude_cli.fullscreen`):
+  # only it enables the alternate screen and mouse tracking the web terminal scrolls with. An
+  # override of this file without the variable runs the inline renderer.
+  env: { CLAUDE_CODE_NO_FLICKER: "1" }
+extensions:
+  coding_agent:
+    pass_env: [ANTHROPIC_API_KEY]
+    product: Claude Code
+    mcp: { kind: file, flag: --mcp-config, format: claude-mcp-json, strict_flag: --strict-mcp-config }
+    tool_allow: { flag: --allowedTools }
+    tool_deny: { flag: --disallowedTools }
+    permission_prompt: { flag: --permission-prompt-tool }
+    instructions:
+      files: [CLAUDE.md, AGENTS.md]
+      append_system_prompt: { flag: --append-system-prompt-file }
+    hooks: { adapter: claude-settings-local }
+    # What a session of this agent offers (`#agent-tools 12/12`): the gates read these, never the
+    # agent's name. Unknown words are refused at load.
+    conversation: { kind: daemon_session_id }
+    capabilities: [hooks, managed_workflow, ask_user_question, split_host, project_home_main, requires_model, branch_name_required, operator_notify]
+    # Which providers a route can point the agent at, and how it reaches it (`#agent-tools 12/12`).
+    route:
+      providers: [anthropic]
+      shape: env
+    # The permission modes a picker offers for `{permission_mode}` (the sweep: this list lived
+    # in Rust — `tddy-tool-engine`'s schema and the web — and is agent metadata, so it lives here).
+    permission_modes: [auto, default, acceptEdits, plan, bypassPermissions]
+    transcript_usage: true
+    models:
+      default: opus
+      curated:
+        - { id: opus, label: "Claude Opus (latest)" }
+        - { id: sonnet, label: "Claude Sonnet (latest)" }
+        - { id: haiku, label: "Claude Haiku (latest)" }
+        - { id: claude-opus-5, label: "Claude Opus 5 (pinned)" }
+        - { id: claude-sonnet-5, label: "Claude Sonnet 5 (pinned)" }
+        - { id: claude-haiku-4-5-20251001, label: "Claude Haiku 4.5 (pinned)" }
+    context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
+    # --- Headless (`#agent-tools 6/12`): one `claude -p` per turn, for the workflow backend
+    # (`tddy-coder --agent claude`) and a headless coding subagent. It renders byte-for-byte what
+    # `build_claude_args` and `headless_driver/argv.rs::claude()` built by hand:
+    #   claude -p PROMPT --output-format stream-json --verbose [--permission-mode P] [--model M]
+    #          [(--resume|--session-id) ID] <slot flags>
+    # The output is read by the `claude-stream-json` adapter (`tddy_agent_backend::adapters`).
+    headless:
+      argv:
+        - "{binary}"
+        - -p
+        - "{prompt}"
+        - --output-format
+        - stream-json
+        - --verbose
+        - { if: permission_mode, then: ["--permission-mode", "{permission_mode}"] }
+        - { if: model, then: ["--model", "{model}"] }
+        - if: session_id
+          then:
+            - { if: resume, then: ["--resume", "{session_id}"], else: ["--session-id", "{session_id}"] }
+        - { splice: slots }
+        - { splice: route_args }
+      env: {}
+      # A headless run keeps the user's own MCP servers, so it is registered without
+      # `--strict-mcp-config`, unlike the interactive session's `coding_agent.mcp`.
+      mcp: { kind: file, flag: --mcp-config, format: claude-mcp-json }
+      adapter: claude-stream-json
+      # Who answers a headless conversation's permission requests (`#agent-tools 27/28`): its
+      # prompts are routed to the caller through the approval tool.
+      permission_policy: asks_caller
+      # `claude -p` can exit 1 after an ExitPlanMode despite a complete structured result.
+      exit_ok_if_structured: true
+      # --- The workflow turn's protocol (`#agent-tools 15/19`), read by `SpecHeadlessBackend`:
+      # what a `tddy-coder` workflow turn needs beyond the argv, reproducing the bespoke backend.
+      system_prompt: flag
+      goal_params:
+        read_only_plan: { permission_mode: plan }
+        accept_edits: { permission_mode: acceptEdits }
+      approval_tool: true
+      workflow_mcp: true
+      route_model: { kind: replaced_if_route_has, flag: --model }
+      fresh_session: caller
+      scratch: session_dir
+    # --- Variants (`#agent-tools 10/12`): the same agent, launched differently. ------------------
+    # `host_agent` is the agent a split session runs on this host against a codebase that lives on
+    # another daemon or in a jail. `--strict-mcp-config` loads only the `--mcp-config` the launch
+    # names, so a checkout's `.mcp.json` cannot register a server that runs unconfined here;
+    # `--setting-sources user` drops the checkout's `.claude/settings.json`, whose hooks would run
+    # here too. Its native filesystem and shell tools are withdrawn through `tool_deny`: on this host
+    # they would reach this host's disk, not the codebase's.
+    variants:
+      host_agent:
+        args: [--strict-mcp-config, --setting-sources, user]
+        withdraw_native: [Read, Write, Edit, MultiEdit, NotebookEdit, Bash, BashOutput, KillShell, Glob, Grep, LS]
+# --- Jail sections (`#agent-tools 5/12`): what a sandboxed launch lowers into the jail. ----------
+# A persistent home at <tddyhome>/homes/claude, mounted rw: refreshed OAuth tokens, history and
+# settings survive the session. Replaces <tddyhome>/sandbox-claude-home, migrated once in place.
+home: { kind: persistent, key: claude }
+files:
+  # Seeded once: the jail may since have refreshed its own token, which the host's must not clobber.
+  - { kind: seed-once, from_host: .claude/.credentials.json, to: .claude/.credentials.json }
+  # Claude's startup self-check looks for its own install under $HOME.
+  - { kind: mirror, from_host: .local/bin/claude, to: .local/bin/claude }
+  - { kind: mirror, from_host: .local/share/claude/versions, to: .local/share/claude/versions }
+  - { kind: overlay, env: CLAUDE_CODE_TMPDIR, value: "{tmp}" }
+  - { kind: overlay, env: CLAUDE_TMPDIR, value: "{tmp}" }
+secrets:
+  # Claude's own vendor login; a provider route brings its own credentials instead.
+  - env: CLAUDE_CODE_OAUTH_TOKEN
+    source: { kind: host-env, var: CLAUDE_CODE_OAUTH_TOKEN }
+    when: unrouted
+# An interactive Node/V8 CLI: JIT, fork, sysctl reads, and the system directories it shells into.
+policy:
+  jit: true
+  fork: true
+  sysctl_read: true
+  exec_paths: [/usr/bin, /usr/libexec, /bin, /sbin, /System, /Library, /Applications, /opt/homebrew, /opt/local]
+# The Anthropic API, telemetry and the OAuth login. A provider route's base-URL host is added by the
+# launcher; `oauth_inbound` admits the login's loopback callback (unrouted sessions only).
+network:
+  egress:
+    hosts: [api.anthropic.com, statsig.anthropic.com, sentry.io, console.anthropic.com, claude.ai]
+  oauth_inbound: true

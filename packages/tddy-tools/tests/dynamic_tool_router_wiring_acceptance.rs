@@ -34,7 +34,7 @@ fn permission_server_exposes_exec_tool_names_when_sandbox_ipc_configured() {
     clear_session_tool_transport_env();
 
     // Then
-    for exec_tool in tddy_sandbox::workspace_exec_tool_names() {
+    for exec_tool in tddy_coding_agent_specs::claude_tools::workspace_exec_tool_names() {
         assert!(
             names.contains(*exec_tool),
             "PermissionServer must expose '{}' via tools/list when TDDY_SANDBOX_TOOL_IPC is set; got: {:?}",
@@ -61,7 +61,7 @@ fn permission_server_exposes_exec_tool_names_when_remote_daemon_configured() {
     clear_session_tool_transport_env();
 
     // Then
-    for exec_tool in tddy_sandbox::workspace_exec_tool_names() {
+    for exec_tool in tddy_coding_agent_specs::claude_tools::workspace_exec_tool_names() {
         assert!(
             names.contains(*exec_tool),
             "PermissionServer must expose '{}' via tools/list when TDDY_REMOTE_* is set; got: {:?}",
@@ -84,7 +84,7 @@ fn permission_server_omits_exec_tool_names_without_any_transport_configured() {
     let names: HashSet<String> = server.tool_names().into_iter().collect();
 
     // Then
-    for exec_tool in tddy_sandbox::workspace_exec_tool_names() {
+    for exec_tool in tddy_coding_agent_specs::claude_tools::workspace_exec_tool_names() {
         assert!(
             !names.contains(*exec_tool),
             "PermissionServer must NOT expose '{}' via tools/list without a session-tool transport configured; got: {:?}",

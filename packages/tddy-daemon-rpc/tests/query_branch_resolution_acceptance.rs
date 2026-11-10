@@ -133,9 +133,10 @@ fn a_config(stub_github: bool) -> (tddy_daemon_kernel::config::DaemonConfig, tem
         ""
     };
     let path = dir.path().join("config.yaml");
+    std::fs::write(&path, github).unwrap();
     std::fs::write(
-        &path,
-        format!("users:\n  - github_user: \"u\"\n    os_user: \"u\"\n{github}"),
+        dir.path().join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
     )
     .unwrap();
     (
@@ -163,6 +164,7 @@ fn a_service(sessions_base: PathBuf, stub_github: bool) -> TestDaemon {
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     ))
 }
 

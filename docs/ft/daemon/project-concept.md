@@ -94,8 +94,9 @@ the stage in git's words (`Counting objects`, `Receiving objects`, `Resolving de
 counts, bytes received and throughput. The events are throttled where git runs — at most four a second,
 plus every stage change and every 100% — so neither the spawn worker's pipe nor a relayed stream carries
 git's every redraw. A start whose project is already on the host reports no clone step. On a host run by
-`tddy-supervisor` the supervisor runs git and streams its progress back (`CloneRepository`), so the
-clone step looks the same, a failure carries git's own message, and the clone can be stopped.
+`tddy-supervisor` the supervisor runs the `tddy-git-clone` helper as the session user and streams its
+stderr back (`SpawnStreamed`); the daemon parses git's progress from it, so the clone step looks the
+same, a failure carries git's own message, and the clone can be stopped.
 
 **No deadline, and no half-written checkout.** A clone takes as long as its repository and network do;
 only the operator stopping it (or the client hanging up) ends it early. Git writes into a temporary
@@ -145,10 +146,13 @@ With `start` (a `StartSessionRequest`, built by the New-session form's
 
 1. **The spec is checked; nothing starts or stops when it is refused.**
    - A `session_role` → `PERMISSION_DENIED`: the role is granted by the daemon, never requested.
-   - A placement other than the home worktree on this host — `sandbox`, `sandboxed_codebase`,
+   - A placement other than the home worktree on this host — `sandboxed_codebase`,
      `codebase_daemon_instance_id`, `ssh_config_host`, `agent_clone`, `split_agent` →
-     `INVALID_ARGUMENT` naming the field. A sandboxed main is refused because the sandboxed
-     `claude-cli` start does not carry the session's role.
+     `INVALID_ARGUMENT` naming the field. `sandbox` is allowed: a main set up in a jail on this host
+     is recorded with `session_role: project-home`, so the daemon's read-only refusal in
+     `ExecuteTool` applies to it. Its agent is launched with an ordinary jailed session's tools —
+     not the main's `tddy-tools`-only wiring or role prompt
+     ([todo](../../dev/todo/2026-10-24-sandboxed-main-needs-session-role.md)).
    - The harness profile named by `agent` is applied, then any session type but `claude-cli` →
      `FAILED_PRECONDITION` naming the type (`tool` for an empty one) and that main could not be kept
      read-only. Only `claude-cli` can enforce managed-codebase mode: Cursor CLI has no tool
@@ -206,10 +210,11 @@ an ordinary, still read-only session, and main is set up once more.
   (`--mcp-config <session dir>/claude-mcp-config.json` and `--strict-mcp-config`). Its process
   environment names the main itself (`TDDY_REMOTE_SESSION_ID`) under a credential of its own
   (`TDDY_REMOTE_SESSION_TOKEN`): minted by this daemon from the **verified** caller of the ensure or
-  resume, with the 24 h agent lifetime, never the caller's own token; a resume mints afresh. On an
-  embedded daemon (Tddy Desktop) `TDDY_REMOTE_DAEMON_SOCKET` names its agent-tool socket, which
-  `tddy-tools` prefers; on a binary `tddy-daemon` the tools reach `TDDY_REMOTE_DAEMON_URL`, its local
-  HTTP URL. Because the main's record holds the home worktree, the daemon runs each call there, under
+  resume, with the 24 h agent lifetime, never the caller's own token; a resume mints afresh. `TDDY_REMOTE_DAEMON_SOCKET` names
+  the agent-tool socket of the main's OS user — Tddy Desktop's one socket, or a server daemon's
+  per-user one — which `tddy-tools` prefers over `TDDY_REMOTE_DAEMON_URL`, the daemon's local HTTP
+  URL. A main whose user the daemon cannot give a socket (under `tddy-supervisor`, one `users.yaml`
+  does not map) is refused at start. Because the main's record holds the home worktree, the daemon runs each call there, under
   the role guard above. A start or resume that cannot mint the credential, or cannot find the
   toolchain's `tddy-tools`, is refused and starts nothing. The main's MCP config and role prompt are
   written into its session directory only when its agent is spawned, so a refused start leaves
@@ -488,7 +493,7 @@ The rule is "type only while you hold it", since leases are never released.
 
 A claude-cli session started by an orchestrator (its changeset's `orchestrator_session_id`) holds
 its `PermissionRequest` hook open for that orchestrator's decision, for at most
-`claude_cli.answer_wait_secs` ([Claude Code CLI session § Waiting for an orchestrator's answer](claude-cli-session.md#waiting-for-an-orchestrators-answer)).
+the answer wait (120 s; declared as `coding_agent.answer_wait_secs` in the agent's spec) ([Claude Code CLI session § Waiting for an orchestrator's answer](claude-cli-session.md#waiting-for-an-orchestrators-answer)).
 `AnswerSessionPermission` gives that decision.
 
 - **The request** is offered in the same shape as an ACP subagent's (`PermissionRequestView`): the

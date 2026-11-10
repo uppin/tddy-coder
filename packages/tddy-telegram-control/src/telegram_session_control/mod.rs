@@ -6,10 +6,9 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
-use tddy_core::backend::BackendModel;
 use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent, Changeset};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
@@ -53,6 +52,7 @@ use tddy_telegram::telegram_tracked_session::{
 
 pub use crate::telegram_session_control::types::*;
 
+mod agent_choices;
 mod callbacks;
 mod chaining_and_listing;
 mod cli_spawns;
@@ -63,6 +63,7 @@ mod types;
 mod workflow_launch;
 mod workflow_spawn;
 
+pub use agent_choices::*;
 pub use callbacks::*;
 pub use workflow_spawn::*;
 
@@ -101,13 +102,17 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     /// on one code path rather than on a branch. `main` injects the daemon's own with
     /// [`Self::with_session_rooms`].
     session_rooms: Arc<dyn tddy_daemon_extensions::SessionRooms>,
-    /// What serves a started session's terminal to participants outside this host, for the start
-    /// that announces its room and identity straight away.
+    /// The host's coding agents: the CLI agents a start offers and each one's models.
     ///
-    /// Defaults to [`tddy_daemon_extensions::NoTerminalExposure`], which exposes nothing — the start
-    /// then reports no room, as it does when the exposure fails. `main` injects the daemon's own
-    /// with [`Self::with_terminal_exposure`].
-    terminal_exposure: Arc<dyn tddy_daemon_extensions::TerminalExposure>,
+    /// Defaults to [`tddy_coding_agent_specs::CodingAgentRegistry::empty`] — a host without coding
+    /// agents, whose every CLI start is refused. `main` injects the host's own with
+    /// [`Self::with_coding_agents`].
+    coding_agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
+    /// The daemon's generic session start, which a CLI start goes through.
+    ///
+    /// Defaults to [`tddy_daemon_extensions::NoSessionStarter`], which refuses every start. `main`
+    /// injects the daemon's late-bound one with [`Self::with_session_starter`].
+    session_starter: Arc<dyn tddy_daemon_extensions::SessionStarter>,
 }
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
@@ -207,8 +212,29 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 TelegramElicitationReplayBridge::default(),
             )),
             session_rooms: Arc::new(tddy_daemon_extensions::NoSessionRooms),
-            terminal_exposure: Arc::new(tddy_daemon_extensions::NoTerminalExposure),
+            coding_agents: Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty()),
+            session_starter: Arc::new(tddy_daemon_extensions::NoSessionStarter),
         }
+    }
+
+    /// Share the host's coding agents (builder): the CLI agents a Telegram start offers and the
+    /// models of each, read from their specs.
+    pub fn with_coding_agents(
+        mut self,
+        agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
+    ) -> Self {
+        self.coding_agents = agents;
+        self
+    }
+
+    /// Share the daemon's session starter (builder), so a Telegram CLI start goes through the same
+    /// generic start a web start does.
+    pub fn with_session_starter(
+        mut self,
+        starter: Arc<dyn tddy_daemon_extensions::SessionStarter>,
+    ) -> Self {
+        self.session_starter = starter;
+        self
     }
 
     /// Share the daemon's session-room registry (builder), so **Delete** closes the room of a
@@ -218,16 +244,6 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         rooms: Arc<dyn tddy_daemon_extensions::SessionRooms>,
     ) -> Self {
         self.session_rooms = rooms;
-        self
-    }
-
-    /// Share the daemon's terminal exposure (builder), so a Telegram-started session's terminal is
-    /// served where the reply says to attach.
-    pub fn with_terminal_exposure(
-        mut self,
-        exposure: Arc<dyn tddy_daemon_extensions::TerminalExposure>,
-    ) -> Self {
-        self.terminal_exposure = exposure;
         self
     }
 

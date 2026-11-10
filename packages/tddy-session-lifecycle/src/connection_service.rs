@@ -95,7 +95,7 @@ pub struct DaemonSessionHost {
     /// Where each presenter event of a workflow session goes besides the notification bus — the
     /// Telegram chat surface, on a daemon that has one; `NoOperatorChannel` when none is configured.
     operator_channel: tddy_daemon_kernel::operator_channel::SharedOperatorChannel,
-    claude_cli_manager: Arc<CliSessionManager>,
+    cli_manager: Arc<CliSessionManager>,
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     sandbox_manager: Arc<tddy_daemon_sandbox::sandbox_session::SandboxSessionManager>,
     /// The per-session jails sandboxed `workspace` sessions dispatch their tools through
@@ -142,6 +142,10 @@ pub struct DaemonSessionHost {
     /// The per-OS-user host-session sockets this daemon serves and the tool sessions they answer
     /// (`spawn_conversation`, `github_token`). Shared with every [`LaunchSessions`] built from it.
     host_session_sockets: Arc<host_session_socket::HostSessionSockets>,
+    /// The agent-tool socket of each session's OS user (`#agent-tools` 26/28): per OS user on a
+    /// server daemon, the runtime's one socket on an embedded one. Shared with every
+    /// [`LaunchSessions`] and `SplitSessions` built from it; the runtime installs its roster.
+    agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     /// Live pub/sub hub for agent-activity records (StreamSessionActivity) plus the PreToolUse /
     /// PostToolUse pending-call pairing state. Shared with the sandbox tool handler so both the
     /// hook path and the in-jail tool path publish through the same channel.
@@ -235,6 +239,9 @@ pub struct DaemonSessionHost {
     /// Told of each started session's worktree — see [`SessionWorktreeObserver`]. `None` on a host
     /// whose embedder acts on nothing of the kind.
     worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
+    /// The daemon's one coding-agent registry, given at construction and read by every launch, gate
+    /// and listing; a host with none gets `no_coding_agents()`, refusing every agent start.
+    coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     /// What extends a session's reach beyond this host when it is connected to — see
     /// [`tddy_daemon_extensions::SessionReach`]. [`tddy_daemon_extensions::NoSessionReach`] until
     /// the composition root installs an integration with [`Self::with_session_reach`].
@@ -288,12 +295,14 @@ pub use tddy_agent_launch::{
     session_coordinate_handlers, session_worktree_observer, stack_child_spawn, stack_parent,
     stack_seed_validation, svc_ensure_project_available_for_start, svc_index_workspace_worktree,
     svc_pr_status_for_caller, svc_relaunch_sandboxed_runner, svc_resume_claude_cli_session,
-    svc_resume_sandboxed_claude_cli_session, svc_start_claude_cli_session,
-    svc_start_sandboxed_claude_cli_session, svc_start_sandboxed_cursor_cli_session,
-    svc_start_session_core, worktree_source,
+    svc_start_claude_cli_session, svc_start_sandboxed_claude_cli_session, svc_start_session_core,
+    worktree_source,
 };
 
 mod svc_launch_delegators;
+
+/// The host as a satellite's session-starter port (`#agent-tools 18/19`).
+pub mod operator_session_starter;
 
 mod svc_agent_host_ports;
 
@@ -483,12 +492,6 @@ mod seeded_roster_records_unit_tests;
 #[cfg(test)]
 mod stack_child_link_tests;
 
-#[cfg(test)]
-mod start_session_binary_resolution_tests;
-
-#[cfg(test)]
-mod resume_session_binary_resolution_tests;
-
 pub use worktree_source::*;
 
 #[cfg(test)]
@@ -530,6 +533,9 @@ pub use tddy_daemon_kernel::daemon_hook_urls;
 /// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
+/// A conversation or pr-stack child runs its parent session's agent (`#agent-tools 17/19`).
+#[cfg(test)]
+mod stack_child_spawn_agent_tests;
 /// The spawn *wiring*, both ways in: a child of a planned PR must come up holding the
 /// orchestrator's documents and knowing to read its boundaries — whether the orchestrator agent
 /// spawned it through `pr_spawn_child` or the operator started it from the Start-session dialog.
@@ -545,6 +551,7 @@ mod svc_conversation_worktree_wiring;
 mod svc_host_builders;
 mod svc_list_exec_tools_wiring;
 pub use svc_list_exec_tools_wiring::start_choices;
+mod svc_coding_agents_wiring;
 mod svc_project_notification_log_wiring;
 mod svc_reachable_sessions;
 mod svc_session_identity_wiring;

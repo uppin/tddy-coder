@@ -1,0 +1,163 @@
+//! `oz-ndjson`: Warp's `oz agent run --output-format ndjson`, read by the transcript that already
+//! reads it (`headless_driver/oz_ndjson.rs`) — wrapped, not rewritten (`#agent-tools 9/12`).
+//! Named by `oz.yaml`'s `coding_agent.headless`.
+
+use std::io::BufRead;
+
+use crate::backend::acp_driver::AcpUpdateSink;
+use crate::backend::headless_driver::oz_ndjson::OzTurn;
+use crate::backend::headless_driver::transcript::Updates;
+use crate::error::BackendError;
+use crate::stream::StreamResult;
+
+use super::{StreamAdapter, StreamSinks, TurnTranscript};
+
+/// [`OzNdjson`]'s name.
+pub const OZ_NDJSON: &str = "oz-ndjson";
+
+/// The [`StreamAdapter`] for `oz`'s NDJSON output.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OzNdjson;
+
+impl StreamAdapter for OzNdjson {
+    fn name(&self) -> &str {
+        OZ_NDJSON
+    }
+
+    /// Every line through the driver's Oz transcript with no update sink: the `agent` events'
+    /// text the result, the `conversation_started` id the session (empty when none), the lines
+    /// kept raw and handed to the conversation and debug sinks. No workflow backend runs `oz`
+    /// today; this is the same reading the driver does, for a consumer that is not a conversation.
+    fn read_stream(
+        &self,
+        stdout: &mut dyn BufRead,
+        sinks: StreamSinks<'_>,
+    ) -> Result<StreamResult, BackendError> {
+        let StreamSinks {
+            mut on_debug_line,
+            mut on_conversation_line,
+            ..
+        } = sinks;
+        let mut turn = OzTurn::without_updates();
+        let mut raw_lines = Vec::new();
+        for line in stdout.lines() {
+            let line = line.map_err(|e| BackendError::InvocationFailed(e.to_string()))?;
+            if let Some(sink) = on_conversation_line.as_mut() {
+                sink(&line);
+            }
+            if let Some(sink) = on_debug_line.as_mut() {
+                sink(&line);
+            }
+            turn.push_line(&line);
+            raw_lines.push(line);
+        }
+        let (result_text, session_id) = turn.into_reading();
+        Ok(StreamResult {
+            result_text,
+            session_id: session_id.unwrap_or_default(),
+            questions: Vec::new(),
+            raw_lines,
+            stream_errors: Vec::new(),
+        })
+    }
+
+    /// Zero only: an `oz` run has no structured result.
+    fn exit_ok(&self, exit_code: i32, stream: &StreamResult, exit_ok_if_structured: bool) -> bool {
+        let _ = (stream, exit_ok_if_structured);
+        exit_code == 0
+    }
+
+    fn failure_detail(&self, stream: &StreamResult, stderr: &str) -> String {
+        let _ = stream;
+        stderr.trim().to_string()
+    }
+
+    fn transcript(&self, updates: Option<AcpUpdateSink>) -> Option<Box<dyn TurnTranscript>> {
+        Some(Box::new(OzTurn::new(Updates::new(updates))))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::stream::ProgressEvent;
+
+    /// A recorded `oz agent run -p … --output-format ndjson` run: the conversation, a command and
+    /// its result, and the agent's text in two events.
+    const A_RECORDED_STREAM: &str = concat!(
+        r#"{"type":"system","event_type":"conversation_started","conversation_id":"oz-conv-1"}"#,
+        "\n",
+        r#"{"type":"tool_call","tool":"run_command","command":"cargo test"}"#,
+        "\n",
+        r#"{"type":"tool_result","tool":"run_command","status":"complete","exit_code":0,"output":"ok"}"#,
+        "\n",
+        r#"{"type":"agent","text":"Tests pass. "}"#,
+        "\n",
+        r#"{"type":"agent","text":"Done."}"#,
+        "\n",
+    );
+
+    #[test]
+    fn the_adapter_reads_a_recorded_oz_stream_into_its_text_its_conversation_and_its_lines() {
+        // Given
+        let mut conversation_lines = Vec::new();
+        let mut on_progress = |_: &ProgressEvent| {};
+        let mut on_raw_output = |_: &str| {};
+        let mut on_conversation_line = |line: &str| conversation_lines.push(line.to_string());
+
+        // When
+        let read = OzNdjson
+            .read_stream(
+                &mut Cursor::new(A_RECORDED_STREAM.as_bytes()),
+                StreamSinks {
+                    on_progress: &mut on_progress,
+                    on_raw_output: &mut on_raw_output,
+                    on_debug_line: None,
+                    on_conversation_line: Some(&mut on_conversation_line),
+                },
+            )
+            .expect("the adapter reads the recorded stream");
+
+        // Then
+        let lines: Vec<String> = A_RECORDED_STREAM.lines().map(str::to_string).collect();
+        assert_eq!(
+            (
+                read.result_text,
+                read.session_id,
+                read.raw_lines,
+                conversation_lines
+            ),
+            (
+                "Tests pass. Done.".to_string(),
+                "oz-conv-1".to_string(),
+                lines.clone(),
+                lines,
+            )
+        );
+    }
+
+    #[test]
+    fn an_oz_exit_is_ok_only_when_zero_even_when_the_spec_allows_structured_results() {
+        // Given
+        let stream = StreamResult {
+            result_text: "Done.".to_string(),
+            session_id: "oz-conv-1".to_string(),
+            questions: Vec::new(),
+            raw_lines: Vec::new(),
+            stream_errors: Vec::new(),
+        };
+
+        // When
+        let ok = (
+            OzNdjson.exit_ok(0, &stream, false),
+            OzNdjson.exit_ok(1, &stream, true),
+        );
+
+        // Then
+        assert_eq!(ok, (true, false));
+    }
+}

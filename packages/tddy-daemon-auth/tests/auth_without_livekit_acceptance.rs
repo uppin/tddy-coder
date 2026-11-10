@@ -112,13 +112,18 @@ async fn sign_in(config: &DaemonConfig) -> String {
 fn a_desktop_daemon_with_no_livekit() -> (DaemonConfig, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let yaml = format!(
-        "users:\n  - github_user: \"{THE_LOGIN}\"\n    os_user: \"{THE_LOGIN}-os\"\n\
+        "\
          github:\n  stub: true\n  stub_codes: \"{THE_CALLBACK_CODE}:{THE_LOGIN}\"\n\
          auth_storage: \"{}\"\n",
         dir.path().join("auth").display()
     );
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).expect("the config is written");
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{THE_LOGIN}\"\n  os_user: \"{THE_LOGIN}-os\"\n"),
+    )
+    .expect("the users file is written");
     (DaemonConfig::load(&path).expect("the config loads"), dir)
 }
 

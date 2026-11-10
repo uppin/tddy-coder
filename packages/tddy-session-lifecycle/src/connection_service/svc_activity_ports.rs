@@ -83,12 +83,14 @@ impl DaemonSessionHost {
         PeerRoutedActivity {
             connection: self.clone(),
             local: ActivityServiceImpl::new(self.activity_ports())
-                .with_question_answers(self.answer_wait_ports()),
+                .with_question_answers(self.answer_wait_ports())
+                .with_agents(self.coding_agents.agents_shared()),
         }
     }
 
     /// What `AwaitQuestionAnswer` holds a hook with: this daemon's registry, its served terminals
-    /// as the orchestrator's presence, and `claude_cli.answer_wait_secs` (`#home-inbox` 6/8).
+    /// as the orchestrator's presence. How long a hook is held is each session's own recorded wait
+    /// (`#agent-tools 19/19`).
     fn answer_wait_ports(&self) -> AnswerWaitPorts {
         AnswerWaitPorts {
             pending: self.pending_answers(),
@@ -96,7 +98,6 @@ impl DaemonSessionHost {
                 terminals: self.terminal_sessions(),
                 connection: self.clone(),
             }),
-            wait: std::time::Duration::from_secs(self.config.claude_cli_answer_wait_secs()),
         }
     }
 

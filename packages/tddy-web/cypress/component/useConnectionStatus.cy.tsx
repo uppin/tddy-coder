@@ -18,13 +18,13 @@
 import React from "react";
 import type { Client, Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
-import type { TerminalFeed } from "../../src/rpc/connections/terminal";
-import type { SessionConnection } from "../../src/rpc/connections/session";
-import type { ConnectionCapability, ConnectionStatus } from "../../src/rpc/connections/types";
+import type { TerminalFeed } from "tddy-client-web/connections/terminal";
+import type { SessionConnection } from "tddy-client-web/connections/session";
+import type { ConnectionCapability, ConnectionStatus } from "tddy-client-web/connections/types";
 import {
   useConnectionStatus,
   type ObservedConnectionStatus,
-} from "../../src/rpc/connections/useConnectionStatus";
+} from "tddy-session-web";
 import { byTestId } from "../support/testIds";
 
 // ---------------------------------------------------------------------------

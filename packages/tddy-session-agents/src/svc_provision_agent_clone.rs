@@ -245,6 +245,30 @@ impl AgentRoster {
         Ok(())
     }
 
+    /// Refuses, as [`Self::tear_down_every_agent_clone`] would, the delete of a session with a
+    /// recorded clone while this daemon has no common room configured or joined — read-only, so
+    /// `DeleteSession` can refuse before it tears anything down (`#agent-tools 30/32`).
+    pub async fn refuse_an_unreachable_clone_host(&self, session_id: &str) -> Result<(), Status> {
+        let clones = self.session_agent_clones.for_session(session_id);
+        let Some((daemon_instance_id, clone)) = clones.into_iter().next() else {
+            return Ok(());
+        };
+        let reachable = match self.peer_routing.common_room_slot("DeleteSession") {
+            Ok(slot) => slot.is_connected().await,
+            Err(_) => false,
+        };
+        if reachable {
+            return Ok(());
+        }
+        let codebase_session = &clone.codebase_session_id;
+        Err(Status::failed_precondition(format!(
+            "cannot reach the common room to delete session {session_id}'s clone \
+             {codebase_session} on daemon {daemon_instance_id}, so its checkout is still \
+             there; delete workspace session {codebase_session} on {daemon_instance_id} once \
+             the daemons can see each other"
+        )))
+    }
+
     /// Delete every clone a session created, on every host that built one.
     ///
     /// Called by `DeleteSession`. One failure fails the deletion naming the orphan, for the same
@@ -389,3 +413,7 @@ use crate::agent_clone_worktree;
 
 use crate::agent_clone_lookup;
 use tddy_daemon_kernel::daemon_hook_urls;
+
+#[cfg(test)]
+#[path = "svc_provision_agent_clone/clone_host_precheck_tests.rs"]
+mod clone_host_precheck_tests;

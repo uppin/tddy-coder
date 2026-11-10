@@ -94,7 +94,9 @@ remote `tddy-daemon`) so that my agent can plan, read, write, and test code in a
 
 ### tddy-tools dynamic MCP proxy
 
-15. With `TDDY_REMOTE_*` env vars set and a running relay daemon, `tddy-tools --mcp` reports a
+15. With `TDDY_REMOTE_*` set — in its environment, or adopted from the `remote` map of the session
+    pointer it finds at or above its cwd (a headless Codex conversation's, in the conversation
+    directory) — and a running relay daemon, `tddy-tools --mcp` reports a
     `tools/list` result that includes `approval_prompt`, `github_create_pull_request`, and
     `github_update_pull_request` (static) **plus** exactly the tools returned by `ListExecTools` —
     no extra tools, no hardcoded remote-tool names.
@@ -232,6 +234,13 @@ tools directly on the host worktree.
    rebuilt, and a replacement that dies the same way, answer with the failure. The distinction
    between the two outcomes exists for exactly one decision — whether to rebuild — and for no
    other.
+
+9. **`Grep` runs a declared tool.** At each jail start, before the jail tree is created, the
+   provisioner loads the built-in tools plus `<tddyhome>/tools` and resolves `rg` against the
+   daemon's process. A bad tool file, or a host that cannot resolve `rg`, refuses the jail as an
+   invalid spec naming the tool and what was searched — `Grep` never fails per call with
+   `spawn failed`. The jail gets `rg` as one executable file on a jail-local `PATH` entry, not its
+   directory. See [Sandbox builder § Declared tools](../coder/sandbox-builder.md#declared-tools).
 
 **What the retry can cost, stated plainly.** A transport failure says the *answer* did not come
 back; it does not say the tool did not run. A mutating call retried in a rebuilt jail can therefore

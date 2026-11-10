@@ -113,12 +113,16 @@ async fn a_manager_with_recorded_terminals(
     let manager = Arc::new(CliSessionManager::new());
     for session in sessions {
         manager
-            .start(
+            .start_with_options(
                 session,
                 dir.to_path_buf(),
                 "claude-opus-4-8",
-                &a_sleeping_agent(dir),
+                vec![a_sleeping_agent(dir)],
+                "agent-cli",
                 None,
+                None,
+                Vec::new(),
+                Vec::new(),
                 None,
             )
             .await

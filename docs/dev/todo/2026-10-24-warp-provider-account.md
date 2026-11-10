@@ -3,7 +3,7 @@
 **Category:** Deferred from `#warp-agent` 1/2 (#717)
 **Source:** the `warp-cli` session changeset (#717) § Decisions & Trade-offs (native Warp login only)
 
-`Harness::WarpCli` refuses every provider preset (`HarnessCannotBeRouted`), the web offers Warp no
+`warp.yaml` declares no `route`, so every provider preset is refused (`AgentCannotBeRouted`), the web offers Warp no
 Provider field, and there is no `warp` preset in `tddy-accounts`. A Warp session uses whatever
 `warp` login the daemon's user already has; a headless host with no login cannot run one.
 

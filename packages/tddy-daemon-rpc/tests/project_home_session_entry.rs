@@ -29,9 +29,17 @@ const MAIN_SESSION: &str = "main-0000-0000-0000-000000000000";
 /// A daemon config mapping `testuser` to `os_user`, written under `dir` (the test's data dir, so it
 /// is removed with it).
 fn a_daemon_config(dir: &Path, os_user: &str) -> DaemonConfig {
-    let yaml = format!("users:\n  - github_user: \"testuser\"\n    os_user: \"{os_user}\"\n");
+    let yaml = "";
     let path = dir.join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     DaemonConfig::load(&path).unwrap()
 }
 
@@ -58,7 +66,8 @@ fn a_daemon(config: DaemonConfig, tddy_data_dir: PathBuf) -> TestDaemon {
             }),
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     ))
 }
 

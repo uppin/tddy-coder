@@ -1,10 +1,9 @@
 import React from "react";
-import { cn } from "@/lib/utils";
-import { useHostConnection } from "../../rpc/connections/registry";
-import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
-import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";
-import { useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { cn } from "tddy-ui-web";
+import { useHostDirectorySource } from "tddy-client-web";
+import { LIVEKIT_SOURCE_ID } from "tddy-livekit-web";
 import { hostGateOf } from "./hostGate";
+import { useHostConnection, useHostLabel, useSelectedDaemon } from "tddy-client-web";
 
 /**
  * Covers a host-scoped screen's body while no viable RPC client reaches the selected host, naming

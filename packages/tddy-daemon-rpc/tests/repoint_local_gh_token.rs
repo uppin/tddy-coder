@@ -157,10 +157,14 @@ impl World {
     fn daemon_with_gh_at(&self, gh: PathBuf) -> TestDaemon {
         let config_dir = tempfile::tempdir().unwrap();
         let config_path = config_dir.path().join("config.yaml");
-        fs::write(
-            &config_path,
+        fs::write(&config_path, "").unwrap();
+        std::fs::write(
+            std::path::Path::new(&(config_path))
+                .parent()
+                .expect("a config directory")
+                .join("users.yaml"),
             format!(
-                "users:\n  - github_user: \"u\"\n    os_user: \"{}\"\n",
+                "- github_user: \"u\"\n  os_user: \"{}\"\n",
                 the_current_os_user()
             ),
         )
@@ -183,6 +187,7 @@ impl World {
                 tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
                 Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
                 Arc::new(CliSessionManager::new()),
+                tddy_session_lifecycle::test_util::builtin_coding_agents(),
             )
             .with_github_cli(GithubCli::at(gh)),
         )

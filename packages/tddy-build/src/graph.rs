@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::builtin::{self, GROUP};
+use crate::builtin::{self, ToolTarget, GROUP, TOOL};
 use crate::capabilities::BuildMode;
 use crate::error::BuildError;
 use crate::lower::lower_target;
@@ -97,9 +97,17 @@ impl BuildGraph {
         if visited.iter().any(|v| v == id) {
             return Ok(());
         }
-        if on_stack.iter().any(|v| v == id) {
+        if let Some(start) = on_stack.iter().position(|v| v == id) {
+            let cycle: Vec<&str> = on_stack[start..]
+                .iter()
+                .map(String::as_str)
+                .chain(std::iter::once(id))
+                .collect();
             log::warn!("build graph cycle detected through target {id}");
-            return Err(BuildError::Cycle(format!("cycle through target {id}")));
+            return Err(BuildError::Cycle(format!(
+                "cycle through target {}",
+                cycle.join(" → ")
+            )));
         }
         on_stack.push(id.to_string());
         if let Some(target) = self.targets.get(id) {
@@ -166,7 +174,8 @@ impl BuildGraph {
         Ok(())
     }
 
-    /// Target-level predecessors: declared deps plus group members.
+    /// Target-level predecessors: declared deps, group members, the tool targets this target's
+    /// actions name, and the target a tool target's binary is built by.
     fn target_edges(&self, target: &BuildTarget) -> Result<Vec<String>, BuildError> {
         let mut edges = target.deps.clone();
         if let Some(config) = &target.config {
@@ -174,7 +183,23 @@ impl BuildGraph {
                 edges.extend(builtin::group_member_ids(&config.fields)?);
             }
         }
+        for action in &target.actions {
+            edges.extend(action.tool_dep_ids.iter().cloned());
+        }
+        edges.extend(tool_producer(target));
         Ok(edges)
+    }
+}
+
+/// The target whose output a tool target's binary is, when its inline definition names one.
+///
+/// A config that is not a readable tool definition names none. The graph does not refuse a manifest
+/// for declaring one: the executor refuses it when a build uses it, before any action runs.
+fn tool_producer(target: &BuildTarget) -> Option<String> {
+    let config = target.config.as_ref().filter(|c| c.r#type == TOOL)?;
+    match builtin::tool_target(&target.id, &config.fields) {
+        Ok(ToolTarget::Inline(def)) => def.binary.target.map(|binary| binary.target),
+        Ok(ToolTarget::Ref { .. }) | Err(_) => None,
     }
 }
 
@@ -386,6 +411,77 @@ mod tests {
         assert!(
             order.iter().position(|t| t == "core").unwrap()
                 < order.iter().position(|t| t == "all").unwrap()
+        );
+    }
+
+    /// `tools:stamp` is a tool whose binary is `producer`'s output.
+    fn a_tool_built_by(producer: &str) -> BuildTarget {
+        BuildTarget {
+            id: "tools:stamp".to_string(),
+            config: Some(config(
+                "tool",
+                &format!(
+                    "schema_version: 1\n\
+                     id: stamp\n\
+                     summary: stamps its input\n\
+                     binary: {{ command: stamp, target: {{ target: \"{producer}\", path: out/stamp }} }}\n"
+                ),
+            )),
+            ..Default::default()
+        }
+    }
+
+    /// A target with one action naming `tools:stamp` in `tool_dep_ids`, and no declared deps.
+    fn a_target_using_the_stamp_tool(id: &str) -> BuildTarget {
+        BuildTarget {
+            id: id.to_string(),
+            actions: vec![BuildAction {
+                tool_dep_ids: vec!["tools:stamp".to_string()],
+                ..action("package", &[], &["app.txt"])
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_tool_built_by_another_target_orders_that_target_before_every_user_of_the_tool() {
+        // Given — `app` declares no deps; only its action's tool links it to `stamp:bin`
+        let graph = BuildGraph::from_manifests(vec![manifest(vec![
+            a_target_using_the_stamp_tool("app"),
+            a_tool_built_by("stamp:bin"),
+            script_target("stamp:bin", vec![]),
+        ])])
+        .unwrap();
+
+        // When
+        let order = graph.build_order("app").unwrap();
+
+        // Then
+        assert_eq!(
+            order,
+            vec![
+                "stamp:bin".to_string(),
+                "tools:stamp".to_string(),
+                "app".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn a_cycle_through_a_tool_target_is_reported_naming_it() {
+        // Given — `gen` builds the stamp tool, and itself uses it
+        let manifests = vec![manifest(vec![
+            a_target_using_the_stamp_tool("gen"),
+            a_tool_built_by("gen"),
+        ])];
+
+        // When
+        let err = BuildGraph::from_manifests(manifests).expect_err("the cycle is refused");
+
+        // Then
+        assert!(
+            matches!(&err, BuildError::Cycle(m) if m.contains("tools:stamp")),
+            "the cycle names the tool target: {err}"
         );
     }
 

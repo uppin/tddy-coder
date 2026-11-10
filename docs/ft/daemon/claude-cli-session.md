@@ -81,8 +81,9 @@ tddy-web new-session form or `tddy-tools pty-relay --sandbox`.
 |--------|------------------------|----------------------|
 | `claude` spawn | Direct PTY in worktree | jail (`sandbox-exec` on macOS / userns+cgroups on Linux) → `tddy-sandbox-runner` → PTY |
 | Filesystem | Full host worktree | Read-only context dir in jail; writes via MCP tools on host |
-| Network from agent | Host network | No direct egress (Seatbelt `deny network*` / Linux network namespace); LLM HTTPS tunneled over `SessionChannel` to a host relay (TLS end-to-end) |
+| Network from agent | Host network | No direct egress (Seatbelt `deny network*` / Linux network namespace); HTTPS tunneled over `SessionChannel` to a host relay (TLS end-to-end), only to the hosts `claude.yaml` declares plus a provider route's base-URL host |
 | Control channel | — | loopback TCP (macOS) / AF_UNIX (Linux, survives the network namespace) |
+| `HOME` | The host user's | `<tddyhome>/homes/claude`, persistent across sessions |
 | Resume / delete | PTY respawn / SIGTERM | Stop sandbox child + relaunch runner; same worktree teardown |
 | Unsupported host | Supported | `failed_precondition` (no userns / no writable cgroup v2 subtree / other OS) — no fallback |
 
@@ -104,6 +105,88 @@ Linux's unprivileged-userns restriction does not apply. See
 21. The agent reads a read-only context dir in the jail; codebase mutations flow through
     `mcp__tddy-tools__*` tool calls executed on the host worktree.
 22. On non-macOS, `sandbox = true` returns `failed_precondition` (no fallback).
+
+### The jail from the `claude` tool definition
+
+A sandboxed start and its relaunch launch Claude through the **shared jail launcher**, from the same
+`claude.yaml` the unsandboxed launch renders ([§ Launch](#launch-from-the-claude-tool-definition)).
+The definition's generic jail sections decide the jail; nothing on the daemon path hard-codes Claude:
+
+```yaml
+home: { kind: persistent, key: claude }            # <tddyhome>/homes/claude, mounted read-write
+files:
+  - { kind: seed-once, from_host: .claude/.credentials.json, to: .claude/.credentials.json }
+  - { kind: mirror, from_host: .local/bin/claude, to: .local/bin/claude }
+  - { kind: mirror, from_host: .local/share/claude/versions, to: .local/share/claude/versions }
+  - { kind: overlay, env: CLAUDE_CODE_TMPDIR, value: "{tmp}" }
+  - { kind: overlay, env: CLAUDE_TMPDIR, value: "{tmp}" }
+secrets:
+  - env: CLAUDE_CODE_OAUTH_TOKEN
+    source: { kind: host-env, var: CLAUDE_CODE_OAUTH_TOKEN }
+    when: unrouted                                  # a provider route brings its own credentials
+policy:
+  jit: true
+  fork: true
+  sysctl_read: true
+  exec_paths: [/usr/bin, /usr/libexec, /bin, /sbin, /System, /Library, /Applications, /opt/homebrew, /opt/local]
+network:
+  egress:
+    hosts: [api.anthropic.com, statsig.anthropic.com, sentry.io, console.anthropic.com, claude.ai]
+  oauth_inbound: true
+```
+
+The section vocabulary is the [sandbox builder's](../coder/sandbox-builder.md#jail-sections), shared
+by every tool. What Claude sees in the jail is an ordinary environment:
+
+- **`HOME`** is `<tddyhome>/homes/claude`, shared by every sandboxed Claude session and kept across
+  them, so refreshed OAuth tokens, history and settings survive. The host's `.credentials.json` is
+  copied in only when the home lacks one; Claude's own install (`~/.local/bin/claude`, its
+  `versions/`) is linked in where its startup self-check looks for it.
+- **`PATH`** is a jail-local directory of the declared tools (`claude`, `tddy-tools`) ahead of the
+  system directories. `CLAUDE_CODE_TMPDIR` / `CLAUDE_TMPDIR` point into the jail's tmp.
+- **`HTTPS_PROXY`** (both casings, loopback bypassed) points at the runner's egress shim.
+- **No `TDDY_*` variable.** The `tddy-tools --mcp` server Claude registers carries what it needs —
+  `TDDY_SANDBOX_TOOL_IPC`, `TDDY_SANDBOX_SESSION_ID`, its log and accounting files, and the daemon's
+  `TDDY_*` additions for the session — in its own `env` block of the MCP config.
+- **Argv** is `claude.yaml`'s template: `--model`, `--session-id` (or `--resume` on a relaunch), the
+  permission mode (blank is `auto`) or `--dangerously-skip-permissions`, the client's pass-through
+  args and first prompt, then the slot flags — `--append-system-prompt-file`, the roster's
+  `--allowedTools` / `--disallowedTools`, `--permission-prompt-tool`, and `--mcp-config` with the
+  config in the jail's tmp. The MCP slot is rendered **without** `--strict-mcp-config`, so a jailed
+  agent loads the project's own `.mcp.json` beside `tddy-tools`; whether it should is open
+  ([todo](../../dev/todo/2026-11-02-jailed-claude-loads-project-mcp-json.md)).
+
+**Network.** The jail reaches the declared hosts through the shim and is refused every other one,
+both at the shim (`403`) and at the host relay's `TunnelOpen`. A session on a provider route also
+reaches the route's base-URL host, carries no `CLAUDE_CODE_OAUTH_TOKEN`, and opens no OAuth inbound
+port; an unrouted session gets the host's token (when the daemon's environment has one) through the
+`TDDY_SECRET_*` channel, and the loopback OAuth callback.
+
+**The runner is told what to exec.** The daemon writes the rendered argv, env and slot files to
+`<session>/sandbox/exec-plan.json` and spawns `tddy-sandbox-runner --exec-plan` on it. No
+Claude-specific flag (`--claude-binary`, `--claude-arg`, `--permission-mode`, `--resume`,
+`--append-system-prompt-file`) reaches the runner from the daemon.
+
+**The home's location.** The daemon's jailed Claude home is always `<tddyhome>/homes/claude`:
+the spec's `home.key` (`claude`) and `TDDY_SANDBOX_CLAUDE_HOME` do not move it (the
+standalone `tddy-sandbox-app` still uses its own home). An operator who wants a directory of their
+own declares `home: { kind: path, path: <absolute dir> }` in a `<tddyhome>/tools/claude.yaml`
+override: that directory is mounted read-write, and a relative path is refused when the tool file
+loads (`#agent-tools` 19/19). The first sandboxed start finding
+`<tddyhome>/sandbox-claude-home` renames it to `homes/claude` once, credentials and history kept. A
+start that finds both refuses with `FAILED_PRECONDITION` naming both, and touches neither. A former daemon.yaml
+`claude_home_dir` is not migrated: the new home is seeded from the host's
+`~/.claude/.credentials.json`.
+
+**Role.** The launcher records the session's `session_role` before the spawn, so a project-home main
+set up in a jail is listed with `session_role: project-home`. A jailed main is launched with an
+ordinary sandboxed session's tool flags, not the main's role wiring
+([todo](../../dev/todo/2026-10-24-sandboxed-main-needs-session-role.md)).
+
+**Requirements.** A sandboxed start on a host without coding agents installed is
+`FAILED_PRECONDITION`; the daemon always installs them. The jail is exercised by tests on macOS
+Seatbelt only: no CI host runs a Linux jail
+([todo](../../dev/todo/2026-11-02-ci-runs-no-linux-jail.md)).
 
 ## tmux mode (`StartSessionRequest.run_in_tmux = true`)
 
@@ -150,13 +233,16 @@ on the host: it shows in `tmux ls` and can be attached from any terminal over SS
 - **Re-attach.** A session whose tmux session is alive and has no main terminal registered gets one
   re-attached — the agent is **never relaunched**, and the recorded `pid` is re-read from the pane:
   - on **Resume**. A daemon that still serves the session's managed workflow (a client that detached
-    from this daemon) keeps it, so the agent's `TDDY_SOCKET` stays bound; a restarted daemon, which has
+    from this daemon) keeps it, so the socket its session pointer and tool server name stays bound; a restarted daemon, which has
     none, prepares one bound to the same `tddy-wf-<id>.sock` path. A main already attached to that tmux
     session is returned as it is, so a second Resume adds no second client;
   - on the **first stream, input or history read** of its `main` terminal — the session reads active
     (its pane pid lives), so the web never offers Resume. The re-attach reads `.session.yaml`, probes
-    tmux as the requester's OS user, attaches, and registers the main recording; it is single-flight per
-    session, so concurrent first accesses attach one client.
+    tmux as the requester's OS user, resolves the agent from the recorded session type among the host's
+    installed coding agents, attaches, and registers the main recording; it is single-flight per
+    session, so concurrent first accesses attach one client. A record without a session type is
+    skipped with a warning (it is never re-attached as claude-cli), and a host without coding agents
+    re-attaches nothing.
 - **Resume** of a tmux-run session whose tmux session is gone kills any leftover tmux session of that
   name, then starts a fresh one running Claude's resume argv (`--resume <id>`).
 - **A failed attach** kills the tmux session that start created: nothing records it, so nothing could
@@ -258,12 +344,16 @@ above. The jail receives the route in two parts:
   runner sets it on the agent child only and unlinks the file, so the key never appears in the jail's
   environment map or on argv.
 
-The host's `CLAUDE_CODE_OAUTH_TOKEN` is not injected beside a route, and the jail's OAuth inbound port
-is not opened. A resume relaunches the jail on the account the start recorded, re-resolved as below.
+The host's `CLAUDE_CODE_OAUTH_TOKEN` is not injected beside a route (`claude.yaml` guards it
+`when: unrouted`), the jail's OAuth inbound port is not opened, and the route's base-URL host is added
+to the jail's egress hosts. A resume relaunches the jail on the account the start recorded, re-resolved as below.
 A sandboxed start that chooses nothing is unchanged.
 
 A **child** session a pr-stack orchestrator spawns, and a **conversation** a grill-me orchestrator
-spawns, run on the vendor: the orchestrator's account is not inherited.
+spawns, run the orchestrator's own agent (a claude-cli orchestrator's child is a claude-cli session,
+a cursor-cli one's a cursor-cli session) on the vendor: the orchestrator's account is not inherited.
+A host without coding agents, or an orchestrator that records no CLI session type, refuses the child
+`FAILED_PRECONDITION`.
 
 ### Persistence and resume
 
@@ -336,6 +426,139 @@ New `ClaudeCliSessionManager` in `tddy-daemon`:
 - **Resume**: opens a fresh PTY, re-exec's `claude --model <model>` in the existing worktree, updates the registry.
 - **Connect**: looks up existing `PtyHandle` — no re-exec if the process is alive.
 
+### Launch from the `claude` tool definition
+
+An unsandboxed `claude-cli` start and resume launch the agent from its **tool definition**,
+`claude.yaml`, through one spec-driven PTY launcher. Nothing in that launch path hard-codes Claude.
+The definition is embedded from `packages/tddy-coding-agent-specs/specs/claude.yaml`, and
+`<tddyhome>/tools/claude.yaml` replaces it **whole**:
+
+```yaml
+id: claude
+binary: { command: claude, env: TDDY_CLAUDE_BINARY }
+deps: [tddy-tools]                       # the MCP relay and hook binary, itself a built-in tool
+run:
+  transport: pty
+  argv:
+    - "{binary}"
+    - { if: model, then: ["--model", "{model}"] }
+    - { if: resume, then: ["--resume", "{session_id}"], else: ["--session-id", "{session_id}"] }
+    - if: dangerously_skip_permissions
+      then: ["--dangerously-skip-permissions"]
+      else:
+        - { if: permission_mode, then: ["--permission-mode", "{permission_mode}"], else: ["--permission-mode", "auto"] }
+    - { splice: slots }                   # the slot flags, before the prompt
+    - { if: prompt, then: ["{prompt}"] }
+  env: {}
+extensions:
+  coding_agent:
+    mcp: { kind: file, flag: --mcp-config, format: claude-mcp-json, strict_flag: --strict-mcp-config }
+    tool_allow: { flag: --allowedTools }
+    tool_deny: { flag: --disallowedTools }
+    permission_prompt: { flag: --permission-prompt-tool }
+    instructions: { files: [CLAUDE.md, AGENTS.md], append_system_prompt: { flag: --append-system-prompt-file } }
+    hooks: { adapter: claude-settings-local }
+    conversation: { kind: daemon_session_id }   # --session-id on a start, --resume on a resume
+    capabilities: [hooks, managed_workflow, ask_user_question, split_host, project_home_main, requires_model, branch_name_required, operator_notify]
+    models: { default: opus, curated: [opus, sonnet, haiku, …] }
+    context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
+```
+
+- **Binary.** A `<tddyhome>/tools/claude.yaml` override's `binary.command` replaces the spec's
+  binary; `TDDY_CLAUDE_BINARY` applies, then the host auto-resolution (`~/.local/bin`, then
+  `PATH` without wrapper shims), then the spec's `PATH` search. `tddy-tools` resolves through
+  `TDDY_TOOLS_BINARY`, then `CARGO_BIN_EXE_tddy-tools` or the daemon's sibling, then `PATH`; its
+  `binary.command` is overridden by `<tddyhome>/tools/tddy-tools.yaml`. daemon.yaml `claude_cli:`
+  (`binary_path`, `tddy_tools_path`) is refused at start-up.
+- **Argv.** The template renders the session's model, id, permission mode (default `auto`), resume
+  flag and first prompt. A blank prompt is no prompt. The slot flags sit before the positional
+  prompt: `--mcp-config` is variadic, so the `strict_flag` that follows the config path keeps the
+  prompt from being swallowed.
+- **Slots.** The `coding_agent` extension declares the tddy integration points, and the launch fills
+  them:
+  - The hooks adapter writes `<worktree>/.claude/settings.local.json`, the six lifecycle hooks that
+    call `tddy-tools session-hook`.
+  - A session's appended system prompt goes through `--append-system-prompt-file`.
+  - A project-home main's pre-approved tools go through `--allowedTools`. Its withdrawn native
+    filesystem and shell tools go through `--disallowedTools`.
+  - The main's `tddy-tools --mcp` server is registered as `<session dir>/claude-mcp-config.json` and
+    loaded with `--mcp-config … --strict-mcp-config`.
+- **Not slotted.** A main's role prompt and a split session's wiring arrive as rendered flags after
+  the slot flags. The slot takes one prompt file, and a managed recipe's prompt can hold it.
+- **Refusals.** The launcher refuses a spec whose `run.transport` is not `pty`, naming the spec. A
+  tool file under `<tddyhome>/tools` that does not load fails daemon start, naming the file. That
+  covers an unknown field, an unknown slot kind, and an `extensions:` key no owner claims.
+- **Hooks are written at the spawn.** A hooks file that cannot be written fails the start.
+- **Resume** renders `--resume <id>` from the same template. It does not rewrite the hooks file or
+  replay the first prompt, and it runs with the default permission mode.
+
+There is no other launch: a host without coding agents refuses every claude-cli start, resume and
+child `FAILED_PRECONDITION`, and re-attaches nothing after a restart (logged). Only the
+session-lifecycle suites build such a host; the daemon always installs coding agents. The sandboxed
+`claude-cli` path renders the same definition through the jail launcher
+([§ The jail](#the-jail-from-the-claude-tool-definition)).
+
+### The generic CLI spec launch serves Claude's needs
+
+The generic CLI launch — the one launch every CLI agent takes, `claude-cli` and `cursor-cli`
+included, `<id>-cli` for a `<tddyhome>/tools/<id>.yaml` — gives an agent what `claude.yaml` declares, each feature keyed on a
+spec slot or capability and never on the agent's id. A copy of `claude.yaml` dropped in under another
+id therefore starts, in tmux, as a project's main and on an ssh checkout with the argv, files and
+environment the `claude-cli` launch produces:
+
+- **Conversation.** `coding_agent.conversation: { kind: daemon_session_id }` binds the daemon's
+  session id: `--session-id <id>` on a start, `--resume <id>` with the recorded model on a resume.
+- **Managed workflow.** `managed_workflow` admits a managed-codebase start; the recipe's prompt is
+  appended through `--append-system-prompt-file` and the workflow is attached once the agent runs. An
+  agent without it is refused `INVALID_ARGUMENT`, naming the agent and `managed_workflow`.
+- **Hooks and notify.** `hooks` writes the hooks adapter's settings file; `operator_notify` appends the
+  notify guidance and puts `tddy-tools notify`'s session into the session pointer
+  ([§ Notifying the operator](#notifying-the-operator)).
+- **Project-home main.** `project_home_main` admits the role (any other agent is refused, naming the
+  agents that can run main); the role is recorded before the spawn and the main's tools are restricted
+  through the `tool_allow` / `tool_deny` slots and its `tddy-tools --mcp` registration.
+- **tmux.** The spec's rendered argv runs in the session's own tmux session, on a start and a resume.
+- **ssh checkout.** On an ssh checkout the slot files are written on the target over ssh (bounded by
+  the 60 s slot-write deadline; a target that never answers refuses the start `DEADLINE_EXCEEDED`
+  naming the host), never at that path on this host.
+- **An allow-listed environment.** The agent process starts from an environment the daemon
+  computes, not from the daemon's own: the base set (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
+  `TERM`, `LANG`, `LC_*`, `TMPDIR`, `TZ`, `SSH_AUTH_SOCK`, proxy variables, `XDG_*`) read from the
+  daemon, the variables the spec's `pass_env` names, and what the launch sets on purpose. No other
+  daemon variable reaches it, so a `CLAUDE_CODE_*` marker or a CI token the daemon was started with
+  stays behind. A host PTY, a tmux pane (which keeps only its own `TERM`, `COLORTERM`, `TMUX` and
+  `TMUX_PANE` besides), a headless turn, an ACP agent, the conversation-id mint and a relayed
+  (supervisor-spawned) agent all start from it. An operator adds a variable in `pass_env` of
+  `tools/<agent>.yaml`, or replaces the base set with `tools/agent-env/base.yaml`
+  ([Harness profiles § The agent's environment](harness-profiles.md#the-agents-environment)).
+- **No `TDDY_*` variable.** The agent process sees no `TDDY_*` variable. A managed workflow's or a
+  main's `TDDY_*` pair is carried by the agent's tool-server registration (`mcp` env), never the
+  process.
+- **Session pointer.** So a `tddy-tools submit`, `transition`, `ask` or `notify` the agent runs from
+  its own shell still reaches the session, the launch writes `<worktree>/.tddy/session.json` at every
+  start and resume ([tddy-tools session resolution](../../../packages/tddy-tools/docs/session-resolution.md)):
+  the managed workflow's socket, session and repo directories, the operator-notify session, and its
+  owner — the daemon's pid and host. It is owner-only (`0600`), added to the repository's
+  `info/exclude` when the worktree is in a git checkout, replaced on resume, and removed when the
+  agent exits (in tmux only when the launch has an exit hook, which keeps the pane; without one it is
+  replaced at the next resume and removed at the delete) and when the session is deleted. On an ssh
+  checkout the same holds on the target: one ssh command, bounded like the slot write, adds the
+  pointer to the target checkout's `info/exclude` and writes it owner-only, and the removals are a
+  bounded ssh command each. A `tddy-tools` on the daemon's host refuses a pointer whose owner has
+  exited or whose socket is gone, naming the pointer; one on the ssh target does not check an owner on
+  another host. The remote agent is not yet recorded as an ssh pointer's owner
+  ([todo](../../dev/todo/2026-11-07-ssh-agent-launch-remote-pointer-owner.md)). A jailed session
+  writes none: its shell relay carries the session, and a pointer copied into the jail would name a
+  host socket the jail cannot reach.
+- **Jail.** The generic jailed start and resume bind the same conversation, permission mode and
+  session id, and carry a managed workflow for a spec declaring `managed_workflow`.
+- **Branch intent.** A `new_branch_from_base` start naming no branch is refused exactly when the
+  spec declares `branch_name_required` (`claude` does, `cursor` does not).
+
+No agent id is compared in the launch: a source scan
+(`tddy-session-lifecycle/tests/no_agent_name_gates.rs`) pins that no `"claude"` / `"cursor"` /
+`"claude-cli"` / `"cursor-cli"` literal is dispatched on in `tddy-agent-launch`.
+
 ### Worktree naming
 
 Branch: `claude-cli/<first-8-chars-of-session-uuid>`
@@ -376,19 +599,14 @@ enables mouse tracking (DECSET `1049`, `1000`/`1002`, `1006`). The web terminal 
 the TUI only once mouse tracking is on, and its live pane keeps no scrollback of its own, so an inline
 Claude cannot be scrolled from the browser at all.
 
-The daemon forces the renderer with **`CLAUDE_CODE_NO_FLICKER=1`** in the agent's environment. On the
-host the agent also inherits the daemon's environment; a sandboxed agent's environment is constructed,
-so the variable has to be added there too. Both paths add it from one helper,
-`DaemonConfig::claude_cli_renderer_env`.
+The renderer is forced by **`CLAUDE_CODE_NO_FLICKER=1`**, which the built-in `claude.yaml` declares
+in its `run.env` (`#agent-tools` 19/19). Nothing outside the spec adds it: the host start, the
+resume, the jailed start and the jail relaunch all take the agent's environment from `run.env`, so a
+`<tddyhome>/tools/claude.yaml` override without it starts Claude inline.
 
-```yaml
-claude_cli:
-  fullscreen: false   # default true; also true when `claude_cli:` is absent
-```
-
-`false` leaves the renderer to Claude (its own setting, or `/tui`). Forcing it also overrides Claude's
-own switch back to the classic renderer after a fullscreen launch failed to start, so a machine where
-fullscreen crashes needs `fullscreen: false`.
+daemon.yaml `claude_cli.fullscreen` is refused at start-up: the field moved to the spec's `run.env`
+(`<tddyhome>/tools/claude.yaml`). Forcing the renderer also overrides Claude's own switch back to the
+classic renderer after a fullscreen launch failed to start.
 
 ## Session table display
 
@@ -454,8 +672,11 @@ so the activity log carries no row for it at all.
 
 The `PermissionRequest` hook and the `PreToolUse` hook of `AskUserQuestion` (matched to that tool
 alone) run `session-hook --await-answer --await-timeout-secs <wait + 5>`, with Claude's hook
-`timeout` set to `<wait + 10>`, where `<wait>` is `claude_cli.answer_wait_secs`
-(default 120). After its report it calls `ActivityService.AwaitQuestionAnswer` with the report's
+`timeout` set to `<wait + 10>`, where `<wait>` is the agent spec's `coding_agent.answer_wait_secs`
+(120 s when absent). The start records that wait beside the session (`answer-wait-ms`, next to
+`.session.yaml`), and `AwaitQuestionAnswer` holds the hook for the recorded value, so the hold always
+equals the hook timeout the agent was launched with; editing `answer_wait_secs` changes new sessions
+only. A session with no record is held for its spec's value (`#agent-tools` 19/19). After its report it calls `ActivityService.AwaitQuestionAnswer` with the report's
 `request_id` and, for a permission, Claude's `permission_suggestions` (as JSON; empty when none). A
 `PreToolUse` of any other tool never waits. The daemon, with the
 same authentication as `ReportSessionStatus`:
@@ -518,26 +739,30 @@ the wait ends.
 The resulting JSON is written to `<worktree>/.claude/settings.local.json`. The `hook_token` is also
 stored in `.session.yaml` for validation on inbound `ReportSessionStatus` calls.
 
-Config (`claude_cli:` block) may override `tddy_tools_path` (default: `current_exe` sibling → `"tddy-tools"`), `daemon_url` (default: `http://127.0.0.1:{web_port}`) and `answer_wait_secs` (default 120).
+The `tddy-tools` binary is `binary.command` of `tools/tddy-tools.yaml` (default: `current_exe` sibling → `"tddy-tools"`), the hook's `daemon_url` is the daemon's `listen.advertise_url` (default: `http://127.0.0.1:{web_port}`) and `answer_wait_secs` is 120. A daemon.yaml `claude_cli:` block is refused at start-up.
+
+**Capabilities.** The `claude` spec declares `hooks`, `ask_user_question`, `split_host`, `project_home_main`, `requires_model`, `branch_name_required` and `operator_notify`. Hook status reports need `hooks`; `AwaitQuestionAnswer` needs `ask_user_question`; operator notifications and the `notify` tool need `operator_notify`; a split or sandboxed-codebase placement needs `split_host`. Gates read the spec, not the session-type string.
 
 ### Which transport a hook reports over
 
-| Host | Hook command carries | Reports go over |
-|---|---|---|
-| Binary daemon (`tddy-daemon`) | `--daemon <daemon_url>` | HTTP: `{daemon_url}/rpc/activity.ActivityService/<method>` |
-| Tddy Desktop (embedded daemon) | `--daemon <daemon_url> --daemon-socket '<path>'` | The daemon's **agent-tool socket** — the Unix socket an embedded daemon binds for co-located processes, serving its full RPC roster |
+Every hook command a host launch writes carries `--daemon <daemon_url> --daemon-socket '<path>'`, and
+`session-hook` reports over the socket alone (a jailed launch points it at the in-jail tool-IPC socket
+instead, which the runner relays). The path is the **agent-tool socket of the session's OS
+user** — a Unix socket the daemon serves its full RPC roster on for co-located processes:
 
-An embedded daemon serves no HTTP RPC: its `listen.web_port` is only where a GitHub sign-in returns,
-and answers `/rpc` with 404. The socket is passed exactly when one is **listening** at
-`agent_tool_socket_path(<resolved data dir>)` at session start (`embedded_host_agent_tool_socket`) —
-a live connect, not the file existing, because the embedded daemon does not unlink the socket on
-exit and a binary daemon later started on the same data dir must keep using HTTP. The data dir is the
-one the daemon resolved (`TDDY_DATA_DIR` wins over `tddy_data_dir` in the config), the same one it
-bound the socket under. When `--daemon-socket` is given, `session-hook` uses only the socket. Hooks
-are written at session start, so a session keeps the transport it started with until it restarts.
+| Host | `--daemon-socket` |
+|---|---|
+| Tddy Desktop (embedded daemon) | the daemon's one socket, `agent_tool_socket_path(<resolved data dir>)`. An embedded daemon serves no HTTP RPC (its `listen.web_port` only answers a GitHub sign-in and returns 404 for `/rpc`), and a session started before the runtime serves the socket is refused rather than pointed at it |
+| Server daemon (`tddy-daemon` binary) | `<data dir>/run/<os user>/daemon.sock`: a directory `0700` and a socket `0600`, both owned by that user, so only that user (and root) can connect. Bound when the user's first session starts; the data dir is the one the daemon resolved (`TDDY_DATA_DIR` wins over `tddy_data_dir`) |
+| Server daemon under `tddy-supervisor` | the socket the supervisor created for that user because `users.yaml` maps them (`/run/tddy-users/<os user>/daemon.sock`; the unprivileged daemon cannot `chown` one to another user). An unmapped user has the start **refused** (`FAILED_PRECONDITION`, naming `users.yaml`) — never started with hooks that report nowhere. See [tddy-supervisor § One socket per user](../supervisor/tddy-supervisor.md#one-socket-per-user-handed-to-the-daemon) |
 
-Split agents' hooks are written the same way. Cursor-cli hooks still report over HTTP only — see
-[`docs/dev/todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md`](../../dev/todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md).
+The socket path is resolved before anything of the start is created. Hooks are written at session
+start, so a session keeps the socket it started with until it restarts. A server daemon that stops
+removes the sockets it bound itself and leaves the supervisor's in place for the next daemon.
+
+Split agents' hooks are written the same way. Cursor-cli hooks report over the agent-tool socket on
+the host and over the tool-IPC bridge in a jail — see
+[Cursor CLI session § Activity status hooks](cursor-cli-session.md#activity-status-hooks-cursorhooksjson).
 
 ### Fail-quiet contract
 
@@ -558,19 +783,22 @@ A daemon-launched claude-cli agent can notify its operator in its own words with
 [Session notifications § Agent-written notifications](session-notifications.md#agent-written-notifications)).
 The launch gives it two things, at start and again at resume:
 
-- **The environment** the command reads (`tddy_agent_launch::notify_env::notify_env_pairs`; the names
-  live in `tddy_service::session_activity::notify_env`):
+- **The notify session** the command reads (`tddy_agent_launch::notify_env::notify_env_pairs`; the
+  names live in `tddy_service::session_activity::notify_env`). It is not exported to the agent
+  process: it is written into the session pointer's `notify` map
+  ([§ The generic CLI spec launch](#the-generic-cli-spec-launch-serves-claudes-needs)), and the
+  `tddy-tools notify` the agent runs adopts it from there (only these five names):
 
   | Variable | Value |
   |---|---|
   | `TDDY_SESSION_ID` | the session id |
   | `TDDY_OS_USER` | the OS user that owns the session |
   | `TDDY_HOOK_TOKEN` | the session's `hook_token` — the same credential its hooks present |
-  | `TDDY_DAEMON_SOCKET` | the embedded daemon's agent-tool socket, when one is listening (the same rule as the hooks' `--daemon-socket`) |
-  | `TDDY_DAEMON_URL` | otherwise, the hooks' daemon URL |
+  | `TDDY_DAEMON_SOCKET` | the session OS user's agent-tool socket — the hooks' `--daemon-socket` |
+  | `TDDY_DAEMON_URL` | the hooks' daemon URL, when no socket is given (never for a daemon-launched agent) |
 
-  Exactly one of the last two is exported: an embedded daemon serves no HTTP RPC, so a URL there would
-  reach nothing.
+  Exactly one of the last two is given: a daemon-launched agent always gets the socket, which is how
+  an embedded daemon, which serves no HTTP RPC, is reached at all.
 - **One guidance paragraph** in its system prompt (`agent_notify_guidance.md`): the command exists,
   use it when long work finishes or something blocks while the operator is likely away, never for
   routine progress. `claude` takes a single `--append-system-prompt-file`, so the daemon writes
@@ -581,13 +809,13 @@ A resume rebuilds both from the `hook_token` recorded in `.session.yaml`; a sess
 none is given nothing. Not wired:
 
 - **A session with a standing role** (`session_role`, e.g. the project-home main). It has no shell to
-  run the command, so neither the environment nor the guidance is given. It notifies with the
+  run the command, so neither the notify session nor the guidance is given. It notifies with the
   `NotifyOperator` exec tool instead, and its role prompt names that tool
   ([Session notifications § A session with no shell](session-notifications.md#a-session-with-no-shell-notifyoperator)).
 - **A sandboxed session.** It has no hooks and no hook token.
 
-A cursor-cli session is given the same environment at start and resume (its socket and URL are its
-hooks'), but no guidance paragraph: its CLI has no system-prompt flag this relies on.
+A cursor-cli session gets the same notify session through its pointer at start and resume (its
+socket and URL are its hooks').
 
 ## Proto delta
 
@@ -608,8 +836,8 @@ message StartSessionRequest {
 
 `activity.proto` — the activity-status hooks, on `activity.ActivityService` (served by
 `tddy-session-activity`; `#unbundle` node 7 moved them off `connection.ConnectionService`, so the
-hook calls `activity.ActivityService/ReportSessionStatus` — over HTTP at `{daemon_url}/rpc/…`, or over
-the agent-tool socket on Tddy Desktop):
+hook calls `activity.ActivityService/ReportSessionStatus` — over the session OS user's agent-tool socket; `{daemon_url}/rpc/…`
+over HTTP for a hook command given no socket):
 
 ```proto
 rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);
@@ -666,7 +894,7 @@ claude --model <model> --session-id <id> "build feature X"
 
 ### Telegram: `/start-claude <prompt>`
 
-The Telegram `/start-claude <prompt>` flow (see [telegram-session-control.md](telegram-session-control.md)) seeds the session with the user's message. After project → branch → model selection, `spawn_telegram_claude_cli` reads `initial_prompt` from `changeset.yaml` and passes it to `ClaudeCliSessionManager::start(…, initial_prompt)`.
+The Telegram `/start-claude <prompt>` flow (see [telegram-session-control.md](telegram-session-control.md#cli-agent-starts-start-agent-start-claude-start-cursor)) seeds the session with the user's message. After project → branch → model selection (the models of `claude.yaml`), Telegram sends `initial_prompt` as the request's `initial_prompt` through the daemon's generic start, so the session gets the same spec launch, hooks file and hook token as a web start.
 
 ### Resume does not replay
 

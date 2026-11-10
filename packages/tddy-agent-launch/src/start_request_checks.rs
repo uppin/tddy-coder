@@ -3,13 +3,12 @@ use std::path::Path;
 
 use tddy_core::{write_session_github_source, SessionGithubSource};
 
-use crate::cli_harness_jail::require_sandbox_hosts;
 use crate::stack_seed_validation::validate_stack_seed_base_session;
-use tddy_core::cli_harness::{cli_harness_requires_model, CliHarness};
 
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_split::service_util;
 
+use tddy_coding_agent_specs::{Capability, CodingAgentSpec};
 use tddy_rpc::Status;
 
 use tddy_service::proto::session::{BranchConflict, StartSessionResponse};
@@ -58,38 +57,34 @@ pub(crate) fn record_requested_github_source(
         .map_err(|e| Status::internal(format!("failed to record the session's GitHub source: {e}")))
 }
 
-/// A start of a registered CLI harness that cannot be served is refused before anything is
-/// created: none of them has a workflow of its own for a managed codebase to drive, and a sandboxed
-/// one must be a harness the sandbox runner hosts (refused naming the runner, before any provider
-/// route is resolved).
-pub(crate) fn refuse_an_unsupported_cli_harness_start(
-    harness: &CliHarness,
+/// A start of a CLI coding agent that cannot be served is refused before anything is created: a
+/// managed codebase is refused, `INVALID_ARGUMENT` naming the agent, for a spec that does not declare
+/// `managed_workflow` (`#agent-tools 14/19`). A sandboxed start's placement is the spec's own refusal
+/// (`LaunchSessions::require_sandbox_placement`), checked by the caller.
+pub(crate) fn refuse_an_unsupported_cli_session_start(
+    spec: &CodingAgentSpec,
+    session_type: &str,
     req: &StartSessionRequest,
 ) -> Result<(), Status> {
-    if req.managed_codebase {
+    if req.managed_codebase && !spec.has(Capability::ManagedWorkflow) {
         return Err(Status::invalid_argument(format!(
-            "managed_codebase is not supported for {} sessions",
-            harness.session_type
+            "managed_codebase is not supported for {session_type} sessions: {} declares no \
+             managed_workflow",
+            spec.id
         )));
-    }
-    if req.sandbox {
-        require_sandbox_hosts(harness)?;
     }
     Ok(())
 }
 
-/// The session types that run their agent in tmux. Any other type ignores `run_in_tmux`.
-pub(crate) const TMUX_RUN_SESSION_TYPES: [&str; 5] = [
-    "claude-cli",
-    "cursor-cli",
-    "opencode-cli",
-    "muse-cli",
-    "warp-cli",
-];
+/// Whether `session_type` is a CLI agent's, which runs its agent in tmux when asked. Any other type
+/// ignores `run_in_tmux`.
+fn runs_in_tmux(session_type: &str) -> bool {
+    session_type.ends_with(tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX)
+}
 
 /// A start that asks for a tmux-run agent together with a placement that is not a plain agent on
-/// this host is refused before anything is created, for every session type in
-/// [`TMUX_RUN_SESSION_TYPES`], naming the conflict:
+/// this host is refused before anything is created, for every CLI agent's session type (`*-cli`),
+/// naming the conflict:
 ///
 /// - `sandbox` confines the agent in its own jail, which a tmux session on the host is not;
 /// - `sandboxed_codebase` withdraws the agent's native tools and jails the code, so there is no host
@@ -97,7 +92,7 @@ pub(crate) const TMUX_RUN_SESSION_TYPES: [&str; 5] = [
 /// - `codebase_daemon_instance_id` (split placement) puts the worktree on another daemon, while the
 ///   tmux session is as this host's OS user in a local worktree.
 pub(crate) fn refuse_a_conflicting_tmux_run_start(req: &StartSessionRequest) -> Result<(), Status> {
-    if !TMUX_RUN_SESSION_TYPES.contains(&req.session_type.trim()) || !req.run_in_tmux {
+    if !runs_in_tmux(req.session_type.trim()) || !req.run_in_tmux {
         return Ok(());
     }
     if req.sandbox {
@@ -123,11 +118,17 @@ pub(crate) fn refuse_a_conflicting_tmux_run_start(req: &StartSessionRequest) -> 
     Ok(())
 }
 
-/// claude-cli and cursor-cli always need a model: a start naming either type without one is
-/// refused before anything is created.
-pub(crate) fn refuse_a_cli_start_without_a_model(req: &StartSessionRequest) -> Result<(), Status> {
+/// An agent that declares `requires_model` always needs a model: a start naming its session type
+/// without one is refused before anything is created.
+pub(crate) fn refuse_a_cli_start_without_a_model(
+    req: &StartSessionRequest,
+    agents: Option<&crate::spec_launch::HostCodingAgents>,
+) -> Result<(), Status> {
     let session_type = req.session_type.trim();
-    if cli_harness_requires_model(session_type) && req.model.trim().is_empty() {
+    let requires_model = agents
+        .and_then(|agents| agents.agents().for_session_type(session_type))
+        .is_some_and(|spec| spec.has(tddy_coding_agent_specs::Capability::RequiresModel));
+    if requires_model && req.model.trim().is_empty() {
         return Err(Status::invalid_argument(format!(
             "model is required for {session_type} sessions"
         )));
@@ -165,7 +166,7 @@ impl LaunchSessions {
         req: &StartSessionRequest,
         os_user: &str,
     ) -> Result<Option<BranchConflict>, Status> {
-        refuse_a_cli_start_without_a_model(req)?;
+        refuse_a_cli_start_without_a_model(req, Some(&*self.coding_agents))?;
         refuse_an_orchestrated_tool_start(req)?;
         self.owned_branch_conflict(os_user, req).await
     }
@@ -291,5 +292,82 @@ impl LaunchSessions {
         )
         .map_err(tddy_service::to_rpc_status)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod managed_workflow_tests {
+    use pretty_assertions::assert_eq;
+    use tddy_rpc::Code;
+
+    use super::*;
+
+    fn a_managed_start() -> StartSessionRequest {
+        StartSessionRequest {
+            managed_codebase: true,
+            ..Default::default()
+        }
+    }
+
+    fn the_builtin(id: &str) -> CodingAgentSpec {
+        tddy_coding_agent_specs::embedded_spec(id).expect("the spec is built in")
+    }
+
+    #[test]
+    fn a_managed_start_of_an_agent_declaring_managed_workflow_is_admitted() {
+        // When
+        let admitted = (
+            refuse_an_unsupported_cli_session_start(
+                &the_builtin("claude"),
+                "claude-cli",
+                &a_managed_start(),
+            )
+            .map_err(|status| status.message),
+            refuse_an_unsupported_cli_session_start(
+                &the_builtin("cursor"),
+                "cursor-cli",
+                &a_managed_start(),
+            )
+            .map_err(|status| status.message),
+        );
+
+        // Then
+        assert_eq!(admitted, (Ok(()), Ok(())));
+    }
+
+    #[test]
+    fn a_managed_start_of_an_agent_without_managed_workflow_is_refused_naming_the_agent() {
+        // When
+        let refused = refuse_an_unsupported_cli_session_start(
+            &the_builtin("opencode"),
+            "opencode-cli",
+            &a_managed_start(),
+        )
+        .map_err(|status| (status.code, status.message));
+
+        // Then
+        assert_eq!(
+            refused,
+            Err((
+                Code::InvalidArgument,
+                "managed_codebase is not supported for opencode-cli sessions: opencode declares no \
+                 managed_workflow"
+                    .to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn an_unmanaged_start_of_any_agent_is_admitted() {
+        // When
+        let admitted = refuse_an_unsupported_cli_session_start(
+            &the_builtin("opencode"),
+            "opencode-cli",
+            &StartSessionRequest::default(),
+        )
+        .map_err(|status| status.message);
+
+        // Then
+        assert_eq!(admitted, Ok(()));
     }
 }

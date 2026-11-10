@@ -14,6 +14,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
+use tddy_testing_commons::sandbox_fixtures::write_exec_plan;
 
 use tddy_daemon_sandbox::sandbox_session::{
     build_sandbox_runner_env, dial_and_bridge, pick_free_loopback_port, spawn_sandbox_runner,
@@ -77,19 +78,13 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
 
     // The agent must outlive the tool call below: the host stops collecting the jail's queued
     // frames once the pty command has exited (`SessionEnded`), because a dead agent has no tool
-    // calls left to make. `/bin/sleep` handed claude's argv rejects it and exits at once, so the
-    // fake agent is a script that ignores its arguments and stays alive until the test kills the
-    // jail.
-    let fake_agent = project.join("fake-agent.sh");
-    std::fs::write(&fake_agent, "#!/bin/sh\nexec /bin/sleep 600\n").unwrap();
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&fake_agent, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    // calls left to make. The exec plan names `/bin/sleep 600`, which stays alive until the test
+    // kills the jail.
 
     let ready_marker = project.join("sandbox.ready");
     let tool_ipc_socket = project.join("tool_ipc.sock");
     let session_id = "daemon-stdio-session";
+    let shim_port = pick_free_loopback_port().expect("egress shim port");
     let runner_argv = vec![
         runner.to_string_lossy().to_string(),
         "--session-id".into(),
@@ -102,12 +97,12 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
         tools.to_string_lossy().to_string(),
         "--ready-marker".into(),
         ready_marker.to_string_lossy().to_string(),
-        "--claude-binary".into(),
-        fake_agent.to_string_lossy().to_string(),
-        "--model".into(),
-        "claude-opus-4-8".into(),
-        "--permission-mode".into(),
-        "auto".into(),
+        "--exec-plan".into(),
+        write_exec_plan(&project, &["/bin/sleep", "600"])
+            .to_string_lossy()
+            .to_string(),
+        "--egress-shim-port".into(),
+        shim_port.to_string(),
         "--stdio".into(),
     ];
 
@@ -123,7 +118,6 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
         egress.to_string_lossy().to_string(),
     );
 
-    let shim_port = pick_free_loopback_port().expect("egress shim port");
     let profile_path = project.join("profile.sb");
 
     let mut handle = spawn_sandbox_runner(SandboxRunnerSpawn {
@@ -139,6 +133,8 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
         host_home: None,
         cgroup: Default::default(),
         route: None,
+        context_dir: Some(context.clone()),
+        stdio: true,
     })
     .expect("spawn sandbox-runner");
     // The jail's whole process group goes when the test ends, on a failed assertion or a timeout
@@ -220,16 +216,21 @@ impl Drop for TerminateJailOnDrop {
 
 /// **sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags**: family-C spawn modules in
 /// `tddy-agent-launch` must request the stdio transport and must never build gRPC flags.
+/// `jail_launch.rs` builds the runner argv for every agent launched from its tool definition.
 #[test]
 fn sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags() {
     let sources = [
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tddy-agent-launch/src/jail_launch.rs"
+        )),
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../tddy-agent-launch/src/svc_start_sandboxed_claude_cli_session.rs"
         )),
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../tddy-agent-launch/src/svc_start_sandboxed_cursor_cli_session.rs"
+            "/../tddy-agent-launch/src/svc_start_sandboxed_cli_harness_session.rs"
         )),
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),

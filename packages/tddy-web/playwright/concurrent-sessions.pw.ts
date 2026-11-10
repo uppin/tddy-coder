@@ -1,7 +1,7 @@
 /**
  * Playwright E2E: Two browser windows connect to the same LiveKit room through
  * the real production app flow (GitHub stub auth → ConnectionForm → ConnectedTerminal
- * → GhosttyTerminalLiveKit).
+ * → TerminalViewLiveKit).
  *
  * Each window must get its own independent VirtualTUI instance:
  *   1. Desktop (1280×720) must keep its terminal rendering unchanged when mobile joins.

@@ -22,6 +22,11 @@ struct Args {
     #[arg(long)]
     mcp: bool,
 
+    /// The session's toolcall socket. Without it the session is found through the nearest
+    /// `.tddy/session.json` at or above the working directory, then `TDDY_SOCKET`.
+    #[arg(long, global = true)]
+    socket: Option<std::path::PathBuf>,
+
     #[command(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -160,11 +165,30 @@ fn installed_languages() -> Result<index_client::ColdLanguages> {
     Ok(index_client::ColdLanguages { supports, verifies })
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     init_logging();
 
     let args = Args::parse();
+    // The session this process reports to, found as `tddy_tools::session_source` orders: `--socket`,
+    // the pointer a headless turn wrote, `TDDY_SOCKET`. A command that needs one and finds none
+    // says so itself; a pointer that cannot be read stops everything, never skipped. Adopted here,
+    // before the runtime starts any thread, because adopting writes this process's environment.
+    match tddy_tools::session_source::resolve_current_session(args.socket.as_deref()) {
+        Ok(session) => tddy_tools::session_source::adopt_session(&session),
+        Err(tddy_tools::session_source::SessionNotFound::Nowhere { .. }) => {}
+        Err(unreadable) => {
+            eprintln!("tddy-tools: {unreadable}");
+            std::process::exit(1);
+        }
+    }
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run(args))
+}
+
+async fn run(args: Args) -> Result<()> {
     let connector = room_connector();
     // Once, before anything dispatches: a split session's tool calls, roster and conversation calls
     // all join their room through the tool client's transport.
@@ -200,7 +224,9 @@ async fn main() -> Result<()> {
         Some(Subcommand::Remote(s)) => remote_cli::run_remote(s).await?,
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         Some(Subcommand::Notify(s)) => notify_cli::run_notify(s).await?,
-        Some(Subcommand::ListModels(s)) => tddy_tools::list_models::run_list_models(&s).await?,
+        Some(Subcommand::ListModels(s)) => {
+            tddy_tools::list_models::run_list_models(&s, &agent_models_catalog(&s)?).await?
+        }
         Some(Subcommand::Analyze(s)) => tddy_code_analysis::analyze_cli::run(s)?,
         Some(Subcommand::Restructure(s)) => {
             index_client::run_restructure(s, installed_languages).await?
@@ -258,4 +284,62 @@ async fn run_mcp_server() -> Result<()> {
     announcer.attach(server.peer().clone());
     server.waiting().await?;
     Ok(())
+}
+
+/// Every built-in agent's model catalogue, read from its spec for `tddy-tools list-models`:
+/// the binary is the composition root that reads the registry and injects plain data into
+/// the library. An agent whose spec declares a `models.list_command` lists through it
+/// (rendered with the caller's resolved binary, or the binary name its tool file declares);
+/// every other agent's catalogue is its spec's curated list.
+fn agent_models_catalog(
+    args: &tddy_tools::list_models::ListModelsArgs,
+) -> anyhow::Result<Vec<tddy_tools::list_models::AgentModels>> {
+    use tddy_coding_agent_specs::CodingAgentRegistry;
+    use tddy_tools::list_models::{AgentModels, AgentModelsSource};
+
+    // With `--tools-dir`, the host's registry: the built-ins with that directory's overrides
+    // applied, refused when it does not load. Without it, the built-ins alone.
+    let loaded;
+    let registry = match &args.tools_dir {
+        Some(dir) => {
+            loaded = CodingAgentRegistry::load(dir)
+                .map_err(|err| anyhow::anyhow!("--tools-dir {}: {err}", dir.display()))?;
+            &loaded
+        }
+        None => CodingAgentRegistry::builtin_cached(),
+    };
+    Ok(registry
+        .all()
+        .into_iter()
+        .map(|spec| {
+            let names = vec![
+                spec.id.clone(),
+                format!(
+                    "{}{}",
+                    spec.id,
+                    tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX
+                ),
+            ];
+            // The binary the listing runs: the caller's resolved one, else the name its
+            // tool file declares (`binary.command`), searched on `PATH` by the OS.
+            let binary = args.binary_path.clone().unwrap_or_else(|| {
+                registry
+                    .tools()
+                    .get(&spec.id)
+                    .map(|def| std::path::PathBuf::from(&def.binary.command))
+                    .unwrap_or_default()
+            });
+            let source = match spec.model_listing_argv(&binary) {
+                Some(Ok((argv, adapter))) => AgentModelsSource::Listed { argv, adapter },
+                _ => {
+                    let (models, default_model) = spec.curated_models();
+                    AgentModelsSource::Curated {
+                        models,
+                        default_model,
+                    }
+                }
+            };
+            AgentModels { names, source }
+        })
+        .collect())
 }

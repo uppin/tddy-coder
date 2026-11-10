@@ -25,12 +25,12 @@
 //! everything the session logs still lands where it always did.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use tddy_supervisor::proto::supervisor::clone_event::Event;
-use tddy_supervisor::proto::supervisor::{CloneExited, CloneRepositoryRequest};
+use tddy_supervisor::proto::supervisor::streamed_event::Event;
+use tddy_supervisor::proto::supervisor::{SpawnStreamedRequest, StreamedEvent, StreamedExited};
 use tddy_supervisor::request::{SessionState, SpawnSessionRequest};
-use tddy_supervisor::SupervisorClient;
+use tddy_supervisor::{SupervisorClient, SupervisorError};
 
 use crate::clone_run::CloneHandle;
 use crate::git_progress::{parse, GitProgress, ProgressThrottle};
@@ -43,12 +43,11 @@ use crate::supervisor_client::connect_supervisor;
 
 /// The `SpawnSession` request that starts a planned session child.
 ///
-/// `env` is empty unless the target user's `~/.tddy/config.yaml` declares a `spawn_path_extra`:
-/// `SpawnPolicy::allowed_env_keys` **denies** a request naming a key it does not list rather than
-/// dropping the key, and the shipped policy lists none. So an ordinary session asks for nothing and
+/// `env` is empty unless the target user's `~/.tddy/config.yaml` declares a `spawn_path_extra`.
+/// The supervisor's one env rule passes the daemon's env whole (loader variables refused,
+/// `HOME`/`USER`/`LOGNAME` forced from the account), so an ordinary session asks for nothing and
 /// is spawned with the environment root chose for it, while a user who asked for a `PATH` prefix
-/// either gets it or has their spawn refused — never silently loses it. An operator granting
-/// `spawn_path_extra` must therefore list `PATH` in the supervisor's `spawn_policy.allowed_env_keys`.
+/// either gets it or has their spawn refused — never silently loses it.
 pub fn spawn_session_request(
     os_user: &str,
     program: &Path,
@@ -76,12 +75,12 @@ pub fn spawn_session_request(
 /// `request` with the commit identity a session is spawned under ([`SpawnOptions::git_environment`])
 /// added to its `env`.
 ///
-/// Like `PATH`, every one of these keys (the commit identity and `TDDY_GITHUB_SOURCE`) must be listed in the supervisor's
-/// `spawn_policy.allowed_env_keys` or the spawn is refused outright — which is the point: a session
-/// that silently started under the machine's identity instead of its project's account is the
-/// failure this exists to prevent. A project that resolves to no account adds no key, so the shipped
-/// empty policy still permits its spawn. Only [`spawner::SESSION_GIT_ENVIRONMENT_KEYS`] ever get
-/// here ([`spawner::plan_session_child`] refuses the rest), so no token can ride this wire.
+/// These keys (the commit identity and `TDDY_GITHUB_SOURCE`) pass whole under the supervisor's
+/// one env rule; none is a loader variable, so none is refused on that account. A session that
+/// silently started under the machine's identity instead of its project's account is the failure
+/// the identity exists to prevent. A project that resolves to no account adds no key. Only
+/// [`spawner::SESSION_GIT_ENVIRONMENT_KEYS`] ever get here ([`spawner::plan_session_child`]
+/// refuses the rest), so no token can ride this wire.
 pub fn with_commit_identity(
     mut request: SpawnSessionRequest,
     git_environment: &[(String, String)],
@@ -237,17 +236,47 @@ pub async fn clone_repo_via_supervisor(
     .await
 }
 
+/// The clone helper (`tddy-git-clone`), from the tddy toolchain beside this process — the install
+/// contract `./install`, `./release` and `scripts/dev-runtime-binaries.sh` keep. Not found is a
+/// refusal naming where it looked: a bare name could never pass the supervisor's exec gate, which
+/// takes only an absolute path under `exec_roots`.
+fn clone_helper_path() -> anyhow::Result<PathBuf> {
+    tddy_daemon_kernel::toolchain::TddyToolchain::resolve(None)
+        .binary(CLONE_HELPER)
+        .map_err(|missing| {
+            anyhow::anyhow!(
+                "failed precondition: a supervised clone runs the clone helper, and {missing}"
+            )
+        })
+}
+
+/// The clone helper's binary name.
+const CLONE_HELPER: &str = "tddy-git-clone";
+
+/// The absolute `git` the clone helper is told to run: the one `on_spawn_child_path` found.
+///
+/// `None` is a refusal naming the missing git, never a bare `git`: the helper runs as the session
+/// user, whose `PATH` would then decide which git a supervised clone runs.
+pub fn git_for_supervised_clone(on_spawn_child_path: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    on_spawn_child_path.ok_or_else(|| {
+        anyhow::anyhow!(
+            "failed precondition: a supervised clone needs `git`, and none is on the spawn-child \
+             PATH ({}); install git on this host",
+            tddy_daemon_kernel::spawn_as_user::merge_spawn_child_path(None)
+        )
+    })
+}
+
 /// Clone `git_url` into `destination` as `os_user` through the supervisor at `socket_path`, with
-/// `env` on the git child: `on_started` once git runs (its handle stops it via `StopSession`),
+/// `env` on the clone child: `on_started` once it runs (its handle stops it via `StopSession`),
 /// `on_progress` for each throttled progress line. Fails with git's own stderr tail.
 ///
-/// One server-streaming `CloneRepository` call: the supervisor runs `git clone --progress` as the
-/// user, into a temporary sibling of `destination` that it renames into place only on success.
-/// `env` is checked against the supervisor's `spawn_policy.allowed_env_keys`, which **denies** a key
-/// it does not list: an operator must list the keys a clone needs — `GIT_SSH_COMMAND`,
-/// `TDDY_DAEMON_URL`, `TDDY_SESSION_TOKEN` for a facilitator-provisioned clone, and
-/// `crate::clone_env::CloneSshEnv::ALLOWED_ENV_KEYS` for passphrase prompts. Git's own absolute path
-/// must be in `allowed_tool_paths`, as it always was; the daemon cannot widen the policy.
+/// One server-streaming `SpawnStreamed` call ([`plan_supervised_clone`]): the supervisor runs the
+/// clone helper as the user and streams its stderr; the helper clones into a partial sibling of
+/// `destination`, renames it into place only on success and removes it on failure. `env` passes
+/// whole under the supervisor's one env rule (loader variables refused), so a clone's SSH settings
+/// need no supervisor configuration. The helper must sit under an `exec_roots` entry; the daemon
+/// cannot widen the policy.
 ///
 /// Unbounded on purpose: how long a clone may take is the caller's deadline, not this function's to
 /// guess. An existing destination is left alone without asking the supervisor for anything.
@@ -258,7 +287,7 @@ pub async fn clone_repo_via_supervisor_with_progress(
     destination: &Path,
     env: BTreeMap<String, String>,
     on_started: impl FnOnce(CloneHandle),
-    mut on_progress: impl FnMut(GitProgress),
+    on_progress: impl FnMut(GitProgress),
 ) -> anyhow::Result<()> {
     if destination.exists() {
         log::info!(
@@ -275,16 +304,50 @@ pub async fn clone_repo_via_supervisor_with_progress(
         os_user,
         destination.display(),
     );
+    let request = supervised_clone_request(os_user, git_url, destination, env)?;
     let mut events = client
-        .clone_repository(CloneRepositoryRequest {
-            os_user: os_user.to_string(),
-            git_url: git_url.to_string(),
-            destination: destination.display().to_string(),
-            env: env.into_iter().collect(),
-        })
+        .spawn_streamed(request)
         .await
         .map_err(|e| anyhow::anyhow!("tddy-supervisor refused to clone the repository: {e}"))?;
+    follow_clone_events(
+        &mut events,
+        destination,
+        |pid| on_started(CloneHandle::through_supervisor(socket_path, pid)),
+        on_progress,
+    )
+    .await
+}
 
+/// [`plan_supervised_clone`] with this host's `git` and clone helper resolved — each refused,
+/// naming what is missing, when it cannot be found.
+fn supervised_clone_request(
+    os_user: &str,
+    git_url: &str,
+    destination: &Path,
+    env: BTreeMap<String, String>,
+) -> anyhow::Result<SpawnStreamedRequest> {
+    let git = git_for_supervised_clone(
+        tddy_daemon_kernel::spawn_as_user::find_program_on_spawn_child_path("git"),
+    )?;
+    plan_supervised_clone(
+        os_user,
+        &clone_helper_path()?,
+        &git,
+        git_url,
+        destination,
+        env,
+    )
+}
+
+/// Read a supervised clone's events to their end: `on_started` with the helper's pid once,
+/// `on_progress` for each throttled progress line git wrote, and the clone's outcome from
+/// `Exited`. A stream that ends without `Exited` is a failure, never a success.
+async fn follow_clone_events(
+    events: &mut tokio::sync::mpsc::Receiver<Result<StreamedEvent, SupervisorError>>,
+    destination: &Path,
+    on_started: impl FnOnce(u32),
+    mut on_progress: impl FnMut(GitProgress),
+) -> anyhow::Result<()> {
     let mut on_started = Some(on_started);
     let mut throttle = ProgressThrottle::new();
     while let Some(event) = events.recv().await {
@@ -294,14 +357,14 @@ pub async fn clone_repo_via_supervisor_with_progress(
         match event.event {
             Some(Event::Started(started)) => {
                 if let Some(on_started) = on_started.take() {
-                    on_started(CloneHandle::through_supervisor(socket_path, started.pid));
+                    on_started(started.pid);
                 }
             }
-            Some(Event::Progress(progress)) => {
-                if let Some(progress) = parse(&progress.line) {
-                    if throttle.admit(&progress, std::time::Instant::now()) {
-                        on_progress(progress);
-                    }
+            Some(Event::Line(line)) => {
+                if let Some(progress) = parse(&line.line)
+                    .filter(|progress| throttle.admit(progress, std::time::Instant::now()))
+                {
+                    on_progress(progress);
                 }
             }
             Some(Event::Exited(exited)) => return clone_outcome(&exited, destination),
@@ -314,8 +377,51 @@ pub async fn clone_repo_via_supervisor_with_progress(
     )
 }
 
+/// The one `SpawnStreamed` request of a supervised clone (`#agent-tools` 32/32): the clone helper
+/// (`tddy-git-clone`, beside the daemon) run as the session user, which clones with `git` into a
+/// partial sibling of `destination`, renames it into place, and removes it on failure — all in its
+/// own process, as that user. It writes git's progress lines on stderr, which the daemon parses. The
+/// supervisor knows nothing about clones: it runs one binary and streams its stderr.
+///
+/// `env` (the clone's SSH settings, for one) is passed whole. The helper, `git` and `destination`
+/// must be absolute: a relative one would be resolved by whoever runs it, not by this plan.
+pub fn plan_supervised_clone(
+    os_user: &str,
+    clone_helper: &Path,
+    git: &Path,
+    git_url: &str,
+    destination: &Path,
+    env: BTreeMap<String, String>,
+) -> anyhow::Result<SpawnStreamedRequest> {
+    for (what, path) in [
+        ("the clone helper", clone_helper),
+        ("git", git),
+        ("the clone destination", destination),
+    ] {
+        anyhow::ensure!(
+            path.is_absolute(),
+            "failed precondition: a supervised clone needs an absolute path for {what}, got {}",
+            path.display()
+        );
+    }
+    Ok(SpawnStreamedRequest {
+        os_user: os_user.to_string(),
+        tool_path: clone_helper.display().to_string(),
+        args: vec![
+            "--git".to_string(),
+            git.display().to_string(),
+            "--".to_string(),
+            git_url.to_string(),
+            destination.display().to_string(),
+        ],
+        env: env.into_iter().collect(),
+        working_dir: None,
+        scope: None,
+    })
+}
+
 /// How git's exit reads as a result: success, or git's own words about why not.
-fn clone_outcome(exited: &CloneExited, destination: &Path) -> anyhow::Result<()> {
+fn clone_outcome(exited: &StreamedExited, destination: &Path) -> anyhow::Result<()> {
     if exited.code == Some(0) {
         return Ok(());
     }
@@ -356,4 +462,122 @@ pub(crate) fn stop_supervised_clone(socket_path: &Path, pid: u32) -> std::io::Re
     .join()
     .map_err(|_| std::io::Error::other("the thread stopping the clone panicked"))?
     .map_err(|e| std::io::Error::other(format!("{e:#}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tddy_supervisor::proto::supervisor::{StreamedLine, StreamedStarted};
+
+    const DESTINATION: &str = "/srv/repos/alice/project";
+
+    fn a_stream_of(
+        events: Vec<Result<Event, SupervisorError>>,
+    ) -> tokio::sync::mpsc::Receiver<Result<StreamedEvent, SupervisorError>> {
+        let (sender, receiver) = tokio::sync::mpsc::channel(events.len().max(1));
+        for event in events {
+            sender
+                .try_send(event.map(|event| StreamedEvent { event: Some(event) }))
+                .expect("room for every event");
+        }
+        receiver
+    }
+
+    fn exited(code: Option<i32>, stderr_tail: &str) -> Event {
+        Event::Exited(StreamedExited {
+            code,
+            signal: None,
+            stderr_tail: stderr_tail.to_string(),
+        })
+    }
+
+    fn line(text: &str) -> Event {
+        Event::Line(StreamedLine {
+            line: text.to_string(),
+        })
+    }
+
+    /// The outcome, the pid `on_started` saw and every progress line admitted.
+    async fn following(
+        events: Vec<Result<Event, SupervisorError>>,
+    ) -> (Result<(), String>, Option<u32>, Vec<String>) {
+        let mut started = None;
+        let mut progress = Vec::new();
+        let outcome = follow_clone_events(
+            &mut a_stream_of(events),
+            Path::new(DESTINATION),
+            |pid| started = Some(pid),
+            |seen| progress.push(seen.line),
+        )
+        .await
+        .map_err(|error| error.to_string());
+        (outcome, started, progress)
+    }
+
+    #[tokio::test]
+    async fn a_clone_that_exits_zero_succeeds_after_reporting_its_pid_and_progress() {
+        // When
+        let (outcome, started, progress) = following(vec![
+            Ok(Event::Started(StreamedStarted { pid: 4242 })),
+            Ok(line("Cloning into '/srv/repos/alice/project.partial-1'...")),
+            Ok(line(
+                "Receiving objects:  45% (45/100), 1.00 MiB | 1.00 MiB/s",
+            )),
+            Ok(exited(Some(0), "")),
+        ])
+        .await;
+
+        // Then — a line without progress is not reported as progress
+        assert_eq!(
+            (outcome, started, progress),
+            (
+                Ok(()),
+                Some(4242),
+                vec!["Receiving objects:  45% (45/100), 1.00 MiB | 1.00 MiB/s".to_string()],
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_clone_that_exits_non_zero_fails_with_gits_own_words() {
+        // When
+        let (outcome, _, _) = following(vec![
+            Ok(Event::Started(StreamedStarted { pid: 7 })),
+            Ok(exited(Some(128), "fatal: repository not found")),
+        ])
+        .await;
+
+        // Then
+        let failure = outcome.expect_err("a failed clone is a failure");
+        assert!(
+            failure.contains("code 128") && failure.contains("fatal: repository not found"),
+            "{failure}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_ends_without_an_exit_is_a_failure() {
+        // When
+        let (outcome, _, _) = following(vec![Ok(Event::Started(StreamedStarted { pid: 7 }))]).await;
+
+        // Then
+        let failure = outcome.expect_err("no Exited is never a success");
+        assert!(
+            failure.contains("without saying how git exited"),
+            "{failure}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_stream_fails_the_clone() {
+        // When
+        let (outcome, _, _) = following(vec![Err(SupervisorError::Denied)]).await;
+
+        // Then
+        let failure = outcome.expect_err("a stream error fails the clone");
+        assert!(
+            failure.contains("clone of the repository failed"),
+            "{failure}"
+        );
+    }
 }

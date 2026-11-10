@@ -1,6 +1,5 @@
 //! Which symlinks an agent's context may carry, what each may pull in, and how one is written.
 
-use crate::context_dir::PREAMBLE_FILES;
 use crate::context_manifest::is_excluded;
 use crate::context_manifest::matches_any_exclusion;
 use crate::context_manifest::matches_context_globs;
@@ -134,10 +133,13 @@ pub(super) fn names_a_link(link_rel: &str, globs: &[&str]) -> bool {
     roots_a_directory_glob && !is_excluded(&path)
 }
 
-/// Whether `rel_path` (already normalized) is one of [`PREAMBLE_FILES`] — a path a link may never
+/// Whether `rel_path` (already normalized) is one of the session agent's guidance files
+/// (`instructions.files`, passed in by the caller that read its spec) — a path a link may never
 /// stand at, because the consumer writes the managed-codebase preamble in front of it.
-pub(super) fn is_preamble_path(rel_path: &str) -> bool {
-    PREAMBLE_FILES.contains(&rel_path)
+pub(super) fn is_preamble_path(rel_path: &str, guidance_files: &[std::path::PathBuf]) -> bool {
+    guidance_files
+        .iter()
+        .any(|file| file.to_string_lossy().replace('\\', "/") == rel_path)
 }
 
 /// One link that may travel: where it stands and where it points, both worktree-root-relative and
@@ -164,7 +166,7 @@ pub struct ContextLink {
 ///   `dir/**` glob ([`names_a_link`]). Only that makes it part of the agent's configuration; a link
 ///   found anywhere else, including inside a tree another link pulled in, is not, which is what
 ///   keeps pulling a target in to one hop rather than a crawl;
-/// - it must not stand at a **preamble path** ([`PREAMBLE_FILES`]). The consumer writes the
+/// - it must not stand at a **preamble path** (`instructions.files`). The consumer writes the
 ///   managed-codebase preamble in front of `CLAUDE.md`, and a recreated `CLAUDE.md -> AGENTS.md`
 ///   would put it wherever the link points — or nowhere, for a target that is not itself a
 ///   preamble file. The walk follows such a link instead ([`followed_preamble_target`]), so on the
@@ -177,9 +179,14 @@ pub struct ContextLink {
 /// What it cannot answer from strings alone is left to the walk: whether git ignores the target,
 /// and whether the target is readable under a withheld name through another link
 /// ([`is_withheld_through_a_link`]).
-pub fn allow_listed_link(link_rel: &str, target_rel: &str, globs: &[&str]) -> Option<ContextLink> {
+pub fn allow_listed_link(
+    link_rel: &str,
+    target_rel: &str,
+    globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
+) -> Option<ContextLink> {
     let link = normalize_context_path(link_rel)?;
-    if is_preamble_path(&link) || !names_a_link(&link, globs) {
+    if is_preamble_path(&link, guidance_files) || !names_a_link(&link, globs) {
         return None;
     }
     let target = normalize_context_path(target_rel)?;
@@ -203,9 +210,10 @@ pub(crate) fn followed_preamble_target(
     link_rel: &str,
     target_rel: &str,
     globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
 ) -> Option<String> {
     let link = normalize_context_path(link_rel)?;
-    if !is_preamble_path(&link) || !matches_context_globs(&link, globs) {
+    if !is_preamble_path(&link, guidance_files) || !matches_context_globs(&link, globs) {
         return None;
     }
     let target = normalize_context_path(target_rel)?;

@@ -12,7 +12,7 @@ When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the
 
 ## Telegram user ↔ GitHub identity
 
-The library module **`tddy_telegram::telegram_github_link`** binds a **Telegram user id** to a **GitHub login** (JSON store on disk, HMAC-signed OAuth **`state`**, stub OAuth exchange for tests). **`resolved_os_user_for_telegram_workflow`** resolves **`daemon.yaml`** **`users:`** the same way as web OAuth flows.
+The library module **`tddy_telegram::telegram_github_link`** binds a **Telegram user id** to a **GitHub login** (JSON store on disk, HMAC-signed OAuth **`state`**, stub OAuth exchange for tests). **`resolved_os_user_for_telegram_workflow`** resolves the **`users.yaml`** mapping the same way as web OAuth flows.
 
 **`TelegramSessionControlHarness::with_telegram_github_link`** accepts a mapping file path. When that path is set, **`handle_start_workflow`** requires a stored GitHub login for the Telegram **`user_id`** before it creates a session directory. If the user is not linked, the handler fails with a message that instructs the operator to complete GitHub linking (including reference to **`/link-github`** in the error text).
 
@@ -22,8 +22,8 @@ Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`T
 
 | Command | Description |
 |---------|-------------|
-| **`/start-claude <prompt>`** | Start a **Claude Code CLI** session seeded with `<prompt>`. Skips recipe/intent steps entirely; routes through **project → branch → model** keyboards, then spawns `claude --model <model> --session-id <id> "<prompt>"` in a real git worktree. See [/start-claude flow](#start-claude-flow) below. |
-| **`/start-cursor <prompt>`** | Start a **Cursor Agent CLI** session seeded with `<prompt>`. Same **project → branch → model** flow as `/start-claude`, but uses the **`tcur:`** model keyboard and spawns the Cursor Agent CLI binary with hooks installed in the worktree. See [/start-cursor flow](#start-cursor-flow) below. |
+| **`/start-agent <prompt>`** | Start any **CLI coding agent** the host's registry offers, seeded with `<prompt>`: **agent → project → branch → model** keyboards, then the daemon's generic start. See [CLI agent starts](#cli-agent-starts-start-agent-start-claude-start-cursor) below. |
+| **`/start-claude <prompt>`**, **`/start-cursor <prompt>`** | The same start with the `claude` or `cursor` agent pre-picked: **project → branch → model**. |
 | **`/start-workflow <prompt>`** | Create a new session. Bot presents **Recipe: tdd-small** and **More recipes…**; **More recipes** sends a second message with **tdd**, **bugfix**, **free-prompting**, and **grill-me** (compact `mr:` callbacks). Choosing a recipe writes **`changeset.yaml`**, then the operator picks **branch/worktree intent** (new branch from integration base vs work on an existing branch — see below), then a **project**, then an **integration base** (see below), then an **agent** when the daemon **`allowed_agents`** list is non-empty. |
 | **`/chain-workflow <prompt>`** | Create a **child** session for stacked work: the first outbound step is a **parent session picker** (other sessions under the same **`sessions_base`**, newest first, excluding the new child id). Inline buttons use **`tcp:p:<parent_tail8>|s:<child_session_id>`** ( **`CB_TELEGRAM_CHAIN_PARENT`** prefix **`tcp:`**; `parent_tail8` = last 8 chars of parent session id — stable across list churn) within Telegram’s **64-byte** `callback_data` limit. A follow-on message presents the same **recipe** keyboard pattern as **`/start-workflow`**. Authorization and optional **Telegram ↔ GitHub** linking match **`handle_start_workflow`**. **`parse_telegram_chain_parent_callback`** decodes **`tcp:`** payloads (returns `(parent_tail8, child_session_id)`); **`handle_chain_parent_callback`** scans candidates by tail and persists **`previous_session_id`** on the child session. The live **`telegram_bot`** path routes **`tcp:`** callbacks through **`maybe_dispatch_tcp_chain_parent_callback`** (same harness behavior as integration tests). |
 | **`/sessions`** | List sessions (10 at a time). Each session shows status, elapsed time, and workflow state. Paginated with a **"More"** inline keyboard button when more sessions exist. |
@@ -53,6 +53,7 @@ Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`T
 - If a live PID exists in **`.session.yaml`**, the daemon terminates the process before directory removal.
 - The session's room is closed first, through the `SessionRooms` port, before the directory goes.
 - Bot sends a confirmation message after successful deletion.
+- A `/delete` removes an agent session's git worktree as `ConnectionService::DeleteSession` does: the controller passes the host's coding-agent registry, so the worktree goes unless the agent's spec declares `keep_worktree_on_delete` (Cursor keeps its worktree). `workspace` sessions are unaffected (`#agent-tools` 19/19).
 
 ### Branch/worktree intent (`/start-workflow` after recipe)
 
@@ -112,95 +113,100 @@ The harness takes an **allowed chat id list** and a **sessions base directory** 
 
 The daemon binary runs **long-polling** inbound handling (see above). Durable **chat ↔ session** registry across restarts and full **`ConnectionService` / `StartSession`** automation from Telegram remain follow-up work where needed.
 
-## /start-claude flow
+## CLI agent starts: `/start-agent`, `/start-claude`, `/start-cursor`
 
-`/start-claude <prompt>` launches a **Claude Code CLI** session directly from Telegram, seeded with the user's first message. It reuses the existing **project → branch** keyboard infrastructure and adds a **model** picker step before spawning `claude`.
+A Telegram CLI start is the daemon's **one generic start** — the same `StartSession` path a web
+client takes — so a Telegram-started session is indistinguishable from a web-started one: the
+agent's tool definition renders its argv, hooks file and hook token, MCP, provider route, tmux, git
+identity and metadata, and the start's own [branch-conflict guard](session-branch-conflict.md)
+answers for the branch. Telegram names no agent and reads no `claude_cli:` / `cursor_cli:` section:
+the agents and their models come from the host's **coding-agent registry** (the built-in specs plus
+`<tddyhome>/tools`).
 
-### Steps
+### Commands
 
-1. **`handle_start_claude`**: auth + optional GitHub-link gate (same as `/start-workflow`). Creates `session_dir`, writes `changeset.yaml` with:
-   - `initial_prompt: <prompt>`
-   - `name: <first 6 words of prompt>` — used to derive the git branch name
-   - `workflow.branch_worktree_intent: new_branch_from_base` — pre-set so the branch callback knows the intent
-   - `session_type: claude-cli` (raw YAML merge, not in the `Changeset` struct)
-   
-   Sends the **project keyboard** (`tp:` callbacks — same as `/start-workflow`).
-
-2. **Project callback** (`handle_telegram_project_callback`): shows the **branch keyboard** (unchanged).
-
-3. **Branch callback** (`handle_telegram_branch_callback`): sets `workflow.selected_integration_base_ref`. For `claude-cli` sessions, also sets `workflow.new_branch_name` derived from `changeset.name` via `claude_cli_branch_name_from_changeset` (since `validate_workflow_branch_intent` requires `new_branch_name` when `intent == new_branch_from_base`). Detects `session_type == "claude-cli"` from the routing snapshot and sends the **model keyboard** instead of the agent/tddy-coder keyboard — unless another session already owns the derived branch, in which case it sends the **branch-conflict keyboard** instead (see below).
-
-3a. **Branch-conflict keyboard** (`tbc:` callbacks) — the derived `feature/<slug(name)>` collides whenever two sessions are named alike, and Telegram spawns worktrees directly rather than through `StartSession`, so it carries its own copy of the [branch-conflict guard](session-branch-conflict.md). Ownership comes from the shared `tddy_worktree_service::branch_owner::find_session_owning_branch` (prefer active, then most recently updated). Three buttons, payload `tbc:<choice>:<proj_idx>:<session_id>` — the branch name is re-derived server-side because `callback_data` caps at 64 bytes:
-
-   | Button | Choice | Effect |
-   |--------|--------|--------|
-   | `Switch to <label>` | `sw` | Enters the owning session (binds the chat, as its Enter button does). The half-configured pending session is left un-spawned, exactly as abandoning any picker mid-flow does — it is not deleted. |
-   | `New agent on <branch>` | `na` | Rewrites the changeset to `work_on_selected_branch` on that branch and clears `new_branch_name`, so the new session shares the owner's worktree, then continues to the model keyboard. |
-   | `Use <suggested>` | `sg` | Keeps `new_branch_from_base` under the first free `<branch>-<n>`, then continues to the model keyboard. |
-
-   Nothing is claimed while the operator decides: no worktree, no `Changeset.branch`. The check applies only to the claude-cli derivation — `/start-cursor` derives `cursor-cli/<short-id>` from the session id and cannot collide. Unlike the web dialog, `sg` does not re-check whether the suggested name is itself owned.
-
-4. **Model keyboard** (`tcm:` callbacks). One button per entry of
-   `tddy_core::backend::claude_cli_models()` — the same catalog the web dropdown renders, so the
-   keyboard grows or shrinks with the Rust source of truth rather than a local copy. Versionless
-   aliases lead (`opus`, `sonnet`, `haiku`), version-pinned ids follow (`claude-opus-5`,
-   `claude-sonnet-5`, `claude-haiku-4-5-20251001`); button text is the catalog `label`.
-   
-   Encoded as `tcm:<model_idx>|p:<proj_idx>|s:<session_id>` (≤64 bytes). `model_idx` indexes the
-   catalog, so an out-of-range index is rejected rather than silently defaulted.
-
-5. **`handle_telegram_claude_model_callback`**: raw-merges `model` into `changeset.yaml`, calls `spawn_telegram_claude_cli`.
-
-6. **`spawn_telegram_claude_cli`**: reads `initial_prompt`, `model`, branch intent from `changeset.yaml`; resolves `repo_root` via `project_storage`; calls `setup_worktree_for_session_with_optional_chain_base` (blocking, via `tokio::task::spawn_blocking`); launches `claude --model <model> --session-id <id> "<initial_prompt>"` via the shared `Arc<ClaudeCliSessionManager>`; writes `.session.yaml`; optionally bridges LiveKit (non-fatal if unavailable); replies with short session id and attach instructions.
-
-### Changeset routing
-
-The `session_type: claude-cli` raw YAML field is the routing signal. It lives alongside the `Changeset` struct fields in `changeset.yaml`. Since `write_changeset` serializes only the `Changeset` struct (which has no `session_type` field), `handle_telegram_branch_callback` saves the routing snapshot **before** calling `write_changeset` and re-applies `session_type` (and `model`) via raw YAML merge after.
-
-### Shared manager (attachability)
-
-`TelegramWorkflowSpawn.claude_cli_manager` is an `Arc<ClaudeCliSessionManager>` shared with the daemon's `ConnectionServiceImpl`. Sessions spawned via Telegram are therefore immediately attachable via the existing **`StreamSessionTerminalIO`** gRPC stream and the web terminal / `tddy-tools pty-relay`.
-
-### LiveKit
-
-LiveKit bridging is **optional** for `/start-claude` (unlike the tddy-coder path). If `livekit_creds_from_config` returns `None`, the session is still launched — attach via gRPC only.
-
-### Launch-only
-
-The current implementation is **launch-only**: `claude`'s PTY output is not streamed back into Telegram. The operator attaches via the web terminal or `pty-relay`.
-
-## /start-cursor flow
-
-`/start-cursor <prompt>` launches a **Cursor Agent CLI** session from Telegram. It reuses the same **project → branch** keyboard infrastructure as `/start-claude` and adds a **model** picker (`tcur:` callbacks) before spawn.
+- **`/start-agent <prompt>`** — the **agent keyboard** first: one button per registry agent a CLI
+  session can run (a `run:` over a PTY, `for_session_type("<id>-cli")`), labelled by id, in id order.
+  An agent dropped into `<tddyhome>/tools` is offered like a built-in. Payload
+  `tsa:<agent_idx>|s:<session_id>` — an index into that list, because an agent id plus a session
+  uuid would not fit Telegram's 64-byte `callback_data`.
+- **`/start-claude <prompt>`**, **`/start-cursor <prompt>`** — shortcuts that pre-pick the `claude`
+  or `cursor` agent and skip the agent keyboard.
 
 ### Steps
 
-1. **`handle_start_cursor`**: auth + optional GitHub-link gate (same as `/start-workflow`). Creates `session_dir`, writes `changeset.yaml` with `initial_prompt`, `name`, `workflow.branch_worktree_intent: new_branch_from_base`, and `session_type: cursor-cli` (raw YAML merge). Sends the **project keyboard** (`tp:` callbacks).
+1. **Begin** (`handle_start_agent` / `handle_start_claude` / `handle_start_cursor`): authorization and
+   the optional GitHub-link gate (as `/start-workflow`). A host with no coding agents is refused
+   in the chat before anything is created ("this host has no coding agents installed: Telegram
+   cannot start a claude-cli session"); a shortcut whose agent the registry does not offer is refused
+   naming its session type. Otherwise a **pending session** is written: `changeset.yaml` with
+   `initial_prompt`, `name` (first six words), `workflow.branch_worktree_intent:
+   new_branch_from_base`, and — for a shortcut — the raw `session_type: <id>-cli` routing marker.
+   The chat is bound to it, and the **agent keyboard** (`/start-agent`) or the **project keyboard**
+   (`tp:`, shortcuts) is sent.
+2. **Agent pick** (`handle_telegram_agent_pick_callback`, `/start-agent` only): records the chosen
+   agent's session type on the pending session, then sends the project keyboard. An index the
+   registry's CLI agents do not reach is refused.
+3. **Project callback**: the branch keyboard (unchanged).
+4. **Branch callback** (`handle_telegram_branch_callback`): sets the integration base. An agent whose
+   spec declares **`branch_name_required`** gets `workflow.new_branch_name = feature/<slug(name)>`;
+   any other agent leaves the name to the start, which generates one. Then the **model keyboard**.
+5. **Model keyboard** (`tcm:` callbacks): the chosen agent's spec models — `models.default` first,
+   then `models.curated` without it — labelled by id (no spec declares labels). Payload
+   `tcm:<model_idx>|p:<proj_idx>|s:<session_id>`; an out-of-range index is refused, never defaulted.
+   An agent that offers no models and does not require one skips the keyboard and starts straight
+   away; one that declares **`requires_model`** and offers none is refused naming it.
+6. **Start** (`handle_telegram_model_pick_callback` → `start_pending_cli_session`): an
+   `OperatorSessionStart` (OS user, project, session type, model, first prompt, branch choice) goes
+   to the daemon through the **session-starter port** (`tddy_daemon_extensions::SessionStarter`),
+   which asks the start to **reject** a held branch. Telegram bounds the call at 600 s; every step
+   inside the start (worktree setup, a Cursor chat's mint) runs under its own deadline.
+   - **Started**: the generic start created the session under its own id (it honours a requested id
+     only for workspace sessions), so the pending directory is removed, the chat's tracking moves to
+     the started session, and the chat is told its short id and how to attach (its LiveKit room when
+     the metadata names one).
+   - **Branch held**: nothing is created, and the **branch-conflict keyboard** is sent (below). The
+     pending session stays, so the operator can choose again.
+   - **Refused** (no session host bound, an unknown session type, an unresolvable agent binary): the
+     refusal's message is sent to the chat; the pending session stays.
 
-2. **Project callback**: shows the **branch keyboard** (unchanged).
+### Branch-conflict keyboard (`tbc:` callbacks)
 
-3. **Branch callback**: for `session_type == "cursor-cli"`, sets `workflow.new_branch_name` from `changeset.name`, then sends the **Cursor model keyboard** (`tcur:`) instead of the agent keyboard.
+The start's own guard reports the conflict — ownership and the first free `<branch>-<n>` come from
+it, not from a copy in Telegram. Three buttons, payload `tbc:<choice>:<proj_idx>:<session_id>` (the
+branch is re-read from the pending changeset, since it does not fit in 64 bytes):
 
-4. **Model keyboard** (`tcur:` callbacks). One button per entry of
-   `tddy_core::backend::cursor_cli_models()` — the catalog is the source of truth, not a local copy,
-   so the keyboard tracks it (currently `gpt-5.3-codex`, `claude-4.6-sonnet-medium-thinking`,
-   `claude-sonnet-5-thinking-high`, `composer-2.5`, `glm-5.2-high`); button text is the catalog
-   `label`.
+| Button | Choice | Effect |
+|--------|--------|--------|
+| `Switch to <label>` | `sw` | Enters the owning session (binds the chat, as its Enter button does). The pending session is left un-started, as abandoning any picker mid-flow does — it is not deleted. |
+| `New agent on <branch>` | `na` | Rewrites the changeset to `work_on_selected_branch` on that branch and clears `new_branch_name`, so the new session shares the owner's worktree, then continues to the model keyboard. |
+| `Use <suggested>` | `sg` | Keeps `new_branch_from_base` under the first free `<branch>-<n>`, then continues to the model keyboard. |
 
-   Encoded as `tcur:<model_idx>|p:<proj_idx>|s:<session_id>` (≤64 bytes). `model_idx` indexes the
-   catalog, so an out-of-range index is rejected rather than silently defaulted.
+The guard fires only for a named new branch, so an agent whose branch the start generates never
+meets it.
 
-5. **`handle_telegram_cursor_model_callback`**: raw-merges `model` into `changeset.yaml`, calls `spawn_telegram_cursor_cli`.
+### Identity
 
-6. **`spawn_telegram_cursor_cli`**: resolves worktree via `setup_worktree_for_session_with_optional_chain_base`; installs `.cursor/hooks.json` in the worktree; launches Cursor Agent CLI via the shared `Arc<ClaudeCliSessionManager>` (`CliSessionManager::start_cursor`); writes `.session.yaml`; replies with short session id and attach instructions.
+The start is keyed by the OS user Telegram already runs its sessions as
+(`TelegramWorkflowSpawn::os_user`), through the daemon's os-user entry
+(`LaunchSessions::start_session_for_os_user`). No session token is minted and none reaches the
+agent — see [GitHub account in Telegram-started sessions](#github-account-in-telegram-started-sessions).
 
-### Routing and attachability
+### Wiring
 
-The `session_type: cursor-cli` raw YAML field is the routing signal (same merge pattern as `/start-claude`). Sessions share `TelegramWorkflowSpawn.claude_cli_manager` with `ConnectionServiceImpl`, so they are attachable via **`StreamSessionTerminalIO`** and the web terminal.
+Telegram is built before the session host, so the daemon hands it a **`LateBoundSessionStarter`**
+(`Registries::session_starter`) and binds the host's `HostSessionStarter` into it once the host
+exists (`install_session_host`). Until then — and on a daemon that never binds one — a start is
+refused `FAILED_PRECONDITION`, never queued. Telegram's registry is the daemon's one coding-agent
+registry: `runtime::build` loads it once (`host_coding_agents`), before anything is assembled over
+it, and hands the same instance to Telegram, the reserved-ids step and the session host. A registry
+that does not load stops the daemon's start with the error, naming the file — Telegram is never
+built over an empty one.
 
-### Launch-only
+### Attach
 
-PTY output is not streamed into Telegram; attach via web terminal or `pty-relay`.
+A Telegram-started session gets LiveKit PTY exposure the way a web session does. PTY output is not
+streamed into Telegram; attach via the web terminal or `tddy-tools pty-relay`.
 
 ## Tests
 
@@ -212,12 +218,12 @@ PTY output is not streamed into Telegram; attach via web terminal or `pty-relay`
 - **Concurrent elicitation** scenarios (single chat, multiple sessions, active token) live in **`packages/tddy-telegram-control/tests/telegram_concurrent_elicitation_integration.rs`**.
 - **Multi-select shortcuts** (outbound keyboards, parser, metadata gating) live in **`packages/tddy-telegram-control/tests/telegram_multi_select_acceptance.rs`**.
 - **Telegram-tracked session gate and replay** live in **`packages/tddy-telegram-control/tests/telegram_tracked_session_acceptance.rs`**.
-- **`/start-claude` acceptance** (`project → branch → model → PTY spawn`) lives in **`packages/tddy-telegram-control/tests/telegram_start_claude_acceptance.rs`**: `start_claude_creates_session_with_initial_prompt_and_marker`, `start_claude_project_then_branch_routes_to_model_keyboard`, `start_claude_model_callback_launches_claude_cli`, `start_claude_uses_shared_manager`.
-- **`/start-cursor` acceptance** lives in **`packages/tddy-telegram-control/tests/telegram_start_cursor_acceptance.rs`**: project/branch routing to `tcur:` keyboard, model callback spawn, hooks installed in worktree.
+- **CLI agent starts through the spec launch** live in **`packages/tddy-telegram-control/tests/telegram_start_agent_from_spec.rs`** (a host with the built-in registry and stub agents named through each spec's `binary.env`): the claude argv, hooks file and hook token the spec renders; the cursor start with a minted chat id; an agent dropped into `<tddyhome>/tools`; the agent and model keyboards; a host without coding agents refused in the chat; the start guard's branch conflict.
+- **`/start-claude` and `/start-cursor` routing** (pending session, keyboards, the started session replacing the pending one) live in **`telegram_start_claude_acceptance.rs`** and **`telegram_start_cursor_acceptance.rs`**; the branch-conflict keyboard and the 64-byte callback contract in **`telegram_branch_conflict_acceptance.rs`**; callback round-trips and the model and branch-name rules in **`telegram_agent_choices_unit.rs`**; the no-agent-config source check in **`telegram_reads_no_agent_config.rs`**.
 
 ## GitHub account in Telegram-started sessions
 
-A Telegram start has an OS user and a Telegram-to-GitHub-login link, but **no session token**, and a vault opens only by an owner's session token. A Telegram-started session therefore starts under the checkout's own identity and **no GitHub token is ever available to it**. When the project assigns an account, the session's chat is told, after the start message on the workflow, Claude and Cursor paths, that the account's commits and the agent's GitHub tools are unavailable and why, and that starting from the web dashboard acts as the account; the same text is logged at `warn`. A project assigning no account is told nothing.
+A Telegram start has an OS user and a Telegram-to-GitHub-login link, but **no session token**, and a vault opens only by an owner's session token. A Telegram-started session therefore starts under the checkout's own identity and **no GitHub token is ever available to it**. When the project assigns an account, the session's chat is told, after the start message on the workflow and CLI agent paths, that the account's commits and the agent's GitHub tools are unavailable and why, and that starting from the web dashboard acts as the account; the same text is logged at `warn`. A project assigning no account is told nothing.
 
 A project set to **Local gh** needs no vault, so a Telegram start of it acts as the host's `gh` login: the session's commits carry that login's identity and its GitHub steps read the token from `gh`, exactly as for a dashboard start. The chat is not sent the "start from the web dashboard" notice for these projects, since nothing is unavailable. If `gh` is missing or logged out on that host the session starts under the checkout's identity and the reason is logged. See [per-project GitHub identity](github-identity.md#local-gh).
 

@@ -18,14 +18,20 @@ use tddy_worktree_service::worktree_files::{canonicalize_root, validate_rel_path
 pub(super) struct WorktreeReach<'a> {
     worktree_root: &'a Path,
     globs: &'a [&'a str],
+    guidance_files: &'a [std::path::PathBuf],
     walked: Option<Cow<'a, ContextReach>>,
 }
 
 impl<'a> WorktreeReach<'a> {
-    pub(super) fn of(worktree_root: &'a Path, globs: &'a [&'a str]) -> Self {
+    pub(super) fn of(
+        worktree_root: &'a Path,
+        globs: &'a [&'a str],
+        guidance_files: &'a [std::path::PathBuf],
+    ) -> Self {
         Self {
             worktree_root,
             globs,
+            guidance_files,
             walked: None,
         }
     }
@@ -33,11 +39,13 @@ impl<'a> WorktreeReach<'a> {
     pub(super) fn already_walked(
         worktree_root: &'a Path,
         globs: &'a [&'a str],
+        guidance_files: &'a [std::path::PathBuf],
         reach: &'a ContextReach,
     ) -> Self {
         Self {
             worktree_root,
             globs,
+            guidance_files,
             walked: Some(Cow::Borrowed(reach)),
         }
     }
@@ -45,13 +53,17 @@ impl<'a> WorktreeReach<'a> {
     fn get(&mut self) -> Result<&ContextReach, Status> {
         let reach = match self.walked.take() {
             Some(reach) => reach,
-            None => Cow::Owned(context_reach(self.worktree_root, self.globs).map_err(|e| {
-                log::error!(
-                    "resolve_allow_listed_context_file: walking {:?} failed: {e}",
-                    self.worktree_root
-                );
-                Status::internal(format!("failed to walk the context tree: {e}"))
-            })?),
+            None => Cow::Owned(
+                context_reach(self.worktree_root, self.globs, self.guidance_files).map_err(
+                    |e| {
+                        log::error!(
+                            "resolve_allow_listed_context_file: walking {:?} failed: {e}",
+                            self.worktree_root
+                        );
+                        Status::internal(format!("failed to walk the context tree: {e}"))
+                    },
+                )?,
+            ),
         };
         Ok(self.walked.insert(reach))
     }

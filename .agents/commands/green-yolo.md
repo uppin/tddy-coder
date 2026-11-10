@@ -87,6 +87,10 @@ PR=$(gh pr view --json number --jq .number 2>/dev/null || true)   # empty = no P
 - Empty `BRANCH` (detached HEAD) or a trunk branch → stop. This command does not cut branches.
 - Uncommitted tracked changes → stop and ask. A green run must not absorb unrelated work.
 - An existing PR that is **merged or closed** → stop. Use `/follow-up-branch`.
+- **`#muse`** in the invocation (or *"let Muse do it"*): Phases A, B and C are each done by Muse Code
+  through the `muse-subagent` skill — run its *Make the host ready* now, then brief one driver per
+  phase (`G`, then `W`, then `F` resuming `W`'s session). This command's consent and stops are what
+  every stage prompt carries; Phase 0, Phase D and the report stay here.
 - Print the **Progress Tracking** checklist below and keep it updated after every phase. The run is
   long. After a context reset, re-derive the phase from git and PR state (green commits present? PR
   ready? head SHA's checks terminal?) rather than starting over.
@@ -374,6 +378,7 @@ they reached GitHub, so the report is where the developer reviews them.
 **Commands**: `/green` (phase A), `/validate-changes` (phase A), `/pr-wrap` (phase B), `/fix-pr`
 (phase C), `/squash-pr` and `/merge-pr-stack` (next: landing), `/repoint` (phase D),
 `/pr-stack-rebase`, `/yolo-pr-stack` (the whole-stack version that reuses this consent table)
-**Skills**: `tdd`, `code-restructuring`, `analyze-code-issues`, `deferred-work`, `pr-stack`
+**Skills**: `tdd`, `code-restructuring`, `analyze-code-issues`, `deferred-work`, `pr-stack`,
+`muse-subagent` (`#muse`), `behaviour-modifiers`
 (all under `.agents/skills/`)
 **Script**: `scripts/ci-status.sh`

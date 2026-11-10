@@ -36,7 +36,7 @@ use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_service::proto::session::{
     ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -153,8 +153,6 @@ users:
   - github_user: "{user}"
     os_user: "{user}"
 daemon_instance_id: "{LOCAL_INSTANCE_ID}"
-claude_cli:
-  binary_path: /bin/cat
 "#
     );
     serde_yaml::from_str(&yaml).expect("config must parse")
@@ -192,7 +190,11 @@ fn a_daemon_with_no_common_room(sessions_base: PathBuf) -> TestDaemon {
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
+            tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+                "claude",
+                Path::new("/bin/cat"),
+            )]),
         )
         .with_session_tokens(this_daemons_session_tokens().clone()),
     )

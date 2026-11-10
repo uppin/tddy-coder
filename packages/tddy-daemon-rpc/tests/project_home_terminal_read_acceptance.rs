@@ -128,12 +128,16 @@ async fn start_main_terminal(host: &Host, session_id: &str, tui: ScriptedTui) ->
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     let handle = host
         .terminals
-        .start(
+        .start_with_options(
             session_id,
             host.worktree_of(session_id),
             "claude-opus-4-8",
-            script.to_str().unwrap(),
+            vec![script.to_str().unwrap().to_string()],
+            "claude-cli",
             None,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await

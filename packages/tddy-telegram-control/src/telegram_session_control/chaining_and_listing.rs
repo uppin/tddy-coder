@@ -413,6 +413,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             &self.sessions_base,
             session_id,
             None,
+            // The registry this controller holds, so a deleted agent session's worktree goes with
+            // it unless its spec keeps it (`KeepWorktreeOnDelete`).
+            Some(&self.coding_agents),
         )
         .map_err(|s| anyhow::anyhow!("{}", s.message))?;
 

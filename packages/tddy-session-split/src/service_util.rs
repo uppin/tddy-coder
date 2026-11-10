@@ -7,7 +7,6 @@ use tddy_core::BranchWorktreeIntent;
 use tddy_rpc::Status;
 
 use std::time::Duration;
-use tddy_daemon_kernel::config::DaemonConfig;
 
 /// Build a session's semantic index over its worktree into its session dir, blocking until the
 /// index is terminal.
@@ -295,35 +294,4 @@ pub fn resume_agent_and_recipe(
         metadata.agent.as_deref().and_then(trim_to_option),
         metadata.recipe.as_deref().and_then(trim_to_option),
     )
-}
-
-/// Write `.claude/settings.local.json` into `cwd` — the directory `claude` will run in — so Claude
-/// Code wires this session's lifecycle hooks on startup.
-///
-/// Warn-and-continue: a session without hooks reports no status, which is worse than a session that
-/// never started only if the operator cannot see it at all, and it still can.
-pub fn write_claude_hooks_settings(cwd: &Path, params: &tddy_core::HookCommandParams<'_>) {
-    let settings = tddy_core::build_claude_hooks_settings(params);
-    let claude_dir = cwd.join(".claude");
-    if let Err(e) = std::fs::create_dir_all(&claude_dir).and_then(|_| {
-        serde_json::to_string_pretty(&settings)
-            .map_err(|e| std::io::Error::other(e.to_string()))
-            .and_then(|json| {
-                tddy_core::atomic_file::write_atomic(&claude_dir.join("settings.local.json"), json)
-            })
-    }) {
-        log::warn!(
-            "session {}: failed to write .claude/settings.local.json — hooks will not fire: {e}",
-            params.session_id
-        );
-    }
-}
-
-/// Resolve the `claude` binary for the interactive (non-sandboxed) StartSession path.
-///
-/// Delegates to [`tddy_daemon_kernel::config::resolve_claude_binary_path`] so the interactive and
-/// sandboxed spawn paths never diverge on which `claude` they pick (explicit config path honored;
-/// bare name auto-resolved to a real host install).
-pub fn resolve_start_session_claude_binary(config: &DaemonConfig) -> String {
-    tddy_daemon_kernel::config::resolve_claude_binary_path(config)
 }

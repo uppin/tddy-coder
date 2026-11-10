@@ -95,7 +95,7 @@ impl TaskRegistry {
     /// Spawn a task body and register the resulting `TaskHandle`.
     ///
     /// The handle is inserted **before** the body starts (so a racing `WatchTask` never
-    /// misses the registration — mirroring the `ClaudeCliSessionManager` pattern at
+    /// misses the registration — mirroring the `CliSessionManager` pattern at
     /// `claude_cli_session.rs:223`).
     ///
     /// Returns the `Arc<TaskHandle>` so callers can embed the `task_id` in their response.

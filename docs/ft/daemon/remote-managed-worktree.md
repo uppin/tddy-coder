@@ -515,9 +515,11 @@ spawn time. Resume must therefore re-derive the remote wiring from the persisted
 `codebase_daemon_instance_id` / `codebase_session_id` and mint a fresh join token — it cannot
 reuse the original, which is scoped to a lifetime that may have elapsed.
 
-`resume_claude_cli_session` currently rebuilds `env_extra` only from the persisted recipe and takes
-its worktree from `meta.repo_path`. A split session resumed through it today would lose its tool
-transport entirely and fail on the missing worktree.
+`SplitSessions::resume_split_wiring` (`tddy-session-split`) re-derives that wiring, and the one CLI
+resume every claude-cli session takes (`LaunchSessions::resume_cli_harness`) calls it first. A split
+session resumes in its context directory with no commit identity of its own, and is given the
+pre-rendered split flags ahead of its role's and the `TDDY_REMOTE_*` transport, as its split spawn
+gives them. A codebase host that cannot be read refuses the resume.
 
 **Resume reads the roster from the codebase daemon.** A split session's own `.session.yaml` never
 holds a roster — its agents are recorded beside the codebase, on the workspace session the pairing

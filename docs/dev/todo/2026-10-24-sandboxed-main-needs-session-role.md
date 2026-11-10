@@ -1,29 +1,33 @@
-# 2026-10-24 — A sandboxed main is refused because the sandboxed claude-cli start drops `session_role`
+# 2026-10-24 — A sandboxed main carries its role but not the main's tool wiring
 
 **Category:** Future enhancement
 **Source:** 2026-10-24-project-home-from-new-session-form
+**Narrowed:** 2026-11-02 by #794 (`#agent-tools` 5/12)
 
-- `EnsureProjectHomeSession` with a `start` spec refuses `sandbox` (and `sandboxed_codebase`) with
-  `INVALID_ARGUMENT` (`refuse_what_main_cannot_honour`,
-  `packages/tddy-agent-launch/src/project_home_start_spec.rs`, which carries the code `TODO`).
-- **Why deferred:** the sandboxed claude-cli start
-  (`start_sandboxed_claude_cli_from_request`, `packages/tddy-agent-launch/src/cli_branch_starts.rs`)
-  passes `repo_path` and `managed_codebase` but not `session_role`. Only the unsandboxed
-  `start_claude_cli_from_request` carries it. A sandboxed main would therefore run without the
-  `project-home` role in its record, and the daemon would read it as an ordinary session: no
-  read-only refusal in `ExecuteTool`, no project-home tools, no `--allowedTools`. That is exactly the
-  state the role exists to prevent, so the placement is refused rather than started unguarded.
-  Approved by the developer with the PRD.
-- **What would close it** (follow-up PR: carry the role on the sandboxed path, then allow it):
-  thread `session_role` through the sandboxed claude-cli start so `record_role_before_spawn` writes
-  it into the jailed session's initial `.session.yaml` and resume re-applies the role's
-  `--allowedTools`; then drop `sandbox` from the refused placements and add an acceptance case in
-  `packages/tddy-session-lifecycle/tests/ensure_project_home_session_acceptance.rs` that sets main up
-  in a sandbox and asserts the listed session carries `session_role: project-home`. Remove the code
-  `TODO` in `project_home_start_spec.rs` with it.
-- **Also carry the main's tool wiring** (2026-10-24-project-home-agent-tools): an unsandboxed main is
-  launched through `packages/tddy-agent-launch/src/project_home_launch.rs` (`StartRole`, `MainLaunchPlan`:
-  `tddy-tools --mcp` as its only MCP server, `TDDY_REMOTE_*` under a minted agent credential, native
-  tools withdrawn, role prompt). A sandboxed main needs the same, with `tddy-tools` reached from inside
-  the jail — check whether the jail can reach the agent-tool socket / local URL before reusing
-  `colocated_jail_tool_env` as-is.
+## Resolved by #794
+
+The sandboxed claude-cli start now carries `session_role`
+(`start_sandboxed_claude_cli_from_request` → `start_sandboxed_claude_cli_session` →
+`LaunchSessions::launch_jailed`, which calls `record_role_before_spawn`), and
+`write_jail_session_metadata` keeps it. `refuse_what_main_cannot_honour`
+(`packages/tddy-agent-launch/src/project_home_start_spec.rs`) no longer refuses `sandbox`. The
+acceptance case
+`ensure_project_home_session_acceptance::a_project_home_main_set_up_in_a_sandbox_is_listed_with_session_role_project_home`
+pins it (macOS). `sandboxed_codebase` is still refused.
+
+## What is left
+
+- **The main's tool wiring in the jail** (2026-10-24-project-home-agent-tools): an unsandboxed main is
+  launched through `packages/tddy-agent-launch/src/project_home_launch.rs` (`StartRole`,
+  `MainLaunchPlan`: `tddy-tools --mcp` as its only MCP server, `TDDY_REMOTE_*` under a minted agent
+  credential, native tools withdrawn, the role prompt). A jailed main gets none of that: its
+  `--allowedTools` / `--disallowedTools` are the ordinary session's (`claude_jail.rs`,
+  `build_claude_allowlist`), and no role prompt is appended. The role is in its record, so the
+  daemon's read-only refusal in `ExecuteTool` applies; what is missing is the agent-side narrowing.
+- **What would close it:** have `launch_jailed_claude` take the role's plan (allowed tools, prompt
+  file, server env) when `session_role` is `project-home`, with `tddy-tools` reached from inside the
+  jail — check whether the jail can reach the agent-tool socket / local URL before reusing
+  `colocated_jail_tool_env` as-is — and add an acceptance case asserting the jailed main's argv
+  carries the role's `--allowedTools`.
+- **Resume:** a relaunch passes no role (`role: ""`); the start's record keeps it, but a resume that
+  must re-apply the role's `--allowedTools` needs the same plan.

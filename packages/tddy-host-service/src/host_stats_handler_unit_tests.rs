@@ -50,10 +50,15 @@ impl HostStats for FakeHostStats {
 }
 
 fn make_unit_config() -> tddy_daemon_kernel::config::DaemonConfig {
-    let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+    let yaml = "";
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
+    )
+    .unwrap();
     tddy_daemon_kernel::config::DaemonConfig::load(&path).unwrap()
 }
 

@@ -20,10 +20,11 @@ fn workspace_exec_tool_names_match_tool_catalog() {
         .collect();
 
     // When the sandbox's own allowlist is read
-    let sandbox: HashSet<String> = tddy_sandbox::workspace_exec_tool_names()
-        .iter()
-        .map(|name| String::from(*name))
-        .collect();
+    let sandbox: HashSet<String> =
+        tddy_coding_agent_specs::claude_tools::workspace_exec_tool_names()
+            .iter()
+            .map(|name| String::from(*name))
+            .collect();
 
     // Then — the sandbox claude allowlist must cover the same exec tools as ListExecTools
     assert_eq!(

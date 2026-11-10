@@ -1,0 +1,58 @@
+//! Why a tool could not be loaded or resolved. Every variant names the ids and files involved.
+
+use std::path::PathBuf;
+
+use thiserror::Error;
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ToolError {
+    /// The file is not a valid tool definition (YAML, an unknown field, or a schema version).
+    #[error("tool file {}: {message}", file.display())]
+    Parse { file: PathBuf, message: String },
+    /// Two files of one source define the same id.
+    #[error("tool {id} is defined twice: {} and {}", first.display(), second.display())]
+    DuplicateId {
+        id: String,
+        first: PathBuf,
+        second: PathBuf,
+    },
+    /// A tool's `deps` names an id no source defines.
+    #[error("tool {tool} depends on unknown tool {dep}")]
+    UnknownDep { tool: String, dep: String },
+    /// A `binary.sibling_of` names an id that is not one of the tool's `deps`, so the binary would
+    /// sit beside a dep that is never resolved beside it.
+    #[error("tool {tool} sits beside {dep}, which is not one of its deps")]
+    SiblingNotDep { tool: String, dep: String },
+    /// The deps form a cycle, listed in order and closed on its first id.
+    #[error("tool dependency cycle: {}", cycle.join(" → "))]
+    DepCycle { cycle: Vec<String> },
+    /// A caller asked to resolve an id the registry does not hold.
+    #[error("unknown tool {0}")]
+    UnknownTool(String),
+    /// The host cannot satisfy the tool's binary. `searched` says where it looked.
+    #[error("tool {tool} is unavailable: searched {searched}")]
+    Unresolvable { tool: String, searched: String },
+    /// Two tools of one closure put the same command on the jail's `PATH`; one would shadow the other.
+    #[error("tools {first} and {second} both provide the command {command}")]
+    DuplicateCommand {
+        command: String,
+        first: String,
+        second: String,
+    },
+    /// An `extensions:` key no registered [`super::ExtensionOwner`] claims.
+    #[error("tool file {}: unknown extension owner {owner}", file.display())]
+    UnknownExtension { file: PathBuf, owner: String },
+    /// The owner of an `extensions:` section refused it.
+    #[error("tool file {}: extension {owner}: {message}", file.display())]
+    ExtensionRejected {
+        file: PathBuf,
+        owner: String,
+        message: String,
+    },
+    /// A `run.argv` placeholder (`{name}`) no template parameter binds. Never rendered as empty.
+    #[error("tool {tool}: argv placeholder {{{name}}} is unbound")]
+    UnboundPlaceholder { tool: String, name: String },
+    /// The overrides directory exists but could not be read.
+    #[error("tool directory {}: {message}", dir.display())]
+    Io { dir: PathBuf, message: String },
+}

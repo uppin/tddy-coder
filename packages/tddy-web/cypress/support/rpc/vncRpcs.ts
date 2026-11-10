@@ -14,7 +14,7 @@ import {
   StopVncStreamResponseSchema,
   UnlockVncVaultResponseSchema,
   VncTargetSchema,
-} from "../../../src/gen/vnc_pb";
+} from "tddy-client-web/gen/vnc_pb";
 import { toArrayBuffer } from "./protoRpc";
 
 // ---------------------------------------------------------------------------

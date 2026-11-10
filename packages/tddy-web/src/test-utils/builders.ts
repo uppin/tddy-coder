@@ -7,30 +7,23 @@
  * For bun:test only — never import from Cypress tests.
  *
  * For ConnectRPC stubbing prefer `anInMemoryRpcBackend` (re-exported from
- * `tddy-connectrpc-testkit`) over the legacy `aFake*Transport` helpers below.
+ * `tddy-connectrpc-testkit`).
  */
 
 // Re-export the in-memory ConnectRPC backend as a primary test-utils export.
 export { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 
 import { create } from "@bufbuild/protobuf";
-import type { Transport, UnaryResponse } from "@connectrpc/connect";
-import { ConnectError, type Code } from "@connectrpc/connect";
-import type { DescMethod } from "@bufbuild/protobuf";
 
-import { type AgentInfo } from "../gen/catalog_pb";
-import { type BranchResolution } from "../gen/pr_stack_pb";
-import { type ProjectEntry } from "../gen/project_pb";
-import { BranchResolutionSchema } from "../gen/pr_stack_pb";
-import { ProjectEntrySchema } from "../gen/project_pb";
-import { SessionEntrySchema, type SessionEntry } from "../gen/session_pb";
-import { AgentInfoSchema } from "../gen/catalog_pb";
-import { EligibleDaemonEntrySchema, type EligibleDaemonEntry } from "../gen/host_pb";
-import type { StackChildSession } from "../components/sessions/prstack/stackChildSessions";
-import type { StackNode } from "../components/sessions/prstack/stackPlan";
-import type { ViewRect } from "../lib/terminalStatusBarLayout";
-import type { TransitionCounters } from "../components/connection/terminalPresentation";
-import type { RoomParticipant } from "../hooks/useRoomParticipants";
+import { type AgentInfo } from "tddy-client-web/gen/catalog_pb";
+import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
+import { ProjectEntrySchema } from "tddy-client-web/gen/project_pb";
+import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
+import { AgentInfoSchema } from "tddy-client-web/gen/catalog_pb";
+import { EligibleDaemonEntrySchema, type EligibleDaemonEntry } from "tddy-client-web/gen/host_pb";
+import type { ViewRect } from "tddy-terminal-web";
+import type { TransitionCounters } from "tddy-terminal-web";
+import type { RoomParticipant } from "tddy-livekit-web";
 
 // ---------------------------------------------------------------------------
 // Proto: SessionEntry
@@ -65,90 +58,6 @@ export function anActiveSession(overrides: Partial<SessionEntry> = {}): SessionE
 /** Convenience: inactive/exited session with isActive:false, status:"exited", pid:0. */
 export function anInactiveSession(overrides: Partial<SessionEntry> = {}): SessionEntry {
   return aSessionEntry({ isActive: false, status: "exited", pid: 0, ...overrides });
-}
-
-// ---------------------------------------------------------------------------
-// Proto: BranchResolution (QueryBranch)
-// ---------------------------------------------------------------------------
-
-/**
- * A `QueryBranch` resolution with every leg present and empty — no session, no worktree, no PR, and
- * no branch on `origin`. Override only the leg a scenario cares about. Every leg is set explicitly
- * rather than left `undefined`, because "the leg is absent" and "the leg says nothing exists" are
- * different conditions in the PR-Stack view — the `remote` leg most of all, since a *missing*
- * resolution leaves a node startable while `remote.exists === false` blocks it.
- */
-export function aBranchResolution(overrides: Partial<BranchResolution> = {}): BranchResolution {
-  return create(BranchResolutionSchema, {
-    branch: "feature/x/n1",
-    session: { exists: false, sessionId: "", isActive: false, status: "" },
-    worktree: { exists: false, path: "" },
-    pr: { exists: false, number: 0n, url: "", state: "" },
-    remote: { exists: false, sha: "" },
-    ...overrides,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// StackNode (PR-Stack planned PR)
-// ---------------------------------------------------------------------------
-
-/**
- * A planned PR as `parseStackPlan` produces it — every field present and carrying the value an
- * unspawned, branchless, unordered node has. Override only the fields a scenario is about.
- *
- * `displayOrder` defaults to `null` (the plan orders nothing) rather than being left off: absent and
- * `null` mean the same thing to `orderStackNodes` but are different *values*, and only `parseStackPlan`
- * guarantees the field is written. A test about the absent-field case builds it explicitly.
- *
- * The title defaults to the node id so a stack built from ids alone still renders distinguishable
- * rows; a test that reads titles states them.
- */
-export function aStackNode(overrides: Partial<StackNode> = {}): StackNode {
-  const nodeId = overrides.nodeId ?? "n1";
-  return {
-    nodeId,
-    title: nodeId,
-    description: "",
-    branchSuggestion: null,
-    branch: null,
-    sessionId: null,
-    parents: [],
-    prStatus: null,
-    childState: null,
-    childRecipe: "tdd",
-    internalStatus: null,
-    displayOrder: null,
-    ...overrides,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// StackChildSession (a session working a planned PR)
-// ---------------------------------------------------------------------------
-
-/**
- * A live child session of a pr-stack orchestrator, in the shape the view joins on
- * (`stackChildSessions`). Every field present: the association is a set of identities, and "absent"
- * and "empty" are the same value here but never the same *statement* — an empty `stackNodeId` means
- * "claims no node" and must never read as a wildcard.
- *
- * Defaults describe the ordinary case: a live child that names both its orchestrator and its node,
- * and owns the branch it created. A scenario states only the identity it is about — which is what
- * separates the three join legs from each other, since each is defined by which of these fields the
- * child does *not* carry.
- */
-export function aStackChildSession(
-  overrides: Partial<StackChildSession> = {},
-): StackChildSession {
-  return {
-    sessionId: "child-session-1",
-    orchestratorSessionId: "pr-stack-session-1",
-    stackNodeId: "n1",
-    branch: "feature/stack/n1",
-    isActive: true,
-    ...overrides,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -259,88 +168,4 @@ export function aCodexOAuthMeta(fields: {
       state: fields.state ?? "test-state",
     },
   });
-}
-
-// ---------------------------------------------------------------------------
-// RPC Playground: registry helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Returns a registry pre-loaded with the EchoService descriptor fixture.
- * Requires registry.ts and the echoServiceDescriptor fixture to exist (Green phase).
- */
-export async function anEchoRegistry() {
-  const { buildRegistry } = await import("../rpc-playground/registry");
-  const { ECHO_SERVICE_DESCRIPTOR_FIXTURE } = await import(
-    "../rpc-playground/test-fixtures/echoServiceDescriptor"
-  );
-  return buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
-}
-
-// ---------------------------------------------------------------------------
-// RPC Playground: fake transports (legacy — prefer anInMemoryRpcBackend for new tests)
-// ---------------------------------------------------------------------------
-
-/**
- * @deprecated Use `anInMemoryRpcBackend().onUnary(method, handler)` instead.
- *
- * Fake unary Transport that returns a preset JSON response string decoded through the method's
- * output schema — matches the `makeFakeUnaryTransport` pattern in invoke.test.ts.
- */
-export function aFakeUnaryTransport(responseJson: string): Transport {
-  return {
-    async unary(method: DescMethod): Promise<UnaryResponse> {
-      const { fromJsonString } = await import("@bufbuild/protobuf");
-      const output = fromJsonString(method.output, responseJson);
-      return {
-        stream: false,
-        service: method.parent,
-        method,
-        header: new Headers(),
-        trailer: new Headers(),
-        message: output,
-      } as unknown as UnaryResponse;
-    },
-    stream() {
-      throw new Error("stream not expected in this transport");
-    },
-  } as unknown as Transport;
-}
-
-/** Fake Transport that rejects every call with a ConnectError of the given code. */
-export function aFakeErrorTransport(code: Code): Transport {
-  return {
-    async unary() {
-      throw new ConnectError("test error", code);
-    },
-    stream() {
-      throw new ConnectError("test error", code);
-    },
-  } as unknown as Transport;
-}
-
-/**
- * Fake server-streaming Transport that yields each string in `chunks` decoded through the
- * method's output schema — matches the inline streamingTransport in invoke.test.ts.
- */
-export function aFakeStreamingTransport(chunks: string[]): Transport {
-  return {
-    unary() {
-      throw new Error("unary not expected in this transport");
-    },
-    async stream(m: DescMethod) {
-      const { fromJsonString } = await import("@bufbuild/protobuf");
-      return {
-        stream: true,
-        method: m,
-        header: new Headers(),
-        trailer: new Headers(),
-        message: (async function* () {
-          for (const chunk of chunks) {
-            yield fromJsonString(m.output, chunk);
-          }
-        })(),
-      };
-    },
-  } as unknown as Transport;
 }

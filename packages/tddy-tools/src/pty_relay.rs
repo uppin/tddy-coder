@@ -98,13 +98,13 @@ pub struct PtyRelayArgs {
     #[arg(long)]
     pub agent: Option<String>,
 
-    /// Model for claude-cli sessions. Defaults to the versionless `opus` alias so a relay started
-    /// today runs the current Opus; pass a pinned id (e.g. `claude-opus-5`) to fix a generation.
-    #[arg(long, default_value = tddy_core::backend::CLAUDE_DEFAULT_MODEL)]
+    /// Model for the new session's agent. Empty lets the agent run its own default; the
+    /// relay names no agent's model.
+    #[arg(long, default_value = "")]
     pub model: String,
 
-    /// Session type: "claude-cli" (default) or empty for a tool session.
-    #[arg(long, default_value = "claude-cli")]
+    /// Session type: an agent's `<id>-cli`, or empty (the default) for a tool session.
+    #[arg(long, default_value = "")]
     pub session_type: String,
 
     /// Seed the first user prompt for the new session (e.g. "opusplan").
@@ -112,12 +112,12 @@ pub struct PtyRelayArgs {
     #[arg(long)]
     pub initial_prompt: Option<String>,
 
-    /// Permission mode for claude-cli sessions (e.g. "auto", "bypassPermissions", "plan").
-    /// Passed as `--permission-mode <mode>` to the claude binary. Empty defaults to "auto".
+    /// Permission mode for the new session's agent, when its launch takes one. Empty is
+    /// the agent's own default.
     #[arg(long)]
     pub permission_mode: Option<String>,
 
-    /// Start claude-cli inside darwin Seatbelt (`StartSessionRequest.sandbox = true`, macOS only).
+    /// Start the new session inside darwin Seatbelt (`StartSessionRequest.sandbox = true`, macOS only).
     #[arg(long, default_value_t = false)]
     pub sandbox: bool,
 
@@ -193,8 +193,11 @@ mod tests {
         assert_eq!(config.livekit_api_secret, "secret");
         assert_eq!(config.client_identity, "pty-relay-client");
         assert_eq!(config.daemon_url, "http://127.0.0.1:8899");
-        assert_eq!(config.model, tddy_core::backend::CLAUDE_DEFAULT_MODEL);
-        assert_eq!(config.session_type, "claude-cli");
+        assert_eq!(config.model, "", "no agent model is the relay default");
+        assert_eq!(
+            config.session_type, "",
+            "a tool session is the relay default"
+        );
         assert!(!config.sandbox);
     }
 

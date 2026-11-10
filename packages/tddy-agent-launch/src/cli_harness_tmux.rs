@@ -44,30 +44,6 @@ pub struct HarnessTmuxLaunch<'a> {
     pub on_exit: Option<ExitHook>,
 }
 
-impl<'a> HarnessTmuxLaunch<'a> {
-    /// A cursor-cli agent's launch: `argv` built by `CliSessionManager::build_cursor_argv`, and no
-    /// exit hook, so its pane is not kept after the agent exits.
-    pub fn cursor(
-        os_user: &'a str,
-        session_id: &'a str,
-        worktree_path: &Path,
-        session_dir: &Path,
-        argv: Vec<String>,
-        env: Vec<(String, String)>,
-    ) -> Self {
-        HarnessTmuxLaunch {
-            os_user,
-            session_id,
-            worktree_path: worktree_path.to_path_buf(),
-            session_dir: session_dir.to_path_buf(),
-            kind: "cursor-cli",
-            argv,
-            env,
-            on_exit: None,
-        }
-    }
-}
-
 /// Start the harness in a new tmux session for `launch.session_id` and attach the session's main
 /// terminal to it; with `on_exit`, the hook source is registered
 /// ([`CliSessionManager::run_exit_hook_on_agent_exit`]).
@@ -241,6 +217,7 @@ pub struct RecordedHarness<'a> {
 /// ends the tmux session.
 pub async fn reattach_recorded_harness(
     manager: &CliSessionManager,
+    agents: Option<&crate::spec_launch::HostCodingAgents>,
     recorded: RecordedHarness<'_>,
 ) -> Result<bool, Status> {
     let RecordedHarness {
@@ -252,7 +229,7 @@ pub async fn reattach_recorded_harness(
     } = recorded;
     let name = agent_tmux_session_name(session_id);
     let state = probe_pane_state(os_user, &name).await?;
-    let on_exit = recorded_exit_hook(session_type, session_dir);
+    let on_exit = recorded_exit_hook(agents, session_type, session_dir)?;
     match (state, on_exit) {
         (PaneState::Running, on_exit) => {
             let running = RunningHarness {
@@ -286,19 +263,19 @@ pub async fn reattach_recorded_harness(
     }
 }
 
-/// The exit hook a re-attached harness is watched with — the one its launch registered. Every
-/// harness the generic launcher runs (opencode, muse, warp) records the resume token its run
-/// prints as it exits; claude-cli and cursor-cli register none. The session's metadata is already
-/// on disk, so the recorder is armed at once.
-fn recorded_exit_hook(session_type: &str, session_dir: &Path) -> Option<ExitHook> {
-    let generic = tddy_core::cli_harness::cli_harness(session_type).is_some()
-        && !matches!(session_type, "claude-cli" | "cursor-cli");
-    if !generic {
-        return None;
-    }
-    let (hook, arm) = resume_token_recorder(session_dir.to_path_buf());
+/// The exit hook a re-attached harness is watched with — the one its launch registered. A harness
+/// whose spec names a resume adapter (opencode, muse, warp) records the resume token its run prints
+/// as it exits; an agent resumed by its worktree (claude, cursor) registers none. The session's
+/// metadata is already on disk, so the recorder is armed at once.
+fn recorded_exit_hook(
+    agents: Option<&crate::spec_launch::HostCodingAgents>,
+    session_type: &str,
+    session_dir: &Path,
+) -> Result<Option<ExitHook>, Status> {
+    let adapter = crate::harness_from_spec::recorded_resume_token_adapter(agents, session_type)?;
+    let (hook, arm) = resume_token_recorder(session_dir.to_path_buf(), adapter);
     arm.arm();
-    Some(hook)
+    Ok(hook)
 }
 
 /// Run the exit hook of a tmux-run harness whose agent exited while no daemon watched it, on the
@@ -307,12 +284,13 @@ fn recorded_exit_hook(session_type: &str, session_dir: &Path) -> Option<ExitHook
 /// running agent, a gone tmux session or a harness with no exit hook.
 pub(crate) async fn settle_unwatched_agent_exit(
     manager: &CliSessionManager,
+    agents: Option<&crate::spec_launch::HostCodingAgents>,
     os_user: &str,
     session_id: &str,
     session_type: &str,
     session_dir: &Path,
 ) -> Result<(), Status> {
-    let Some(on_exit) = recorded_exit_hook(session_type, session_dir) else {
+    let Some(on_exit) = recorded_exit_hook(agents, session_type, session_dir)? else {
         return Ok(());
     };
     let name = agent_tmux_session_name(session_id);

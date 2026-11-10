@@ -9,8 +9,9 @@ use std::path::PathBuf;
 
 use crate::session_coordinate_handlers::bridge_conn_resume_response;
 
-use tddy_core::cli_harness::cli_harness;
 use tddy_core::read_session_metadata;
+
+use crate::harness_from_spec::cli_launcher;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
@@ -52,47 +53,29 @@ impl LaunchSessions {
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
 
-        // --- claude-cli branch: resume without LiveKit ---
-        if metadata.session_type.as_deref() == Some("claude-cli") {
-            return bridge_conn_resume_response(
-                self.resume_claude_cli_session(
-                    os_user,
-                    &req.session_id,
-                    &sessions_base,
-                    session_dir,
-                    metadata,
-                    &req.session_token,
-                )
-                .await,
-            );
-        }
-
-        // --- cursor-cli branch: resume without LiveKit ---
-        if metadata.session_type.as_deref() == Some("cursor-cli") {
-            return bridge_conn_resume_response(
-                self.resume_cursor_cli(os_user, &req, &session_dir, metadata)
-                    .await,
-            );
-        }
-
-        // --- any other registered CLI harness (opencode-cli, muse-cli): resume without LiveKit ---
-        if let Some(harness) = metadata.session_type.as_deref().and_then(cli_harness) {
+        // Every CLI agent resumes through the one spec-driven launch, read from the agent its
+        // recorded session type names in the host's registry.
+        if let Some(kind) = cli_launcher(
+            Some(&*self.coding_agents),
+            metadata.session_type.as_deref().unwrap_or(""),
+        )? {
             // A sandboxed session resumes in its jail and never on the host's PTY.
             if metadata.sandbox == Some(true) {
                 return bridge_conn_resume_response(
-                    self.resume_sandboxed_cli_harness(
-                        harness,
-                        os_user,
-                        &req,
-                        &session_dir,
-                        metadata,
-                    )
-                    .await,
+                    self.resume_sandboxed_cli_harness(kind, os_user, &req, &session_dir, metadata)
+                        .await,
                 );
             }
             return bridge_conn_resume_response(
-                self.resume_cli_harness(harness, os_user, &req, &session_dir, metadata)
-                    .await,
+                self.resume_cli_harness(
+                    kind,
+                    os_user,
+                    &req,
+                    &sessions_base,
+                    &session_dir,
+                    metadata,
+                )
+                .await,
             );
         }
 
@@ -155,6 +138,7 @@ impl LaunchSessions {
         // re-resolved against the owner's vault as it stands now, and a refusal resumes nothing.
         let provider_route_json = resumed_tool_session_route_json(
             &self.host.session_account_access(&req.session_token),
+            Some(&*self.coding_agents),
             resume_agent.as_deref().unwrap_or_default(),
             &session_dir,
         )?;
@@ -218,42 +202,5 @@ impl LaunchSessions {
             livekit_url: result.livekit_url,
             livekit_server_identity: result.livekit_server_identity,
         }))
-    }
-}
-
-impl LaunchSessions {
-    /// Resume a cursor-cli session on this host's PTY: its process is given the project's account
-    /// identity pairs again and its notify environment, rebuilt from the hook token its record
-    /// holds.
-    async fn resume_cursor_cli(
-        &self,
-        os_user: &str,
-        req: &ResumeSessionRequest,
-        session_dir: &std::path::Path,
-        metadata: tddy_core::SessionMetadata,
-    ) -> Result<Response<ResumeSessionResponse>, Status> {
-        let identity = self.host.session_identity(
-            os_user,
-            &req.session_id,
-            &metadata.project_id,
-            &req.session_token,
-        );
-        let mut agent_env = identity.git_environment;
-        agent_env.extend(crate::cursor_cli_spawn::resumed_cursor_notify_env(
-            &self.config,
-            &self.tddy_data_dir,
-            os_user,
-            &metadata,
-        ));
-        crate::cursor_cli_spawn::resume_cursor_cli_session(
-            &self.claude_cli_manager,
-            &self.config,
-            os_user,
-            &req.session_id,
-            session_dir,
-            metadata,
-            agent_env,
-        )
-        .await
     }
 }

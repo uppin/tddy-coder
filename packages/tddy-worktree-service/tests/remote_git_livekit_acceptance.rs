@@ -262,16 +262,26 @@ async fn a_served_project(suffix: &str) -> AServedProject {
     std::fs::write(
         &config_path,
         format!(
-            "users:\n  - github_user: \"{GITHUB_USER}\"\n    os_user: \"{}\"\n\
+            "\
              github:\n  stub: true\n\
              auth_storage: \"{}\"\n\
              livekit:\n  enabled: true\n  url: \"{ws_url}\"\n  api_key: \"devkey\"\n  \
              api_secret: \"{LK_API_SECRET}\"\n  common_room: \"{room}\"\n",
-            serving_os_user(),
             config_dir.path().join("auth").display()
         ),
     )
     .expect("write daemon.yaml");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!(
+            "- github_user: \"{GITHUB_USER}\"\n  os_user: \"{}\"\n",
+            serving_os_user()
+        ),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
 
     // The daemon's own auth wiring — the OAuth service, the room-token mint, and the resolver both

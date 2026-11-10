@@ -11,7 +11,7 @@ presenter events and metadata ticks into chat messages and keyboards.
 It sits above both `tddy-telegram` and `tddy-session-lifecycle` and is reached by
 `tddy-daemon` alone — see [README.md](../README.md) for why it is a crate of its own.
 
-## `telegram_session_control/` — ten files, one harness
+## `telegram_session_control/` — eleven files, one harness
 
 `mod.rs` holds `TelegramSessionControlHarness` and the inherent methods more than one flow calls; its
 DTOs live in `types.rs`, glob-re-exported from `mod.rs` so every child sees them under the same names.
@@ -21,26 +21,28 @@ family of flows. A private method is
 visible only inside the module that declares it and its children, so a helper two families share
 lives in `mod.rs`, where every child can see it; a free helper they share is `pub(super)` in
 `callbacks` or `workflow_spawn`. Those two hold no harness methods: `callbacks` is pure functions,
-and `workflow_spawn` is `TelegramWorkflowSpawn` and its helpers.
+and `workflow_spawn` is `TelegramWorkflowSpawn` and its helpers. Nor does `agent_choices`, the pure
+registry reads and callback codecs of the CLI starts, glob-re-exported from `mod.rs`.
 
 | Module | Prod lines | Holds |
 |---|---:|---|
-| `callbacks.rs` | 736 | the command and `callback_data` vocabulary: the slash commands, the prefixes, and the pure parsers, formatters and chunkers (`parse_*`, `chunk_telegram_text`) with their unit tests |
-| `pickers.rs` | 617 | the project, branch-intent, branch, branch-conflict, model and agent keyboards, which end in `spawn_telegram_workflow` |
+| `callbacks.rs` | 682 | the command and `callback_data` vocabulary: the slash commands, the prefixes, and the pure parsers, formatters and chunkers (`parse_*`, `chunk_telegram_text`) with their unit tests |
+| `pickers.rs` | 627 | the CLI agent keyboard and its pick, the project, branch-intent, branch, branch-conflict and model keyboards, the workflow agent keyboard, and `pending_session_agent` (the registry spec of a pending session's session type) |
 | `chaining_and_listing.rs` | 518 | `/chain-workflow` and its parent picker, recipe and plan-review callbacks, the session list with Enter and Delete |
-| `workflow_spawn.rs` | 480 | `TelegramWorkflowSpawn`: the chain integration-base merge, the spawn configuration and inputs, and the branch-name helpers the start paths share |
+| `workflow_spawn.rs` | 456 | `TelegramWorkflowSpawn`: the chain integration-base merge, the spawn configuration and inputs, and the branch-name helpers the start paths share |
 | `elicitation.rs` | 456 | presenter input from Telegram: feature submission, document review, elicitation answers, the changeset writes and recipe keyboard around them |
-| `cli_spawns.rs` | 444 | the Claude and Cursor model-pick callbacks and the two CLI spawns they end in, `spawn_telegram_claude_cli` and `spawn_telegram_cursor_cli` — including the terminal exposure a Claude start announces, where the exposure port's `FailedPrecondition` ("nothing is wired") is not logged as a failure |
-| `mod.rs` | 413 | the harness and the shared helpers |
-| `session_start.rs` | 296 | `/start-workflow`, `/start-claude`, `/start-cursor`: session creation up to the model pick |
-| `types.rs` | 151 | the harness's DTOs |
+| `agent_choices.rs` | 245 | what Telegram offers to start, read from the host's coding-agent registry: the CLI agents (`TelegramAgentChoices`), each agent's spec models (`telegram_model_choices`), the spec-driven new-branch name (`branch_name_required`), the `tsa:` / `tcm:` callbacks by index and `TelegramPickRefusal`. Names no agent |
+| `cli_spawns.rs` | 162 | the model-pick callback of a CLI start and the start it ends in: an `OperatorSessionStart` through the session-starter port (no deadline of its own: the daemon's `session_start_timeout_secs` bounds it, and its `DEADLINE_EXCEEDED` is relayed like any refusal), then the started session replacing the pending one, or the branch-conflict keyboard |
+| `mod.rs` | 429 | the harness (with its coding-agent registry and session starter) and the shared helpers |
+| `session_start.rs` | 299 | `/start-workflow`, `/start-agent`, `/start-claude`, `/start-cursor`: the pending session up to the agent or project keyboard |
+| `types.rs` | 168 | the harness's DTOs |
 | `workflow_launch.rs` | 133 | `spawn_telegram_workflow`: from the session's recorded recipe and chain parent to the "Workflow started" message — the spawn deps, the project lookup, the chain child's integration-base merge, the spawn, following the spawned session's presenter stream, and the announcement |
 
 Production lines are counted to the first `#[cfg(test)]`. The repo's file budget is 500; no test
 enforces it (line-budget tests were removed 2026-10-26). The three modules over it each have a record in
 [code-issues/](code-issues/) naming its seams. Two of them (`pickers.rs` and the production half of
 `callbacks.rs`) cannot reach 500 by moving items alone, because their size is in long functions such
-as the 177-line `handle_telegram_branch_callback`.
+as the 135-line `handle_telegram_branch_callback`.
 
 ## GitHub account of a Telegram-started session
 
@@ -49,7 +51,7 @@ credential vault opens only by an owner's session token. Reaching an already-ope
 would let a Telegram chat bypass that gate, so no mechanism exists: a session started here starts under
 the checkout's own identity (no `GIT_*` pairs) and **no GitHub token is available to it**. The
 harness's `notify_account_identity_unavailable` makes that visible: when the project assigns an
-account, the chat is told, after the start message on the workflow, claude-cli and cursor-cli paths,
+account, the chat is told, after the start message on the workflow and CLI agent paths,
 that the account's commits and the agent's GitHub tools are unavailable and why, and that starting from
 the web dashboard acts as the account; the same text is logged at `warn`. A project assigning no account
 is told nothing, since nothing is lost. Product view:

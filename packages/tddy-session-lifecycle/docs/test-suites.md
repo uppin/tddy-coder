@@ -58,8 +58,19 @@ On a macOS developer host this gives 59 targets (58 test binaries plus doctests)
 | `sandboxed_session_lifecycle_acceptance` | 2 (`delete_sandbox_session_stops_child_and_removes_directory`, `resume_sandbox_session_respawns_and_updates_pid`) | the same |
 | `session_sync_livekit_acceptance` | 6 of 6 | `tddy-remote-git-repo is not built`: `./test`'s prebuild does not build it |
 
-So **the sandboxed Claude start, the sandboxed Cursor start and the sandboxed relaunch have no
-passing test on a developer host.** `sandboxed_cli_harness_acceptance` (OpenCode and Muse Code, #670)
-is the exception: it installs the bridge with `install_sandbox_rpc_bridge` and passes against a real
-Seatbelt jail, so it is the pattern for fixing the others. Changing those paths needs that coverage first:
-[`docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md`](../../../docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md).
+`sandboxed_cli_harness_acceptance` (OpenCode and Muse Code, #670) installs the bridge with
+`install_sandbox_rpc_bridge` and passes against a real Seatbelt jail, and so do the suites that pin
+the sandboxed Claude start and relaunch on the shared jail launcher (`LaunchSessions::launch_jailed`,
+[`tddy-agent-launch` module layout](../../tddy-agent-launch/docs/module-layout.md#the-sandboxed-starts-and-relaunch)).
+All three are `#![cfg(target_os = "macos")]` — no CI host runs a Linux jail
+([todo](../../../docs/dev/todo/2026-11-02-ci-runs-no-linux-jail.md)):
+
+| Suite | What it pins |
+|---|---|
+| `sandboxed_claude_launch_baseline` | the start and the relaunch through a recording stub runner: argv, env, mounts and files; the jail home at `<tddyhome>/homes/claude` |
+| `claude_cli_jail_from_spec_acceptance` (fixture `claude_jail_support/`) | a stub `claude` in a real jail sees the spec's argv, `HOME`, `PATH`, proxy env, MCP config and credentials; no `TDDY_*` variable on the agent and the ones it needs on its `tddy-tools` server; the relaunch renders the same spec; a declared host reached through the shim and an undeclared one refused; a routed session reaches its base-URL host and carries no OAuth token secret; `sandbox-claude-home` migrated to `homes/claude` once; no Claude flag on the runner's argv |
+| `ensure_project_home_session_acceptance::a_project_home_main_set_up_in_a_sandbox_is_listed_with_session_role_project_home` | a jailed main keeps `session_role: project-home` |
+
+`sandboxed_claude_cli_acceptance`, `sandboxed_cursor_cli_acceptance`, `sandbox_behavior_acceptance`
+and the two `sandboxed_session_lifecycle_acceptance` tests above stay red on the bridge: their
+fixtures do not install it.

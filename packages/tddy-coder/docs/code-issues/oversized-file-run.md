@@ -16,6 +16,7 @@
 | 2026-09-22 | 2682 | 2682 → 2682 in #493 — catalog paths repointed to `tddy_session_catalog`; not grown |
 | 2026-09-24 | 2707 | 2682 on the merge-base with `origin/master` (`4e7157d2`) → 2707 after #509 (`#keyring` 2/9): the `standalone_auth_provider` / `StandaloneAuthProvider` auth-flow declaration (step 1 V9) and transport stamping. Grown; the split is deferred with the developer's consent to a follow-up after `#keyring` lands, because #510 and #511 touch this file (`docs/dev/todo/2026-09-24-keyring-desktop-login-grew-thirteen-over-budget-files.md`). The step 3.5 gate read 2715; step 4's `build_auth_service_entry` cleanup took 8 back. First `#[cfg(test)]` now at L2708 |
 | 2026-10-21 | 2655 | 2655 → 2655 in #690 (`#satellite` 15/15): one string in `verify_tddy_tools_available` repointed to `cargo build -p tddy-tools-cli`. Touched, not grown |
+| 2026-11-05 | 2646 → 2647 | **regressed** by one line in #821 (`#agent-tools` 15/19): `create_backend`'s claude/cursor/codex arms build `SpecHeadlessBackend` through `headless_backend_from_spec`; measured against `origin/feature/agent-tools/cli-spec-features` (`4552a851c`). Not split: restructuring deferred to the `#agent-tools` sweep node (n20); n16 replaces `create_backend` |
 
 ## What would close it — designed seams
 
@@ -62,3 +63,9 @@ This file has **three** `#[cfg(test)]` modules (L2683, L2880, L4359). Seam A in 
 `session_participant::pending_question::spawn_pending_question_recorder` beside the ACP transcript
 writer (the recorder itself is the new `session_participant/pending_question.rs`, 76). Already over
 budget before this PR, which did not push it past; recorded, not split, by developer instruction.
+
+**Regressed, split deferred (2026-11-02, #795, #agent-tools 6/12):** 2,626 → 2,638 production lines. `create_backend` takes `tools_dir` and `claude` is built by `claude_from_spec::claude_backend_from_spec` (a new 41-line module, not in `run.rs`). deferred to the #agent-tools sweep node (developer, 2026-11-02).
+
+**Regressed, split deferred (2026-11-04, #800, #agent-tools 11/12):** 2,637 → 2,646 production lines. The `claude-acp`, `codex-acp` and `opencode` arms of `create_backend` are built by `acp_from_spec` (a new 120-line module, not in `run.rs`). Deferred to the #agent-tools sweep node (developer, 2026-11-04).
+
+**Shrank, split still deferred (2026-11-05, #822, #agent-tools 16/19):** 2,646 → **2,502 production lines** (-144). `create_backend` (~120 lines) and `BUILTIN_BACKEND_AGENT_IDS` left for `spec_backend_build.rs` (`create_workflow_backend`, `build_spec_backend`); `on_progress` went. Deferred to the #agent-tools sweep node (n20).

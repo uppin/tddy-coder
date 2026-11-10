@@ -64,13 +64,18 @@ fn write_config(max_attachment_bytes: u64) -> (tempfile::TempDir, DaemonConfig) 
     let yaml = format!(
         r#"
 max_attachment_bytes: {max_attachment_bytes}
-users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
 "#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
@@ -143,7 +148,8 @@ fn a_workspace_service_with_cap(max_attachment_bytes: u64) -> Fixture {
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
     .with_staging_base_dir(staging_tmp.path().to_path_buf());
 

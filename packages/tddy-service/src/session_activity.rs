@@ -29,6 +29,19 @@ pub const SESSION_ACTIVITY_TOPIC: &str = "session.activity";
 /// `not_found` at runtime, one caller at a time.
 pub const ACTIVITY_SERVICE: &str = "activity.ActivityService";
 
+/// The hook reports an in-jail `tddy-tools session-hook` sends over the tool-IPC bridge
+/// (`TDDY_SANDBOX_TOOL_IPC`), and the runner relays to the facilitating daemon as a host RPC
+/// (`#agent-tools 7/12`): a jail is handed no host socket path, so this bridge is the only way its
+/// agent's lifecycle hooks reach the daemon.
+///
+/// What the entry costs: both reports authenticate by the per-session `hook_token` they carry,
+/// exactly as they do over HTTP and the agent-tool socket, so the bridge opens no route weaker than
+/// those. `AwaitQuestionAnswer` is deliberately absent — a Cursor hook never waits for an answer.
+pub const IN_JAIL_RELAYABLE_HOOK_REPORTS: [(&str, &str); 2] = [
+    (ACTIVITY_SERVICE, "ReportSessionStatus"),
+    (ACTIVITY_SERVICE, "ReportAgentActivity"),
+];
+
 /// The environment a daemon-launched claude-cli or cursor-cli session's agent is given so that
 /// `tddy-tools notify` can call `ReportOperatorNotification` (`#home-inbox` 1/8).
 ///

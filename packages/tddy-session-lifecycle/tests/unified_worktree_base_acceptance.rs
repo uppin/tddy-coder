@@ -6,6 +6,8 @@
 //! cursor-cli and claude-cli session types — the cursor-cli path was the
 //! regression (hardcoded `None` for the chain base).
 
+mod cursor_cli_support;
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -37,32 +39,41 @@ fn current_os_user() -> String {
 
 fn write_config_with_binary(
     stub_binary: &str,
-    cursor_cli: bool,
-) -> (tempfile::TempDir, DaemonConfig) {
+    for_cursor: bool,
+) -> (tempfile::TempDir, DaemonConfig, String, &'static str) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let section = if cursor_cli {
-        format!("cursor_cli:\n  binary_path: {stub_binary}\n")
-    } else {
-        format!("claude_cli:\n  binary_path: {stub_binary}\n")
-    };
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
+    // The command the stub is installed as on the host's `PATH`: the agent's spec names it.
+    let command = if for_cursor { "agent" } else { "claude" };
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
-{section}"#
-    );
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
-    (dir, config)
+    (dir, config, stub_binary.to_string(), command)
 }
 
-fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+fn minimal_service(
+    config: DaemonConfig,
+    stub: (&str, &str),
+    sessions_base: PathBuf,
+) -> DaemonSessionHost {
+    // A host with no coding agents refuses every agent session: a Cursor or Claude session launches
+    // from its spec, so every host here has them, with the stub installed as the agent the test starts.
+    let cursor_agents = Some(cursor_cli_support::coding_agents_over(&sessions_base));
+    let (stub_binary, command) = stub;
+    cursor_cli_support::install_an_agent_as(&sessions_base, command, stub_binary);
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -74,7 +85,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
             None
         }
     });
-    DaemonSessionHost::new(
+    let service = DaemonSessionHost::new(
         config.clone(),
         sessions_base_resolver,
         tddy_data_dir,
@@ -84,7 +95,12 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
-    )
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
+    );
+    match cursor_agents {
+        Some(agents) => service.with_coding_agents(agents),
+        None => service,
+    }
 }
 
 fn create_test_repo_with_origin(dir: &std::path::Path) {
@@ -282,8 +298,13 @@ async fn cursor_cli_pr_stack_child_bases_off_planned_node_parent() {
     );
 
     let stub = write_echo_argv_script(repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_binary(stub.to_str().unwrap(), true);
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let (_cfg_dir, config, stub_binary, command) =
+        write_config_with_binary(stub.to_str().unwrap(), true);
+    let service = minimal_service(
+        config,
+        (&stub_binary, command),
+        sessions_tmp.path().to_path_buf(),
+    );
 
     // When — start a cursor-cli session chaining onto the orchestrator.
     let resp = service
@@ -326,8 +347,13 @@ async fn claude_cli_pr_stack_child_bases_off_planned_node_parent() {
     );
 
     let stub = write_echo_argv_script(repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_binary(stub.to_str().unwrap(), false);
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let (_cfg_dir, config, stub_binary, command) =
+        write_config_with_binary(stub.to_str().unwrap(), false);
+    let service = minimal_service(
+        config,
+        (&stub_binary, command),
+        sessions_tmp.path().to_path_buf(),
+    );
 
     // When
     let resp = service
@@ -362,8 +388,13 @@ async fn cursor_cli_session_without_stack_parent_uses_default_base() {
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
 
     let stub = write_echo_argv_script(repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_binary(stub.to_str().unwrap(), true);
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let (_cfg_dir, config, stub_binary, command) =
+        write_config_with_binary(stub.to_str().unwrap(), true);
+    let service = minimal_service(
+        config,
+        (&stub_binary, command),
+        sessions_tmp.path().to_path_buf(),
+    );
 
     // When — no stack_parent.
     let resp = service
@@ -466,8 +497,13 @@ async fn explicit_base_override_bypasses_the_gate_for_an_externally_merged_paren
     write_orchestrator_with_externally_merged_parent(sessions_tmp.path(), child_branch);
 
     let stub = write_echo_argv_script(repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_binary(stub.to_str().unwrap(), false);
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let (_cfg_dir, config, stub_binary, command) =
+        write_config_with_binary(stub.to_str().unwrap(), false);
+    let service = minimal_service(
+        config,
+        (&stub_binary, command),
+        sessions_tmp.path().to_path_buf(),
+    );
 
     // When — the operator starts `child` naming the planned node and choosing `origin/main` as the
     // base, the deliberate escape from a stack whose parent has nothing left to offer.
@@ -523,8 +559,13 @@ async fn empty_base_override_still_refuses_when_the_parent_is_branchless_and_non
     write_orchestrator_with_externally_merged_parent(sessions_tmp.path(), child_branch);
 
     let stub = write_echo_argv_script(repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_binary(stub.to_str().unwrap(), false);
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let (_cfg_dir, config, stub_binary, command) =
+        write_config_with_binary(stub.to_str().unwrap(), false);
+    let service = minimal_service(
+        config,
+        (&stub_binary, command),
+        sessions_tmp.path().to_path_buf(),
+    );
 
     // When — the operator names the planned node but sends no base override (the default path).
     let err = service

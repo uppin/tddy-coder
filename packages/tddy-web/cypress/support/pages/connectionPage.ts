@@ -104,7 +104,7 @@ export const connectionPage = {
   // Terminal chrome (after connecting)
   // ---------------------------------------------------------------------------
 
-  /** The terminal container that holds the GhosttyTerminal after a connect. */
+  /** The terminal container that holds the TerminalView after a connect. */
   terminalContainer: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.connectedTerminalContainer, { timeout: 5000, ...options }),
 

@@ -46,7 +46,7 @@ async fn rejects_a_sandbox_spawn_for_an_os_user_outside_the_allowlist() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_session_user("someone-else")
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
 
@@ -69,7 +69,7 @@ async fn rejects_a_sandbox_spawn_for_a_tool_path_outside_the_allowlist() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(allowlisted.path())
+        .with_exec_root(allowlisted.path())
         .start()
         .await;
 
@@ -91,7 +91,7 @@ async fn rejects_a_sandbox_spawn_whose_mount_source_is_outside_every_allowed_roo
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .allowing_mount_root(Path::new("/srv/tddy/repos"))
         .start()
         .await;
@@ -118,7 +118,7 @@ async fn rejects_a_sandbox_spawn_whose_mount_source_escapes_an_allowed_root_by_t
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .allowing_mount_root(Path::new("/srv/tddy/repos"))
         .start()
         .await;
@@ -144,7 +144,7 @@ async fn rejects_a_sandbox_spawn_whose_mount_source_only_shares_a_prefix_with_an
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .allowing_mount_root(Path::new("/srv/tddy/repos"))
         .start()
         .await;
@@ -170,7 +170,7 @@ async fn rejects_a_sandbox_spawn_when_the_policy_grants_no_mount_roots_at_all() 
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
 

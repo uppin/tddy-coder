@@ -47,13 +47,14 @@ use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 pub(super) fn refuse_unlisted_paths(
     served: &ContextManifest,
     globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
 ) -> Result<Vec<ContextLink>, Status> {
     let mut links = Vec::new();
     for entry in served.entries() {
         let Some(target) = &entry.symlink_target else {
             continue;
         };
-        match allow_listed_link(&entry.rel_path, target, globs) {
+        match allow_listed_link(&entry.rel_path, target, globs, guidance_files) {
             Some(link) => links.push(link),
             None => {
                 log::warn!(

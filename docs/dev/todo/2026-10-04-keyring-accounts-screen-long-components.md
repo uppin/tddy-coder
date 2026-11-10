@@ -6,8 +6,8 @@
 
 | Component | File | Lines |
 |---|---|---|
-| `AccountRowView` | `packages/tddy-web/src/components/accounts/AccountsScreen.tsx` | ~65 |
-| `renderOutcome` | `packages/tddy-web/src/components/accounts/AccountsScreen.tsx` | ~64 |
+| `AccountRowView` | `packages/tddy-workspace-web/src/accounts/AccountsScreen.tsx` | ~65 |
+| `renderOutcome` | `packages/tddy-workspace-web/src/accounts/AccountsScreen.tsx` | ~64 |
 | `AccountsAppPage` | `packages/tddy-web/src/components/accounts/AccountsAppPage.tsx` | ~70 |
 
 **Why deferred:** `#keyring` 8/9 (#515) edits both files, so a split here would turn its next

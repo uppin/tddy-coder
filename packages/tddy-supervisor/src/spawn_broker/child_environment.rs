@@ -4,6 +4,7 @@ use crate::spawn_broker::SpawnPlan;
 use crate::spawn_broker::FORWARDED_VARIABLES;
 use crate::spawn_broker::SESSION_PATH;
 use crate::spawn_broker::SUPERVISOR_SOCKET_ENV;
+use crate::spawn_broker::USERS_FILE_ENV;
 use std::collections::BTreeMap;
 use std::ffi::{CString, OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
@@ -55,6 +56,7 @@ impl ChildEnvironment {
         let mut values: BTreeMap<OsString, OsString> = match &plan.environment {
             EnvironmentBase::Inherited { .. } => std::env::vars_os().collect(),
             EnvironmentBase::Minimal => minimal_environment(),
+            EnvironmentBase::Exactly => BTreeMap::new(),
         };
         for (key, value) in &plan.env {
             values.insert(OsString::from(key), OsString::from(value));
@@ -81,10 +83,17 @@ impl ChildEnvironment {
         // anything is added back, so neither a caller nor an inherited value can tell a child where
         // the supervisor listens. Only a declared managed service is told.
         values.remove(OsStr::new(SUPERVISOR_SOCKET_ENV));
+        values.remove(OsStr::new(USERS_FILE_ENV));
         if let EnvironmentBase::Inherited { supervisor_socket } = &plan.environment {
             values.insert(
                 OsString::from(SUPERVISOR_SOCKET_ENV),
                 supervisor_socket.clone().into_os_string(),
+            );
+        }
+        if let Some(users_file) = handover.and_then(|handover| handover.users_file()) {
+            values.insert(
+                OsString::from(USERS_FILE_ENV),
+                users_file.to_path_buf().into_os_string(),
             );
         }
         if let Some(handover) = handover {

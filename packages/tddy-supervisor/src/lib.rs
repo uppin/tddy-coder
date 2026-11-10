@@ -31,7 +31,6 @@ pub mod proto {
 pub mod authz;
 pub mod cgroup_broker;
 pub mod client;
-mod clone;
 pub mod config;
 pub mod error;
 mod handover;
@@ -49,17 +48,22 @@ pub mod services;
 pub mod signals;
 pub mod socket;
 pub mod spawn_broker;
+mod streamed;
 pub mod supervisor;
+pub mod user_sockets;
+pub mod users_file;
+pub mod users_watch;
 
 #[cfg(test)]
 mod test_util;
 
-pub use crate::config::spawn_policy::SpawnPolicy;
+pub use crate::config::spawn_policy::{ExecRoot, SpawnPolicy};
 pub use authz::{Authorizer, PeerIdentity};
 pub use cgroup_broker::CgroupBroker;
 pub use client::SupervisorClient;
 pub use config::{
     CgroupPolicy, HostSocket, ManagedService, RestartPolicy, SocketConfig, SupervisorConfig,
+    UsersConfig,
 };
 pub use error::{ConfigError, SupervisorError};
 pub use request::{
@@ -70,8 +74,8 @@ pub use restart::{BackoffState, RestartDecision};
 pub use service::{ServiceState, ServiceStatus};
 pub use services::{ExitOutcome, ServiceRuntime};
 pub use socket::{
-    host_session_fd_name, resolve_host_session_fds, SocketSource, HOST_SESSION_FD_NAME_PREFIX,
-    MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START, SERVICE_SOCKET_FD_NAME,
+    user_socket_fd_name, SocketSource, MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START,
+    SERVICE_SOCKET_FD_NAME, USER_SOCKET_FD_NAME_PREFIX,
 };
 pub use supervisor::Supervisor;
 
@@ -122,6 +126,51 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
             }
         }
     });
+
+    // Watch users.yaml before the first service starts, so a save during startup is not missed:
+    // a valid edit rebuilds the per-user sockets and restarts the services that serve users, an
+    // invalid one is refused and the running mapping kept.
+    struct SupervisorUsersSink {
+        supervisor: Arc<Supervisor>,
+        handle: tokio::runtime::Handle,
+        // One change applied at a time, in the order they were saved: two overlapping applies
+        // would each stop and start the same service.
+        applying: Arc<tokio::sync::Mutex<()>>,
+    }
+    impl crate::users_watch::UsersWatchSink for SupervisorUsersSink {
+        fn changed(&self, next: &crate::users_file::UsersFile) {
+            let supervisor = Arc::clone(&self.supervisor);
+            let applying = Arc::clone(&self.applying);
+            let next = next.clone();
+            self.handle.spawn(async move {
+                let _one_at_a_time = applying.lock().await;
+                if let Err(error) = supervisor.apply_users_change(&next).await {
+                    log::error!(
+                        target: "tddy_supervisor",
+                        "could not apply a users.yaml change: {error:#}"
+                    );
+                }
+            });
+        }
+        fn refused(&self, why: &ConfigError) {
+            log::warn!(
+                target: "tddy_supervisor",
+                "refusing a users.yaml edit, keeping the running mapping: {why}"
+            );
+        }
+    }
+    let _users_watch = match supervisor.users_config().map(|users| users.file.clone()) {
+        Some(users_file) => Some(crate::users_watch::UsersWatch::spawn(
+            &users_file,
+            supervisor.current_users(),
+            Arc::new(SupervisorUsersSink {
+                supervisor: Arc::clone(&supervisor),
+                handle: tokio::runtime::Handle::current(),
+                applying: Arc::new(tokio::sync::Mutex::new(())),
+            }),
+        )?),
+        None => None,
+    };
 
     supervisor.start_declared_services().await;
     let server = tokio::spawn(crate::server::listener::serve(

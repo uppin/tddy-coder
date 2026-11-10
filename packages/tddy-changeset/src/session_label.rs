@@ -3,11 +3,11 @@
 //! Every surface that shows a session — the web drawer, a Telegram alert, an indicator tooltip —
 //! must call it the same thing, or an operator reading one cannot find it in the other. The rule
 //! is deliberately a mirror of the web's `sessionDrawerLabel`
-//! (`packages/tddy-web/src/utils/sessionDrawerLabel.ts`): **the basename of `repo_path`, else
+//! (`packages/tddy-session-web/src/utils/sessionDrawerLabel.ts`): **the basename of `repo_path`, else
 //! `workflow_goal`, else the first eight characters of `session_id`**. Change one side and the
 //! other must change with it — the parity is pinned case for case by
 //! `packages/tddy-core/tests/session_display_label_acceptance.rs` against
-//! `packages/tddy-web/src/utils/sessionDrawerLabel.test.ts`.
+//! `packages/tddy-session-web/src/utils/sessionDrawerLabel.test.ts`.
 
 /// The display placeholder the daemon's session-list enrichment puts in a field it has no value
 /// for (`SessionListStatusDisplay::all_placeholders`), and which `ListSessions` hands to the

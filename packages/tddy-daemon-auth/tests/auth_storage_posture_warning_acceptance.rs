@@ -85,13 +85,20 @@ fn starts_a_daemon_on(auth_storage: &Path) {
 
 fn a_config_with_auth_storage(auth_storage: &Path) -> DaemonConfig {
     let yaml = format!(
-        "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\n\
+        "github:\n  stub: true\n\
          auth_storage: \"{}\"\n",
         auth_storage.display()
     );
     let config_dir = tempfile::tempdir().expect("a directory for the config file");
     let path = config_dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).expect("the config is written");
+    std::fs::write(
+        path.parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
+    )
+    .expect("the users file is written");
     DaemonConfig::load(&path).expect("the config fixture loads")
 }
 

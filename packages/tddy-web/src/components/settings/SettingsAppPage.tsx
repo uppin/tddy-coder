@@ -9,13 +9,12 @@
  */
 
 import { AppShell } from "../shell/AppShell";
-import { useAuthContext } from "../../hooks/authProvider";
-import { useHttpClient } from "../../rpc/transportProvider";
-import { DaemonConfigService } from "../../gen/daemon_config_pb";
-import { DaemonSettingsScreen } from "./DaemonSettingsScreen";
+import { DaemonConfigService } from "tddy-client-web/gen/daemon_config_pb";
+import { useAuth, useHttpClient } from "tddy-client-web";
+import { DaemonSettingsScreen } from "tddy-workspace-web";
 
 export function SettingsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { sessionToken } = useAuthContext();
+  const { sessionToken } = useAuth();
   const client = useHttpClient(DaemonConfigService);
 
   return (

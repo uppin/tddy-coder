@@ -16,42 +16,57 @@
 //! run's recorder to finish: a resume that follows the exit closely still continues its conversation.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
-use tddy_core::cli_harness_warp::resume_token_from_output;
+use tddy_core::adapters::ResumeTokenAdapter;
 use tddy_core::{read_session_metadata, write_session_metadata};
 use tddy_rpc::Status;
 use tddy_task::TerminalCapture;
 use tokio::sync::oneshot;
 
 /// Releases the recorder built by [`resume_token_recorder`] once the session's metadata is on disk.
-pub(crate) struct ResumeTokenArm(oneshot::Sender<()>);
+/// Holds nothing for an agent with no recorder, so arming it does nothing.
+pub(crate) struct ResumeTokenArm(Option<oneshot::Sender<()>>);
 
 impl ResumeTokenArm {
     /// The metadata is written: the recorder may now add the token to it.
     pub(crate) fn arm(self) {
-        let _ = self.0.send(());
+        if let Some(sender) = self.0 {
+            let _ = sender.send(());
+        }
     }
 }
 
-/// The hook recording the resume token `session_dir`'s terminal prints as it exits, and the arm that
-/// releases it. A run that prints no token leaves the recorded one as it is.
-pub(crate) fn resume_token_recorder(session_dir: PathBuf) -> (ExitHook, ResumeTokenArm) {
+/// The hook recording the resume token `session_dir`'s terminal prints as it exits, read by
+/// `adapter` (the agent's `coding_agent.resume.adapter`), and the arm that releases it. A run that
+/// prints no token leaves the recorded one as it is. An agent with no resume adapter gets no hook:
+/// its resume is by its worktree, so there is no token to record.
+pub(crate) fn resume_token_recorder(
+    session_dir: PathBuf,
+    adapter: Option<Arc<dyn ResumeTokenAdapter>>,
+) -> (Option<ExitHook>, ResumeTokenArm) {
+    let Some(adapter) = adapter else {
+        return (None, ResumeTokenArm(None));
+    };
     let (arm_tx, arm_rx) = oneshot::channel();
     let hook: ExitHook = Box::new(move |capture| {
         Box::pin(async move {
             // A dropped arm (the start failed before writing the metadata) records nothing.
             if arm_rx.await.is_ok() {
-                record_from_capture(&session_dir, &capture);
+                record_from_capture(&session_dir, &capture, adapter.as_ref());
             }
         })
     });
-    (hook, ResumeTokenArm(arm_tx))
+    (Some(hook), ResumeTokenArm(Some(arm_tx)))
 }
 
-/// Records the resume token `capture` ends with, if it holds one.
-fn record_from_capture(session_dir: &Path, capture: &Mutex<TerminalCapture>) {
+/// Records the resume token `adapter` reads from `capture`, if the run printed one.
+fn record_from_capture(
+    session_dir: &Path,
+    capture: &Mutex<TerminalCapture>,
+    adapter: &dyn ResumeTokenAdapter,
+) {
     let output = match capture.lock() {
         Ok(capture) => capture.buffered_bytes().to_vec(),
         Err(_) => {
@@ -62,7 +77,7 @@ fn record_from_capture(session_dir: &Path, capture: &Mutex<TerminalCapture>) {
             return;
         }
     };
-    let Some(token) = resume_token_from_output(&output) else {
+    let Some(token) = adapter.resume_token(&output) else {
         return;
     };
     if let Err(e) = record_resume_token(session_dir, &token) {

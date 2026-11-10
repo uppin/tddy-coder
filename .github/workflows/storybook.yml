@@ -1,0 +1,77 @@
+name: Storybook
+
+# Builds the static Storybook when a change reaches the package that owns it (scripts/web-affected.ts:
+# its own files, any workspace package it depends on, or a global input); otherwise the check passes
+# without building. See docs/dev/guides/ci.md § Web checks.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Keyed on the event too, so a manual dispatch never cancels the pull_request run of the same branch.
+concurrency:
+  group: storybook-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read # the build gate reads a draft's comments for #forcebuild
+
+env:
+  # The workspace package whose `build-storybook` script builds the Storybook.
+  STORYBOOK_PACKAGE: tddy-storybook
+
+jobs:
+  gate:
+    uses: ./.github/workflows/build-gate.yml
+
+  build:
+    name: Storybook build
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false
+
+      - name: Decide whether the Storybook is affected
+        id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = pull_request ]; then
+            range=(--base "$BASE" --head "$HEAD")
+          else
+            range=(--all)
+          fi
+          ./dev bun scripts/web-affected.ts --package "$STORYBOOK_PACKAGE" "${range[@]}" \
+            | grep '^affected=' >> "$GITHUB_OUTPUT"
+
+      - name: bun install
+        if: steps.detect.outputs.affected == 'true'
+        env:
+          CYPRESS_INSTALL_BINARY: "0"
+        run: ./dev bun install --frozen-lockfile
+
+      - name: Build the Storybook
+        if: steps.detect.outputs.affected == 'true'
+        run: ./dev bun run --filter "$STORYBOOK_PACKAGE" build-storybook

@@ -28,7 +28,7 @@ that serves OpenAI Responses or OpenAI Chat Completions.
 3. A chosen account is resolved **before anything is cut or spawned** (see
    [Running on a provider account](#running-on-a-provider-account)).
 4. The daemon cuts a worktree for the session on `opencode-cli/<short id>` when `new_branch_name` is
-   empty (`BranchIntentPolicy::cli_harness("opencode-cli")`), pushing it when **Create remote branch** is set.
+   empty (`harness_from_spec::cli_branch_intent`: `BranchIntentPolicy::cli_agent("opencode-cli", false)` — the spec declares no `branch_name_required`), pushing it when **Create remote branch** is set.
 5. The daemon spawns `opencode [--model <provider/model>] [--prompt <first prompt>]` in the worktree.
    `--model` is passed only when a model was chosen — an empty model leaves the choice to OpenCode.
 6. `StartSessionResponse` returns `session_id`; LiveKit fields are empty.
@@ -38,7 +38,6 @@ Refused starts:
 | Request | Status |
 |---|---|
 | `sandbox = true` with no provider account (none chosen, no default, or **Built in**) | `FAILED_PRECONDITION` "a sandboxed opencode-cli session needs a provider account" — see [Sandbox mode](#sandbox-mode) |
-| `sandbox = true` with a non-blank first prompt | `FAILED_PRECONDITION` — the jail hosts OpenCode without a first prompt |
 | `managed_codebase = true` | `INVALID_ARGUMENT` — OpenCode has no workflow of its own for a managed codebase to drive |
 
 ## Sandbox mode
@@ -46,9 +45,10 @@ Refused starts:
 The web **Create session** pane does not offer a sandbox toggle for OpenCode; the mode is reached through
 `StartSession` directly.
 
-`sandbox = true` runs OpenCode in a jail (macOS Seatbelt, Linux userns + cgroups). The jail hosts
-`tddy-sandbox-runner --agent-kind opencode`, which runs `opencode --model <model>` in its PTY and
-relays the PTY over the daemon's own connection, as a sandboxed Cursor session does. The worktree is
+`sandbox = true` runs OpenCode in a jail (macOS Seatbelt, Linux userns + cgroups). The jail's
+`tddy-sandbox-runner` runs the argv `opencode.yaml`'s `run:` template renders (`opencode --model
+<model> [--prompt <prompt>]`) in its PTY and relays the PTY over the daemon's own connection, as a
+sandboxed Cursor session does. The worktree is
 the daemon's, cut exactly as for an unsandboxed start. The jail's `$HOME` is the session's own
 scratch directory, so a resume finds OpenCode's session store where it left it.
 
@@ -62,14 +62,22 @@ On the account:
   scratch, and `OPENCODE_CONFIG` names it;
 - the key reaches the agent child through the jail's secret-file channel (`TDDY_SECRET_<NAME>`), never
   the jail's environment map or argv;
-- the runner's `--model` is the route's (`tddy-route/<model>`).
+- the agent's `--model` is the route's (`tddy-route/<model>`), so a blank requested model is not
+  refused;
+- the jail's egress admits the hosts `opencode.yaml` declares plus the base-URL host named in the
+  route's files (`opencode.json`), so a routed jail reaches its own provider.
+
+The agent process sees no `TDDY_*` variable: the daemon's `TDDY_*` additions go only to the
+`tddy-tools --mcp` server's environment. It starts from an allow-listed environment
+([Harness profiles § The agent's environment](harness-profiles.md#the-agents-environment)); the
+spec's `pass_env` names `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`.
 
 The binary is resolved to an absolute path on the daemon's `PATH` before the jail is built, because
 the sandbox profile grants reads to it by path. A binary that is not there is refused with
 `FAILED_PRECONDITION`.
 
-The jail's runner hosts **no first prompt**, so a sandboxed start with a non-blank `initial_prompt` is
-refused (`FAILED_PRECONDITION`) rather than dropping the prompt silently. A blank prompt is no prompt.
+A non-blank first prompt is delivered through the spec's argv (`--prompt`). A blank prompt is no
+prompt.
 
 A resume of a sandboxed session relaunches its jail with `--resume` (`opencode --continue`), on the
 account the start recorded and re-resolved from the owner's vault as it stands now. It never resumes
@@ -78,14 +86,19 @@ with the start's statuses.
 
 ## The binary
 
-The binary is resolved as: `TDDY_OPENCODE_CLI` when set and non-blank, else
-`cli_harnesses.opencode-cli.binary_path` in `daemon.yaml`, else `opencode` on `PATH`:
+The binary is resolved as: `TDDY_OPENCODE_CLI` (the spec's `binary.env`) when set and non-blank,
+else the `binary.command` of the `opencode` spec, `opencode` on `PATH`. A different binary is
+declared by overriding the spec ([Declared tools](../../../packages/tddy-actions/docs/declared-tools.md)):
 
 ```yaml
-cli_harnesses:
-  opencode-cli:
-    binary_path: /home/dev/.opencode/bin/opencode
+# <tddyhome>/tools/opencode.yaml — replaces the built-in `opencode` spec whole (same `id`)
+id: opencode
+binary: { command: /home/dev/.opencode/bin/opencode }
+# …the rest of the built-in spec, unchanged
 ```
+
+A `cli_harnesses:` section in `daemon.yaml` is refused at start-up
+([Removed `daemon.yaml` sections](systemd-install.md#removed-daemonyaml-sections)).
 
 The same resolution is used for the start, the resume and the model-list probe.
 
@@ -117,7 +130,7 @@ Context files served to the session's agent: `AGENTS.md`, `.agents/**`, `opencod
 
 ## Resume and delete
 
-- **Resume** relaunches `opencode --continue` in the session's worktree, with neither model nor prompt.
+- **Resume** relaunches `opencode --continue` in the session's worktree, with neither model nor prompt: `opencode.yaml` declares no `coding_agent.conversation`, so its conversation is the worktree's own.
   tddy never learns OpenCode's own session id; a session owns its worktree, so the worktree's last
   OpenCode session is this one. The session's provider route is re-resolved from the owner's vault as
   it stands now and its configuration regenerated. A resume whose worktree is gone is refused with
@@ -136,8 +149,8 @@ The pane's environment carries the session's own (the provider route's key inclu
 - **Resume** re-attaches while the tmux session is alive; otherwise it starts a fresh tmux session
   running `opencode --continue`.
 - **Re-attach after a restart.** The first stream, input or history read of the session's `main`
-  terminal on a daemon that has none re-attaches it, dispatched by the session type `.session.yaml`
-  records, so the main keeps its kind (`opencode-cli`). The agent is never relaunched and the recorded `pid`
+  terminal on a daemon that has none re-attaches it as the agent the session type `.session.yaml`
+  records names among the host's installed coding agents, so the main keeps its kind (`opencode-cli`). The agent is never relaunched and the recorded `pid`
   is unchanged.
 - The shared harness path registers the resume-token reader as an exit hook (see
   [Warp § tmux mode](warp-cli-session.md#tmux-mode)), so the pane is kept after `opencode` exits until
@@ -147,18 +160,23 @@ The pane's environment carries the session's own (the provider route's key inclu
 ## Running on a provider account
 
 An opencode-cli session can run on any provider account whose endpoint serves OpenAI Responses or
-OpenAI Chat Completions. The start resolves the account first, then writes, owner-only (`0600`), into
-the session directory an `opencode.json` that declares the account as provider `tddy-route` and
-selects the model on it:
+OpenAI Chat Completions. The start resolves the account first, then generates an OpenCode
+configuration that declares the account as provider `tddy-route` and selects the model on it. The
+configuration is carried **inline**, in `OPENCODE_CONFIG_CONTENT` (`opencode.yaml`'s `route.shape:
+inline_config`, `route.config_env`); no file is written:
 
 | Account serves | Provider package | Model entry |
 |---|---|---|
 | OpenAI Responses (preferred) | `@ai-sdk/openai`, `baseURL` = the Responses root | `options.include = ["reasoning.encrypted_content"]`, so reasoning is carried across turns |
 | only OpenAI Chat Completions | `@ai-sdk/openai-compatible`, `baseURL` = the Chat root | — |
 
-The key is referenced in the file as `{env:TDDY_OPENCODE_PROVIDER_KEY}` and never written into it. The
-child is launched with `OPENCODE_CONFIG=<session dir>/opencode.json`, `TDDY_OPENCODE_PROVIDER_KEY=<key>`
-and `--model tddy-route/<model>`. The account id and model are recorded beside the session (never the
+The key is referenced in the configuration as `{env:OPENCODE_PROVIDER_KEY}` (`opencode.yaml`'s
+`route.key_env`) and never written into it. The child is launched with
+`OPENCODE_CONFIG_CONTENT=<configuration>`, `OPENCODE_PROVIDER_KEY=<key>` and
+`--model tddy-route/<model>`; `OPENCODE_CONFIG` is not set, and it sees no `TDDY_*` route variable.
+Inline configuration outranks a worktree's own `opencode.json`, so a repository cannot redirect the
+route's endpoint. A jailed start hands the key into
+the jail the same way. The account id and model are recorded beside the session (never the
 key), so a resume re-applies them. A start that chooses no account writes no configuration and runs on
 the person's own OpenCode setup.
 

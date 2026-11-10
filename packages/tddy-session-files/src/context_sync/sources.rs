@@ -22,7 +22,8 @@ use tddy_sandbox::{context_reach, ContextEntry, ContextManifest, ContextReach};
 /// away.
 pub struct LocalWorktreeSource {
     worktree_root: PathBuf,
-    globs: &'static [&'static str],
+    globs: Vec<String>,
+    guidance_files: Vec<std::path::PathBuf>,
     max_bytes: u64,
     /// The walk the last manifest was taken with, which that tick's reads are answered from.
     ///
@@ -35,10 +36,16 @@ pub struct LocalWorktreeSource {
 }
 
 impl LocalWorktreeSource {
-    pub fn new(worktree_root: PathBuf, globs: &'static [&'static str], max_bytes: u64) -> Self {
+    pub fn new(
+        worktree_root: PathBuf,
+        globs: Vec<String>,
+        guidance_files: Vec<std::path::PathBuf>,
+        max_bytes: u64,
+    ) -> Self {
         Self {
             worktree_root,
             globs,
+            guidance_files,
             max_bytes,
             reach: std::sync::Mutex::new(None),
         }
@@ -60,11 +67,19 @@ impl ContextSource for LocalWorktreeSource {
             );
             Status::internal(format!("failed to read local context manifest: {e}"))
         };
-        let manifest =
-            ContextManifest::of_worktree(&self.worktree_root, self.globs, self.max_bytes)
-                .map_err(|e| failed(format!("{e:#}")))?;
-        let reach =
-            context_reach(&self.worktree_root, self.globs).map_err(|e| failed(format!("{e:#}")))?;
+        let manifest = ContextManifest::of_worktree(
+            &self.worktree_root,
+            &self.globs.iter().map(String::as_str).collect::<Vec<_>>(),
+            &self.guidance_files,
+            self.max_bytes,
+        )
+        .map_err(|e| failed(format!("{e:#}")))?;
+        let reach = context_reach(
+            &self.worktree_root,
+            &self.globs.iter().map(String::as_str).collect::<Vec<_>>(),
+            &self.guidance_files,
+        )
+        .map_err(|e| failed(format!("{e:#}")))?;
         *self.held_reach() = Some(reach);
         Ok(manifest)
     }
@@ -74,13 +89,18 @@ impl ContextSource for LocalWorktreeSource {
             Some(reach) => read_context_file_bytes_within(
                 &self.worktree_root,
                 rel_path,
-                self.globs,
+                &self.globs.iter().map(String::as_str).collect::<Vec<_>>(),
+                &self.guidance_files,
                 self.max_bytes,
                 reach,
             ),
-            None => {
-                read_context_file_bytes(&self.worktree_root, rel_path, self.globs, self.max_bytes)
-            }
+            None => read_context_file_bytes(
+                &self.worktree_root,
+                rel_path,
+                &self.globs.iter().map(String::as_str).collect::<Vec<_>>(),
+                &self.guidance_files,
+                self.max_bytes,
+            ),
         }
     }
 }

@@ -37,10 +37,15 @@ pub(super) fn subagent_info(
 pub(super) fn coding_agent_info(
     def: &tddy_coding_subagent::CodingAgentDef,
     daemon_instance_id: &str,
+    coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
 ) -> Result<SubagentInfo, tddy_core::AgentIdError> {
     let record = coding_agent_record(def, daemon_instance_id)?;
-    let (transport, permission_policy) =
-        tddy_coding_subagent::transport_and_policy_wire(record.harness.as_deref().unwrap_or(""));
+    let (transport, permission_policy) = record
+        .harness
+        .as_deref()
+        .and_then(|harness| coding_agents.get(harness))
+        .map(tddy_coding_subagent::transport_and_policy_wire_of_spec)
+        .unwrap_or_default();
     Ok(SubagentInfo {
         agent_id: record.agent_id,
         label: record.label.unwrap_or_else(|| record.name.clone()),
@@ -64,26 +69,33 @@ pub(super) fn coding_agent_rows(
     config: &tddy_daemon_kernel::config::DaemonConfig,
     daemon_instance_id: &str,
     model_rows: &[SubagentInfo],
+    coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
 ) -> Vec<SubagentInfo> {
-    tddy_session_lifecycle::connection_service::coding_agent_defs_for(tddy_data_dir, config)
-        .iter()
-        .filter(|def| {
-            let taken = model_rows.iter().any(|row| row.name == def.name);
-            if taken {
-                log::warn!(
-                    "list_subagents RPC: not advertising coding agent '{}' — a model agent has \
+    tddy_session_lifecycle::connection_service::coding_agent_defs_for(
+        tddy_data_dir,
+        config,
+        coding_agents,
+    )
+    .iter()
+    .filter(|def| {
+        let taken = model_rows.iter().any(|row| row.name == def.name);
+        if taken {
+            log::warn!(
+                "list_subagents RPC: not advertising coding agent '{}' — a model agent has \
                      that name",
-                    def.name
-                );
-            }
-            !taken
-        })
-        .filter_map(|def| match coding_agent_info(def, daemon_instance_id) {
+                def.name
+            );
+        }
+        !taken
+    })
+    .filter_map(
+        |def| match coding_agent_info(def, daemon_instance_id, coding_agents) {
             Ok(info) => Some(info),
             Err(e) => {
                 log::warn!("list_subagents RPC: not advertising a coding agent — {e}");
                 None
             }
-        })
-        .collect()
+        },
+    )
+    .collect()
 }

@@ -14,7 +14,6 @@ use async_trait::async_trait;
 use tddy_cli_sessions::tmux::{
     ensure_reachable, tmux_attach_argv, tmux_binary, tmux_new_session_argv, tmux_session_name,
 };
-use tddy_core::cli_harness::{cli_harness, CliLaunch};
 use tddy_daemon_kernel::privilege_drop::EffectiveIdentity;
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::{
@@ -25,7 +24,6 @@ use tokio::sync::broadcast;
 
 use super::DaemonSessionHost;
 use crate::cli_session_manager::CliSessionManager;
-use crate::config::DaemonConfig;
 use crate::terminal_session_adapter::DaemonTerminalSessionStore;
 
 mod recorded_worktree;
@@ -47,7 +45,7 @@ impl DaemonSessionHost {
     #[must_use]
     pub fn terminal_sessions(&self) -> DaemonTerminalSessionStore {
         DaemonTerminalSessionStore::new(
-            Arc::clone(&self.claude_cli_manager),
+            Arc::clone(&self.cli_manager),
             Arc::clone(&self.sandbox_manager),
         )
     }
@@ -62,7 +60,7 @@ impl DaemonSessionHost {
     #[must_use]
     pub fn terminal_control(&self) -> Arc<dyn TerminalControl> {
         Arc::new(CliManagerTerminalControl::new(Arc::clone(
-            &self.claude_cli_manager,
+            &self.cli_manager,
         )))
     }
 
@@ -110,8 +108,8 @@ impl DaemonSessionHost {
             terminals: Arc::new(self.terminal_sessions()),
             control: self.terminal_control(),
             roster: Arc::new(CliManagerTerminalRoster::new(
-                Arc::clone(&self.claude_cli_manager),
-                self.config.clone(),
+                Arc::clone(&self.cli_manager),
+                self.launch_coding_agents(),
                 self.tddy_data_dir.clone(),
                 Arc::clone(&tmux),
             )),
@@ -121,8 +119,10 @@ impl DaemonSessionHost {
                 ),
             ),
             main_reattach: Arc::new(TmuxMainReattach::new(
-                Arc::clone(&self.claude_cli_manager),
+                Arc::clone(&self.cli_manager),
+                self.coding_agents.clone(),
                 self.tddy_data_dir.clone(),
+                Arc::clone(&self.agent_tool_sockets),
             )),
             tmux,
             initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
@@ -137,16 +137,46 @@ impl DaemonSessionHost {
 /// main the first attached.
 struct TmuxMainReattach {
     manager: Arc<CliSessionManager>,
+    /// The coding agents this daemon installed: what a record is re-attached as.
+    coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     tddy_data_dir: PathBuf,
+    /// Served again for the session's OS user before its main is re-attached: the agent that
+    /// outlived its daemon reports its hooks and makes its tool calls over that user's socket, and
+    /// a fresh daemon serves a user's socket only once something asks for it.
+    agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     in_flight: tokio::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl TmuxMainReattach {
-    fn new(manager: Arc<CliSessionManager>, tddy_data_dir: PathBuf) -> Self {
+    fn new(
+        manager: Arc<CliSessionManager>,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+        tddy_data_dir: PathBuf,
+        agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
+    ) -> Self {
         TmuxMainReattach {
             manager,
+            coding_agents,
             tddy_data_dir,
+            agent_tool_sockets,
             in_flight: tokio::sync::Mutex::default(),
+        }
+    }
+
+    /// Serve `os_user`'s agent-tool socket, which the outliving agent's hooks, `notify` and tool
+    /// server were pointed at when it started. A user this daemon can no longer serve (under the
+    /// supervisor, one dropped from `agent_tool_sockets:`) still gets the terminal back: the refusal
+    /// is logged, naming the setting, and that agent's reports are not answered.
+    async fn serve_agent_tool_socket_of(&self, os_user: &str, session_id: &str) {
+        if let Err(e) = self
+            .agent_tool_sockets
+            .ensure_bound(os_user, &self.tddy_data_dir)
+            .await
+        {
+            log::warn!(
+                "re-attaching session {session_id}: its agent's reports go unanswered, {os_user}'s \
+                 agent-tool socket cannot be served: {e:#}"
+            );
         }
     }
 }
@@ -163,14 +193,19 @@ impl MainReattach for TmuxMainReattach {
         );
         let attached = {
             let _one_at_a_time = gate.lock().await;
-            self.manager.get(session_id).await.is_some()
-                || tddy_agent_launch::claude_cli_tmux::reattach_recorded_main(
+            if self.manager.get(session_id).await.is_some() {
+                true
+            } else {
+                self.serve_agent_tool_socket_of(os_user, session_id).await;
+                tddy_agent_launch::claude_cli_tmux::reattach_recorded_main(
                     &self.manager,
+                    Some(&*self.coding_agents),
                     &self.tddy_data_dir,
                     os_user,
                     session_id,
                 )
                 .await
+            }
         };
         // The last access out forgets the session's gate (every clone is taken under this lock, so
         // a count of two — the map's and this one — means nobody else holds or waits on it).
@@ -223,7 +258,8 @@ impl TerminalControl for CliManagerTerminalControl {
 /// The terminals of a session, spawned as tasks by [`CliSessionManager`].
 struct CliManagerTerminalRoster {
     manager: Arc<CliSessionManager>,
-    config: DaemonConfig,
+    /// The coding agents an agent tab's binary is resolved from: the spec's, never daemon.yaml's.
+    coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     /// Where session directories live — a stopped session's worktree is read from its record.
     tddy_data_dir: PathBuf,
     /// The host's tmux, which a tmux tab's session name is checked against before anything spawns.
@@ -233,13 +269,13 @@ struct CliManagerTerminalRoster {
 impl CliManagerTerminalRoster {
     fn new(
         manager: Arc<CliSessionManager>,
-        config: DaemonConfig,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
         tddy_data_dir: PathBuf,
         tmux: Arc<dyn TmuxHost>,
     ) -> Self {
         CliManagerTerminalRoster {
             manager,
-            config,
+            coding_agents,
             tddy_data_dir,
             tmux,
         }
@@ -262,24 +298,36 @@ impl TerminalRoster for CliManagerTerminalRoster {
                 .await
                 .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?,
             TerminalKind::Agent(kind) => {
-                let harness = cli_harness(kind).ok_or_else(|| {
-                    Status::invalid_argument(format!("unknown terminal kind {kind:?}"))
-                })?;
-                let binary = self.config.cli_harness_binary(
-                    harness.session_type,
-                    harness.default_binary,
-                    harness.binary_env,
-                );
-                // A tab is a conversation of its own: a harness told a session id (Claude Code)
-                // gets a fresh one, never the session's.
+                let spec = self
+                    .coding_agents
+                    .agents()
+                    .for_session_type(kind)
+                    .ok_or_else(|| {
+                        Status::invalid_argument(format!("unknown terminal kind {kind:?}"))
+                    })?;
+                // The binary is the agent spec's, resolved on this host (`#agent-tools 19/19`): its
+                // `binary.env`, then the host's search, refusing what is found nowhere.
+                let binary = self
+                    .coding_agents
+                    .resolve(&spec.id, None)
+                    .map_err(|e| Status::failed_precondition(e.to_string()))?
+                    .tool
+                    .binary;
+                // A tab is a conversation of its own: an agent told a session id gets a fresh
+                // one, never the session's. The argv is the spec's `run.argv` rendered with it.
                 let conversation_id = uuid::Uuid::now_v7().to_string();
-                let argv = (harness.argv)(&CliLaunch {
-                    binary: &binary,
-                    session_id: &conversation_id,
-                    ..CliLaunch::default()
-                });
+                let argv = spec
+                    .render_run_argv(
+                        &binary,
+                        &[
+                            ("session_id", conversation_id.as_str()),
+                            ("chat_id", conversation_id.as_str()),
+                        ],
+                        &[],
+                    )
+                    .map_err(|e| Status::failed_precondition(e.to_string()))?;
                 self.manager
-                    .start_agent_terminal(session_id, worktree, harness.session_type, argv)
+                    .start_agent_terminal(session_id, worktree, kind, argv)
                     .await
                     .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
             }

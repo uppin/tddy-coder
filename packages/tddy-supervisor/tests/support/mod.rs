@@ -47,6 +47,7 @@ pub struct ServiceFixture {
     stability_threshold_ms: u64,
     declares_socket: bool,
     declares_host_socket: bool,
+    serves_users: bool,
     env: Vec<(String, String)>,
 }
 
@@ -60,6 +61,7 @@ pub fn a_service(name: &str) -> ServiceFixture {
         stability_threshold_ms: 10_000,
         declares_socket: false,
         declares_host_socket: false,
+        serves_users: false,
         env: Vec::new(),
     }
 }
@@ -85,10 +87,18 @@ impl ServiceFixture {
         self
     }
 
-    /// Also declares a host socket for the account running the tests, at descriptor 4. The
-    /// supervisor's `allowed_session_users` must list that account (`allowing_the_current_user`).
-    pub fn with_a_host_socket_for_the_current_user(mut self) -> Self {
-        self.declares_host_socket = true;
+    /// Also declares a host socket for the account running the tests, at descriptor 4.
+    /// Superseded by `serving_users` with a mapping (`#agent-tools` 31/32): the merged per-user
+    /// socket is derived from `users.yaml`, never declared.
+    pub fn with_a_host_socket_for_the_current_user(self) -> Self {
+        self.serving_users()
+    }
+
+    /// Declares `serves_users: true`: the service is handed one `user.<os user>` socket per user
+    /// `users.yaml` maps, and told the file's path (`#agent-tools` 31/32). Needs a listening socket
+    /// and a mapping (`mapping_the_current_user_as`).
+    pub fn serving_users(mut self) -> Self {
+        self.serves_users = true;
         self
     }
 
@@ -129,14 +139,14 @@ impl ServiceFixture {
 pub struct SupervisorFixture {
     services: Vec<ServiceFixture>,
     allowed_session_users: Vec<String>,
-    allowed_tool_paths: Vec<PathBuf>,
-    allowed_relay_tool_paths: Vec<PathBuf>,
     allowed_mount_roots: Vec<PathBuf>,
+    exec_roots: Vec<PathBuf>,
     memory_max_ceiling: Option<u64>,
     cpu_max_ceiling: Option<String>,
     pids_max_ceiling: Option<u64>,
     shutdown_grace_secs: u64,
-    path_prefix: Option<PathBuf>,
+    /// GitHub logins `users.yaml` maps to the account running the tests; `None` writes no file.
+    current_user_logins: Option<Vec<String>>,
 }
 
 /// A supervisor with no declared services and an empty spawn policy — deny-everything defaults.
@@ -144,14 +154,13 @@ pub fn a_supervisor() -> SupervisorFixture {
     SupervisorFixture {
         services: Vec::new(),
         allowed_session_users: Vec::new(),
-        allowed_tool_paths: Vec::new(),
-        allowed_relay_tool_paths: Vec::new(),
         allowed_mount_roots: Vec::new(),
+        exec_roots: Vec::new(),
         memory_max_ceiling: None,
         cpu_max_ceiling: None,
         pids_max_ceiling: None,
         shutdown_grace_secs: 2,
-        path_prefix: None,
+        current_user_logins: None,
     }
 }
 
@@ -172,20 +181,9 @@ impl SupervisorFixture {
         self
     }
 
-    pub fn allowing_tool(mut self, tool_path: &Path) -> Self {
-        self.allowed_tool_paths.push(tool_path.to_path_buf());
-        self
-    }
-
-    /// Puts `dir` first on the supervisor's own `PATH`, which is where it looks for `git`.
-    pub fn with_first_on_path(mut self, dir: &Path) -> Self {
-        self.path_prefix = Some(dir.to_path_buf());
-        self
-    }
-
-    /// Allow `tool_path` as a harness binary a relayed spawn may exec (off unless this is called).
-    pub fn allowing_relay_tool(mut self, tool_path: &Path) -> Self {
-        self.allowed_relay_tool_paths.push(tool_path.to_path_buf());
+    /// Name `path` — a directory or one file — under `spawn_policy.exec_roots` (`#agent-tools` 32).
+    pub fn with_exec_root(mut self, path: &Path) -> Self {
+        self.exec_roots.push(path.to_path_buf());
         self
     }
 
@@ -206,6 +204,13 @@ impl SupervisorFixture {
 
     pub fn with_pids_ceiling(mut self, pids: u64) -> Self {
         self.pids_max_ceiling = Some(pids);
+        self
+    }
+
+    /// Write a `users.yaml` mapping each of `logins` to the account running the tests, and point
+    /// `supervisor.yaml`'s `users:` block at it (`#agent-tools` 31/32).
+    pub fn mapping_the_current_user_as(mut self, logins: &[&str]) -> Self {
+        self.current_user_logins = Some(logins.iter().map(|login| login.to_string()).collect());
         self
     }
 
@@ -231,7 +236,7 @@ impl SupervisorFixture {
                     "      initial_backoff_ms: {initial_backoff_ms}\n",
                     "      max_backoff_ms: 1000\n",
                     "      stability_threshold_ms: {stability_threshold_ms}\n",
-                    "{env}{socket}{host_sockets}",
+                    "{env}{socket}{host_sockets}{serves_users}",
                 ),
                 name = service.name,
                 script = script.display(),
@@ -265,8 +270,35 @@ impl SupervisorFixture {
                 } else {
                     String::new()
                 },
+                serves_users = if service.serves_users {
+                    "    serves_users: true\n".to_string()
+                } else {
+                    String::new()
+                },
             ));
         }
+
+        let mut user_rows: Vec<(String, String)> = Vec::new();
+        if let Some(logins) = &self.current_user_logins {
+            for login in logins {
+                user_rows.push((login.clone(), user.clone()));
+            }
+        }
+        for (index, allowed) in self.allowed_session_users.iter().enumerate() {
+            if !user_rows.iter().any(|(_, os_user)| os_user == allowed) {
+                user_rows.push((format!("session-user-{index}"), allowed.clone()));
+            }
+        }
+        let users_yaml = if !user_rows.is_empty() || self.current_user_logins.is_some() {
+            write_users_rows(&root, &user_rows);
+            format!(
+                "users:\n  file: {}\n  sockets_dir: {}\n",
+                users_file_path(&root).display(),
+                user_sockets_dir(&root).display()
+            )
+        } else {
+            String::new()
+        };
 
         let config_yaml = format!(
             concat!(
@@ -276,16 +308,15 @@ impl SupervisorFixture {
                 "shutdown_grace_secs: {grace}\n",
                 "services:\n{services}",
                 "spawn_policy:\n",
-                "  allowed_session_users: [{users}]\n",
-                "  allowed_tool_paths: [{tools}]\n",
-                "  allowed_relay_tool_paths: [{relay_tools}]\n",
                 "  allowed_mount_roots: [{mount_roots}]\n",
+                "  exec_roots: [{exec_roots}]\n",
                 "cgroup:\n",
                 "  base_override: {base}\n",
                 "  mount_root: {base}\n",
                 "  controllers: [memory, cpu, pids]\n",
                 "  supervisor_leaf: supervisor\n",
                 "{ceilings}",
+                "{users_yaml}",
             ),
             socket = socket_path.display(),
             grace = self.shutdown_grace_secs,
@@ -294,21 +325,6 @@ impl SupervisorFixture {
             } else {
                 service_yaml
             },
-            users = yaml_list(&self.allowed_session_users),
-            tools = yaml_list(
-                &self
-                    .allowed_tool_paths
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-            ),
-            relay_tools = yaml_list(
-                &self
-                    .allowed_relay_tool_paths
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-            ),
             mount_roots = yaml_list(
                 &self
                     .allowed_mount_roots
@@ -316,23 +332,22 @@ impl SupervisorFixture {
                     .map(|p| p.display().to_string())
                     .collect::<Vec<_>>()
             ),
+            exec_roots = yaml_list(
+                &self
+                    .exec_roots
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+            ),
             base = cgroup_base.display(),
             ceilings = self.ceilings_yaml(),
+            users_yaml = users_yaml,
         );
 
         let config_path = root.join("supervisor.yaml");
         fs::write(&config_path, &config_yaml).expect("write supervisor config");
 
-        let mut command = Command::new(env!("CARGO_BIN_EXE_tddy-supervisor"));
-        if let Some(prefix) = &self.path_prefix {
-            let inherited = std::env::var_os("PATH").unwrap_or_default();
-            let path = std::env::join_paths(
-                std::iter::once(prefix.clone()).chain(std::env::split_paths(&inherited)),
-            )
-            .expect("a PATH with the prefix on it");
-            command.env("PATH", path);
-        }
-        let process = command
+        let process = Command::new(env!("CARGO_BIN_EXE_tddy-supervisor"))
             .arg("--config")
             .arg(&config_path)
             .stdout(Stdio::piped())
@@ -443,6 +458,29 @@ impl RunningSupervisor {
         if path.exists() {
             fs::remove_file(&path).expect("clear the handoff report");
         }
+    }
+
+    /// Rewrite `users.yaml` so it maps each of `logins` to the account running the tests.
+    pub fn remap_the_current_user_as(&self, logins: &[&str]) {
+        write_users_file(
+            self.workspace.path(),
+            &logins
+                .iter()
+                .map(|login| login.to_string())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    /// The `users.yaml` the supervisor was pointed at.
+    pub fn users_file_path(&self) -> PathBuf {
+        users_file_path(self.workspace.path())
+    }
+
+    /// Where the current user's daemon socket should have been derived: `<sockets_dir>/<user>/daemon.sock`.
+    pub fn derived_user_socket_path(&self) -> PathBuf {
+        user_sockets_dir(self.workspace.path())
+            .join(current_username())
+            .join("daemon.sock")
     }
 
     /// Path the named service's declared socket should have been bound at.
@@ -613,6 +651,22 @@ impl Drop for RunningSupervisor {
 // Session tool fixtures
 // ---------------------------------------------------------------------------------------------
 
+/// The build's `target/tmp`, created when absent: `CARGO_TARGET_TMPDIR` is fixed at compile time,
+/// and a test binary run from a nextest archive on another runner finds the checkout there but
+/// not the directory, which cargo only creates for the build that compiled it.
+fn the_trusted_tmp_root() -> &'static Path {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    fs::create_dir_all(root).expect("create the build's target/tmp");
+    root
+}
+
+fn a_trusted_workspace() -> TempDir {
+    let workspace = TempDir::new_in(the_trusted_tmp_root()).expect("create tool workspace");
+    fs::set_permissions(workspace.path(), fs::Permissions::from_mode(0o755))
+        .expect("make the tool workspace readable");
+    workspace
+}
+
 /// A script that records the pid of whichever process exec'd it, then stays alive.
 pub struct ToolFixture {
     path: PathBuf,
@@ -622,7 +676,7 @@ pub struct ToolFixture {
 
 /// A tool that exits immediately with `code`, for asserting on reported exit statuses.
 pub fn a_tool_that_exits_with(code: i32) -> ToolFixture {
-    let workspace = TempDir::new().expect("create tool workspace");
+    let workspace = a_trusted_workspace();
     let path = workspace.path().join("exiting-tool");
     let parent_pid_log = workspace.path().join("parent.pid");
     write_script(&path, &format!("exit {code}"));
@@ -635,7 +689,7 @@ pub fn a_tool_that_exits_with(code: i32) -> ToolFixture {
 
 /// A harness stand-in that echoes its stdin to its stdout, for asserting on a relayed spawn.
 pub fn a_tool_that_echoes_its_stdin() -> ToolFixture {
-    let workspace = TempDir::new().expect("create tool workspace");
+    let workspace = a_trusted_workspace();
     let path = workspace.path().join("echoing-tool");
     let parent_pid_log = workspace.path().join("parent.pid");
     write_script(&path, "exec cat");
@@ -646,8 +700,21 @@ pub fn a_tool_that_echoes_its_stdin() -> ToolFixture {
     }
 }
 
+/// A tool that prints the environment it was started with, one `NAME=value` per line, and exits.
+pub fn a_tool_that_prints_its_environment() -> ToolFixture {
+    let workspace = a_trusted_workspace();
+    let path = workspace.path().join("environment-printing-tool");
+    let parent_pid_log = workspace.path().join("parent.pid");
+    write_script(&path, "exec /usr/bin/env");
+    ToolFixture {
+        path,
+        parent_pid_log,
+        _workspace: workspace,
+    }
+}
+
 pub fn a_tool_that_records_its_parent() -> ToolFixture {
-    let workspace = TempDir::new().expect("create tool workspace");
+    let workspace = a_trusted_workspace();
     let path = workspace.path().join("recording-tool");
     let parent_pid_log = workspace.path().join("parent.pid");
     write_script(
@@ -674,9 +741,36 @@ pub fn a_tool_that_records_its_parent() -> ToolFixture {
     }
 }
 
+/// A tool the exec gate can trust: in a directory only the account running the tests can write,
+/// all the way up — under the build's `target/tmp`, never `/tmp`, which is sticky but
+/// world-writable and so refused (`#agent-tools` 32/32). `body` follows the `#!/bin/sh` line.
+pub fn a_trusted_tool(name: &str, body: &str) -> ToolFixture {
+    let workspace =
+        TempDir::new_in(the_trusted_tmp_root()).expect("create a trusted tool workspace");
+    fs::set_permissions(workspace.path(), fs::Permissions::from_mode(0o755))
+        .expect("make the tool workspace readable");
+    let path = workspace
+        .path()
+        .canonicalize()
+        .expect("resolve the tool workspace")
+        .join(name);
+    let parent_pid_log = workspace.path().join("parent.pid");
+    write_script(&path, body);
+    ToolFixture {
+        path,
+        parent_pid_log,
+        _workspace: workspace,
+    }
+}
+
 impl ToolFixture {
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The directory the tool lives in — what an `exec_roots` directory entry would name.
+    pub fn directory(&self) -> &Path {
+        self.path.parent().expect("a tool lives in a directory")
     }
 
     /// Block until the tool has recorded its own process group id.
@@ -932,6 +1026,39 @@ fn host_socket_path(root: &Path, service: &str, user: &str) -> PathBuf {
         .join("host.sock")
 }
 
+fn users_file_path(root: &Path) -> PathBuf {
+    root.join("users.yaml")
+}
+
+fn user_sockets_dir(root: &Path) -> PathBuf {
+    root.join("user-sockets")
+}
+
+/// Write `users.yaml` rows atomically (rename), as an editor saving it would.
+fn write_users_rows(root: &Path, rows: &[(String, String)]) {
+    let body: String = rows
+        .iter()
+        .map(|(login, os_user)| format!("- {{github_user: {login}, os_user: {os_user}}}\n"))
+        .collect();
+    let staged = root.join("users.yaml.saving");
+    fs::write(&staged, body).expect("write users.yaml");
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o644)).expect("narrow users.yaml");
+    fs::rename(&staged, users_file_path(root)).expect("save users.yaml");
+}
+
+/// Write `users.yaml` atomically (rename), as an editor saving it would, owner-only writable.
+fn write_users_file(root: &Path, logins: &[String]) {
+    let user = current_username();
+    let rows: String = logins
+        .iter()
+        .map(|login| format!("- {{github_user: {login}, os_user: {user}}}\n"))
+        .collect();
+    let staged = root.join("users.yaml.saving");
+    fs::write(&staged, rows).expect("write users.yaml");
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o644)).expect("narrow users.yaml");
+    fs::rename(&staged, users_file_path(root)).expect("save users.yaml");
+}
+
 fn service_socket_path(root: &Path, service: &str) -> PathBuf {
     root.join(format!("{service}.sock"))
 }
@@ -947,6 +1074,8 @@ const HANDOFF_REPORT_BODY: &str = "\
   echo \"own_pid=$$\"
   echo \"listen_fdnames=${LISTEN_FDNAMES:-unset}\"
   echo \"supervisor_socket=${TDDY_SUPERVISOR_SOCKET:-unset}\"
+  echo \"users_file=${TDDY_USERS_FILE:-unset}\"
+  echo \"fd4_inode=$(stat -L -c %i /proc/self/fd/4 2>/dev/null || echo absent)\"
   if [ -S /proc/self/fd/4 ]; then echo \"fd4=socket\"; else echo \"fd4=absent\"; fi
   if [ -S /proc/self/fd/3 ]; then echo \"fd3=socket\"; else echo \"fd3=absent\"; fi
 } > __REPORT__

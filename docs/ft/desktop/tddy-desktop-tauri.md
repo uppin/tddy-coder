@@ -169,7 +169,10 @@ existing setups keep working:
 
 1. `TDDY_DAEMON_CONFIG`, else repo-root `dev.desktop.yaml` found by walking up from the working
    directory.
-2. `CURRENT_USER` in the YAML is substituted before the daemon reads it.
+2. `CURRENT_USER` in the YAML — and in the `users.yaml` beside it — is substituted before the daemon
+   reads them. `./desktop-dev` renders that `users.yaml` (mapping `testuser` to `$USER`) at the
+   checkout root, and only for the checkout's own `dev.desktop.yaml`: a config passed in
+   `TDDY_DAEMON_CONFIG` brings its own `users.yaml`, which it never overwrites.
 
 A **release build** reads `~/.tddy/desktop.yaml` and nothing else. There is no `TDDY_DAEMON_CONFIG`,
 no `dev.desktop.yaml` and no upward walk: an installed `.app` launched from the Dock has `/` for a
@@ -201,7 +204,13 @@ sessions, no hosts, no screen sharing. With it:
 | Block | What it does |
 |---|---|
 | `github:` | A `client_id` alone makes the daemon serve **GitHub device-flow sign-in**, which needs no secret — nothing confidential ships in the application. A `client_id` with a `client_secret` serves the redirect flow instead, as a served deployment does |
-| `users:` | Which OS user a login runs sessions as. **Written by the first sign-in**, not by hand — see [Signing in](#signing-in). A login with no entry is refused `permission_denied: user not mapped to OS user` on every session RPC; there is no fallback to whoever the daemon runs as. Peers sharing a common room must name the same login on every side |
+
+**Which OS user a login runs sessions as** is not in this file: it is **`~/.tddy/users.yaml`**, beside
+it, **written by the first sign-in**, not by hand — see [Signing in](#signing-in). `./install --desktop`
+renders it empty (`[]`, mode `0644`) and never overwrites an existing one; a missing `users.yaml` fails
+the daemon's load naming it, and a `users:` key in `desktop.yaml` fails it too. A login with no row is
+refused `permission_denied: user not mapped to OS user` on every session RPC; there is no fallback to
+whoever the daemon runs as. Peers sharing a common room must name the same login on every side.
 
 No `livekit:` block is needed to sign in. The daemon signs session tokens with an Ed25519 key it
 generates for itself on first boot, `signing_key.pem` (mode `0600`) in `auth_storage`, and reuses it
@@ -213,7 +222,7 @@ Nothing stands between a fresh `./install --desktop` and a signed-in dashboard: 
 without LiveKit, and the rendered configuration carries the Tddy Desktop OAuth App's **public**
 `client_id` (`desktop.yaml.production`, `github: { client_id: "Ov23lioH6CfiaZR8ESr5" }`) with no
 `client_secret`, so the daemon serves the device flow and the first sign-in from the window writes
-`users:`. Nothing confidential ships. An end-to-end check of a fresh install against github.com —
+`users.yaml`. Nothing confidential ships. An end-to-end check of a fresh install against github.com —
 and of the OAuth App's device-flow token carrying no expiring `refresh_token` — is the developer's,
 tracked in `docs/dev/todo/2026-09-18-desktop-install-configures-no-identity.md`.
 
@@ -235,8 +244,8 @@ The session that results is the same session a redirect sign-in produces — the
 lifetimes — see [Cross-daemon session authentication](../daemon/session-auth.md).
 
 **The first account to sign in from the desktop's own window owns the install.** On a desktop whose
-`users:` is empty, that first login is enrolled against the OS user the application runs as, and the
-row is persisted to `~/.tddy/desktop.yaml`. Every later start finds it like a hand-written row. It is
+`users.yaml` maps nobody, that first login is enrolled against the OS user the application runs as, and
+the row is persisted to `~/.tddy/users.yaml`; `desktop.yaml` is left byte-for-byte unchanged. Every later start finds it like a hand-written row. It is
 enrolment, not a fallback: it happens once, on a deployment that has never had an identity, and the
 lookup that maps a login to an OS user is otherwise unchanged.
 
@@ -249,14 +258,15 @@ lookup that maps a login to an OS user is otherwise unchanged.
   refused. The window's own login still enrols afterwards. Which way a login arrived is decided by
   the host that received it, never by anything the caller sent.
 - **A first login that cannot be written down is refused**, naming the file, rather than appearing to
-  work and vanishing on restart.
-- **Writing the row drops the file's comments**, the explanatory header `./install --desktop`
-  rendered included. Field values are preserved. This is a known limit shared with saving settings
+  work and vanishing on restart. A `users.yaml` that has gone since the daemon started is such a
+  refusal — it is never read as an empty mapping, and enrolment does not recreate it.
+- **Saving settings never writes the mapping.** `UpdateConfig` rewrites `desktop.yaml` only, which
+  never carries `users:`; enrolment is `users.yaml`'s one writer
   ([daemon-settings.md](../daemon/daemon-settings.md)).
 
-The application hands the daemon the configuration file it loaded, which is where the enrolment is
-written. An embedded daemon serving sign-in to an empty `users:` with no file to write to refuses to
-start rather than assemble a desktop that could never enrol.
+The application hands the daemon the configuration file it loaded, and the enrolment is written to the
+`users.yaml` beside it. An embedded daemon serving sign-in with no file to write to refuses to start
+rather than assemble a desktop that could never enrol.
 
 ## Installing it
 
@@ -287,7 +297,8 @@ A `tauri build` that fails **after** producing the `.app` says so and names the 
 the application itself is complete. `./install --desktop` then installs what is already built.
 
 The configuration is rendered from `desktop.yaml.production` and an existing one is **never**
-overwritten, so a reinstall keeps every choice the operator made. Overrides: `INSTALL_TDDY_HOME`,
+overwritten, so a reinstall keeps every choice the operator made. Beside it the install writes an empty
+`users.yaml` (`[]`, mode `0644`) when there is none — the file the first sign-in enrols into. Overrides: `INSTALL_TDDY_HOME`,
 `INSTALL_BIN_DIR`, `INSTALL_DESKTOP_APP_DIR`, `INSTALL_XDG_DATA_DIR`, `INSTALL_DAEMON_LOG_DIR`,
 `INSTALL_AUTH_STORAGE_DIR`. Moving `INSTALL_TDDY_HOME` away from `$HOME/.tddy` warns, because a
 release build has no second place to look.

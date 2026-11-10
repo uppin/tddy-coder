@@ -109,7 +109,7 @@ stop_children() {
 # container this run started outlive it.
 on_exit() {
   stop_children
-  rm -f "${TMP_CONFIG:-}"
+  [ -n "${TMP_CONFIG_DIR:-}" ] && rm -rf "$TMP_CONFIG_DIR"
   dev_livekit_down
   [ "$RUN_RECORD_OWNED" = "true" ] && rm -f "$RUN_RECORD"
   return 0
@@ -176,10 +176,16 @@ if [ -f "$CONFIG" ]; then
   # Replace CURRENT_USER with $USER in a temp copy (daemon config uses os_user), and listen on this
   # run's DAEMON_PORT rather than the YAML's fixed one.
   # Use | as delimiter so slashes in paths inside YAML are not conflated with sed's replacement.
-  TMP_CONFIG=$(mktemp)
+  # A directory of this run's own, so the users.yaml beside the copy is never another run's.
+  TMP_CONFIG_DIR=$(mktemp -d)
+  TMP_CONFIG="$TMP_CONFIG_DIR/daemon.yaml"
   sed -e "s|CURRENT_USER|${USER}|g" \
     -e "s|^\([[:space:]]*web_port:\).*|\1 ${DAEMON_PORT}|" \
     "$CONFIG" > "$TMP_CONFIG"
+  # The mapping lives in users.yaml beside the config the daemon launches with — the temp
+  # copy's directory — never in the daemon config itself (#agent-tools 31/32).
+  printf -- '- github_user: "testuser"\n  os_user: "%s"\n- github_user: "uppin"\n  os_user: "mantasi"\n' "${USER}" \
+    > "$TMP_CONFIG_DIR/users.yaml"
   daemon_args+=("-c" "$TMP_CONFIG")
 else
   echo "tddy-daemon requires -c CONFIG. ${CONFIG} not found." >&2

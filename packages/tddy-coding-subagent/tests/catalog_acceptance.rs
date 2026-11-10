@@ -2,7 +2,13 @@
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
-use tddy_coding_subagent::{coding_agent_defs, confinement_for, CodingAgentDef, Confinement};
+use tddy_coding_agent_specs::CodingAgentRegistry;
+use tddy_coding_subagent::{coding_agent_defs, refuse_unless_registry_confinable, CodingAgentDef};
+
+/// Whether a managed session admits `harness` among the built-in agents.
+fn managed_session_admits(harness: &str) -> bool {
+    refuse_unless_registry_confinable(CodingAgentRegistry::builtin_cached(), harness, true).is_ok()
+}
 use tddy_discovery::harness_profile::HarnessProfile;
 
 fn a_profile(name: &str, harness: &str, model: &str) -> HarnessProfile {
@@ -69,7 +75,12 @@ fn an_acp_allowed_agent_is_a_coding_agent_on_its_default_model() {
     assert_eq!(defs[0].label.as_deref(), Some("Claude (ACP)"));
     assert_eq!(
         defs[0].model,
-        tddy_agent_backend::default_model_for_agent("claude-acp")
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+            .get("claude-acp")
+            .expect("the claude-acp spec loads")
+            .agent
+            .models
+            .default
     );
     assert_eq!(defs[0].provider_account, None);
 }
@@ -106,36 +117,24 @@ fn a_profile_shadows_an_allowed_agent_of_the_same_name() {
 
 #[test]
 fn claude_can_withdraw_its_native_tools() {
-    // When
-    let confinement = confinement_for("claude-acp");
-
-    // Then
-    assert_eq!(confinement, Confinement::WithdrawsNativeTools);
+    // When / Then
+    assert!(managed_session_admits("claude-acp"));
 }
 
 #[test]
 fn opencode_can_withdraw_its_native_tools() {
-    // When
-    let confinement = confinement_for("opencode");
-
-    // Then
-    assert_eq!(confinement, Confinement::WithdrawsNativeTools);
+    // When / Then
+    assert!(managed_session_admits("opencode"));
 }
 
 #[test]
 fn codex_cannot_withdraw_its_native_tools() {
-    // When
-    let confinement = confinement_for("codex-acp");
-
-    // Then
-    assert_eq!(confinement, Confinement::CannotWithdraw);
+    // When / Then
+    assert!(!managed_session_admits("codex-acp"));
 }
 
 #[test]
 fn a_harness_nobody_proved_confinable_cannot_withdraw() {
-    // When
-    let confinement = confinement_for("some-new-harness");
-
-    // Then
-    assert_eq!(confinement, Confinement::CannotWithdraw);
+    // When / Then
+    assert!(!managed_session_admits("some-new-harness"));
 }

@@ -12,15 +12,15 @@ upload).
 |--------|------|
 | `hooks/useSessionAttachments.ts` | Owns the attachment state, the cap, rename/remove, `stageAttachments()` and the streamed-start consumer |
 | `hooks/useStagedAttachmentUpload.ts` | Per-file chunk loop against `SessionFilesService.UploadStagedAttachmentChunk`, one `staging_id` per submit |
-| `components/sessions/attachments/AttachmentDropZone.tsx` | Drop target + drag-over overlay + the two pick affordances |
-| `components/sessions/attachments/SessionAttachmentList.tsx` | One row per attachment: source, editable basename, size, progress, remove |
-| `components/sessions/attachments/HostDocumentPicker.tsx` | Browses a host by `HostDocumentScope`, yields a `HostDocumentRef` |
-| `components/sessions/attachments/pendingAttachment.ts` | The row model shared by the above |
+| `tddy-session-create-web`'s `src/attachments/AttachmentDropZone.tsx` | Drop target + drag-over overlay + the two pick affordances |
+| `tddy-session-create-web`'s `src/attachments/SessionAttachmentList.tsx` | One row per attachment: source, editable basename, size, progress, remove |
+| `tddy-session-create-web`'s `src/attachments/HostDocumentPicker.tsx` | Browses a host by `HostDocumentScope`, yields a `HostDocumentRef` |
+| `tddy-session-create-web`'s `src/attachments/pendingAttachment.ts` | The row model shared by the above |
 | `lib/attachmentBasenames.ts` | Basename validation + collision detection, mirroring the host's rules |
 | `lib/attachmentBytes.ts` | Binary-unit formatting (`8 MiB`), which the decimal `formatBytes` cannot produce |
 
 Reused rather than rebuilt: `lib/fileUploadChunks.ts` (`chunkFile`, `UPLOAD_CHUNK_SIZE`) and
-`lib/randomId.ts` from [terminal-file-upload.md](terminal-file-upload.md); `WorktreeFileTree` +
+`lib/randomId.ts` from [terminal-file-upload.md](../../tddy-terminal-web/docs/terminal-file-upload.md); `WorktreeFileTree` +
 `worktreeFilesApi` from `components/session/` for the two tree-browsing picker scopes.
 
 ## Invariants worth not breaking
@@ -40,10 +40,10 @@ the streaming stub throw. Always streaming would have changed the request path f
 create-session spec for no benefit.
 
 **3. Consume the stream with a `cancelled` flag, never `AbortController`.**
-`packages/tddy-livekit-web/src/transport.ts`'s `handleServerStreaming` accepts `_signal` and never
+`packages/tddy-livekit-rpc-web/src/transport.ts`'s `handleServerStreaming` accepts `_signal` and never
 reads it — no abort frame is published and the queue is not closed. The in-memory test router *does*
 honour the signal, so an `AbortController`-based implementation passes its spec while the real stream
-keeps running in production. `components/sessions/useSessionActivity.ts` is the reference idiom.
+keeps running in production. `tddy-chat-web`'s `src/useSessionActivity.ts` is the reference idiom.
 
 **4. A stream error is a failed creation, not an interrupted progress bar.** The terminal `result`
 event is what calls `onCreated`; an error terminates the stream and must surface in the form's error

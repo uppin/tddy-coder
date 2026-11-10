@@ -35,13 +35,22 @@ account, not an endpoint. Profiles are edited as YAML only; there is no UI edito
 | `claude-cli`, `opencode-cli`, `muse-cli`, `cursor-cli` | a CLI session of that type |
 | `claude`, `claude-acp`, `codex`, `codex-acp`, `opencode`, `cursor` | a tool session with that agent |
 
-Any other harness is refused (`INVALID_ARGUMENT`) when the profile is started. Whether the harness can
+The `harness:` is resolved through the host's coding agents. A CLI session type is resolved to the
+agent it runs (`opencode-cli` → `opencode`, any `<id>-cli` of a terminal agent, a dropped-in one
+included), and the session starts from that spec. Any other name is a tool session, and must be an
+agent the host can run headless or over ACP.
+
+Any other harness is refused (`INVALID_ARGUMENT`) when the profile is started — an unknown name is
+never resolved to another agent. Whether the harness can
 run on the account at all is the [capability matrix](provider-accounts.md#running-a-harness-on-an-account)'s call.
 
 ## In the agent list
 
 `ListAgents` offers every profile after the configured agents and registry assistants, under its
-`label` (or name); its id is the profile name.
+`label` (or name); its id is the profile name. A row whose id names a spec in the host's coding-agent
+registry (built-in or `<tddyhome>/tools/<id>.yaml`) is a `CODING_AGENT` row carrying that spec's `harness`
+and `route_providers`; the create-session pane asks for provider routes only when `route_providers` is
+non-empty. Every other row is `MODEL`.
 
 A profile whose harness speaks ACP (`claude-acp`, `codex-acp`, `opencode`) is also offered by
 `ListSubagents` as a **coding agent** a session can attach to its roster — see
@@ -60,6 +69,27 @@ account id, never the profile name:
   `NOT_FOUND`; a label two accounts share is refused (`INVALID_ARGUMENT`) rather than guessed.
 - The profile's model is used only when the request names none.
 - Refusals name the profile and the account.
+
+## The agent's environment
+
+An agent process starts from an allow-listed environment, never the daemon's own. The daemon
+computes it in one place from three parts:
+
+- **The base set**, read from the daemon's environment: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
+  `TERM`, `LANG`, `LC_*`, `TMPDIR`, `TZ`, `SSH_AUTH_SOCK`, `HTTP(S)_PROXY` / `NO_PROXY` (both cases)
+  and `XDG_*`. It is built in; an operator replaces it whole with
+  `<tddyhome>/tools/agent-env/base.yaml` (a subdirectory, because every `*.yaml` directly in `tools/`
+  is a tool file).
+- **The spec's `pass_env`**: names, or `PREFIX_*` patterns, of further daemon variables the agent
+  needs. The built-in specs name their provider keys: `ANTHROPIC_API_KEY` (claude, claude-acp),
+  `OPENAI_API_KEY` (codex, codex-acp), `CURSOR_API_KEY` (cursor), both of the first two (opencode);
+  muse, warp and oz name none.
+- **What the launch sets on purpose**: the spec's `env`, the provider route's variables, the
+  session's own variables.
+
+No other daemon variable reaches the agent. An entry matching `TDDY_*`, in `pass_env` or the base
+set, is refused when the file loads, naming it. A user's Bash terminal is not an agent: it still
+inherits the daemon's environment.
 
 ## Related
 

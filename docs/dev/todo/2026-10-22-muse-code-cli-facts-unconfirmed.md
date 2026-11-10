@@ -9,7 +9,7 @@ sources and are pinned by tests as written, not as observed:
 
 | Fact | Where | Assumed |
 |---|---|---|
-| Key variable for non-interactive auth | `MUSE_ROUTE_KEY_ENV` in `packages/tddy-agent-backend/src/cli_harness_muse.rs` | `META_API_KEY` |
+| Key variable for non-interactive auth | `route.key_env` in `packages/tddy-coding-agent-specs/specs/muse.yaml` | `META_API_KEY` |
 | Model flag | `muse_argv` (same file) | `--model <id>` |
 | Resume flag | `muse_argv` | `--continue` (the worktree's last session) |
 | Project configuration tree | `context_globs_for_agent("muse")` in `packages/tddy-agent-backend/src/backend/mod.rs` | `.muse/**` |

@@ -37,7 +37,7 @@ use tddy_service::proto::session::{
 };
 use tddy_service::proto::session_agents_svc::{ListSessionAgentsRequest, SessionAgentService as _};
 use tddy_service::proto::types::AgentKind;
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::test_util::{TestDaemon, TEST_TOKEN, TEST_USER};
@@ -57,9 +57,6 @@ const CHOSEN_SESSION_ID: &str = "019d105b-ac0f-78d3-9a89-409731145ab1";
 
 const CONFIG_YAML: &str = r#"
 daemon_instance_id: "codebase-host"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
 allowed_agents:
   - id: codex-acp
     label: "Codex ACP"
@@ -205,6 +202,14 @@ fn a_codebase_host_in_a_common_room() -> ACodebaseHostInACommonRoom {
 
     let config_path = sessions.path().join("config.yaml");
     std::fs::write(&config_path, CONFIG_YAML).expect("write daemon config");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testdev\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
 
     let laptop = Arc::new(ALaptopListingOneCodingAgent::default());
@@ -230,7 +235,8 @@ fn a_codebase_host_in_a_common_room() -> ACodebaseHostInACommonRoom {
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         peer_routing,
         Arc::new(NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
     .with_session_reach(Arc::new(ASessionRoomThatOpens));
 

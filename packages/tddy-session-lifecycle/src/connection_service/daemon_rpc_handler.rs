@@ -6,6 +6,9 @@ use tddy_service::proto::session_agents_svc::{
 };
 // The calls below are `SessionAgentService` trait methods on the daemon's family-B surface, so the
 // trait must be in scope.
+use tddy_service::proto::activity::{
+    ActivityService as _, ReportAgentActivityRequest, ReportSessionStatusRequest,
+};
 use tddy_service::proto::session_agents_svc::SessionAgentService as _;
 
 use super::DaemonRpcHandler;
@@ -20,6 +23,25 @@ pub(crate) struct BoundJailSession {
 /// The coordinate an in-jail agent relays family B at, read from the crate that serves it so this
 /// bridge and `tddy-sandbox-runner`'s allowlist cannot disagree about the name.
 const SESSION_AGENT_SERVICE: &str = tddy_session_agents::SERVICE_NAME;
+
+/// The coordinate a jailed `tddy-tools session-hook` reports its hooks at (`#agent-tools 7/12`),
+/// read from `tddy-service` so the hook, the runner's relay and this bridge agree on the name.
+const ACTIVITY_SERVICE: &str = tddy_service::session_activity::ACTIVITY_SERVICE;
+
+/// Refuses a relayed hook report that names a session other than the one the jail was built for: a
+/// jail reports its own hooks, and no other session's.
+fn refuse_other_session(
+    bound: &BoundJailSession,
+    session_id: &str,
+) -> Result<(), tddy_rpc::Status> {
+    if session_id == bound.session_id {
+        return Ok(());
+    }
+    Err(tddy_rpc::Status::permission_denied(format!(
+        "a jail reports hooks for its own session {}, not {session_id}",
+        bound.session_id
+    )))
+}
 
 #[async_trait::async_trait]
 impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
@@ -197,6 +219,52 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                     Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
                 }
             }
+            (ACTIVITY_SERVICE, "ReportSessionStatus") => {
+                let req = match ReportSessionStatusRequest::decode(payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return tddy_rpc::RpcResult::Unary(Err(
+                            tddy_rpc::Status::invalid_argument(format!(
+                                "decode ReportSessionStatusRequest: {e}"
+                            )),
+                        ));
+                    }
+                };
+                if let Err(status) = refuse_other_session(&self.bound, &req.session_id) {
+                    return tddy_rpc::RpcResult::Unary(Err(status));
+                }
+                match conn
+                    .activity_service()
+                    .report_session_status(Request::direct(req))
+                    .await
+                {
+                    Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
+                    Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
+                }
+            }
+            (ACTIVITY_SERVICE, "ReportAgentActivity") => {
+                let req = match ReportAgentActivityRequest::decode(payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return tddy_rpc::RpcResult::Unary(Err(
+                            tddy_rpc::Status::invalid_argument(format!(
+                                "decode ReportAgentActivityRequest: {e}"
+                            )),
+                        ));
+                    }
+                };
+                if let Err(status) = refuse_other_session(&self.bound, &req.session_id) {
+                    return tddy_rpc::RpcResult::Unary(Err(status));
+                }
+                match conn
+                    .activity_service()
+                    .report_agent_activity(Request::direct(req))
+                    .await
+                {
+                    Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
+                    Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
+                }
+            }
             (tddy_tool_engine::EXEC_TOOL_SERVICE, "ConversationWorktree") => {
                 tddy_rpc::RpcResult::Unary(
                     conn.conversation_worktree_from_jail(&self.bound, payload)
@@ -207,7 +275,10 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 super::svc_list_exec_tools_wiring::list_exec_tools_from_jail(
                     &self.bound,
                     payload,
-                    &super::svc_list_exec_tools_wiring::start_choices(&conn.peer_routing()),
+                    &super::svc_list_exec_tools_wiring::start_choices(
+                        &conn.peer_routing(),
+                        conn.coding_agents().agents(),
+                    ),
                 ),
             ),
             _ => tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(

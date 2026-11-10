@@ -1,0 +1,268 @@
+/**
+ * The daemon's own settings.
+ *
+ * The desktop application is a daemon with a UI, so the configuration that used to be reachable
+ * only by editing YAML and restarting is edited here: read through `DaemonConfigService.GetConfig`,
+ * written through `UpdateConfig`. What the daemon cannot apply to itself while running, it names in
+ * the response, and this screen says so rather than leaving the operator to wonder.
+ */
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Code, ConnectError, type Client } from "@connectrpc/connect";
+import type { DaemonConfigService } from "tddy-client-web/gen/daemon_config_pb";
+import { integrationStatusText } from "./integrationStatusText";
+import { toFormState, toUpdateSettings, type DaemonSettingsFormState, type LivekitIceGathering } from "./settingsForm";
+
+export interface DaemonSettingsScreenProps {
+  client: Client<typeof DaemonConfigService>;
+  /** Daemon access token, gating every configuration read and write. */
+  sessionToken: string;
+}
+
+const inputClass = "w-full rounded border border-border px-2 py-1 text-sm";
+const labelClass = "block text-sm mb-1 text-muted-foreground";
+
+/** How often the integration status lines are re-read while the screen is open. */
+const INTEGRATION_STATUS_POLL_MS = 5000;
+
+export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScreenProps) {
+  // Null until the daemon has answered: a blank form would read as a daemon with no configuration.
+  const [form, setForm] = useState<DaemonSettingsFormState | null>(null);
+  const [configPath, setConfigPath] = useState("");
+  const [restartRequired, setRestartRequired] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  // Null when there is no line to show: an older daemon, or one with no LiveKit entry.
+  const [liveKitStatusText, setLiveKitStatusText] = useState<string | null>(null);
+  // The same for Telegram: a daemon that reports no `telegram` entry shows no Telegram line.
+  const [telegramStatusText, setTelegramStatusText] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    client
+      .getConfig({ sessionToken })
+      .then((response) => {
+        if (cancelled) return;
+        setForm(toFormState(response));
+        setConfigPath(response.configPath);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(ConnectError.from(err).rawMessage);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, sessionToken]);
+
+  // Set once the daemon answers `Unimplemented`: an older daemon will not learn the call mid-session.
+  const statusUnsupported = useRef(false);
+
+  const readIntegrationStatus = useCallback(async () => {
+    if (statusUnsupported.current) return;
+    try {
+      const response = await client.getIntegrationStatus({ sessionToken });
+      const now = new Date();
+      const statusTextOf = (id: string) => {
+        const entry = response.integrations.find((candidate) => candidate.id === id);
+        return entry ? integrationStatusText(entry, now) : null;
+      };
+      setLiveKitStatusText(statusTextOf("livekit"));
+      setTelegramStatusText(statusTextOf("telegram"));
+    } catch (err) {
+      const connectError = ConnectError.from(err);
+      if (connectError.code === Code.Unimplemented) {
+        // A daemon too old to report its integrations is not a broken one: no line, form unaffected.
+        statusUnsupported.current = true;
+        setLiveKitStatusText(null);
+        setTelegramStatusText(null);
+        return;
+      }
+      // Shown on the status line, not in the save error: a failed poll says nothing about the form.
+      // Said once, on LiveKit's line: whether the daemon has a Telegram entry at all is unknown.
+      setLiveKitStatusText(`Status unavailable: ${connectError.rawMessage}`);
+      setTelegramStatusText(null);
+    }
+  }, [client, sessionToken]);
+
+  useEffect(() => {
+    statusUnsupported.current = false;
+    void readIntegrationStatus();
+    const interval = setInterval(() => void readIntegrationStatus(), INTEGRATION_STATUS_POLL_MS);
+    return () => clearInterval(interval);
+  }, [readIntegrationStatus]);
+
+  // Typed per field rather than as `string`, so the LiveKit switch is edited through the same one
+  // helper every text field is — a checkbox writing a boolean is not a different kind of edit.
+  const edit = <Field extends keyof DaemonSettingsFormState>(
+    field: Field,
+    value: DaemonSettingsFormState[Field],
+  ) => setForm((current) => (current ? { ...current, [field]: value } : current));
+
+  const save = async () => {
+    if (!form) return;
+    setSaving(true);
+    try {
+      const response = await client.updateConfig({
+        sessionToken,
+        settings: toUpdateSettings(form),
+      });
+      setRestartRequired(response.restartRequired);
+      setError(null);
+      // The save is the operator's cue to look at whether the daemon can now reach the new server.
+      void readIntegrationStatus();
+    } catch (err) {
+      // The form keeps what was entered: a refused value is the one the operator has to correct.
+      setError(ConnectError.from(err).rawMessage);
+      setRestartRequired([]);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div data-testid="daemon-settings-screen" className="flex flex-col gap-4 p-4">
+      <div>
+        <div className="font-semibold">Daemon settings</div>
+        {configPath ? (
+          <div className="text-sm text-muted-foreground">{configPath}</div>
+        ) : null}
+      </div>
+
+      {form === null ? (
+        <div className="text-sm text-muted-foreground">Loading the daemon's configuration…</div>
+      ) : (
+        <>
+          <div className="flex max-w-md flex-col gap-3 rounded-md border border-border p-4">
+            <div className="font-medium">LiveKit</div>
+            {liveKitStatusText === null ? null : (
+              <div data-testid="daemon-settings-livekit-status" className="text-sm">
+                {liveKitStatusText}
+              </div>
+            )}
+            {/* The operator's switch. Off keeps every field below it, so turning the common room
+                back on is this one checkbox rather than four credentials retyped. */}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                data-testid="daemon-settings-livekit-enabled"
+                checked={form.livekitEnabled}
+                onChange={(e) => edit("livekitEnabled", e.target.checked)}
+              />
+              <span>Join the common room</span>
+            </label>
+            <label>
+              <span className={labelClass}>URL</span>
+              <input
+                data-testid="daemon-settings-livekit-url"
+                className={inputClass}
+                value={form.livekitUrl}
+                onChange={(e) => edit("livekitUrl", e.target.value)}
+              />
+            </label>
+            <label>
+              <span className={labelClass}>Public URL</span>
+              <input
+                className={inputClass}
+                value={form.livekitPublicUrl}
+                onChange={(e) => edit("livekitPublicUrl", e.target.value)}
+              />
+            </label>
+            <label>
+              <span className={labelClass}>API key</span>
+              <input
+                data-testid="daemon-settings-livekit-api-key"
+                className={inputClass}
+                value={form.livekitApiKey}
+                onChange={(e) => edit("livekitApiKey", e.target.value)}
+              />
+            </label>
+            <label>
+              <span className={labelClass}>API secret</span>
+              <input
+                type="password"
+                className={inputClass}
+                value={form.livekitApiSecret}
+                onChange={(e) => edit("livekitApiSecret", e.target.value)}
+              />
+            </label>
+            <div
+              data-testid="daemon-settings-livekit-secret-state"
+              className="text-sm text-muted-foreground"
+            >
+              {form.livekitApiSecretSet
+                ? "A secret is stored. Type a new one to replace it; leave blank to keep it."
+                : "No secret stored."}
+            </div>
+            <label>
+              <span className={labelClass}>Common room</span>
+              <input
+                className={inputClass}
+                value={form.livekitCommonRoom}
+                onChange={(e) => edit("livekitCommonRoom", e.target.value)}
+              />
+            </label>
+            <label>
+              <span className={labelClass}>ICE gathering</span>
+              <select
+                data-testid="daemon-settings-livekit-ice-gathering"
+                className={inputClass}
+                value={form.livekitIceGathering}
+                onChange={(e) =>
+                  edit("livekitIceGathering", e.target.value as LivekitIceGathering)
+                }
+              >
+                <option value="gather_once">Gather once (recommended)</option>
+                <option value="gather_continually">Gather continually</option>
+              </select>
+              <span className="text-xs text-muted-foreground">
+                Gathering continually keeps a session alive across a network switch without a
+                reconnect, but leaks file descriptors on hosts whose networks change; the daemon
+                runs out of file descriptors after a couple of days.
+              </span>
+            </label>
+          </div>
+
+          {/* Telegram is configured in the YAML file; only its live state is shown here. */}
+          {telegramStatusText === null ? null : (
+            <div className="flex max-w-md flex-col gap-1 rounded-md border border-border p-4">
+              <div className="font-medium">Telegram</div>
+              <div data-testid="daemon-settings-telegram-status" className="text-sm">
+                {telegramStatusText}
+              </div>
+            </div>
+          )}
+
+          {/* Where the daemon listens is edited in the YAML file: changing it needs a restart. */}
+          <div className="flex max-w-md flex-col gap-1 rounded-md border border-border p-4 text-sm">
+            <div className="font-medium">Listen</div>
+            <div className="text-muted-foreground">
+              Host {form.webHost || "—"}, port {form.webPort || "—"}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            data-testid="daemon-settings-save"
+            className="self-start rounded-md border border-border px-3 py-2 text-sm font-medium"
+            disabled={saving}
+            onClick={save}
+          >
+            Save
+          </button>
+        </>
+      )}
+
+      {error ? (
+        <div data-testid="daemon-settings-error" className="text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      {restartRequired.length > 0 ? (
+        <div data-testid="daemon-settings-restart-required" className="text-sm">
+          Saved. A daemon restart is needed to apply: {restartRequired.join(", ")}
+        </div>
+      ) : null}
+    </div>
+  );
+}

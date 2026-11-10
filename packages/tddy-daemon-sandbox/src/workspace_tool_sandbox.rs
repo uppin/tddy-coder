@@ -22,7 +22,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::{Stream, StreamExt};
-use tddy_sandbox::{CgroupConfig, MountSpec, SandboxError, SandboxPlan};
+use tddy_actions::tool::{ProcessToolHost, ResolvedTool, ToolError, ToolHost, ToolRegistry};
+use tddy_sandbox::{CgroupConfig, EgressPolicy, MountSpec, SandboxError, SandboxPlan};
 // The budget both hosts of this exchange keep. Imported rather than restated: the daemon and the
 // standalone app speak the same one-call-at-a-time protocol into the same jail, so a call still
 // legitimate on one of them must not already have been abandoned on the other.
@@ -32,6 +33,8 @@ use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::SessionFrame;
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
+
+use crate::sandbox_session::pick_free_loopback_port;
 
 /// Where the jail runner records its pid so a later daemon can tear down an orphaned process.
 pub const RUNNER_PID_FILE: &str = "runner.pid";
@@ -146,6 +149,9 @@ pub struct WorkspaceToolPlanRequest {
     pub runner_path: String,
     pub tddy_tools_path: String,
     pub cgroup: CgroupConfig,
+    /// The declared tools this jail runs, resolved against the host (`#agent-tools 1/12`): each is
+    /// exec-granted as its binary file and reachable by name through the jail's own `bin/`.
+    pub tools: Vec<ResolvedTool>,
 }
 
 /// Assemble the [`SandboxPlan`] for a workspace jail: `tddy-sandbox-runner --stdio` over the
@@ -165,15 +171,33 @@ pub fn build_workspace_tool_plan(
         runner_path,
         tddy_tools_path,
         cgroup,
+        tools,
     } = request;
+    // The declared tools (`#agent-tools 1/12`): each binary is granted as the file it is, and reached
+    // by name through the jail's own `bin/`, which goes first on the jail's PATH.
+    let grants = tddy_sandbox_recipes::lower_tools(
+        &tools,
+        &layout.scratch_dir.join("bin"),
+        &tddy_sandbox_recipes::HostBinaryLibraries,
+    );
+    // The declared tools' network (`#agent-tools 3/12`): one policy for the whole jail, the union of
+    // their `network:` sections. A `none` jail starts no shim, so it picks no port for one.
+    let (egress, oauth_inbound) = tddy_sandbox_recipes::lower_network(&tools);
+    let shim_port = match egress {
+        EgressPolicy::None => None,
+        EgressPolicy::Any | EgressPolicy::Hosts(_) => {
+            Some(pick_free_loopback_port().map_err(SandboxError::InvalidSpec)?)
+        }
+    };
 
     let scratch_home = layout.scratch_dir.join("home");
     let scratch_tmp = layout.scratch_dir.join("tmp");
 
     // `--workspace-tools` is what makes this a jail with no agent in it: the runner serves the
-    // host's `in_jail_tool_request`s against the worktree as mounted here, and spawns no PTY, no
-    // in-jail `tddy-tools --mcp` server and no egress shim for one to reach the network through.
-    let runner_argv = vec![
+    // host's `in_jail_tool_request`s against the worktree as mounted here, and spawns no PTY and no
+    // in-jail `tddy-tools --mcp` server. It starts an egress shim only when a tool it serves declares
+    // hosts.
+    let mut runner_argv = vec![
         runner_path,
         "--session-id".to_string(),
         session_id.clone(),
@@ -189,6 +213,17 @@ pub fn build_workspace_tool_plan(
         worktree_path.to_string_lossy().to_string(),
         "--stdio".to_string(),
     ];
+    if let Some(port) = shim_port {
+        runner_argv.extend([
+            "--egress-shim-port".to_string(),
+            port.to_string(),
+            "--egress-policy".to_string(),
+            egress.to_runner_arg(),
+        ]);
+        for tool in &tools {
+            runner_argv.extend(["--egress-tool".to_string(), tool.id.clone()]);
+        }
+    }
 
     let mut env = tddy_sandbox::scratch_runner_env(
         &scratch_home,
@@ -197,14 +232,8 @@ pub fn build_workspace_tool_plan(
         &layout.tool_ipc_socket,
         &layout.egress_dir,
     );
-    // FIXME(grep-in-jail): see `host_ripgrep_grants`. Both halves are needed and neither is enough
-    // on its own — PATH so `Command::new("rg")` resolves, and the reads below so Seatbelt lets the
-    // loader read and run what it resolved, including the libraries it pulls in.
-    let ripgrep = host_ripgrep_grants();
-    if let Some(grants) = &ripgrep {
-        if let Some(path) = env.get_mut("PATH") {
-            *path = format!("{}:{path}", grants.bin_dir.display());
-        }
+    if let Some(path) = env.get_mut("PATH") {
+        *path = format!("{}:{path}", grants.path_prefix.display());
     }
 
     let plan_worktree = worktree_path.clone();
@@ -216,7 +245,9 @@ pub fn build_workspace_tool_plan(
             profile_path: layout.profile_path.clone(),
             runner_argv,
             env,
-            loopback_allow_ports: vec![],
+            // The runner binds its egress shim inside the jail, so the jail is allowed that one
+            // loopback port, and no other.
+            loopback_allow_ports: shim_port.into_iter().collect(),
             // No host-bound tool IPC: that socket exists for an in-jail `tddy-tools --mcp` calling
             // *out* to the host, which a jail with no agent in it never does. Declaring one would
             // also have to fit macOS's 104-byte `SUN_LEN` cap, which a path this deep under the
@@ -230,7 +261,13 @@ pub fn build_workspace_tool_plan(
             host_home: None,
             // The jail hosts the session's tools and no agent, so it takes no provider route.
             route: None,
+            context_dir: Some(layout.context_dir.clone()),
+            stdio: true,
         })?;
+    // The policy and the OAuth callback come from the tools, not the recipe: a plan built from
+    // tools declares its own network.
+    plan.network.egress = egress;
+    plan.network.allow_oauth_inbound = oauth_inbound;
     // Path lookup for the worktree itself. Resolving `/a/b/worktree` walks `/a`, then `/a/b`, and
     // a jail that cannot stat those cannot canonicalize its own checkout — which is the first
     // thing every path-containing tool does. That lookup is all each ancestor is granted: a
@@ -249,122 +286,11 @@ pub fn build_workspace_tool_plan(
     // `main()` runs. Denied, that read fails with `EINVAL` and the runtime aborts, so the jail
     // never comes up at all. Nothing else of the shell policy is relaxed.
     plan.policy.sysctl_read = true;
-    // FIXME(grep-in-jail): see `host_ripgrep_grants`. `exec_paths` alone would not do — it grants
-    // `process-exec*` and no read, and a binary the loader cannot read is a binary it cannot run.
-    // `binary_exec_reads` carries both for the binary's own directory, and plain reads for the
-    // libraries and the symlink farm above them.
-    if let Some(grants) = ripgrep {
-        plan.reads.extend(grants.reads);
-    }
+    // The declared tools' reads, and the links that name them on the jail's PATH.
+    plan.reads.extend(grants.reads);
+    plan.symlinks.extend(grants.symlinks);
     plan.cgroup = cgroup;
     Ok(plan)
-}
-
-/// Everything the jail needs to run the host's `rg`: the binary, its libraries, and the symlink
-/// farm the loader walks to reach them.
-///
-/// FIXME(grep-in-jail): temporary. `tool_grep` shells out to `ripgrep`, and the jail's PATH is
-/// `/usr/bin:/bin:/usr/sbin:/sbin` while Homebrew installs `rg` under `/opt/homebrew/bin` (or
-/// `/usr/local/bin` on Intel). So `Grep` failed `spawn failed: No such file or directory` on every
-/// call in every sandboxed session on a Mac — silently, as one refused tool among many.
-///
-/// Three things make this harder than "grant the directory `which` reported", and all three were
-/// found by running `sandbox-exec` against a real session's profile:
-///
-/// 1. **`which` reports a symlink.** `/opt/homebrew/bin/rg` points into
-///    `../Cellar/ripgrep/<version>/bin`. Seatbelt matches the *resolved* path, so granting the
-///    symlink's directory grants nothing. The path is canonicalized before anything is derived
-///    from it.
-/// 2. **`rg` links a Homebrew library**, `libpcre2-8`. The binary's own directory is not enough;
-///    [`binary_exec_reads`] walks `otool -L` for exactly this.
-/// 3. **The loader asks for the library by its *symlinked* path** (`/opt/homebrew/opt/pcre2/lib/…`),
-///    and the profile renderer canonicalizes every rule path — so the canonical grant alone still
-///    denies the traversal. The nearest ancestor that is itself not a symlink
-///    (`/opt/homebrew/opt`) has to be readable for the walk to succeed.
-///
-/// It is still the wrong shape: it grants directories of unrelated binaries and libraries because
-/// of one tool's dependencies, hardcoded in the plan builder for one named binary, in a sandbox
-/// whose whole claim is an explicit allow-list. The designed replacement is a declared tool set —
-/// `<tddyhome>/tools/*.yaml` naming a host binary or a `tddy-build` target, each stating what
-/// becomes readable, executable and reachable on `PATH`. See PR #548 and
-/// `docs/dev/todo/2026-09-26-grep-is-unreachable-inside-every-jail.md`.
-fn host_ripgrep_grants() -> Option<RipgrepGrants> {
-    let output = std::process::Command::new("/usr/bin/which")
-        .arg("rg")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let reported = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
-    // Point 1: resolve the symlink before deriving anything. Everything below is about the real
-    // binary, so `PATH` names the directory the loader will actually be asked for.
-    let binary = std::fs::canonicalize(&reported).ok()?;
-    let bin_dir = binary.parent()?.to_path_buf();
-
-    // Point 2: the binary's directory as executable, plus each `otool -L` dependency's directory.
-    let mut reads = tddy_sandbox::binary_exec_reads(&binary);
-    // Point 3: the traversal. Each dependency is named by a path that runs through Homebrew's
-    // symlink farm; grant the nearest ancestor that is not itself a symlink, which is the deepest
-    // directory a canonicalizing renderer can still express.
-    for ancestor in binary_dependency_traversal_dirs(&binary) {
-        reads.push(tddy_sandbox::ReadSpec::subpath(
-            ancestor,
-            tddy_sandbox::ReadReason::Toolchain,
-        ));
-    }
-    Some(RipgrepGrants { bin_dir, reads })
-}
-
-/// What [`host_ripgrep_grants`] found: the directory to put on `PATH`, and the grants that let the
-/// loader read and run what is there.
-struct RipgrepGrants {
-    bin_dir: PathBuf,
-    reads: Vec<tddy_sandbox::ReadSpec>,
-}
-
-/// The nearest non-symlinked ancestor of each of `binary`'s dynamic dependencies.
-///
-/// `otool -L` reports a library by the path the loader will ask for, which for Homebrew runs
-/// through `<prefix>/opt/<formula>` — a symlink into `Cellar`. A grant on that path is rewritten to
-/// its canonical form by the profile renderer, so it never authorises the walk that reaches it.
-/// Walking up to the first directory that is its own canonical form gives a path the renderer
-/// leaves alone.
-fn binary_dependency_traversal_dirs(binary: &Path) -> Vec<PathBuf> {
-    let Ok(output) = std::process::Command::new("otool")
-        .args(["-L"])
-        .arg(binary)
-        .output()
-    else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    for line in text.lines().skip(1) {
-        let lib = line.split_whitespace().next().unwrap_or("");
-        if !lib.starts_with('/') {
-            continue;
-        }
-        let mut walk = Path::new(lib).parent();
-        while let Some(dir) = walk {
-            if dir == Path::new("/") {
-                break;
-            }
-            // The first ancestor that is already its own canonical form. Below it every component
-            // is a symlink the renderer would rewrite.
-            if std::fs::canonicalize(dir).is_ok_and(|c| c == dir) {
-                if !dirs.contains(&dir.to_path_buf()) {
-                    dirs.push(dir.to_path_buf());
-                }
-                break;
-            }
-            walk = dir.parent();
-        }
-    }
-    dirs
 }
 
 /// Every directory above `worktree`, from the filesystem root down to its parent.
@@ -397,9 +323,47 @@ pub fn workspace_sandbox_platform_support() -> Result<(), SandboxError> {
 /// How long the jail is given to write its ready marker before the start is failed.
 const JAIL_READY_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// The declared tools every workspace jail runs: `Grep` shells out to `rg`.
+pub const WORKSPACE_JAIL_TOOLS: &[&str] = &["rg"];
+
 /// The production provisioner: a real jail on this host's backend.
-#[derive(Debug, Default)]
-pub struct JailedWorkspaceSandboxProvisioner;
+///
+/// It resolves [`WORKSPACE_JAIL_TOOLS`] from the built-in tools plus `<tddyhome>/tools` **at jail
+/// start**, so an `rg` installed after the daemon started is picked up and a missing one refuses
+/// only the jails that need it, naming the tool.
+pub struct JailedWorkspaceSandboxProvisioner {
+    tools_dir: PathBuf,
+    host: Arc<dyn ToolHost>,
+}
+
+impl std::fmt::Debug for JailedWorkspaceSandboxProvisioner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JailedWorkspaceSandboxProvisioner")
+            .field("tools_dir", &self.tools_dir)
+            .finish_non_exhaustive()
+    }
+}
+
+impl JailedWorkspaceSandboxProvisioner {
+    /// Resolve tools from `tools_dir` overrides against `host`.
+    pub fn new(tools_dir: PathBuf, host: Arc<dyn ToolHost>) -> Self {
+        Self { tools_dir, host }
+    }
+
+    /// The daemon's provisioner: overrides from `<tddy_home>/tools`, resolved against this process.
+    pub fn for_tddy_home(tddy_home: &Path) -> Self {
+        Self::new(tddy_home.join("tools"), Arc::new(ProcessToolHost))
+    }
+
+    /// The jail's declared tools, resolved — or the refusal naming the tool the host lacks.
+    pub fn resolve_jail_tools(&self) -> Result<Vec<ResolvedTool>, SandboxError> {
+        let builtin = ToolRegistry::builtin().map_err(tool_refusal)?;
+        let registry = ToolRegistry::load(builtin, &self.tools_dir).map_err(tool_refusal)?;
+        registry
+            .resolve_closure(WORKSPACE_JAIL_TOOLS, &*self.host)
+            .map_err(tool_refusal)
+    }
+}
 
 #[async_trait]
 impl WorkspaceSandboxProvisioner for JailedWorkspaceSandboxProvisioner {
@@ -408,6 +372,9 @@ impl WorkspaceSandboxProvisioner for JailedWorkspaceSandboxProvisioner {
         spec: &WorkspaceSandboxSpec,
     ) -> Result<Arc<dyn WorkspaceSandbox>, SandboxError> {
         workspace_sandbox_platform_support()?;
+        // Resolved before the jail tree exists, so a host that cannot satisfy a declared tool refuses
+        // the start without leaving anything of the jail behind.
+        let tools = self.resolve_jail_tools()?;
 
         let layout = prepare_jail_tree(&spec.session_dir)?;
         // Seatbelt matches its rules against fully symlink-resolved paths (`/var` →
@@ -421,6 +388,7 @@ impl WorkspaceSandboxProvisioner for JailedWorkspaceSandboxProvisioner {
             runner_path: canonical_exec(&crate::sandbox_session::resolve_sandbox_runner_path()),
             tddy_tools_path: canonical_exec(&crate::sandbox_session::resolve_tddy_tools_path(None)),
             cgroup: CgroupConfig::default(),
+            tools,
         })?;
 
         let mut handle = crate::sandbox_session::spawn_sandbox_plan(plan)?;
@@ -535,6 +503,12 @@ fn canonical_exec(binary: &str) -> String {
     } else {
         binary.to_string()
     }
+}
+
+/// A declared tool the host cannot load or satisfy refuses the jail's start. The message already names
+/// the tool and what was searched.
+fn tool_refusal(error: ToolError) -> SandboxError {
+    SandboxError::InvalidSpec(error.to_string())
 }
 
 /// The open `SessionChannel` to one jail.

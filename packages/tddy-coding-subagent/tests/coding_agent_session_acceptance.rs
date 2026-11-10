@@ -84,9 +84,14 @@ impl ScriptedAgent {
             cwd: self.dir.path().to_path_buf(),
             ..OpenSession::default()
         };
-        CodingAgentSession::start(command, open, "stub-model".to_string())
-            .await
-            .expect("the coding agent starts")
+        CodingAgentSession::start(
+            command,
+            open,
+            "stub-model".to_string(),
+            tddy_coding_subagent::no_launch_hooks(),
+        )
+        .await
+        .expect("the coding agent starts")
     }
 
     fn recorded(&self, event: &str) -> Vec<serde_json::Value> {

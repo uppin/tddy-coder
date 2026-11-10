@@ -81,6 +81,27 @@ pub trait SplitHost: AgentHostCallbacks {
     fn session_agents(&self) -> Arc<SplitSessionAgents>;
 }
 
+/// Where a split agent's session pointer is placed and removed: #829's pointer placement
+/// (`tddy-agent-launch`), reached through this port because that crate sits above this one.
+pub trait SplitSessionPointers: Send + Sync {
+    /// Place `pointer` in `context_dir` on this host — owner-only, git-excluded where `context_dir`
+    /// is in a checkout — and return `on_exit` preceded by the pointer's removal, for the agent's
+    /// spawn to run once the agent has exited.
+    fn place(
+        &self,
+        pointer: &tddy_core::session_pointer::SessionPointer,
+        context_dir: &std::path::Path,
+        on_exit: Option<tddy_cli_sessions::cli_session_manager::ExitHook>,
+    ) -> Result<Option<tddy_cli_sessions::cli_session_manager::ExitHook>, Status>;
+
+    /// Remove the pointer [`Self::place`] put in `context_dir`: for a spawn that failed after the
+    /// pointer was placed, when no agent exists whose exit would remove it.
+    fn remove(&self, context_dir: &std::path::Path);
+}
+
+/// How a split agent's binary is found: the host's coding agents resolve the named agent.
+pub type AgentBinary = Arc<dyn Fn(&str) -> Result<String, Status> + Send + Sync>;
+
 /// The session host's split fields, owned, plus its callbacks.
 ///
 /// Built per call by the host (`DaemonSessionHost::split_sessions`). Every shared field is the
@@ -100,10 +121,21 @@ pub struct SplitSessions {
         Arc<tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry>,
     pub workspace_sandbox_provisioner:
         Arc<dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner>,
-    pub claude_cli_manager: Arc<CliSessionManager>,
+    pub cli_manager: Arc<CliSessionManager>,
+    /// The binary a split agent is spawned with: its coding agent as it resolves on this
+    /// host, refused when it is found nowhere (`#agent-tools 19/19`).
+    pub agent_binary: AgentBinary,
     pub session_tokens: Option<tddy_daemon_auth::SessionTokens>,
+    /// The host's coding-agent registry, operator overrides included: the split agent's spec is
+    /// read from it ([`crate::agent_argv::split_agent_spec`]), never from the embedded one.
+    pub coding_agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
+    /// Where the split agent's session pointer is placed, and removed when it exits.
+    pub session_pointers: Arc<dyn SplitSessionPointers>,
     /// The agent topic's handle: the split start resolves the request's agent defs through it.
     pub agent_roster: AgentRoster,
+    /// The agent-tool socket of each session's OS user (`#agent-tools` 26/28): what a split or
+    /// jailed-codebase agent is told to report and call tools over.
+    pub agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     /// The host's capabilities that are not fields.
     pub host: Arc<dyn SplitHost>,
 }

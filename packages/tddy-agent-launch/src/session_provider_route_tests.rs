@@ -10,19 +10,21 @@
 use std::sync::Arc;
 
 use tddy_accounts::{endpoints_for, preset, ProviderAccount};
-use tddy_core::provider_route::{Harness, RouteChoice, RouteSources};
+use tddy_core::output::SESSIONS_SUBDIR;
+use tddy_core::provider_route::{RouteChoice, RouteSources, RoutedAgent};
 use tddy_credentials::{AccountId, CredentialStore, SecretString, SessionVaults};
-use tddy_rpc::Code;
+use tddy_rpc::{Code, Status};
 use tddy_service::proto::session::StartSessionRequest;
 
 use crate::cli_route_launch::{resume_cli_route, start_cli_route};
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::session_provider_route::{
     pty_route_env, resolve_session_route, resume_route, resume_route_env, route_sources_on_resume,
-    sandboxed_start_route, session_route_sources, start_route,
+    sandboxed_start_route, session_route_sources, start_route, RouteAgent, StartRoute,
 };
-use std::os::unix::fs::PermissionsExt;
-use tddy_core::cli_harness::cli_harness;
+use crate::spec_launch::HostCodingAgents;
+use std::path::{Path, PathBuf};
+use tddy_coding_agent_specs::{load_agent_registry, routed_agent, CodingAgentSpec};
 use tddy_core::{
     read_session_provider_account, write_session_provider_account, SessionProviderAccount,
     SESSION_PROVIDER_ACCOUNT_FILENAME,
@@ -87,6 +89,24 @@ fn value_of<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
         .map(|(_, v)| v.as_str())
 }
 
+/// The built-in spec of the coding agent `id`, as a host loads it.
+fn the_spec(id: &str) -> CodingAgentSpec {
+    let tools = tempfile::tempdir().expect("a tools directory");
+    let registry = load_agent_registry(tools.path()).expect("the built-in agents load");
+    CodingAgentSpec::of(registry.get(id).expect("registered")).expect("a coding agent")
+}
+
+/// What a route is built from for the built-in agent `id`, as a host's registry gives it.
+fn the_routed(id: &str) -> RoutedAgent {
+    routed_agent(&the_spec(id))
+}
+
+/// The coding agents of a fixture host: every built-in spec, resolved as the daemon resolves them.
+fn the_host_agents() -> Arc<crate::spec_launch::HostCodingAgents> {
+    crate::host_coding_agents::host_coding_agents(std::path::Path::new("/nonexistent-tddy-home"))
+        .expect("the built-in coding agents load")
+}
+
 #[test]
 fn a_claude_cli_start_on_a_meta_account_launches_with_the_route_env() {
     // Given Ada holds her Meta account in an unlocked vault
@@ -95,7 +115,7 @@ fn a_claude_cli_start_on_a_meta_account_launches_with_the_route_env() {
     // When a claude-cli start chooses it
     let route = resolve_session_route(
         &access,
-        Harness::ClaudeCli,
+        &the_routed("claude"),
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
     )
@@ -124,7 +144,7 @@ fn a_start_that_chooses_nothing_runs_on_the_vendor() {
     // When
     let route = resolve_session_route(
         &access,
-        Harness::ClaudeCli,
+        &the_routed("claude"),
         &RouteSources::default(),
         "opus",
     )
@@ -142,7 +162,7 @@ fn a_locked_vault_refuses_a_routed_start_before_anything_spawns() {
     // When
     let refusal = resolve_session_route(
         &access,
-        Harness::ClaudeCli,
+        &the_routed("claude"),
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
     )
@@ -161,7 +181,7 @@ fn an_account_the_vault_does_not_hold_is_refused() {
     // When
     let refusal = resolve_session_route(
         &access,
-        Harness::ClaudeCli,
+        &the_routed("claude"),
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
     )
@@ -179,7 +199,7 @@ fn a_harness_that_cannot_run_on_the_account_is_refused_with_the_reason() {
     // When
     let refusal = resolve_session_route(
         &access,
-        Harness::CursorCli,
+        &the_routed("cursor"),
         &on_account("meta-hackathon"),
         "composer-2.5",
     )
@@ -235,7 +255,7 @@ fn a_resumed_claude_cli_session_reapplies_its_account() {
     let (sources, model) = route_sources_on_resume(session_dir.path()).expect("the record reads");
     let route = resolve_session_route(
         &access,
-        Harness::ClaudeCli,
+        &the_routed("claude"),
         &sources,
         model.as_deref().expect("the recorded model"),
     )
@@ -273,7 +293,7 @@ fn a_routed_start_records_its_account_and_model_but_never_its_key() {
     // When a claude-cli start chooses it and records it in the session directory
     let start = start_route(
         &access,
-        Harness::ClaudeCli,
+        (&the_routed("claude")).into(),
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
     )
@@ -303,7 +323,7 @@ fn a_start_on_an_account_with_no_model_is_refused() {
     // When
     let refusal = start_route(
         &access,
-        Harness::ClaudeCli,
+        (&the_routed("claude")).into(),
         &on_account("meta-hackathon"),
         "  ",
     )
@@ -324,7 +344,7 @@ fn a_sandboxed_start_on_an_account_runs_on_that_account() {
     // When a sandboxed claude-cli start chooses that account
     let route = sandboxed_start_route(
         &access,
-        Harness::ClaudeCli,
+        (&the_routed("claude")).into(),
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
         &session_dir,
@@ -363,7 +383,7 @@ fn a_sandboxed_start_that_chooses_nothing_runs_on_the_vendor() {
     assert_eq!(
         sandboxed_start_route(
             &access,
-            Harness::ClaudeCli,
+            (&the_routed("claude")).into(),
             &RouteSources::default(),
             "muse-wonder-1.0",
             &session_dir,
@@ -389,7 +409,7 @@ fn a_resumed_sandboxed_session_reapplies_its_account_as_a_route() {
     .expect("recorded at start");
 
     // When it resumes
-    let route = resume_route(&access, Harness::ClaudeCli, session_dir.path())
+    let route = resume_route(&access, (&the_routed("claude")).into(), session_dir.path())
         .expect("the record reads and the account resolves")
         .expect("a route, not the vendor");
 
@@ -419,7 +439,7 @@ fn a_resume_whose_account_was_removed_is_refused_rather_than_run_on_the_vendor()
     .expect("recorded at start");
 
     // When it resumes
-    let refusal = resume_route_env(&access, Harness::ClaudeCli, session_dir.path())
+    let refusal = resume_route_env(&access, (&the_routed("claude")).into(), session_dir.path())
         .expect_err("a removed account refuses the resume");
 
     // Then
@@ -434,9 +454,39 @@ fn a_resumed_session_on_its_vendor_gets_no_route_env() {
 
     // When / Then
     assert_eq!(
-        resume_route_env(&access, Harness::ClaudeCli, session_dir.path()).expect("no record"),
+        resume_route_env(&access, (&the_routed("claude")).into(), session_dir.path())
+            .expect("no record"),
         Vec::<(String, String)>::new()
     );
+}
+
+/// The agent `claude` among a host's coding agents, which a route is resolved for.
+fn on_the_claude_agent(agents: Option<&HostCodingAgents>) -> RouteAgent<'_> {
+    RouteAgent::OnHost {
+        agents,
+        id: "claude",
+    }
+}
+
+/// A claude-cli start's session directory under `sessions_base/sessions/<id>/`, with the route's
+/// account recorded there. The route is resolved **before** the directory is created, so a refused
+/// route leaves nothing on disk.
+fn start_a_claude_cli_session_dir(
+    sessions_base: &Path,
+    session_id: &str,
+    access: &SessionAccountAccess,
+    sources: &RouteSources,
+    model: &str,
+    agent: RouteAgent<'_>,
+) -> Result<(PathBuf, Option<StartRoute>), Status> {
+    let route = start_route(access, agent, sources, model)?;
+    let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+    std::fs::create_dir_all(&session_dir)
+        .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
+    if let Some(route) = &route {
+        route.record_in(&session_dir)?;
+    }
+    Ok((session_dir, route))
 }
 
 #[test]
@@ -446,12 +496,13 @@ fn a_routed_claude_cli_start_records_its_account_in_the_session_dir_it_creates()
     let sessions_base = tempfile::tempdir().expect("a sessions base");
 
     // When a claude-cli start on it creates its session directory
-    let (session_dir, route) = crate::claude_cli_spawn::create_routed_session_dir(
+    let (session_dir, route) = start_a_claude_cli_session_dir(
         sessions_base.path(),
         "sess-1",
         &access,
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
+        on_the_claude_agent(Some(&the_host_agents())),
     )
     .expect("the start proceeds");
 
@@ -473,12 +524,13 @@ fn a_refused_claude_cli_start_creates_no_session_dir() {
     let sessions_base = tempfile::tempdir().expect("a sessions base");
 
     // When a claude-cli start chooses her account
-    let refusal = crate::claude_cli_spawn::create_routed_session_dir(
+    let refusal = start_a_claude_cli_session_dir(
         sessions_base.path(),
         "sess-1",
         &access,
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
+        on_the_claude_agent(Some(&the_host_agents())),
     )
     .expect_err("a locked vault refuses");
 
@@ -499,12 +551,13 @@ fn a_claude_cli_start_on_its_vendor_creates_its_session_dir_with_no_record() {
     let sessions_base = tempfile::tempdir().expect("a sessions base");
 
     // When
-    let (session_dir, route) = crate::claude_cli_spawn::create_routed_session_dir(
+    let (session_dir, route) = start_a_claude_cli_session_dir(
         sessions_base.path(),
         "sess-1",
         &access,
         &RouteSources::default(),
         "opus",
+        on_the_claude_agent(Some(&the_host_agents())),
     )
     .expect("the start proceeds");
 
@@ -522,16 +575,16 @@ fn a_claude_cli_start_on_its_vendor_creates_its_session_dir_with_no_record() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn an_opencode_start_on_a_meta_account_writes_its_config_and_launches_with_it() {
+fn an_opencode_cli_start_on_an_account_carries_its_route_inline_and_writes_no_file() {
     // Given Ada holds her Meta account, and OpenCode's session directory is empty
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When an opencode-cli start chooses the account
     let launch = start_cli_route(
         &access,
-        opencode,
+        &opencode,
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
         session_dir.path(),
@@ -539,26 +592,26 @@ fn an_opencode_start_on_a_meta_account_writes_its_config_and_launches_with_it() 
     .expect("the route resolves")
     .expect("a route, not the vendor");
 
-    // Then opencode.json is in the session directory, owner-only, and OPENCODE_CONFIG names it
-    let config = session_dir.path().join("opencode.json");
-    let mode = std::fs::metadata(&config)
-        .expect("written")
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(mode, 0o600);
+    // Then the generated configuration is inline in OPENCODE_CONFIG_CONTENT (`route.shape:
+    // inline_config`, `#agent-tools 29/32`), no opencode.json is written and OPENCODE_CONFIG is unset
+    let inline: serde_json::Value = serde_json::from_str(
+        value_of(&launch.env, "OPENCODE_CONFIG_CONTENT").expect("OPENCODE_CONFIG_CONTENT is set"),
+    )
+    .expect("the inline configuration is JSON");
     assert_eq!(
-        value_of(&launch.env, "OPENCODE_CONFIG"),
-        Some(config.to_str().expect("utf-8"))
+        (
+            inline["model"].clone(),
+            value_of(&launch.env, "OPENCODE_CONFIG"),
+            session_dir.path().join("opencode.json").exists(),
+        ),
+        (serde_json::json!("tddy-route/muse-wonder-1.0"), None, false)
     );
-    // And the key is in the child's environment and nowhere on disk
+    // And the key is in the child's environment, never in the configuration
     assert_eq!(
-        value_of(&launch.env, "TDDY_OPENCODE_PROVIDER_KEY"),
+        value_of(&launch.env, "OPENCODE_PROVIDER_KEY"),
         Some(META_KEY)
     );
-    assert!(!std::fs::read_to_string(&config)
-        .expect("readable")
-        .contains(META_KEY));
+    assert!(!inline.to_string().contains(META_KEY));
     // And the model is selected on the generated provider
     assert_eq!(launch.args, vec!["--model", "tddy-route/muse-wonder-1.0"]);
 }
@@ -568,12 +621,12 @@ fn an_opencode_start_that_chooses_nothing_writes_nothing_and_records_nothing() {
     // Given
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When
     let launch = start_cli_route(
         &access,
-        opencode,
+        &opencode,
         &RouteSources::default(),
         "anthropic/claude-sonnet-4",
         session_dir.path(),
@@ -593,12 +646,12 @@ fn an_opencode_start_records_its_account_and_model_but_never_its_key() {
     // Given
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When
     start_cli_route(
         &access,
-        opencode,
+        &opencode,
         &on_account("meta-hackathon"),
         "muse-wonder-1.0",
         session_dir.path(),
@@ -633,12 +686,12 @@ fn an_opencode_start_on_an_account_that_serves_neither_openai_protocol_is_refuse
     };
     let (_dir, access) = a_daemon_where_ada_holds(&[account], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When
     let refusal = start_cli_route(
         &access,
-        opencode,
+        &opencode,
         &on_account("anthropic-direct"),
         "claude-sonnet-4",
         session_dir.path(),
@@ -654,7 +707,7 @@ fn an_opencode_start_on_an_account_that_serves_neither_openai_protocol_is_refuse
 }
 
 #[test]
-fn a_resumed_opencode_session_regenerates_its_config_from_the_vault_as_it_stands() {
+fn a_resumed_opencode_session_regenerates_its_inline_config_from_the_vault_as_it_stands() {
     // Given a session recorded on the Meta account
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
@@ -666,15 +719,17 @@ fn a_resumed_opencode_session_regenerates_its_config_from_the_vault_as_it_stands
         },
     )
     .expect("recorded at start");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When it resumes
-    let launch = resume_cli_route(&access, opencode, session_dir.path()).expect("re-resolved");
+    let launch = resume_cli_route(&access, &opencode, session_dir.path()).expect("re-resolved");
 
-    // Then the config is written again and the key comes from the vault
-    assert!(session_dir.path().join("opencode.json").is_file());
+    // Then the configuration is generated again, inline (`#agent-tools 29/32`) with nothing
+    // written, and the key comes from the vault
+    assert!(value_of(&launch.env, "OPENCODE_CONFIG_CONTENT").is_some());
+    assert!(!session_dir.path().join("opencode.json").exists());
     assert_eq!(
-        value_of(&launch.env, "TDDY_OPENCODE_PROVIDER_KEY"),
+        value_of(&launch.env, "OPENCODE_PROVIDER_KEY"),
         Some(META_KEY)
     );
     assert_eq!(launch.args, vec!["--model", "tddy-route/muse-wonder-1.0"]);
@@ -685,11 +740,85 @@ fn a_resumed_opencode_session_on_its_own_setup_gets_no_route() {
     // Given a session directory with no account record
     let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
     let session_dir = tempfile::tempdir().expect("a session directory");
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let opencode = the_spec("opencode");
 
     // When / Then
     assert_eq!(
-        resume_cli_route(&access, opencode, session_dir.path()).expect("no record"),
+        resume_cli_route(&access, &opencode, session_dir.path()).expect("no record"),
         crate::cli_route_launch::CliRouteLaunch::default()
     );
+}
+
+// ---------------------------------------------------------------------------
+// What a route is resolved for: the agent's spec, never its name
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_cli_session_type_carries_the_route_support_its_spec_declares() {
+    // Given
+    let agents = the_host_agents();
+
+    // When
+    let opencode = crate::harness_from_spec::cli_session_type(&agents, "opencode-cli")
+        .expect("opencode-cli is built in");
+    let cursor = crate::harness_from_spec::cli_session_type(&agents, "cursor-cli")
+        .expect("cursor-cli is built in");
+
+    // Then — OpenCode's spec routes inline JSON configuration; Cursor's declares no route at all
+    assert_eq!(
+        (
+            opencode.route.id.as_str(),
+            opencode.route.product.as_str(),
+            opencode.route.support.shape,
+            opencode.route.support.providers.clone(),
+            opencode.route.key_env.as_deref(),
+            cursor.route.support.providers.is_empty(),
+        ),
+        (
+            "opencode",
+            "OpenCode",
+            tddy_core::provider_route::RouteShape::InlineConfig,
+            vec![
+                tddy_core::provider_route::ProviderKind::OpenaiResponses,
+                tddy_core::provider_route::ProviderKind::OpenaiChat,
+            ],
+            Some("OPENCODE_PROVIDER_KEY"),
+            true,
+        )
+    );
+}
+
+#[test]
+fn an_agent_asked_for_by_a_host_with_no_coding_agents_is_refused_when_a_route_is_asked() {
+    // Given Ada holds her account, and the host has no coding agents installed
+    let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
+    let on_host = on_the_claude_agent(None);
+
+    // When a start chooses the account, and one chooses nothing
+    let routed = start_route(&access, on_host, &on_account("meta-hackathon"), "m")
+        .expect_err("there is no spec to build the route from");
+    let on_the_vendor = start_route(&access, on_host, &RouteSources::default(), "m");
+
+    // Then only the start that needs a route is refused, and as a failed precondition
+    assert_eq!(routed.code(), Code::FailedPrecondition);
+    assert!(
+        routed.message().contains("no coding agents installed"),
+        "{}",
+        routed.message()
+    );
+    assert_eq!(on_the_vendor.expect("the vendor needs no spec"), None);
+}
+
+#[test]
+fn an_id_the_registry_does_not_know_is_refused_never_routed_as_another_agent() {
+    // Given
+    let agents = the_host_agents();
+
+    // When
+    let refusal = crate::session_provider_route::routed_agent_on_host(Some(&agents), "acme")
+        .expect_err("unknown agent");
+
+    // Then
+    assert_eq!(refusal.code(), Code::InvalidArgument);
+    assert!(refusal.message().contains("acme"), "{}", refusal.message());
 }

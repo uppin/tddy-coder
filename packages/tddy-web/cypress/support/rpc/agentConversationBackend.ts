@@ -18,8 +18,8 @@
 import { Code, ConnectError, type ServiceImpl } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { SessionAgentService } from "../../../src/gen/session_agents_pb";
-import { AgentConversationChunkSchema, CancelAgentConversationResponseSchema, OpenAgentConversationResponseSchema } from "../../../src/gen/session_agents_pb";
+import { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
+import { AgentConversationChunkSchema, CancelAgentConversationResponseSchema, OpenAgentConversationResponseSchema } from "tddy-client-web/gen/session_agents_pb";
 
 /** What `OpenAgentConversation` was asked for — the routing half of the call plus who it names. */
 export interface OpenedConversation {

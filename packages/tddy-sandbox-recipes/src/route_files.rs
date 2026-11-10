@@ -1,8 +1,7 @@
 //! A routed jail's route files, written into the jail's scratch directory owner-only.
 //!
-//! A route file can carry the endpoint and the key a harness runs on (OpenCode's configuration
-//! names its provider there), so it is written the way the OpenCode ACP route files are: a `0700`
-//! directory, `0600` files created exclusively, and a name that is one plain file name. The
+//! A route file can carry the endpoint and the key a harness runs on (a harness's configuration
+//! may name its provider there), so it is written owner-only: a `0700` directory, `0600` files created exclusively, and a name that is one plain file name. The
 //! directory is the scratch's own, so it is replaced when a plan is built again for the same
 //! session (a relaunch).
 
@@ -13,15 +12,13 @@ use std::path::{Component, Path, PathBuf};
 use tddy_core::provider_route::HarnessRoute;
 use tddy_sandbox::SandboxError;
 
-use crate::plan::SandboxRecipe;
-
 /// The directory under the jail's scratch that holds a routed session's files.
 const ROUTE_FILES_DIR: &str = "provider-route";
 const OWNER_ONLY_DIR: u32 = 0o700;
 const OWNER_ONLY_FILE: u32 = 0o600;
 
 /// Write `route`'s files into `scratch_dir/provider-route` and return the path of the first one,
-/// which the harness's configuration variable names. `None` when the route has no files, and
+/// which the launch's configuration variable names (`coding_agent.route.config_env`). `None` when the route has no files, and
 /// nothing is written.
 pub(crate) fn materialise_route_files(
     scratch_dir: &Path,
@@ -54,18 +51,6 @@ pub(crate) fn materialise_route_files(
             .map_err(|e| io_error("write a route file", &path, &e))?;
     }
     Ok(Some(dir.join(plain_file_name(&first.name)?)))
-}
-
-/// The environment variable a routed harness reads its configuration file from, per the CLI harness
-/// registry (`OPENCODE_CONFIG` for OpenCode). `None` for a recipe whose harness is routed by its
-/// environment alone.
-pub(crate) fn route_config_env(recipe: SandboxRecipe) -> Option<&'static str> {
-    let session_type = match recipe {
-        SandboxRecipe::OpenCodeCli => "opencode-cli",
-        SandboxRecipe::MuseCli => "muse-cli",
-        _ => return None,
-    };
-    tddy_core::cli_harness::cli_harness(session_type).and_then(|harness| harness.route_config_env)
 }
 
 /// `name` when it is exactly one normal path component. A separator or a parent reference would

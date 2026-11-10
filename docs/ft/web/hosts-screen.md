@@ -101,5 +101,5 @@ daemon that was asked.
 - [host-stats-footer.md](./host-stats-footer.md) — host telemetry for the selected daemon
 - [hosts-screen-add-key.md](./hosts-screen-add-key.md) — loading a key into a host's ssh-agent
   from a row
-- Technical: [hosts-screen.md](../../../packages/tddy-web/docs/hosts-screen.md),
+- Technical: [hosts-screen.md](../../../packages/tddy-hosts-web/docs/hosts-screen.md),
   [host-registry.md](../../../packages/tddy-host-service/docs/host-registry.md)

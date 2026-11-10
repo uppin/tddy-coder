@@ -1,5 +1,5 @@
 ---
-description: /plan-pr-stack with an implementation pipeline bolted onto pass 2 - as soon as a node's contract commit is pushed and its green-wave needs are met, give it an ephemeral worktree and run /green, then /validate-changes + /pr-wrap, then a /fix-pr loop, each in its own subagent sized to the node, and remove the worktree when the PR is green. A final **sweep node** is planned at the tail once the pipelines drain: it solves every code issue the stack added and every TODO it can, and the TODOs still open are put to the user. Planning (interview, pass 1, the 6e acceptance-test review) stays interactive. Pointed at a stack that is already partly done, it **resumes**: it reads each node's implementation status from git, GitHub and CI and starts every node at the stage it has not finished. Every subagent is started with an explicit model **and** effort taken from the changeset's complexity score, and the orchestrator tells the user which and why before each one starts
+description: /plan-pr-stack with an implementation pipeline bolted onto pass 2 - as soon as a node's contract commit is pushed and its green-wave needs are met, give it an ephemeral worktree and run /green, then /validate-changes + /pr-wrap, then a /fix-pr loop - [G] and [W] in per-node subagents sized to the node, [F] as ONE long-lived serial fixer working in one reusable worktree - and remove each per-node worktree once [W] has pushed. A final **sweep node** is planned at the tail once the pipelines drain: it solves every code issue the stack added and every TODO it can, and the TODOs still open are put to the user. Planning (interview, pass 1, the 6e acceptance-test review) stays interactive. Pointed at a stack that is already partly done, it **resumes**: it reads each node's implementation status from git, GitHub and CI and starts every node at the stage it has not finished. Every subagent is started with an explicit model **and** effort taken from the changeset's complexity score, and the orchestrator tells the user which and why before each one starts
 ---
 ## YOLO PR Stack — `/plan-pr-stack`, and every ready node implemented while pass 2 keeps going
 
@@ -11,9 +11,16 @@ pipeline only starts work that pass 2 would otherwise leave for the hand-off in 
 
 ```
 pass 2 lands PRₖ (contract commit pushed) → moves on to PRₖ₊₁
-        └─ PRₖ ready? ──► ephemeral worktree ──► [G] /green ──► [W] /validate-changes + /pr-wrap ──► [F] /fix-pr loop ──► worktree removed
-                                                   [G] and [W]+[F] = background subagents; [F] continues [W]'s agent, model sized to the node
+        └─ PRₖ ready? ──► ephemeral worktree ──► [G] /green ──► [W] /validate-changes + /pr-wrap ──► worktree freed once pushed
+                                                   [G] and [W] = per-node background subagents, model sized to the node
+        serial [F] fixer (ONE agent, ONE reusable worktree) ── lowest PR whose [W] is done: /fix-pr until green ── F ✅ ──► next branch up
 ```
+
+`[G]` and `[W]` are per-node subagents, as ever. `[F]` is **one long-lived agent for the whole stack**,
+working in one reusable worktree and moving up the line one node at a time: it keeps its context across
+nodes (the stack's conventions, earlier answers, what already failed in CI), which is why it replaces
+the per-node continuation of `[W]`'s agent. The `[G]` lane is capped at 1 and the fixer is 1. There is
+**no fan-out inside a stage**: a stage agent does not spawn helper subagents.
 
 ```
 pipelines drain → cascade → collect the stack's open TODOs + code issues → plan the SWEEP node (tail) → its pipeline
@@ -24,6 +31,12 @@ The orchestrator is the session running pass 2. It owns the worktrees, picks eac
 starts the next stage when the previous one reports, and keeps the interactive parts interactive.
 Subagents cannot ask the user anything; each one runs under **pre-approved consent** (below) and
 stops with a 🔴 report where that consent runs out.
+
+**Progress notes.** Every `[G]`, `[W]` and `[F]` agent sends the orchestrator a ~5-line note with
+`SendMessage` to `main` about **every 50 minutes**: its head, what changed since the last note, what it
+waits on, and the stops it can see coming. The orchestrator relays the notable ones to the user. A stage
+agent that goes **quiet** — typically after its own helpers finish and nothing woke it — is checked
+(`git`, `gh`, its worktree) and resumed with `SendMessage`, never assumed dead.
 
 ## Resume mode — a stack that is already partly done
 
@@ -82,8 +95,8 @@ the complexity score, and the stage it starts at. Then run Dispatch as normal, w
 - Each stage brief for a resumed node adds the facts the stage needs and says: **re-verify, do not
   redo.** `G:resume` gets the head SHA, the commits after the contract commit and the tests still
   failing, and builds on them. `W` re-runs its own validations rather than trusting that green was
-  proven. An `[F]` with no `[W]` agent to continue is a **fresh** agent, sized by `[W]`'s row, that
-  first reads the diff and the changeset.
+  proven. The serial `[F]` fixer starts **fresh** on a resume, sized by the highest `[W]`
+  row among the nodes it will walk, and first reads each diff and changeset as it reaches it.
 - **Nodes with `plan:` statuses are planned first**, interactively, because pass 2 is bottom-up and
   their acceptance tests need the user. The implementation pipelines of nodes already past their
   contract commit start alongside, as in the ordinary command — planning never waits on them and
@@ -128,8 +141,9 @@ packages, than planned) — never silently, and never more than one row.
 - **`[W]` raise.** `[W]`'s effective score is the complexity **+1** (cap 5) when `[G]` needed its
   retry, a file this PR grew has to be decomposed (`pr-wrap` step 3.5), or the code-issue gate found
   added issues. Opus · medium is the ceiling.
-- **`[F]` continues `[W]`'s agent**, so it keeps `[W]`'s model and effort. A fresh `[F]` (the original
-  is gone — context exhausted, restart, or a reopened layer) uses `[W]`'s row for the node.
+- **`[F]` is one serial agent for the whole stack**, so its model and effort are chosen **once**, from
+  the **highest** `[W]` row among the nodes it will walk. A replacement (context exhausted, harness
+  restart, a reopened layer) is announced like any start and resumes at the node the ledger names.
 
 ### Announce the choice — every time a subagent starts
 
@@ -142,7 +156,7 @@ signals behind it:
 ▶ n3 #702 [G] /green → haiku · xhigh — complexity 4/5 (two crates, proto change); first attempt
 ▶ n1 #700 [W] /validate-changes + /pr-wrap → sonnet · medium — complexity 2/5 raised by 1: [G] needed its retry
 ↗ n3 #702 [G] retry → sonnet · medium — haiku · xhigh stopped 🔴 out of its depth on the proto seam
-▶ n3 #702 [F] /fix-pr → continues [W]'s agent (sonnet · medium, effort inherited) — round 1
+▶ stack [F] /fix-pr walker → sonnet · medium — highest [W] row on the line is sonnet · medium; serial, one worktree, starts at n1 #700
 ▶ n5 #705 [G] /green → haiku · high — complexity 3/5 moved up one row: contract commit has 14 failing tests, plan said 6
 ▶ n2 #701 [W] /validate-changes + /pr-wrap → sonnet · low — complexity 1/5; resuming at W, evidence: scoped probe green on 3fa9c1e
 ```
@@ -179,7 +193,8 @@ A node is **ready** when all of these hold:
 
 1. Its contract commit (commit 2) is pushed and its 6e was approved.
 2. It has no **started** pipeline: its ledger row is absent, `queued` or `blocked:n<j>`. A row in
-   `G`, `W`, `F`, `done` or `stopped` is excluded. (In resume mode a row is created at the node's
+   `G`, `W`, `F`, `done` or `stopped` is excluded. (`F` rows are served by the serial fixer, not
+   dispatched here.) (In resume mode a row is created at the node's
    derived stage — see *Step R3*.) `queued` and `blocked` rows are **re-evaluated by
    every dispatch** and move to `G` the moment rules 1 and 3–5 hold, which is how a node waiting for a
    free slot or a resumed blocker ever starts.
@@ -205,15 +220,25 @@ A node is **ready** when all of these hold:
    before dispatching.
 4. No node it needs is in a 🔴 stopped state. Mark it **blocked**, not failed, and say which node
    blocks it.
-5. The running count is below the **concurrency cap**.
+5. The running count of `[G]` agents is below the **`[G]` lane's cap**.
 
-**Concurrency cap: 3**, unless the user set another number in this request. Each worktree builds its
+**Lane caps: `[G]` 1, serial `[F]` 1**, unless the user set other numbers in this request. A node's
+`[W]` follows its own `[G]` in the same per-node worktree, so it adds no lane. Each worktree builds its
 own Rust `target/` (several GB per worktree, more with `tddy-web` deps), every green PR that lands
 makes the layers above it stale (`plan-pr-stack` Step 9 § *What concurrency costs*), and parallel
-cargo builds compete for the machine. Say the cap in the Step 1 decomposition approval so the user can
-change it before anything is created. Say there too that a **sweep node** will be appended at the tail
+cargo builds compete for the machine. Dispatch is **proactive**: `[G]` always takes the next ready
+node in stack order, blockers first, as dependencies deliver, so its lane never idles while a ready
+node exists. Say the caps in the Step 1 decomposition approval so the user can change them before
+anything is created. Say there too that a **sweep node** will be appended at the tail
 (see *The sweep node*), with its scope unknown until the stack has been implemented. Nodes that are
 ready beyond the cap queue in stack order, blockers first.
+
+**Lineage after parallel greens.** Greens and wraps rewrite branches, so every next stage starts with
+the single-mode rebase onto the parent's current head (`git rebase --onto origin/<parent> <old base
+tip>` — a plain rebase replays the parent's old commits once the parent was rewritten). When a span of
+the line was **built on a node's contract rather than its green**, run a **rebase-only cascade** before
+dispatching `[G]` above it: one agent, no CI waits, scoped gates per branch, and the lower node's
+design wins on a duplicate helper move.
 
 **Re-assess the order after each pass, and after every `[G]` that reports.** A green can settle an
 edge that the contract only guessed at. Re-run `plan-pr-stack` Step 7b's checks: the waves never
@@ -234,8 +259,9 @@ report says so. A changeset that names a different implementer wins.
 
 ### Ledger
 
-Keep one file in the scratchpad: `yolo-pr-stack-<slug>.md`, one row per node — branch, PR number,
-worktree path, stage (`queued · G · W · F · done · stopped:<stage> · blocked:n<j> · blocked:lineage · manual`), the
+Keep one file in the scratchpad: `yolo-pr-stack-<slug>.md`, with **one row for the serial `[F]` fixer**
+(agent id, model · effort and why, worktree path, the node it is on, last progress note) **plus one row
+per node** — branch, PR number, per-node worktree path (none once freed), stage (`queued · G · W · F · done · stopped:<stage> · blocked:n<j> · blocked:lineage · manual`), the
 complexity score, **model · effort used per stage with the reason** (both attempts, when retried),
 head SHA at the last report. Update it on every report. It is the orchestrator's memory across a
 context reset: after one, re-derive stages from `git worktree list`, the branches' pushed state and
@@ -278,8 +304,8 @@ branch, which is the opposite of what is wanted. Bind in the prompt, and say all
 - Report in the format at the end of this file, and nothing else.
 
 Fork-style context is not needed and costs tokens. Use a **fresh** subagent for `[G]` and a **fresh**
-one for `[W]` (stage `[F]` continues `[W]`'s agent, see below) with the brief above, the PR number,
-the changeset path, and the command to run. Name the stage's consent section below; do not paste the
+one for `[W]`, and one long-lived agent for `[F]` (below; bound the same way to its own worktree), with the brief above, the PR number,
+the changeset path (or the range, for `[F]`), and the command to run. Name the stage's consent section below; do not paste the
 whole of this file.
 
 ### Stage G — `/green`
@@ -316,14 +342,11 @@ report and does not ask.
 **Model and effort.** `[W]`'s row for the node's complexity, raised by one when the *Sizing* rule says
 so — pass both `model` and `effort`, announce first.
 
-### Stage F — `/fix-pr`, looped
+### Stage F — `/fix-pr`, looped, serial
 
-Start only when `[W]` reported done. **Continue `[W]`'s own agent** with `SendMessage` (load it with
-`ToolSearch("select:SendMessage")` if its schema is not loaded) — do not spawn a new one. Same context,
-same conversation: it already holds the diff, the changeset and every cleanup decision, which is what
-makes its answers to review comments accurate, and it is already bound to `<W>`. The message names
-the command and the stop conditions below. Cursor: resume the same subagent the same way. Run
-`.agents/commands/fix-pr.md` in `<W>`, **repeatedly**, until both hold on the **current head SHA**:
+**One long-lived `[F]` agent for the whole stack**, in **one reusable worktree** (`yolo-<slug>-fix`).
+It takes the **lowest PR whose `[W]` is done** and runs `.agents/commands/fix-pr.md` on it,
+**repeatedly**, until both hold on the **current head SHA**:
 
 - every check in **the PR's own rollup** is terminal and passing (`scripts/ci-status.sh <N>`; readying
   the PR in `[W]` is what started its build). See *What counts as green*: a passing `workflow_dispatch`
@@ -331,25 +354,42 @@ the command and the stop conditions below. Cursor: resume the same subagent the 
 - every review thread is addressed — the main (non-nit) comments fixed or answered with evidence, per
   `fix-pr.md`'s reaction protocol.
 
+Then it sends the orchestrator `F ✅ #<N> <sha>` and **moves up**: worktree clean and nothing unpushed →
+`rm -rf target` → `git switch` to the next branch → single-mode rebase onto the parent's current head
+(`git rebase --onto origin/<parent> <old base tip>`; a plain rebase replays foreign commits once the
+parent was rewritten) → scoped gates → push with an explicit lease → the `/fix-pr` loop. A branch
+checked out elsewhere cannot be switched to, so the orchestrator **frees a node's per-node worktree**
+(only if clean and fully pushed — step 3's checks) before the fixer needs that branch.
+
 One `/fix-pr` run already re-checks running checks and fixes failures as they appear, so the loop is
-for what it hands back: a new push that restarts CI, a new comment. Between rounds the subagent
+for what it hands back: a new push that restarts CI, a new comment. Between rounds the agent
 re-reads the PR state; it does not sleep-poll. Consent is `green-yolo.md` § *Phase C* — including its
-stops, which end the loop with a 🔴 and **never** re-run a flaky check unprompted:
+stops, which end that PR's loop with a 🔴 and **never** re-run a flaky check unprompted:
 
 - a flaky or infra failure that needs a re-run → stop, ask;
 - the same check failing on a **third** consecutive push → stop;
 - a fix for one failure that keeps causing another → stop;
-- **a round cap of 5.** A fifth round with the PR still not green is a stop, not a sixth try.
+- **a round cap of 5, per PR.** A fifth round with the PR still not green is a stop, not a sixth try.
+
+A stopped PR stops the fixer at that layer (everything above needs it); the report says which.
+
+**CI traps worth knowing.**
+
+- A `workflow_dispatch` on a PR branch **cancels the PR-event run** of the same workflow when their
+  concurrency group ignores the event. Key groups on `github.event_name`.
+- GitHub may report a very large PR as `mergeable_state=dirty` with no real conflict and start **no PR
+  checks**. Dispatching the workflows on the branch is the fallback, and it needs the user's consent
+  (not pre-approved).
+- Re-running runs that were **cancelled by our own dispatches** is not a flaky re-run.
 
 **This command does not merge.** That is `/green-yolo` Phase D, and nobody invoked it here. Landing
 stays with `/merge-pr-stack`.
 
-**Model and effort.** Whatever `[W]`'s agent already runs — a continued agent cannot change either. So
-`[F]` has `[W]`'s model and effort, and there is no escalation or de-escalation; the announcement says
-`continues [W]'s agent` with those values. A check that keeps failing or a thread arguing a design
-point is what the round cap and the stops are for: the stage stops and reports. If the agent is no
-longer resumable (context exhausted, harness restarted), start a fresh agent on `[W]`'s row for the
-node, with the same brief, announce it, and say so in the ledger.
+**Model and effort.** The highest `[W]` row among the nodes on the line (see *Sizing*); an agent cannot
+change either once started, so there is no per-node escalation. A check that keeps failing or a thread
+arguing a design point is what the round cap and the stops are for: the stage stops and reports. If the
+agent is no longer resumable (context exhausted, harness restarted), start a fresh one with the same
+brief at the node the ledger names, announce it, and say so in the ledger.
 
 ### What counts as green — the PR's own checks, never the run list
 
@@ -408,9 +448,45 @@ ladder to size against, so the complexity rubric does not choose a model or effo
 announce each start, with the complexity score and `effort n/a`. Binding to the worktree, the stage
 order, the consent and the stops are identical on both harnesses.
 
-### 3 — Green: remove the worktree
+### Muse mode (`#muse`)
 
-The node is done when stage F ends with the green condition above. Then, from the **orchestrator**:
+When the user asks for it — `#muse`, or in words ("let Muse do it", "offload to Muse Code") — every
+implementation stage is done by **Muse Code run headless through its programmatic CLI**
+(`muse exec --json`, one session per stage name continued with `--session-id`), driven by a
+Claude Code subagent, through the **`muse-subagent` skill** (`.agents/skills/muse-subagent/SKILL.md`).
+Read it first. **Only `[G]`, `[W]` and `[F]` are offloaded.** Planning stays with the orchestrator's
+own model: the interview, the decomposition question, pass 1, all of pass 2 (changesets, PRDs, the
+contract commits with their failing tests, 6e), the sweep node's planning and the TODO gate. The
+dispatch rules, the ledger, the consent and the stops are unchanged. What changes:
+
+| | Default | `#muse` |
+|---|---|---|
+| Step 0 worktree | `git worktree add` beside the planning worktree, warm builds | the same |
+| Who edits code | the stage subagent | Muse Code, in the node's worktree |
+| Stage subagent | does the stage, model by the rubric | a **driver**: Sonnet · low (effort passed explicitly), briefed with `muse-subagent` `references/driver-brief.md` and the stage's prompt from it |
+| Model doing the work | the G/W rubric | `MUSE_MODEL` from `muse-agent.sh ensure local` (or the one the user named), every stage, every node. No retry one row up — a `[G]` that stops is a stop |
+| Effort | the G/W rubric | from the changeset's complexity score: **1** `low` · **2–3** `medium` · **4** `high` · **5** `xhigh`; `[W]` takes its raised score (*Sizing every subagent*); `[F]` inherits `[W]`'s. Passed as `--effort`, announced and recorded |
+| `[F]` continues `[W]` | `SendMessage` to `[W]`'s agent | `SendMessage` to `[W]`'s **driver**, which resumes `[W]`'s **Muse session** (`--resume <SESSION_ID>`, same name `yolo-<slug>-n<k>-W`). `[G]` is its own session, `yolo-<slug>-n<k>-G` |
+| Stream | the subagent's transcript | `~/.muse-runs/<name>/stream.jsonl`; after a context reset `muse-agent.sh summary local <name>` |
+
+**The orchestrator readies the host before the first dispatch**: `muse-agent.sh ensure local`,
+guiding the user through a missing CLI or login (`muse-subagent` § *Make the host ready*), and names
+`MUSE_MODEL` in the decomposition question next to the concurrency cap. The cap still applies: the
+Rust builds are the bottleneck whoever types. Announce each start as usual:
+
+```
+▶ n3 #702 [G] /green → Muse Code (<MUSE_MODEL> · high) via muse exec, driven by sonnet · low — complexity 4/5; #muse
+```
+
+Record per row in the ledger: the run name, the Muse `SESSION_ID`, `MUSE_MODEL` and the effort. A
+driver's `RUN_EXIT=16` (machine stop or reboot) is resumed by the driver itself and never counts
+against the round cap. A `🔴 stopped` node keeps its worktree.
+
+### 3 — Free the per-node worktree
+
+The per-node worktree is freed once `[W]` reports done and its head is pushed, and **always** before
+the serial fixer needs that branch. The node itself is `done` when the fixer ends it with the green
+condition above and `F ✅`. From the **orchestrator**:
 
 ```bash
 git -C "$W" status --porcelain | grep -v '^?? '                        # must be empty — untracked build artifacts are expected
@@ -419,8 +495,8 @@ git worktree remove --force "$W" && git worktree prune
 ```
 
 If anything is uncommitted or unpushed, do not remove: push it, or stop and ask. **Never delete the
-branch** — it is the PR, and successors are based on it. Mark the ledger row `done`, then run the
-dispatch again.
+branch** — it is the PR, and successors are based on it. Update the ledger row, then run the
+dispatch again. The fixer's worktree is removed at the end, under the same two checks.
 
 A **stopped** node keeps its worktree: it holds the diagnosis context and the next human decision
 may be to resume there. Say where it is.
@@ -434,7 +510,8 @@ pipeline pins its own. So:
 1. Restore `$ORIGINAL_BRANCH` (Step 7) and run Step 7b's wave-order check. Report pass 2 as finished
    **and the pipelines as running**. A Step 7b reorder while pipelines run is a stop: it rebuilds
    branches they have checked out. Wait for them to drain first, then reorder.
-2. **Wait for the pipelines to drain** — every ledger row `done`, `stopped`, `blocked` or `manual`.
+2. **Wait for the pipelines to drain** — every ledger row `done`, `stopped`, `blocked` or `manual`,
+   and the serial fixer finished (its worktree removed).
    The orchestrator is notified on each background subagent's completion; it does not poll in a loop.
 3. Run Step 8's cascade **from the lowest layer that is actually stale**, over whatever has no pinned
    branch. A layer is stale when it does not contain its parent's current head. Layers that are `done`
@@ -447,9 +524,8 @@ pipeline pins its own. So:
 5. **A rebased layer is not done until its new head is green.** Any layer whose head the cascade
    changed — or whose base moved after its own `[F]` finished, because a predecessor pushed during
    `[W]` or `[F]` — is **reopened**: set its row back to `F`, re-create its worktree (step 0), and run
-   `[F]` again with a fresh agent on `[W]`'s row for that node (the original one is gone with its
-   worktree), announced like any start, until the green condition holds on the new head, then remove
-   the worktree again. Cascade first, then reopen, bottom-up, so a layer is not re-run twice. The
+   `[F]` again (the serial fixer, or a fresh one if it is gone), announced like any start, until the
+   green condition holds on the new head. Cascade first, then reopen, bottom-up, so a layer is not re-run twice. The
    final report lists every reopened layer.
 6. **Sweep.** With every layer green, run *The sweep node*: collect, plan, run its pipeline, then the
    TODO gate. The command is not finished until the gate has an answer for every open TODO. A
@@ -501,8 +577,8 @@ behaviour, split that behaviour out as its own TODO and still fix the issue.
 
 ### Run
 
-The ordinary pipeline: `[G]` `/code-restructuring`, `[W]` `/validate-changes` + `/pr-wrap`, `[F]`
-`/fix-pr`, with the model rubric and consent above. Two additions:
+The ordinary pipeline: `[G]` `/code-restructuring`, `[W]` `/validate-changes` + `/pr-wrap`, then the
+serial `[F]` `/fix-pr` fixer, with the model rubric and consent above. Two additions:
 
 - `[W]` re-measures with `/analyze-code-issues`. The sweep node must add **no** code issue and must
   close **every** code issue in its backlog (record deleted by the commit that resolves it, per
@@ -536,8 +612,9 @@ TODOs."* Never defer on the user's behalf, and never end the command with the ta
 For every node's pipeline, on that node's branch only: commit and push the green work; apply
 `/pr-wrap`'s cleanups, decompositions and per-row recommendations; wrap docs, retitle and
 `gh pr ready`; fix checks and review comments, post `/fix-pr`'s evidence-backed replies, and push;
-remove the ephemeral worktree with `git worktree remove --force` once step 3's tracked-changes and
-unpushed checks pass — the force is for the untracked build artifacts only. Everything `green-yolo.md`
+remove a per-node or the fixer's worktree with `git worktree remove --force` once step 3's
+tracked-changes and unpushed checks pass; `rm -rf target` between nodes in the fixer's worktree;
+`git switch`, single-mode rebase onto the parent and push with an explicit lease inside it — the force is for the untracked build artifacts only. Everything `green-yolo.md`
 lists as **not pre-approvable** still stops that pipeline, and a stop never blocks pass 2 — only the
 nodes that need the stopped one.
 
@@ -546,9 +623,9 @@ pre-approved: deferring a TODO (only the user's answer at the TODO gate records 
 for a TODO without that answer.
 
 Not pre-approved, so not done: `#automerge`, `#forcemerge`, `#forcebuild`, `gh stack unstack`,
-`--force` on a push, on `git worktree add` or on a rebase (the one exception is
+`--force` on a push (an explicit `--force-with-lease` with the expected SHA is pre-approved), on `git worktree add` or on a rebase (the one exception is
 `git worktree remove --force` in step 3, which *is* pre-approved; `/pr-stack-rebase`'s own
-`--force-with-lease` is part of that command), a re-run of a flaky check, editing another node's
+`--force-with-lease` is part of that command), a re-run of a flaky check, dispatching workflows on a branch to get a PR built, editing another node's
 branch, and the cascade over pinned branches.
 
 ## Subagent report format
@@ -569,9 +646,10 @@ The orchestrator reads only this, so a stage that finishes with "it seems to wor
 On top of `/plan-pr-stack` Step 9, add the **pipeline table**, one row per node:
 
 ```
-n1 #700  ✅ done      G haiku·low  W+F sonnet·low (2 fix rounds)  worktree removed
-n2 #701  ✅ done      G sonnet·low W+F sonnet·med (1 fix round)   worktree removed
-n3 #702  🔴 stopped:F G sonnet·med W+F opus·low  — F: third push failing `test`   worktree kept at <path>
+fixer    [F] sonnet·med (yolo-<slug>-fix)   worktree removed
+n1 #700  ✅ done      G haiku·low  W sonnet·low  (2 fix rounds)  per-node worktree freed
+n2 #701  ✅ done      G sonnet·low W sonnet·med  (1 fix round)   per-node worktree freed
+n3 #702  🔴 stopped:F G sonnet·med W opus·low  — F: third push failing `test`   fixer worktree kept at <path>
 n4 #703  ⏸ blocked:n3 (needs n3's behaviour)      never started
 ```
 
@@ -589,12 +667,18 @@ with the user's answer per row. A node that is not ✅ is stated plainly — no 
 - **A node starts only when every dependency has delivered `/green`; one dependency still in `[G]`
   holds it back.** Wave 1 first; later waves as their predecessors' `[G]` stage reports, not when
   their contract commit lands.
-- **Stages run in order: G → W → F.** `[G]` and `[W]` are separate fresh subagents; `[F]` **continues
-  `[W]`'s agent** rather than starting another. The next stage starts on the previous one's
-  report, never in parallel with it. The orchestrator chains them; subagents do not spawn the next.
+- **Stages run in order: G → W → F.** `[G]` and `[W]` are separate fresh per-node subagents; `[F]` is
+  **one long-lived serial agent** in one reusable worktree that takes the lowest PR whose `[W]` is done.
+  A node's next stage starts on the previous one's report, never in parallel with it. The orchestrator
+  chains them; subagents do not spawn the next, and a stage agent never fans out into helpers.
+- **Progress notes every ~50 minutes** from every stage agent to `main`; a quiet agent is checked and
+  resumed.
 - **Model and effort by the changeset's complexity score, always both.** On Claude Code `[G]` runs
+  Haiku (low → xhigh) up to Sonnet · medium, `[W]` Sonnet · low up to Opus · medium, the serial `[F]`
+  fixer is sized once by the line's highest `[W]` row; on Cursor every stage uses its default model. **Announce one line to the user at
   Haiku (low → xhigh) up to Sonnet · medium, `[W]` Sonnet · low up to Opus · medium, `[F]` inherits
-  `[W]`'s agent; on Cursor every stage uses its default model. **Announce one line to the user at
+  `[W]`'s agent; on Cursor every stage uses its default model; under `#muse` every stage is done by
+  Muse Code, driven by a Sonnet · low subagent (§ *Muse mode*). **Announce one line to the user at
   each subagent start** (node, stage, model · effort, why) and record it in the ledger.
 - **Resume reads evidence, not memory.** A stack that is partly done restarts each node at its first
   unfinished stage; nothing done is redone, nothing unseen is trusted, and the status table shows the
@@ -603,7 +687,7 @@ with the user's answer per row. A node that is not ✅ is stated plainly — no 
   the orchestrator confirms the head SHA is pushed before it starts the next stage.
 - **Scoped local gates in every stage.** No subagent runs a workspace build, a bare `./test` or a full
   Cypress run; whole-stack health is CI's.
-- **Concurrency cap 3** by default, stated at the decomposition approval.
+- **Lane caps `[G]` 1, serial `[F]` 1** by default, stated at the decomposition approval.
 - **A stop is local.** It halts that node and blocks only the nodes that need it. It keeps its
   worktree. Pass 2 and every unrelated pipeline carry on.
 - **Green means the PR's own check rollup, on its head.** Never mark a node `done` from `gh run list`
@@ -625,6 +709,7 @@ with the user's answer per row. A node that is not ✅ is stated plainly — no 
 `Complexity`), `/green`, `/validate-changes`, `/pr-wrap`, `/fix-pr`, `/green-yolo` (the single-branch
 version whose consent table this reuses), `/pr-stack-rebase`, `/add-to-pr-stack`, `/repoint`,
 `/merge-pr-stack`
-**Skills**: `code-restructuring`, `analyze-code-issues`, `deferred-work` (record formats, the bar for
+**Skills**: `code-restructuring`, `analyze-code-issues`, `muse-subagent` (Muse mode), `behaviour-modifiers`
+(`#muse`), `deferred-work` (record formats, the bar for
 deferring), `pr-stack` (`.agents/skills/pr-stack/SKILL.md`) — § *`## Green wave`*, § *The backlog delta a
 stack leaves*

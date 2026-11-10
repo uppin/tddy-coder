@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     StartTerminalSessionRequest, TerminalSessionService as TerminalSessionServiceTrait,
@@ -34,7 +34,7 @@ const SPAWN_OBSERVE: Duration = Duration::from_secs(10);
 /// A daemon with a stub Muse Code harness configured, over a data dir the test writes sessions into.
 struct DormantTabDaemon {
     service: tddy_terminal_rpc::TerminalSessionServiceImpl,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
     data_dir: PathBuf,
     muse_cwd_log: PathBuf,
     _data_dir: tempfile::TempDir,
@@ -65,7 +65,7 @@ fn a_daemon() -> DormantTabDaemon {
         .build();
     let (config_dir, config) = a_config_naming_muse(&muse);
     let data_dir = tempfile::tempdir().unwrap();
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let service = session_host(config, data_dir.path().to_path_buf(), Arc::clone(&manager))
         .terminal_session_service();
     DormantTabDaemon {
@@ -106,12 +106,16 @@ impl DormantTabDaemon {
             .then_reading_stdin()
             .build();
         self.manager
-            .start(
+            .start_with_options(
                 SESSION_ID,
                 worktree.to_path_buf(),
                 "claude-opus-4-8",
-                main.to_str().unwrap(),
+                vec![main.to_str().unwrap().to_string()],
+                "claude-cli",
                 None,
+                None,
+                Vec::new(),
+                Vec::new(),
                 None,
             )
             .await
@@ -263,23 +267,34 @@ async fn a_live_session_still_starts_tabs_in_its_main_terminals_worktree() {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-fn a_config_naming_muse(muse: &Path) -> (tempfile::TempDir, DaemonConfig) {
+/// A daemon config, and the coding agents the host installs: `muse` is the stub.
+type AConfigAndItsAgents = (
+    DaemonConfig,
+    Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+);
+
+fn a_config_naming_muse(muse: &Path) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = format!(
-        "users:\n  - github_user: \"testuser\"\n    os_user: \"testuser\"\ncli_harnesses:\n  \
-         muse-cli:\n    binary_path: {}\n",
-        muse.display()
-    );
+    let yaml = "";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
-    (dir, config)
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("muse", muse)]);
+    (dir, (config, agents))
 }
 
 fn session_host(
-    config: DaemonConfig,
+    (config, agents): AConfigAndItsAgents,
     data_dir: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let sessions_base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -296,5 +311,6 @@ fn session_host(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
 }

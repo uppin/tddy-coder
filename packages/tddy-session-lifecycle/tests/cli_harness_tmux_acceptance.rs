@@ -6,10 +6,11 @@
 //! The fixtures mirror `claude_cli_tmux_session_acceptance.rs` and
 //! `claude_cli_tmux_reattach_acceptance.rs` (TODO(tmux-agent): share them through `tests/support/`
 //! — the same follow-up those files name); the harnesses are stub scripts named in
-//! `cli_harnesses.<type>.binary_path` (cursor: `cursor_cli.binary_path`), the pattern of
+//! installed on the host as each agent's binary (`agent`, `opencode`, `muse`, `warp`), the pattern of
 //! `agent_terminal_tabs_acceptance.rs`. Serial — the tmux socket directory is process-wide
 //! environment.
 
+mod cursor_cli_support;
 mod support;
 
 use std::path::{Path, PathBuf};
@@ -20,7 +21,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::session::{
     ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
 use tddy_terminal_rpc::proto::terminal_session::{
@@ -79,8 +80,9 @@ const HARNESSES: [Harness; 4] = [
 /// A daemon whose harnesses are stubs that record how they were launched.
 struct HarnessTmuxDaemon {
     host: Arc<DaemonSessionHost>,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
     config: DaemonConfig,
+    stub: PathBuf,
     sessions_base: PathBuf,
     launches: PathBuf,
     users: PathBuf,
@@ -98,10 +100,11 @@ async fn a_daemon_with_a_private_tmux(exits_with_banner: bool) -> HarnessTmuxDae
     let users = stub_dir.path().join("users.log");
     let stub = a_stub_harness(stub_dir.path(), &launches, &users, exits_with_banner);
     let repo = a_registered_project(sessions_dir.path());
-    let (config_dir, config) = a_config_running(&stub);
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let (config_dir, config) = a_config_running();
+    let manager = Arc::new(CliSessionManager::new());
     let host = a_session_host(
         config.clone(),
+        &stub,
         sessions_dir.path().to_path_buf(),
         Arc::clone(&manager),
     );
@@ -109,6 +112,7 @@ async fn a_daemon_with_a_private_tmux(exits_with_banner: bool) -> HarnessTmuxDae
         host,
         manager,
         config,
+        stub,
         sessions_base: sessions_dir.path().to_path_buf(),
         launches,
         users,
@@ -139,27 +143,29 @@ fn a_stub_harness(dir: &Path, launches: &Path, users: &Path, exits_with_banner: 
     }
 }
 
-fn a_config_running(stub: &Path) -> (tempfile::TempDir, DaemonConfig) {
+fn a_config_running() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = this_os_user();
-    let harnesses: String = ["opencode-cli", "muse-cli", "warp-cli"]
-        .iter()
-        .map(|t| format!("  {t}:\n    binary_path: {}\n", stub.display()))
-        .collect();
-    let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nallowed_tools:\n  - path: /bin/true\n    label: true\ncursor_cli:\n  binary_path: {}\ncli_harnesses:\n{harnesses}",
-        stub.display()
-    );
+    let yaml = "allowed_tools:\n  - path: /bin/true\n    label: true\n";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
     (dir, config)
 }
 
 fn a_session_host(
     config: DaemonConfig,
+    stub: &Path,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> Arc<DaemonSessionHost> {
     let data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -167,6 +173,13 @@ fn a_session_host(
     let user = this_os_user();
     let user_resolver: UserResolver =
         Arc::new(move |token| (token == VALID_TOKEN).then(|| user.clone()));
+    // A harness session is launched from its tool definition: the host has coding agents, as the
+    // daemon runtime gives them.
+    let coding_agents = cursor_cli_support::coding_agents_over(&data_dir);
+    // The stub is every harness's binary on the host's `PATH`.
+    for command in ["agent", "opencode", "muse", "warp"] {
+        cursor_cli_support::install_an_agent_as(&data_dir, command, stub.to_str().unwrap());
+    }
     let host = Arc::new(DaemonSessionHost::new(
         config.clone(),
         sessions_base_resolver,
@@ -177,6 +190,7 @@ fn a_session_host(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        coding_agents,
     ));
     host.install_sandbox_rpc_bridge();
     host
@@ -277,10 +291,13 @@ impl HarnessTmuxDaemon {
     }
 
     /// [`Self::restarted`], with the restarted daemon's terminal manager.
-    fn restarted_with_its_manager(&self) -> (Arc<DaemonSessionHost>, Arc<ClaudeCliSessionManager>) {
-        let manager = Arc::new(ClaudeCliSessionManager::new());
+    fn restarted_with_its_manager(&self) -> (Arc<DaemonSessionHost>, Arc<CliSessionManager>) {
+        // The daemon that restarts is gone: nothing of it still listens on its agent-tool sockets.
+        self.host.agent_tool_sockets().stop_serving();
+        let manager = Arc::new(CliSessionManager::new());
         let host = a_session_host(
             self.config.clone(),
+            &self.stub,
             self.sessions_base.clone(),
             Arc::clone(&manager),
         );
@@ -302,7 +319,7 @@ impl HarnessTmuxDaemon {
         Self::until_the_main_left(&self.manager, session_id).await;
     }
 
-    async fn until_the_main_left(manager: &ClaudeCliSessionManager, session_id: &str) {
+    async fn until_the_main_left(manager: &CliSessionManager, session_id: &str) {
         eventually_awaiting(
             "the main terminal to leave the registry",
             OBSERVE,
@@ -397,7 +414,13 @@ async fn each_cli_harness_resumes_in_a_fresh_tmux_session_with_its_resume_argv()
         // Then the harness is launched again, with its resume argv, in a tmux session with a client
         let resumed = daemon.tmux_session_of(&session_id);
         until_attached(&daemon.tmux, &resumed, 1).await;
+        // Wait for the relaunch itself: a cursor start already launches with `--resume <chat>`, so
+        // the resume flag alone matches the first launch before the relaunch is appended.
         let argv = eventually("the harness to be relaunched", OBSERVE, || {
+            let launches = daemon.launch_count();
+            if launches < 2 {
+                return Err(format!("{launches} launch(es) recorded so far"));
+            }
             let argv = read_last_appended_argv(&daemon.launches)?;
             argv.contains(&harness.resume_flag.to_string())
                 .then_some(argv.clone())

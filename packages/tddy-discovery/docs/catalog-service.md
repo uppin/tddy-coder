@@ -5,7 +5,7 @@ Family **A** — the tools-and-agents catalogue the daemon exposes to pickers an
 | RPC | Purpose |
 |-----|---------|
 | `ListTools` | Allowed `tddy-*` binaries from config (`allowed_tools`). |
-| `ListAgents` | Allowed coding backends from config (`allowed_agents`), then registry assistants, then [harness profiles](../../../docs/ft/daemon/harness-profiles.md) from `<tddy_data_dir>/agents` (`harness_profile::harness_profile_rows`: id = profile name, label = `label` or name; appended in `tddy-daemon-rpc`'s `catalog/ports.rs` `list_agents`). |
+| `ListAgents` | Allowed coding backends from config (`allowed_agents`), then registry assistants, then [harness profiles](../../../docs/ft/daemon/harness-profiles.md) from `<tddy_data_dir>/agents` (`harness_profile::harness_profile_rows`: id = profile name, label = `label` or name; appended in `tddy-daemon-rpc`'s `catalog/ports.rs` `list_agents`). Each row is annotated from the daemon's coding-agent registry (`catalog/agent_rows.rs`): an id naming a spec is `kind = CODING_AGENT` with `harness` (the spec id) and `route_providers` (the spec's `route.providers`, empty for an agent that always runs on its own vendor); any other id is `kind = MODEL`. |
 | `ListAgentModels` | Models available from the daemon's registry integration. |
 | `ListSubagents` | Specialized agent defs this daemon can attach — `<tddyhome>/agents/*.yaml` and registry assistants, answered from the same resolution path as attach. See [specialized-subagents.md](../../../docs/ft/coder/specialized-subagents.md). |
 

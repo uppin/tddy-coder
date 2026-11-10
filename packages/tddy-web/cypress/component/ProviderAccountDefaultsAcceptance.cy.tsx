@@ -5,15 +5,16 @@
  * Feature: docs/ft/daemon/provider-accounts.md (A person's default per harness)
  */
 import { createClient } from "@connectrpc/connect";
+import { servedAgentWire } from "../support/servedAgents";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AccountsAppPage } from "../../src/components/accounts/AccountsAppPage";
-import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import { AccountsService, SyncStatus, type AccountSummary } from "../../src/gen/accounts_pb";
-import { SessionService } from "../../src/gen/session_pb";
-import { ProjectService } from "../../src/gen/project_pb";
-import { CatalogService } from "../../src/gen/catalog_pb";
-import { SessionFilesService } from "../../src/gen/session_files_pb";
-import { WorktreeService } from "../../src/gen/worktree_pb";
+import { CreateSessionPane } from "tddy-session-create-web";
+import { AccountsService, SyncStatus, type AccountSummary } from "tddy-client-web/gen/accounts_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { accountsScreenPage } from "../support/pages/accountsScreenPage";
@@ -44,7 +45,12 @@ function mountCreateSessionPaneWithTheDefault(defaultFor: string[]) {
     .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [] }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [] }))
+    .onUnary(CatalogService.method.listAgents, () => ({
+      agents: [
+        { id: "claude", label: "Claude", ...servedAgentWire("claude") },
+        { id: "muse", label: "Muse Code", ...servedAgentWire("muse") },
+      ],
+    }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({ models: [], defaultModel: "" }))
     .onUnary(AccountsService.method.listAccounts, () => ({
@@ -76,6 +82,16 @@ function mountCreateSessionPaneWithTheDefault(defaultFor: string[]) {
   );
 }
 
+/** The catalog the Accounts screen reads its harness options from: claude and muse, as a daemon serves them. */
+function withServedCatalog<T extends ReturnType<typeof anInMemoryRpcBackend>>(backend: T): T {
+  return backend.onUnary(CatalogService.method.listAgents, () => ({
+    agents: [
+      { id: "claude", label: "Claude", ...servedAgentWire("claude") },
+      { id: "muse", label: "Muse Code", ...servedAgentWire("muse") },
+    ],
+  })) as T;
+}
+
 describe("Default provider account per harness", () => {
   it("marks an account as the Claude CLI default from its row", () => {
     const sets: { accountId: string; harnesses: string[] }[] = [];
@@ -90,7 +106,7 @@ describe("Default provider account per harness", () => {
         return { changed: [meta(req.harnesses)] };
       },
     });
-    mountWithRpc(withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />), backend);
+    mountWithRpc(withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />), withServedCatalog(backend));
 
     accountsScreenPage.defaultForSelect("meta", "meta-hackathon").select(["claude-cli"]);
     accountsScreenPage.defaultForSave("meta", "meta-hackathon").click();
@@ -111,7 +127,7 @@ describe("Default provider account per harness", () => {
         return { changed: [meta(req.harnesses)] };
       },
     });
-    mountWithRpc(withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />), backend);
+    mountWithRpc(withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />), withServedCatalog(backend));
 
     accountsScreenPage.defaultForSelect("meta", "meta-hackathon").select(["Muse Code"]);
     accountsScreenPage.defaultForSave("meta", "meta-hackathon").click();
@@ -133,7 +149,7 @@ describe("Default provider account per harness", () => {
         changed: [aProviderAccount("fireworks", "fw", [...req.harnesses]), meta([])],
       }),
     });
-    mountWithRpc(withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />), backend);
+    mountWithRpc(withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />), withServedCatalog(backend));
     accountsScreenPage.defaultForSelect("meta", "meta-hackathon").invoke("val").should("deep.equal", ["claude-cli"]);
 
     accountsScreenPage.defaultForSelect("fireworks", "fw").select(["claude-cli"]);

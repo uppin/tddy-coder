@@ -138,15 +138,26 @@ pub fn stack_base_session_candidates(
 }
 
 /// The harness whose provider accounts a start for `query` may run on, as the form chooses it: a CLI
-/// session type is its own harness, a tool session runs the agent it names, and Warp runs only on its
-/// own vendor, so none. The reason when there is none.
-pub fn provider_harness(query: &StartOptionsQuery) -> Result<String, String> {
+/// session type is its own harness, a tool session runs the agent it names, and an agent whose
+/// injected choice says no route can point it elsewhere runs only on its own vendor, so none.
+/// The reason when there is none.
+pub fn provider_harness(
+    query: &StartOptionsQuery,
+    agents: &[crate::start_session_args::AgentChoice],
+) -> Result<String, String> {
     let session_type = query.session_type.trim();
     let agent = query.agent.trim();
+    if let Some(choice) = agents
+        .iter()
+        .find(|choice| choice.session_type == session_type)
+    {
+        if !choice.routable {
+            return Err(format!(
+                "{session_type} runs only on its own vendor, so no provider account can run it"
+            ));
+        }
+    }
     match session_type {
-        "warp-cli" => Err(
-            "warp-cli runs only on its own vendor, so no provider account can run it".to_string(),
-        ),
         "tool" if agent.is_empty() => {
             Err("a tool session names its agent: provider routes are per harness".to_string())
         }

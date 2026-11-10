@@ -18,9 +18,17 @@ systemd ── tddy-supervisor.service (User=root, Delegate=yes)
              │
              ├─ session process                       [alice]  SpawnSession
              ├─ jailed sandbox                        [bob]    SpawnSandbox
-             └─ coding-agent harness                  [alice]  SpawnRelayed — stdio relayed to
+             ├─ streamed child (e.g. tddy-git-clone)  [alice]  SpawnStreamed — stderr streamed
+             │                                                back line by line
+             └─ relayed child (e.g. an ACP agent)     [alice]  SpawnRelayed — stdio relayed to
                                                               a socket the daemon listens on
 ```
+
+The supervisor gates **where** a binary lives (`exec_roots`) and **who** it runs as, and puts the
+child in a cgroup scope when asked. It knows nothing about what the binary is: no coding-agent
+name appears in its non-test `src/`, its `proto/` or the two supervisor templates, which
+`tests/supervisor_names_no_coding_agent.rs` enforces by scanning them for the stems of the daemon's
+coding-agent spec files.
 
 Everything network-facing — the axum server, LiveKit, GitHub OAuth, Telegram, LSP, BSP, the VM
 service — stays in the daemon, as `tddy`.
@@ -47,6 +55,39 @@ Every request passes both, in this order, and neither is skippable on any path:
    the request asserts about itself.
 
 They answer different questions and are separate so a regression in one cannot hide behind the other.
+
+Every spawn method — `SpawnSession`, `SpawnSandbox`, `SpawnStreamed`, `SpawnRelayed` — passes the
+policy through **one** `PrivilegedSurface::resolve_spawn(kind, …)` in `server.rs`, so the kinds
+cannot drift into checking different things: the exec gate, the env rule, the mapped session user,
+the scope and the account, in that order. A refusal at any of them is the opaque `Denied` on the call;
+the reason is logged.
+
+## The exec gate: `exec_roots`
+
+`policy::resolve_exec(policy, path)` returns a `CheckedExecutable` or `Denied`. Each
+`spawn_policy.exec_roots` entry (`config/spawn_policy.rs`, `ExecRoot`) is an absolute path naming a
+directory or one file, written bare or as `{ path, trusted_prefix: true }`:
+
+- the requested path must be plain and absolute; it is canonicalised, so **a symlink is judged by its
+  target**, and the target must equal a file entry or lie under a directory entry;
+- the target, **every parent up to `/`**, and the entry itself must be owned by uid 0 or the
+  supervisor's euid and not group- or world-writable. Unlike the policy file's own trust check
+  (`require_trustworthy_config_directory`), **a sticky world-writable directory is refused** — `/tmp`
+  is never trusted;
+- a `trusted_prefix` entry's own directory is not checked (`/nix/store` is `drwxrwxr-t
+  root:nixbld`); everything below it still is. It is the operator's per-entry opt-in.
+
+On Linux the check opens the file `O_PATH` (`open_resolved`) and `ForkBroker` execs that descriptor
+as `/proc/self/fd/<n>`, with `argv[0]` set to the checked path, so a file swapped in between the check
+and the exec is not what runs. The child clears the descriptor's `FD_CLOEXEC` as its last pre-exec
+step: for a script the kernel hands the interpreter `/proc/self/fd/<n>` to read, which a descriptor
+closed by the exec would leave it unable to open. **macOS is path-only**: there is no exec through a descriptor, so the
+checked path is exec'd and the swap window stays open; the tests say so. The reason for a refusal is
+logged under the `tddy_supervisor::policy` target.
+
+The old keys `allowed_tool_paths`, `allowed_relay_tool_paths` and `allowed_env_keys` fail config load
+(`spawn_policy::refuse_old_spawn_policy_keys`), naming `exec_roots` or the removal;
+`./install`'s `migrate_spawn_policy_keys` rewrites them once.
 
 **Denials are opaque.** Every authorization or policy refusal is `SupervisorError::Denied`, which
 carries no fields and renders exactly `"request denied"`, in both directions across the wire. A caller
@@ -126,7 +167,7 @@ every string is a `CString` built pre-fork, and pids are formatted into stack bu
 to the *forking thread*, and tokio retires idle blocking threads after seconds, which would tell every
 child its parent had died.
 
-## The child's environment is an allowlist
+## The child's environment: one rule
 
 `ChildEnvironment` builds the whole `envp` pre-fork. `spawn_now` calls **no** `Command::env*` method,
 which matters: std runs `pre_exec` closures *before* it installs `Command`'s own `envp`, so a `putenv`
@@ -134,16 +175,18 @@ from inside the closure would be discarded — and would take glibc's `__environ
 `realloc`, neither safe after a fork. Instead a pre-sized `LISTEN_PID=` buffer has its digits written
 in place, which is how the child learns its own pid.
 
-`SpawnPolicy::allowed_env_keys` is a **deny, not a filter**: a request naming an unlisted key is
-refused outright rather than having the key dropped, because silently discarding a variable a caller
-believed it set is worse than saying no. Loader keys (`LD_*`, `MALLOC_*`, `GCONV_PATH`, `NLSPATH`,
-`LOCPATH`, `HOSTALIASES`, `RESOLV_HOST_CONF`) can never be listed and are rejected at config load:
-`LD_PRELOAD` on an allowlisted tool is arbitrary code execution as the session user, which would make
-`allowed_tool_paths` meaningless.
+`policy::resolve_spawn_env(SpawnKind, env)` is the one rule for every spawn kind. The environment the
+daemon sends passes **whole**; there is no key list. A request naming a loader variable (`LD_*`,
+`MALLOC_*`, `GCONV_PATH`, `NLSPATH`, `LOCPATH`, `HOSTALIASES`, `RESOLV_HOST_CONF`) is refused outright
+rather than having the key dropped: `LD_PRELOAD` on a binary under a root is arbitrary code execution
+as the session user, which would make `exec_roots` meaningless. No runtime-specific names
+(`NODE_OPTIONS`, …) are on that list.
 
-Sessions get a minimal base (fixed `PATH`, forwarded `LANG`/`TZ`); declared services keep an inherited
-one, because root authored that declaration. `HOME`/`USER`/`LOGNAME` are always derived from the
-resolved account, after the request's own vars, so a caller cannot override them.
+The base (`EnvironmentBase`) is `Minimal` — fixed `PATH`, forwarded `LANG`/`TZ` — for sessions,
+sandboxes and streamed spawns, and `Exactly` for relayed spawns, which start from precisely the env the
+daemon computed. Declared services keep an inherited one, because root authored that declaration.
+`HOME`/`USER`/`LOGNAME` are always derived from the resolved account, after the request's own vars, so
+a caller cannot override them; `LISTEN_*` and `TDDY_SUPERVISOR_SOCKET` are stripped (below).
 
 ## Handing a listening socket to a managed service
 
@@ -168,6 +211,11 @@ cannot set or override it and a session spawn never receives it. The value trave
 `Minimal` base has no field that could carry it. This is how `tddy-daemon` learns it is supervised —
 there is no `supervisor:` key in `daemon.yaml`. Pinned by `tests/supervisor_service_environment.rs`
 (Linux only).
+
+**A service that declares `serves_users: true`** is also handed one listener per OS user `users.yaml`
+maps, after fd 3 and named `user.<os user>`, and told the mapping's path in `TDDY_USERS_FILE`, set the
+same way after its `env:` overlay. A saved edit to `users.yaml` rebuilds those listeners (unchanged
+users keep theirs) and restarts the service. See [host-sockets.md](host-sockets.md).
 
 `ForkBroker` reserves fd 3 at startup, because `Command::spawn` reports exec failures over a
 `SOCK_SEQPACKET` pair opened just before the fork: had that landed on fd 3, a *failed* exec would have
@@ -217,12 +265,11 @@ unprivileged daemon cannot start that agent as another user itself. It is `Spawn
 stdio carried over a unix socket the **caller** listens on — a path crosses a process boundary, a file
 descriptor does not.
 
-**Gates.** The authorizer, then the program against **`allowed_relay_tool_paths`** — a list of its
-own, empty by default, so a host that allowlisted session tools has not enabled relaying, and a
-relay-only harness cannot be run through `SpawnSession` either. Each spawn method resolves its program
-against its own allowlist before the shared gate (`resolve_spawn`: session user, environment, working
-directory). Then the socket — the one new action of a root process, connecting to a path the caller
-names, which is a confused-deputy edge closed twice (`relay::connect_to_callers_socket`):
+**Gates.** The authorizer, then the same `resolve_spawn` every spawn kind passes (`exec_roots`, the
+env rule with an `Exactly` base, the session user, the scope). Relaying is a stdio mode, not a trust
+class: there is no list of its own. Then the socket — the one new action of a root process, connecting
+to a path the caller names, which is a confused-deputy edge closed twice
+(`relay::connect_to_callers_socket`):
 
 1. before connecting, the path is absolute with no `..`, and `lstat` says it is a socket — not a
    symlink to one — **owned by the caller's uid**;
@@ -238,7 +285,15 @@ and its stdout out to the socket (`tokio::io::copy`), and logs stderr at debug �
 stdout. End of input from the caller is a stop: the session is stopped with the host's
 `shutdown_grace_secs`, so a daemon that goes away leaves no agent running as somebody else's user.
 Exit status and explicit stops travel over the existing `SessionStatus` / `StopSession`, keyed by the
-returned pid. A relayed spawn takes no cgroup scope, as no caller's `SpawnSession` does today.
+returned pid. `SpawnRelayedRequest.scope` (wire field 7) names a cgroup scope the child joins before
+it drops privilege; the daemon names none yet ([backlog](../../../docs/dev/todo/2026-11-09-daemon-creates-no-cgroup-scope-for-supervised-spawns.md)).
+
+**A relayed agent's environment is the daemon's, whole.** The supervisor knows no coding-agent
+specifics: the daemon computes the agent's env (its base set, the spec's `pass_env`, what the launch
+sets) and a relayed spawn carries it as it is. `policy::resolve_relayed_env` applies no
+`allowed_env_keys` to it; the loader keys (`LD_*`, `MALLOC_*`, …) are still refused. The child is
+built on `EnvironmentBase::Exactly`: the request's env plus the account's `HOME`/`USER`/`LOGNAME`, and
+no supervisor `PATH` or locale. `allowed_env_keys` still gates `SpawnSession` and clone spawns.
 
 The daemon side is `tddy-session-lifecycle`'s
 [coding-agent launcher](../../tddy-session-lifecycle/docs/coding-agent-launcher.md).
@@ -256,23 +311,39 @@ otherwise the privileged surface becomes a liveness oracle for arbitrary host pr
 is gated the same way, and more strictly: a *retained-exited* pid is refused too, because the kernel is
 free to have reissued it.
 
-### Streamed clones
+### Streamed spawns
 
-`CloneRepository` (`src/clone.rs`) is a supervised session with two differences. Its `SpawnPlan` output
-is `ChildOutput::CaptureStderr` (sessions get `Discard`, managed services `Inherit`), so
-`Supervisor::spawn_session_capturing_stderr` hands back the pipe; and it clones into a random
-`<destination>.partial-*` sibling. The handler checks user, tool and environment before forking —
-git is the first executable `git` on the supervisor's own `PATH`, then `resolve_tool_path` against
-`allowed_tool_paths`, so the RPC widens nothing. A thread reads stderr (split on `\r` and `\n`) into
-`Progress` events and keeps the last 8 non-progress lines; a task waits on
-`Supervisor::wait_for_session_exit(pid)`, drains stderr for at most 2 s more, renames or removes the
-partial directory as root, and only then sends `Exited`. The session table records an exit code, not a
-signal, so `Exited.signal` is never set and `code: None` reads as "signalled". A send that fails (the
-caller hung up) stops the clone. The client side keeps the connection alive in an `Arc` guard shared
-with the stream, so the event receiver outlives the `SupervisorClient` that made the call.
+`SpawnStreamed` (`src/streamed.rs`) is a supervised session whose `SpawnPlan` output is
+`ChildOutput::CaptureStderr` (sessions get `Discard`, managed services `Inherit`), so
+`Supervisor::spawn_session_capturing_stderr` hands back the pipe. `SpawnStreamedRequest` carries
+`os_user`, `tool_path`, `args`, `env`, `working_dir` and an optional `scope`; everything is checked by
+`resolve_spawn` before forking, so a refusal is an error on the call, not an event on the stream. The
+stream is `StreamedEvent`: `Started{pid}`, then one `Line{line}` per stderr line — a thread splits on
+`\r` as well as `\n` and keeps the last 8 lines — then `Exited{code, signal, stderr_tail}` once
+`Supervisor::wait_for_session_exit(pid)` returns and stderr has drained for at most 2 s more. The
+session table records an exit code, not a signal, so `Exited.signal` is never set and `code: None`
+reads as "signalled". A send that fails (the caller hung up) stops the child. The client side
+(`SupervisorClient::spawn_streamed`) keeps the connection alive in an `Arc` guard shared with the
+stream, so the event receiver outlives the `SupervisorClient` that made the call.
 
-The partial directory sits in a user-writable parent and is renamed/removed by root; its name is random
-and `remove_dir_all` does not follow symlinks.
+The supervisor gives the lines no meaning. A clone is the daemon's: one streamed spawn of the
+`tddy-git-clone` helper as the session user (`tddy-spawn`'s
+[clone run](../../tddy-spawn/docs/clone-run.md)), which clones into a random partial sibling and
+renames or removes it **as that user** — root never touches a path in a user-writable directory.
+
+### Deadlines on the client
+
+`SupervisorClient` (`src/client.rs`) bounds every unary call with `SUPERVISOR_CALL_DEADLINE` (60 s) and
+the streamed spawn with `SUPERVISOR_CLONE_PROGRESS_DEADLINE` (300 s). Opening the stream and its first
+event share one instant (`timeout_at`); each later event gets the full deadline, and a gap that long
+ends the event channel with `Unavailable` as its last item. Both failures come from `went_silent`,
+which names the method and the deadline. `with_call_deadline` / `with_clone_progress_deadline` exist
+so tests can shorten them (`tests/supervisor_call_deadline.rs`, a silent `UnixListener` peer — it
+runs on every platform, unlike the Linux-only `supervisor_streamed_spawn.rs`).
+
+Expiry drops the call future. `tddy-rpc`'s `ClientEngine` keeps its pending entry until a reply for
+that id arrives or the connection closes, and the supervisor may already have acted on the request —
+recorded in `docs/dev/todo/2026-11-07-rpc-dropped-call-leaves-pending-entry.md`.
 
 ## Restart policy
 
@@ -295,6 +366,11 @@ escalate is a startup failure and not a runtime surprise.
 config file or directory that is not root-owned, or that is group/world-writable without being sticky
 (the kernel's own rule: `/tmp` at `1777` is safe, `/etc/tddy` at `0777` is not). Every doc comment in
 the crate rests on "root-owned policy file"; this is what makes that true rather than assumed.
+
+`users.yaml` is a second policy input — it decides which OS users a session may run as — and is
+loaded with the same ownership and mode checks (`users_file.rs`); the hand-kept lists it replaces
+(`spawn_policy.allowed_session_users`, `services[].host_sockets`, `services[].agent_tool_sockets`) are
+refused at load, naming it.
 
 `root` is refused as a service or session user by name at load, and the *resolved* uid/gid is checked
 too — a passwd entry aliased to uid 0 under another name would otherwise pass validation and then skip
@@ -334,7 +410,7 @@ returning `EBUSY`, which a plain directory never does.
 
 ## Related
 
-- Per-OS-user host-session sockets the supervisor creates and hands to the daemon: [host-sockets.md](host-sockets.md)
+- The `users.yaml` mapping, and the one per-OS-user daemon socket the supervisor creates from it and hands to the daemon: [host-sockets.md](host-sockets.md)
 - Product docs: [docs/ft/supervisor/tddy-supervisor.md](../../../docs/ft/supervisor/tddy-supervisor.md)
 - Install: [docs/ft/daemon/systemd-install.md](../../../docs/ft/daemon/systemd-install.md)
 - The no-supervisor deployment: [docs/dev/tddy-daemon.service.example](../../../docs/dev/tddy-daemon.service.example)

@@ -24,7 +24,7 @@ use tddy_host_service::multi_host::EligibleDaemonSource;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecToolService, ListExecToolsRequest};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
 
@@ -70,10 +70,7 @@ fn write_daemon_yaml(ws_url: &str, instance_id: Option<&str>) -> (tempfile::Temp
     let room = relay_room();
     let yaml = format!(
         r#"
-{id_block}users:
-  - github_user: "testuser"
-    os_user: "testuser"
-livekit:
+{id_block}livekit:
   enabled: true
   url: {ws_url}
   api_key: {LK_API_KEY}
@@ -82,6 +79,11 @@ livekit:
 "#
     );
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     (dir, path)
 }
 
@@ -213,7 +215,8 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b), // B has no discovery of its own — it only serves its local tools
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
+            tddy_session_lifecycle::test_util::builtin_coding_agents(),
         ))
         .0,
     );
@@ -274,7 +277,8 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
             }),
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     ));
 
     // When

@@ -66,15 +66,16 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
 
     let config_dir = tempfile::tempdir().expect("config dir");
     let config_path = config_dir.path().join("daemon.yaml");
+    std::fs::write(&config_path, "").expect("write daemon config");
     std::fs::write(
-        &config_path,
-        format!(
-            "users:\n  - github_user: \"{os_user}\"\n    os_user: \"{os_user}\"\nclaude_cli:\n  binary_path: {}\n",
-            stub.display()
-        ),
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{os_user}\"\n  os_user: \"{os_user}\"\n"),
     )
-    .expect("write daemon config");
-    let config = DaemonConfig::load(&config_path).expect("daemon config must parse");
+    .unwrap();
+    let config = crate::config::DaemonConfig::load(&config_path).expect("daemon config must parse");
 
     let sessions_base = sessions.path().to_path_buf();
     let resolver: SessionsBaseResolver = Arc::new(move |_| Some(sessions_base.clone()));
@@ -91,6 +92,7 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
+        crate::test_util::coding_agents_with_binaries(&[("claude", &stub)]),
     );
 
     let orchestrator = Orchestrator {
@@ -193,7 +195,7 @@ impl Orchestrator {
             service: self.service.launch_sessions(),
             config: self.config.clone(),
             tddy_data_dir: self.sessions_base().to_path_buf(),
-            claude_cli_manager: Arc::clone(&self.service.claude_cli_manager),
+            cli_manager: Arc::clone(&self.service.cli_manager),
             os_user: self.os_user.clone(),
             project_id: TEST_PROJECT_ID.to_string(),
             sessions_base: self.sessions_base().to_path_buf(),
@@ -211,7 +213,7 @@ impl Orchestrator {
             stack_parent_host: Arc::new(self.service.launch_sessions()),
             config: self.config.clone(),
             tddy_data_dir: self.sessions_base().to_path_buf(),
-            claude_cli_manager: Arc::clone(&self.service.claude_cli_manager),
+            cli_manager: Arc::clone(&self.service.cli_manager),
             os_user: self.os_user.clone(),
             project_id: TEST_PROJECT_ID.to_string(),
             sessions_base: self.sessions_base().to_path_buf(),
@@ -390,9 +392,10 @@ fn write_argv_recording_stub(dir: &Path, record_to: &Path, environment_to: &Path
     std::fs::write(
         &script,
         format!(
-            // The environment lands by rename, so a reader never sees the file half-written.
-            "#!/bin/sh\nenv > '{env}.partial' && mv '{env}.partial' '{env}'\nprintf '%s\\n' \"$@\" > '{}'\n",
-            record_to.display(),
+            // Both records land by rename, so a reader never sees a file half-written: a reader
+            // polling for the command line could otherwise read it truncated, mid-`printf`.
+            "#!/bin/sh\nenv > '{env}.partial' && mv '{env}.partial' '{env}'\nprintf '%s\\n' \"$@\" > '{argv}.partial' && mv '{argv}.partial' '{argv}'\n",
+            argv = record_to.display(),
             env = environment_to.display()
         ),
     )

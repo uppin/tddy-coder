@@ -48,9 +48,11 @@ record, the clone state only the clone store knows, and what the agent is doing,
 activity store knows. `roster_entry` reads all three, which is why an entry's `clone_state` and
 `status` are current without the roster having to be rewritten every time either advances.
 
-The two live stores are passed together as `SnapshotSources { clones, activity }`, so neither can be
-consulted without the other — an entry carrying a fresh `clone_state` and a stale `status` is two
-different accounts of one agent.
+The two live stores are passed together as `SnapshotSources { clones, activity, coding_agents }`, so
+neither can be consulted without the other — an entry carrying a fresh `clone_state` and a stale
+`status` is two different accounts of one agent. `coding_agents` is the host's `CodingAgentRegistry`:
+a coding agent's `transport` and `permission_policy` are read from its spec there
+(`SessionAgentRosterStore::new(clones, activity, coding_agents)`).
 
 Four properties are load-bearing and each is pinned by a test in
 `tests/session_agent_roster_acceptance.rs`:
@@ -301,17 +303,20 @@ like any other entry:
 
 | Function | Role |
 |---|---|
-| `coding_agent_defs_for` | the daemon's `CodingAgentDef`s: harness profiles under `<tddy_data_dir>/agents` and ACP `allowed_agents` ids |
+| `coding_agent_defs_for` | the daemon's `CodingAgentDef`s, read against the host's registry (`AgentRoster.coding_agents`): harness profiles under `<tddy_data_dir>/agents` on an agent it declares with a transport, then `allowed_agents` ids it declares ACP agents |
 | `coding_agent_record` | the `SessionAgentRecord` a coding-agent row attaches as (`kind: coding_agent`, its harness, no `replaces`) — `tddy-daemon-rpc`'s `ListSubagents` row is built from the same record |
 | `agent_kind_to_wire`, `agent_kind_from_wire` | `AgentKindRecord` ↔ `types.AgentKind`; an unknown wire value (a newer peer's row) is `INVALID_ARGUMENT`, never read as a model |
-| `refuse_unconfinable_harness` | attach admission: in a managed-codebase session, `tddy_coding_subagent::refuse_unless_confinable` → `FAILED_PRECONDITION` naming the harness |
+| `refuse_unconfinable_harness` | attach admission: in a managed-codebase session, `tddy_coding_subagent::refuse_unless_registry_confinable` over the host's registry → `FAILED_PRECONDITION` naming the harness |
 | `AgentRoster::open_coding_agent_session` | `open_local_agent_session`'s branch for a `coding_agent` record |
 
 Opening a conversation refuses a system prompt (a coding agent has its own), resolves the session's
 GitHub user to its OS user and its worktree, and builds a `CodingAgentLaunch` (managed when the
 session's codebase is). It asks the launcher for the MCP servers **before** the transport, so a
-refusal starts nothing; a managed `claude-acp` launch carries `withdrawal_session_meta` as
-`OpenSession.meta`. A daemon with no launcher installed refuses with `FAILED_PRECONDITION`.
+refusal starts nothing; a managed launch whose spec withdraws through `acp_meta` (`claude-acp`)
+carries the launcher's `session_meta_for` as `OpenSession.meta`. The agent is started through
+`launch_agent`, and the session runs with — and holds — the hooks its spec's declared adapter
+prepared (`codex-acp`'s login retry). Whether the conversation is headless or ACP is the host spec's
+(`transport_of_spec`). A daemon with no launcher installed refuses with `FAILED_PRECONDITION`.
 
 ### Workspace rosters
 

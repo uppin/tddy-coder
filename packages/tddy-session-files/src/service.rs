@@ -57,7 +57,9 @@ pub type OsUserResolver = Arc<dyn Fn(&str) -> Result<String, Status> + Send + Sy
 /// blocks.
 pub struct SessionContextScope {
     pub worktree_root: PathBuf,
-    pub globs: &'static [&'static str],
+    pub globs: Vec<String>,
+    /// The session agent's guidance files (its spec's `instructions.files`).
+    pub guidance_files: Vec<PathBuf>,
 }
 
 /// Resolves one request to the checkout and allow-list row it may read.
@@ -300,7 +302,12 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
             "StreamContextManifest",
             self.ports.context_read_deadline,
             move || {
-                crate::context_files::context_manifest(&scope.worktree_root, scope.globs, max_bytes)
+                crate::context_files::context_manifest(
+                    &scope.worktree_root,
+                    &scope.globs.iter().map(String::as_str).collect::<Vec<_>>(),
+                    &scope.guidance_files,
+                    max_bytes,
+                )
             },
         )
         .await?;
@@ -327,7 +334,8 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
                 crate::context_files::read_context_file_bytes(
                     &scope.worktree_root,
                     &rel_path,
-                    scope.globs,
+                    &scope.globs.iter().map(String::as_str).collect::<Vec<_>>(),
+                    &scope.guidance_files,
                     max_bytes,
                 )
             },
@@ -361,7 +369,8 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
                 crate::context_files::read_context_files_bytes(
                     &scope.worktree_root,
                     &rel_paths,
-                    scope.globs,
+                    &scope.globs.iter().map(String::as_str).collect::<Vec<_>>(),
+                    &scope.guidance_files,
                     max_bytes,
                 )
             },

@@ -13,9 +13,9 @@
 
 import React from "react";
 import { createClient } from "@connectrpc/connect";
-import { CodeNavigationService } from "../../../src/gen/code_navigation_pb";
-import { WorktreeService } from "../../../src/gen/worktree_pb";
-import { WorktreeCodePane } from "../../../src/components/session/WorktreeCodePane";
+import { CodeNavigationService } from "tddy-client-web/gen/code_navigation_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
+import { WorktreeCodePane } from "tddy-session-web";
 import { mountWithRpc } from "../rpc/inMemory";
 import type { CodeIndexHost, OpenedWorktree } from "../rpc/codeSessionBackend";
 import { worktreeCodePanePage } from "../pages/worktreeCodePanePage";

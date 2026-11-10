@@ -88,7 +88,8 @@ impl RecordingLauncher {
                     )],
                 ))
             }),
-        );
+        )
+        .with_coding_agents(tddy_session_lifecycle::test_util::builtin_coding_agents());
         Arc::new(Self {
             dir: dir.to_path_buf(),
             launches: Mutex::new(Vec::new()),
@@ -106,8 +107,10 @@ impl RecordingLauncher {
     }
 
     fn recorded(&self, event: &str) -> Vec<serde_json::Value> {
-        std::fs::read_to_string(self.dir.join("record.jsonl"))
-            .unwrap_or_default()
+        let text = std::fs::read_to_string(self.dir.join("record.jsonl")).unwrap_or_default();
+        // Only the lines the stub has finished writing: the last one may still be half-written.
+        let complete = text.rfind('\n').map_or("", |end| &text[..=end]);
+        complete
             .lines()
             .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("JSON line"))
             .filter(|line| line["event"] == event)
@@ -117,6 +120,31 @@ impl RecordingLauncher {
 
 #[async_trait::async_trait]
 impl CodingAgentLauncher for RecordingLauncher {
+    /// What a launcher holding the built-in specs answers: a managed launch's `acp_meta`
+    /// withdrawal of its agent's declared `acp.withdraw_native`.
+    async fn session_meta_for(
+        &self,
+        launch: &tddy_coding_subagent::CodingAgentLaunch,
+    ) -> Result<
+        Option<serde_json::Map<String, serde_json::Value>>,
+        tddy_discovery::subagent::SubagentError,
+    > {
+        let registry = tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached();
+        let Some(spec) = registry.get(&launch.def.harness).filter(|_| launch.managed) else {
+            return Ok(None);
+        };
+        let withdrawn = spec
+            .acp()
+            .map(|acp| acp.withdraw_native.clone())
+            .unwrap_or_default();
+        match tddy_coding_agent_specs::slots::acp::acp_withdrawal(spec, &withdrawn)
+            .map_err(|e| tddy_discovery::subagent::SubagentError::from(e.to_string()))?
+        {
+            Some(tddy_coding_agent_specs::slots::acp::AcpWithdrawal::Meta(meta)) => Ok(Some(meta)),
+            _ => Ok(None),
+        }
+    }
+
     async fn command_for(
         &self,
         launch: &CodingAgentLaunch,
@@ -482,9 +510,17 @@ async fn an_acp_allowed_agent_is_listed_as_a_coding_agent_with_its_default_model
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
         &config_path,
-        "users:\n  - github_user: \"u\"\n    os_user: \"u\"\nallowed_agents:\n  - id: claude-acp\n    label: \"Claude (ACP)\"\n  - id: cursor\n",
+        "allowed_agents:\n  - id: claude-acp\n    label: \"Claude (ACP)\"\n  - id: cursor\n",
     )
     .expect("write config");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"u\"\n  os_user: \"u\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("load config");
     let tddy_home = tempfile::tempdir().expect("tddy home");
     let home = tddy_home.path().to_path_buf();
@@ -498,8 +534,10 @@ async fn an_acp_allowed_agent_is_listed_as_a_coding_agent_with_its_default_model
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
-        ),
+            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+            tddy_agent_launch::host_coding_agents::no_coding_agents(),
+        )
+        .with_coding_agents(tddy_session_lifecycle::test_util::builtin_coding_agents()),
     );
 
     // When
@@ -520,7 +558,12 @@ async fn an_acp_allowed_agent_is_listed_as_a_coding_agent_with_its_default_model
     assert_eq!(coding[0].label, "Claude (ACP)");
     assert_eq!(
         coding[0].model,
-        tddy_core::default_model_for_agent("claude-acp")
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+            .get("claude-acp")
+            .expect("the claude-acp spec loads")
+            .agent
+            .models
+            .default
     );
 }
 
@@ -930,12 +973,19 @@ async fn cancelling_a_turn_paused_on_a_permission_request_answers_it_cancelled_a
 
     // Then the request was answered cancelled, and the conversation is still open
     assert!(response.conversation_kept, "{response:?}");
-    let outcomes = session.launcher.recorded("permission_outcome");
-    assert_eq!(
-        outcomes.last().map(|outcome| outcome["outcome"].clone()),
-        Some(serde_json::json!("cancelled")),
-        "the agent saw its request cancelled: {outcomes:?}"
-    );
+    // The stub records the outcome as it receives it, so its line may land just after the response.
+    tddy_testing_commons::wait::eventually(
+        "the agent to see its request cancelled",
+        Duration::from_secs(10),
+        || {
+            let outcomes = session.launcher.recorded("permission_outcome");
+            match outcomes.last().map(|outcome| outcome["outcome"].clone()) {
+                Some(outcome) if outcome == serde_json::json!("cancelled") => Ok(()),
+                _ => Err(format!("recorded outcomes: {outcomes:?}")),
+            }
+        },
+    )
+    .await;
     let (_, next) = session.prompt(&conversation_id, "Carry on").await;
     assert_eq!(next, "EndTurn", "the conversation answers again");
 }

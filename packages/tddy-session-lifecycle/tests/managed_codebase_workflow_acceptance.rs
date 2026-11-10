@@ -15,7 +15,7 @@ use tddy_core::changeset::read_changeset;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 use tddy_service::proto::session::{
@@ -43,28 +43,41 @@ fn current_os_user() -> String {
         .into_owned()
 }
 
-fn write_config_with_claude_cli_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+/// A daemon config, and the coding agents the host installs: `claude` is the stub.
+type AConfigAndItsAgents = (
+    DaemonConfig,
+    Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+);
+
+fn write_config_with_claude_cli_binary(
+    stub_binary: &str,
+) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
-claude_cli:
-  binary_path: {stub_binary}
-"#
-    );
+    let yaml = r#"
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
-    (dir, config)
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+        "claude",
+        std::path::Path::new(stub_binary),
+    )]);
+    (dir, (config, agents))
 }
 
 fn minimal_service_with_manager(
-    config: DaemonConfig,
+    (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -87,6 +100,7 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
 }
 
@@ -132,12 +146,20 @@ fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
     script_path
 }
 
-/// Executable stub that dumps `TDDY_SOCKET` (for asserting per-session env injection).
+/// Executable stub that dumps the `TDDY_SOCKET` of the tool-server registration it was launched with
+/// (for asserting per-session env injection): the agent's own environment carries no `TDDY_*`, the
+/// session's `tddy-tools --mcp` server does.
 fn write_env_echo_script(dir: &std::path::Path) -> std::path::PathBuf {
     let script_path = dir.join("stub_claude_env.sh");
     std::fs::write(
         &script_path,
-        "#!/bin/sh\necho \"ENVDUMP TDDY_SOCKET=[$TDDY_SOCKET]\"\n",
+        concat!(
+            "#!/bin/sh\n",
+            "cfg=\"\"; prev=\"\"\n",
+            "for a in \"$@\"; do if [ \"$prev\" = \"--mcp-config\" ]; then cfg=\"$a\"; fi; prev=\"$a\"; done\n",
+            "sock=$(sed -n 's/.*\"TDDY_SOCKET\": *\"\\([^\"]*\\)\".*/\\1/p' \"$cfg\" 2>/dev/null)\n",
+            "echo \"ENVDUMP TDDY_SOCKET=[$sock]\"\n",
+        ),
     )
     .unwrap();
     make_executable(&script_path);
@@ -150,7 +172,14 @@ fn write_argv_and_env_script(dir: &std::path::Path) -> std::path::PathBuf {
     let script_path = dir.join("stub_claude_argv_env.sh");
     std::fs::write(
         &script_path,
-        "#!/bin/sh\necho \"ARGV: $@\"\necho \"ENVDUMP TDDY_SOCKET=[$TDDY_SOCKET]\"\n",
+        concat!(
+            "#!/bin/sh\n",
+            "echo \"ARGV: $@\"\n",
+            "cfg=\"\"; prev=\"\"\n",
+            "for a in \"$@\"; do if [ \"$prev\" = \"--mcp-config\" ]; then cfg=\"$a\"; fi; prev=\"$a\"; done\n",
+            "sock=$(sed -n 's/.*\"TDDY_SOCKET\": *\"\\([^\"]*\\)\".*/\\1/p' \"$cfg\" 2>/dev/null)\n",
+            "echo \"ENVDUMP TDDY_SOCKET=[$sock]\"\n",
+        ),
     )
     .unwrap();
     make_executable(&script_path);
@@ -192,7 +221,7 @@ async fn managed_claude_cli_session_seeds_changeset_with_recipe_start_goal() {
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     );
 
     // When
@@ -226,7 +255,7 @@ async fn managed_claude_cli_session_with_unknown_recipe_is_rejected() {
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     );
 
     // When
@@ -254,7 +283,7 @@ async fn managed_claude_cli_session_launches_claude_with_orchestration_prompt_fi
     let stub_dir = tempfile::tempdir().unwrap();
     let stub = write_echo_argv_script(stub_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -292,7 +321,7 @@ async fn managed_claude_cli_session_launches_claude_with_tddy_socket_in_env() {
     let stub_dir = tempfile::tempdir().unwrap();
     let stub = write_env_echo_script(stub_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -368,7 +397,7 @@ async fn resuming_a_managed_claude_cli_session_re_wires_orchestration_and_socket
     let stub_dir = tempfile::tempdir().unwrap();
     let stub = write_argv_and_env_script(stub_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),

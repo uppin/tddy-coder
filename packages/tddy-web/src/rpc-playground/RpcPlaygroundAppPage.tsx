@@ -1,29 +1,33 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@connectrpc/connect";
 import { create, type Registry } from "@bufbuild/protobuf";
-import { useLiveKitTransport } from "../rpc/transportProvider";
+import { useLiveKitTransport } from "../app/rpc/transportProvider";
 import {
   ServerReflection,
   ServerReflectionRequestSchema,
-} from "../gen/grpc/reflection/v1/reflection_pb";
-import { GitHubLoginButton } from "../components/GitHubLoginButton";
+} from "tddy-client-web/gen/grpc/reflection/v1/reflection_pb";
+import { GitHubLoginButton } from "tddy-workspace-web";
 import { AppShell } from "../components/shell/AppShell";
-import { useAuthContext } from "../hooks/authProvider";
-import { useRoomParticipants } from "../hooks/useRoomParticipants";
-import { presenceIdentityForUser } from "../lib/presenceIdentity";
-import { useSelectedDaemon } from "../rpc/selectedDaemon";
-import { useHostConnection } from "../rpc/connections/registry";
-import { useCapabilityAvailability } from "../hooks/useCapabilityAvailability";
-import { useHostPresence } from "../rpc/hostDirectory/useHostPresence";
-import { PARAM_PARTICIPANT } from "../routing/appLocation";
-import { useAppLocation } from "../routing/useAppLocation";
-import { buildRegistry, findMethod } from "./registry";
-import { invokeRpc, type InvokeResult } from "./invoke";
+import { useAuthContext } from "../app/auth/authProvider";
+import { presenceIdentityForUser } from "tddy-livekit-web";
 import {
+  buildRegistry,
+  findMethod,
+  invokeRpc,
   RpcPlaygroundScreen,
+  type InvokeResult,
   type ServiceInfo,
   type ServiceMethodKind,
-} from "./RpcPlaygroundScreen";
+} from "tddy-rpc-playground-web";
+import {
+  PARAM_PARTICIPANT,
+  useAppLocation,
+  useCapabilityAvailability,
+  useHostConnection,
+  useHostPresence,
+  useRoomParticipants,
+  useSelectedDaemon,
+} from "tddy-client-web";
 
 async function* once<T>(value: T): AsyncIterable<T> {
   yield value;

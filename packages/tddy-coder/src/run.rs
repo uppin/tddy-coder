@@ -3,25 +3,20 @@
 //! Args is the common runtime type. CoderArgs and DemoArgs are CLI parser types
 //! with different agent constraints; both convert to Args via From.
 
-use crate::codex_binaries::{resolve_codex_acp_binary, resolve_codex_binary};
-use crate::provider_route_arg::{
-    apply_provider_route, load_provider_route, refuse_route_for_definition,
-};
+use crate::codex_binaries::resolve_codex_binary;
+use crate::provider_route_arg::load_provider_route;
+use crate::spec_backend_build::{create_workflow_backend, BinaryPathFlags};
 use anyhow::Context;
 use clap::Parser;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tddy_core::provider_route::HarnessRoute;
 use tddy_core::usage_watcher::{spawn_session_usage_watcher, SessionUsageWatchConfig};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
-    backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
-    output::SESSIONS_SUBDIR, preselected_index_for_agent, read_changeset, read_session_metadata,
-    AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend, CodingBackend,
-    CursorBackend, GoalId, OpenCodeAcpBackend, PendingWorkflowStart, ProgressEvent, SharedBackend,
-    StubBackend, WorkflowEngine, WorkflowRecipe,
+    get_session_for_tag, output::SESSIONS_SUBDIR, read_changeset, read_session_metadata,
+    CodingBackend, GoalId, PendingWorkflowStart, SharedBackend, WorkflowEngine, WorkflowRecipe,
 };
 use tddy_discovery;
 use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response};
@@ -218,11 +213,11 @@ fn assign_default_session_id(args: &mut Args) {
 
 /// Plain stdin menu when `--agent` was omitted (single-goal mode).
 fn resolve_agent_for_single_goal_plain(_args: &Args) -> anyhow::Result<String> {
-    let q = backend_selection_question();
+    let q = crate::agent_registry_cli::builtin_backend_selection_question();
     let label = plain::read_backend_selection_plain(&q)?;
-    let (agent, _) = backend_from_label(&label);
-    verify_tddy_tools_available(agent)?;
-    Ok(agent.to_string())
+    let (agent, _) = crate::agent_registry_cli::agent_and_default_model(&label);
+    verify_tddy_tools_available(&agent)?;
+    Ok(agent)
 }
 
 /// Plain stdin menu when `--agent` was omitted (full workflow, no TUI).
@@ -230,11 +225,11 @@ fn resolve_agent_for_full_workflow_plain(args: &Args) -> anyhow::Result<String> 
     if let Some(ref a) = args.agent {
         return Ok(a.clone());
     }
-    let q = backend_selection_question();
+    let q = crate::agent_registry_cli::builtin_backend_selection_question();
     let label = plain::read_backend_selection_plain(&q)?;
-    let (agent, _) = backend_from_label(&label);
-    verify_tddy_tools_available(agent)?;
-    Ok(agent.to_string())
+    let (agent, _) = crate::agent_registry_cli::agent_and_default_model(&label);
+    verify_tddy_tools_available(&agent)?;
+    Ok(agent)
 }
 
 /// Resolve the tddy data directory from args (CLI `--tddy-data-dir`), falling back to the
@@ -249,7 +244,7 @@ fn resolve_tddy_data_dir(args: &Args) -> PathBuf {
         })
 }
 
-/// Resolve the specialized-agent def set for `create_backend` — `<tddyhome>/agents/*.yaml`, then
+/// Resolve the specialized-agent def set for `create_workflow_backend` — `<tddyhome>/agents/*.yaml`, then
 /// the def the spawning daemon resolved for us (`--agent-def-path`), which wins on a name
 /// collision. There is no compiled-in def: every agent comes from a def source someone wrote (see
 /// docs/ft/daemon/session-agent-roster.md § Removing the hardcoded agents).
@@ -285,19 +280,27 @@ fn resolve_specialized_agent_defs(
 }
 
 /// The backend `args` runs for `agent`, with the specialized defs and the provider route `args`
-/// names applied by [`create_backend`].
+/// names applied by [`create_workflow_backend`].
 fn create_backend_for_args(args: &Args, agent: &str) -> anyhow::Result<SharedBackend> {
-    create_backend(
+    let tools_dir = resolve_tddy_data_dir(args).join("tools");
+    create_workflow_backend(
         agent,
-        args.cursor_agent_path.as_deref(),
-        args.codex_cli_path.as_deref(),
-        args.codex_acp_cli_path.as_deref(),
-        args.opencode_cli_path.as_deref(),
-        None,
-        None,
+        binary_path_flags(args),
+        &tools_dir,
+        Arc::new(tddy_actions::tool::ProcessToolHost),
         &resolve_specialized_agent_defs(args)?,
         load_provider_route(args.provider_route_path.as_deref())?,
     )
+}
+
+/// The `--*-path` flags `args` carries that name a spec's binary.
+fn binary_path_flags(args: &Args) -> BinaryPathFlags<'_> {
+    BinaryPathFlags {
+        cursor_agent: args.cursor_agent_path.as_deref(),
+        codex_cli: args.codex_cli_path.as_deref(),
+        codex_acp_cli: args.codex_acp_cli_path.as_deref(),
+        opencode_cli: args.opencode_cli_path.as_deref(),
+    }
 }
 
 /// CLI `--output-dir` when set, else `"."` (derive repo root from cwd / default sessions base).
@@ -450,7 +453,7 @@ pub fn run_main(mut args: Args, host: ParticipantHost) {
     let ctrlc_pressed_for_handler = ctrlc_pressed.clone();
 
     ctrlc::set_handler(move || {
-        tddy_core::kill_child_process();
+        tddy_core::kill_running_turns();
         ctrlc_pressed_for_handler.store(true, Ordering::Relaxed);
         shutdown_for_handler.store(true, Ordering::Relaxed);
         let _ = crossterm::execute!(
@@ -506,7 +509,7 @@ pub struct Args {
     pub agent: Option<String>,
     /// File holding the full `SpecializedAgentDef` for `agent`, as JSON (`--agent-def-path`). Set
     /// by `tddy-daemon` when it resolved the name against a def source this process cannot read for
-    /// itself — its model-registry assistants — so `create_backend` sees the same def the daemon
+    /// itself — its model-registry assistants — so `create_workflow_backend` sees the same def the daemon
     /// validated. A path rather than the JSON itself because the def carries the provider
     /// credential, and argv is world-readable.
     pub agent_def_path: Option<PathBuf>,
@@ -662,7 +665,7 @@ pub struct CoderArgs {
     ///
     /// Deliberately not a static `value_parser` allowlist: a def's name is only knowable once
     /// `--tddy-data-dir` and `--agent-def-path` have been parsed, which is after clap would have to
-    /// validate. `create_backend` refuses an unresolvable name instead, where the whole def set is
+    /// validate. `create_workflow_backend` refuses an unresolvable name instead, where the whole def set is
     /// known (docs/ft/coder/specialized-subagents.md AC14).
     #[arg(long)]
     pub agent: Option<String>,
@@ -1320,7 +1323,6 @@ fn run_codex_oauth_login(args: &Args) -> anyhow::Result<()> {
         "--codex-oauth-login requires --session-dir or --session-id so the artifact directory is known",
     )?;
     let codex_bin = resolve_codex_binary(args.codex_cli_path.as_deref());
-    let backend = CodexBackend::with_path(codex_bin);
     let url_file = session_dir.join(tddy_core::CODEX_OAUTH_AUTHORIZE_URL_FILENAME);
     eprintln!("Codex browser OAuth login (OpenAI). This is not `--device-auth`.");
     eprintln!(
@@ -1330,8 +1332,7 @@ fn run_codex_oauth_login(args: &Args) -> anyhow::Result<()> {
     eprintln!(
         "Complete sign-in in a browser on this host; Codex listens on localhost for the callback until finished or interrupted."
     );
-    let mut child = backend
-        .spawn_oauth_login(&session_dir)
+    let mut child = tddy_core::spawn_codex_oauth_login(&codex_bin, &session_dir)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
     let status = child.wait().context("wait on codex login")?;
     if !status.success() {
@@ -1532,10 +1533,6 @@ pub fn run_with_args(
         );
     });
     run_goal_plain(args, backend, goal_to_run, ctx, true, &shutdown)
-}
-
-fn on_progress(_event: &ProgressEvent) {
-    // Plain mode: progress is not displayed (no stdout/stderr per AGENTS.md)
 }
 
 /// Resolves paths for the LiveKit Virtual TUI branch inside [`run_daemon`].
@@ -1830,7 +1827,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
             agent_str,
             args.model
                 .as_deref()
-                .unwrap_or_else(|| default_model_for_agent(agent_str)),
+                .unwrap_or_else(|| crate::agent_registry_cli::default_model_for_agent(agent_str)),
             recipe_arc_for_args(args)?,
             tddy_data_dir.clone(),
         )
@@ -2117,7 +2114,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
                         model: args
                             .model
                             .as_deref()
-                            .unwrap_or_else(|| default_model_for_agent(agent_str))
+                            .unwrap_or_else(|| crate::agent_registry_cli::default_model_for_agent(agent_str))
                             .to_string(),
                         poll_interval: SESSION_USAGE_POLL_INTERVAL,
                     },
@@ -2154,7 +2151,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
                 model: args
                     .model
                     .as_deref()
-                    .unwrap_or_else(|| default_model_for_agent(agent_str))
+                    .unwrap_or_else(|| crate::agent_registry_cli::default_model_for_agent(agent_str))
                     .to_string(),
                 recipe: args
                     .recipe
@@ -2502,131 +2499,9 @@ fn apply_agent_from_changeset_if_needed(args: &mut Args) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Resolve Cursor `agent` executable: `--cursor-agent-path` / config, then `TDDY_CURSOR_AGENT`, then `agent` on `PATH`.
-fn resolve_cursor_agent_binary(cursor_agent_path: Option<&Path>) -> PathBuf {
-    cursor_agent_path
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("TDDY_CURSOR_AGENT").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from(CursorBackend::DEFAULT_CLI_BINARY))
-}
-
-/// Create backend once at startup (plain mode, no progress events).
-/// StubBackend always uses InMemoryToolExecutor (no tddy-tools): stub simulates the agent,
-/// so it stores results directly. ProcessToolExecutor is for real agents (Claude/Cursor/Codex)
-/// that run tddy-tools submit.
-///
-/// An `agent` that matches neither a resolved def nor a known backend id is an error. It used to
-/// fall through to Claude, which meant a mistyped id — or a registry assistant whose def never
-/// reached this process — ran a completely different agent while reporting success.
-#[allow(clippy::too_many_arguments)]
-fn create_backend(
-    agent: &str,
-    cursor_agent_path: Option<&Path>,
-    codex_cli_path: Option<&Path>,
-    codex_acp_cli_path: Option<&Path>,
-    opencode_cli_path: Option<&Path>,
-    _socket_path: Option<&Path>,
-    _working_dir: Option<&Path>,
-    // Resolved specialized-agent defs (<tddyhome>/agents/*.yaml, `--agent-def-path` — see
-    // docs/ft/coder/specialized-subagents.md).
-    specialized_agent_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
-    // The provider route the session runs on (`--provider-route-path`), applied to the backend.
-    provider_route: Option<HarnessRoute>,
-) -> anyhow::Result<SharedBackend> {
-    log::info!("[tddy-coder] using agent: {}", agent);
-    if let Some(def) = specialized_agent_defs.iter().find(|d| d.name == agent) {
-        refuse_route_for_definition(agent, provider_route.as_ref())?;
-        // The def is the whole configuration — endpoint, model, turn budget and credential. No
-        // flag can override it: one that could would run the session against a model the operator
-        // never configured while still reporting the def's name
-        // (docs/ft/daemon/session-agent-roster.md AC46).
-        log::info!(
-            "[tddy-coder] specialized agent backend '{}': url={} model={} max_turns={}",
-            def.name,
-            def.base_url,
-            def.model,
-            def.max_turns
-        );
-        let backend = tddy_discovery::backend::SpecializedAgentBackend::from_def(def);
-        return Ok(SharedBackend::from_arc(Arc::new(backend)));
-    }
-    let backend: AnyBackend = match agent {
-        "cursor" => {
-            let path = resolve_cursor_agent_binary(cursor_agent_path);
-            log::info!(
-                "[tddy-coder] Cursor backend: CLI binary `{}` (full argv logged when a goal invokes the backend)",
-                path.display()
-            );
-            AnyBackend::Cursor(CursorBackend::with_path(path).with_progress(on_progress))
-        }
-        "claude-acp" => AnyBackend::ClaudeAcp(ClaudeAcpBackend::new()),
-        "codex" => {
-            let path = resolve_codex_binary(codex_cli_path);
-            log::info!(
-                "[tddy-coder] Codex backend: CLI binary `{}`",
-                path.display()
-            );
-            AnyBackend::Codex(CodexBackend::with_path(path))
-        }
-        "codex-acp" => {
-            let acp_bin = resolve_codex_acp_binary(codex_acp_cli_path, codex_cli_path);
-            let codex_bin = resolve_codex_binary(codex_cli_path);
-            log::info!(
-                "[tddy-coder] Codex ACP backend: agent `{}`, codex CLI for OAuth `{}`",
-                acp_bin.display(),
-                codex_bin.display()
-            );
-            AnyBackend::CodexAcp(CodexAcpBackend::with_agent_and_codex_paths(
-                acp_bin, codex_bin,
-            ))
-        }
-        "opencode" => {
-            let path = opencode_cli_path
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| PathBuf::from(OpenCodeAcpBackend::DEFAULT_CLI_BINARY));
-            log::info!(
-                "[tddy-coder] OpenCode ACP backend: agent `{}`",
-                path.display()
-            );
-            AnyBackend::OpenCode(OpenCodeAcpBackend::with_agent_path(path))
-        }
-        "stub" => AnyBackend::Stub(StubBackend::new()),
-        "claude" => AnyBackend::Claude(ClaudeCodeBackend::new().with_progress(on_progress)),
-        unknown => {
-            let known = specialized_agent_defs
-                .iter()
-                .map(|d| d.name.as_str())
-                .chain(BUILTIN_BACKEND_AGENT_IDS.iter().copied())
-                .collect::<Vec<_>>()
-                .join(", ");
-            anyhow::bail!(
-                "unknown agent {unknown:?}: it is neither a coding backend nor a resolved \
-                 specialized agent def. Known agents: {known}"
-            );
-        }
-    };
-    Ok(SharedBackend::from_any(apply_provider_route(
-        backend,
-        provider_route,
-    )?))
-}
-
-/// The coding-backend ids `create_backend` dispatches on directly, as opposed to the named
-/// specialized agent defs it resolves. Named here so an unknown `--agent` can say what it could
-/// have been.
-pub const BUILTIN_BACKEND_AGENT_IDS: &[&str] = &[
-    "claude",
-    "claude-acp",
-    "cursor",
-    "codex",
-    "codex-acp",
-    "stub",
-    "opencode",
-];
-
 #[cfg(test)]
-mod create_backend_specialized_agent_tests {
-    //! Unit tests: `create_backend` building a backend from a resolved `SpecializedAgentDef` —
+mod create_workflow_backend_specialized_agent_tests {
+    //! Unit tests: `create_workflow_backend` building a backend from a resolved `SpecializedAgentDef` —
     //! the def being the whole configuration, with no literal and no flag able to override it.
     //!
     //! Feature: docs/ft/coder/specialized-subagents.md (criteria 13-14)
@@ -2635,7 +2510,7 @@ mod create_backend_specialized_agent_tests {
     //! No mocking crate is added for this: a minimal raw-socket one-shot HTTP responder is
     //! sufficient to observe which endpoint the backend actually called.
 
-    use super::create_backend;
+    use super::{create_workflow_backend, BinaryPathFlags};
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use tddy_core::backend::{CodingBackend, InvokeRequest};
@@ -2685,7 +2560,7 @@ mod create_backend_specialized_agent_tests {
         (format!("http://127.0.0.1:{port}"), received)
     }
 
-    /// `create_backend` builds its backend from the resolved `SpecializedAgentDef` — the endpoint
+    /// `create_workflow_backend` builds its backend from the resolved `SpecializedAgentDef` — the endpoint
     /// it dials is the def's own. A hardcoded default here would mean a session talking to an
     /// endpoint the operator never named while reporting the def's name.
     #[tokio::test]
@@ -2707,14 +2582,11 @@ mod create_backend_specialized_agent_tests {
         };
 
         // When
-        let backend = create_backend(
+        let backend = create_workflow_backend(
             "explorer",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            BinaryPathFlags::default(),
+            std::path::Path::new("/nonexistent/tools"),
+            std::sync::Arc::new(tddy_actions::tool::ProcessToolHost),
             std::slice::from_ref(&def),
             None,
         )
@@ -2729,7 +2601,7 @@ mod create_backend_specialized_agent_tests {
         // Then — the backend reached the resolved def's endpoint and returned its citation
         assert!(
             result.is_ok(),
-            "create_backend must route to the resolved def's own base_url; got: {:?}",
+            "create_workflow_backend must route to the resolved def's own base_url; got: {:?}",
             result.err()
         );
         assert_eq!(result.unwrap().output, "src/lib.rs:1-1");
@@ -2758,14 +2630,11 @@ mod create_backend_specialized_agent_tests {
         };
 
         // When
-        create_backend(
+        create_workflow_backend(
             "repo-explorer",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            BinaryPathFlags::default(),
+            std::path::Path::new("/nonexistent/tools"),
+            std::sync::Arc::new(tddy_actions::tool::ProcessToolHost),
             std::slice::from_ref(&def),
             None,
         )
@@ -2808,14 +2677,11 @@ mod create_backend_specialized_agent_tests {
         };
 
         // When
-        let backend = create_backend(
+        let backend = create_workflow_backend(
             "my-explorer",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            BinaryPathFlags::default(),
+            std::path::Path::new("/nonexistent/tools"),
+            std::sync::Arc::new(tddy_actions::tool::ProcessToolHost),
             std::slice::from_ref(&def),
             None,
         )
@@ -2825,7 +2691,7 @@ mod create_backend_specialized_agent_tests {
         assert_eq!(
             backend.name(),
             "my-explorer",
-            "create_backend must build the named def's own backend, reporting that def's name"
+            "create_workflow_backend must build the named def's own backend, reporting that def's name"
         );
     }
 }
@@ -2838,7 +2704,8 @@ mod agent_def_handover_tests {
     //!
     //! PRD: docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md (AC9).
 
-    use super::{create_backend, resolve_specialized_agent_defs, Args};
+    use super::{create_workflow_backend, resolve_specialized_agent_defs, Args, BinaryPathFlags};
+    use std::path::{Path, PathBuf};
     use tddy_core::backend::CodingBackend;
     use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 
@@ -2993,14 +2860,11 @@ mod agent_def_handover_tests {
         let defs: Vec<SpecializedAgentDef> = Vec::new();
 
         // When
-        let error = create_backend(
+        let error = create_workflow_backend(
             "repo-explorer",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            BinaryPathFlags::default(),
+            std::path::Path::new("/nonexistent/tools"),
+            std::sync::Arc::new(tddy_actions::tool::ProcessToolHost),
             &defs,
             None,
         )
@@ -3009,20 +2873,69 @@ mod agent_def_handover_tests {
         // Then
         assert_eq!(
             error.to_string(),
-            "unknown agent \"repo-explorer\": it is neither a coding backend nor a resolved \
-             specialized agent def. Known agents: claude, claude-acp, cursor, codex, codex-acp, \
-             stub, opencode"
+            "unknown agent \"repo-explorer\": no coding agent of that id can run a workflow turn \
+             on this host. Known agents: claude, claude-acp, codex, codex-acp, cursor, opencode, \
+             oz, stub"
         );
+    }
+
+    /// A host that knows nothing of the real machine: its `PATH` is one directory holding an
+    /// executable stub `claude` and `tddy-tools`, and it has no environment.
+    struct AHostWithStubAgentTools {
+        bin: tempfile::TempDir,
+    }
+
+    impl AHostWithStubAgentTools {
+        fn new() -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let bin = tempfile::tempdir().expect("stub bin dir");
+            for name in ["claude", "tddy-tools"] {
+                let path = bin.path().join(name);
+                std::fs::write(&path, "#!/bin/sh\nexit 0\n").expect("stub binary");
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                    .expect("stub binary mode");
+            }
+            Self { bin }
+        }
+    }
+
+    impl tddy_actions::tool::ToolHost for AHostWithStubAgentTools {
+        fn env_var(&self, _name: &str) -> Option<String> {
+            None
+        }
+
+        fn path_dirs(&self) -> Vec<PathBuf> {
+            vec![self.bin.path().to_path_buf()]
+        }
+
+        fn is_executable_file(&self, path: &Path) -> bool {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::metadata(path)
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        }
+
+        fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+            std::fs::canonicalize(path)
+        }
     }
 
     #[test]
     fn the_default_claude_backend_is_still_selectable_by_name() {
-        // Given
+        // Given — a host whose `claude` and `tddy-tools` are stubs, so nothing of this machine's
+        // installed tools is consulted
         let defs: Vec<SpecializedAgentDef> = Vec::new();
+        let host = std::sync::Arc::new(AHostWithStubAgentTools::new());
 
         // When
-        let backend = create_backend("claude", None, None, None, None, None, None, &defs, None)
-            .expect("'claude' names a coding backend");
+        let backend = create_workflow_backend(
+            "claude",
+            BinaryPathFlags::default(),
+            std::path::Path::new("/nonexistent/tools"),
+            host,
+            &defs,
+            None,
+        )
+        .expect("'claude' names a coding backend");
 
         // Then
         assert_eq!(backend.name(), "claude");
@@ -3045,10 +2958,9 @@ fn build_goal_context(
 ) -> std::collections::HashMap<String, serde_json::Value> {
     let inherit_stdin = io::stdin().is_terminal();
     let mut ctx = std::collections::HashMap::new();
-    let model_val = args
-        .model
-        .clone()
-        .unwrap_or_else(|| default_model_for_agent(resolved_agent_for_model).to_string());
+    let model_val = args.model.clone().unwrap_or_else(|| {
+        crate::agent_registry_cli::default_model_for_agent(resolved_agent_for_model).to_string()
+    });
     ctx.insert(
         "model".to_string(),
         serde_json::to_value(model_val).unwrap(),
@@ -3313,14 +3225,14 @@ fn run_full_workflow_tui(
             let m = args
                 .model
                 .as_deref()
-                .unwrap_or_else(|| default_model_for_agent(a));
+                .unwrap_or_else(|| crate::agent_registry_cli::default_model_for_agent(a));
             Presenter::new(a, m, recipe_arc_for_args(args)?, tddy_data_dir.clone())
         }
         None => {
             let m = args
                 .model
                 .as_deref()
-                .unwrap_or_else(|| default_model_for_agent("claude"));
+                .unwrap_or_else(|| crate::agent_registry_cli::default_model_for_agent("claude"));
             Presenter::new(
                 "claude",
                 m,
@@ -3347,27 +3259,39 @@ fn run_full_workflow_tui(
     let presenter = Arc::new(Mutex::new(presenter));
 
     if args.agent.is_none() {
-        let q = backend_selection_question();
-        let idx = preselected_index_for_agent("claude");
-        let socket_path_for_factory = socket_path.clone();
+        let q = crate::agent_registry_cli::builtin_backend_selection_question();
+        let idx = crate::agent_registry_cli::preselected_index_for_agent(
+            crate::agent_registry_cli::backend_agent_ids(
+                tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached(),
+            )
+            .first()
+            .map(String::as_str)
+            .unwrap_or(""),
+        );
         let cursor_path_for_factory = args.cursor_agent_path.clone();
         let codex_path_for_factory = args.codex_cli_path.clone();
         let codex_acp_path_for_factory = args.codex_acp_cli_path.clone();
         let opencode_path_for_factory = args.opencode_cli_path.clone();
+        let tools_dir_for_factory = resolve_tddy_data_dir(args).join("tools");
         let specialized_agent_defs_for_factory = resolve_specialized_agent_defs(args)?;
         let provider_route_for_factory = load_provider_route(args.provider_route_path.as_deref())?;
         let mut p = presenter.lock().unwrap();
+        p.set_backend_default_models(crate::agent_registry_cli::backend_default_models(
+            tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached(),
+        ));
         p.configure_deferred_workflow_start(
             Box::new(move |agent: &str| {
                 verify_tddy_tools_available(agent).map_err(|e| e.to_string())?;
-                create_backend(
+                create_workflow_backend(
                     agent,
-                    cursor_path_for_factory.as_deref(),
-                    codex_path_for_factory.as_deref(),
-                    codex_acp_path_for_factory.as_deref(),
-                    opencode_path_for_factory.as_deref(),
-                    socket_path_for_factory.as_deref(),
-                    None,
+                    BinaryPathFlags {
+                        cursor_agent: cursor_path_for_factory.as_deref(),
+                        codex_cli: codex_path_for_factory.as_deref(),
+                        codex_acp_cli: codex_acp_path_for_factory.as_deref(),
+                        opencode_cli: opencode_path_for_factory.as_deref(),
+                    },
+                    &tools_dir_for_factory,
+                    Arc::new(tddy_actions::tool::ProcessToolHost),
                     &specialized_agent_defs_for_factory,
                     provider_route_for_factory.clone(),
                 )

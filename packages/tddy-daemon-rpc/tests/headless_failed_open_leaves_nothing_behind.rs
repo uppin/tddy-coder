@@ -45,6 +45,16 @@ struct PlanningLauncher {
 
 #[async_trait::async_trait]
 impl CodingAgentLauncher for PlanningLauncher {
+    async fn session_meta_for(
+        &self,
+        _launch: &tddy_coding_subagent::CodingAgentLaunch,
+    ) -> Result<
+        Option<serde_json::Map<String, serde_json::Value>>,
+        tddy_discovery::subagent::SubagentError,
+    > {
+        Ok(None)
+    }
+
     async fn command_for(
         &self,
         _launch: &CodingAgentLaunch,
@@ -75,12 +85,10 @@ impl CodingAgentLauncher for PlanningLauncher {
             .register_launch(conversation, &launch.session_id, AGENT_TOKEN);
         let dir = headless_conversation_dir(&self.tddy_data_dir, conversation);
         std::fs::create_dir_all(&dir).expect("the conversation's headless dir");
-        let config = dir.join("mcp.json");
-        std::fs::write(&config, "{}").expect("the conversation's MCP config");
+        std::fs::write(dir.join("mcp.json"), "{}").expect("the conversation's MCP config");
+        // The open fails before any turn is rendered, so the plan names no renderer.
         Ok(HeadlessCommand {
-            program: PathBuf::from("/nonexistent/claude-is-never-run"),
             cwd: Some(launch.worktree.clone()),
-            mcp_config: Some(config),
             ..HeadlessCommand::default()
         })
     }

@@ -92,7 +92,7 @@ is already the LiveKit CLI credential set.
    a `session_token` and nothing else:
    - The token is verified by the same resolver every other RPC uses (AC8); anything that is not a
      live access token is `UNAUTHENTICATED`.
-   - A login with no `users:` mapping is `PERMISSION_DENIED`.
+   - A login with no `users.yaml` mapping is `PERMISSION_DENIED`.
    - The room is the daemon's configured `livekit.common_room` — there is no request field for it.
    - The participant identity is generated server-side as `remote-git-<uuid>`. A client cannot ask
      for `daemon-<id>`, which is how a daemon's RPC-serving participant is addressed and would let
@@ -109,7 +109,7 @@ is already the LiveKit CLI credential set.
    process is spawned.
 8. An absent, malformed, expired, or refresh-kind `session_token` is `UNAUTHENTICATED`; no process
    is spawned. (Same resolver as every other daemon RPC — `packages/tddy-daemon/src/auth.rs:117`.)
-9. A valid token whose GitHub login has no `users:` mapping is `PERMISSION_DENIED`; no process is
+9. A valid token whose GitHub login has no `users.yaml` mapping is `PERMISSION_DENIED`; no process is
    spawned.
 10. `project_ref` resolves against **that OS user's own** `~/.tddy/projects/projects.yaml` — by
     `project_id` first, then by `name`. No match is `NOT_FOUND`; no process is spawned.

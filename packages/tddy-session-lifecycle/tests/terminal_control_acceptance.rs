@@ -3,7 +3,7 @@
 //! PRD: docs/ft/daemon/terminal-sessions.md (control section).
 //!
 //! These tests verify that:
-//!   1. `ClaudeCliSessionManager` correctly manages control leases (manager-level tests).
+//!   1. `CliSessionManager` correctly manages control leases (manager-level tests).
 //!   2. The `ConnectionService` RPC handlers enforce the lease (RPC-level tests).
 //!
 //! All tests are green (production implementation in place).
@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
-use tddy_session_lifecycle::claude_cli_session::{ClaimOutcome, ClaudeCliSessionManager};
+use tddy_session_lifecycle::claude_cli_session::{ClaimOutcome, CliSessionManager};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     ClaimTerminalControlRequest, SessionTerminalInput, StreamReplayMode,
@@ -36,9 +36,17 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 fn test_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = "users:\n  - github_user: \"testuser\"\n    os_user: \"testuser\"\n";
+    let yaml = "";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     let config = DaemonConfig::load(&path).expect("config must parse");
     (dir, config)
 }
@@ -47,7 +55,7 @@ fn test_config() -> (tempfile::TempDir, DaemonConfig) {
 /// are about is the manager's, and `terminal_session.TerminalSessionService` is where the two RPCs
 /// that read and take it live since `#unbundle` node 6.
 fn make_service(
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> (
     tddy_terminal_rpc::TerminalSessionServiceImpl,
     tempfile::TempDir,
@@ -77,20 +85,25 @@ fn make_service(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     );
     let sessions = tempfile::tempdir().unwrap();
     (service.terminal_session_service(), cfg_dir, sessions)
 }
 
-async fn start_main_terminal(manager: &ClaudeCliSessionManager) -> tempfile::TempDir {
+async fn start_main_terminal(manager: &CliSessionManager) -> tempfile::TempDir {
     let worktree = tempfile::tempdir().unwrap();
     manager
-        .start(
+        .start_with_options(
             SESSION_ID,
             worktree.path().to_path_buf(),
             "claude-opus-4-8",
-            MAIN_STUB,
+            vec![MAIN_STUB.to_string()],
+            "claude-cli",
             None,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await
@@ -99,7 +112,7 @@ async fn start_main_terminal(manager: &ClaudeCliSessionManager) -> tempfile::Tem
 }
 
 // ---------------------------------------------------------------------------
-// Manager-level: ClaudeCliSessionManager control lease semantics.
+// Manager-level: CliSessionManager control lease semantics.
 // ---------------------------------------------------------------------------
 
 /// **claim_grants_token_when_unheld**: the first screen to claim an uncontrolled session
@@ -107,7 +120,7 @@ async fn start_main_terminal(manager: &ClaudeCliSessionManager) -> tempfile::Tem
 #[tokio::test]
 async fn claim_grants_token_when_unheld() {
     // Given — fresh manager, no lease held
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
 
     // When
     let outcome = manager.claim_control(SESSION_ID, SCREEN_A, false).await;
@@ -131,7 +144,7 @@ async fn claim_grants_token_when_unheld() {
 #[tokio::test]
 async fn claim_without_steal_rejected_when_held_by_other() {
     // Given — screen A holds the lease
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
     let _outcome_a = manager.claim_control(SESSION_ID, SCREEN_A, false).await;
 
     // When — screen B tries to claim without steal
@@ -156,7 +169,7 @@ async fn claim_without_steal_rejected_when_held_by_other() {
 #[tokio::test]
 async fn claim_with_steal_revokes_previous_holder() {
     // Given — screen A holds the lease
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
     let outcome_a = manager.claim_control(SESSION_ID, SCREEN_A, false).await;
     let token_a = match outcome_a {
         ClaimOutcome::Granted { control_token } => control_token,
@@ -198,7 +211,7 @@ async fn claim_with_steal_revokes_previous_holder() {
 #[tokio::test]
 async fn verify_control_matches_only_current_token() {
     // Given — screen A holds the lease
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
     let token_a = match manager.claim_control(SESSION_ID, SCREEN_A, false).await {
         ClaimOutcome::Granted { control_token } => control_token,
         ClaimOutcome::Denied { .. } => panic!("unexpected Denied"),
@@ -228,7 +241,7 @@ async fn verify_control_matches_only_current_token() {
 #[tokio::test]
 async fn subscribe_emits_change_on_steal() {
     // Given — screen A holds; screen B subscribes before stealing
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
     let _ = manager.claim_control(SESSION_ID, SCREEN_A, false).await;
     let mut rx = manager.subscribe_control();
 
@@ -262,7 +275,7 @@ async fn subscribe_emits_change_on_steal() {
 #[serial_test::serial]
 async fn send_terminal_input_rejected_without_valid_control_token() {
     // Given — a connected session, screen A holds control
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let _worktree = start_main_terminal(&manager).await;
     // Claim control on the manager directly (simulates screen A having the lease)
     let _ = manager.claim_control(SESSION_ID, SCREEN_A, false).await;
@@ -301,7 +314,7 @@ async fn send_terminal_input_rejected_without_valid_control_token() {
 #[serial_test::serial]
 async fn send_terminal_input_succeeds_for_current_controller() {
     // Given — screen A holds the lease and knows its token
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let _worktree = start_main_terminal(&manager).await;
     let token = match manager.claim_control(SESSION_ID, SCREEN_A, false).await {
         ClaimOutcome::Granted { control_token } => control_token,
@@ -336,7 +349,7 @@ async fn send_terminal_input_succeeds_for_current_controller() {
 #[tokio::test]
 async fn claim_terminal_control_rpc_returns_granted_for_unheld_session() {
     // Given
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
     // When
@@ -364,7 +377,7 @@ async fn claim_terminal_control_rpc_returns_granted_for_unheld_session() {
 #[tokio::test]
 async fn watch_terminal_control_emits_snapshot() {
     // Given — screen A holds the lease via the manager
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let token = match manager.claim_control(SESSION_ID, SCREEN_A, false).await {
         ClaimOutcome::Granted { control_token } => control_token,
         ClaimOutcome::Denied { .. } => panic!("unexpected Denied"),
@@ -405,7 +418,7 @@ async fn watch_terminal_control_emits_snapshot() {
 #[tokio::test]
 async fn terminal_control_rpcs_require_valid_token() {
     // Given
-    let manager = Arc::new(ClaudeCliSessionManager::new());
+    let manager = Arc::new(CliSessionManager::new());
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
     // When — invalid session token

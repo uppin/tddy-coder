@@ -16,6 +16,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 421 | 7 | 46 | 54 | first detection |
+| 2026-11-06 | 415 | — | — | — | `#agent-tools 18/19` (#824): **−6**. The claude and cursor model-callback branches folded into one `tcm:` branch; the `tsa:` agent-pick branch came in. Nesting, branches and early exits not re-derived. Not decomposed here (sweep node n20) |
 
 ## What the tool found
 

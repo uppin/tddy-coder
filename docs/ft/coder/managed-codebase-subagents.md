@@ -21,6 +21,7 @@ same `session/new` → `session/prompt` shape the codebase already uses for `Cla
 A subagent can also be a **coding agent** — Claude Code, Codex or OpenCode over ACP, launched by the
 daemon as the session's user on the session's worktree. The same `subagent_*` tools reach it; in a
 managed session it is managed too (native tools withdrawn, `tddy-tools --mcp` its only tool server).
+Its command, MCP servers and withdrawal render from the agent's tool definition (`#agent-tools 11/12`).
 See [Session agent roster § Coding agents](../daemon/session-agent-roster.md#coding-agents).
 
 ## ACP → MCP tool mapping
@@ -341,7 +342,15 @@ subagent is paused, not finished — its ACP prompt stays in flight, waiting on 
 - **Headless `claude -p` asks the same way.** Its `--permission-prompt-tool` is tddy-tools'
   `approval_prompt`, which asks the daemon (`ExecToolService.RequestApproval`); the daemon parks the
   request on the conversation, and the caller sees the same `permission_requested` turn and answers
-  it with `subagent_resume`. A timeout (60 s), a cancel or a refused route is a denial. Headless
+  it with `subagent_resume`. A timeout (60 s), a cancel or a refused route is a denial. A daemon
+  renders each headless `claude` turn from `claude.yaml`'s `coding_agent.headless` section: the
+  binary the agent registry resolves, `--model`, `--resume`, the approval tool and the MCP
+  registration (`<tddyhome>/headless/<conversation>/claude-mcp-config.json`, mode 0600) from its
+  slots. When the daemon's coding agents do not load, a headless `claude` launch is refused with the
+  load error — never planned by hand. Headless `cursor`, `codex` and `oz` render the same way from
+  `cursor.yaml`, `codex.yaml` and `oz.yaml`, with MCP registered as each spec's slot kind: a worktree
+  `.cursor/mcp.json` (removed when the conversation closes), `-c mcp_servers.*` overrides, and an
+  `--mcp <file>`. When the coding agents do not load, all four are refused. Headless
   `cursor`, `codex` and `oz` cannot ask mid-turn and run under the fixed policy their row names
   ([Session agent roster § Coding agents](../daemon/session-agent-roster.md#coding-agents)).
 - **`toolCall.kind` is the agent's ACP tool kind** by its wire name (`edit`, `execute`, `read`, …),
@@ -758,9 +767,9 @@ the clone the owning daemon holds.
     `override_csv` is `None` or empty, and the override's tool names (normalized to the exec
     catalog's casing) when non-empty — the override always wins over the default, never merges with
     it. A token that doesn't match a known exec tool is dropped rather than passed through.
-15. `tddy_sandbox_recipes::build_claude_allowlist(subagent_enabled, replaced)` omits
+15. `tddy_coding_agent_specs::claude_tools::build_claude_allowlist(subagent_enabled, replaced)` omits
     `mcp__tddy-tools__<Tool>` for every `Tool` in `replaced`, while every other exec tool from
-    `tddy_sandbox::workspace_exec_tool_names()` (plus `AskUserQuestion`, plus the subagent tools when
+    `tddy_coding_agent_specs::claude_tools::workspace_exec_tool_names()` (plus `AskUserQuestion`, plus the subagent tools when
     `subagent_enabled`) is still present. An empty `replaced` slice reproduces today's full-exec
     allowlist exactly (no regression for sessions without a replacing subagent).
 16. `tddy_sandbox::context_dir::sandbox_remote_appendix(subagent, replaced)` — when `replaced` is
@@ -810,9 +819,10 @@ fully migrated onto the array model.
     resolves `specialized_agents` names once per call (unknown name ⇒ `InvalidArgument`, naming the
     unresolvable agent); `specialized_subagent_env` builds the `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON`
     env pair from the already-resolved defs. The per-agent `SubagentReplacement` list feeds
-    `prepare_context_dir_with_subagent` for both `start_sandboxed_claude_cli_session` and
-    `relaunch_sandboxed_runner` (the latter takes a `specialized_agents: &[String]` parameter, so a
-    resumed session re-resolves and re-wires the same defs it started with). There is no
+    `prepare_context_dir_with_subagent` for both the sandboxed CLI start
+    (`svc_start_sandboxed_cli_harness_session`, through `prepare_jail_context_dir`) and its relaunch
+    (`svc_resume_sandboxed_cli_harness_session`, through `refresh_relaunch_context_dir`), so a
+    resumed session re-resolves and re-wires the same defs it started with. There is no
     `discovery_subagent` field, and therefore no mutual-exclusivity concern to guard against.
 23. `SessionMetadata` has a `specialized_agents: Vec<String>` field
     (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`) — omitted from `.session.yaml` when
@@ -1058,7 +1068,8 @@ claude-sandbox -c ~/sandbox-config.yaml -- "implement the login form"
   `/usr/bin:/bin`, so a bare name (or a wrapper shim that re-execs `claude` from `PATH`, e.g.
   Superset's `~/.superset/bin/claude`) would fail to resolve inside the jail. `resolve_claude()`
   prefers `~/.local/bin/claude`, then scans `PATH` skipping `*/.superset*/bin` dirs; override with
-  `--claude-binary /path/to/claude`.
+  `--claude-binary /path/to/claude`. The launcher hands the result to `tddy-sandbox-app --agent claude`
+  as `TDDY_CLAUDE_BINARY`, the override `claude.yaml` declares, because the app has no binary flag.
 - Builds `tddy-sandbox-app` + `tddy-tools` + `tddy-sandbox-runner` via
   `nix develop "$ROOT" --profile "$ROOT/.nix-profile" -c cargo build` into one target dir (they
   must sit as siblings — `tddy-sandbox-app` resolves the other two as siblings of its own
@@ -1072,7 +1083,7 @@ claude-sandbox -c ~/sandbox-config.yaml -- "implement the login form"
 | `-c` / `--config <yaml>` | `SandboxAppConfig` YAML (see below); CLI flags override config values |
 | `--release` | Build with the release profile (default: debug) |
 | `--no-build` | Skip the cargo build step (assumes binaries already built) |
-| `--claude-binary <path>` | Override the `claude` binary resolution |
+| `--claude-binary <path>` | Override the `claude` binary resolution (passed on as `TDDY_CLAUDE_BINARY`) |
 | Any other flag | Forwarded to `tddy-sandbox-app` |
 | `-- <args>` | Forwarded verbatim to the in-jail `claude` (after fixed flags + MCP allowlist, before the MCP args — a trailing positional prompt therefore lands last) |
 
@@ -1118,10 +1129,10 @@ the variant. No code change — the sandbox config's existing `model:` field is 
 
 ### Observability: persisted MCP/subagent logs
 
-`write_claude_mcp_config` writes an `env` block for the `tddy-tools --mcp` server; the runner sets
-`TDDY_TOOLS_LOG_FILE` → `<session-dir>/egress/tddy-tools.mcp.log` and `RUST_LOG` (default
-`info,tddy_tools=debug,tddy_discovery=debug`, override via `mcp_log_level` config / `--mcp-log-level`
-CLI / runner `--mcp-log-level`). `tddy-tools`' `init_logging()` honors `TDDY_TOOLS_LOG_FILE` (append;
+The agent's MCP slot registers the `tddy-tools --mcp` server with an `env` block. The app's exec plan
+sets `TDDY_TOOLS_LOG_FILE` → `<session-dir>/egress/tddy-tools.mcp.log` and `RUST_LOG` there (default
+`info,tddy_tools=debug,tddy_discovery=debug`, overridden by the `mcp_log_level` config or the app's
+`--mcp-log-level`). The runner has no such flag. `tddy-tools`' `init_logging()` honors `TDDY_TOOLS_LOG_FILE` (append;
 falls back to stderr). The app also maintains a `<session-base>/sessions/latest` symlink to the
 newest session dir.
 

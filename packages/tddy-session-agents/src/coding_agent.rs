@@ -8,10 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
-use tddy_agent_backend::HeadlessHarness;
 use tddy_coding_subagent::{
-    coding_agent_defs_in, refuse_unless_confinable, transport_of, withdrawal_session_meta,
-    AgentTransport, CodingAgentDef, CodingAgentLaunch, CodingAgentLauncher, CodingAgentSession,
+    coding_agent_defs_in, refuse_unless_registry_confinable, transport_of_spec, AgentTransport,
+    CodingAgentDef, CodingAgentLaunch, CodingAgentLauncher, CodingAgentSession, LaunchedAgent,
     Transport,
 };
 use tddy_core::OpenSession;
@@ -25,15 +24,20 @@ use crate::agent_host_callbacks::AgentRoster;
 use crate::agent_roster::qualified_agent_id;
 use crate::seed_codebase::read_session_metadata;
 
-/// The coding agents this daemon offers: ACP harness profiles under `<tddyhome>/agents`, then its
-/// ACP `allowed_agents` ids.
-pub fn coding_agent_defs_for(tddy_data_dir: &Path, config: &DaemonConfig) -> Vec<CodingAgentDef> {
+/// The coding agents this daemon offers: harness profiles under `<tddyhome>/agents` on an agent
+/// `coding_agents` declares with a transport, then its `allowed_agents` ids `coding_agents` declares
+/// ACP agents (`tddy_coding_subagent::coding_agent_defs_from`).
+pub fn coding_agent_defs_for(
+    tddy_data_dir: &Path,
+    config: &DaemonConfig,
+    coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
+) -> Vec<CodingAgentDef> {
     let allowed: Vec<(String, Option<String>)> = config
         .allowed_agents()
         .iter()
         .map(|agent| (agent.id.clone(), agent.label.clone()))
         .collect();
-    coding_agent_defs_in(&tddy_data_dir.join("agents"), &allowed)
+    coding_agent_defs_in(coding_agents, &tddy_data_dir.join("agents"), &allowed)
 }
 
 /// The roster entry attaching `def` produces. A coding agent replaces no tool and carries no tool
@@ -82,11 +86,14 @@ pub fn agent_kind_from_wire(kind: i32) -> Result<AgentKindRecord, Status> {
 
 /// Refuse a coding agent whose harness cannot have its native tools withdrawn, for a managed
 /// session — whose main agent has none, so its subagent must not either. Never launched
-/// unconfined. `managed` is the session's `managed_codebase`, as its caller already read it.
+/// unconfined. `managed` is the session's `managed_codebase`, as its caller already read it; what
+/// the agent can withdraw is its spec's in `coding_agents`
+/// (`tddy_coding_subagent::refuse_unless_registry_confinable`).
 pub fn refuse_unconfinable_harness(
     session_id: &str,
     record: &SessionAgentRecord,
     managed: bool,
+    coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
 ) -> Result<(), Status> {
     match record.kind {
         AgentKindRecord::CodingAgent => refuse_in_managed_session(
@@ -94,6 +101,7 @@ pub fn refuse_unconfinable_harness(
             &record.agent_id,
             record.harness.as_deref().unwrap_or_default(),
             managed,
+            coding_agents,
         ),
         AgentKindRecord::Model => Ok(()),
     }
@@ -104,8 +112,9 @@ fn refuse_in_managed_session(
     agent_id: &str,
     harness: &str,
     managed: bool,
+    coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
 ) -> Result<(), Status> {
-    refuse_unless_confinable(harness, managed).map_err(|reason| {
+    refuse_unless_registry_confinable(coding_agents, harness, managed).map_err(|reason| {
         Status::failed_precondition(format!(
             "coding agent '{agent_id}' cannot join session '{session_id}', a managed codebase: \
              {reason}"
@@ -150,11 +159,20 @@ pub(crate) fn session_worktree(
 pub async fn start_coding_agent_session(
     launcher: &dyn CodingAgentLauncher,
     launch: &CodingAgentLaunch,
+    coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
 ) -> Result<CodingAgentSession, Status> {
-    match transport_of(&launch.def.harness) {
+    match harness_transport(coding_agents, &launch.def.harness) {
         Some(Transport::Headless) => start_headless_session(launcher, launch).await,
         Some(Transport::Acp) | None => start_acp_session(launcher, launch).await,
     }
+}
+
+/// The transport the host's spec for `harness` declares; `None` for a harness it does not declare.
+fn harness_transport(
+    coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
+    harness: &str,
+) -> Option<Transport> {
+    coding_agents.get(harness).and_then(transport_of_spec)
 }
 
 /// A headless conversation: the launcher's CLI command, run once per turn on the def's model.
@@ -164,19 +182,13 @@ async fn start_headless_session(
 ) -> Result<CodingAgentSession, Status> {
     let refused =
         |e: tddy_discovery::subagent::SubagentError| Status::failed_precondition(e.to_string());
-    let harness = HeadlessHarness::from_id(&launch.def.harness).ok_or_else(|| {
-        Status::failed_precondition(format!(
-            "coding agent '{}' is not a headless harness",
-            launch.def.name
-        ))
-    })?;
     let mut command = launcher
         .headless_command_for(launch)
         .await
         .map_err(refused)?;
     // The CLI runs the model the session reports, whatever model the launcher named.
     command.model = Some(launch.def.model.clone());
-    CodingAgentSession::start_headless(harness, command, launch.def.model.clone())
+    CodingAgentSession::start_headless(command, launch.def.model.clone())
         .await
         .map_err(refused)
 }
@@ -190,23 +202,29 @@ async fn start_acp_session(
     let refused =
         |e: tddy_discovery::subagent::SubagentError| Status::failed_precondition(e.to_string());
     let mcp_servers = launcher.mcp_servers_for(launch).await.map_err(refused)?;
-    let transport = launcher.launch_transport(launch).await.map_err(refused)?;
     // A managed session's agent loses its native tools: through `_meta` for the harness that
-    // takes them there; the others get theirs through the launcher's environment.
+    // takes them there; the others get theirs through the launcher's environment. Asked before the
+    // transport, so a refusal here never leaves a process started.
+    let meta = launcher.session_meta_for(launch).await.map_err(refused)?;
+    // The agent starts with the hooks its spec's declared adapter prepared; the session runs with,
+    // and holds, them.
+    let LaunchedAgent { transport, hooks } =
+        launcher.launch_agent(launch).await.map_err(refused)?;
     let open = OpenSession {
         cwd: launch.worktree.clone(),
         resume: None,
         model: Some(launch.def.model.clone()),
         mcp_servers,
-        meta: launch
-            .managed
-            .then(|| withdrawal_session_meta(&launch.def.harness))
-            .flatten(),
+        meta,
     };
     let model = launch.def.model.clone();
     match transport {
-        AgentTransport::Command(command) => CodingAgentSession::start(command, open, model).await,
-        AgentTransport::Stream(stream) => CodingAgentSession::start_over(stream, open, model).await,
+        AgentTransport::Command(command) => {
+            CodingAgentSession::start(command, open, model, hooks).await
+        }
+        AgentTransport::Stream(stream) => {
+            CodingAgentSession::start_over(stream, open, model, hooks).await
+        }
     }
     .map_err(refused)
 }
@@ -222,23 +240,19 @@ impl AgentRoster {
         if ConversationId::parse(conversation_id).is_err() {
             return;
         }
-        let dir = tddy_coding_subagent::launcher::headless_conversation_dir(
+        if let Err(e) = tddy_coding_subagent::launcher::close_headless_conversation(
             &self.tddy_data_dir,
             conversation_id,
-        );
-        match std::fs::remove_dir_all(&dir) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => log::warn!(
-                "could not remove the headless files of conversation {conversation_id} at {}: {e}",
-                dir.display()
-            ),
+        ) {
+            log::warn!(
+                "could not remove the headless files of conversation {conversation_id}: {e}"
+            );
         }
     }
 
     /// The coding agent this daemon offers under `name`, if any.
     pub(crate) fn coding_agent_def(&self, name: &str) -> Option<CodingAgentDef> {
-        coding_agent_defs_for(&self.tddy_data_dir, &self.config)
+        coding_agent_defs_for(&self.tddy_data_dir, &self.config, &self.coding_agents)
             .into_iter()
             .find(|def| def.name == name)
     }
@@ -279,7 +293,13 @@ impl AgentRoster {
         })?;
         let metadata = read_session_metadata(session_id, session_dir)?;
         let managed = metadata.managed_codebase;
-        refuse_in_managed_session(session_id, &record.agent_id, &def.harness, managed)?;
+        refuse_in_managed_session(
+            session_id,
+            &record.agent_id,
+            &def.harness,
+            managed,
+            &self.coding_agents,
+        )?;
         Ok(CodingAgentLaunch {
             worktree: session_worktree(session_id, &record.agent_id, &metadata)?,
             def,
@@ -330,10 +350,12 @@ impl AgentRoster {
                 Some(worktree)
             }
         };
-        let session = start_coding_agent_session(launcher.as_ref(), &launch).await?;
+        let session =
+            start_coding_agent_session(launcher.as_ref(), &launch, &self.coding_agents).await?;
         // A headless conversation's permission requests park on its session, so the approvals for it
         // are answered from there.
-        if matches!(transport_of(&launch.def.harness), Some(Transport::Headless)) {
+        if harness_transport(&self.coding_agents, &launch.def.harness) == Some(Transport::Headless)
+        {
             if let Some(routes) = self.host.approval_routes() {
                 routes.register_permissions(conversation_id, session.permissions());
             }

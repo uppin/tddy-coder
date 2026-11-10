@@ -134,7 +134,7 @@ async fn moves_an_associated_function_the_file_s_tests_call_through_the_type() {
     assert_compiles_with_its_tests(&workspace);
 }
 
-/// The same through a type alias, `Meter::doubled(2)`: `ClaudeCliSessionManager::build_claude_argv`.
+/// The same through a type alias, `Meter::doubled(2)`: `CliSessionManager::build_claude_argv`.
 #[tokio::test(flavor = "multi_thread")]
 async fn moves_an_associated_function_the_file_s_tests_call_through_a_type_alias() {
     // Given

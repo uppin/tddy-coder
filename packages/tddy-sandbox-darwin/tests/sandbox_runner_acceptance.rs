@@ -5,12 +5,14 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use tddy_sandbox::format_egress_logs;
-use tddy_sandbox_darwin::{connect_sandbox_client, run_sandbox_runner, SandboxRunnerArgs};
+use tddy_sandbox_darwin::{connect_sandbox_client, SandboxRunnerArgs};
+use tddy_sandbox_runner::run_exec_plan;
 use tddy_service::proto::exec_tools::ExecuteToolResponse;
 use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::{
     EchoRequest, EchoStreamFrame, HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,
 };
+use tddy_testing_commons::sandbox_fixtures::write_exec_plan;
 use tokio_stream::wrappers::ReceiverStream;
 
 fn tddy_tools_path() -> PathBuf {
@@ -51,7 +53,8 @@ async fn wait_for_ready(ready_marker: &Path, egress: &Path, timeout: Duration) {
     }
 }
 
-fn runner_args(tmp: &Path, stub_claude: &Path) -> (SandboxRunnerArgs, PathBuf) {
+/// The runner's args and egress dir, and the exec plan that runs `stub_agent` in its PTY.
+fn runner_args(tmp: &Path, stub_agent: &Path) -> (SandboxRunnerArgs, PathBuf, PathBuf) {
     let context_dir = tmp.join("context");
     let egress = tmp.join("egress");
     std::fs::create_dir_all(&context_dir).unwrap();
@@ -63,30 +66,22 @@ fn runner_args(tmp: &Path, stub_claude: &Path) -> (SandboxRunnerArgs, PathBuf) {
         session_id: SESSION_ID.to_string(),
         context_dir,
         cwd: None,
-        claude_binary: stub_claude.to_string_lossy().to_string(),
-        agent_kind: "claude".to_string(),
-        agent_binary: None,
-        model: TEST_MODEL.to_string(),
         grpc_socket: Some(tmp.join("sandbox.grpc.sock")),
         tool_ipc_socket: tmp.join("tool_ipc.sock"),
         tddy_tools_path: Some(tddy_tools_path()),
         ready_marker: tmp.join("sandbox.ready"),
-        permission_mode: "auto".to_string(),
-        dangerously_skip_permissions: false,
-        resume: false,
-        append_system_prompt_file: None,
         grpc_listen_port: None,
         egress_shim_port: None,
+        egress_policy: "any".to_string(),
+        egress_tool: vec![],
         grpc_uds: None,
         pty_command: vec![],
-        claude_arg: vec![],
-        agent_arg: vec![],
-        mcp_log_level: None,
         stdio: false,
         initial_cols: 80,
         initial_rows: 24,
     };
-    (args, egress)
+    let plan = write_exec_plan(tmp, &[&stub_agent.to_string_lossy(), "--model", TEST_MODEL]);
+    (args, egress, plan)
 }
 
 async fn stop_runner(runner_task: tokio::task::JoinHandle<()>) {
@@ -165,11 +160,11 @@ async fn sandbox_runner_echo_unary_round_trips() {
         // Given
         let tmp = tempfile::tempdir().unwrap();
         let stub_claude = write_echo_argv_script(tmp.path());
-        let (args, egress) = runner_args(tmp.path(), &stub_claude);
+        let (args, egress, plan) = runner_args(tmp.path(), &stub_claude);
         let ready_marker = args.ready_marker.clone();
 
         let runner_task = tokio::spawn(async move {
-            let _ = run_sandbox_runner(args).await;
+            let _ = run_exec_plan(args, plan).await;
         });
 
         wait_for_ready(&ready_marker, &egress, Duration::from_secs(15)).await;
@@ -209,11 +204,11 @@ async fn sandbox_runner_echo_stream_bidi_round_trips() {
         // Given
         let tmp = tempfile::tempdir().unwrap();
         let stub_claude = write_echo_argv_script(tmp.path());
-        let (args, egress) = runner_args(tmp.path(), &stub_claude);
+        let (args, egress, plan) = runner_args(tmp.path(), &stub_claude);
         let ready_marker = args.ready_marker.clone();
 
         let runner_task = tokio::spawn(async move {
-            let _ = run_sandbox_runner(args).await;
+            let _ = run_exec_plan(args, plan).await;
         });
 
         wait_for_ready(&ready_marker, &egress, Duration::from_secs(15)).await;
@@ -282,11 +277,11 @@ async fn sandbox_runner_session_channel_streams_pty_output_and_accepts_input() {
         // Given
         let tmp = tempfile::tempdir().unwrap();
         let stub_claude = write_echo_argv_script(tmp.path());
-        let (args, egress) = runner_args(tmp.path(), &stub_claude);
+        let (args, egress, plan) = runner_args(tmp.path(), &stub_claude);
         let ready_marker = args.ready_marker.clone();
 
         let runner_task = tokio::spawn(async move {
-            let _ = run_sandbox_runner(args).await;
+            let _ = run_exec_plan(args, plan).await;
         });
 
         wait_for_ready(&ready_marker, &egress, Duration::from_secs(15)).await;
@@ -373,13 +368,13 @@ async fn sandbox_runner_session_channel_tool_exec_round_trips() {
         // Given
         let tmp = tempfile::tempdir().unwrap();
         let stub_claude = write_echo_argv_script(tmp.path());
-        let (args, egress) = runner_args(tmp.path(), &stub_claude);
+        let (args, egress, plan) = runner_args(tmp.path(), &stub_claude);
         let ready_marker = args.ready_marker.clone();
         let tool_ipc = args.tool_ipc_socket.clone();
         std::env::set_var("TDDY_SANDBOX_TOOL_IPC", &tool_ipc);
 
         let runner_task = tokio::spawn(async move {
-            let _ = run_sandbox_runner(args).await;
+            let _ = run_exec_plan(args, plan).await;
         });
 
         wait_for_ready(&ready_marker, &egress, Duration::from_secs(15)).await;

@@ -189,12 +189,16 @@ impl Host {
         std::fs::write(&script, "#!/bin/sh\nexec sleep 600\n").unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         self.terminals
-            .start(
+            .start_with_options(
                 session_id,
                 self.worktree_of(session_id),
                 "claude-opus-4-8",
-                script.to_str().unwrap(),
+                vec![script.to_str().unwrap().to_string()],
+                "claude-cli",
                 None,
+                None,
+                Vec::new(),
+                Vec::new(),
                 None,
             )
             .await

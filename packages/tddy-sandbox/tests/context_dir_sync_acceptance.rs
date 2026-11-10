@@ -67,6 +67,11 @@ const CLAUDE_GLOBS: &[&str] = &[
     ".agents/**",
 ];
 
+/// The guidance files the session's spec declares, as test data.
+fn guidance_files() -> Vec<PathBuf> {
+    vec![PathBuf::from("CLAUDE.md"), PathBuf::from("AGENTS.md")]
+}
+
 const CURSOR_GLOBS: &[&str] = &[
     "CLAUDE.md",
     "AGENTS.md",
@@ -80,7 +85,8 @@ const CURSOR_GLOBS: &[&str] = &[
 fn a_context_dir_of(repo: &ATargetRepo, globs: &[&str]) -> (tempfile::TempDir, PathBuf) {
     let dest = tempfile::tempdir().expect("tempdir");
     let path = dest.path().to_path_buf();
-    copy_context_from_repo(repo.path(), &path, globs).expect("copy_context_from_repo must succeed");
+    copy_context_from_repo(repo.path(), &path, globs, &guidance_files())
+        .expect("copy_context_from_repo must succeed");
     (dest, path)
 }
 
@@ -277,7 +283,8 @@ fn nothing_in_the_built_context_dir_is_left_read_only() {
     let repo = a_target_repo();
 
     // When
-    let ctx = SandboxContextDir::create(repo.path(), CLAUDE_GLOBS).expect("create must succeed");
+    let ctx = SandboxContextDir::create(repo.path(), CLAUDE_GLOBS, &guidance_files())
+        .expect("create must succeed");
 
     // Then
     for entry in walkdir::WalkDir::new(ctx.path()).follow_links(false) {
@@ -309,11 +316,12 @@ fn claude_md_begins_with_the_managed_codebase_preamble_and_keeps_the_projects_co
     let repo = a_target_repo();
 
     // When
-    let ctx = SandboxContextDir::create(repo.path(), CLAUDE_GLOBS).expect("create must succeed");
+    let ctx = SandboxContextDir::create(repo.path(), CLAUDE_GLOBS, &guidance_files())
+        .expect("create must succeed");
     let claude_md = read(ctx.path(), "CLAUDE.md");
 
     // Then
-    let preamble = managed_codebase_preamble(&[]);
+    let preamble = managed_codebase_preamble(&[], &guidance_files());
     assert!(
         claude_md.starts_with(preamble.trim_start()),
         "CLAUDE.md must open with the preamble, not close with it; it opens:\n{}",
@@ -333,12 +341,13 @@ fn agents_md_begins_with_the_managed_codebase_preamble_too() {
     let repo = a_target_repo();
 
     // When
-    let ctx = SandboxContextDir::create(repo.path(), CLAUDE_GLOBS).expect("create must succeed");
+    let ctx = SandboxContextDir::create(repo.path(), CLAUDE_GLOBS, &guidance_files())
+        .expect("create must succeed");
     let agents_md = read(ctx.path(), "AGENTS.md");
 
     // Then
     assert!(
-        agents_md.starts_with(managed_codebase_preamble(&[]).trim_start()),
+        agents_md.starts_with(managed_codebase_preamble(&[], &guidance_files()).trim_start()),
         "AGENTS.md must open with the preamble; it opens:\n{}",
         &agents_md[..agents_md.len().min(200)]
     );
@@ -358,11 +367,15 @@ fn a_repo_without_a_claude_md_still_gets_one_holding_the_preamble_alone() {
     std::fs::remove_file(repo.path().join("CLAUDE.md")).expect("remove");
 
     // When
-    let ctx = SandboxContextDir::create(repo.path(), CLAUDE_GLOBS).expect("create must succeed");
+    let ctx = SandboxContextDir::create(repo.path(), CLAUDE_GLOBS, &guidance_files())
+        .expect("create must succeed");
 
     // Then
     let claude_md = read(ctx.path(), "CLAUDE.md");
-    assert_eq!(claude_md.trim_end(), managed_codebase_preamble(&[]).trim());
+    assert_eq!(
+        claude_md.trim_end(),
+        managed_codebase_preamble(&[], &guidance_files()).trim()
+    );
 }
 
 /// AC14. The context directory is writable and, on a split session, is the agent's only scratch
@@ -371,7 +384,7 @@ fn a_repo_without_a_claude_md_still_gets_one_holding_the_preamble_alone() {
 #[test]
 fn the_preamble_names_the_synced_paths_as_owned_by_the_sync() {
     // When
-    let preamble = managed_codebase_preamble(&[]);
+    let preamble = managed_codebase_preamble(&[], &guidance_files());
 
     // Then
     assert!(
@@ -391,10 +404,13 @@ fn the_preamble_names_the_synced_paths_as_owned_by_the_sync() {
 #[test]
 fn the_preamble_still_names_the_subagent_a_withdrawn_tool_went_to() {
     // When
-    let preamble = managed_codebase_preamble(&[SubagentReplacement {
-        name: "explorer",
-        replaced: &["Grep", "Glob"],
-    }]);
+    let preamble = managed_codebase_preamble(
+        &[SubagentReplacement {
+            name: "explorer",
+            replaced: &["Grep", "Glob"],
+        }],
+        &[],
+    );
 
     // Then
     assert!(

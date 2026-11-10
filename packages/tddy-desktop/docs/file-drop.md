@@ -2,7 +2,7 @@
 
 How a file dragged from the OS onto the desktop window reaches a session terminal. The product-level
 description is [web-terminal.md § In Tddy Desktop](../../../docs/ft/web/web-terminal.md#file-drop-in-tddy-desktop);
-the page's half is [`tddy-web` terminal-file-upload.md](../../tddy-web/docs/terminal-file-upload.md#tddy-desktop-drops-arrive-from-the-window-not-the-dom).
+the page's half is [`tddy-web` terminal-file-upload.md](../../tddy-terminal-web/docs/terminal-file-upload.md#tddy-desktop-drops-arrive-from-the-window-not-the-dom).
 
 | Package | Owns |
 |---|---|

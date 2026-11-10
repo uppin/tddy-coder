@@ -7,9 +7,7 @@ mod common;
 use std::sync::Arc;
 use tddy_core::changeset::read_changeset;
 use tddy_core::workflow::ids::WorkflowState;
-use tddy_core::{
-    BackendError, CodingBackend, CursorBackend, GoalId, MockBackend, SharedBackend, WorkflowEngine,
-};
+use tddy_core::{CodingBackend, GoalId, MockBackend, SharedBackend, WorkflowEngine};
 
 use common::{
     ctx_refactor, run_goal_until_done, write_changeset_with_state, write_refactoring_plan,
@@ -189,26 +187,25 @@ async fn refactor_parses_structured_response() {
     let _ = std::fs::remove_dir_all(&session_dir);
 }
 
-/// CursorBackend must not return the legacy "refactor is not supported on the Cursor backend"
-/// error; Refactor uses the same invocation path as other goals (Claude parity). A missing
-/// binary yields `BinaryNotFound` after attempting spawn, not a pre-spawn rejection.
+/// The cursor spec backend must not return the legacy "refactor is not supported on the Cursor
+/// backend" error; Refactor uses the same invocation path as other goals (Claude parity). A missing
+/// binary is now refused when the backend is built, so the goal is accepted over a stub that answers.
 #[tokio::test]
 async fn refactor_cursor_backend_does_not_reject_goal_before_spawn() {
     // Given
-    let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/cursor"));
-    let req = common::stub_invoke_request("refactor", "refactor");
+    let (backend, dir) = common::a_spec_backend("cursor", STUB_ANSWER);
+    let req = common::in_spec_workspace(&dir, common::stub_invoke_request("refactor", "refactor"));
 
     // When
     let result = backend.invoke(req).await;
 
     // Then
     assert!(
-        !matches!(
-            &result,
-            Err(BackendError::InvocationFailed(ref m))
-                if m == "refactor is not supported on the Cursor backend"
-        ),
+        result.is_ok(),
         "Refactor on Cursor must be implemented like Claude; got {:?}",
         result
     );
 }
+
+/// What a stub `agent` prints for any goal.
+const STUB_ANSWER: &str = r##"printf '%s\n' '{"type":"result","result":"ok","session_id":"s1"}'"##;

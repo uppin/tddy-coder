@@ -1,12 +1,16 @@
 import React from "react";
 import { mount } from "cypress/react";
 import { mountWithRpc } from "./rpc/inMemory.tsx";
-import { agentActivityRegistry } from "../../src/components/sessions/agentActivityRegistry";
-import { sessionNotificationRegistry } from "../../src/components/sessions/sessionNotificationRegistry";
-import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
+import { agentActivityRegistry } from "tddy-chat-web";
+import { sessionNotificationRegistry } from "tddy-session-web";
+import { UploadProgressProvider } from "tddy-terminal-web";
+import { AppClientsPorts } from "../../src/app/rpc/appClientsPorts";
+import { AppPortsScope, type AppPorts } from "../../src/app/ports";
+import { hashNavigationPort } from "../../src/routing/useAppLocation";
+import { livekitPorts } from "tddy-livekit-web";
 import { create } from "@bufbuild/protobuf";
 import { registerServerStreamFallback } from "tddy-connectrpc-testkit";
-import { SessionService, StartSessionEventSchema } from "../../src/gen/session_pb";
+import { SessionService, StartSessionEventSchema } from "tddy-client-web/gen/session_pb";
 
 /** The Agent Activity and session-notification stores are app-lifetime module singletons; component
  *  tests share one JS context across cases, so clear their per-session state before each test to keep
@@ -28,13 +32,36 @@ beforeEach(() => {
 /** Default `strict: false` so React 18 dev double-mount does not discard imperative refs / font state mid-test.
  *
  *  Wraps every mount in `UploadProgressProvider` to mirror production: the app shell provides it
- *  app-wide, and `GhosttyTerminalSession` always renders `TerminalFileDropZone` (which reads the upload
+ *  app-wide, and `TerminalSession` always renders `TerminalFileDropZone` (which reads the upload
  *  store). Mounting a terminal subtree without the provider would otherwise throw
  *  "upload-progress hooks must be used within an UploadProgressProvider" — the provider is inert
  *  when no upload hooks run, so wrapping unconditionally is safe. (createElement is used because this
- *  support file is `.ts`, not `.tsx`, so JSX syntax is not available here.) */
+ *  support file is `.ts`, not `.tsx`, so JSX syntax is not available here.)
+ *
+ *  Also mounts `AppClientsPorts`, as the app root does (`RpcTransportProvider`): the hooks from
+ *  `tddy-client-web` throw without a clients port, and a bare mount stands for a page whose
+ *  directory lists no daemon. A spec that wants hosts or a backend mounts its own providers, which
+ *  re-mount the ports from theirs.
+ *
+ *  `AppClientsPorts` also fills the slots component packages ask the app for: the Hosts screen's
+ *  passphrase dialog (create-session) and the screen shell (session screens). */
+/** The ports a mount hands the app's providers, supplied explicitly as the app container does: the page's
+ *  hash navigation and the real LiveKit ports (their transport factory is what specs override). Built
+ *  once — the LiveKit hooks must keep one identity. */
+const liveKit = livekitPorts();
+const mountedPorts: AppPorts = {
+  navigation: hashNavigationPort,
+  presence: liveKit.presence,
+  media: liveKit.media,
+  roomRpc: liveKit.roomRpc,
+};
+
 Cypress.Commands.add("mount", (jsx, options = {}) => {
-  const wrapped = React.createElement(UploadProgressProvider, null, jsx);
+  const wrapped = React.createElement(
+    AppPortsScope.Provider,
+    { value: mountedPorts },
+    React.createElement(AppClientsPorts, null, React.createElement(UploadProgressProvider, null, jsx)),
+  );
   return mount(wrapped, { strict: false, ...options });
 });
 

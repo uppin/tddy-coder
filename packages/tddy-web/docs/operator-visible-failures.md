@@ -11,7 +11,7 @@ screen are kept apart:
 The layout handles the second case wholesale for host-scoped screens: see
 [host-connections.md § The host connection gate](host-connections.md#the-host-connection-gate).
 
-## Vocabulary — `src/rpc/rpcFailure.ts`
+## Vocabulary — `packages/tddy-client-web/src/rpcFailure.ts`
 
 | Export | Use |
 |---|---|
@@ -20,8 +20,8 @@ The layout handles the second case wholesale for host-scoped screens: see
 | `hostNotConnectedText(host)` | The same, already as text, for a surface that holds a string |
 | `actionFailed(action, error)` | `Delete failed: <reason>`, converted once |
 
-Hosts are named by `useHostLabel()` (`src/rpc/selectedDaemon.tsx`, over the pure `hostLabelOf` in
-`src/rpc/hostLabel.ts`). It is one rule everywhere a host appears in text: the listed label, with the
+Hosts are named by `useHostLabel()` (`src/app/rpc/selectedDaemon.tsx`, over the pure `hostLabelOf` in
+`packages/tddy-client-web/src/hostLabel.ts`). It is one rule everywhere a host appears in text: the listed label, with the
 self-advertised ` (this daemon)` suffix dropped (`SELF_ADVERTISED_LABEL_SUFFIX`), else the instance
 id. The callback changes identity exactly when a name it can give changes, and not when the daemon
 list is merely rebuilt with the same names. A poll keyed on it is therefore not restarted by every
@@ -32,7 +32,7 @@ participant event, and a compiled caller still recomputes a label that changed
 
 - **`components/ui/inline-error.tsx` — `<InlineError testId message />`.** Renders nothing without a
   message. Otherwise it renders `role="alert"` and `text-destructive`.
-- **`hooks/useActionFailure.ts` — one surface's failure slot: `{ error, pending, run, report, clear }`.**
+- **`tddy-client-web`'s `src/useActionFailure.ts` — one surface's failure slot: `{ error, pending, run, report, clear }`.**
   - `run(action)` clears the previous failure, records this one, and never rejects, so a caller has
     nothing left to swallow.
   - `pending` disables a button while its action is in flight ("Creating…", "Adding…").
@@ -56,7 +56,7 @@ Rules the screens follow:
 
 ## Where it applies
 
-- **Projects:** see [projects-screen.md § Failures](projects-screen.md#failures).
+- **Projects:** see [projects-screen.md § Failures](../../tddy-workspace-web/docs/projects-screen.md#failures).
 - **Session inspector tabs** (VNC, screen sharing, files, worktree, tools, terminals): the list
   error, and per-row errors for add, start, remove and delete.
 - **Sessions drawer and runtime:**

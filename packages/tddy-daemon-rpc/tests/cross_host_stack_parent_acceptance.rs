@@ -33,7 +33,6 @@ use std::sync::Arc;
 use pretty_assertions::assert_eq;
 use tddy_core::changeset::{write_changeset, Changeset, Stack, StackNode};
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_daemon_rpc::test_util::TestDaemon;
@@ -171,9 +170,6 @@ fn a_daemon_in_the_common_room(write_sessions: impl Fn(&Path, &Path)) -> ADaemon
     let config_yaml = format!(
         r#"
 daemon_instance_id: "{THIS_HOST}"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
 livekit:
   url: ws://127.0.0.1:7880
   api_key: devkey
@@ -182,7 +178,16 @@ livekit:
     );
     let config_path = data_dir.path().join("daemon.yaml");
     std::fs::write(&config_path, config_yaml).expect("write daemon config");
-    let config = DaemonConfig::load(&config_path).expect("load daemon config");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
+    let config =
+        tddy_daemon_kernel::config::DaemonConfig::load(&config_path).expect("load daemon config");
 
     let base = data_dir.path().to_path_buf();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
@@ -190,23 +195,30 @@ livekit:
     let user_resolver: SessionUserResolver =
         Arc::new(move |token| (token == VALID_TOKEN).then(|| resolved_user.clone()));
 
-    let service = TestDaemon::from_host(DaemonSessionHost::new(
-        config.clone(),
-        sessions_base_resolver,
-        data_dir.path().to_path_buf(),
-        user_resolver,
-        None,
-        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-        tddy_daemon_livekit::peer_routing::peer_routing_over(
-            &config,
-            Some(LiveKitDiscoveryHandles {
-                eligible_daemon_source: Arc::new(ACommonRoomWithTheOrchestratorHost),
-                common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
-            }),
-        ),
-        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(CliSessionManager::new()),
-    ));
+    let service = TestDaemon::from_host(
+        DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver,
+            data_dir.path().to_path_buf(),
+            user_resolver,
+            None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+            tddy_daemon_livekit::peer_routing::peer_routing_over(
+                &config,
+                Some(LiveKitDiscoveryHandles {
+                    eligible_daemon_source: Arc::new(ACommonRoomWithTheOrchestratorHost),
+                    common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
+                }),
+            ),
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+            Arc::new(CliSessionManager::new()),
+            tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+                "claude",
+                std::path::Path::new("/bin/cat"),
+            )]),
+        ), // A claude-cli start resolves its agent before it asks for its stack parent: the stub keeps
+           // the host's own `claude` (or its absence, on CI) out of a test about the parent.,
+    );
 
     ADaemonInTheCommonRoom {
         service,

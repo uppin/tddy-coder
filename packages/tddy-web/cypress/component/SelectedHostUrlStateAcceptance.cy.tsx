@@ -9,8 +9,8 @@
  */
 
 import React from "react";
-import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import type { DaemonHost } from "../../src/lib/participantRole";
+import { SessionsDrawerScreen } from "tddy-session-web";
+import type { DaemonHost } from "tddy-client-web";
 import { SELECTED_DAEMON_STORAGE_KEY } from "../../src/routing/selectedHost";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";

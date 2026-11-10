@@ -22,9 +22,9 @@
 import React from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
-import { AuthService, VaultState } from "../../src/gen/auth_pb";
-import { CredentialVaultPrompt } from "../../src/components/CredentialVaultPrompt";
+import { AuthProvider, useAuthContext } from "../../src/app/auth/authProvider";
+import { AuthService, VaultState } from "tddy-client-web/gen/auth_pb";
+import { CredentialVaultPrompt } from "tddy-workspace-web";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aGitHubUser } from "../support/rpc/responses";
 import {

@@ -15,9 +15,13 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use tddy_build::service::{build_json, build_list_json, BuildListQuery};
+use tddy_actions::tool::ProcessToolHost;
+use tddy_build::executor::{BuildTools, ExecuteOptions};
+use tddy_build::service::{build_json_with_tools, build_list_json, BuildListQuery};
 use tddy_core::toolcall::dispatch_toolcall;
+use tddy_daemon_sandbox::build_action_sandbox::DaemonActionSandbox;
 
 use crate::plugins::plugin_registry;
 
@@ -70,6 +74,12 @@ pub struct BuildArgs {
     /// Print the planned argv per action without executing.
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Run every action in a jail: its inputs read-only, its declared outputs the only writable
+    /// paths, and only its tool closure executable. An action declaring `sandbox: true` runs that way
+    /// without this flag.
+    #[arg(long)]
+    pub hermetic: bool,
 }
 
 pub async fn run_build_list(args: BuildListArgs) -> Result<()> {
@@ -90,21 +100,66 @@ pub async fn run_build_list(args: BuildListArgs) -> Result<()> {
 pub async fn run_build(args: BuildArgs) -> Result<()> {
     let repo_dir = resolve_repo_dir(&args.repo_dir)?;
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
+        // The relayed build runs in the session's process, which does not take this flag: running
+        // it there would build unconfined while the caller asked for a jail.
+        if args.hermetic {
+            anyhow::bail!(
+                "--hermetic is not relayed to the session's build; run the build without TDDY_SOCKET"
+            );
+        }
         return relay_build(Path::new(&socket_path), &args, &repo_dir).await;
     }
     let registry = plugin_registry();
-    let value = build_json(
+    let tools = local_build_tools()?;
+    let opts = ExecuteOptions {
+        no_cache: args.no_cache,
+        dry_run: args.dry_run,
+        hermetic: args.hermetic,
+        ..ExecuteOptions::default()
+    };
+    let value = build_json_with_tools(
         &repo_dir,
         &args.target,
-        args.no_cache,
-        args.dry_run,
+        &opts,
         tddy_build::BuildMode::Compile,
         &registry,
+        &tools,
     )
     .await
     .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     println!("{}", serde_json::to_string(&value)?);
     Ok(())
+}
+
+/// The tools a local build resolves against: the built-ins with `<tddyhome>/tools` overrides, read
+/// against this process. A `sandbox: true` action, or every action of a `--hermetic` run, is jailed
+/// under `<tddyhome>/build-jails`.
+fn local_build_tools() -> Result<BuildTools> {
+    let home = tddy_home()?;
+    let tools = BuildTools::load(&home.join("tools"), Arc::new(ProcessToolHost))
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    Ok(tools.with_sandbox(Arc::new(DaemonActionSandbox::new(home.join("build-jails")))))
+}
+
+/// The tddy home a local build reads from: `TDDY_DATA_DIR` when it is set, else the profile default,
+/// else `$HOME/.tddy` — the rule the daemon resolves its data directory by. Absolute, because a
+/// jail's directories must be.
+fn tddy_home() -> Result<PathBuf> {
+    let home = match std::env::var_os("TDDY_DATA_DIR").filter(|dir| !dir.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => match tddy_core::output::default_tddy_data_dir() {
+            Some(dir) => dir,
+            None => PathBuf::from(
+                std::env::var_os("HOME").context("neither TDDY_DATA_DIR nor HOME is set")?,
+            )
+            .join(".tddy"),
+        },
+    };
+    if home.is_absolute() {
+        Ok(home)
+    } else {
+        Ok(std::env::current_dir()?.join(home))
+    }
 }
 
 #[derive(Debug, Serialize)]

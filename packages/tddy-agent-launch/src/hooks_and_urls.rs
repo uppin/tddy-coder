@@ -1,7 +1,5 @@
 use crate::stack_parent;
 
-use tddy_daemon_kernel::config::DaemonConfig;
-
 use std::path::Path;
 
 /// The branch a spawn actually operates on: the branch it creates, or — under
@@ -44,6 +42,8 @@ pub fn effective_spawn_branch<'a>(
 /// — a `stack_node_id` without the orchestrator that holds it names nothing — and because the whole
 /// point of naming this input is that what the participant advertises can be asserted.
 pub struct StartingClaudeCliSession<'a> {
+    /// The id of the coding agent the session runs.
+    pub agent: &'a str,
     /// The session's own id. The web recovers it from the participant identity too, but a block
     /// that does not name itself cannot be checked against that.
     pub session_id: &'a str,
@@ -82,7 +82,7 @@ pub fn claude_cli_participant_metadata(
     session: &StartingClaudeCliSession<'_>,
 ) -> tddy_core::session_participant_metadata::SessionParticipantMetadata {
     tddy_core::session_participant_metadata::SessionParticipantMetadata {
-        agent: "claude".to_string(),
+        agent: session.agent.to_string(),
         model: session.model.to_string(),
         recipe: session.recipe.to_string(),
         repo_path: session.worktree_path.to_string_lossy().to_string(),
@@ -138,11 +138,4 @@ pub fn spawned_branch_of_session(session_dir: &Path, requested_branch: &str) -> 
             requested_branch.trim().to_string()
         }
     }
-}
-
-/// Resolve the `claude` binary for a ResumeSession relaunch through the same host resolver as
-/// StartSession, so an explicitly configured path is honored and a bare name is resolved to a host
-/// path instead of being spawned against the daemon's minimal systemd PATH.
-pub fn resolve_resume_session_claude_binary(config: &DaemonConfig) -> String {
-    tddy_daemon_kernel::config::resolve_claude_binary_path(config)
 }

@@ -13,8 +13,8 @@
  * (see `ConnectionStatus`), and the single calls made on it report their own failures inline.
  */
 
-import { LIVEKIT_PROVIDER_ID } from "../../rpc/connections/liveKit";
-import type { ConnectionStatus } from "../../rpc/connections/types";
+import { LIVEKIT_PROVIDER_ID } from "tddy-livekit-web";
+import type { ConnectionStatus } from "tddy-client-web/connections/types";
 
 export interface HostGateInput {
   selectedInstanceId: string | null;

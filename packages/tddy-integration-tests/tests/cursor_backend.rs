@@ -1,7 +1,9 @@
-//! Acceptance tests for CursorBackend.
+//! Acceptance tests for the `cursor` spec turn (`SpecHeadlessBackend` over a stub `agent`).
 //!
-//! Verifies that CursorBackend spawns the `agent` CLI with correct flags,
-//! parses Cursor's stream-json output, and captures thread_id for --resume.
+//! Verifies that the generic spec backend spawns the `agent` CLI with correct flags, parses
+//! Cursor's stream-json output, and captures the thread id for --resume (`#agent-tools 15/19`
+//! replaced the bespoke `CursorBackend`). Cursor writes `.cursor/mcp.json` into the request's
+//! working directory, so each turn runs in the fixture's git checkout.
 //! Migrated from Workflow to WorkflowEngine where applicable.
 
 mod common;
@@ -9,135 +11,82 @@ mod common;
 use std::fs;
 use std::sync::Arc;
 use tddy_core::workflow::graph::ExecutionStatus;
-use tddy_core::{CodingBackend, CursorBackend, GoalId, SharedBackend};
+use tddy_core::{
+    BackendError, CodingBackend, GoalId, InvokeRequest, InvokeResponse, SharedBackend,
+};
 
-use common::{ctx_plan, session_dir_for_new_session, stub_invoke_request};
+use common::{
+    a_spec_backend, ctx_plan, in_spec_workspace, session_dir_for_new_session, spec_argv,
+    stub_invoke_request,
+};
+
+/// Runs `req` over a stub `agent` that prints `stdout_lines` (shell lines) after recording its argv.
+fn run_cursor(
+    stub_script: &str,
+    req: InvokeRequest,
+) -> (Result<InvokeResponse, BackendError>, tempfile::TempDir) {
+    let (backend, dir) = a_spec_backend("cursor", stub_script);
+    let req = in_spec_workspace(&dir, req);
+    let result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req));
+    (result, dir)
+}
 
 /// CursorBackend spawns agent with -p, --output-format stream-json, --force, --trust.
 #[test]
 fn cursor_backend_spawns_cursor_agent_with_correct_flags() {
     // Given
-    let tmp = std::env::temp_dir().join("tddy-cursor-backend-test");
-    let _ = std::fs::create_dir_all(&tmp);
-    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
-    let args_file = tmp_abs.join("captured_args.txt");
+    let script = r##"printf '%s\n' '{"type":"system","thread_id":"cursor-thread-abc"}'
+printf '%s\n' '{"type":"result","result":"output","session_id":"cursor-thread-abc"}'
+exit 0"##;
 
-    let script = format!(
-        r##"#!/bin/sh
-printf '%s\n' "$@" > "{}"
-# Emit minimal Cursor stream-json: system event with thread_id, then result
-printf '%s\n' '{{"type":"system","thread_id":"cursor-thread-abc"}}'
-printf '%s\n' '{{"type":"result","result":"output","session_id":"cursor-thread-abc"}}'
-exit 0
-"##,
-        args_file.display()
-    );
-    let script_path = tmp.join("agent");
-    fs::write(&script_path, script).expect("write script");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script_path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script_path, perms).unwrap();
-    }
-
-    let backend = CursorBackend::with_path(script_path);
-    let req = stub_invoke_request("test prompt", "plan");
-
-    let result = tokio::runtime::Runtime::new()
-        .unwrap()
-        // When
-        .block_on(backend.invoke(req))
-        .expect("invoke should succeed");
+    // When
+    let (result, dir) = run_cursor(script, stub_invoke_request("test prompt", "plan"));
+    let result = result.expect("invoke should succeed");
 
     // Then
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.output, "output");
     assert_eq!(result.session_id.as_deref(), Some("cursor-thread-abc"));
 
-    let captured = fs::read_to_string(&args_file).expect("read captured args");
+    let argv = spec_argv(&dir);
     assert_eq!(
-        captured.lines().next(),
+        argv.first().map(String::as_str),
         Some("--plan"),
-        "Plan goal should pass --plan as first arg, got: {}",
-        captured
+        "Plan goal should pass --plan as first arg, got: {argv:?}"
     );
-    assert!(
-        captured.contains("-p"),
-        "should have -p flag, got: {}",
-        captured
-    );
-    assert!(
-        captured.contains("--output-format"),
-        "should have --output-format, got: {}",
-        captured
-    );
-    assert!(
-        captured.contains("stream-json"),
-        "should have stream-json, got: {}",
-        captured
-    );
-    assert!(
-        captured.contains("--force"),
-        "should have --force, got: {}",
-        captured
-    );
-    assert!(
-        captured.contains("--trust"),
-        "should have --trust, got: {}",
-        captured
-    );
-    assert!(
-        captured.contains("--plan"),
-        "should have --plan when goal is Plan, got: {}",
-        captured
-    );
+    for flag in [
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--force",
+        "--trust",
+        "--plan",
+    ] {
+        assert!(
+            argv.iter().any(|a| a == flag),
+            "should have {flag}, got: {argv:?}"
+        );
+    }
 }
 
 /// CursorBackend does not pass --plan when goal is not Plan.
 #[test]
 fn cursor_backend_omits_plan_flag_when_goal_is_not_plan() {
-    // Given
-    let tmp = std::env::temp_dir().join("tddy-cursor-no-plan-test");
-    let _ = std::fs::create_dir_all(&tmp);
-    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
-    let args_file = tmp_abs.join("captured_args.txt");
-
-    let script = format!(
-        r##"#!/bin/sh
-printf '%s\n' "$@" > "{}"
-printf '%s\n' '{{"type":"result","result":"ok","session_id":"s1"}}'
-exit 0
-"##,
-        args_file.display()
-    );
-    let script_path = tmp.join("agent");
-    fs::write(&script_path, script).expect("write script");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script_path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script_path, perms).unwrap();
-    }
-
-    let backend = CursorBackend::with_path(script_path);
     for goal_id in ["acceptance-tests", "red", "green"] {
-        let req = stub_invoke_request("Create tests", goal_id);
-        let _ = tokio::runtime::Runtime::new()
-            .unwrap()
-            // When
-            .block_on(backend.invoke(req))
-            .expect("invoke should succeed");
-        let captured = fs::read_to_string(&args_file).expect("read captured args");
+        // Given
+        let script = r##"printf '%s\n' '{"type":"result","result":"ok","session_id":"s1"}'"##;
+
+        // When
+        let (result, dir) = run_cursor(script, stub_invoke_request("Create tests", goal_id));
+        result.expect("invoke should succeed");
 
         // Then
+        let argv = spec_argv(&dir);
         assert!(
-            !captured.contains("--plan"),
-            "should not have --plan when goal is {}, got: {}",
-            goal_id,
-            captured
+            !argv.iter().any(|a| a == "--plan"),
+            "should not have --plan when goal is {goal_id}, got: {argv:?}"
         );
     }
 }
@@ -146,48 +95,24 @@ exit 0
 #[test]
 fn cursor_backend_invokes_validate_goal_like_other_non_plan_goals() {
     // Given
-    let tmp = std::env::temp_dir().join("tddy-cursor-validate-invoke-test");
-    let _ = std::fs::create_dir_all(&tmp);
-    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
-    let args_file = tmp_abs.join("captured_args.txt");
+    let script =
+        r##"printf '%s\n' '{"type":"result","result":"validate-ok","session_id":"val-sid"}'"##;
 
-    let script = format!(
-        r##"#!/bin/sh
-printf '%s\n' "$@" > "{}"
-printf '%s\n' '{{"type":"result","result":"validate-ok","session_id":"val-sid"}}'
-exit 0
-"##,
-        args_file.display()
+    // When
+    let (result, dir) = run_cursor(
+        script,
+        stub_invoke_request("run validate subagents", "validate"),
     );
-    let script_path = tmp.join("agent");
-    fs::write(&script_path, script).expect("write script");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script_path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script_path, perms).unwrap();
-    }
-
-    let backend = CursorBackend::with_path(script_path);
-    let req = stub_invoke_request("run validate subagents", "validate");
-
-    let result = tokio::runtime::Runtime::new()
-        .unwrap()
-        // When
-        .block_on(backend.invoke(req))
-        .expect("invoke Goal::Validate must succeed like other goals");
+    let result = result.expect("invoke Goal::Validate must succeed like other goals");
 
     // Then
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.output, "validate-ok");
     assert_eq!(result.session_id.as_deref(), Some("val-sid"));
-
-    let captured = fs::read_to_string(&args_file).expect("read captured args");
+    let argv = spec_argv(&dir);
     assert!(
-        !captured.contains("--plan"),
-        "validate must not use --plan, got: {}",
-        captured
+        !argv.iter().any(|a| a == "--plan"),
+        "validate must not use --plan, got: {argv:?}"
     );
 }
 
@@ -195,48 +120,24 @@ exit 0
 #[test]
 fn cursor_backend_invokes_refactor_goal_like_other_non_plan_goals() {
     // Given
-    let tmp = std::env::temp_dir().join("tddy-cursor-refactor-invoke-test");
-    let _ = std::fs::create_dir_all(&tmp);
-    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
-    let args_file = tmp_abs.join("captured_args.txt");
+    let script =
+        r##"printf '%s\n' '{"type":"result","result":"refactor-ok","session_id":"ref-sid"}'"##;
 
-    let script = format!(
-        r##"#!/bin/sh
-printf '%s\n' "$@" > "{}"
-printf '%s\n' '{{"type":"result","result":"refactor-ok","session_id":"ref-sid"}}'
-exit 0
-"##,
-        args_file.display()
+    // When
+    let (result, dir) = run_cursor(
+        script,
+        stub_invoke_request("apply refactoring plan", "refactor"),
     );
-    let script_path = tmp.join("agent");
-    fs::write(&script_path, script).expect("write script");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script_path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script_path, perms).unwrap();
-    }
-
-    let backend = CursorBackend::with_path(script_path);
-    let req = stub_invoke_request("apply refactoring plan", "refactor");
-
-    let result = tokio::runtime::Runtime::new()
-        .unwrap()
-        // When
-        .block_on(backend.invoke(req))
-        .expect("invoke Goal::Refactor must succeed like other non-plan goals");
+    let result = result.expect("invoke Goal::Refactor must succeed like other non-plan goals");
 
     // Then
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.output, "refactor-ok");
     assert_eq!(result.session_id.as_deref(), Some("ref-sid"));
-
-    let captured = fs::read_to_string(&args_file).expect("read captured args");
+    let argv = spec_argv(&dir);
     assert!(
-        !captured.contains("--plan"),
-        "refactor must not use --plan, got: {}",
-        captured
+        !argv.iter().any(|a| a == "--plan"),
+        "refactor must not use --plan, got: {argv:?}"
     );
 }
 
@@ -244,54 +145,30 @@ exit 0
 #[test]
 fn cursor_backend_omits_session_id_on_fresh_session() {
     // Given
-    let tmp = std::env::temp_dir().join("tddy-cursor-fresh-no-sid-test");
-    let _ = std::fs::create_dir_all(&tmp);
-    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
-    let args_file = tmp_abs.join("captured_args.txt");
-
-    let script = format!(
-        r##"#!/bin/sh
-printf '%s\n' "$@" > "{}"
-printf '%s\n' '{{"type":"result","result":"ok","session_id":"from-stream"}}'
-exit 0
-"##,
-        args_file.display()
-    );
-    let script_path = tmp.join("agent");
-    fs::write(&script_path, script).expect("write script");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script_path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script_path, perms).unwrap();
-    }
-
-    let backend = CursorBackend::with_path(script_path);
+    let script = r##"printf '%s\n' '{"type":"result","result":"ok","session_id":"from-stream"}'"##;
     let mut req = stub_invoke_request("first turn", "plan");
     req.session = Some(tddy_core::SessionMode::Fresh(
         "7a552e2e-1d03-4f9b-82fa-f0c45b343ae1".to_string(),
     ));
 
-    let result = tokio::runtime::Runtime::new()
-        .unwrap()
-        // When
-        .block_on(backend.invoke(req))
-        .expect("invoke should succeed");
+    // When
+    let (result, dir) = run_cursor(script, req);
+    let result = result.expect("invoke should succeed");
 
     // Then
     assert_eq!(result.session_id.as_deref(), Some("from-stream"));
-
-    let captured = fs::read_to_string(&args_file).expect("read captured args");
+    let argv = spec_argv(&dir);
     assert!(
-        !captured.contains("--session-id"),
-        "Cursor CLI has no --session-id; must not pass it on Fresh, got: {}",
-        captured
+        !argv.iter().any(|a| a == "--session-id"),
+        "Cursor CLI has no --session-id; must not pass it on Fresh, got: {argv:?}"
     );
     assert!(
-        !captured.contains("--resume"),
-        "Fresh session must not use --resume, got: {}",
-        captured
+        !argv.iter().any(|a| a == "--resume"),
+        "Fresh session must not use --resume, got: {argv:?}"
+    );
+    assert!(
+        !argv.iter().any(|a| a.contains("7a552e2e")),
+        "a fresh session passes no session flag, got: {argv:?}"
     );
 }
 
@@ -299,239 +176,145 @@ exit 0
 #[test]
 fn cursor_backend_adds_resume_flag_on_followup() {
     // Given
-    let tmp = std::env::temp_dir().join("tddy-cursor-resume-test");
-    let _ = std::fs::create_dir_all(&tmp);
-    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
-    let args_file = tmp_abs.join("captured_args.txt");
-
-    let script = format!(
-        r##"#!/bin/sh
-printf '%s\n' "$@" > "{}"
-printf '%s\n' '{{"type":"result","result":"continued"}}'
-exit 0
-"##,
-        args_file.display()
-    );
-    let script_path = tmp.join("agent");
-    fs::write(&script_path, script).expect("write script");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script_path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script_path, perms).unwrap();
-    }
-
-    let backend = CursorBackend::with_path(script_path);
+    let script = r##"printf '%s\n' '{"type":"result","result":"continued"}'"##;
     let mut req = stub_invoke_request("continue", "plan");
     req.session = Some(tddy_core::SessionMode::Resume("prev-thread-id".to_string()));
 
-    let _ = tokio::runtime::Runtime::new()
-        .unwrap()
-        // When
-        .block_on(backend.invoke(req))
-        .expect("invoke should succeed");
-
-    let captured = fs::read_to_string(&args_file).expect("read captured args");
+    // When
+    let (result, dir) = run_cursor(script, req);
+    result.expect("invoke should succeed");
 
     // Then
-    assert!(
-        captured.contains("--resume"),
-        "should have --resume on followup, got: {}",
-        captured
-    );
-    assert!(
-        captured.lines().any(|l| l == "prev-thread-id"),
-        "should pass thread id to --resume, got: {}",
-        captured
-    );
+    let argv = spec_argv(&dir);
+    let at = argv
+        .iter()
+        .position(|a| a == "--resume")
+        .expect("--resume on followup");
+    assert_eq!(argv.get(at + 1).map(String::as_str), Some("prev-thread-id"));
 }
 
-/// CursorBackend returns name "cursor".
+/// The backend is named for its spec.
 #[test]
 fn cursor_backend_name_returns_cursor() {
     // Given
-    let backend = CursorBackend::new();
+    let (backend, _dir) = a_spec_backend("cursor", "exit 0");
 
     // Then
     assert_eq!(backend.name(), "cursor");
 }
 
-/// Extract the prompt value passed to -p from captured args (one arg per line).
+/// Extract the prompt value passed to -p from the recorded argv (one entry per line).
 /// The prompt may span multiple lines when it contains system + user content.
-fn prompt_from_captured_args(captured: &str) -> Option<String> {
-    let lines: Vec<&str> = captured.lines().collect();
-    let i = lines.iter().position(|l| *l == "-p")?;
+fn prompt_from_argv(argv: &[String]) -> Option<String> {
+    let i = argv.iter().position(|l| l == "-p")?;
     let start = i + 1;
-    // Prompt runs until the next flag (--output-format)
-    let end = lines[start..]
+    // The prompt runs until the next flag (--output-format)
+    let end = argv[start..]
         .iter()
-        .position(|l| *l == "--output-format")
+        .position(|l| l == "--output-format")
         .map(|j| start + j)
-        .unwrap_or(lines.len());
-    Some(lines[start..end].join("\n"))
+        .unwrap_or(argv.len());
+    Some(argv[start..end].join("\n"))
 }
 
-/// CursorBackend includes system_prompt in the prompt passed to -p when set.
-/// Cursor CLI has no --system-prompt; we prepend system instructions to the user prompt.
+const OK_RESULT: &str = r##"printf '%s\n' '{"type":"result","result":"ok","session_id":"s1"}'"##;
+
+/// An inline system_prompt is merged into the prompt passed to -p (system, blank line, user).
+/// Cursor CLI has no --system-prompt; system instructions are prepended to the user prompt.
 #[test]
-#[cfg(unix)]
 fn cursor_backend_includes_system_prompt_in_prompt_when_set() {
     // Given
-    let tmp = std::env::temp_dir().join("tddy-cursor-sysprompt-test");
-    let _ = std::fs::create_dir_all(&tmp);
-    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
-    let args_file = tmp_abs.join("captured_args.txt");
-
-    let script = format!(
-        r##"#!/bin/sh
-printf '%s\n' "$@" > "{}"
-printf '%s\n' '{{"type":"result","result":"ok","session_id":"s1"}}'
-exit 0
-"##,
-        args_file.display()
-    );
-    let script_path = tmp.join("agent");
-    fs::write(&script_path, script).expect("write script");
-    use std::os::unix::fs::PermissionsExt;
-    let mut perms = fs::metadata(&script_path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&script_path, perms).unwrap();
-
-    let backend = CursorBackend::with_path(script_path);
     let mut req = stub_invoke_request("Create a PRD for: Add login", "plan");
     req.system_prompt = Some("You MUST output a <structured-response> block.".to_string());
 
-    let _ = tokio::runtime::Runtime::new()
-        .unwrap()
-        // When
-        .block_on(backend.invoke(req))
-        .expect("invoke should succeed");
-
-    let captured = fs::read_to_string(&args_file).expect("read captured args");
-    let prompt = prompt_from_captured_args(&captured).expect("prompt should be present after -p");
+    // When
+    let (result, dir) = run_cursor(OK_RESULT, req);
+    result.expect("invoke should succeed");
 
     // Then
-    assert!(
-        prompt.contains("You MUST output a <structured-response> block."),
-        "prompt should include system_prompt content, got: {}",
-        prompt
-    );
-    assert!(
-        prompt.contains("Create a PRD for: Add login"),
-        "prompt should include user prompt, got: {}",
-        prompt
+    let prompt = prompt_from_argv(&spec_argv(&dir)).expect("prompt should be present after -p");
+    assert_eq!(
+        prompt,
+        "You MUST output a <structured-response> block.\n\nCreate a PRD for: Add login"
     );
 }
 
-/// CursorBackend includes system_prompt_path file content in the prompt when set.
+/// The content of a system_prompt_path file is merged into the prompt when set.
 #[test]
-#[cfg(unix)]
 fn cursor_backend_includes_system_prompt_path_content_in_prompt_when_set() {
     // Given
-    let tmp = std::env::temp_dir().join("tddy-cursor-sysprompt-file-test");
-    let _ = std::fs::create_dir_all(&tmp);
-    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
-    let args_file = tmp_abs.join("captured_args.txt");
-    let system_file = tmp_abs.join("system.md");
+    let files = tempfile::tempdir().expect("dir");
+    let system_file = std::fs::canonicalize(files.path())
+        .unwrap()
+        .join("system.md");
     fs::write(&system_file, "Output format: structured-response only.").expect("write system file");
-
-    let script = format!(
-        r##"#!/bin/sh
-printf '%s\n' "$@" > "{}"
-printf '%s\n' '{{"type":"result","result":"ok","session_id":"s1"}}'
-exit 0
-"##,
-        args_file.display()
-    );
-    let script_path = tmp.join("agent");
-    fs::write(&script_path, script).expect("write script");
-    use std::os::unix::fs::PermissionsExt;
-    let mut perms = fs::metadata(&script_path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&script_path, perms).unwrap();
-
-    let backend = CursorBackend::with_path(script_path);
     let mut req = stub_invoke_request("Plan: Add logout", "plan");
     req.system_prompt_path = Some(system_file);
 
-    let _ = tokio::runtime::Runtime::new()
-        .unwrap()
-        // When
-        .block_on(backend.invoke(req))
-        .expect("invoke should succeed");
-
-    let captured = fs::read_to_string(&args_file).expect("read captured args");
-    let prompt = prompt_from_captured_args(&captured).expect("prompt should be present after -p");
+    // When
+    let (result, dir) = run_cursor(OK_RESULT, req);
+    result.expect("invoke should succeed");
 
     // Then
-    assert!(
-        prompt.contains("Output format: structured-response only."),
-        "prompt should include system_prompt_path file content, got: {}",
-        prompt
-    );
-    assert!(
-        prompt.contains("Plan: Add logout"),
-        "prompt should include user prompt, got: {}",
-        prompt
+    let prompt = prompt_from_argv(&spec_argv(&dir)).expect("prompt should be present after -p");
+    assert_eq!(
+        prompt,
+        "Output format: structured-response only.\n\nPlan: Add logout"
     );
 }
 
-/// CursorBackend prefers system_prompt_path over system_prompt when both are set.
+/// system_prompt_path wins over an inline system_prompt when both are set.
 #[test]
-#[cfg(unix)]
 fn cursor_backend_prefers_system_prompt_path_over_system_prompt() {
     // Given
-    let tmp = std::env::temp_dir().join("tddy-cursor-sysprompt-prefer-test");
-    let _ = std::fs::create_dir_all(&tmp);
-    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
-    let args_file = tmp_abs.join("captured_args.txt");
-    let system_file = tmp_abs.join("system.md");
+    let files = tempfile::tempdir().expect("dir");
+    let system_file = std::fs::canonicalize(files.path())
+        .unwrap()
+        .join("system.md");
     fs::write(&system_file, "From file: use structured-response.").expect("write system file");
-
-    let script = format!(
-        r##"#!/bin/sh
-printf '%s\n' "$@" > "{}"
-printf '%s\n' '{{"type":"result","result":"ok","session_id":"s1"}}'
-exit 0
-"##,
-        args_file.display()
-    );
-    let script_path = tmp.join("agent");
-    fs::write(&script_path, script).expect("write script");
-    use std::os::unix::fs::PermissionsExt;
-    let mut perms = fs::metadata(&script_path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&script_path, perms).unwrap();
-
-    let backend = CursorBackend::with_path(script_path);
     let mut req = stub_invoke_request("Plan feature", "plan");
     req.system_prompt = Some("Inline: ignored when path set.".to_string());
     req.system_prompt_path = Some(system_file);
 
-    let _ = tokio::runtime::Runtime::new()
-        .unwrap()
-        // When
-        .block_on(backend.invoke(req))
-        .expect("invoke should succeed");
-
-    let captured = fs::read_to_string(&args_file).expect("read captured args");
-    let prompt = prompt_from_captured_args(&captured).expect("prompt should be present after -p");
+    // When
+    let (result, dir) = run_cursor(OK_RESULT, req);
+    result.expect("invoke should succeed");
 
     // Then
+    let prompt = prompt_from_argv(&spec_argv(&dir)).expect("prompt should be present after -p");
     assert!(
         prompt.contains("From file: use structured-response."),
-        "prompt should use system_prompt_path content, got: {}",
-        prompt
+        "prompt should use system_prompt_path content, got: {prompt}"
     );
     assert!(
         !prompt.contains("Inline: ignored when path set."),
-        "prompt should not use system_prompt when path is set, got: {}",
-        prompt
+        "prompt should not use system_prompt when path is set, got: {prompt}"
     );
 }
 
-/// CursorBackend plan workflow returns ClarificationNeeded when stream contains
+/// The agent is handed the MCP registration in the checkout, which the turn removes afterwards.
+#[test]
+fn cursor_turn_registers_the_tool_server_in_the_checkout_and_removes_it_after() {
+    // Given
+    let script =
+        format!("[ -f .cursor/mcp.json ] && cp .cursor/mcp.json ../mcp-seen.json\n{OK_RESULT}");
+
+    // When
+    let (result, dir) = run_cursor(&script, stub_invoke_request("hi", "plan"));
+    result.expect("invoke should succeed");
+
+    // Then
+    let root = common::spec_workspace_root(&dir);
+    let seen =
+        fs::read_to_string(root.join("mcp-seen.json")).expect("the agent saw .cursor/mcp.json");
+    assert!(seen.contains("tddy-tools"), "{seen}");
+    assert!(
+        !root.join("repo/.cursor/mcp.json").exists(),
+        "the registration is removed after the turn"
+    );
+}
+
+/// The cursor spec turn in a plan workflow returns ClarificationNeeded when stream contains
 /// clarification-questions block in result event.
 /// IGNORED: inline clarification-questions text parsing was removed (Drop Inline Parsing plan).
 /// Clarification now comes from AskUserQuestion tool events or tddy-tools ask.
@@ -554,23 +337,9 @@ async fn cursor_backend_plan_returns_clarification_needed_when_stream_has_questi
     let stream_path = tmp_canonical.join("stream.ndjson");
     fs::write(&stream_path, ndjson).expect("write stream");
 
-    let script = format!(
-        r#"#!/bin/sh
-cat "{}"
-exit 0
-"#,
-        stream_path.display()
-    );
-    let script_path = tmp.join("agent");
-    fs::write(&script_path, script).expect("write script");
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script_path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script_path, perms).unwrap();
-    }
-
-    let backend = Arc::new(CursorBackend::with_path(script_path));
+    let (backend, _workspace) =
+        a_spec_backend("cursor", &format!("cat \"{}\"", stream_path.display()));
+    let backend = Arc::new(backend);
     let storage_dir = std::env::temp_dir().join("tddy-cursor-clarification-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
     let engine = common::tdd_engine(SharedBackend::from_arc(backend), storage_dir);

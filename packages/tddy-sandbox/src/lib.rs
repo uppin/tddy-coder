@@ -10,6 +10,7 @@ mod error;
 pub mod exec_reads;
 mod log;
 pub mod materialize;
+pub mod network;
 pub mod runner_env;
 mod spec;
 pub mod tool_ipc;
@@ -33,7 +34,6 @@ pub use context_dir::{
     clear_context_stale, copy_context_from_repo, copy_tree, copy_tree_within_root,
     managed_codebase_preamble, mark_context_stale, prepend_preamble, with_stale_marker,
     without_stale_marker, SandboxContextDir, SubagentReplacement, MANAGED_CODEBASE_PREAMBLE,
-    PREAMBLE_FILES,
 };
 pub use context_manifest::{
     diff_manifests, matches_context_globs, normalized_context_path, sha256_hex, ContextEntry,
@@ -50,6 +50,7 @@ pub use log::{
     SANDBOX_SPAWN_MANIFEST,
 };
 pub use materialize::{materialize_copies, materialize_secrets, materialize_symlinks};
+pub use network::{EgressPolicy, EgressPolicyArgError, HostPattern};
 pub use runner_env::{process_jail_env, scratch_runner_env};
 pub use spec::{SandboxHandle, SandboxSpec};
 pub use tool_ipc::session_id_from_env;

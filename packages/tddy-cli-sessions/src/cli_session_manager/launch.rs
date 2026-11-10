@@ -4,11 +4,9 @@ use super::CliSessionManager;
 
 use std::path::Path;
 
-use tddy_core::cli_harness::{CliHarness, CliLaunch};
-
 use super::pty_spawn::ExitHook;
 
-/// What a [`CliSessionManager::launch_cli_harness`] launch adds to the harness's own argv.
+/// What a rendered launch adds to the argv its launcher rendered.
 #[derive(Default)]
 pub struct HarnessLaunchExtras {
     /// Follow the harness's argv (a provider route's `--model`).
@@ -26,142 +24,60 @@ use std::sync::Arc;
 use std::path::PathBuf;
 
 impl CliSessionManager {
-    /// Spawn `harness` for `session_id` in `worktree_path`, its argv built by the registry from
-    /// `launch` (`launch.resume` continues the worktree's session instead of starting one).
+    /// Spawn `argv` — already rendered, by a launcher that owns the agent's argument template — as
+    /// `session_id`'s main terminal, registered under `session_type`. `os_user` is the session
+    /// owner, or `None` to run as the daemon. `on_exit` runs once the process has exited, before its
+    /// terminal is deregistered (see [`HarnessLaunchExtras`]).
     ///
-    /// `extras` adds to that launch: arguments after the harness's own argv, environment on top of
-    /// the daemon's, and the work to finish once the process exits (see [`HarnessLaunchExtras`]).
-    ///
-    /// `os_user` — the session owner, whose `HOME` and configured `PATH` extra the child must run
-    /// under (the same overrides a claude-cli launch applies); `None` runs the child as the daemon.
-    pub async fn launch_cli_harness(
-        &self,
-        harness: &CliHarness,
-        session_id: &str,
-        worktree_path: PathBuf,
-        launch: &CliLaunch<'_>,
-        extras: HarnessLaunchExtras,
-        os_user: Option<&str>,
-    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        let mut argv = (harness.argv)(launch);
-        argv.extend(extras.args);
-        self.spawn_tool(
-            session_id,
-            MAIN_TERMINAL_ID,
-            harness.session_type,
-            worktree_path,
-            launch.model,
-            argv,
-            extras.env,
-            os_user,
-            extras.on_exit,
-            None,
-        )
-        .await
-    }
-
-    /// Spawn a new Cursor Agent CLI process for `session_id` in `worktree_path`.
-    ///
-    /// `chat_id` — the Cursor chat the session owns, launched into via `--resume <chat_id>`.
+    /// An agent main starts from exactly `env` (`#agent-tools 28/28`): its whole environment, which
+    /// the caller computed from the allow-list (`AgentEnvBase::agent_env`: the base set, the
+    /// spec's `pass_env` values, the launch's own variables). Nothing else the daemon holds reaches
+    /// it. A user's terminal ([`Self::start_terminal`]) still inherits the daemon's environment.
     #[allow(clippy::too_many_arguments)]
-    pub async fn start_cursor(
+    pub async fn spawn_rendered_main(
         &self,
         session_id: &str,
+        session_type: &str,
         worktree_path: PathBuf,
         model: &str,
-        binary_path: &str,
-        chat_id: Option<&str>,
-        initial_prompt: Option<&str>,
-        // Extra per-session env pairs applied to the cursor process (e.g. `TDDY_SEMANTIC_INDEX_DB`).
+        argv: Vec<String>,
         env: Vec<(String, String)>,
+        os_user: Option<&str>,
+        on_exit: Option<ExitHook>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        let argv = Self::build_cursor_argv(binary_path, model, chat_id, initial_prompt);
-        self.spawn_tool(
+        self.spawn_tool_on(
             session_id,
             MAIN_TERMINAL_ID,
-            "cursor-cli",
+            session_type,
             worktree_path,
             model,
             argv,
             env,
-            None,
-            None,
-            None,
-        )
-        .await
-    }
-
-    /// Resume a Cursor CLI session into `chat_id` (never replays the initial prompt).
-    pub async fn resume_cursor(
-        &self,
-        session_id: &str,
-        worktree_path: PathBuf,
-        model: &str,
-        binary_path: &str,
-        chat_id: Option<&str>,
-        // Extra per-session env pairs applied to the cursor process.
-        env: Vec<(String, String)>,
-    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        self.start_cursor(
-            session_id,
-            worktree_path,
-            model,
-            binary_path,
-            chat_id,
-            None,
-            env,
-        )
-        .await
-    }
-
-    /// Spawn a new claude CLI process for `session_id` in `worktree_path`.
-    ///
-    /// Returns an `Arc<PtyHandle>` on success. The child process is monitored in a background
-    /// std thread; when it exits the session is removed from the registry.
-    ///
-    /// `initial_prompt` — when `Some` and non-empty, appended as a positional CLI argument so
-    /// that `claude` receives it as the first user turn. Pass `None` (or `Some("")`) for an
-    /// interactive session with no seeded prompt. **Resume** (`resume()`) always passes `None`
-    /// because the session is continued via `--session-id`; re-injecting the original prompt
-    /// would create a duplicate user turn.
-    ///
-    /// `permission_mode` — forwarded as `--permission-mode <mode>` to the claude binary.
-    /// `None` or empty/whitespace defaults to `"auto"`.
-    pub async fn start(
-        &self,
-        session_id: &str,
-        worktree_path: PathBuf,
-        model: &str,
-        binary_path: &str,
-        initial_prompt: Option<&str>,
-        permission_mode: Option<&str>,
-    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        self.start_with_options(
-            session_id,
-            worktree_path,
-            model,
-            binary_path,
-            initial_prompt,
-            permission_mode,
-            false,
-            false,
-            None,
-            Vec::new(),
-            Vec::new(),
+            tddy_pty::PtyEnvBase::Cleared,
+            os_user,
+            on_exit,
             None,
         )
         .await
     }
 
-    /// Like [`Self::start`], plus managed-workflow launch options.
+    /// Spawn a new CLI process for `session_id` in `worktree_path` from an argv the caller
+    /// rendered from the agent's spec, with managed-workflow launch options. Returns an
+    /// `Arc<PtyHandle>`; the child is monitored in a background std thread and the session
+    /// leaves the registry when it exits.
     ///
-    /// `resume` — when true, continue the existing on-disk transcript via `--resume <id>` instead of
-    /// assigning the id to a fresh session via `--session-id <id>`. Only [`Self::resume_with_options`]
-    /// passes true; fresh starts pass false.
+    /// `argv` — the agent's launch argv, already rendered (binary first, the model, the
+    /// session id, the prompt as its trailing positional when it carries one).
     ///
-    /// `append_system_prompt_file` — when `Some`, inserted as `--append-system-prompt-file <path>`
-    /// (before any positional prompt) so `claude` appends that file to its system prompt (a managed
-    /// workflow's orchestration prompt).
+    /// `initial_prompt` — the prompt bound in `argv`, named only so the launch flags below
+    /// can be spliced before it. **Resume** always passes `None`: re-injecting the original
+    /// prompt would create a duplicate user turn.
+    ///
+    /// `session_type` — registered as the session's tool label (`<id>-cli`).
+    ///
+    /// `append_system_prompt_file` — when `Some`, inserted as
+    /// `--append-system-prompt-file <path>` (before any positional prompt) so the agent
+    /// appends that file to its system prompt (a managed workflow's orchestration prompt).
     ///
     /// `env` — extra environment variables set on the spawned process (e.g. a managed session's
     /// per-session `TDDY_SOCKET` and a `PATH` that resolves `tddy-tools`).
@@ -175,34 +91,20 @@ impl CliSessionManager {
         session_id: &str,
         worktree_path: PathBuf,
         model: &str,
-        binary_path: &str,
+        argv: Vec<String>,
+        session_type: &str,
         initial_prompt: Option<&str>,
-        permission_mode: Option<&str>,
-        dangerously_skip_permissions: bool,
-        resume: bool,
         append_system_prompt_file: Option<&Path>,
         extra_args: Vec<String>,
         env: Vec<(String, String)>,
         os_user: Option<&str>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        let argv = Self::with_claude_launch_flags(
-            Self::build_claude_argv(
-                binary_path,
-                model,
-                session_id,
-                initial_prompt,
-                permission_mode,
-                dangerously_skip_permissions,
-                resume,
-            ),
-            initial_prompt,
-            append_system_prompt_file,
-            extra_args,
-        );
+        let argv =
+            Self::with_launch_flags(argv, initial_prompt, append_system_prompt_file, &extra_args);
         self.spawn_tool(
             session_id,
             MAIN_TERMINAL_ID,
-            "claude-cli",
+            session_type,
             worktree_path,
             model,
             argv,

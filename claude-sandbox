@@ -101,7 +101,10 @@ if [ ! -x "$BIN" ]; then
   exit 1
 fi
 
-CMD=("$BIN" --repo "$REPO" --claude-binary "$CLAUDE_BIN")
+# The app resolves the agent's binary from its spec, whose override is `TDDY_CLAUDE_BINARY`; it has
+# no binary flag of its own.
+export TDDY_CLAUDE_BINARY="$CLAUDE_BIN"
+CMD=("$BIN" --repo "$REPO" --agent claude)
 [ -n "$CONFIG" ] && CMD+=(--config "$CONFIG")
 CMD+=(${APP_ARGS[@]+"${APP_ARGS[@]}"})
 if [ "${#CLAUDE_ARGS[@]}" -gt 0 ]; then

@@ -1,0 +1,9 @@
+<STUBS>/claude
+--model
+claude-opus-4-8
+--session-id
+<SESSION_ID>
+--permission-mode
+auto
+--append-system-prompt-file
+<SESSIONS>/sessions/<SESSION_ID>/agent-system-prompt.md

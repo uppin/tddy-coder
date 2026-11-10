@@ -1,0 +1,3 @@
+# 2026-11-02 — Workspace jail runs `rg` as a declared tool
+
+`#agent-tools` 1/12 ([#790](https://github.com/uppin/tddy-coder/pull/790)). `WorkspaceToolPlanRequest.tools`; `JailedWorkspaceSandboxProvisioner::{new, for_tddy_home, resolve_jail_tools}` resolve `WORKSPACE_JAIL_TOOLS` at each jail start before the tree exists and refuse with `SandboxError::InvalidSpec`. `host_ripgrep_grants`, `RipgrepGrants`, `binary_dependency_traversal_dirs` and `tests/ripgrep_in_jail_seatbelt.rs` deleted. `workspace_tool_sandbox.rs` 741 → 684 production lines. See [cross-package entry](../../../../docs/dev/changesets/2026-11-02-agent-tools-tool-defs.md).

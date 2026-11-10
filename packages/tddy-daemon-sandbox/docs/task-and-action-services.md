@@ -39,12 +39,67 @@ re-exports this crate (`pub use tddy_daemon_sandbox::*;`), so those paths resolv
 Neither module needed a dependency the crate did not already have: `tddy-task` and `tddy-actions`
 could not host them without a cycle, and `tddy-daemon-rpc` sits above lifecycle.
 
+## `build_action_sandbox`
+
+`DaemonActionSandbox::new(work_dir)` implements `tddy_build::ActionSandbox` for `sandbox: true` /
+`--hermetic` build actions ([tddy-build § Hermetic actions](../../../docs/ft/build/tddy-build.md#hermetic-actions)).
+It lowers one action into a process-mode jail plan, one directory per action id under `work_dir`:
+inputs are read-only grants, declared outputs the only writable paths, the tool closure is lowered
+by `tddy_sandbox_recipes::lower_tools` (literal executable reads, linked from a jail-local `bin/`
+first on `PATH`), and network is `lower_network` of the closure. A closure that declares egress hosts
+is refused — there is no egress shim for build actions. It spawns through `spawn_sandbox_plan` (Seatbelt
+on macOS, cgroups on Linux); the action's stdout/stderr are captured by a launcher shell into files in
+its jail directory, because the backends' own logs are not the command's output.
+
+Limits: on Linux writes and execs are not confined
+([todo](../../../docs/dev/todo/2026-11-02-hermetic-build-actions-unconfined-on-linux.md)), so the two
+confinement tests in `tests/hermetic_build_action_acceptance.rs` are macOS-only
+(`FIXME(fs-confinement)`); outputs are executable
+([todo](../../../docs/dev/todo/2026-11-02-hermetic-build-action-outputs-are-executable.md)); no egress
+shim ([todo](../../../docs/dev/todo/2026-11-02-hermetic-build-actions-have-no-egress-shim.md)).
+
+## `tool_jail`
+
+The jail of a tool run from its definition — the sandboxed `claude-cli` session's, through
+`tddy_agent_launch`'s `LaunchSessions::launch_jailed`. Nothing here names a tool.
+
+- `lower_tool_jail(&ToolJailInputs { tool, closure, defs, tddy_home, host_home, scratch_dir, host, route })
+  -> Result<ToolJailGrants, Status>` lowers the tool's `home:` (`lower_home`; both a legacy and a
+  `homes/<key>` home existing is `FAILED_PRECONDITION`), every closure member's `files:`, `secrets:`
+  (dropped by their route guard against `route`) and `policy:` (with Mach lookup of all services and a
+  pseudo-terminal added), `lower_tools` of the closure into `<scratch>/bin`, the binary's own
+  `process_exec_reads`, and `lower_network` of the closure. It is not pure: a persistent home is
+  created or migrated and `seed-once` files are copied before the jail exists.
+- `ToolJailGrants { home, env, bin_dir, mounts, reads, symlinks, secrets, policy, egress, oauth_inbound }`:
+  `env` is the definition's overlays plus `HOME`; `oauth_inbound` is the declared one and only on an
+  unrouted session.
+- **The route's hosts.** `route_hosts(&HarnessRoute)` is the `host:port` of every `http(s)` URL in the
+  route's env — found **inside** each value, so an inline JSON configuration's base URL counts
+  (OpenCode's `OPENCODE_CONFIG_CONTENT`, `#agent-tools 29/32`) — and in its files, the
+  scheme's port when none is named. They join a `hosts` policy, become the whole
+  policy of a `none` one, and leave `any` as it is.
+- `build_tool_jail_plan(SandboxRunnerSpawn, ToolJailGrants)` is `build_sandbox_plan` of the spawn
+  (whose `mounts` already hold the grants') with the grants' reads and links added, and their policy,
+  egress and OAuth inbound replacing what the runner's argv would imply; each secret goes on with
+  `SandboxPlan::add_secret`.
+
+`sandbox_session::dial_and_bridge_with_egress` is `dial_and_bridge` with the jail's `EgressGuard` on
+the host relay (`HostRelayConfig::with_egress`), so a `TunnelOpen` to an undeclared host is refused on
+the host as well as at the in-jail shim. `dial_and_bridge` is it with an unrestricted guard, for the
+recipe-built jails.
+
+A jailed agent's persistent home is its tool definition's `home:` section, resolved by
+`tool_jail::lower_tool_jail`. `sandbox_session` seeds no agent home, and `build_allow_read_paths`
+grants the toolchain paths plus the runner binary's own directory. What the process the runner execs
+reads comes from its tool definition, never from the runner's argv.
+
 ## Tests
 
 | Suite | What it pins |
 |---|---|
 | `tests/action_service_acceptance.rs` | a started bash action is visible as a task; the kinds list carries bash with its input schema |
 | `tests/action_sandbox_acceptance.rs` | sandboxed actions: writing to the output directory, refusing one without it, `tddy-coder` and a build action under a read-only mount, a write outside egress denied, PTY output streamed, and the refusal off Darwin and Linux |
+| `tool_jail::tests` | a route's base-URL host with its scheme's port; route hosts joining declared hosts and opening a `none` jail to themselves alone; no route keeps the declared policy |
 | `tests/task_service_peer_cancel.rs` | `CancelTask` naming a peer daemon is forwarded to it (over a scripted `CommonRoom` peer) and its answer returned; one naming this daemon is not forwarded |
 | `packages/tddy-session-lifecycle/tests/task_service_acceptance.rs` | `tasks.TaskService`. It stays in lifecycle because three of its tests drive lifecycle's `ClaudeCliSessionManager`, and moving it would make this crate dev-depend on lifecycle |
 

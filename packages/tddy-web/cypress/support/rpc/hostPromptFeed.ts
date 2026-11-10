@@ -16,7 +16,7 @@ import {
   HostPromptEventSchema,
   HostPromptKind,
   type HostPromptEvent,
-} from "../../../src/gen/host_pb";
+} from "tddy-client-web/gen/host_pb";
 
 /** One question a host is waiting on, as a spec states it. */
 export interface HostPromptFrame {

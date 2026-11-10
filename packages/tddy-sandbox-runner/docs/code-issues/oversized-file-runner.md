@@ -3,8 +3,7 @@
 **Location:** `packages/tddy-sandbox-runner/src/runner.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — `/pr-wrap` step 3.5 file-length gate on PR #545
-**Metrics:** **2,742 production lines** (2026-10-25) (counted to the module-level `#[cfg(test)]`) · budget 500 ·
-**5.2× over**
+**Metrics:** **2,235 production lines** (2026-11-07, after #832) (counted to the module-level `#[cfg(test)]`) · budget 500 · **4.5× over**
 **Thresholds breached:** length 2,742 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
 **Status:** Open — unclaimed
@@ -18,6 +17,11 @@
 | 2026-10-01 | 2,639 | **worse** by 28 over master's 2,611 in PR #560 (`#agent-worktree` 1/4): `call_tool(conversation_id, …)` and the `ConversationWorktree` relay arm. The jail-side root and session binding live in `conversation_root.rs` |
 | 2026-10-22 | 2,698 | **worse** by 59 in PR #670 (`#provider-route` 9/9): the `--agent-kind opencode \| muse` dispatch arm (+20; the PTY spawn itself is in the new `harness_pty.rs`), and two pre-existing relay fixes — `acknowledge_attach` (+17) and `release_outbound` with its two call sites (+17) — plus `pub(crate)` on the PTY helpers `harness_pty.rs` reuses. Not split in #670: the orchestrator scoped decomposition to files the PR pushed past 500, and this one was 5.2× over before it |
 | 2026-10-25 | 2,742 | **worse** by 44 in PR #762 (`#term-snapshot` 3/4): the terminal backlog carries `TerminalBacklogItem::{Output, Resized}`, `push_terminal_size`, and the generic and claude PTY threads report the size after `openpty` and after each accepted resize. Split deferred with the developer's consent (code issues may be deferred in `#term-snapshot`) |
+| 2026-11-02 | 2,799 | **worse** by 57 in PR #792 (`#agent-tools` 3/12): `--egress-policy` / `--egress-tool` args, `runner_egress_guard`, `start_egress_shim_for_policy` (a `none` policy starts no shim), the guard threaded through the shim's CONNECT and HTTP-forward paths, and the PTY proxy env made optional. The policy check itself lives in the new `egress_policy.rs`. Not split: the file is stack-shared with every later `#agent-tools` node, so a split is deferred to after the stack lands (pr-wrap step 3.5) |
+| 2026-11-02 | 2,847 | **worse** by 48 in PR #794 (`#agent-tools` 5/12): `--exec-plan` threads an `ExecPlan` through `run_sandbox_runner_inner` (245 → 261 lines), `ChildEnv` on the generic PTY thread, `notify_when_the_process_exits` (folds a duplicated block), and four helpers widened to `pub(crate)` for the new `exec_plan.rs`, where the mode's own logic lives. Not split: stack-shared, and deferred to the #agent-tools sweep node (developer, 2026-11-02) |
+| 2026-11-03 | 2,854 | **worse** by 7 in PR #796 (`#agent-tools` 7/12): the in-jail tool-IPC server relays `tddy_service::session_activity::IN_JAIL_RELAYABLE_HOOK_REPORTS` (`ReportSessionStatus`, `ReportAgentActivity`) to the host through `relays_to_the_host`, and the hand-built `spawn_runner_cursor` daemon path is gone. Not split: stack-shared, and deferred to the #agent-tools sweep node (developer, 2026-11-02) |
+| 2026-11-03 | 2,240 | **better** by 614 in PR #799 (`#agent-tools` 10/12): the agent modes are deleted (`spawn_claude_pty`, `spawn_cursor_pty`, the agent flags, the opencode/muse dispatch arm and `harness_pty.rs`); +10 back for `notify_when_the_process_exits` waiting on a detached thread instead of `spawn_blocking`. Still 4.5× over. Not split: deferred to the #agent-tools sweep node (developer) |
+| 2026-11-07 | 2,235 | **better** by 5 in PR #832 (`#agent-tools` 24/28): the vestigial `--model` argument is deleted from `SandboxRunnerArgs`. Still 4.5× over. Not split: this PR did not grow it |
 
 ## What the tool found
 

@@ -64,11 +64,10 @@ No ssh-agent is ever started by the daemon.
   `/run/user/<uid>/gnupg/S.gpg-agent.ssh`, `/run/user/<uid>/keyring/ssh`).
 - The `tddy-askpass` binary beside `tddy-daemon` (shipped by `./install`, `./release` and
   `./publish.sh`).
-- Under `tddy-supervisor`, the seven variables a clone sets listed in `spawn_policy.allowed_env_keys`
-  (`GIT_SSH_COMMAND`, `GIT_TERMINAL_PROMPT`, `SSH_ASKPASS`, `SSH_ASKPASS_REQUIRE`, `SSH_AUTH_SOCK`,
-  `TDDY_ASKPASS_TOKEN`, `TDDY_ASKPASS_URL`). The supervisor refuses a request naming an unlisted key,
-  so without them every SSH clone through it is refused. The shipped configuration templates document the
-  list.
+- Nothing in `supervisor.yaml` for the clone's environment. Under `tddy-supervisor` the variables a
+  clone sets (`GIT_SSH_COMMAND`, `GIT_TERMINAL_PROMPT`, `SSH_ASKPASS`, `SSH_ASKPASS_REQUIRE`,
+  `SSH_AUTH_SOCK`, `TDDY_ASKPASS_TOKEN`, `TDDY_ASKPASS_URL`) pass whole under its one env rule, which
+  refuses only loader variables.
 - The host's `github.com` (or other forge) host key in the OS user's `known_hosts`. A host-key question is
   refused, not relayed.
 
@@ -118,8 +117,13 @@ No ssh-agent is ever started by the daemon.
 - Only the clone a session start runs asks. Other daemon-run git over SSH (fetch, push, worktree sync, the
   project coordinate handlers' clone) cannot ask; the first clone usually leaves the key in the agent, so
   they succeed afterwards.
-- A supervisor refusal for an unlisted key is reported as the supervisor's own refusal, not as a missing
-  `allowed_env_keys` entry.
+- A supervisor refusal of a clone is reported as the supervisor's own opaque refusal; the reason is only
+  in the supervisor's log.
+
+- A host-key confirmation prompt is refused by `tddy-askpass`, which answers only a key passphrase
+  request, so ssh fails "Host key verification failed" at once. A hang reported against the real sshd
+  fixture did not reproduce (2026-11-07: macOS, nix OpenSSH 10.2p1, the acceptance test 10/10 in
+  2.4–3.1 s). Linux and older OpenSSH were not checked.
 
 ## Out of scope
 
@@ -132,7 +136,7 @@ Storing a passphrase. Any ssh authentication method other than a key passphrase.
   encryption and the key-continuity check this feature reuses
 - [Project concept](project-concept.md) — where a clone happens
 - [Remote git repo](remote-git-repo.md) — the facilitator clone, which uses no SSH key on the owning daemon
-- [Supervisor](../supervisor/tddy-supervisor.md) — `spawn_policy.allowed_env_keys`
+- [Supervisor](../supervisor/tddy-supervisor.md) — the one environment rule and `exec_roots`
 - Dev: [`packages/tddy-askpass/README.md`](../../../packages/tddy-askpass/README.md),
   [`packages/tddy-host-service/docs/clone-askpass.md`](../../../packages/tddy-host-service/docs/clone-askpass.md),
   [`packages/tddy-spawn/docs/clone-ssh-environment.md`](../../../packages/tddy-spawn/docs/clone-ssh-environment.md)

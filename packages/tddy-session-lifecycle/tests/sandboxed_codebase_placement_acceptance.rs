@@ -40,7 +40,7 @@ use tddy_github::GitHubUser;
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::Request;
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::{
     classify_placement, CodebasePlacement, DaemonSessionHost, PlacementRequest,
 };
@@ -179,8 +179,6 @@ users:
   - github_user: "{user}"
     os_user: "{user}"
 daemon_instance_id: "{LOCAL_INSTANCE_ID}"
-claude_cli:
-  binary_path: /bin/cat
 "#
     );
     serde_yaml::from_str(&yaml).expect("config must parse")
@@ -232,7 +230,12 @@ fn a_daemon(sessions_base: PathBuf, discovery: Option<LiveKitDiscoveryHandles>) 
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_daemon_livekit::peer_routing::peer_routing_over(&test_config(), discovery),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
+            // `/bin/cat` stands for `claude`, as the fixture config used to name it.
+            tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+                "claude",
+                Path::new("/bin/cat"),
+            )]),
         )
         .with_session_tokens(this_daemons_session_tokens().clone()),
     ))
@@ -297,6 +300,7 @@ fn a_placement_request() -> PlacementRequest {
         sandbox: false,
         sandboxed_codebase: false,
         session_type: "claude-cli".to_string(),
+        session_type_splits_host: true,
         recipe: String::new(),
         dangerously_skip_permissions: false,
     }
@@ -452,6 +456,7 @@ fn a_sandboxed_codebase_request_for_cursor_cli_is_refused_naming_the_withdrawabl
     // Given a cursor-cli request asking for the codebase to be jailed
     let request = PlacementRequest {
         session_type: "cursor-cli".to_string(),
+        session_type_splits_host: false,
         ..a_jailed_codebase_placement_request()
     };
 
@@ -471,6 +476,7 @@ fn a_sandboxed_codebase_request_for_a_tool_session_is_refused_naming_the_session
     // Given a tddy-coder tool session asking for the codebase to be jailed
     let request = PlacementRequest {
         session_type: "tool".to_string(),
+        session_type_splits_host: false,
         ..a_jailed_codebase_placement_request()
     };
 

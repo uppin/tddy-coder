@@ -1,0 +1,137 @@
+# Cursor Agent CLI — the interactive coding agent behind `cursor-cli` sessions (`#agent-tools 7/12`).
+#
+# The argv renders byte-for-byte what `build_cursor_argv` built by hand:
+#   agent [--resume CHAT_ID] [--model M] [PROMPT]
+# CHAT_ID is the chat the session owns for its whole lifetime (`agent create-chat`, minted at start
+# and persisted in `.session.yaml`); `--resume` takes an *optional* argument, so it is rendered only
+# with an id — a bare flag drops the CLI into an interactive chat picker.
+#
+# In a jail the published `agent` wrapper cannot resolve its own install dir (it `realpath`s `$0`),
+# so a launch whose resolved binary is that launcher script binds `node_launcher` to the bundled
+# `node` beside it and `node_entry` to its `index.js`, and runs those instead.
+#
+# Override whole with `<tddyhome>/tools/cursor.yaml`. `TDDY_CURSOR_AGENT` (and, until
+# `#agent-tools 12/12`, daemon.yaml `cursor_cli.binary_path`) still names the binary.
+#
+# Cursor has no allow-list, deny-list or permission-prompt flag: those slots are `unsupported`
+# (`ToolSlot::Unsupported`), and a launch that fills one is refused rather than dropped.
+schema_version: 1
+id: cursor
+summary: Cursor Agent CLI — the interactive coding agent behind cursor-cli sessions
+binary:
+  command: agent
+  env: TDDY_CURSOR_AGENT
+deps: [tddy-tools]
+reads: []
+run:
+  transport: pty
+  argv:
+    - if: node_launcher
+      then: ["{node_launcher}", "{node_entry}"]
+      else: ["{binary}"]
+    - { if: chat_id, then: ["--resume", "{chat_id}"] }
+    - { if: model, then: ["--model", "{model}"] }
+    - { splice: slots }
+    - { if: prompt, then: ["{prompt}"] }
+  env: {}
+extensions:
+  coding_agent:
+    pass_env: [CURSOR_API_KEY]
+    product: Cursor
+    # Cursor reads its MCP servers from `$HOME/.cursor/mcp.json`; no flag names the file.
+    mcp: { kind: placed, path: "{home}/.cursor/mcp.json", format: cursor-mcp-json }
+    tool_allow: unsupported
+    # Managed-codebase enforcement refuses a withdrawal Cursor cannot carry: the refusal reads this.
+    tool_deny: unsupported
+    permission_prompt: unsupported
+    instructions:
+      files: []
+      rules_file: .cursor/rules/tddy-managed-workflow.mdc
+    hooks: { adapter: cursor-hooks-json }
+    # What a session of this agent offers (`#agent-tools 12/12`): the gates read these, never the
+    # agent's name. Unknown words are refused at load.
+    # The chat id `agent create-chat` prints, minted before the first start (bounded: 30 s) and passed as `--resume`.
+    conversation: { kind: minted, adapter: cursor-create-chat }
+    capabilities: [hooks, managed_workflow, requires_model, keep_worktree_on_delete, operator_notify]
+    models:
+      default: composer-2.5
+      curated:
+        - { id: composer-2.5, label: "Composer 2.5" }
+        - { id: gpt-5.3-codex, label: "GPT-5.3 Codex" }
+        - { id: claude-4.6-sonnet-medium-thinking, label: "Claude 4.6 Sonnet (thinking)" }
+      list_command: ["{binary}", --list-models]
+      adapter: cursor-models
+    context_globs: [AGENTS.md, ".agents/**", ".cursor/**"]
+    # --- Headless (`#agent-tools 9/12`): one `agent -p` per turn, for the workflow backend
+    # (`tddy-coder --agent cursor`) and a headless coding subagent. It renders byte-for-byte what
+    # `build_cursor_cli_args` and `headless_driver/argv.rs::cursor()` built by hand:
+    #   agent [--plan] [--resume ID] -p PROMPT [--model M] --output-format stream-json
+    #         --stream-partial-output [--force] --trust --approve-mcps
+    # `plan` and `force` are the turn's params: the workflow backend binds `force` (and `plan` for a
+    # planning goal); a headless conversation binds neither, so it runs read-only unless an operator
+    # opts in. `--resume` takes an optional argument, so it is rendered only with an id.
+    #
+    # Headless, Cursor reads the worktree's `.cursor/mcp.json` rather than `{home}`'s: the file is
+    # the conversation's, recorded in `headless/<conversation>/written-files` and removed on close.
+    # The output is read by the `cursor-stream` adapter (`tddy_agent_backend::adapters`).
+    headless:
+      argv:
+        - "{binary}"
+        - { if: plan, then: [--plan] }
+        - { if: resume, then: [--resume, "{session_id}"] }
+        - -p
+        - "{prompt}"
+        - { if: model, then: [--model, "{model}"] }
+        - --output-format
+        - stream-json
+        - --stream-partial-output
+        - { if: force, then: [--force] }
+        - --trust
+        - --approve-mcps
+        - { splice: slots }
+      env: {}
+      adapter: cursor-stream
+      # Who answers a headless conversation's permission requests (`#agent-tools 27/28`): the CLI
+      # cannot ask mid-turn, so it runs under this fixed policy, shown on its catalog row.
+      permission_policy: { fixed: "read-only; the CLI cannot ask mid-turn" }
+      mcp: { kind: workdir, path: .cursor/mcp.json, format: cursor-mcp-json }
+      # --- The workflow turn's protocol (`#agent-tools 15/19`), read by `SpecHeadlessBackend`:
+      # what a `tddy-coder` workflow turn needs beyond the argv, reproducing the bespoke backend.
+      # `.cursor/mcp.json` is written in the worktree, git-excluded, and removed with the turn.
+      system_prompt: prepend
+      goal_params:
+        always: { force: "1" }
+        plan_mode: { plan: "1" }
+      workflow_mcp: true
+      fresh_session: agent
+      scratch: workdir
+# --- Jail sections: what a sandboxed launch lowers into the jail. ---------------------------------
+# A persistent home at <tddyhome>/homes/cursor, mounted rw: Cursor's refreshed login and its config
+# survive the session.
+home: { kind: persistent, key: cursor }
+files:
+  # Seeded once: the jail may since have refreshed its own login, which the host's must not clobber.
+  - { kind: seed-once, from_host: .cursor/auth.json, to: .cursor/auth.json }
+  - { kind: seed-once, from_host: .cursor/cli-config.json, to: .cursor/cli-config.json }
+  # The wrapper's self-check looks for its own install under $HOME.
+  - { kind: mirror, from_host: .local/bin/agent, to: .local/bin/agent }
+  - { kind: mirror, from_host: .local/share/cursor-agent/versions, to: .local/share/cursor-agent/versions }
+  - { kind: overlay, env: CURSOR_TMPDIR, value: "{tmp}" }
+  # The jail has no Keychain entitlement: a probe of securityd hangs ~30s and fails, and `CI=true`
+  # keeps a parent shell from re-enabling the interactive login.
+  - { kind: overlay, env: CURSOR_SKIP_KEYCHAIN, value: "1" }
+  - { kind: overlay, env: CI, value: "true" }
+# An interactive Node/V8 CLI: the same allows as Claude Code.
+policy:
+  jit: true
+  fork: true
+  sysctl_read: true
+  exec_paths: [/usr/bin, /usr/libexec, /bin, /sbin, /System, /Library, /Applications, /opt/homebrew, /opt/local]
+# Cursor's API, its auth and its update channel.
+#
+# TODO(cursor-cli): this host list is unverified against a live Cursor session. It must stay
+# declared: a definition with no `network:` section cannot start a jail
+# (docs/dev/todo/2026-11-03-jail-with-no-network-section-cannot-bind-its-shim.md).
+network:
+  egress:
+    hosts: [api2.cursor.sh, api3.cursor.sh, api.cursor.com, cursor.com, www.cursor.com, repo42.cursor.sh]

@@ -1,7 +1,7 @@
 # Tasks UI — Real-time View with Channel Output
 
 **Route:** `#/tasks`
-**Component:** `TasksDrawerScreen` (`packages/tddy-web/src/components/tasks/`)
+**Component:** `TasksScreen` (`packages/tddy-workspace-web/src/tasks/`), in `tddy-web`'s `TasksDrawerScreen` shell
 **Updated:** 2026-06-25
 **Status:** Shipped
 

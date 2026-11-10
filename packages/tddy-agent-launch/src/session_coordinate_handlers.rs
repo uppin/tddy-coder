@@ -66,6 +66,7 @@ impl LaunchSessions {
         // seed is paid for on this blocking thread rather than on the reactor.
         let session_agent_inference = Arc::clone(&self.session_agent_inference);
         let agent_activity_hub = Arc::clone(&self.agent_activity_hub);
+        let coding_agents = self.coding_agents.clone();
         let entries = service_util::spawn_blocking_with_timeout(
             timeout,
             "ListSessions: read and enrich",
@@ -79,6 +80,7 @@ impl LaunchSessions {
                         &local_daemon_id,
                         &session_agent_inference,
                         &agent_activity_hub,
+                        Some(&*coding_agents),
                         s,
                     )?;
                     out.push(entry);
@@ -143,7 +145,7 @@ impl LaunchSessions {
         session_dir: PathBuf,
         arrived_over: RequestTransport,
     ) -> Result<(), Status> {
-        let worktree_root = match facilitated_checkout(metadata) {
+        let worktree_root = match facilitated_checkout(metadata, self.coding_agents.agents()) {
             FacilitatedCheckout::NotFacilitated => return Ok(()),
             FacilitatedCheckout::NoCheckout => {
                 log::debug!(
@@ -181,11 +183,15 @@ impl LaunchSessions {
         self.tell_the_reach(&req.session_id, &metadata, session_dir, arrived_over)
             .await?;
 
-        // The *terminal* room, which is a different room with different participants. A CLI harness
-        // (claude-cli, cursor-cli, opencode-cli) or workspace session has none: its PTY is served
+        // The *terminal* room, which is a different room with different participants. A CLI
+        // session (an agent's `<id>-cli`) or workspace session has none: its PTY is served
         // over gRPC and bridged into the lobby, never into a room of its own, so these answer with
         // empty coordinates — as they did before the session room above existed.
-        if tddy_core::cli_harness::cli_harness(session_type).is_some()
+        if self
+            .coding_agents
+            .agents()
+            .for_session_type(session_type)
+            .is_some()
             || session_type == "workspace"
         {
             return Ok(Response::new(ConnectSessionResponse {
@@ -365,6 +371,7 @@ fn session_entry_from_listing(
         tddy_session_agents::session_agent_inference::SessionAgentInferenceStore,
     >,
     agent_activity_hub: &Arc<tddy_daemon_kernel::AgentActivityHub>,
+    coding_agents: Option<&crate::spec_launch::HostCodingAgents>,
     s: session_reader::SessionEntry,
 ) -> Result<ConnSessionEntry, anyhow::Error> {
     let session_dir = sessions_base_blocking
@@ -439,10 +446,13 @@ fn session_entry_from_listing(
     entry = crate::family_proto_bridge::wire_same(&conn_entry)
         .map_err(|s| anyhow::anyhow!(s.to_string()))?;
     // Only a session that runs an agent is tailed — the same gate
-    // `report_session_status` applies, and for the same reason: those are the two
-    // session types that write a conversation. A `workspace` session holds a clone
+    // `report_session_status` applies (the agent declares `hooks`), and for the same reason: those
+    // are the sessions that write a conversation. A `workspace` session holds a clone
     // and would spend a subscription and a file read to conclude UNSPECIFIED.
-    if matches!(entry.session_type.as_str(), "claude-cli" | "cursor-cli") {
+    let tails_conversation = coding_agents
+        .and_then(|agents| agents.agents().for_session_type(&entry.session_type))
+        .is_some_and(|spec| spec.has(tddy_coding_agent_specs::Capability::Hooks));
+    if tails_conversation {
         session_agent_inference.ensure_tailing(agent_activity_hub, &entry.session_id, &session_dir);
         let inferred = tddy_session_agents::session_agent_inference::inferred_activity(
             tddy_core::SessionActivityStatus::from_wire(&entry.activity_status),

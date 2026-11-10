@@ -1,0 +1,4 @@
+# Polyfill minimal DOM APIs (e.g. KeyboardEvent) for unit tests running in Bun's Node-like environment.
+[test]
+root = "src"
+preload = ["./src/test-utils/dom-preload.ts"]

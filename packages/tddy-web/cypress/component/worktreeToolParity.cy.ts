@@ -11,7 +11,7 @@
  * Changeset: docs/dev/1-WIP/2026-10-25-start-parity-worktree-list.md
  */
 
-import { sortWorktreesBySize, type WorktreeListItem } from "../../src/lib/worktreeList";
+import { sortWorktreesBySize, type WorktreeListItem } from "tddy-workspace-web";
 import fixture from "../support/fixtures/worktree-sort-order.json";
 
 function asScreenItem(row: { name: string; disk_bytes: number | null }): WorktreeListItem {

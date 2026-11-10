@@ -48,7 +48,7 @@ use tddy_service::proto::session_agents_svc::{
     AgentPlacement, AttachSessionAgentRequest, OpenAgentConversationRequest,
     SessionAgentService as _,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::test_util::{TEST_TOKEN, TEST_USER};
@@ -133,12 +133,14 @@ fn a_daemon(
     let config_path = sessions_base.join("config.yaml");
     std::fs::write(
         &config_path,
-        format!(
-            "daemon_instance_id: \"{instance_id}\"\nusers:\n  - github_user: \"testuser\"\n    \
-             os_user: \"testdev\"\n"
-        ),
+        format!("daemon_instance_id: \"{instance_id}\"\n"),
     )
     .expect("write daemon config");
+    std::fs::write(
+        sessions_base.join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testdev\"\n",
+    )
+    .expect("write users.yaml");
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     let routing = peers(&config);
     let base = sessions_base.to_path_buf();
@@ -154,7 +156,8 @@ fn a_daemon(
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         routing,
         Arc::new(NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
 }
 
@@ -360,6 +363,16 @@ struct ALauncherRecordingTheLaunches {
 
 #[async_trait::async_trait]
 impl CodingAgentLauncher for ALauncherRecordingTheLaunches {
+    async fn session_meta_for(
+        &self,
+        _launch: &tddy_coding_subagent::CodingAgentLaunch,
+    ) -> Result<
+        Option<serde_json::Map<String, serde_json::Value>>,
+        tddy_discovery::subagent::SubagentError,
+    > {
+        Ok(None)
+    }
+
     async fn command_for(
         &self,
         launch: &CodingAgentLaunch,

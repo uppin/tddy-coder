@@ -1,8 +1,8 @@
 //! Specialized subagent definitions — YAML files under `<tddyhome>/agents/*.yaml` (see
 //! docs/ft/coder/specialized-subagents.md). A `SpecializedAgentDef` is the single source of truth
 //! consumed by the MCP subagent registry (`crate::subagent::SubagentRegistry::from_defs`), the
-//! standalone `tddy-sandbox-app` CLI, and the `tddy-coder` workflow backend (`create_backend`) —
-//! one config surface rather than one per agent-shaped feature.
+//! standalone `tddy-sandbox-app` CLI, and the `tddy-coder` workflow backend
+//! (`create_workflow_backend`) — one config surface rather than one per agent-shaped feature.
 
 use std::path::{Path, PathBuf};
 

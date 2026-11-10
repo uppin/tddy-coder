@@ -11,18 +11,19 @@
  */
 
 import React from "react";
-import { Room } from "livekit-client";
+import { servedAgentWire } from "../support/servedAgents";
+import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import { SessionService } from "../../src/gen/session_pb";
-import { ProjectService } from "../../src/gen/project_pb";
-import { CatalogService } from "../../src/gen/catalog_pb";
-import { SessionFilesService } from "../../src/gen/session_files_pb";
-import { WorktreeService } from "../../src/gen/worktree_pb";
-import { HostService } from "../../src/gen/host_pb";
-import type { DaemonHost } from "../../src/lib/participantRole";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
+import { CreateSessionPane } from "tddy-session-create-web";
+import { SessionService } from "tddy-client-web/gen/session_pb";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
+import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
+import { HostService } from "tddy-client-web/gen/host_pb";
+import type { DaemonHost } from "tddy-client-web";
+import { SelectedDaemonProvider } from "../../src/app/rpc/selectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aHostPromptFeed, type HostPromptFeed } from "../support/rpc/hostPromptFeed";
 import { anRsaOaepKeypair, fingerprintOf } from "../support/hostKeys";
@@ -54,7 +55,7 @@ function aBackendWhoseStartWaits(feed: HostPromptFeed): InMemoryRpcBackend {
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({
-      agents: [{ id: "claude", label: "Claude" }],
+      agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }],
     }))
     .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
@@ -79,7 +80,7 @@ function aBackendWhoseStartWaits(feed: HostPromptFeed): InMemoryRpcBackend {
 /** The pane as production mounts it: handed its token as a prop, with no auth context around it. */
 function mountCreatePane(backend: InMemoryRpcBackend) {
   mountWithRpc(
-    <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={AGENT_HOST}>
+    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={DAEMON_HOSTS} servingInstanceId={AGENT_HOST}>
       <CreateSessionPane
         client={createClient(SessionService, backend.transport())}
         projectClient={createClient(ProjectService, backend.transport())}

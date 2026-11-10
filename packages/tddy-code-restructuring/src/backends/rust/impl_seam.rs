@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn puts_back_an_associated_function_call_the_assist_wrote_through_the_type() {
         // Given
-        let produced = "        let argv = ClaudeCliSessionManager::modname::build_claude_argv(\n";
+        let produced = "        let argv = CliSessionManager::modname::build_claude_argv(\n";
 
         // When
         let restored = with_method_calls_restored(
@@ -240,7 +240,7 @@ mod tests {
         // Then
         assert_eq!(
             restored,
-            "        let argv = ClaudeCliSessionManager::build_claude_argv(\n"
+            "        let argv = CliSessionManager::build_claude_argv(\n"
         );
     }
 

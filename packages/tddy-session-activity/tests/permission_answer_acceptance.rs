@@ -32,6 +32,14 @@ use tddy_session_activity::answers::{
 };
 use tddy_session_activity::orchestrator_presence::OrchestratorPresence;
 use tddy_session_activity::pending_answers::PendingAnswers;
+
+/// The coding agents of a host with no overrides: every built-in spec, as the hook gates read them.
+fn the_builtin_agents() -> std::sync::Arc<tddy_coding_agent_specs::CodingAgentRegistry> {
+    std::sync::Arc::new(
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin()
+            .expect("the built-in specs form a registry"),
+    )
+}
 use tddy_session_activity::{
     ActivityPorts, ActivityServiceImpl, AnswerWaitPorts, NoSessionDeltaStores, SessionLabels,
 };
@@ -144,6 +152,8 @@ impl HostBuilder {
         let data_dir = tempfile::tempdir().expect("a temporary data dir");
         let child_dir = data_dir.path().join("sessions").join(CHILD);
         write_claude_cli_session(&child_dir);
+        tddy_session_activity::answer_wait::record_answer_wait(&child_dir, self.wait)
+            .expect("the wait the child's start recorded");
         write_orchestrator(&child_dir, &self.orchestrator);
         write_pending_question(&child_dir, &the_permission_question())
             .expect("the child's pending question");
@@ -170,10 +180,10 @@ impl HostBuilder {
             deltas: Arc::new(NoSessionDeltaStores),
             daemon_instance_id: THIS_HOST.to_string(),
         })
+        .with_agents(the_builtin_agents())
         .with_question_answers(AnswerWaitPorts {
             pending: Arc::clone(&pending),
             presence: Arc::new(presence),
-            wait: self.wait,
         });
         AnActivityHost {
             data_dir,

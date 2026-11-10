@@ -230,6 +230,22 @@ mod tests {
     use crate::presenter::WorkflowEvent;
     use crate::{ClarificationQuestion, QuestionOption, WorkflowRecipe};
 
+    /// A backend-selection question whose options are agent ids, as the coder builds it from
+    /// the coding-agent registry.
+    fn a_backend_selection_question() -> crate::ClarificationQuestion {
+        let option = |label: &str| crate::QuestionOption {
+            label: label.to_string(),
+            description: String::new(),
+        };
+        crate::ClarificationQuestion {
+            header: "Backend".to_string(),
+            question: "Select the coding backend".to_string(),
+            options: vec![option("claude"), option("claude-acp"), option("cursor")],
+            multi_select: false,
+            allow_other: false,
+        }
+    }
+
     fn make_presenter() -> Presenter {
         let tmp = tempfile::tempdir().expect("make_presenter: create temp dir");
         Presenter::new(
@@ -724,7 +740,7 @@ mod tests {
     fn show_backend_selection_transitions_to_select_mode() {
         // Given
         let mut p = make_presenter();
-        let q = crate::backend::backend_selection_question();
+        let q = a_backend_selection_question();
 
         // When
         p.show_backend_selection(q, 0);
@@ -816,7 +832,12 @@ mod tests {
     fn backend_selection_answer_transitions_to_feature_input() {
         // Given
         let mut p = make_presenter();
-        let q = crate::backend::backend_selection_question();
+        let q = a_backend_selection_question();
+        p.set_backend_default_models(
+            [("cursor".to_string(), "composer-2.5".to_string())]
+                .into_iter()
+                .collect(),
+        );
         p.show_backend_selection(q, 0);
 
         // When
@@ -833,7 +854,12 @@ mod tests {
     fn backend_selection_answer_claude_acp() {
         // Given
         let mut p = make_presenter();
-        let q = crate::backend::backend_selection_question();
+        let q = a_backend_selection_question();
+        p.set_backend_default_models(
+            [("claude-acp".to_string(), "opus".to_string())]
+                .into_iter()
+                .collect(),
+        );
         p.show_backend_selection(q, 0);
 
         // When
@@ -1080,7 +1106,6 @@ mod tests {
     #[test]
     fn start_slash_restart_unblocks_workflow_waiting_for_first_feature_input() {
         use crate::presenter::presenter_test_recipe::EmptyPresenterTestRecipe;
-        use crate::{AnyBackend, StubBackend};
 
         // Given
         let tmp_guard = tempfile::tempdir().unwrap();
@@ -1095,7 +1120,7 @@ mod tests {
             tmp.clone(),
         )
         .with_recipe_resolver(resolver);
-        let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+        let backend = SharedBackend::stub();
         p.start_workflow(
             backend,
             tmp.clone(),

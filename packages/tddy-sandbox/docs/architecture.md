@@ -53,12 +53,22 @@ These three relay defects (the missing acknowledgement and the two held senders)
 (`#provider-route` 9/9) at the developer's request, because the jail acceptance suites that node adds
 could not finish without them.
 
-**Agent kinds:** `--agent-kind` is `claude` (default), `cursor`, `opencode` or `muse`. `opencode` and
-`muse` run in the same PTY as Claude Code (`harness_pty.rs`). Their argv comes from the CLI harness
-descriptors the host uses (`tddy_agent_backend::cli_harness`), so a jailed session starts exactly as
-an unsandboxed one does; both refuse a blank `--model`. `--resume` continues the harness's own last
-session. A provider route's secrets reach the agent child through the `TDDY_SECRET_<NAME>` files, and
-its files are written owner-only into the scratch (`tddy-sandbox-recipes`, `route_files.rs`).
+**No agent modes.** The runner execs an `--exec-plan`, runs a confined action (`--pty-command`), or
+serves `--workspace-tools`, and refuses anything else (`nothing to run`). It has no agent flag:
+`--agent-kind`, `--claude-binary`, `--agent-binary`, `--claude-arg`, `--agent-arg`,
+`--permission-mode`, `--dangerously-skip-permissions`, `--resume`, `--append-system-prompt-file` and
+`--mcp-log-level` are rejected by the parser (`runner_cli_surface.rs`). Every coding agent, Claude
+Code, Cursor, OpenCode and Muse included, is a tool plan its launcher renders from the agent's spec
+(`tddy-coding-agent-specs`). A provider route's secrets reach the child through the
+`TDDY_SECRET_<NAME>` files, and its files are written owner-only into the scratch
+(`tddy-sandbox-recipes`, `route_files.rs`). The runner has no `--model` flag: the
+parser refuses one, since what a confined agent runs on is its exec plan's argv.
+
+**Shutdown.** A jail that runs one process (an exec plan or a confined action) shuts its server down
+about 300 ms after that process exits. The exit wait runs on a detached thread, not on a
+`spawn_blocking` task: the runtime waits for its blocking tasks when it shuts down. So a server that
+returned first (an stdio host going away, or the runner's task being dropped) would otherwise keep
+the runner alive and the PTY open while the process kept running.
 
 ### Control-channel transport
 
@@ -68,7 +78,8 @@ but not runtime-verified — no Linux dev box). `--stdio` serves `SandboxService
 (`Echo`/`EchoStream`/`SessionChannel`) over the jailed process's own piped stdin/stdout instead of
 a gRPC socket, via `tddy-rpc`/`tddy-stdio`. `tddy_sandbox_darwin::spawn_plan` and
 `tddy_sandbox_cgroups::spawn_plan` both pipe stdin/stdout (instead of redirecting stdout to an
-egress log, on macOS) when `--stdio` is present in the command; `SandboxHandle::take_stdio()`
+egress log, on macOS) when the plan is marked `SandboxPlan.stdio`. The backends read the transport
+from the plan, never from the runner's argv; `SandboxHandle::take_stdio()`
 exposes the piped (blocking) `std::process::ChildStdin`/`ChildStdout`;
 `tddy_daemon::sandbox_session::bridge_sandbox_stdio` converts them to async via
 `tokio::net::unix::pipe` and hosts an `RpcService` endpoint over them. `run_host_relay` is
@@ -86,9 +97,8 @@ jail. Its fake agent is a script that ignores its argv and runs `exec /bin/sleep
 `/bin/sleep` handed claude's argv rejected it and exited at once, and the host stops collecting frames
 after `SessionEnded`, so the tool call the test makes never came back. The jail's process group is
 terminated when the test ends, on a failure as much as on a pass, so no runner outlives it. `tddy-daemon-rpc`'s
-`in_jail_conversation_acceptance` had the same fixture (`--claude-binary /bin/sleep`), failed the same
-way and left a runner behind; it now uses the same script and arms the same guard right after the
-spawn.
+`in_jail_conversation_acceptance` uses the same script, through an exec plan, and arms the same guard
+right after the spawn.
 
 The sandbox-runner's own tonic gRPC server is retained as an independent transport (unaffected by
 the above) for `tddy-sandbox-app`'s standalone demo path and `sandbox_action.rs`'s separate
@@ -166,6 +176,26 @@ The egress shim exists exactly when `--egress-shim-port` asks for one, and its p
 reaches the tool engine's subprocesses, which is what lets a jailed `cargo` or `bun` fetch through
 the host's CONNECT relay with TLS still end-to-end.
 
+### The `--exec-plan` jail: a process the runner knows nothing about
+
+`tddy-sandbox-runner --exec-plan <file>` runs one process the host rendered: the file is an
+`ExecPlan { argv, env, files, egress_shim }` (`tddy_sandbox_runner::exec_plan`), written by the
+daemon's jail launcher at `<session>/sandbox/exec-plan.json`. Boot, the `SessionChannel` server, the
+egress shim and the in-jail tool-IPC server are the runner's shared body (`run_sandbox_runner_inner`);
+what the plan decides is the PTY:
+
+- the plan's `files` are written at their jail paths, creating parent directories;
+- the child's environment is replaced, not inherited: the runner's own minus every `TDDY_SANDBOX_*`
+  control variable, plus the plan's `env` with each `TDDY_SECRET_<NAME>` resolved to `<NAME>` and its
+  file unlinked (`resolve_secret_envs`), plus — when `egress_shim` is
+  set and the policy started a shim — `HTTPS_PROXY` / `HTTP_PROXY` in both casings with `NO_PROXY`
+  bypassing loopback (`ExecPlan::child_env`);
+- the jail shuts down shortly after that one process exits, as the confined-action mode does.
+
+`--exec-plan` conflicts with `--workspace-tools`. An empty `argv` or an unreadable plan fails the
+boot through the failure marker. Product contract:
+[Sandbox builder § Jail sections](../../../docs/ft/coder/sandbox-builder.md#jail-sections).
+
 ### Codebase modes: which side of the jail the agent is on
 
 `tddy-sandbox-app` places the agent and the checkout independently:
@@ -193,7 +223,7 @@ Product behaviour is [sandboxed-codebase-mode.md](../../../docs/ft/coder/sandbox
 | `env` | Clean environment (`HOME`/`TMPDIR` redirected into scratch) |
 | `profile_path` | Rendered SBPL file path |
 | `loopback_allow_ports` | Loopback TCP ports allowed in SBPL (gRPC + egress shim) |
-| `ipc_socket` | Short out-of-tree AF_UNIX path for tool IPC |
+| `ipc_socket` | Short out-of-tree AF_UNIX path for tool IPC: `SandboxSpec::short_ipc_socket_path(session_id)` is `<canonical temp dir>/tddy-<FNV-1a 64 of the whole session id, 16 hex digits>-<daemon pid>.sock` — the whole id, since a UUIDv7's leading characters are its millisecond timestamp and two sessions started together share them; fixed-length, so any session id stays under macOS's 104-byte `sun_path` |
 
 ## Sandbox builder (explicit plan)
 
@@ -209,10 +239,12 @@ allow-lists:
 | `MountSpec { host, jail, writable }` | A host directory made available in the jail. macOS grants read (+write+exec when `writable`) at the real path (no remap); Linux bind-mounts it (rw when `writable`). |
 | `CopySpec { src, dest, optional, mode }` | A file copied into the writable jail tree before spawn. |
 | `SymlinkSpec { link, target }` | A symlink created inside the jail tree. |
-| `SecretSpec { env_name, source }` | Out-of-band secret: written to a `0600` `scratch/.secrets/<NAME>` file referenced by `TDDY_SECRET_<NAME>`; the value never enters the broad env or `sandbox-exec` argv. The runner reads it and sets it on the inner `claude` child only, then unlinks. |
+| `SecretSpec { env_name, source }` | Out-of-band secret: written to a `0600` `scratch/.secrets/<NAME>` file referenced by `TDDY_SECRET_<NAME>`; the value never enters the broad env or `sandbox-exec` argv. The runner reads it and sets it on the confined child only, then unlinks. `SandboxBuilder::secret` adds one before `build()`; `SandboxPlan::add_secret` adds one to a plan assembled before its secrets were known (a tool jail, whose secrets come from the tool's definition). |
 | `PolicySpec` | dynamic-code-generation, process-fork, mach-lookup, sysctl-read, pseudo-tty, `process-exec*` paths. |
 | `NetworkSpec { loopback_allow_ports, allow_oauth_inbound }` | Loopback TCP allows; `allow_oauth_inbound` permits the ephemeral OAuth callback listener. |
 | `ResourceLimits` | cgroup v2 memory/cpu/pids (Linux). |
+| `context_dir: Option<PathBuf>` | The directory inside the writable tree that holds the confined process's guidance files and stays read-only to it. Seatbelt emits the write deny for it; the cgroups backend carries the field and adds no bind (`docs/dev/todo/2026-11-03-cgroups-has-no-context-dir-carve-out.md`). Set with `SandboxBuilder::context_dir`. No backend reads `--context-dir` out of the command. |
+| `stdio: bool` | The confined process speaks RPC over its stdin/stdout, so both are piped back to the caller (`SandboxHandle::take_stdio`). Set with `SandboxBuilder::stdio`. No backend sniffs `--stdio` from the command. |
 
 **Strict reads (macOS):** `render_plan(&SandboxPlan)` emits an explicit read allow-list (always
 including the `(literal "/")` dyld-cache root) and **no blanket `(allow file-read*)`**. The audited
@@ -220,18 +252,20 @@ read set lives in one place — `claude_spawn::system_baseline_reads` / `claude_
 also folds in toolchain dirs and the `claude` binary's `otool -L` deps). Materialization of copies,
 symlinks, and secrets is shared (`materialize.rs`). Backends consume the plan via
 `tddy_sandbox_darwin::{render_plan, spawn_plan}` and `tddy_sandbox_cgroups::{plan_to_bind_mounts,
-spawn_plan}`; the daemon's `build_sandbox_plan` builds it from the Claude recipe + per-spawn `mounts`.
+spawn_plan}`; the daemon's `build_sandbox_plan` builds it from a generic recipe, the tool definition's
+jail grants and the per-spawn `mounts`.
 
 **Env:** `default_runner_env` (shared) produces the clean runner env (`HOME`/`TMPDIR`/`PATH`/… plus
 `CLAUDE_CODE_TMPDIR` so Claude's `/tmp/claude-$UID` runtime dir lands in writable scratch).
 
 ## Context dir
 
-`SandboxContextDir` copies the target repo's **agent configuration** into a tree the jailed agent reads as its working directory, and **prepends** `MANAGED_CODEBASE_PREAMBLE` (same "Managed Codebase" notice as managed-codebase mode) to `CLAUDE.md` and `AGENTS.md`. In managed-codebase mode the host worktree is reached only via MCP tools — optionally with one or more [specialized agents](../../../docs/ft/coder/specialized-subagents.md) wired in, if `tddy-sandbox-app --specialized-agent` was given. Alternatively a caller may mount the repo into the jail (`MountSpec`, e.g. `tddy-sandbox-app --repo`, read-write) and set the runner's `--cwd` so `claude` starts in the real project tree.
+`SandboxContextDir` copies the target repo's **agent configuration** into a tree the jailed agent reads as its working directory, and **prepends** `MANAGED_CODEBASE_PREAMBLE` (same "Managed Codebase" notice as managed-codebase mode) to `CLAUDE.md` and `AGENTS.md`. In managed-codebase mode the host worktree is reached only via MCP tools — optionally with one or more [specialized agents](../../../docs/ft/coder/specialized-subagents.md) wired in, if `tddy-sandbox-app --specialized-agent` was given. Alternatively a caller may mount the repo into the jail (`MountSpec`, e.g. `tddy-sandbox-app --repo`, read-write) and set the runner's `--cwd` so the agent starts in the real project tree.
 
 **What is copied is a per-backend glob allow-list**, not a fixed set of names: `create(source, globs)` takes the row `tddy_core::backend::context_globs_for_agent` returns for the session's agent, so a Cursor session gets `.cursor/**` and a Claude session does not. Matching goes through `matches_context_globs` (`context_manifest`), which is the single predicate every consumer shares — the copier here, the manifest walk, the daemon's reader and the syncer's delete path. `CONTEXT_EXCLUDE_GLOBS` narrows it further; `.claude/settings.local.json` is withheld because the daemon replaces that file wholesale on a managed session. **Symlinks travel as links** (`context_manifest::links`, `::walk`): an allow-listed link — a glob names its path, or it is the root of a `dir/**` glob — is listed with its root-relative target and recreated by the consumer; the walk never descends it. Its target is pulled in one hop even when no glob names it, but only what `git check-ignore` does not report ignored (`context_manifest::git_ignore`, one batched query per walk stage, failing closed), and never a target that escapes the root or is withheld at any depth by `CONTEXT_EXCLUDE_GLOBS` / `CONTEXT_SECRET_GLOBS`. `is_withheld_through_a_link` withholds a file readable under an excluded name through *any* travelling link. A link at a preamble path is followed instead, listed as a file carrying its target's bytes. `context_reach` is the walk's answer the daemon's reader asks, so the two cannot disagree, and `prepare_context_write` is the guard every writer — this copier included — goes through: each parent component a real directory, its canonical path exactly the logical one. Product contract: [agent-context-sync.md](../../../docs/ft/daemon/agent-context-sync.md).
 
-**The tree is no longer chmod 0444.** Continuous re-sync has to write into the live directory, and a file mode cannot distinguish the host-side syncer (which must write) from the jailed agent (which must not). On darwin the profile now emits `(deny file-write* (subpath <context_dir>))` *after* the project-root allow — seatbelt is last-match-wins, and the context dir sits inside `project_root`, so without that rule the mode was the only thing holding it. The deny is stricter than the mode it replaces: 0444 left directory modes alone, so an agent could still create new files.
+**The tree is no longer chmod 0444.** Continuous re-sync has to write into the live directory, and a file mode cannot distinguish the host-side syncer (which must write) from the jailed agent (which must not). On darwin the profile emits `(deny file-write* (subpath <context_dir>))`, for the plan's
+`SandboxPlan.context_dir`, *after* the project-root allow — seatbelt is last-match-wins, and the context dir sits inside `project_root`, so without that rule the mode was the only thing holding it. The deny is stricter than the mode it replaces: 0444 left directory modes alone, so an agent could still create new files.
 
 `managed_codebase_preamble(replacements)` renders each agent's tool replacements into the preamble: replaced tools get a per-agent delegation clause (`subagent_new_session`/`subagent_prompt`, plus a note that a prompt still running after its grace period answers `{responseId, pending: true}` and is collected with `subagent_await`), except a replaced **`Shell`**, which gets its own paragraph describing the session-action surface (`request_action` authored by the replacing agent, `list_actions`, `invoke_action`) — see [no-bash-mode.md](../../../docs/ft/coder/no-bash-mode.md).
 
@@ -246,7 +280,7 @@ subtree) — `spawn` returns `SandboxError::Unsupported`. Callers map this to gR
 
 ## Consumers
 
-- **`tddy-daemon`**: `start_sandboxed_claude_cli_session`, `sandbox_session.rs`
+- **`tddy-daemon`**: `start_sandboxed_cli_harness_session` (`tddy-agent-launch`), `sandbox_session.rs`
 - **`tddy-tools`**: `sandbox-runner` subcommand (in-jail entrypoint)
 
 ## See also

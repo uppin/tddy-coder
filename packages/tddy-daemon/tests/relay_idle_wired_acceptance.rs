@@ -11,7 +11,7 @@ use tddy_daemon::config::DaemonConfig;
 use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_rpc::Request;
 use tddy_service::proto::catalog::{CatalogService, ListToolsRequest};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
 
@@ -33,7 +33,8 @@ fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> TestDaemon 
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&DaemonConfig::default()),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
+            tddy_agent_launch::host_coding_agents::no_coding_agents(),
         )
         .with_idle_tracker(tracker),
     )
@@ -44,9 +45,12 @@ fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> TestDaemon 
 #[tokio::test]
 async fn rpc_call_bumps_idle_tracker_so_shutdown_is_not_triggered() {
     // Given
-    // Use a 1ms timeout and let it expire before the RPC call.
-    let tracker = Arc::new(IdleTimeoutTracker::new(Duration::from_millis(1)));
-    std::thread::sleep(Duration::from_millis(10));
+    // Let the timeout expire before the RPC call. It is long enough that the check after the call
+    // cannot itself outlive it: with a 1 ms timeout, any scheduling delay between the RPC's bump and
+    // `should_shutdown` read as "the RPC never bumped it".
+    let timeout = Duration::from_millis(500);
+    let tracker = Arc::new(IdleTimeoutTracker::new(timeout));
+    std::thread::sleep(timeout + Duration::from_millis(100));
 
     assert!(
         tracker.should_shutdown(),

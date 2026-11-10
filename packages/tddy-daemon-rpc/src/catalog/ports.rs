@@ -54,8 +54,8 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
         log::debug!("list_agents RPC: mapping config allowlist to AgentInfo");
         let agents = listed_agents(
             &self.config,
-            &self.tddy_data_dir,
-            self.model_registry.as_deref(),
+            &self.agents.tddy_data_dir,
+            self.agents.model_registry.as_deref(),
         )
         .await?;
         log::info!("list_agents RPC: returning {} agent(s)", agents.len());
@@ -109,29 +109,14 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
         // resolves it, so the impersonated child execs a fully-qualified binary instead of doing a
         // PATH lookup that lacks the install dir. Only an absolute path is forwarded — a bare-name
         // resolution keeps the existing behavior (no path flag).
-        let listing_binary = if agent == "cursor" {
-            Some(tddy_daemon_kernel::config::resolve_cursor_binary_path(
-                &self.config,
-            ))
-        } else {
-            tddy_core::cli_harness::cli_harness(listing_harness_session(&agent))
-                .filter(|harness| {
-                    matches!(
-                        harness.models,
-                        tddy_core::cli_harness::CliModelSource::ListedByBinary(_)
-                    )
-                })
-                .map(|harness| {
-                    self.config.cli_harness_binary(
-                        harness.session_type,
-                        harness.default_binary,
-                        harness.binary_env,
-                    )
-                })
-        }
-        .filter(|path| std::path::Path::new(path).is_absolute())
-        .map(std::path::PathBuf::from);
-        let probe_args = list_models_probe_args(&agent, listing_binary.as_deref());
+        // The binary is the agent spec's, resolved on this host (`#agent-tools 19/19`); an agent whose
+        // spec cannot be resolved here is probed with no path flag.
+        let listing_binary = self.listing_binary(&agent);
+        let probe_args = list_models_probe_args(
+            &agent,
+            listing_binary.as_deref(),
+            &self.agents.tddy_data_dir.join("tools"),
+        );
         let probe = tokio::task::spawn_blocking(move || {
             spawner::run_capture_as_user(&os_user, &tools_path, &probe_args)
         })
@@ -170,8 +155,11 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
     ) -> Result<Response<ListSubagentsResponse>, Status> {
         log::debug!("list_subagents RPC: resolving agent defs");
         let daemon_instance_id = local_instance_id_for_config(&self.config);
-        let defs =
-            resolvable_agent_defs(&self.tddy_data_dir, self.model_registry.as_deref()).await?;
+        let defs = resolvable_agent_defs(
+            &self.agents.tddy_data_dir,
+            self.agents.model_registry.as_deref(),
+        )
+        .await?;
         let resolved = defs.len();
         let mut subagents: Vec<CatalogSubagentInfo> = defs
             .into_iter()
@@ -184,10 +172,11 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
             })
             .collect();
         subagents.extend(coding_agent_rows(
-            &self.tddy_data_dir,
+            &self.agents.tddy_data_dir,
             &self.config,
             &daemon_instance_id,
             &subagents,
+            &self.agents.coding_agents.agents_shared(),
         ));
         // An empty answer has three very different causes — this daemon has no defs, its registry
         // was never wired in, or a def was dropped on the way out — and "returning 0" told them
@@ -198,8 +187,8 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
              model registry {}]: {:?}",
             subagents.len(),
             resolved,
-            self.tddy_data_dir.join("agents").display(),
-            if self.model_registry.is_some() {
+            self.agents.tddy_data_dir.join("agents").display(),
+            if self.agents.model_registry.is_some() {
                 "attached"
             } else {
                 "absent"
@@ -210,12 +199,21 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
     }
 }
 
-/// The CLI harness whose binary an agent's model probe runs. The `opencode` ACP agent runs the binary
-/// the `opencode-cli` harness lists with (`opencode acp` and `opencode models`), so it resolves that
-/// harness's binary; every other agent or session type is its own harness, or none.
-fn listing_harness_session(agent: &str) -> &str {
-    match agent {
-        "opencode" => "opencode-cli",
-        other => other,
+impl CatalogRpcHandler {
+    /// The binary `agent`'s model probe is handed: the one its spec resolves to on this host, for the
+    /// agents whose models are listed by their own binary (Cursor, and the CLI harnesses that ask
+    /// theirs). Only an absolute path is forwarded.
+    fn listing_binary(&self, agent: &str) -> Option<std::path::PathBuf> {
+        // An agent lists its models by its own binary when its spec declares a
+        // `models.list_command`; its catalogue is otherwise its spec's curated list, which
+        // the probe answers without a binary.
+        let agents = &self.agents.coding_agents;
+        let spec = agents
+            .agents()
+            .get(agent)
+            .or_else(|| agents.agents().for_session_type(agent))?;
+        spec.agent.models.list_command.as_ref()?;
+        let binary = agents.resolve(&spec.id, None).ok()?.tool.binary;
+        binary.is_absolute().then_some(binary)
     }
 }

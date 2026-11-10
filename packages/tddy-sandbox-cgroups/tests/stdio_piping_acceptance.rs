@@ -60,6 +60,8 @@ fn spawn_plan_pipes_stdin_and_stdout_when_stdio_flag_is_present() {
         limits: ResourceLimits::default(),
         stdin: None,
         cgroup: Default::default(),
+        context_dir: None,
+        stdio: false,
     };
 
     // When

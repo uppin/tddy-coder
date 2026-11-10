@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tddy_core::session_metadata::{read_session_metadata, write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 use tddy_service::proto::session::{
@@ -23,6 +23,74 @@ type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 const VALID_TOKEN: &str = "valid-token";
+
+/// What the old argv builder produced, now rendered from the `claude` YAML spec's `run.argv`
+/// with the production binding (blank values trimmed away, as `harness_template_params`
+/// binds them): binary, model, session, permissions, prompt.
+#[allow(clippy::too_many_arguments)]
+fn spec_claude_argv(
+    binary: &str,
+    model: &str,
+    session_id: &str,
+    prompt: Option<&str>,
+    permission_mode: Option<&str>,
+    dangerously_skip_permissions: bool,
+    resume: bool,
+) -> Vec<String> {
+    let mut flags: Vec<&str> = Vec::new();
+    if resume {
+        flags.push("resume");
+    }
+    if dangerously_skip_permissions {
+        flags.push("dangerously_skip_permissions");
+    }
+    tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+        .get("claude")
+        .expect("the claude spec loads")
+        .render_run_argv(
+            std::path::Path::new(binary),
+            &[
+                ("model", model.trim()),
+                ("session_id", session_id),
+                (
+                    "permission_mode",
+                    permission_mode.map(str::trim).unwrap_or(""),
+                ),
+                ("prompt", prompt.map(str::trim).unwrap_or("")),
+            ],
+            &flags,
+        )
+        .expect("the claude argv renders")
+}
+
+/// The launch argv a `claude` session runs, rendered from its YAML spec with the stub as its
+/// binary: the manager spawns what it is given, so the argv these tests assert on comes from
+/// the spec (`packages/tddy-coding-agent-specs/specs/claude.yaml`), as production renders it.
+fn a_claude_argv(
+    stub: &std::path::Path,
+    session_id: &str,
+    permission_mode: Option<&str>,
+    resume: bool,
+) -> Vec<String> {
+    let mut flags: Vec<&str> = Vec::new();
+    if resume {
+        flags.push("resume");
+    }
+    tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()
+        .get("claude")
+        .expect("the claude spec loads")
+        .render_run_argv(
+            stub,
+            &[
+                ("model", TEST_MODEL),
+                ("session_id", session_id),
+                ("permission_mode", permission_mode.unwrap_or("")),
+            ],
+            &flags,
+        )
+        .expect("the claude argv renders")
+}
+
 const TEST_MODEL: &str = "claude-opus-4-8";
 const TEST_PROJECT_ID: &str = "test-project";
 // Safety-net ceiling, not an expected duration: `wait_for_capture_contains` returns the instant
@@ -41,39 +109,45 @@ fn current_os_user() -> String {
         .into_owned()
 }
 
-fn write_config_with_claude_cli_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+/// A daemon config, and the coding agents the host installs: `claude` is the stub.
+type AConfigAndItsAgents = (
+    DaemonConfig,
+    Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+);
+
+fn write_config_with_claude_cli_binary(
+    stub_binary: &str,
+) -> (tempfile::TempDir, AConfigAndItsAgents) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
-claude_cli:
-  binary_path: {stub_binary}
-"#
-    );
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(std::path::Path::new(&(config_path)).parent().expect("a config directory").join("users.yaml"), format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n- github_user: \"{user}\"\n  os_user: \"{user}\"\n- github_user: \"{user}\"\n  os_user: \"{user}\"\n- github_user: \"{user}\"\n  os_user: \"{user}\"\n")).unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
-    (dir, config)
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+        "claude",
+        std::path::Path::new(stub_binary),
+    )]);
+    (dir, (config, agents))
 }
 
-fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+fn minimal_service(config: AConfigAndItsAgents, sessions_base: PathBuf) -> DaemonSessionHost {
     minimal_service_with_manager(
         config,
         sessions_base,
-        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
     )
 }
 
 fn minimal_service_with_manager(
-    config: DaemonConfig,
+    (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
-    manager: Arc<tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager>,
+    manager: Arc<tddy_session_lifecycle::claude_cli_session::CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -96,6 +170,7 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        agents,
     )
 }
 
@@ -353,20 +428,24 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
     // No changeset.yaml — intentionally absent to test the claude-cli fallback path.
 
     let user = current_os_user();
-    let config_yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
-"#
-    );
+    let config_yaml = r#"
+"#;
     let cfg_dir = tempfile::tempdir().unwrap();
     let cfg_path = cfg_dir.path().join("d.yaml");
     std::fs::write(&cfg_path, config_yaml).unwrap();
+    std::fs::write(
+        cfg_dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&cfg_path).unwrap();
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+        "claude",
+        std::path::Path::new("/bin/cat"),
+    )]);
 
     let sessions_base = sessions_tmp.path().join(current_os_user());
-    let service = minimal_service(config, sessions_base);
+    let service = minimal_service((config, agents), sessions_base);
 
     // When
     let sessions = service
@@ -498,18 +577,22 @@ async fn claude_cli_start_session_requires_model() {
     // Given
     let sessions_tmp = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let config_yaml = format!(
-        r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
-"#
-    );
+    let config_yaml = r#"
+"#;
     let cfg_dir = tempfile::tempdir().unwrap();
     let cfg_path = cfg_dir.path().join("d.yaml");
     std::fs::write(&cfg_path, config_yaml).unwrap();
+    std::fs::write(
+        cfg_dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&cfg_path).unwrap();
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+        "claude",
+        std::path::Path::new("/bin/cat"),
+    )]);
+    let service = minimal_service((config, agents), sessions_tmp.path().to_path_buf());
 
     // When
     let err = service
@@ -629,6 +712,155 @@ async fn claude_cli_start_session_requires_project() {
     );
 }
 
+/// A daemon host over `sessions_base` that was given **no** coding agents — the host a daemon
+/// whose `<tddyhome>/tools` registry failed to load runs as. Nothing else differs from
+/// [`minimal_service`].
+fn a_host_without_coding_agents(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+    let tddy_data_dir = sessions_base.clone();
+    let sessions_base_resolver: SessionsBaseResolver =
+        Arc::new(move |_| Some(sessions_base.clone()));
+    let resolved_user = current_os_user();
+    let user_resolver: UserResolver =
+        Arc::new(move |token| (token == VALID_TOKEN).then(|| resolved_user.clone()));
+    DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        tddy_data_dir,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(CliSessionManager::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
+    )
+}
+
+/// A host start of `session_type` on a registered project, naming its branch.
+fn a_cli_start_of(session_type: &str) -> StartSessionRequest {
+    StartSessionRequest {
+        session_token: VALID_TOKEN.to_string(),
+        project_id: TEST_PROJECT_ID.to_string(),
+        session_type: session_type.to_string(),
+        model: TEST_MODEL.to_string(),
+        branch_worktree_intent: "new_branch_from_base".to_string(),
+        new_branch_name: format!("{session_type}-work"),
+        ..Default::default()
+    }
+}
+
+/// A machine with no `claude` anywhere: a `$HOME` whose `.local/bin` is empty, one `PATH`
+/// directory that does not hold it, and `tddy-tools` named by `TDDY_TOOLS_BINARY`. Nothing of the
+/// real machine — whose `~/.local/bin/claude` a developer's laptop has — reaches resolution.
+struct AMachineWithoutClaude {
+    home: PathBuf,
+    path_dir: PathBuf,
+    tddy_tools: PathBuf,
+    _dir: tempfile::TempDir,
+}
+
+fn a_machine_without_claude() -> AMachineWithoutClaude {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let home = root.join("home");
+    std::fs::create_dir_all(home.join(".local/bin")).unwrap();
+    let path_dir = root.join("usr/local/bin");
+    std::fs::create_dir_all(&path_dir).unwrap();
+    let tddy_tools = root.join("install/tddy-tools");
+    std::fs::create_dir_all(tddy_tools.parent().unwrap()).unwrap();
+    std::fs::write(&tddy_tools, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&tddy_tools, std::fs::Permissions::from_mode(0o755)).unwrap();
+    AMachineWithoutClaude {
+        home,
+        path_dir,
+        tddy_tools,
+        _dir: dir,
+    }
+}
+
+impl tddy_actions::tool::ToolHost for AMachineWithoutClaude {
+    fn env_var(&self, name: &str) -> Option<String> {
+        match name {
+            "HOME" => Some(self.home.to_string_lossy().into_owned()),
+            "TDDY_TOOLS_BINARY" => Some(self.tddy_tools.to_string_lossy().into_owned()),
+            _ => None,
+        }
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        vec![self.path_dir.clone()]
+    }
+
+    fn is_executable_file(&self, path: &std::path::Path) -> bool {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+}
+
+/// A daemon.yaml with no agent section, as `DaemonConfig::load` reads one at start-up.
+fn a_config_without_agent_sections() -> (tempfile::TempDir, DaemonConfig) {
+    let dir = tempfile::tempdir().unwrap();
+    let user = current_os_user();
+    let config_path = dir.path().join("daemon.yaml");
+    std::fs::write(&config_path, "").unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
+    let config = DaemonConfig::load(&config_path).expect("config must load");
+    (dir, config)
+}
+
+/// **a_claude_cli_start_whose_binary_is_not_found_…** (`#agent-tools 19/19`): the daemon's host
+/// finds `claude` through `TDDY_CLAUDE_BINARY`, then `$HOME/.local/bin`, then `PATH` — and when
+/// none holds it, the start is refused naming the agent, its spec's `binary.env` and every place
+/// searched. There is no daemon.yaml `claude_cli.binary_path` to fall back to, and no "as-is" bare
+/// `claude` handed to the spawn.
+#[tokio::test]
+async fn a_claude_cli_start_whose_binary_is_not_found_is_refused_naming_its_binary_env() {
+    // Given — a registered project, a daemon.yaml with no agent section, and no claude anywhere
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let sessions_base = sessions_tmp.path().join(current_os_user());
+    register_project(&sessions_base.join("projects"), repo_dir.path());
+    let machine = Arc::new(a_machine_without_claude());
+    let (_cfg_dir, config) = a_config_without_agent_sections();
+    let registry = tddy_coding_agent_specs::load_agent_registry(&sessions_base.join("tools"))
+        .expect("the built-in agents load");
+    let host = a_host_without_coding_agents(config, sessions_base.clone()).with_coding_agents(
+        Arc::new(tddy_agent_launch::spec_launch::HostCodingAgents::new(
+            registry,
+            tddy_agent_launch::host_coding_agents::daemon_tool_host(machine.clone()),
+        )),
+    );
+
+    // When
+    let started = host
+        .start_session(Request::direct(a_cli_start_of("claude-cli")))
+        .await
+        .map(|response| response.into_inner().session_id);
+
+    // Then — refused, naming claude, TDDY_CLAUDE_BINARY and the host's search path
+    assert_eq!(
+        started.map_err(|status| (status.code, status.message)),
+        Err((
+            Code::FailedPrecondition,
+            format!(
+                "tool claude is unavailable: searched TDDY_CLAUDE_BINARY (unset), PATH ({}:{})",
+                machine.home.join(".local/bin").display(),
+                machine.path_dir.display(),
+            ),
+        ))
+    );
+}
+
 // ---------------------------------------------------------------------------
 // initial_prompt tests
 // ---------------------------------------------------------------------------
@@ -638,7 +870,7 @@ async fn claude_cli_start_session_requires_project() {
 #[test]
 fn build_claude_argv_includes_positional_prompt_when_present() {
     // When / Then
-    let argv = ClaudeCliSessionManager::build_claude_argv(
+    let argv = spec_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
         "test-session-id",
@@ -681,7 +913,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
 
     // When / Then
     assert_eq!(
-        ClaudeCliSessionManager::build_claude_argv(
+        spec_claude_argv(
             "/usr/local/bin/claude",
             "claude-opus-4-8",
             "sid",
@@ -694,7 +926,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
         "None initial_prompt must produce no positional arg"
     );
     assert_eq!(
-        ClaudeCliSessionManager::build_claude_argv(
+        spec_claude_argv(
             "/usr/local/bin/claude",
             "claude-opus-4-8",
             "sid",
@@ -707,7 +939,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
         "empty string must produce no positional arg"
     );
     assert_eq!(
-        ClaudeCliSessionManager::build_claude_argv(
+        spec_claude_argv(
             "/usr/local/bin/claude",
             "claude-opus-4-8",
             "sid",
@@ -730,16 +962,28 @@ async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
     let stub_path = write_echo_argv_script(stub_dir.path());
 
     let worktree_dir = tempfile::tempdir().unwrap();
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
 
     // When
     let handle = manager
-        .start(
+        .start_with_options(
             "test-session-with-prompt",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
-            stub_path.to_str().unwrap(),
+            spec_claude_argv(
+                stub_path.to_str().unwrap(),
+                TEST_MODEL,
+                "test-session-with-prompt",
+                Some("build a hello world app"),
+                None,
+                false,
+                false,
+            ),
+            "claude-cli",
             Some("build a hello world app"),
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await
@@ -769,16 +1013,28 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
     let stub_path = write_echo_argv_script(stub_dir.path());
 
     let worktree_dir = tempfile::tempdir().unwrap();
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
 
     // When
     let handle = manager
-        .start(
+        .start_with_options(
             "test-session-empty-prompt",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
-            stub_path.to_str().unwrap(),
+            spec_claude_argv(
+                stub_path.to_str().unwrap(),
+                TEST_MODEL,
+                "test-session-empty-prompt",
+                Some(""),
+                None,
+                false,
+                false,
+            ),
+            "claude-cli",
             Some(""), // empty — must not add a stray positional arg
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await
@@ -824,7 +1080,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
 
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub_path.to_str().unwrap());
 
-    let shared_manager = Arc::new(ClaudeCliSessionManager::new());
+    let shared_manager = Arc::new(CliSessionManager::new());
     let service = minimal_service_with_manager(
         config,
         sessions_tmp.path().to_path_buf(),
@@ -865,7 +1121,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
     let handle = shared_manager
         .get(&session_id)
         .await
-        .expect("session must be present in the shared ClaudeCliSessionManager after start");
+        .expect("session must be present in the shared CliSessionManager after start");
 
     let output = a_capture_showing(&handle.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 
@@ -886,16 +1142,28 @@ async fn resume_does_not_replay_initial_prompt() {
     let stub_path = write_echo_argv_script(stub_dir.path());
 
     let worktree_dir = tempfile::tempdir().unwrap();
-    let manager = ClaudeCliSessionManager::new();
+    let manager = CliSessionManager::new();
 
     // Initial start — seeds a prompt.
     let _handle1 = manager
-        .start(
+        .start_with_options(
             "test-session-resume-noreplay",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
-            stub_path.to_str().unwrap(),
+            spec_claude_argv(
+                stub_path.to_str().unwrap(),
+                TEST_MODEL,
+                "test-session-resume-noreplay",
+                Some("original prompt"),
+                None,
+                false,
+                false,
+            ),
+            "claude-cli",
             Some("original prompt"),
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await
@@ -907,7 +1175,8 @@ async fn resume_does_not_replay_initial_prompt() {
             "test-session-resume-noreplay",
             worktree_dir.path().to_path_buf(),
             "claude-opus-4-8",
-            stub_path.to_str().unwrap(),
+            a_claude_argv(&stub_path, "test-session-resume-noreplay", None, true),
+            "claude-cli",
         )
         .await
         .expect("resume must succeed");

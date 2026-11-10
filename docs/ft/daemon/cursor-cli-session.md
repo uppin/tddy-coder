@@ -18,12 +18,12 @@ As a developer, I want to start a raw Cursor Agent CLI session from the tddy web
 1. The **Create session** pane's **Session type** selector includes **Cursor Agent CLI** (alongside **Managed session** and **Claude Code CLI**). When selected:
    - The **Workflow recipe** dropdown appears when **Managed codebase** is enabled.
    - A **Model** dropdown is populated from `ListAgentModels("cursor-cli")` (curated catalog in `tddy_core::cursor_cli_models()`).
-   - The **Tool** dropdown is hidden (binary resolved from `cursor_cli.binary_path`, default `"agent"`).
+   - The **Tool** dropdown is hidden: the agent is the `cursor` tool definition (see [Launch](#launch-from-the-cursor-tool-definition)).
    - **Sandbox** and **Managed codebase** toggles are available (parity with Claude CLI).
 2. **Start New Session** issues `StartSession` with `session_type = "cursor-cli"`, the chosen `model`, and optional `sandbox`, `managed_codebase`, `recipe`, and `specialized_agents`.
 3. The daemon creates a git worktree on branch `cursor-cli/{short_id}` (auto-default when `new_branch_name` is empty).
-4. The daemon writes `<worktree>/.cursor/hooks.json` via `tddy_core::build_cursor_hooks_settings`.
-5. The daemon spawns the Cursor Agent CLI with `--model <model>` and an optional initial prompt.
+4. The daemon mints the session's Cursor chat (`agent create-chat`, the `cursor-create-chat` launch adapter) and records its id before the agent starts. The mint is bounded by 30 s: a `create-chat` that never answers is killed and the start is refused `DEADLINE_EXCEEDED`, naming the agent, the adapter and the deadline; nothing is spawned.
+5. The daemon launches the agent from `cursor.yaml`: `agent --resume <chat> --model <model> [<prompt>]`, with `<worktree>/.cursor/hooks.json` rendered for it.
 6. `StartSessionResponse` returns `session_id`; LiveKit fields are empty.
 
 ## Terminal access
@@ -39,14 +39,15 @@ The session directory `~/.tddy/sessions/<session-id>/` contains `.session.yaml` 
 - `model: <model-id>`
 - `repo_path: <worktree-absolute-path>`
 - `pid: <agent-pid>`
-- `hook_token: <per-session-uuid>`
+- `hook_token: <per-session-uuid>` (written before the agent starts: its first hook fires during the launch)
+- `cursor_chat_id: <chat-id>` (the chat every resume reattaches to)
 - `status: active`
 
 `ListSessions` shows `workflow_goal`, `workflow_state`, and `elapsed_display` as `—`, `model` as the selected model, and `agent` as `cursor-cli`.
 
 ## Resume, connect, signal, delete
 
-- **Resume** — when the agent process exits, status becomes `inactive`; **Resume** re-spawns in the existing worktree without replaying the initial prompt.
+- **Resume** — when the agent process exits, status becomes `inactive`; **Resume** relaunches the `cursor` definition on the host in the existing worktree, into the recorded chat (`--resume <cursor_chat_id>`), without replaying the initial prompt. It keeps the hooks file its start wrote. A session recorded with no chat id adopts a fresh one on its first resume and pins it.
 - **Connect** — when the process is still running, `ConnectSession` reattaches to the existing PTY.
 - **Signal** — `SignalSession` delivers to the agent PTY process.
 - **Delete** — SIGTERM, wait, remove session directory and worktree.
@@ -67,14 +68,27 @@ refusals with `sandbox`, `sandboxed_codebase` and a split placement.
 - **Resume** re-attaches while the tmux session is alive (the agent is not relaunched); otherwise it
   starts a fresh tmux session running `--resume <chat id>`.
 - **Re-attach after a restart.** The first stream, input or history read of the session's `main`
-  terminal on a daemon that has none re-attaches it, dispatched by the session type `.session.yaml`
-  records, so the main keeps its kind (`cursor-cli`). The agent is never relaunched and the recorded `pid`
+  terminal on a daemon that has none re-attaches it as the agent the session type `.session.yaml`
+  records names among the host's installed coding agents, so the main keeps its kind (`cursor-cli`).
+  A record without a session type is skipped with a warning, and a host without coding agents
+  re-attaches nothing. The agent is never relaunched and the recorded `pid`
   is unchanged.
 - cursor-cli registers no exit hook, so its pane is not kept after the agent exits.
 
 ## Activity status hooks (`.cursor/hooks.json`)
 
-At session start the daemon writes `<worktree>/.cursor/hooks.json`. Each hook invokes `tddy-tools session-hook`, which reads Cursor's stdin JSON `hook_event_name`, maps to `SessionActivityStatus`, and calls `ReportSessionStatus` on `activity.ActivityService`. The daemon validates `hook_token`, writes `activity_status` to `.session.yaml`, and surfaces it via `ListSessions`.
+At session start the `cursor-hooks-json` hooks adapter renders `<worktree>/.cursor/hooks.json`. Each hook invokes `tddy-tools session-hook --daemon-socket <socket>`, which reads Cursor's stdin JSON `hook_event_name`, maps it to `SessionActivityStatus`, and calls `ReportSessionStatus` (and `ReportAgentActivity`) on `activity.ActivityService`. The daemon validates `hook_token`, writes `activity_status` to `.session.yaml`, and surfaces it via `ListSessions`.
+
+Where the reports go:
+
+| Launch | `--daemon-socket` | Path to the daemon |
+|---|---|---|
+| Host | the agent-tool socket of the session's OS user: Tddy Desktop's one socket, or on a server daemon `<data dir>/run/<user>/daemon.sock` (owner-only; under `tddy-supervisor` the one it handed over, `/run/tddy-users/<user>/daemon.sock`) | the socket itself |
+| Jail | the in-jail tool-IPC socket | `tddy-sandbox-runner` relays the two reports (`IN_JAIL_RELAYABLE_HOOK_REPORTS`) to the facilitating daemon as host RPCs. The bridge serves them for the jail's own session only, and refuses any other session id |
+
+A hooks file is never rendered without a socket: the adapter refuses (`SlotError::NoDaemonSocket`) rather than falling back to `daemon_url`.
+
+**Server daemons** serve one daemon socket per OS user, so a host session's reports reach the daemon whichever user it runs as, and no other user can connect to it. Under `tddy-supervisor` a session user must be mapped in `users.yaml`; an unmapped one has the start refused, naming `users.yaml`, rather than started with hooks that report nowhere — see [tddy-supervisor § One socket per user](../supervisor/tddy-supervisor.md#one-socket-per-user-handed-to-the-daemon).
 
 | Cursor hook event | `activity_status` |
 |---|---|
@@ -87,35 +101,61 @@ At session start the daemon writes `<worktree>/.cursor/hooks.json`. Each hook in
 
 **`WaitingForInput`** is not produced — Cursor hooks have no permission-prompt equivalent in v1.
 
-Hooks use a fail-quiet contract (2-second reqwest timeout, exit 0 on no-op events), matching the Claude CLI hook path.
+Hooks use a fail-quiet contract (a 2-second ceiling per report, exit 0 on no-op events), matching the Claude CLI hook path.
+
+## Launch from the `cursor` tool definition
+
+Every `cursor-cli` launch — host start, host resume, re-attach, jailed start and resume — is the one generic CLI launch every agent takes, rendering the built-in `packages/tddy-coding-agent-specs/specs/cursor.yaml` (overridable whole by `<tddyhome>/tools/cursor.yaml`) through the shared launchers: `launch_host_pty` on the host, `launch_jailed` in a jail. A host without coding agents refuses the start, resume or child with `FailedPrecondition: this host has no coding agents installed`; there is no hand-built fallback.
+
+| Fact | Declared as |
+|---|---|
+| Binary | `agent`, overridable by `TDDY_CURSOR_AGENT`; a `<tddyhome>/tools/cursor.yaml` override sets `binary.command` |
+| Argv | `agent [--resume {chat_id}] [--model {model}] <slots> [{prompt}]`. When the resolved binary is the published launcher script, the bundled `node` and its `index.js` run instead (`node_launcher` / `node_entry`) — the wrapper cannot resolve its own install dir in a jail |
+| MCP | `kind: placed`, `{home}/.cursor/mcp.json`, format `cursor-mcp-json`. Rendered in a jail only, into the persistent home; a **host** launch registers no MCP server, so the user's own `$HOME/.cursor/mcp.json` is never touched |
+| Instructions | `rules_file: .cursor/rules/tddy-managed-workflow.mdc` — the managed workflow's prompt, written whole on every launch |
+| Hooks | `adapter: cursor-hooks-json` (above) |
+| Tool allow / deny / permission prompt | `unsupported`: a launch that fills one is refused, never dropped. Managed-codebase enforcement reads this — see [`2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md`](../../dev/todo/2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md) |
+| Models | default `composer-2.5`, plus a curated list |
+| Conversation | `conversation: { kind: minted, adapter: cursor-create-chat }` — the chat minted before the first start (`mint_deadline_secs`, default 30), recorded as `cursor_chat_id` and bound as `chat_id` on every launch |
+| Capabilities | `hooks`, `managed_workflow`, `requires_model`, `keep_worktree_on_delete`, `operator_notify` |
+
+The generic CLI launch serves the same needs from the spec alone: a copy of `cursor.yaml` dropped in under another id mints and records its chat, resumes it with `--resume <chat>`, writes `.cursor/hooks.json` and binds the node launcher, exactly as `cursor-cli` does ([Claude CLI session § The generic CLI spec launch](claude-cli-session.md#the-generic-cli-spec-launch-serves-claudes-needs)). A resume of a session that recorded no chat adopts a freshly minted one and records it, so every later resume continues it. Nothing in the launch compares the agent's id.
+
+Like every CLI agent, a cursor-cli agent starts from an allow-listed environment (its spec's `pass_env` names `CURSOR_API_KEY`; [Harness profiles § The agent's environment](harness-profiles.md#the-agents-environment)) and gets no `TDDY_*` variable in its process; its hooks carry the session over `--daemon-socket`, and a `tddy-tools` it runs from its shell (`notify`, or `submit` / `ask` / `transition` in a managed session) finds the session through the `.tddy/session.json` pointer the launch writes into the worktree ([Claude CLI session § The generic CLI spec launch](claude-cli-session.md#the-generic-cli-spec-launch-serves-claudes-needs)).
+
+A conversation or pr-stack child of a cursor-cli orchestrator is itself a cursor-cli session: a child runs its parent's agent.
 
 ## Telegram `/start-cursor`
 
-`/start-cursor <prompt>` follows **project → branch → model** (`tcur:` callbacks), then spawns with the prompt as a positional arg. See [telegram-session-control.md](telegram-session-control.md#start-cursor-flow).
+`/start-cursor <prompt>` pre-picks the `cursor` agent and follows **project → branch → model** — the models of `cursor.yaml` (`tcm:` callbacks) — then starts through the daemon's generic start, like a web start: the spec's argv, `.cursor/hooks.json`, and a chat minted by `cursor-create-chat` under its deadline. See [telegram-session-control.md](telegram-session-control.md#cli-agent-starts-start-agent-start-claude-start-cursor).
 
 ## Architecture
 
 ### Session type discriminant
 
-`StartSessionRequest.session_type` accepts `"cursor-cli"`. The daemon branches in `connection_service.rs` via `cursor_cli_spawn.rs`. Existing `tool` and `claude-cli` sessions are unaffected.
+`StartSessionRequest.session_type` accepts `"cursor-cli"`. Like every `*-cli` session type, it resolves through the host's coding agents (`harness_from_spec::cli_launcher`) to the generic CLI launch (`opencode_cli_spawn::start_cli_harness_session`, or `svc_start_sandboxed_cli_harness_session` when sandboxed). Existing `tool` and `claude-cli` sessions are unaffected.
 
 ### Session manager
 
-`CliSessionManager` in `packages/tddy-daemon/src/cli_session_manager.rs` (re-exported as `claude_cli_session`) handles both `claude-cli` and `cursor-cli` PTY sessions. `start_cursor()` sets `PtyHandle.kind = "cursor-cli"`.
+`CliSessionManager` in `packages/tddy-daemon/src/cli_session_manager.rs` (re-exported as `claude_cli_session`) handles both `claude-cli` and `cursor-cli` PTY sessions. `launch_host_pty` registers a Cursor PTY with `PtyHandle.kind = "cursor-cli"`.
 
 ### Hook wiring
 
-- `tddy_core::build_cursor_hooks_settings` — emits `.cursor/hooks.json` v1 (five lifecycle events).
+- `tddy_coding_agent_specs::slots::cursor::render_cursor_hooks_json` (`cursor-hooks-json`) — emits `.cursor/hooks.json` v1 (five lifecycle events), each naming the daemon socket.
 - `tddy-tools session-hook` — primary mapping from stdin `hook_event_name`; `--event` fallback for tests.
 - `tddy_core::session_activity` — unified PascalCase + camelCase hook name → status mapping shared with Claude hooks.
 
 ### Config
 
-Optional `cursor_cli:` block in `daemon.yaml`:
+`daemon.yaml` has no `cursor_cli:` block; one is refused at start-up
+([Removed `daemon.yaml` sections](systemd-install.md#removed-daemonyaml-sections)). The Cursor binary
+is `binary.command` of `cursor.yaml` (`<tddyhome>/tools/cursor.yaml` overrides it) or `TDDY_CURSOR_AGENT`;
+the Cursor home is the spec's `home.key`; the `--daemon` URL hooks carry is the daemon's
+`listen.advertise_url`, unread when `--daemon-socket` is given, which every rendered hook is.
 
-- `binary_path` — Cursor Agent CLI binary (default `"agent"`)
-- `tddy_tools_path` — path to `tddy-tools` for hook commands
-- `daemon_url` — base URL the hook posts `ReportSessionStatus` to, at `/rpc/activity.ActivityService/…` (defaults to `http://127.0.0.1:{web_port}`)
+The `cursor` spec declares the capabilities `hooks`, `requires_model`, `keep_worktree_on_delete` and
+`operator_notify`: hook status reports and operator notifications are accepted from a `cursor-cli`
+session, a model is required to start one, and `DeleteSession` leaves its worktree in place.
 
 ### Web UI
 
@@ -125,29 +165,32 @@ Cursor's agent cannot be pointed at another provider, so a cursor-cli session al
 
 ### Proto
 
-No new RPCs. `sandbox = true` with `session_type = "cursor-cli"` starts a Seatbelt (macOS) or cgroups+namespaces (Linux) sandboxed session via `start_sandboxed_cursor_cli_session`, mirroring `claude-cli`.
+No new RPCs. `sandbox = true` with `session_type = "cursor-cli"` starts a Seatbelt (macOS) or cgroups+namespaces (Linux) sandboxed session, mirroring `claude-cli`.
 
 ### Sandbox mode
 
 When `StartSession.sandbox = true`:
 
-- macOS: Seatbelt profile from `tddy-sandbox-recipes::cursor_cli` via `tddy-sandbox-runner --agent-kind cursor`.
-- Linux: rootless cgroups+user namespaces (same backend as Claude CLI).
-- MCP config: writes `$HOME/.cursor/mcp.json` inside the jail (registering `tddy-tools --mcp`). Headless approval flags (`--approve-mcps`, `--force`, `--trust`) are **not** injected by tddy — pass them explicitly via agent args when using print mode.
+- The jail is lowered from `cursor.yaml`'s generic sections by `launch_jailed`, into an exec plan `tddy-sandbox-runner` runs. No Cursor-specific flag (`--agent-kind cursor`, `--cursor-home-dir`, …) reaches the runner from the daemon, and the Claude env overlay is not applied.
+  - `home: { kind: persistent, key: cursor }` — `<tddyhome>/homes/cursor`, mounted read-write, so Cursor's refreshed login and config survive the session.
+  - `files:` — `~/.cursor/auth.json` and `~/.cursor/cli-config.json` seeded once from the host, the `agent` install mirrored, and the overlays `CURSOR_TMPDIR`, `CURSOR_SKIP_KEYCHAIN=1` and `CI=true`.
+  - `network.egress.hosts` — Cursor's API, auth and update hosts; an undeclared host is refused. A definition with no `network:` section cannot start a jail ([`2026-11-03-jail-with-no-network-section-cannot-bind-its-shim.md`](../../dev/todo/2026-11-03-jail-with-no-network-section-cannot-bind-its-shim.md)). The list is not yet verified against a live Cursor session (`TODO(cursor-cli)` in `cursor.yaml`).
+- macOS: Seatbelt. Linux: rootless cgroups+user namespaces (same backend as Claude CLI).
+- MCP config: `$HOME/.cursor/mcp.json` in the persistent home registers `tddy-tools --mcp`. Headless approval flags (`--approve-mcps`, `--force`, `--trust`) are **not** injected by tddy — pass them explicitly via agent args when using print mode.
 - Egress is confined to the SessionChannel tunnel; tool execution uses the host worktree via IPC.
 
 ### Managed codebase and specialized subagents
 
-When `managed_codebase = true`, the daemon seeds `changeset.yaml`, writes orchestration guidance to `.cursor/rules/tddy-managed-workflow.mdc` in the worktree (or prepends it to the initial prompt for non-sandbox sessions), sets `TDDY_SOCKET`, and exposes `subagent_new_session` / `prompt` / `cancel` via MCP. `specialized_agents` resolves to `TDDY_SUBAGENTS_JSON` / `TDDY_SUBAGENT` in the sandbox env overlay.
+When `managed_codebase = true`, the daemon seeds `changeset.yaml`, writes orchestration guidance to `.cursor/rules/tddy-managed-workflow.mdc` in the worktree (the definition's `rules_file`), hands `TDDY_SOCKET` to the `tddy-tools` MCP server and the session pointer (never the agent process), and exposes `subagent_new_session` / `prompt` / `cancel` via MCP. `specialized_agents` resolves to `TDDY_SUBAGENTS_JSON` / `TDDY_SUBAGENT` in the `tddy-tools` MCP server's env; the jailed agent's own process sees no `TDDY_*` variable.
 
-### Workflow `CursorBackend::invoke`
+### Workflow turns (`--agent cursor`)
 
-`CursorBackend::invoke` registers `tddy-tools --mcp` and `permission-prompt-tool` for headless tool approvals (same model as `ClaudeCodeBackend`), and exports `TDDY_SOCKET`, `TDDY_REPO_DIR`, `TDDY_SESSION_DIR`, and `TDDY_REMOTE_*` (`RemoteToolEnv`) into the invoke subprocess.
+A workflow turn is a `SpecHeadlessBackend` turn rendered from `cursor.yaml`'s `coding_agent.headless` section: `agent -p … --force --trust --approve-mcps` (`--plan` for a planning goal), the system prompt in front of the prompt, `tddy-tools --mcp` registered in `<worktree>/.cursor/mcp.json` — git-excluded while the turn runs and removed when it ends. The agent's environment carries no `TDDY_*` variable; its `tddy-tools` finds the session through the `.tddy/session.json` pointer the turn writes in the worktree (socket, repo and session directory, and the `TDDY_REMOTE_*` remote tool environment). See [tddy-agent-backend architecture](../../../packages/tddy-agent-backend/docs/architecture.md#backend-backend).
 
 ## Known follow-ups
 
-- **Jail authentication:** a sandboxed `agent` cannot reach macOS Keychain — the host (`tddy-daemon` / `tddy-sandbox-app`) is an unsigned Rust binary with no `keychain-access-group` entitlement, so `securityd` rejects `SecItem*` calls with `errSecMissingEntitlement` (-34018) and the CLI hangs/times out ("Failed to store authentication tokens: Security command failed: Security process exited with code: 36"). The sandbox env overlay (`cursor_runner_env_overlay`, applied via `build_sandboxed_cursor_runner_env`) sets `CURSOR_SKIP_KEYCHAIN=1` + `CI=true` (Cursor's own CI convention) so the agent never probes Keychain. The caller must still supply `CURSOR_API_KEY` (User API key from the Cursor dashboard — admin keys are rejected) or pre-seed `~/.cursor/auth.json` via `seed_cursor_credentials`. True Keychain *access* from the jail would require codesigning the host with `keychain-access-group` and a TCC grant — recorded as a follow-up, not pursued; the current stance is fail-closed with `CURSOR_API_KEY`/seeded `auth.json`.
-- **`resume_sandboxed_cursor_cli_session`:** sandboxed cursor-cli resume relaunch is not implemented; non-sandbox resume works via `CliSessionManager`.
+- **Jail authentication:** a sandboxed `agent` cannot reach macOS Keychain — the host (`tddy-daemon` / `tddy-sandbox-app`) is an unsigned Rust binary with no `keychain-access-group` entitlement, so `securityd` rejects `SecItem*` calls with `errSecMissingEntitlement` (-34018) and the CLI hangs/times out ("Failed to store authentication tokens: Security command failed: Security process exited with code: 36"). `cursor.yaml`'s `files:` overlays set `CURSOR_SKIP_KEYCHAIN=1` + `CI=true` (Cursor's own CI convention) so the agent never probes Keychain. The caller must still supply `CURSOR_API_KEY` (User API key from the Cursor dashboard — admin keys are rejected) or pre-seed `~/.cursor/auth.json` (seeded once into the persistent home). True Keychain *access* from the jail would require codesigning the host with `keychain-access-group` and a TCC grant — recorded as a follow-up, not pursued; the current stance is fail-closed with `CURSOR_API_KEY`/seeded `auth.json`.
+- **Jailed resume:** a sandboxed cursor-cli resume relaunches on the host PTY; a jailed resume is not implemented.
 
 ## Out of scope (v1)
 

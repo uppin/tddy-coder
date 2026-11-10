@@ -34,12 +34,16 @@ fn an_agent_printing(dir: &Path, first: &str, last: &str) -> PathBuf {
 
 async fn start_main(manager: &CliSessionManager, dir: &Path, agent: &Path) -> Arc<PtyHandle> {
     manager
-        .start(
+        .start_with_options(
             SESSION,
             dir.to_path_buf(),
             "claude-opus-4-8",
-            agent.to_str().unwrap(),
+            vec![agent.to_string_lossy().into_owned()],
+            "agent-cli",
             None,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await

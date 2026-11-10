@@ -336,7 +336,8 @@ is one the host runs is the roster's decision, because only the host knows its h
 
 - **`tddy-daemon`** (`CliManagerTerminalRoster`, in `tddy-session-lifecycle`) runs `Bash` with
   `launch.login_shell`, and resolves `Agent(kind)` through `cli_harness(kind)` — `INVALID_ARGUMENT`
-  "unknown terminal kind" when unregistered — then `DaemonConfig::cli_harness_binary` and the
+  "unknown terminal kind" when unregistered — then the harness's spec binary as the host's coding
+  agents resolve it (`#agent-tools` 19/19; `DaemonConfig::cli_harness_binary` is gone) and the
   descriptor's argv for a default `CliLaunch` with a fresh conversation id, spawned by
   `CliSessionManager::start_agent_terminal`. `Tmux { session }` is refused before anything spawns when
   the daemon cannot become `launch.os_user` (the kernel's `CannotBecomeUser`, `FAILED_PRECONDITION`)

@@ -160,6 +160,9 @@ pub(super) struct TelegramInbound {
             >,
         >,
     >,
+    /// The coding agents the harness offers: the registry it was built with, kept so the runtime
+    /// can show which registry Telegram serves (`RuntimeTasks::telegram_coding_agents`).
+    pub(super) coding_agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
 }
 
 impl TelegramInbound {
@@ -245,6 +248,18 @@ impl RuntimeTaskHandles {
 }
 
 impl RuntimeTasks {
+    /// The coding-agent registry Telegram's CLI starts offer, when a bot with inbound session
+    /// control is configured: the daemon's one registry, the very instance its session host
+    /// launches from.
+    #[must_use]
+    pub fn telegram_coding_agents(
+        &self,
+    ) -> Option<&Arc<tddy_coding_agent_specs::CodingAgentRegistry>> {
+        self.telegram_inbound
+            .as_ref()
+            .map(|inbound| &inbound.coding_agents)
+    }
+
     /// Start every listener, dialer and background loop this runtime needs. Must be called from
     /// within the host's async runtime.
     pub fn spawn(self) -> RuntimeTaskHandles {

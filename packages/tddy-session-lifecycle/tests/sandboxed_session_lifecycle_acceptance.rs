@@ -13,7 +13,7 @@ use tddy_service::proto::session::{
     DeleteSessionRequest, ResumeSessionRequest, SessionService as SessionServiceTrait,
     StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_testing_commons::process_is_alive;
 
@@ -32,25 +32,20 @@ fn tddy_tools_binary() -> PathBuf {
         })
 }
 
-fn write_config_with_claude_cli_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+fn write_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
-    let tddy_tools = tddy_tools_binary();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "testuser"
-    os_user: "testuser"
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
-claude_cli:
-  binary_path: {stub_binary}
-  tddy_tools_path: {tddy_tools}
-"#,
-        tddy_tools = tddy_tools.display()
-    );
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
+    )
+    .unwrap();
     (
         dir,
         DaemonConfig::load(&config_path).expect("config must parse"),
@@ -77,8 +72,62 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     )
+}
+
+/// [`minimal_service`] with the daemon's coding agents installed, as the runtime installs them: a
+/// sandboxed `claude-cli` session is launched from the `claude` tool definition, which resolves the
+/// jail's `tddy-tools` on a `PATH` of `<sessions_base>/stub-bin` alone. `claude` itself stays the
+/// the stub passed in. A sandboxed launch reaches the jail over the sandbox RPC
+/// bridge, which the daemon runtime installs at mount.
+fn a_service_with_coding_agents(
+    config: DaemonConfig,
+    sessions_base: PathBuf,
+    stub: &std::path::Path,
+) -> Arc<DaemonSessionHost> {
+    let stub_bin = sessions_base.join("stub-bin");
+    std::fs::create_dir_all(&stub_bin).unwrap();
+    let stub_bin = std::fs::canonicalize(stub_bin).unwrap();
+    std::os::unix::fs::symlink(tddy_tools_binary(), stub_bin.join("tddy-tools")).unwrap();
+    // The stub stands for `claude` on the declared `PATH`.
+    std::os::unix::fs::symlink(stub, stub_bin.join("claude")).unwrap();
+    let registry = tddy_coding_agent_specs::load_agent_registry(&sessions_base.join("tools"))
+        .expect("the agent registry loads");
+    let host = Arc::new(
+        minimal_service(config, sessions_base).with_coding_agents(Arc::new(
+            tddy_agent_launch::spec_launch::HostCodingAgents::new(
+                registry,
+                Arc::new(APathHost(vec![stub_bin])),
+            ),
+        )),
+    );
+    host.install_sandbox_rpc_bridge();
+    host
+}
+
+/// A tool host with a declared `PATH` over the real filesystem: nothing of the real machine's
+/// `PATH` or `TDDY_*_BINARY` variables reaches resolution.
+struct APathHost(Vec<PathBuf>);
+
+impl tddy_actions::tool::ToolHost for APathHost {
+    fn env_var(&self, _name: &str) -> Option<String> {
+        None
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        self.0.clone()
+    }
+
+    fn is_executable_file(&self, path: &std::path::Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
 }
 
 fn create_test_repo_with_origin(dir: &std::path::Path) {
@@ -159,8 +208,8 @@ async fn delete_sandbox_session_stops_child_and_removes_directory() {
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let stub = write_stub_claude(repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let (_cfg_dir, config) = write_config();
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf(), &stub);
 
     let resp = service
         .start_session(Request::direct(sandbox_start_request()))
@@ -199,8 +248,8 @@ async fn resume_sandbox_session_respawns_and_updates_pid() {
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let stub = write_stub_claude(repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let (_cfg_dir, config) = write_config();
+    let service = a_service_with_coding_agents(config, sessions_tmp.path().to_path_buf(), &stub);
 
     let session_id = service
         .start_session(Request::direct(sandbox_start_request()))

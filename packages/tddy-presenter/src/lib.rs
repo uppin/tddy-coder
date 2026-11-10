@@ -11,11 +11,11 @@ pub mod usage_watcher;
 
 // Every layer the presenter orchestrates, named at the `crate::` paths these modules used inside
 // `tddy-core`.
+#[cfg(test)]
+use tddy_agent_backend::QuestionOption;
 use tddy_agent_backend::{
     backend, token_accounting, ClarificationQuestion, ProgressEvent, SharedBackend,
 };
-#[cfg(test)]
-use tddy_agent_backend::{AnyBackend, QuestionOption, StubBackend};
 use tddy_agent_skills::feature_start_slash;
 use tddy_changeset::{agent_activity, changeset, session_metadata};
 use tddy_changeset::{get_session_for_tag, read_changeset, write_changeset_atomic, GithubPrStatus};

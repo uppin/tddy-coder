@@ -109,8 +109,9 @@ it for a default launch, in the session's worktree under a fresh UUIDv7 `termina
   session's own;
 - no chat id for Cursor, which starts a new chat.
 
-The binary is resolved exactly as for that harness's own sessions: its env var, then
-`cli_harnesses.<type>.binary_path` in `daemon.yaml`, then the default name on `PATH`.
+The binary is resolved exactly as for that harness's own sessions: its env var
+(the spec's `binary.env`), then the spec's `binary.command` (a `<tddyhome>/tools/<id>.yaml`
+override sets it), then the default name on `PATH`.
 `ListTerminalSessions` lists the tab with the harness's session type as its `kind`, and
 `StopTerminalSession` kills it and removes it from the list.
 

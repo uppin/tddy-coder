@@ -46,8 +46,15 @@ impl ActionServiceImpl {
 }
 
 fn kind_metadata(kind: &str) -> ActionKindInfo {
+    // A CLI session kind is its agent's session type (`<id>-cli`, from its spec).
+    if kind.ends_with("-cli") {
+        return ActionKindInfo {
+            kind: kind.to_string(),
+            summary: "Interactive CLI session (PTY)".to_string(),
+            has_input_schema: true,
+        };
+    }
     let (summary, has_input_schema) = match kind {
-        "claude-cli" => ("Interactive Claude CLI session (PTY)", true),
         "bash" => ("Run a shell command", true),
         "tddy-coder" => ("Run tddy-coder planning or workflow", true),
         "build-action" => ("Run a tddy-build action", true),

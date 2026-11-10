@@ -20,6 +20,9 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use tddy_accounts::{endpoints_for, preset, ProviderAccount};
+use tddy_actions::tool::ToolHost;
+use tddy_agent_launch::spec_launch::HostCodingAgents;
+use tddy_coding_agent_specs::load_agent_registry;
 use tddy_core::session_metadata::read_session_metadata;
 use tddy_credentials::{AccountId, CredentialStore, SecretString, SessionVaults};
 use tddy_daemon_kernel::config::DaemonConfig;
@@ -27,7 +30,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::session::{
     ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     StreamReplayMode, StreamTerminalOutputRequest,
@@ -73,11 +76,11 @@ fn a_sandboxed_daemon_for(session_type: &str, stub_name: &str) -> SandboxedHarne
     let sessions_dir = tempfile::tempdir().unwrap();
     register_project(&sessions_dir.path().join("projects"), repo_dir.path());
     let stub = a_stub_harness_printing_its_launch(repo_dir.path(), stub_name);
-    let (config_dir, config) = daemon_config_with_cli_harness_binary(session_type, &stub);
+    let (config_dir, config) = a_daemon_config();
     let vault_dir = tempfile::tempdir().unwrap();
     let sessions_base = sessions_dir.path().to_path_buf();
     let service = Arc::new(
-        session_host(config, sessions_base.clone())
+        session_host(config, session_type, &stub, sessions_base.clone())
             .with_credential_vaults(vaults_holding_a_meta_account(vault_dir.path())),
     );
     service.install_sandbox_rpc_bridge();
@@ -204,11 +207,12 @@ async fn a_sandboxed_opencode_session_runs_in_its_jail_on_the_provider_account()
     assert_eq!(meta.session_type.as_deref(), Some("opencode-cli"));
     assert_eq!(meta.sandbox, Some(true));
 
-    // And the jailed harness runs on the route's model, its config file and its key
+    // And the jailed harness runs on the route's model, its configuration inline in
+    // OPENCODE_CONFIG_CONTENT with no file named (`#agent-tools 29/32`), and its key
     let terminal = daemon
         .terminal_showing(
             &session_id,
-            &["ARGV:", "OPENCODE_CONFIG=/", &format!("KEY={META_KEY}")],
+            &["ARGV:", "OPENCODE_CONFIG=UNSET", &format!("KEY={META_KEY}")],
         )
         .await;
     assert!(terminal.contains("ARGV:"), "no harness output: {terminal}");
@@ -216,7 +220,11 @@ async fn a_sandboxed_opencode_session_runs_in_its_jail_on_the_provider_account()
         terminal.contains(&format!("--model tddy-route/{MUSE_MODEL}")),
         "{terminal}"
     );
-    assert!(terminal.contains("OPENCODE_CONFIG=/"), "{terminal}");
+    assert!(terminal.contains("OPENCODE_CONFIG=UNSET"), "{terminal}");
+    assert!(
+        terminal.contains(&format!(r#""model": "tddy-route/{MUSE_MODEL}""#)),
+        "{terminal}"
+    );
     assert!(terminal.contains(&format!("KEY={META_KEY}")), "{terminal}");
 }
 
@@ -294,7 +302,8 @@ async fn resuming_a_sandboxed_muse_session_relaunches_its_jail_continuing_on_the
 // Fixtures
 // ---------------------------------------------------------------------------
 
-/// A stub harness that prints its argv, `OPENCODE_CONFIG`, OpenCode's route key and Muse's
+/// A stub harness that prints its argv, `OPENCODE_CONFIG`, the inline `OPENCODE_CONFIG_CONTENT`
+/// (newlines removed), OpenCode's route key and Muse's
 /// `META_API_KEY` on its terminal, then waits on stdin so the session stays up.
 fn a_stub_harness_printing_its_launch(dir: &Path, name: &str) -> PathBuf {
     let path = dir.join(name);
@@ -302,8 +311,9 @@ fn a_stub_harness_printing_its_launch(dir: &Path, name: &str) -> PathBuf {
         &path,
         "#!/bin/sh\n\
          echo \"ARGV: $@\"\n\
-         echo \"OPENCODE_CONFIG=$OPENCODE_CONFIG\"\n\
-         echo \"KEY=$TDDY_OPENCODE_PROVIDER_KEY\"\n\
+         echo \"OPENCODE_CONFIG=${OPENCODE_CONFIG-UNSET}\"\n\
+         echo \"INLINE=$(printf '%s' \"$OPENCODE_CONFIG_CONTENT\" | tr -d '\\n')\"\n\
+         echo \"KEY=$OPENCODE_PROVIDER_KEY\"\n\
          echo \"META=$META_API_KEY\"\n\
          cat\n",
     )
@@ -335,32 +345,39 @@ fn vaults_holding_a_meta_account(dir: &Path) -> Arc<SessionVaults> {
     vaults
 }
 
-fn daemon_config_with_cli_harness_binary(
-    session_type: &str,
-    binary: &Path,
-) -> (tempfile::TempDir, DaemonConfig) {
+fn a_daemon_config() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "{OWNER}"
-    os_user: "{OWNER}"
+    let yaml = r#"
 allowed_tools:
   - path: /bin/true
     label: true
-cli_harnesses:
-  {session_type}:
-    binary_path: {binary}
-"#,
-        binary = binary.display()
-    );
+"#;
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{OWNER}\"\n  os_user: \"{OWNER}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
 
-fn session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+/// A session host whose coding agents resolve `binary` as the agent a `session_type` session
+/// launches (its spec's binary on the host's `PATH`).
+fn session_host(
+    config: DaemonConfig,
+    session_type: &str,
+    binary: &Path,
+    sessions_base: PathBuf,
+) -> DaemonSessionHost {
+    let agents = coding_agents_over(&sessions_base);
+    let command = session_type.strip_suffix("-cli").unwrap_or(session_type);
+    std::os::unix::fs::symlink(binary, sessions_base.join("tool-bin").join(command))
+        .expect("the harness binary is installed on the host's PATH");
     let tddy_data_dir = sessions_base.clone();
     DaemonSessionHost::new(
         config.clone(),
@@ -371,8 +388,67 @@ fn session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHo
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
+        agents,
     )
+}
+
+/// The coding agents a daemon keeping its state in `tddy_home` launches from, as the daemon runtime
+/// binds them: the agent registry loaded from `<tddyhome>/tools`, resolved against a host whose `PATH`
+/// holds the real `tddy-tools` and whose `$HOME` is a directory of the test's.
+fn coding_agents_over(tddy_home: &Path) -> Arc<HostCodingAgents> {
+    let tools_dir = tddy_home.join("tools");
+    std::fs::create_dir_all(&tools_dir).unwrap();
+    let registry = load_agent_registry(&tools_dir).expect("the agent registry loads");
+    let tool_bin = tddy_home.join("tool-bin");
+    std::fs::create_dir_all(&tool_bin).unwrap();
+    match std::os::unix::fs::symlink(tddy_tools_binary(), tool_bin.join("tddy-tools")) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => panic!("tddy-tools is linked into the host's PATH: {e}"),
+    }
+    let home = tddy_home.join("host-home");
+    std::fs::create_dir_all(&home).unwrap();
+    Arc::new(HostCodingAgents::new(
+        registry,
+        Arc::new(AFixtureHost {
+            path: vec![tool_bin],
+            home,
+        }),
+    ))
+}
+
+/// The real `tddy-tools`, built beside this test binary.
+fn tddy_tools_binary() -> PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_tddy-tools")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-tools")
+        })
+}
+
+/// A host with a declared `PATH` and `$HOME` over the real filesystem.
+struct AFixtureHost {
+    path: Vec<PathBuf>,
+    home: PathBuf,
+}
+
+impl ToolHost for AFixtureHost {
+    fn env_var(&self, name: &str) -> Option<String> {
+        (name == "HOME").then(|| self.home.to_string_lossy().into_owned())
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        self.path.clone()
+    }
+
+    fn is_executable_file(&self, path: &Path) -> bool {
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
 }
 
 fn create_test_repo_with_origin(dir: &Path) {

@@ -199,9 +199,20 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
         &config_path,
-        a_daemon_yaml(&ws_url, &agent_binary, &config_dir.path().join("auth")),
+        a_daemon_yaml(&ws_url, &config_dir.path().join("auth")),
     )
     .expect("write daemon.yaml");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!(
+            "- github_user: \"{GITHUB_USER}\"\n  os_user: \"{}\"\n",
+            serving_os_user()
+        ),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("daemon.yaml must load");
 
     // The daemon's real auth wiring: one resolver verifies the session token everywhere, as in
@@ -247,7 +258,11 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+            tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+                "claude",
+                agent_binary.as_path(),
+            )]),
         )
         .with_session_rooms(rooms.clone())
         .with_session_delta_stores(Arc::new(RoomsHostedByThisDaemon::new(rooms)))
@@ -610,21 +625,18 @@ fn a_project_at(repo: &Path) -> ProjectData {
 }
 
 /// The `daemon.yaml` of a daemon that runs agents, hosts their rooms and serves its projects.
-fn a_daemon_yaml(ws_url: &str, agent_binary: &Path, auth_storage: &Path) -> String {
+fn a_daemon_yaml(ws_url: &str, auth_storage: &Path) -> String {
     let room = common_room();
     format!(
         "daemon_instance_id: {INSTANCE_ID}\n\
-         users:\n  - github_user: \"{GITHUB_USER}\"\n    os_user: \"{}\"\n\
+         \
          github:\n  stub: true\n\
          auth_storage: {}\n\
-         claude_cli:\n  binary_path: {}\n\
          session_room:\n  poll_interval_ms: {POLL_INTERVAL_MS}\n\
          livekit:\n  enabled: true\n  url: {ws_url}\n  api_key: {LK_API_KEY}\n  \
          api_secret: {LK_API_SECRET}\n  \
          common_room: {room}\n",
-        serving_os_user(),
         auth_storage.display(),
-        agent_binary.display(),
     )
 }
 

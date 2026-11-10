@@ -18,11 +18,12 @@
 
 import React from "react";
 import { DaemonSelector } from "../../src/components/shell/DaemonSelector";
-import type { DaemonHost } from "../../src/lib/participantRole";
-import { SelectedDaemonProvider, useSelectedDaemon } from "../../src/rpc/selectedDaemon";
+import type { DaemonHost } from "tddy-client-web";
+import { SelectedDaemonProvider } from "../../src/app/rpc/selectedDaemon";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 import { byTestId } from "../support/testIds";
-import { aFakeCommonRoom } from "../support/livekit/fakeCommonRoom";
+import { aFakeCommonRoom } from "tddy-livekit-web/testkit";
+import { useSelectedDaemon } from "tddy-client-web";
 
 const UDOO: DaemonHost = { instanceId: "udoo", label: "udoo (this daemon)" };
 

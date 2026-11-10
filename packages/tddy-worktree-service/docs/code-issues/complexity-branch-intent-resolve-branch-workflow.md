@@ -16,6 +16,7 @@
 | 2026-09-18 | 86 | 5 | 6 | 3 | first detection |
 | 2026-10-22 | 86 | — | — | — | touched by `#provider-route` 3/9 (#664) and **unchanged by it**: the file gained an opencode-cli policy beside the other policies (now `BranchIntentPolicy::cli_harness(session_type)`); `resolve_branch_workflow` is 86 lines (fn line to closing brace) on the base and on HEAD |
 | 2026-10-22 | 86 | — | — | — | touched by `#provider-route` 6/9 (#667) and **unchanged by it**: the opencode-cli policy became `BranchIntentPolicy::cli_harness(session_type)` (generated branch prefix = the harness's session type, so `muse-cli` shares it); `resolve_branch_workflow` is 86 lines (fn line to closing brace) on `origin/feature/provider-route/default-route` and on HEAD |
+| 2026-11-06 | 86 → 86 | 5 | — | — | **unchanged** in #823 (`#agent-tools` 17/19), which deleted `BranchIntentPolicy::{claude_cli, cursor_cli, cli_harness}` above it (the function moved from line 134 to 106); fn line to closing brace on `origin/feature/agent-tools/spec-backend` (`d325fba73`) and HEAD |
 
 ## What the tool found
 

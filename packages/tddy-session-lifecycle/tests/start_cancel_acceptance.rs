@@ -19,7 +19,7 @@ use tddy_service::proto::session::start_session_event::Event as StartEvent;
 use tddy_service::proto::session::{
     SessionService as SessionServiceTrait, StartSessionEvent, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -36,14 +36,20 @@ fn current_os_user() -> String {
         .into_owned()
 }
 
-fn a_config_launching_claude_as(binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+fn a_config_for_the_current_user() -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().expect("a config directory");
     let user = current_os_user();
-    let yaml = format!(
-        "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\nclaude_cli:\n  binary_path: {binary}\n"
-    );
+    let yaml = "";
     let path = dir.path().join("daemon.yaml");
     std::fs::write(&path, yaml).expect("write the config");
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     (dir, DaemonConfig::load(&path).expect("the config parses"))
 }
 
@@ -63,7 +69,11 @@ fn a_session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSession
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+            "claude",
+            Path::new("/bin/cat"),
+        )]),
     )
 }
 
@@ -88,7 +98,7 @@ fn a_daemon_cloning_from(git_url: &str) -> ADaemon {
         ),
     )
     .unwrap();
-    let (config_dir, config) = a_config_launching_claude_as("/bin/cat");
+    let (config_dir, config) = a_config_for_the_current_user();
     ADaemon {
         service: a_session_host(config, sessions.path().to_path_buf()),
         working_copy,
@@ -134,7 +144,7 @@ fn a_daemon_whose_worktree_cut_is_slow() -> ADaemonWithASlowCut {
         ),
     )
     .unwrap();
-    let (config_dir, config) = a_config_launching_claude_as("/bin/cat");
+    let (config_dir, config) = a_config_for_the_current_user();
     ADaemonWithASlowCut {
         service: a_session_host(config, sessions.path().to_path_buf()),
         repo,

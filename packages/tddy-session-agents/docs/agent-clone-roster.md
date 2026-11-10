@@ -13,7 +13,7 @@ handle. The daemon host implements the callbacks once, in `tddy-session-lifecycl
 
 | Module | Holds |
 |---|---|
-| `svc_provision_agent_clone.rs` | `AgentRoster`'s provisioning and tear-down of agent clones, the roster broadcast and publish, and the clone and worktree lookups (12 methods) |
+| `svc_provision_agent_clone.rs` | `AgentRoster`'s provisioning and tear-down of agent clones, the roster broadcast and publish, and the clone and worktree lookups, and `refuse_an_unreachable_clone_host` — the tear-down's read-only pre-check, refusing `FAILED_PRECONDITION` (naming the clone and its daemon) a session with a recorded clone while no common room is configured or joined (13 methods) |
 | `svc_start_hosted_agent_clone.rs` | starting a hosted clone, the unready and departed-daemon refusals, the forwarded and local conversation opens, and the clone's codebase access (9 methods) |
 | `svc_ensure_session_room_for_agents.rs` | claiming, seeding and unwinding a clone's roster entry, and `ensure_session_room_for_agents` (6 methods) |
 | `svc_resolve_listed_worktree.rs` | agent-def resolution (`resolvable_agent_defs`, `agent_def_for_spawn`, `resolve_specialized_agent_defs`), `seeded_roster_records`, `roster_session_dir`, `report_shadowed_agent_def` (6 methods) |

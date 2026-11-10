@@ -16,7 +16,7 @@ use tddy_service::proto::session::{
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse,
     SessionService as SessionServiceTrait, StartSessionRequest,
 };
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -55,8 +55,10 @@ pub fn a_caller_token() -> &'static str {
 
 /// A daemon serving one project: what a suite's `World` holds, beside the project's repo.
 pub struct HomeDaemon {
-    pub service: DaemonSessionHost,
-    pub manager: Arc<ClaudeCliSessionManager>,
+    /// Shared, with its sandbox RPC bridge installed as the daemon runtime installs it, so a
+    /// sandboxed main's jail can reach it (`#agent-tools 5/12`).
+    pub service: Arc<DaemonSessionHost>,
+    pub manager: Arc<CliSessionManager>,
     pub data: tempfile::TempDir,
     _stub: tempfile::TempDir,
     _cfg: tempfile::TempDir,
@@ -66,20 +68,91 @@ pub struct HomeDaemon {
 /// carries `extra_row_yaml` (e.g. a `home_session_id:` line), with `extra_config_yaml` appended to
 /// its daemon config (e.g. a `project_home:` block).
 pub fn a_home_daemon(repo: &Path, extra_row_yaml: &str, extra_config_yaml: &str) -> HomeDaemon {
+    // A host with no coding agents refuses every agent session, so a home daemon always has them.
+    build_home_daemon(repo, extra_row_yaml, extra_config_yaml, true)
+}
+
+/// [`a_home_daemon`] with the daemon's coding agents installed, as the daemon runtime installs
+/// them: the agent registry, resolved against a host whose `PATH` holds the stub `claude` and the
+/// real `tddy-tools`. A sandboxed main is launched from the `claude` tool definition and needs them.
+// Used by the suite that sets a main up in a sandbox; the others include this module too.
+#[allow(dead_code)]
+pub fn a_home_daemon_with_coding_agents(
+    repo: &Path,
+    extra_row_yaml: &str,
+    extra_config_yaml: &str,
+) -> HomeDaemon {
+    build_home_daemon(repo, extra_row_yaml, extra_config_yaml, true)
+}
+
+fn build_home_daemon(
+    repo: &Path,
+    extra_row_yaml: &str,
+    extra_config_yaml: &str,
+    coding_agents: bool,
+) -> HomeDaemon {
     let data = tempfile::tempdir().unwrap();
     write_project_registry(data.path(), repo, extra_row_yaml);
     let stub = tempfile::tempdir().unwrap();
     let claude = write_argv_and_env_script(stub.path());
-    let (cfg, config) = write_daemon_config(claude.to_str().unwrap(), extra_config_yaml);
-    let manager = Arc::new(ClaudeCliSessionManager::new());
-    let service =
+    let (cfg, config) = write_daemon_config(extra_config_yaml);
+    let manager = Arc::new(CliSessionManager::new());
+    let mut host =
         minimal_service_with_manager(config, data.path().to_path_buf(), Arc::clone(&manager));
+    if coding_agents {
+        let tools_dir = std::fs::canonicalize(stub.path()).unwrap();
+        std::os::unix::fs::symlink(tddy_tools_binary(), tools_dir.join("tddy-tools")).unwrap();
+        // The stub stands for `claude` on the declared `PATH`.
+        std::os::unix::fs::symlink(&claude, tools_dir.join("claude")).unwrap();
+        let registry = tddy_coding_agent_specs::load_agent_registry(&data.path().join("tools"))
+            .expect("the agent registry loads");
+        host = host.with_coding_agents(Arc::new(
+            tddy_agent_launch::spec_launch::HostCodingAgents::new(
+                registry,
+                Arc::new(APathHost(vec![tools_dir])),
+            ),
+        ));
+    }
+    let service = Arc::new(host);
+    service.install_sandbox_rpc_bridge();
     HomeDaemon {
         service,
         manager,
         data,
         _stub: stub,
         _cfg: cfg,
+    }
+}
+
+/// The real `tddy-tools`, built beside this test binary.
+fn tddy_tools_binary() -> PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_tddy-tools")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-tools")
+        })
+}
+
+/// A tool host with a declared `PATH` over the real filesystem: nothing of the real machine's `PATH`
+/// or `TDDY_*_BINARY` variables reaches resolution.
+struct APathHost(Vec<PathBuf>);
+
+impl tddy_actions::tool::ToolHost for APathHost {
+    fn env_var(&self, _name: &str) -> Option<String> {
+        None
+    }
+
+    fn path_dirs(&self) -> Vec<PathBuf> {
+        self.0.clone()
+    }
+
+    fn is_executable_file(&self, path: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        std::fs::canonicalize(path)
     }
 }
 
@@ -118,7 +191,8 @@ pub fn git(cwd: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-fn current_os_user() -> String {
+/// The OS user the test process runs as, which the sessions run as.
+pub fn current_os_user() -> String {
     let pw = unsafe { libc::getpwuid(libc::getuid()) };
     assert!(!pw.is_null(), "current uid must resolve to a passwd entry");
     unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }
@@ -155,20 +229,20 @@ fn write_project_registry(data: &Path, repo: &Path, extra_row_yaml: &str) {
     .unwrap();
 }
 
-fn write_daemon_config(stub_binary: &str, extra_yaml: &str) -> (tempfile::TempDir, DaemonConfig) {
+fn write_daemon_config(extra_yaml: &str) -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
     let yaml = format!(
         r#"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
-claude_cli:
-  binary_path: {stub_binary}
 {extra_yaml}"#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
@@ -176,7 +250,7 @@ claude_cli:
 fn minimal_service_with_manager(
     config: DaemonConfig,
     sessions_base: PathBuf,
-    manager: Arc<ClaudeCliSessionManager>,
+    manager: Arc<CliSessionManager>,
 ) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -194,6 +268,7 @@ fn minimal_service_with_manager(
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
+        tddy_agent_launch::host_coding_agents::no_coding_agents(),
     )
     .with_session_tokens(this_daemons_session_tokens().clone())
 }
@@ -202,20 +277,32 @@ fn minimal_service_with_manager(
 /// waiting for input — so a started main is still running when it is ensured again, and the idle
 /// reaper (which only considers live processes) is not racing a process exit. `cat` ends when the
 /// session is stopped (SIGTERM) or its terminal closes.
+///
+/// The variables are read from the `tddy-tools` server's `env` block in the MCP config the agent was
+/// launched with (`--mcp-config`): the agent's own environment carries no `TDDY_*`, its tool server's
+/// does.
 fn write_argv_and_env_script(dir: &Path) -> PathBuf {
     let script_path = dir.join("stub_claude_argv_env.sh");
+    let dump = |key: &str| {
+        format!(
+            "echo \"ENVDUMP {key}=[$(sed -n 's/.*\"{key}\": *\"\\([^\"]*\\)\".*/\\1/p' \"$cfg\" 2>/dev/null)]\"\n"
+        )
+    };
     std::fs::write(
         &script_path,
-        concat!(
-            "#!/bin/sh\n",
-            "echo \"ARGV: $@\"\n",
-            "echo \"ENVDUMP TDDY_SOCKET=[$TDDY_SOCKET]\"\n",
-            "echo \"ENVDUMP TDDY_REMOTE_SESSION_ID=[$TDDY_REMOTE_SESSION_ID]\"\n",
-            "echo \"ENVDUMP TDDY_REMOTE_SESSION_TOKEN=[$TDDY_REMOTE_SESSION_TOKEN]\"\n",
-            "echo \"ENVDUMP TDDY_REMOTE_DAEMON_URL=[$TDDY_REMOTE_DAEMON_URL]\"\n",
-            "echo \"ENVDUMP TDDY_REMOTE_DAEMON_SOCKET=[$TDDY_REMOTE_DAEMON_SOCKET]\"\n",
-            "exec cat >/dev/null\n",
-        ),
+        [
+            "#!/bin/sh\n".to_string(),
+            "echo \"ARGV: $@\"\n".to_string(),
+            "cfg=\"\"; prev=\"\"\n".to_string(),
+            "for a in \"$@\"; do if [ \"$prev\" = \"--mcp-config\" ]; then cfg=\"$a\"; fi; prev=\"$a\"; done\n".to_string(),
+            dump("TDDY_SOCKET"),
+            dump("TDDY_REMOTE_SESSION_ID"),
+            dump("TDDY_REMOTE_SESSION_TOKEN"),
+            dump("TDDY_REMOTE_DAEMON_URL"),
+            dump("TDDY_REMOTE_DAEMON_SOCKET"),
+            "exec cat >/dev/null\n".to_string(),
+        ]
+        .concat(),
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;

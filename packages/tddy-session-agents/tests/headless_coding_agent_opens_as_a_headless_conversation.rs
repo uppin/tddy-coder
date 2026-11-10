@@ -7,10 +7,17 @@
 //! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use tddy_agent_backend::adapters::{
+    AdapterError, AdapterRegistry, HeadlessInvocation, HeadlessMcpServer, HeadlessRenderer,
+    HeadlessTurn, CLAUDE_STREAM_JSON,
+};
+
 use tddy_agent_backend::{AcpAgentCommand, HeadlessCommand, McpServerSpec};
 use tddy_coding_subagent::{CodingAgentDef, CodingAgentLaunch, CodingAgentLauncher};
 use tddy_discovery::subagent::{PromptOutcome, SubagentError, SubagentSession};
@@ -26,6 +33,16 @@ struct AHeadlessCliLauncher {
 
 #[async_trait]
 impl CodingAgentLauncher for AHeadlessCliLauncher {
+    async fn session_meta_for(
+        &self,
+        _launch: &tddy_coding_subagent::CodingAgentLaunch,
+    ) -> Result<
+        Option<serde_json::Map<String, serde_json::Value>>,
+        tddy_discovery::subagent::SubagentError,
+    > {
+        Ok(None)
+    }
+
     async fn command_for(
         &self,
         _launch: &CodingAgentLaunch,
@@ -85,11 +102,51 @@ fn a_fake_claude(stream: &[serde_json::Value]) -> FakeClaude {
     FakeClaude { dir }
 }
 
+/// A renderer standing in for claude's spec: `-p <prompt>`, `--resume <session>` on a resumed turn,
+/// read through `claude-stream-json`. The argv a real spec renders is pinned by its render goldens.
+#[derive(Debug)]
+struct ARenderer {
+    program: PathBuf,
+}
+
+impl HeadlessRenderer for ARenderer {
+    fn agent_id(&self) -> &str {
+        "claude"
+    }
+
+    fn tool_server(&self) -> Option<HeadlessMcpServer> {
+        None
+    }
+
+    fn render(&self, turn: &HeadlessTurn) -> Result<HeadlessInvocation, AdapterError> {
+        let mut argv = vec!["-p".to_string(), turn.prompt.clone()];
+        if let Some(model) = &turn.model {
+            argv.extend(["--model".to_string(), model.clone()]);
+        }
+        if let Some(session) = turn.session.as_ref().filter(|session| session.is_resume()) {
+            argv.extend(["--resume".to_string(), session.session_id().to_string()]);
+        }
+        Ok(HeadlessInvocation {
+            program: self.program.clone(),
+            argv,
+            env: Vec::new(),
+            files: Vec::new(),
+            adapter: AdapterRegistry::builtin()
+                .get(CLAUDE_STREAM_JSON)
+                .expect("claude-stream-json is registered"),
+            exit_ok_if_structured: false,
+        })
+    }
+}
+
 impl FakeClaude {
     fn command(&self) -> HeadlessCommand {
         HeadlessCommand {
-            program: self.dir.path().join("claude"),
             cwd: Some(self.dir.path().to_path_buf()),
+            scratch_dir: Some(self.dir.path().join("conversation")),
+            renderer: Some(Arc::new(ARenderer {
+                program: self.dir.path().join("claude"),
+            })),
             ..HeadlessCommand::default()
         }
     }
@@ -158,9 +215,13 @@ async fn a_headless_coding_agent_opens_as_a_headless_conversation() {
     let launch = a_claude_launch(claude.dir.path().to_path_buf());
 
     // When
-    let mut session = start_coding_agent_session(&launcher, &launch)
-        .await
-        .expect("the headless conversation opens");
+    let mut session = start_coding_agent_session(
+        &launcher,
+        &launch,
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached(),
+    )
+    .await
+    .expect("the headless conversation opens");
     let outcome = within_deadline(session.prompt("Run it.")).await;
 
     // Then

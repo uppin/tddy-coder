@@ -1,11 +1,14 @@
 //! tddy-coder library — shared by the tddy-coder (package `tddy-coder-cli`) and tddy-demo binaries.
 
 pub mod acp_agent;
+pub mod acp_from_spec;
 pub mod acp_host;
+pub mod agent_registry_cli;
 pub mod build_executor;
 mod codex_binaries;
 pub mod config;
 pub mod conversation_spawn_relay;
+pub mod headless_from_spec;
 pub mod participant_host;
 pub mod plain;
 mod provider_route_arg;
@@ -13,6 +16,7 @@ pub mod recipe;
 pub mod remote;
 pub mod run;
 pub mod session_participant;
+pub mod spec_backend_build;
 pub mod tool_host_wiring;
 mod tty;
 pub mod web_server;

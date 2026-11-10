@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file catalog.proto.
  */
 export const file_catalog: GenFile = /*@__PURE__*/
-  fileDesc("Cg1jYXRhbG9nLnByb3RvEgdjYXRhbG9nIiYKCUFnZW50SW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSJaChZMaXN0QWdlbnRNb2RlbHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDQoFYWdlbnQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIlQKF0xpc3RBZ2VudE1vZGVsc1Jlc3BvbnNlEiIKBm1vZGVscxgBIAMoCzISLmNhdGFsb2cuTW9kZWxJbmZvEhUKDWRlZmF1bHRfbW9kZWwYAiABKAkiEwoRTGlzdEFnZW50c1JlcXVlc3QiOAoSTGlzdEFnZW50c1Jlc3BvbnNlEiIKBmFnZW50cxgBIAMoCzISLmNhdGFsb2cuQWdlbnRJbmZvIhYKFExpc3RTdWJhZ2VudHNSZXF1ZXN0IkEKFUxpc3RTdWJhZ2VudHNSZXNwb25zZRIoCglzdWJhZ2VudHMYASADKAsyFS5jYXRhbG9nLlN1YmFnZW50SW5mbyISChBMaXN0VG9vbHNSZXF1ZXN0IjUKEUxpc3RUb29sc1Jlc3BvbnNlEiAKBXRvb2xzGAEgAygLMhEuY2F0YWxvZy5Ub29sSW5mbyImCglNb2RlbEluZm8SCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAki6AEKDFN1YmFnZW50SW5mbxIMCgRuYW1lGAEgASgJEg0KBWxhYmVsGAIgASgJEg0KBW1vZGVsGAMgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgEIAEoCRIQCghhZ2VudF9pZBgFIAEoCRIQCghyZXBsYWNlcxgGIAMoCRINCgV0b29scxgHIAMoCRIeCgRraW5kGAggASgOMhAudHlwZXMuQWdlbnRLaW5kEg8KB2hhcm5lc3MYCSABKAkSEQoJdHJhbnNwb3J0GAogASgJEhkKEXBlcm1pc3Npb25fcG9saWN5GAsgASgJIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkywQIKDkNhdGFsb2dTZXJ2aWNlEkIKCUxpc3RUb29scxIZLmNhdGFsb2cuTGlzdFRvb2xzUmVxdWVzdBoaLmNhdGFsb2cuTGlzdFRvb2xzUmVzcG9uc2USRQoKTGlzdEFnZW50cxIaLmNhdGFsb2cuTGlzdEFnZW50c1JlcXVlc3QaGy5jYXRhbG9nLkxpc3RBZ2VudHNSZXNwb25zZRJUCg9MaXN0QWdlbnRNb2RlbHMSHy5jYXRhbG9nLkxpc3RBZ2VudE1vZGVsc1JlcXVlc3QaIC5jYXRhbG9nLkxpc3RBZ2VudE1vZGVsc1Jlc3BvbnNlEk4KDUxpc3RTdWJhZ2VudHMSHS5jYXRhbG9nLkxpc3RTdWJhZ2VudHNSZXF1ZXN0Gh4uY2F0YWxvZy5MaXN0U3ViYWdlbnRzUmVzcG9uc2ViBnByb3RvMw", [file_types]);
+  fileDesc("Cg1jYXRhbG9nLnByb3RvEgdjYXRhbG9nIvUBCglBZ2VudEluZm8SCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSHgoEa2luZBgDIAEoDjIQLnR5cGVzLkFnZW50S2luZBIPCgdoYXJuZXNzGAQgASgJEhcKD3JvdXRlX3Byb3ZpZGVycxgFIAMoCRIUCgxzZXNzaW9uX3R5cGUYBiABKAkSFAoMY2FwYWJpbGl0aWVzGAcgAygJEhIKCnJ1bl9wYXJhbXMYCCADKAkSGAoQcGVybWlzc2lvbl9tb2RlcxgJIAMoCRIVCg1kZWZhdWx0X21vZGVsGAogASgJEhIKCnBsYWNlbWVudHMYCyADKAkiWgoWTGlzdEFnZW50TW9kZWxzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEg0KBWFnZW50GAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSJUChdMaXN0QWdlbnRNb2RlbHNSZXNwb25zZRIiCgZtb2RlbHMYASADKAsyEi5jYXRhbG9nLk1vZGVsSW5mbxIVCg1kZWZhdWx0X21vZGVsGAIgASgJIhMKEUxpc3RBZ2VudHNSZXF1ZXN0IjgKEkxpc3RBZ2VudHNSZXNwb25zZRIiCgZhZ2VudHMYASADKAsyEi5jYXRhbG9nLkFnZW50SW5mbyIWChRMaXN0U3ViYWdlbnRzUmVxdWVzdCJBChVMaXN0U3ViYWdlbnRzUmVzcG9uc2USKAoJc3ViYWdlbnRzGAEgAygLMhUuY2F0YWxvZy5TdWJhZ2VudEluZm8iEgoQTGlzdFRvb2xzUmVxdWVzdCI1ChFMaXN0VG9vbHNSZXNwb25zZRIgCgV0b29scxgBIAMoCzIRLmNhdGFsb2cuVG9vbEluZm8iJgoJTW9kZWxJbmZvEgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJIugBCgxTdWJhZ2VudEluZm8SDAoEbmFtZRgBIAEoCRINCgVsYWJlbBgCIAEoCRINCgVtb2RlbBgDIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYBCABKAkSEAoIYWdlbnRfaWQYBSABKAkSEAoIcmVwbGFjZXMYBiADKAkSDQoFdG9vbHMYByADKAkSHgoEa2luZBgIIAEoDjIQLnR5cGVzLkFnZW50S2luZBIPCgdoYXJuZXNzGAkgASgJEhEKCXRyYW5zcG9ydBgKIAEoCRIZChFwZXJtaXNzaW9uX3BvbGljeRgLIAEoCSInCghUb29sSW5mbxIMCgRwYXRoGAEgASgJEg0KBWxhYmVsGAIgASgJMsECCg5DYXRhbG9nU2VydmljZRJCCglMaXN0VG9vbHMSGS5jYXRhbG9nLkxpc3RUb29sc1JlcXVlc3QaGi5jYXRhbG9nLkxpc3RUb29sc1Jlc3BvbnNlEkUKCkxpc3RBZ2VudHMSGi5jYXRhbG9nLkxpc3RBZ2VudHNSZXF1ZXN0GhsuY2F0YWxvZy5MaXN0QWdlbnRzUmVzcG9uc2USVAoPTGlzdEFnZW50TW9kZWxzEh8uY2F0YWxvZy5MaXN0QWdlbnRNb2RlbHNSZXF1ZXN0GiAuY2F0YWxvZy5MaXN0QWdlbnRNb2RlbHNSZXNwb25zZRJOCg1MaXN0U3ViYWdlbnRzEh0uY2F0YWxvZy5MaXN0U3ViYWdlbnRzUmVxdWVzdBoeLmNhdGFsb2cuTGlzdFN1YmFnZW50c1Jlc3BvbnNlYgZwcm90bzM", [file_types]);
 
 /**
  * @generated from message catalog.AgentInfo
@@ -27,6 +27,79 @@ export type AgentInfo = Message<"catalog.AgentInfo"> & {
    * @generated from field: string label = 2;
    */
   label: string;
+
+  /**
+   * CODING_AGENT for an agent the daemon's coding-agent registry holds (a spec, built in or a
+   * `<tddyhome>/tools/<id>.yaml`); MODEL for a specialized agent definition or registry assistant
+   * (`#agent-tools 12/12`).
+   *
+   * @generated from field: types.AgentKind kind = 3;
+   */
+  kind: AgentKind;
+
+  /**
+   * For a CODING_AGENT row, the id of the spec it runs (`claude`, `codex-acp`, `opencode`). Empty
+   * for MODEL rows.
+   *
+   * @generated from field: string harness = 4;
+   */
+  harness: string;
+
+  /**
+   * The provider kinds a route can point this agent at, as its spec's `route.providers` spells
+   * them (`anthropic`, `openai_responses`, `openai_chat`, `meta`). Empty for an agent that always
+   * runs on its own vendor and for every MODEL row: a picker asks `ListProviderRoutes` only when
+   * this is non-empty.
+   *
+   * @generated from field: repeated string route_providers = 5;
+   */
+  routeProviders: string[];
+
+  /**
+   * The session type that starts this agent (`<id>-cli`), from its spec; empty for an agent
+   * with no PTY launch. The web offers session types from this, never from its own list.
+   *
+   * @generated from field: string session_type = 6;
+   */
+  sessionType: string;
+
+  /**
+   * The agent's spec capabilities (`requires_model`, `managed_workflow`, `hooks`, …), as
+   * declared in its YAML.
+   *
+   * @generated from field: repeated string capabilities = 7;
+   */
+  capabilities: string[];
+
+  /**
+   * The parameter names the agent's launch argv binds (`model`, `permission_mode`,
+   * `dangerously_skip_permissions`, …), read from its spec's argv template.
+   *
+   * @generated from field: repeated string run_params = 8;
+   */
+  runParams: string[];
+
+  /**
+   * The permission modes the agent's launch takes, from its spec; empty when it binds none.
+   *
+   * @generated from field: repeated string permission_modes = 9;
+   */
+  permissionModes: string[];
+
+  /**
+   * The agent's default model id, from its spec.
+   *
+   * @generated from field: string default_model = 10;
+   */
+  defaultModel: string;
+
+  /**
+   * The placements the agent's spec allows (`host`, `jail`). A client offers a sandboxed
+   * (jailed) start only for an agent that lists `jail`; absence never reads as allowed.
+   *
+   * @generated from field: repeated string placements = 11;
+   */
+  placements: string[];
 };
 
 /**

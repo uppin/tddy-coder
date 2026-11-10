@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tddy_sandbox::format_egress_logs;
-use tddy_sandbox_darwin::{run_sandbox_runner, SandboxRunnerArgs};
+use tddy_sandbox_darwin::SandboxRunnerArgs;
+use tddy_sandbox_runner::run_exec_plan;
+use tddy_testing_commons::sandbox_fixtures::write_exec_plan_with_shim;
 use tddy_testing_commons::{
     write_connect_proxy_claude_script, write_egress_probe_claude_script, SandboxSessionChannelHost,
     CONNECT_PROBE_TUNNEL_OK, EGRESS_PROBE_SESSION_CHANNEL_OK,
@@ -13,7 +15,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
 const SESSION_ID: &str = "sandbox-runner-behavior-session";
-const TEST_MODEL: &str = "claude-opus-4-8";
 const TEST_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Serializes tests that mutate the process-global `TDDY_EGRESS_PROBE_*` env so they don't clobber
@@ -54,7 +55,9 @@ async fn wait_for_ready(ready_marker: &Path, egress: &Path, timeout: Duration) {
     }
 }
 
-fn runner_args(tmp: &Path, claude_binary: &Path) -> (SandboxRunnerArgs, PathBuf) {
+/// The runner's args and egress dir, and the exec plan that runs `agent_binary` in its PTY with the
+/// egress shim on.
+fn runner_args(tmp: &Path, agent_binary: &Path) -> (SandboxRunnerArgs, PathBuf, PathBuf) {
     let context_dir = tmp.join("context");
     let egress = tmp.join("egress");
     std::fs::create_dir_all(&context_dir).unwrap();
@@ -66,30 +69,22 @@ fn runner_args(tmp: &Path, claude_binary: &Path) -> (SandboxRunnerArgs, PathBuf)
         session_id: SESSION_ID.to_string(),
         context_dir,
         cwd: None,
-        claude_binary: claude_binary.to_string_lossy().to_string(),
-        agent_kind: "claude".to_string(),
-        agent_binary: None,
-        model: TEST_MODEL.to_string(),
         grpc_socket: Some(tmp.join("sandbox.grpc.sock")),
         tool_ipc_socket: tmp.join("tool_ipc.sock"),
         tddy_tools_path: Some(tddy_tools_path()),
         ready_marker: tmp.join("sandbox.ready"),
-        permission_mode: "auto".to_string(),
-        dangerously_skip_permissions: false,
-        resume: false,
-        append_system_prompt_file: None,
         grpc_listen_port: None,
         egress_shim_port: None,
+        egress_policy: "any".to_string(),
+        egress_tool: vec![],
         grpc_uds: None,
         pty_command: vec![],
-        claude_arg: vec![],
-        agent_arg: vec![],
-        mcp_log_level: None,
         stdio: false,
         initial_cols: 80,
         initial_rows: 24,
     };
-    (args, egress)
+    let plan = write_exec_plan_with_shim(tmp, &[&agent_binary.to_string_lossy()], true);
+    (args, egress, plan)
 }
 
 async fn stop_runner(runner_task: tokio::task::JoinHandle<()>) {
@@ -129,11 +124,11 @@ async fn sandbox_runner_streams_demo_tui_dimensions_on_session_channel() {
             "build tddy-demo-tui before running: cargo build -p tddy-demo-tui"
         );
         let tmp = tempfile::tempdir().unwrap();
-        let (args, egress) = runner_args(tmp.path(), &demo_tui);
+        let (args, egress, plan) = runner_args(tmp.path(), &demo_tui);
         let ready_marker = args.ready_marker.clone();
 
         let runner_task = tokio::spawn(async move {
-            let _ = run_sandbox_runner(args).await;
+            let _ = run_exec_plan(args, plan).await;
         });
         wait_for_ready(&ready_marker, &egress, Duration::from_secs(15)).await;
         let host = SandboxSessionChannelHost::connect(&ready_marker, SESSION_ID).await;
@@ -173,12 +168,12 @@ async fn sandbox_runner_relays_claude_llm_egress_via_session_channel() {
         );
 
         let tmp = tempfile::tempdir().unwrap();
-        let probe_claude = write_egress_probe_claude_script(tmp.path());
-        let (args, egress) = runner_args(tmp.path(), &probe_claude);
+        let probe_claude = write_egress_probe_claude_script(tmp.path(), "127.0.0.1", echo_port);
+        let (args, egress, plan) = runner_args(tmp.path(), &probe_claude);
         let ready_marker = args.ready_marker.clone();
 
         let runner_task = tokio::spawn(async move {
-            let _ = run_sandbox_runner(args).await;
+            let _ = run_exec_plan(args, plan).await;
         });
         wait_for_ready(&ready_marker, &egress, Duration::from_secs(15)).await;
         let host = SandboxSessionChannelHost::connect(&ready_marker, SESSION_ID).await;
@@ -215,11 +210,11 @@ async fn sandbox_runner_tunnels_https_proxy_connect_via_session_channel() {
 
         let tmp = tempfile::tempdir().unwrap();
         let connect_claude = write_connect_proxy_claude_script(tmp.path());
-        let (args, egress) = runner_args(tmp.path(), &connect_claude);
+        let (args, egress, plan) = runner_args(tmp.path(), &connect_claude);
         let ready_marker = args.ready_marker.clone();
 
         let runner_task = tokio::spawn(async move {
-            let _ = run_sandbox_runner(args).await;
+            let _ = run_exec_plan(args, plan).await;
         });
         wait_for_ready(&ready_marker, &egress, Duration::from_secs(15)).await;
         let host = SandboxSessionChannelHost::connect(&ready_marker, SESSION_ID).await;

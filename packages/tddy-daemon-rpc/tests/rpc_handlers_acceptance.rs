@@ -85,6 +85,7 @@ impl ADaemon {
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(CliSessionManager::new()),
+            tddy_session_lifecycle::test_util::builtin_coding_agents(),
         );
         let host = match self.idle_tracker {
             Some(tracker) => host.with_idle_tracker(tracker),
@@ -105,11 +106,17 @@ fn a_config(home: &Path, tools: &[String]) -> DaemonConfig {
         .iter()
         .map(|path| format!("  - path: \"{path}\"\n"))
         .collect();
-    let yaml = format!(
-        "users:\n  - github_user: \"{GITHUB_USER}\"\n    os_user: \"{OS_USER}\"\nallowed_tools:\n{allowed_tools}"
-    );
+    let yaml = format!("allowed_tools:\n{allowed_tools}");
     let path = home.join("daemon.yaml");
     std::fs::write(&path, yaml).expect("write the daemon config");
+    std::fs::write(
+        std::path::Path::new(&(path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{GITHUB_USER}\"\n  os_user: \"{OS_USER}\"\n"),
+    )
+    .unwrap();
     DaemonConfig::load(&path).expect("the daemon config did not load")
 }
 

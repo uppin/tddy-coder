@@ -8,7 +8,7 @@
 **CRAP:** **CRAP 462** · complexity 21 · rank 9/50 in this crate · **never executed by any test**
 **Thresholds breached:** length 241 > 60; nesting 6 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — regressed 2026-10-22 (173 → 181, `#provider-route` 3/9); narrowed 2026-09-24 by #524 (242 → 137); still over the 60-line budget — **unclaimed**
+**Status:** Open — partially fixed 2026-11-06 by #823 (197 → 172); still over the 60-line budget — unclaimed
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/session_coordinate_handlers/svc_resume_session.rs:30`
 
@@ -26,6 +26,8 @@
 | 2026-10-22 | unchanged | — | — | — | `#provider-route` 6/9 (#667), by brace matching against `origin/feature/provider-route/default-route`: the `opencode-cli` resume branch became a CLI-harness-registry lookup (`cli_harness(session_type)` → `LaunchSessions::resume_cli_harness`), the descriptor-driven resume this record named as the seam. Same line count and nesting; the function is still over budget. Kept open |
 | 2026-10-24 | 202 | — | — | — | **Not touched** by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`): length by brace matching is identical at both. `/analyze-code-issues` re-run: complexity 23. This crate's own tests never enter it (CRAP 552). The session-lifecycle `ensure_project_home_session_acceptance` + `project_home_idle_stop_acceptance` (27 tests), with every workspace crate instrumented enter it (CRAP 23) |
 | 2026-10-26 | 189 | — | — | — | **better** by 13 (202 → 189) in #766 (`#home-inbox` 1/8): the cursor-cli branch is one call to the new `LaunchSessions::resume_cursor_cli`, which also gives the resumed agent its notify environment (`chat::resumed_cursor_notify_env`); the green phase had grown it to 222. Fn line to closing brace on `origin/feature/start-parity/spawn-conversation` (dfdfe8d93) and HEAD; no coverage run. Still open, unclaimed |
+| 2026-11-05 | 196 → 197 | — | — | — | **worse by 1** in #819 (`#agent-tools` 13/19): `resumed_tool_session_route_json` takes the host's coding agents; measured fn line to closing brace on `origin/feature/agent-tools/agent-registry` (`7ab752605`) and HEAD; no coverage run. Restructuring deferred to the #agent-tools sweep node (developer, 2026-11-04) |
+| 2026-11-06 | 197 → 172 | — | — | — | **better by 25** in #823 (`#agent-tools` 17/19): the claude-cli and cursor-cli resume arms are gone — every CLI agent resumes through `resume_cli_harness`; measured fn line to closing brace on `origin/feature/agent-tools/spec-backend` (`d325fba73`) and HEAD; no coverage run. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
 
 ## What the tool found
 

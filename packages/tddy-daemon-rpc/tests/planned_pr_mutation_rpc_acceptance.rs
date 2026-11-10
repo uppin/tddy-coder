@@ -239,9 +239,13 @@ impl Orchestrator {
     fn service(&self) -> TestDaemon {
         let config_dir = tempfile::tempdir().unwrap();
         let config_path = config_dir.path().join("config.yaml");
-        fs::write(
-            &config_path,
-            "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n",
+        fs::write(&config_path, "").unwrap();
+        std::fs::write(
+            std::path::Path::new(&(config_path))
+                .parent()
+                .expect("a config directory")
+                .join("users.yaml"),
+            "- github_user: \"u\"\n  os_user: \"u\"\n",
         )
         .unwrap();
         let config = tddy_daemon_kernel::config::DaemonConfig::load(&config_path).unwrap();
@@ -262,6 +266,7 @@ impl Orchestrator {
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(CliSessionManager::new()),
+            tddy_session_lifecycle::test_util::builtin_coding_agents(),
         ))
     }
 

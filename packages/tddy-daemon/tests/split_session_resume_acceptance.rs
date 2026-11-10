@@ -47,7 +47,7 @@ use tddy_github::GitHubUser;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{ResumeSessionRequest, SessionService as SessionServiceTrait};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::wait_until_peer_discovered;
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_argv};
@@ -168,26 +168,16 @@ fn a_claude_stub_recording_its_launch(dir: &Path, env_file: &Path, argv_file: &P
 
 /// A daemon that can wire a split session: LiveKit credentials for the real common room, and a
 /// spawnable `claude`.
-fn a_daemon_config(
-    ws_url: &str,
-    instance_id: &str,
-    claude_binary: &Path,
-) -> (tempfile::TempDir, DaemonConfig) {
+fn a_daemon_config(ws_url: &str, instance_id: &str) -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
-    let claude_binary = claude_binary.display();
     let common_room = the_common_room();
     let yaml = format!(
         r#"
 daemon_instance_id: "{instance_id}"
-users:
-  - github_user: "{user}"
-    os_user: "{user}"
 allowed_tools:
   - path: /bin/true
     label: true
-claude_cli:
-  binary_path: {claude_binary}
 livekit:
   enabled: true
   url: {ws_url}
@@ -198,13 +188,24 @@ livekit:
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = DaemonConfig::load(&config_path).expect("config must parse");
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
+    let config =
+        tddy_daemon_kernel::config::DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
 }
 
 /// A service wired to the real common room, so it can be discovered as a peer and can route a call
 /// to one.
-fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+fn a_service(
+    config: DaemonConfig,
+    sessions_base: PathBuf,
+    claude_binary: &Path,
+    agent_overrides: &Path,
+) -> DaemonSessionHost {
     let key = the_signing_key_of(
         config
             .daemon_instance_id
@@ -248,7 +249,11 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
             }),
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries_over(
+            agent_overrides,
+            &[("claude", claude_binary)],
+        ),
     )
     .with_session_tokens(tokens);
     let rooms = Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new());
@@ -388,6 +393,10 @@ fn an_agent_withdrawing(tool: &str) -> SessionAgentRecord {
 /// launch to.
 struct ResumedSplitSession {
     env_file: PathBuf,
+    /// The resumed session's context dir: where its agent runs, and its pointer is.
+    context_dir: PathBuf,
+    /// The daemon running the agent, which a delete is sent to.
+    agent_service: Arc<DaemonSessionHost>,
     argv_file: PathBuf,
     livekit_url: String,
     _agent_rpc_run: tokio::task::JoinHandle<()>,
@@ -398,6 +407,8 @@ struct ResumedSplitSession {
     _stubs: tempfile::TempDir,
     _agent_config: tempfile::TempDir,
     _codebase_config: tempfile::TempDir,
+    _agent_host: AnAgentHost,
+    _no_overrides: tempfile::TempDir,
 }
 
 impl ResumedSplitSession {
@@ -419,21 +430,85 @@ impl ResumedSplitSession {
         )
     }
 
-    fn agent_env_var(&self, name: &str) -> String {
-        let env = self.agent_env();
-        env.iter()
-            .find(|(k, _)| k == name)
-            .map(|(_, v)| v.clone())
-            .unwrap_or_else(|| {
-                // Only the remote-tool half of the environment: the inherited shell environment is
-                // hundreds of variables of noise around the handful this feature sets.
-                let remote: Vec<&str> = env
-                    .iter()
-                    .map(|(k, _)| k.as_str())
-                    .filter(|k| k.starts_with("TDDY_REMOTE_"))
-                    .collect();
-                panic!("the relaunched agent had no {name}; its TDDY_REMOTE_* env was {remote:?}")
+    /// The `TDDY_*` variables of the session's tool transport (`TDDY_REMOTE_*`, the roster seed)
+    /// the launched process carried — the agent's own environment, as opposed to its tool server's.
+    fn transport_vars_in_the_agent_env(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .agent_env()
+            .into_iter()
+            .map(|(name, _)| name)
+            .filter(|name| {
+                name.starts_with("TDDY_REMOTE_") || name == "TDDY_SESSION_AGENT_ROSTER_SEED"
             })
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// The `env` block the relaunched agent's MCP config registers `tddy-tools` with: where the
+    /// session's tool transport is handed over (`#agent-tools 25/28`).
+    fn tool_server_env(&self) -> std::collections::BTreeMap<String, String> {
+        let config_path = self
+            .agent_flag_values("--mcp-config")
+            .into_iter()
+            .next()
+            .expect("the relaunched agent names an --mcp-config");
+        let config: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&config_path).expect("the relaunched agent's MCP config"),
+        )
+        .expect("the MCP config is JSON");
+        serde_json::from_value(config["mcpServers"]["tddy-tools"]["env"].clone())
+            .expect("tddy-tools is registered with a string env")
+    }
+
+    /// `name` as the relaunched agent's tool server is registered with it.
+    fn tool_server_env_var(&self, name: &str) -> String {
+        let env = self.tool_server_env();
+        env.get(name).cloned().unwrap_or_else(|| {
+            panic!(
+                "the relaunched agent's tool server had no {name}; it was registered with {:?}",
+                env.keys().collect::<Vec<_>>()
+            )
+        })
+    }
+
+    /// The pointer the resumed agent's context dir holds, once it is there.
+    fn the_context_dirs_pointer(&self) -> tddy_core::session_pointer::SessionPointer {
+        let path = self
+            .context_dir
+            .join(tddy_core::session_pointer::SESSION_POINTER_FILE);
+        eventually_blocking(
+            "the resumed agent's context dir to hold its session pointer",
+            STUB_RECORD_TIMEOUT,
+            move || {
+                let bytes = std::fs::read(&path)
+                    .map_err(|e| format!("{} not readable: {e}", path.display()))?;
+                serde_json::from_slice(&bytes).map_err(|e| format!("not a pointer: {e}"))
+            },
+        )
+    }
+
+    /// Delete the resumed session through the daemon running its agent.
+    async fn delete(&self) {
+        self.agent_service
+            .delete_session(Request::direct(
+                tddy_service::proto::session::DeleteSessionRequest {
+                    session_token: a_caller_token().to_string(),
+                    session_id: AGENT_SESSION_ID.to_string(),
+                },
+            ))
+            .await
+            .expect("the resumed split session is deleted");
+    }
+
+    /// The relaunched agent's whole argv.
+    fn agent_argv(&self) -> Vec<String> {
+        let path = self.argv_file.clone();
+        eventually_blocking(
+            "the relaunched agent to record its argv",
+            STUB_RECORD_TIMEOUT,
+            move || read_recorded_argv(&path),
+        )
     }
 
     /// Every value the relaunched agent was given for `flag`, in argv order.
@@ -457,6 +532,61 @@ impl ResumedSplitSession {
 
 /// Resume the stopped split session against a codebase daemon whose roster holds `agents`.
 async fn resume_a_split_session_whose_roster_holds(
+    agents: Vec<SessionAgentRecord>,
+) -> ResumedSplitSession {
+    resume_a_split_session_on(AnAgentHost::without_overrides(), agents).await
+}
+
+/// Resume the stopped split session on an agent host whose operator added `flag` to the split
+/// agent's `host_agent` variant.
+async fn resume_a_split_session_on_a_host_whose_agent_adds(flag: &str) -> ResumedSplitSession {
+    resume_a_split_session_on(
+        AnAgentHost::adding_to_the_host_agent_variant(flag),
+        Vec::new(),
+    )
+    .await
+}
+
+/// The agent host's `<tddyhome>/tools`: empty, or one override of `claude.yaml`.
+struct AnAgentHost {
+    tools: tempfile::TempDir,
+}
+
+impl AnAgentHost {
+    fn without_overrides() -> Self {
+        Self {
+            tools: tempfile::tempdir().unwrap(),
+        }
+    }
+
+    fn adding_to_the_host_agent_variant(flag: &str) -> Self {
+        let builtin = tddy_coding_agent_specs::builtin_specs()
+            .into_iter()
+            .find(|(path, _)| path.ends_with("/claude.yaml"))
+            .map(|(_, yaml)| yaml)
+            .expect("claude.yaml is built in");
+        let builtin_args = "args: [--strict-mcp-config, --setting-sources, user]";
+        assert!(
+            builtin.contains(builtin_args),
+            "claude.yaml's host_agent variant is the one this override extends"
+        );
+        let host = Self::without_overrides();
+        std::fs::write(
+            host.tools.path().join("claude.yaml"),
+            builtin.replace(
+                builtin_args,
+                &format!("args: [--strict-mcp-config, --setting-sources, user, {flag}]"),
+            ),
+        )
+        .unwrap();
+        host
+    }
+}
+
+/// Resume the stopped split session on `agent_host` against a codebase daemon whose roster holds
+/// `agents`.
+async fn resume_a_split_session_on(
+    agent_host: AnAgentHost,
     agents: Vec<SessionAgentRecord>,
 ) -> ResumedSplitSession {
     let livekit = LiveKitTestkit::start()
@@ -487,9 +617,14 @@ async fn resume_a_split_session_whose_roster_holds(
         &a_workspace_session_holding(agents, &codebase_worktree),
     )
     .unwrap();
-    let (codebase_config_dir, codebase_config) =
-        a_daemon_config(&ws_url, CODEBASE_INSTANCE_ID, &claude_stub);
-    let codebase_service = Arc::new(a_service(codebase_config, codebase_base));
+    let (codebase_config_dir, codebase_config) = a_daemon_config(&ws_url, CODEBASE_INSTANCE_ID);
+    let no_overrides = tempfile::tempdir().unwrap();
+    let codebase_service = Arc::new(a_service(
+        codebase_config,
+        codebase_base,
+        &claude_stub,
+        no_overrides.path(),
+    ));
 
     // The agent host: the stopped session, and no repository at all.
     let agent_sessions = tempfile::tempdir().unwrap();
@@ -497,9 +632,13 @@ async fn resume_a_split_session_whose_roster_holds(
     let agent_session_dir = agent_base.join("sessions").join(AGENT_SESSION_ID);
     std::fs::create_dir_all(&agent_session_dir).unwrap();
     write_session_metadata(&agent_session_dir, &a_stopped_split_session()).unwrap();
-    let (agent_config_dir, agent_config) =
-        a_daemon_config(&ws_url, FACILITATING_INSTANCE_ID, &claude_stub);
-    let agent_service = Arc::new(a_service(agent_config, agent_base));
+    let (agent_config_dir, agent_config) = a_daemon_config(&ws_url, FACILITATING_INSTANCE_ID);
+    let agent_service = Arc::new(a_service(
+        agent_config,
+        agent_base,
+        &claude_stub,
+        agent_host.tools.path(),
+    ));
 
     let codebase_rpc_run = serve_on_the_common_room(
         &livekit,
@@ -527,6 +666,8 @@ async fn resume_a_split_session_whose_roster_holds(
 
     ResumedSplitSession {
         env_file,
+        context_dir: tddy_session_lifecycle::split_session::split_context_dir(&agent_session_dir),
+        agent_service: Arc::clone(&agent_service),
         argv_file,
         livekit_url: ws_url,
         _agent_rpc_run: agent_rpc_run,
@@ -537,6 +678,8 @@ async fn resume_a_split_session_whose_roster_holds(
         _stubs: stub_dir,
         _agent_config: agent_config_dir,
         _codebase_config: codebase_config_dir,
+        _agent_host: agent_host,
+        _no_overrides: no_overrides,
     }
 }
 
@@ -584,7 +727,7 @@ async fn a_resumed_split_agent_is_pointed_at_the_codebase_hosts_session_not_its_
     // the agent's own session id would resolve to nothing there. A co-located resume gets this
     // right by accident because both ids name the same thing; a split resume cannot.
     assert_eq!(
-        resumed.agent_env_var("TDDY_REMOTE_SESSION_ID"),
+        resumed.tool_server_env_var("TDDY_REMOTE_SESSION_ID"),
         CODEBASE_SESSION_ID,
         "the resumed agent must address the workspace session on the codebase host"
     );
@@ -601,24 +744,24 @@ async fn a_resumed_split_agents_tool_transport_is_rebuilt_from_the_persisted_pai
     // leave the agent with no route to a worktree at all, since there is no repository on this host
     // to fall back to.
     assert_eq!(
-        resumed.agent_env_var("TDDY_REMOTE_SERVER_IDENTITY"),
+        resumed.tool_server_env_var("TDDY_REMOTE_SERVER_IDENTITY"),
         format!("daemon-{FACILITATING_INSTANCE_ID}"),
         "tool calls are addressed at the host of the room the agent rejoins — this daemon; the \
          codebase daemon serves the common room, not the session's own"
     );
     assert_eq!(
-        resumed.agent_env_var("TDDY_REMOTE_DAEMON_INSTANCE_ID"),
+        resumed.tool_server_env_var("TDDY_REMOTE_DAEMON_INSTANCE_ID"),
         CODEBASE_INSTANCE_ID,
         "the resumed agent must name the daemon holding its codebase"
     );
     assert_eq!(
-        resumed.agent_env_var("TDDY_REMOTE_LIVEKIT_ROOM"),
+        resumed.tool_server_env_var("TDDY_REMOTE_LIVEKIT_ROOM"),
         tddy_daemon_livekit::session_room::session_room_name(AGENT_SESSION_ID),
         "a resumed agent rejoins its own session's room — the one this daemon hosts as the session's \
          facilitating daemon, not one named after the codebase session on the other host"
     );
     assert_eq!(
-        resumed.agent_env_var("TDDY_REMOTE_LIVEKIT_URL"),
+        resumed.tool_server_env_var("TDDY_REMOTE_LIVEKIT_URL"),
         resumed.livekit_url,
         "the tool transport dials the configured LiveKit server"
     );
@@ -634,7 +777,7 @@ async fn a_resumed_split_agent_receives_a_join_token_minted_at_the_resume() {
     // Then — the token is good for a full lifetime measured from *this* moment, not whatever was
     // left of the one the original agent process carried. The persisted pairing is the only durable
     // part of a split session's wiring; the credential is minted afresh every spawn.
-    let expiry = token_expiry_epoch_secs(&resumed.agent_env_var("TDDY_REMOTE_LIVEKIT_TOKEN"));
+    let expiry = token_expiry_epoch_secs(&resumed.tool_server_env_var("TDDY_REMOTE_LIVEKIT_TOKEN"));
     let expected = now_epoch_secs() + EXPECTED_TOKEN_TTL.as_secs() as i64;
     // Wall-clock: the token was minted a moment before this line ran, so its expiry trails the
     // expectation by however long the resume took. 60s covers a starved PTY spawn.
@@ -691,11 +834,13 @@ async fn a_resumed_split_agent_keeps_every_tool_when_the_roster_is_empty() {
 
 /// The agent half of a split session records `sandbox: None` (the codebase half on the other host
 /// is the one that is sandboxed). A resume must take the split wiring path — relaunching the
-/// configured `claude` with the rebuilt `TDDY_REMOTE_*` transport — and must **not** route to
+/// configured `claude` with its tool server registered with the rebuilt `TDDY_REMOTE_*` transport
+/// — and must **not** route to
 /// `resume_sandboxed_claude_cli_session`, which would refuse the session (the agent half has no
 /// `repo_path`) and never relaunch anything. The routing decision is observable in the relaunched
-/// process's environment: the split path injects `TDDY_REMOTE_DAEMON_INSTANCE_ID`; the sandboxed
-/// path injects none of the `TDDY_REMOTE_*` variables, and would not have spawned the stub at all.
+/// process's tool-server registration: the split path registers `TDDY_REMOTE_DAEMON_INSTANCE_ID`;
+/// the sandboxed path registers none of the `TDDY_REMOTE_*` variables, and would not have spawned
+/// the stub at all.
 #[tokio::test]
 #[serial]
 async fn a_split_sessions_agent_half_resumes_through_the_split_path_not_the_sandboxed_runner_path()
@@ -717,12 +862,92 @@ async fn a_split_sessions_agent_half_resumes_through_the_split_path_not_the_sand
     // resume_split_wiring path. A sandboxed relaunch would have left every TDDY_REMOTE_* variable
     // unset (and, in fact, would not have spawned the stub to record them).
     assert_eq!(
-        resumed.agent_env_var("TDDY_REMOTE_DAEMON_INSTANCE_ID"),
+        resumed.tool_server_env_var("TDDY_REMOTE_DAEMON_INSTANCE_ID"),
         CODEBASE_INSTANCE_ID,
         "a split session whose agent half is sandbox: None must relaunch with the split \
          transport, not the sandboxed runner path"
     );
 }
+
+#[tokio::test]
+#[serial]
+async fn a_resumed_split_agent_process_carries_none_of_its_tool_transport() {
+    // Given a stopped split session paired with a workspace session on another daemon
+    // When it is resumed
+    let resumed = resume_a_split_session().await;
+
+    // Then the relaunched agent's own environment holds none of the session's transport: its
+    // tddy-tools server is registered with it, and a process running model-authored code is not
+    assert_eq!(
+        resumed.transport_vars_in_the_agent_env(),
+        Vec::<String>::new(),
+        "a resumed split agent must be launched with no TDDY_REMOTE_* or roster seed variable"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_resumed_split_session_renders_the_hosts_agent_spec() {
+    // Given an agent host whose operator added a flag to the split agent's host_agent variant
+    let resumed = resume_a_split_session_on_a_host_whose_agent_adds(AN_OPERATOR_FLAG).await;
+
+    // When the stopped split session was resumed there
+
+    // Then the agent was relaunched as that host configures it, not as the binary embeds it
+    let argv = resumed.agent_argv();
+    assert!(
+        argv.iter().any(|arg| arg == AN_OPERATOR_FLAG),
+        "the resumed split agent must carry the host's override {AN_OPERATOR_FLAG}; argv was {argv:?}"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_resumed_split_agents_context_dir_holds_a_pointer_rewritten_for_it() {
+    // Given a stopped split session paired with a workspace session on another daemon
+    // When it is resumed
+    let resumed = resume_a_split_session().await;
+
+    // Then its context dir holds a pointer naming the transport this resume minted — the same
+    // fresh join token its tool server was registered with — owned by the daemon that relaunched it
+    let pointer = resumed.the_context_dirs_pointer();
+    assert_eq!(
+        (
+            pointer.remote.get("TDDY_REMOTE_SESSION_ID").cloned(),
+            pointer.remote.get("TDDY_REMOTE_LIVEKIT_TOKEN").cloned(),
+            pointer.owner,
+        ),
+        (
+            Some(CODEBASE_SESSION_ID.to_string()),
+            Some(resumed.tool_server_env_var("TDDY_REMOTE_LIVEKIT_TOKEN")),
+            Some(tddy_core::session_pointer::SessionPointerOwner::this_process()),
+        )
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_deleted_split_session_leaves_no_pointer_behind() {
+    // Given a resumed split session whose context dir holds its pointer
+    let resumed = resume_a_split_session().await;
+    let _ = resumed.the_context_dirs_pointer();
+
+    // When the session is deleted
+    resumed.delete().await;
+
+    // Then no pointer is left for a tddy-tools to find
+    assert!(
+        !resumed
+            .context_dir
+            .join(tddy_core::session_pointer::SESSION_POINTER_FILE)
+            .exists(),
+        "a deleted split session must leave no session pointer in {}",
+        resumed.context_dir.display()
+    );
+}
+
+/// The flag the overriding agent host's `host_agent` variant adds.
+const AN_OPERATOR_FLAG: &str = "--an-operator-flag";
 
 /// How much of the codebase host this daemon can see — the two shapes "unreachable" takes, which
 /// the resume must refuse identically.
@@ -821,11 +1046,8 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
     std::fs::create_dir_all(&session_dir).unwrap();
     write_session_metadata(&session_dir, &a_stopped_split_session()).unwrap();
 
-    let (_config_dir, config) = a_daemon_config(
-        "ws://livekit.invalid:7880",
-        FACILITATING_INSTANCE_ID,
-        &claude_stub,
-    );
+    let (_config_dir, config) =
+        a_daemon_config("ws://livekit.invalid:7880", FACILITATING_INSTANCE_ID);
     let tddy_data_dir = sessions_base.clone();
     let resolver: SessionsBaseResolver = Arc::new(move |_| Some(sessions_base.clone()));
     let resolved_user = current_os_user();
@@ -847,7 +1069,8 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_daemon_livekit::peer_routing::peer_routing_over(&config, discovery),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("claude", &claude_stub)]),
     )
     .with_session_tokens(SessionTokens::new(
         &the_signing_key_of(FACILITATING_INSTANCE_ID),

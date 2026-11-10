@@ -35,9 +35,6 @@ fn service_with_livekit_configured(sessions_base: PathBuf) -> DaemonSessionHost 
     std::fs::write(
         &config_path,
         r#"
-users:
-  - github_user: "testuser"
-    os_user: "testuser"
 allowed_tools:
   - path: target/debug/tddy-coder
     label: debug
@@ -46,6 +43,14 @@ livekit:
   api_key: dummy-key
   api_secret: dummy-secret
 "#,
+    )
+    .unwrap();
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testuser\"\n",
     )
     .unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
@@ -69,7 +74,8 @@ livekit:
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
     )
 }
 

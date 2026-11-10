@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Request, RequestMetadata, RequestTransport};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, ResumeSessionRequest,
@@ -73,15 +72,19 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
     let user = os_user();
     std::fs::write(
         &config_path,
-        format!(
-            "users:\n  - github_user: \"{user}\"\n    os_user: \"{user}\"\n\
-             allowed_tools:\n  - path: /bin/true\n    label: true\n\
-             claude_cli:\n  binary_path: {}\n",
-            claude.display()
-        ),
+        "allowed_tools:\n  - path: /bin/true\n    label: true\n",
     )
     .unwrap();
-    let config = DaemonConfig::load(&config_path).expect("daemon.yaml must load");
+    std::fs::write(
+        std::path::Path::new(&(config_path))
+            .parent()
+            .expect("a config directory")
+            .join("users.yaml"),
+        format!("- github_user: \"{user}\"\n  os_user: \"{user}\"\n"),
+    )
+    .unwrap();
+    let config = tddy_session_lifecycle::config::DaemonConfig::load(&config_path)
+        .expect("daemon.yaml must load");
 
     let sessions = tempfile::tempdir().unwrap();
     let projects_dir = sessions.path().join("projects");
@@ -104,7 +107,11 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+            "claude",
+            claude.as_path(),
+        )]),
     );
     AHostWithNothingWired {
         host,

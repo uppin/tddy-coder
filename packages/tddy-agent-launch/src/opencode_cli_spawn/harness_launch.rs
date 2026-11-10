@@ -1,28 +1,17 @@
-//! Launching a registered CLI harness — as the PTY child, or inside tmux (`#tmux-agent` 3/3) — for
-//! a start or a resume of [`super`].
+//! Launching a registered CLI harness from its spec — as the PTY child, or inside tmux
+//! (`#tmux-agent` 3/3) — for a start or a resume of [`super`].
 
-use crate::cli_route_launch::CliRouteLaunch;
 use std::path::Path;
 use std::sync::Arc;
-use tddy_cli_sessions::cli_session_manager::CliSessionManager;
-use tddy_cli_sessions::cli_session_manager::{ExitHook, HarnessLaunchExtras};
-use tddy_core::cli_harness::{CliHarness, CliLaunch};
+use tddy_actions::tool::TemplateParams;
+use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
+use tddy_coding_agent_specs::slots::RenderedSlots;
 use tddy_rpc::Status;
 
-/// What a launch adds to the harness's argv: the route's arguments, `env` with the route's
-/// environment on top, and `on_exit` run once the process has exited.
-pub(super) fn launch_extras(
-    route: CliRouteLaunch,
-    mut env: Vec<(String, String)>,
-    on_exit: ExitHook,
-) -> HarnessLaunchExtras {
-    env.extend(route.env);
-    HarnessLaunchExtras {
-        args: route.args,
-        env,
-        on_exit: Some(on_exit),
-    }
-}
+use crate::spec_launch::{
+    in_a_pane_with_only_the_agent_env, launch_host_pty, plan_host_pty,
+    without_the_panes_terminal_variables, HostAgent, HostPtySession,
+};
 
 /// How a harness is run: as the PTY child, or inside tmux — and whether the launch starts the
 /// session's agent or resumes it.
@@ -80,16 +69,27 @@ impl<'a> HarnessSession<'a> {
     }
 }
 
-/// Spawn `harness` with `launch`, followed by `extras`, as the session's OS user — whose `HOME` and
-/// configured `PATH` extra the child must run under, or its user-local binary and credentials are
-/// never found (a systemd daemon's own `PATH` is minimal). In tmux (`run.in_tmux`) the harness runs
-/// in a session of its own, re-attached on a resume when alive.
+/// What the harness's spec is launched with: its argv's parameters and rendered slots (the route's
+/// arguments already in `slots.argv_extra`), the session type it is registered under, the model,
+/// the environment on top of the spec's `run.env`, and `on_exit` run once the agent has exited.
+pub(super) struct HarnessSpecLaunch<'a> {
+    pub(super) agent: &'a HostAgent,
+    pub(super) params: &'a TemplateParams,
+    pub(super) slots: &'a RenderedSlots,
+    pub(super) kind: &'a str,
+    pub(super) model: &'a str,
+    pub(super) env: Vec<(String, String)>,
+    pub(super) on_exit: Option<ExitHook>,
+}
+
+/// Spawn the harness from its spec as the session's OS user — whose `HOME` and configured `PATH`
+/// extra the child must run under, or its user-local binary and credentials are never found (a
+/// systemd daemon's own `PATH` is minimal). In tmux (`run.in_tmux`) the spec's rendered argv runs in
+/// a session of its own, re-attached on a resume when alive.
 pub(super) async fn launch(
     cli_manager: &Arc<CliSessionManager>,
-    harness: &CliHarness,
     session: HarnessSession<'_>,
-    launch: &CliLaunch<'_>,
-    extras: HarnessLaunchExtras,
+    launch: HarnessSpecLaunch<'_>,
     run: HarnessRun,
 ) -> Result<LaunchedHarness, Status> {
     let HarnessSession {
@@ -98,18 +98,35 @@ pub(super) async fn launch(
         session_dir,
         os_user,
     } = session;
+    let HarnessSpecLaunch {
+        agent,
+        params,
+        slots,
+        kind,
+        model,
+        env,
+        on_exit,
+    } = launch;
+    let failed = |e: crate::spec_launch::SpecLaunchError| {
+        Status::internal(format!("failed to spawn {kind}: {e}"))
+    };
     if run.in_tmux {
-        let mut argv = (harness.argv)(launch);
-        argv.extend(extras.args);
+        let plan = plan_host_pty(agent, params, slots).map_err(failed)?;
+        let env: Vec<(String, String)> = plan.env.into_iter().chain(env).collect();
+        let env = without_the_panes_terminal_variables(agent.env_base.agent_env(
+            &agent.spec,
+            std::env::vars_os(),
+            &env,
+        ));
         let tmux_launch = crate::cli_harness_tmux::HarnessTmuxLaunch {
             os_user,
             session_id,
             worktree_path: worktree_path.to_path_buf(),
             session_dir: session_dir.to_path_buf(),
-            kind: harness.session_type,
-            argv,
-            env: extras.env,
-            on_exit: extras.on_exit,
+            kind,
+            argv: in_a_pane_with_only_the_agent_env(plan.argv, &env),
+            env,
+            on_exit,
         };
         let launched = if run.resume {
             crate::cli_harness_tmux::resume_harness_in_tmux(cli_manager, tmux_launch).await?
@@ -121,17 +138,23 @@ pub(super) async fn launch(
             tmux_session: Some(launched.tmux_session),
         });
     }
-    let handle = cli_manager
-        .launch_cli_harness(
-            harness,
+    let handle = launch_host_pty(
+        agent,
+        params,
+        slots,
+        worktree_path,
+        HostPtySession {
+            manager: cli_manager,
             session_id,
-            worktree_path.to_path_buf(),
-            launch,
-            extras,
-            Some(os_user),
-        )
-        .await
-        .map_err(|e| Status::internal(format!("failed to spawn {}: {e}", harness.session_type)))?;
+            session_type: kind,
+            model,
+            env,
+            os_user: Some(os_user),
+        },
+        on_exit,
+    )
+    .await
+    .map_err(failed)?;
     Ok(LaunchedHarness {
         pid: handle.pid,
         tmux_session: None,

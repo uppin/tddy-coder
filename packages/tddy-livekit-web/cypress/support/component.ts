@@ -1,28 +1,27 @@
 import { mount } from "cypress/react";
+import { createElement, type ReactElement } from "react";
+import { MediaPortProvider } from "tddy-client-web";
+import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { aMediaDouble, type MountWithClientsOverrides, withClients } from "tddy-client-web/testkit";
+import "tddy-ui-web/theme.css";
 
-Cypress.Commands.add("mount", mount);
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Cypress {
+    interface Chainable {
+      mount: typeof mount;
+      mountWithClients(jsx: ReactElement, backend: InMemoryRpcBackend, overrides?: MountWithClientsOverrides): Chainable;
+    }
+  }
+}
 
-beforeEach(() => {
-  cy.window({ log: false }).then((win) => {
-    (win as unknown as { cypressLogs: string[] }).cypressLogs = [];
-    const originalLog = (win as Window).console.log;
-    (win as Window).console.log = function (...args: unknown[]) {
-      const message = args
-        .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))
-        .join(" ");
-      if (message.includes("[LiveKitTransport]") || message.includes("[TEST]") || message.includes("[REFLECTION]")) {
-        (win as unknown as { cypressLogs: string[] }).cypressLogs.push(message);
-      }
-      originalLog.apply((win as Window).console, args);
-    };
-  });
-});
+/** `strict: false` as in tddy-web, so a dev double-mount does not discard imperative refs mid-test. */
+/** A media port with no camera video anywhere; a spec that cares mounts its own provider inside (`cameraRoster`). */
+const noMedia = aMediaDouble();
 
-afterEach(() => {
-  cy.window({ log: false }).then((win) => {
-    const logs = (win as unknown as { cypressLogs?: string[] }).cypressLogs ?? [];
-    logs.forEach((log: string) => {
-      cy.task("log", `[BROWSER] ${log}`, { log: false });
-    });
-  });
-});
+Cypress.Commands.add("mount", (jsx, options = {}) =>
+  mount(createElement(MediaPortProvider, { port: noMedia }, jsx), { strict: false, ...options }),
+);
+Cypress.Commands.add("mountWithClients", (jsx: ReactElement, backend: InMemoryRpcBackend, overrides?: MountWithClientsOverrides) =>
+  mount(withClients(jsx, backend, overrides), { strict: false }),
+);

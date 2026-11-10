@@ -1,8 +1,10 @@
 //! The port the daemon implements to start a coding agent for one conversation.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use tddy_agent_backend::{AcpAgentCommand, HeadlessCommand, McpServerSpec};
+use tddy_agent_backend::adapters::PreparedAcpHooks;
+use tddy_agent_backend::{AcpAgentCommand, HeadlessCommand, McpServerSpec, NoHooks};
 use tddy_discovery::subagent::SubagentError;
 
 use crate::catalog::CodingAgentDef;
@@ -45,6 +47,70 @@ pub fn claim_headless_conversation_dir(
     std::fs::write(dir.join(HEADLESS_OWNER_FILE), daemon_instance_id)
 }
 
+/// The file in a headless conversation's directory listing, one absolute path per line, every file
+/// its plan wrote **outside** that directory — a worktree's `.cursor/mcp.json` — so the close and
+/// the start-up sweep remove those too (`#agent-tools 9/12`;
+/// `docs/dev/changesets/2026-11-03-agent-tools-headless-others.md`).
+pub const HEADLESS_WRITTEN_FILES: &str = "written-files";
+
+/// Record `files` — a plan's `RenderedSlots::written` — in `dir`'s [`HEADLESS_WRITTEN_FILES`],
+/// after what an earlier plan of the conversation recorded. Written before the files themselves,
+/// so a plan that fails part-way leaves nothing the record does not name.
+pub fn record_written_files(dir: &Path, files: &[PathBuf]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut record = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(HEADLESS_WRITTEN_FILES))?;
+    let lines: String = files
+        .iter()
+        .map(|file| format!("{}\n", file.display()))
+        .collect();
+    record.write_all(lines.as_bytes())
+}
+
+/// Remove every file `dir`'s [`HEADLESS_WRITTEN_FILES`] records. A recorded file already gone is
+/// not an error; a missing record removes nothing. Returns the files removed, in recorded order.
+pub fn remove_recorded_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let record = match std::fs::read_to_string(dir.join(HEADLESS_WRITTEN_FILES)) {
+        Ok(record) => record,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut removed = Vec::new();
+    for file in record
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+    {
+        match std::fs::remove_file(&file) {
+            Ok(()) => removed.push(file),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(removed)
+}
+
+/// Close headless conversation `conversation_id` under `tddy_data_dir`: the files its record names
+/// ([`remove_recorded_files`]), then its directory. What `AgentRoster::conversation_closed` does
+/// for a closed conversation. A conversation with no directory is not an error. Returns the
+/// recorded files removed.
+pub fn close_headless_conversation(
+    tddy_data_dir: &Path,
+    conversation_id: &str,
+) -> std::io::Result<Vec<PathBuf>> {
+    let dir = headless_conversation_dir(tddy_data_dir, conversation_id);
+    let removed = remove_recorded_files(&dir)?;
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    Ok(removed)
+}
+
 /// Remove the files every headless conversation of the daemon `daemon_instance_id` left under
 /// `<tddy_data_dir>/headless/` — what that daemon left behind when it stopped without closing them.
 /// Called once at start-up, when the daemon holds no conversation (its conversation table is in
@@ -71,6 +137,7 @@ pub fn sweep_headless_dirs(
         if owner.trim() != daemon_instance_id {
             continue;
         }
+        remove_recorded_files(&dir)?;
         std::fs::remove_dir_all(&dir)?;
         if let Some(conversation) = dir.file_name().and_then(|name| name.to_str()) {
             swept.push(conversation.to_string());
@@ -87,6 +154,35 @@ pub enum AgentTransport {
     /// A connected stream to an agent started elsewhere — by `tddy-supervisor` as the session's OS
     /// user, its stdio relayed over this stream. Closing it ends the agent.
     Stream(std::os::unix::net::UnixStream),
+}
+
+/// An ACP agent a launcher started (or planned) for one conversation, with the hooks its driver
+/// runs with and the bracket around each open they need (`PreparedAcpHooks`): what the agent's
+/// declared `coding_agent.acp.hooks_adapter` prepared — `codex-acp-login`'s one `codex login` retry
+/// on an auth-like `session/new` error. The session that opens over the agent holds them for exactly
+/// its lifetime ([`crate::CodingAgentSession::start`]).
+pub struct LaunchedAgent {
+    pub transport: AgentTransport,
+    pub hooks: PreparedAcpHooks,
+}
+
+impl std::fmt::Debug for LaunchedAgent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LaunchedAgent")
+            .field("transport", &self.transport)
+            .field("brackets_opens", &self.hooks.opens.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// The hooks of a launch whose agent declares no hooks adapter: they change nothing and bracket no
+/// open.
+#[must_use]
+pub fn no_launch_hooks() -> PreparedAcpHooks {
+    PreparedAcpHooks {
+        hooks: Arc::new(NoHooks),
+        opens: None,
+    }
 }
 
 /// Everything a launch needs to know about the conversation it serves.
@@ -148,6 +244,23 @@ pub trait CodingAgentLauncher: Send + Sync {
         self.command_for(launch).await.map(AgentTransport::Command)
     }
 
+    /// [`Self::launch_transport`] with the hooks the agent's driver runs with: what the daemon opens
+    /// an ACP conversation through. By default the transport alone with [`no_launch_hooks`] — a
+    /// launcher that holds no agent specs has no hooks adapter to prepare. A launcher whose agents
+    /// declare one (`coding_agent.acp.hooks_adapter`) overrides it and prepares every declared
+    /// adapter on the command before it is spawned or relayed.
+    async fn launch_agent(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<LaunchedAgent, SubagentError> {
+        self.launch_transport(launch)
+            .await
+            .map(|transport| LaunchedAgent {
+                transport,
+                hooks: no_launch_hooks(),
+            })
+    }
+
     /// The MCP servers the ACP session is opened with — in a managed session, `tddy-tools --mcp`
     /// ([`TDDY_TOOLS_SERVER`], [`TDDY_TOOLS_MCP_ARG`]) with the binary resolved and the agent's own
     /// tool credential minted. Asked before [`Self::launch_transport`], so a refusal here never
@@ -156,6 +269,15 @@ pub trait CodingAgentLauncher: Send + Sync {
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<Vec<McpServerSpec>, SubagentError>;
+
+    /// The `_meta` the ACP session is opened with (`#agent-tools 11/12`): in a managed session, the
+    /// native-tool withdrawal of an agent whose spec declares `tool_deny: { acp_meta: … }`. Required:
+    /// a launcher answers from the agent specs it holds, and one that holds none says so (`Ok(None)`)
+    /// rather than inheriting an answer that names agents.
+    async fn session_meta_for(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, SubagentError>;
 
     /// The command a headless coding agent's CLI runs for every turn of `launch`'s conversation: the
     /// program, the environment it adds, its working directory and any MCP config it reads. Asked

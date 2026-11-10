@@ -71,7 +71,8 @@ impl ScenarioLauncher {
                     )],
                 ))
             }),
-        );
+        )
+        .with_coding_agents(tddy_session_lifecycle::test_util::builtin_coding_agents());
         Arc::new(Self {
             dir: dir.to_path_buf(),
             daemons_own,
@@ -81,6 +82,16 @@ impl ScenarioLauncher {
 
 #[async_trait::async_trait]
 impl CodingAgentLauncher for ScenarioLauncher {
+    async fn session_meta_for(
+        &self,
+        _launch: &tddy_coding_subagent::CodingAgentLaunch,
+    ) -> Result<
+        Option<serde_json::Map<String, serde_json::Value>>,
+        tddy_discovery::subagent::SubagentError,
+    > {
+        Ok(None)
+    }
+
     async fn command_for(
         &self,
         launch: &CodingAgentLaunch,

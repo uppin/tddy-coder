@@ -4,18 +4,18 @@
 //!
 //! Extracted from `tddy-core`, which re-exports every module and root item at its old path.
 
+pub mod adapters;
+pub mod agent_env;
 pub mod backend;
-pub mod claude_argv;
 pub mod claude_hooks;
-pub mod cli_harness;
-pub mod cli_harness_muse;
-pub mod cli_harness_warp;
 pub mod cursor_hooks;
 pub mod provider_route;
 pub mod provider_route_file;
+pub mod session_pointer;
 pub mod spawn_env;
 pub mod stream;
 pub mod token_accounting;
+pub mod turn_files;
 
 // The storage layer and the tool-call channels a backend reports through, named at the `crate::`
 // paths these modules used inside `tddy-core`.
@@ -26,21 +26,24 @@ pub use backend::acp_driver::{
     AcpAgentCommand, AcpAgentHooks, AcpDriver, AcpSession, AcpStopReason, AcpToolStatus,
     AcpTurnEnd, AcpUpdate, AcpUpdateSink, AllowOnce, McpServerSpec, NoHooks, OpenSession,
     PermissionDecision, PermissionHandler, PermissionOptionView, PermissionRequest,
-    SessionErrorVerdict,
+    SessionErrorVerdict, SESSION_OPEN_DEADLINE,
 };
 pub use backend::headless_driver::{
-    AcpConversation, ConversationDriver, HeadlessCommand, HeadlessDriver, HeadlessHarness,
+    AcpConversation, ConversationDriver, HeadlessCommand, HeadlessDriver,
 };
 pub use backend::{
-    backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,
-    codex_acp_route_args, default_model_for_agent, get_child_pid, kill_child_process,
-    preselected_index_for_agent, recipe_cli_name_from_selection_label, set_child_pid,
-    workflow_recipe_selection_question, AgentOutputSink, AnyBackend, ClarificationQuestion,
-    ClaudeAcpBackend, ClaudeCodeBackend, ClaudeInvokeConfig, CodexAcpBackend, CodexBackend,
-    CodingBackend, CursorBackend, InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend,
-    OpenCodeAcpBackend, PermissionMode, ProcessToolExecutor, QuestionOption, RemoteToolEnv,
-    SessionMode, SharedBackend, StubBackend, ToolExecutor, CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
-    CODEX_THREAD_ID_FILENAME,
+    codex_acp_route_args, kill_running_turns, recipe_cli_name_from_selection_label,
+    spawn_codex_oauth_login, workflow_recipe_selection_question, AgentOutputSink,
+    ClarificationQuestion, CodingBackend, InMemoryToolExecutor, InvokeRequest, InvokeResponse,
+    MockBackend, ProcessToolExecutor, QuestionOption, RemoteToolEnv, RunningGroup, SessionMode,
+    SharedBackend, StubBackend, ToolExecutor, CODEX_DEFAULT_CLI_BINARY,
+    CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_ID_FILENAME,
+};
+// `#agent-tools 16/19`: the workflow backend built from any coding agent's spec.
+pub use backend::spec_backend::{SpecAcpBackend, SpecBackend, SpecBackendRefusal, SpecTransport};
+// `#agent-tools 15/19`: the one headless workflow backend, configured by an agent's spec.
+pub use backend::spec_headless::{
+    SpecHeadlessBackend, DEFAULT_TURN_DEADLINE, MODEL_LISTING_DEADLINE,
 };
 pub use claude_hooks::{
     build_claude_hooks_settings, HookCommandParams, AWAIT_CLIENT_MARGIN_SECS,

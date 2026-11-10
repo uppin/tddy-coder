@@ -133,10 +133,11 @@ host's git credentials; setting up `gh auth setup-git` is the person's choice, n
 
 ## Supervised hosts
 
-Where the daemon runs as an unprivileged child of `tddy-supervisor`, each session user's socket is
-declared in `supervisor.yaml` (`host_sockets:`) and the supervisor must allow the four git identity
-environment keys for session spawns, plus `TDDY_GITHUB_SOURCE` for projects that use Local gh. A user who is not declared gets no GitHub token in their tool
-sessions, and the refusal names the setting. That path is built and unit-tested; it has not yet run
+Where the daemon runs as an unprivileged child of `tddy-supervisor`, each session user's daemon socket
+is made by the supervisor for every OS user `users.yaml` maps (`<sockets_dir>/<user>/daemon.sock`), and
+the supervisor must allow the four git identity
+environment keys for session spawns, plus `TDDY_GITHUB_SOURCE` for projects that use Local gh. A user `users.yaml` does not map gets no socket, so their
+session start is refused, naming `users.yaml`. That path is built and unit-tested; it has not yet run
 under a real root supervisor.
 
 ## Related

@@ -61,12 +61,16 @@ impl TerminalExposure for CapturingExposure {
 async fn a_room_terminal(dir: &Path) -> (Arc<CliSessionManager>, Arc<dyn RpcService>) {
     let manager = Arc::new(CliSessionManager::new());
     manager
-        .start(
+        .start_with_options(
             SESSION,
             dir.to_path_buf(),
             "claude-opus-4-8",
-            &a_tui_agent(dir),
+            vec![a_tui_agent(dir)],
+            "agent-cli",
             None,
+            None,
+            Vec::new(),
+            Vec::new(),
             None,
         )
         .await

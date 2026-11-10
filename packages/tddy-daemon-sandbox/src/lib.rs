@@ -36,6 +36,7 @@
 //! `ManagedWorkflow`'s.
 
 pub mod action_service;
+pub mod build_action_sandbox;
 mod conversation_tool;
 mod main_recording;
 pub mod sandbox_action;
@@ -43,6 +44,7 @@ pub mod sandbox_plan_builder;
 pub mod sandbox_runtime;
 pub mod sandbox_session;
 pub mod task_service;
+pub mod tool_jail;
 pub mod workspace_tool_sandbox;
 
 #[cfg(test)]

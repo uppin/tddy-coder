@@ -1,6 +1,6 @@
 import React from "react";
-import { App } from "../../src/index";
-import { AuthProvider } from "../../src/hooks/authProvider";
+import { App } from "../../src/app/App";
+import { AuthProvider } from "../../src/app/auth/authProvider";
 import {
   anAuthStatusAuthenticated,
   anAuthStatusUnauthenticated,
@@ -11,7 +11,7 @@ import { toArrayBuffer } from "../support/rpc/protoRpc";
 import { byTestId, TEST_IDS } from "../support/testIds";
 import { connectionPage } from "../support/pages/connectionPage";
 
-// Mobile tap-to-type / focus assertions need a real LiveKit room (server participant). Those flows are covered in GhosttyTerminalSessionChrome.cy.tsx without full App wiring.
+// Mobile tap-to-type / focus assertions need a real LiveKit room (server participant). Those flows are covered in TerminalSessionChrome.cy.tsx without full App wiring.
 describe("App", () => {
   beforeEach(() => {
     cy.clearLocalStorage();

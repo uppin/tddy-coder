@@ -1,11 +1,10 @@
-//! Acceptance tests: the Telegram `/start-claude` branch pick prompts when the branch it is about
-//! to create is already owned by another session, instead of silently creating a `<branch>-1`.
+//! Acceptance tests: a Telegram CLI start onto a branch another session holds asks the operator
+//! how to continue, instead of silently creating a `<branch>-1`.
 //!
-//! Telegram spawns sessions without going through `StartSession` — it calls
-//! `setup_worktree_for_session_with_optional_chain_base` directly — so it needs the same ownership
-//! check at its own call site. The check runs when the base-branch choice resolves the branch name
-//! (`handle_telegram_branch_callback`), so the operator is asked *before* the model picker rather
-//! than after committing to a model.
+//! The answer comes from the daemon's generic start: its own branch-conflict guard reports the
+//! owner and the suggested name (`telegram_start_agent_from_spec.rs` runs it for real); Telegram
+//! keeps no check of its own. Here the starter is a double that reports a conflict, so the three
+//! choices and what each rewrites are pinned without a host.
 //!
 //! The branch name is derived, never typed: `feature/<slug(changeset.name)>`, and `changeset.name`
 //! is the first six words of the `/start-claude` prompt. A prompt of "Auth Feature" therefore
@@ -20,15 +19,21 @@ use std::sync::{Arc, Mutex};
 use tddy_core::changeset::{BranchWorktreeIntent, Changeset};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon_kernel::config::{ClaudeCliConfig, DaemonConfig};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_daemon_extensions::{
+    OperatorBranchChoice, OperatorBranchConflict, OperatorSessionStart, OperatorStartOutcome,
+    SessionStarter,
+};
+use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_telegram::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
 use tddy_telegram_control::telegram_notifier::InMemoryTelegramSender;
 use tddy_telegram_control::telegram_session_control::{
-    collect_outbound_messages, parse_telegram_branch_conflict_callback, CapturedTelegramMessage,
-    StartClaudeCommand, TelegramSessionControlHarness, TelegramWorkflowSpawn,
+    collect_outbound_messages, parse_telegram_branch_conflict_callback,
+    telegram_agent_pick_callback, telegram_model_choices, telegram_model_pick_callback,
+    CapturedTelegramMessage, StartClaudeCommand, TelegramAgentChoices,
+    TelegramSessionControlHarness, TelegramWorkflowSpawn,
 };
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
@@ -52,15 +57,30 @@ const SUGGESTED_BRANCH: &str = "feature/auth-feature-1";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-fn write_echo_argv_script(dir: &Path) -> std::path::PathBuf {
-    let script_path = dir.join("stub_claude.sh");
-    std::fs::write(&script_path, "#!/bin/sh\necho \"ARGV: $@\"\n").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+/// The daemon's generic start as its branch-conflict guard answers it: the branch is held by
+/// [`OWNER_SESSION`], and [`SUGGESTED_BRANCH`] is the first free name.
+struct AStarterReportingTheBranchHeld;
+
+#[async_trait::async_trait]
+impl SessionStarter for AStarterReportingTheBranchHeld {
+    async fn start_for_operator(
+        &self,
+        start: OperatorSessionStart,
+    ) -> Result<OperatorStartOutcome, tddy_rpc::Status> {
+        let OperatorBranchChoice::NewBranchFromBase {
+            new_branch_name, ..
+        } = start.branch
+        else {
+            panic!("a Telegram start of a new branch asks for a new branch");
+        };
+        Ok(OperatorStartOutcome::BranchConflict(
+            OperatorBranchConflict {
+                branch: new_branch_name,
+                owner_session_id: OWNER_SESSION.to_string(),
+                suggested_branch_name: SUGGESTED_BRANCH.to_string(),
+            },
+        ))
     }
-    script_path
 }
 
 /// A git repo whose `origin` is itself, so the branch pick can list refs with no server.
@@ -97,7 +117,6 @@ fn register_project(projects_dir: &Path, repo_path: &Path) {
 
 fn build_harness(
     sessions_base: std::path::PathBuf,
-    stub_binary: &str,
     projects_dir: std::path::PathBuf,
 ) -> (
     TelegramSessionControlHarness<InMemoryTelegramSender>,
@@ -105,17 +124,7 @@ fn build_harness(
     SharedTelegramTrackedSessionCoordinator,
 ) {
     let sender = Arc::new(InMemoryTelegramSender::new());
-    let config = DaemonConfig {
-        claude_cli: Some(ClaudeCliConfig {
-            binary_path: stub_binary.to_string(),
-            tddy_tools_path: None,
-            daemon_url: None,
-            claude_home_dir: None,
-            fullscreen: true,
-            answer_wait_secs: 120,
-        }),
-        ..Default::default()
-    };
+    let config = DaemonConfig::default();
     let workflow_spawn = Arc::new(TelegramWorkflowSpawn {
         config: Arc::new(config),
         spawn_client: None,
@@ -128,7 +137,7 @@ fn build_harness(
         elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
         elicitation_multi_select_meta: Arc::new(Mutex::new(HashMap::new())),
         pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
-        claude_cli_manager: Arc::new(ClaudeCliSessionManager::new()),
+        cli_manager: Arc::new(CliSessionManager::new()),
     });
     let tracked: SharedTelegramTrackedSessionCoordinator =
         Arc::new(Mutex::new(TelegramTrackedSessionCoordinator::new()));
@@ -139,7 +148,11 @@ fn build_harness(
         Some(workflow_spawn),
         None,
         Some(tracked.clone()),
-    );
+    )
+    .with_coding_agents(Arc::new(
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin().expect("the built-in agents load"),
+    ))
+    .with_session_starter(Arc::new(AStarterReportingTheBranchHeld));
     (harness, sender, tracked)
 }
 
@@ -168,7 +181,6 @@ fn a_session_owning(sessions_base: &Path, session_id: &str, branch: &str) {
 struct World {
     _repo_dir: tempfile::TempDir,
     _projects_tmp: tempfile::TempDir,
-    _stub_dir: tempfile::TempDir,
     sessions_tmp: tempfile::TempDir,
     harness: TelegramSessionControlHarness<InMemoryTelegramSender>,
     sender: Arc<InMemoryTelegramSender>,
@@ -214,12 +226,9 @@ async fn a_world_at_the_branch_pick() -> World {
     create_test_repo_with_origin(repo_dir.path());
     let projects_tmp = tempfile::tempdir().unwrap();
     register_project(projects_tmp.path(), repo_dir.path());
-    let stub_dir = tempfile::tempdir().unwrap();
-    let stub_path = write_echo_argv_script(stub_dir.path());
 
     let (mut harness, sender, tracked) = build_harness(
         sessions_tmp.path().to_path_buf(),
-        stub_path.to_str().unwrap(),
         projects_tmp.path().to_path_buf(),
     );
 
@@ -241,7 +250,6 @@ async fn a_world_at_the_branch_pick() -> World {
     World {
         _repo_dir: repo_dir,
         _projects_tmp: projects_tmp,
-        _stub_dir: stub_dir,
         sessions_tmp,
         harness,
         sender,
@@ -258,6 +266,22 @@ async fn pick_default_base(world: &World) -> Vec<CapturedTelegramMessage> {
         .handle_telegram_branch_callback(AUTHORIZED_CHAT, 0, 0, 0, &world.session_id)
         .await
         .expect("branch callback must answer");
+    collect_outbound_messages(&world.sender, AUTHORIZED_CHAT)
+        .into_iter()
+        .skip(before)
+        .collect()
+}
+
+/// Pick the default base and the first model — the pick that runs the start — and return only the
+/// messages the model pick produced.
+async fn pick_default_base_and_first_model(world: &World) -> Vec<CapturedTelegramMessage> {
+    pick_default_base(world).await;
+    let before = world.sender.len();
+    world
+        .harness
+        .handle_telegram_model_pick_callback(AUTHORIZED_CHAT, 0, 0, &world.session_id)
+        .await
+        .expect("model callback must answer");
     collect_outbound_messages(&world.sender, AUTHORIZED_CHAT)
         .into_iter()
         .skip(before)
@@ -295,13 +319,14 @@ async fn tap_conflict_choice(world: &World, sent: &[CapturedTelegramMessage], ch
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn telegram_branch_pick_offers_three_conflict_choices_when_the_derived_branch_is_owned() {
+async fn telegram_model_pick_offers_three_conflict_choices_when_the_start_reports_the_branch_held()
+{
     // Given
     let world = a_world_at_the_branch_pick().await;
     a_session_owning(world.sessions_tmp.path(), OWNER_SESSION, DERIVED_BRANCH);
 
     // When
-    let sent = pick_default_base(&world).await;
+    let sent = pick_default_base_and_first_model(&world).await;
 
     // Then — switch / add another agent / use the suggested name, instead of the model picker.
     let prompt = sent
@@ -329,7 +354,7 @@ async fn telegram_branch_conflict_buttons_fit_the_callback_data_limit() {
     a_session_owning(world.sessions_tmp.path(), OWNER_SESSION, DERIVED_BRANCH);
 
     // When
-    let sent = pick_default_base(&world).await;
+    let sent = pick_default_base_and_first_model(&world).await;
 
     // Then — Telegram rejects callback_data over 64 bytes, which is why the branch name is
     // re-derived server-side instead of being carried in the payload.
@@ -392,7 +417,7 @@ async fn telegram_branch_conflict_creates_no_worktree_for_the_pending_session() 
     a_session_owning(world.sessions_tmp.path(), OWNER_SESSION, DERIVED_BRANCH);
 
     // When
-    pick_default_base(&world).await;
+    pick_default_base_and_first_model(&world).await;
 
     // Then — the pending session must still be un-spawned while the operator decides.
     let session_dir = unified_session_dir_path(world.sessions_tmp.path(), &world.session_id);
@@ -412,7 +437,7 @@ async fn telegram_branch_conflict_switch_binds_the_chat_to_the_owning_session() 
     // Given
     let world = a_world_at_the_branch_pick().await;
     a_session_owning(world.sessions_tmp.path(), OWNER_SESSION, DERIVED_BRANCH);
-    let prompt = pick_default_base(&world).await;
+    let prompt = pick_default_base_and_first_model(&world).await;
 
     // When
     tap_conflict_choice(&world, &prompt, "sw").await;
@@ -430,7 +455,7 @@ async fn telegram_branch_conflict_add_agent_rewrites_the_changeset_to_the_owned_
     // Given
     let world = a_world_at_the_branch_pick().await;
     a_session_owning(world.sessions_tmp.path(), OWNER_SESSION, DERIVED_BRANCH);
-    let prompt = pick_default_base(&world).await;
+    let prompt = pick_default_base_and_first_model(&world).await;
 
     // When
     tap_conflict_choice(&world, &prompt, "na").await;
@@ -451,7 +476,7 @@ async fn telegram_branch_conflict_suggested_name_keeps_a_new_branch_under_the_su
     // Given
     let world = a_world_at_the_branch_pick().await;
     a_session_owning(world.sessions_tmp.path(), OWNER_SESSION, DERIVED_BRANCH);
-    let prompt = pick_default_base(&world).await;
+    let prompt = pick_default_base_and_first_model(&world).await;
 
     // When
     tap_conflict_choice(&world, &prompt, "sg").await;
@@ -465,4 +490,36 @@ async fn telegram_branch_conflict_suggested_name_keeps_a_new_branch_under_the_su
             selected_branch_to_work_on: None,
         }
     );
+}
+
+/// The largest project index a fixture of this size could show — two digits, as a host with up to
+/// a hundred projects writes it.
+const WIDEST_PROJECT_INDEX: usize = 99;
+
+#[test]
+fn every_registry_backed_picker_callback_fits_in_64_bytes() {
+    // Given — the built-in agents, a uuid session id, and the widest project index
+    let registry =
+        tddy_coding_agent_specs::CodingAgentRegistry::builtin().expect("the built-in agents load");
+    let offered = TelegramAgentChoices::of(&registry);
+
+    // When — every agent button, and every model button of every agent
+    let agent_buttons = (0..offered.choices().len())
+        .map(|agent_idx| telegram_agent_pick_callback(agent_idx, OWNER_SESSION));
+    let model_buttons = offered.choices().iter().flat_map(|choice| {
+        let spec = registry
+            .for_session_type(&choice.session_type)
+            .expect("an offered agent has a spec");
+        let offered_models = telegram_model_choices(spec).map(|m| m.len()).unwrap_or(0);
+        (0..offered_models).map(|model_idx| {
+            telegram_model_pick_callback(model_idx, WIDEST_PROJECT_INDEX, OWNER_SESSION)
+        })
+    });
+    let over_the_limit: Vec<String> = agent_buttons
+        .chain(model_buttons)
+        .filter(|data| data.len() > 64)
+        .collect();
+
+    // Then — Telegram rejects callback_data over 64 bytes
+    assert_eq!(over_the_limit, Vec::<String>::new());
 }

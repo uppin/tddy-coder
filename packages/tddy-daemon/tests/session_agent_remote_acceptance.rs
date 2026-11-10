@@ -28,7 +28,6 @@ use serial_test::serial;
 use tddy_connectrpc::connect_router;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
-use tddy_daemon::config::DaemonConfig;
 use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
@@ -259,9 +258,10 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         let repos_base = tempfile::tempdir().expect("peer repos_base tempdir");
         let repos_base_path = repos_base.path().to_string_lossy().into_owned();
         repos_bases.push(repos_base);
-        let (cfg_dir, cfg_path) =
+        let (cfg_dir, cfg_path, _cursor_binary) =
             write_daemon_yaml(&ws_url, Some(instance_id), &os_user, &repos_base_path);
-        let config = DaemonConfig::load(&cfg_path).expect("peer config");
+        let config =
+            tddy_daemon_kernel::config::DaemonConfig::load(&cfg_path).expect("peer config");
         configs.push(cfg_dir);
 
         let sessions = tempfile::tempdir().expect("peer sessions tempdir");
@@ -279,7 +279,8 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-            Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+            Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+            tddy_agent_launch::host_coding_agents::no_coding_agents(),
         );
         let service = daemon_rpc_participant::with_the_livekit_room_ports(
             service,
@@ -325,8 +326,10 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     let repos_base_a = tempfile::tempdir().expect("daemon A repos_base tempdir");
     let repos_base_path_a = repos_base_a.path().to_string_lossy().into_owned();
     repos_bases.push(repos_base_a);
-    let (cfg_dir_a, cfg_path_a) = write_daemon_yaml(&ws_url, None, &os_user, &repos_base_path_a);
-    let config_a = DaemonConfig::load(&cfg_path_a).expect("daemon A config");
+    let (cfg_dir_a, cfg_path_a, cursor_binary_a) =
+        write_daemon_yaml(&ws_url, None, &os_user, &repos_base_path_a);
+    let config_a =
+        tddy_daemon_kernel::config::DaemonConfig::load(&cfg_path_a).expect("daemon A config");
     configs.push(cfg_dir_a);
 
     let sessions_a = tempfile::tempdir().expect("sessions A tempdir");
@@ -405,7 +408,13 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             ),
         ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        // A's co-located cursor-cli start launches from the `cursor` tool definition, so A has its
+        // coding agents, with the stub `cursor-agent` bound to the `cursor` tool's binary variable.
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+            "cursor",
+            &cursor_binary_a,
+        )]),
     );
     let session_admissions =
         Arc::new(tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry::new());
@@ -574,11 +583,10 @@ fn write_daemon_yaml(
     instance_id: Option<&str>,
     os_user: &str,
     repos_base_path: &str,
-) -> (tempfile::TempDir, PathBuf) {
+) -> (tempfile::TempDir, PathBuf, PathBuf) {
     let dir = tempfile::tempdir().expect("config tempdir");
     let path = dir.path().join("daemon.yaml");
     let cursor_binary = write_stub_cursor_agent(dir.path());
-    let cursor_binary = cursor_binary.display();
     let id_block = instance_id
         .map(|id| format!("daemon_instance_id: {id}\n"))
         .unwrap_or_default();
@@ -592,15 +600,10 @@ fn write_daemon_yaml(
         &path,
         format!(
             r#"
-{id_block}users:
-  - github_user: "testuser"
-    os_user: "{os_user}"
-repos_base_path: {repos_base_path}
+{id_block}repos_base_path: {repos_base_path}
 allowed_tools:
   - path: {true_path}
     label: t
-cursor_cli:
-  binary_path: {cursor_binary}
 livekit:
   enabled: true
   url: {ws_url}
@@ -611,7 +614,12 @@ livekit:
         ),
     )
     .expect("write daemon.yaml");
-    (dir, path)
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        format!("- github_user: \"testuser\"\n  os_user: \"{os_user}\"\n"),
+    )
+    .unwrap();
+    (dir, path, cursor_binary)
 }
 
 fn write_project_registry(tddy_data_dir: &Path, repo_path: &Path) {

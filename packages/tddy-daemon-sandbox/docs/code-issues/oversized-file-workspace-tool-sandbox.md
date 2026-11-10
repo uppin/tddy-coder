@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-daemon-sandbox/src/workspace_tool_sandbox.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 — `/pr-wrap` step 3.5 file-length gate
-**Metrics:** **741 production lines** (2026-10-22) · budget 500
-**Thresholds breached:** length 741 > 500
+**Metrics:** **715 production lines** (2026-11-03, after #799) · budget 500
+**Thresholds breached:** length 684 > 500
 **Restructure:** `extract_module --to_file` — single seam, designed, **passes a plain `check`**, not applied
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-11-03 (+2 in #799); deferred to the #agent-tools sweep node — **unclaimed**
 
 ## Measurement history
 
@@ -18,23 +18,27 @@
 | 2026-09-27 | 737 | +73 fixing the ripgrep grants: `which` reports a symlink into `Cellar`, `rg` links a Homebrew `libpcre2`, and the loader traverses a symlink farm the renderer canonicalizes away. Still `FIXME(grep-in-jail)`; PR #548 deletes all of it |
 | 2026-10-01 | 739 | **worse** by 2 in PR #560 (`#agent-worktree` 1/4): the `conversation_id` parameter and its doc on the jail route's `execute_tool` request. Inside the standing deferral (PR #548 deletes the ripgrep block this file is over budget for) |
 | 2026-10-22 | 741 | **worse** by 2 in PR #670 (`#provider-route` 9/9): `route: None` and its comment on the workspace tool jail's plan — the jail hosts no agent, so it takes no route. Inside the standing deferral |
+| 2026-11-02 | 684 | **better** by 57 in PR #790 (`#agent-tools` 1/12): `host_ripgrep_grants`, `RipgrepGrants`, `binary_dependency_traversal_dirs` and their three `FIXME(grep-in-jail)` sites are deleted; the jail now lowers declared tools through `tddy_sandbox_recipes::tool_grants`. The provisioner gained tool resolution at jail start (`new`, `for_tddy_home`, `resolve_jail_tools`, `WORKSPACE_JAIL_TOOLS`). The standing deferral's premise (PR #548 deletes the ripgrep block) is void: the block is gone and the file is still over budget, so the seam below is what closes it |
+| 2026-11-02 | 713 | **worse** by 29 in PR #792 (`#agent-tools` 3/12): `build_workspace_tool_plan` lowers its tools' network (`lower_network`, the shim port, `--egress-*` runner args, `loopback_allow_ports`, `NetworkSpec.egress` / `allow_oauth_inbound`). Not split: stack-shared with every `#agent-tools` node, deferred to after the stack lands |
+| 2026-11-03 | 715 | **worse** by 2 in PR #799 (`#agent-tools` 10/12): the workspace tool jail's plan sets `context_dir` and `stdio`. Not split: deferred to the #agent-tools sweep node (developer) |
 
 ## What would close it — designed seam
 
-**Seam:** contiguous run L245–507, the whole jail implementation — `JAIL_READY_TIMEOUT`,
-`JailedWorkspaceSandboxProvisioner`, `impl WorkspaceSandboxProvisioner for …`, `start_jail_channel`,
+**Seam:** contiguous run from `JAIL_READY_TIMEOUT` (~L293 at 684 lines) to the end of
+`exchange_in_jail_tool_call`, the whole jail implementation — `JAIL_READY_TIMEOUT`,
+`WORKSPACE_JAIL_TOOLS`, `JailedWorkspaceSandboxProvisioner` (with its tool resolution), `impl WorkspaceSandboxProvisioner for …`, `start_jail_channel`,
 `prepare_jail_tree`, `canonical`, `canonical_exec`, `InJailChannel`, `JailedWorkspaceSandbox`,
 `impl WorkspaceSandbox for …`, `impl Drop for …`, `exchange_in_jail_tool_call`.
 
 **Operation:** `extract_module --to_file`, name `jailed_workspace_sandbox`, `reexport: "named"`.
 
-**Estimate:** ~263 lines out → parent **~308**. A single seam clears the budget.
+**Estimate (re-derive):** the seam was ~263 lines at 571; with the provisioner's tool resolution it is
+larger, and the parent lands well under 500. A single seam clears the budget.
 
 **Verified:** this plan passes a plain (non-deep) `check` — `no findings`. It has **not** been proven
 by `check --deep`, which is the real gate.
 
 ## Constraints a later session must know
 
-Line numbers above were taken at 571 production lines and have shifted by the registry `Drop` added
-at ~`:549`. Re-derive them with `restructure anchors`; never carry hand-written coordinates across a
+Line numbers above are approximate (taken at 684 production lines, 2026-11-02). Re-derive them with `restructure anchors`; never carry hand-written coordinates across a
 file edit.
