@@ -139,14 +139,12 @@ impl ServiceFixture {
 pub struct SupervisorFixture {
     services: Vec<ServiceFixture>,
     allowed_session_users: Vec<String>,
-    allowed_tool_paths: Vec<PathBuf>,
-    allowed_relay_tool_paths: Vec<PathBuf>,
     allowed_mount_roots: Vec<PathBuf>,
+    exec_roots: Vec<PathBuf>,
     memory_max_ceiling: Option<u64>,
     cpu_max_ceiling: Option<String>,
     pids_max_ceiling: Option<u64>,
     shutdown_grace_secs: u64,
-    path_prefix: Option<PathBuf>,
     /// GitHub logins `users.yaml` maps to the account running the tests; `None` writes no file.
     current_user_logins: Option<Vec<String>>,
 }
@@ -156,14 +154,12 @@ pub fn a_supervisor() -> SupervisorFixture {
     SupervisorFixture {
         services: Vec::new(),
         allowed_session_users: Vec::new(),
-        allowed_tool_paths: Vec::new(),
-        allowed_relay_tool_paths: Vec::new(),
         allowed_mount_roots: Vec::new(),
+        exec_roots: Vec::new(),
         memory_max_ceiling: None,
         cpu_max_ceiling: None,
         pids_max_ceiling: None,
         shutdown_grace_secs: 2,
-        path_prefix: None,
         current_user_logins: None,
     }
 }
@@ -185,20 +181,9 @@ impl SupervisorFixture {
         self
     }
 
-    pub fn allowing_tool(mut self, tool_path: &Path) -> Self {
-        self.allowed_tool_paths.push(tool_path.to_path_buf());
-        self
-    }
-
-    /// Puts `dir` first on the supervisor's own `PATH`, which is where it looks for `git`.
-    pub fn with_first_on_path(mut self, dir: &Path) -> Self {
-        self.path_prefix = Some(dir.to_path_buf());
-        self
-    }
-
-    /// Allow `tool_path` as a harness binary a relayed spawn may exec (off unless this is called).
-    pub fn allowing_relay_tool(mut self, tool_path: &Path) -> Self {
-        self.allowed_relay_tool_paths.push(tool_path.to_path_buf());
+    /// Name `path` — a directory or one file — under `spawn_policy.exec_roots` (`#agent-tools` 32).
+    pub fn with_exec_root(mut self, path: &Path) -> Self {
+        self.exec_roots.push(path.to_path_buf());
         self
     }
 
@@ -323,9 +308,8 @@ impl SupervisorFixture {
                 "shutdown_grace_secs: {grace}\n",
                 "services:\n{services}",
                 "spawn_policy:\n",
-                "  allowed_tool_paths: [{tools}]\n",
-                "  allowed_relay_tool_paths: [{relay_tools}]\n",
                 "  allowed_mount_roots: [{mount_roots}]\n",
+                "  exec_roots: [{exec_roots}]\n",
                 "cgroup:\n",
                 "  base_override: {base}\n",
                 "  mount_root: {base}\n",
@@ -341,23 +325,16 @@ impl SupervisorFixture {
             } else {
                 service_yaml
             },
-            tools = yaml_list(
-                &self
-                    .allowed_tool_paths
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-            ),
-            relay_tools = yaml_list(
-                &self
-                    .allowed_relay_tool_paths
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-            ),
             mount_roots = yaml_list(
                 &self
                     .allowed_mount_roots
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+            ),
+            exec_roots = yaml_list(
+                &self
+                    .exec_roots
                     .iter()
                     .map(|p| p.display().to_string())
                     .collect::<Vec<_>>()
@@ -370,16 +347,7 @@ impl SupervisorFixture {
         let config_path = root.join("supervisor.yaml");
         fs::write(&config_path, &config_yaml).expect("write supervisor config");
 
-        let mut command = Command::new(env!("CARGO_BIN_EXE_tddy-supervisor"));
-        if let Some(prefix) = &self.path_prefix {
-            let inherited = std::env::var_os("PATH").unwrap_or_default();
-            let path = std::env::join_paths(
-                std::iter::once(prefix.clone()).chain(std::env::split_paths(&inherited)),
-            )
-            .expect("a PATH with the prefix on it");
-            command.env("PATH", path);
-        }
-        let process = command
+        let process = Command::new(env!("CARGO_BIN_EXE_tddy-supervisor"))
             .arg("--config")
             .arg(&config_path)
             .stdout(Stdio::piped())
@@ -683,6 +651,22 @@ impl Drop for RunningSupervisor {
 // Session tool fixtures
 // ---------------------------------------------------------------------------------------------
 
+/// The build's `target/tmp`, created when absent: `CARGO_TARGET_TMPDIR` is fixed at compile time,
+/// and a test binary run from a nextest archive on another runner finds the checkout there but
+/// not the directory, which cargo only creates for the build that compiled it.
+fn the_trusted_tmp_root() -> &'static Path {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    fs::create_dir_all(root).expect("create the build's target/tmp");
+    root
+}
+
+fn a_trusted_workspace() -> TempDir {
+    let workspace = TempDir::new_in(the_trusted_tmp_root()).expect("create tool workspace");
+    fs::set_permissions(workspace.path(), fs::Permissions::from_mode(0o755))
+        .expect("make the tool workspace readable");
+    workspace
+}
+
 /// A script that records the pid of whichever process exec'd it, then stays alive.
 pub struct ToolFixture {
     path: PathBuf,
@@ -692,7 +676,7 @@ pub struct ToolFixture {
 
 /// A tool that exits immediately with `code`, for asserting on reported exit statuses.
 pub fn a_tool_that_exits_with(code: i32) -> ToolFixture {
-    let workspace = TempDir::new().expect("create tool workspace");
+    let workspace = a_trusted_workspace();
     let path = workspace.path().join("exiting-tool");
     let parent_pid_log = workspace.path().join("parent.pid");
     write_script(&path, &format!("exit {code}"));
@@ -705,7 +689,7 @@ pub fn a_tool_that_exits_with(code: i32) -> ToolFixture {
 
 /// A harness stand-in that echoes its stdin to its stdout, for asserting on a relayed spawn.
 pub fn a_tool_that_echoes_its_stdin() -> ToolFixture {
-    let workspace = TempDir::new().expect("create tool workspace");
+    let workspace = a_trusted_workspace();
     let path = workspace.path().join("echoing-tool");
     let parent_pid_log = workspace.path().join("parent.pid");
     write_script(&path, "exec cat");
@@ -718,7 +702,7 @@ pub fn a_tool_that_echoes_its_stdin() -> ToolFixture {
 
 /// A tool that prints the environment it was started with, one `NAME=value` per line, and exits.
 pub fn a_tool_that_prints_its_environment() -> ToolFixture {
-    let workspace = TempDir::new().expect("create tool workspace");
+    let workspace = a_trusted_workspace();
     let path = workspace.path().join("environment-printing-tool");
     let parent_pid_log = workspace.path().join("parent.pid");
     write_script(&path, "exec /usr/bin/env");
@@ -730,7 +714,7 @@ pub fn a_tool_that_prints_its_environment() -> ToolFixture {
 }
 
 pub fn a_tool_that_records_its_parent() -> ToolFixture {
-    let workspace = TempDir::new().expect("create tool workspace");
+    let workspace = a_trusted_workspace();
     let path = workspace.path().join("recording-tool");
     let parent_pid_log = workspace.path().join("parent.pid");
     write_script(
@@ -757,9 +741,36 @@ pub fn a_tool_that_records_its_parent() -> ToolFixture {
     }
 }
 
+/// A tool the exec gate can trust: in a directory only the account running the tests can write,
+/// all the way up — under the build's `target/tmp`, never `/tmp`, which is sticky but
+/// world-writable and so refused (`#agent-tools` 32/32). `body` follows the `#!/bin/sh` line.
+pub fn a_trusted_tool(name: &str, body: &str) -> ToolFixture {
+    let workspace =
+        TempDir::new_in(the_trusted_tmp_root()).expect("create a trusted tool workspace");
+    fs::set_permissions(workspace.path(), fs::Permissions::from_mode(0o755))
+        .expect("make the tool workspace readable");
+    let path = workspace
+        .path()
+        .canonicalize()
+        .expect("resolve the tool workspace")
+        .join(name);
+    let parent_pid_log = workspace.path().join("parent.pid");
+    write_script(&path, body);
+    ToolFixture {
+        path,
+        parent_pid_log,
+        _workspace: workspace,
+    }
+}
+
 impl ToolFixture {
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The directory the tool lives in — what an `exec_roots` directory entry would name.
+    pub fn directory(&self) -> &Path {
+        self.path.parent().expect("a tool lives in a directory")
     }
 
     /// Block until the tool has recorded its own process group id.

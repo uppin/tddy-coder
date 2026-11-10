@@ -1,8 +1,8 @@
 //! The environment a daemon-run SSH clone is given, and whether the host's OpenSSH can honour it.
 //!
 //! Composed by a pure function so what reaches `git` is a value a test can read, the same whichever
-//! backend carries it. Under a supervisor, every key [`CloneSshEnv::into_env`] can set must be on
-//! `spawn_policy.allowed_env_keys`; [`CloneSshEnv::ALLOWED_ENV_KEYS`] is that list.
+//! backend carries it. Under a supervisor the env passes whole (loader variables aside), so a
+//! clone's SSH settings need no supervisor configuration.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -24,18 +24,6 @@ pub struct CloneSshEnv {
 }
 
 impl CloneSshEnv {
-    /// Every key [`Self::into_env`] can set, sorted. This is what a supervisor's
-    /// `allowed_env_keys` must contain for a clone to be accepted.
-    pub const ALLOWED_ENV_KEYS: &'static [&'static str] = &[
-        "GIT_SSH_COMMAND",
-        "GIT_TERMINAL_PROMPT",
-        "SSH_ASKPASS",
-        "SSH_ASKPASS_REQUIRE",
-        "SSH_AUTH_SOCK",
-        "TDDY_ASKPASS_TOKEN",
-        "TDDY_ASKPASS_URL",
-    ];
-
     /// A clone whose ssh asks `askpass_program`, which calls the daemon at `askpass_url` with
     /// `askpass_token`.
     pub fn new(

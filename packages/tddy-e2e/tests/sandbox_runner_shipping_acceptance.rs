@@ -73,6 +73,9 @@ const RELEASE_BINARIES: &[&str] = &[
     // Spawned by the daemon as a sibling of its own executable, exactly like the runner, so
     // `install` pre-flights it too and a fixture without it never reaches the assertion below.
     "tddy-index-daemon",
+    // The clone helper a supervised daemon runs as the session user; `install` requires it
+    // beside the daemon for the same sibling-resolution reason.
+    "tddy-git-clone",
 ];
 
 fn copy_install_tree(dest: &Path) {

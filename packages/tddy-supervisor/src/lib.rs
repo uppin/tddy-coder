@@ -31,7 +31,6 @@ pub mod proto {
 pub mod authz;
 pub mod cgroup_broker;
 pub mod client;
-mod clone;
 pub mod config;
 pub mod error;
 mod handover;
@@ -49,6 +48,7 @@ pub mod services;
 pub mod signals;
 pub mod socket;
 pub mod spawn_broker;
+mod streamed;
 pub mod supervisor;
 pub mod user_sockets;
 pub mod users_file;
@@ -57,7 +57,7 @@ pub mod users_watch;
 #[cfg(test)]
 mod test_util;
 
-pub use crate::config::spawn_policy::SpawnPolicy;
+pub use crate::config::spawn_policy::{ExecRoot, SpawnPolicy};
 pub use authz::{Authorizer, PeerIdentity};
 pub use cgroup_broker::CgroupBroker;
 pub use client::SupervisorClient;

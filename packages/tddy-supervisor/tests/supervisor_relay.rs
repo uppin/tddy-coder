@@ -29,6 +29,7 @@ fn a_relayed_spawn(tool: &Path, socket: &Path) -> SpawnRelayedRequest {
         env: Default::default(),
         working_dir: None,
         relay_socket: socket.to_path_buf(),
+        scope: None,
     }
 }
 
@@ -51,13 +52,12 @@ fn a_listening_socket() -> (tempfile::TempDir, std::path::PathBuf, UnixListener)
 }
 
 #[tokio::test]
-async fn relaying_is_off_unless_the_operator_allowlisted_the_harness_for_it() {
-    // Given a tool that SpawnSession may run, and no relay allowlist at all
+async fn relaying_is_refused_for_a_binary_outside_every_exec_root() {
+    // Given a tool no exec root names
     let tool = a_tool_that_echoes_its_stdin();
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_tool(tool.path())
         .start()
         .await;
     let (_dir, socket, _listener) = a_listening_socket();
@@ -74,13 +74,12 @@ async fn relaying_is_off_unless_the_operator_allowlisted_the_harness_for_it() {
 }
 
 #[tokio::test]
-async fn a_harness_allowlisted_only_for_relaying_cannot_be_spawned_as_a_session() {
-    // Given a harness on the relay allowlist and on no session allowlist
+async fn a_binary_outside_every_exec_root_cannot_be_spawned_as_a_session() {
+    // Given a tool no exec root names
     let tool = a_tool_that_echoes_its_stdin();
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_relay_tool(tool.path())
         .start()
         .await;
 
@@ -102,7 +101,7 @@ async fn a_relayed_spawn_for_a_user_outside_the_allowlist_is_denied() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_session_user("someone-else")
-        .allowing_relay_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let (_dir, socket, _listener) = a_listening_socket();
@@ -124,7 +123,7 @@ async fn a_relayed_spawn_from_a_peer_that_owns_no_declared_service_is_denied() {
     let tool = a_tool_that_echoes_its_stdin();
     let supervisor = a_supervisor()
         .allowing_the_current_user()
-        .allowing_relay_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let (_dir, socket, _listener) = a_listening_socket();
@@ -147,7 +146,7 @@ async fn a_relay_path_that_is_not_the_callers_listening_socket_is_denied() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_relay_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let dir = tempfile::tempdir().expect("tempdir");
@@ -176,7 +175,7 @@ async fn an_allowlisted_harness_has_its_stdio_relayed_and_its_exit_reported() {
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_relay_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let client = supervisor.client().await;
@@ -212,12 +211,12 @@ async fn a_relayed_agent_starts_from_exactly_the_env_the_daemon_computed() {
     use support::a_tool_that_prints_its_environment;
     use tokio::io::AsyncReadExt;
 
-    // Given — an agent env the daemon computed, naming a key no `allowed_env_keys` lists
+    // Given — an agent env the daemon computed, naming a key no supervisor configuration lists
     let tool = a_tool_that_prints_its_environment();
     let supervisor = a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
-        .allowing_relay_tool(tool.path())
+        .with_exec_root(tool.path())
         .start()
         .await;
     let client = supervisor.client().await;
@@ -264,4 +263,48 @@ async fn a_relayed_agent_starts_from_exactly_the_env_the_daemon_computed() {
         5,
         "nothing beyond the daemon's env and the account's: {printed}"
     );
+}
+
+/// Makes the supervisor spawn for real, so it is Linux-only — see this file's header.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_relayed_spawn_runs_in_a_cgroup_scope() {
+    use support::{a_trusted_tool, ScopeAssertions};
+    use tddy_supervisor::CreateScopeRequest;
+
+    // Given a scope, and a harness stand-in under an exec root (`#agent-tools` 32/32)
+    let tool = a_trusted_tool("echoing-tool", "exec cat");
+    let supervisor = a_supervisor()
+        .managing(a_service("tddy-daemon").that_stays_alive())
+        .allowing_the_current_user()
+        .with_exec_root(tool.directory())
+        .start()
+        .await;
+    let client = supervisor.client().await;
+    let scope = client
+        .create_scope(CreateScopeRequest {
+            name: "relayed-scoped".to_string(),
+            limits: Default::default(),
+        })
+        .await
+        .expect("create a cgroup scope");
+    let (_dir, socket, listener) = a_listening_socket();
+
+    // When it is relayed into the scope
+    let spawned = client
+        .spawn_relayed(SpawnRelayedRequest {
+            scope: Some("relayed-scoped".to_string()),
+            ..a_relayed_spawn(tool.path(), &socket)
+        })
+        .await
+        .expect("spawn relayed");
+    let (agent, _) = tokio::time::timeout(RELAY_DEADLINE, listener.accept())
+        .await
+        .expect("the supervisor connects within the deadline")
+        .expect("accept the supervisor's connection");
+
+    // Then the child joined the scope before it exec'd
+    scope.assert_wrote("cgroup.procs", &spawned.pid.to_string());
+    drop(agent);
+    supervisor.await_session_exit(&client, spawned.pid).await;
 }

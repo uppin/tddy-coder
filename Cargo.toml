@@ -52,6 +52,7 @@ members = [
     "packages/tddy-livekit-testkit",
     "packages/tddy-connectrpc",
     "packages/tddy-git",
+    "packages/tddy-git-clone",
     "packages/tddy-github",
     "packages/tddy-daemon",
     "packages/tddy-daemon-kernel",

@@ -351,7 +351,12 @@ impl DaemonCodingAgentLauncher {
         match run_as_session_user(command.clone(), &launch.session_os_user, &self.drop) {
             Ok(command) => Ok(AgentTransport::Command(command)),
             Err(AsUserRefusal::Unprivileged(reason)) => match &self.relay {
-                Some(relay) => start_relayed(relay, &launch.session_os_user, &command)
+                // No scope: the daemon creates no cgroup scope for a session (its own supervised
+                // spawn names none either), and naming one that does not exist would refuse every
+                // relayed start. Deferred by the user, 2026-11-09.
+                // TODO(daemon-creates-no-cgroup-scope-for-supervised-spawns):
+                // docs/dev/todo/2026-11-09-daemon-creates-no-cgroup-scope-for-supervised-spawns.md
+                Some(relay) => start_relayed(relay, &launch.session_os_user, &command, None)
                     .await
                     .map(AgentTransport::Stream)
                     .map_err(|e| Self::refuse(launch, &e.to_string())),

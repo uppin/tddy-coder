@@ -53,6 +53,9 @@ fn an_install_tree() -> InstallTree {
         // Spawned by the daemon as a sibling of its own executable, so `install` requires it for
         // the same reason and with the same preflight.
         "tddy-index-daemon",
+        // The clone helper a supervised daemon runs as the session user; `install` requires it
+        // beside the daemon for the same sibling-resolution reason.
+        "tddy-git-clone",
     ] {
         write_executable(&release.join(binary), "fake-binary\n");
     }
@@ -528,7 +531,7 @@ fn keeps_an_existing_supervisor_config_rather_than_overwriting_the_policy_in_it(
     let tree = an_install_tree();
     tree.install();
     let operator_policy = format!(
-        "{}spawn_policy:\n  allowed_tool_paths: [/usr/local/bin/tddy-coder]\n",
+        "{}spawn_policy:\n  exec_roots:\n    - /usr/local/bin/tddy-coder\n",
         a_supervisor_config_declaring_the_daemon_as("tddy", Some("tddy"))
     );
     tree.overwrite_installed_config("supervisor.yaml", &operator_policy);
@@ -1055,4 +1058,164 @@ fn install_declares_no_per_user_sockets_in_supervisor_yaml() {
         )
     );
     assert_mode(&tree.config_dir.join("users.yaml"), 0o644);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The supervisor names no coding agent: exec roots, no env key list (`#agent-tools` 32/32)
+// ---------------------------------------------------------------------------------------------
+
+/// A supervisor.yaml from before `#agent-tools` 32/32: binaries listed one by one, a relay list of
+/// its own, and an env key list — and a mount root, which stays.
+fn a_supervisor_config_with_the_old_spawn_policy(bin_dir: &Path) -> String {
+    a_supervisor_config_allowing_sessions_as("[]").replace(
+        "  allowed_session_users: []\n",
+        &format!(
+            concat!(
+                "  allowed_tool_paths: [{bin}/tddy-coder, {bin}/tddy-tools]\n",
+                "  allowed_relay_tool_paths: [/usr/local/bin/some-harness]\n",
+                "  allowed_mount_roots: [/srv/repos]\n",
+                "  allowed_env_keys: [RUST_LOG, GIT_SSH_COMMAND]\n",
+            ),
+            bin = bin_dir.display()
+        ),
+    )
+}
+
+const OLD_SPAWN_POLICY_KEYS: [&str; 3] = [
+    "allowed_tool_paths",
+    "allowed_relay_tool_paths",
+    "allowed_env_keys",
+];
+
+/// The installed supervisor.yaml, read by the supervisor's own loader.
+fn supervisor_config_the_supervisor_loads(yaml: &str) -> tddy_supervisor::config::SupervisorConfig {
+    tddy_supervisor::config::SupervisorConfig::from_yaml(yaml).unwrap_or_else(|error| {
+        panic!("the supervisor refuses the installed config: {error}\n{yaml}")
+    })
+}
+
+#[test]
+fn install_migrates_the_old_spawn_policy_keys_once() {
+    // Given a host installed before `#agent-tools` 32/32
+    let tree = an_install_tree();
+    tree.install();
+    tree.overwrite_installed_config(
+        "supervisor.yaml",
+        &a_supervisor_config_with_the_old_spawn_policy(&tree.bin_dir),
+    );
+
+    // When install runs again
+    tree.install();
+
+    // Then the listed binaries are exec roots, the env list is gone, the mount root stays — and
+    // the supervisor loads the file
+    let supervisor = tree.installed_config("supervisor.yaml");
+    let policy = supervisor_config_the_supervisor_loads(&supervisor).spawn_policy;
+    let migrated = [
+        tree.bin_dir.join("tddy-coder"),
+        tree.bin_dir.join("tddy-tools"),
+        PathBuf::from("/usr/local/bin/some-harness"),
+    ];
+    pretty_assertions::assert_eq!(
+        (
+            OLD_SPAWN_POLICY_KEYS
+                .into_iter()
+                .filter(|key| supervisor.contains(&format!("{key}:")))
+                .collect::<Vec<_>>(),
+            migrated
+                .iter()
+                .filter(|path| !policy.exec_roots.iter().any(|root| &root.path == *path))
+                .collect::<Vec<_>>(),
+            policy.allowed_mount_roots,
+        ),
+        (
+            Vec::<&str>::new(),
+            Vec::<&PathBuf>::new(),
+            vec![PathBuf::from("/srv/repos")],
+        )
+    );
+
+    // And a second run changes nothing
+    tree.install();
+    pretty_assertions::assert_eq!(tree.installed_config("supervisor.yaml"), supervisor);
+}
+
+/// Every word an agent's spec file name is made of (`claude-acp` → `claude`, `acp`).
+fn coding_agent_names() -> Vec<String> {
+    let specs = repo_root().join("packages/tddy-coding-agent-specs/specs");
+    let mut names: Vec<String> = fs::read_dir(&specs)
+        .unwrap_or_else(|error| panic!("read {}: {error}", specs.display()))
+        .map(|entry| entry.expect("a spec directory entry").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "yaml")
+        })
+        .filter_map(|path| Some(path.file_stem()?.to_str()?.to_string()))
+        .filter(|stem| stem != "agent-env")
+        .flat_map(|stem| stem.split('-').map(str::to_string).collect::<Vec<_>>())
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+#[test]
+fn the_installed_supervisor_config_names_no_coding_agent() {
+    // Given
+    let tree = an_install_tree();
+    let names = coding_agent_names();
+
+    // When a fresh host is installed
+    tree.install();
+
+    // Then the supervisor's file names no agent, not even in a comment — that is the daemon's YAML
+    let supervisor = tree.installed_config("supervisor.yaml");
+    let mentions: Vec<String> = supervisor
+        .lines()
+        .enumerate()
+        .flat_map(|(index, line)| {
+            line.to_lowercase()
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .filter(|word| names.iter().any(|name| name == word))
+                .map(|word| format!("{}: {word}", index + 1))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    pretty_assertions::assert_eq!(mentions, Vec::<String>::new());
+}
+
+/// The file `git` on this host's `PATH` resolves to — a symlink is judged by its target.
+fn the_resolved_git() -> PathBuf {
+    std::env::split_paths(&std::env::var_os("PATH").expect("a PATH"))
+        .map(|dir| dir.join("git"))
+        .find(|candidate| candidate.is_file())
+        .expect("git on PATH")
+        .canonicalize()
+        .expect("resolve git")
+}
+
+#[test]
+fn a_fresh_install_renders_exec_roots_naming_the_bin_dir_and_the_resolved_git() {
+    // Given
+    let tree = an_install_tree();
+    let git = the_resolved_git();
+
+    // When a fresh host is installed
+    tree.install();
+
+    // Then the supervisor may run what install put in the bin dir and the one git file — never the
+    // whole directory git lives in — and /nix/store is a trusted prefix only when git lives there
+    let policy = supervisor_config_the_supervisor_loads(&tree.installed_config("supervisor.yaml"))
+        .spawn_policy;
+    let mut expected = vec![
+        tddy_supervisor::ExecRoot::at(tree.bin_dir.clone()),
+        tddy_supervisor::ExecRoot::at(git.clone()),
+    ];
+    if git.starts_with("/nix/store") {
+        expected.push(tddy_supervisor::ExecRoot::trusted_prefix("/nix/store"));
+    }
+    let mut rendered = policy.exec_roots.clone();
+    rendered.sort_by(|a, b| a.path.cmp(&b.path));
+    expected.sort_by(|a, b| a.path.cmp(&b.path));
+    pretty_assertions::assert_eq!(rendered, expected);
 }

@@ -15,20 +15,20 @@ service SupervisorService {
   rpc StartService(ServiceRef) returns (ServiceStatus);
   rpc StopService(ServiceRef) returns (ServiceStatus);
 
-  // Spawn a tool as another OS user. Both the user and the tool path must appear in root-owned
-  // allowlists.
+  // Spawn a binary as another OS user. The user must be mapped in users.yaml, and the binary must
+  // resolve under the root-owned spawn_policy.exec_roots.
   rpc SpawnSession(SpawnSessionRequest) returns (SpawnedProcess);
 
-  // Spawn a tool as another OS user, jailed. Same allowlists as SpawnSession, plus every mount
+  // Spawn a binary as another OS user, jailed. Same gates as SpawnSession, plus every mount
   // source must sit under a root-owned allowed_mount_roots entry: the mount list is the one part of
   // a sandbox request that names host paths, so it is the part a compromised caller reaches for.
   rpc SpawnSandbox(SpawnSandboxRequest) returns (SpawnedProcess);
 
-  // Spawn an allowlisted coding-agent harness as another OS user with its stdin, stdout and stderr
+  // Spawn a binary as another OS user with its stdin, stdout and stderr
   // relayed over a unix socket the caller owns. The caller binds a listening socket at
   // `relay_socket` first; the supervisor connects to it, verifies the listener is the caller, and
-  // relays bytes until the child exits. Gated by its own allowlist (allowed_relay_tool_paths, empty
-  // by default) beside the session-user and environment gates SpawnSession passes. The child's exit
+  // relays bytes until the child exits. Gated by the exec roots beside the session-user and
+  // environment gates SpawnSession passes. The child's exit
   // status and its stop travel over SessionStatus / StopSession, keyed by the returned pid.
   rpc SpawnRelayed(SpawnRelayedRequest) returns (SpawnedProcess);
 
@@ -41,11 +41,11 @@ service SupervisorService {
   // resolve to the method of that name declared just above rather than to the message.
   rpc SessionStatus(SessionRef) returns (.supervisor.SessionStatus);
   rpc StopSession(SessionRef) returns (.supervisor.SessionStatus);
-  // Clone a repository as an allowlisted OS user, streaming git's progress: `git clone --progress`
-  // under the same user and environment policy as SpawnSession, into a temporary sibling of
-  // `destination` renamed into place on success. The first event names the clone's pid (StopSession
-  // stops it); the last says how git exited. The one server-streaming RPC on this surface.
-  rpc CloneRepository(CloneRepositoryRequest) returns (stream CloneEvent);
+  // Spawn a binary as another OS user and stream its stderr: the first event names its pid
+  // (StopSession stops it), then one Line per line it writes to stderr (split on `\r` as well as
+  // `\n`), then Exited with its exit and the last lines of stderr. The same user, exec and
+  // environment gates as SpawnSession; the supervisor knows nothing about what the binary is.
+  rpc SpawnStreamed(SpawnStreamedRequest) returns (stream StreamedEvent);
 
   // cgroup v2 scope lifecycle inside the subtree the supervisor owns.
   rpc CreateScope(CreateScopeRequest) returns (ScopeHandle);
@@ -85,7 +85,7 @@ message ServiceStatus {
 }
 
 message SpawnSessionRequest {
-  // Must appear in the policy's allowed_session_users; `root` never resolves.
+  // Must be mapped in users.yaml; `root` never resolves.
   string os_user = 1;
   // Must appear verbatim in the policy's allowed_tool_paths.
   string tool_path = 2;
@@ -97,7 +97,7 @@ message SpawnSessionRequest {
 }
 
 message SpawnRelayedRequest {
-  // Must appear in the policy's allowed_session_users; `root` never resolves.
+  // Must be mapped in users.yaml; `root` never resolves.
   string os_user = 1;
   // Must appear verbatim in the policy's allowed_relay_tool_paths — not allowed_tool_paths.
   string tool_path = 2;
@@ -107,6 +107,8 @@ message SpawnRelayedRequest {
   // Absolute path of a unix socket the caller is listening on, owned by the caller's uid. A path
   // crosses a process boundary, a file descriptor does not.
   string relay_socket = 6;
+  // Name of an existing scope the child joins before it drops privilege and execs.
+  optional string scope = 7;
 }
 
 message SpawnedProcess {
@@ -120,7 +122,7 @@ message SpawnedProcess {
 // path in `args` and dials it once the child is up, following the precedent set by
 // SpawnRequest::host_session_socket: a path crosses a process boundary, a file descriptor does not.
 message SpawnSandboxRequest {
-  // Must appear in the policy's allowed_session_users; `root` never resolves.
+  // Must be mapped in users.yaml; `root` never resolves.
   string os_user = 1;
   // Must appear verbatim in the policy's allowed_tool_paths.
   string tool_path = 2;
@@ -143,40 +145,40 @@ message SandboxMount {
   bool readonly = 3;
 }
 
-message CloneRepositoryRequest {
-  // Must appear in the policy's allowed_session_users; `root` never resolves.
+message SpawnStreamedRequest {
   string os_user = 1;
-  string git_url = 2;
-  // Absolute; created by the clone. An existing destination is left alone (the clone is skipped).
-  string destination = 3;
-  // Keys must appear in the policy's allowed_env_keys.
+  // Resolved against the policy's exec_roots.
+  string tool_path = 2;
+  repeated string args = 3;
   map<string, string> env = 4;
+  optional string working_dir = 5;
+  // Name of an existing scope the child joins before it drops privilege and execs.
+  optional string scope = 6;
 }
 
-message CloneEvent {
+message StreamedEvent {
   oneof event {
-    CloneStarted started = 1;
-    CloneProgressLine progress = 2;
-    CloneExited exited = 3;
+    StreamedStarted started = 1;
+    StreamedLine line = 2;
+    StreamedExited exited = 3;
   }
 }
 
-message CloneStarted {
+message StreamedStarted {
   uint32 pid = 1;
 }
 
-// One line of git's stderr progress, as git wrote it.
-message CloneProgressLine {
+// One line of the child's stderr, as it wrote it.
+message StreamedLine {
   string line = 1;
 }
 
-message CloneExited {
-  // Git's exit code. Unset when git was ended by a signal (a stopped clone).
+message StreamedExited {
+  // The child's exit code. Unset when it was ended by a signal.
   optional int32 code = 1;
-  // Reserved for the signal that ended git; never set today, because the supervisor's session table
-  // records an exit code and not the signal. Read `code` being unset as "ended by a signal".
+  // Reserved for the signal that ended the child; read `code` being unset as "ended by a signal".
   optional int32 signal = 2;
-  // The last lines git wrote to stderr: its own explanation of a failure.
+  // The last lines the child wrote to stderr.
   string stderr_tail = 3;
 }
 

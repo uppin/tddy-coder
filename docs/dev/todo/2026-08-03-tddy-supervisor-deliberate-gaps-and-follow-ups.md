@@ -44,7 +44,7 @@ justifies it in `stop_session`. Those surviving descendants are exactly what mak
 checked absolute or traversal-free (it names a path inside the jail's own namespace, which is why no
 test pins it), and a session spawn's `working_dir` is `chdir`'d after the privilege drop — so it is
 traversed with the target user's authority, the important part — but is not matched against any
-allowlist the way `tool_path` is.
+policy entry the way `tool_path` is matched against `spawn_policy.exec_roots`.
 
 **Recursive read-only bind mounts.** A read-only `BindMount` remounts only the top mount; submounts
 beneath it stay writable. Closing it wants `mount_setattr(AT_RECURSIVE)`. `TODO(supervisor/jail)` in

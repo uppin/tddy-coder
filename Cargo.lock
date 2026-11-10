@@ -13177,6 +13177,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-git-clone"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "tddy-github"
 version = "0.1.0"
 dependencies = [

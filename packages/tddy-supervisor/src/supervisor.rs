@@ -752,6 +752,7 @@ mod tests {
             output: ChildOutput::Discard,
             environment: EnvironmentBase::Minimal,
             sandbox: None,
+            checked: None,
         }
     }
 

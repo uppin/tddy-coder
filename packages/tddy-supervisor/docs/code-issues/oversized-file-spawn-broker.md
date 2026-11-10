@@ -19,6 +19,7 @@
 | 2026-10-25 | 968 | #721 rebased onto master's #start-progress: the split kept, #736/#739's additions carried into the moved files (`fork_broker.rs` 372, `child_environment.rs` 196); `SUPERVISOR_SOCKET_ENV` stays here as the public path |
 | 2026-11-09 | 969 → 977 | **regressed** by #836 (`#agent-tools` 28/32), measured against `origin/feature/agent-tools/acp-subagent-leftovers` at #836's wrap: the `EnvironmentBase::Exactly` variant and its docs. Not split: stack-shared — #859 and #865 above it modify this file (`/pr-wrap` step 3.5's stack-branch rule); left for the `#agent-tools` sweep node. The engine limit below still stands |
 | 2026-11-09 | 977 → 984 | grown by #859 (`#agent-tools` 31/32): `USERS_FILE_ENV` (`TDDY_USERS_FILE`) and its doc beside `SUPERVISOR_SOCKET_ENV`. Not split there: #836, #857 and #865 in the same stack also modify this file, so a split mid-stack would conflict with each of them |
+| 2026-11-09 | 984 → 984 | unchanged by #865 (`#agent-tools` 32/32): it touched the file (`SpawnPlan.checked`, the `CheckedExecutable` the exec gate returns, and the env-rule tests) without changing its production line count — the 977 → 984 above is #859's |
 
 ## Why the engine stops here
 

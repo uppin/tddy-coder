@@ -686,7 +686,7 @@ jobs:
           # them missing, and a short list only announces itself after a bake and a boot.
           for b in tddy-supervisor tddy-daemon tddy-coder tddy-tools \
                    tddy-remote-git-repo tddy-askpass tddy-session-sync tddy-sandbox-runner \
-                   tddy-index-daemon; do
+                   tddy-index-daemon tddy-git-clone; do
             cp "target/debug/$b" dist/
           done
           cp install daemon.yaml.production supervisor.yaml.production dist/

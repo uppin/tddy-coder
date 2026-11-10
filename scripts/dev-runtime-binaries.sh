@@ -27,6 +27,7 @@ DEV_RUNTIME_PACKAGES=(
   tddy-remote-git-repo-cli # builds `tddy-remote-git-repo`, git's GIT_SSH_COMMAND shim
   tddy-askpass         # ssh's SSH_ASKPASS helper for a daemon-run clone
   tddy-session-sync-cli # builds `tddy-session-sync`, mirrors a session's worktree
+  tddy-git-clone         # the clone helper a supervised daemon runs as the session user
 )
 
 # Resolve the build set: DEV_RUNTIME_PACKAGES plus any extra package names passed as arguments,

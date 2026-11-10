@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::spawn_policy::is_loader_env_key;
 use crate::config::spawn_policy::SpawnPolicy;
 use crate::error::ConfigError;
 
@@ -250,10 +249,7 @@ impl ServiceSocket {
 ///
 /// Checked on the untyped document, before typed deserialization, so a leftover key is told it is
 /// obsolete rather than getting serde's bare `unknown field`.
-fn refuse_old_user_list_keys(yaml: &str) -> Result<(), ConfigError> {
-    let document: serde_yaml::Value = serde_yaml::from_str(yaml).map_err(|error| ConfigError {
-        message: error.to_string(),
-    })?;
+fn refuse_old_user_list_keys(document: &serde_yaml::Value) -> Result<(), ConfigError> {
     let Some(top) = document.as_mapping() else {
         return Ok(());
     };
@@ -336,7 +332,13 @@ impl SupervisorConfig {
     /// Validation is part of parsing on purpose: a config that would let the daemon escalate is
     /// a startup failure, not a runtime surprise.
     pub fn from_yaml(yaml: &str) -> Result<SupervisorConfig, ConfigError> {
-        refuse_old_user_list_keys(yaml)?;
+        // The untyped document, read once for the obsolete-key checks.
+        let document: serde_yaml::Value =
+            serde_yaml::from_str(yaml).map_err(|error| ConfigError {
+                message: error.to_string(),
+            })?;
+        refuse_old_user_list_keys(&document)?;
+        spawn_policy::refuse_old_spawn_policy_keys(&document)?;
         let config: SupervisorConfig = serde_yaml::from_str(yaml).map_err(|error| ConfigError {
             message: error.to_string(),
         })?;
@@ -389,21 +391,15 @@ impl SupervisorConfig {
             require_absolute("users file", &users.file)?;
             require_absolute("users sockets_dir", &users.sockets_dir)?;
         }
-        for tool in &self.spawn_policy.allowed_tool_paths {
-            require_absolute("allowed_tool_paths entry", tool)?;
-        }
-        for tool in &self.spawn_policy.allowed_relay_tool_paths {
-            require_absolute("allowed_relay_tool_paths entry", tool)?;
-        }
         for root in &self.spawn_policy.allowed_mount_roots {
             require_absolute("allowed_mount_roots entry", root)?;
         }
-        for key in &self.spawn_policy.allowed_env_keys {
-            if is_loader_env_key(key) {
+        for root in &self.spawn_policy.exec_roots {
+            if !root.path.is_absolute() {
                 return Err(ConfigError {
                     message: format!(
-                        "allowed_env_keys may not contain `{key}`: it chooses what code a session \
-                         loads, which would hand a caller everything allowed_tool_paths withholds"
+                        "exec_roots entry `{}` must be absolute",
+                        root.path.display()
                     ),
                 });
             }
@@ -608,65 +604,13 @@ mod tests {
         // default on both sides of the comparison.
         assert_eq!(config.users, None);
         assert_eq!(
-            config.spawn_policy.allowed_tool_paths,
-            Vec::<PathBuf>::new()
+            config.spawn_policy.exec_roots,
+            Vec::<crate::config::spawn_policy::ExecRoot>::new()
         );
         assert_eq!(
             config.spawn_policy.allowed_mount_roots,
             Vec::<PathBuf>::new()
         );
-    }
-
-    #[test]
-    fn defaults_to_relaying_no_harness() {
-        // Given / When
-        let config = SupervisorConfig::from_yaml(a_minimal_config()).expect("parse config");
-
-        // Then
-        assert_eq!(
-            config.spawn_policy.allowed_relay_tool_paths,
-            Vec::<PathBuf>::new()
-        );
-    }
-
-    #[test]
-    fn refuses_a_relay_tool_path_that_is_not_absolute() {
-        // Given
-        let yaml = format!(
-            "{}\nspawn_policy:\n  allowed_relay_tool_paths: [\"bin/opencode\"]\n",
-            a_minimal_config()
-        );
-
-        // When
-        let result = SupervisorConfig::from_yaml(&yaml);
-
-        // Then
-        assert_rejected_because(result, "allowed_relay_tool_paths entry");
-    }
-
-    #[test]
-    fn defaults_to_passing_on_no_environment_variable_a_caller_asks_for() {
-        // Given / When
-        let config = SupervisorConfig::from_yaml(a_minimal_config()).expect("parse config");
-
-        // Then — a variable the caller can set on a process running as another user is a grant, so
-        // an operator who wrote none has granted none.
-        assert_eq!(config.spawn_policy.allowed_env_keys, Vec::<String>::new());
-    }
-
-    #[test]
-    fn rejects_a_spawn_policy_that_lets_a_caller_preload_a_library_into_a_session() {
-        // Given
-        let yaml = "\
-socket:
-  path: /run/tddy-supervisor.sock
-spawn_policy:
-  allowed_env_keys: [RUST_LOG, LD_PRELOAD]
-";
-
-        // When / Then — `LD_PRELOAD` makes any allowlisted tool load code the caller chose, so
-        // granting it would hand over everything `allowed_tool_paths` exists to withhold.
-        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "LD_PRELOAD");
     }
 
     #[test]
@@ -850,6 +794,59 @@ services:
         assert_rejected_because(SupervisorConfig::from_yaml(yaml), "users.yaml");
     }
 
+    #[rstest::rstest]
+    #[case::allowed_tool_paths("allowed_tool_paths: [/opt/tddy/bin/tddy-coder]", "exec_roots")]
+    #[case::allowed_relay_tool_paths(
+        "allowed_relay_tool_paths: [/opt/tddy/bin/relayed]",
+        "exec_roots"
+    )]
+    #[case::allowed_env_keys("allowed_env_keys: [RUST_LOG]", "removed")]
+    fn an_old_spawn_policy_key_fails_loading_naming_its_replacement(
+        #[case] old_key: &str,
+        #[case] replacement: &str,
+    ) {
+        // Given a supervisor.yaml from before `#agent-tools` 32/32
+        let yaml = format!("{}spawn_policy:\n  {old_key}\n", a_minimal_config());
+
+        // When / Then it is refused, telling the operator what took the key's place
+        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), replacement);
+    }
+
+    #[test]
+    fn an_exec_root_that_is_not_absolute_fails_loading() {
+        // Given
+        let yaml = format!(
+            "{}spawn_policy:\n  exec_roots: [opt/tddy/bin]\n",
+            a_minimal_config()
+        );
+
+        // When / Then — relative to wherever systemd started the supervisor, it would be a dead grant
+        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), "exec_roots entry");
+    }
+
+    #[test]
+    fn reads_exec_roots_naming_directories_single_files_and_trusted_prefixes() {
+        // Given
+        let yaml = format!(
+            "{}spawn_policy:\n  exec_roots:\n    - /opt/tddy/bin\n    - /usr/bin/git\n    - {{path: /nix/store, trusted_prefix: true}}\n",
+            a_minimal_config()
+        );
+
+        // When
+        let config = SupervisorConfig::from_yaml(&yaml).expect("exec_roots loads");
+
+        // Then
+        use crate::config::spawn_policy::ExecRoot;
+        assert_eq!(
+            config.spawn_policy.exec_roots,
+            vec![
+                ExecRoot::at("/opt/tddy/bin"),
+                ExecRoot::at("/usr/bin/git"),
+                ExecRoot::trusted_prefix("/nix/store"),
+            ]
+        );
+    }
+
     #[test]
     fn reads_where_the_user_mapping_and_its_sockets_live() {
         // Given
@@ -986,7 +983,7 @@ services:
 socket:
   path: /run/tddy-supervisor.sock
 spawn_policy:
-  allowed_tool_paths: [\"bin/tddy-coder\"]
+  exec_roots: [\"bin/tddy-coder\"]
 ";
 
         // When / Then — a relative entry could never match a resolved request anyway, so it is a
