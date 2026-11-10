@@ -292,35 +292,7 @@ impl AgentToolSockets {
             inherited.get_mut(os_user).map(Option::take)
         };
         let supervised = self.placement == AgentToolSocketPlacement::Supervised;
-        let (path, listener, bound_here) = match inherited {
-            Some(Some(socket)) => {
-                socket
-                    .listener
-                    .set_nonblocking(true)
-                    .context("make the inherited socket non-blocking")?;
-                (socket.path, socket.listener, false)
-            }
-            // The supervisor made this socket and only it can make another.
-            Some(None) if supervised => bail!(
-                "the daemon socket tddy-supervisor created for {os_user} is gone or no longer \
-                 accepting; map the user in users.yaml and restart tddy-supervisor to recreate it"
-            ),
-            Some(None) => bail!(
-                "the agent-tool socket tddy-supervisor created for {os_user} is gone or no longer \
-                 accepting; it can only be recreated by restarting tddy-supervisor"
-            ),
-            None if supervised => bail!(
-                "no daemon socket was handed over for {os_user}: a supervised daemon derives no \
-                 socket path of its own — map the user in users.yaml, and the supervisor will \
-                 create their socket and hand it over on the next start"
-            ),
-            None => {
-                let path = user_socket_path_for_user(data_dir, os_user)?;
-                let listener =
-                    owner_socket::bind_owner_only(&path, os_user, OwnerSocketKind::USER_DAEMON)?;
-                (path, listener, true)
-            }
-        };
+        let (path, listener, bound_here) = acquire_agent_tool_socket(os_user, data_dir, inherited, supervised)?;
         let meta = std::fs::symlink_metadata(&path).context("stat the bound socket")?;
         let listener = tokio::net::UnixListener::from_std(listener)
             .context("hand the socket to the runtime")?;
@@ -346,6 +318,39 @@ impl AgentToolSockets {
         );
         Ok(path)
     }
+}
+
+fn acquire_agent_tool_socket(os_user: &str, data_dir: &Path, inherited: Option<Option<InheritedAgentToolSocket>>, supervised: bool) -> anyhow::Result<(PathBuf, UnixListener, bool)> {
+    let (path, listener, bound_here) = match inherited {
+        Some(Some(socket)) => {
+            socket
+                .listener
+                .set_nonblocking(true)
+                .context("make the inherited socket non-blocking")?;
+            (socket.path, socket.listener, false)
+        }
+        // The supervisor made this socket and only it can make another.
+        Some(None) if supervised => bail!(
+            "the daemon socket tddy-supervisor created for {os_user} is gone or no longer \
+                 accepting; map the user in users.yaml and restart tddy-supervisor to recreate it"
+        ),
+        Some(None) => bail!(
+            "the agent-tool socket tddy-supervisor created for {os_user} is gone or no longer \
+                 accepting; it can only be recreated by restarting tddy-supervisor"
+        ),
+        None if supervised => bail!(
+            "no daemon socket was handed over for {os_user}: a supervised daemon derives no \
+                 socket path of its own — map the user in users.yaml, and the supervisor will \
+                 create their socket and hand it over on the next start"
+        ),
+        None => {
+            let path = user_socket_path_for_user(data_dir, os_user)?;
+            let listener =
+                owner_socket::bind_owner_only(&path, os_user, OwnerSocketKind::USER_DAEMON)?;
+            (path, listener, true)
+        }
+    };
+    Ok((path, listener, bound_here))
 }
 
 /// The one socket an embedded daemon's runtime serves. The runtime binds it at startup, so a
