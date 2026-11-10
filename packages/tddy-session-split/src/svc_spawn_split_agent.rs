@@ -262,17 +262,15 @@ impl SplitSessions {
         let answer_wait_secs = record_split_answer_wait(session_dir)?;
         // The hooks file is the one the split agent's spec's hooks slot renders, written
         // under the context dir the agent runs in.
-        let agent_tool_socket = self.agent_tool_socket_of(os_user).await?;
-        let hook_params = tddy_core::HookCommandParams {
-            tddy_tools_path: &tddy_tools_path.to_string_lossy(),
-            daemon_url: &tddy_daemon_kernel::daemon_hook_urls::advertise_daemon_url(&self.config),
-            session_id,
+        self.write_split_hooks(
             os_user,
-            hook_token: &hook_token,
-            daemon_socket: Some(&agent_tool_socket),
+            session_id,
+            tddy_tools_path,
+            &context_dir,
+            &hook_token,
             answer_wait_secs,
-        };
-        self.render_and_write_split_hooks(session_id, &context_dir, hook_params)?;
+        )
+        .await?;
         // The launch argv is rendered from the split agent's spec — the same template a
         // spec-driven launch renders — with this start's model, session, permission mode and
         // prompt bound.
@@ -294,6 +292,29 @@ impl SplitSessions {
             )
             .await?;
         Ok((hook_token, handle))
+    }
+
+    async fn write_split_hooks(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        tddy_tools_path: std::path::PathBuf,
+        context_dir: &std::path::Path,
+        hook_token: &str,
+        answer_wait_secs: u64,
+    ) -> Result<(), Status> {
+        let agent_tool_socket = self.agent_tool_socket_of(os_user).await?;
+        let hook_params = tddy_core::HookCommandParams {
+            tddy_tools_path: &tddy_tools_path.to_string_lossy(),
+            daemon_url: &tddy_daemon_kernel::daemon_hook_urls::advertise_daemon_url(&self.config),
+            session_id,
+            os_user,
+            hook_token,
+            daemon_socket: Some(&agent_tool_socket),
+            answer_wait_secs,
+        };
+        self.render_and_write_split_hooks(session_id, context_dir, hook_params)?;
+        Ok(())
     }
 
     async fn place_pointer_and_spawn(
