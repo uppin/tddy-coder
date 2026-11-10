@@ -1251,6 +1251,26 @@ rebases **only the named nodes**, runs each **inside a worktree that owns that b
 outright when such a worktree has uncommitted or unpushed work, and pushes **one branch at a time**,
 stopping at the first conflict.
 
+**A ready lineage stays clean.** Each rewritten layer re-runs its CI and makes every layer above it
+stale, so a cascade that starts at the bottom rebuilds the whole stack. Keep the rewrite as short as the
+change needs:
+
+- **Start the cascade at the lowest layer that is actually stale.** A layer is stale when it doesn't
+  contain its parent's current head:
+  `git merge-base --is-ancestor origin/<parent> origin/<layer> || echo STALE`.
+  Layers below that are left alone.
+- **A ready, green layer is not rewritten to absorb a fix found higher up.** The fix goes into the open
+  layer that exposed it, or into a later node. Pushing it down needs the developer's go-ahead, with the
+  layers it would rebuild named.
+- **Rebase onto a moved trunk only when a layer conflicts with it or can't build on it, or when the
+  developer asks.** A moved trunk alone is no reason to rebuild every ready PR.
+- **After any force-push, check the PR's own checks, not the run list.** A force-push can cancel the
+  `pull_request`-event run through the concurrency group. A passing `workflow_dispatch` run on the
+  same SHA doesn't count: the merge gate reads the PR-event checks, and a cancelled one leaves the PR
+  BLOCKED and every layer above it "Blocked downstack". Re-run the cancelled run
+  (`gh run rerun <id>`), then read
+  `gh pr view <N> --json mergeStateStatus,statusCheckRollup` or `scripts/ci-status.sh <N>`.
+
 Its load-bearing mechanic is `--onto` with each node's **recorded pre-rebase tip**: once node K has
 been rewritten, node K+1's merge-base no longer exists on K, and a plain `git rebase origin/<base>`
 there would replay **K's old commits** as K+1's own — silently duplicating a parent's work into its

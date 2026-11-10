@@ -62,7 +62,7 @@ Read-only, from the orchestrator, one node at a time. **First row that matches w
 | Evidence on the node | Status | Starts at |
 |---|---|---|
 | PR merged | `landed` | nothing — counts as delivered. If a successor is still based on its branch, say `/repoint` is needed; this command does not do it |
-| PR ready (not draft), changeset gone from `1-WIP/` (wrapped), every check terminal-green and every thread addressed **on the current head SHA** | `done` | nothing |
+| PR ready (not draft), changeset gone from `1-WIP/` (wrapped), the **PR's own check rollup** terminal-green and every thread addressed **on the current head SHA** (see *What counts as green*) | `done` | nothing |
 | PR ready and wrapped, but a check is red or running, or a thread is open | `F` | `[F]` |
 | Tests green and pushed, PR still draft or its changeset still in `1-WIP/` | `W` | `[W]` |
 | Contract commit pushed, commits after it, tests **still red** | `G:resume` | `[G]`, told what exists |
@@ -348,8 +348,9 @@ so — pass both `model` and `effort`, announce first.
 It takes the **lowest PR whose `[W]` is done** and runs `.agents/commands/fix-pr.md` on it,
 **repeatedly**, until both hold on the **current head SHA**:
 
-- every check is terminal and passing (`scripts/ci-status.sh <N>`; readying the PR in `[W]` is what
-  started its build), and
+- every check in **the PR's own rollup** is terminal and passing (`scripts/ci-status.sh <N>`; readying
+  the PR in `[W]` is what started its build). See *What counts as green*: a passing `workflow_dispatch`
+  run next to a cancelled `pull_request` run is **not** green. And
 - every review thread is addressed — the main (non-nit) comments fixed or answered with evidence, per
   `fix-pr.md`'s reaction protocol.
 
@@ -389,6 +390,55 @@ change either once started, so there is no per-node escalation. A check that kee
 arguing a design point is what the round cap and the stops are for: the stage stops and reports. If the
 agent is no longer resumable (context exhausted, harness restarted), start a fresh one with the same
 brief at the node the ledger names, announce it, and say so in the ledger.
+
+### What counts as green — the PR's own checks, never the run list
+
+A node is green, and may be marked `done`, only when **the PR itself** says so on its current head:
+
+```bash
+gh pr view <N> --json headRefOid,isDraft,mergeStateStatus,statusCheckRollup \
+  --jq '"\(.headRefOid[0:9]) draft=\(.isDraft) merge=\(.mergeStateStatus) not-green=\([.statusCheckRollup[]
+        | select(((.conclusion // .state) | IN("SUCCESS","SKIPPED","NEUTRAL")) | not)] | length)"'
+# or: scripts/ci-status.sh <N>
+```
+
+`draft=false`, `not-green=0`, and `mergeStateStatus` not blocked by checks. Two shortcuts look green and
+are not:
+
+- **`gh run list --branch … --limit 1` per workflow.** GitHub's merge gate reads the checks of the
+  `pull_request`-event runs on the head. A `workflow_dispatch` run on the same SHA can pass while the
+  PR's own run sits **cancelled**, typically because a force-push or a newer push cancelled it through
+  the concurrency group. The run list then shows success, but the PR stays BLOCKED, and every PR above
+  it in the stack reads *Blocked downstack*. A manual dispatch is diagnostic, never the gate.
+- **A draft's run.** A draft is not built (`docs/dev/guides/ci.md` § Draft PRs): every job is skipped,
+  so its "success" proves nothing.
+
+**A cancelled `pull_request` run on the head is not a flaky failure.** Re-run it
+(`gh run rerun <id>`) without asking: it is the run the PR is gated on, and it never ran. This is
+distinct from `/fix-pr`'s rule against re-running a *failed* check unprompted, which still holds. After
+every push or force-push the orchestrator makes, list the head's `pull_request` runs and re-run any that
+were cancelled before reading the result.
+
+### Keep the ready lineage clean — a done layer is frozen
+
+Every rewrite of a layer re-runs CI on it and makes every layer above it stale. So a cascade from the
+bottom rebuilds the whole stack, and each rebuilt PR has to go green again. Once a layer is `done`, its
+head is **frozen**:
+
+- **Fixes found later go up, not down.** A problem found while working on n_k that lives in the code of
+  a done layer n_j (j < k) is fixed in **n_k**, the open layer that exposed it, or recorded for the
+  sweep node. It is not pushed into n_j. Rewriting n_j needs the user's go-ahead, and the ask names
+  every layer it would rebuild.
+- **Rebase only the layer whose parent moved.** When an open parent pushes, rebase the open children
+  that need it (`/pr-stack-rebase` single mode, or a cascade starting at the first open layer). Never
+  start a cascade at a done layer.
+- **No cascade onto the trunk while the lower layers are ready.** Rebasing the stack onto a moved trunk
+  rewrites every layer. Do it only when a layer actually conflicts with the trunk or cannot build on it,
+  or when the user asks. Even then, it starts at the lowest layer that needs it, and the report says
+  which layers will be rebuilt.
+- **Check the lineage before marking anything done.** Each layer must contain its parent's current
+  head (`git merge-base --is-ancestor origin/<parent> origin/<layer>`). A done layer whose parent head
+  is not in it is not done.
 
 ### Models on Cursor
 
@@ -463,9 +513,12 @@ pipeline pins its own. So:
 2. **Wait for the pipelines to drain** — every ledger row `done`, `stopped`, `blocked` or `manual`,
    and the serial fixer finished (its worktree removed).
    The orchestrator is notified on each background subagent's completion; it does not poll in a loop.
-3. Run Step 8's cascade over whatever has no pinned branch. Greens moved the stack, so *"every layer
-   already current"* is **not** the expected answer here, and a rebased layer is not a finding to
-   alarm on — but a layer whose rebase changes its tests or build state is. Report each layer.
+3. Run Step 8's cascade **from the lowest layer that is actually stale**, over whatever has no pinned
+   branch. A layer is stale when it does not contain its parent's current head. Layers that are `done`
+   and current are skipped, never rewritten (see *Keep the ready lineage clean*). Do not cascade onto a
+   moved trunk unless a layer conflicts with it or the user asks. Greens moved the stack, so some
+   layers above the last green will be stale; that is expected. A layer whose rebase changes its tests
+   or build state is a finding. Report each layer, including the ones skipped as current.
 4. A `stopped` node keeps its worktree and therefore its branch pinned: the cascade stops **at that
    layer** and reports it. Do not `--force` around it.
 5. **A rebased layer is not done until its new head is green.** Any layer whose head the cascade
@@ -637,8 +690,12 @@ with the user's answer per row. A node that is not ✅ is stated plainly — no 
 - **Lane caps `[G]` 1, serial `[F]` 1** by default, stated at the decomposition approval.
 - **A stop is local.** It halts that node and blocks only the nodes that need it. It keeps its
   worktree. Pass 2 and every unrelated pipeline carry on.
-- **Remove a worktree only when it is clean and nothing is unpushed.** Free a node's worktree before the
-  fixer needs its branch. Never delete a branch.
+- **Green means the PR's own check rollup, on its head.** Never mark a node `done` from `gh run list`
+  or a `workflow_dispatch` run. Re-run any cancelled `pull_request` run on the head after a push.
+- **A done layer is frozen.** Fixes go into the open layer that exposed them, or into the sweep, never
+  down into a ready PR. Cascades start at the lowest stale layer, never at a done one, and never onto a
+  moved trunk without a conflict or the user's ask.
+- **Remove a worktree only when its PR is green and nothing is unpushed.** Never delete a branch.
 - **No cascade, no `gh stack sync` / `rebase` from a pipeline worktree**, and no merge from anywhere
   in this command.
 - **Reserve a sweep node, plan it after the pipelines drain.** No code issue the stack added or
