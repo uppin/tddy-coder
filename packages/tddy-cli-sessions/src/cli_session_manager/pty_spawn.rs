@@ -125,10 +125,7 @@ impl CliSessionManager {
         )
         .await;
 
-        let ready = ready_rx
-            .await
-            .map_err(|_| anyhow::anyhow!("PTY runtime did not signal ready"))?
-            .map_err(|e| anyhow::anyhow!("PTY spawn failed: {e}"))?;
+        let ready = await_pty_ready(ready_rx).await?;
 
         let mut handle =
             self.build_pty_handle(task, terminal_id, kind, worktree_path, model, ready)?;
@@ -357,6 +354,16 @@ impl CliSessionManager {
         handle.tmux_session = entry.tmux_session;
         Some(Arc::new(handle))
     }
+}
+
+async fn await_pty_ready(
+    ready_rx: oneshot::Receiver<Result<PtyReady, String>>,
+) -> anyhow::Result<PtyReady> {
+    let ready = ready_rx
+        .await
+        .map_err(|_| anyhow::anyhow!("PTY runtime did not signal ready"))?
+        .map_err(|e| anyhow::anyhow!("PTY spawn failed: {e}"))?;
+    Ok(ready)
 }
 
 /// An exit hook, and the flag that tells [`CliSessionManager::exit_hook_settled`] it has finished.
