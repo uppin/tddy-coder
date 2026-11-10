@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 3 — one engine crate plus spec bindings; integration tests over rollout fixtures; no proto, no I/O seam beyond files
-**Branch**: `feature/usage-binding/codex-rollout`, base `feature/usage-binding/live-tap` (#892) — `#usage-binding 4/5`
+**Branch**: `feature/usage-binding/codex-rollout`, base `feature/usage-binding/live-tap` (#892) — `#usage-binding 4/5`, PR [#893](https://github.com/uppin/tddy-coder/pull/893), stack [#895](https://github.com/uppin/tddy-coder/stack/895)
 
 ## Initial Discovery
 
@@ -174,7 +174,41 @@ home. Unit tests cover the expression parser and the guards.
 
 ## Technical Debt & Production Readiness
 
-(Populated during development.)
+### Contract commit (pass 2, 2026-11-11)
+
+- **How the surface differs from *State B*'s YAML:**
+  - children by parent field is `children_by: parent_field`, beside `children`, not
+    `children: { by_parent_field: true }`. That is additive: n1's `ChildrenSpec` keeps its required
+    `path` and `id`;
+  - the main-file pick is `main.match: { field, equals }` (`MainMatch`);
+  - the header identity is `identity: { id, parent }` (`IdentitySpec`).
+- **`CounterMap`'s fields change type from `Option<FieldPath>` to `Option<CounterExpr>`.** That widens
+  a `#usage-binding 1/5` type. A plain path is a one-term expression, so every existing binding
+  still parses, and the only consumer in n3 (`CounterMap::default()`) is unaffected.
+  `#usage-binding 5/5` reuses `CounterExpr` over column names.
+- **The ACP cost bindings handed down from `#usage-binding 3/5` are not added.** No recorded
+  `usage_update` from `claude-code-acp` or `codex-acp` exists in the repo, and binding it would be
+  invented. A **TODO for the sweep**: record a real ACP stream, then bind `cost.amount` with
+  `aggregate: last` and a `cost.currency == USD` predicate.
+- **The Codex bindings are verified against real rollouts on this machine** (Codex CLI 0.167):
+  - `payload.parent_thread_id` at the top level of `session_meta`;
+  - a child shares its parent's `cwd`;
+  - `total_token_usage` is cumulative, with cached input inside input and reasoning inside output.
+- **The test fixtures are builders** (`a_rollout(…).turn_on(…).token_count(…)`) that mirror those
+  lines. The numbers in `fresh_input_is_total_input_less_the_cached_part` are the real thread's last
+  totals.
+
+### Red (2026-11-11)
+
+- `codex_binding_acceptance.rs`: 6 of 6 fail.
+- `counter_expr` unit tests: 5 of 6 fail. "A line with none of the fields has no value" holds on the
+  stub.
+- `usage_section_acceptance.rs`: the malformed-expression and `children_by`-without-`identity`
+  refusals fail. `the_builtin_codex_specs_bind_their_rollouts` passes, because the YAML is contract
+  data.
+
+A scoped `./test -p tddy-coding-agent-specs -p tddy-usage` gives 20 suites green, and every failure
+is a 1/5, 3/5 or 4/5 red test. Clippy `-D warnings --all-targets` is clean.
 
 ## Decisions & Trade-offs
 
@@ -204,10 +238,10 @@ home. Unit tests cover the expression parser and the guards.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

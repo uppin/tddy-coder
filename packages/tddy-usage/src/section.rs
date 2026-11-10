@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::tree::{FILE_VARIABLES, MAIN_VARIABLES};
-use crate::{FieldPath, PathTemplate};
+use crate::{CounterExpr, FieldPath, PathTemplate};
 
 /// An agent's usage binding: every source its usage is read from, in order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,7 +31,43 @@ pub struct JsonlSource {
     /// `None` for an agent whose files hold no nested conversations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub children: Option<ChildrenSpec>,
+    /// Where a file's conversation id and parent id are read from, when the path does not say: the
+    /// first line holding the `id` field (`#usage-binding 4/5`). `None` takes the id from the path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<IdentitySpec>,
+    /// Children found by the parent id their own files declare, rather than by a path relative to
+    /// the parent: every file the main glob matches whose `identity.parent` is a conversation's id
+    /// is its child, recursively (`#usage-binding 4/5`). Requires `identity`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub children_by: Option<ChildrenBy>,
     pub record: RecordSpec,
+}
+
+/// A file's conversation id, and the id of the conversation it is nested under, as fields of its
+/// header line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IdentitySpec {
+    pub id: FieldPath,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<FieldPath>,
+}
+
+/// How children are found when not by path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildrenBy {
+    /// By `identity.parent`.
+    ParentField,
+}
+
+/// The main conversation is the newest file (by modification time) whose header `field` equals
+/// the rendered `equals` and which declares no parent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MainMatch {
+    pub field: FieldPath,
+    pub equals: PathTemplate,
 }
 
 /// The conversation's own file(s): a glob template; every match is merged into one conversation.
@@ -39,6 +75,10 @@ pub struct JsonlSource {
 #[serde(deny_unknown_fields)]
 pub struct MainSpec {
     pub path: PathTemplate,
+    /// Pick one file among the matches by a header field, rather than merging every match
+    /// (`#usage-binding 4/5`).
+    #[serde(default, rename = "match", skip_serializing_if = "Option::is_none")]
+    pub match_: Option<MainMatch>,
 }
 
 /// A conversation's children, located relative to one of its files (`{dir}`, `{stem}`).
@@ -102,24 +142,28 @@ pub enum Aggregate {
     /// Each counter is the sum over the kept records.
     #[default]
     Sum,
+    /// Each counter is its value on the last kept record that has it — for a source whose counters
+    /// are already cumulative (`#usage-binding 4/5`).
+    Last,
 }
 
-/// Where each counter is read from. The counters are disjoint: `input` is fresh input only and
+/// Where each counter is read from — a field path, or paths joined by `+` / `-`
+/// ([`CounterExpr`]). The counters are disjoint: `input` is fresh input only and
 /// `output` excludes reasoning, so a conversation's total is their plain sum. A counter left out
 /// is zero.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CounterMap {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input: Option<FieldPath>,
+    pub input: Option<CounterExpr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_read: Option<FieldPath>,
+    pub cache_read: Option<CounterExpr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_write: Option<FieldPath>,
+    pub cache_write: Option<CounterExpr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<FieldPath>,
+    pub output: Option<CounterExpr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<FieldPath>,
+    pub reasoning: Option<CounterExpr>,
 }
 
 /// Why `section` cannot be evaluated, in words a spec author can act on — the checks serde cannot

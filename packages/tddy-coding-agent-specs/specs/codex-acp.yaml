@@ -63,6 +63,29 @@ extensions:
       default: gpt-5
       curated: [gpt-5]
     context_globs: [AGENTS.md, ".agents/**", ".codex/**"]
+    # Where this agent's token usage lives and how to read it (`#usage-binding 4/5`). Codex writes
+    # one rollout file per thread under `~/.codex/sessions/YYYY/MM/DD/`; its first line
+    # (`session_meta`) names the thread, its `cwd`, and — for a spawned thread — `parent_thread_id`.
+    # `token_count` events carry cumulative totals in which cached input is part of input and
+    # reasoning part of output, so the mapping subtracts them to keep the counters disjoint.
+    usage:
+      sources:
+        - format: jsonl
+          main:
+            path: "{agent_home}/.codex/sessions/*/*/*/rollout-*.jsonl"
+            match: { field: payload.cwd, equals: "{worktree}" }
+          identity: { id: payload.id, parent: payload.parent_thread_id }
+          children_by: parent_field
+          record:
+            where: [{ field: payload.type, equals: token_count }]
+            aggregate: last
+            model: payload.model
+            tokens:
+              input: "payload.info.total_token_usage.input_tokens - payload.info.total_token_usage.cached_input_tokens"
+              cache_read: payload.info.total_token_usage.cached_input_tokens
+              cache_write: payload.info.total_token_usage.cache_write_input_tokens
+              output: "payload.info.total_token_usage.output_tokens - payload.info.total_token_usage.reasoning_output_tokens"
+              reasoning: payload.info.total_token_usage.reasoning_output_tokens
     placements: [host]
     acp:
       command:

@@ -299,3 +299,86 @@ fn the_builtin_claude_spec_taps_its_headless_results_for_their_cost() {
         )
     );
 }
+
+#[test]
+fn a_malformed_counter_expression_is_refused_at_load() {
+    // Given
+    let tools = a_tools_dir().with_file(
+        "claude.yaml",
+        &a_claude_override_with(
+            r#"    usage:
+      sources:
+        - format: jsonl
+          main: { path: "{agent_home}/{conversation_id}.jsonl" }
+          record: { tokens: { input: "usage.input -" } }
+"#,
+        ),
+    );
+
+    // When
+    let (file, _, message) = the_refusal(&tools);
+
+    // Then
+    assert_eq!(file, tools.file("claude.yaml"));
+    assert!(
+        message.contains("usage.input -"),
+        "the refusal must quote the expression: {message}"
+    );
+}
+
+#[test]
+fn children_by_parent_field_without_an_identity_is_refused_at_load() {
+    // Given
+    let tools = a_tools_dir().with_file(
+        "claude.yaml",
+        &a_claude_override_with(
+            r#"    usage:
+      sources:
+        - format: jsonl
+          main: { path: "{agent_home}/*.jsonl" }
+          children_by: parent_field
+          record: { tokens: { input: usage.input } }
+"#,
+        ),
+    );
+
+    // When
+    let (file, _, message) = the_refusal(&tools);
+
+    // Then
+    assert_eq!(file, tools.file("claude.yaml"));
+    assert!(
+        message.contains("usage:") && message.contains("identity"),
+        "the refusal must say children_by needs an identity: {message}"
+    );
+}
+
+#[test]
+fn the_builtin_codex_specs_bind_their_rollouts() {
+    // Given
+    let home = tempfile::tempdir().unwrap();
+
+    // When
+    let registry = load_agent_registry(&home.path().join("tools")).expect("the built-ins load");
+
+    // Then
+    for id in ["codex", "codex-acp"] {
+        let spec =
+            CodingAgentSpec::of(registry.get(id).expect("built in")).expect("a coding agent");
+        let usage = spec
+            .agent
+            .usage
+            .unwrap_or_else(|| panic!("{id} declares no usage"));
+        let Some(UsageSource::Jsonl(source)) = usage.sources.first() else {
+            panic!("{id}: expected a jsonl source, got {:?}", usage.sources);
+        };
+        assert_eq!(
+            (source.main.path.as_str(), source.record.aggregate),
+            (
+                "{agent_home}/.codex/sessions/*/*/*/rollout-*.jsonl",
+                tddy_usage::Aggregate::Last
+            ),
+            "{id}"
+        );
+    }
+}
