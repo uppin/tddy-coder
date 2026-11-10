@@ -19,7 +19,9 @@ use std::path::PathBuf;
 use tddy_agent_backend::claude_hooks::HookCommandParams;
 use thiserror::Error;
 
-use crate::{CodingAgentSpec, McpSlot, ToolSlot};
+use crate::spec::slot_shapes::McpSlot;
+use crate::spec::slot_shapes::ToolSlot;
+use crate::CodingAgentSpec;
 
 /// The MCP server a launch registers with its agent (`tddy-tools --mcp`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,10 +220,14 @@ mod tests {
     use tddy_agent_backend::claude_hooks::{build_claude_hooks_settings, HookCommandParams};
 
     use super::*;
-    use crate::{
-        CodingAgentSection, FlagSlot, HooksSlot, InstructionsSlot, McpFormat, McpSlot,
-        ModelsSection, ToolSlot, Unsupported,
-    };
+    use crate::spec::slot_shapes::FlagSlot;
+    use crate::spec::slot_shapes::HooksSlot;
+    use crate::spec::slot_shapes::InstructionsSlot;
+    use crate::spec::slot_shapes::McpFormat;
+    use crate::spec::slot_shapes::McpSlot;
+    use crate::spec::slot_shapes::ToolSlot;
+    use crate::spec::slot_shapes::Unsupported;
+    use crate::{CodingAgentSection, ModelsSection};
 
     const PREAMBLE: &str = "## Managed Codebase\n\nThe real codebase is managed.";
 

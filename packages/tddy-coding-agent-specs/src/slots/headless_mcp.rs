@@ -13,7 +13,8 @@ use std::path::{Path, PathBuf};
 use super::cursor::placed_path;
 use super::mcp::{mcp_servers_json, MCP_CONFIG_FILENAME};
 use super::{McpServerCommand, SlotError};
-use crate::{McpFormat, McpSlot};
+use crate::spec::slot_shapes::McpFormat;
+use crate::spec::slot_shapes::McpSlot;
 
 /// The file an [`McpSlot::Argv`] registration is written as, under the launch's scratch directory
 /// — the name the hand-built Oz launch gives it today.

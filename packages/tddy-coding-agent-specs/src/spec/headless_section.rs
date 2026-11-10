@@ -1,8 +1,8 @@
 use crate::headless::{
     FreshSession, GoalParams, HeadlessProtocol, RouteModel, ScratchDir, SystemPromptDelivery,
 };
+use crate::spec::slot_shapes::McpSlot;
 use crate::spec::CodingAgentSpec;
-use crate::spec::McpSlot;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tddy_actions::tool::{ArgvItem, RunSection, Transport};

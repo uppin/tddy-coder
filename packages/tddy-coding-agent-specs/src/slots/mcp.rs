@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use super::cursor::{placed_path, render_cursor_mcp_json};
 use super::headless_mcp;
 use super::{McpServerCommand, SlotError};
-use crate::{McpFormat, McpSlot};
+use crate::spec::slot_shapes::McpFormat;
+use crate::spec::slot_shapes::McpSlot;
 
 /// The registration file's name, as `write_claude_mcp_config` names it.
 pub(crate) const MCP_CONFIG_FILENAME: &str = "claude-mcp-config.json";

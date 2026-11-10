@@ -26,6 +26,13 @@ pub use crate::spec::acp::AcpCommandError;
 pub use crate::spec::acp::AcpSection;
 pub use crate::spec::headless_section::HeadlessPermissionPolicy;
 pub use crate::spec::headless_section::HeadlessSection;
+pub use crate::spec::slot_shapes::FlagSlot;
+pub use crate::spec::slot_shapes::HooksSlot;
+pub use crate::spec::slot_shapes::InstructionsSlot;
+pub use crate::spec::slot_shapes::McpFormat;
+pub use crate::spec::slot_shapes::McpSlot;
+pub use crate::spec::slot_shapes::ToolSlot;
+pub use crate::spec::slot_shapes::Unsupported;
 pub use agent_env_base::{
     AgentEnvBase, AgentEnvBaseError, AGENT_ENV_BASE_EMBEDDED_PATH, AGENT_ENV_BASE_OVERRIDE,
     AGENT_ENV_BASE_YAML,
@@ -35,8 +42,7 @@ pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
 pub use route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 pub use spec::{
     routed_agent, AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec,
-    CuratedModel, FlagSlot, HooksSlot, InstructionsSlot, McpFormat, McpSlot, ModelsSection,
-    Placement, PlacementError, ResumeSlot, RouteSlot, SpecError, ToolSlot, Unsupported,
+    CuratedModel, ModelsSection, Placement, PlacementError, ResumeSlot, RouteSlot, SpecError,
     VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
 };
 

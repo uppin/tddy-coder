@@ -1,6 +1,6 @@
+use crate::spec::slot_shapes::McpSlot;
+use crate::spec::slot_shapes::ToolSlot;
 use crate::spec::CodingAgentSpec;
-use crate::spec::McpSlot;
-use crate::spec::ToolSlot;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;

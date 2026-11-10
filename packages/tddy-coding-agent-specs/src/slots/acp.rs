@@ -6,7 +6,9 @@
 use tddy_agent_backend::McpServerSpec;
 
 use super::{McpServerCommand, SlotError};
-use crate::{CodingAgentSpec, McpSlot, ToolSlot};
+use crate::spec::slot_shapes::McpSlot;
+use crate::spec::slot_shapes::ToolSlot;
+use crate::CodingAgentSpec;
 
 /// How an ACP launch withdraws an agent's native tools.
 #[derive(Debug, Clone, PartialEq, Eq)]
