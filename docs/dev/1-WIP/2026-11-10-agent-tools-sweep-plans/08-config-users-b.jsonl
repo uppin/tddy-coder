@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-supervisor/src/config.rs":{"sha256":"sha256:1ac33fed4faaa7774af8d94a930de79977a6e46bfbbf7871e2e947ea6186fce2"}}}
+{"id": "op-1", "op": "move_item", "anchor": {"kind": "items", "file": "packages/tddy-supervisor/src/config.rs", "items": ["tddy_supervisor::config::refuse_old_user_list_keys"], "fingerprints": ["sha256:ce67a5aac801b0a38f1965b16e317b4a945ab758bb95d440f9accf03d3ce363d"]}, "to": "tddy_supervisor::config::users", "reexport": "outside"}
