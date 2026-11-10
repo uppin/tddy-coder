@@ -21,23 +21,7 @@ pub async fn run(argv: Vec<String>, cwd: PathBuf, env: Vec<(String, String)>) ->
     }
     let (rows, cols) = crate::local_terminal::terminal_size();
 
-    let registry = TaskRegistry::new();
-    let pty_registry = PtyRegistry::new();
-    let spec = PtySpawnSpec {
-        argv,
-        worktree_path: cwd,
-        session_id: "local-pty-relay".to_string(),
-        terminal_id: "local".to_string(),
-        kind: "local".to_string(),
-        env,
-        env_base: tddy_pty::PtyEnvBase::Inherited,
-    };
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-    let task = PtyRuntime::spawn(&registry, &pty_registry, spec, ready_tx).await;
-    let ready = ready_rx
-        .await
-        .map_err(|e| anyhow::anyhow!("ready signal dropped: {e}"))?
-        .map_err(|e| anyhow::anyhow!("pty spawn failed: {e}"))?;
+    let (pty_registry, task, ready) = spawn_local_pty_task(argv, cwd, env).await?;
 
     // Resize the PTY to the local terminal size now that we know it (the runtime spawns at the
     // default 24×220; the local terminal may be larger).
@@ -58,8 +42,9 @@ pub async fn run(argv: Vec<String>, cwd: PathBuf, env: Vec<(String, String)>) ->
 
     // Input: local stdin → PTY. Stops when stdin closes or the child has exited, so a blocked stdin
     // read cannot keep a sender clone alive after the command finishes.
-    let mut stdin_status = task.status_watch();
-    let (mut stdin_pump, resize_pump) = spawn_stdin_pump(pty_registry, &task, &stdin_sender, stdin_status);
+    let stdin_status = task.status_watch();
+    let (mut stdin_pump, resize_pump) =
+        spawn_stdin_pump(pty_registry, &task, &stdin_sender, stdin_status);
 
     let mut status_watch = task.status_watch();
     let wait_for_child = async {
@@ -84,8 +69,42 @@ pub async fn run(argv: Vec<String>, cwd: PathBuf, env: Vec<(String, String)>) ->
     Ok(())
 }
 
-fn spawn_stdin_pump(pty_registry: PtyRegistry, task: &std::sync::Arc<tddy_task::TaskHandle>, stdin_sender: &tokio::sync::mpsc::UnboundedSender<Bytes>, mut stdin_status: tokio::sync::watch::Receiver<tddy_task::TaskStatus>) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
-    let mut stdin_pump = tokio::spawn({
+async fn spawn_local_pty_task(
+    argv: Vec<String>,
+    cwd: PathBuf,
+    env: Vec<(String, String)>,
+) -> Result<(
+    PtyRegistry,
+    std::sync::Arc<tddy_task::TaskHandle>,
+    tddy_pty::PtyReady,
+)> {
+    let registry = TaskRegistry::new();
+    let pty_registry = PtyRegistry::new();
+    let spec = PtySpawnSpec {
+        argv,
+        worktree_path: cwd,
+        session_id: "local-pty-relay".to_string(),
+        terminal_id: "local".to_string(),
+        kind: "local".to_string(),
+        env,
+        env_base: tddy_pty::PtyEnvBase::Inherited,
+    };
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let task = PtyRuntime::spawn(&registry, &pty_registry, spec, ready_tx).await;
+    let ready = ready_rx
+        .await
+        .map_err(|e| anyhow::anyhow!("ready signal dropped: {e}"))?
+        .map_err(|e| anyhow::anyhow!("pty spawn failed: {e}"))?;
+    Ok((pty_registry, task, ready))
+}
+
+fn spawn_stdin_pump(
+    pty_registry: PtyRegistry,
+    task: &std::sync::Arc<tddy_task::TaskHandle>,
+    stdin_sender: &tokio::sync::mpsc::UnboundedSender<Bytes>,
+    mut stdin_status: tokio::sync::watch::Receiver<tddy_task::TaskStatus>,
+) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
+    let stdin_pump = tokio::spawn({
         let stdin_sender = stdin_sender.clone();
         async move {
             let mut stdin = tokio::io::stdin();
