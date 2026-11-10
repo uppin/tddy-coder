@@ -68,8 +68,6 @@ impl UsersFileSource {
 /// and others, and yields a holder that refuses enrolment
 /// ([`LiveUsers::owned_by_supervisor`]).
 pub fn load_users_file(source: &UsersFileSource) -> anyhow::Result<LiveUsers> {
-    use std::os::unix::fs::MetadataExt;
-
     let path = source.path();
     let contents = std::fs::read_to_string(path).map_err(|error| {
         anyhow::anyhow!("could not read users.yaml at {}: {error}", path.display())
