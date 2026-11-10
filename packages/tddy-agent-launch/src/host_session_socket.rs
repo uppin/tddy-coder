@@ -197,10 +197,7 @@ impl HostSessionSockets {
         }
         // A server whose file is gone or replaced listens on nothing anyone can reach; stop it so
         // the probe below does not mistake it for a live peer.
-        if let Some(mut stale) = servers.remove(os_user) {
-            stale.task.abort();
-            let _ = (&mut stale.task).await;
-        }
+        drop_stale_server(os_user, &mut servers).await;
         let path = host_session_socket_path(data_dir, os_user)?;
         let listener = tddy_daemon_kernel::owner_socket::bind_owner_only(
             &path,
@@ -228,6 +225,16 @@ impl HostSessionSockets {
             path.display()
         );
         Ok(path)
+    }
+}
+
+async fn drop_stale_server(
+    os_user: &str,
+    servers: &mut tokio::sync::MutexGuard<'_, HashMap<String, BoundServer>>,
+) {
+    if let Some(mut stale) = servers.remove(os_user) {
+        stale.task.abort();
+        let _ = (&mut stale.task).await;
     }
 }
 
