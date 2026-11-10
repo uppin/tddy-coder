@@ -291,7 +291,7 @@ pub use tddy_session_split::{
 pub use tddy_agent_launch::{
     child_spawn_handler, claude_cli_spawn, conversation_spawn, conversation_spawn_handler,
     conversation_worktree_op, family_proto_bridge, hooks_and_urls, host_session_socket,
-    inherited_host_sockets, jail_relaunch, launch_ports, managed_launch, session_acting_identity,
+    jail_relaunch, launch_ports, managed_launch, session_acting_identity,
     session_coordinate_handlers, session_worktree_observer, stack_child_spawn, stack_parent,
     stack_seed_validation, svc_ensure_project_available_for_start, svc_index_workspace_worktree,
     svc_pr_status_for_caller, svc_relaunch_sandboxed_runner, svc_resume_claude_cli_session,

@@ -622,8 +622,8 @@ pub fn clone_as_user(os_user: &str, git_url: &str, destination: &Path) -> anyhow
 ///
 /// `extra_env` is for transport-shim env vars the clone itself needs — today `GIT_SSH_COMMAND`,
 /// `TDDY_DAEMON_URL`, `TDDY_SESSION_TOKEN` for a facilitator-provisioned clone that drives
-/// `tddy-remote-git-repo` as its `GIT_SSH_COMMAND` (PRD AC37). Under a supervisor the same keys must
-/// appear in `spawn_policy.allowed_env_keys` or the supervisor refuses the spawn; this fallback path
+/// `tddy-remote-git-repo` as its `GIT_SSH_COMMAND` (PRD AC37). Under a supervisor the spawn's
+/// environment passes whole except loader variables; this fallback path
 /// (no supervisor) sets them directly, having already dropped privilege to the target user.
 #[cfg(unix)]
 pub fn clone_as_user_with_env(

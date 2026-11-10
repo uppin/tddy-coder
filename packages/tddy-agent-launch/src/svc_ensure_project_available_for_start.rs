@@ -202,7 +202,8 @@ impl LaunchSessions {
         // The transport-shim env var a facilitator-provisioned clone sets on the `git clone` child.
         // `tddy-remote-git-repo` takes its daemon URL and session token as `--long` flags on the
         // `GIT_SSH_COMMAND` string, so a single env var carries both — the supervisor's
-        // `allowed_env_keys` needs only `GIT_SSH_COMMAND` to admit it.
+        // The spawn's environment passes whole except loader variables, so `GIT_SSH_COMMAND`
+        // needs no listing to admit it.
         let ssh_command = facilitating.as_ref().map(|(_, daemon_url)| {
             format!(
                 "{} --daemon-url {daemon_url} --session-token {session_token}",

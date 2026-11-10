@@ -41,8 +41,6 @@ use tddy_host_service::host_session_service::{
 };
 use tokio::task::JoinHandle;
 
-use crate::inherited_host_sockets::InheritedHostSocket;
-
 /// Longest socket path accepted. `sun_path` is 104 bytes on macOS and 108 on Linux, NUL included.
 const MAX_SOCKET_PATH_BYTES: usize = 100;
 
@@ -94,9 +92,6 @@ const DEFAULT_STOP_WATCH_INTERVAL: std::time::Duration = std::time::Duration::fr
 pub struct HostSessionSockets {
     registry: Arc<HostSessionRegistry>,
     servers: tokio::sync::Mutex<HashMap<String, BoundServer>>,
-    /// Sockets the supervisor created, by OS user: `Some` until first served, `None` after — the
-    /// key stays so a user the supervisor serves is never bound by this daemon itself.
-    inherited: std::sync::Mutex<HashMap<String, Option<InheritedHostSocket>>>,
     stop_watch_interval: std::time::Duration,
     /// The merged per-user daemon sockets to serve on instead, once [`Self::serve_on`] is called.
     user_sockets:
@@ -117,7 +112,6 @@ impl HostSessionSockets {
         Self {
             registry: Arc::default(),
             servers: tokio::sync::Mutex::default(),
-            inherited: std::sync::Mutex::default(),
             stop_watch_interval,
             user_sockets: std::sync::Mutex::new(None),
             probes: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -173,14 +167,6 @@ impl HostSessionSockets {
         *self.user_sockets.lock().expect("user sockets lock") = Some(user_sockets);
     }
 
-    /// Serve these supervisor-created sockets for their users from now on (served on first use).
-    pub fn adopt_inherited(&self, sockets: Vec<InheritedHostSocket>) {
-        let mut inherited = self.inherited.lock().expect("inherited sockets lock");
-        for socket in sockets {
-            inherited.insert(socket.os_user.clone(), Some(socket));
-        }
-    }
-
     /// The sessions answered on these sockets: registered at a session's start or resume, removed
     /// when it is deleted.
     pub fn registry(&self) -> &Arc<HostSessionRegistry> {
@@ -215,32 +201,12 @@ impl HostSessionSockets {
             stale.task.abort();
             let _ = (&mut stale.task).await;
         }
-        let inherited = {
-            let mut inherited = self.inherited.lock().expect("inherited sockets lock");
-            inherited.get_mut(os_user).map(Option::take)
-        };
-        let (path, listener) = match inherited {
-            Some(Some(socket)) => {
-                socket
-                    .listener
-                    .set_nonblocking(true)
-                    .context("make the inherited socket non-blocking")?;
-                (socket.path, socket.listener)
-            }
-            // The supervisor made this socket and only it can make another.
-            Some(None) => bail!(
-                "the host-session socket tddy-supervisor created for {os_user} is gone or no longer                  accepting; it can only be recreated by restarting tddy-supervisor"
-            ),
-            None => {
-                let path = host_session_socket_path(data_dir, os_user)?;
-                let listener = tddy_daemon_kernel::owner_socket::bind_owner_only(
-                    &path,
-                    os_user,
-                    tddy_daemon_kernel::owner_socket::OwnerSocketKind::HOST_SESSION,
-                )?;
-                (path, listener)
-            }
-        };
+        let path = host_session_socket_path(data_dir, os_user)?;
+        let listener = tddy_daemon_kernel::owner_socket::bind_owner_only(
+            &path,
+            os_user,
+            tddy_daemon_kernel::owner_socket::OwnerSocketKind::HOST_SESSION,
+        )?;
         let meta = std::fs::symlink_metadata(&path).context("stat the bound socket")?;
         let listener = tokio::net::UnixListener::from_std(listener)
             .context("hand the socket to the runtime")?;
