@@ -103,6 +103,10 @@ impl LaunchSessions {
             sessions_base,
             os_user
         );
+        // Every part a peer holds is checked before anything here is torn down: a delete one of
+        // them would refuse is refused with the session and its agent still running.
+        self.refuse_a_delete_a_peer_would_refuse(&sessions_base, session_id)
+            .await?;
         // The agent of a tmux-run session lives in its tmux session, so that is killed before
         // anything else of the session is torn down: a refused kill refuses the delete with the
         // session intact, and a retry kills whatever is left.
@@ -176,6 +180,26 @@ impl LaunchSessions {
         )?;
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
+    }
+
+    /// Refuses a delete of `session_id` that one of its peer-held parts would refuse, before
+    /// [`Self::delete_session_as`] tears anything down: a codebase half on another daemon
+    /// (`SplitSessions::refuse_an_unreachable_paired_codebase`) or
+    /// an agent clone (`AgentRoster::refuse_an_unreachable_clone_host`) while
+    /// this daemon cannot reach the common room. What only the peer can answer — reachable now,
+    /// failing at the delete — still fails after the local teardown began (`#agent-tools 30/32`).
+    pub(crate) async fn refuse_a_delete_a_peer_would_refuse(
+        &self,
+        sessions_base: &Path,
+        session_id: &str,
+    ) -> Result<(), Status> {
+        self.split_sessions
+            .refuse_an_unreachable_paired_codebase(sessions_base, session_id)
+            .await?;
+        self.agent_roster
+            .refuse_an_unreachable_clone_host(session_id)
+            .await?;
+        Ok(())
     }
 }
 

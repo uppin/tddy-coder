@@ -142,13 +142,9 @@ async fn undo_a_cancelled_start(
 /// teardown ([`remove_what_a_start_created`]) once it has resolved its caller's token.
 ///
 /// `session_token` is the start's own token, which the split codebase half and the agent clones are
-/// deleted with (see [`LaunchSessions::delete_session_as`]). An operator start has none, so a session
-/// that has either is refused here and left in place, and that is logged.
-///
-/// TODO(operator-start-undo): an operator start's split codebase half and agent clones cannot be torn
-/// down by a token-free undo until the split host port and the peer delete protocol take an OS user
-/// rather than a session token. Planned as a follow-up stack node (user, 2026-11-07):
-/// `docs/dev/todo/2026-11-07-operator-start-undo-of-peer-held-parts.md`.
+/// deleted with (see [`LaunchSessions::delete_session_as`]). An operator start has none, and it
+/// has no peer-held part to undo: `start_session_for_os_user` refuses every field that would
+/// create one (`refuse_peer_held_parts`), so this undo never needs a peer delete.
 ///
 /// A failure is logged, naming the session it left in place. The deadline's error is the only
 /// answer the caller gets, and it cannot carry this.

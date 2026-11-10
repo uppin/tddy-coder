@@ -642,11 +642,14 @@ and the branch it cut removed; one that does not come back is dropped. Either wa
 within 600s; it was on its clone step`). A start that answers the cancel with `CANCELLED` is still
 reported `DEADLINE_EXCEEDED`. Its progress events reach the caller before the error does.
 
-**Known limit.** An operator start carries no session token, and the split codebase half and the agent
-clones are deleted on their peers with one. An operator start that overran its deadline after creating
-either is left in place, and that is logged — see
-[the follow-up record](../../dev/todo/2026-11-07-operator-start-undo-of-peer-held-parts.md). A start
-dropped during the grace can leave a partially cut worktree (`TODO(start-cancel)`).
+An operator start carries no session token, and the split codebase half and the agent clones are
+deleted on their peers with one, so an operator start may not ask for either: one naming a codebase
+host, a sandboxed codebase, specialized agents or clone-placed agents is refused `INVALID_ARGUMENT`,
+naming the field, before anything is created. A session delete that a peer-held part would refuse
+for want of a common room is refused before the session's agent or pointer is touched.
+
+**Known limit.** A start dropped during the grace can leave a partially cut worktree
+(`TODO(start-cancel)`).
 
 ## Tool replacement, without behaviour
 

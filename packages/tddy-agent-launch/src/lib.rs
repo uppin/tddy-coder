@@ -98,6 +98,8 @@ mod host_session_socket_tests;
 #[cfg(test)]
 mod notify_env_unit_tests;
 #[cfg(test)]
+mod operator_start_unit_tests;
+#[cfg(test)]
 mod provider_account_lookup_tests;
 #[cfg(test)]
 mod session_acting_identity_tests;
