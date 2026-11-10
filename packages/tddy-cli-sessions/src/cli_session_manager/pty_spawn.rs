@@ -139,6 +139,23 @@ impl CliSessionManager {
             ),
             None => None,
         };
+        self.spawn_cleanup_for(
+            (session_id, terminal_id, kind),
+            os_user,
+            tmux_session,
+            handle,
+            on_exit,
+        )
+    }
+
+    fn spawn_cleanup_for(
+        &self,
+        (session_id, terminal_id, kind): (&str, &str, &str),
+        os_user: Option<&str>,
+        tmux_session: Option<&str>,
+        handle: super::PtyHandle,
+        on_exit: Option<PendingExit>,
+    ) -> anyhow::Result<Arc<super::PtyHandle>> {
         self.spawn_terminal_cleanup(
             session_id.to_string(),
             terminal_id.to_string(),
