@@ -135,19 +135,7 @@ impl TerminalManager {
             .stdin_sender()
             .ok_or_else(|| anyhow::anyhow!("PTY channel missing stdin"))?;
 
-        let (pty_done_tx, pty_done_rx) = watch::channel(false);
-        let mut status_rx = task.status_watch();
-        tokio::spawn(async move {
-            loop {
-                if status_rx.borrow().is_terminal() {
-                    let _ = pty_done_tx.send(true);
-                    break;
-                }
-                if status_rx.changed().await.is_err() {
-                    break;
-                }
-            }
-        });
+        let pty_done_rx = spawn_terminal_done_watch(&task);
 
         let handle = Arc::new(PtyHandle {
             terminal_id: terminal_id.clone(),
@@ -227,6 +215,23 @@ impl TerminalManager {
             }
         });
     }
+}
+
+fn spawn_terminal_done_watch(task: &Arc<tddy_task::TaskHandle>) -> watch::Receiver<bool> {
+    let (pty_done_tx, pty_done_rx) = watch::channel(false);
+    let mut status_rx = task.status_watch();
+    tokio::spawn(async move {
+        loop {
+            if status_rx.borrow().is_terminal() {
+                let _ = pty_done_tx.send(true);
+                break;
+            }
+            if status_rx.changed().await.is_err() {
+                break;
+            }
+        }
+    });
+    pty_done_rx
 }
 
 /// Resolve the interactive login shell for the coder's own user.
