@@ -21,6 +21,9 @@ use std::path::Path;
 
 use tddy_actions::tool::{ToolError, ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN_TOOLS};
 
+pub use crate::spec::acp::package_runner;
+pub use crate::spec::acp::AcpCommandError;
+pub use crate::spec::acp::AcpSection;
 pub use crate::spec::headless_section::HeadlessPermissionPolicy;
 pub use crate::spec::headless_section::HeadlessSection;
 pub use agent_env_base::{
@@ -31,11 +34,10 @@ pub use capability::Capability;
 pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
 pub use route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 pub use spec::{
-    package_runner, routed_agent, AcpCommandError, AcpSection, AgentVariant, CodingAgentExtension,
-    CodingAgentSection, CodingAgentSpec, CuratedModel, FlagSlot, HooksSlot, InstructionsSlot,
-    McpFormat, McpSlot, ModelsSection, Placement, PlacementError, ResumeSlot, RouteSlot, SpecError,
-    ToolSlot, Unsupported, VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS,
-    HOST_AGENT_VARIANT,
+    routed_agent, AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec,
+    CuratedModel, FlagSlot, HooksSlot, InstructionsSlot, McpFormat, McpSlot, ModelsSection,
+    Placement, PlacementError, ResumeSlot, RouteSlot, SpecError, ToolSlot, Unsupported,
+    VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
 };
 
 /// `specs/cursor.yaml` (`#agent-tools 7/12`), embedded.
