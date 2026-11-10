@@ -90,22 +90,7 @@ impl ChildEnvironment {
                 supervisor_socket.clone().into_os_string(),
             );
         }
-        if let Some(users_file) = handover.and_then(|handover| handover.users_file()) {
-            values.insert(
-                OsString::from(USERS_FILE_ENV),
-                users_file.to_path_buf().into_os_string(),
-            );
-        }
-        if let Some(handover) = handover {
-            values.insert(
-                OsString::from("LISTEN_FDS"),
-                OsString::from(handover.count().to_string()),
-            );
-            values.insert(
-                OsString::from("LISTEN_FDNAMES"),
-                OsString::from(handover.fd_names()),
-            );
-        }
+        insert_handover_variables(handover, &mut values);
 
         let mut variables = Vec::with_capacity(values.len());
         for (key, value) in &values {
@@ -133,6 +118,28 @@ impl ChildEnvironment {
             write_listen_pid(entry);
         }
         environ = self.pointers.as_ptr();
+    }
+}
+
+fn insert_handover_variables(
+    handover: Option<&SocketHandover>,
+    values: &mut BTreeMap<OsString, OsString>,
+) {
+    if let Some(users_file) = handover.and_then(|handover| handover.users_file()) {
+        values.insert(
+            OsString::from(USERS_FILE_ENV),
+            users_file.to_path_buf().into_os_string(),
+        );
+    }
+    if let Some(handover) = handover {
+        values.insert(
+            OsString::from("LISTEN_FDS"),
+            OsString::from(handover.count().to_string()),
+        );
+        values.insert(
+            OsString::from("LISTEN_FDNAMES"),
+            OsString::from(handover.fd_names()),
+        );
     }
 }
 
