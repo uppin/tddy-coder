@@ -80,6 +80,7 @@ its changeset wraps.
 | PRD | Affects |
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
+| [PR stacks live in the project](1-WIP/PRD-2026-11-10-project-stack-store.md) | [PR stacking](pr-stacking.md) — the stack moves from `Changeset.stack` to a per-host project store, migrated at startup |
 
 ## Integration Points
 
