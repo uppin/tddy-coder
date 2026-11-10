@@ -1,6 +1,6 @@
 use crate::route::RoutedAgent;
 use crate::route::{ProviderKind, RouteShape};
-use crate::spec::admits_a_tddy_variable;
+use crate::spec::pass_env::admits_a_tddy_variable;
 use crate::spec::CodingAgentSpec;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
