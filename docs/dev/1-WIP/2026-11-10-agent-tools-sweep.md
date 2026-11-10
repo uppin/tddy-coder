@@ -1,7 +1,10 @@
 # Changeset: refactor — the `#agent-tools` sweep pays down every code issue the stack added
 
 **Date**: 2026-11-10
-**Status**: 🚧 In Progress — contract (commit 2); 6e answered by the user 2026-11-10
+**Status**: Green phase run in PR #876 (2026-11-10) — see the execution notes at the end.
+Applied: spec split (01-06), config split (07-08), spawn_broker plans 11/12, the
+`tddy-users-file` crate, the dead-module deletion, the wording pass, both renames (13, 14) and
+the Tier C/B4 extracts. Deferred by the user: spawn_broker plans 09/10 to a Linux target.
 **Type**: Refactor
 **Complexity**: 5/5 (re-scored at the contract: it rose further with the new `tddy-users-file` crate and the 14 Tier C extracts; already at the ceiling)
 **Stack**: `#agent-tools` 33/33, the sweep node. ⚠ **The stack merged while this node was being
