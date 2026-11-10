@@ -281,10 +281,36 @@ impl SplitSessions {
         // The agent's `tddy-tools` finds its session through the pointer in the context dir (and
         // through its own registration, `extra_args`): the agent process is given no `TDDY_*`
         // variable. The pointer is removed when the agent exits.
+        let handle = self
+            .place_pointer_and_spawn(
+                os_user,
+                session_id,
+                req,
+                remote,
+                context_dir,
+                session_dir,
+                (spec, argv),
+                session_type,
+            )
+            .await?;
+        Ok((hook_token, handle))
+    }
+
+    async fn place_pointer_and_spawn(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        req: &StartSessionRequest,
+        remote: tddy_core::RemoteToolEnv,
+        context_dir: std::path::PathBuf,
+        session_dir: &Path,
+        spec_and_argv: (tddy_coding_agent_specs::CodingAgentSpec, Vec<String>),
+        session_type: String,
+    ) -> Result<Arc<tddy_cli_sessions::cli_session_manager::PtyHandle>, Status> {
+        let (spec, argv) = spec_and_argv;
         let pointer =
             crate::split_session::split_session_pointer(&remote, &context_dir, session_dir);
         let on_exit = self.session_pointers.place(&pointer, &context_dir, None)?;
-        let argv = split_argv_with_flags(initial_prompt, extra_args, argv);
         let pointer_dir = context_dir.clone();
         let handle = spawn_split_agent_pty(
             &self.cli_manager,
@@ -306,7 +332,7 @@ impl SplitSessions {
             self.session_pointers.remove(&pointer_dir);
             Status::internal(format!("failed to spawn {session_type}: {e}"))
         })?;
-        Ok((hook_token, handle))
+        Ok(handle)
     }
 
     fn render_and_write_split_hooks(
