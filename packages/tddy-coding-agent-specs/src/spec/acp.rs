@@ -30,6 +30,11 @@ pub struct AcpSection {
     /// refused at load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hooks_adapter: Option<String>,
+    /// The protocol events that carry usage (`#usage-binding 3/5`): the driver appends each event
+    /// satisfying every predicate, verbatim, to `<session_dir>/usage/<conversation_id>.jsonl`, where
+    /// the agent's `usage:` binding reads it. Empty taps nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub usage_events: Vec<tddy_usage::FieldEq>,
     /// Where an ACP launch registers its MCP server, when that differs from `coding_agent.mcp`
     /// (OpenCode: none on its PTY launch, `session/new` here). `None` uses `coding_agent.mcp`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

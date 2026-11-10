@@ -16,6 +16,7 @@ pub mod spawn_env;
 pub mod stream;
 pub mod token_accounting;
 pub mod turn_files;
+pub mod usage_tap;
 
 // The storage layer and the tool-call channels a backend reports through, named at the `crate::`
 // paths these modules used inside `tddy-core`.

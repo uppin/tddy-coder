@@ -76,6 +76,9 @@ pub struct HeadlessCommand {
     /// How long one turn may run before its process group is killed and the turn fails;
     /// [`DEFAULT_TURN_DEADLINE`] when `None`. No headless wait is unbounded.
     pub turn_deadline: Option<Duration>,
+    /// Where the turn's usage events are tapped (`#usage-binding 3/5`): the events the spec's
+    /// `headless.usage_events` declares, appended verbatim. `None` taps nothing.
+    pub usage_tap: Option<crate::usage_tap::UsageTapSpec>,
 }
 
 /// One headless conversation: its CLI, and the CLI's own session id once the first turn named it.

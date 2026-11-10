@@ -13,6 +13,7 @@ mod context_file;
 mod field_path;
 mod gather;
 mod jsonl;
+mod registry;
 mod section;
 mod template;
 pub mod token_accounting;
@@ -24,6 +25,10 @@ pub use context_file::{
 };
 pub use field_path::FieldPath;
 pub use gather::{account, gather_session_usage, UsageContext};
+pub use registry::{
+    merge_sources, register_conversation, registered_conversations, RegisteredConversation,
+    CONVERSATION_REGISTRY_FILE,
+};
 pub use section::{
     validate_usage_section, Aggregate, ChildrenSpec, CounterMap, FieldEq, JsonlSource, MainSpec,
     NameSpec, RecordSpec, UsageSection, UsageSource,

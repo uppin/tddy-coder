@@ -330,6 +330,7 @@ mod tests {
             workflow_mcp: false,
             route_model: RouteModel::default(),
             fresh_session: FreshSession::default(),
+            usage_events: Vec::new(),
             scratch: ScratchDir::default(),
             permission_policy: None,
         }

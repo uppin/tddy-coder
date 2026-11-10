@@ -82,6 +82,17 @@ extensions:
               cache_read: message.usage.cache_read_input_tokens
               cache_write: message.usage.cache_creation_input_tokens
               output: message.usage.output_tokens
+        # A headless run's stream-json `result` reports what that invocation cost; the headless driver
+        # taps it (see `headless.usage_events`). Tokens stay with the transcript above — a source
+        # supplies only the counters it maps.
+        - format: jsonl
+          main:
+            path: "{session_dir}/usage/{conversation_id}.jsonl"
+          record:
+            where: [{ field: type, equals: result }]
+            aggregate: sum
+            tokens: {}
+            cost: total_cost_usd
     models:
       default: opus
       curated:
@@ -101,6 +112,8 @@ extensions:
     #          [(--resume|--session-id) ID] <slot flags>
     # The output is read by the `claude-stream-json` adapter (`tddy_agent_backend::adapters`).
     headless:
+      # The stream-json events that carry usage, tapped verbatim for the `usage:` binding.
+      usage_events: [{ field: type, equals: result }]
       argv:
         - "{binary}"
         - -p

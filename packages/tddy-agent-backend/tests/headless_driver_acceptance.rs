@@ -543,3 +543,66 @@ async fn the_worktree_model_tool_server_and_profile_reach_the_renderer_for_oz() 
         )
     );
 }
+
+// ---------------------------------------------------------------------------
+// Usage tap (`#usage-binding 3/5`): the events a spec declares as usage, appended verbatim
+// ---------------------------------------------------------------------------
+
+/// The spec's `usage_events` for a stream-json agent: its `result` events.
+fn result_events() -> Vec<tddy_usage::FieldEq> {
+    serde_json::from_value(serde_json::json!([{ "field": "type", "equals": "result" }]))
+        .expect("a predicate list")
+}
+
+#[tokio::test]
+async fn a_stream_json_result_is_tapped_verbatim_into_the_conversations_usage_file() {
+    // Given — a result carrying the usage and cost a real `claude -p` reports
+    let result = serde_json::json!({
+        "type": "result", "subtype": "success", "result": "Done.", "session_id": "cl-1",
+        "total_cost_usd": 0.579661, "usage": { "input_tokens": 1217, "output_tokens": 40 }
+    });
+    let mut stream = claude_stream("cl-1", "Done.");
+    stream[2] = result.clone();
+    let cli = a_fake_cli(&stream, 0);
+    let tap = cli
+        .path()
+        .join("conversation")
+        .join("usage")
+        .join("conv-1.jsonl");
+    let (driver, _) = cli.driver(
+        "claude",
+        CLAUDE_STREAM_JSON,
+        HeadlessCommand {
+            usage_tap: Some(tddy_agent_backend::usage_tap::UsageTapSpec {
+                path: tap.clone(),
+                events: result_events(),
+            }),
+            ..cli.command()
+        },
+    );
+
+    // When — two turns
+    a_turn(&driver, "Do it").await;
+    a_turn(&driver, "Again").await;
+
+    // Then — one tapped line per turn, each the event exactly as the agent wrote it
+    let lines: Vec<serde_json::Value> = std::fs::read_to_string(&tap)
+        .expect("the tap file exists")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON line"))
+        .collect();
+    assert_eq!(lines, vec![result.clone(), result]);
+}
+
+#[tokio::test]
+async fn a_turn_without_a_usage_tap_writes_no_usage_file() {
+    // Given
+    let cli = a_fake_cli(&claude_stream("cl-1", "Done."), 0);
+    let (driver, _) = cli.driver("claude", CLAUDE_STREAM_JSON, cli.command());
+
+    // When
+    a_turn(&driver, "Do it").await;
+
+    // Then
+    assert!(!cli.path().join("conversation").join("usage").exists());
+}

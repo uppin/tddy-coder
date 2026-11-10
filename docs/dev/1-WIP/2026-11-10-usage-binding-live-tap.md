@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — four crates, three protocol drivers, an append-only registry written concurrently by subagent opens, a source-merge rule in the engine
-**Branch**: `feature/usage-binding/live-tap`, base `feature/usage-binding/daemon-stream` (#891) — `#usage-binding 3/5`
+**Branch**: `feature/usage-binding/live-tap`, base `feature/usage-binding/daemon-stream` (#891) — `#usage-binding 3/5`, PR [#892](https://github.com/uppin/tddy-coder/pull/892), stack [#895](https://github.com/uppin/tddy-coder/stack/895)
 
 ## Initial Discovery
 
@@ -232,7 +232,47 @@ See *Affected Packages*.
 
 ## Technical Debt & Production Readiness
 
-(Populated during development.)
+### Contract commit (pass 2, 2026-11-11): premises checked against real sources
+
+- **ACP `usage_update.cost` is cumulative** (`agent-client-protocol-schema 0.11.4`
+  `UsageUpdate { used, size, cost: Option<Cost { amount, currency }> }`, "Cumulative session cost").
+  It needs `aggregate: last` (`#usage-binding 4/5`) and a currency filter. **The ACP cost bindings
+  move to 4/5**, as *Boundaries* anticipated. This node taps ACP `usage_update` (tested) but binds
+  none.
+- **Cursor's stream-json `result` carries no usage** in any recorded fixture
+  (`tddy-integration-tests/tests/cursor_backend.rs`: `{"type":"result","result":…,"session_id":…}`).
+  A Cursor binding would be invented, so none ships. A **TODO for the sweep**: record a real
+  `agent -p --output-format stream-json` result and bind it if it reports usage.
+- **The verified binding is Claude's headless `result`.** The recorded sample in
+  `tddy-agent-backend/tests/agent_env_allow_list.rs` carries `usage` and `total_cost_usd`. It is a
+  second source in `claude.yaml` mapping **cost only**, and the transcript keeps the tokens.
+  `headless.usage_events: [{ field: type, equals: result }]`.
+- **Changed in a parent's test.** `#usage-binding 1/5`'s
+  `the_builtin_claude_specs_bind_their_transcripts` asserted exactly one source. This node adds a
+  second, so it now asserts that the first source is the transcript.
+- **Where things live:**
+  - `HeadlessCommand.usage_tap: Option<UsageTapSpec>` is where a driver gets its tap;
+  - `UsageTap` lives at `tddy_agent_backend::usage_tap`;
+  - `merge_sources`, `register_conversation`, `registered_conversations` and
+    `RegisteredConversation` live in `tddy-usage/src/registry.rs`.
+- ⚠ **`SubagentSession::cumulative_usage` from the tap has no red test yet.** Evaluating a subagent's
+  binding needs its agent home. The headless harness inherits the real `$HOME`, and a test must not
+  read or write `~/.claude`. `/green` adds the test once the launch passes an explicit agent home.
+
+### Red (2026-11-11)
+
+- `tddy-usage/tests/registry_acceptance.rs`: 3 of 3 fail.
+- `tddy-agent-backend/tests/usage_tap_acceptance.rs`: 2 of 3 fail. The cannot-write guard passes on
+  the stub.
+- `headless_driver_acceptance.rs`: the tap test fails; the no-tap test and the 12 existing tests
+  pass.
+- `usage_section_acceptance.rs`: `two_sources_mapping_the_same_counter_are_refused_at_load` fails.
+  The tap-binding test passes, because the YAML is contract data.
+
+A scoped `./test -p tddy-coding-agent-specs -p tddy-agent-backend -p tddy-usage` gives 43 suites
+green, and every failure is a 1/5 or 3/5 red test. Clippy `-D warnings --all-targets` is clean on
+`tddy-usage`, `tddy-agent-backend`, `tddy-coding-agent-specs`, `tddy-coding-subagent` and
+`tddy-session-agents`.
 
 ## Decisions & Trade-offs
 
@@ -264,10 +304,10 @@ See *Affected Packages*.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
