@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-supervisor/src/streamed.rs":{"sha256":"sha256:6e7472e10f618d3b247000e37b06c2e9ea5d5de2dcf8cbc4fafcd57f63d9a569"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_supervisor::streamed::for_each_line", "file": "packages/tddy-supervisor/src/streamed.rs", "start": {"line": 5, "col": 5}, "end": {"line": 13, "col": 7}, "fingerprint": "sha256:565c0af9a2efdd59e89ddd03fc1884b11fdf64b89ebb07c2ddf99d2467706ff4", "hint": {"line": 185, "col": 5}}, "name": "emit_trimmed_line"}

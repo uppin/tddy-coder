@@ -182,22 +182,13 @@ fn read_lines_in_the_background(
 fn for_each_line(mut reader: impl Read, mut on_line: impl FnMut(&str) -> bool) {
     let mut chunk = [0u8; 4096];
     let mut line: Vec<u8> = Vec::new();
-    let mut emit = |line: &mut Vec<u8>| -> bool {
-        let keep_going = {
-            let text = String::from_utf8_lossy(line);
-            let text = text.trim();
-            text.is_empty() || on_line(text)
-        };
-        line.clear();
-        keep_going
-    };
     loop {
         match reader.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => {
                 for &byte in &chunk[..n] {
                     if byte == b'\r' || byte == b'\n' {
-                        if !emit(&mut line) {
+                        if !emit_trimmed_line(&mut line, &mut on_line) {
                             return;
                         }
                     } else {
@@ -209,7 +200,17 @@ fn for_each_line(mut reader: impl Read, mut on_line: impl FnMut(&str) -> bool) {
             Err(_) => break,
         }
     }
-    emit(&mut line);
+    emit_trimmed_line(&mut line, &mut on_line);
+}
+
+fn emit_trimmed_line(line: &mut Vec<u8>, on_line: &mut impl FnMut(&str) -> bool) -> bool {
+    let keep_going = {
+        let text = String::from_utf8_lossy(line);
+        let text = text.trim();
+        text.is_empty() || on_line(text)
+    };
+    line.clear();
+    keep_going
 }
 
 #[cfg(test)]
