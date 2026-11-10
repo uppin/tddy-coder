@@ -262,7 +262,7 @@ fn signal_pid(pid: i32, sig: libc::c_int) -> Result<(), std::io::Error> {
 /// task's channel. Reports readiness (or the failure reason) via `setup_tx`.
 fn open_pty_and_pump(
     spec: PtySpawnSpec,
-    mut stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
     output_ch: Arc<TaskChannel>,
     setup_tx: oneshot::Sender<Result<SetupResult, String>>,
     rt_handle: tokio::runtime::Handle,
@@ -308,31 +308,7 @@ fn open_pty_and_pump(
     let (reader_done_tx, reader_done_rx) = std::sync::mpsc::channel::<()>();
     spawn_pty_reader(master_for_reader, output_ch_reader, reader_done_tx);
 
-    let mut cmd = CommandBuilder::new(&spec.argv[0]);
-    for arg in &spec.argv[1..] {
-        cmd.arg(arg);
-    }
-    cmd.cwd(&spec.worktree_path);
-    let cleared = spec.env_base == PtyEnvBase::Cleared;
-    if cleared {
-        cmd.env_clear();
-    } else {
-        set_terminal_variables(&mut cmd);
-    }
-    // The environment is never a credential: a daemon that has one of these exported must not hand
-    // it to the agent by inheritance, or `gh` would act as whoever exported it.
-    for token_variable in GITHUB_TOKEN_VARIABLES {
-        cmd.env_remove(token_variable);
-    }
-
-    for (key, value) in &spec.env {
-        cmd.env(key, value);
-    }
-    if cleared {
-        // An agent's env is the daemon's base set, whose `TERM` names the daemon's terminal: this
-        // PTY's own description stands over it.
-        set_terminal_variables(&mut cmd);
-    }
+    let cmd = build_pty_command(spec);
 
     let child = match pair.slave.spawn_command(cmd) {
         Ok(child) => child,
@@ -391,7 +367,41 @@ fn open_pty_and_pump(
     Ok(())
 }
 
-fn spawn_pty_writer(mut stdin_rx: mpsc::UnboundedReceiver<Bytes>, rt_handle: tokio::runtime::Handle, master: Arc<Mutex<Box<dyn MasterPty + Send>>>, child_exited_rx: oneshot::Receiver<()>) {
+fn build_pty_command(spec: PtySpawnSpec) -> CommandBuilder {
+    let mut cmd = CommandBuilder::new(&spec.argv[0]);
+    for arg in &spec.argv[1..] {
+        cmd.arg(arg);
+    }
+    cmd.cwd(&spec.worktree_path);
+    let cleared = spec.env_base == PtyEnvBase::Cleared;
+    if cleared {
+        cmd.env_clear();
+    } else {
+        set_terminal_variables(&mut cmd);
+    }
+    // The environment is never a credential: a daemon that has one of these exported must not hand
+    // it to the agent by inheritance, or `gh` would act as whoever exported it.
+    for token_variable in GITHUB_TOKEN_VARIABLES {
+        cmd.env_remove(token_variable);
+    }
+
+    for (key, value) in &spec.env {
+        cmd.env(key, value);
+    }
+    if cleared {
+        // An agent's env is the daemon's base set, whose `TERM` names the daemon's terminal: this
+        // PTY's own description stands over it.
+        set_terminal_variables(&mut cmd);
+    }
+    cmd
+}
+
+fn spawn_pty_writer(
+    mut stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+    rt_handle: tokio::runtime::Handle,
+    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    child_exited_rx: oneshot::Receiver<()>,
+) {
     let master_for_writer = Arc::clone(&master);
     std::thread::spawn(move || {
         let writer = {

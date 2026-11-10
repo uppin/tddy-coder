@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-pty/src/runtime.rs":{"sha256":"sha256:9dc283b0bfcdc15d7c02dcc168b016c465f9707760549bee9f24e228f4076f36"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_pty::runtime::open_pty_and_pump", "file": "packages/tddy-pty/src/runtime.rs", "start": {"line": 51, "col": 5}, "end": {"line": 75, "col": 6}, "fingerprint": "sha256:3ed7a58d205aa88988cbf0d3d15c7eeb7443eb0e8d00f2895c6cd5edfb25550d", "hint": {"line": 311, "col": 5}}, "name": "build_pty_command"}
