@@ -143,7 +143,10 @@ fn insert_handover_variables(
     }
 }
 
-fn environment_pointers(variables: &[CString], listen_pid: &Option<Box<[u8]>>) -> Vec<*const i8> {
+fn environment_pointers(
+    variables: &[CString],
+    listen_pid: &Option<Box<[u8]>>,
+) -> Vec<*const libc::c_char> {
     let mut pointers: Vec<*const libc::c_char> =
         variables.iter().map(|entry| entry.as_ptr()).collect();
     if let Some(entry) = listen_pid {
