@@ -74,7 +74,7 @@ the touched packages finds none in flight).
 - [ ] **Hand edits**: B5's deletion and refusal, B6's wording, B8's crate body and consumer wiring, each in its own commit. No hand edit in B2
 - [ ] **Baseline**: the scoped suites below, back to the recorded failing set by name
 - [ ] **Code quality**: `cargo fmt --check`; `cargo clippy -p <touched> --all-targets -- -D warnings`
-- [ ] **Re-measure**: `/analyze-code-issues` adds none and closes every backlog row. The records are deleted with their final numbers in the change-history entry
+- [ ] **Re-measure**: `/analyze-code-issues` adds none and closes every backlog row, except the six functions the user deferred on 2026-11-10 (#876 sweep) — `build_session_host`, `DaemonSessionHost::new`, `spawn_tool_on`, `for_each_line`, `forward_lines_until_exit`, `UsersMapping::from_yaml` — which stay open as `complexity-*` records; no record claims them closed. The records are deleted with their final numbers in the change-history entry
 - [ ] **Documentation**: the Final Checklist executed
 
 ## Backlog — each item, and the intent that closes it
@@ -564,3 +564,11 @@ All answered by the user on 2026-11-10. See *Decisions & Trade-offs*.
   for its builder literal, in both extract variants.
 - Scoped test: `tddy-cli-sessions` 54/0. Clippy over all 15 touched packages and
   `cargo fmt --check` clean.
+- Deferred by the user, 2026-11-10 (#876 sweep) — NOT closed, no further extraction:
+  `build_session_host` (74 lines, `packages/tddy-daemon/docs/code-issues/complexity-mount-host-build-session-host.md`),
+  `DaemonSessionHost::new` (97, `packages/tddy-session-lifecycle/docs/code-issues/complexity-svc-host-builders-new.md`),
+  `spawn_tool_on` (75, `packages/tddy-cli-sessions/docs/code-issues/complexity-pty-spawn-spawn-tool-on.md`),
+  `for_each_line` (23 lines, depth 5) and `forward_lines_until_exit` (20, depth 5)
+  (`packages/tddy-supervisor/docs/code-issues/complexity-streamed-{for-each-line,forward-lines-until-exit}.md`),
+  `UsersMapping::from_yaml` (41, depth about 6, `packages/tddy-users-file/docs/code-issues/complexity-lib-from-yaml.md`).
+  Follow-up: `docs/dev/todo/2026-11-10-sweep-deferred-function-extractions.md`.
