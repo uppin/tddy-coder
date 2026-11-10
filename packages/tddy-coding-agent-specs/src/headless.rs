@@ -171,6 +171,40 @@ impl SpecHeadlessRenderer {
             .map(crate::spec::headless_section::HeadlessSection::protocol)
             .unwrap_or_default()
     }
+
+    fn render_headless_slots(
+        &self,
+        turn: &HeadlessTurn,
+        spec: CodingAgentSpec,
+    ) -> Result<(Vec<String>, Vec<(PathBuf, Vec<u8>)>), AdapterError> {
+        let RenderedSlots {
+            argv_extra, files, ..
+        } = slots::render(
+            &spec,
+            &SlotInputs {
+                workdir: turn.workdir.clone(),
+                scratch_dir: turn.scratch_dir.clone(),
+                mcp_server: turn.mcp_server.as_ref().map(mcp_server_command),
+                // A goal's allowed tools are pre-approval hints for the agent's own prompts. An agent
+                // whose spec declares `tool_allow` unsupported approves under its own mode (Cursor's
+                // `--force`, Codex's sandbox), as the workflow backends always ran it: it is passed
+                // none, where a launch's withdraw list is refused rather than dropped.
+                allowed_tools: if matches!(self.spec.agent.tool_allow, ToolSlot::Unsupported(_)) {
+                    Vec::new()
+                } else {
+                    turn.allowed_tools.clone()
+                },
+                denied_tools: turn.denied_tools.clone(),
+                permission_prompt_tool: turn.permission_prompt_tool.clone(),
+                preamble: None,
+                append_system_prompt_file: turn.append_system_prompt_file.clone(),
+                hooks: None,
+                home: None,
+            },
+        )
+        .map_err(|e| AdapterError::InvocationFailed(e.to_string()))?;
+        Ok((argv_extra, files))
+    }
 }
 
 /// The template parameters a turn renders with: its prompt, model, permission mode and workdir, its
@@ -244,32 +278,7 @@ impl HeadlessRenderer for SpecHeadlessRenderer {
         }
         // `written` is the paths of `files` (the MCP registrations): a launcher records them with
         // `mcp_written_paths` at plan time, before the turn renders, so nothing is written unrecorded.
-        let RenderedSlots {
-            argv_extra, files, ..
-        } = slots::render(
-            &spec,
-            &SlotInputs {
-                workdir: turn.workdir.clone(),
-                scratch_dir: turn.scratch_dir.clone(),
-                mcp_server: turn.mcp_server.as_ref().map(mcp_server_command),
-                // A goal's allowed tools are pre-approval hints for the agent's own prompts. An agent
-                // whose spec declares `tool_allow` unsupported approves under its own mode (Cursor's
-                // `--force`, Codex's sandbox), as the workflow backends always ran it: it is passed
-                // none, where a launch's withdraw list is refused rather than dropped.
-                allowed_tools: if matches!(self.spec.agent.tool_allow, ToolSlot::Unsupported(_)) {
-                    Vec::new()
-                } else {
-                    turn.allowed_tools.clone()
-                },
-                denied_tools: turn.denied_tools.clone(),
-                permission_prompt_tool: turn.permission_prompt_tool.clone(),
-                preamble: None,
-                append_system_prompt_file: turn.append_system_prompt_file.clone(),
-                hooks: None,
-                home: None,
-            },
-        )
-        .map_err(|e| AdapterError::InvocationFailed(e.to_string()))?;
+        let (argv_extra, files) = self.render_headless_slots(turn, spec)?;
         let params = turn_params(turn, argv_extra);
         let mut argv = render_argv(&headless.run_section(), &self.tool, &params)
             .map_err(|e| AdapterError::InvocationFailed(e.to_string()))?;
