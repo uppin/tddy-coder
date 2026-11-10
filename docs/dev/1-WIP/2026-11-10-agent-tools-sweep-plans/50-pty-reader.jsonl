@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-pty/src/runtime.rs":{"sha256":"sha256:746558bb322960b8f25c82f84a0d5583a68b190b181a48354d5fc8d75f25ee12"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_pty::runtime::open_pty_and_pump", "file": "packages/tddy-pty/src/runtime.rs", "start": {"line": 49, "col": 5}, "end": {"line": 75, "col": 8}, "fingerprint": "sha256:88cb172be4e0e5235c6f31d144c1d7104c606916ce21666dd6f89c175f6fddc4", "hint": {"line": 309, "col": 5}}, "name": "spawn_pty_reader"}

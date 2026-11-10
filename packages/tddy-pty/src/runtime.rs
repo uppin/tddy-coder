@@ -306,33 +306,7 @@ fn open_pty_and_pump(
     let output_ch_reader = Arc::clone(&output_ch);
     // Disconnects when the reader ends, which the exit monitor waits for (see below).
     let (reader_done_tx, reader_done_rx) = std::sync::mpsc::channel::<()>();
-    std::thread::spawn(move || {
-        let _reader_done = reader_done_tx;
-        let reader = {
-            let m = master_for_reader.lock().unwrap();
-            m.try_clone_reader()
-        };
-        match reader {
-            Err(e) => {
-                log::warn!(
-                    target: "tddy_pty::runtime",
-                    "PTY reader: try_clone_reader failed: {e}"
-                );
-            }
-            Ok(mut r) => {
-                let mut buf = vec![0u8; PTY_READ_BUF];
-                loop {
-                    match std::io::Read::read(&mut r, &mut buf) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            output_ch_reader.write(Bytes::copy_from_slice(&buf[..n]));
-                        }
-                        Err(_) => break,
-                    }
-                }
-            }
-        }
-    });
+    spawn_pty_reader(master_for_reader, output_ch_reader, reader_done_tx);
 
     let mut cmd = CommandBuilder::new(&spec.argv[0]);
     for arg in &spec.argv[1..] {
@@ -447,6 +421,40 @@ fn open_pty_and_pump(
     });
 
     Ok(())
+}
+
+fn spawn_pty_reader(
+    master_for_reader: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    output_ch_reader: Arc<TaskChannel>,
+    reader_done_tx: std::sync::mpsc::Sender<()>,
+) {
+    std::thread::spawn(move || {
+        let _reader_done = reader_done_tx;
+        let reader = {
+            let m = master_for_reader.lock().unwrap();
+            m.try_clone_reader()
+        };
+        match reader {
+            Err(e) => {
+                log::warn!(
+                    target: "tddy_pty::runtime",
+                    "PTY reader: try_clone_reader failed: {e}"
+                );
+            }
+            Ok(mut r) => {
+                let mut buf = vec![0u8; PTY_READ_BUF];
+                loop {
+                    match std::io::Read::read(&mut r, &mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            output_ch_reader.write(Bytes::copy_from_slice(&buf[..n]));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+        }
+    });
 }
 
 #[cfg(test)]
