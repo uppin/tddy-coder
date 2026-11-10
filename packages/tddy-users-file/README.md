@@ -11,4 +11,4 @@ readers apply: `tddy-supervisor`, which uses only the `os_user` column, and the 
   different owners.
 - It depends on `serde` and `serde_yaml` only, and names no coding agent or daemon type.
 
-Introduced by the `#agent-tools` sweep (#876). Its API is a contract stub until that PR's green phase.
+Introduced by the `#agent-tools` sweep (#876). 

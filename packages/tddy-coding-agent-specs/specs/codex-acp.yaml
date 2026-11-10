@@ -10,7 +10,7 @@
 # The command renders what the launcher and `CodexAcpBackend` build by hand:
 #   codex-acp [ROUTE ARGS]
 # The route's arguments take `-c key=value` overrides; its `-m <model>` reaches `codex-acp` as
-# `-c model="<model>"` (`codex_acp_route_args`) until route compatibility becomes spec data
+# `-c model="<model>"` (`toml_route_overrides`) until route compatibility becomes spec data
 # (`#agent-tools 12/12`). Its key travels in the environment.
 #
 # An auth-like `session/new` error runs `codex login` (the `codex` dep's binary) and retries once:

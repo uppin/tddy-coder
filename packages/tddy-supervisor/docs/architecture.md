@@ -293,7 +293,7 @@ specifics: the daemon computes the agent's env (its base set, the spec's `pass_e
 sets) and a relayed spawn carries it as it is. `policy::resolve_relayed_env` applies no
 `allowed_env_keys` to it; the loader keys (`LD_*`, `MALLOC_*`, …) are still refused. The child is
 built on `EnvironmentBase::Exactly`: the request's env plus the account's `HOME`/`USER`/`LOGNAME`, and
-no supervisor `PATH` or locale. `allowed_env_keys` still gates `SpawnSession` and clone spawns.
+no supervisor `PATH` or locale. a spawn's env passes whole except the loader keys; `spawn_policy.exec_roots` gates which programs may be spawned.
 
 The daemon side is `tddy-session-lifecycle`'s
 [coding-agent launcher](../../tddy-session-lifecycle/docs/coding-agent-launcher.md).
@@ -368,7 +368,16 @@ config file or directory that is not root-owned, or that is group/world-writable
 the crate rests on "root-owned policy file"; this is what makes that true rather than assumed.
 
 `users.yaml` is a second policy input — it decides which OS users a session may run as — and is
-loaded with the same ownership and mode checks (`users_file.rs`); the hand-kept lists it replaces
+loaded with the same ownership and mode checks (`users_file.rs`). Its parsing and validation live
+in the shared **`tddy-users-file`** crate (`UsersMapping::from_yaml`), which the daemon
+(`tddy-daemon-kernel`) also reads: both refuse the same malformed, root-mapped, unsafe-OS-user,
+ambiguous and over-limit (more than 15 distinct OS users) files. Only the ownership trust check
+stays with each reader. Config validation is split by subject: `config/trust.rs` holds the
+ownership checks and `config/users.rs` the users mapping and its old-key refusals; the spawn
+broker's plan, step chain and Linux process syscalls are `spawn_broker/spawn_plan.rs` and
+`spawn_broker/process_syscalls.rs` (the namespace and resolve ranges remain in `spawn_broker.rs`,
+deferred to a Linux target — see `docs/dev/todo/2026-11-10-spawn-broker-linux-only-moves.md`).
+The hand-kept lists `users.yaml` replaces
 (`spawn_policy.allowed_session_users`, `services[].host_sockets`, `services[].agent_tool_sockets`) are
 refused at load, naming it.
 

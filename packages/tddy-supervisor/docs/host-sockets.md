@@ -85,7 +85,7 @@ service socket, then one listener per mapped OS user in OS-user order
 `supervisor.yaml` can neither set nor forge it; no socket path is handed separately — the daemon reads
 each one from its listener. The prefix (`USER_SOCKET_FD_NAME_PREFIX` = `user.`) and the variable name
 are spelled again on the daemon side, which does not link the supervisor for them;
-`inherited_host_sockets_tests.rs` in `tddy-session-lifecycle` pins both
+`user_socket_tests.rs` in `tddy-session-lifecycle` pins both
 (`the_supervisor_and_the_daemon_share_one_user_socket_prefix`). Each listener is copied above the slots
 before any is placed, so one listener's descriptor can never be another's slot, and the supervisor
 keeps descriptors 3–18 occupied so nothing it opens lands on one.
