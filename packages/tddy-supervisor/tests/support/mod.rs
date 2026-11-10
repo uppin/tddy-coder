@@ -651,8 +651,17 @@ impl Drop for RunningSupervisor {
 // Session tool fixtures
 // ---------------------------------------------------------------------------------------------
 
+/// The build's `target/tmp`, created when absent: `CARGO_TARGET_TMPDIR` is fixed at compile time,
+/// and a test binary run from a nextest archive on another runner finds the checkout there but
+/// not the directory, which cargo only creates for the build that compiled it.
+fn the_trusted_tmp_root() -> &'static Path {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    fs::create_dir_all(root).expect("create the build's target/tmp");
+    root
+}
+
 fn a_trusted_workspace() -> TempDir {
-    let workspace = TempDir::new_in(env!("CARGO_TARGET_TMPDIR")).expect("create tool workspace");
+    let workspace = TempDir::new_in(the_trusted_tmp_root()).expect("create tool workspace");
     fs::set_permissions(workspace.path(), fs::Permissions::from_mode(0o755))
         .expect("make the tool workspace readable");
     workspace
@@ -737,7 +746,7 @@ pub fn a_tool_that_records_its_parent() -> ToolFixture {
 /// world-writable and so refused (`#agent-tools` 32/32). `body` follows the `#!/bin/sh` line.
 pub fn a_trusted_tool(name: &str, body: &str) -> ToolFixture {
     let workspace =
-        TempDir::new_in(env!("CARGO_TARGET_TMPDIR")).expect("create a trusted tool workspace");
+        TempDir::new_in(the_trusted_tmp_root()).expect("create a trusted tool workspace");
     fs::set_permissions(workspace.path(), fs::Permissions::from_mode(0o755))
         .expect("make the tool workspace readable");
     let path = workspace
