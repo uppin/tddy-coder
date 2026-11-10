@@ -734,13 +734,6 @@ impl CodingAgentSpec {
 }
 
 impl CodingAgentSpec {
-    /// The agent's headless declaration, if it has one.
-    pub fn headless(&self) -> Option<&HeadlessSection> {
-        self.agent.headless.as_ref()
-    }
-}
-
-impl CodingAgentSpec {
     /// `Ok` when the agent's `placements` include `placement`; otherwise the refusal, naming the
     /// agent and every placement it declares — a sandboxed `warp-cli` start is refused with it
     /// (`#agent-tools 8/12`).

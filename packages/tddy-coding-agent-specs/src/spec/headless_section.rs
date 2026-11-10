@@ -1,6 +1,7 @@
 use crate::headless::{
     FreshSession, GoalParams, HeadlessProtocol, RouteModel, ScratchDir, SystemPromptDelivery,
 };
+use crate::spec::CodingAgentSpec;
 use crate::spec::McpSlot;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -134,5 +135,12 @@ impl HeadlessSection {
             argv: self.argv.clone(),
             env: self.env.clone(),
         }
+    }
+}
+
+impl CodingAgentSpec {
+    /// The agent's headless declaration, if it has one.
+    pub fn headless(&self) -> Option<&HeadlessSection> {
+        self.agent.headless.as_ref()
     }
 }
