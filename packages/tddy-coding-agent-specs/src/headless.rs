@@ -25,7 +25,8 @@ pub use tddy_agent_backend::adapters::{
 use thiserror::Error;
 
 use crate::slots::{self, McpServerCommand, RenderedSlots, SlotInputs};
-use crate::{CodingAgentSpec, HeadlessSection, ToolSlot};
+use crate::spec::headless_section::HeadlessSection;
+use crate::{CodingAgentSpec, ToolSlot};
 
 /// The id of the dep a headless agent's tool server runs (`tddy-tools --mcp`).
 pub const TOOL_SERVER_DEP: &str = "tddy-tools";
@@ -166,7 +167,7 @@ impl SpecHeadlessRenderer {
     pub fn protocol(&self) -> HeadlessProtocol {
         self.spec
             .headless()
-            .map(crate::HeadlessSection::protocol)
+            .map(crate::spec::headless_section::HeadlessSection::protocol)
             .unwrap_or_default()
     }
 }

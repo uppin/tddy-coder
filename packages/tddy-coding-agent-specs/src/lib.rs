@@ -21,6 +21,8 @@ use std::path::Path;
 
 use tddy_actions::tool::{ToolError, ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN_TOOLS};
 
+pub use crate::spec::headless_section::HeadlessPermissionPolicy;
+pub use crate::spec::headless_section::HeadlessSection;
 pub use agent_env_base::{
     AgentEnvBase, AgentEnvBaseError, AGENT_ENV_BASE_EMBEDDED_PATH, AGENT_ENV_BASE_OVERRIDE,
     AGENT_ENV_BASE_YAML,
@@ -30,10 +32,10 @@ pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
 pub use route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 pub use spec::{
     package_runner, routed_agent, AcpCommandError, AcpSection, AgentVariant, CodingAgentExtension,
-    CodingAgentSection, CodingAgentSpec, CuratedModel, FlagSlot, HeadlessPermissionPolicy,
-    HeadlessSection, HooksSlot, InstructionsSlot, McpFormat, McpSlot, ModelsSection, Placement,
-    PlacementError, ResumeSlot, RouteSlot, SpecError, ToolSlot, Unsupported, VariantError,
-    CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
+    CodingAgentSection, CodingAgentSpec, CuratedModel, FlagSlot, HooksSlot, InstructionsSlot,
+    McpFormat, McpSlot, ModelsSection, Placement, PlacementError, ResumeSlot, RouteSlot, SpecError,
+    ToolSlot, Unsupported, VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS,
+    HOST_AGENT_VARIANT,
 };
 
 /// `specs/cursor.yaml` (`#agent-tools 7/12`), embedded.
