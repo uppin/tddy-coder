@@ -65,7 +65,7 @@ pub struct Supervisor {
     session_exited: tokio::sync::Notify,
     shutting_down: AtomicBool,
     /// The `users:` block (`users.yaml` and where its sockets live), when configured.
-    users_config: Option<crate::config::UsersConfig>,
+    users_config: Option<crate::config::users::UsersConfig>,
     /// The mapping in force: loaded at startup, replaced by a valid saved edit.
     current_users: Mutex<crate::users_file::UsersFile>,
 }
@@ -176,7 +176,7 @@ impl Supervisor {
     }
 
     /// The `users:` block, when this supervisor reads a mapping at all.
-    pub fn users_config(&self) -> Option<&crate::config::UsersConfig> {
+    pub fn users_config(&self) -> Option<&crate::config::users::UsersConfig> {
         self.users_config.as_ref()
     }
 
@@ -932,7 +932,7 @@ mod tests {
             spawn_policy: SpawnPolicy::default(),
             cgroup: crate::config::CgroupPolicy::default(),
             shutdown_grace_secs: 1,
-            users: Some(crate::config::UsersConfig {
+            users: Some(crate::config::users::UsersConfig {
                 file: users_file,
                 sockets_dir: directory.join("user-sockets"),
             }),

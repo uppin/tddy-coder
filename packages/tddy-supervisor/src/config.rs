@@ -5,6 +5,7 @@
 
 pub(crate) mod spawn_policy;
 pub(crate) mod trust;
+pub(crate) mod users;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -14,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::spawn_policy::SpawnPolicy;
 use crate::config::trust::require_trustworthy_config_directory;
 use crate::config::trust::require_trustworthy_config_file;
+use crate::config::users::UsersConfig;
 use crate::error::ConfigError;
 
 /// The one OS user the supervisor never spawns anything as, in any capacity.
@@ -46,23 +48,6 @@ pub struct SupervisorConfig {
     /// [`serves_users`](ManagedService::serves_users).
     #[serde(default)]
     pub users: Option<UsersConfig>,
-}
-
-/// `users:` in `supervisor.yaml`: the mapping file and the directory its sockets are derived under.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct UsersConfig {
-    /// Absolute path of `users.yaml` (`/etc/tddy/users.yaml`). Watched; a change restarts the
-    /// services that serve users.
-    pub file: PathBuf,
-    /// Absolute directory holding one `<os user>/daemon.sock` per mapped OS user. Every directory
-    /// above it must be writable by root alone.
-    #[serde(default = "default_user_sockets_dir")]
-    pub sockets_dir: PathBuf,
-}
-
-fn default_user_sockets_dir() -> PathBuf {
-    PathBuf::from("/run/tddy-users")
 }
 
 fn default_shutdown_grace_secs() -> u64 {
@@ -429,6 +414,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+    use crate::config::users::UsersConfig;
 
     /// The smallest config that should load: a socket and nothing else.
     fn a_minimal_config() -> &'static str {

@@ -58,12 +58,12 @@ pub mod users_watch;
 mod test_util;
 
 pub use crate::config::spawn_policy::{ExecRoot, SpawnPolicy};
+pub use crate::config::users::UsersConfig;
 pub use authz::{Authorizer, PeerIdentity};
 pub use cgroup_broker::CgroupBroker;
 pub use client::SupervisorClient;
 pub use config::{
     CgroupPolicy, HostSocket, ManagedService, RestartPolicy, SocketConfig, SupervisorConfig,
-    UsersConfig,
 };
 pub use error::{ConfigError, SupervisorError};
 pub use request::{
