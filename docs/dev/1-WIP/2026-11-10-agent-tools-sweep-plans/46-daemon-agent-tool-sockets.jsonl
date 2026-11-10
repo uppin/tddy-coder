@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-daemon/src/runtime/build_context.rs":{"sha256":"sha256:145667be76c19d5e3124fd39f1a60c37d434a2b6876ad400efe328fe82282f1e"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_daemon::runtime::build_context::BuildContext::new", "file": "packages/tddy-daemon/src/runtime/build_context.rs", "start": {"line": 36, "col": 9}, "end": {"line": 51, "col": 12}, "fingerprint": "sha256:36668d43c7c01bf4d182624152a77fb745cef716b11155ce5cc199c69100b106", "hint": {"line": 96, "col": 9}}, "name": "agent_tool_sockets_for_host"}
