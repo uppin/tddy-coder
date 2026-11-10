@@ -289,12 +289,7 @@ impl SplitSessions {
         let pointer =
             crate::split_session::split_session_pointer(&remote, &context_dir, session_dir);
         let on_exit = self.session_pointers.place(&pointer, &context_dir, None)?;
-        let argv = tddy_cli_sessions::cli_session_manager::CliSessionManager::with_launch_flags(
-            argv,
-            Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
-            None,
-            &extra_args,
-        );
+        let argv = split_argv_with_flags(initial_prompt, extra_args, argv);
         let pointer_dir = context_dir.clone();
         let handle = spawn_split_agent_pty(
             &self.cli_manager,
@@ -512,6 +507,20 @@ impl SplitSessions {
     pub fn agent_session_token_for(&self, caller_token: &str) -> Result<String, Status> {
         crate::split_session::mint_agent_session_token(self.session_tokens()?, caller_token)
     }
+}
+
+fn split_argv_with_flags(
+    initial_prompt: String,
+    extra_args: Vec<String>,
+    argv: Vec<String>,
+) -> Vec<String> {
+    let argv = tddy_cli_sessions::cli_session_manager::CliSessionManager::with_launch_flags(
+        argv,
+        Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
+        None,
+        &extra_args,
+    );
+    argv
 }
 
 mod split_agent_pty;
