@@ -87,65 +87,7 @@ impl Supervisor {
                 .map_err(|error| anyhow::anyhow!("users.yaml {}: {error}", users.file.display()))?,
             None => crate::users_file::UsersFile::default(),
         };
-        let mut slots = Vec::with_capacity(config.services.len());
-        for service in &config.services {
-            let mut target = accounts::resolve_target_user(&service.user).map_err(|error| {
-                anyhow::anyhow!(
-                    "service `{}` declares user `{}`: {error}",
-                    service.name,
-                    service.user
-                )
-            })?;
-            // An explicit `group:` overrides the account's primary group. Resolving it here rather
-            // than at spawn time means a typo is a startup failure instead of a service that dies
-            // on every restart attempt.
-            if let Some(group) = &service.group {
-                target.gid = accounts::resolve_group_gid(group).map_err(|error| {
-                    anyhow::anyhow!(
-                        "service `{}` declares group `{group}`: {error}",
-                        service.name
-                    )
-                })?;
-            }
-            // Again, because the override just replaced a gid that `resolve_target_user` had already
-            // checked: `group: root` is the same escalation as an account aliased to uid 0, reached
-            // by a different key.
-            accounts::refuse_root_credentials(&service.user, target.uid, target.gid)
-                .map_err(|error| anyhow::anyhow!("service `{}`: {error}", service.name))?;
-            // Before the service exists, so a client that races its startup finds a socket that
-            // queues rather than a path that is about to work.
-            let listener = match &service.socket {
-                Some(socket) => Some(Arc::new(bind_service_listener(service, socket)?)),
-                None => None,
-            };
-            let (user_listeners, users_file) = if service.serves_users {
-                let users_config = config.users.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "service `{}` declares serves_users but the config has no `users:` block",
-                        service.name
-                    )
-                })?;
-                (
-                    crate::user_sockets::UserListeners::bind(
-                        &service.name,
-                        &users_config.sockets_dir,
-                        &initial_users,
-                    )?,
-                    Some(users_config.file.clone()),
-                )
-            } else {
-                (crate::user_sockets::UserListeners::default(), None)
-            };
-            slots.push(Slot {
-                runtime: ServiceRuntime::new(service),
-                service: service.clone(),
-                target,
-                started_at: None,
-                listener,
-                user_listeners,
-                users_file,
-            });
-        }
+        let slots = build_service_slots(config, &initial_users)?;
         Ok(Arc::new(Supervisor {
             slots: Mutex::new(slots),
             sessions: Mutex::new(SessionTable::default()),
@@ -381,6 +323,72 @@ impl Supervisor {
     fn lock(&self) -> MutexGuard<'_, Vec<Slot>> {
         lock_or_recover(&self.slots, "service slots")
     }
+}
+
+fn build_service_slots(
+    config: &SupervisorConfig,
+    initial_users: &crate::users_file::UsersFile,
+) -> anyhow::Result<Vec<Slot>> {
+    let mut slots = Vec::with_capacity(config.services.len());
+    for service in &config.services {
+        let mut target = accounts::resolve_target_user(&service.user).map_err(|error| {
+            anyhow::anyhow!(
+                "service `{}` declares user `{}`: {error}",
+                service.name,
+                service.user
+            )
+        })?;
+        // An explicit `group:` overrides the account's primary group. Resolving it here rather
+        // than at spawn time means a typo is a startup failure instead of a service that dies
+        // on every restart attempt.
+        if let Some(group) = &service.group {
+            target.gid = accounts::resolve_group_gid(group).map_err(|error| {
+                anyhow::anyhow!(
+                    "service `{}` declares group `{group}`: {error}",
+                    service.name
+                )
+            })?;
+        }
+        // Again, because the override just replaced a gid that `resolve_target_user` had already
+        // checked: `group: root` is the same escalation as an account aliased to uid 0, reached
+        // by a different key.
+        accounts::refuse_root_credentials(&service.user, target.uid, target.gid)
+            .map_err(|error| anyhow::anyhow!("service `{}`: {error}", service.name))?;
+        // Before the service exists, so a client that races its startup finds a socket that
+        // queues rather than a path that is about to work.
+        let listener = match &service.socket {
+            Some(socket) => Some(Arc::new(bind_service_listener(service, socket)?)),
+            None => None,
+        };
+        let (user_listeners, users_file) = if service.serves_users {
+            let users_config = config.users.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "service `{}` declares serves_users but the config has no `users:` block",
+                    service.name
+                )
+            })?;
+            (
+                crate::user_sockets::UserListeners::bind(
+                    &service.name,
+                    &users_config.sockets_dir,
+                    initial_users,
+                )?,
+                Some(users_config.file.clone()),
+            )
+        } else {
+            (crate::user_sockets::UserListeners::default(), None)
+        };
+        slots.push(Slot {
+            runtime: ServiceRuntime::new(service),
+            service: service.clone(),
+            target,
+            started_at: None,
+            listener,
+            user_listeners,
+            users_file,
+        });
+    }
+    Ok(slots)
 }
 
 /// The cgroup scope directory a spawn plan places its child in, if any.
