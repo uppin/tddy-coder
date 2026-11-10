@@ -258,10 +258,7 @@ impl BuildContext {
         // The per-user daemon sockets the supervisor handed over (`user.<os user>`), read before
         // the local socket server is spawned: adopting its own listener clears the `LISTEN_*`
         // variables they are announced in.
-        self.agent_tool_sockets.adopt_inherited(
-            tddy_daemon_kernel::agent_tool_sockets::adopt_user_sockets_from_environment(),
-        );
-        let connection_impl = self.build_connection_impl(
+        let connection_impl = self.adopt_and_build_connection(
             sessions_base_resolver,
             &user_resolver,
             livekit_discovery,
@@ -308,6 +305,29 @@ impl BuildContext {
         // 31/32): an embedded host keeps binding its own host sockets, as its runtime serves
         // its one socket itself.
         .with_host_sessions_merged(options.host != RuntimeHost::Embedded))
+    }
+
+    fn adopt_and_build_connection(
+        &self,
+        sessions_base_resolver: &Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>,
+        user_resolver: &Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
+        livekit_discovery: Option<
+            tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles,
+        >,
+        shared_cli_manager: &Arc<tddy_session_lifecycle::CliSessionManager>,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+    ) -> DaemonSessionHost {
+        self.agent_tool_sockets.adopt_inherited(
+            tddy_daemon_kernel::agent_tool_sockets::adopt_user_sockets_from_environment(),
+        );
+        let connection_impl = self.build_connection_impl(
+            sessions_base_resolver,
+            user_resolver,
+            livekit_discovery,
+            shared_cli_manager,
+            coding_agents,
+        );
+        connection_impl
     }
 
     fn build_connection_impl(
