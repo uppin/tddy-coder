@@ -439,7 +439,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     use crate::spawn_broker::accounts::TargetUser;
     #[cfg(target_os = "linux")]
-    use crate::spawn_broker::spawn_plan::ChildOutput;
+    use crate::spawn_broker::spawn_plan::{ChildOutput, EnvironmentBase, SpawnPlan};
     use crate::supervisor::session_table::SessionTable;
     use crate::test_util::a_managed_service;
     #[cfg(target_os = "linux")]

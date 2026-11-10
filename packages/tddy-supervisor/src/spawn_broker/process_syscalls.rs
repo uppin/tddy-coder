@@ -1,5 +1,8 @@
 use std::ffi::CStr;
 
+#[cfg(target_os = "linux")]
+use super::ORPHANED_EXIT_STATUS;
+
 /// The answer every step below gives on a host whose kernel does not have the facility it needs.
 ///
 /// The supervisor is a Linux program: systemd starts it, it joins cgroup scopes, and it builds a
@@ -33,7 +36,7 @@ pub(crate) fn only_on_linux(facility: &str) -> std::io::Error {
 /// Runs after `fork`, so it may only use async-signal-safe syscalls. `prctl` and `getppid` read and
 /// write nothing but this process's own state.
 #[cfg(target_os = "linux")]
-unsafe fn set_parent_death_signal(supervisor_pid: libc::pid_t) -> std::io::Result<()> {
+pub(crate) unsafe fn set_parent_death_signal(supervisor_pid: libc::pid_t) -> std::io::Result<()> {
     // A supervisor that is killed rather than asked to stop should not leave its daemon and
     // sessions behind: without this they would be reparented to init and run on unsupervised.
     if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as libc::c_ulong) != 0 {
