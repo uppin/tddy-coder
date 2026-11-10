@@ -261,15 +261,20 @@ impl PreExecSteps {
             unsafe { hand_over_listeners(&self.handover) }?;
         }
 
-        for step in &self.steps {
-            step.execute(self.supervisor_pid)?;
-        }
+        self.execute_pre_exec_steps()?;
         if let Some(descriptor) = self.exec_descriptor {
             // SAFETY: `fcntl(F_SETFD)` is async-signal-safe and touches only the flags of a
             // descriptor inherited across the fork.
             if unsafe { libc::fcntl(descriptor, libc::F_SETFD, 0) } == -1 {
                 return Err(std::io::Error::last_os_error());
             }
+        }
+        Ok(())
+    }
+
+    fn execute_pre_exec_steps(&mut self) -> std::io::Result<()> {
+        for step in &self.steps {
+            step.execute(self.supervisor_pid)?;
         }
         Ok(())
     }
