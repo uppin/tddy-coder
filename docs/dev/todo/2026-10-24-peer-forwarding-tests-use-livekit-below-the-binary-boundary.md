@@ -2,6 +2,7 @@
 
 **Category:** Future enhancement (test architecture)
 **Source:** `#start-progress` 4/8 (split-stream), PR #737
+**Extended by:** [tests use cheap RPC; LiveKit only for compatibility; media behind a port](./2026-11-05-tests-use-cheap-rpc-livekit-only-for-compatibility.md) — this entry is its daemon-to-daemon `PeerForwarder` slice.
 
 Daemon-to-daemon calls go through a transport-neutral RPC port: `PeerForwarder` (`tddy-daemon-extensions`) —
 `call_unary` and `call_server_stream` to a named peer — wrapped by the kernel's `CommonRoom`, which owns the
