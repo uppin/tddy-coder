@@ -14,6 +14,7 @@
 | Run | Lines | Note |
 |---|---|---|
 | 2026-11-06 | 87 → 127 | first detection — #823: the jailed relaunch now re-wires a managed recipe, adopts the conversation and carries the renderer env, so claude and cursor relaunch through it. Not split: restructuring deferred to the sweep node (n20) |
+| 2026-11-10 | 139 → 140 | **worse by 1** across #835–#865 (`#agent-tools` 27–32), brace-matched on `b8d9b769c` against `153b3c05d` (the 127 above was counted from the fn line; this scan counts from the signature's first line). Not extracted: the `#agent-tools` sweep (#876) scoped Tier C to functions grown by 5 or more lines or with no record (user, 6e, 2026-11-10) |
 
 ## What would close it
 

@@ -37,20 +37,19 @@ auth_storage: "__AUTH_STORAGE_DIR__/auth"
 # downgrade an isolated session to one running as the daemon user. A `supervisor:` block left in this
 # file by an earlier install is refused at startup; ./install removes it on upgrade.
 #
-# For a delegated spawn to be permitted, supervisor.yaml's spawn_policy must list the tool paths the
-# daemon will name — including git's absolute path for cloning — and, if any session user's
-# ~/.tddy/config.yaml sets spawn_path_extra, the PATH key under allowed_env_keys. An unlisted tool,
-# user or env key is refused rather than silently adjusted.
+# For a delegated spawn to be permitted, supervisor.yaml's spawn_policy exec_roots must cover the
+# tool paths the daemon will name — including git's absolute path for cloning. A tool outside the
+# exec roots, or an unmapped user, is refused rather than silently adjusted. The spawn's
+# environment passes whole except loader variables, which are refused.
 #
 # A tddy-coder tool session of a project that acts as a GitHub account is also spawned with that
 # account's commit identity — GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME and
-# GIT_COMMITTER_EMAIL — which must be listed under allowed_env_keys too, or the supervisor refuses
-# that spawn. A project set to Local gh adds TDDY_GITHUB_SOURCE (not a secret), which must be
-# listed as well. (A project that resolves to no account adds none of them.) Never a token: the
+# GIT_COMMITTER_EMAIL. A project set to Local gh adds TDDY_GITHUB_SOURCE (not a secret).
+# (A project that resolves to no account adds none of them.) Never a token: the
 # account's token is asked of the daemon per call and is in no spawn environment.
 #
-# A clone over SSH is spawned with the passphrase-prompt environment (SSH_ASKPASS and friends, see
-# supervisor.yaml's spawn_policy.allowed_env_keys), which the supervisor refuses unless listed there.
+# A clone over SSH is spawned with the passphrase-prompt environment (SSH_ASKPASS and friends),
+# which passes whole like the rest except loader variables.
 #
 # STILL SPAWNED BY THE DAEMON ITSELF, and therefore still running as the daemon user on a supervised
 # host: sandbox sessions (tddy-sandbox-cgroups builds those jails in-process) and the claude-cli /

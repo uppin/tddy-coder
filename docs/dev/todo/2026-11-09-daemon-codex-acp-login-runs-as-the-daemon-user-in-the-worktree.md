@@ -35,3 +35,5 @@ Fixing it needs the login spawned through the user switch, a session-user file o
 The OpenCode route-file record that shared it was closed by `#agent-tools` 29/32 (#857) without
 solving it — OpenCode's route went inline, so no file needed an owner — and this one now stands
 alone.
+
+**Deferred by the user, 2026-11-10** (#agent-tools TODO gate after the sweep #876): asked "continue the stack or defer?", the user answered "Defer". Left open for a later, separately planned node.

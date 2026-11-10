@@ -275,4 +275,27 @@ mod tests {
         // Then each ended up where its position says, not where it happened to be
         assert!(placed, "a crossed listener was clobbered or misplaced");
     }
+
+    /// `#agent-tools` 33/33 (b8d9b769c's edge case): a descriptor opened while the slots are
+    /// reserved — as the exec gate's checked `O_PATH` descriptor is, after `ForkBroker::start` —
+    /// never lands in `SD_LISTEN_FDS_START..SD_LISTEN_FDS_START + MAX_HANDED_OVER_LISTENERS`, so
+    /// `hand_over_listeners`' `dup2` can never replace the file the child is about to exec. Run in a
+    /// forked child, so no other test's descriptors come and go meanwhile. The kernel hands out the
+    /// lowest free descriptor whatever the open's flags, so `/dev/null` stands in for the checked file.
+    /// The one allocation after the fork (the reservation's `Vec`) is the system allocator's, which is
+    /// fork-safe on both targets.
+    #[test]
+    fn a_descriptor_opened_while_the_slots_are_reserved_lands_above_every_slot() {
+        let first_free = SD_LISTEN_FDS_START + MAX_HANDED_OVER_LISTENERS as RawFd;
+        assert!(in_a_forked_child(|| {
+            let Ok(reserved) = reserve_handover_slots() else {
+                return false;
+            };
+            // SAFETY: a literal C string; the descriptor is owned by nothing else and leaks with the child.
+            let opened =
+                unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+            std::mem::forget(reserved);
+            opened >= first_free
+        }));
+    }
 }

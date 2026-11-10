@@ -258,19 +258,11 @@ impl BuildContext {
         // The per-user daemon sockets the supervisor handed over (`user.<os user>`), read before
         // the local socket server is spawned: adopting its own listener clears the `LISTEN_*`
         // variables they are announced in.
-        self.agent_tool_sockets.adopt_inherited(
-            tddy_daemon_kernel::agent_tool_sockets::adopt_user_sockets_from_environment(),
-        );
-        let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver.clone(),
-            tddy_data_dir.clone(),
-            user_resolver.clone(),
-            options.spawn_client.clone(),
-            options.spawn_backend.clone(),
-            tddy_daemon_livekit::peer_routing::peer_routing_over(config, livekit_discovery),
-            self.operator_channel(),
-            Arc::clone(shared_cli_manager),
+        let connection_impl = self.adopt_and_build_connection(
+            sessions_base_resolver,
+            &user_resolver,
+            livekit_discovery,
+            shared_cli_manager,
             coding_agents,
         );
 
@@ -291,15 +283,7 @@ impl BuildContext {
         .with_model_registry(Arc::clone(model_registry))
         .with_coding_agent_launcher(Arc::new(
             tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher::for_daemon(
-                tddy_session_lifecycle::coding_agent_launcher::DaemonLauncherDeps {
-                    config: config.clone(),
-                    tddy_data_dir: tddy_data_dir.clone(),
-                    spawn_backend: options.spawn_backend.clone(),
-                    vaults: self.identity.credential_vaults.clone(),
-                    user_resolver,
-                    tokens: Some(session_tokens.clone()),
-                    agent_tool_sockets: Arc::clone(&self.agent_tool_sockets),
-                },
+                self.daemon_launcher_deps(user_resolver, session_tokens),
             )
             .with_approval_routes(Arc::clone(&approval_routes)),
         ))
@@ -313,6 +297,71 @@ impl BuildContext {
         // 31/32): an embedded host keeps binding its own host sockets, as its runtime serves
         // its one socket itself.
         .with_host_sessions_merged(options.host != RuntimeHost::Embedded))
+    }
+
+    fn daemon_launcher_deps(
+        &self,
+        user_resolver: tddy_daemon_kernel::SessionUserResolver,
+        session_tokens: &tddy_daemon_auth::SessionTokens,
+    ) -> tddy_session_lifecycle::coding_agent_launcher::DaemonLauncherDeps {
+        tddy_session_lifecycle::coding_agent_launcher::DaemonLauncherDeps {
+            config: self.config.clone(),
+            tddy_data_dir: self.identity.keys.tddy_data_dir.clone(),
+            spawn_backend: self.options.spawn_backend.clone(),
+            vaults: self.identity.credential_vaults.clone(),
+            user_resolver,
+            tokens: Some(session_tokens.clone()),
+            agent_tool_sockets: Arc::clone(&self.agent_tool_sockets),
+        }
+    }
+
+    fn adopt_and_build_connection(
+        &self,
+        sessions_base_resolver: &tddy_daemon_kernel::SessionsBaseResolver,
+        user_resolver: &tddy_daemon_kernel::SessionUserResolver,
+        livekit_discovery: Option<
+            tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles,
+        >,
+        shared_cli_manager: &Arc<tddy_session_lifecycle::CliSessionManager>,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+    ) -> DaemonSessionHost {
+        self.agent_tool_sockets.adopt_inherited(
+            tddy_daemon_kernel::agent_tool_sockets::adopt_user_sockets_from_environment(),
+        );
+        self.build_connection_impl(
+            sessions_base_resolver,
+            user_resolver,
+            livekit_discovery,
+            shared_cli_manager,
+            coding_agents,
+        )
+    }
+
+    fn build_connection_impl(
+        &self,
+        sessions_base_resolver: &tddy_daemon_kernel::SessionsBaseResolver,
+        user_resolver: &tddy_daemon_kernel::SessionUserResolver,
+        livekit_discovery: Option<
+            tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles,
+        >,
+        shared_cli_manager: &Arc<tddy_session_lifecycle::CliSessionManager>,
+        coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+    ) -> DaemonSessionHost {
+        let config = &self.config;
+        let options = &self.options;
+        let tddy_data_dir = &self.identity.keys.tddy_data_dir;
+        tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver.clone(),
+            tddy_data_dir.to_owned(),
+            user_resolver.clone(),
+            options.spawn_client.clone(),
+            options.spawn_backend.clone(),
+            tddy_daemon_livekit::peer_routing::peer_routing_over(config, livekit_discovery),
+            self.operator_channel(),
+            Arc::clone(shared_cli_manager),
+            coding_agents,
+        )
     }
 
     pub(super) fn install_session_host(

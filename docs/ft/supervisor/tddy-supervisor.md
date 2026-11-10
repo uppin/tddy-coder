@@ -228,6 +228,9 @@ the GitHub logins.
   account name (it must ride in a path segment and a `LISTEN_FDNAMES` entry) are refused.
 - **Cap.** At most **15** distinct OS users: each costs one handed-over descriptor, and descriptor 3 is
   the daemon's own listener out of 16. A sixteenth fails loading, naming `users.yaml` and the limit.
+- The file is parsed by the shared **`tddy-users-file`** crate, which the daemon reads too: both
+  refuse an unsafe OS user (not one safe path segment), an empty login, and more than 15 distinct
+  OS users, besides the malformed, `root`-mapped and ambiguous cases.
 - **Required.** A missing `users.yaml` is an error naming it, never an empty mapping. `./install`
   renders an empty one (`[]`, `0644`).
 

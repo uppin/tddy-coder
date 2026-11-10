@@ -157,20 +157,7 @@ impl CodingAgentSession {
         model: String,
         hooks: PreparedAcpHooks,
     ) -> Result<Self, SubagentError> {
-        let session_dir = open.cwd.clone();
-        if let Some(scope) = &hooks.opens {
-            scope.begin_open(Some(session_dir)).await;
-        }
-        let opened = driver.open_session(open).await;
-        let hook_failure = match &hooks.opens {
-            Some(scope) => scope.end_open().await,
-            None => None,
-        };
-        let opened = match (opened, hook_failure) {
-            (Err(_), Some(failure)) => Err(failure),
-            (opened, _) => opened,
-        }
-        .map_err(|e| SubagentError::from(format!("could not open the coding agent: {e}")))?;
+        let opened = open_under_hooks(&driver, open, &hooks).await?;
         let acp = Arc::new(AcpConversation {
             driver,
             session_id: opened.session_id,
@@ -409,6 +396,28 @@ impl CodingAgentSession {
         outcome.messages = messages;
         Ok(outcome)
     }
+}
+
+async fn open_under_hooks(
+    driver: &AcpDriver,
+    open: OpenSession,
+    hooks: &PreparedAcpHooks,
+) -> Result<tddy_agent_backend::AcpSession, SubagentError> {
+    let session_dir = open.cwd.clone();
+    if let Some(scope) = &hooks.opens {
+        scope.begin_open(Some(session_dir)).await;
+    }
+    let opened = driver.open_session(open).await;
+    let hook_failure = match &hooks.opens {
+        Some(scope) => scope.end_open().await,
+        None => None,
+    };
+    let opened = match (opened, hook_failure) {
+        (Err(_), Some(failure)) => Err(failure),
+        (opened, _) => opened,
+    }
+    .map_err(|e| SubagentError::from(format!("could not open the coding agent: {e}")))?;
+    Ok(opened)
 }
 
 /// Wait until the prompt ends, or until the agent asks for a permission request that no caller

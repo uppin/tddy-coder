@@ -213,7 +213,7 @@ records its environment), `tests/tool_session_host_socket.rs` (every recipe gets
 socket, token over the real socket, two sessions two accounts, no cross-session token, verbatim
 refusals, `GITHUB_TOKEN` rescues nothing, delete unregisters, stop and restart),
 `src/connection_service/session_acting_identity_tests.rs` (pinning), `host_session_socket_tests.rs`,
-`inherited_host_sockets_tests.rs` (`a_supervised_daemon_serves_host_session_and_agent_tool_calls_on_one_user_socket`,
+`user_socket_tests.rs` (`a_supervised_daemon_serves_host_session_and_agent_tool_calls_on_one_user_socket`,
 `a_supervised_host_session_refusal_names_users_yaml`, the cross-crate prefix pin). Local gh: `tests/tool_session_local_gh.rs` (the real start and
 resume into a recording tool, driven by the `a_gh_cli` stub: the `gh` login's commit pairs, an
 Enterprise host, the source entry, a logged-out `gh`, a start naming the source on a host whose row was

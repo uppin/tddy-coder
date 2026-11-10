@@ -31,7 +31,7 @@
 //!
 //! **The harness binary** is the agent spec's: `claude-acp` runs as the spec declares (`bunx
 //! claude-agent-acp` unless `TDDY_CLAUDE_AGENT_ACP_CLI` names a binary), `codex-acp` and `opencode`
-//! likewise. On a supervised host the program is what `allowed_relay_tool_paths` must list, and its
+//! likewise. On a supervised host the program is what the supervisor's `exec_roots` must cover, and its
 //! arguments are not allowlisted — so allowlisting `bunx` lets the session user run any npm package;
 //! set `TDDY_CLAUDE_AGENT_ACP_CLI` and allowlist that binary instead.
 //!

@@ -3,10 +3,12 @@
 **Location:** `packages/tddy-supervisor/src/spawn_broker.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-24 — `/pr-wrap` step 3.5 file-length gate on #736 (`#start-progress` 3/8), and again on `#coagents` 2/8 (#721), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **984 production lines** (2026-11-09, #859) · budget 500
+**Metrics:** **984 → 534 production lines** (2026-11-10, #876) · budget 500
 **Thresholds breached:** length 984 > 500
 **Restructure:** blocked — the remaining code is the pre-exec syscall layer, about 630 lines, most of it defined twice (one item per `#[cfg(target_os)]` branch)
-**Status:** Open — regressed 2026-11-09 (969 → 977, #836; 977 → 984, #859); partially fixed 2026-10-24 (1,595 → 968 by #721's split); unclaimed
+**Status:** Open — partially fixed 2026-11-10 by #876 (plans 11/12 applied; 09/10 deferred, see below); regressed 2026-11-09 (969 → 977, #836; 977 → 984, #859); partially fixed 2026-10-24 (1,595 → 968 by #721's split); unclaimed
+
+09/10 deferred by the user, 2026-11-10 (#876 6e): Linux-only ranges the engine cannot move on macOS; follow-up on a Linux target
 **Verified:** the engine refusals below were reproduced by hand on 2026-10-24; the 968 is a machine-measured line count after the rebase
 
 ## Measurement history
@@ -20,6 +22,7 @@
 | 2026-11-09 | 969 → 977 | **regressed** by #836 (`#agent-tools` 28/32), measured against `origin/feature/agent-tools/acp-subagent-leftovers` at #836's wrap: the `EnvironmentBase::Exactly` variant and its docs. Not split: stack-shared — #859 and #865 above it modify this file (`/pr-wrap` step 3.5's stack-branch rule); left for the `#agent-tools` sweep node. The engine limit below still stands |
 | 2026-11-09 | 977 → 984 | grown by #859 (`#agent-tools` 31/32): `USERS_FILE_ENV` (`TDDY_USERS_FILE`) and its doc beside `SUPERVISOR_SOCKET_ENV`. Not split there: #836, #857 and #865 in the same stack also modify this file, so a split mid-stack would conflict with each of them |
 | 2026-11-09 | 984 → 984 | unchanged by #865 (`#agent-tools` 32/32): it touched the file (`SpawnPlan.checked`, the `CheckedExecutable` the exec gate returns, and the env-rule tests) without changing its production line count — the 977 → 984 above is #859's |
+| 2026-11-10 | 984 → 534 | #876 (`#agent-tools` 33/33 sweep): plans 11 (`spawn_broker::process_syscalls`, + `join_cgroup_scope`) and 12 (`spawn_broker::spawn_plan`, + mount helpers) applied and verified; plans 09 (namespaces, ~325 lines) and 10 (resolve, ~95 lines) deferred by the user — Linux-only ranges the engine cannot move on macOS. Follow-up: `docs/dev/todo/2026-11-10-spawn-broker-linux-only-moves.md` |
 
 ## Why the engine stops here
 

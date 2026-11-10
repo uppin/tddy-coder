@@ -1,8 +1,8 @@
 use crate::handover::SocketHandover;
-use crate::spawn_broker::EnvironmentBase;
-use crate::spawn_broker::SpawnPlan;
-use crate::spawn_broker::FORWARDED_VARIABLES;
-use crate::spawn_broker::SESSION_PATH;
+use crate::spawn_broker::spawn_plan::EnvironmentBase;
+use crate::spawn_broker::spawn_plan::SpawnPlan;
+use crate::spawn_broker::spawn_plan::FORWARDED_VARIABLES;
+use crate::spawn_broker::spawn_plan::SESSION_PATH;
 use crate::spawn_broker::SUPERVISOR_SOCKET_ENV;
 use crate::spawn_broker::USERS_FILE_ENV;
 use std::collections::BTreeMap;
@@ -90,22 +90,7 @@ impl ChildEnvironment {
                 supervisor_socket.clone().into_os_string(),
             );
         }
-        if let Some(users_file) = handover.and_then(|handover| handover.users_file()) {
-            values.insert(
-                OsString::from(USERS_FILE_ENV),
-                users_file.to_path_buf().into_os_string(),
-            );
-        }
-        if let Some(handover) = handover {
-            values.insert(
-                OsString::from("LISTEN_FDS"),
-                OsString::from(handover.count().to_string()),
-            );
-            values.insert(
-                OsString::from("LISTEN_FDNAMES"),
-                OsString::from(handover.fd_names()),
-            );
-        }
+        insert_handover_variables(handover, &mut values);
 
         let mut variables = Vec::with_capacity(values.len());
         for (key, value) in &values {
@@ -113,12 +98,7 @@ impl ChildEnvironment {
         }
         let listen_pid = hands_over_listener.then(listen_pid_entry);
 
-        let mut pointers: Vec<*const libc::c_char> =
-            variables.iter().map(|entry| entry.as_ptr()).collect();
-        if let Some(entry) = &listen_pid {
-            pointers.push(entry.as_ptr().cast());
-        }
-        pointers.push(std::ptr::null());
+        let pointers = environment_pointers(&variables, &listen_pid);
 
         Ok(ChildEnvironment {
             variables,
@@ -139,6 +119,41 @@ impl ChildEnvironment {
         }
         environ = self.pointers.as_ptr();
     }
+}
+
+fn insert_handover_variables(
+    handover: Option<&SocketHandover>,
+    values: &mut BTreeMap<OsString, OsString>,
+) {
+    if let Some(users_file) = handover.and_then(|handover| handover.users_file()) {
+        values.insert(
+            OsString::from(USERS_FILE_ENV),
+            users_file.to_path_buf().into_os_string(),
+        );
+    }
+    if let Some(handover) = handover {
+        values.insert(
+            OsString::from("LISTEN_FDS"),
+            OsString::from(handover.count().to_string()),
+        );
+        values.insert(
+            OsString::from("LISTEN_FDNAMES"),
+            OsString::from(handover.fd_names()),
+        );
+    }
+}
+
+fn environment_pointers(
+    variables: &[CString],
+    listen_pid: &Option<Box<[u8]>>,
+) -> Vec<*const libc::c_char> {
+    let mut pointers: Vec<*const libc::c_char> =
+        variables.iter().map(|entry| entry.as_ptr()).collect();
+    if let Some(entry) = listen_pid {
+        pointers.push(entry.as_ptr().cast());
+    }
+    pointers.push(std::ptr::null());
+    pointers
 }
 
 /// The base environment of a session: a `PATH` it did not choose, plus the locale.

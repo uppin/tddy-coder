@@ -44,25 +44,14 @@ impl DaemonSessionHost {
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
         // Declared tools resolve from `<tddyhome>/tools` at each jail start (`#agent-tools 1/12`).
-        let workspace_sandbox_provisioner =
-            tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner::for_tddy_home(
-                &tddy_data_dir,
-            );
-        let task_registry = cli_manager.task_registry();
-        let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
-        let host_session_sockets =
-            Arc::new(super::host_session_socket::HostSessionSockets::default());
-        // Built here rather than inline below because the roster store reads it: an entry's
-        // `clone_state` is the state of the checkout serving it, and two stores would let a roster
-        // report READY for a clone nobody built.
-        let session_agent_clones =
-            Arc::new(crate::session_agent_clone::SessionAgentCloneStore::new());
-        let worktree_size_calculator = Arc::new(
-            tddy_worktree_service::worktrees::WorktreeSizeCalculator::new(
-                tddy_worktree_service::worktrees::projects_stats_cache_root(&tddy_data_dir),
-                tddy_worktree_service::worktrees::DAEMON_SIZE_WALK_PERMITS,
-            ),
-        );
+        let HostStores {
+            workspace_sandbox_provisioner,
+            task_registry,
+            demo_vm_state,
+            host_session_sockets,
+            session_agent_clones,
+            worktree_size_calculator,
+        } = build_host_stores(&tddy_data_dir, &cli_manager);
         Self {
             config,
             sessions_base_for_user,
@@ -93,11 +82,7 @@ impl DaemonSessionHost {
             host_session_sockets,
             // A server daemon's placement; `runtime::build` replaces it on an embedded host
             // (`with_agent_tool_sockets`).
-            agent_tool_sockets: Arc::new(
-                tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(
-                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser,
-                ),
-            ),
+            agent_tool_sockets: default_agent_tool_sockets(),
             agent_activity_hub: Arc::new(tddy_daemon_kernel::AgentActivityHub::default()),
             agent_conversation_frames: Arc::new(
                 tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
@@ -486,6 +471,59 @@ impl DaemonSessionHost {
             Arc::clone(self.peer_routing.eligible_daemon_source()),
             Arc::clone(&self.user_resolver),
         )
+    }
+}
+
+fn default_agent_tool_sockets() -> Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets> {
+    Arc::new(
+        tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(
+            tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser,
+        ),
+    )
+}
+
+struct HostStores {
+    workspace_sandbox_provisioner:
+        tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,
+    task_registry: TaskRegistry,
+    demo_vm_state: Arc<
+        tokio::sync::Mutex<
+            std::collections::HashMap<String, tddy_demo_vm_service::activity_hub::DemoVmHandle>,
+        >,
+    >,
+    host_session_sockets: Arc<tddy_agent_launch::host_session_socket::HostSessionSockets>,
+    session_agent_clones: Arc<tddy_session_agents::session_agent_clone::SessionAgentCloneStore>,
+    worktree_size_calculator: Arc<tddy_worktree_service::worktrees::WorktreeSizeCalculator>,
+}
+
+fn build_host_stores(
+    tddy_data_dir: &std::path::Path,
+    cli_manager: &Arc<CliSessionManager>,
+) -> HostStores {
+    let workspace_sandbox_provisioner =
+        tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner::for_tddy_home(
+            tddy_data_dir,
+        );
+    let task_registry = cli_manager.task_registry();
+    let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+    let host_session_sockets = Arc::new(super::host_session_socket::HostSessionSockets::default());
+    // Built here rather than inline below because the roster store reads it: an entry's
+    // `clone_state` is the state of the checkout serving it, and two stores would let a roster
+    // report READY for a clone nobody built.
+    let session_agent_clones = Arc::new(crate::session_agent_clone::SessionAgentCloneStore::new());
+    let worktree_size_calculator = Arc::new(
+        tddy_worktree_service::worktrees::WorktreeSizeCalculator::new(
+            tddy_worktree_service::worktrees::projects_stats_cache_root(tddy_data_dir),
+            tddy_worktree_service::worktrees::DAEMON_SIZE_WALK_PERMITS,
+        ),
+    );
+    HostStores {
+        workspace_sandbox_provisioner,
+        task_registry,
+        demo_vm_state,
+        host_session_sockets,
+        session_agent_clones,
+        worktree_size_calculator,
     }
 }
 

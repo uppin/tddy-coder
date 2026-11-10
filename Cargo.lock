@@ -12881,6 +12881,7 @@ dependencies = [
  "tddy-service",
  "tddy-stdio",
  "tddy-task",
+ "tddy-users-file",
  "tempfile",
  "tokio",
  "toml 0.9.12+spec-1.1.0",
@@ -14300,6 +14301,7 @@ dependencies = [
  "tddy-codegen",
  "tddy-rpc",
  "tddy-stdio",
+ "tddy-users-file",
  "tempfile",
  "tokio",
 ]
@@ -14609,6 +14611,14 @@ dependencies = [
  "tokio",
  "uuid",
  "vt100",
+]
+
+[[package]]
+name = "tddy-users-file"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml",
 ]
 
 [[package]]

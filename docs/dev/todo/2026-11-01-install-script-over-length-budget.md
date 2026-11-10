@@ -37,3 +37,9 @@ sourcing convention plus the `install_contract` static checks updated to follow 
 **Status:** Open — still over budget (500); the seams above are unchanged, and the spawn-policy
 migration is a third self-contained region a split could take out with the user-mapping migration
 it extends.
+
+**Deferred again by:** the user, 2026-11-10, at the 6e review of the `#agent-tools` sweep
+([#876](https://github.com/uppin/tddy-coder/pull/876)), answering "install split: defer". The sweep
+that the stack's other stack-shared files went to does not take it. The reason has not changed: the
+Rust-only restructure engine cannot split a bash script, and a hand split needs a sourcing convention
+and the `install_contract` checks updated. The `#agent-tools` stack left it at 1,811 lines (`wc -l`).

@@ -262,7 +262,7 @@ fn signal_pid(pid: i32, sig: libc::c_int) -> Result<(), std::io::Error> {
 /// task's channel. Reports readiness (or the failure reason) via `setup_tx`.
 fn open_pty_and_pump(
     spec: PtySpawnSpec,
-    mut stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
     output_ch: Arc<TaskChannel>,
     setup_tx: oneshot::Sender<Result<SetupResult, String>>,
     rt_handle: tokio::runtime::Handle,
@@ -294,7 +294,97 @@ fn open_pty_and_pump(
         capture.resize(initial_size.rows, initial_size.cols);
     }
 
-    let master = Arc::new(Mutex::new(pair.master));
+    let setup = spawn_reader_with_master(output_ch, initial_size, pair.master);
+
+    let cmd = build_pty_command(spec);
+
+    spawn_child_and_pump(stdin_rx, setup_tx, rt_handle, pair.slave, setup, cmd)
+}
+
+fn spawn_child_and_pump(
+    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+    setup_tx: oneshot::Sender<Result<SetupResult, String>>,
+    rt_handle: tokio::runtime::Handle,
+    slave: Box<dyn portable_pty::SlavePty + Send>,
+    setup: PtyMasterSetup,
+    cmd: CommandBuilder,
+) -> Result<(), String> {
+    let PtyMasterSetup {
+        master,
+        current_size,
+        exit_tx,
+        exit_rx,
+        child_exited_tx,
+        child_exited_rx,
+        reader_done_rx,
+    } = setup;
+    let child = match slave.spawn_command(cmd) {
+        Ok(child) => child,
+        Err(e) => {
+            let msg = format!("spawn failed: {e}");
+            let _ = setup_tx.send(Err(msg.clone()));
+            return Err(msg);
+        }
+    };
+
+    let pid = match child.process_id() {
+        Some(pid) => pid,
+        None => {
+            let msg = "spawned child has no pid".to_string();
+            let _ = setup_tx.send(Err(msg.clone()));
+            return Err(msg);
+        }
+    };
+
+    let _ = setup_tx.send(Ok(SetupResult {
+        pid,
+        master: Arc::clone(&master),
+        current_size: Arc::clone(&current_size),
+        exit_rx,
+    }));
+
+    // Writer: stdin mpsc → PTY master. Stops on stdin close, a write error, or child exit —
+    // whichever comes first — so the dup'd writer fd and the master Arc are released promptly.
+    spawn_pty_writer(stdin_rx, rt_handle, master, child_exited_rx);
+
+    // Exit monitor: wait for child, report terminal status.
+    let mut child_monitor = child;
+    std::thread::spawn(move || {
+        let status = match child_monitor.wait() {
+            Ok(_) => TaskStatus::Completed { exit_code: Some(0) },
+            Err(e) => TaskStatus::Failed {
+                message: format!("child wait error: {e}"),
+            },
+        };
+        // Unblock the writer thread first so it drops its master fd.
+        let _ = child_exited_tx.send(());
+        // The reader ends once every holder of the slave side has closed it. Waiting for it means
+        // the capture holds everything the child wrote before it exited, by the time the terminal
+        // status is reported. A process the child left behind can hold the slave open for as long
+        // as it runs, so the wait is bounded: past it, the exit is reported without that output.
+        wait_for_reader_drain(reader_done_rx, pid);
+        let _ = exit_tx.send(status);
+    });
+
+    Ok(())
+}
+
+struct PtyMasterSetup {
+    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    current_size: Arc<Mutex<PtySize>>,
+    exit_tx: oneshot::Sender<TaskStatus>,
+    exit_rx: oneshot::Receiver<TaskStatus>,
+    child_exited_tx: oneshot::Sender<()>,
+    child_exited_rx: oneshot::Receiver<()>,
+    reader_done_rx: std::sync::mpsc::Receiver<()>,
+}
+
+fn spawn_reader_with_master(
+    output_ch: Arc<TaskChannel>,
+    initial_size: PtySize,
+    pair_master: Box<dyn MasterPty + Send>,
+) -> PtyMasterSetup {
+    let master = Arc::new(Mutex::new(pair_master));
     let current_size = Arc::new(Mutex::new(initial_size));
     let (exit_tx, exit_rx) = oneshot::channel();
     // Fires when the child exits so the writer thread can stop and release its master fd, rather
@@ -306,34 +396,28 @@ fn open_pty_and_pump(
     let output_ch_reader = Arc::clone(&output_ch);
     // Disconnects when the reader ends, which the exit monitor waits for (see below).
     let (reader_done_tx, reader_done_rx) = std::sync::mpsc::channel::<()>();
-    std::thread::spawn(move || {
-        let _reader_done = reader_done_tx;
-        let reader = {
-            let m = master_for_reader.lock().unwrap();
-            m.try_clone_reader()
-        };
-        match reader {
-            Err(e) => {
-                log::warn!(
-                    target: "tddy_pty::runtime",
-                    "PTY reader: try_clone_reader failed: {e}"
-                );
-            }
-            Ok(mut r) => {
-                let mut buf = vec![0u8; PTY_READ_BUF];
-                loop {
-                    match std::io::Read::read(&mut r, &mut buf) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            output_ch_reader.write(Bytes::copy_from_slice(&buf[..n]));
-                        }
-                        Err(_) => break,
-                    }
-                }
-            }
-        }
-    });
+    spawn_pty_reader(master_for_reader, output_ch_reader, reader_done_tx);
+    PtyMasterSetup {
+        master,
+        current_size,
+        exit_tx,
+        exit_rx,
+        child_exited_tx,
+        child_exited_rx,
+        reader_done_rx,
+    }
+}
 
+fn wait_for_reader_drain(reader_done_rx: std::sync::mpsc::Receiver<()>, pid: u32) {
+    if let Err(RecvTimeoutError::Timeout) = reader_done_rx.recv_timeout(READER_DRAIN_GRACE) {
+        log::info!(
+            target: "tddy_pty::runtime",
+            "PTY child {pid} exited while another process still holds its terminal open"
+        );
+    }
+}
+
+fn build_pty_command(spec: PtySpawnSpec) -> CommandBuilder {
     let mut cmd = CommandBuilder::new(&spec.argv[0]);
     for arg in &spec.argv[1..] {
         cmd.arg(arg);
@@ -359,35 +443,15 @@ fn open_pty_and_pump(
         // PTY's own description stands over it.
         set_terminal_variables(&mut cmd);
     }
+    cmd
+}
 
-    let child = match pair.slave.spawn_command(cmd) {
-        Ok(child) => child,
-        Err(e) => {
-            let msg = format!("spawn failed: {e}");
-            let _ = setup_tx.send(Err(msg.clone()));
-            return Err(msg);
-        }
-    };
-    drop(pair.slave);
-
-    let pid = match child.process_id() {
-        Some(pid) => pid,
-        None => {
-            let msg = "spawned child has no pid".to_string();
-            let _ = setup_tx.send(Err(msg.clone()));
-            return Err(msg);
-        }
-    };
-
-    let _ = setup_tx.send(Ok(SetupResult {
-        pid,
-        master: Arc::clone(&master),
-        current_size: Arc::clone(&current_size),
-        exit_rx,
-    }));
-
-    // Writer: stdin mpsc → PTY master. Stops on stdin close, a write error, or child exit —
-    // whichever comes first — so the dup'd writer fd and the master Arc are released promptly.
+fn spawn_pty_writer(
+    mut stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+    rt_handle: tokio::runtime::Handle,
+    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    child_exited_rx: oneshot::Receiver<()>,
+) {
     let master_for_writer = Arc::clone(&master);
     std::thread::spawn(move || {
         let writer = {
@@ -421,32 +485,40 @@ fn open_pty_and_pump(
             }
         }
     });
+}
 
-    // Exit monitor: wait for child, report terminal status.
-    let mut child_monitor = child;
+fn spawn_pty_reader(
+    master_for_reader: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    output_ch_reader: Arc<TaskChannel>,
+    reader_done_tx: std::sync::mpsc::Sender<()>,
+) {
     std::thread::spawn(move || {
-        let status = match child_monitor.wait() {
-            Ok(_) => TaskStatus::Completed { exit_code: Some(0) },
-            Err(e) => TaskStatus::Failed {
-                message: format!("child wait error: {e}"),
-            },
+        let _reader_done = reader_done_tx;
+        let reader = {
+            let m = master_for_reader.lock().unwrap();
+            m.try_clone_reader()
         };
-        // Unblock the writer thread first so it drops its master fd.
-        let _ = child_exited_tx.send(());
-        // The reader ends once every holder of the slave side has closed it. Waiting for it means
-        // the capture holds everything the child wrote before it exited, by the time the terminal
-        // status is reported. A process the child left behind can hold the slave open for as long
-        // as it runs, so the wait is bounded: past it, the exit is reported without that output.
-        if let Err(RecvTimeoutError::Timeout) = reader_done_rx.recv_timeout(READER_DRAIN_GRACE) {
-            log::info!(
-                target: "tddy_pty::runtime",
-                "PTY child {pid} exited while another process still holds its terminal open"
-            );
+        match reader {
+            Err(e) => {
+                log::warn!(
+                    target: "tddy_pty::runtime",
+                    "PTY reader: try_clone_reader failed: {e}"
+                );
+            }
+            Ok(mut r) => {
+                let mut buf = vec![0u8; PTY_READ_BUF];
+                loop {
+                    match std::io::Read::read(&mut r, &mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            output_ch_reader.write(Bytes::copy_from_slice(&buf[..n]));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
         }
-        let _ = exit_tx.send(status);
     });
-
-    Ok(())
 }
 
 #[cfg(test)]

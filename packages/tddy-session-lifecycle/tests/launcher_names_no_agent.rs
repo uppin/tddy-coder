@@ -79,3 +79,86 @@ fn the_daemon_acp_launcher_names_no_agent_and_no_agent_variable() {
     // Then — no branch, import or helper names the agent or its `OPENCODE_CONFIG_CONTENT`
     assert_eq!(naming_opencode, Vec::<String>::new());
 }
+
+/// The name of every coding agent this workspace ships a spec for: each spec's `id`, split at `-`
+/// with the protocol suffix `acp` dropped (`codex-acp` → `codex`), and its `product` with the spaces
+/// removed (`Claude Code` → `claudecode`), lower-cased.
+fn every_shipped_agent_name() -> Vec<String> {
+    let specs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tddy-coding-agent-specs/specs");
+    let mut names: Vec<String> = std::fs::read_dir(&specs)
+        .unwrap_or_else(|e| panic!("{}: {e}", specs.display()))
+        .map(|entry| entry.expect("a directory entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "yaml"))
+        .flat_map(|path| {
+            let text = std::fs::read_to_string(&path).unwrap_or_default();
+            let value = |key: &str| {
+                text.lines()
+                    .find_map(|line| line.trim_start().strip_prefix(key))
+                    .map(|rest| rest.trim().trim_matches('"').to_lowercase())
+            };
+            let ids = value("id:")
+                .map(|id| {
+                    id.split('-')
+                        .filter(|part| *part != "acp")
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            ids.into_iter()
+                .chain(value("product:").map(|product| product.replace(' ', "")))
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Every code line of `sources` with an identifier segment (split at anything not a letter or digit)
+/// equal to one of `names`, as `file:line: text`.
+fn code_lines_with_a_segment_in(sources: &[(PathBuf, String)], names: &[String]) -> Vec<String> {
+    sources
+        .iter()
+        .flat_map(|(path, text)| {
+            let file = path.file_name().map(|n| n.to_string_lossy().into_owned());
+            text.lines()
+                .enumerate()
+                .filter(|(_, line)| !line.trim_start().starts_with("//"))
+                .filter(|(_, line)| {
+                    line.to_lowercase()
+                        .split(|c: char| !c.is_ascii_alphanumeric())
+                        .any(|segment| names.iter().any(|name| name == segment))
+                })
+                .map(move |(n, line)| {
+                    format!(
+                        "{}:{}: {}",
+                        file.clone().unwrap_or_default(),
+                        n + 1,
+                        line.trim()
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// `#agent-tools` 33/33 (the sweep, #857's `TODO(sweep)`): the launcher names no shipped agent at
+/// all — not only OpenCode. The `toml_args` route renderer is keyed off `RouteShape::TomlArgs`, so it
+/// is reached as `toml_route_overrides`, not by a Codex-named helper.
+#[test]
+fn the_daemon_acp_launcher_names_no_shipped_agent() {
+    // Given every agent the specs ship, and the launcher's production code
+    let names = every_shipped_agent_name();
+    assert!(
+        ["claude", "codex", "opencode"]
+            .iter()
+            .all(|name| names.iter().any(|n| n == name)),
+        "the shipped specs are read: {names:?}"
+    );
+    let sources = the_launchers_production_sources();
+
+    // When
+    let naming_an_agent = code_lines_with_a_segment_in(&sources, &names);
+
+    // Then
+    assert_eq!(naming_an_agent, Vec::<String>::new());
+}

@@ -97,7 +97,7 @@ impl AgentEnvBase {
                 parsed.schema_version
             )));
         }
-        crate::spec::validate_env_entries(&parsed.base).map_err(invalid)?;
+        crate::spec::pass_env::validate_env_entries(&parsed.base).map_err(invalid)?;
         Ok(Self {
             file: file.to_path_buf(),
             entries: parsed.base,

@@ -19,10 +19,10 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
-
 use crate::error::ConfigError;
 use crate::socket::MAX_HANDED_OVER_LISTENERS;
+
+pub use tddy_users_file::MappedUser;
 
 /// The file's conventional name, beside `supervisor.yaml` (`/etc/tddy/users.yaml`).
 pub const USERS_FILE_NAME: &str = "users.yaml";
@@ -30,27 +30,10 @@ pub const USERS_FILE_NAME: &str = "users.yaml";
 /// The most distinct OS users one mapping may name: every handed-over slot but descriptor 3.
 pub const MAX_MAPPED_OS_USERS: usize = MAX_HANDED_OVER_LISTENERS - 1;
 
-/// One row of `users.yaml`: the same shape `daemon.yaml` `users:` had.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MappedUser {
-    pub github_user: String,
-    pub os_user: String,
-}
-
-/// Whether `name` can ride in a descriptor name and a path segment unchanged.
-fn is_one_safe_segment(name: &str) -> bool {
-    !name.is_empty()
-        && !name.starts_with('.')
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
-}
-
 /// A validated `users.yaml`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UsersFile {
-    rows: Vec<MappedUser>,
+    mapping: tddy_users_file::UsersMapping,
 }
 
 impl UsersFile {
@@ -64,7 +47,7 @@ impl UsersFile {
         let metadata = file.metadata().map_err(|error| ConfigError {
             message: format!("could not inspect {}: {error}", path.display()),
         })?;
-        crate::config::require_trustworthy_config_file(path, &metadata)?;
+        crate::config::trust::require_trustworthy_config_file(path, &metadata)?;
         let resolved = std::fs::canonicalize(path).map_err(|error| ConfigError {
             message: format!("could not resolve {}: {error}", path.display()),
         })?;
@@ -73,7 +56,7 @@ impl UsersFile {
             let metadata = std::fs::metadata(directory).map_err(|error| ConfigError {
                 message: format!("could not inspect {}: {error}", directory.display()),
             })?;
-            crate::config::require_trustworthy_config_directory(directory, &metadata)?;
+            crate::config::trust::require_trustworthy_config_directory(directory, &metadata)?;
             ancestor = directory.parent();
         }
         let mut yaml = String::new();
@@ -91,78 +74,29 @@ impl UsersFile {
     /// Parse and validate `users.yaml` text: a YAML list of [`MappedUser`] rows, no `root`, at most
     /// [`MAX_MAPPED_OS_USERS`] distinct OS users, each OS user one plain path and fd-name segment.
     pub fn from_yaml(yaml: &str) -> Result<UsersFile, ConfigError> {
-        let rows: Vec<MappedUser> = if yaml.trim().is_empty() {
-            Vec::new()
-        } else {
-            serde_yaml::from_str(yaml).map_err(|error| ConfigError {
-                message: format!("users.yaml: {error}"),
-            })?
-        };
-        let mut by_login: std::collections::BTreeMap<&str, &str> =
-            std::collections::BTreeMap::new();
-        for row in &rows {
-            if row.github_user.is_empty() {
-                return Err(ConfigError {
-                    message: "users.yaml: a row names no github_user".to_string(),
-                });
-            }
-            if row.os_user == "root" {
-                return Err(ConfigError {
-                    message: "users.yaml: a mapping to `root` is refused; the supervisor never \
-                              runs a session as root"
-                        .to_string(),
-                });
-            }
-            if !is_one_safe_segment(&row.os_user) {
-                return Err(ConfigError {
-                    message: format!(
-                        "users.yaml: os_user `{}` cannot name a socket: it is not one plain \
-                         path and descriptor-name segment",
-                        row.os_user
-                    ),
-                });
-            }
-            match by_login.entry(row.github_user.as_str()) {
-                std::collections::btree_map::Entry::Vacant(entry) => {
-                    entry.insert(row.os_user.as_str());
+        tddy_users_file::UsersMapping::from_yaml(yaml)
+            .map(|mapping| UsersFile { mapping })
+            .map_err(|refusal| {
+                let words = refusal.to_string();
+                ConfigError {
+                    message: if words.starts_with("users.yaml") {
+                        words
+                    } else {
+                        format!("users.yaml: {words}")
+                    },
                 }
-                std::collections::btree_map::Entry::Occupied(entry) => {
-                    if *entry.get() != row.os_user {
-                        return Err(ConfigError {
-                            message: format!(
-                                "users.yaml: github_user `{}` is mapped to two OS users \
-                                 (`{}` and `{}`); which one its sessions run as is ambiguous",
-                                row.github_user,
-                                entry.get(),
-                                row.os_user
-                            ),
-                        });
-                    }
-                }
-            }
-        }
-        let users = UsersFile { rows };
-        let distinct = users.os_users().len();
-        if distinct > MAX_MAPPED_OS_USERS {
-            return Err(ConfigError {
-                message: format!(
-                    "users.yaml names {distinct} distinct OS users; at most \
-                     {MAX_MAPPED_OS_USERS} fit the handed-over descriptors"
-                ),
-            });
-        }
-        Ok(users)
+            })
     }
 
     /// Every row, in file order.
     pub fn rows(&self) -> &[MappedUser] {
-        &self.rows
+        self.mapping.rows()
     }
 
     /// The distinct OS users the mapping names, sorted — the users sessions may run as and the
     /// users who get a daemon socket.
     pub fn os_users(&self) -> BTreeSet<String> {
-        self.rows.iter().map(|row| row.os_user.clone()).collect()
+        self.mapping.os_users()
     }
 }
 
@@ -307,6 +241,15 @@ mod tests {
                 github_user: "a".to_string(),
                 os_user: "alice".to_string()
             }]
+        );
+    }
+
+    /// `#agent-tools` 33/33: the shared users.yaml budget is the supervisor's own handover budget.
+    #[test]
+    fn the_shared_mapping_budget_is_every_handover_slot_but_the_daemons_own() {
+        assert_eq!(
+            (tddy_users_file::MAX_MAPPED_OS_USERS, MAX_MAPPED_OS_USERS),
+            (MAX_HANDED_OVER_LISTENERS - 1, MAX_HANDED_OVER_LISTENERS - 1)
         );
     }
 }

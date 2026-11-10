@@ -45,7 +45,7 @@ so a routed ACP agent's spec declares `inline_config` (OpenCode) or `toml_args` 
 
 When the definition names a provider account, `route_from_vault` resolves it in the session owner's
 vault with `tddy_agent_launch::session_provider_route::resolve_session_route` — the call tool sessions
-use — and `apply_route` applies it: `env` and `secret_env` for every harness, `codex_acp_route_args`
+use — and `apply_route` applies it: `env` and `secret_env` for every harness, `toml_route_overrides`
 (`-c` overrides) for an agent whose spec's `route.shape` is `toml_args` (`codex-acp`) — keyed on the
 spec, never the harness name. An `inline_config` route (`opencode`) already carries its
 configuration in its plain environment (`OPENCODE_CONFIG_CONTENT`, the spec's `route.config_env`), so

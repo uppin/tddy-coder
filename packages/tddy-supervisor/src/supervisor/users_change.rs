@@ -28,22 +28,7 @@ impl Supervisor {
             self.set_current_users(next.clone());
             return Ok(());
         };
-        let serving: Vec<usize> = {
-            let mut slots = self.lock();
-            let mut serving = Vec::new();
-            for (index, slot) in slots.iter_mut().enumerate() {
-                if !slot.service.serves_users {
-                    continue;
-                }
-                slot.user_listeners = slot.user_listeners.rebuild(
-                    &slot.service.name.clone(),
-                    &users_config.sockets_dir,
-                    next,
-                )?;
-                serving.push(index);
-            }
-            serving
-        };
+        let serving = self.rebuild_serving_sockets(next, users_config)?;
         self.set_current_users(next.clone());
 
         for index in serving {
@@ -72,6 +57,30 @@ impl Supervisor {
             self.start(index).await;
         }
         Ok(())
+    }
+
+    fn rebuild_serving_sockets(
+        self: &Arc<Self>,
+        next: &UsersFile,
+        users_config: crate::UsersConfig,
+    ) -> anyhow::Result<Vec<usize>> {
+        let serving: Vec<usize> = {
+            let mut slots = self.lock();
+            let mut serving = Vec::new();
+            for (index, slot) in slots.iter_mut().enumerate() {
+                if !slot.service.serves_users {
+                    continue;
+                }
+                slot.user_listeners = slot.user_listeners.rebuild(
+                    &slot.service.name.clone(),
+                    &users_config.sockets_dir,
+                    next,
+                )?;
+                serving.push(index);
+            }
+            serving
+        };
+        Ok(serving)
     }
 
     /// Send `signal` to the service at `index` (running as `pid`) and reap until it is gone,

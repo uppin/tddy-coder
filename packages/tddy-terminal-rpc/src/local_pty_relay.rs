@@ -21,6 +21,63 @@ pub async fn run(argv: Vec<String>, cwd: PathBuf, env: Vec<(String, String)>) ->
     }
     let (rows, cols) = crate::local_terminal::terminal_size();
 
+    let (pty_registry, task, ready) = spawn_local_pty_task(argv, cwd, env).await?;
+
+    // Resize the PTY to the local terminal size now that we know it (the runtime spawns at the
+    // default 24×220; the local terminal may be larger).
+    pty_registry.resize(&task.id, rows, cols).await;
+
+    let channel = task
+        .channel("0")
+        .ok_or_else(|| anyhow::anyhow!("missing PTY channel"))?;
+    let stdin_sender = channel
+        .stdin_sender()
+        .ok_or_else(|| anyhow::anyhow!("PTY channel has no stdin"))?;
+    let stdout_rx = channel.subscribe();
+
+    let _raw = crate::local_terminal::RawMode::enable();
+
+    // Output: PTY → local stdout.
+    let stdout_pump = spawn_stdout_pump(stdout_rx);
+
+    // Input: local stdin → PTY. Stops when stdin closes or the child has exited, so a blocked stdin
+    // read cannot keep a sender clone alive after the command finishes.
+    let stdin_status = task.status_watch();
+    let (mut stdin_pump, resize_pump) =
+        spawn_stdin_pump(pty_registry, &task, &stdin_sender, stdin_status);
+
+    let mut status_watch = task.status_watch();
+    let wait_for_child = async {
+        while !status_watch.borrow().is_terminal() {
+            if status_watch.changed().await.is_err() {
+                break;
+            }
+        }
+    };
+
+    tokio::select! {
+        _ = wait_for_child => {}
+        _ = &mut stdin_pump => {}
+    }
+
+    drop(stdin_sender);
+    stdin_pump.abort();
+    stdout_pump.abort();
+    resize_pump.abort();
+    drop(ready);
+
+    Ok(())
+}
+
+async fn spawn_local_pty_task(
+    argv: Vec<String>,
+    cwd: PathBuf,
+    env: Vec<(String, String)>,
+) -> Result<(
+    PtyRegistry,
+    std::sync::Arc<tddy_task::TaskHandle>,
+    tddy_pty::PtyReady,
+)> {
     let registry = TaskRegistry::new();
     let pty_registry = PtyRegistry::new();
     let spec = PtySpawnSpec {
@@ -38,45 +95,16 @@ pub async fn run(argv: Vec<String>, cwd: PathBuf, env: Vec<(String, String)>) ->
         .await
         .map_err(|e| anyhow::anyhow!("ready signal dropped: {e}"))?
         .map_err(|e| anyhow::anyhow!("pty spawn failed: {e}"))?;
+    Ok((pty_registry, task, ready))
+}
 
-    // Resize the PTY to the local terminal size now that we know it (the runtime spawns at the
-    // default 24×220; the local terminal may be larger).
-    pty_registry.resize(&task.id, rows, cols).await;
-
-    let channel = task
-        .channel("0")
-        .ok_or_else(|| anyhow::anyhow!("missing PTY channel"))?;
-    let stdin_sender = channel
-        .stdin_sender()
-        .ok_or_else(|| anyhow::anyhow!("PTY channel has no stdin"))?;
-    let mut stdout_rx = channel.subscribe();
-
-    let _raw = crate::local_terminal::RawMode::enable();
-
-    // Output: PTY → local stdout.
-    let stdout_pump = tokio::spawn({
-        let mut stdout = tokio::io::stdout();
-        async move {
-            use tokio::sync::broadcast::error::RecvError;
-            loop {
-                match stdout_rx.recv().await {
-                    Ok(bytes) => {
-                        if stdout.write_all(&bytes).await.is_err() {
-                            break;
-                        }
-                        let _ = stdout.flush().await;
-                    }
-                    Err(RecvError::Closed) => break,
-                    Err(RecvError::Lagged(_)) => continue,
-                }
-            }
-        }
-    });
-
-    // Input: local stdin → PTY. Stops when stdin closes or the child has exited, so a blocked stdin
-    // read cannot keep a sender clone alive after the command finishes.
-    let mut stdin_status = task.status_watch();
-    let mut stdin_pump = tokio::spawn({
+fn spawn_stdin_pump(
+    pty_registry: PtyRegistry,
+    task: &std::sync::Arc<tddy_task::TaskHandle>,
+    stdin_sender: &tokio::sync::mpsc::UnboundedSender<Bytes>,
+    mut stdin_status: tokio::sync::watch::Receiver<tddy_task::TaskStatus>,
+) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
+    let stdin_pump = tokio::spawn({
         let stdin_sender = stdin_sender.clone();
         async move {
             let mut stdin = tokio::io::stdin();
@@ -133,26 +161,29 @@ pub async fn run(argv: Vec<String>, cwd: PathBuf, env: Vec<(String, String)>) ->
             std::future::pending::<()>().await;
         }
     });
+    (stdin_pump, resize_pump)
+}
 
-    let mut status_watch = task.status_watch();
-    let wait_for_child = async {
-        while !status_watch.borrow().is_terminal() {
-            if status_watch.changed().await.is_err() {
-                break;
+fn spawn_stdout_pump(
+    mut stdout_rx: tokio::sync::broadcast::Receiver<Bytes>,
+) -> tokio::task::JoinHandle<()> {
+    let stdout_pump = tokio::spawn({
+        let mut stdout = tokio::io::stdout();
+        async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match stdout_rx.recv().await {
+                    Ok(bytes) => {
+                        if stdout.write_all(&bytes).await.is_err() {
+                            break;
+                        }
+                        let _ = stdout.flush().await;
+                    }
+                    Err(RecvError::Closed) => break,
+                    Err(RecvError::Lagged(_)) => continue,
+                }
             }
         }
-    };
-
-    tokio::select! {
-        _ = wait_for_child => {}
-        _ = &mut stdin_pump => {}
-    }
-
-    drop(stdin_sender);
-    stdin_pump.abort();
-    stdout_pump.abort();
-    resize_pump.abort();
-    drop(ready);
-
-    Ok(())
+    });
+    stdout_pump
 }

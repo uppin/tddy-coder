@@ -5,7 +5,7 @@ use crate::signals::{signal_process_group, KILL, TERMINATE};
 use crate::spawn_broker::fork_broker::ChildStdio;
 use crate::spawn_broker::fork_broker::SpawnedChild;
 use crate::spawn_broker::fork_broker::StdioMode;
-use crate::spawn_broker::SpawnPlan;
+use crate::spawn_broker::spawn_plan::SpawnPlan;
 use crate::supervisor::scope_directory_of;
 use crate::supervisor::Supervisor;
 use crate::supervisor::SCOPE_REMOVAL_GRACE;
@@ -218,7 +218,7 @@ impl Supervisor {
     }
 
     /// [`Self::spawn_session`] for a plan whose output is
-    /// [`ChildOutput::CaptureStderr`](crate::spawn_broker::ChildOutput::CaptureStderr): the pid, and
+    /// [`ChildOutput::CaptureStderr`](crate::spawn_broker::spawn_plan::ChildOutput::CaptureStderr): the pid, and
     /// the read end of the session's stderr.
     pub async fn spawn_session_capturing_stderr(
         &self,
@@ -307,7 +307,7 @@ impl Supervisor {
     ///
     /// The signal goes to the session's *process group*, which reaches the descendants a session
     /// spawned for itself. That is safe precisely because every child leads its own group
-    /// ([`crate::spawn_broker::PreExecStep::LeadOwnProcessGroup`]) — a session left in the
+    /// ([`crate::spawn_broker::spawn_plan::PreExecStep::LeadOwnProcessGroup`]) — a session left in the
     /// supervisor's group would turn this into a signal to the supervisor and everything under it.
     ///
     /// Returns the session's state as of the request rather than waiting for the exit: the escalation

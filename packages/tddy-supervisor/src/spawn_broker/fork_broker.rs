@@ -4,21 +4,21 @@ use crate::spawn_broker::bind_mount;
 use crate::spawn_broker::bring_loopback_up;
 use crate::spawn_broker::change_directory;
 use crate::spawn_broker::child_environment::ChildEnvironment;
-use crate::spawn_broker::compile_bind_mount;
 use crate::spawn_broker::drop_privilege;
 use crate::spawn_broker::enter_mount_namespace;
 use crate::spawn_broker::enter_network_namespace;
 use crate::spawn_broker::enter_user_namespace;
-use crate::spawn_broker::join_cgroup_scope;
 use crate::spawn_broker::lead_own_process_group;
 use crate::spawn_broker::make_root_mount_private;
 use crate::spawn_broker::path_to_c_string;
-use crate::spawn_broker::pre_exec_plan;
+use crate::spawn_broker::process_syscalls::join_cgroup_scope;
 use crate::spawn_broker::set_parent_death_signal;
-use crate::spawn_broker::single_id_map;
-use crate::spawn_broker::ChildOutput;
-use crate::spawn_broker::PreExecStep;
-use crate::spawn_broker::SpawnPlan;
+use crate::spawn_broker::spawn_plan::compile_bind_mount;
+use crate::spawn_broker::spawn_plan::pre_exec_plan;
+use crate::spawn_broker::spawn_plan::single_id_map;
+use crate::spawn_broker::spawn_plan::ChildOutput;
+use crate::spawn_broker::spawn_plan::PreExecStep;
+use crate::spawn_broker::spawn_plan::SpawnPlan;
 use std::ffi::CString;
 use std::os::fd::RawFd;
 use std::os::unix::process::CommandExt;
@@ -142,17 +142,29 @@ fn spawn_now(
         command.pre_exec(move || steps.run());
     }
 
+    let (child, piped, stderr) = spawned_stdio(stdio, command)?;
+    Ok(SpawnedChild {
+        pid: child.id(),
+        stderr,
+        stdio: piped,
+    })
+}
+
+fn spawned_stdio(
+    stdio: StdioMode,
+    mut command: Command,
+) -> std::io::Result<(
+    std::process::Child,
+    Option<ChildStdio>,
+    Option<std::process::ChildStderr>,
+)> {
     let mut child = command.spawn()?;
     let piped = take_piped(&mut child, stdio);
     let stderr = match stdio {
         StdioMode::Plan => child.stderr.take(),
         StdioMode::Piped => None,
     };
-    Ok(SpawnedChild {
-        pid: child.id(),
-        stderr,
-        stdio: piped,
-    })
+    Ok((child, piped, stderr))
 }
 
 /// Point the child's stdio where `stdio` says: for [`StdioMode::Plan`], stdin null and the output
@@ -249,15 +261,24 @@ impl PreExecSteps {
             unsafe { hand_over_listeners(&self.handover) }?;
         }
 
-        for step in &self.steps {
-            step.execute(self.supervisor_pid)?;
-        }
+        self.execute_pre_exec_steps()?;
+        self.keep_exec_descriptor_open()
+    }
+
+    fn keep_exec_descriptor_open(&mut self) -> std::io::Result<()> {
         if let Some(descriptor) = self.exec_descriptor {
             // SAFETY: `fcntl(F_SETFD)` is async-signal-safe and touches only the flags of a
             // descriptor inherited across the fork.
             if unsafe { libc::fcntl(descriptor, libc::F_SETFD, 0) } == -1 {
                 return Err(std::io::Error::last_os_error());
             }
+        }
+        Ok(())
+    }
+
+    fn execute_pre_exec_steps(&mut self) -> std::io::Result<()> {
+        for step in &self.steps {
+            step.execute(self.supervisor_pid)?;
         }
         Ok(())
     }

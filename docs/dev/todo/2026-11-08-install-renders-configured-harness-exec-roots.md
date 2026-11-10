@@ -16,3 +16,5 @@ refused at run time (the reason only in the supervisor's log).
 Whether `./install` should resolve each harness binary the daemon's spec YAML names (as the daemon user,
 following symlinks to their targets) and render each as a single-file `exec_roots` entry — and how it learns
 which agents are configured without the supervisor naming any of them.
+
+**Deferred by the user, 2026-11-10** (#agent-tools TODO gate after the sweep #876): asked "continue the stack or defer?", the user answered "Defer". Left open for a later, separately planned node.

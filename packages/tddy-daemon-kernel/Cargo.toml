@@ -21,6 +21,9 @@ pulldown-cmark = { version = "0.13", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+# users.yaml's model and validation, shared with the other reader (`#agent-tools` 33/33). An
+# internal crate depending on serde/serde_yaml only: nothing new in Cargo.lock but itself.
+tddy-users-file = { path = "../tddy-users-file" }
 tddy-core = { path = "../tddy-core" }
 # `DaemonConfig::agent_warmup_options` answers in `tddy_discovery`'s own `WarmupOptions`, so the
 # config block and what consumes it cannot disagree about the shape.

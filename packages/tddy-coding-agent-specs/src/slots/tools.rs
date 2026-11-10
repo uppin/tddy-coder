@@ -1,6 +1,6 @@
 //! The flag slots: `tool_allow`, `tool_deny` and `permission_prompt`.
 
-use crate::FlagSlot;
+use crate::spec::slot_shapes::FlagSlot;
 
 /// `slot.flag` before each of `values`, in order: `[--allowedTools, a, --allowedTools, b]` — one
 /// flag per entry, as the hand-built launch passed them.

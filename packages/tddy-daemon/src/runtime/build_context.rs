@@ -93,22 +93,7 @@ impl BuildContext {
             telegram_inbound: telegram.inbound,
             credential_sync_publish_watch: None,
         };
-        let agent_tool_sockets = Arc::new(
-            tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(match options.host {
-                RuntimeHost::Embedded => {
-                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::Embedded
-                }
-                RuntimeHost::Binary
-                    if std::env::var_os(tddy_daemon_kernel::users_file::USERS_FILE_ENV)
-                        .is_some() =>
-                {
-                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::Supervised
-                }
-                RuntimeHost::Binary => {
-                    tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser
-                }
-            }),
-        );
+        let agent_tool_sockets = agent_tool_sockets_for_host(&options);
         Self {
             config,
             options,
@@ -206,4 +191,24 @@ impl BuildContext {
             credential_vaults: self.identity.credential_vaults,
         }
     }
+}
+
+fn agent_tool_sockets_for_host(
+    options: &RuntimeOptions,
+) -> Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets> {
+    Arc::new(
+        tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(match options.host {
+            RuntimeHost::Embedded => {
+                tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::Embedded
+            }
+            RuntimeHost::Binary
+                if std::env::var_os(tddy_daemon_kernel::users_file::USERS_FILE_ENV).is_some() =>
+            {
+                tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::Supervised
+            }
+            RuntimeHost::Binary => {
+                tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser
+            }
+        }),
+    )
 }

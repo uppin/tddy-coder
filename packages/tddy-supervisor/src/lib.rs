@@ -58,12 +58,12 @@ pub mod users_watch;
 mod test_util;
 
 pub use crate::config::spawn_policy::{ExecRoot, SpawnPolicy};
+pub use crate::config::users::UsersConfig;
 pub use authz::{Authorizer, PeerIdentity};
 pub use cgroup_broker::CgroupBroker;
 pub use client::SupervisorClient;
 pub use config::{
     CgroupPolicy, HostSocket, ManagedService, RestartPolicy, SocketConfig, SupervisorConfig,
-    UsersConfig,
 };
 pub use error::{ConfigError, SupervisorError};
 pub use request::{
@@ -90,9 +90,9 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
     // Signal streams first: a service that dies the instant it is exec'd would otherwise raise its
     // `SIGCHLD` before anything was listening for it, and the supervisor would wait forever for a
     // notification it had already missed.
-    let mut child_exited = signal(SignalKind::child())?;
-    let mut terminate = signal(SignalKind::terminate())?;
-    let mut interrupt = signal(SignalKind::interrupt())?;
+    let child_exited = signal(SignalKind::child())?;
+    let terminate = signal(SignalKind::terminate())?;
+    let interrupt = signal(SignalKind::interrupt())?;
 
     // Every fork in the process goes through this one thread, and it must outlive every child it
     // creates — see `spawn_broker::fork_broker::ForkBroker`.
@@ -118,15 +118,33 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
     // orphaned services behind.
     let listener = crate::server::listener::bind_privileged_listener(&config.socket)?;
 
+    let (reaper, _users_watch) = start_reaper_and_users_watch(child_exited, &supervisor)?;
+
+    supervisor.start_declared_services().await;
+    let server = tokio::spawn(crate::server::listener::serve(
+        listener,
+        Arc::clone(&surface),
+    ));
+
+    wait_for_shutdown_and_stop(config, terminate, interrupt, supervisor, reaper, server).await;
+    Ok(())
+}
+
+fn start_reaper_and_users_watch(
+    mut child_exited: tokio::signal::unix::Signal,
+    supervisor: &Arc<Supervisor>,
+) -> anyhow::Result<(
+    tokio::task::JoinHandle<()>,
+    Option<crate::users_watch::UsersWatch>,
+)> {
     let reaper = tokio::spawn({
-        let supervisor = Arc::clone(&supervisor);
+        let supervisor = Arc::clone(supervisor);
         async move {
             while child_exited.recv().await.is_some() {
                 supervisor.reap().await;
             }
         }
     });
-
     // Watch users.yaml before the first service starts, so a save during startup is not missed:
     // a valid edit rebuilds the per-user sockets and restarts the services that serve users, an
     // invalid one is refused and the running mapping kept.
@@ -164,20 +182,24 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
             &users_file,
             supervisor.current_users(),
             Arc::new(SupervisorUsersSink {
-                supervisor: Arc::clone(&supervisor),
+                supervisor: Arc::clone(supervisor),
                 handle: tokio::runtime::Handle::current(),
                 applying: Arc::new(tokio::sync::Mutex::new(())),
             }),
         )?),
         None => None,
     };
+    Ok((reaper, _users_watch))
+}
 
-    supervisor.start_declared_services().await;
-    let server = tokio::spawn(crate::server::listener::serve(
-        listener,
-        Arc::clone(&surface),
-    ));
-
+async fn wait_for_shutdown_and_stop(
+    config: Arc<SupervisorConfig>,
+    mut terminate: tokio::signal::unix::Signal,
+    mut interrupt: tokio::signal::unix::Signal,
+    supervisor: Arc<Supervisor>,
+    reaper: tokio::task::JoinHandle<()>,
+    server: tokio::task::JoinHandle<()>,
+) {
     tokio::select! {
         _ = terminate.recv() => log::info!(target: "tddy_supervisor", "SIGTERM received"),
         _ = interrupt.recv() => log::info!(target: "tddy_supervisor", "SIGINT received"),
@@ -190,5 +212,4 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
         .shutdown(Duration::from_secs(config.shutdown_grace_secs))
         .await;
     reaper.abort();
-    Ok(())
 }

@@ -27,7 +27,7 @@ pub(super) fn route_child_env(route: &HarnessRoute) -> impl Iterator<Item = (&st
 /// The route's arguments as `codex-acp` takes them. It accepts `-c key=value` overrides, as `codex`
 /// does, but has no `-m`: its model is the `model` override, so `-m <model>` becomes
 /// `-c model="<model>"`. Any other argument passes through unchanged.
-pub fn codex_acp_route_args(route: &HarnessRoute) -> Vec<String> {
+pub fn toml_route_overrides(route: &HarnessRoute) -> Vec<String> {
     let mut out = Vec::with_capacity(route.args.len());
     let mut args = route.args.iter();
     while let Some(arg) = args.next() {
@@ -67,7 +67,7 @@ mod tests {
         };
 
         // When
-        let args = codex_acp_route_args(&route);
+        let args = toml_route_overrides(&route);
 
         // Then codex-acp, which has no `-m`, is given the same model as a `-c` override
         assert_eq!(

@@ -135,32 +135,10 @@ impl TerminalManager {
             .stdin_sender()
             .ok_or_else(|| anyhow::anyhow!("PTY channel missing stdin"))?;
 
-        let (pty_done_tx, pty_done_rx) = watch::channel(false);
-        let mut status_rx = task.status_watch();
-        tokio::spawn(async move {
-            loop {
-                if status_rx.borrow().is_terminal() {
-                    let _ = pty_done_tx.send(true);
-                    break;
-                }
-                if status_rx.changed().await.is_err() {
-                    break;
-                }
-            }
-        });
+        let pty_done_rx = spawn_terminal_done_watch(&task);
 
-        let handle = Arc::new(PtyHandle {
-            terminal_id: terminal_id.clone(),
-            kind: "bash".to_string(),
-            pid: ready.pid,
-            stdin_tx,
-            stdout_tx: channel.output_broadcast(),
-            capture: channel.capture_arc(),
-            pty_done: pty_done_rx,
-            task_id: task.id.clone(),
-            pty_registry: self.pty_registry.clone(),
-            channel,
-        });
+        let handle =
+            self.build_terminal_handle(&terminal_id, &task, ready, channel, stdin_tx, pty_done_rx);
 
         self.terminals
             .write()
@@ -178,6 +156,29 @@ impl TerminalManager {
         );
 
         Ok(handle)
+    }
+
+    fn build_terminal_handle(
+        &self,
+        terminal_id: &str,
+        task: &Arc<tddy_task::TaskHandle>,
+        ready: tddy_pty::PtyReady,
+        channel: Arc<TaskChannel>,
+        stdin_tx: mpsc::UnboundedSender<Bytes>,
+        pty_done_rx: watch::Receiver<bool>,
+    ) -> Arc<PtyHandle> {
+        Arc::new(PtyHandle {
+            terminal_id: terminal_id.to_owned(),
+            kind: "bash".to_string(),
+            pid: ready.pid,
+            stdin_tx,
+            stdout_tx: channel.output_broadcast(),
+            capture: channel.capture_arc(),
+            pty_done: pty_done_rx,
+            task_id: task.id.clone(),
+            pty_registry: self.pty_registry.clone(),
+            channel,
+        })
     }
 
     /// Look up a started terminal by id.
@@ -227,6 +228,23 @@ impl TerminalManager {
             }
         });
     }
+}
+
+fn spawn_terminal_done_watch(task: &Arc<tddy_task::TaskHandle>) -> watch::Receiver<bool> {
+    let (pty_done_tx, pty_done_rx) = watch::channel(false);
+    let mut status_rx = task.status_watch();
+    tokio::spawn(async move {
+        loop {
+            if status_rx.borrow().is_terminal() {
+                let _ = pty_done_tx.send(true);
+                break;
+            }
+            if status_rx.changed().await.is_err() {
+                break;
+            }
+        }
+    });
+    pty_done_rx
 }
 
 /// Resolve the interactive login shell for the coder's own user.

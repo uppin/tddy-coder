@@ -68,12 +68,30 @@ impl UsersFileSource {
 /// and others, and yields a holder that refuses enrolment
 /// ([`LiveUsers::owned_by_supervisor`]).
 pub fn load_users_file(source: &UsersFileSource) -> anyhow::Result<LiveUsers> {
-    use std::os::unix::fs::MetadataExt;
-
     let path = source.path();
     let contents = std::fs::read_to_string(path).map_err(|error| {
         anyhow::anyhow!("could not read users.yaml at {}: {error}", path.display())
     })?;
+    require_root_owned_users_file(source, path)?;
+    let mapping = tddy_users_file::UsersMapping::from_yaml(&contents)
+        .map_err(|refusal| anyhow::anyhow!("users.yaml at {}: {refusal}", path.display()))?;
+    let rows: Vec<crate::config::access::UserMapping> = mapping
+        .distinct_rows()
+        .into_iter()
+        .map(|row| crate::config::access::UserMapping {
+            github_user: row.github_user,
+            os_user: row.os_user,
+        })
+        .collect();
+    Ok(match source {
+        UsersFileSource::HandedBySupervisor(_) => LiveUsers::owned_by_supervisor(rows),
+        UsersFileSource::BesideConfig(_) => LiveUsers::new(rows),
+    })
+}
+
+fn require_root_owned_users_file(source: &UsersFileSource, path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
     if let UsersFileSource::HandedBySupervisor(_) = source {
         let metadata = std::fs::metadata(path)
             .map_err(|error| anyhow::anyhow!("users.yaml at {}: {error}", path.display()))?;
@@ -87,46 +105,7 @@ pub fn load_users_file(source: &UsersFileSource) -> anyhow::Result<LiveUsers> {
             );
         }
     }
-    let rows: Vec<crate::config::access::UserMapping> = if contents.trim().is_empty() {
-        Vec::new()
-    } else {
-        serde_yaml::from_str(&contents)
-            .map_err(|error| anyhow::anyhow!("users.yaml at {}: {error}", path.display()))?
-    };
-    let mut by_login: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
-    for row in &rows {
-        if row.os_user == "root" {
-            anyhow::bail!(
-                "users.yaml at {} maps a login to `root`, which is refused",
-                path.display()
-            );
-        }
-        match by_login.entry(row.github_user.as_str()) {
-            std::collections::btree_map::Entry::Vacant(entry) => {
-                entry.insert(row.os_user.as_str());
-            }
-            std::collections::btree_map::Entry::Occupied(entry) => {
-                if *entry.get() != row.os_user {
-                    anyhow::bail!(
-                        "users.yaml at {} maps github_user `{}` to two OS users; which one its \
-                         sessions run as is ambiguous",
-                        path.display(),
-                        row.github_user
-                    );
-                }
-            }
-        }
-    }
-    // An identical row repeated is one mapping, as the in-memory deserialization always read it.
-    let mut seen: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
-    let rows: Vec<crate::config::access::UserMapping> = rows
-        .into_iter()
-        .filter(|row| seen.insert((row.github_user.clone(), row.os_user.clone())))
-        .collect();
-    Ok(match source {
-        UsersFileSource::HandedBySupervisor(_) => LiveUsers::owned_by_supervisor(rows),
-        UsersFileSource::BesideConfig(_) => LiveUsers::new(rows),
-    })
+    Ok(())
 }
 
 #[cfg(test)]
@@ -245,6 +224,58 @@ mod tests {
         assert!(
             format!("{refusal:#}").contains("users.yaml"),
             "got {refusal:#}"
+        );
+    }
+
+    // `#agent-tools` 33/33 (the sweep): the daemon validates users.yaml through `tddy-users-file`,
+    // the same checks the supervisor makes, so a mapping one reader refuses the other refuses too.
+
+    fn the_refusal_of_a_desktop_mapping(rows: &str) -> String {
+        let deployment = ADeployment::with_daemon_yaml().mapping(rows);
+        let refusal = load_users_file(&UsersFileSource::BesideConfig(deployment.users_yaml()))
+            .expect_err("the mapping must be refused");
+        format!("{refusal:#}")
+    }
+
+    #[test]
+    fn a_daemon_refuses_a_users_yaml_whose_os_user_cannot_name_a_socket() {
+        // Given / When
+        let refusal =
+            the_refusal_of_a_desktop_mapping("- {github_user: operator, os_user: '../a:b'}\n");
+
+        // Then
+        assert!(
+            refusal.contains("users.yaml") && refusal.contains("../a:b"),
+            "got {refusal}"
+        );
+    }
+
+    #[test]
+    fn a_daemon_refuses_a_users_yaml_naming_more_os_users_than_the_supervisor_can_hand_over() {
+        // Given sixteen distinct OS users
+        let rows: String = (0..16)
+            .map(|n| format!("- {{github_user: login{n}, os_user: u{n}}}\n"))
+            .collect();
+
+        // When
+        let refusal = the_refusal_of_a_desktop_mapping(&rows);
+
+        // Then
+        assert!(
+            refusal.contains("users.yaml") && refusal.contains("15"),
+            "got {refusal}"
+        );
+    }
+
+    #[test]
+    fn a_daemon_refuses_a_users_yaml_row_that_names_no_github_user() {
+        // Given / When
+        let refusal = the_refusal_of_a_desktop_mapping("- {github_user: '', os_user: ops}\n");
+
+        // Then
+        assert!(
+            refusal.contains("users.yaml") && refusal.contains("github_user"),
+            "got {refusal}"
         );
     }
 }

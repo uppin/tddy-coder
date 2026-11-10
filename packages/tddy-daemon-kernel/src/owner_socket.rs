@@ -28,25 +28,20 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
 
-/// Which kind of per-OS-user socket is being bound or adopted: how a refusal names it and the
-/// `supervisor.yaml` setting that would have had the supervisor create it instead.
+/// Which kind of per-OS-user socket is being bound or adopted: how a refusal names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OwnerSocketKind {
-    /// The service's `supervisor.yaml` key listing the users the supervisor creates one for.
-    pub setting: &'static str,
     /// The socket, as a refusal names it.
     pub noun: &'static str,
 }
 
 impl OwnerSocketKind {
-    /// The host-session socket (`host_sockets:`).
+    /// The host-session socket.
     pub const HOST_SESSION: OwnerSocketKind = OwnerSocketKind {
-        setting: "host_sockets",
         noun: "host-session socket",
     };
     /// A mapped user's one daemon socket (`users.yaml`, `#agent-tools` 31/32).
     pub const USER_DAEMON: OwnerSocketKind = OwnerSocketKind {
-        setting: "users.yaml",
         noun: "daemon socket",
     };
 }
@@ -87,6 +82,25 @@ pub fn descriptors_named(
         .collect()
 }
 
+/// Why this daemon cannot hand `os_user` (uid `target_uid`) the `kind` socket it bound: it is not
+/// privileged to `chown`, as when it runs as `tddy-supervisor`'s unprivileged child. The remedy is the
+/// same for every kind — map the user in `users.yaml`, so the supervisor creates the socket — and it
+/// names no `supervisor.yaml` key (`#agent-tools` 33/33: `host_sockets:` is a load error since #859).
+pub fn not_privileged_to_hand_over(
+    kind: OwnerSocketKind,
+    euid: u32,
+    os_user: &str,
+    target_uid: u32,
+) -> String {
+    format!(
+        "this daemon (uid {euid}) is not privileged to hand the socket to {os_user} \
+         (uid {target_uid}) — as when it runs as tddy-supervisor's unprivileged child, which \
+         cannot chown. Under the supervisor, map {os_user} in users.yaml: the supervisor then \
+         creates their {} and hands it over. Until then a session of that user gets no {}",
+        kind.noun, kind.noun
+    )
+}
+
 /// Bind `path` for `os_user` with no window in which anyone else can reach it. See the module docs.
 pub fn bind_owner_only(
     path: &Path,
@@ -96,16 +110,7 @@ pub fn bind_owner_only(
     let target = crate::privilege_drop::resolve_pty_os_user(os_user).map_err(anyhow::Error::msg)?;
     let euid = unsafe { libc::geteuid() };
     let needs_chown = target.uid != euid;
-    let user_dir = path.parent().context("socket path has no directory")?;
-    let run_dir = user_dir
-        .parent()
-        .context("socket path has no run directory")?;
-    let data_dir = run_dir
-        .parent()
-        .context("socket path has no data directory")?;
-    if !data_dir.is_dir() {
-        bail!("data dir {} does not exist", data_dir.display());
-    }
+    let (user_dir, run_dir) = socket_parent_dirs(path)?;
 
     // Traversable but not listable by others: the user reaches its own subdirectory through it.
     let created_run = ensure_dir(run_dir, 0o711, &[euid, target.uid], false)?;
@@ -126,26 +131,7 @@ pub fn bind_owner_only(
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
             .context("restrict the socket to its owner")?;
         if needs_chown {
-            let not_privileged = || {
-                if kind == OwnerSocketKind::USER_DAEMON {
-                    return format!(
-                        "this daemon (uid {euid}) is not privileged to hand the socket to \
-                         {os_user} (uid {}) — as when it runs as tddy-supervisor's unprivileged \
-                         child, which cannot chown. Under the supervisor, map {os_user} in \
-                         users.yaml: the supervisor then creates their daemon socket and hands \
-                         it over. Until then a session of that user gets no {}",
-                        target.uid, kind.noun
-                    );
-                }
-                format!(
-                    "this daemon (uid {euid}) is not privileged to hand the socket to {os_user} \
-                     (uid {}) — as when it runs as tddy-supervisor's unprivileged child, which \
-                     cannot chown. Under the supervisor, list {os_user} under `{}:` for \
-                     this daemon's service in supervisor.yaml: the supervisor then creates their \
-                     socket and hands it over. Until then a session of that user gets no {}",
-                    target.uid, kind.setting, kind.noun
-                )
-            };
+            let not_privileged = || not_privileged_to_hand_over(kind, euid, os_user, target.uid);
             chown(path, target.uid, target.gid).with_context(not_privileged)?;
             chown(user_dir, target.uid, target.gid).with_context(not_privileged)?;
         }
@@ -161,6 +147,20 @@ pub fn bind_owner_only(
         )));
     }
     Ok(listener)
+}
+
+fn socket_parent_dirs(path: &Path) -> anyhow::Result<(&Path, &Path)> {
+    let user_dir = path.parent().context("socket path has no directory")?;
+    let run_dir = user_dir
+        .parent()
+        .context("socket path has no run directory")?;
+    let data_dir = run_dir
+        .parent()
+        .context("socket path has no data directory")?;
+    if !data_dir.is_dir() {
+        bail!("data dir {} does not exist", data_dir.display());
+    }
+    Ok((user_dir, run_dir))
 }
 
 /// Remove what a failed bind created, so a refusal leaves nothing a later start could trust.
@@ -375,4 +375,36 @@ pub fn require_listening(listener: &UnixListener) -> Result<(), String> {
 #[cfg(not(target_os = "linux"))]
 pub fn require_listening(_listener: &UnixListener) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_refusal_to_hand_over_a_host_session_socket_names_users_yaml_and_no_supervisor_key() {
+        // Given / When the embedded host's bind of alice's host-session socket cannot chown
+        let refusal =
+            not_privileged_to_hand_over(OwnerSocketKind::HOST_SESSION, 990, "alice", 1001);
+
+        // Then it points the operator at users.yaml, never at a key supervisor.yaml refuses
+        assert!(
+            refusal.contains("users.yaml")
+                && refusal.contains("alice")
+                && !refusal.contains("host_sockets")
+                && !refusal.contains("supervisor.yaml"),
+            "got {refusal}"
+        );
+    }
+
+    #[test]
+    fn both_socket_kinds_give_the_same_remedy() {
+        // Given / When
+        let remedies = [OwnerSocketKind::HOST_SESSION, OwnerSocketKind::USER_DAEMON].map(|kind| {
+            not_privileged_to_hand_over(kind, 990, "alice", 1001).replace(kind.noun, "<socket>")
+        });
+
+        // Then
+        assert_eq!(remedies[0], remedies[1]);
+    }
 }

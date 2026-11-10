@@ -4,6 +4,8 @@
 //! tool paths, mount roots and resource ceilings are all decided here, by root, at load time.
 
 pub(crate) mod spawn_policy;
+pub(crate) mod trust;
+pub(crate) mod users;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -11,6 +13,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::config::spawn_policy::SpawnPolicy;
+use crate::config::trust::require_trustworthy_config_directory;
+use crate::config::trust::require_trustworthy_config_file;
+use crate::config::users::refuse_old_user_list_keys;
+use crate::config::users::UsersConfig;
 use crate::error::ConfigError;
 
 /// The one OS user the supervisor never spawns anything as, in any capacity.
@@ -43,23 +49,6 @@ pub struct SupervisorConfig {
     /// [`serves_users`](ManagedService::serves_users).
     #[serde(default)]
     pub users: Option<UsersConfig>,
-}
-
-/// `users:` in `supervisor.yaml`: the mapping file and the directory its sockets are derived under.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct UsersConfig {
-    /// Absolute path of `users.yaml` (`/etc/tddy/users.yaml`). Watched; a change restarts the
-    /// services that serve users.
-    pub file: PathBuf,
-    /// Absolute directory holding one `<os user>/daemon.sock` per mapped OS user. Every directory
-    /// above it must be writable by root alone.
-    #[serde(default = "default_user_sockets_dir")]
-    pub sockets_dir: PathBuf,
-}
-
-fn default_user_sockets_dir() -> PathBuf {
-    PathBuf::from("/run/tddy-users")
 }
 
 fn default_shutdown_grace_secs() -> u64 {
@@ -245,40 +234,6 @@ impl ServiceSocket {
     }
 }
 
-/// Refuse the hand-kept user lists `users.yaml` replaces, naming that file (`#agent-tools` 31/32).
-///
-/// Checked on the untyped document, before typed deserialization, so a leftover key is told it is
-/// obsolete rather than getting serde's bare `unknown field`.
-fn refuse_old_user_list_keys(document: &serde_yaml::Value) -> Result<(), ConfigError> {
-    let Some(top) = document.as_mapping() else {
-        return Ok(());
-    };
-    let old_key = |key: &str| ConfigError {
-        message: format!(
-            "`{key}:` in supervisor.yaml is obsolete — the GitHub → OS-user mapping lives in \
-             users.yaml now (see the top-level `users:` block); delete the `{key}:` key"
-        ),
-    };
-    if let Some(policy) = top.get("spawn_policy").and_then(|v| v.as_mapping()) {
-        if policy.contains_key("allowed_session_users") {
-            return Err(old_key("allowed_session_users"));
-        }
-    }
-    if let Some(services) = top.get("services").and_then(|v| v.as_sequence()) {
-        for service in services {
-            let Some(service) = service.as_mapping() else {
-                continue;
-            };
-            for key in ["host_sockets", "agent_tool_sockets"] {
-                if service.contains_key(key) {
-                    return Err(old_key(key));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 impl SupervisorConfig {
     /// Read and validate the configuration at `path`, refusing one anybody else could have written.
     ///
@@ -409,85 +364,6 @@ impl SupervisorConfig {
     }
 }
 
-/// Refuse a policy file that somebody other than the supervisor's own identity could have written.
-///
-/// "Owned by uid 0 **or** by the supervisor's own effective uid" is one rule, not a concession: on a
-/// host the supervisor runs as root, both halves are uid 0, and the rule reads "root-owned". Run
-/// unprivileged — a developer, or the acceptance suite driving the real binary — it reads "owned by
-/// whoever is enforcing it", which is the same statement about the same trust relationship. What it
-/// never permits is a policy file authored by a *third* party, which is the only case that matters.
-pub(crate) fn require_trustworthy_config_file(
-    path: &Path,
-    metadata: &std::fs::Metadata,
-) -> Result<(), ConfigError> {
-    use std::os::unix::fs::MetadataExt;
-
-    // SAFETY: reads this process's own effective uid and nothing else.
-    let enforcing_uid = unsafe { libc::geteuid() };
-    if metadata.uid() != ROOT_UID && metadata.uid() != enforcing_uid {
-        return Err(ConfigError {
-            message: format!(
-                "{} is owned by uid {} but only uid {ROOT_UID} or uid {enforcing_uid} may write the \
-                 policy this supervisor enforces",
-                path.display(),
-                metadata.uid()
-            ),
-        });
-    }
-    if metadata.mode() & GROUP_OR_OTHER_WRITE != 0 {
-        return Err(ConfigError {
-            message: format!(
-                "{} is writable by its group or by everyone (mode {:o}); anyone who can write it \
-                 chooses what the supervisor permits",
-                path.display(),
-                metadata.mode() & 0o7777
-            ),
-        });
-    }
-    Ok(())
-}
-
-/// Refuse a directory on the way to the policy file that a third party could write.
-///
-/// Group- or world-writable is refused *unless* the sticky bit is set, and that exception is the
-/// kernel's own rule rather than a loophole: in a sticky directory only the owner of an entry may
-/// rename or unlink it, so `/tmp` being `1777` does not let anybody replace somebody else's file.
-/// A `/etc/tddy` left at `0777` has no such protection, and that is precisely the case being caught.
-pub(crate) fn require_trustworthy_config_directory(
-    path: &Path,
-    metadata: &std::fs::Metadata,
-) -> Result<(), ConfigError> {
-    use std::os::unix::fs::MetadataExt;
-
-    // SAFETY: reads this process's own effective uid and nothing else.
-    let enforcing_uid = unsafe { libc::geteuid() };
-    if metadata.uid() != ROOT_UID && metadata.uid() != enforcing_uid {
-        return Err(ConfigError {
-            message: format!(
-                "{} is owned by uid {}, so uid {} could replace the supervisor's policy file",
-                path.display(),
-                metadata.uid(),
-                metadata.uid()
-            ),
-        });
-    }
-    let sticky = metadata.mode() & 0o1000 != 0;
-    if metadata.mode() & GROUP_OR_OTHER_WRITE != 0 && !sticky {
-        return Err(ConfigError {
-            message: format!(
-                "{} is writable by its group or by everyone (mode {:o}) and is not sticky, so the \
-                 supervisor's policy file could be replaced",
-                path.display(),
-                metadata.mode() & 0o7777
-            ),
-        });
-    }
-    Ok(())
-}
-
-/// The two write bits that decide whether anybody but the owner can change something.
-const GROUP_OR_OTHER_WRITE: u32 = 0o022;
-
 /// A relative path in this config is never usable: it would resolve against whatever directory
 /// systemd happened to start the supervisor in, so an allowlist entry would be a silently dead
 /// grant rather than a working one.
@@ -505,6 +381,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+    use crate::config::users::UsersConfig;
 
     /// The smallest config that should load: a socket and nothing else.
     fn a_minimal_config() -> &'static str {

@@ -221,8 +221,8 @@ fn asks_for_no_environment_at_all_so_an_empty_env_policy_still_permits_the_spawn
         no_path_extra,
     );
 
-    // Then nothing is named that `allowed_env_keys` would have to list — the shipped policy grants
-    // no keys, and a request naming one it does not list is refused outright rather than stripped.
+    // Then no environment is named — the spawn's environment passes whole except loader
+    // variables, so there is nothing to list.
     assert!(
         request.env.is_empty(),
         "an unremarkable session spawn must name no environment variable, got: {:?}",
@@ -244,8 +244,8 @@ fn asks_for_the_path_prefix_a_users_spawn_path_extra_declares() {
         path_extra,
     );
 
-    // Then PATH is the one variable asked for — which an operator must list in
-    // `allowed_env_keys`, or the supervisor refuses the spawn rather than dropping the prefix.
+    // Then PATH is the one variable asked for — the spawn's environment passes whole except
+    // loader variables, so no listing admits it.
     assert_eq!(
         request.env.keys().collect::<Vec<_>>(),
         vec!["PATH"],
@@ -281,8 +281,7 @@ fn asks_for_the_commit_identity_variables_a_session_is_spawned_with_and_nothing_
     // When the supervisor is asked to run it under her identity
     let request = supervisor_spawn::with_commit_identity(request, &identity);
 
-    // Then the four pairs are the whole environment named — which an operator must list in
-    // `allowed_env_keys`, and which carries no token
+    // Then the four pairs are the whole environment named, and it carries no token
     assert_eq!(
         request.env,
         std::collections::BTreeMap::from([

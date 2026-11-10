@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use super::SlotError;
-use crate::InstructionsSlot;
+use crate::spec::slot_shapes::InstructionsSlot;
 
 /// Each of `slot.files` that exists under `workdir`, with `preamble` prepended — once: a file that
 /// already leads with it is returned unchanged, so a re-run is idempotent.

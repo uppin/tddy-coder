@@ -31,7 +31,11 @@ use crate::request::{
 use crate::server::rpc::SupervisorServiceImpl;
 use crate::spawn_broker::accounts;
 use crate::spawn_broker::accounts::TargetUser;
-use crate::spawn_broker::{ChildOutput, EnvironmentBase, JailMount, SandboxJail, SpawnPlan};
+use crate::spawn_broker::spawn_plan::ChildOutput;
+use crate::spawn_broker::spawn_plan::EnvironmentBase;
+use crate::spawn_broker::spawn_plan::JailMount;
+use crate::spawn_broker::spawn_plan::SandboxJail;
+use crate::spawn_broker::spawn_plan::SpawnPlan;
 use crate::streamed::StreamedEvents;
 use crate::supervisor::Supervisor;
 
@@ -184,10 +188,7 @@ impl PrivilegedSurface {
         } = policy::resolve_spawn_env(kind, env)?;
         let os_user =
             policy::resolve_mapped_session_user(&self.supervisor.current_users(), os_user)?;
-        let scope_procs = scope
-            .map(|scope| self.cgroups.scope_procs_path(scope))
-            .transpose()?;
-        let target = resolve_account(&os_user)?;
+        let (scope_procs, target) = self.resolve_scope_and_target(scope, &os_user)?;
 
         Ok(ResolvedSpawn {
             os_user,
@@ -200,6 +201,18 @@ impl PrivilegedSurface {
             scope_procs,
             environment,
         })
+    }
+
+    fn resolve_scope_and_target(
+        &self,
+        scope: Option<&str>,
+        os_user: &str,
+    ) -> Result<(Option<PathBuf>, TargetUser), SupervisorError> {
+        let scope_procs = scope
+            .map(|scope| self.cgroups.scope_procs_path(scope))
+            .transpose()?;
+        let target = resolve_account(os_user)?;
+        Ok((scope_procs, target))
     }
 
     /// Run a binary as an OS user the mapping names, streaming its stderr — see [`crate::streamed`].

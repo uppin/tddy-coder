@@ -21,6 +21,25 @@ use std::path::Path;
 
 use tddy_actions::tool::{ToolError, ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN_TOOLS};
 
+pub use crate::spec::acp::package_runner;
+pub use crate::spec::acp::AcpCommandError;
+pub use crate::spec::acp::AcpSection;
+pub use crate::spec::argv::CuratedModel;
+pub use crate::spec::argv::ModelsSection;
+pub use crate::spec::headless_section::HeadlessPermissionPolicy;
+pub use crate::spec::headless_section::HeadlessSection;
+pub use crate::spec::route_slot::routed_agent;
+pub use crate::spec::route_slot::Placement;
+pub use crate::spec::route_slot::PlacementError;
+pub use crate::spec::route_slot::ResumeSlot;
+pub use crate::spec::route_slot::RouteSlot;
+pub use crate::spec::slot_shapes::FlagSlot;
+pub use crate::spec::slot_shapes::HooksSlot;
+pub use crate::spec::slot_shapes::InstructionsSlot;
+pub use crate::spec::slot_shapes::McpFormat;
+pub use crate::spec::slot_shapes::McpSlot;
+pub use crate::spec::slot_shapes::ToolSlot;
+pub use crate::spec::slot_shapes::Unsupported;
 pub use agent_env_base::{
     AgentEnvBase, AgentEnvBaseError, AGENT_ENV_BASE_EMBEDDED_PATH, AGENT_ENV_BASE_OVERRIDE,
     AGENT_ENV_BASE_YAML,
@@ -29,11 +48,8 @@ pub use capability::Capability;
 pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
 pub use route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
 pub use spec::{
-    package_runner, routed_agent, AcpCommandError, AcpSection, AgentVariant, CodingAgentExtension,
-    CodingAgentSection, CodingAgentSpec, CuratedModel, FlagSlot, HeadlessPermissionPolicy,
-    HeadlessSection, HooksSlot, InstructionsSlot, McpFormat, McpSlot, ModelsSection, Placement,
-    PlacementError, ResumeSlot, RouteSlot, SpecError, ToolSlot, Unsupported, VariantError,
-    CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
+    AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec, SpecError,
+    VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
 };
 
 /// `specs/cursor.yaml` (`#agent-tools 7/12`), embedded.

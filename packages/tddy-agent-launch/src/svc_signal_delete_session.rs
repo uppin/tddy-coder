@@ -93,16 +93,7 @@ impl LaunchSessions {
         session_id: &str,
         session_token: &str,
     ) -> Result<Response<DeleteSessionResponse>, Status> {
-        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
-            os_user,
-            Some(&self.tddy_data_dir),
-        )
-        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        log::debug!(
-            "DeleteSession: resolved sessions_base={:?} for os_user={}",
-            sessions_base,
-            os_user
-        );
+        let sessions_base = self.sessions_base_for_delete(os_user)?;
         // Every part a peer holds is checked before anything here is torn down: a delete one of
         // them would refuse is refused with the session and its agent still running.
         self.refuse_a_delete_a_peer_would_refuse(&sessions_base, session_id)
@@ -118,14 +109,7 @@ impl LaunchSessions {
         .await?;
         // A worktree kept after the delete (`keep_worktree_on_delete`) must not keep pointing a
         // shell-run `tddy-tools` at a session that is gone.
-        let session_dir = unified_session_dir_path(&sessions_base, session_id);
-        if let Err(e) = tokio::task::spawn_blocking(move || {
-            remove_recorded_session_pointer(&session_dir, Path::new("ssh"))
-        })
-        .await
-        {
-            log::warn!("the session pointer's removal did not finish: {e}");
-        }
+        remove_session_pointer(session_id, &sessions_base).await;
         let projects_dir_opt = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
         // A split session's worktree lives on another daemon, which must lose it first: deleting
         // this side alone would leave a checkout on a host with no session left to reclaim it. A
@@ -144,6 +128,33 @@ impl LaunchSessions {
         // after the delete must be refused, and `revoke_all_for_session` is the bulk revocation
         // that does it. (Per-daemon revocation on the last detach is in `tear_down_agent_clone`;
         // this is the session-wide sweep that catches admissions whose clones were already gone.)
+        self.forget_session_state(session_id).await;
+        session_deletion::close_session_room(&*self.session_rooms, session_id);
+        session_deletion::delete_session_directory(
+            &sessions_base,
+            session_id,
+            projects_dir_opt.as_deref(),
+            Some(self.coding_agents.agents()),
+        )?;
+        log::info!("DeleteSession: successfully removed session {}", session_id);
+        Ok(Response::new(DeleteSessionResponse { ok: true }))
+    }
+
+    fn sessions_base_for_delete(&self, os_user: &str) -> Result<std::path::PathBuf, Status> {
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        log::debug!(
+            "DeleteSession: resolved sessions_base={:?} for os_user={}",
+            sessions_base,
+            os_user
+        );
+        Ok(sessions_base)
+    }
+
+    async fn forget_session_state(&self, session_id: &str) {
         let revoked = self.session_admissions.revoke_all_for_session(session_id);
         if revoked > 0 {
             log::info!("revoked {revoked} admission(s) for session {session_id} on session delete");
@@ -171,15 +182,6 @@ impl LaunchSessions {
         if let Some(jail) = self.workspace_sandboxes.remove(session_id).await {
             jail.stop();
         }
-        session_deletion::close_session_room(&*self.session_rooms, session_id);
-        session_deletion::delete_session_directory(
-            &sessions_base,
-            session_id,
-            projects_dir_opt.as_deref(),
-            Some(self.coding_agents.agents()),
-        )?;
-        log::info!("DeleteSession: successfully removed session {}", session_id);
-        Ok(Response::new(DeleteSessionResponse { ok: true }))
     }
 
     /// Refuses a delete of `session_id` that one of its peer-held parts would refuse, before
@@ -200,6 +202,17 @@ impl LaunchSessions {
             .refuse_an_unreachable_clone_host(session_id)
             .await?;
         Ok(())
+    }
+}
+
+async fn remove_session_pointer(session_id: &str, sessions_base: &std::path::Path) {
+    let session_dir = unified_session_dir_path(sessions_base, session_id);
+    if let Err(e) = tokio::task::spawn_blocking(move || {
+        remove_recorded_session_pointer(&session_dir, Path::new("ssh"))
+    })
+    .await
+    {
+        log::warn!("the session pointer's removal did not finish: {e}");
     }
 }
 

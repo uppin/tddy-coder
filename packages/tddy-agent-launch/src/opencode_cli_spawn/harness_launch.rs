@@ -113,11 +113,7 @@ pub(super) async fn launch(
     if run.in_tmux {
         let plan = plan_host_pty(agent, params, slots).map_err(failed)?;
         let env: Vec<(String, String)> = plan.env.into_iter().chain(env).collect();
-        let env = without_the_panes_terminal_variables(agent.env_base.agent_env(
-            &agent.spec,
-            std::env::vars_os(),
-            &env,
-        ));
+        let env = pane_agent_env(agent, env);
         let tmux_launch = crate::cli_harness_tmux::HarnessTmuxLaunch {
             os_user,
             session_id,
@@ -128,11 +124,7 @@ pub(super) async fn launch(
             env,
             on_exit,
         };
-        let launched = if run.resume {
-            crate::cli_harness_tmux::resume_harness_in_tmux(cli_manager, tmux_launch).await?
-        } else {
-            crate::cli_harness_tmux::start_harness_in_tmux(cli_manager, tmux_launch).await?
-        };
+        let launched = start_or_resume_in_tmux(cli_manager, run, tmux_launch).await?;
         return Ok(LaunchedHarness {
             pid: launched.pane_pid,
             tmux_session: Some(launched.tmux_session),
@@ -143,14 +135,7 @@ pub(super) async fn launch(
         params,
         slots,
         worktree_path,
-        HostPtySession {
-            manager: cli_manager,
-            session_id,
-            session_type: kind,
-            model,
-            env,
-            os_user: Some(os_user),
-        },
+        host_pty_session(cli_manager, session_id, os_user, kind, model, env),
         on_exit,
     )
     .await
@@ -159,4 +144,43 @@ pub(super) async fn launch(
         pid: handle.pid,
         tmux_session: None,
     })
+}
+
+fn host_pty_session<'a>(
+    cli_manager: &'a Arc<CliSessionManager>,
+    session_id: &'a str,
+    os_user: &'a str,
+    kind: &'a str,
+    model: &'a str,
+    env: Vec<(String, String)>,
+) -> HostPtySession<'a> {
+    HostPtySession {
+        manager: cli_manager,
+        session_id,
+        session_type: kind,
+        model,
+        env,
+        os_user: Some(os_user),
+    }
+}
+
+fn pane_agent_env(agent: &HostAgent, env: Vec<(String, String)>) -> Vec<(String, String)> {
+    without_the_panes_terminal_variables(agent.env_base.agent_env(
+        &agent.spec,
+        std::env::vars_os(),
+        &env,
+    ))
+}
+
+async fn start_or_resume_in_tmux(
+    cli_manager: &Arc<CliSessionManager>,
+    run: HarnessRun,
+    tmux_launch: crate::cli_harness_tmux::HarnessTmuxLaunch<'_>,
+) -> Result<crate::claude_cli_tmux::TmuxLaunched, Status> {
+    let launched = if run.resume {
+        crate::cli_harness_tmux::resume_harness_in_tmux(cli_manager, tmux_launch).await?
+    } else {
+        crate::cli_harness_tmux::start_harness_in_tmux(cli_manager, tmux_launch).await?
+    };
+    Ok(launched)
 }

@@ -113,6 +113,7 @@ members = [
     "packages/tddy-sandbox-app",
     "packages/tddy-sandbox-qemu",
     "packages/tddy-supervisor",
+    "packages/tddy-users-file",
     "packages/tddy-desktop/src-tauri",
 ]
 exclude = [

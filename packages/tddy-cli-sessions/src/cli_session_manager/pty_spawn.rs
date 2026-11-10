@@ -87,16 +87,14 @@ impl CliSessionManager {
         tmux_session: Option<&str>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         let (ready_tx, ready_rx) = oneshot::channel();
-        let spec = PtySpawnSpec {
+        let spec = build_pty_spawn_spec(
+            (session_id, terminal_id, kind),
+            &worktree_path,
             argv,
-            worktree_path: worktree_path.clone(),
-            session_id: session_id.to_string(),
-            terminal_id: terminal_id.to_string(),
-            kind: kind.to_string(),
             env,
             env_base,
-            os_user: os_user.map(str::to_string),
-        };
+            os_user,
+        );
 
         // The main terminal's recording is finished by the PTY runtime itself, before the terminal
         // leaves the PTY registry: a stopped main must answer history from its recording the moment
@@ -125,15 +123,56 @@ impl CliSessionManager {
         )
         .await;
 
-        let ready = ready_rx
-            .await
-            .map_err(|_| anyhow::anyhow!("PTY runtime did not signal ready"))?
-            .map_err(|e| anyhow::anyhow!("PTY spawn failed: {e}"))?;
+        let ready = await_pty_ready(ready_rx).await?;
 
         let mut handle =
             self.build_pty_handle(task, terminal_id, kind, worktree_path, model, ready)?;
         handle.tmux_session = tmux_session.map(str::to_string);
 
+        self.register_spawned_terminal(session_id, terminal_id, &handle)
+            .await;
+
+        let on_exit = match on_exit {
+            Some(hook) => Some(
+                self.pending_exit(session_id, terminal_id, &handle.task_id, hook)
+                    .await,
+            ),
+            None => None,
+        };
+        self.spawn_cleanup_for(
+            (session_id, terminal_id, kind),
+            os_user,
+            tmux_session,
+            handle,
+            on_exit,
+        )
+    }
+
+    fn spawn_cleanup_for(
+        &self,
+        (session_id, terminal_id, kind): (&str, &str, &str),
+        os_user: Option<&str>,
+        tmux_session: Option<&str>,
+        handle: super::PtyHandle,
+        on_exit: Option<PendingExit>,
+    ) -> anyhow::Result<Arc<super::PtyHandle>> {
+        self.spawn_terminal_cleanup(
+            session_id.to_string(),
+            terminal_id.to_string(),
+            handle.task_id.clone(),
+            on_exit,
+            TmuxRun::new(tmux_session, os_user),
+        );
+
+        finish_spawned_terminal(session_id, terminal_id, kind, handle)
+    }
+
+    async fn register_spawned_terminal(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        handle: &super::PtyHandle,
+    ) {
         self.terminals
             .write()
             .await
@@ -148,33 +187,6 @@ impl CliSessionManager {
                     tmux_session: handle.tmux_session.clone(),
                 },
             );
-
-        let on_exit = match on_exit {
-            Some(hook) => Some(
-                self.pending_exit(session_id, terminal_id, &handle.task_id, hook)
-                    .await,
-            ),
-            None => None,
-        };
-        self.spawn_terminal_cleanup(
-            session_id.to_string(),
-            terminal_id.to_string(),
-            handle.task_id.clone(),
-            on_exit,
-            TmuxRun::new(tmux_session, os_user),
-        );
-
-        log::info!(
-            target: "tddy_daemon::claude_cli_session",
-            "spawn_tool: registered session={} terminal={} kind={} pid={} task_id={}",
-            session_id,
-            terminal_id,
-            kind,
-            handle.pid,
-            handle.task_id
-        );
-
-        Ok(Arc::new(handle))
     }
 
     pub(crate) fn build_pty_handle(
@@ -347,6 +359,55 @@ impl CliSessionManager {
         handle.tmux_session = entry.tmux_session;
         Some(Arc::new(handle))
     }
+}
+
+fn build_pty_spawn_spec(
+    (session_id, terminal_id, kind): (&str, &str, &str),
+    worktree_path: &std::path::Path,
+    argv: Vec<String>,
+    env: Vec<(String, String)>,
+    env_base: tddy_pty::PtyEnvBase,
+    os_user: Option<&str>,
+) -> PtySpawnSpec {
+    PtySpawnSpec {
+        argv,
+        worktree_path: worktree_path.to_owned(),
+        session_id: session_id.to_string(),
+        terminal_id: terminal_id.to_string(),
+        kind: kind.to_string(),
+        env,
+        env_base,
+        os_user: os_user.map(str::to_string),
+    }
+}
+
+fn finish_spawned_terminal(
+    session_id: &str,
+    terminal_id: &str,
+    kind: &str,
+    handle: super::PtyHandle,
+) -> anyhow::Result<Arc<super::PtyHandle>> {
+    log::info!(
+        target: "tddy_daemon::claude_cli_session",
+        "spawn_tool: registered session={} terminal={} kind={} pid={} task_id={}",
+        session_id,
+        terminal_id,
+        kind,
+        handle.pid,
+        handle.task_id
+    );
+
+    Ok(Arc::new(handle))
+}
+
+async fn await_pty_ready(
+    ready_rx: oneshot::Receiver<Result<PtyReady, String>>,
+) -> anyhow::Result<PtyReady> {
+    let ready = ready_rx
+        .await
+        .map_err(|_| anyhow::anyhow!("PTY runtime did not signal ready"))?
+        .map_err(|e| anyhow::anyhow!("PTY spawn failed: {e}"))?;
+    Ok(ready)
 }
 
 /// An exit hook, and the flag that tells [`CliSessionManager::exit_hook_settled`] it has finished.

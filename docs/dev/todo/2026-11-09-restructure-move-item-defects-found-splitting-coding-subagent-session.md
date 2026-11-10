@@ -27,3 +27,5 @@ Re-resolve each pending item anchor after a move rewrites its file, rather than 
 through the earlier edit; and widen every item of the moved set that a caller left behind names, not
 only the ones the outline reports as referenced through a moved function's callers. Pin both with
 fixtures in `packages/tddy-code-restructuring` that reproduce this file's shape.
+
+**Deferred by the user, 2026-11-10** (#agent-tools TODO gate after the sweep #876): asked "continue the stack or defer?", the user answered "Defer". Left open for a later, separately planned node.

@@ -99,7 +99,7 @@ message SpawnSessionRequest {
 message SpawnRelayedRequest {
   // Must be mapped in users.yaml; `root` never resolves.
   string os_user = 1;
-  // Must appear verbatim in the policy's allowed_relay_tool_paths — not allowed_tool_paths.
+  // Must appear verbatim under the policy's exec_roots.
   string tool_path = 2;
   repeated string args = 3;
   map<string, string> env = 4;
