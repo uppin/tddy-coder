@@ -149,17 +149,7 @@ impl CliSessionManager {
             TmuxRun::new(tmux_session, os_user),
         );
 
-        log::info!(
-            target: "tddy_daemon::claude_cli_session",
-            "spawn_tool: registered session={} terminal={} kind={} pid={} task_id={}",
-            session_id,
-            terminal_id,
-            kind,
-            handle.pid,
-            handle.task_id
-        );
-
-        Ok(Arc::new(handle))
+        finish_spawned_terminal(session_id, terminal_id, kind, handle)
     }
 
     async fn register_spawned_terminal(
@@ -354,6 +344,25 @@ impl CliSessionManager {
         handle.tmux_session = entry.tmux_session;
         Some(Arc::new(handle))
     }
+}
+
+fn finish_spawned_terminal(
+    session_id: &str,
+    terminal_id: &str,
+    kind: &str,
+    handle: super::PtyHandle,
+) -> anyhow::Result<Arc<super::PtyHandle>> {
+    log::info!(
+        target: "tddy_daemon::claude_cli_session",
+        "spawn_tool: registered session={} terminal={} kind={} pid={} task_id={}",
+        session_id,
+        terminal_id,
+        kind,
+        handle.pid,
+        handle.task_id
+    );
+
+    Ok(Arc::new(handle))
 }
 
 async fn await_pty_ready(
