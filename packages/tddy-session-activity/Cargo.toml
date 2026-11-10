@@ -23,6 +23,8 @@ tddy-rpc = { path = "../tddy-rpc" }
 # `gen::ServerMessage` and its `Event` — the presenter events a notification is classified from,
 # plus `activity.proto`'s generated messages, `acp_replay` and `agent_activity_to_activity_proto`.
 tddy-service = { path = "../tddy-service" }
+# The usage binding a session is evaluated with (`StreamSessionUsage`, `#usage-binding 2/5`).
+tddy-usage = { path = "../tddy-usage" }
 # `stream::MpscResultStream` — the one server-stream adapter node 6 established for a
 # `Result`-carrying stream. Re-declaring a fifth copy of it here would be a fifth thing to keep
 # equal to the four already in the workspace.
@@ -68,8 +70,11 @@ libc = "0.2"
 
 [dev-dependencies]
 # `#[tokio::test]` in `tests/operator_channel_subscriber_acceptance.rs` — the bus publishes async.
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "time"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-workflow = { path = "../tddy-workflow" }
 tempfile = "3"
+# `session_usage_stream_acceptance` reads the stream the handler returns.
+futures-util = "0.3"
+# The `time` feature: the usage stream tests wait on its poller with a deadline.

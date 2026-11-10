@@ -8,25 +8,27 @@
  */
 
 import React from "react";
-import type { RoomHandle } from "tddy-client-web";
+import type { Client } from "@connectrpc/connect";
+import type { ActivityService } from "tddy-client-web/gen/activity_pb";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow, InlineError } from "tddy-ui-web";
 import { formatTokens } from "./formatTokens";
 import { usageTotals } from "./sessionUsage";
 import { useSessionUsage } from "./useSessionUsage";
 
 export interface SessionUsageTabProps {
-  /** LiveKit room + daemon/presenter identity selecting the usage stream's transport target. */
-  room: RoomHandle | null;
-  serverIdentity: string;
+  /** `activity.ActivityService` on the host that owns the session. */
+  client: Client<typeof ActivityService> | undefined;
+  sessionToken: string;
+  sessionId: string;
 }
 
 /**
  * Owns the usage subscription itself (rather than receiving a snapshot prop) so the
- * `TddyRemote.Stream` opens only while this tab is mounted — i.e. when the user is actually
+ * usage stream opens only while this tab is mounted — i.e. when the user is actually
  * viewing Usage — instead of for the whole lifetime of the inspector drawer.
  */
-export function SessionUsageTab({ room, serverIdentity }: SessionUsageTabProps) {
-  const { usage, error } = useSessionUsage(room, serverIdentity);
+export function SessionUsageTab({ client, sessionToken, sessionId }: SessionUsageTabProps) {
+  const { usage, error } = useSessionUsage(client, sessionToken, sessionId);
   // Quiet, beside the table: the last snapshot stays readable while the stream is down.
   const streamError = (
     <InlineError

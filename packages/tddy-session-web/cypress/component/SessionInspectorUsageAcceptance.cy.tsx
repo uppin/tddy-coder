@@ -3,10 +3,10 @@
  *
  * PRD: docs/ft/web/session-usage-inspector.md.
  *
- * Real-time per-session token usage streams over the existing `TddyRemote.Stream` as a
- * `tokenUsageUpdated` `ServerMessage` carrying the full cumulative per-conversation snapshot.
- * Exercised through the full `SessionsDrawerScreen`; all RPC (including the LiveKit-transport
- * presenter stream) flows through an in-memory backend — no `cy.intercept`.
+ * Real-time per-session token usage streams from the daemon's `ActivityService.StreamSessionUsage`
+ * as full cumulative per-conversation snapshots (`#usage-binding 2/5`). Exercised through the full
+ * `SessionsDrawerScreen`; all RPC flows through an in-memory backend — no `cy.intercept`, and no
+ * LiveKit room.
  */
 
 import React from "react";
@@ -179,4 +179,111 @@ it("shows a zero state and no conversation rows before any usage snapshot arrive
   // Then
   page.usageEmpty().should("exist");
   page.usageRow("claude-main").should("not.exist");
+});
+
+// ---------------------------------------------------------------------------
+// Cache, reasoning and cost columns (`#usage-binding 2/5`)
+// ---------------------------------------------------------------------------
+
+it("shows cache read, cache write, reasoning and cost beside in and out", () => {
+  // Given
+  const main = aConversationRecord({
+    id: "claude-main",
+    inputTokens: 12n,
+    cacheReadTokens: 332059n,
+    cacheWriteTokens: 43803n,
+    outputTokens: 2057n,
+    reasoningTokens: 0n,
+    totalTokens: 377931n,
+    turns: 6,
+    costUsd: 1.2345,
+  });
+  const backend = aSessionUsageBackend([SESSION], [[main]]);
+
+  // When
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  page.drawerItem(SESSION.sessionId).click();
+  page.inspectorUsageTab().click();
+
+  // Then
+  page.usageRowInput("claude-main").should("have.text", "12");
+  page.usageRowCacheRead("claude-main").should("have.text", "332,059");
+  page.usageRowCacheWrite("claude-main").should("have.text", "43,803");
+  page.usageRowOutput("claude-main").should("have.text", "2,057");
+  page.usageRowReasoning("claude-main").should("have.text", "0");
+  page.usageRowTotal("claude-main").should("have.text", "377,931");
+  page.usageRowCost("claude-main").should("have.text", "$1.23");
+});
+
+it("leaves cost blank when a conversation reported none and marks the total partial", () => {
+  // Given
+  const backend = aSessionUsageBackend(
+    [SESSION],
+    [
+      [
+        aConversationRecord({ id: "claude-main", costUsd: 0.5 }),
+        aConversationRecord({ agent: "fastcontext", id: "fc-1" }),
+      ],
+    ],
+  );
+
+  // When
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  page.drawerItem(SESSION.sessionId).click();
+  page.inspectorUsageTab().click();
+
+  // Then
+  page.usageRowCost("fc-1").should("have.text", "");
+  page.usageTotalCost().should("have.text", "$0.50*");
+  page
+    .usageTotalCost()
+    .should("have.attr", "title", "partial: some conversations did not report a cost");
+});
+
+it("nests a subagent under the conversation that spawned it, at any depth", () => {
+  // Given — the grandchild arrives before its parent in the snapshot
+  const backend = aSessionUsageBackend(
+    [SESSION],
+    [
+      [
+        aConversationRecord({ id: "claude-main" }),
+        aConversationRecord({ agent: "Plan", id: "agent-b", parentId: "agent-a" }),
+        aConversationRecord({ agent: "Explore", id: "agent-a", parentId: "claude-main" }),
+      ],
+    ],
+  );
+
+  // When
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  page.drawerItem(SESSION.sessionId).click();
+  page.inspectorUsageTab().click();
+
+  // Then
+  page
+    .usageRows()
+    .then((rows) =>
+      [...rows].map((row) => `${row.dataset.testid}@${row.dataset.depth}`),
+    )
+    .should("deep.equal", [
+      "sessions-usage-row-claude-main@0",
+      "sessions-usage-row-agent-a@1",
+      "sessions-usage-row-agent-b@2",
+    ]);
+});
+
+it("shows usage for a terminal session that has no LiveKit room", () => {
+  // Given — a terminal session: the daemon connects it to no room
+  const terminal = { ...SESSION, sessionType: "claude-cli" };
+  const backend = aSessionUsageBackend(
+    [terminal],
+    [[aConversationRecord({ id: "claude-main", inputTokens: 5n, totalTokens: 5n })]],
+  );
+
+  // When
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  page.drawerItem(terminal.sessionId).click();
+  page.inspectorUsageTab().click();
+
+  // Then
+  page.usageRowInput("claude-main").should("have.text", "5");
 });

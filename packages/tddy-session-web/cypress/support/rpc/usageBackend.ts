@@ -1,29 +1,29 @@
 /**
  * In-memory backend + fixtures for the Session Inspector "Usage" tab acceptance tests.
  *
- * Token usage rides the existing generic `ServerMessage` oneof on `TddyRemote.Stream` (a new
- * `tokenUsageUpdated` variant carrying the full cumulative `ConversationRecord` snapshot). These
- * helpers drive that stream through `anInMemoryRpcBackend()` + `mountWithRpc` — the
- * fluent-tests-preferred in-memory fake — exactly as `PrStackChatStreamingAcceptance` drives the
- * chat's `agentOutput` events.
+ * Token usage is served by the daemon's `ActivityService.StreamSessionUsage`: the full cumulative
+ * per-conversation snapshot, then each changed snapshot (`#usage-binding 2/5`). These helpers drive
+ * that stream through `anInMemoryRpcBackend()` + `mountWithRpc` — the fluent-tests-preferred
+ * in-memory fake. No LiveKit room is involved: the tab reaches the daemon the way the Activity tab
+ * does.
  *
  * Each element of `snapshots` is one full cumulative snapshot (a list of conversations); the
- * stream yields one `ServerMessage` per snapshot, in order, then closes — so the view renders the
- * latest snapshot.
+ * stream yields one `SessionUsageSnapshot` per element, in order, then closes — so the view renders
+ * the latest snapshot.
  */
 
 import { create } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import { TddyRemote, ServerMessageSchema } from "tddy-client-web/gen/tddy/v1/remote_pb";
+import { ActivityService, SessionUsageSnapshotSchema } from "tddy-client-web/gen/activity_pb";
 import { aSessionsDrawerBackend } from "./vncBackend";
 
 // ---------------------------------------------------------------------------
-// ConversationRecord fixture
+// UsageConversation fixture
 // ---------------------------------------------------------------------------
 
 /**
- * Wire shape of one conversation's accounting (matches proto `ConversationRecord`; 64-bit token
+ * Wire shape of one conversation's accounting (matches proto `UsageConversation`; 64-bit token
  * counts are `bigint`, `turns` is a 32-bit `number`).
  */
 export interface ConversationRecordInit {
@@ -31,9 +31,14 @@ export interface ConversationRecordInit {
   id: string;
   model: string;
   inputTokens: bigint;
+  cacheReadTokens: bigint;
+  cacheWriteTokens: bigint;
   outputTokens: bigint;
+  reasoningTokens: bigint;
   totalTokens: bigint;
   turns: number;
+  costUsd?: number;
+  parentId?: string;
 }
 
 /** A conversation record; override only the fields that matter for the scenario. */
@@ -45,7 +50,10 @@ export function aConversationRecord(
     id: "claude-main",
     model: "claude-opus-4-8",
     inputTokens: 0n,
+    cacheReadTokens: 0n,
+    cacheWriteTokens: 0n,
     outputTokens: 0n,
+    reasoningTokens: 0n,
     totalTokens: 0n,
     turns: 0,
     ...overrides,
@@ -57,22 +65,18 @@ export function aConversationRecord(
 // ---------------------------------------------------------------------------
 
 /**
- * A `SessionsDrawerScreen` backend whose `TddyRemote.stream` yields one `tokenUsageUpdated`
- * `ServerMessage` per snapshot in `snapshots`. Pass `[]` for a session that never reports usage.
+ * A `SessionsDrawerScreen` backend whose `ActivityService.streamSessionUsage` yields one snapshot
+ * per element of `snapshots`. Pass `[]` for a session that never reports usage.
  */
 export function aSessionUsageBackend(
   sessions: Partial<SessionEntry>[],
   snapshots: ConversationRecordInit[][],
 ): InMemoryRpcBackend {
-  return aSessionsDrawerBackend(sessions).implement(TddyRemote, {
-    stream: async function* () {
+  return aSessionsDrawerBackend(sessions).implement(ActivityService, {
+    streamSessionUsage: async function* () {
       for (const conversations of snapshots) {
-        yield create(ServerMessageSchema, {
-          event: { case: "tokenUsageUpdated", value: { conversations } },
-        });
+        yield create(SessionUsageSnapshotSchema, { conversations });
       }
     },
-    getSession: async () => ({}),
-    listSessions: async () => ({ sessions: [] }),
   });
 }

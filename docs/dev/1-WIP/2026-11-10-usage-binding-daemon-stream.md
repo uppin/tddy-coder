@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 5 — proto contract change across daemon and web, four launch paths plus resume and relaunch, a shared poller (concurrency), a deleted transport path
-**Branch**: `feature/usage-binding/daemon-stream`, base `feature/usage-binding/claude-transcript` (#890) — `#usage-binding 2/5`
+**Branch**: `feature/usage-binding/daemon-stream`, base `feature/usage-binding/claude-transcript` (#890) — `#usage-binding 2/5`, PR [#891](https://github.com/uppin/tddy-coder/pull/891), stack [#895](https://github.com/uppin/tddy-coder/stack/895)
 
 ## Initial Discovery
 
@@ -285,7 +285,53 @@ See *Affected Packages*. The deletions are:
 
 ## Technical Debt & Production Readiness
 
-(Populated during development.)
+### Contract commit (pass 2, 2026-11-10)
+
+**Where the work ended up differs from the plan:**
+- **`UsageContextFile`, `write_usage_context`, `read_usage_context` and `gather_session_usage_for`
+  live in `tddy-usage`** (`src/context_file.rs`), not in `tddy-agent-launch`. The activity service
+  reads the context, and depending on the launch crate for that would invert the graph.
+  `tddy-agent-launch` / `tddy-spawn` only call `write_usage_context` (green).
+- **The context also records `model`**, the main row's fallback, because the stream has no CLI args
+  to take it from.
+- **No peer forwarding.** `PeerRoutedActivity::stream_session_usage` refuses a request addressed at a
+  peer, exactly as `StreamSessionActivity` does. The PRD's "routed to its owner" is narrowed to that.
+- **`ActivityPorts.usage_bindings`** (`UsageBindings = Arc<dyn Fn(&str) -> Option<UsageSection>>`) is
+  the composition-root seam. `svc_activity_ports.rs` fills it from `HostCodingAgents::agents_shared()`
+  (already wired). The five existing test constructions pass `|_| None`.
+
+**Web:**
+- `useSessionUsage(client, sessionToken, sessionId)` is on the daemon `ActivityService` client.
+- `SessionUsageTab` takes `{ client, sessionToken, sessionId }`, and the drawer passes `activityClient`.
+- The hook body is `TODO(daemon-stream)`.
+- `SessionInspectorDrawer`'s `serverIdentity` prop is now unread, and is marked
+  `TODO(daemon-stream): remove`.
+
+**Still for `/green`:**
+- the deletion of the presenter `usage_watcher`, `PresenterEvent::TokenUsageUpdated`,
+  `TddyRemote.TokenUsageUpdated` / `ConversationRecord`, and the `tddy-coder` spawn;
+- the context writes at every launch site;
+- the poller.
+
+**Workflow-session context (`tddy-spawn`) has no dedicated test.** The launch tests cover the host PTY
+start, resume and the jailed start (macOS) on the real daemon. Green adds a spawn-level test if the
+wiring is not trivially covered.
+
+### Red (6e/6f, 2026-11-10)
+
+All of these were run scoped:
+- **`tddy-session-activity/tests/session_usage_stream_acceptance.rs`**: 6 of 6 fail, because the stub
+  stream closes before any snapshot.
+- **`tddy-session-lifecycle/tests/usage_context_acceptance.rs`**: 3 of 3 fail with "recorded no usage
+  context". The real daemon starts the session; the jailed test ran a Seatbelt jail.
+- **`tddy-session-web/src/sessionUsage.test.ts`**: 4 of 5 fail. The empty-snapshot totals already hold
+  on the stub.
+- **`SessionInspectorUsageAcceptance.cy.tsx`**: 7 of 9 fail, because no rows render. The tab-exists and
+  zero-state tests pass on the stub.
+
+The pre-existing suites still pass: 32 suites in `./test -p tddy-session-activity -p tddy-service`.
+Clippy `-D warnings --all-targets` is clean on `tddy-usage`, `tddy-session-activity`,
+`tddy-session-lifecycle` and `tddy-service`.
 
 ## Decisions & Trade-offs
 
@@ -319,10 +365,10 @@ See *Affected Packages*. The deletions are:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

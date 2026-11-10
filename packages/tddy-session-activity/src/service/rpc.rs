@@ -18,8 +18,8 @@ use tddy_service::proto::activity::{
     IsSessionTerminalServedRequest, IsSessionTerminalServedResponse, ReportAgentActivityRequest,
     ReportAgentActivityResponse, ReportOperatorNotificationRequest,
     ReportOperatorNotificationResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
-    SessionNotificationEvent, StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
-    StreamSessionNotificationsRequest,
+    SessionNotificationEvent, SessionUsageSnapshot, StreamAcpReplayRequest, StreamMode,
+    StreamSessionActivityRequest, StreamSessionNotificationsRequest, StreamSessionUsageRequest,
 };
 use tddy_worktree_service::stream::MpscResultStream;
 
@@ -106,6 +106,22 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         let broadcast_rx = self.ports.activity.subscribe(&req.session_id);
         tokio::spawn(relay_agent_activity(broadcast_rx, tx));
 
+        Ok(relayed(rx))
+    }
+
+    type StreamSessionUsageStream = MpscResultStream<SessionUsageSnapshot>;
+
+    /// Stream a session's per-conversation token usage: the snapshot its agent's spec binding
+    /// yields against the session's recorded usage context, then each changed snapshot, from one
+    /// poller shared by every subscriber of the session.
+    async fn stream_session_usage(
+        &self,
+        request: Request<StreamSessionUsageRequest>,
+    ) -> Result<Response<Self::StreamSessionUsageStream>, Status> {
+        // TODO(daemon-stream): implement — authorise, peer-route on `daemon_instance_id`, join or
+        // start the session's poller, send its last snapshot at once.
+        let _ = request;
+        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel::<SessionUsageSnapshot>();
         Ok(relayed(rx))
     }
 

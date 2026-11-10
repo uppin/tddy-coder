@@ -117,6 +117,8 @@ http = "1"
 tokio-stream = "0.1"
 
 [dev-dependencies]
+# `usage_context_acceptance` reads back the context a launch records (`#usage-binding 2/5`).
+tddy-usage = { path = "../tddy-usage" }
 # `test-util`: a paused clock drives the split-start keep-alive test past the old 300 s budget.
 tokio = { version = "1", features = ["test-util"] }
 # The acceptance suites dispatch through the very client the in-jail MCP server uses, over the same

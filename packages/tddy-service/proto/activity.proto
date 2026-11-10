@@ -55,6 +55,13 @@ service ActivityService {
   // wrapped in a connection-local message so the cross-package reference is a field (prost
   // extern_path) rather than a service return type.
   rpc StreamAcpReplay(StreamAcpReplayRequest) returns (stream AcpReplayFrame);
+  // Per-conversation token usage of one session (docs/ft/web/session-usage-inspector.md): the
+  // whole snapshot on subscribe, then the whole snapshot again each time it changes — never a
+  // delta. Evaluated by the daemon from the agent's spec `usage:` binding against the usage
+  // context the session's launch recorded, so every session has it — terminal, jailed or
+  // workflow, live or ended. Served over HTTP; a session on a peer is routed by
+  // `daemon_instance_id` like the other per-session streams.
+  rpc StreamSessionUsage(StreamSessionUsageRequest) returns (stream SessionUsageSnapshot);
   // On-demand tool-call body lookup for the Agent Activity detail dialog. StreamAcpReplay's
   // SNAPSHOT_THEN_LIVE / LIVE_ONLY frames carry a tool call's metadata only (title/status/kind/id) —
   // its raw_input/raw_output are stripped so the stream's size tracks the number of tool calls, not
@@ -493,6 +500,34 @@ message StreamSessionActivityRequest {
   string     session_id         = 2;
   string     daemon_instance_id = 3;
   StreamMode mode               = 4;   // snapshot-then-live (default) vs live-only
+}
+
+message StreamSessionUsageRequest {
+  string session_token      = 1;
+  string session_id         = 2;
+  string daemon_instance_id = 3;
+}
+
+// One full usage snapshot: every conversation, parents before their children.
+message SessionUsageSnapshot {
+  repeated UsageConversation conversations = 1;
+}
+
+// One conversation's token accounting — the main agent or a subagent, at any depth. The counters
+// are disjoint (input is fresh input only; output excludes reasoning), so total_tokens is their sum.
+message UsageConversation {
+  string agent              = 1;  // the spec id, a subagent's name, …
+  string id                 = 2;
+  string model              = 3;
+  uint64 input_tokens       = 4;
+  uint64 cache_read_tokens  = 5;
+  uint64 cache_write_tokens = 6;
+  uint64 output_tokens      = 7;
+  uint64 reasoning_tokens   = 8;
+  uint64 total_tokens       = 9;
+  uint32 turns              = 10;
+  optional double cost_usd  = 11;  // US dollars, when the source reported a cost
+  optional string parent_id = 12;  // the conversation this one is nested under
 }
 
 message StreamSessionNotificationsRequest {

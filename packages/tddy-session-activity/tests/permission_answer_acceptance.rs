@@ -179,6 +179,7 @@ impl HostBuilder {
             session_labels: Arc::new(EverySessionIsLabelled),
             deltas: Arc::new(NoSessionDeltaStores),
             daemon_instance_id: THIS_HOST.to_string(),
+            usage_bindings: Arc::new(|_spec: &str| None),
         })
         .with_agents(the_builtin_agents())
         .with_question_answers(AnswerWaitPorts {

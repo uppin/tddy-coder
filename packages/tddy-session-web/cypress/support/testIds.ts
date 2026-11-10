@@ -432,6 +432,10 @@ export const TEST_IDS = {
   sessionsUsageTabPanel: "sessions-usage-tab-panel",
   sessionsUsageEmpty: "sessions-usage-empty",
   sessionsUsageTotalInput: "sessions-usage-total-input",
+  sessionsUsageTotalCacheRead: "sessions-usage-total-cache-read",
+  sessionsUsageTotalCacheWrite: "sessions-usage-total-cache-write",
+  sessionsUsageTotalReasoning: "sessions-usage-total-reasoning",
+  sessionsUsageTotalCost: "sessions-usage-total-cost",
   sessionsUsageTotalOutput: "sessions-usage-total-output",
   sessionsUsageTotalTotal: "sessions-usage-total-total",
   /** Why the usage stream stopped (or never opened); the last snapshot stays shown beside it. */
@@ -894,6 +898,10 @@ export const sessionsUsageRowModel = (id: string) => `sessions-usage-row-model-$
 
 /** `[data-testid="sessions-usage-row-input-<id>"]` — the input-tokens cell of a conversation row */
 export const sessionsUsageRowInput = (id: string) => `sessions-usage-row-input-${id}`;
+export const sessionsUsageRowCacheRead = (id: string) => `sessions-usage-row-cache-read-${id}`;
+export const sessionsUsageRowCacheWrite = (id: string) => `sessions-usage-row-cache-write-${id}`;
+export const sessionsUsageRowReasoning = (id: string) => `sessions-usage-row-reasoning-${id}`;
+export const sessionsUsageRowCost = (id: string) => `sessions-usage-row-cost-${id}`;
 
 /** `[data-testid="sessions-usage-row-output-<id>"]` — the output-tokens cell of a conversation row */
 export const sessionsUsageRowOutput = (id: string) => `sessions-usage-row-output-${id}`;
