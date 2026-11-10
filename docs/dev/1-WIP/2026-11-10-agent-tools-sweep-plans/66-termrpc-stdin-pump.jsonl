@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-terminal-rpc/src/local_pty_relay.rs":{"sha256":"sha256:c008c4434601131a77fc5421cb9da1b748e8ddbece91bdc39b7769686e326497"}}}
-{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_terminal_rpc::local_pty_relay::run", "file": "packages/tddy-terminal-rpc/src/local_pty_relay.rs", "start": {"line": 64, "col": 5}, "end": {"line": 95, "col": 8}, "fingerprint": "sha256:b568ea12e77f14b3e1b99a3d5afa2e4e48437431b7aa16d868a9c4d1e4e1f8ae", "hint": {"line": 79, "col": 5}}, "name": "spawn_stdin_pump"}

@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-coding-agent-specs/src/spec.rs":{"sha256":"sha256:1ee4a8fcd2ed3e30f1c4d4d19e6beea6415a88b868bc73882801d0fd98236406"}}}
-{"id": "op-1", "op": "move_item", "anchor": {"kind": "items", "file": "packages/tddy-coding-agent-specs/src/spec.rs", "items": ["tddy_coding_agent_specs::spec::<CodingAgentSpec>#5"], "fingerprints": ["sha256:142db2b0e0421ca527da0eebe6fb931f355a2ee0ce3c2d372ab56144d3678bd0"]}, "to": "tddy_coding_agent_specs::spec::headless_section", "reexport": "outside"}

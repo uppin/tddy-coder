@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-pty/src/runtime.rs":{"sha256":"sha256:d36c569d55244accff3cbc4c1300b00ea8b549d5f704f27b6d168cbfb96547b5"}}}
-{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_pty::runtime::open_pty_and_pump", "file": "packages/tddy-pty/src/runtime.rs", "start": {"line": 37, "col": 5}, "end": {"line": 49, "col": 70}, "fingerprint": "sha256:f9154d8f6561c868838798611ee325252ff08607de959928c6b12411fbf509e0", "hint": {"line": 297, "col": 5}}, "name": "spawn_reader_with_master"}

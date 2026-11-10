@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-supervisor/src/supervisor.rs":{"sha256":"sha256:bfa440e24dc6e556fba0c75e8d8299409b3ababacb970ce408c07ef9be9f7241"}}}
-{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_supervisor::supervisor::Supervisor::new", "file": "packages/tddy-supervisor/src/supervisor.rs", "start": {"line": 17, "col": 9}, "end": {"line": 75, "col": 10}, "fingerprint": "sha256:62f42f0e0ecf96a06328c05bbe7005eb34b34e0c945abfc2edfe7a401913e7e7", "hint": {"line": 90, "col": 9}}, "name": "build_service_slots"}

@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-daemon-kernel/src/users_file.rs":{"sha256":"sha256:e58c49a33fa84493477418a9523bba3e0b33f7e2e1a7fd81b7bc8473c2c11e51"}}}
-{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_daemon_kernel::users_file::load_users_file", "file": "packages/tddy-daemon-kernel/src/users_file.rs", "start": {"line": 11, "col": 5}, "end": {"line": 23, "col": 6}, "fingerprint": "sha256:dbea46393730d5d856ccb395e69296b72b295e360452fac8b0d2b65ae275fe32", "hint": {"line": 77, "col": 5}}, "name": "require_root_owned_users_file"}

@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-supervisor/src/lib.rs":{"sha256":"sha256:d77bee75609363f9c5f7160cabdeb5d8dfb83119060f5d09d8b1874cbef1c02d"}}}
-{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_supervisor::run", "file": "packages/tddy-supervisor/src/lib.rs", "start": {"line": 100, "col": 5}, "end": {"line": 111, "col": 30}, "fingerprint": "sha256:a820966e2c82f898b328f28d589b59edcbc32cd200963fa5b420e4b1d68bb6ef", "hint": {"line": 181, "col": 5}}, "name": "wait_for_shutdown_and_stop"}

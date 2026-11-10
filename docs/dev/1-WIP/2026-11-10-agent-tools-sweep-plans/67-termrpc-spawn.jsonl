@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-terminal-rpc/src/local_pty_relay.rs":{"sha256":"sha256:32424b6ae86685aa0898ceeef41e430cee6f3ac418843d9cb912eaf642f78edc"}}}
-{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_terminal_rpc::local_pty_relay::run", "file": "packages/tddy-terminal-rpc/src/local_pty_relay.rs", "start": {"line": 9, "col": 5}, "end": {"line": 25, "col": 66}, "fingerprint": "sha256:50688d3cf695ebcf8b253a90f0d433afcf112fcae292d06e37b30f691355698d", "hint": {"line": 24, "col": 5}}, "name": "spawn_local_pty_task"}

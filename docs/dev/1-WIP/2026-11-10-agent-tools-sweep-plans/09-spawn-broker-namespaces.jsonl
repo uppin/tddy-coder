@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{"packages/tddy-supervisor/src/spawn_broker.rs":"sha256:5e4bb0fcaf8d93e71b7322e0111fbde9d761392c91817fd8d7f2494dd41a9b6a"}}
-{"id":"op-1","op":"extract_module","group":"namespaces","anchor":{"kind":"range","file":"packages/tddy-supervisor/src/spawn_broker.rs","start":{"line":596,"col":1},"end":{"line":918,"col":2}},"name":"namespaces","reexport":"glob","to_file":true}

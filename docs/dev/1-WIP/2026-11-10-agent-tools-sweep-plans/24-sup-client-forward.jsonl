@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-supervisor/src/client.rs":{"sha256":"sha256:1feeec0dd86e932b4f7fef04fb4e10cf2c5221c334dee0835e0b8510f23ef4bf"}}}
-{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_supervisor::client::SupervisorClient::open_event_stream", "file": "packages/tddy-supervisor/src/client.rs", "start": {"line": 42, "col": 9}, "end": {"line": 66, "col": 11}, "fingerprint": "sha256:9209eefcb4e99da05813e512046921a742d136450166561b7b0db76a6a8984c8", "hint": {"line": 283, "col": 9}}, "name": "forward_frames"}

@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-daemon/src/runtime/mount_host.rs":{"sha256":"sha256:0cfd7cd11fa7ffa1c40389498062a7c1cf4e72344580657f8d3c169f6057edc1"}}}
-{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_daemon::runtime::mount_host::BuildContext::build_session_host", "file": "packages/tddy-daemon/src/runtime/mount_host.rs", "start": {"line": 38, "col": 9}, "end": {"line": 49, "col": 11}, "fingerprint": "sha256:0b71e94a944f1d9564beacf6922ccc5b50ceefb188371d29791545e72c49c1b1", "hint": {"line": 264, "col": 9}}, "name": "build_connection_impl"}

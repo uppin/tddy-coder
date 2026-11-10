@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-daemon/src/runtime/mount_host.rs":{"sha256":"sha256:85b680f44d4c62a28b504013c7347d5d27b13a549d54e5956898d634a75c4c20"}}}
-{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_daemon::runtime::mount_host::BuildContext::build_session_host", "file": "packages/tddy-daemon/src/runtime/mount_host.rs", "start": {"line": 60, "col": 17}, "end": {"line": 68, "col": 18}, "fingerprint": "sha256:8c7c5500071d6b9cab11d797f8ff556675b4722df279076e30a217be339247dc", "hint": {"line": 286, "col": 17}}, "name": "daemon_launcher_deps"}
