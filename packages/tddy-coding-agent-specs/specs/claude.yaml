@@ -59,7 +59,6 @@ extensions:
     # The permission modes a picker offers for `{permission_mode}` (the sweep: this list lived
     # in Rust — `tddy-tool-engine`'s schema and the web — and is agent metadata, so it lives here).
     permission_modes: [auto, default, acceptEdits, plan, bypassPermissions]
-    transcript_usage: true
     # Where this agent's token usage lives and how to read it (`#usage-binding`). The engine
     # (`tddy-usage`) knows formats, not agents: everything Claude-specific is here. Claude Code
     # writes one JSON line per content block, each repeating its API message's id and usage, so

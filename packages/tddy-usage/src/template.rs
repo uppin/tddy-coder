@@ -38,6 +38,16 @@ impl std::fmt::Display for TemplateError {
 
 impl std::error::Error for TemplateError {}
 
+/// A piece of a template: text kept as written, or a variable to replace.
+enum Segment<'a> {
+    Literal(&'a str),
+    Variable(&'a str),
+}
+
+fn is_identifier(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 impl PathTemplate {
     /// A template over `text`.
     pub fn new(text: impl Into<String>) -> Self {
@@ -51,8 +61,40 @@ impl PathTemplate {
 
     /// Every `{identifier}` the template names, in order of appearance.
     pub fn variables(&self) -> Vec<&str> {
-        // TODO(claude-transcript): implement
-        Vec::new()
+        self.segments()
+            .into_iter()
+            .filter_map(|segment| match segment {
+                Segment::Variable(name) => Some(name),
+                Segment::Literal(_) => None,
+            })
+            .collect()
+    }
+
+    /// The template split into literal text and `{identifier}` placeholders.
+    fn segments(&self) -> Vec<Segment<'_>> {
+        let mut segments = Vec::new();
+        let rest = self.0.as_str();
+        let mut literal_start = 0;
+        let mut scan_from = 0;
+        while let Some(open) = rest[scan_from..].find('{').map(|i| i + scan_from) {
+            let name_start = open + 1;
+            let name_end = rest[name_start..].find('}').map(|i| i + name_start);
+            match name_end {
+                Some(end) if is_identifier(&rest[name_start..end]) => {
+                    if open > literal_start {
+                        segments.push(Segment::Literal(&rest[literal_start..open]));
+                    }
+                    segments.push(Segment::Variable(&rest[name_start..end]));
+                    literal_start = end + 1;
+                    scan_from = end + 1;
+                }
+                _ => scan_from = name_start,
+            }
+        }
+        if literal_start < rest.len() {
+            segments.push(Segment::Literal(&rest[literal_start..]));
+        }
+        segments
     }
 
     /// The template with each variable replaced by `lookup(name)`. A name `allowed` does not hold
@@ -63,9 +105,26 @@ impl PathTemplate {
         allowed: &[&str],
         lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<String, TemplateError> {
-        // TODO(claude-transcript): implement
-        let _ = (allowed, lookup);
-        Ok(self.0.clone())
+        let mut rendered = String::new();
+        for segment in self.segments() {
+            match segment {
+                Segment::Literal(text) => rendered.push_str(text),
+                Segment::Variable(name) => {
+                    if !allowed.contains(&name) {
+                        return Err(TemplateError::UnknownVariable {
+                            template: self.0.clone(),
+                            variable: name.to_string(),
+                        });
+                    }
+                    let value = lookup(name).ok_or_else(|| TemplateError::Unset {
+                        template: self.0.clone(),
+                        variable: name.to_string(),
+                    })?;
+                    rendered.push_str(&value);
+                }
+            }
+        }
+        Ok(rendered)
     }
 }
 

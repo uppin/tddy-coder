@@ -10,9 +10,9 @@ pub struct FieldPath(String);
 impl FieldPath {
     /// The value at this path, or `None` when a segment is missing or not an object.
     pub fn lookup<'a>(&self, value: &'a serde_json::Value) -> Option<&'a serde_json::Value> {
-        // TODO(claude-transcript): implement
-        let _ = value;
-        None
+        self.0
+            .split('.')
+            .try_fold(value, |current, key| current.as_object()?.get(key))
     }
 
     /// The path as written.

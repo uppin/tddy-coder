@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::tree::{FILE_VARIABLES, MAIN_VARIABLES};
 use crate::{FieldPath, PathTemplate};
 
 /// An agent's usage binding: every source its usage is read from, in order.
@@ -125,7 +126,43 @@ pub struct CounterMap {
 /// make: every template names only the variables its position binds, and there is at least one
 /// source.
 pub fn validate_usage_section(section: &UsageSection) -> Result<(), String> {
-    // TODO(claude-transcript): implement
-    let _ = section;
+    if section.sources.is_empty() {
+        return Err("sources is empty: name at least one source".to_string());
+    }
+    for source in &section.sources {
+        let UsageSource::Jsonl(jsonl) = source;
+        check_variables("main.path", &jsonl.main.path, MAIN_VARIABLES)?;
+        if let Some(children) = &jsonl.children {
+            check_variables("children.path", &children.path, FILE_VARIABLES)?;
+            check_variables("children.id", &children.id, FILE_VARIABLES)?;
+            if let Some(name) = &children.name {
+                check_variables("children.name.sidecar", &name.sidecar, FILE_VARIABLES)?;
+            }
+        }
+    }
     Ok(())
+}
+
+/// `template` names only variables from `allowed`.
+fn check_variables(
+    position: &str,
+    template: &PathTemplate,
+    allowed: &[&str],
+) -> Result<(), String> {
+    match template
+        .variables()
+        .into_iter()
+        .find(|v| !allowed.contains(v))
+    {
+        Some(unknown) => Err(format!(
+            "{position} '{}' names unknown variable '{{{unknown}}}' (known: {})",
+            template.as_str(),
+            allowed
+                .iter()
+                .map(|v| format!("{{{v}}}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+        None => Ok(()),
+    }
 }

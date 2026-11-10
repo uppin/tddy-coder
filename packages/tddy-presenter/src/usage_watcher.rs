@@ -3,7 +3,7 @@
 //! A running session's token usage grows as the agent (and its subagents) produce turns. To let a
 //! connected Inspector see live totals — rather than only the end-of-session summary
 //! `tddy-sandbox-app` prints — this module re-reads the on-disk token sources
-//! ([`crate::backend::gather_session_usage`]) on a fixed interval and broadcasts each snapshot as a
+//! ([`tddy_usage::gather_session_usage`]) on a fixed interval and broadcasts each snapshot as a
 //! [`PresenterEvent::TokenUsageUpdated`] on the session's presenter event channel.
 //!
 //! Three pieces:

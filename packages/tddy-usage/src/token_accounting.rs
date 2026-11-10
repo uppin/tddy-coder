@@ -70,24 +70,39 @@ pub struct ConversationRecord {
 /// Render the per-conversation token breakdown a session prints when it ends: one line per
 /// conversation followed by a TOTAL row summing the columns.
 pub fn format_token_summary(session_id: &str, records: &[ConversationRecord]) -> String {
-    // TODO(claude-transcript): print cache_read, cache_write and reasoning per row and in TOTAL
     let mut lines = vec![format!("Session token usage (session {session_id}):")];
 
-    let mut total_in = 0u64;
-    let mut total_out = 0u64;
-    let mut total = 0u64;
+    let mut totals = [0u64; 6];
     for r in records {
-        total_in += r.input_tokens;
-        total_out += r.output_tokens;
-        total += r.total_tokens;
+        let row = [
+            r.input_tokens,
+            r.cache_read_tokens,
+            r.cache_write_tokens,
+            r.output_tokens,
+            r.reasoning_tokens,
+            r.total_tokens,
+        ];
+        for (sum, value) in totals.iter_mut().zip(row) {
+            *sum += value;
+        }
         lines.push(format!(
-            "- {} [{}] [{}]: in={} out={} total={} turns={}",
-            r.agent, r.id, r.model, r.input_tokens, r.output_tokens, r.total_tokens, r.turns
+            "- {} [{}] [{}]: in={} cache_read={} cache_write={} out={} reasoning={} total={} turns={}",
+            r.agent,
+            r.id,
+            r.model,
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            row[5],
+            r.turns
         ));
     }
 
+    let [input, cache_read, cache_write, output, reasoning, total] = totals;
     lines.push(format!(
-        "TOTAL: in={total_in} out={total_out} total={total}"
+        "TOTAL: in={input} cache_read={cache_read} cache_write={cache_write} out={output} reasoning={reasoning} total={total}"
     ));
     lines.join("\n")
 }

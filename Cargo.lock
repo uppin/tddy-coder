@@ -13691,6 +13691,7 @@ dependencies = [
  "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-tool-engine",
+ "tddy-usage",
  "tempfile",
  "tokio",
  "tokio-stream",

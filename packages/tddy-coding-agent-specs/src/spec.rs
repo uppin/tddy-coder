@@ -247,11 +247,6 @@ pub struct CodingAgentSection {
     /// code (the sweep: agent metadata lives only in YAML).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub permission_modes: Vec<String>,
-    /// This agent leaves transcripts the host can total token usage from, when a transcript
-    /// reader for its format exists. A summary that reads transcripts gates on this rather
-    /// than naming the agent.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub transcript_usage: bool,
     /// Where this agent's token usage lives and how to read it (`#usage-binding`): the sources a
     /// session's usage snapshot is evaluated from by the agent-agnostic `tddy-usage` engine. `None`
     /// for an agent that declares none — its sessions report only their tddy subagents.

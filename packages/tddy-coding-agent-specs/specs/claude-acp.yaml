@@ -53,7 +53,6 @@ extensions:
     route:
       providers: [anthropic]
       shape: env
-    transcript_usage: true
     # Where this agent's token usage lives and how to read it (`#usage-binding`). The engine
     # (`tddy-usage`) knows formats, not agents: everything Claude-specific is here. Claude Code
     # writes one JSON line per content block, each repeating its API message's id and usage, so

@@ -572,10 +572,11 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     }
 
     // Captured before `model` and `agent` move into `SpawnParams` — used to build the
-    // end-of-session token summary once the terminal bridge returns. The transcript reader behind
-    // it reads one agent's transcripts, so only that agent's session has a main-agent row.
+    // end-of-session token summary once the terminal bridge returns. The agent's usage binding says
+    // where its transcripts live; an agent that declares none has only its tddy subagent rows.
     let model_for_summary = model.clone();
-    let is_transcript_agent = agent.spec.agent.transcript_usage;
+    let agent_id_for_summary = agent.id.clone();
+    let usage_for_summary = agent.spec.agent.usage.clone();
 
     // Register the reusable-LSP executor before spawning the jail, so the spawn-time
     // availability check can gate the in-jail `Lsp*` tools, and relayed `Lsp*` tool calls
@@ -670,11 +671,16 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     }
 
     print_token_summary(
-        &session_dir,
         &session_id,
-        &spawned.home,
-        &model_for_summary,
-        is_transcript_agent,
+        usage_for_summary.as_ref(),
+        &tddy_usage::UsageContext {
+            agent_home: Some(spawned.home.clone()),
+            session_dir: session_dir.clone(),
+            conversation_id: Some(session_id.clone()),
+            worktree: None,
+            agent_label: agent_id_for_summary,
+            fallback_model: model_for_summary,
+        },
     );
 
     if let Err(e) = bridge_result {
@@ -908,7 +914,18 @@ async fn run_sandboxed_codebase(run: SandboxedCodebaseRun) -> Result<()> {
     // a summary gathered from a stand-in path prints an empty table that reads like a session which
     // spent no tokens; say why instead.
     match host_home(std::env::var_os("HOME")) {
-        Ok(home) => print_token_summary(&run.session_dir, &run.session_id, &home, &run.model, true),
+        Ok(home) => print_token_summary(
+            &run.session_id,
+            run.agent.spec.agent.usage.as_ref(),
+            &tddy_usage::UsageContext {
+                agent_home: Some(home),
+                session_dir: run.session_dir.clone(),
+                conversation_id: Some(run.session_id.clone()),
+                worktree: Some(session.worktree().to_path_buf()),
+                agent_label: run.agent.id.clone(),
+                fallback_model: run.model.clone(),
+            },
+        ),
         Err(reason) => eprintln!("no token summary: {reason}"),
     }
 
@@ -932,36 +949,26 @@ fn host_home(env_home: Option<std::ffi::OsString>) -> Result<PathBuf, String> {
 
 /// Print the per-conversation token breakdown for the finished session to stderr.
 ///
-/// Combines three sources: the main Claude agent's own usage (from its transcript, via
-/// [`tddy_core::backend::read_claude_transcript_usage`]), each of Claude's nested Task-tool
-/// subagents ([`tddy_core::backend::read_claude_subagent_usages`]), and the tddy subagent
-/// conversations the in-jail MCP server wrote to `<session_dir>/egress/accounting.json`.
-/// Best-effort: a missing or unreadable accounting file simply contributes no tddy-subagent rows.
+/// The snapshot is [`tddy_usage::gather_session_usage`]: the conversations the agent's `usage`
+/// binding reads (none when the agent declares no binding), then the tddy subagent conversations
+/// the in-jail MCP server wrote to `<session_dir>/egress/accounting.json`.
 ///
-/// macOS-only: the in-process `run_macos` flow spawns and reaps Claude itself, so it is the only
+/// macOS-only: the in-process `run_macos` flow spawns and reaps the agent itself, so it is the only
 /// path that can read the finished transcript. The Linux path delegates the session lifecycle to
-/// the daemon (`run_linux` → `daemon_client::run`) and never reaps Claude here, so it has no
+/// the daemon (`run_linux` → `daemon_client::run`) and never reaps the agent here, so it has no
 /// summary to print.
 #[cfg(target_os = "macos")]
 fn print_token_summary(
-    session_dir: &std::path::Path,
     session_id: &str,
-    claude_home_dir: &std::path::Path,
-    model: &str,
-    include_main_agent: bool,
+    usage: Option<&tddy_usage::UsageSection>,
+    ctx: &tddy_usage::UsageContext,
 ) {
-    use tddy_core::backend::gather_session_usage;
-    use tddy_core::token_accounting::format_token_summary;
+    let records = tddy_usage::gather_session_usage(usage, ctx);
 
-    let records = gather_session_usage(
-        session_dir,
-        session_id,
-        claude_home_dir,
-        model,
-        include_main_agent,
+    eprintln!(
+        "{}",
+        tddy_usage::token_accounting::format_token_summary(session_id, &records)
     );
-
-    eprintln!("{}", format_token_summary(session_id, &records));
 }
 
 #[cfg(all(test, target_os = "macos"))]
