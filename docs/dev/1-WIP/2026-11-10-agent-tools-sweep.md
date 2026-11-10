@@ -526,3 +526,11 @@ All answered by the user on 2026-11-10. See *Decisions & Trade-offs*.
   `spawn_split_agent_process`.
 - Three plan-only commits in the stack (`117cda382`, `72700a22f`, `ce545ab48`) hold re-anchored
   or refused-attempt plan files; the code for their groups landed in the following commits.
+- Verification (2026-11-10): scoped `./test` batches — users-file+supervisor+kernel+specs+
+  agent-backend 953 passed/0 failed; agent-launch+pty+terminal-rpc+session-split+cli-sessions+
+  coding-subagent+spawn 663/0; daemon 313/0; coder+session-lifecycle 1175 passed/2 failed, the
+  two failures being the recorded pre-existing `an_unsandboxed_claude_cli_start…` and
+  `jailed::…hook_reaches_the_daemon…`. Clippy (`./dev cargo clippy … -D warnings`) clean for all
+  fifteen touched packages; `cargo fmt --check` clean. Linux-only tests
+  (`supervisor_user_sockets`, the Linux cfg ranges in spawn_broker) compile-checked on macOS and
+  run on CI only.
