@@ -87,16 +87,14 @@ impl CliSessionManager {
         tmux_session: Option<&str>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         let (ready_tx, ready_rx) = oneshot::channel();
-        let spec = PtySpawnSpec {
+        let spec = build_pty_spawn_spec(
+            (session_id, terminal_id, kind),
+            &worktree_path,
             argv,
-            worktree_path: worktree_path.clone(),
-            session_id: session_id.to_string(),
-            terminal_id: terminal_id.to_string(),
-            kind: kind.to_string(),
             env,
             env_base,
-            os_user: os_user.map(str::to_string),
-        };
+            os_user,
+        );
 
         // The main terminal's recording is finished by the PTY runtime itself, before the terminal
         // leaves the PTY registry: a stopped main must answer history from its recording the moment
@@ -344,6 +342,27 @@ impl CliSessionManager {
         handle.tmux_session = entry.tmux_session;
         Some(Arc::new(handle))
     }
+}
+
+fn build_pty_spawn_spec(
+    (session_id, terminal_id, kind): (&str, &str, &str),
+    worktree_path: &std::path::Path,
+    argv: Vec<String>,
+    env: Vec<(String, String)>,
+    env_base: tddy_pty::PtyEnvBase,
+    os_user: Option<&str>,
+) -> PtySpawnSpec {
+    let spec = PtySpawnSpec {
+        argv,
+        worktree_path: worktree_path.to_owned(),
+        session_id: session_id.to_string(),
+        terminal_id: terminal_id.to_string(),
+        kind: kind.to_string(),
+        env,
+        env_base,
+        os_user: os_user.map(str::to_string),
+    };
+    spec
 }
 
 fn finish_spawned_terminal(
