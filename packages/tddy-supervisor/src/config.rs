@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::spawn_policy::SpawnPolicy;
 use crate::config::trust::require_trustworthy_config_directory;
 use crate::config::trust::require_trustworthy_config_file;
+use crate::config::users::refuse_old_user_list_keys;
 use crate::config::users::UsersConfig;
 use crate::error::ConfigError;
 
@@ -231,40 +232,6 @@ impl ServiceSocket {
             ),
         })
     }
-}
-
-/// Refuse the hand-kept user lists `users.yaml` replaces, naming that file (`#agent-tools` 31/32).
-///
-/// Checked on the untyped document, before typed deserialization, so a leftover key is told it is
-/// obsolete rather than getting serde's bare `unknown field`.
-fn refuse_old_user_list_keys(document: &serde_yaml::Value) -> Result<(), ConfigError> {
-    let Some(top) = document.as_mapping() else {
-        return Ok(());
-    };
-    let old_key = |key: &str| ConfigError {
-        message: format!(
-            "`{key}:` in supervisor.yaml is obsolete — the GitHub → OS-user mapping lives in \
-             users.yaml now (see the top-level `users:` block); delete the `{key}:` key"
-        ),
-    };
-    if let Some(policy) = top.get("spawn_policy").and_then(|v| v.as_mapping()) {
-        if policy.contains_key("allowed_session_users") {
-            return Err(old_key("allowed_session_users"));
-        }
-    }
-    if let Some(services) = top.get("services").and_then(|v| v.as_sequence()) {
-        for service in services {
-            let Some(service) = service.as_mapping() else {
-                continue;
-            };
-            for key in ["host_sockets", "agent_tool_sockets"] {
-                if service.contains_key(key) {
-                    return Err(old_key(key));
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 impl SupervisorConfig {
