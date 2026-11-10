@@ -280,31 +280,9 @@ impl SupervisorClient {
         let connection = Arc::clone(&self.connection);
         // Owns the connection's guard and the transport, so the stream outlives `self`.
         let transport = Arc::clone(&self.transport);
-        tokio::spawn(async move {
-            let _keep_alive = (connection, transport);
-            if events.send(Ok(first)).await.is_err() {
-                return;
-            }
-            loop {
-                let frame = match tokio::time::timeout(deadline, frames.recv()).await {
-                    Ok(Some(frame)) => frame,
-                    Ok(None) => break,
-                    Err(_elapsed) => {
-                        // Silence ends the stream with the failure as its last item: nothing after
-                        // a gap this long can be trusted to be the rest of the clone.
-                        let _ = events.send(Err(went_silent(method, deadline))).await;
-                        break;
-                    }
-                };
-                let event = match frame {
-                    Ok(bytes) => decode_event::<E>(method, &bytes),
-                    Err(status) => Err(protocol::error_from_status(status)),
-                };
-                if events.send(event).await.is_err() {
-                    break;
-                }
-            }
-        });
+        forward_frames(
+            method, deadline, frames, first, events, connection, transport,
+        );
         Ok(receiver)
     }
 
@@ -365,6 +343,45 @@ impl SupervisorClient {
             message: format!("could not decode the supervisor's reply to {method}: {error}"),
         })
     }
+}
+
+fn forward_frames<E>(
+    method: &'static str,
+    deadline: Duration,
+    mut frames: tokio::sync::mpsc::Receiver<Result<Vec<u8>, Status>>,
+    first: E,
+    events: tokio::sync::mpsc::Sender<Result<E, SupervisorError>>,
+    connection: Arc<Connection>,
+    transport: Arc<StdioRpcClient>,
+) -> JoinHandle<()>
+where
+    E: Message + Default + Send + 'static,
+{
+    tokio::spawn(async move {
+        let _keep_alive = (connection, transport);
+        if events.send(Ok(first)).await.is_err() {
+            return;
+        }
+        loop {
+            let frame = match tokio::time::timeout(deadline, frames.recv()).await {
+                Ok(Some(frame)) => frame,
+                Ok(None) => break,
+                Err(_elapsed) => {
+                    // Silence ends the stream with the failure as its last item: nothing after
+                    // a gap this long can be trusted to be the rest of the clone.
+                    let _ = events.send(Err(went_silent(method, deadline))).await;
+                    break;
+                }
+            };
+            let event = match frame {
+                Ok(bytes) => decode_event::<E>(method, &bytes),
+                Err(status) => Err(protocol::error_from_status(status)),
+            };
+            if events.send(event).await.is_err() {
+                break;
+            }
+        }
+    })
 }
 
 /// The failure of a call or a clone event that the supervisor did not answer within `deadline`.
