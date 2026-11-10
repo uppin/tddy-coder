@@ -308,123 +308,8 @@ fn privilege_to_drop(target: &TargetUser) -> Option<(u32, u32)> {
     Some((target.uid, target.gid))
 }
 
-/// The answer every step below gives on a host whose kernel does not have the facility it needs.
-///
-/// The supervisor is a Linux program: systemd starts it, it joins cgroup scopes, and it builds a
-/// jail out of namespaces and bind mounts. None of that exists on Darwin, and the sandboxing that
-/// does — Seatbelt, in `tddy-sandbox-darwin` — is a different mechanism reached a different way. What
-/// the two platforms share is everything this file decides *before* the fork: the step ordering, the
-/// credentials it refuses, the environment it builds. Compiling there keeps those under test on a
-/// developer's machine.
-///
-/// So a step that cannot be performed says so and the spawn fails. It is not a reduced jail: a
-/// session the supervisor cannot confine is one it does not start.
-#[cfg(not(target_os = "linux"))]
-fn only_on_linux(facility: &str) -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        format!(
-            "{facility} is a Linux facility, and this host is not Linux; the supervisor will not \
-             spawn a session it cannot confine"
-        ),
-    )
-}
-
-/// Ask the kernel to signal us when the supervisor dies, and check it has not died already.
-///
-/// Called once per [`PreExecStep::SetParentDeathSignal`], which a plan contains once per operation
-/// that clears the signal plus one: an arming is not sticky, and `commit_creds()` drops it on any
-/// change of effective ids or capability set.
-///
-/// # Safety
-///
-/// Runs after `fork`, so it may only use async-signal-safe syscalls. `prctl` and `getppid` read and
-/// write nothing but this process's own state.
-#[cfg(target_os = "linux")]
-unsafe fn set_parent_death_signal(supervisor_pid: libc::pid_t) -> std::io::Result<()> {
-    // A supervisor that is killed rather than asked to stop should not leave its daemon and
-    // sessions behind: without this they would be reparented to init and run on unsupervised.
-    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as libc::c_ulong) != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    // The supervisor may have died in the window between `fork` and the line above, in which case
-    // the signal it asks for will never arrive. Checking closes that race.
-    if libc::getppid() != supervisor_pid {
-        libc::_exit(ORPHANED_EXIT_STATUS);
-    }
-    Ok(())
-}
-
-/// `PR_SET_PDEATHSIG` has no counterpart outside Linux — see [`only_on_linux`]. Refused rather than
-/// skipped: it is the first step of every plan precisely because a child that cannot be tied to its
-/// supervisor's lifetime is one that can outlive it.
-#[cfg(not(target_os = "linux"))]
-unsafe fn set_parent_death_signal(supervisor_pid: libc::pid_t) -> std::io::Result<()> {
-    let _ = supervisor_pid;
-    Err(only_on_linux("the parent-death signal"))
-}
-
-/// Become the leader of a new session, and so of a process group of our own.
-///
-/// `setsid` rather than `setpgid(0, 0)`: a supervised process has no business keeping the
-/// supervisor's controlling terminal, and a fresh child is never already a group leader, which is
-/// the only way `setsid` can fail.
-///
-/// # Safety
-///
-/// Runs after `fork`. `setsid` only changes this process's session and group.
-unsafe fn lead_own_process_group() -> std::io::Result<()> {
-    if libc::setsid() < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-/// How many groups `setgroups(2)` is being handed: `size_t` in glibc's header, `c_int` in Darwin's.
-/// The count is the length of a group list resolved from the passwd database, so neither type can be
-/// narrowed by the cast.
-#[cfg(target_os = "linux")]
-type GroupCount = libc::size_t;
-#[cfg(not(target_os = "linux"))]
-type GroupCount = libc::c_int;
-
-/// `setgroups` → `setgid` → `setuid`. Root is surrendered here and never comes back.
-///
-/// `setgroups(2)` rather than `initgroups(3)`: the list was enumerated before the fork precisely so
-/// this is a bare syscall — see [`TargetUser::groups`]. It goes first because dropping the group set
-/// needs `CAP_SETGID`, which `setuid` is about to take away.
-///
-/// # Safety
-///
-/// Runs after `fork`. `groups` must remain valid for the call. All three change only this process's
-/// own credentials, and the order is the security contract: the group set must be replaced while the
-/// process still has the privilege to replace it.
-unsafe fn drop_privilege(
-    uid: libc::uid_t,
-    gid: libc::gid_t,
-    groups: &[libc::gid_t],
-) -> std::io::Result<()> {
-    if libc::setgroups(groups.len() as GroupCount, groups.as_ptr()) != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    if libc::setgid(gid) != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    if libc::setuid(uid) != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-/// # Safety
-///
-/// Runs after `fork`. `path` must remain valid for the call; `chdir` changes only this process's cwd.
-unsafe fn change_directory(path: &CStr) -> std::io::Result<()> {
-    if libc::chdir(path.as_ptr()) != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
-}
+mod process_syscalls;
+pub(crate) use process_syscalls::*;
 
 /// The map that makes a jail rootless: one id, the account the child has already become, mapped to
 /// root *inside* the new namespace and to nothing at all outside it.
@@ -545,7 +430,9 @@ pub(crate) fn open_directory_reference(path: &CStr) -> std::io::Result<OwnedFd> 
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn open_directory_reference(path: &CStr) -> std::io::Result<OwnedFd> {
     let _ = path;
-    Err(only_on_linux("an O_PATH directory reference"))
+    Err(process_syscalls::only_on_linux(
+        "an O_PATH directory reference",
+    ))
 }
 
 /// `openat2(2)` under the given `RESOLVE_*` flags, as an `O_PATH` reference.
@@ -590,7 +477,9 @@ pub(crate) fn open_resolved(dirfd: RawFd, path: &CStr, resolve: u64) -> std::io:
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn open_resolved(dirfd: RawFd, path: &CStr, resolve: u64) -> std::io::Result<OwnedFd> {
     let _ = (dirfd, path, resolve);
-    Err(only_on_linux("openat2(2) path resolution"))
+    Err(process_syscalls::only_on_linux(
+        "openat2(2) path resolution",
+    ))
 }
 
 /// The files a fresh user namespace is configured through, and the switch that has to be thrown
@@ -645,7 +534,7 @@ unsafe fn enter_user_namespace(uid_map: &[u8], gid_map: &[u8]) -> std::io::Resul
 #[cfg(not(target_os = "linux"))]
 unsafe fn enter_user_namespace(uid_map: &[u8], gid_map: &[u8]) -> std::io::Result<()> {
     let _ = (uid_map, gid_map);
-    Err(only_on_linux("a user namespace"))
+    Err(process_syscalls::only_on_linux("a user namespace"))
 }
 
 /// Write a buffer to a file in one call, allocation-free.
@@ -696,7 +585,7 @@ unsafe fn enter_mount_namespace() -> std::io::Result<()> {
 /// Mount namespaces are Linux's — see [`only_on_linux`].
 #[cfg(not(target_os = "linux"))]
 unsafe fn enter_mount_namespace() -> std::io::Result<()> {
-    Err(only_on_linux("a mount namespace"))
+    Err(process_syscalls::only_on_linux("a mount namespace"))
 }
 
 /// Take an empty network of our own.
@@ -721,7 +610,7 @@ unsafe fn enter_network_namespace() -> std::io::Result<()> {
 /// Network namespaces are Linux's — see [`only_on_linux`].
 #[cfg(not(target_os = "linux"))]
 unsafe fn enter_network_namespace() -> std::io::Result<()> {
-    Err(only_on_linux("a network namespace"))
+    Err(process_syscalls::only_on_linux("a network namespace"))
 }
 
 /// Stop this mount namespace from propagating anything back to the host.
@@ -751,7 +640,7 @@ unsafe fn make_root_mount_private() -> std::io::Result<()> {
 /// Mount propagation is a property of a Linux mount namespace — see [`only_on_linux`].
 #[cfg(not(target_os = "linux"))]
 unsafe fn make_root_mount_private() -> std::io::Result<()> {
-    Err(only_on_linux("a private root mount"))
+    Err(process_syscalls::only_on_linux("a private root mount"))
 }
 
 /// `/proc/self/fd/`, plus room for every digit of a descriptor and the nul.
@@ -856,7 +745,7 @@ unsafe fn bind_mount(source: &CStr, target: &CStr, readonly: bool) -> std::io::R
 #[cfg(not(target_os = "linux"))]
 unsafe fn bind_mount(source: &CStr, target: &CStr, readonly: bool) -> std::io::Result<()> {
     let _ = (source, target, readonly);
-    Err(only_on_linux("a bind mount"))
+    Err(process_syscalls::only_on_linux("a bind mount"))
 }
 
 /// Bring `lo` up inside the jail's own network namespace, so a loopback-only session can still talk
@@ -914,7 +803,9 @@ unsafe fn bring_loopback_up() -> std::io::Result<()> {
 /// unreachable in practice; it refuses rather than succeeds so that stays true if it ever is not.
 #[cfg(not(target_os = "linux"))]
 unsafe fn bring_loopback_up() -> std::io::Result<()> {
-    Err(only_on_linux("a network namespace's loopback"))
+    Err(process_syscalls::only_on_linux(
+        "a network namespace's loopback",
+    ))
 }
 
 /// The variable a managed service is told the supervisor's privileged socket in.
