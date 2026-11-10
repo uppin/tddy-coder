@@ -302,30 +302,6 @@ impl CodingAgentSpec {
         }
     }
 
-    /// `coding_agent.pass_env`: the names and `PREFIX_*` patterns of the daemon variables the
-    /// agent's process is also started with.
-    pub fn pass_env(&self) -> &[String] {
-        &self.agent.pass_env
-    }
-
-    /// The variables of `parent` (the daemon's environment) that [`Self::pass_env`] names, in
-    /// `parent`'s order — what every host launch of this agent adds to its environment. A variable
-    /// whose name or value is not UTF-8 is not passed.
-    pub fn passed_env(
-        &self,
-        parent: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
-    ) -> Vec<(String, String)> {
-        parent
-            .into_iter()
-            .filter(|(name, _)| {
-                self.agent.pass_env.iter().any(|pattern| {
-                    tddy_agent_backend::agent_env::matches_env_pattern(pattern, name)
-                })
-            })
-            .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
-            .collect()
-    }
-
     /// `coding_agent.product`, or the agent id when the spec declares none.
     pub fn product(&self) -> &str {
         self.agent.product.as_deref().unwrap_or(&self.id)

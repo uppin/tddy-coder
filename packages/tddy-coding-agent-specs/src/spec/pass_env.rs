@@ -1,3 +1,5 @@
+use crate::spec::CodingAgentSpec;
+
 /// Agent-env entries (`coding_agent.pass_env`, an agent-env base set) refused when one would let an
 /// agent inherit a `TDDY_*` variable — `TDDY_X`, `TDDY_*`, or a prefix pattern every `TDDY_*` name
 /// matches (`TDDY*`, `T*`, `*`) — or is not a variable name nor a `PREFIX_*` pattern. The message
@@ -39,5 +41,31 @@ fn is_an_env_entry(entry: &str) -> bool {
     match entry.strip_suffix("_*") {
         Some(prefix) => is_name(&format!("{prefix}_")),
         None => is_name(entry),
+    }
+}
+
+impl CodingAgentSpec {
+    /// `coding_agent.pass_env`: the names and `PREFIX_*` patterns of the daemon variables the
+    /// agent's process is also started with.
+    pub fn pass_env(&self) -> &[String] {
+        &self.agent.pass_env
+    }
+
+    /// The variables of `parent` (the daemon's environment) that [`Self::pass_env`] names, in
+    /// `parent`'s order — what every host launch of this agent adds to its environment. A variable
+    /// whose name or value is not UTF-8 is not passed.
+    pub fn passed_env(
+        &self,
+        parent: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+    ) -> Vec<(String, String)> {
+        parent
+            .into_iter()
+            .filter(|(name, _)| {
+                self.agent.pass_env.iter().any(|pattern| {
+                    tddy_agent_backend::agent_env::matches_env_pattern(pattern, name)
+                })
+            })
+            .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+            .collect()
     }
 }
