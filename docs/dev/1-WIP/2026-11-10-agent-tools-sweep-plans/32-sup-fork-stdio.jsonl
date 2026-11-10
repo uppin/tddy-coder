@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-supervisor/src/spawn_broker/fork_broker.rs":{"sha256":"sha256:133fe7a468cdd351c9e39d17fb477ffa4f12a983cdcbe69064d685f012ecd62c"}}}
+{"id": "op-1", "op": "extract_method", "anchor": {"kind": "item", "item": "tddy_supervisor::spawn_broker::fork_broker::spawn_now", "file": "packages/tddy-supervisor/src/spawn_broker/fork_broker.rs", "start": {"line": 24, "col": 5}, "end": {"line": 29, "col": 7}, "fingerprint": "sha256:477493f2303fff1264a80855722d42ec91526d5d118c608f78058cd0f002c51f", "hint": {"line": 145, "col": 5}}, "name": "spawned_stdio"}

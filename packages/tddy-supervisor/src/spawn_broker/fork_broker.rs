@@ -142,17 +142,29 @@ fn spawn_now(
         command.pre_exec(move || steps.run());
     }
 
+    let (child, piped, stderr) = spawned_stdio(stdio, command)?;
+    Ok(SpawnedChild {
+        pid: child.id(),
+        stderr,
+        stdio: piped,
+    })
+}
+
+fn spawned_stdio(
+    stdio: StdioMode,
+    mut command: Command,
+) -> std::io::Result<(
+    std::process::Child,
+    Option<ChildStdio>,
+    Option<std::process::ChildStderr>,
+)> {
     let mut child = command.spawn()?;
     let piped = take_piped(&mut child, stdio);
     let stderr = match stdio {
         StdioMode::Plan => child.stderr.take(),
         StdioMode::Piped => None,
     };
-    Ok(SpawnedChild {
-        pid: child.id(),
-        stderr,
-        stdio: piped,
-    })
+    Ok((child, piped, stderr))
 }
 
 /// Point the child's stdio where `stdio` says: for [`StdioMode::Plan`], stdin null and the output
