@@ -47,16 +47,18 @@ pub(crate) mod accounts;
 mod child_environment;
 pub(crate) mod fork_broker;
 
+#[cfg(test)]
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString};
 #[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::fd::{OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 pub use crate::handover::SocketHandover;
-use crate::spawn_broker::accounts::TargetUser;
 use crate::spawn_broker::fork_broker::CompiledStep;
 
 extern "C" {
@@ -81,234 +83,8 @@ type GroupListId = libc::gid_t;
 #[cfg(not(target_os = "linux"))]
 type GroupListId = libc::c_int;
 
-/// One fork/exec the supervisor performs on someone's behalf.
-#[derive(Debug, Clone)]
-pub struct SpawnPlan {
-    pub program: PathBuf,
-    pub args: Vec<String>,
-    pub env: BTreeMap<String, String>,
-    pub working_dir: PathBuf,
-    pub target: TargetUser,
-    /// `cgroup.procs` of the scope the child joins while it is still root. `None` leaves the child
-    /// in the supervisor's own cgroup.
-    pub scope_procs: Option<PathBuf>,
-    /// Where the child's stdout/stderr go. See [`ChildOutput`].
-    pub output: ChildOutput,
-    /// What the child's environment is built on top of, before `env` is applied.
-    pub environment: EnvironmentBase,
-    /// Jail to build around the child. `None` spawns a plain process in the host's namespaces.
-    pub sandbox: Option<SandboxJail>,
-    /// The checked executable, held so its descriptor stays open until the exec.
-    pub checked: Option<crate::policy::CheckedExecutable>,
-}
-
-/// Where a child's stdout and stderr go.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChildOutput {
-    /// Shared with the supervisor's own, so a managed service's output reaches the journal.
-    Inherit,
-    /// `/dev/null`. A session's output belongs to whoever asked for it, not to the supervisor's
-    /// journal.
-    Discard,
-    /// stdout to `/dev/null`, stderr to a pipe the supervisor reads: a clone's progress and its own
-    /// explanation of a failure. The read end is handed back by
-    /// [`Supervisor::spawn_session_capturing_stderr`](crate::supervisor::Supervisor::spawn_session_capturing_stderr).
-    CaptureStderr,
-}
-
-/// Where a child's environment starts from.
-///
-/// The supervisor's own environment is not a neutral starting point. On a real host it is whatever the
-/// unit's `Environment=` and `EnvironmentFile=` put there, which is where operators keep credentials,
-/// and the supervisor is uid 0 when it reads them.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EnvironmentBase {
-    /// The supervisor's own environment, verbatim, plus [`SUPERVISOR_SOCKET_ENV`] naming the socket
-    /// this supervisor listens on.
-    ///
-    /// For a *declared managed service* only. Root wrote that declaration, and an operator who sets
-    /// `RUST_LOG` on the supervisor unit expects it to reach the daemon exactly as it does today.
-    /// The socket travels in this variant, rather than with every spawn, so that only a managed
-    /// service can ever be told where the supervisor listens.
-    Inherited {
-        /// `socket.path` from `supervisor.yaml`.
-        supervisor_socket: PathBuf,
-    },
-    /// `PATH`, the account's own `HOME`/`USER`/`LOGNAME`, and the host's locale. Nothing else.
-    ///
-    /// For a session, which runs as somebody else on a caller's behalf and has no claim on anything
-    /// the supervisor was started with.
-    Minimal,
-    /// The request's own variables, as the daemon computed them, and the account's
-    /// `HOME`/`USER`/`LOGNAME`. No supervisor `PATH`, no forwarded locale, nothing the supervisor
-    /// was started with (`#agent-tools 28/28`).
-    ///
-    /// For a relayed spawn: what the child sees is the caller's configuration, owned by the
-    /// daemon and its YAML; the supervisor knows only the OS user.
-    Exactly,
-}
-
-/// `PATH` for a session, whose caller does not get to choose one.
-///
-/// Fixed rather than taken from the supervisor's own environment, so what a session resolves a
-/// command to does not depend on how the unit happened to be started. The daemon's env passes
-/// whole under the one env rule, and this is the base it is laid over for a session.
-const SESSION_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
-
-/// Variables a minimal environment still takes from the supervisor: they decide how text is rendered
-/// and what the clock reads, not what code runs.
-const FORWARDED_VARIABLES: [&str; 2] = ["LANG", "TZ"];
-
-/// The jail the supervisor builds around a sandbox session, once it has dropped to the target user.
-///
-/// Every path here has already been resolved against `SpawnPolicy::allowed_mount_roots`; the child
-/// never sees a source the policy did not permit.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SandboxJail {
-    /// Bind mounts to establish inside the jail, in declaration order.
-    pub mounts: Vec<JailMount>,
-    /// Whether the jail gets its own network namespace with only loopback up.
-    pub isolate_network: bool,
-}
-
-/// One bind mount inside a jail.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JailMount {
-    pub source: PathBuf,
-    pub target: PathBuf,
-    pub readonly: bool,
-}
-
-/// One step the child performs between `fork` and `exec`, in the order it must happen.
-///
-/// This exists as data rather than as straight-line code because the *ordering* is the security
-/// contract, not an implementation detail: the privilege drop has to come after the operations that
-/// need root and before every operation that must not have it. Ordering expressed as a value can be
-/// asserted by a test on any host; ordering expressed as statements inside `pre_exec` cannot be
-/// asserted at all.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PreExecStep {
-    /// Ask the kernel to signal this child if the supervisor dies, so a killed supervisor does not
-    /// leave sessions reparented to init.
-    ///
-    /// Appears more than once in a plan, and has to: `commit_creds()` sets `pdeath_signal` back to 0
-    /// on any change of effective ids or capability set, so both [`Self::DropPrivilege`] and the
-    /// `unshare(CLONE_NEWUSER)` in [`Self::EnterUserNamespace`] silently disarm it. Each is therefore
-    /// followed by another arming, and the last one is what the child carries through the `exec`.
-    SetParentDeathSignal,
-    /// `setsid`, making the child the leader of its own session and process group.
-    ///
-    /// Callers address a session with `kill(-pid, …)`. A child left in the supervisor's group turns
-    /// that into either a miss or a signal to the supervisor and everything it manages.
-    LeadOwnProcessGroup,
-    /// Write our pid into a scope's `cgroup.procs`. Needs root: the scope is root-owned.
-    JoinCgroupScope { procs: PathBuf },
-    /// `setgroups` → `setgid` → `setuid`. Root is surrendered here and never comes back.
-    DropPrivilege { uid: u32, gid: u32 },
-    /// `unshare(CLONE_NEWUSER)`, the uid/gid maps and `setgroups=deny`.
-    EnterUserNamespace,
-    /// `unshare(CLONE_NEWNS)`. Every jail takes one: the private remount and the bind mounts below
-    /// have nowhere else to happen.
-    EnterMountNamespace,
-    /// `unshare(CLONE_NEWNET)`. Only for a jail that asked to be isolated from the host's network —
-    /// a namespace nobody asked for is an *empty* network, not a shared one.
-    EnterNetworkNamespace,
-    /// `mount(/, MS_REC | MS_PRIVATE)`, so later mounts do not propagate to the host.
-    MakeRootMountPrivate,
-    /// One bind mount inside the jail.
-    BindMount {
-        source: PathBuf,
-        target: PathBuf,
-        readonly: bool,
-    },
-    /// Bring `lo` up inside the new network namespace.
-    BringLoopbackUp,
-    /// `chdir` into the working directory.
-    ChangeDirectory { path: PathBuf },
-}
-
-/// The ordered steps a child performs between `fork` and `exec`. Pure — builds no OS state.
-///
-/// This is the only place the order is decided. [`PreExecSteps`](fork_broker::PreExecSteps) executes exactly this sequence,
-/// so what a test asserts here is what a child does.
-pub fn pre_exec_plan(plan: &SpawnPlan) -> Vec<PreExecStep> {
-    let mut steps = vec![
-        // First, because every later step can fail, and a child that dies before asking for the
-        // parent-death signal is a child that could outlive its supervisor.
-        PreExecStep::SetParentDeathSignal,
-        PreExecStep::LeadOwnProcessGroup,
-    ];
-
-    // While still root: the scope directory is root-owned, and joining it here rather than from the
-    // parent leaves no window in which the child runs outside its limits.
-    if let Some(procs) = &plan.scope_procs {
-        steps.push(PreExecStep::JoinCgroupScope {
-            procs: procs.clone(),
-        });
-    }
-
-    if let Some((uid, gid)) = privilege_to_drop(&plan.target) {
-        steps.push(PreExecStep::DropPrivilege { uid, gid });
-        // The kernel clears `pdeath_signal` on every change of effective credentials, so the arming
-        // above is now gone — see [`PreExecStep::SetParentDeathSignal`].
-        steps.push(PreExecStep::SetParentDeathSignal);
-    }
-
-    // After the drop, so a caller-supplied directory is traversed with the target user's authority
-    // and not with root's.
-    steps.push(PreExecStep::ChangeDirectory {
-        path: plan.working_dir.clone(),
-    });
-
-    if let Some(jail) = &plan.sandbox {
-        // Every namespace is created after the drop, so it is owned by the unprivileged target user
-        // and its uid map is the same rootless map the daemon builds today.
-        steps.push(PreExecStep::EnterUserNamespace);
-        // The `unshare` above hands the child a full capability set inside its new namespace, which is
-        // another change of credentials, and so clears the signal again.
-        steps.push(PreExecStep::SetParentDeathSignal);
-        // Whatever the jail asked for, the mount namespace is unconditional: the private remount and
-        // the bind mounts below have nowhere else to happen. The *network* namespace is not, because
-        // a jail that asked to share the host's network and got one of its own would get an empty
-        // network with its loopback down — worse than either answer the request can ask for.
-        steps.push(PreExecStep::EnterMountNamespace);
-        if jail.isolate_network {
-            steps.push(PreExecStep::EnterNetworkNamespace);
-        }
-        // Before any bind mount, or every mount below propagates back out to the host.
-        steps.push(PreExecStep::MakeRootMountPrivate);
-        for mount in &jail.mounts {
-            steps.push(PreExecStep::BindMount {
-                source: mount.source.clone(),
-                target: mount.target.clone(),
-                readonly: mount.readonly,
-            });
-        }
-        if jail.isolate_network {
-            // Inside the network namespace unshared above, so this configures the jail's loopback and
-            // not the host's.
-            steps.push(PreExecStep::BringLoopbackUp);
-        }
-    }
-
-    steps
-}
-
-/// The credentials to drop to, or `None` when the supervisor already runs as the target.
-///
-/// Not a special case for tests: a supervisor started as the same account a service declares has no
-/// privilege to give up, and `initgroups` would fail with `EPERM` for lack of it. The comparison is
-/// against the *effective* ids, because those are what `setgid`/`setuid` would change.
-fn privilege_to_drop(target: &TargetUser) -> Option<(u32, u32)> {
-    // SAFETY: both accessors only read this process's own credentials.
-    let (euid, egid) = unsafe { (libc::geteuid(), libc::getegid()) };
-    if euid == target.uid && egid == target.gid {
-        return None;
-    }
-    Some((target.uid, target.gid))
-}
-
 mod process_syscalls;
+pub(crate) mod spawn_plan;
 pub(crate) use process_syscalls::*;
 
 /// The map that makes a jail rootless: one id, the account the child has already become, mapped to
@@ -840,6 +616,13 @@ mod tests {
     use crate::spawn_broker::accounts::TargetUser;
     use crate::spawn_broker::child_environment::ChildEnvironment;
     use crate::spawn_broker::fork_broker::CompiledStep;
+    use crate::spawn_broker::spawn_plan::pre_exec_plan;
+    use crate::spawn_broker::spawn_plan::ChildOutput;
+    use crate::spawn_broker::spawn_plan::EnvironmentBase;
+    use crate::spawn_broker::spawn_plan::JailMount;
+    use crate::spawn_broker::spawn_plan::PreExecStep;
+    use crate::spawn_broker::spawn_plan::SandboxJail;
+    use crate::spawn_broker::spawn_plan::SpawnPlan;
 
     const TDDY_UID: u32 = 998;
     const TDDY_GID: u32 = 998;

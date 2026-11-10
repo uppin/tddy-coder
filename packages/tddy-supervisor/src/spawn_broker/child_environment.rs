@@ -1,8 +1,8 @@
 use crate::handover::SocketHandover;
-use crate::spawn_broker::EnvironmentBase;
-use crate::spawn_broker::SpawnPlan;
-use crate::spawn_broker::FORWARDED_VARIABLES;
-use crate::spawn_broker::SESSION_PATH;
+use crate::spawn_broker::spawn_plan::EnvironmentBase;
+use crate::spawn_broker::spawn_plan::SpawnPlan;
+use crate::spawn_broker::spawn_plan::FORWARDED_VARIABLES;
+use crate::spawn_broker::spawn_plan::SESSION_PATH;
 use crate::spawn_broker::SUPERVISOR_SOCKET_ENV;
 use crate::spawn_broker::USERS_FILE_ENV;
 use std::collections::BTreeMap;

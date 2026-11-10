@@ -25,7 +25,7 @@ use crate::config::{CgroupPolicy, ROOT_USER};
 use crate::error::SupervisorError;
 use crate::request::{AppliedLimits, RequestedLimits};
 use crate::spawn_broker;
-use crate::spawn_broker::EnvironmentBase;
+use crate::spawn_broker::spawn_plan::EnvironmentBase;
 use crate::users_file::UsersFile;
 
 /// The kernel's `cpu.max` pair: `"<quota_us> <period_us>"`.

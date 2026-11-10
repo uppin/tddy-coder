@@ -55,7 +55,7 @@ pub struct Supervisor {
     sessions: Mutex<SessionTable>,
     forks: Arc<ForkBroker>,
     /// `socket.path` from the config: the privileged socket every managed service is told about,
-    /// through [`EnvironmentBase::Inherited`](crate::spawn_broker::EnvironmentBase::Inherited).
+    /// through [`EnvironmentBase::Inherited`](crate::spawn_broker::spawn_plan::EnvironmentBase::Inherited).
     supervisor_socket: PathBuf,
     /// Held while a start is between `fork` and having its pid recorded, so a reap cannot see the
     /// exit of a process nothing has claimed yet. Async, because the fork round-trip is awaited.
@@ -431,7 +431,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     use crate::spawn_broker::accounts::TargetUser;
     #[cfg(target_os = "linux")]
-    use crate::spawn_broker::{ChildOutput, EnvironmentBase, SpawnPlan};
+    use crate::spawn_broker::spawn_plan::ChildOutput;
     use crate::supervisor::session_table::SessionTable;
     use crate::test_util::a_managed_service;
     #[cfg(target_os = "linux")]

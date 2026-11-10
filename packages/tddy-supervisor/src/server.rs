@@ -31,7 +31,11 @@ use crate::request::{
 use crate::server::rpc::SupervisorServiceImpl;
 use crate::spawn_broker::accounts;
 use crate::spawn_broker::accounts::TargetUser;
-use crate::spawn_broker::{ChildOutput, EnvironmentBase, JailMount, SandboxJail, SpawnPlan};
+use crate::spawn_broker::spawn_plan::ChildOutput;
+use crate::spawn_broker::spawn_plan::EnvironmentBase;
+use crate::spawn_broker::spawn_plan::JailMount;
+use crate::spawn_broker::spawn_plan::SandboxJail;
+use crate::spawn_broker::spawn_plan::SpawnPlan;
 use crate::streamed::StreamedEvents;
 use crate::supervisor::Supervisor;
 
