@@ -1,4 +1,5 @@
 use crate::route::{ProviderKind, RouteShape};
+use crate::spec::admits_a_tddy_variable;
 use crate::spec::CodingAgentSpec;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -103,4 +104,34 @@ pub enum PlacementError {
         placement: Placement,
         placements: Vec<Placement>,
     },
+}
+
+/// A `coding_agent.route` slot refused at load because its shape cannot be rendered as declared:
+/// `shape: inline_config` without a `config_env` to carry the configuration in, with a
+/// `config_env` matching `TDDY_*` (an agent never sees a daemon variable), or with a `files_dir`
+/// (an inline route writes no file). The message names the field.
+pub(crate) fn route_slot_errors(route: &RouteSlot) -> Result<(), String> {
+    if route.shape != RouteShape::InlineConfig {
+        return Ok(());
+    }
+    let Some(config_env) = route.config_env.as_deref() else {
+        return Err(
+            "shape `inline_config` needs a `config_env` naming the variable that carries the \
+             route's configuration inline"
+                .to_string(),
+        );
+    };
+    if admits_a_tddy_variable(config_env) {
+        return Err(format!(
+            "config_env '{config_env}' would hand the route's configuration over in a TDDY_* \
+             variable, which no agent sees"
+        ));
+    }
+    if route.files_dir.is_some() {
+        return Err(
+            "shape `inline_config` takes no `files_dir`: an inline route writes no file"
+                .to_string(),
+        );
+    }
+    Ok(())
 }

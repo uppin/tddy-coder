@@ -17,7 +17,7 @@ use thiserror::Error;
 
 use crate::capability::Capability;
 use crate::headless::validate_headless;
-use crate::route::{RouteShape, RouteSupport, RoutedAgent};
+use crate::route::{RouteSupport, RoutedAgent};
 use crate::slots::conversation::ConversationSlot;
 use crate::slots::hooks;
 use crate::slots::tools::render_flag_per_value;
@@ -158,36 +158,6 @@ fn parse_section(
             .map_err(invalid)?;
     }
     Ok(agent)
-}
-
-/// A `coding_agent.route` slot refused at load because its shape cannot be rendered as declared:
-/// `shape: inline_config` without a `config_env` to carry the configuration in, with a
-/// `config_env` matching `TDDY_*` (an agent never sees a daemon variable), or with a `files_dir`
-/// (an inline route writes no file). The message names the field.
-pub(crate) fn route_slot_errors(route: &RouteSlot) -> Result<(), String> {
-    if route.shape != RouteShape::InlineConfig {
-        return Ok(());
-    }
-    let Some(config_env) = route.config_env.as_deref() else {
-        return Err(
-            "shape `inline_config` needs a `config_env` naming the variable that carries the \
-             route's configuration inline"
-                .to_string(),
-        );
-    };
-    if admits_a_tddy_variable(config_env) {
-        return Err(format!(
-            "config_env '{config_env}' would hand the route's configuration over in a TDDY_* \
-             variable, which no agent sees"
-        ));
-    }
-    if route.files_dir.is_some() {
-        return Err(
-            "shape `inline_config` takes no `files_dir`: an inline route writes no file"
-                .to_string(),
-        );
-    }
-    Ok(())
 }
 
 /// Agent-env entries (`coding_agent.pass_env`, an agent-env base set) refused when one would let an
@@ -616,6 +586,7 @@ impl CodingAgentSpec {
 
 pub use crate::spec::route_slot::{Placement, ResumeSlot, RouteSlot};
 
+use crate::spec::route_slot::route_slot_errors;
 pub use crate::spec::slot_shapes::{HooksSlot, McpSlot, ToolSlot};
 
 /// One curated model: its id, and the label a picker shows for it. Written in YAML either as the
