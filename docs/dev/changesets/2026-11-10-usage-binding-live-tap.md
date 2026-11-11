@@ -58,7 +58,15 @@
 
 ## Code issues
 
-- `tddy-agent-backend` `oversized-file-headless-driver` — see the record's measurement rows.
+- `tddy-agent-backend` `oversized-file-headless-driver` — **closed**: 505 → 515 with the tap call and
+  `HeadlessCommand::usage_tap`, then **474** production lines after `drain_stderr` / `stderr_tail`
+  moved to `headless_driver/stderr.rs` (`tddy-tools restructure` `move_item`; the import tidy was
+  done by hand). Record deleted.
+- `tddy-session-lifecycle` `coding_agent_launcher/headless_tests.rs` (a `#[cfg(test)]` module file,
+  640 → 641, one `session_dir: None`): test code, not a budget finding.
+- No other code issue in a touched package changed; no stack-shared file was decomposed (`tddy-usage`
+  `gather.rs`, `lib.rs` and `section.rs` are also modified by `codex-rollout` / `opencode-sqlite`, and
+  all are under 500).
 
 ## Left for later
 
