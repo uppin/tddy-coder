@@ -156,6 +156,11 @@ fn parse_section(
             .map_err(|e| format!("route: {e}"))
             .map_err(invalid)?;
     }
+    if let Some(usage) = &agent.usage {
+        tddy_usage::validate_usage_section(usage)
+            .map_err(|e| format!("usage: {e}"))
+            .map_err(invalid)?;
+    }
     Ok(agent)
 }
 
@@ -242,11 +247,11 @@ pub struct CodingAgentSection {
     /// code (the sweep: agent metadata lives only in YAML).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub permission_modes: Vec<String>,
-    /// This agent leaves transcripts the host can total token usage from, when a transcript
-    /// reader for its format exists. A summary that reads transcripts gates on this rather
-    /// than naming the agent.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub transcript_usage: bool,
+    /// Where this agent's token usage lives and how to read it (`#usage-binding`): the sources a
+    /// session's usage snapshot is evaluated from by the agent-agnostic `tddy-usage` engine. `None`
+    /// for an agent that declares none — its sessions report only their tddy subagents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<tddy_usage::UsageSection>,
     /// The daemon's variables this agent's process is also started with, on top of the base set
     /// ([`crate::AgentEnvBase`]) — its provider keys and the agent-specific
     /// variables it reads (`#agent-tools 28/28`). Each entry is a name or a `PREFIX_*` pattern; one

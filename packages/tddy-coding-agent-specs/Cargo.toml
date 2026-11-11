@@ -20,6 +20,8 @@ tddy-workflow = { path = "../tddy-workflow" }
 # `HookCommandParams` and `build_claude_hooks_settings`: the hook protocol stays in Rust, and the
 # `claude-settings-local` adapter names it.
 tddy-agent-backend = { path = "../tddy-agent-backend" }
+# The usage binding model and its agent-agnostic evaluation (`#usage-binding`).
+tddy-usage = { path = "../tddy-usage" }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

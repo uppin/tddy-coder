@@ -176,6 +176,11 @@ pub fn event_to_server_message(event: PresenterEvent) -> ServerMessage {
                         output_tokens: r.output_tokens,
                         total_tokens: r.total_tokens,
                         turns: r.turns,
+                        cache_read_tokens: r.cache_read_tokens,
+                        cache_write_tokens: r.cache_write_tokens,
+                        reasoning_tokens: r.reasoning_tokens,
+                        cost_usd: r.cost_usd,
+                        parent_id: r.parent_id,
                     })
                     .collect(),
             })),
@@ -398,6 +403,11 @@ mod token_usage_updated_rpc {
                 output_tokens: 3_210,
                 total_tokens: 15_550,
                 turns: 7,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                reasoning_tokens: 0,
+                cost_usd: None,
+                parent_id: None,
             },
             ConversationRecord {
                 agent: "Explore".to_string(),
@@ -407,6 +417,11 @@ mod token_usage_updated_rpc {
                 output_tokens: 820,
                 total_tokens: 4_920,
                 turns: 2,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                reasoning_tokens: 0,
+                cost_usd: None,
+                parent_id: None,
             },
         ];
 
@@ -430,6 +445,7 @@ mod token_usage_updated_rpc {
                     output_tokens: 3_210,
                     total_tokens: 15_550,
                     turns: 7,
+                    ..Default::default()
                 },
                 ProtoConversationRecord {
                     agent: "Explore".to_string(),
@@ -439,6 +455,7 @@ mod token_usage_updated_rpc {
                     output_tokens: 820,
                     total_tokens: 4_920,
                     turns: 2,
+                    ..Default::default()
                 },
             ]
         );

@@ -19,6 +19,8 @@ tddy-workflow = { path = "../tddy-workflow" }
 tddy-session-store = { path = "../tddy-session-store" }
 # The submit-result and transition channels a backend's tool calls arrive on.
 tddy-toolcall = { path = "../tddy-toolcall" }
+# The usage binding model and its agent-agnostic evaluation (`#usage-binding`).
+tddy-usage = { path = "../tddy-usage" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

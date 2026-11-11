@@ -537,15 +537,15 @@ fn conversation_record(
     id: &str,
     conv: &SubagentConversation,
 ) -> tddy_core::token_accounting::ConversationRecord {
-    tddy_core::token_accounting::ConversationRecord {
-        agent: conv.agent.clone(),
-        id: id.to_string(),
-        model: conv.model.clone(),
-        input_tokens: conv.usage.input_tokens,
-        output_tokens: conv.usage.output_tokens,
-        total_tokens: conv.usage.total(),
-        turns: conv.turns,
-    }
+    let usage = &conv.usage;
+    tddy_core::token_accounting::ConversationRecord::new(
+        &conv.agent,
+        id,
+        &conv.model,
+        usage.input_tokens,
+        usage.output_tokens,
+        conv.turns,
+    )
 }
 
 /// Every conversation as `subagent_list` reports it: the shared accounting record, plus the

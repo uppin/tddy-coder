@@ -44,6 +44,7 @@ tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-service = { path = "../tddy-service" }
 tddy-task = { path = "../tddy-task" }
+tddy-usage = { path = "../tddy-usage" }
 # The in-jail terminal bridge dials `terminal_session.TerminalSessionService` on the daemon's local
 # socket; the tonic client and its messages are this crate's. Default features only — its
 # `tddy-livekit` is behind the optional `livekit` feature, and this binary runs inside every jail.
