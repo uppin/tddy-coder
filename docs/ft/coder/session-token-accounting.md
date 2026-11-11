@@ -23,8 +23,11 @@ of `sources`, each naming a **format** (`jsonl`) and how to read it:
   field path per counter: `input`, `cache_read`, `cache_write`, `output`, `reasoning`) and an
   optional `cost`. `turns` is the number of kept records.
 
-A spec with an unknown format, an unknown template variable, an empty `sources`, an empty field path
-or a leftover `transcript_usage` key is **refused at load**, naming the file. A session whose agent
+A spec with an unknown format, an unknown template variable, an empty `sources`, an empty field path,
+a leftover `transcript_usage` key, or **two sources mapping the same counter** (or both mapping
+`cost`) is **refused at load**, naming the file. When two sources of one binding describe the same
+conversation, their rows **merge into one**: each counter and the cost come from the one source that
+maps it; model and turns from the first source that has them. A session whose agent
 declares no `usage:` has no main-agent row — only its tddy subagent rows.
 
 ## Conversations accounted
@@ -38,6 +41,22 @@ declares no `usage:` has no main-agent row — only its tddy subagent rows.
 - **Claude's nested Task-tool subagents** — `{dir}/{stem}/subagents/agent-*.jsonl`, named from the
   sibling `agent-<id>.meta.json` `agentType` (default `subagent`), found recursively: a subagent of a
   subagent is a row under its parent.
+- **Usage tapped from the live stream.** An agent whose usage exists only in its protocol stream
+  declares the events that carry it — `headless.usage_events` (stream-json, codex-jsonl and every
+  other headless CLI) or `acp.usage_events` (ACP `session/update`s) — as `{ field, equals }`
+  predicates. The driver appends each matching event, **verbatim**, to
+  `<session_dir>/usage/<conversation_id>.jsonl`, and the agent's binding reads that file with the
+  ordinary `jsonl` format, so no driver names a usage field. A write failure is logged and switches
+  the tap off for the turn; it never fails the turn. `claude.yaml` taps its headless `result` and
+  binds its **cost** (`total_cost_usd`) as a second source; the tokens stay with the transcript.
+- **Coding subagents the daemon runs for a session** (opened through `SessionAgentService`) — each
+  conversation is registered in `<session_dir>/usage-conversations.jsonl` (spec id, conversation id,
+  agent home, worktree, parent = the session's main conversation, label = the subagent's name; one
+  appended line per open, the last per conversation id winning on a resume). The usage stream
+  evaluates **that agent's** binding for it and nests its row under the main conversation. A session
+  with no recorded main conversation registers nothing. The subagent's
+  `SubagentSession::cumulative_usage` reads the same row, so `subagent_list` agrees with the Usage
+  tab; its `context_tokens` stays 0.
 - **tddy `subagent_*` conversations** (`fastcontext` and other YAML-defined specialized agents,
   including local models via **Ollama**) — accumulated from the model's own `usage` object across
   every prompt turn.
@@ -70,8 +89,13 @@ declares no `usage:` has no main-agent row — only its tddy subagent rows.
 - `tddy-usage` — the binding model, its evaluation (`account`, `gather_session_usage`) and
   `token_accounting` (`TokenUsage`, `ConversationRecord`, `format_token_summary`); it names no agent.
   `tddy-agent-backend::token_accounting` re-exports it.
-- `tddy-coding-agent-specs` — parses and validates `coding_agent.usage`; the Claude bindings in
-  `specs/claude.yaml` and `specs/claude-acp.yaml`.
+- `tddy-coding-agent-specs` — parses and validates `coding_agent.usage`, `headless.usage_events` and
+  `acp.usage_events`; the Claude bindings in `specs/claude.yaml` and `specs/claude-acp.yaml`.
+- `tddy-agent-backend::usage_tap` — `UsageTapSpec` (`for_conversation`) and `UsageTap`, fed by the
+  headless driver (each stdout line) and the ACP driver (each `session/update`), given through
+  `HeadlessCommand::usage_tap` / `OpenSession::usage_tap`.
+- `tddy-session-agents` — registers each coding subagent conversation it opens and attaches its
+  `UsageReading` (`tddy-coding-subagent`); `tddy-session-lifecycle`'s headless launcher sets the tap.
 - `tddy-tools` — `subagent_list` tool, `usage` in `subagent_prompt` results, accounting-file writer.
 - `tddy-sandbox-runner` — sets `TDDY_TOOLS_ACCOUNTING_FILE` on the in-jail MCP spawn.
 - `tddy-sandbox-app` — `print_token_summary` gathers the agent's binding plus the accounting file and
@@ -90,7 +114,10 @@ declares no `usage:` has no main-agent row — only its tddy subagent rows.
 - **In scope (web):** the daemon streams every session's usage to the Inspector's Usage tab — see
   [Session Usage Inspector](../web/session-usage-inspector.md).
 - **Out of scope:** TUI visualization; USD cost estimation; bindings for agents other than Claude and
-  Claude-ACP (later `#usage-binding` nodes).
+  Claude-ACP (later `#usage-binding` nodes). Cursor's headless `result` carries no usage in any
+  recorded stream, so Cursor declares no tap yet; ACP's `usage_update` cost is cumulative and waits
+  for a `last` aggregate. A `shared`-placement ACP subagent is registered but not yet tapped
+  ([todo](../../dev/todo/2026-11-11-shared-acp-conversation-usage-untapped.md)).
 
 > ⚠️ The live end-to-end stderr summary against a real Ollama-backed session has not yet been
 > exercised; the behavior is covered by unit/acceptance tests (including against a real Claude

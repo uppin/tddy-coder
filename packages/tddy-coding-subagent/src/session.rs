@@ -73,6 +73,35 @@ pub struct CodingAgentSession {
     /// Every update of every turn as it streams, for [`SubagentSession::updates`]. Each update goes
     /// here alongside the recorder and the turn's own list, so all of them see the same stream.
     update_stream: broadcast::Sender<AcpUpdate>,
+    /// How this conversation's totals are read: its agent's usage binding and what it resolves
+    /// against. `None` reports no usage ([`SubagentSession::cumulative_usage`]).
+    usage_reading: Option<UsageReading>,
+}
+
+/// A conversation's usage binding and the context it resolves against — the same evaluation the
+/// session's usage stream runs for the conversation, so the totals agree with its row.
+#[derive(Debug, Clone)]
+pub struct UsageReading {
+    /// The agent's `usage:` binding.
+    pub section: tddy_usage::UsageSection,
+    /// The paths the binding's templates resolve against; `conversation_id` names this
+    /// conversation.
+    pub ctx: tddy_usage::UsageContext,
+}
+
+impl UsageReading {
+    /// This conversation's own row, summed over every source of the binding. Zero while no usage has
+    /// been written.
+    pub(crate) fn totals(&self) -> tddy_discovery::openai::TokenUsage {
+        tddy_usage::account(&self.section, &self.ctx)
+            .into_iter()
+            .find(|row| Some(&row.id) == self.ctx.conversation_id.as_ref())
+            .map(|row| tddy_discovery::openai::TokenUsage {
+                input_tokens: row.input_tokens,
+                output_tokens: row.output_tokens,
+            })
+            .unwrap_or_default()
+    }
 }
 
 /// One `session/prompt` the session has sent and has not yet seen end.
@@ -189,7 +218,15 @@ impl CodingAgentSession {
             history: Vec::new(),
             recorder: None,
             update_stream: broadcast::channel(UPDATE_STREAM_CAPACITY).0,
+            usage_reading: None,
         }
+    }
+
+    /// Report this conversation's totals from `reading` — what its agent's binding finds in the
+    /// files the conversation writes.
+    pub fn with_usage_reading(mut self, reading: UsageReading) -> Self {
+        self.usage_reading = Some(reading);
+        self
     }
 
     /// The handle this session's turns park their permission requests on. A caller that answers

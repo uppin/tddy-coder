@@ -204,6 +204,9 @@ pub struct CodingAgentLaunch {
     /// The conversation this launch serves, when it has a worktree of its own: its exec calls then
     /// run in that worktree ([`CONVERSATION_ID_ENV`]). `None` runs them in the session's worktree.
     pub conversation_id: Option<String>,
+    /// The tddy session's directory — where a conversation's tapped usage events are written
+    /// (`<session_dir>/usage/<conversation_id>.jsonl`, `#usage-binding 3/5`). `None` taps nothing.
+    pub session_dir: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for CodingAgentLaunch {
@@ -215,6 +218,7 @@ impl std::fmt::Debug for CodingAgentLaunch {
             .field("worktree", &self.worktree)
             .field("managed", &self.managed)
             .field("conversation_id", &self.conversation_id)
+            .field("session_dir", &self.session_dir)
             .field("session_token", &"<redacted>")
             .finish()
     }

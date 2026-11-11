@@ -58,6 +58,11 @@ pub struct HeadlessSection {
     /// absent.
     #[serde(default)]
     pub fresh_session: FreshSession,
+    /// The protocol events that carry usage (`#usage-binding 3/5`): the driver appends each event
+    /// satisfying every predicate, verbatim, to `<session_dir>/usage/<conversation_id>.jsonl`, where
+    /// the agent's `usage:` binding reads it. Empty taps nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub usage_events: Vec<tddy_usage::FieldEq>,
     /// Where the turn's registration files go: `session_dir` or `workdir`. `session_dir` when
     /// absent.
     #[serde(default)]

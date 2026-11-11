@@ -195,6 +195,7 @@ fn a_git_worktree() -> tempfile::TempDir {
 
 fn a_headless_launch(harness: &str, conversation: &str, worktree: &Path) -> CodingAgentLaunch {
     CodingAgentLaunch {
+        session_dir: None,
         def: CodingAgentDef {
             name: format!("fix-the-parser-{harness}"),
             label: None,

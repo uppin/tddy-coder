@@ -28,7 +28,7 @@ pub use launcher::{
 };
 pub use parked_permissions::ParkedPermissions;
 pub use permissions::DenyAndRecord;
-pub use session::CodingAgentSession;
+pub use session::{CodingAgentSession, UsageReading};
 pub use transports::{
     permission_policy_of, permission_policy_of_spec, transport_and_policy_wire,
     transport_and_policy_wire_of_spec, transport_of, transport_of_spec, PermissionPolicy,

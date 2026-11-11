@@ -13,34 +13,35 @@
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
-use std::collections::VecDeque;
 use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, ChildStderr};
+use tokio::process::Child;
 use tokio::sync::Notify;
-use tokio::task::JoinHandle;
 
 use crate::adapters::headless::{
     render_env, turn_workdir, write_rendered_files, EnvTemplate, HeadlessMcpServer, HeadlessTurn,
 };
 use crate::adapters::{HeadlessRenderer, TurnTranscript};
 use crate::error::BackendError;
+use crate::usage_tap::UsageTap;
 
 use super::acp_driver::{AcpDriver, AcpTurnEnd, AcpUpdateSink, McpServerSpec};
 use super::spec_headless::DEFAULT_TURN_DEADLINE;
 use super::turn_process::{
     describe_deadline, kill_process_group, spawn_turn_command, RunningGroup, TurnCommand,
-    STDERR_GRACE,
 };
 use super::SessionMode;
+use crate::backend::headless_driver::stderr::drain_stderr;
+use crate::backend::headless_driver::stderr::stderr_tail;
 use transcript::{Ending, Finished};
 
 pub(crate) mod codex_jsonl;
 pub(crate) mod oz_ndjson;
+mod stderr;
 pub(crate) mod stream_json;
 pub(crate) mod transcript;
 
@@ -76,6 +77,9 @@ pub struct HeadlessCommand {
     /// How long one turn may run before its process group is killed and the turn fails;
     /// [`DEFAULT_TURN_DEADLINE`] when `None`. No headless wait is unbounded.
     pub turn_deadline: Option<Duration>,
+    /// Where the turn's usage events are tapped (`#usage-binding 3/5`): the events the spec's
+    /// `headless.usage_events` declares, appended verbatim. `None` taps nothing.
+    pub usage_tap: Option<crate::usage_tap::UsageTapSpec>,
 }
 
 /// One headless conversation: its CLI, and the CLI's own session id once the first turn named it.
@@ -272,6 +276,7 @@ impl HeadlessDriver {
             .take()
             .map(|stderr| tokio::spawn(drain_stderr(stderr)));
         let mut lines = BufReader::new(stdout).lines();
+        let mut usage_tap = self.command.usage_tap.clone().map(UsageTap::open);
         let deadline = self.command.turn_deadline.unwrap_or(DEFAULT_TURN_DEADLINE);
         let overrun = tokio::time::sleep(deadline);
         tokio::pin!(overrun);
@@ -284,7 +289,12 @@ impl HeadlessDriver {
                     return Err(self.end_overrun(agent, &mut child, pgid, deadline).await);
                 }
                 line = lines.next_line() => match line {
-                    Ok(Some(line)) => transcript.push_line(&line),
+                    Ok(Some(line)) => {
+                        if let Some(tap) = usage_tap.as_mut() {
+                            tap.offer_line(&line);
+                        }
+                        transcript.push_line(&line);
+                    }
                     Ok(None) => break false,
                     Err(e) => {
                         return Err(BackendError::InvocationFailed(format!(
@@ -401,47 +411,6 @@ fn kill_turn(child: &mut Child, pgid: Option<u32>) {
     }
     if let Err(e) = child.start_kill() {
         log::debug!("[headless] kill of the turn's child failed: {e}");
-    }
-}
-
-/// Reads a CLI's stderr to its end, keeping the last few lines.
-async fn drain_stderr(stderr: ChildStderr) -> Vec<String> {
-    let mut tail = VecDeque::with_capacity(STDERR_TAIL_LINES);
-    let mut lines = BufReader::new(stderr).lines();
-    loop {
-        match lines.next_line().await {
-            Ok(Some(line)) => {
-                if tail.len() == STDERR_TAIL_LINES {
-                    tail.pop_front();
-                }
-                tail.push_back(line);
-            }
-            Ok(None) => break,
-            Err(e) => {
-                log::debug!("[headless] reading stderr failed: {e}");
-                break;
-            }
-        }
-    }
-    tail.into()
-}
-
-/// The stderr tail of a CLI that has exited. Waits a bounded time for the reader to see the close,
-/// since a grandchild that inherited the pipe can hold it open.
-async fn stderr_tail(reader: Option<JoinHandle<Vec<String>>>) -> String {
-    let Some(reader) = reader else {
-        return String::new();
-    };
-    match tokio::time::timeout(STDERR_GRACE, reader).await {
-        Ok(Ok(lines)) => lines.join("\n"),
-        Ok(Err(e)) => {
-            log::debug!("[headless] stderr reader failed: {e}");
-            String::new()
-        }
-        Err(_) => {
-            log::debug!("[headless] stderr still open after the CLI exited");
-            String::new()
-        }
     }
 }
 

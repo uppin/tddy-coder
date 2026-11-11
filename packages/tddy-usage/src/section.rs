@@ -140,6 +140,38 @@ pub fn validate_usage_section(section: &UsageSection) -> Result<(), String> {
             }
         }
     }
+    check_counters_unowned_twice(section)
+}
+
+/// No counter (nor the cost) is mapped by two sources: ownership is the mapping, and the merge of
+/// one conversation's rows relies on each counter having exactly one source.
+fn check_counters_unowned_twice(section: &UsageSection) -> Result<(), String> {
+    let mut owners: Vec<(&'static str, usize)> = Vec::new();
+    for (index, source) in section.sources.iter().enumerate() {
+        let UsageSource::Jsonl(jsonl) = source;
+        let record = &jsonl.record;
+        let tokens = &record.tokens;
+        let mapped = [
+            ("input", tokens.input.is_some()),
+            ("cache_read", tokens.cache_read.is_some()),
+            ("cache_write", tokens.cache_write.is_some()),
+            ("output", tokens.output.is_some()),
+            ("reasoning", tokens.reasoning.is_some()),
+            ("cost", record.cost.is_some()),
+        ];
+        for (counter, is_mapped) in mapped {
+            if !is_mapped {
+                continue;
+            }
+            if let Some((_, first)) = owners.iter().find(|(c, _)| *c == counter) {
+                return Err(format!(
+                    "sources[{first}] and sources[{index}] both map the counter '{counter}': \
+                     a counter is mapped by one source"
+                ));
+            }
+            owners.push((counter, index));
+        }
+    }
     Ok(())
 }
 

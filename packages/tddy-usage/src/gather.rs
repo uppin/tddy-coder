@@ -29,14 +29,44 @@ pub struct UsageContext {
 /// first (a zero row carrying `ctx.fallback_model` when it has no files yet), each followed by its
 /// children, recursively, every child's `parent_id` naming its parent.
 pub fn account(section: &UsageSection, ctx: &UsageContext) -> Vec<ConversationRecord> {
-    section
-        .sources
-        .iter()
-        .filter_map(|source| match source {
-            UsageSource::Jsonl(jsonl) => conversation_rows(jsonl, ctx),
-        })
-        .flatten()
-        .collect()
+    merge_sources(
+        section
+            .sources
+            .iter()
+            .filter_map(|source| match source {
+                UsageSource::Jsonl(jsonl) => conversation_rows(jsonl, ctx),
+            })
+            .collect(),
+    )
+}
+
+/// One row per conversation from the rows several sources of one binding produced: rows with the
+/// same id merge, each counter (and the cost) taken from the source whose mapping names it, the
+/// model and turns from the first source. Order is the first source's, then each new id in the
+/// order it first appears.
+///
+/// A counter is mapped by at most one source (the spec loader refuses overlaps), so a source that
+/// does not map it reads zero and the plain sum is the mapping source's figure. The model is the
+/// first source's, or the first non-empty one when that source named none.
+pub fn merge_sources(per_source: Vec<Vec<ConversationRecord>>) -> Vec<ConversationRecord> {
+    let mut merged: Vec<ConversationRecord> = Vec::new();
+    for row in per_source.into_iter().flatten() {
+        let Some(into) = merged.iter_mut().find(|r| r.id == row.id) else {
+            merged.push(row);
+            continue;
+        };
+        into.input_tokens += row.input_tokens;
+        into.output_tokens += row.output_tokens;
+        into.total_tokens += row.total_tokens;
+        into.cache_read_tokens += row.cache_read_tokens;
+        into.cache_write_tokens += row.cache_write_tokens;
+        into.reasoning_tokens += row.reasoning_tokens;
+        into.cost_usd = into.cost_usd.or(row.cost_usd);
+        if into.model.is_empty() {
+            into.model = row.model;
+        }
+    }
+    merged
 }
 
 /// The session's full usage snapshot: [`account`] over `section` when the agent declares one,

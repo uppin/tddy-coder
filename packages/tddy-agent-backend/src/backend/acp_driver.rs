@@ -67,6 +67,10 @@ pub struct OpenSession {
     /// Sent verbatim as `_meta` on `session/new` / `session/load` — where an adapter reads options
     /// the protocol has no field for (`claude-agent-acp` reads `disallowedTools` there).
     pub meta: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Where the session's usage updates are tapped (`#usage-binding 3/5`): each `session/update`
+    /// matching the spec's `acp.usage_events`, serialised, appended to the conversation's usage file.
+    /// `None` taps nothing.
+    pub usage_tap: Option<crate::usage_tap::UsageTapSpec>,
 }
 
 /// An opened ACP session.
@@ -246,6 +250,7 @@ pub(super) fn open_for_request(
         },
         mcp_servers: Vec::new(),
         meta: None,
+        usage_tap: None,
     })
 }
 

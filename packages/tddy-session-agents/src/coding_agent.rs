@@ -163,7 +163,7 @@ pub async fn start_coding_agent_session(
 ) -> Result<CodingAgentSession, Status> {
     match harness_transport(coding_agents, &launch.def.harness) {
         Some(Transport::Headless) => start_headless_session(launcher, launch).await,
-        Some(Transport::Acp) | None => start_acp_session(launcher, launch).await,
+        Some(Transport::Acp) | None => start_acp_session(launcher, launch, coding_agents).await,
     }
 }
 
@@ -173,6 +173,27 @@ fn harness_transport(
     harness: &str,
 ) -> Option<Transport> {
     coding_agents.get(harness).and_then(transport_of_spec)
+}
+
+/// Where the conversation's ACP usage updates are tapped, from the spec's `acp.usage_events`:
+/// `<session_dir>/usage/<conversation_id>.jsonl`. `None` when the spec declares none, or the launch
+/// names no session directory or conversation.
+fn acp_usage_tap(
+    coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
+    launch: &CodingAgentLaunch,
+) -> Option<tddy_core::usage_tap::UsageTapSpec> {
+    let events = coding_agents
+        .get(&launch.def.harness)?
+        .acp()?
+        .usage_events
+        .clone();
+    // TODO(usage-binding): a `shared`-placement ACP conversation launches with no
+    // `conversation_id` (that field names the clone worktree its exec calls run in), so it is
+    // registered for usage but never tapped. Recommended: a separate tap-id field on the launch.
+    // See docs/dev/todo/2026-11-11-shared-acp-conversation-usage-untapped.md.
+    let conversation = launch.conversation_id.as_deref()?;
+    let session_dir = launch.session_dir.as_ref()?;
+    tddy_core::usage_tap::UsageTapSpec::for_conversation(session_dir, conversation, events)
 }
 
 /// A headless conversation: the launcher's CLI command, run once per turn on the def's model.
@@ -198,6 +219,7 @@ async fn start_headless_session(
 async fn start_acp_session(
     launcher: &dyn CodingAgentLauncher,
     launch: &CodingAgentLaunch,
+    coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
 ) -> Result<CodingAgentSession, Status> {
     let refused =
         |e: tddy_discovery::subagent::SubagentError| Status::failed_precondition(e.to_string());
@@ -216,6 +238,7 @@ async fn start_acp_session(
         model: Some(launch.def.model.clone()),
         mcp_servers,
         meta,
+        usage_tap: acp_usage_tap(coding_agents, launch),
     };
     let model = launch.def.model.clone();
     match transport {
@@ -308,6 +331,7 @@ impl AgentRoster {
             managed,
             session_token: session_token.to_string(),
             conversation_id: None,
+            session_dir: Some(session_dir.to_path_buf()),
         })
     }
 
@@ -352,6 +376,17 @@ impl AgentRoster {
         };
         let session =
             start_coding_agent_session(launcher.as_ref(), &launch, &self.coding_agents).await?;
+        let session = match register_usage_conversation(
+            &self.coding_agents,
+            session_dir,
+            &launch,
+            tddy_daemon_kernel::user_paths::home_dir_for_user(&launch.session_os_user),
+            &record.name,
+            conversation_id,
+        ) {
+            Some(reading) => session.with_usage_reading(reading),
+            None => session,
+        };
         // A headless conversation's permission requests park on its session, so the approvals for it
         // are answered from there.
         if harness_transport(&self.coding_agents, &launch.def.harness) == Some(Transport::Headless)
@@ -368,5 +403,164 @@ impl AgentRoster {
             )),
         };
         Ok(turns)
+    }
+}
+
+/// Register the conversation where the session's usage stream finds it, nested under the session's
+/// main conversation, and return how its own totals are read. `None` — nothing registered — when
+/// the agent's spec declares no usage binding or the session has no recorded main conversation to
+/// nest under.
+///
+/// `agent_home` is the agent's HOME — its OS user's home, the rule the session's own usage context
+/// uses.
+/// TODO(usage-binding): a conversation's `context_tokens` stays 0. Occupancy is the last record's
+/// *input* (input + cache counters of one turn), and a binding only aggregates whole counters — an
+/// `aggregate: last` would not answer it either (`#usage-binding 4/5`); it needs a per-record input
+/// read the binding has no field for.
+fn register_usage_conversation(
+    coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
+    session_dir: &Path,
+    launch: &CodingAgentLaunch,
+    agent_home: Option<std::path::PathBuf>,
+    agent_name: &str,
+    conversation_id: &str,
+) -> Option<tddy_coding_subagent::UsageReading> {
+    let spec_id = launch.def.harness.as_str();
+    let section = coding_agents.get(spec_id)?.agent.usage.clone()?;
+    let parent_id = tddy_usage::read_usage_context(session_dir)?.conversation_id?;
+    let registered = tddy_usage::RegisteredConversation {
+        spec_id: spec_id.to_string(),
+        conversation_id: conversation_id.to_string(),
+        agent_home: agent_home.clone(),
+        worktree: Some(launch.worktree.clone()),
+        parent_id,
+        agent_label: agent_name.to_string(),
+    };
+    if let Err(e) = tddy_usage::register_conversation(session_dir, &registered) {
+        log::warn!("usage: could not register conversation {conversation_id}: {e}");
+        return None;
+    }
+    Some(tddy_coding_subagent::UsageReading {
+        section,
+        ctx: tddy_usage::UsageContext {
+            agent_home,
+            session_dir: session_dir.to_path_buf(),
+            conversation_id: Some(conversation_id.to_string()),
+            worktree: Some(launch.worktree.clone()),
+            agent_label: agent_name.to_string(),
+            fallback_model: launch.def.model.clone(),
+        },
+    })
+}
+
+#[cfg(test)]
+mod usage_registration_tests {
+    use super::*;
+    use tddy_coding_agent_specs::CodingAgentRegistry;
+    use tddy_usage::{gather_session_usage_for, write_usage_context, UsageContextFile};
+
+    const MAIN_CONVERSATION: &str = "main-conv";
+    const SUBAGENT_CONVERSATION: &str = "sub-conv";
+
+    fn a_launch(harness: &str, session_dir: &Path) -> CodingAgentLaunch {
+        CodingAgentLaunch {
+            def: CodingAgentDef {
+                name: "fix-the-parser".to_string(),
+                label: None,
+                harness: harness.to_string(),
+                model: "a-model".to_string(),
+                provider_account: None,
+            },
+            session_id: "s-1".to_string(),
+            session_os_user: "nobody".to_string(),
+            worktree: session_dir.join("worktree"),
+            managed: false,
+            session_token: "t".to_string(),
+            conversation_id: Some(SUBAGENT_CONVERSATION.to_string()),
+            session_dir: Some(session_dir.to_path_buf()),
+        }
+    }
+
+    fn a_session_with_a_main_conversation(session_dir: &Path, spec_id: &str) {
+        write_usage_context(
+            session_dir,
+            &UsageContextFile {
+                spec_id: spec_id.to_string(),
+                agent_home: None,
+                conversation_id: Some(MAIN_CONVERSATION.to_string()),
+                worktree: None,
+                model: None,
+            },
+        )
+        .expect("a usage context");
+    }
+
+    fn a_spec_id_with_a_usage_binding(registry: &CodingAgentRegistry) -> String {
+        ["claude", "claude-acp", "cursor", "codex"]
+            .into_iter()
+            .find(|id| registry.get(id).is_some_and(|s| s.agent.usage.is_some()))
+            .expect("a built-in spec declares a usage binding")
+            .to_string()
+    }
+
+    #[test]
+    fn a_registered_subagent_is_nested_under_the_sessions_main_conversation_with_its_tapped_cost() {
+        // Given — a session whose main conversation is recorded, and a subagent that tapped a result
+        let registry = CodingAgentRegistry::builtin().expect("builtin specs");
+        let spec_id = a_spec_id_with_a_usage_binding(&registry);
+        let session_dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        a_session_with_a_main_conversation(session_dir.path(), &spec_id);
+        std::fs::create_dir_all(session_dir.path().join("usage")).unwrap();
+        std::fs::write(
+            session_dir
+                .path()
+                .join("usage")
+                .join(format!("{SUBAGENT_CONVERSATION}.jsonl")),
+            "{\"type\":\"result\",\"total_cost_usd\":0.25}\n",
+        )
+        .unwrap();
+
+        // When
+        let reading = register_usage_conversation(
+            &registry,
+            session_dir.path(),
+            &a_launch(&spec_id, session_dir.path()),
+            Some(home.path().to_path_buf()),
+            "fix-the-parser",
+            SUBAGENT_CONVERSATION,
+        );
+        let rows = gather_session_usage_for(session_dir.path(), &|id| {
+            registry.get(id).and_then(|s| s.agent.usage.clone())
+        });
+
+        // Then
+        assert!(reading.is_some(), "a binding was attached to the session");
+        let row = rows
+            .iter()
+            .find(|r| r.id == SUBAGENT_CONVERSATION)
+            .expect("the subagent has a row");
+        assert_eq!(row.parent_id.as_deref(), Some(MAIN_CONVERSATION));
+        assert_eq!(row.agent, "fix-the-parser");
+        assert_eq!(row.cost_usd, Some(0.25));
+    }
+
+    #[test]
+    fn a_session_with_no_recorded_main_conversation_registers_nothing() {
+        let registry = CodingAgentRegistry::builtin().expect("builtin specs");
+        let spec_id = a_spec_id_with_a_usage_binding(&registry);
+        let session_dir = tempfile::tempdir().unwrap();
+
+        let reading = register_usage_conversation(
+            &registry,
+            session_dir.path(),
+            &a_launch(&spec_id, session_dir.path()),
+            None,
+            "fix-the-parser",
+            SUBAGENT_CONVERSATION,
+        );
+
+        assert!(reading.is_none());
+        assert!(tddy_usage::registered_conversations(session_dir.path()).is_empty());
     }
 }

@@ -67,6 +67,7 @@ impl AgentConnection {
             model,
             mcp_servers,
             meta,
+            usage_tap,
         } = open;
         let mcp_servers: Vec<acp::McpServer> =
             mcp_servers.into_iter().map(mapping::mcp_server).collect();
@@ -97,6 +98,9 @@ impl AgentConnection {
             }
         };
 
+        if let Some(spec) = usage_tap {
+            self.turns.tap_session(&session_id, spec);
+        }
         let (offered, current) = mapping::offered_models(models.as_ref());
         let current_model = match model {
             Some(requested) => {

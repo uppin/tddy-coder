@@ -106,8 +106,13 @@ fn the_builtin_claude_specs_bind_their_transcripts() {
             .agent
             .usage
             .unwrap_or_else(|| panic!("{id} declares no usage"));
-        let [UsageSource::Jsonl(source)] = usage.sources.as_slice() else {
-            panic!("{id}: expected one jsonl source, got {:?}", usage.sources);
+        // The transcript is the first source; `#usage-binding 3/5` adds Claude's tapped headless
+        // results after it.
+        let Some(UsageSource::Jsonl(source)) = usage.sources.first() else {
+            panic!(
+                "{id}: expected a jsonl source first, got {:?}",
+                usage.sources
+            );
         };
         assert_eq!(
             source.main.path.as_str(),
@@ -229,5 +234,68 @@ fn a_source_without_a_main_path_is_refused_at_load() {
     assert!(
         message.contains("main"),
         "the refusal must name the missing field: {message}"
+    );
+}
+
+#[test]
+fn two_sources_mapping_the_same_counter_are_refused_at_load() {
+    // Given — a transcript and a tapped stream both claiming input tokens
+    let tools = a_tools_dir().with_file(
+        "claude.yaml",
+        &a_claude_override_with(
+            r#"    usage:
+      sources:
+        - format: jsonl
+          main: { path: "{agent_home}/{conversation_id}.jsonl" }
+          record: { tokens: { input: usage.input } }
+        - format: jsonl
+          main: { path: "{session_dir}/usage/{conversation_id}.jsonl" }
+          record: { tokens: { input: usage.input_tokens } }
+"#,
+        ),
+    );
+
+    // When
+    let (file, _, message) = the_refusal(&tools);
+
+    // Then
+    assert_eq!(file, tools.file("claude.yaml"));
+    assert!(
+        message.contains("usage:") && message.contains("input"),
+        "the refusal must name the counter mapped twice: {message}"
+    );
+}
+
+#[test]
+fn the_builtin_claude_spec_taps_its_headless_results_for_their_cost() {
+    // Given
+    let home = tempfile::tempdir().unwrap();
+
+    // When
+    let registry = load_agent_registry(&home.path().join("tools")).expect("the built-ins load");
+    let spec =
+        CodingAgentSpec::of(registry.get("claude").expect("built in")).expect("a coding agent");
+
+    // Then — the headless driver taps `result` events, and a second source reads their cost
+    let headless = spec.agent.headless.expect("claude runs headless");
+    assert_eq!(
+        serde_json::to_value(&headless.usage_events).unwrap(),
+        serde_json::json!([{ "field": "type", "equals": "result" }])
+    );
+    let usage = spec.agent.usage.expect("claude declares usage");
+    let Some(UsageSource::Jsonl(tapped)) = usage.sources.get(1) else {
+        panic!("expected a second jsonl source, got {:?}", usage.sources);
+    };
+    assert_eq!(
+        (
+            tapped.main.path.as_str(),
+            tapped.record.cost.as_ref().map(|c| c.as_str()),
+            tapped.record.tokens.clone(),
+        ),
+        (
+            "{session_dir}/usage/{conversation_id}.jsonl",
+            Some("total_cost_usd"),
+            tddy_usage::CounterMap::default(),
+        )
     );
 }

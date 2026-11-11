@@ -158,6 +158,7 @@ any of them is refused at load, naming the file and the word.
 | `route_model` | `{ kind: kept }`, `{ kind: replaced }` (a routed turn names no model; the route's argv does), `{ kind: replaced_if_route_has, flag: <flag> }` | `kept` |
 | `fresh_session` | `caller` — the caller's id is passed as `session_id`; `agent` — the agent mints one, read off its stream | `agent` |
 | `scratch` | where the turn's registration files go: `session_dir` or `workdir` | `session_dir` |
+| `usage_events` | `[{ field, equals }]` — the stdout events carrying usage; each event satisfying every predicate is appended verbatim to `<session_dir>/usage/<conversation_id>.jsonl` for the `usage:` binding (`#usage-binding 3/5`) | none tapped |
 
 `headless.env` values may name `{session_dir}` (the request's session directory; a turn without one
 is refused) and `{self_exe}` (the running executable). The backend never inherits an environment: the child starts from the computed agent env
@@ -226,6 +227,12 @@ refused at load with the spec file named (messages prefixed `usage:`). `transcri
 | `record.model` / `record.cost` | field paths; the last model seen, the summed cost |
 | `record.tokens` | `input`, `cache_read`, `cache_write`, `output`, `reasoning` field paths — disjoint counters |
 
-An unknown template variable, an empty field path or segment, an unknown `format` and a missing
-`main` are refused. `specs/claude.yaml` and `specs/claude-acp.yaml` carry the Claude transcript
+An unknown template variable, an empty field path or segment, an unknown `format`, a missing
+`main`, and two sources mapping the same counter (or both `cost`) are refused.
+
+**Tapped events.** `headless.usage_events` (above) and `acp.usage_events` (`AcpSection`, the same
+`FieldEq` list, matched against each serialised ACP `session/update`) name the protocol events the
+driver writes to `<session_dir>/usage/<conversation_id>.jsonl`; a binding reads that file with
+`{session_dir}/usage/{conversation_id}.jsonl`. Empty taps nothing. `claude.yaml` taps
+`[{ field: type, equals: result }]` and binds its `total_cost_usd` as a second, cost-only source. `specs/claude.yaml` and `specs/claude-acp.yaml` carry the Claude transcript
 binding; no other built-in declares one yet.

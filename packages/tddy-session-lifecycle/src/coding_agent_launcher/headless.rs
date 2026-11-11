@@ -19,6 +19,7 @@ use tddy_coding_subagent::refuse_unless_registry_confinable;
 use tddy_coding_subagent::CodingAgentLaunch;
 use tddy_core::adapters::AdapterRegistry;
 use tddy_core::provider_route::HarnessRoute;
+use tddy_core::usage_tap::UsageTapSpec;
 use tddy_core::AcpAgentCommand;
 use tddy_core::HeadlessCommand;
 use tddy_core::McpServerSpec;
@@ -36,6 +37,20 @@ fn registers_mcp_inline(spec: &CodingAgentSpec) -> bool {
             .unwrap_or(&spec.agent.mcp),
         McpSlot::Inline { .. }
     )
+}
+
+/// Where, and which events of, the conversation's turns are tapped for its usage binding
+/// (`#usage-binding 3/5`): the spec's `headless.usage_events`, appended to
+/// `<session_dir>/usage/<conversation>.jsonl`. `None` when the spec declares none or the launch
+/// carries no session directory.
+fn usage_tap_for(
+    launch: &CodingAgentLaunch,
+    spec: &CodingAgentSpec,
+    conversation: &str,
+) -> Option<UsageTapSpec> {
+    let events = spec.headless()?.usage_events.clone();
+    let session_dir = launch.session_dir.as_ref()?;
+    UsageTapSpec::for_conversation(session_dir, conversation, events)
 }
 
 impl DaemonCodingAgentLauncher {
@@ -90,6 +105,7 @@ impl DaemonCodingAgentLauncher {
             server.cwd = Some(scratch_dir.clone());
         }
         files.keep();
+        let usage_tap = usage_tap_for(launch, &agent.spec, conversation);
         Ok(HeadlessCommand {
             env,
             cwd: Some(launch.worktree.clone()),
@@ -102,6 +118,7 @@ impl DaemonCodingAgentLauncher {
             scratch_dir: Some(scratch_dir),
             // The driver's own deadline: no conversation turn waits unbounded.
             turn_deadline: None,
+            usage_tap,
         })
     }
 
