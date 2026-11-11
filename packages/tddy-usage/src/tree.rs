@@ -4,13 +4,13 @@ use std::collections::HashSet;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
-use crate::jsonl::fold_files;
+use crate::jsonl::{fold_files, Folded};
 use crate::template::TemplateError;
 use crate::token_accounting::ConversationRecord;
 use crate::{ChildrenSpec, FieldPath, IdentitySpec, JsonlSource, PathTemplate, UsageContext};
 
 /// How many levels of children below the main conversation are followed.
-const MAX_DEPTH: usize = 16;
+pub(crate) const MAX_DEPTH: usize = 16;
 
 /// How many leading lines of a file are searched for its identity and match fields.
 const HEADER_LINES: usize = 50;
@@ -67,7 +67,11 @@ fn main_files(source: &JsonlSource, ctx: &UsageContext) -> Vec<PathBuf> {
 
 /// `template` over the main conversation's variables; the values are glob-escaped when the result
 /// is a glob pattern. `None` when a variable has no value for this session.
-fn render_main(template: &PathTemplate, ctx: &UsageContext, as_glob: bool) -> Option<String> {
+pub(crate) fn render_main(
+    template: &PathTemplate,
+    ctx: &UsageContext,
+    as_glob: bool,
+) -> Option<String> {
     let lookup = |name: &str| -> Option<String> {
         let value = match name {
             "agent_home" => ctx.agent_home.as_ref().map(|p| p.display().to_string()),
@@ -331,7 +335,17 @@ fn row(
     source: &JsonlSource,
     ctx: &UsageContext,
 ) -> ConversationRecord {
-    let folded = fold_files(files, &source.record);
+    record_of(agent, id, parent_id, fold_files(files, &source.record), ctx)
+}
+
+/// The record a conversation's folded figures make; its model is the fallback when none was seen.
+pub(crate) fn record_of(
+    agent: &str,
+    id: &str,
+    parent_id: Option<&str>,
+    folded: Folded,
+    ctx: &UsageContext,
+) -> ConversationRecord {
     ConversationRecord {
         agent: agent.to_string(),
         id: id.to_string(),

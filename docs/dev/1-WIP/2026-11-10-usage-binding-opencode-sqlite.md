@@ -91,8 +91,8 @@ evaluate a subtraction wait for #893's green.
 
 ## Scope
 
-- [ ] The `sqlite` format: read-only open, identifier validation, root match, recursive children
-- [ ] Lock tolerance: a busy database keeps the last snapshot
+- [x] The `sqlite` format: read-only open, identifier validation, root match, recursive children
+- [x] Lock tolerance: a busy database keeps the last snapshot
 - [ ] The OpenCode binding, with the reasoning overlap checked on a real store
 - [ ] Docs: `session-token-accounting.md`, the `coding-agent-specs.md` usage field table
 
@@ -146,8 +146,8 @@ See *Affected Packages*.
 
 ## Implementation Milestones
 
-- [ ] `SqliteSource` and validation
-- [ ] Read-only evaluation with lock tolerance
+- [x] `SqliteSource` and validation
+- [x] Read-only evaluation with lock tolerance
 - [ ] Recursion
 - [ ] The binding, checked against a real store
 

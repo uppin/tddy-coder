@@ -213,8 +213,10 @@ pub fn validate_usage_section(section: &UsageSection) -> Result<(), String> {
         return Err("sources is empty: name at least one source".to_string());
     }
     for source in &section.sources {
-        let UsageSource::Jsonl(jsonl) = source;
-        check_source(jsonl)?;
+        match source {
+            UsageSource::Jsonl(jsonl) => check_source(jsonl)?,
+            UsageSource::Sqlite(sqlite) => check_sqlite(sqlite)?,
+        }
     }
     check_counters_unowned_twice(section)
 }
@@ -260,21 +262,39 @@ fn check_identity(jsonl: &JsonlSource) -> Result<(), String> {
     Ok(())
 }
 
+/// A `sqlite` source: its templates name only session variables, and every table and column name is
+/// a plain identifier, since each goes into SQL.
+fn check_sqlite(source: &SqliteSource) -> Result<(), String> {
+    check_variables("path", &source.path, MAIN_VARIABLES)?;
+    check_variables("root.equals", &source.root.equals, MAIN_VARIABLES)?;
+    match crate::sqlite::named_identifiers(source)
+        .into_iter()
+        .find(|(_, name)| !crate::sqlite::is_identifier(name))
+    {
+        Some((position, name)) => Err(format!(
+            "{position} '{name}' is not a plain identifier (letters, digits and '_', not starting \
+             with a digit): a sqlite binding names tables and columns, never SQL"
+        )),
+        None => Ok(()),
+    }
+}
+
 /// No counter (nor the cost) is mapped by two sources: ownership is the mapping, and the merge of
 /// one conversation's rows relies on each counter having exactly one source.
 fn check_counters_unowned_twice(section: &UsageSection) -> Result<(), String> {
     let mut owners: Vec<(&'static str, usize)> = Vec::new();
     for (index, source) in section.sources.iter().enumerate() {
-        let UsageSource::Jsonl(jsonl) = source;
-        let record = &jsonl.record;
-        let tokens = &record.tokens;
+        let (tokens, cost) = match source {
+            UsageSource::Jsonl(jsonl) => (&jsonl.record.tokens, jsonl.record.cost.is_some()),
+            UsageSource::Sqlite(sqlite) => (&sqlite.tokens, sqlite.cost.is_some()),
+        };
         let mapped = [
             ("input", tokens.input.is_some()),
             ("cache_read", tokens.cache_read.is_some()),
             ("cache_write", tokens.cache_write.is_some()),
             ("output", tokens.output.is_some()),
             ("reasoning", tokens.reasoning.is_some()),
-            ("cost", record.cost.is_some()),
+            ("cost", cost),
         ];
         for (counter, is_mapped) in mapped {
             if !is_mapped {
