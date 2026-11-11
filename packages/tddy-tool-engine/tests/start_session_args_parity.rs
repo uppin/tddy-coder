@@ -41,6 +41,7 @@ fn any_choices() -> StartChoices {
         }],
         recipes: vec!["tdd".to_string()],
         agents: Vec::new(),
+        session_types: Vec::new(),
     }
 }
 

@@ -30,6 +30,7 @@ import {
 } from "tddy-client-web/gen/session_pb";
 import {
   AgentInfoSchema,
+  SessionTypeInfoSchema,
   ListAgentModelsResponseSchema,
   ListAgentsResponseSchema,
   ListToolsResponseSchema,
@@ -164,20 +165,44 @@ export function listProjects(projects: Partial<ProjectEntry>[]): Uint8Array {
   );
 }
 
+/**
+ * The session types a stubbed daemon declares beside `agents`: `tool` (tddy-coder.yaml's, the
+ * `tddy_coder` launch) and each listed agent's own session type (the `agent_cli` launch), labelled
+ * as the agent is. A real daemon serves every session type its tool files declare.
+ */
+function declaredSessionTypes(agents: AgentInfo[]) {
+  const seen = new Set<string>(["tool"]);
+  const declared = [create(SessionTypeInfoSchema, { sessionType: "tool", label: "Tool", launch: "tddy_coder" })];
+  for (const agent of agents) {
+    if (agent.sessionType === "" || seen.has(agent.sessionType)) continue;
+    seen.add(agent.sessionType);
+    declared.push(
+      create(SessionTypeInfoSchema, {
+        sessionType: agent.sessionType,
+        label: agent.label || agent.id,
+        launch: "agent_cli",
+      }),
+    );
+  }
+  return declared;
+}
+
 export function listAgents(agents: Partial<AgentInfo>[]): Uint8Array {
+  const rows = agents.map((a) =>
+    create(AgentInfoSchema, {
+      id: "claude",
+      label: "Claude (opus)",
+      // The spec-derived fields a daemon serves for this id; an explicit field on
+      // the fixture overrides them.
+      ...servedAgentWire(a.id ?? "claude"),
+      ...a,
+    }),
+  );
   return toBinary(
     ListAgentsResponseSchema,
     create(ListAgentsResponseSchema, {
-      agents: agents.map((a) =>
-        create(AgentInfoSchema, {
-          id: "claude",
-          label: "Claude (opus)",
-          // The spec-derived fields a daemon serves for this id; an explicit field on
-          // the fixture overrides them.
-          ...servedAgentWire(a.id ?? "claude"),
-          ...a,
-        }),
-      ),
+      agents: rows,
+      sessionTypes: declaredSessionTypes(rows),
     }),
   );
 }

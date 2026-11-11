@@ -43,7 +43,7 @@ message AgentInfo {
   // runs on its own vendor and for every MODEL row: a picker asks `ListProviderRoutes` only when
   // this is non-empty.
   repeated string route_providers = 5;
-  // The session type that starts this agent (`<id>-cli`), from its spec; empty for an agent
+  // The session type that starts this agent, as its spec declares it; empty for an agent
   // with no PTY launch. The web offers session types from this, never from its own list.
   string session_type = 6;
   // The agent's spec capabilities (`requires_model`, `managed_workflow`, `hooks`, …), as
@@ -79,6 +79,22 @@ message ListAgentsRequest {}
 
 message ListAgentsResponse {
   repeated AgentInfo agents = 1;
+  // Every session type this daemon's tool files declare (`extensions.session`), with its label and
+  // launch kind. The no-agent session type ("workspace") is not among them: nothing declares it. A
+  // client offers and branches on these, never on its own list of session types.
+  repeated SessionTypeInfo session_types = 2;
+}
+
+// One session type a daemon declares.
+message SessionTypeInfo {
+  // The wire value a StartSession names (`tool`, `claude-cli`, …).
+  string session_type = 1;
+  // What a picker calls it.
+  string label = 2;
+  // How a session of it is launched: "agent_cli" (a coding agent's interactive CLI, the agent
+  // named by `session_type`) or "tddy_coder" (the tddy-coder workflow tool, run by
+  // `StartSessionRequest.agent` from one of the daemon's `allowed_tools`).
+  string launch = 3;
 }
 
 message ListSubagentsRequest {}

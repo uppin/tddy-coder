@@ -48,7 +48,10 @@ impl LaunchSessions {
         let req = self.apply_harness_profile(req)?;
         // Refused before routing, on the session type the profile resolved: a start this daemon
         // would refuse is not forwarded to a peer to be refused there, and nothing is created for it.
-        crate::start_request_checks::refuse_a_conflicting_tmux_run_start(&req)?;
+        crate::start_request_checks::refuse_a_conflicting_tmux_run_start(
+            &req,
+            Some(&*self.coding_agents),
+        )?;
         self.start_session_with_role(req, progress, cancel).await
     }
 

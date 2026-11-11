@@ -205,7 +205,7 @@ instance serves the session host, Telegram, the reserved assistant ids and the m
 operator's `models:` override in `tools/<id>.yaml` is the list the Create-session pane shows. An
 agent that exists only as a YAML file is a
 coding agent without a code change; what it may do is its spec's `coding_agent.capabilities`, not a
-session-type string. Its CLI session (`<id>-cli`) takes the generic spec launch, which serves every
+session-type string. Its CLI session (the session type its spec declares, below) takes the generic spec launch, which serves every
 capability `claude.yaml` and `cursor.yaml` declare — a managed workflow with hooks for
 `managed_workflow`, a project's main for `project_home_main`, the operator-notify guidance for
 `operator_notify` — and identifies its conversation by `coding_agent.conversation` (the daemon's
@@ -218,6 +218,41 @@ daemon launches and talks to over ACP. Each ACP launch renders from the agent's 
 servers sent with `session/new`, and a managed session's native-tool withdrawal. `codex-acp` resolves
 beside the resolved `codex`, never from `PATH`. `SubagentInfo` (the `ListSubagents` row) carries the same
 `kind` and `harness` (fields 8 and 9).
+
+#### Session types are declared
+
+Every session type a host offers is **declared** by a tool file, in its `extensions.session` section:
+
+```yaml
+extensions:
+  session: { session_type: claude-cli, launch: agent_cli, label: Claude Code }
+```
+
+- `session_type` — the wire value `StartSession` names and `.session.yaml` records. The built-in
+  coding agents with a PTY launch declare `claude-cli`, `codex-cli`, `cursor-cli`, `muse-cli`,
+  `opencode-cli`, `oz-cli` and `warp-cli`; ACP-only agents declare none. `tool` is declared by
+  `session-tools/tddy-coder.yaml`, which is no coding agent.
+- `launch` — a closed set the daemon implements: `agent_cli` (the generic spec launch of the
+  declaring coding agent; refused at load unless its `run:` is a PTY) and `tddy_coder` (the
+  tddy-coder workflow tool, run by the start's `agent`, its binary the start's `tool_path`, which
+  must be one of the daemon's `allowed_tools` — empty is refused, there is no default).
+- `label` — what a picker calls it.
+
+Nothing derives a session type from an agent id. The one session type nothing declares is
+`workspace`, a session with **no agent** — reserved: a tool file declaring it is refused. A start
+naming an empty session type, or one that is neither declared nor `workspace`, is
+`INVALID_ARGUMENT` before anything is created, naming the value refused and every session type the
+host offers. Two tool files declaring one session type refuse the registry, naming both; an
+override in `<tddyhome>/tools/` of a built-in that declares a session type must declare one too —
+the load is refused, naming the file and quoting the built-in's values, and nothing is inherited.
+A new tool file overriding no built-in may declare none.
+
+Clients read the declarations: `ListAgentsResponse.session_types` (`SessionTypeInfo`: session
+type, label, launch) feeds the Create-session pane's type toggle, the terminal "+" menu and the
+attach rules, which branch on the served launch kind; `StartSession`'s tool schema offers the
+declared session types plus `workspace`, and `DescribeSessionStartOptions` lists them. tddy-coder
+records the session type its host declares for the `tddy_coder` launch in every session it starts;
+a legacy record that names none resumes as a tool session when it names its `tool`, and is refused otherwise.
 
 **What is offered.** `ListSubagents` lists, after the model rows, as `CODING_AGENT` rows:
 

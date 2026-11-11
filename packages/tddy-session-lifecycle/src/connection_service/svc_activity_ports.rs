@@ -116,7 +116,9 @@ impl DaemonSessionHost {
             // tool call and a `claude` hook reach one stream.
             activity: Arc::clone(&self.agent_activity_hub),
             conversation_frames: Arc::clone(&self.agent_conversation_frames),
-            session_labels: Arc::new(SessionsNamedAsListSessionsNamesThem),
+            session_labels: Arc::new(SessionsNamedAsListSessionsNamesThem {
+                agents: self.coding_agents.agents_shared(),
+            }),
             deltas: Arc::clone(&self.session_delta_stores),
             notifications: self.session_notification_bus.clone(),
             // The routing id, as `svc_session_files_ports` hands it: the one a web client names in
@@ -235,11 +237,18 @@ impl DaemonSessionHost {
 /// because the fallback reads `session_list_enrichment` — the module serving `ListSessions`, family
 /// C, which this node keeps in the daemon. A second rule would name sessions correctly right up
 /// until the two disagreed.
-struct SessionsNamedAsListSessionsNamesThem;
+struct SessionsNamedAsListSessionsNamesThem {
+    /// This daemon's coding agents: which recorded session types run no workflow.
+    agents: Arc<tddy_coding_agent_specs::CodingAgentRegistry>,
+}
 
 impl SessionLabels for SessionsNamedAsListSessionsNamesThem {
     fn label_for(&self, sessions_base: &std::path::Path, session_id: &str) -> String {
-        crate::session_notifications::resolve_session_label(sessions_base, session_id)
+        crate::session_notifications::resolve_session_label(
+            Some(&self.agents),
+            sessions_base,
+            session_id,
+        )
     }
 }
 

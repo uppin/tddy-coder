@@ -111,10 +111,12 @@ it("only Claude CLI can be chosen for main; every other type says why", () => {
   setup.typeButton("cursor-cli").should("be.disabled");
   setup.typeButton("opencode-cli").should("be.disabled");
   setup.typeButton("muse-cli").should("be.disabled");
-  setup.typeReason("tool").should("have.text", whyMainCannotRun("tool"));
-  setup.typeReason("cursor-cli").should("have.text", whyMainCannotRun("cursor-cli"));
-  setup.typeReason("opencode-cli").should("have.text", whyMainCannotRun("opencode-cli"));
-  setup.typeReason("muse-cli").should("have.text", whyMainCannotRun("muse-cli"));
+  // `tool` is declared with the tddy_coder launch; the others are coding agents' CLIs whose specs
+  // do not declare project_home_main
+  setup.typeReason("tool").should("have.text", whyMainCannotRun("tddy_coder"));
+  setup.typeReason("cursor-cli").should("have.text", whyMainCannotRun("agent_cli"));
+  setup.typeReason("opencode-cli").should("have.text", whyMainCannotRun("agent_cli"));
+  setup.typeReason("muse-cli").should("have.text", whyMainCannotRun("agent_cli"));
 });
 
 it("Start main session ensures main with the form's model, permission mode and initial prompt, and selects it", () => {

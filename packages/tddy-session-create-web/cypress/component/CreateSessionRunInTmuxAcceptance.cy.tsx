@@ -7,7 +7,7 @@
  * Uses the in-memory ConnectRPC backend so the assertions read the request the component sent.
  */
 import React from "react";
-import { servedAgentWire } from "../support/servedAgents";
+import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/CreateSessionPane";
@@ -28,7 +28,7 @@ function aCreateSessionBackend() {
     .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => withDeclaredSessionTypes({
       agents: [
         { id: "claude", label: "Claude", ...servedAgentWire("claude") },
         { id: "cursor", label: "Cursor", ...servedAgentWire("cursor") },

@@ -2,8 +2,6 @@
 //! the agent, project, branch and model picks. (The keyboards are in `pickers`; the model-pick
 //! callback and the generic start it ends in are in `cli_spawns`.)
 
-use tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX;
-
 use super::*;
 
 /// The agent `/start-claude` picks.
@@ -186,25 +184,34 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         }
 
         let offered = TelegramAgentChoices::of(&self.coding_agents);
-        let session_type = shortcut.map(|agent_id| format!("{agent_id}{CLI_SESSION_TYPE_SUFFIX}"));
         if offered.choices().is_empty() {
             return Err(TelegramPickRefusal::NoCodingAgents {
-                session_type: session_type.unwrap_or_else(|| "CLI agent".to_string()),
+                session_type: shortcut.unwrap_or("CLI agent").to_string(),
             }
             .into());
         }
-        if let Some(session_type) = &session_type {
-            if !offered
+        // The shortcut names an agent; the session type is the one its spec declares, and it must
+        // be one of the offered agents'.
+        if let Some(agent_id) = shortcut {
+            let offered_session_type = offered
                 .choices()
                 .iter()
-                .any(|choice| &choice.session_type == session_type)
-            {
+                .any(|choice| choice.agent_id == agent_id);
+            if !offered_session_type {
                 return Err(TelegramPickRefusal::UnknownSessionType {
-                    session_type: session_type.clone(),
+                    session_type: agent_id.to_string(),
                 }
                 .into());
             }
         }
+
+        let session_type = shortcut.and_then(|agent_id| {
+            offered
+                .choices()
+                .iter()
+                .find(|choice| choice.agent_id == agent_id)
+                .map(|choice| choice.session_type.clone())
+        });
 
         let session_id = Uuid::new_v4().to_string();
         let session_dir = unified_session_dir_path(&self.sessions_base, &session_id);

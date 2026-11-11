@@ -179,7 +179,7 @@ pub struct HostChoice {
 /// crate only renders what it is handed — it names no agent and reads no spec.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentChoice {
-    /// The session type that starts this agent (`<id>-cli`).
+    /// The session type that starts this agent, as its spec declares it (`claude-cli`).
     pub session_type: String,
     /// The toggle's label for it (the spec's `product`).
     pub label: String,
@@ -192,6 +192,15 @@ pub struct AgentChoice {
     pub routable: bool,
 }
 
+/// One session type a host declares (a tool file's `extensions.session`), as plain data the daemon
+/// injects: its wire value and the label a picker shows. The no-agent session type
+/// ([`tddy_workflow::NO_AGENT_SESSION_TYPE`]) is not among them — nothing declares it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionTypeChoice {
+    pub session_type: String,
+    pub label: String,
+}
+
 /// The closed lists the schema offers as enums that only the daemon knows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartChoices {
@@ -201,6 +210,8 @@ pub struct StartChoices {
     pub recipes: Vec<String>,
     /// Every coding agent this daemon starts, injected from its spec registry.
     pub agents: Vec<AgentChoice>,
+    /// Every session type this daemon's tool files declare, in the registry's order.
+    pub session_types: Vec<SessionTypeChoice>,
 }
 
 /// What the caller's context supplies for [`CONTEXT_FILLED_FIELDS`].

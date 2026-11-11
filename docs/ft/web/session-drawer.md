@@ -959,8 +959,10 @@ resolveWorkflowView({ recipe: "tdd", sessionType: "claude-cli" }) → null  // t
 resolveWorkflowView({ recipe: "", sessionType: "claude-cli" }) → null      // terminal
 ```
 
-The gate for the generic chat screen is `sessionType ∈ {"", "tool"} && recipe != ""` — only
-tddy-coder `tool` sessions run a Presenter/ACP surface the chat can reach, so a `claude-cli` /
+The gate for the generic chat screen (`sessionPaneIsWorkflowView`) is a session type whose served
+launch kind is `tddy_coder` (`tool`; [Session types are declared](../daemon/session-agent-roster.md#session-types-are-declared)),
+or a legacy record's empty one, with `recipe != ""` — only tddy-coder sessions run a Presenter/ACP
+surface the chat can reach, so a `claude-cli` /
 `cursor-cli` session keeps the terminal even when it carries a managed `recipe`. `pr-stack` is
 matched first and routes to its own chat + Planned PRs panel screen.
 

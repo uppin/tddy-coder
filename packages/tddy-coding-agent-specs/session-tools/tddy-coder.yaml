@@ -1,0 +1,21 @@
+# tddy-coder — the workflow tool behind `tool` sessions.
+#
+# Not a coding agent: it has no `coding_agent` section and no `run:` template. It is here so the
+# `tool` session type is declared like every other one, rather than being what an unknown or empty
+# session type falls into. Its launch, `tddy_coder`, spawns the start's `tool_path` — which must be
+# one of the daemon's `allowed_tools`; `binary.command` names the tool only for a reader of this
+# file, and is never resolved on `PATH`.
+#
+# Override whole with `<tddyhome>/tools/tddy-coder.yaml`.
+schema_version: 1
+id: tddy-coder
+summary: tddy-coder — the TDD workflow tool behind tool sessions
+binary:
+  command: tddy-coder
+deps: []
+reads: []
+extensions:
+  session:
+    session_type: tool
+    launch: tddy_coder
+    label: Tool

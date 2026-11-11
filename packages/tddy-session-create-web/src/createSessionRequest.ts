@@ -1,10 +1,11 @@
 import type { BranchFieldOverrides, BranchWorktreeIntent } from "./lib/branchConflict";
+import { TDDY_CODER_LAUNCH, type SessionLaunch } from "./cliHarnessOptions";
 import type {
   SessionAttachmentInit,
   StartSessionRequestInit,
 } from "./hooks/useSessionAttachments";
 
-/** A session type: `tool`, or a coding agent's `<id>-cli` as its daemon served it. */
+/** A session type, as its daemon declared it (`ListAgentsResponse.session_types`). */
 export type SessionType = string;
 
 /**
@@ -36,11 +37,11 @@ export const NO_CLI_FEATURES: CliAgentFeatures = {
 
 /**
  * Whether the daemon cuts the session's worktree itself — and so can push the new branch to origin
- * at start. Every CLI harness session does; a "tool" session spawns tddy-coder, which owns its own
- * worktree.
+ * at start. Every CLI harness session does; a session of the `tddy_coder` launch spawns tddy-coder,
+ * which owns its own worktree.
  */
-export function daemonCutsTheWorktree(sessionType: SessionType): boolean {
-  return sessionType !== "tool";
+export function daemonCutsTheWorktree(sessionLaunch: SessionLaunch | undefined): boolean {
+  return sessionLaunch !== TDDY_CODER_LAUNCH;
 }
 
 /**
@@ -57,6 +58,8 @@ export interface CreateSessionFormValues {
   selectedBranchToWorkOn: string;
   daemonInstanceId: string;
   sessionType: SessionType;
+  /** How a session of `sessionType` is launched, as its daemon declared it. */
+  sessionLaunch: SessionLaunch | undefined;
   /** What the agent behind `sessionType` may be asked for; absent for a tool session. */
   cliFeatures?: CliAgentFeatures;
   toolPath: string;
@@ -148,7 +151,7 @@ export function buildStartSessionRequest(
     attachments: requestAttachments,
     ...branchOverrides,
   };
-  if (sessionType === "tool") {
+  if (form.sessionLaunch === TDDY_CODER_LAUNCH) {
     return {
       ...commonParams,
       toolPath,
@@ -167,7 +170,9 @@ export function buildStartSessionRequest(
       // refuses a base session named beside any other recipe rather than dropping it silently, so a
       // choice made before switching recipes must not leak into the request.
       prStackBaseSessionId: recipe === "pr-stack" ? prStackBaseSessionId : "",
-      sessionType: "",
+      // The session type the toggle chose: the daemon refuses an empty one rather than reading
+      // it as a tool session.
+      sessionType,
       model,
       // The account the agent runs on, or the vendor. The daemon refuses an agent that cannot run
       // on the account it is named with, rather than starting it on the vendor.

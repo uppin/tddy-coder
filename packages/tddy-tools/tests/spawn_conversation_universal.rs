@@ -24,6 +24,7 @@ fn spawn_conversation_accepts_every_start_session_argument() {
         }],
         recipes: vec!["tdd".to_string()],
         agents: Vec::new(),
+        session_types: Vec::new(),
     })
     .into_iter()
     .collect();

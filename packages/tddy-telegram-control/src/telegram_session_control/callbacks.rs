@@ -334,8 +334,12 @@ pub(super) fn telegram_label_for_session_id(session_id: &str) -> String {
     session_telegram_label(session_id).unwrap_or_else(|| session_id.to_string())
 }
 
-pub(super) fn session_list_status_or_placeholders(session_dir: &Path) -> SessionListStatusDisplay {
+pub(super) fn session_list_status_or_placeholders(
+    agents: &tddy_coding_agent_specs::CodingAgentRegistry,
+    session_dir: &Path,
+) -> SessionListStatusDisplay {
     match tddy_session_lifecycle::session_list_enrichment::session_list_status_from_session_dir(
+        Some(agents),
         session_dir,
     ) {
         Ok(d) => d,

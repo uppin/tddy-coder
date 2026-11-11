@@ -86,19 +86,25 @@ fn vaults_holding_ada(dir: &Path) -> Arc<SessionVaults> {
 }
 
 /// A daemon that spawns directly (no supervisor, no worker) and holds the owner's unlocked vault.
-fn a_daemon(data_dir: &Path, vault_dir: &Path) -> DaemonSessionHost {
+fn a_daemon(data_dir: &Path, vault_dir: &Path, tool: &Path) -> DaemonSessionHost {
     let config_dir = tempfile::tempdir().unwrap();
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
         &config_path,
-        r#"
+        // The stand-in tool is the one path this daemon allows a tool session to run.
+        format!(
+            r#"
 livekit:
   url: ws://127.0.0.1:1
   api_key: dummy-key
   api_secret: dummy-secret
 spawn_startup_grace_period_ms: 300
 spawn_startup_poll_interval_ms: 10
+allowed_tools:
+  - path: "{}"
 "#,
+            tool.display()
+        ),
     )
     .unwrap();
     std::fs::write(
@@ -203,7 +209,7 @@ fn a_world_where_the_project_assigns(accounts: &[&str]) -> World {
     let dump = tools.path().join("env");
     let tool = a_tool_that_dumps_its_environment(tools.path(), &dump);
     register_project(data_dir.path(), repo.path(), accounts);
-    let daemon = a_daemon(data_dir.path(), vault_dir.path());
+    let daemon = a_daemon(data_dir.path(), vault_dir.path(), &tool);
     World {
         data_dir,
         _vault_dir: vault_dir,
@@ -221,6 +227,7 @@ impl World {
             .start_session(Request::direct(StartSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 project_id: PROJECT_ID.to_string(),
+                session_type: "tool".to_string(),
                 tool_path: self.tool.to_str().unwrap().to_string(),
                 ..Default::default()
             }))

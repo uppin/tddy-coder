@@ -30,7 +30,7 @@ pub fn is_daemon_managed_worktree(worktree: &Path) -> bool {
 /// Whether a session of this type owns the worktree its `.session.yaml` records, and therefore
 /// whether `DeleteSession` should remove it.
 ///
-/// An agent session (`<id>-cli`) and a `workspace` session each get a worktree cut for them alone —
+/// An agent session (a session type a coding agent declares) and a no-agent (`workspace`) session each get a worktree cut for them alone —
 /// a workspace session *is* its worktree and nothing else, so leaving it behind leaks the only
 /// thing the session was for (see `docs/ft/daemon/remote-managed-worktree.md` § Teardown). A
 /// `tool` (tddy-coder) session records the project's shared checkout instead, and an empty type is a
@@ -44,16 +44,13 @@ pub fn worktree_removal_applies_to(
     agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
     session_type: &str,
 ) -> bool {
-    if session_type == WORKSPACE_SESSION_TYPE {
+    if tddy_coding_agent_specs::is_no_agent_session_type(session_type) {
         return true;
     }
     agents
         .and_then(|agents| agents.for_session_type(session_type))
         .is_some_and(|spec| !spec.has(tddy_coding_agent_specs::Capability::KeepWorktreeOnDelete))
 }
-
-/// The session type of a worktree-only session.
-const WORKSPACE_SESSION_TYPE: &str = "workspace";
 
 /// After SIGKILL the child may be a zombie until its parent reaps it; `kill(pid, 0)` still succeeds.
 #[cfg(all(unix, target_os = "linux"))]

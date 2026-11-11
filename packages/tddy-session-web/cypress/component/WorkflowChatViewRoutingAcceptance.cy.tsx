@@ -13,6 +13,8 @@ import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { workflowChatScreenPage } from "../support/pages/workflowChatScreenPage";
@@ -49,6 +51,15 @@ const PR_STACK_SESSION = aSession({
   recipe: "pr-stack",
 });
 
+/** The drawer's backend, serving the session types a daemon declares — `tool` among them, which is
+ *  what makes a tddy-coder session's pane a workflow view. */
+function aWorkflowSessionsBackend() {
+  return aSessionsDrawerBackend([TDD_SESSION, PR_STACK_SESSION])
+    .onUnary(CatalogService.method.listAgents, () =>
+      withDeclaredSessionTypes({ agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude") }] }),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
@@ -66,7 +77,7 @@ beforeEach(() => {
 
 it("opens the full-screen Workflow Chat Screen instead of the terminal for a tool workflow session", () => {
   // Given
-  const backend = aSessionsDrawerBackend([TDD_SESSION, PR_STACK_SESSION]);
+  const backend = aWorkflowSessionsBackend();
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -82,7 +93,7 @@ it("opens the full-screen Workflow Chat Screen instead of the terminal for a too
 
 it("keeps the two-pane PR-Stack Chat Screen for a pr-stack session (not the full-screen chat)", () => {
   // Given
-  const backend = aSessionsDrawerBackend([TDD_SESSION, PR_STACK_SESSION]);
+  const backend = aWorkflowSessionsBackend();
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);

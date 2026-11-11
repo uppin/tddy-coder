@@ -14,6 +14,7 @@
 | Run | Lines | Note |
 |---|---|---|
 | 2026-10-25 | 178 | first detection. Replaces `start_project_session_schema` (~55 lines, five arguments) in `project_home_tools.rs`; the argument set grew from 5 to 28. Moved into `start_session_args/schema.rs` by the same PR's file split (engine `move_item`) |
+| 2026-11-11 | 179 | declared-session-types: 191 → 179 (fn line to closing brace) — the hard-coded session-type enum became the declared list. Still ~3× the 60-line budget; open |
 
 ## What would close it
 

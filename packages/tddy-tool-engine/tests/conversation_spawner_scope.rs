@@ -48,6 +48,7 @@ fn a_scoped_tool_is_one_the_spawner_is_offered_beside_its_six() {
             hosts: Vec::new(),
             recipes: Vec::new(),
             agents: Vec::new(),
+            session_types: Vec::new(),
         },
     )
     .into_iter()

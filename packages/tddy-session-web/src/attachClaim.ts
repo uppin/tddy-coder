@@ -7,6 +7,8 @@
  * without a rendered screen, and keeps the pane-ownership question answered in exactly one place.
  */
 
+import { knownSessionLaunch, TDDY_CODER_LAUNCH } from "tddy-session-create-web";
+
 /**
  * An attach already taken for one session, stamped with the session-list snapshot it was taken
  * under. The stamp is what lets a dormant reading be judged as evidence or as staleness: a list
@@ -46,7 +48,11 @@ export function sessionPaneIsWorkflowView(
   session: Pick<AttachCandidate, "sessionType" | "recipe">,
 ): boolean {
   if (session.recipe === "pr-stack") return true;
-  const isToolSession = session.sessionType === "" || session.sessionType === "tool";
+  // A tddy-coder session — its type declared with the `tddy_coder` launch, as the daemons served it
+  // (`knownSessionLaunch`) — owns a workflow view. So does a legacy record naming no session type:
+  // tddy-coder wrote its own records without one until it began recording the declared type.
+  const isToolSession =
+    session.sessionType === "" || knownSessionLaunch(session.sessionType) === TDDY_CODER_LAUNCH;
   return isToolSession && session.recipe !== "";
 }
 

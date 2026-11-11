@@ -7,7 +7,7 @@
  */
 
 import React from "react";
-import { servedAgentWire } from "../support/servedAgents";
+import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
@@ -53,7 +53,7 @@ function aCreateSessionBackend(aliases: string[] = ["buildbox"]): InMemoryRpcBac
     .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => withDeclaredSessionTypes({
       agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }, { id: "cursor", label: "Cursor", ...servedAgentWire("cursor"), },],
     }))
     .onUnary(CatalogService.method.listTools, () => ({

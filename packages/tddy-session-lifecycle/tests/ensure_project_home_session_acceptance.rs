@@ -334,9 +334,10 @@ async fn setting_up_main_as_cursor_cli_is_refused_naming_the_type_and_starts_not
 
 #[tokio::test]
 async fn setting_up_main_as_a_tool_session_is_refused_and_starts_nothing() {
-    // Given the form's tool-session request: no session type, an agent
+    // Given the form's tool-session request: the `tool` session type, an agent
     let world = a_daemon_with_a_project();
     let spec = StartSessionRequest {
+        session_type: "tool".to_string(),
         agent: "claude".to_string(),
         model: "opus".to_string(),
         ..Default::default()

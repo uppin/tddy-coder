@@ -43,7 +43,10 @@ impl LaunchSessions {
         refuse_peer_held_parts(&req)?;
         crate::harness_profile_request::refuse_a_requested_role(&req)?;
         let req = self.apply_harness_profile(req)?;
-        crate::start_request_checks::refuse_a_conflicting_tmux_run_start(&req)?;
+        crate::start_request_checks::refuse_a_conflicting_tmux_run_start(
+            &req,
+            Some(&*self.coding_agents),
+        )?;
         let (local_id, eligible_ids) = self.eligible_daemon_ids();
         let placement =
             classify_start_placement(&req, Some(&*self.coding_agents), local_id, eligible_ids)?;

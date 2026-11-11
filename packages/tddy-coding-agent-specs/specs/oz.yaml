@@ -30,6 +30,12 @@ run:
     - "{binary}"
   env: {}
 extensions:
+  # The session type a session of this agent is started and recorded as, and its launch. Declared
+  # here, never derived from the id: a stored `.session.yaml` names it.
+  session:
+    session_type: oz-cli
+    launch: agent_cli
+    label: Oz
   coding_agent:
     product: Oz
     mcp: { kind: argv, flag: --mcp }

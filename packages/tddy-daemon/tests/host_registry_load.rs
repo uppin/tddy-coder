@@ -43,6 +43,47 @@ async fn a_daemon_with_an_unparseable_tool_spec_refuses_to_start_naming_the_file
 }
 
 #[tokio::test]
+async fn a_daemon_whose_override_of_a_builtin_drops_its_session_type_refuses_to_start_naming_the_file(
+) {
+    // Given an operator override of `cursor.yaml` written before session types were declared: the
+    // built-in's `extensions.session` section is gone
+    let (_, builtin) = tddy_coding_agent_specs::builtin_specs()
+        .into_iter()
+        .find(|(path, _)| path.ends_with("/cursor.yaml"))
+        .expect("cursor.yaml is built in");
+    let start_of_section = builtin
+        .find("  session:\n")
+        .expect("cursor.yaml declares a session section");
+    let end_of_section = start_of_section
+        + builtin[start_of_section..]
+            .find("  coding_agent:\n")
+            .expect("its coding_agent section follows");
+    let stale = format!(
+        "{}{}",
+        &builtin[..start_of_section],
+        &builtin[end_of_section..]
+    );
+    let tddy_home = a_tddy_home().with_tool_file("cursor.yaml", &stale);
+    let config = a_daemon_config(tddy_home.path())
+        .with_a_signed_in_operator()
+        .build()
+        .await;
+
+    // When the daemon starts
+    let Err(refusal) = start(config).await else {
+        panic!("a daemon whose override drops a built-in's session type must not start");
+    };
+
+    // Then the operator is told which file to fix, and with what
+    let message = format!("{refusal:#}");
+    assert!(
+        message.contains(&tddy_home.tool_file("cursor.yaml").display().to_string())
+            && message.contains("session_type: cursor-cli, launch: agent_cli, label: Cursor"),
+        "the refusal names the file and the built-in's values: {message}"
+    );
+}
+
+#[tokio::test]
 async fn telegram_and_the_session_host_share_one_registry() {
     // Given a daemon that hosts sessions and runs a Telegram bot
     let tddy_home = a_tddy_home();

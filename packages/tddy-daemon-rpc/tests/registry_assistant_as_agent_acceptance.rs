@@ -41,6 +41,8 @@ const THE_OPERATOR: &str = "testuser";
 /// hostname of whatever machine runs the suite.
 const DAEMON_YAML: &str = r#"
 daemon_instance_id: "workstation-1"
+allowed_tools:
+  - path: /bin/true
 allowed_agents:
   - id: claude
     label: Claude
@@ -135,6 +137,7 @@ impl Harness {
         self.service
             .start_session(Request::direct(StartSessionRequest {
                 session_token: VALID_TOKEN.to_string(),
+                session_type: "tool".to_string(),
                 tool_path: "/bin/true".to_string(),
                 project_id: "no-such-project".to_string(),
                 agent: agent.to_string(),

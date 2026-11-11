@@ -1,5 +1,6 @@
 import type { BranchWorktreeIntent } from "./lib/branchConflict";
-import { daemonCutsTheWorktree, type SessionType } from "./createSessionRequest";
+import { daemonCutsTheWorktree } from "./createSessionRequest";
+import type { SessionLaunch } from "./cliHarnessOptions";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import { InlineError } from "tddy-ui-web";
 import type { BaseBranchOption } from "./baseBranchOptions";
@@ -18,7 +19,8 @@ export interface CreateSessionBranchFieldsProps {
   setSelectedBaseBranch: (baseBranch: string) => void;
   newBranchName: string;
   setNewBranchName: (newBranchName: string) => void;
-  sessionType: SessionType;
+  /** How the session is launched, as its daemon declared its session type. */
+  sessionLaunch: SessionLaunch | undefined;
   createRemoteBranch: boolean;
   setCreateRemoteBranch: (createRemoteBranch: boolean) => void;
   remoteBranches: string[];
@@ -43,7 +45,7 @@ export function CreateSessionBranchFields({
   setSelectedBaseBranch,
   newBranchName,
   setNewBranchName,
-  sessionType,
+  sessionLaunch,
   createRemoteBranch,
   setCreateRemoteBranch,
   remoteBranches,
@@ -109,9 +111,9 @@ export function CreateSessionBranchFields({
             placeholder="e.g. feature/my-work"
           />
           {/* Only the CLI-harness spawn paths create the worktree in-daemon and can push it; a
-              "tool" session spawns tddy-coder, which owns its own worktree — so we don't offer the
+              `tddy_coder` session spawns tddy-coder, which owns its own worktree — so we don't offer the
               toggle there rather than show a checked box that silently does nothing. */}
-          {daemonCutsTheWorktree(sessionType) && (
+          {daemonCutsTheWorktree(sessionLaunch) && (
             <label className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
               <input
                 data-testid="create-session-create-remote-branch-toggle"

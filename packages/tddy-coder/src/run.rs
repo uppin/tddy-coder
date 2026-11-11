@@ -234,6 +234,26 @@ fn resolve_agent_for_full_workflow_plain(args: &Args) -> anyhow::Result<String> 
 
 /// Resolve the tddy data directory from args (CLI `--tddy-data-dir`), falling back to the
 /// profile default (`tmp/.tddy` in debug, `$HOME/.tddy` in release).
+/// The session type this process records for its own session: the one session type the host's
+/// tool files (the built-ins plus `<tddyhome>/tools`) declare with the `tddy_coder` launch —
+/// `tool`, from `tddy-coder.yaml`. Read from the declaration, never spelled here; a host whose tool
+/// files do not load, or that declares no such session type or more than one, is refused.
+fn declared_tool_session_type(args: &Args) -> anyhow::Result<String> {
+    let tools_dir = resolve_tddy_data_dir(args).join("tools");
+    let registry = tddy_coding_agent_specs::CodingAgentRegistry::load(&tools_dir)
+        .map_err(|e| anyhow::anyhow!("load the tool files under {}: {e}", tools_dir.display()))?;
+    registry
+        .sole_session_type_launching(tddy_coding_agent_specs::LaunchKind::TddyCoder)
+        .map(|declared| declared.session_type.clone())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "the tool files under {} do not declare exactly one session type with the \
+                 tddy_coder launch, so this session cannot record its session type",
+                tools_dir.display()
+            )
+        })
+}
+
 fn resolve_tddy_data_dir(args: &Args) -> PathBuf {
     args.tddy_data_dir
         .clone()
@@ -1508,7 +1528,7 @@ pub fn run_with_args(
             tool: std::env::args().next(),
             livekit_room: None,
             previous_session_id: args.stack_base.clone(),
-            session_type: None,
+            session_type: Some(declared_tool_session_type(args)?),
             model: None,
 
             activity_status: None,
@@ -1907,7 +1927,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
                 tool: std::env::args().next(),
                 livekit_room: args.livekit_room.clone(),
                 previous_session_id: args.stack_base.clone(),
-                session_type: None,
+                session_type: Some(declared_tool_session_type(args)?),
                 model: None,
 
                 activity_status: None,
@@ -3942,7 +3962,7 @@ fn run_plan_bootstrap_in_session_dir(
             tool: std::env::args().next(),
             livekit_room: None,
             previous_session_id: args.stack_base.clone(),
-            session_type: None,
+            session_type: Some(declared_tool_session_type(args)?),
             model: None,
 
             activity_status: None,

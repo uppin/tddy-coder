@@ -262,3 +262,93 @@ fn the_spec_branch_intent_of_the_builtin_agents_follows_their_branch_name_requir
         )
     );
 }
+
+// ── requested_session_launch / recorded_session_launch ───────────────────────────────────────
+
+/// What a launch is, as a word: the dispatch arm it takes.
+fn launch_kind(launch: SessionLaunch) -> &'static str {
+    match launch {
+        SessionLaunch::NoAgent => "no_agent",
+        SessionLaunch::AgentCli(_) => "agent_cli",
+        SessionLaunch::TddyCoder => "tddy_coder",
+    }
+}
+
+#[test]
+fn a_requested_session_type_dispatches_by_its_declared_launch() {
+    // Given
+    let agents = the_builtin_coding_agents();
+
+    // When
+    let launches: Vec<Result<&str, (Code, String)>> = ["workspace", "tool", "claude-cli"]
+        .into_iter()
+        .map(|session_type| {
+            requested_session_launch(&agents, session_type)
+                .map(launch_kind)
+                .map_err(refusal)
+        })
+        .collect();
+
+    // Then
+    assert_eq!(
+        launches,
+        vec![Ok("no_agent"), Ok("tddy_coder"), Ok("agent_cli")]
+    );
+}
+
+#[test]
+fn an_empty_or_undeclared_requested_session_type_is_an_invalid_argument_naming_the_declared_ones() {
+    // Given
+    let agents = the_builtin_coding_agents();
+
+    // When
+    let refused: Vec<(Code, bool, bool)> = ["", "  ", "claude"]
+        .into_iter()
+        .map(|session_type| {
+            let status = requested_session_launch(&agents, session_type)
+                .map(launch_kind)
+                .expect_err("refused");
+            (
+                status.code,
+                status.message.contains("claude-cli"),
+                status.message.contains("workspace"),
+            )
+        })
+        .collect();
+
+    // Then
+    assert_eq!(
+        refused,
+        vec![
+            (Code::InvalidArgument, true, true),
+            (Code::InvalidArgument, true, true),
+            (Code::InvalidArgument, true, true),
+        ]
+    );
+}
+
+#[test]
+fn a_record_naming_no_session_type_resumes_its_recorded_tool_and_one_naming_neither_is_refused() {
+    // Given
+    let agents = the_builtin_coding_agents();
+
+    // When
+    let with_tool =
+        recorded_session_launch(&agents, None, Some("target/debug/tddy-coder")).map(launch_kind);
+    let with_neither = recorded_session_launch(&agents, None, None)
+        .map(launch_kind)
+        .map_err(|status| status.code);
+    let undeclared = recorded_session_launch(&agents, Some("gone-cli"), None)
+        .map(launch_kind)
+        .map_err(|status| status.code);
+
+    // Then
+    assert_eq!(
+        (with_tool.map_err(refusal), with_neither, undeclared),
+        (
+            Ok("tddy_coder"),
+            Err(Code::FailedPrecondition),
+            Err(Code::FailedPrecondition)
+        )
+    );
+}

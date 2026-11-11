@@ -70,7 +70,8 @@ const REPORTED_ENV: &str = "ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MO
 /// How long a stub has to report on its terminal.
 const TERMINAL_OBSERVE: Duration = Duration::from_secs(90);
 
-/// `acme`: an agent no Rust names, declared in this one file. Its session type is `acme-cli`; it
+/// `acme`: an agent no Rust names, declared in this one file. Its session type is `acme-cli`, as its
+/// `session` extension declares; it
 /// runs on the host or in a jail, writes Claude's hook settings through the existing
 /// `claude-settings-local` adapter, and declares the hooks and requires-model capabilities.
 pub const ACME_YAML: &str = r#"schema_version: 1
@@ -89,6 +90,7 @@ run:
     - { if: prompt, then: ["{prompt}"] }
   env: {}
 extensions:
+  session: { session_type: acme-cli, launch: agent_cli, label: Acme Code }
   coding_agent:
     mcp: { kind: unsupported }
     tool_allow: unsupported
@@ -136,6 +138,12 @@ pub fn builtin_yaml_as(builtin: &str, id: &str) -> String {
         serde_yaml::from_str(yaml).expect("the built-in is a tool file");
     let swaps = [
         (format!("\nid: {builtin}\n"), format!("\nid: {id}\n")),
+        // The session type it declares is its own, as a dropped-in agent's must be: two files
+        // declaring one session type refuse the registry.
+        (
+            format!("\n    session_type: {builtin}-cli\n"),
+            format!("\n    session_type: {id}-cli\n"),
+        ),
         (
             format!("\n  command: {}\n", def.binary.command),
             format!("\n  command: {id}\n"),

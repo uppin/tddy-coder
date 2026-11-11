@@ -62,6 +62,7 @@ function aFormWith(values: Partial<CreateSessionFormValues>): CreateSessionFormV
     selectedBranchToWorkOn: "",
     daemonInstanceId: "",
     sessionType: "claude-cli",
+    sessionLaunch: "agent_cli",
     cliFeatures: CLAUDE_FEATURES,
     toolPath: "",
     selectedAgentId: "",
@@ -104,6 +105,7 @@ describe("create session request builder", () => {
     // Given a tool session with an agent and a tool path
     const form = aFormWith({
       sessionType: "tool",
+      sessionLaunch: "tddy_coder",
       selectedAgentId: "explorer",
       toolPath: "/usr/bin/tddy-coder",
     });
@@ -111,16 +113,17 @@ describe("create session request builder", () => {
     // When the request is built
     const request = buildStartSessionRequest(form, null, []);
 
-    // Then the agent and tool path go out, and the session type is left empty — a tool session is
-    // what the daemon starts when no session type names a CLI
+    // Then the agent and tool path go out with the session type the toggle chose — the daemon
+    // refuses an empty session type rather than reading it as a tool session
     expect(request.agent).to.equal("explorer");
     expect(request.toolPath).to.equal("/usr/bin/tddy-coder");
-    expect(request.sessionType).to.equal("");
+    expect(request.sessionType).to.equal("tool");
   });
 
   it("names no owning host for a tool session's stack parent", () => {
     // Given a tool session parented to an orchestrator
-    const form = aFormWith({ sessionType: "tool", stackParent: "session-7" });
+    const form = aFormWith({ sessionType: "tool",
+      sessionLaunch: "tddy_coder", stackParent: "session-7" });
 
     // When the request is built
     const request = buildStartSessionRequest(form, null, []);
@@ -136,6 +139,7 @@ describe("create session request builder", () => {
     // Given a base session chosen while the recipe was pr-stack
     const form = aFormWith({
       sessionType: "tool",
+      sessionLaunch: "tddy_coder",
       recipe: "pr-stack",
       prStackBaseSessionId: "session-9",
     });
@@ -151,6 +155,7 @@ describe("create session request builder", () => {
     // Given a base session still held from a pr-stack recipe the operator has since left
     const form = aFormWith({
       sessionType: "tool",
+      sessionLaunch: "tddy_coder",
       recipe: "tdd",
       prStackBaseSessionId: "session-9",
     });

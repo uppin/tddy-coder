@@ -8,12 +8,15 @@ import {
 import { BUILT_IN_PROVIDER } from "./CreateSessionProviderField";
 import type { CreateSessionPaneProps } from "./createSessionPaneProps";
 import type { SessionType } from "./createSessionRequest";
+import { TDDY_CODER_LAUNCH, type SessionLaunch } from "./cliHarnessOptions";
 
 export interface UseCreateSessionModelArgs {
   catalogClient: CreateSessionPaneProps["catalogClient"];
   accountsClient: CreateSessionPaneProps["accountsClient"];
   sessionToken: string;
   sessionType: SessionType;
+  /** How a session of `sessionType` is launched, as its daemon declared it. */
+  sessionLaunch: SessionLaunch | undefined;
   /** The agent a tool session starts as (empty when none is selectable). */
   selectedAgentId: string;
   daemonInstanceId: string;
@@ -42,12 +45,15 @@ export function useCreateSessionModel({
   accountsClient,
   sessionToken,
   sessionType,
+  sessionLaunch,
   selectedAgentId,
   daemonInstanceId,
   selectedAgentRouteProviders,
   cliRouteProviders,
   initialModel,
 }: UseCreateSessionModelArgs) {
+  // A tddy-coder session runs the agent the form picked; any other session type is its own harness.
+  const runsThePickedAgent = sessionLaunch === TDDY_CODER_LAUNCH;
   const [model, setModel] = useState(initialModel ?? "");
   // Where the session's harness runs. `null` until the operator chooses: an untouched form names no
   // provider, so a default the daemon holds for the harness may still decide; choosing "built in"
@@ -56,7 +62,7 @@ export function useCreateSessionModel({
 
   // The model catalog is enumerated per selected backend: the chosen agent for tool sessions, and
   // for a CLI session type the pseudo-agent named after it ("claude-cli", "cursor-cli", …).
-  const modelAgentKey = sessionType === "tool" ? selectedAgentId : sessionType;
+  const modelAgentKey = runsThePickedAgent ? selectedAgentId : sessionType;
   const vendorModels = useAgentModels(catalogClient, sessionToken, modelAgentKey, daemonInstanceId);
 
   // The provider field is offered for the harness the session runs: a CLI session type names its
@@ -67,8 +73,9 @@ export function useCreateSessionModel({
   // not; the form keeps no matrix of its own.
   const providerHarness = providerHarnessFor(
     sessionType,
+    runsThePickedAgent,
     selectedAgentId,
-    sessionType === "tool" ? selectedAgentRouteProviders : cliRouteProviders,
+    runsThePickedAgent ? selectedAgentRouteProviders : cliRouteProviders,
   );
   const providerRoutes = useProviderRoutes(accountsClient, sessionToken, providerHarness);
   // A provider choice belongs to the harness it was made for: switching session type or agent
@@ -117,10 +124,11 @@ export function useCreateSessionModel({
  */
 function providerHarnessFor(
   sessionType: SessionType,
+  runsThePickedAgent: boolean,
   selectedAgentId: string,
   routeProviders: readonly string[] | undefined,
 ): string | null {
   if (routeProviders !== undefined && routeProviders.length === 0) return null;
-  if (sessionType === "tool") return selectedAgentId || null;
+  if (runsThePickedAgent) return selectedAgentId || null;
   return sessionType;
 }

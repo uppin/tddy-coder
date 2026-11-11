@@ -49,7 +49,7 @@ pub fn workspace_start_request(
         })
         .collect::<Result<Vec<String>, Status>>()?;
     Ok(StartSessionRequest {
-        session_type: "workspace".to_string(),
+        session_type: tddy_coding_agent_specs::NO_AGENT_SESSION_TYPE.to_string(),
         daemon_instance_id: String::new(),
         codebase_daemon_instance_id: String::new(),
         requested_session_id: codebase_session_id.to_string(),

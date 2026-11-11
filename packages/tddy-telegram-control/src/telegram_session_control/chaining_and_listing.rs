@@ -347,7 +347,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
 
         for se in page_slice {
             let session_dir = sessions_root.join(&se.session_id);
-            let enrich = session_list_status_or_placeholders(&session_dir);
+            let enrich = session_list_status_or_placeholders(&self.coding_agents, &session_dir);
             let label = telegram_label_for_session_id(&se.session_id);
             let entry = TelegramSessionEntry {
                 session_id: se.session_id.clone(),
@@ -467,7 +467,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             let _replay_scheduled =
                 g.notify_enter_session_elicitation_replay_skeleton(chat_id, session_id);
         }
-        let enrich = session_list_status_or_placeholders(&session_dir);
+        let enrich = session_list_status_or_placeholders(&self.coding_agents, &session_dir);
         let label = telegram_label_for_session_id(session_id);
         let text = format!(
             "Session {} ({}): status {} · workflow {} · elapsed {}",

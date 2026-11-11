@@ -14,6 +14,7 @@ pub mod claude_tools;
 pub mod headless;
 mod registry;
 mod route;
+mod session;
 pub mod slots;
 mod spec;
 
@@ -45,8 +46,12 @@ pub use agent_env_base::{
     AGENT_ENV_BASE_YAML,
 };
 pub use capability::Capability;
-pub use registry::{CodingAgentRegistry, RegistryError, CLI_SESSION_TYPE_SUFFIX};
+pub use registry::{CodingAgentRegistry, RegistryError};
 pub use route::{ProviderKind, RouteShape, RouteSupport, RoutedAgent};
+pub use session::{
+    is_no_agent_session_type, DeclaredSessionType, LaunchKind, SessionExtension, SessionSection,
+    NO_AGENT_SESSION_TYPE, SESSION_EXTENSION,
+};
 pub use spec::{
     AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec, SpecError,
     VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
@@ -118,6 +123,31 @@ pub fn builtin_specs() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
+/// `session-tools/tddy-coder.yaml`, embedded: the tool that declares the `tool` session type. It
+/// lives apart from `specs/`, which holds only coding agents.
+pub const TDDY_CODER_SPEC_YAML: &str = include_str!("../session-tools/tddy-coder.yaml");
+
+/// The embedded tool files that declare a session type but are no coding agent: `(source path,
+/// YAML)`. Kept apart from [`builtin_specs`], every one of which is a coding agent.
+pub fn builtin_session_tools() -> Vec<(&'static str, &'static str)> {
+    vec![(
+        "packages/tddy-coding-agent-specs/session-tools/tddy-coder.yaml",
+        TDDY_CODER_SPEC_YAML,
+    )]
+}
+
+/// Every embedded tool file a host that launches sessions loads: `tddy-actions`' built-in and
+/// support tools, [`builtin_specs`] and [`builtin_session_tools`].
+pub(crate) fn embedded_tool_sources() -> Vec<(&'static str, &'static str)> {
+    BUILTIN_TOOLS
+        .iter()
+        .chain(BUILTIN_SUPPORT_TOOLS)
+        .copied()
+        .chain(builtin_specs())
+        .chain(builtin_session_tools())
+        .collect()
+}
+
 /// The built-in spec of agent `id`, as embedded — without the `<tddyhome>/tools` overrides
 /// [`load_agent_registry`] applies, and without resolving its binary.
 ///
@@ -140,17 +170,62 @@ pub fn embedded_spec(id: &str) -> Result<CodingAgentSpec, SpecError> {
     CodingAgentSpec::of(&def)
 }
 
-/// The registry a host that launches coding agents uses: `tddy-actions`' built-in and support
-/// tools plus [`builtin_specs`], with `<tddyhome>/tools` (`overrides_dir`) applied and every
-/// `extensions:` section validated by [`CodingAgentExtension`].
+/// The registry a host that launches coding agents uses: the [`embedded_tool_sources`], with
+/// `<tddyhome>/tools` (`overrides_dir`) applied and every `extensions:` section validated by its
+/// owner — [`CodingAgentExtension`] or [`SessionExtension`].
+///
+/// An override of a built-in that declares a session type must declare one too: dropping the
+/// `session` section would silently take the built-in's session type off the host (and with it every
+/// stored session of that type), so the override is refused, naming its file and the built-in's
+/// values. Nothing is inherited from the built-in. A new tool that overrides no built-in may declare
+/// none.
 pub fn load_agent_registry(overrides_dir: &Path) -> Result<ToolRegistry, ToolError> {
-    let specs = builtin_specs();
-    let sources: Vec<(&str, &str)> = BUILTIN_TOOLS
-        .iter()
-        .chain(BUILTIN_SUPPORT_TOOLS)
-        .chain(&specs)
-        .copied()
-        .collect();
-    let builtin = ToolRegistry::from_embedded(&sources)?;
-    ToolRegistry::load_with_owners(builtin, overrides_dir, &[&CodingAgentExtension])
+    let builtin = ToolRegistry::from_embedded(&embedded_tool_sources())?;
+    let loaded = ToolRegistry::load_with_owners(
+        builtin.clone(),
+        overrides_dir,
+        &[&CodingAgentExtension, &SessionExtension],
+    )?;
+    refuse_overrides_that_drop_a_session_type(&builtin, &loaded)?;
+    Ok(loaded)
+}
+
+/// [`load_agent_registry`]'s refusal of an override that drops its built-in's `session` section.
+fn refuse_overrides_that_drop_a_session_type(
+    builtin: &ToolRegistry,
+    loaded: &ToolRegistry,
+) -> Result<(), ToolError> {
+    for id in builtin.ids() {
+        let (Some(builtin_def), Some(loaded_def)) = (builtin.get(id), loaded.get(id)) else {
+            continue;
+        };
+        let Some(declared) = builtin_def.extensions.get(SESSION_EXTENSION) else {
+            continue;
+        };
+        if loaded.origin(id) == builtin.origin(id)
+            || loaded_def.extensions.contains_key(SESSION_EXTENSION)
+        {
+            continue;
+        }
+        let declared: SessionSection =
+            serde_yaml::from_value(declared.clone()).map_err(|e| ToolError::ExtensionRejected {
+                file: builtin
+                    .origin(id)
+                    .map(Path::to_path_buf)
+                    .unwrap_or_default(),
+                owner: SESSION_EXTENSION.to_string(),
+                message: e.to_string(),
+            })?;
+        return Err(ToolError::ExtensionRejected {
+            file: loaded.origin(id).map(Path::to_path_buf).unwrap_or_default(),
+            owner: SESSION_EXTENSION.to_string(),
+            message: format!(
+                "this file overrides the built-in {id}, which declares a session type, but declares \
+                 none itself; add `extensions.session: {{ session_type: {}, launch: {}, label: \
+                 {} }}` (the built-in's values) or another session type of its own",
+                declared.session_type, declared.launch, declared.label
+            ),
+        });
+    }
+    Ok(())
 }

@@ -16,7 +16,7 @@
  */
 
 import React from "react";
-import { servedAgentWire } from "../support/servedAgents";
+import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
@@ -100,7 +100,7 @@ function anOrchestratorBackend(
   };
   return aSessionsDrawerBackend([orchestrator])
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
-    .onUnary(CatalogService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => withDeclaredSessionTypes({
       agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }],
     }))
     .onUnary(CatalogService.method.listAgentModels, () => ({

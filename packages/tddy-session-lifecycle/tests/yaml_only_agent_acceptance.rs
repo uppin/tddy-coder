@@ -419,6 +419,40 @@ async fn a_dropped_in_agent_without_managed_workflow_is_refused_a_managed_codeba
     );
 }
 
+/// A start whose `session_type` is no session type the host's YAML declares — here `claude`, the
+/// agent's spec id where its session type is `claude-cli` — is not refused: it falls through into
+/// the tddy-coder tool-session spawn, which on a host with LiveKit execs an empty `tool_path`
+/// resolved to the daemon's cwd and answers `Permission denied (os error 13)`.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_start_naming_a_session_type_no_agent_yaml_declares_is_refused_naming_the_declared_types_and_spawns_nothing(
+) {
+    // Given — acme.yaml dropped in beside the built-ins, so `acme-cli` is a declared session type
+    let daemon = a_daemon_with_tools(&[("acme.yaml", ACME_YAML)]);
+
+    // When — the start names the claude spec's id rather than its session type
+    let refusal = daemon
+        .start(daemon.a_start("claude", false))
+        .await
+        .map(|(session_id, _host)| session_id)
+        .expect_err("a session type no agent YAML declares is not started");
+
+    // Then — refused as a bad argument naming the value sent and the YAML-declared types offered
+    // instead; nothing spawned
+    assert_eq!(
+        (
+            refusal.code,
+            refusal.message.contains("\"claude\""),
+            refusal.message.contains("claude-cli"),
+            refusal.message.contains("acme-cli"),
+            daemon.spawn_marker.exists(),
+        ),
+        (Code::InvalidArgument, true, true, true, false),
+        "refusal: {}",
+        refusal.message
+    );
+}
+
 #[tokio::test]
 #[serial_test::serial]
 async fn a_dropped_in_agent_whose_conversation_is_the_daemon_session_id_resumes_with_the_same_id() {

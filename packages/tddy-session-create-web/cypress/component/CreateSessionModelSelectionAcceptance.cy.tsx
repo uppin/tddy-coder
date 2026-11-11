@@ -10,7 +10,7 @@
  * the component actually sent and observe the models the daemon advertised.
  */
 import React from "react";
-import { servedAgentWire } from "../support/servedAgents";
+import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { createClient, ConnectError, Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/CreateSessionPane";
@@ -51,7 +51,7 @@ function aBackendWithModels({ cursorFails = false }: { cursorFails?: boolean } =
     .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => withDeclaredSessionTypes({
       agents: [
         { id: "claude", label: "Claude", ...servedAgentWire("claude"), },
         { id: "cursor", label: "Cursor", ...servedAgentWire("cursor"), },
@@ -154,7 +154,7 @@ describe("CreateSessionPane — tool-session model selection", () => {
     cy.wrap(null).should(() => {
       const calls = backend.callsTo(SessionService.method.startSession);
       expect(calls).to.have.length(1);
-      expect(calls[0].sessionType).to.eq("");
+      expect(calls[0].sessionType).to.eq("tool");
       expect(calls[0].agent).to.eq("claude");
       expect(calls[0].model).to.eq("sonnet");
     });

@@ -22,14 +22,16 @@ along with the notification bus.
 | `GetAcpReplayPage` | unary | a page of the transcript before a given position |
 
 **Capability gates.** The hook-driven methods accept a session by what its agent declares in its
-spec's `coding_agent.capabilities`, not by its session-type string: the session type `<id>-cli`
-resolves to agent `<id>` in the host's coding-agent registry (`CodingAgentRegistry::for_session_type`).
+spec's `coding_agent.capabilities`, not by its session-type string: the session type resolves to the
+coding agent whose tool file declares it in the host's coding-agent registry
+(`CodingAgentRegistry::for_session_type`).
 `ReportSessionStatus` and `ReportAgentActivity` need `hooks` (`FAILED_PRECONDITION` otherwise, before the
 token is read), `AwaitQuestionAnswer` needs `ask_user_question`, `ReportOperatorNotification` needs
 `operator_notify`. `ActivityServiceImpl::with_agents(registry)` supplies the registry; the daemon passes
 its host's coding agents (`DaemonSessionHost::activity_service`), and a service built without one holds
 `CodingAgentRegistry::empty()`, which refuses every hook report. Deleting a session removes the
-worktree of any agent session (`<id>-cli`) and of `workspace`, except one whose agent declares
+worktree of any agent session (a session type a coding agent declares) and of `workspace` (checked
+through `is_no_agent_session_type`), except one whose agent declares
 `keep_worktree_on_delete` (`worktree_removal_applies_to`).
 
 Proto: [`packages/tddy-service/proto/activity.proto`](../../tddy-service/proto/activity.proto). It

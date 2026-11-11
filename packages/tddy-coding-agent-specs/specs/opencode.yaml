@@ -33,6 +33,12 @@ run:
     - { splice: slots }
   env: {}
 extensions:
+  # The session type a session of this agent is started and recorded as, and its launch. Declared
+  # here, never derived from the id: a stored `.session.yaml` names it.
+  session:
+    session_type: opencode-cli
+    launch: agent_cli
+    label: OpenCode
   coding_agent:
     pass_env: [ANTHROPIC_API_KEY, OPENAI_API_KEY]
     product: OpenCode

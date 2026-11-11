@@ -5,7 +5,7 @@
  * Feature: docs/ft/daemon/provider-accounts.md (A person's default per harness)
  */
 import { createClient } from "@connectrpc/connect";
-import { servedAgentWire } from "../support/servedAgents";
+import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AccountsAppPage } from "../../src/components/accounts/AccountsAppPage";
 import { CreateSessionPane } from "tddy-session-create-web";
@@ -45,7 +45,7 @@ function mountCreateSessionPaneWithTheDefault(defaultFor: string[]) {
     .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [] }))
-    .onUnary(CatalogService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => withDeclaredSessionTypes({
       agents: [
         { id: "claude", label: "Claude", ...servedAgentWire("claude") },
         { id: "muse", label: "Muse Code", ...servedAgentWire("muse") },
@@ -84,7 +84,7 @@ function mountCreateSessionPaneWithTheDefault(defaultFor: string[]) {
 
 /** The catalog the Accounts screen reads its harness options from: claude and muse, as a daemon serves them. */
 function withServedCatalog<T extends ReturnType<typeof anInMemoryRpcBackend>>(backend: T): T {
-  return backend.onUnary(CatalogService.method.listAgents, () => ({
+  return backend.onUnary(CatalogService.method.listAgents, () => withDeclaredSessionTypes({
     agents: [
       { id: "claude", label: "Claude", ...servedAgentWire("claude") },
       { id: "muse", label: "Muse Code", ...servedAgentWire("muse") },

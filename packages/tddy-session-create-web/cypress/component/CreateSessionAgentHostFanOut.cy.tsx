@@ -13,7 +13,7 @@
 
 import { mountWithHostBackends } from "../support/mounts";
 import React from "react";
-import { servedAgentWire } from "../support/servedAgents";
+import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionService } from "tddy-client-web/gen/session_pb";
@@ -68,14 +68,14 @@ function aCreateSessionBackend(agents: readonly AgentRow[]) {
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [...agents] }))
+    .onUnary(CatalogService.method.listAgents, () => withDeclaredSessionTypes({ agents: [...agents] }))
     .onUnary(SessionService.method.startSession, () => ({ sessionId: "new-1" }));
 }
 
 /** A peer host that answers `ListAgents` with exactly `agents`. */
 function aHostOffering(agents: readonly AgentRow[]): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [...agents] }))
+    .onUnary(CatalogService.method.listAgents, () => withDeclaredSessionTypes({ agents: [...agents] }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }));
 }
 

@@ -47,7 +47,10 @@ mod unbundle_catalog_entry_tests {
                 tddy_rpc::Status,
             > {
                 Ok(tddy_rpc::Response::new(
-                    tddy_service::proto::catalog::ListAgentsResponse { agents: vec![] },
+                    tddy_service::proto::catalog::ListAgentsResponse {
+                        agents: vec![],
+                        session_types: vec![],
+                    },
                 ))
             }
             async fn list_agent_models(

@@ -49,6 +49,7 @@ run:
   transport: pty
   argv: ["{{binary}}"]
 extensions:
+  session: {{ session_type: claude-cli, launch: agent_cli, label: Claude Code }}
   coding_agent:
     mcp: {mcp}
     tool_allow: {{ flag: --allowedTools }}

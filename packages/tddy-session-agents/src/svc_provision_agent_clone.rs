@@ -76,7 +76,7 @@ impl AgentRoster {
         });
         let request = StartSessionRequest {
             session_token: session_token.to_string(),
-            session_type: "workspace".to_string(),
+            session_type: tddy_coding_agent_specs::NO_AGENT_SESSION_TYPE.to_string(),
             project_id: codebase.project_id.clone(),
             // Empty: the peer holds this checkout itself and must not route the request onward.
             daemon_instance_id: String::new(),

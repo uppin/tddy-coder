@@ -1,14 +1,15 @@
 //! Starting a session from a harness profile: which session type or tool-session agent runs, on
 //! which account, with which model — the `agent_definition` level of the route.
 
-use tddy_coding_agent_specs::CodingAgentRegistry;
+use tddy_coding_agent_specs::{CodingAgentRegistry, LaunchKind};
 use tddy_core::provider_route::RouteChoice;
 use tddy_discovery::harness_profile::HarnessProfile;
 
 /// What a profile starts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProfileStart {
-    /// `Some("claude-cli" | "opencode-cli" | "muse-cli")` for a CLI harness; `None` for a tool session.
+    /// The session type the profile starts: its CLI harness's own (`opencode-cli`), or, for a
+    /// tool-session agent, the one session type the host declares with the `tddy_coder` launch.
     pub session_type: Option<String>,
     /// The tool-session agent (`claude`, `codex`, …); `None` for a CLI harness.
     pub agent: Option<String>,
@@ -17,10 +18,10 @@ pub struct ProfileStart {
     pub model: String,
 }
 
-/// What `profile` starts; `Err` when its `harness` names no coding agent this host has. A name
-/// ending `-cli` is a CLI session type, launched from the spec of the agent it runs; any other name
-/// is a tool-session agent, which must be one the host can run headless or over ACP. A CLI
-/// profile's start is then the session type's start.
+/// What `profile` starts; `Err` when its `harness` names no coding agent this host has. A name a
+/// coding agent declares as its session type is a CLI session type, launched from the spec of the
+/// agent it runs; any other name is a tool-session agent, which must be one the host can run
+/// headless or over ACP. A CLI profile's start is then the session type's start.
 pub fn profile_start(
     profile: &HarnessProfile,
     agents: &CodingAgentRegistry,
@@ -32,7 +33,19 @@ pub fn profile_start(
         .get(name)
         .is_some_and(|spec| spec.acp().is_some() || spec.headless().is_some())
     {
-        (None, Some(name.to_string()))
+        let tool_session_type = agents
+            .sole_session_type_launching(LaunchKind::TddyCoder)
+            .ok_or_else(|| {
+                format!(
+                    "profile {:?} names the tool-session agent {:?}, but this daemon does not \
+                     declare exactly one session type with the tddy_coder launch to run it in",
+                    profile.name, profile.harness
+                )
+            })?;
+        (
+            Some(tool_session_type.session_type.clone()),
+            Some(name.to_string()),
+        )
     } else {
         return Err(format!(
             "profile {:?} names {:?}, which is no harness this daemon runs",

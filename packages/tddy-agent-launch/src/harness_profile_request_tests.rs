@@ -109,8 +109,8 @@ fn a_tool_session_profile_starts_its_agent() {
     )
     .expect("the profile starts");
 
-    // Then
-    assert_eq!(req.session_type, "");
+    // Then — the tool session type tddy-coder.yaml declares, run by the profile's agent
+    assert_eq!(req.session_type, "tool");
     assert_eq!(req.agent, "codex");
 }
 

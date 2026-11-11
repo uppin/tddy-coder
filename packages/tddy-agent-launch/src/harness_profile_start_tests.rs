@@ -42,8 +42,8 @@ fn a_codex_profile_starts_a_tool_session_with_the_codex_agent() {
     // When
     let start = profile_start(&a_profile("codex"), &the_agents()).expect("codex is a harness");
 
-    // Then
-    assert_eq!(start.session_type, None);
+    // Then — the one session type declared with the tddy_coder launch
+    assert_eq!(start.session_type.as_deref(), Some("tool"));
     assert_eq!(start.agent.as_deref(), Some("codex"));
 }
 

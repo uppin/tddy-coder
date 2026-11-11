@@ -106,13 +106,15 @@ pub fn context_globs(spec_globs: Option<&[String]>) -> Vec<String> {
 ///    cannot be stamped on later). The caller resolves [`SessionContextAgent::Paired`] to
 ///    the split agent its registry offers; deriving it from the pairing rather than from
 ///    `req.agent` keeps the answer a property of what this daemon wrote down.
-/// 2. **Otherwise the session's own type**: `<id>-cli` names agent `<id>`; a `workspace`
-///    session nobody is paired with runs no agent and gets the shared base.
+/// 2. **Otherwise the session's own type**, which the caller resolves to the agent that declares
+///    it (`CodingAgentRegistry::for_session_type`); a `workspace` session nobody is paired with
+///    runs no agent and gets the shared base.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionContextAgent {
     /// The workspace half of a split placement: the agent lives on another daemon.
     Paired,
-    /// The agent id the session's own type names, or `None` for a session with no agent.
+    /// The session's own recorded session type, or `None` for a session with no agent (the no-agent
+    /// session type, or none recorded). The caller's registry names the agent that declares it.
     Own(Option<String>),
 }
 
@@ -123,9 +125,10 @@ pub fn context_agent_for_session(meta: &tddy_core::SessionMetadata) -> SessionCo
     }
     let session_type = meta.session_type.as_deref().unwrap_or_default().trim();
     SessionContextAgent::Own(
-        session_type
-            .strip_suffix("-cli")
-            .filter(|id| !id.is_empty())
+        Some(session_type)
+            .filter(|session_type| {
+                !session_type.is_empty() && !tddy_workflow::is_no_agent_session_type(session_type)
+            })
             .map(str::to_string),
     )
 }
@@ -509,7 +512,7 @@ mod tests {
         // Then
         assert_eq!(
             context_agent_for_session(&meta),
-            SessionContextAgent::Own(Some("cursor".to_string()))
+            SessionContextAgent::Own(Some("cursor-cli".to_string()))
         );
     }
 }

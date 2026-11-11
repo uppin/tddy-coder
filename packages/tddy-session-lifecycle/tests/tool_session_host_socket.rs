@@ -89,19 +89,25 @@ fn a_tool_that_records_its_argv(dir: &Path) -> PathBuf {
     path
 }
 
-fn a_daemon(data_dir: &Path, vaults: Arc<SessionVaults>) -> DaemonSessionHost {
+fn a_daemon(data_dir: &Path, vaults: Arc<SessionVaults>, tool: &Path) -> DaemonSessionHost {
     let config_dir = tempfile::tempdir().unwrap();
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
         &config_path,
-        r#"
+        // The stand-in tool is the one path this daemon allows a tool session to run.
+        format!(
+            r#"
 livekit:
   url: ws://127.0.0.1:1
   api_key: dummy-key
   api_secret: dummy-secret
 spawn_startup_grace_period_ms: 300
 spawn_startup_poll_interval_ms: 10
+allowed_tools:
+  - path: "{}"
 "#,
+            tool.display()
+        ),
     )
     .unwrap();
     std::fs::write(
@@ -177,7 +183,7 @@ fn a_world_with(projects: &[(&str, Option<&str>)]) -> World {
     let tool = a_tool_that_records_its_argv(tools.path());
     register_projects(data_dir.path(), repo.path(), projects);
     let vaults = vaults_holding_ada_and_grace(vault_dir.path());
-    let daemon = a_daemon(data_dir.path(), Arc::clone(&vaults));
+    let daemon = a_daemon(data_dir.path(), Arc::clone(&vaults), &tool);
     World {
         data_dir,
         _vault_dir: vault_dir,
@@ -218,6 +224,7 @@ impl World {
             .start_session(Request::direct(StartSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 project_id: project_id.to_string(),
+                session_type: "tool".to_string(),
                 tool_path: self.tool.to_str().unwrap().to_string(),
                 recipe: recipe.to_string(),
                 ..Default::default()
@@ -302,7 +309,7 @@ impl World {
     /// starts or resumes.
     async fn restart_daemon(&mut self) {
         // (the vaults stay open: what a restart loses here is the host-session registry, not them)
-        self.daemon = a_daemon(self.data_dir.path(), Arc::clone(&self.vaults));
+        self.daemon = a_daemon(self.data_dir.path(), Arc::clone(&self.vaults), &self.tool);
         // The old daemon's server tasks are cancelled by their drop; let the runtime run that.
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
@@ -533,6 +540,7 @@ async fn a_deleted_session_is_no_longer_answered() {
         .start_session(Request::direct(StartSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: ADA_PROJECT.to_string(),
+            session_type: "tool".to_string(),
             tool_path: world.tool.to_str().unwrap().to_string(),
             ..Default::default()
         }))

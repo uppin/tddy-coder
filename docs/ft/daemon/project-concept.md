@@ -302,8 +302,9 @@ can start any session a person can.
   `github_source`, `session_role`). An argument the tool does not offer — a role among them — is
   refused by name. Two parity tests hold this: one against the compiled-in proto descriptor, one
   against every key the form's request builder can send.
-- **The schema states the closed choices.** `session_type`, `permission_mode`,
-  `branch_worktree_intent` and an attachment's `scope` are enums; `daemon_instance_id` lists `""`
+- **The schema states the closed choices.** `session_type` (the session types the daemon declares,
+  [Session types are declared](session-agent-roster.md#session-types-are-declared), plus
+  `workspace`), `permission_mode`, `branch_worktree_intent` and an attachment's `scope` are enums; `daemon_instance_id` lists `""`
   (this host) and every eligible host, and `recipe` every workflow recipe the daemon supports, as the
   daemon answers `ListExecTools`. `if`/`then` blocks make `model` required for the harnesses that need
   one and `selected_branch_to_work_on` required with `work_on_selected_branch`.
@@ -312,12 +313,13 @@ can start any session a person can.
 - **Across hosts.** A start naming another host takes the daemon's own start path, which forwards it
   there; that host creates the session and records the orchestrator in it.
 - **Known limitations.**
-  - A `tool` session (or an empty session type) started with an orchestrator is refused with
-    `FAILED_PRECONDITION`: its changeset is written by its own `tddy-coder` process, which does not
+  - A session of a type declared with the `tddy_coder` launch (`tool`) started with an orchestrator
+    is refused with `FAILED_PRECONDITION`: its changeset is written by its own `tddy-coder` process, which does not
     record one.
   - The agent's client registers its MCP tools before it asks the daemon, so the schema it sees names
-    hosts and recipes as free strings; the daemon refuses a host it cannot route to and a recipe it
-    does not support.
+    hosts, recipes and session types as free strings; the daemon refuses a host it cannot route to, a
+    recipe it does not support, and a session type it does not declare (`DescribeSessionStartOptions`
+    lists the declared ones).
   - The orchestrator is written into the changeset after the start returns, not in the changeset the
     session type first writes.
 
@@ -396,8 +398,9 @@ answers them on demand, each from the RPC the form calls, on the host `daemon_in
 |---|---|
 | `daemon_instance_id` | the host that answered |
 | `agents` `[{id, label}]` | `CatalogService.ListAgents` |
-| `models` `{default, choices: [{id, label}]}` | `AccountsService.ListProviderAccountModels` when `provider_account_id` is named (the first preselected); else `CatalogService.ListAgentModels` for `agent`, or for `session_type` when it is a CLI harness |
-| `provider_routes` `[{account_id, label, preset, supported, reason}]` | `AccountsService.ListProviderRoutes` for the harness: the `session_type`, or the `agent` of a `tool` session; `warp-cli` has none |
+| `session_types` `[{id, label}]` | the session types the host's tool files declare (`workspace` is startable besides, and declared by nothing) |
+| `models` `{default, choices: [{id, label}]}` | `AccountsService.ListProviderAccountModels` when `provider_account_id` is named (the first preselected); else `CatalogService.ListAgentModels` for `agent`, or for `session_type` when it is a coding agent's |
+| `provider_routes` `[{account_id, label, preset, supported, reason}]` | `AccountsService.ListProviderRoutes` for the harness: a coding agent's `session_type`, or the `agent` of any other session type (a `workspace` session runs none); `warp-cli` has none |
 | `ssh_config_hosts` | `HostService.ListSshConfigHosts` |
 | `subagents` | `CatalogService.ListSubagents`, each qualified `name@daemon_instance_id` as `specialized_agents` takes them |
 | `branches` | `ProjectService.ListProjectBranches` for the project's checkout on that host |

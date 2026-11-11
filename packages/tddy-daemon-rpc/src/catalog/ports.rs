@@ -52,14 +52,17 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
         _request: Request<ListAgentsRequest>,
     ) -> Result<Response<ListAgentsResponse>, Status> {
         log::debug!("list_agents RPC: mapping config allowlist to AgentInfo");
-        let agents = listed_agents(
+        let (agents, session_types) = listed_agents(
             &self.config,
             &self.agents.tddy_data_dir,
             self.agents.model_registry.as_deref(),
         )
         .await?;
         log::info!("list_agents RPC: returning {} agent(s)", agents.len());
-        Ok(Response::new(ListAgentsResponse { agents }))
+        Ok(Response::new(ListAgentsResponse {
+            agents,
+            session_types,
+        }))
     }
 
     /// Enumerate the models an agent supports by shelling out to `tddy-tools list-models` as the

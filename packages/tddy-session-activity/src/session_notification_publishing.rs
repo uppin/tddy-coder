@@ -13,7 +13,14 @@ use tddy_core::session_label::session_display_label;
 /// that the chat and the drawer cannot disagree. A session directory that is missing or unreadable
 /// (a hook outracing session creation, a session deleted with a report in flight) falls to the
 /// short session id rather than failing: a label is display text, and there is always one.
-pub fn resolve_session_label(sessions_base: &Path, session_id: &str) -> String {
+///
+/// `agents` are the host's coding agents: a session whose type one of them declares runs no
+/// workflow, so it has no goal to be named by.
+pub fn resolve_session_label(
+    agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
+    sessions_base: &Path,
+    session_id: &str,
+) -> String {
     let session_dir = tddy_core::unified_session_dir_path(sessions_base, session_id);
 
     let repo_path = tddy_core::read_session_metadata(&session_dir)
@@ -36,7 +43,7 @@ pub fn resolve_session_label(sessions_base: &Path, session_id: &str) -> String {
     }
 
     let workflow_goal =
-        crate::session_list_enrichment::session_list_status_from_session_dir(&session_dir)
+        crate::session_list_enrichment::session_list_status_from_session_dir(agents, &session_dir)
             .map(|status| status.workflow_goal)
             .unwrap_or_else(|e| {
                 log::debug!(
@@ -77,7 +84,9 @@ impl SessionNotificationPublishing {
         session_id: &str,
         build: impl FnOnce(&str, &str) -> Option<SessionNotification>,
     ) {
-        let label = resolve_session_label(&self.sessions_base, session_id);
+        // A presenter observer follows a `tddy-coder` session, which runs a workflow: no coding
+        // agent's session type is asked about, so none is passed.
+        let label = resolve_session_label(None, &self.sessions_base, session_id);
         if let Some(notification) = build(&label, &self.os_user) {
             self.bus.publish(notification).await;
         }

@@ -23,11 +23,19 @@ pub fn host_coding_agents(tddy_data_dir: &Path) -> anyhow::Result<Arc<HostCoding
     Ok(Arc::new(agents))
 }
 
-/// The coding agents of a host that installed none: an empty registry, so every agent session is
-/// refused for naming no spec rather than launched some other way (`#agent-tools 19/19`).
+/// The coding agents of a host that installed none: a registry of no agents, so every agent session
+/// is refused for naming no spec rather than launched some other way (`#agent-tools 19/19`).
+///
+/// It still holds the built-in tool files that declare a session type without being a coding
+/// agent ([`tddy_coding_agent_specs::builtin_session_tools`] — `tddy-coder.yaml`'s `tool`): those
+/// sessions never depended on an agent being installed.
 pub fn no_coding_agents() -> Arc<HostCodingAgents> {
+    let session_tools = tddy_actions::tool::ToolRegistry::from_embedded(
+        &tddy_coding_agent_specs::builtin_session_tools(),
+    )
+    .expect("the built-in session tool files load");
     Arc::new(HostCodingAgents::new(
-        tddy_actions::tool::ToolRegistry::default(),
+        session_tools,
         daemon_tool_host(Arc::new(ProcessToolHost)),
     ))
 }

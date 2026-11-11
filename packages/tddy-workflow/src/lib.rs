@@ -12,6 +12,7 @@ pub mod hints;
 pub mod ids;
 pub mod progress;
 pub mod questions;
+pub mod session_type;
 
 pub use artifact_paths::{
     canonical_artifact_write_path, canonical_attachment_write_path, list_session_attachments,
@@ -25,3 +26,4 @@ pub use hints::{GoalHints, PermissionHint};
 pub use ids::{GoalId, WorkflowState};
 pub use progress::ProgressEvent;
 pub use questions::{ClarificationQuestion, QuestionOption};
+pub use session_type::{is_no_agent_session_type, NO_AGENT_SESSION_TYPE};

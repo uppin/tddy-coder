@@ -20,6 +20,7 @@ function aCliForm(overrides: Partial<CreateSessionFormValues> = {}): CreateSessi
     selectedBranchToWorkOn: "feature/y",
     daemonInstanceId: "host-1",
     sessionType: "acme-cli",
+    sessionLaunch: "agent_cli",
     cliFeatures: {
       bindsModel: true,
       bindsPermissionMode: true,

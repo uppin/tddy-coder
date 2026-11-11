@@ -20,20 +20,22 @@ import {
   type CreateSessionFormValues,
   type SessionType,
 } from "../../src/createSessionRequest";
+import type { SessionLaunch } from "../../src/cliHarnessOptions";
 import toolFields from "../support/fixtures/start-session-tool-fields.json";
 
-const SESSION_TYPES: SessionType[] = [
-  "tool",
-  "claude-cli",
-  "cursor-cli",
-  "opencode-cli",
-  "muse-cli",
-  "warp-cli",
+/** Every session type a daemon declares by default, with the launch kind it declares it with. */
+const SESSION_TYPES: [SessionType, SessionLaunch][] = [
+  ["tool", "tddy_coder"],
+  ["claude-cli", "agent_cli"],
+  ["cursor-cli", "agent_cli"],
+  ["opencode-cli", "agent_cli"],
+  ["muse-cli", "agent_cli"],
+  ["warp-cli", "agent_cli"],
 ];
 
 /** A form with every value the pane can hold set to something non-empty. */
 function aFormWithEveryOptionSet(
-  sessionType: SessionType,
+  [sessionType, sessionLaunch]: [SessionType, SessionLaunch],
   values: Partial<CreateSessionFormValues>,
 ): CreateSessionFormValues {
   return {
@@ -46,6 +48,7 @@ function aFormWithEveryOptionSet(
     selectedBranchToWorkOn: "feature/y",
     daemonInstanceId: "host-a",
     sessionType,
+    sessionLaunch,
     toolPath: "/usr/bin/tddy-coder",
     selectedAgentId: "claude",
     recipe: "pr-stack",

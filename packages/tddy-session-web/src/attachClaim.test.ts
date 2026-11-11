@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { registerSessionTypeOptions } from "tddy-session-create-web";
 import {
   attachActionForSnapshot,
   claimAfterFeedEnd,
@@ -20,6 +21,13 @@ import {
  * again on the next 2s list poll — a `ConnectSession` per poll, forever, for as long as the session
  * stays alive. That is the loop observed against session 01a051f0 on host `udoo`.
  */
+
+// The session types a daemon declared, as the drawer registers them from its `ListAgents` answer:
+// `tool` is tddy-coder's (`tddy_coder` launch), `claude-cli` a coding agent's.
+registerSessionTypeOptions([
+  { id: "tool", label: "Tool", launch: "tddy_coder" },
+  { id: "claude-cli", label: "Claude Code", launch: "agent_cli" },
+]);
 
 const PR_STACK_SESSION = "01a051f0-482d-7841-927d-a8983d2af9a8";
 const TERMINAL_SESSION = "019fc148-ae2c-7363-98a1-269c46f432ce";
@@ -103,6 +111,19 @@ describe("sessionPaneIsWorkflowView", () => {
 
     // Then
     expect(workflowOwned).toBe(false);
+  });
+});
+
+describe("sessionPaneIsWorkflowView for a legacy record", () => {
+  it("reports a recorded session naming no session type, carrying a recipe, as workflow-owned", () => {
+    // Given a record tddy-coder wrote before it recorded its session type
+    const session = aSession({ sessionType: "", recipe: "grill-me" });
+
+    // When the pane owner is resolved
+    const workflowOwned = sessionPaneIsWorkflowView(session);
+
+    // Then
+    expect(workflowOwned).toBe(true);
   });
 });
 

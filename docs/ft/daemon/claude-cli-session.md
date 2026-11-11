@@ -379,12 +379,12 @@ it on Anthropic. A session with no record resumes on the vendor.
 
 ### Session type discriminant
 
-`StartSessionRequest` gains a `session_type` string field (`"tool"` default, `"claude-cli"` new). The daemon branches on this field in `connection_service.rs`. Existing sessions are unaffected (absent or empty `session_type` = `"tool"`).
+`StartSessionRequest.session_type` names the session to start: `"claude-cli"` is the session type `claude.yaml` declares (`extensions.session`, `launch: agent_cli`), `"tool"` the one `tddy-coder.yaml` declares. It is required — an empty or undeclared value is `INVALID_ARGUMENT` — and the daemon dispatches on the declared launch kind, never on the spelling ([Session types are declared](session-agent-roster.md#session-types-are-declared)). A legacy `.session.yaml` that records no `session_type` resumes as a tool session when it records a `tool`.
 
 ### `SessionMetadata` additions
 
 ```yaml
-session_type: claude-cli    # optional; absent/empty = "tool"
+session_type: claude-cli    # the session type the session was started as; absent only in legacy records
 model: opus                 # optional; stored for resume
 sandbox: true               # optional; darwin Seatbelt jail (macOS only)
 tmux_session: tddy-<id>     # optional; the tmux session a tmux-run agent runs in (pid is its pane's)
@@ -826,7 +826,7 @@ socket and URL are its hooks').
 ```proto
 message StartSessionRequest {
   // ... existing fields ...
-  string session_type = 7;  // "tool" (default) or "claude-cli"
+  string session_type = 7;  // required: a declared session type ("claude-cli", "tool", …) or "workspace"
   string model        = 8;  // model id for claude-cli sessions
   bool   sandbox      = 15; // when true with session_type "claude-cli": darwin Seatbelt spawn (macOS only)
   bool   run_in_tmux  = 47; // claude-cli: run the agent in a tmux session on the host (see § tmux mode)

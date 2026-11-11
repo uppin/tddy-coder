@@ -183,17 +183,19 @@ impl LaunchSessions {
         self.tell_the_reach(&req.session_id, &metadata, session_dir, arrived_over)
             .await?;
 
-        // The *terminal* room, which is a different room with different participants. A CLI
-        // session (an agent's `<id>-cli`) or workspace session has none: its PTY is served
-        // over gRPC and bridged into the lobby, never into a room of its own, so these answer with
-        // empty coordinates — as they did before the session room above existed.
-        if self
-            .coding_agents
-            .agents()
-            .for_session_type(session_type)
-            .is_some()
-            || session_type == "workspace"
-        {
+        // The *terminal* room, which is a different room with different participants. Only a
+        // `tddy_coder` launch has one. A CLI agent's session or a no-agent session has none: its
+        // PTY is served over gRPC and bridged into the lobby, never into a room of its own, so
+        // these answer with empty coordinates — as they did before the session room above existed.
+        let has_terminal_room = matches!(
+            crate::harness_from_spec::recorded_session_launch(
+                &self.coding_agents,
+                Some(session_type),
+                metadata.tool.as_deref(),
+            ),
+            Ok(crate::harness_from_spec::SessionLaunch::TddyCoder)
+        );
+        if !has_terminal_room {
             return Ok(Response::new(ConnectSessionResponse {
                 livekit_room: String::new(),
                 livekit_url: String::new(),
@@ -433,9 +435,11 @@ fn session_entry_from_listing(
     };
     let mut conn_entry: ConnSessionEntry = crate::family_proto_bridge::wire_same(&entry)
         .map_err(|s| anyhow::anyhow!(s.to_string()))?;
-    if let Err(e) =
-        session_list_enrichment::apply_session_list_status_to_proto(&session_dir, &mut conn_entry)
-    {
+    if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
+        coding_agents.map(|agents| agents.agents()),
+        &session_dir,
+        &mut conn_entry,
+    ) {
         log::warn!(
             target: "tddy_daemon::connection_service",
             "ListSessions: enrichment failed for {}: {}",

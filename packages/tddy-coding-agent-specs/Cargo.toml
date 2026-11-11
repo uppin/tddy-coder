@@ -14,6 +14,9 @@ serde_json = "1"
 serde_yaml = "0.9"
 thiserror = "1"
 tddy-actions = { path = "../tddy-actions" }
+# `NO_AGENT_SESSION_TYPE`: the one session type no tool file declares, re-exported beside the
+# declared ones.
+tddy-workflow = { path = "../tddy-workflow" }
 # `HookCommandParams` and `build_claude_hooks_settings`: the hook protocol stays in Rust, and the
 # `claude-settings-local` adapter names it.
 tddy-agent-backend = { path = "../tddy-agent-backend" }

@@ -76,8 +76,11 @@ impl LocalExecTools {
                 ))
             }
         };
-        let sandboxed_workspace =
-            meta.session_type.as_deref() == Some("workspace") && meta.sandbox == Some(true);
+        let sandboxed_workspace = meta
+            .session_type
+            .as_deref()
+            .is_some_and(tddy_coding_agent_specs::is_no_agent_session_type)
+            && meta.sandbox == Some(true);
         if !sandboxed_workspace {
             return ExecToolRoute::HostWorktree;
         }
