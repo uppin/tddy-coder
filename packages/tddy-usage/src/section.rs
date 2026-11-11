@@ -176,6 +176,21 @@ pub fn validate_usage_section(section: &UsageSection) -> Result<(), String> {
     for source in &section.sources {
         let UsageSource::Jsonl(jsonl) = source;
         check_variables("main.path", &jsonl.main.path, MAIN_VARIABLES)?;
+        if let Some(m) = &jsonl.main.match_ {
+            check_variables("main.match.equals", &m.equals, MAIN_VARIABLES)?;
+        }
+        if jsonl.identity.is_none() {
+            for (position, used) in [
+                ("children_by", jsonl.children_by.is_some()),
+                ("main.match", jsonl.main.match_.is_some()),
+            ] {
+                if used {
+                    return Err(format!(
+                        "{position} needs an identity: say which fields hold a file's id and parent"
+                    ));
+                }
+            }
+        }
         if let Some(children) = &jsonl.children {
             check_variables("children.path", &children.path, FILE_VARIABLES)?;
             check_variables("children.id", &children.id, FILE_VARIABLES)?;

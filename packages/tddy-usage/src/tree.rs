@@ -1,15 +1,19 @@
 //! The conversation tree: children located from each conversation's files, to any depth.
 
 use std::collections::HashSet;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use crate::jsonl::fold_files;
 use crate::template::TemplateError;
 use crate::token_accounting::ConversationRecord;
-use crate::{ChildrenSpec, FieldPath, JsonlSource, PathTemplate, UsageContext};
+use crate::{ChildrenSpec, FieldPath, IdentitySpec, JsonlSource, PathTemplate, UsageContext};
 
 /// How many levels of children below the main conversation are followed.
 const MAX_DEPTH: usize = 16;
+
+/// How many leading lines of a file are searched for its identity and match fields.
+const HEADER_LINES: usize = 50;
 
 /// The variables a children template binds: the parent or child file's directory and stem.
 pub(crate) const FILE_VARIABLES: &[&str] = &["dir", "stem"];
@@ -25,6 +29,9 @@ pub(crate) fn conversation_rows(
     source: &JsonlSource,
     ctx: &UsageContext,
 ) -> Option<Vec<ConversationRecord>> {
+    if let Some(identity) = &source.identity {
+        return identified_rows(source, identity, ctx);
+    }
     let id = ctx.conversation_id.clone()?;
     let files = main_files(source, ctx);
     let main = row(&ctx.agent_label, &id, None, &files, source, ctx);
@@ -52,6 +59,15 @@ pub(crate) fn conversation_rows(
 /// The files `main.path` matches, in path order. A template that cannot be rendered — a variable
 /// with no value for this session — matches none.
 fn main_files(source: &JsonlSource, ctx: &UsageContext) -> Vec<PathBuf> {
+    match render_main(&source.main.path, ctx, true) {
+        Some(pattern) => glob_files(&pattern),
+        None => Vec::new(),
+    }
+}
+
+/// `template` over the main conversation's variables; the values are glob-escaped when the result
+/// is a glob pattern. `None` when a variable has no value for this session.
+fn render_main(template: &PathTemplate, ctx: &UsageContext, as_glob: bool) -> Option<String> {
     let lookup = |name: &str| -> Option<String> {
         let value = match name {
             "agent_home" => ctx.agent_home.as_ref().map(|p| p.display().to_string()),
@@ -60,19 +76,128 @@ fn main_files(source: &JsonlSource, ctx: &UsageContext) -> Vec<PathBuf> {
             "worktree" => ctx.worktree.as_ref().map(|p| p.display().to_string()),
             _ => None,
         };
-        value.map(|v| glob::Pattern::escape(&v))
+        value.map(|v| {
+            if as_glob {
+                glob::Pattern::escape(&v)
+            } else {
+                v
+            }
+        })
     };
-    match source.main.path.render(MAIN_VARIABLES, &lookup) {
-        Ok(pattern) => glob_files(&pattern),
-        Err(TemplateError::Unset { .. }) => Vec::new(),
+    match template.render(MAIN_VARIABLES, &lookup) {
+        Ok(text) => Some(text),
+        Err(TemplateError::Unset { .. }) => None,
         Err(e) => {
             log::warn!("usage: {e}");
-            Vec::new()
+            None
         }
     }
 }
 
-/// The child conversations of `parent_file`, each with its own descendants (in sibling order).
+/// A conversation file's identity, read from its header.
+struct Identified {
+    file: PathBuf,
+    id: String,
+    parent: Option<String>,
+}
+
+/// The rows of a source whose conversations name themselves: the main conversation is the newest
+/// root file matching `main.match`, its children every file declaring a conversation as its parent,
+/// to any depth. `None` when no file qualifies as the main conversation.
+fn identified_rows(
+    source: &JsonlSource,
+    identity: &IdentitySpec,
+    ctx: &UsageContext,
+) -> Option<Vec<ConversationRecord>> {
+    let files: Vec<Identified> = main_files(source, ctx)
+        .into_iter()
+        .filter_map(|file| {
+            let id = header_string(&file, &identity.id)?;
+            let parent = identity
+                .parent
+                .as_ref()
+                .and_then(|path| header_string(&file, path));
+            Some(Identified { file, id, parent })
+        })
+        .collect();
+    let wanted = match &source.main.match_ {
+        Some(m) => Some((&m.field, render_main(&m.equals, ctx, false)?)),
+        None => None,
+    };
+    let main = files
+        .iter()
+        .filter(|f| f.parent.is_none())
+        .filter(|f| {
+            wanted.as_ref().is_none_or(|(field, equals)| {
+                header_string(&f.file, field).as_ref() == Some(equals)
+            })
+        })
+        .max_by_key(|f| {
+            let modified = std::fs::metadata(&f.file).and_then(|m| m.modified()).ok();
+            (modified, f.file.clone())
+        })?;
+
+    let mut rows = vec![row(
+        &ctx.agent_label,
+        &main.id,
+        None,
+        std::slice::from_ref(&main.file),
+        source,
+        ctx,
+    )];
+    let mut visited: HashSet<&str> = HashSet::from([main.id.as_str()]);
+    if source.children_by.is_some() {
+        spawned_rows(&main.id, &files, 1, &mut visited, source, ctx, &mut rows);
+    }
+    Some(rows)
+}
+
+/// The rows of every file declaring `parent_id` as its parent, depth-first, siblings by id.
+fn spawned_rows<'a>(
+    parent_id: &str,
+    files: &'a [Identified],
+    depth: usize,
+    visited: &mut HashSet<&'a str>,
+    source: &JsonlSource,
+    ctx: &UsageContext,
+    rows: &mut Vec<ConversationRecord>,
+) {
+    if depth > MAX_DEPTH {
+        return;
+    }
+    let mut children: Vec<&'a Identified> = files
+        .iter()
+        .filter(|f| f.parent.as_deref() == Some(parent_id))
+        .collect();
+    children.sort_by(|a, b| a.id.cmp(&b.id));
+    for child in children {
+        if !visited.insert(child.id.as_str()) {
+            continue;
+        }
+        rows.push(row(
+            &child.id,
+            &child.id,
+            Some(parent_id),
+            std::slice::from_ref(&child.file),
+            source,
+            ctx,
+        ));
+        spawned_rows(&child.id, files, depth + 1, visited, source, ctx, rows);
+    }
+}
+
+/// The string at `field` on the first of the file's leading lines that holds it.
+fn header_string(file: &Path, field: &FieldPath) -> Option<String> {
+    let reader = std::io::BufReader::new(std::fs::File::open(file).ok()?);
+    reader
+        .lines()
+        .take(HEADER_LINES)
+        .map_while(Result::ok)
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(&line).ok())
+        .find_map(|value| field.lookup(&value)?.as_str().map(str::to_string))
+}
+
+/// The child conversations of `parent_file`, each with its own descendants, in sibling order.
 fn children_of(
     parent_file: &Path,
     children: &ChildrenSpec,
