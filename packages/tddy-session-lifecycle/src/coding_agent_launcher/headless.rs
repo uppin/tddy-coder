@@ -50,12 +50,7 @@ fn usage_tap_for(
 ) -> Option<UsageTapSpec> {
     let events = spec.headless()?.usage_events.clone();
     let session_dir = launch.session_dir.as_ref()?;
-    (!events.is_empty()).then(|| UsageTapSpec {
-        path: session_dir
-            .join("usage")
-            .join(format!("{conversation}.jsonl")),
-        events,
-    })
+    UsageTapSpec::for_conversation(session_dir, conversation, events)
 }
 
 impl DaemonCodingAgentLauncher {

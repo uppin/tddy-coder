@@ -113,8 +113,9 @@ impl SubagentSession for CodingAgentSession {
             .unwrap_or_default()
     }
 
-    /// TODO(#893): context occupancy is the *last* turn's input, which needs `aggregate: last`
-    /// (`#usage-binding 4/5`); the binding sums, so it cannot answer it yet.
+    /// TODO(usage-binding): context occupancy is the last record's *input* (its input and cache
+    /// counters together), and a binding aggregates whole counters only — `aggregate: last` was found
+    /// not to answer it (`#usage-binding 4/5`); it needs a per-record input read. Zero until then.
     fn context_tokens(&self) -> u64 {
         0
     }

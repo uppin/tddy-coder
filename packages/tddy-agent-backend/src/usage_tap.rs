@@ -17,6 +17,27 @@ pub struct UsageTapSpec {
     pub events: Vec<FieldEq>,
 }
 
+/// The directory under a session's directory that holds its conversations' tapped usage files.
+pub const USAGE_TAP_DIR: &str = "usage";
+
+impl UsageTapSpec {
+    /// The tap of `conversation_id` in the session at `session_dir`:
+    /// `<session_dir>/usage/<conversation_id>.jsonl`, keeping the events satisfying `events`. `None`
+    /// when `events` is empty — a spec declaring no usage events taps nothing.
+    pub fn for_conversation(
+        session_dir: &std::path::Path,
+        conversation_id: &str,
+        events: Vec<FieldEq>,
+    ) -> Option<Self> {
+        (!events.is_empty()).then(|| UsageTapSpec {
+            path: session_dir
+                .join(USAGE_TAP_DIR)
+                .join(format!("{conversation_id}.jsonl")),
+            events,
+        })
+    }
+}
+
 /// An open tap. A write that fails is logged once and disables the tap for the rest of the turn; it
 /// never fails the turn.
 #[derive(Debug)]

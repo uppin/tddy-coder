@@ -24,9 +24,9 @@ pub use context_file::{
     USAGE_CONTEXT_FILE,
 };
 pub use field_path::FieldPath;
-pub use gather::{account, gather_session_usage, UsageContext};
+pub use gather::{account, gather_session_usage, merge_sources, UsageContext};
 pub use registry::{
-    merge_sources, register_conversation, registered_conversations, RegisteredConversation,
+    register_conversation, registered_conversations, RegisteredConversation,
     CONVERSATION_REGISTRY_FILE,
 };
 pub use section::{

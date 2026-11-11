@@ -187,14 +187,13 @@ fn acp_usage_tap(
         .acp()?
         .usage_events
         .clone();
+    // TODO(usage-binding): a `shared`-placement ACP conversation launches with no
+    // `conversation_id` (that field names the clone worktree its exec calls run in), so it is
+    // registered for usage but never tapped. Recommended: a separate tap-id field on the launch.
+    // See docs/dev/todo/2026-11-11-shared-acp-conversation-usage-untapped.md.
     let conversation = launch.conversation_id.as_deref()?;
     let session_dir = launch.session_dir.as_ref()?;
-    (!events.is_empty()).then(|| tddy_core::usage_tap::UsageTapSpec {
-        path: session_dir
-            .join("usage")
-            .join(format!("{conversation}.jsonl")),
-        events,
-    })
+    tddy_core::usage_tap::UsageTapSpec::for_conversation(session_dir, conversation, events)
 }
 
 /// A headless conversation: the launcher's CLI command, run once per turn on the def's model.
@@ -414,7 +413,10 @@ impl AgentRoster {
 ///
 /// `agent_home` is the agent's HOME — its OS user's home, the rule the session's own usage context
 /// uses.
-/// TODO(#893): a conversation's `context_tokens` stays 0 until `aggregate: last` exists.
+/// TODO(usage-binding): a conversation's `context_tokens` stays 0. Occupancy is the last record's
+/// *input* (input + cache counters of one turn), and a binding only aggregates whole counters — an
+/// `aggregate: last` would not answer it either (`#usage-binding 4/5`); it needs a per-record input
+/// read the binding has no field for.
 fn register_usage_conversation(
     coding_agents: &tddy_coding_agent_specs::CodingAgentRegistry,
     session_dir: &Path,
