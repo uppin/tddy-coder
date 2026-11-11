@@ -174,6 +174,10 @@ class XtermEngine implements TerminalEngine {
   }
 
   proposeDimensions(): TerminalEngineSize | null {
+    // A terminal under a `display: none` ancestor has no layout box, yet FitAddon measures the
+    // parent's computed `height`/`width`, which then read back as the specified `100%` (parsed as
+    // 100px) and propose a tiny grid. Hiding a terminal must leave its grid as it was last shown.
+    if (!this.term?.element?.getClientRects().length) return null;
     const proposed = this.fitAddon?.proposeDimensions();
     if (!proposed || !Number.isFinite(proposed.cols) || !Number.isFinite(proposed.rows)) return null;
     return { cols: proposed.cols, rows: proposed.rows };

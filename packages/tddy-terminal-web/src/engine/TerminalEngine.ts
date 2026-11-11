@@ -63,7 +63,7 @@ export interface TerminalEngine {
   readonly cols: number;
   readonly rows: number;
   resize(cols: number, rows: number): void;
-  /** The grid that fits the container at the current font size, or null when it cannot measure yet. */
+  /** The grid that fits the container at the current font size, or null when it cannot measure (not yet laid out, or hidden). */
   proposeDimensions(): TerminalEngineSize | null;
   setFontSize(px: number): void;
   fontSize(): number;
