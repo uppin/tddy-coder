@@ -28,6 +28,7 @@ mod operator_notifications;
 pub(crate) mod ports;
 mod question_answers;
 mod rpc;
+mod usage_pollers;
 
 pub use question_answers::AnswerWaitPorts;
 
@@ -55,6 +56,8 @@ pub struct ActivityServiceImpl {
     /// (`#agent-tools 12/12`). Empty until [`Self::with_agents`]: a host with no coding agents
     /// refuses every hook report rather than guessing which sessions may make one.
     agents: Arc<CodingAgentRegistry>,
+    /// The per-session pollers `StreamSessionUsage` shares between a session's subscribers.
+    usage_pollers: usage_pollers::UsagePollers,
 }
 
 impl ActivityServiceImpl {
@@ -66,6 +69,7 @@ impl ActivityServiceImpl {
             ports,
             answers: AnswerWaitPorts::default(),
             agents: Arc::new(CodingAgentRegistry::empty()),
+            usage_pollers: usage_pollers::UsagePollers::default(),
         }
     }
 

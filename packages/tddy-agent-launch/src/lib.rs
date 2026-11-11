@@ -77,6 +77,7 @@ pub mod svc_start_session_core;
 pub mod tool_session_route;
 pub mod tool_session_spawn;
 pub mod tool_spawn_plan;
+pub mod usage_context;
 pub mod workspace_branch_start;
 pub mod worktree_source;
 

@@ -26,7 +26,7 @@ cargo test -p tddy-core      # the facade shape and path guards
 | [`tddy-toolcall`](../tddy-toolcall/README.md) | `toolcall` |
 | [`tddy-agent-backend`](../tddy-agent-backend/README.md) | `backend`, `stream`, `token_accounting`, `claude_argv`, `claude_hooks`, `cursor_hooks`, `spawn_env` |
 | [`tddy-workflow-engine`](../tddy-workflow-engine/README.md) | `workflow` |
-| [`tddy-presenter`](../tddy-presenter/README.md) | `presenter`, `post_workflow`, `usage_watcher` |
+| [`tddy-presenter`](../tddy-presenter/README.md) | `presenter`, `post_workflow` |
 | [`tddy-git`](../tddy-git/README.md) | `ssh_exec` |
 
 The per-session SQLite catalog lives in [`tddy-session-catalog`](../tddy-session-catalog/README.md)

@@ -18,8 +18,8 @@ use tddy_service::proto::activity::{
     IsSessionTerminalServedRequest, IsSessionTerminalServedResponse, ReportAgentActivityRequest,
     ReportAgentActivityResponse, ReportOperatorNotificationRequest,
     ReportOperatorNotificationResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
-    SessionNotificationEvent, StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
-    StreamSessionNotificationsRequest,
+    SessionNotificationEvent, SessionUsageSnapshot, StreamAcpReplayRequest, StreamMode,
+    StreamSessionActivityRequest, StreamSessionNotificationsRequest, StreamSessionUsageRequest,
 };
 use tddy_worktree_service::stream::MpscResultStream;
 
@@ -107,6 +107,25 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         tokio::spawn(relay_agent_activity(broadcast_rx, tx));
 
         Ok(relayed(rx))
+    }
+
+    type StreamSessionUsageStream = MpscResultStream<SessionUsageSnapshot>;
+
+    /// Stream a session's per-conversation token usage: the snapshot its agent's spec binding
+    /// yields against the session's recorded usage context, then each changed snapshot, from one
+    /// poller shared by every subscriber of the session.
+    async fn stream_session_usage(
+        &self,
+        request: Request<StreamSessionUsageRequest>,
+    ) -> Result<Response<Self::StreamSessionUsageStream>, Status> {
+        let req = request.into_inner();
+        // Authorised as `stream_session_activity` is. A request addressed at a peer never reaches
+        // here: the daemon's `PeerRoutedActivity` refuses it, as it does for the activity stream.
+        let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
+        Ok(Response::new(
+            self.usage_pollers
+                .stream(&session_dir, &self.ports.usage_bindings),
+        ))
     }
 
     type StreamSessionNotificationsStream = MpscResultStream<SessionNotificationEvent>;

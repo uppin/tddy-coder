@@ -63,6 +63,19 @@ impl HostCodingAgents {
         Arc::clone(&self.agents)
     }
 
+    /// Each agent's `usage:` binding by spec id, read from this host's registry — what the
+    /// daemon's usage stream evaluates a session with. `None` for a spec that declares none.
+    pub fn usage_bindings(
+        &self,
+    ) -> impl Fn(&str) -> Option<tddy_usage::UsageSection> + Send + Sync + 'static {
+        let agents = self.agents_shared();
+        move |spec_id: &str| {
+            agents
+                .get(spec_id)
+                .and_then(|spec| spec.agent.usage.clone())
+        }
+    }
+
     pub fn registry(&self) -> &ToolRegistry {
         &self.registry
     }

@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-10-25 | 963 | first record of the *length*; 901 at the PR's base, **+62** in PR #763 (`#term-snapshot` 4/4): `VIRTUAL_TUI_REPAINT_REQUEST` and `take_repaint_request`, `apply_leading_control_sequences` (repaint requests and resizes at the front of the input buffer), and `resend_mouse_capture` (re-enabling mouse tracking after every full repaint, which now reaches the client led by RIS). Split deferred with the developer's consent (code issues may be deferred in `#term-snapshot`). The file already carries a complexity record, [`complexity-virtual-tui-process-virtual-tui-input-chunk.md`](complexity-virtual-tui-process-virtual-tui-input-chunk.md) |
+| 2026-11-11 | 961 | 963 → 961 in #891 (`#usage-binding 2/5`): the ignored `TokenUsageUpdated` arm and its comment deleted with the event; not otherwise touched |
 
 ## What the tool found
 

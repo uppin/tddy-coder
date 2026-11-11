@@ -33,6 +33,10 @@ import {
   sessionsUsageRowAgent,
   sessionsUsageRowModel,
   sessionsUsageRowInput,
+  sessionsUsageRowCacheRead,
+  sessionsUsageRowCacheWrite,
+  sessionsUsageRowReasoning,
+  sessionsUsageRowCost,
   sessionsUsageRowOutput,
   sessionsUsageRowTotal,
   sessionsUsageRowTurns,
@@ -332,6 +336,26 @@ export const sessionsDrawerPage = {
   usageRowInput: (id: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsUsageRowInput(id), { timeout: 5000, ...options }),
 
+  /** The cache-read-tokens cell of a conversation row. */
+  usageRowCacheRead: (id: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsUsageRowCacheRead(id), { timeout: 5000, ...options }),
+
+  /** The cache-write-tokens cell of a conversation row. */
+  usageRowCacheWrite: (id: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsUsageRowCacheWrite(id), { timeout: 5000, ...options }),
+
+  /** The reasoning-tokens cell of a conversation row. */
+  usageRowReasoning: (id: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsUsageRowReasoning(id), { timeout: 5000, ...options }),
+
+  /** The cost cell of a conversation row — blank when the source reported no cost. */
+  usageRowCost: (id: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsUsageRowCost(id), { timeout: 5000, ...options }),
+
+  /** Every conversation row, in display order. */
+  usageRows: (options?: Parameters<typeof cy.get>[1]) =>
+    cy.get('[data-testid^="sessions-usage-row-"][data-depth]', { timeout: 5000, ...options }),
+
   /** The output-tokens cell of a conversation row. */
   usageRowOutput: (id: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsUsageRowOutput(id), { timeout: 5000, ...options }),
@@ -351,6 +375,22 @@ export const sessionsDrawerPage = {
   /** The output-tokens cell of the TOTAL row. */
   usageTotalOutput: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsUsageTotalOutput, { timeout: 5000, ...options }),
+
+  /** The cache-read cell of the TOTAL row. */
+  usageTotalCacheRead: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsUsageTotalCacheRead, { timeout: 5000, ...options }),
+
+  /** The cache-write cell of the TOTAL row. */
+  usageTotalCacheWrite: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsUsageTotalCacheWrite, { timeout: 5000, ...options }),
+
+  /** The reasoning cell of the TOTAL row. */
+  usageTotalReasoning: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsUsageTotalReasoning, { timeout: 5000, ...options }),
+
+  /** The cost cell of the TOTAL row. */
+  usageTotalCost: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsUsageTotalCost, { timeout: 5000, ...options }),
 
   /** The total-tokens cell of the TOTAL row. */
   usageTotalTotal: (options?: Parameters<typeof cy.get>[1]) =>

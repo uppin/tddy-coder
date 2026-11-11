@@ -15,6 +15,10 @@ use tddy_rpc::Status;
 /// so the distinction can only be drawn where the closure is built.
 pub type OsUserResolver = Arc<dyn Fn(&str) -> Result<String, Status> + Send + Sync>;
 
+/// The `usage:` binding of a coding agent spec, by spec id — the daemon's registry, handed over as
+/// data so this crate never learns one agent from another. `None` for a spec that declares none.
+pub type UsageBindings = Arc<dyn Fn(&str) -> Option<tddy_usage::UsageSection> + Send + Sync>;
+
 /// A session's display label, as every surface on this host names it.
 ///
 /// A port rather than a rule this crate applies, because the label falls back to the workflow goal
@@ -149,4 +153,6 @@ pub struct ActivityPorts {
     /// What this host is called in the common room. An agent notification links to its session
     /// as `#/sessions/<id>?host=<this>`, the route the web opens a session on another host by.
     pub daemon_instance_id: String,
+    /// The spec bindings `StreamSessionUsage` evaluates each session with.
+    pub usage_bindings: UsageBindings,
 }

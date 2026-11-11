@@ -2,13 +2,13 @@
 
 ## Overview
 
-The presenter (MVP): application state and workflow orchestration behind every view, the
-post-workflow elicitation that follows a run, and the usage watcher that reports token spend. The
-top of the carved stack; it depends on every crate beneath it (`tddy-workflow`, `tddy-log`,
+The presenter (MVP): application state and workflow orchestration behind every view, and the
+post-workflow elicitation that follows a run. Session token usage is not here: the daemon streams
+it (`ActivityService.StreamSessionUsage`, `tddy-session-activity`). The top of the carved stack; it depends on every crate beneath it (`tddy-workflow`, `tddy-log`,
 `tddy-agent-skills`, `tddy-session-store`, `tddy-changeset`, `tddy-session-worktree`,
 `tddy-toolcall`, `tddy-agent-backend`, `tddy-workflow-engine`).
 
-`tddy-core` re-exports this crate whole (`pub use tddy_presenter::*;`), so every `tddy_core::{presenter, post_workflow, usage_watcher}::…` path consumers name resolves unchanged. New code should name `tddy_presenter` directly.
+`tddy-core` re-exports this crate whole (`pub use tddy_presenter::*;`), so every `tddy_core::{presenter, post_workflow}::…` path consumers name resolves unchanged. New code should name `tddy_presenter` directly.
 The `cfg(test)` `test_support` module lives here, beside the one presenter unit test that uses it.
 
 ## Presenter (`presenter`)
@@ -43,14 +43,6 @@ The `cfg(test)` `test_support` module lives here, beside the one presenter unit 
 Pure policy helpers for the GitHub-PR and session-worktree-removal questions asked after a run and
 before `WorkflowComplete`: whether a PR phase is terminal for a re-prompt, and the questions and
 answers that `workflow_runner` persists through `changeset.yaml`. No I/O.
-
-## Usage watcher (`usage_watcher`)
-
-Real-time per-session token usage. `spawn_usage_watcher` re-reads the on-disk token sources
-(`backend::gather_session_usage`) on a fixed interval and broadcasts each changed snapshot as
-`PresenterEvent::TokenUsageUpdated`; `SessionUsageEmitter` owns the dedup contract (a full snapshot
-first, then only on change). `spawn_session_usage_watcher` is the entry point `tddy-coder --daemon`
-calls. See [session-token-accounting.md](../../../docs/ft/coder/session-token-accounting.md).
 
 ## Data flow
 

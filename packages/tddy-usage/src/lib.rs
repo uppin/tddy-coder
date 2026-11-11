@@ -9,6 +9,7 @@
 //!
 //! Feature: docs/ft/coder/session-token-accounting.md
 
+mod context_file;
 mod field_path;
 mod gather;
 mod jsonl;
@@ -17,6 +18,10 @@ mod template;
 pub mod token_accounting;
 mod tree;
 
+pub use context_file::{
+    gather_session_usage_for, read_usage_context, write_usage_context, UsageContextFile,
+    USAGE_CONTEXT_FILE,
+};
 pub use field_path::FieldPath;
 pub use gather::{account, gather_session_usage, UsageContext};
 pub use section::{

@@ -14,6 +14,7 @@
 | Run | Lines | Note |
 |---|---|---|
 | 2026-11-06 | 41 → 82 | first detection — #823: the generic jail gained claude's and cursor's slots — the tool-server registration and its jail home, the tool lists and permission prompt (`JailToolset`), the managed prompt as a flag or a rules file, the passthrough args. Not split: restructuring deferred to the sweep node (n20) |
+| 2026-11-11 | 82 → 84 | **worse by 2** in #891 (`#usage-binding 2/5`): `usage` is destructured from `CliJail` and passed on to `JailedSession`; br |
 
 ## What would close it
 

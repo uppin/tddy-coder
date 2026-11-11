@@ -1,5 +1,5 @@
 //! The presenter: application state and workflow orchestration behind every view (MVP), the
-//! post-workflow elicitation that follows a run, and the usage watcher that reports token spend.
+//! post-workflow elicitation that follows a run.
 //!
 //! Extracted from `tddy-core`, which re-exports every module and root item at its old path.
 
@@ -7,15 +7,12 @@ pub mod post_workflow;
 pub mod presenter;
 #[cfg(test)]
 pub(crate) mod test_support;
-pub mod usage_watcher;
 
 // Every layer the presenter orchestrates, named at the `crate::` paths these modules used inside
 // `tddy-core`.
 #[cfg(test)]
 use tddy_agent_backend::QuestionOption;
-use tddy_agent_backend::{
-    backend, token_accounting, ClarificationQuestion, ProgressEvent, SharedBackend,
-};
+use tddy_agent_backend::{backend, ClarificationQuestion, ProgressEvent, SharedBackend};
 use tddy_agent_skills::feature_start_slash;
 use tddy_changeset::{agent_activity, changeset, session_metadata};
 use tddy_changeset::{get_session_for_tag, read_changeset, write_changeset_atomic, GithubPrStatus};

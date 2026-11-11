@@ -22,6 +22,9 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # The privileged spawn backend. `tddy-supervisor` depends on neither `tddy-core` nor `tddy-daemon`,
 # so it can be reached from here without a cycle.
 tddy-supervisor = { path = "../tddy-supervisor" }
+# `write_usage_context`: a workflow session records where its agent keeps its files, so the daemon can
+# account its usage (`#usage-binding 2/5`).
+tddy-usage = { path = "../tddy-usage" }
 tokio = { version = "1", features = ["rt", "macros", "time"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 

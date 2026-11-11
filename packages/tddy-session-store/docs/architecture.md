@@ -95,7 +95,8 @@ These writes deliberately do **not** go through it:
   with a regular file would change behaviour.
 
 Atomic replacement changes the file's **inode**. Nothing in the repo watches session files through
-`notify`/inotify (`usage_watcher.rs` documents polling as a deliberate choice), so no reader depends
+`notify`/inotify (the daemon's usage pollers, `tddy-session-activity`'s `usage_pollers.rs`, poll by
+design), so no reader depends
 on the inode surviving. Swap files are dotfiles ending in `.swap`, so directory scans that filter on
 `.md` (`inject_cross_references`) or skip hidden files never pick one up.
 

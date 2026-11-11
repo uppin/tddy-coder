@@ -482,7 +482,6 @@ export function SessionMainPane({
                      which is a behaviour change rather than gating. */
                   hostConnection={host}
                   room={room}
-                  serverIdentity={attachmentHint?.serverIdentity}
                   traffic={traffic}
                   buildSessionExecToolClient={buildSessionExecToolClient}
                   onInsertPathIntoTerminal={insertPathIntoTerminal}

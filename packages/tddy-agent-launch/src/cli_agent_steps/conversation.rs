@@ -43,6 +43,16 @@ impl LaunchConversation {
         }
     }
 
+    /// The main conversation's id, as the usage context records it: the session id, the minted
+    /// id or the recorded resume token. A worktree conversation has none.
+    pub(crate) fn usage_id(&self) -> Option<&str> {
+        match self {
+            Self::SessionId(id) | Self::Minted(id) => Some(id),
+            Self::ResumeToken(token) => token.as_deref(),
+            Self::Worktree => None,
+        }
+    }
+
     /// The id to record on the session's `.session.yaml` (`cursor_chat_id`): the minted one only.
     pub(crate) fn recorded_chat_id(&self) -> Option<&str> {
         match self {

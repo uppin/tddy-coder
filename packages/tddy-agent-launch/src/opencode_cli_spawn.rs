@@ -26,6 +26,7 @@ use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::provider_route::RouteSources;
 use tddy_core::{write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_kernel::user_paths::home_dir_for_user;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::start_phase::Step as StartStep;
 use tddy_service::proto::session::StartSessionResponse;
@@ -55,6 +56,7 @@ use crate::project_home_launch::StartRole;
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::spec_launch::HostAgent;
 use crate::stack_parent::SpawnStackParent;
+use crate::usage_context::{record_usage_context, UsageSubject};
 use harness_launch::{launch, HarnessRun, HarnessSession, HarnessSpecLaunch};
 
 /// Everything one CLI harness start reads.
@@ -325,6 +327,13 @@ pub(crate) async fn start_cli_harness_session(
         node_launcher: launcher.as_ref(),
         ..HarnessLaunch::default()
     }));
+    record_usage_context(
+        &session_dir,
+        &spec.id,
+        home_dir_for_user(os_user),
+        &UsageSubject::new(conversation.usage_id(), model),
+        &worktree_path,
+    )?;
     let launched = launch(
         cli_manager,
         HarnessSession::new(session_id, &worktree_path, &session_dir, os_user),

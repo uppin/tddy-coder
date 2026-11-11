@@ -26,8 +26,8 @@ use tddy_service::proto::activity::{
     GetAcpToolCallDetailResponse, IsSessionTerminalServedRequest, IsSessionTerminalServedResponse,
     ReportAgentActivityRequest, ReportAgentActivityResponse, ReportOperatorNotificationRequest,
     ReportOperatorNotificationResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
-    SessionNotificationEvent, StreamAcpReplayRequest, StreamSessionActivityRequest,
-    StreamSessionNotificationsRequest,
+    SessionNotificationEvent, SessionUsageSnapshot, StreamAcpReplayRequest,
+    StreamSessionActivityRequest, StreamSessionNotificationsRequest, StreamSessionUsageRequest,
 };
 use tddy_session_activity::orchestrator_presence::{OrchestratorPresence, PEER_PRESENCE_TIMEOUT};
 use tddy_session_activity::{ActivityPorts, ActivityServiceImpl, AnswerWaitPorts, SessionLabels};
@@ -126,6 +126,7 @@ impl DaemonSessionHost {
             daemon_instance_id: tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(
                 &self.config,
             ),
+            usage_bindings: Arc::new(self.coding_agents.usage_bindings()),
         }
     }
 }
@@ -399,6 +400,22 @@ impl ActivityService for PeerRoutedActivity {
             &request.get_ref().daemon_instance_id,
         )?;
         self.local.stream_session_activity(request).await
+    }
+
+    type StreamSessionUsageStream = MpscResultStream<SessionUsageSnapshot>;
+
+    /// Refused when addressed at a peer, exactly as `StreamSessionActivity` is: a session's usage
+    /// is read from its own host's files.
+    async fn stream_session_usage(
+        &self,
+        request: Request<StreamSessionUsageRequest>,
+    ) -> Result<Response<Self::StreamSessionUsageStream>, Status> {
+        self.record_activity();
+        self.refuse_if_addressed_at_a_peer(
+            "StreamSessionUsage",
+            &request.get_ref().daemon_instance_id,
+        )?;
+        self.local.stream_session_usage(request).await
     }
 
     type StreamSessionNotificationsStream = MpscResultStream<SessionNotificationEvent>;

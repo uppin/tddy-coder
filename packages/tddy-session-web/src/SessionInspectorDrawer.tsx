@@ -86,9 +86,6 @@ interface SessionInspectorDrawerProps {
    */
   hostConnection: HostConnection | null;
   room?: RoomHandle | null;
-  /** LiveKit participant identity of the daemon/presenter side, for the token-usage stream.
-   *  Selected together with `room`; falls back to `"server"` when not connected over LiveKit. */
-  serverIdentity?: string;
   /** Inspector I/O traffic (req 5): byte counters + last-received. Live runtime for active
    *  sessions; daemon-sourced `SessionEntry` fields for inactive / non-LiveKit sessions. */
   traffic?: InspectorTraffic | null;
@@ -126,7 +123,6 @@ export function SessionInspectorDrawer({
   sessionToken,
   hostConnection,
   room = null,
-  serverIdentity = "server",
   traffic = null,
   buildSessionExecToolClient,
   onInsertPathIntoTerminal,
@@ -277,7 +273,11 @@ export function SessionInspectorDrawer({
           </ScrollArea>
         ) : tab === "usage" ? (
           <ScrollArea className="flex-1 min-h-0">
-            <SessionUsageTab room={room} serverIdentity={serverIdentity} />
+            <SessionUsageTab
+              client={activityClient}
+              sessionToken={sessionToken ?? ""}
+              sessionId={session.sessionId}
+            />
           </ScrollArea>
         ) : tab === "worktree" ? (
           <ScrollArea className="flex-1 min-h-0">

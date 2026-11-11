@@ -20,10 +20,12 @@ use crate::opencode_cli_spawn::harness_launch::{
     launch, HarnessRun, HarnessSession, HarnessSpecLaunch,
 };
 use crate::session_acting_identity::SessionAccountAccess;
+use crate::usage_context::{record_usage_context, UsageSubject};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_core::{write_session_metadata, SessionMetadata};
+use tddy_daemon_kernel::user_paths::home_dir_for_user;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{ResumeSessionRequest, ResumeSessionResponse};
 
@@ -232,6 +234,16 @@ async fn resume_cli_harness_session(
         node_launcher: launcher.as_ref(),
         ..HarnessLaunch::default()
     }));
+    record_usage_context(
+        session_dir,
+        &spec.id,
+        home_dir_for_user(os_user),
+        &UsageSubject::new(
+            conversation.usage_id(),
+            meta.model.as_deref().unwrap_or_default(),
+        ),
+        &worktree_path,
+    )?;
     let launched = launch(
         cli_manager,
         HarnessSession::new(session_id, &worktree_path, session_dir, os_user),
