@@ -35,6 +35,7 @@ pub fn account(section: &UsageSection, ctx: &UsageContext) -> Vec<ConversationRe
             .iter()
             .filter_map(|source| match source {
                 UsageSource::Jsonl(jsonl) => conversation_rows(jsonl, ctx),
+                UsageSource::Sqlite(sqlite) => crate::sqlite::conversation_rows(sqlite, ctx),
             })
             .collect(),
     )

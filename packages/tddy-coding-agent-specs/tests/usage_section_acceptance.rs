@@ -382,3 +382,61 @@ fn the_builtin_codex_specs_bind_their_rollouts() {
         );
     }
 }
+
+#[test]
+fn a_sqlite_binding_naming_a_non_identifier_column_is_refused_at_load() {
+    // Given — a column name carrying SQL
+    let tools = a_tools_dir().with_file(
+        "claude.yaml",
+        &a_claude_override_with(
+            r#"    usage:
+      sources:
+        - format: sqlite
+          path: "{agent_home}/store.db"
+          table: session_v2
+          id: "id; DROP TABLE session_v2"
+          root: { column: directory, equals: "{worktree}", newest_by: time_updated }
+          tokens: { input: tokens_input }
+"#,
+        ),
+    );
+
+    // When
+    let (file, _, message) = the_refusal(&tools);
+
+    // Then
+    assert_eq!(file, tools.file("claude.yaml"));
+    assert!(
+        message.contains("usage:") && message.contains("DROP TABLE"),
+        "the refusal must quote the offending name: {message}"
+    );
+}
+
+#[test]
+fn the_builtin_opencode_spec_binds_its_store() {
+    // Given
+    let home = tempfile::tempdir().unwrap();
+
+    // When
+    let registry = load_agent_registry(&home.path().join("tools")).expect("the built-ins load");
+    let spec =
+        CodingAgentSpec::of(registry.get("opencode").expect("built in")).expect("a coding agent");
+
+    // Then
+    let usage = spec.agent.usage.expect("opencode declares usage");
+    let Some(UsageSource::Sqlite(source)) = usage.sources.first() else {
+        panic!("expected a sqlite source, got {:?}", usage.sources);
+    };
+    assert_eq!(
+        (
+            source.path.as_str(),
+            source.table.as_str(),
+            source.parent.as_deref()
+        ),
+        (
+            "{agent_home}/.local/share/opencode/opencode.db",
+            "session_v2",
+            Some("parent_id")
+        )
+    );
+}

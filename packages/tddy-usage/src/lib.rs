@@ -16,6 +16,7 @@ mod gather;
 mod jsonl;
 mod registry;
 mod section;
+mod sqlite;
 mod template;
 pub mod token_accounting;
 mod tree;
@@ -33,6 +34,7 @@ pub use registry::{
 };
 pub use section::{
     validate_usage_section, Aggregate, ChildrenBy, ChildrenSpec, CounterMap, FieldEq, IdentitySpec,
-    JsonlSource, MainMatch, MainSpec, NameSpec, RecordSpec, UsageSection, UsageSource,
+    JsonlSource, MainMatch, MainSpec, NameSpec, RecordSpec, RootMatch, SqliteSource, UsageSection,
+    UsageSource,
 };
 pub use template::{PathTemplate, TemplateError};

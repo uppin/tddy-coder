@@ -19,6 +19,45 @@ pub struct UsageSection {
 pub enum UsageSource {
     /// Newline-delimited JSON files, one record per line.
     Jsonl(JsonlSource),
+    /// One row per conversation in a SQLite table, opened read-only (`#usage-binding 5/5`).
+    Sqlite(SqliteSource),
+}
+
+/// A `sqlite` source: the database, the table holding one row per conversation, and which columns
+/// say what. Every table and column name is checked to be a plain identifier when the spec loads,
+/// so a binding cannot carry SQL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SqliteSource {
+    /// The database file, over the session variables.
+    pub path: PathTemplate,
+    pub table: String,
+    /// The column holding a conversation's id.
+    pub id: String,
+    /// The column holding the id of the conversation a row is nested under; rows whose parent is a
+    /// conversation's id are its children, recursively. `None` for a table with no nesting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    pub root: RootMatch,
+    /// Counter expressions over the row's column names.
+    pub tokens: CounterMap,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<FieldPath>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<FieldPath>,
+    /// The column naming a child conversation's agent; a child without one is named after its id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<FieldPath>,
+}
+
+/// The main conversation: the root row (no parent) whose `column` equals the rendered `equals`,
+/// the newest by `newest_by` when several do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RootMatch {
+    pub column: String,
+    pub equals: PathTemplate,
+    pub newest_by: String,
 }
 
 /// A `jsonl` source: the conversation's own files, how its children are found, and how a line is
@@ -174,8 +213,10 @@ pub fn validate_usage_section(section: &UsageSection) -> Result<(), String> {
         return Err("sources is empty: name at least one source".to_string());
     }
     for source in &section.sources {
-        let UsageSource::Jsonl(jsonl) = source;
-        check_source(jsonl)?;
+        match source {
+            UsageSource::Jsonl(jsonl) => check_source(jsonl)?,
+            UsageSource::Sqlite(sqlite) => check_sqlite(sqlite)?,
+        }
     }
     check_counters_unowned_twice(section)
 }
@@ -221,21 +262,39 @@ fn check_identity(jsonl: &JsonlSource) -> Result<(), String> {
     Ok(())
 }
 
+/// A `sqlite` source: its templates name only session variables, and every table and column name is
+/// a plain identifier, since each goes into SQL.
+fn check_sqlite(source: &SqliteSource) -> Result<(), String> {
+    check_variables("path", &source.path, MAIN_VARIABLES)?;
+    check_variables("root.equals", &source.root.equals, MAIN_VARIABLES)?;
+    match crate::sqlite::named_identifiers(source)
+        .into_iter()
+        .find(|(_, name)| !crate::sqlite::is_identifier(name))
+    {
+        Some((position, name)) => Err(format!(
+            "{position} '{name}' is not a plain identifier (letters, digits and '_', not starting \
+             with a digit): a sqlite binding names tables and columns, never SQL"
+        )),
+        None => Ok(()),
+    }
+}
+
 /// No counter (nor the cost) is mapped by two sources: ownership is the mapping, and the merge of
 /// one conversation's rows relies on each counter having exactly one source.
 fn check_counters_unowned_twice(section: &UsageSection) -> Result<(), String> {
     let mut owners: Vec<(&'static str, usize)> = Vec::new();
     for (index, source) in section.sources.iter().enumerate() {
-        let UsageSource::Jsonl(jsonl) = source;
-        let record = &jsonl.record;
-        let tokens = &record.tokens;
+        let (tokens, cost) = match source {
+            UsageSource::Jsonl(jsonl) => (&jsonl.record.tokens, jsonl.record.cost.is_some()),
+            UsageSource::Sqlite(sqlite) => (&sqlite.tokens, sqlite.cost.is_some()),
+        };
         let mapped = [
             ("input", tokens.input.is_some()),
             ("cache_read", tokens.cache_read.is_some()),
             ("cache_write", tokens.cache_write.is_some()),
             ("output", tokens.output.is_some()),
             ("reasoning", tokens.reasoning.is_some()),
-            ("cost", record.cost.is_some()),
+            ("cost", cost),
         ];
         for (counter, is_mapped) in mapped {
             if !is_mapped {

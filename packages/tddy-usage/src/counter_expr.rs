@@ -48,6 +48,11 @@ impl CounterExpr {
         Some(u64::try_from(total.max(0)).unwrap_or(u64::MAX))
     }
 
+    /// The field paths the expression reads, in order.
+    pub fn paths(&self) -> impl Iterator<Item = &FieldPath> {
+        self.terms.iter().map(|term| &term.path)
+    }
+
     /// The expression as written.
     pub fn as_str(&self) -> &str {
         &self.text

@@ -9,7 +9,8 @@ stderr, and the accounting is also exposed at the RPC/backend layer.
 ## Where an agent's usage is declared
 
 Each coding agent spec declares its own usage source under `extensions.coding_agent.usage` — a list
-of `sources`, each naming a **format** (`jsonl`) and how to read it:
+of `sources`, each naming a **format** (`jsonl` or `sqlite`) and how to read it. The fields below are
+the `jsonl` format's; [the `sqlite` format](#the-sqlite-format) follows.
 
 - **`main.path`** — a path template for the conversation's own file(s); every match is merged into
   one row. Variables: `{agent_home}`, `{session_dir}`, `{conversation_id}`, `{worktree}`. A variable
@@ -41,6 +42,28 @@ of `sources`, each naming a **format** (`jsonl`) and how to read it:
   - **`model`** is read from **every** line of the file, including those `where` drops, and is the
     last value seen — so a line that only announces the model (not a usage line) still supplies it.
 
+### The `sqlite` format
+
+A store with one row per conversation. The binding names the table and the columns; no SQL is written
+in it, and every table and column name must be a plain identifier (letters, digits and `_`, not
+starting with a digit) or the spec is refused at load.
+
+- **`path`** — a template over the main variables, the database file.
+- **`table`**, **`id`**, optional **`parent`** — the conversation table, the id column and the column
+  holding a row's parent id.
+- **`root: { column, equals, newest_by }`** — the main conversation is the row whose `column` equals
+  the rendered `equals` template, with no parent, newest by `newest_by`.
+- **`parent`** — rows whose parent column equals a conversation's id are its children, recursively (to
+  depth 16, never revisiting a row); siblings are ordered by id.
+- **`tokens`** — each counter is a column name or columns joined by `+` / `-`, like a `jsonl`
+  counter expression. **`cost`**, **`model`** and **`name`** (a child's label, default its id) are
+  columns. `turns` is not a column of such a store and reads 0.
+
+The store is opened **read-only** with a 200 ms busy timeout, so a running agent's writer is never
+contended. A store that cannot be read now (busy, locked, malformed) yields **no rows**, so the
+stream keeps its last snapshot instead of showing zeros; a store or root row that does not exist yet
+yields a zero main row, as a missing transcript does. A row without a usable id is skipped and logged.
+
 A spec with an unknown format, an unknown template variable, an empty `sources`, an empty field path,
 a leftover `transcript_usage` key, a malformed counter expression, `children_by` or `main.match`
 without an `identity`, an `identity` beside path-located `children`, or **two sources mapping the same counter** (or both mapping
@@ -71,6 +94,13 @@ declares no `usage:` has no main-agent row — only its tddy subagent rows.
   `output` = `output_tokens − reasoning_output_tokens`, `reasoning` = `reasoning_output_tokens`; the
   model is the last `turn_context` one. **Spawned threads** are nested under the thread that spawned
   them, to any depth.
+- **Main `opencode` agent** — `opencode.yaml` binds OpenCode's `opencode.db`,
+  `{agent_home}/.local/share/opencode/opencode.db`, table `session_v2`, one row per session carrying
+  running totals. The main conversation is the **newest root session whose `directory` is the
+  session's worktree** (OpenCode keeps one conversation per worktree); sessions it spawned are nested
+  by `parent_id`, to any depth. Counters: `tokens_input` → input, `tokens_cache_read` → cache read,
+  `tokens_cache_write` → cache write, `tokens_output` → output, `tokens_reasoning` → reasoning;
+  `cost`, `model` and `agent` (the child's name) come from their columns.
 - **Usage tapped from the live stream.** An agent whose usage exists only in its protocol stream
   declares the events that carry it — `headless.usage_events` (stream-json, codex-jsonl and every
   other headless CLI) or `acp.usage_events` (ACP `session/update`s) — as `{ field, equals }`
@@ -116,12 +146,14 @@ declares no `usage:` has no main-agent row — only its tddy subagent rows.
 
 - `tddy-discovery` — `TokenUsage` and `usage` parsing on `ChatCompletionResponse`; per-turn and
   cumulative usage on `SubagentSession` (`model()` / `cumulative_usage()`, `PromptOutcome.usage`).
-- `tddy-usage` — the binding model, its evaluation (`account`, `gather_session_usage`) and
+- `tddy-usage` — the binding model, its evaluation (`account`, `gather_session_usage`; the `sqlite`
+  format reads through `rusqlite`) and
   `token_accounting` (`TokenUsage`, `ConversationRecord`, `format_token_summary`); it names no agent.
   `tddy-agent-backend::token_accounting` re-exports it.
 - `tddy-coding-agent-specs` — parses and validates `coding_agent.usage`, `headless.usage_events` and
   `acp.usage_events`; the Claude bindings in `specs/claude.yaml` and `specs/claude-acp.yaml`, the
-  Codex bindings in `specs/codex.yaml` and `specs/codex-acp.yaml`.
+  Codex bindings in `specs/codex.yaml` and `specs/codex-acp.yaml`, the OpenCode binding in
+  `specs/opencode.yaml`.
 - `tddy-agent-backend::usage_tap` — `UsageTapSpec` (`for_conversation`) and `UsageTap`, fed by the
   headless driver (each stdout line) and the ACP driver (each `session/update`), given through
   `HeadlessCommand::usage_tap` / `OpenSession::usage_tap`.
@@ -144,8 +176,8 @@ declares no `usage:` has no main-agent row — only its tddy subagent rows.
 - **In scope:** RPC/backend layer + the `tddy-sandbox-app` CLI stderr summary.
 - **In scope (web):** the daemon streams every session's usage to the Inspector's Usage tab — see
   [Session Usage Inspector](../web/session-usage-inspector.md).
-- **Out of scope:** TUI visualization; USD cost estimation; bindings for agents other than Claude and
-  Claude, Claude-ACP, Codex and Codex-ACP (later `#usage-binding` nodes). Cursor's headless `result` carries no usage in any
+- **Out of scope:** TUI visualization; USD cost estimation; bindings for agents other than Claude,
+  Claude-ACP, Codex, Codex-ACP and OpenCode. Cursor's headless `result` carries no usage in any
   recorded stream, so Cursor declares no tap yet; ACP's `usage_update` cost is cumulative and is not bound
   yet — no recorded ACP stream exists to bind it against
   ([todo](../../dev/todo/2026-11-11-acp-usage-update-cost-unbound.md)). A `shared`-placement ACP subagent is registered but not yet tapped
@@ -159,3 +191,8 @@ declares no `usage:` has no main-agent row — only its tddy subagent rows.
 > rollouts (header, `turn_context`, `token_count`). The binding has not been run against a real user's
 > rollout directory, and `main.path`'s three-level date glob walks every rollout the user ever
 > wrote.
+
+> The OpenCode fixtures are synthetic rows in a store built with the real `session_v2` schema. The
+> only local `opencode.db` held no sessions, so whether `tokens_output` already includes
+> `tokens_reasoning` is unverified; the binding maps them as disjoint columns
+> ([todo](../../dev/todo/2026-11-11-opencode-reasoning-overlap-unverified.md)).
