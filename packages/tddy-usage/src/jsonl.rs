@@ -163,3 +163,43 @@ fn read_line(value: &Value, spec: &RecordSpec) -> Reading {
             .and_then(Value::as_f64),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(aggregate: &str) -> RecordSpec {
+        serde_json::from_value(serde_json::json!({
+            "aggregate": aggregate,
+            "tokens": { "input": "n", "output": "m" }
+        }))
+        .expect("a record spec")
+    }
+
+    fn fold_lines(lines: &[&str], aggregate: &str) -> Folded {
+        let dir = std::env::temp_dir().join(format!(
+            "tddy-usage-jsonl-{}-{aggregate}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("lines.jsonl");
+        std::fs::write(&file, lines.join("\n")).unwrap();
+        let folded = fold_files(&[file], &spec(aggregate));
+        std::fs::remove_dir_all(&dir).unwrap();
+        folded
+    }
+
+    #[test]
+    fn last_takes_each_counter_from_the_last_record_that_carries_it() {
+        let folded = fold_lines(&[r#"{"n":5,"m":1}"#, r#"{"n":9}"#], "last");
+
+        assert_eq!((folded.input, folded.output), (9, 1));
+    }
+
+    #[test]
+    fn sum_adds_every_record() {
+        let folded = fold_lines(&[r#"{"n":5,"m":1}"#, r#"{"n":9}"#], "sum");
+
+        assert_eq!((folded.input, folded.output, folded.turns), (14, 1, 2));
+    }
+}

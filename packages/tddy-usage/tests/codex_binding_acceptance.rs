@@ -1,7 +1,7 @@
 //! Acceptance: the Codex usage binding shipped in `codex.yaml`, evaluated by the agent-agnostic
 //! engine over rollout files shaped the way Codex CLI 0.167 writes them (`#usage-binding 4/5`).
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-11-10-usage-binding-codex-rollout.md
+//! Feature: docs/ft/coder/session-token-accounting.md
 
 mod support;
 

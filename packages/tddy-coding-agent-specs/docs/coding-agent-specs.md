@@ -219,20 +219,25 @@ refused at load with the spec file named (messages prefixed `usage:`). `transcri
 |---|---|
 | `sources[]` | one or more sources; each is `format`-tagged (`jsonl`). Empty is refused |
 | `main.path` | template over `{agent_home}`, `{session_dir}`, `{conversation_id}`, `{worktree}`; every match merges into the main row. Required |
+| `identity` | `{ id, parent }` field paths read from a file's leading lines — the file names its own conversation and its parent (needs `main.match` or `children_by` to matter; refused beside `children`) |
+| `main.match` | `{ field, equals }` — pick the newest parentless file whose header `field` equals the rendered template, instead of merging every match; needs `identity` |
+| `children_by` | `parent_field` — children are the files whose `identity.parent` is a conversation's id, recursively; needs `identity` |
 | `children.path` / `children.id` | templates over a conversation file's `{dir}` and `{stem}`; applied recursively |
 | `children.name` | `{ sidecar, field, default }` — the child's name from a sidecar JSON field |
 | `record.where[]` | `{ field, equals }` predicates a line must all satisfy |
 | `record.dedupe_by` | field path; the last line per key wins |
-| `record.aggregate` | `sum` (the default) |
-| `record.model` / `record.cost` | field paths; the last model seen, the summed cost |
-| `record.tokens` | `input`, `cache_read`, `cache_write`, `output`, `reasoning` field paths — disjoint counters |
+| `record.aggregate` | `sum` (the default), or `last` — each counter and the cost from the last record that has it, for cumulative sources |
+| `record.model` / `record.cost` | field paths; the last model seen on **any** line (the `where` filter does not hide it), the cost aggregated like the counters |
+| `record.tokens` | `input`, `cache_read`, `cache_write`, `output`, `reasoning` — each a field path or a counter expression (`a - b`, `a + b`); disjoint counters |
 
-An unknown template variable, an empty field path or segment, an unknown `format`, a missing
-`main`, and two sources mapping the same counter (or both `cost`) are refused.
+An unknown template variable, an empty field path or segment, a malformed counter expression, an unknown `format`, a missing
+`main`, `children_by` or `main.match` without an `identity`, an `identity` beside `children`, and two sources mapping the same counter (or both `cost`) are refused.
 
 **Tapped events.** `headless.usage_events` (above) and `acp.usage_events` (`AcpSection`, the same
 `FieldEq` list, matched against each serialised ACP `session/update`) name the protocol events the
 driver writes to `<session_dir>/usage/<conversation_id>.jsonl`; a binding reads that file with
 `{session_dir}/usage/{conversation_id}.jsonl`. Empty taps nothing. `claude.yaml` taps
 `[{ field: type, equals: result }]` and binds its `total_cost_usd` as a second, cost-only source. `specs/claude.yaml` and `specs/claude-acp.yaml` carry the Claude transcript
-binding; no other built-in declares one yet.
+binding, and `specs/codex.yaml` and `specs/codex-acp.yaml` the Codex rollout binding
+(`{agent_home}/.codex/sessions/*/*/*/rollout-*.jsonl`, rooted by `payload.cwd == {worktree}`, spawned
+threads nested by `payload.parent_thread_id`); no other built-in declares one yet.

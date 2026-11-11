@@ -99,6 +99,8 @@ struct Identified {
     file: PathBuf,
     id: String,
     parent: Option<String>,
+    /// Whether the header satisfies `main.match` (true when the source has none).
+    matches_main: bool,
 }
 
 /// The rows of a source whose conversations name themselves: the main conversation is the newest
@@ -109,29 +111,33 @@ fn identified_rows(
     identity: &IdentitySpec,
     ctx: &UsageContext,
 ) -> Option<Vec<ConversationRecord>> {
-    let files: Vec<Identified> = main_files(source, ctx)
-        .into_iter()
-        .filter_map(|file| {
-            let id = header_string(&file, &identity.id)?;
-            let parent = identity
-                .parent
-                .as_ref()
-                .and_then(|path| header_string(&file, path));
-            Some(Identified { file, id, parent })
-        })
-        .collect();
     let wanted = match &source.main.match_ {
         Some(m) => Some((&m.field, render_main(&m.equals, ctx, false)?)),
         None => None,
     };
-    let main = files
-        .iter()
-        .filter(|f| f.parent.is_none())
-        .filter(|f| {
-            wanted.as_ref().is_none_or(|(field, equals)| {
-                header_string(&f.file, field).as_ref() == Some(equals)
+    let files: Vec<Identified> = main_files(source, ctx)
+        .into_iter()
+        .filter_map(|file| {
+            let header = header_values(&file);
+            let id = header_string(&header, &identity.id)?;
+            let parent = identity
+                .parent
+                .as_ref()
+                .and_then(|path| header_string(&header, path));
+            let matches_main = wanted.as_ref().is_none_or(|(field, equals)| {
+                header_string(&header, field).as_ref() == Some(equals)
+            });
+            Some(Identified {
+                file,
+                id,
+                parent,
+                matches_main,
             })
         })
+        .collect();
+    let main = files
+        .iter()
+        .filter(|f| f.parent.is_none() && f.matches_main)
         .max_by_key(|f| {
             let modified = std::fs::metadata(&f.file).and_then(|m| m.modified()).ok();
             (modified, f.file.clone())
@@ -186,15 +192,24 @@ fn spawned_rows<'a>(
     }
 }
 
-/// The string at `field` on the first of the file's leading lines that holds it.
-fn header_string(file: &Path, field: &FieldPath) -> Option<String> {
-    let reader = std::io::BufReader::new(std::fs::File::open(file).ok()?);
-    reader
+/// The JSON lines among the file's first [`HEADER_LINES`]; an unreadable file has none.
+fn header_values(file: &Path) -> Vec<serde_json::Value> {
+    let Ok(opened) = std::fs::File::open(file) else {
+        return Vec::new();
+    };
+    std::io::BufReader::new(opened)
         .lines()
         .take(HEADER_LINES)
         .map_while(Result::ok)
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(&line).ok())
-        .find_map(|value| field.lookup(&value)?.as_str().map(str::to_string))
+        .filter_map(|line| serde_json::from_str(&line).ok())
+        .collect()
+}
+
+/// The string at `field` on the first header line that holds it.
+fn header_string(header: &[serde_json::Value], field: &FieldPath) -> Option<String> {
+    header
+        .iter()
+        .find_map(|value| field.lookup(value)?.as_str().map(str::to_string))
 }
 
 /// The child conversations of `parent_file`, each with its own descendants, in sibling order.

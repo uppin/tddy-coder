@@ -175,31 +175,50 @@ pub fn validate_usage_section(section: &UsageSection) -> Result<(), String> {
     }
     for source in &section.sources {
         let UsageSource::Jsonl(jsonl) = source;
-        check_variables("main.path", &jsonl.main.path, MAIN_VARIABLES)?;
-        if let Some(m) = &jsonl.main.match_ {
-            check_variables("main.match.equals", &m.equals, MAIN_VARIABLES)?;
-        }
-        if jsonl.identity.is_none() {
-            for (position, used) in [
-                ("children_by", jsonl.children_by.is_some()),
-                ("main.match", jsonl.main.match_.is_some()),
-            ] {
-                if used {
-                    return Err(format!(
-                        "{position} needs an identity: say which fields hold a file's id and parent"
-                    ));
-                }
-            }
-        }
-        if let Some(children) = &jsonl.children {
-            check_variables("children.path", &children.path, FILE_VARIABLES)?;
-            check_variables("children.id", &children.id, FILE_VARIABLES)?;
-            if let Some(name) = &children.name {
-                check_variables("children.name.sidecar", &name.sidecar, FILE_VARIABLES)?;
-            }
-        }
+        check_source(jsonl)?;
     }
     check_counters_unowned_twice(section)
+}
+
+/// One source's templates name only the variables their position binds, and its identity-dependent
+/// features come with an identity.
+fn check_source(jsonl: &JsonlSource) -> Result<(), String> {
+    check_variables("main.path", &jsonl.main.path, MAIN_VARIABLES)?;
+    if let Some(m) = &jsonl.main.match_ {
+        check_variables("main.match.equals", &m.equals, MAIN_VARIABLES)?;
+    }
+    check_identity(jsonl)?;
+    if let Some(children) = &jsonl.children {
+        check_variables("children.path", &children.path, FILE_VARIABLES)?;
+        check_variables("children.id", &children.id, FILE_VARIABLES)?;
+        if let Some(name) = &children.name {
+            check_variables("children.name.sidecar", &name.sidecar, FILE_VARIABLES)?;
+        }
+    }
+    Ok(())
+}
+
+/// `children_by` and `main.match` read a file's header identity, which path-located `children`
+/// replace.
+fn check_identity(jsonl: &JsonlSource) -> Result<(), String> {
+    if jsonl.identity.is_none() {
+        for (position, used) in [
+            ("children_by", jsonl.children_by.is_some()),
+            ("main.match", jsonl.main.match_.is_some()),
+        ] {
+            if used {
+                return Err(format!(
+                    "{position} needs an identity: say which fields hold a file's id and parent"
+                ));
+            }
+        }
+    } else if jsonl.children.is_some() {
+        return Err(
+            "children locates by path, which an identity replaces: use children_by instead"
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 /// No counter (nor the cost) is mapped by two sources: ownership is the mapping, and the merge of
@@ -255,5 +274,48 @@ fn check_variables(
                 .join(", ")
         )),
         None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn section(source: serde_json::Value) -> UsageSection {
+        serde_json::from_value(serde_json::json!({ "sources": [source] })).expect("a section")
+    }
+
+    #[test]
+    fn an_identity_beside_a_path_located_children_is_refused() {
+        let section = section(serde_json::json!({
+            "format": "jsonl",
+            "main": { "path": "{session_dir}/*.jsonl" },
+            "identity": { "id": "id" },
+            "children": { "path": "{dir}/*.jsonl", "id": "{stem}" },
+            "record": { "tokens": { "input": "n" } }
+        }));
+
+        let refusal = validate_usage_section(&section).unwrap_err();
+
+        assert!(refusal.contains("children_by"), "{refusal}");
+    }
+
+    #[test]
+    fn a_counter_mapped_by_two_sources_is_refused() {
+        let source = serde_json::json!({
+            "format": "jsonl",
+            "main": { "path": "{session_dir}/*.jsonl" },
+            "record": { "tokens": { "input": "n" } }
+        });
+        let section: UsageSection =
+            serde_json::from_value(serde_json::json!({ "sources": [source.clone(), source] }))
+                .expect("a section");
+
+        let refusal = validate_usage_section(&section).unwrap_err();
+
+        assert!(
+            refusal.contains("both map the counter 'input'"),
+            "{refusal}"
+        );
     }
 }
