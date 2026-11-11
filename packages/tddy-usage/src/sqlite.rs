@@ -89,17 +89,15 @@ pub(crate) fn conversation_rows(
     let main_id = main.id.clone();
     let mut rows = vec![record(source, &ctx.agent_label, None, &main, ctx)];
     if source.parent.is_some() {
-        let mut visited = HashSet::from([main_id.clone()]);
-        let walked = walk_children(
-            &db,
-            &query,
+        let mut walk = Walk {
+            db: &db,
+            query: &query,
             source,
             ctx,
-            &main_id,
-            1,
-            &mut visited,
-            &mut rows,
-        );
+            visited: HashSet::from([main_id.clone()]),
+            rows: &mut rows,
+        };
+        let walked = walk.children_of(&main_id, 1);
         if let Err(e) = walked {
             log::warn!("usage: cannot read {path}: {e}");
             return None;
@@ -210,11 +208,14 @@ impl Queries {
         let mut found = Vec::new();
         for columns in rows {
             let columns = columns?;
-            // A row without an id cannot be nested under or reported; it is skipped.
+            // A row without an id cannot be nested under or reported; it is skipped, and said so.
             let id = match columns.get(&self.id_column) {
                 Some(Value::String(id)) => id.clone(),
                 Some(Value::Number(id)) => id.to_string(),
-                _ => continue,
+                _ => {
+                    log::warn!("usage: a row of {sql:?} has no usable id and is skipped");
+                    continue;
+                }
             };
             found.push(Found { id, columns });
         }
@@ -232,36 +233,46 @@ fn json_of(value: ValueRef<'_>) -> Value {
     }
 }
 
-/// The rows of every child of `parent_id`, depth-first, siblings by id.
-#[allow(clippy::too_many_arguments)]
-fn walk_children(
-    db: &Connection,
-    query: &Queries,
-    source: &SqliteSource,
-    ctx: &UsageContext,
-    parent_id: &str,
-    depth: usize,
-    visited: &mut HashSet<String>,
-    rows: &mut Vec<ConversationRecord>,
-) -> rusqlite::Result<()> {
-    if depth > MAX_DEPTH {
-        return Ok(());
-    }
-    for child in query.children_of(db, parent_id)? {
-        if !visited.insert(child.id.clone()) {
-            continue;
+/// The state of one depth-first walk below the main conversation.
+struct Walk<'a> {
+    db: &'a Connection,
+    query: &'a Queries,
+    source: &'a SqliteSource,
+    ctx: &'a UsageContext,
+    /// Ids already reported, so a cycle in the parent column ends the walk.
+    visited: HashSet<String>,
+    rows: &'a mut Vec<ConversationRecord>,
+}
+
+impl Walk<'_> {
+    /// The rows of every child of `parent_id`, depth-first, siblings by id.
+    fn children_of(&mut self, parent_id: &str, depth: usize) -> rusqlite::Result<()> {
+        if depth > MAX_DEPTH {
+            return Ok(());
         }
-        let name = source
-            .name
-            .as_ref()
-            .and_then(|field| field.lookup(&child.columns))
-            .and_then(Value::as_str)
-            .unwrap_or(&child.id)
-            .to_string();
-        rows.push(record(source, &name, Some(parent_id), &child, ctx));
-        walk_children(db, query, source, ctx, &child.id, depth + 1, visited, rows)?;
+        for child in self.query.children_of(self.db, parent_id)? {
+            if !self.visited.insert(child.id.clone()) {
+                continue;
+            }
+            let name = self
+                .source
+                .name
+                .as_ref()
+                .and_then(|field| field.lookup(&child.columns))
+                .and_then(Value::as_str)
+                .unwrap_or(&child.id)
+                .to_string();
+            self.rows.push(record(
+                self.source,
+                &name,
+                Some(parent_id),
+                &child,
+                self.ctx,
+            ));
+            self.children_of(&child.id, depth + 1)?;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 /// One conversation's record from its row: counters from the counter expressions, the cost and

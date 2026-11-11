@@ -217,7 +217,7 @@ refused at load with the spec file named (messages prefixed `usage:`). `transcri
 
 | Field | Meaning |
 |---|---|
-| `sources[]` | one or more sources; each is `format`-tagged (`jsonl`). Empty is refused |
+| `sources[]` | one or more sources; each is `format`-tagged (`jsonl` or `sqlite`). Empty is refused |
 | `main.path` | template over `{agent_home}`, `{session_dir}`, `{conversation_id}`, `{worktree}`; every match merges into the main row. Required |
 | `identity` | `{ id, parent }` field paths read from a file's leading lines — the file names its own conversation and its parent (needs `main.match` or `children_by` to matter; refused beside `children`) |
 | `main.match` | `{ field, equals }` — pick the newest parentless file whose header `field` equals the rendered template, instead of merging every match; needs `identity` |
@@ -230,6 +230,21 @@ refused at load with the spec file named (messages prefixed `usage:`). `transcri
 | `record.model` / `record.cost` | field paths; the last model seen on **any** line (the `where` filter does not hide it), the cost aggregated like the counters |
 | `record.tokens` | `input`, `cache_read`, `cache_write`, `output`, `reasoning` — each a field path or a counter expression (`a - b`, `a + b`); disjoint counters |
 
+A `sqlite` source (`format: sqlite`) replaces the `jsonl` fields with:
+
+| Field | Meaning |
+|---|---|
+| `path` | template over the main variables; the database file. Required |
+| `table` / `id` | the conversation table and its id column. Required |
+| `parent` | the column holding a row's parent id; children are rows naming a conversation as parent, recursively |
+| `root` | `{ column, equals, newest_by }` — the main conversation is the newest (by `newest_by`) parentless row whose `column` equals the rendered template |
+| `tokens` | `input`, `cache_read`, `cache_write`, `output`, `reasoning` — each a column or an expression over columns (`a - b`) |
+| `cost` / `model` / `name` | columns; `name` labels a child (default its id) |
+
+Every table and column name must be a plain identifier, and `path` and `root.equals` bind only the main
+variables; a violation is refused at load. A `sqlite` source and a `jsonl` source obey the same
+one-owner-per-counter rule.
+
 An unknown template variable, an empty field path or segment, a malformed counter expression, an unknown `format`, a missing
 `main`, `children_by` or `main.match` without an `identity`, an `identity` beside `children`, and two sources mapping the same counter (or both `cost`) are refused.
 
@@ -240,4 +255,6 @@ driver writes to `<session_dir>/usage/<conversation_id>.jsonl`; a binding reads 
 `[{ field: type, equals: result }]` and binds its `total_cost_usd` as a second, cost-only source. `specs/claude.yaml` and `specs/claude-acp.yaml` carry the Claude transcript
 binding, and `specs/codex.yaml` and `specs/codex-acp.yaml` the Codex rollout binding
 (`{agent_home}/.codex/sessions/*/*/*/rollout-*.jsonl`, rooted by `payload.cwd == {worktree}`, spawned
-threads nested by `payload.parent_thread_id`); no other built-in declares one yet.
+threads nested by `payload.parent_thread_id`), and `specs/opencode.yaml` the OpenCode `sqlite` binding
+(`{agent_home}/.local/share/opencode/opencode.db`, `session_v2`, rooted by `directory == {worktree}`,
+spawned sessions nested by `parent_id`); no other built-in declares one yet.

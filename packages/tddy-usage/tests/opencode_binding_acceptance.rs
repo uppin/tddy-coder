@@ -2,7 +2,7 @@
 //! agent-agnostic `sqlite` format over a store with OpenCode's real `session_v2` schema
 //! (`#usage-binding 5/5`).
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-11-10-usage-binding-opencode-sqlite.md
+//! Feature: docs/ft/coder/session-token-accounting.md
 
 mod support;
 
