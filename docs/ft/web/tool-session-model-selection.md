@@ -32,7 +32,7 @@ both the SessionDrawer "+ New session" flow and the PR-stack "Start session" dia
 | `claude` | **curated** | maintained (id,label) list in `tddy-core` (opus / sonnet / haiku) |
 | `codex` | **curated** | maintained list in `tddy-core` (gpt-5) |
 | `stub` | static | `stub` |
-| `claude-cli` (session type) | **curated** | maintained list in `tddy-core`: the versionless aliases first (opus / sonnet / haiku), then the version-pinned ids (claude-opus-5 / claude-sonnet-5 / claude-haiku-4-5-20251001) |
+| `claude-cli` (session type) | **curated** | maintained list in `tddy-core`: the versionless aliases first (opus / fable / sonnet / haiku), then the version-pinned ids (claude-opus-5 / claude-fable-5-1 / claude-sonnet-5 / claude-haiku-4-5-20251001) |
 
 `tddy_core::backend` is the **single source of truth** for every catalog above. `tddy-web` holds no
 model list of its own — the dropdowns render whatever `ListAgentModels` returns and preselect
@@ -41,7 +41,7 @@ model list of its own — the dropdowns render whatever `ListAgentModels` return
 
 ### Versionless aliases vs pinned ids
 
-`opus` / `sonnet` / `haiku` are aliases the `claude` CLI resolves to the newest model in each tier,
+`opus` / `fable` / `sonnet` / `haiku` are aliases the `claude` CLI resolves to the newest model in each tier,
 so a session started today keeps tracking the latest release. They lead the catalog and `opus` is
 the default (`CLAUDE_DEFAULT_MODEL`), which is also the `--model` default for `tddy-tools pty-relay`
 and `tddy-sandbox-app`. The pinned ids follow the aliases in the same dropdown for callers who need

@@ -460,7 +460,7 @@ extensions:
     hooks: { adapter: claude-settings-local }
     conversation: { kind: daemon_session_id }   # --session-id on a start, --resume on a resume
     capabilities: [hooks, managed_workflow, ask_user_question, split_host, project_home_main, requires_model, branch_name_required, operator_notify]
-    models: { default: opus, curated: [opus, sonnet, haiku, …] }
+    models: { default: opus, curated: [opus, fable, sonnet, haiku, …] }
     context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
 ```
 
@@ -579,9 +579,11 @@ The Model dropdown is populated from `ListAgentModels(agent: "claude-cli")` and 
 response's `default_model`. The web holds no model list of its own; the catalog lives in
 `tddy_core::backend::claude_cli_models()` — versionless aliases first, version-pinned ids after:
 - `opus` → "Claude Opus (latest)" ← default
+- `fable` → "Claude Fable (latest)"
 - `sonnet` → "Claude Sonnet (latest)"
 - `haiku` → "Claude Haiku (latest)"
 - `claude-opus-5` → "Claude Opus 5 (pinned)"
+- `claude-fable-5-1` → "Claude Fable 5.1 (pinned)"
 - `claude-sonnet-5` → "Claude Sonnet 5 (pinned)"
 - `claude-haiku-4-5-20251001` → "Claude Haiku 4.5 (pinned)"
 
