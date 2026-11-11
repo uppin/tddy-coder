@@ -59,13 +59,12 @@ an idle session still shows its running totals immediately.
 
 The daemon watches the session's on-disk token sources and re-emits `TokenUsageUpdated` on change:
 
-- **Main `claude` agent** — the transcript JSONL (`read_claude_transcript_usage`).
-- **Claude Task subagents** — `<session_id>/subagents/agent-<id>.jsonl` (`read_claude_subagent_usages`).
+- **The main agent and its nested subagents** — whatever its spec's `coding_agent.usage` binding
+  declares (for Claude: the transcript JSONL and its `subagents/` tree), evaluated by `tddy-usage`.
 - **tddy subagents** — the in-jail `accounting.json` (`TDDY_TOOLS_ACCOUNTING_FILE`).
 
 These three are merged into one ordered `Vec<ConversationRecord>` by a reusable
-`gather_session_usage(...)` (the merge currently inlined in `tddy-sandbox-app`'s
-`print_token_summary`, extracted for reuse). Emissions are debounced; a missing transcript yields a
+`tddy_usage::gather_session_usage(...)` (shared with `tddy-sandbox-app`'s `print_token_summary`). Emissions are debounced; a missing transcript yields a
 zero-token main-agent row, never an error.
 
 ## Layout

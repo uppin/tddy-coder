@@ -67,6 +67,34 @@ pub struct ConversationRecord {
     pub parent_id: Option<String>,
 }
 
+impl ConversationRecord {
+    /// A top-level conversation whose source reports only fresh input and output: no cache,
+    /// reasoning or cost, and no parent.
+    pub fn new(
+        agent: impl Into<String>,
+        id: impl Into<String>,
+        model: impl Into<String>,
+        input_tokens: u64,
+        output_tokens: u64,
+        turns: u32,
+    ) -> Self {
+        Self {
+            agent: agent.into(),
+            id: id.into(),
+            model: model.into(),
+            input_tokens,
+            output_tokens,
+            total_tokens: input_tokens + output_tokens,
+            turns,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            cost_usd: None,
+            parent_id: None,
+        }
+    }
+}
+
 /// Render the per-conversation token breakdown a session prints when it ends: one line per
 /// conversation followed by a TOTAL row summing the columns.
 pub fn format_token_summary(session_id: &str, records: &[ConversationRecord]) -> String {

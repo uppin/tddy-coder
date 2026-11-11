@@ -68,7 +68,7 @@ writers) stay as Rust, selected by the name a spec gives them; they own no metad
 | models (curated / listed) | `coding_agent.models` (`CuratedModel`: a bare id, or `{ id, label }`) |
 | context globs, instructions files | `coding_agent.context_globs`, `instructions.files` |
 | requires-model, placements, capabilities | `coding_agent.capabilities`, `placements` |
-| permission modes, transcript usage | `coding_agent.permission_modes`, `coding_agent.transcript_usage` |
+| permission modes, usage source | `coding_agent.permission_modes`, `coding_agent.usage` (see [§ Usage binding](#usage-binding-coding_agentusage)) |
 
 The argv templates double as the CLI-arg schema: `CodingAgentSpec::argv_params()` is the set of
 params a spec's `run.argv` binds, `binds_argv_param(param)` answers for one, `render_run_argv`
@@ -205,3 +205,27 @@ Tests: `tests/cursor_spec_acceptance.rs` (`cursor.yaml`'s section, and the regis
 owner, an unregistered headless adapter, and their positive controls); `tests/headless_render_golden.rs`
 (the built-in headless section renders Claude's argv byte for byte); `tests/headless_protocol_spec_unit.rs` (each built-in's protocol, the defaults, Cursor's model listing through its spec-resolved binary, an unknown `system_prompt`, `route_model`, `fresh_session`, `scratch` or `goal_params` word refused at load). Unit tests cover `slots::tests`, `slots::mcp::tests`,
 `slots::hooks::tests`, `slots::cursor::tests` and `spec::tool_slot_tests`. `tests/agent_registry_unit.rs` covers the registry (every built-in by id, `for_session_type`, the built-ins' capabilities, `has`, an unknown capability refused, `route_support` with and without a `route` section, every built-in session type with its launch and tool, a duplicate session type, a declared `workspace`, the undeclared-type message, an override dropping its built-in's session section, and a new agent declaring none); `session::tests` covers the section's parsing. `tests/cli_spec_features_unit.rs` covers `managed_workflow` and the conversation slot (each kind, the derived default, the mint deadline, an unknown adapter and a `resume_token` without `resume` refused at load).
+
+## Usage binding (`coding_agent.usage`)
+
+`CodingAgentSection.usage: Option<tddy_usage::UsageSection>` says where the agent's token usage
+lives and how to read it. The types and their evaluation are `tddy-usage`'s; this crate parses the
+section and, in `parse_section`, calls `tddy_usage::validate_usage_section` so a bad binding is
+refused at load with the spec file named (messages prefixed `usage:`). `transcript_usage` is gone:
+`deny_unknown_fields` refuses an override that still carries it.
+
+| Field | Meaning |
+|---|---|
+| `sources[]` | one or more sources; each is `format`-tagged (`jsonl`). Empty is refused |
+| `main.path` | template over `{agent_home}`, `{session_dir}`, `{conversation_id}`, `{worktree}`; every match merges into the main row. Required |
+| `children.path` / `children.id` | templates over a conversation file's `{dir}` and `{stem}`; applied recursively |
+| `children.name` | `{ sidecar, field, default }` — the child's name from a sidecar JSON field |
+| `record.where[]` | `{ field, equals }` predicates a line must all satisfy |
+| `record.dedupe_by` | field path; the last line per key wins |
+| `record.aggregate` | `sum` (the default) |
+| `record.model` / `record.cost` | field paths; the last model seen, the summed cost |
+| `record.tokens` | `input`, `cache_read`, `cache_write`, `output`, `reasoning` field paths — disjoint counters |
+
+An unknown template variable, an empty field path or segment, an unknown `format` and a missing
+`main` are refused. `specs/claude.yaml` and `specs/claude-acp.yaml` carry the Claude transcript
+binding; no other built-in declares one yet.

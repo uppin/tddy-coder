@@ -44,11 +44,7 @@ pub(crate) fn conversation_rows(
                 ctx,
             ));
         }
-        found.sort_by(|a, b| a.0.id.cmp(&b.0.id));
-        for (child, descendants) in found {
-            rows.push(child);
-            rows.extend(descendants);
-        }
+        rows.extend(in_sibling_order(found));
     }
     Some(rows)
 }
@@ -76,7 +72,7 @@ fn main_files(source: &JsonlSource, ctx: &UsageContext) -> Vec<PathBuf> {
     }
 }
 
-/// The child conversations of `parent_file`, each with its own descendants, in sibling order.
+/// The child conversations of `parent_file`, each with its own descendants (in sibling order).
 fn children_of(
     parent_file: &Path,
     children: &ChildrenSpec,
@@ -109,17 +105,21 @@ fn children_of(
             source,
             ctx,
         );
-        let mut descendants = Vec::new();
-        let mut grandchildren = children_of(&file, children, &id, depth + 1, visited, source, ctx);
-        grandchildren.sort_by(|a, b| a.0.id.cmp(&b.0.id));
-        for (grandchild, rest) in grandchildren {
-            descendants.push(grandchild);
-            descendants.extend(rest);
-        }
-        found.push((record, descendants));
+        let grandchildren = children_of(&file, children, &id, depth + 1, visited, source, ctx);
+        found.push((record, in_sibling_order(grandchildren)));
     }
+    found
+}
+
+/// Siblings sorted by id, each followed by its own descendants.
+fn in_sibling_order(
+    mut found: Vec<(ConversationRecord, Vec<ConversationRecord>)>,
+) -> Vec<ConversationRecord> {
     found.sort_by(|a, b| a.0.id.cmp(&b.0.id));
     found
+        .into_iter()
+        .flat_map(|(child, descendants)| std::iter::once(child).chain(descendants))
+        .collect()
 }
 
 /// The child's display name: the sidecar's field, else the spec's default; its id when the spec

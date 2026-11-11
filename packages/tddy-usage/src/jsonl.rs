@@ -50,13 +50,7 @@ pub(crate) fn fold_files(files: &[PathBuf], spec: &RecordSpec) -> Folded {
             let Ok(value) = serde_json::from_str::<Value>(line) else {
                 continue;
             };
-            if !spec.where_.iter().all(|predicate| {
-                predicate
-                    .field
-                    .lookup(&value)
-                    .and_then(Value::as_str)
-                    .is_some_and(|actual| actual == predicate.equals)
-            }) {
+            if !passes_where(&value, spec) {
                 continue;
             }
             if let Some(name) = spec
@@ -73,26 +67,53 @@ pub(crate) fn fold_files(files: &[PathBuf], spec: &RecordSpec) -> Folded {
                 .as_ref()
                 .and_then(|path| path.lookup(&value))
                 .map(Value::to_string);
-            match key {
-                Some(key) => match by_key.get(&key) {
-                    Some(&index) => records[index] = reading,
-                    None => {
-                        by_key.insert(key, records.len());
-                        records.push(reading);
-                    }
-                },
-                None => records.push(reading),
-            }
+            keep(&mut records, &mut by_key, key, reading);
         }
     }
 
-    let Aggregate::Sum = spec.aggregate;
+    sum(&records, model, spec.aggregate)
+}
+
+/// Keep `reading`: in place of the earlier record with the same dedupe `key`, else as a new one.
+fn keep(
+    records: &mut Vec<Reading>,
+    by_key: &mut HashMap<String, usize>,
+    key: Option<String>,
+    reading: Reading,
+) {
+    let Some(key) = key else {
+        records.push(reading);
+        return;
+    };
+    match by_key.get(&key) {
+        Some(&index) => records[index] = reading,
+        None => {
+            by_key.insert(key, records.len());
+            records.push(reading);
+        }
+    }
+}
+
+/// Whether `value` satisfies every `where` predicate of `spec`.
+fn passes_where(value: &Value, spec: &RecordSpec) -> bool {
+    spec.where_.iter().all(|predicate| {
+        predicate
+            .field
+            .lookup(value)
+            .and_then(Value::as_str)
+            .is_some_and(|actual| actual == predicate.equals)
+    })
+}
+
+/// The kept records folded by `aggregate`: each counter and the cost summed.
+fn sum(records: &[Reading], model: Option<String>, aggregate: Aggregate) -> Folded {
+    let Aggregate::Sum = aggregate;
     let mut folded = Folded {
         model,
         turns: records.len() as u32,
         ..Folded::default()
     };
-    for record in &records {
+    for record in records {
         let [input, cache_read, cache_write, output, reasoning] = record.counters;
         folded.input += input;
         folded.cache_read += cache_read;

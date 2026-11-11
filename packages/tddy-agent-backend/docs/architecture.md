@@ -165,12 +165,12 @@ selects by name, and own no metadata. See
 
 ## Token accounting (`token_accounting`)
 
-Agent-neutral per-conversation token accounting: `TokenUsage` (input/output counts, `total()`,
-field-wise `Add`), the `ConversationRecord` wire shape (camelCase token fields) shared by the
-`subagent_list` MCP tool, the in-jail accounting file, and the stderr summary, and
-`format_token_summary`. Agent-specific token *sources* live with their backend — the Claude
-readers `read_claude_transcript_usage` (main-thread transcript) and `read_claude_subagent_usages`
-(nested Task-tool subagents under `<session_id>/subagents/`) are in `backend/claude/transcript_usage.rs`, re-exported from `backend/claude.rs`. See
+`token_accounting` is a re-export of `tddy_usage::token_accounting` (`TokenUsage`,
+`ConversationRecord`, `format_token_summary`), so every `tddy_agent_backend::token_accounting` /
+`tddy_core::token_accounting` path keeps compiling. No backend reads usage any more: an agent's usage
+source is its spec's `coding_agent.usage` binding, evaluated by `tddy_usage::gather_session_usage`.
+The Claude transcript readers (`backend/claude/transcript_usage.rs`) and
+`backend::gather_session_usage` are deleted. See
 [session-token-accounting.md](../../../docs/ft/coder/session-token-accounting.md).
 
 ## Schema (in `tddy-workflow-recipes`)

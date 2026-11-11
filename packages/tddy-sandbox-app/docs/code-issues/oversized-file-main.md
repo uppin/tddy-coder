@@ -35,3 +35,5 @@ Not designed. `main.rs` holds the CLI `Args` and the run loop; the banner and ho
 
 2026-10-22 — Confirmed both counts with the gate's awk, and read #670's diff of the file. Not
 decomposed in #670: the orchestrator scoped that PR's decomposition to files it pushed past 500.
+
+**Regressed 2026-11-11 by #890 (`#usage-binding` 1/5):** 966 → **973 production lines** (+7): the two `print_token_summary` call sites build a `tddy_usage::UsageContext`. Decomposition attempted at wrap with `tddy-tools restructure` (`move_item` of `host_home` + `print_token_summary` into a new `token_summary` module): `check --deep` reported no findings, but `apply` declared the module in **`lib.rs`** — the engine resolves `tddy_sandbox_app::` to the library root even for an anchor in the binary's `main.rs` — and the tree no longer compiled (`E0433 unresolved crate tddy_sandbox_app` in the moved file). Rolled back; not moved by hand. Engine defect: `move_item` cannot target a binary crate root in a package that also has a `lib.rs`. **Status:** Open — regressed 2026-11-11 by #890.

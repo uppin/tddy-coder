@@ -6,17 +6,38 @@ A `tddy-sandbox-app` session runs several distinct conversations against languag
 accounts the tokens each spends. When the session ends it prints a per-conversation breakdown to
 stderr, and the accounting is also exposed at the RPC/backend layer.
 
+## Where an agent's usage is declared
+
+Each coding agent spec declares its own usage source under `extensions.coding_agent.usage` — a list
+of `sources`, each naming a **format** (`jsonl`) and how to read it:
+
+- **`main.path`** — a path template for the conversation's own file(s); every match is merged into
+  one row. Variables: `{agent_home}`, `{session_dir}`, `{conversation_id}`, `{worktree}`. A variable
+  with no value for the session matches no files.
+- **`children`** (optional) — a template over each conversation file's `{dir}` and `{stem}`, applied
+  recursively (to depth 16, never revisiting a file). Each match is a child row whose `parentId` is
+  its parent's id. `id` is a template; `name` may come from a sidecar JSON file's field, with a
+  default. Siblings are ordered by id.
+- **`record`** — `where` (field-equality predicates), `dedupe_by` (the last line per key wins; a line
+  without the key is its own record), `aggregate: sum`, `model` (the last value seen), `tokens` (a
+  field path per counter: `input`, `cache_read`, `cache_write`, `output`, `reasoning`) and an
+  optional `cost`. `turns` is the number of kept records.
+
+A spec with an unknown format, an unknown template variable, an empty `sources`, an empty field path
+or a leftover `transcript_usage` key is **refused at load**, naming the file. A session whose agent
+declares no `usage:` has no main-agent row — only its tddy subagent rows.
+
 ## Conversations accounted
 
-- **Main `claude` agent** — summed from Claude Code's own transcript JSONL. The runner spawns
-  `claude --session-id <session_id>`, so the transcript path
-  (`<claude_home>/.claude/projects/<encoded-cwd>/<session_id>.jsonl`) is deterministic. Input and
-  output tokens are folded from each assistant message's `message.usage`; Claude's separate
-  `cache_*` counters are not folded into input.
-- **Claude's nested Task-tool subagents** (Explore / general-purpose / etc.) — each recorded by
-  Claude Code under `<session_id>/subagents/agent-<id>.jsonl` with a sibling `agent-<id>.meta.json`.
-  Each is accounted as its own conversation: agent name from the meta's `agentType`, id from the
-  `agent-<id>` file stem, tokens/model from its own transcript.
+- **Main `claude` / `claude-acp` agent** — `claude.yaml` and `claude-acp.yaml` bind
+  `{agent_home}/.claude/projects/*/{conversation_id}.jsonl`, keep `type == assistant` lines, and
+  **deduplicate by `message.id`** (Claude Code writes one line per content block, each repeating the
+  message's usage). Counters: `message.usage.input_tokens` → input,
+  `cache_read_input_tokens` → cache read, `cache_creation_input_tokens` → cache write,
+  `output_tokens` → output; model from `message.model`.
+- **Claude's nested Task-tool subagents** — `{dir}/{stem}/subagents/agent-*.jsonl`, named from the
+  sibling `agent-<id>.meta.json` `agentType` (default `subagent`), found recursively: a subagent of a
+  subagent is a row under its parent.
 - **tddy `subagent_*` conversations** (`fastcontext` and other YAML-defined specialized agents,
   including local models via **Ollama**) — accumulated from the model's own `usage` object across
   every prompt turn.
@@ -25,7 +46,8 @@ stderr, and the accounting is also exposed at the RPC/backend layer.
 
 - **List all conversations (RPC).** The in-jail `tddy-tools --mcp` server exposes a `subagent_list`
   tool returning every open subagent conversation with `{ agent, id, model, inputTokens,
-  outputTokens, totalTokens, turns }`, and writes the same list to a host-visible accounting file
+  outputTokens, totalTokens, turns, cacheReadTokens, cacheWriteTokens, reasoningTokens, costUsd?,
+  parentId? }` (every field after `turns` defaulted on read, so an older file still reads), and writes the same list to a host-visible accounting file
   (`TDDY_TOOLS_ACCOUNTING_FILE`, pointed by the runner at `<session>/egress/accounting.json`) on
   each prompt/cancel. `subagent_prompt` results also carry the turn's `usage`.
 - **Subagent usage** is read from the model's `usage` (`prompt_tokens` → input, `completion_tokens`
@@ -33,27 +55,35 @@ stderr, and the accounting is also exposed at the RPC/backend layer.
   response that omits `usage` counts as zero — it never fails a turn.
 - **End-of-session summary.** After the terminal bridge returns, `tddy-sandbox-app` prints one row
   per conversation — the main agent, its Task subagents, then the tddy subagents — followed by a
-  session TOTAL row, to stderr. A Cursor session skips the main-agent row. A missing accounting
-  file simply contributes no tddy-subagent rows; a missing Claude transcript yields a zero
-  main-agent row (with the model from CLI args), never an error.
-- **Tokens only** — input / output / total and turn count. No monetary cost estimation.
+  session TOTAL row, to stderr — `in`, `cache_read`, `cache_write`, `out`, `reasoning`, `total` and
+  `turns` per row. An agent with no `usage:` binding skips the main-agent row. A missing accounting
+  file contributes no tddy-subagent rows; a missing transcript yields a zero main-agent row (with
+  the model from CLI args), never an error.
+- **Disjoint counters.** `input` is fresh input only and `output` excludes reasoning, so
+  `total = input + cache_read + cache_write + output + reasoning`. A source's `cost` is carried
+  when it reports one; nothing estimates it.
 
 ## Where it lives
 
 - `tddy-discovery` — `TokenUsage` and `usage` parsing on `ChatCompletionResponse`; per-turn and
   cumulative usage on `SubagentSession` (`model()` / `cumulative_usage()`, `PromptOutcome.usage`).
-- `tddy-core::token_accounting` — agent-neutral `TokenUsage`, `ConversationRecord`,
-  `format_token_summary`.
-- `tddy-core::backend` (Claude backend) — `read_claude_transcript_usage`,
-  `read_claude_subagent_usages` (Claude-Code-specific transcript layout lives with the backend).
+- `tddy-usage` — the binding model, its evaluation (`account`, `gather_session_usage`) and
+  `token_accounting` (`TokenUsage`, `ConversationRecord`, `format_token_summary`); it names no agent.
+  `tddy-agent-backend::token_accounting` re-exports it.
+- `tddy-coding-agent-specs` — parses and validates `coding_agent.usage`; the Claude bindings in
+  `specs/claude.yaml` and `specs/claude-acp.yaml`.
 - `tddy-tools` — `subagent_list` tool, `usage` in `subagent_prompt` results, accounting-file writer.
 - `tddy-sandbox-runner` — sets `TDDY_TOOLS_ACCOUNTING_FILE` on the in-jail MCP spawn.
-- `tddy-sandbox-app` — `print_token_summary` merges the sources and prints the breakdown.
+- `tddy-sandbox-app` — `print_token_summary` gathers the agent's binding plus the accounting file and
+  prints the breakdown.
+- `tddy-presenter` — the session usage watcher re-gathers on change from the spec's binding, passed
+  as data.
 
 ## Scope
 
 - **In scope:** RPC/backend layer + the `tddy-sandbox-app` CLI stderr summary.
-- **Out of scope:** web dashboard / TUI visualization; USD cost estimation.
+- **Out of scope:** web dashboard / TUI visualization; USD cost estimation; bindings for agents other
+  than Claude and Claude-ACP (later `#usage-binding` nodes).
 
 > ⚠️ The live end-to-end stderr summary against a real Ollama-backed session has not yet been
 > exercised; the behavior is covered by unit/acceptance tests (including against a real Claude

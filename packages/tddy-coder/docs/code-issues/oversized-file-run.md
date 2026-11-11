@@ -70,3 +70,5 @@ budget before this PR, which did not push it past; recorded, not split, by devel
 **Regressed, split deferred (2026-11-04, #800, #agent-tools 11/12):** 2,637 → 2,646 production lines. The `claude-acp`, `codex-acp` and `opencode` arms of `create_backend` are built by `acp_from_spec` (a new 120-line module, not in `run.rs`). Deferred to the #agent-tools sweep node (developer, 2026-11-04).
 
 **Shrank, split still deferred (2026-11-05, #822, #agent-tools 16/19):** 2,646 → **2,502 production lines** (-144). `create_backend` (~120 lines) and `BUILTIN_BACKEND_AGENT_IDS` left for `spec_backend_build.rs` (`create_workflow_backend`, `build_spec_backend`); `on_progress` went. Deferred to the #agent-tools sweep node (n20).
+
+**Regressed, split deferred (2026-11-11, #890, #usage-binding 1/5):** 2,501 → **2,511 production lines** (+10): the usage watcher is handed the session agent's `coding_agent.usage` binding and a `tddy_usage::UsageContext`. Not split: stack-shared — `#usage-binding 2/5` (`feature/usage-binding/daemon-stream`) also modifies `run.rs`; the split is a follow-up after the stack lands.

@@ -1,13 +1,13 @@
 //! Integration tests: the per-session usage emitter that the file-watcher drives.
 //!
 //! The watcher re-reads the on-disk token sources on start and on every change, gathers them
-//! (`tddy_agent_backend::backend::gather_session_usage`), and hands the snapshot to a `SessionUsageEmitter`.
+//! (`tddy_usage::gather_session_usage`), and hands the snapshot to a `SessionUsageEmitter`.
 //! The emitter broadcasts a `PresenterEvent::TokenUsageUpdated` carrying the full cumulative
 //! snapshot — always on the first gather (so a newly-connected Inspector sees current totals), and
 //! again whenever the snapshot changes, but never for an unchanged snapshot.
 //!
 //! Gathering-from-disk (including "an appended transcript yields larger totals") is covered by the
-//! `tddy-core` `gather_session_usage` tests; these pin the emitter's broadcast/dedup contract.
+//! `tddy-usage` binding and gather tests; these pin the emitter's broadcast/dedup contract.
 
 use tddy_agent_backend::token_accounting::ConversationRecord;
 use tddy_presenter::usage_watcher::SessionUsageEmitter;
@@ -15,20 +15,7 @@ use tddy_presenter::PresenterEvent;
 use tokio::sync::broadcast;
 
 fn a_record(id: &str, input: u64, output: u64) -> ConversationRecord {
-    ConversationRecord {
-        agent: "claude".to_string(),
-        id: id.to_string(),
-        model: "claude-opus-4-8".to_string(),
-        input_tokens: input,
-        output_tokens: output,
-        total_tokens: input + output,
-        turns: 1,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        reasoning_tokens: 0,
-        cost_usd: None,
-        parent_id: None,
-    }
+    ConversationRecord::new("claude", id, "claude-opus-4-8", input, output, 1)
 }
 
 fn recv_snapshot(rx: &mut broadcast::Receiver<PresenterEvent>) -> Vec<ConversationRecord> {
