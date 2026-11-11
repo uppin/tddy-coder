@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::{Aggregate, FieldPath, RecordSpec};
+use crate::{Aggregate, CounterExpr, RecordSpec};
 
 /// What a conversation's files add up to under a [`RecordSpec`].
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -25,13 +25,15 @@ pub(crate) struct Folded {
 /// One kept record: the figures read from a line.
 #[derive(Default)]
 struct Reading {
-    counters: [u64; 5],
+    /// `None` where the line does not carry the counter's field.
+    counters: [Option<u64>; 5],
     cost: Option<f64>,
 }
 
 /// Fold every line of `files` under `spec`: lines that are not JSON or fail a `where` predicate are
 /// dropped, the last line per `dedupe_by` key wins (a line without the key is a record of its own),
-/// the counters are summed, `model` is the last value seen and `turns` counts the kept records.
+/// the counters are folded by `aggregate`, `model` is the last value seen on any line (the `where`
+/// filter does not hide it) and `turns` counts the kept records.
 /// An unreadable file contributes nothing.
 pub(crate) fn fold_files(files: &[PathBuf], spec: &RecordSpec) -> Folded {
     let mut records: Vec<Reading> = Vec::new();
@@ -50,9 +52,6 @@ pub(crate) fn fold_files(files: &[PathBuf], spec: &RecordSpec) -> Folded {
             let Ok(value) = serde_json::from_str::<Value>(line) else {
                 continue;
             };
-            if !passes_where(&value, spec) {
-                continue;
-            }
             if let Some(name) = spec
                 .model
                 .as_ref()
@@ -60,6 +59,9 @@ pub(crate) fn fold_files(files: &[PathBuf], spec: &RecordSpec) -> Folded {
                 .and_then(Value::as_str)
             {
                 model = Some(name.to_string());
+            }
+            if !passes_where(&value, spec) {
+                continue;
             }
             let reading = read_line(&value, spec);
             let key = spec
@@ -71,7 +73,7 @@ pub(crate) fn fold_files(files: &[PathBuf], spec: &RecordSpec) -> Folded {
         }
     }
 
-    sum(&records, model, spec.aggregate)
+    fold(&records, model, spec.aggregate)
 }
 
 /// Keep `reading`: in place of the earlier record with the same dedupe `key`, else as a new one.
@@ -105,36 +107,46 @@ fn passes_where(value: &Value, spec: &RecordSpec) -> bool {
     })
 }
 
-/// The kept records folded by `aggregate`: each counter and the cost summed.
-fn sum(records: &[Reading], model: Option<String>, aggregate: Aggregate) -> Folded {
-    let Aggregate::Sum = aggregate;
+/// The kept records folded by `aggregate`: each counter and the cost summed, or the last one read.
+fn fold(records: &[Reading], model: Option<String>, aggregate: Aggregate) -> Folded {
     let mut folded = Folded {
         model,
         turns: records.len() as u32,
         ..Folded::default()
     };
-    for record in records {
-        let [input, cache_read, cache_write, output, reasoning] = record.counters;
-        folded.input += input;
-        folded.cache_read += cache_read;
-        folded.cache_write += cache_write;
-        folded.output += output;
-        folded.reasoning += reasoning;
-        if let Some(cost) = record.cost {
-            *folded.cost.get_or_insert(0.0) += cost;
-        }
-    }
+    let counters = match aggregate {
+        Aggregate::Sum => std::array::from_fn(|i| {
+            records
+                .iter()
+                .map(|r| r.counters[i].unwrap_or(0))
+                .sum::<u64>()
+        }),
+        Aggregate::Last => std::array::from_fn(|i| {
+            records
+                .iter()
+                .rev()
+                .find_map(|r| r.counters[i])
+                .unwrap_or(0)
+        }),
+    };
+    [
+        folded.input,
+        folded.cache_read,
+        folded.cache_write,
+        folded.output,
+        folded.reasoning,
+    ] = counters;
+    let mut costs = records.iter().filter_map(|r| r.cost);
+    folded.cost = match aggregate {
+        Aggregate::Sum => costs.reduce(|a, b| a + b),
+        Aggregate::Last => costs.next_back(),
+    };
     folded
 }
 
-/// The counters and cost one line reports; a field that is missing or not a number reads as zero.
+/// The counters and cost one line reports; a field that is missing or not a number is absent.
 fn read_line(value: &Value, spec: &RecordSpec) -> Reading {
-    let number = |path: &Option<FieldPath>| {
-        path.as_ref()
-            .and_then(|p| p.lookup(value))
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-    };
+    let number = |expr: &Option<CounterExpr>| expr.as_ref().and_then(|e| e.evaluate(value));
     let tokens = &spec.tokens;
     Reading {
         counters: [
@@ -149,5 +161,45 @@ fn read_line(value: &Value, spec: &RecordSpec) -> Reading {
             .as_ref()
             .and_then(|p| p.lookup(value))
             .and_then(Value::as_f64),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(aggregate: &str) -> RecordSpec {
+        serde_json::from_value(serde_json::json!({
+            "aggregate": aggregate,
+            "tokens": { "input": "n", "output": "m" }
+        }))
+        .expect("a record spec")
+    }
+
+    fn fold_lines(lines: &[&str], aggregate: &str) -> Folded {
+        let dir = std::env::temp_dir().join(format!(
+            "tddy-usage-jsonl-{}-{aggregate}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("lines.jsonl");
+        std::fs::write(&file, lines.join("\n")).unwrap();
+        let folded = fold_files(&[file], &spec(aggregate));
+        std::fs::remove_dir_all(&dir).unwrap();
+        folded
+    }
+
+    #[test]
+    fn last_takes_each_counter_from_the_last_record_that_carries_it() {
+        let folded = fold_lines(&[r#"{"n":5,"m":1}"#, r#"{"n":9}"#], "last");
+
+        assert_eq!((folded.input, folded.output), (9, 1));
+    }
+
+    #[test]
+    fn sum_adds_every_record() {
+        let folded = fold_lines(&[r#"{"n":5,"m":1}"#, r#"{"n":9}"#], "sum");
+
+        assert_eq!((folded.input, folded.output, folded.turns), (14, 1, 2));
     }
 }

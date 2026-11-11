@@ -10,6 +10,7 @@
 //! Feature: docs/ft/coder/session-token-accounting.md
 
 mod context_file;
+mod counter_expr;
 mod field_path;
 mod gather;
 mod jsonl;
@@ -23,6 +24,7 @@ pub use context_file::{
     gather_session_usage_for, read_usage_context, write_usage_context, UsageContextFile,
     USAGE_CONTEXT_FILE,
 };
+pub use counter_expr::CounterExpr;
 pub use field_path::FieldPath;
 pub use gather::{account, gather_session_usage, merge_sources, UsageContext};
 pub use registry::{
@@ -30,7 +32,7 @@ pub use registry::{
     CONVERSATION_REGISTRY_FILE,
 };
 pub use section::{
-    validate_usage_section, Aggregate, ChildrenSpec, CounterMap, FieldEq, JsonlSource, MainSpec,
-    NameSpec, RecordSpec, UsageSection, UsageSource,
+    validate_usage_section, Aggregate, ChildrenBy, ChildrenSpec, CounterMap, FieldEq, IdentitySpec,
+    JsonlSource, MainMatch, MainSpec, NameSpec, RecordSpec, UsageSection, UsageSource,
 };
 pub use template::{PathTemplate, TemplateError};
