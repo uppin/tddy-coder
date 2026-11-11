@@ -1823,8 +1823,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
     ) = if livekit_enabled {
         let (event_tx, _) = tokio::sync::broadcast::channel(256);
         let presenter_observer = tddy_service::PresenterObserverService::new(event_tx.clone());
-        // Feed the session's live token usage onto the same presenter channel the web Inspector
-        // reads (via `PresenterObserver`); the watcher is spawned once the tokio runtime is up.
+        // The presenter channel the session participant taps once the tokio runtime is up.
         let presenter_event_tx = event_tx.clone();
         let (intent_tx, intent_rx) = std::sync::mpsc::channel();
         let presenter_intent_tx = intent_tx.clone();

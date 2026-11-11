@@ -1,8 +1,8 @@
-# `activity.ActivityService` — the ten methods and their ports
+# `activity.ActivityService` — the eleven methods and their ports
 
 ## Role
 
-`tddy-session-activity` serves the ten RPCs of families M and N: what an agent is doing, what a
+`tddy-session-activity` serves the eleven RPCs of families M and N: what an agent is doing, what a
 session's status is, and the transcript of both. The coordinate and the crate both arrived with
 `#unbundle` node 7, which moved the families off `connection.ConnectionService` (50 methods → 33)
 along with the notification bus.
@@ -15,6 +15,7 @@ along with the notification bus.
 | `IsSessionTerminalServed` | unary, peer-only | no token: refused `PERMISSION_DENIED` unless it arrived over `RequestTransport::LiveKit` (stamped by the listener's `ServerEngine`, never by the caller). Answers `served` from this daemon's own terminals (`presence.is_active(session_id, None)`), so it is never forwarded again; `PeerRoutedActivity` delegates it locally (`service/question_answers.rs`) |
 | `ReportAgentActivity` | unary | the same hook token; mints the `call_id` pairing a PreToolUse row to its PostToolUse row |
 | `StreamSessionActivity` | server-stream | the persisted activity log, then the live hub |
+| `StreamSessionUsage` | server-stream | the session's per-conversation token usage: its spec's `usage:` binding (`ActivityPorts::usage_bindings`) evaluated against the `usage-context.json` its launch recorded (`tddy_usage::gather_session_usage_for`), by one poller per session shared between its subscribers (`service/usage_pollers.rs`). The current snapshot first, then each changed one; the poller re-evaluates every 2 s and stops when its last subscriber's stream is dropped. Refused by `PeerRoutedActivity` when addressed at a peer, like `StreamSessionActivity`. Not served by `tddy-coder`'s session participant (see *The second server*) |
 | `StreamSessionNotifications` | server-stream | this host's notification bus, scoped to the caller's OS user |
 | `StreamAgentActivityDelta` | server-stream | the per-session delta ring the session room measured |
 | `StreamAcpReplay` | server-stream | the ACP transcript, then the live broadcast |
@@ -74,7 +75,7 @@ point.
 
 ## The ports, and why each is one
 
-`ActivityPorts` is a struct rather than six positional parameters: they are all wiring, and the two
+`ActivityPorts` is a struct rather than positional parameters: they are all wiring, and the two
 `Arc<dyn _>` ports have no type-level distinction at a call site.
 
 | Port | What only a daemon can answer |
@@ -84,6 +85,7 @@ point.
 | `activity` | node 1's `AgentActivityHub`, consumed unchanged — the sandbox subsystem publishes into the same hub, so a second one here would leave an in-jail tool call invisible to every stream |
 | `notifications` | an `Option`, because a host with no subscribers and no stream clients raises no bus, and inventing one here would retain events nobody reads |
 | `session_labels` | a session's display name, whose fallback reads `session_list_enrichment` — `ListSessions` is family C and stays in the daemon |
+| `usage_bindings` | each coding agent's `usage:` binding by spec id — the host's registry (`HostCodingAgents::usage_bindings`), handed over as data so this crate never learns one agent from another |
 | `deltas` | the ring is filled by the session room's poll loop in `tddy-daemon-livekit`, and a patch is a measurement of a live checkout only that host ever took |
 
 `SessionDeltaStores::delta_for_call` returns a `DeltaLookup` with four settled answers a client acts
@@ -188,9 +190,10 @@ written twice. See
 
 | Module | Production lines | Holds |
 |---|---:|---|
-| `service.rs` | 202 | `ActivityServiceImpl`, the session-directory and hook-session resolution every method shares, `publish_for_session`, `activity_delta_frames` and the two stream adapters (`streamed`, `relayed`) |
-| `service/ports.rs` | 146 | the ports the daemon injects: `ActivityPorts`, `SessionLabels`, `SessionDeltaStores` and `NoSessionDeltaStores`, `DeltaLookup`, `DeltaScope`, `MeasuredDelta` — re-exported from `service` |
-| `service/rpc.rs` | 323 | the `activity.ActivityService` trait impl: the four streams, the two ACP replay reads, and the two hook reports as one-line delegations |
+| `service.rs` | 246 | `ActivityServiceImpl`, the session-directory and hook-session resolution every method shares, `publish_for_session`, `activity_delta_frames` and the two stream adapters (`streamed`, `relayed`) |
+| `service/ports.rs` | 158 | the ports the daemon injects: `ActivityPorts`, `SessionLabels`, `SessionDeltaStores` and `NoSessionDeltaStores`, `DeltaLookup`, `DeltaScope`, `MeasuredDelta` — re-exported from `service` |
+| `service/rpc.rs` | 404 | the `activity.ActivityService` trait impl: the five streams, the two ACP replay reads, and the two hook reports as one-line delegations |
+| `service/usage_pollers.rs` | 159 | `UsagePollers`: the per-session poller registry, the poll loop, the subscriber relay that leaves on a dropped stream, and the `ConversationRecord` → `UsageConversation` mapping |
 | `service/question_answers.rs` | 167 | `AnswerWaitPorts` and `await_question_answer_impl`, the long-held hook call |
 | `answers.rs` | 434 | `answer_permission`, `clear_answered_pending_question`, its refusals and `permission_request_view` |
 | `pending_answers.rs` | 249 | `PendingAnswers`, the in-memory waiters |

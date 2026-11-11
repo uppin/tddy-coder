@@ -21,6 +21,7 @@
 | 2026-11-07 | 115 → 115 | **unchanged, moved** in #829 (`#agent-tools` 21/28): engine `move_item` into `opencode_cli_spawn/resume.rs`; the session-pointer call takes a `PointerHost`, bound on its own line, so the length holds; fn line to closing brace (this script's count; the 121 above was measured with the doc comment) on `origin/master` (`d3fe1abea`) and HEAD |
 | 2026-11-07 | 115 → 117 | touched by `#agent-tools` 25/28 (#833): **+2**, fn line to closing brace on `origin/feature/agent-tools/dead-launch-code` and HEAD. A split session's pointer is chosen by session kind and a split wiring without one is refused; that selection is `split_launch_parts`, a helper beside the function (the inline form was 125) |
 | 2026-11-10 | 117 → 118 | **worse by 1** across #835–#865 (`#agent-tools` 27–32), brace-matched on `b8d9b769c` against `153b3c05d`. Not extracted: the `#agent-tools` sweep (#876) scoped Tier C to functions grown by 5 or more lines or with no record (user, 6e, 2026-11-10) |
+| 2026-11-11 | 118 → 128 | **worse by 10** in #891 (`#usage-binding 2/5`): the host resume rewrites its usage context before relaunching; br |
 
 ## What would close it
 

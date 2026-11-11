@@ -20,6 +20,7 @@
 | 2026-11-07 | 300 → 300 | **unchanged** in #829 (`#agent-tools` 21/28), which touched it: the session-pointer call takes a `PointerHost` bound on its own line; fn line to closing brace on `origin/master` (`d3fe1abea`) and HEAD (300 by this count; 301 above) |
 | 2026-11-07 | 300 → 302 | **worse by 2** in #834 (`#agent-tools` 26/28): `CliSessionStart` carries the session user's `agent_tool_socket`, destructured and passed on to the session wiring (+2); measured fn line to closing brace on `origin/feature/agent-tools/split-remote-env` (`cd9026d9d`) and HEAD; no coverage run |
 | 2026-11-10 | 302 → 303 | **worse by 1** across #835–#865 (`#agent-tools` 27–32), brace-matched on `b8d9b769c` against the stack's merge-base `153b3c05d`. Not extracted: the `#agent-tools` sweep (#876) scoped Tier C to functions grown by 5 or more lines or with no record (user, 6e, 2026-11-10) |
+| 2026-11-11 | 303 → 310 | **worse by 7** in #891 (`#usage-binding 2/5`): the host start records its usage context with the OS user's home before launching; br |
 
 ## What would close it
 

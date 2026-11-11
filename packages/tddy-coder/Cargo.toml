@@ -48,7 +48,6 @@ tddy-tool-engine = { path = "../tddy-tool-engine" }
 # invocation (`#agent-tools 6/12`).
 tddy-actions = { path = "../tddy-actions" }
 tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
-tddy-usage = { path = "../tddy-usage" }
 tonic = "0.12"
 tokio-stream = "0.1"
 prost = "0.13"

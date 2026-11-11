@@ -2,7 +2,7 @@
 //! the snapshot its agent's spec binding yields against the usage context the session's launch
 //! recorded, then each changed snapshot (`#usage-binding 2/5`).
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-11-10-usage-binding-daemon-stream.md
+//! Feature: docs/ft/web/session-usage-inspector.md
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

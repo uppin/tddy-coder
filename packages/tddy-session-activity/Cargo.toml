@@ -35,8 +35,8 @@ async-trait = "0.1"
 # propagated to the RPC that published (PRD NFR3).
 anyhow = "1"
 # The broadcast channel the notification stream fans out on, one per daemon, and the `rt` handle the
-# three relay tasks are spawned onto.
-tokio = { version = "1", features = ["rt", "sync", "time"] }
+# three relay tasks are spawned onto; `macros` for the usage relay's `select!` on a dropped client.
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 # A swallowed subscriber failure is only visible in the log, so the log line is the report.
 log = "0.4"
 # An ACP replay frame carries its `AcpAgentMessage` as encoded bytes — `Message::encode_to_vec`.
@@ -69,7 +69,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 libc = "0.2"
 
 [dev-dependencies]
-# `#[tokio::test]` in `tests/operator_channel_subscriber_acceptance.rs` — the bus publishes async.
+# `#[tokio::test]` in `tests/operator_channel_subscriber_acceptance.rs` — the bus publishes async;
+# `time`: the usage stream tests wait on its poller with a deadline.
 tokio = { version = "1", features = ["macros", "rt", "time"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
@@ -77,4 +78,3 @@ tddy-workflow = { path = "../tddy-workflow" }
 tempfile = "3"
 # `session_usage_stream_acceptance` reads the stream the handler returns.
 futures-util = "0.3"
-# The `time` feature: the usage stream tests wait on its poller with a deadline.

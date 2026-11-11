@@ -742,7 +742,6 @@ pub fn apply_event(
         PresenterEvent::ShouldQuit => {
             state.should_quit = true;
         }
-        // The TUI does not render live token usage; the snapshot is for remote (Inspector) views.
         // Agent-activity records are served over the web `StreamSessionActivity` stream, not the TUI.
         PresenterEvent::AgentActivity(_) => {}
     }

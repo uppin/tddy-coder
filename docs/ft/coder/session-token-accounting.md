@@ -76,14 +76,21 @@ declares no `usage:` has no main-agent row — only its tddy subagent rows.
 - `tddy-sandbox-runner` — sets `TDDY_TOOLS_ACCOUNTING_FILE` on the in-jail MCP spawn.
 - `tddy-sandbox-app` — `print_token_summary` gathers the agent's binding plus the accounting file and
   prints the breakdown.
-- `tddy-presenter` — the session usage watcher re-gathers on change from the spec's binding, passed
-  as data.
+- `tddy-agent-launch` / `tddy-spawn` — every launch, resume and relaunch records the session's usage
+  context (`<session_dir>/usage-context.json`: spec id, agent home as a host path, conversation id,
+  worktree, model; `tddy_usage::write_usage_context`).
+- `tddy-session-activity` — `ActivityService.StreamSessionUsage`: one poller per watched session
+  evaluates the spec's binding against that context (`tddy_usage::gather_session_usage_for`) and
+  streams each changed snapshot to the web's Usage tab
+  ([Session Usage Inspector](../web/session-usage-inspector.md)).
 
 ## Scope
 
 - **In scope:** RPC/backend layer + the `tddy-sandbox-app` CLI stderr summary.
-- **Out of scope:** web dashboard / TUI visualization; USD cost estimation; bindings for agents other
-  than Claude and Claude-ACP (later `#usage-binding` nodes).
+- **In scope (web):** the daemon streams every session's usage to the Inspector's Usage tab — see
+  [Session Usage Inspector](../web/session-usage-inspector.md).
+- **Out of scope:** TUI visualization; USD cost estimation; bindings for agents other than Claude and
+  Claude-ACP (later `#usage-binding` nodes).
 
 > ⚠️ The live end-to-end stderr summary against a real Ollama-backed session has not yet been
 > exercised; the behavior is covered by unit/acceptance tests (including against a real Claude

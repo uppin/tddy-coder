@@ -942,36 +942,7 @@ pub fn plan_session_child(
         );
     }
 
-    // Where the session's agent keeps its files, for the daemon's usage stream: the OS user's home,
-    // which the child runs with. A session with no `--agent` has no spec to record.
-    if let Some(spec_id) = opts.agent.map(str::trim).filter(|a| !a.is_empty()) {
-        let session_dir = tddy_core::session_lifecycle::unified_session_dir_path(
-            &resolved_tddy_data_dir,
-            &session_id,
-        );
-        std::fs::create_dir_all(&session_dir).map_err(|e| {
-            anyhow::anyhow!(
-                "failed to create session dir {}: {}",
-                session_dir.display(),
-                e
-            )
-        })?;
-        tddy_usage::write_usage_context(
-            &session_dir,
-            &tddy_usage::UsageContextFile {
-                spec_id: spec_id.to_string(),
-                agent_home: Some(home.to_path_buf()),
-                conversation_id: None,
-                worktree: Some(repo_path.to_path_buf()),
-                model: opts
-                    .model
-                    .map(str::trim)
-                    .filter(|m| !m.is_empty())
-                    .map(str::to_string),
-            },
-        )
-        .map_err(|e| anyhow::anyhow!("failed to write the session's usage context: {}", e))?;
-    }
+    record_workflow_usage_context(&resolved_tddy_data_dir, &session_id, home, repo_path, &opts)?;
 
     if opts.mouse {
         args.push("--mouse".to_string());
@@ -1026,6 +997,48 @@ pub fn plan_session_child(
         target,
         logs,
     })
+}
+
+/// Record where a workflow session's agent keeps its files, for the daemon's usage stream: the OS
+/// user's `home`, which the child runs with. A session with no `--agent` has no spec to record.
+// TODO(usage-binding): a spawn without `--agent` runs `tddy-coder --daemon`'s default agent, so its
+// usage is real but unrecorded. The daemon should resolve that default before spawning rather than
+// this crate naming an agent
+// (docs/dev/todo/2026-11-11-workflow-spawn-without-agent-records-no-usage-context.md).
+fn record_workflow_usage_context(
+    tddy_data_dir: &Path,
+    session_id: &str,
+    home: &Path,
+    repo_path: &Path,
+    opts: &SpawnOptions<'_>,
+) -> anyhow::Result<()> {
+    let Some(spec_id) = opts.agent.map(str::trim).filter(|a| !a.is_empty()) else {
+        return Ok(());
+    };
+    let session_dir =
+        tddy_core::session_lifecycle::unified_session_dir_path(tddy_data_dir, session_id);
+    std::fs::create_dir_all(&session_dir).map_err(|e| {
+        anyhow::anyhow!(
+            "failed to create session dir {}: {}",
+            session_dir.display(),
+            e
+        )
+    })?;
+    tddy_usage::write_usage_context(
+        &session_dir,
+        &tddy_usage::UsageContextFile {
+            spec_id: spec_id.to_string(),
+            agent_home: Some(home.to_path_buf()),
+            conversation_id: None,
+            worktree: Some(repo_path.to_path_buf()),
+            model: opts
+                .model
+                .map(str::trim)
+                .filter(|m| !m.is_empty())
+                .map(str::to_string),
+        },
+    )
+    .map_err(|e| anyhow::anyhow!("failed to write the session's usage context: {}", e))
 }
 
 /// Spawn a tddy-* process as the given OS user.

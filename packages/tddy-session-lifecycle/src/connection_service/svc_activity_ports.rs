@@ -126,15 +126,7 @@ impl DaemonSessionHost {
             daemon_instance_id: tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(
                 &self.config,
             ),
-            // The host's coding-agent registry, read for each session's spec binding.
-            usage_bindings: {
-                let agents = self.coding_agents.agents_shared();
-                Arc::new(move |spec_id: &str| {
-                    agents
-                        .get(spec_id)
-                        .and_then(|spec| spec.agent.usage.clone())
-                })
-            },
+            usage_bindings: Arc::new(self.coding_agents.usage_bindings()),
         }
     }
 }

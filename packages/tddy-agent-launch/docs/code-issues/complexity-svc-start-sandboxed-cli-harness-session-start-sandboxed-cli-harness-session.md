@@ -19,6 +19,7 @@
 | 2026-11-03 | 214 | — | #797 (`#agent-tools` 8/12): **better, not clean.** 250 → 214 (`:76`–`:289`, fn line to closing brace on `origin/feature/agent-tools/cursor-cli` `ca7814b57` and HEAD; no coverage run). The runner argv, env, spawn and bridge moved onto the shared jail launcher (`launch_jailed_cli_agent` → `launch_jailed`, with `JailSession` / `JailDirs`), and the argv renders from the spec (`harness_from_spec.rs`). What is left inline is the pre-launch sequence: route check, roster warm-up, worktree, seeded clones, jail dirs and metadata. Extracting it is deferred to the sweep node (developer, 2026-11-02) |
 | 2026-11-05 | 220 → 223 | — | **worse by 3** in #819 (`#agent-tools` 13/19): `routed_launch_model` is handed the route's arguments (wrapped onto five lines) so a route that names the model leaves the argv without one; measured fn line to closing brace on `origin/feature/agent-tools/agent-registry` (`7ab752605`) and HEAD; no coverage run. Restructuring deferred to the #agent-tools sweep node (developer, 2026-11-04) |
 | 2026-11-10 | 285 → 286 | — | **worse by 1** across #835–#865 (`#agent-tools` 27–32), brace-matched on `b8d9b769c` against `153b3c05d`. Not extracted: the `#agent-tools` sweep (#876) scoped Tier C to functions grown by 5 or more lines or with no record (user, 6e, 2026-11-10) |
+| 2026-11-11 | 286 → 287 | — | **worse by 1** in #891 (`#usage-binding 2/5`): the jailed start hands the jail its `UsageSubject`; br |
 
 ## What the tool found
 

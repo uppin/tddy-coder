@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-11-02 | 147 lines | first detection; new in this PR |
 | 2026-11-06 | 150 → 151 | **worse by 1** in #823 (`#agent-tools` 17/19); measured fn line to closing brace on `origin/feature/agent-tools/spec-backend` (`d325fba73`) and HEAD; no coverage run. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
+| 2026-11-11 | 151 → 161 | **worse by 10** in #891 (`#usage-binding 2/5`): the usage context is recorded with the jail's home once `lower_tool_jail` has resolved it (a 2-line comment and a 7-line call); br |
 
 ## What the tool found
 

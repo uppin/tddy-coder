@@ -1,7 +1,7 @@
 //! A workflow session's spawn records the usage context the daemon later accounts it from: which
 //! agent it runs, the OS user's home its child runs with, and its working tree.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-11-10-usage-binding-daemon-stream.md
+//! Feature: docs/ft/web/session-usage-inspector.md
 
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;

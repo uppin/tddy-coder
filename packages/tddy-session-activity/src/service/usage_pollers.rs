@@ -7,13 +7,15 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use tddy_rpc::Status;
 use tddy_service::proto::activity::{SessionUsageSnapshot, UsageConversation};
 use tddy_usage::gather_session_usage_for;
 use tddy_usage::token_accounting::ConversationRecord;
-use tokio::sync::watch;
+use tddy_worktree_service::stream::MpscResultStream;
+use tokio::sync::{mpsc, watch};
 
 use crate::service::ports::UsageBindings;
 
@@ -30,6 +32,20 @@ pub(crate) struct UsagePollers {
 }
 
 impl UsagePollers {
+    /// `session_dir`'s usage as a server stream: the poller's first evaluation (or its latest, when
+    /// a poller was already running), then each change. Dropping the stream leaves the poller at
+    /// once, so the last subscriber to go stops it without waiting for another change.
+    pub(crate) fn stream(
+        &self,
+        session_dir: &Path,
+        bindings: &UsageBindings,
+    ) -> MpscResultStream<SessionUsageSnapshot> {
+        let snapshots = self.join(session_dir, bindings);
+        let (tx, rx) = mpsc::unbounded_channel();
+        tokio::spawn(relay(snapshots, tx));
+        MpscResultStream::from(rx)
+    }
+
     /// A receiver of `session_dir`'s snapshots: joins the session's poller, or starts one that
     /// evaluates `bindings` against it.
     pub(crate) fn join(
@@ -37,7 +53,7 @@ impl UsagePollers {
         session_dir: &Path,
         bindings: &UsageBindings,
     ) -> watch::Receiver<Option<SessionUsageSnapshot>> {
-        let mut running = self.running.lock().expect("usage pollers lock");
+        let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(latest) = running.get(session_dir).filter(|l| !l.is_closed()) {
             return latest.subscribe();
         }
@@ -55,9 +71,28 @@ impl UsagePollers {
     /// Forget `session_dir`'s poller once its subscribers are gone. A poller a later subscriber
     /// replaced is live and stays.
     fn forget_if_closed(&self, session_dir: &Path) {
-        let mut running = self.running.lock().expect("usage pollers lock");
+        let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
         if running.get(session_dir).is_some_and(Latest::is_closed) {
             running.remove(session_dir);
+        }
+    }
+}
+
+/// Forward each snapshot from `snapshots` to `tx` until either side goes away.
+async fn relay(
+    mut snapshots: watch::Receiver<Option<SessionUsageSnapshot>>,
+    tx: mpsc::UnboundedSender<Result<SessionUsageSnapshot, Status>>,
+) {
+    loop {
+        let latest = snapshots.borrow_and_update().clone();
+        if let Some(snapshot) = latest {
+            if tx.send(Ok(snapshot)).is_err() {
+                return;
+            }
+        }
+        tokio::select! {
+            changed = snapshots.changed() => if changed.is_err() { return },
+            () = tx.closed() => return,
         }
     }
 }
@@ -149,6 +184,18 @@ mod tests {
         let _second = pollers.join(dir.path(), &no_bindings());
 
         assert_eq!(pollers.running.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_dropped_stream_stops_the_poller_without_waiting_for_a_change() {
+        let pollers = UsagePollers::default();
+        let dir = tempfile::tempdir().unwrap();
+        let mut stream = pollers.stream(dir.path(), &no_bindings());
+        let _first = futures_util::StreamExt::next(&mut stream).await;
+
+        drop(stream);
+
+        assert!(until_no_poller_runs(&pollers).await);
     }
 
     #[tokio::test]

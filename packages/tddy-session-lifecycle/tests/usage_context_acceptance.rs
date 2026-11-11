@@ -3,7 +3,7 @@
 //! path, its conversation id and its worktree (`#usage-binding 2/5`). Without it a terminal session
 //! has no usage at all, and a jailed one is read from the wrong HOME.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-11-10-usage-binding-daemon-stream.md
+//! Feature: docs/ft/web/session-usage-inspector.md
 //!
 //! The daemon is `agent_registry_support`'s: the real `DaemonSessionHost` over a copy of the
 //! built-in `claude.yaml` dropped in as `acme`, its binary a stub. The jailed start runs a real
