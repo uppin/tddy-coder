@@ -25,6 +25,9 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # `LiveAgentRoster`, node 5's — the roster as a *client* process sees it.
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-coding-subagent = { path = "../tddy-coding-subagent" }
+# `RegisteredConversation`: a conversation this daemon opens is registered where the session's usage
+# stream finds it (`#usage-binding 3/5`).
+tddy-usage = { path = "../tddy-usage" }
 # `CodingAgentRegistry`: which coding agents a host declares, read for its catalog and confinement
 # (`#agent-tools 27/28`).
 tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }

@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::token_accounting::ConversationRecord;
-use crate::{gather_session_usage, UsageContext, UsageSection};
+use crate::{
+    account, gather_session_usage, registered_conversations, RegisteredConversation, UsageContext,
+    UsageSection,
+};
 
 /// The file a launch writes next to the session's `.session.yaml`.
 pub const USAGE_CONTEXT_FILE: &str = "usage-context.json";
@@ -63,27 +66,66 @@ pub fn gather_session_usage_for(
     session_dir: &Path,
     binding_for: &dyn Fn(&str) -> Option<UsageSection>,
 ) -> Vec<ConversationRecord> {
-    let Some(file) = read_usage_context(session_dir) else {
-        let ctx = UsageContext {
-            agent_home: None,
-            session_dir: session_dir.to_path_buf(),
-            conversation_id: None,
-            worktree: None,
-            agent_label: String::new(),
-            fallback_model: String::new(),
-        };
-        return gather_session_usage(None, &ctx);
+    let mut records = match read_usage_context(session_dir) {
+        None => {
+            let ctx = UsageContext {
+                agent_home: None,
+                session_dir: session_dir.to_path_buf(),
+                conversation_id: None,
+                worktree: None,
+                agent_label: String::new(),
+                fallback_model: String::new(),
+            };
+            gather_session_usage(None, &ctx)
+        }
+        Some(file) => {
+            let section = binding_for(&file.spec_id);
+            let ctx = UsageContext {
+                agent_home: file.agent_home,
+                session_dir: session_dir.to_path_buf(),
+                conversation_id: file.conversation_id,
+                worktree: file.worktree,
+                agent_label: file.spec_id,
+                fallback_model: file.model.unwrap_or_default(),
+            };
+            gather_session_usage(section.as_ref(), &ctx)
+        }
     };
-    let section = binding_for(&file.spec_id);
+    let known: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
+    for conversation in registered_conversations(session_dir) {
+        if known.contains(&conversation.conversation_id) {
+            continue;
+        }
+        records.extend(registered_rows(session_dir, &conversation, binding_for));
+    }
+    records
+}
+
+/// The rows of one registered conversation under its own agent's binding, its top row nested under
+/// the conversation it was registered with. No binding for its spec, no rows.
+fn registered_rows(
+    session_dir: &Path,
+    conversation: &RegisteredConversation,
+    binding_for: &dyn Fn(&str) -> Option<UsageSection>,
+) -> Vec<ConversationRecord> {
+    let Some(section) = binding_for(&conversation.spec_id) else {
+        return Vec::new();
+    };
     let ctx = UsageContext {
-        agent_home: file.agent_home,
+        agent_home: conversation.agent_home.clone(),
         session_dir: session_dir.to_path_buf(),
-        conversation_id: file.conversation_id,
-        worktree: file.worktree,
-        agent_label: file.spec_id,
-        fallback_model: file.model.unwrap_or_default(),
+        conversation_id: Some(conversation.conversation_id.clone()),
+        worktree: conversation.worktree.clone(),
+        agent_label: conversation.agent_label.clone(),
+        fallback_model: String::new(),
     };
-    gather_session_usage(section.as_ref(), &ctx)
+    let mut rows = account(&section, &ctx);
+    for row in &mut rows {
+        if row.id == conversation.conversation_id {
+            row.parent_id = Some(conversation.parent_id.clone());
+        }
+    }
+    rows
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::token_accounting::ConversationRecord;
 use crate::tree::conversation_rows;
-use crate::{UsageSection, UsageSource};
+use crate::{merge_sources, UsageSection, UsageSource};
 
 /// What a binding's templates resolve against for one session, and what labels its main row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,14 +29,15 @@ pub struct UsageContext {
 /// first (a zero row carrying `ctx.fallback_model` when it has no files yet), each followed by its
 /// children, recursively, every child's `parent_id` naming its parent.
 pub fn account(section: &UsageSection, ctx: &UsageContext) -> Vec<ConversationRecord> {
-    section
-        .sources
-        .iter()
-        .filter_map(|source| match source {
-            UsageSource::Jsonl(jsonl) => conversation_rows(jsonl, ctx),
-        })
-        .flatten()
-        .collect()
+    merge_sources(
+        section
+            .sources
+            .iter()
+            .filter_map(|source| match source {
+                UsageSource::Jsonl(jsonl) => conversation_rows(jsonl, ctx),
+            })
+            .collect(),
+    )
 }
 
 /// The session's full usage snapshot: [`account`] over `section` when the agent declares one,

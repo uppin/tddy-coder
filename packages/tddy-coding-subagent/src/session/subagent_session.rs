@@ -105,12 +105,16 @@ impl SubagentSession for CodingAgentSession {
         &self.model
     }
 
-    /// ACP reports no token usage, so there is nothing to total.
+    /// The conversation's totals under its agent's usage binding; zero when none is attached.
     fn cumulative_usage(&self) -> TokenUsage {
-        TokenUsage::default()
+        self.usage_reading
+            .as_ref()
+            .map(crate::session::UsageReading::totals)
+            .unwrap_or_default()
     }
 
-    /// ACP reports no context occupancy.
+    /// TODO(#893): context occupancy is the *last* turn's input, which needs `aggregate: last`
+    /// (`#usage-binding 4/5`); the binding sums, so it cannot answer it yet.
     fn context_tokens(&self) -> u64 {
         0
     }
@@ -130,5 +134,84 @@ impl SubagentSession for CodingAgentSession {
 
     fn turn_canceller(&self) -> Option<Arc<dyn TurnCancelling>> {
         Some(Arc::new(self.cancel_handle()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::UsageReading;
+    use tddy_agent_backend::HeadlessCommand;
+    use tddy_usage::{UsageContext, UsageSection};
+
+    const A_TAPPED_BINDING: &str = r#"
+sources:
+  - format: jsonl
+    main:
+      path: "{session_dir}/usage/{conversation_id}.jsonl"
+    record:
+      where: [{ field: type, equals: result }]
+      aggregate: sum
+      tokens: { input: usage.input_tokens, output: usage.output_tokens }
+"#;
+
+    async fn a_session_reading(
+        session_dir: &std::path::Path,
+        conversation_id: &str,
+    ) -> CodingAgentSession {
+        let section: UsageSection = serde_yaml::from_str(A_TAPPED_BINDING).expect("a binding");
+        let reading = UsageReading {
+            section,
+            ctx: UsageContext {
+                agent_home: None,
+                session_dir: session_dir.to_path_buf(),
+                conversation_id: Some(conversation_id.to_string()),
+                worktree: None,
+                agent_label: "an-agent".to_string(),
+                fallback_model: String::new(),
+            },
+        };
+        CodingAgentSession::start_headless(HeadlessCommand::default(), "a-model".to_string())
+            .await
+            .expect("a headless session")
+            .with_usage_reading(reading)
+    }
+
+    #[tokio::test]
+    async fn cumulative_usage_reads_the_tapped_totals() {
+        // Given — two tapped turns of the conversation
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("usage")).unwrap();
+        std::fs::write(
+            dir.path().join("usage").join("conv-1.jsonl"),
+            concat!(
+                r#"{"type":"result","usage":{"input_tokens":100,"output_tokens":10}}"#,
+                "\n",
+                r#"{"type":"result","usage":{"input_tokens":50,"output_tokens":5}}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+        let session = a_session_reading(dir.path(), "conv-1").await;
+
+        // When
+        let usage = session.cumulative_usage();
+
+        // Then
+        assert_eq!(
+            usage,
+            TokenUsage {
+                input_tokens: 150,
+                output_tokens: 15
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_conversation_that_has_tapped_nothing_yet_reports_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = a_session_reading(dir.path(), "conv-1").await;
+
+        assert_eq!(session.cumulative_usage(), TokenUsage::default());
     }
 }

@@ -29,6 +29,7 @@ use crate::adapters::headless::{
 };
 use crate::adapters::{HeadlessRenderer, TurnTranscript};
 use crate::error::BackendError;
+use crate::usage_tap::UsageTap;
 
 use super::acp_driver::{AcpDriver, AcpTurnEnd, AcpUpdateSink, McpServerSpec};
 use super::spec_headless::DEFAULT_TURN_DEADLINE;
@@ -275,6 +276,7 @@ impl HeadlessDriver {
             .take()
             .map(|stderr| tokio::spawn(drain_stderr(stderr)));
         let mut lines = BufReader::new(stdout).lines();
+        let mut usage_tap = self.command.usage_tap.clone().map(UsageTap::open);
         let deadline = self.command.turn_deadline.unwrap_or(DEFAULT_TURN_DEADLINE);
         let overrun = tokio::time::sleep(deadline);
         tokio::pin!(overrun);
@@ -287,7 +289,12 @@ impl HeadlessDriver {
                     return Err(self.end_overrun(agent, &mut child, pgid, deadline).await);
                 }
                 line = lines.next_line() => match line {
-                    Ok(Some(line)) => transcript.push_line(&line),
+                    Ok(Some(line)) => {
+                        if let Some(tap) = usage_tap.as_mut() {
+                            tap.offer_line(&line);
+                        }
+                        transcript.push_line(&line);
+                    }
                     Ok(None) => break false,
                     Err(e) => {
                         return Err(BackendError::InvocationFailed(format!(

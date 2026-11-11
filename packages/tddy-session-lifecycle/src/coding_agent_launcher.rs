@@ -529,6 +529,7 @@ mod tests {
 
     fn a_launch(harness: &str) -> CodingAgentLaunch {
         CodingAgentLaunch {
+            session_dir: None,
             def: CodingAgentDef {
                 name: "fix-the-parser".to_string(),
                 label: None,

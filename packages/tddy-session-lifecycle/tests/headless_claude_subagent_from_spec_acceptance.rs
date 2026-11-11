@@ -136,6 +136,7 @@ fn the_daemons_own_identity() -> DropContext {
 
 fn a_headless_claude_launch(worktree: &Path) -> CodingAgentLaunch {
     CodingAgentLaunch {
+        session_dir: None,
         def: CodingAgentDef {
             name: "fix-the-parser".to_string(),
             label: None,

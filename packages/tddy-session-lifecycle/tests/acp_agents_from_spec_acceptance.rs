@@ -267,6 +267,7 @@ fn an_env_naming(binaries: &TheAgentBinaries) -> BTreeMap<String, String> {
 
 fn a_launch(harness: &str, managed: bool, worktree: &Path) -> CodingAgentLaunch {
     CodingAgentLaunch {
+        session_dir: None,
         def: CodingAgentDef {
             name: format!("fix-the-parser-{harness}"),
             label: None,
@@ -308,6 +309,7 @@ async fn open(
         model: Some(STUB_MODEL.to_string()),
         mcp_servers,
         meta,
+        usage_tap: None,
     };
     CodingAgentSession::start(
         command,

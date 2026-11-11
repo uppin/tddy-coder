@@ -12648,6 +12648,7 @@ dependencies = [
  "tddy-agent-backend",
  "tddy-coding-agent-specs",
  "tddy-discovery",
+ "tddy-usage",
  "tempfile",
  "tokio",
 ]
@@ -13990,6 +13991,7 @@ dependencies = [
  "tddy-session-sync",
  "tddy-subagent-worktree",
  "tddy-testing-commons",
+ "tddy-usage",
  "tddy-worktree-service",
  "tempfile",
  "tokio",

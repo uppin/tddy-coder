@@ -172,6 +172,7 @@ fn claude_stream(session: &str, text: &str) -> Vec<serde_json::Value> {
 /// A claude coding agent on the `sonnet` model, opened for a conversation of its own.
 fn a_claude_launch(worktree: PathBuf) -> CodingAgentLaunch {
     CodingAgentLaunch {
+        session_dir: None,
         def: CodingAgentDef {
             name: "plain-claude".to_string(),
             label: None,

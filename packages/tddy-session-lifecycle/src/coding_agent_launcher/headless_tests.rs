@@ -54,6 +54,7 @@ fn the_daemons_own_identity() -> DropContext {
 /// A headless launch of `harness` on the model every test runs, for a conversation of its own.
 fn a_headless_launch(harness: &str, worktree: &Path) -> CodingAgentLaunch {
     CodingAgentLaunch {
+        session_dir: None,
         def: CodingAgentDef {
             name: "plain-agent".to_string(),
             label: None,
