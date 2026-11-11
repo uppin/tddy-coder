@@ -58,7 +58,7 @@ rule: the basename of `repo_path`, else `workflow_goal`, else the first eight ch
 It mirrors `packages/tddy-session-web/src/utils/sessionDrawerLabel.ts` case for case, and the em-dash
 display placeholder counts as absent on both sides.
 
-`resolve_session_label(sessions_base, session_id)` performs the lookup from **the same three values
+`resolve_session_label(agents, sessions_base, session_id)` performs the lookup from **the same three values
 `ListSessions` reports** — anything else would agree with the drawer only until the two sources
 diverged. It asks the worktree first and pays for the goal lookup only when the rule will consult
 it: this runs on every reported hook, twice per agent tool call.

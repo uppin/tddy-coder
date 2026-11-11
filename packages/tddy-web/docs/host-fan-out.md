@@ -31,7 +31,7 @@ genuinely different one takes effect on the next read, which is why it belongs a
 
 | Hook | RPC | Row key | Host attribution |
 |---|---|---|---|
-| `sessions/useSelectableAgents.ts` | `ListAgents` | `id@daemonInstanceId` | **client-side** — `AgentInfo` has no host field, so each row is stamped with the identity the read was addressed to |
+| `tddy-session-create-web`: `src/useSelectableAgents.ts` | `ListAgents` | `agent:id@daemonInstanceId`, and `session-type:<session type>@daemonInstanceId` for each of the host's declared session types (`ListAgentsResponse.session_types`), read in the same call and returned apart as `sessionTypes` | **client-side** — `AgentInfo` and `SessionTypeInfo` have no host field, so each row is stamped with the identity the read was addressed to |
 | `sessions/useAvailableAgents.ts` | `ListSubagents` | the daemon-minted `agent_id` | **on the wire** — the serving daemon stamps `daemon_instance_id` |
 
 `tddy-workspace-web`'s `src/models/useModelRegistryFanOut.ts` fans out the same way but is **not** a reader: it reads

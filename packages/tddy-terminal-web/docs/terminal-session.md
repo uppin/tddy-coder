@@ -204,12 +204,15 @@ clamped to the viewport with an 8px margin. Its `position`, `top`, `left` and `z
 styles: the coordinates are computed at run time, and the component harness loads no CSS, so classes
 alone painted the portaled menu under the page. The outside-press listener counts a press inside the
 portaled panel as inside. Its Escape and outside-press listeners are attached only while the menu is
-open. A `sessionType` of `"tool"` (passed from `SessionRuntime`) limits it to bash; an unset one offers
-every served harness. `cliHarnessOptions.ts` is the one list both the menu and the Create pane's
-`CreateSessionTypeToggle` read: the options are derived from the agents the daemon serves
-(`sessionTypeOptions` over `ListAgents` rows), registered by every listing
-(`registerSessionTypeOptions`, read back as `knownSessionTypes`), beside `BASH_KIND`,
-`TOOL_SESSION_TYPE` and `terminalKindLabel`. The bundle hard-codes no agent.
+open. A `sessionType` (passed from `SessionRuntime`) whose served launch kind is `tddy_coder`
+(`knownSessionLaunch`) limits it to bash and lists no tmux sessions; any other, or an unset one,
+offers every served harness. `cliHarnessOptions.ts` is the one list both the menu and the Create
+pane's `CreateSessionTypeToggle` read: the options are the session types the daemon declares, each
+with its label and launch kind (`sessionTypeOptions` over `ListAgentsResponse.session_types`),
+registered by every listing (`registerSessionTypeOptions`, read back as `knownSessionTypes` and
+`knownSessionLaunch`), beside `BASH_KIND`, `NO_AGENT_SESSION_TYPE` (`workspace`, mirroring
+`tddy_workflow::NO_AGENT_SESSION_TYPE`) and `terminalKindLabel`. The bundle hard-codes no agent and no
+session type besides `workspace`.
 
 In Cypress, `terminalSessionServiceBackend.ts` records `startedTerminalKinds` and lists each started
 terminal with its requested kind; `sessionTerminalTabsPage.ts` offers `newTabMenu()` and

@@ -28,6 +28,7 @@
 | 2026-10-26 | 189 | — | — | — | **better** by 13 (202 → 189) in #766 (`#home-inbox` 1/8): the cursor-cli branch is one call to the new `LaunchSessions::resume_cursor_cli`, which also gives the resumed agent its notify environment (`chat::resumed_cursor_notify_env`); the green phase had grown it to 222. Fn line to closing brace on `origin/feature/start-parity/spawn-conversation` (dfdfe8d93) and HEAD; no coverage run. Still open, unclaimed |
 | 2026-11-05 | 196 → 197 | — | — | — | **worse by 1** in #819 (`#agent-tools` 13/19): `resumed_tool_session_route_json` takes the host's coding agents; measured fn line to closing brace on `origin/feature/agent-tools/agent-registry` (`7ab752605`) and HEAD; no coverage run. Restructuring deferred to the #agent-tools sweep node (developer, 2026-11-04) |
 | 2026-11-06 | 197 → 172 | — | — | — | **better by 25** in #823 (`#agent-tools` 17/19): the claude-cli and cursor-cli resume arms are gone — every CLI agent resumes through `resume_cli_harness`; measured fn line to closing brace on `origin/feature/agent-tools/spec-backend` (`d325fba73`) and HEAD; no coverage run. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
+| 2026-11-11 | 175 | — | — | — | declared-session-types: +3 against HEAD~1 (172 → 175, fn line to closing brace) — resume dispatches on `recorded_session_launch` instead of the session type's spelling. Not re-derived beyond length. **Regressed, kept open** |
 
 ## What the tool found
 

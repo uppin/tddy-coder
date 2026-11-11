@@ -31,7 +31,7 @@ pub struct SessionMetadata {
     pub previous_session_id: Option<String>,
     /// The session type the session was started as: one a tool file declares
     /// (`extensions.session.session_type` — `tool`, `claude-cli`, …) or the no-agent
-    /// `workspace`. Absent in a record `tddy-coder` writes for its own session, and in legacy files.
+    /// `workspace`. Absent in legacy files (a legacy `tddy-coder` record names its `tool` instead).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_type: Option<String>,
     /// Model id for claude-cli sessions (e.g. "opus", "claude-opus-5"). Absent in legacy files.
@@ -213,7 +213,7 @@ pub struct InitialToolSessionMetadataOpts {
     pub livekit_room: Option<String>,
     /// When set, `.session.yaml` records the stacked-from parent session id.
     pub previous_session_id: Option<String>,
-    /// The session type to record; `None` records none (what `tddy-coder` writes for itself).
+    /// The session type to record; `None` records none.
     pub session_type: Option<String>,
     /// Model id for claude-cli sessions.
     pub model: Option<String>,

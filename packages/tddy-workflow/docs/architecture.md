@@ -32,6 +32,18 @@ Callers include TDD hooks (`before_*` / `after_*`), `TddRecipe::read_primary_ses
 
 Product contract for attachments: [session-attachments.md](../../../docs/ft/coder/session-attachments.md).
 
+## `session_type` module
+
+- **`NO_AGENT_SESSION_TYPE`** (`"workspace"`): the wire value of a session with no agent of its own —
+  a worktree and a session room, whose agents (if any) join from its roster. It is the one session
+  type no tool file declares; every other is declared by a tool file's `extensions.session`
+  (`tddy-coding-agent-specs`, which re-exports both names). See
+  [Session types are declared](../../../docs/ft/daemon/session-agent-roster.md#session-types-are-declared).
+- **`is_no_agent_session_type(session_type)`**: whether the trimmed value is that word. Every check of
+  the no-agent session type goes through it.
+
+It lives here because this is the lowest crate every reader of a session type already depends on.
+
 ## Related
 
 - **`tddy-workflow-engine`** (re-exported by `tddy-core`): `WorkflowRecipe` trait (`uses_primary_session_document`, `read_primary_session_document_utf8`).

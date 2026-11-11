@@ -133,7 +133,7 @@ A conversation or pr-stack child of a cursor-cli orchestrator is itself a cursor
 
 ### Session type discriminant
 
-`StartSessionRequest.session_type` accepts `"cursor-cli"`. Like every `*-cli` session type, it resolves through the host's coding agents (`harness_from_spec::cli_launcher`) to the generic CLI launch (`opencode_cli_spawn::start_cli_harness_session`, or `svc_start_sandboxed_cli_harness_session` when sandboxed). Existing `tool` and `claude-cli` sessions are unaffected.
+`StartSessionRequest.session_type` accepts `"cursor-cli"`, the session type `cursor.yaml` declares (`extensions.session`, `launch: agent_cli`; see [Session types are declared](session-agent-roster.md#session-types-are-declared)). Like every session type declared with the `agent_cli` launch, it resolves through the host's coding agents (`harness_from_spec::requested_session_launch` → `SessionLaunch::AgentCli`) to the generic CLI launch (`opencode_cli_spawn::start_cli_harness_session`, or `svc_start_sandboxed_cli_harness_session` when sandboxed). Existing `tool` and `claude-cli` sessions are unaffected.
 
 ### Session manager
 

@@ -33,7 +33,7 @@ one discards. Each session type's start reports its slow steps through the sink 
 
 | Start | Steps reported |
 |---|---|
-| every CLI agent (claude-cli, cursor-cli, any `*-cli`) | clone when the project is not on the host (`provision_project_for_start`, with git's progress), worktree and semantic index when requested (`cli_session_worktree::provision_cli_worktree`), agent (`opencode_cli_spawn::start_cli_harness_session`; `svc_start_sandboxed_cli_harness_session` in a jail) |
+| every CLI agent (claude-cli, cursor-cli, any session type declared with the `agent_cli` launch) | clone when the project is not on the host (`provision_project_for_start`, with git's progress), worktree and semantic index when requested (`cli_session_worktree::provision_cli_worktree`), agent (`opencode_cli_spawn::start_cli_harness_session`; `svc_start_sandboxed_cli_harness_session` in a jail) |
 | workspace | worktree (the seed), semantic index when requested; the jail is built after the index and reports nothing |
 
 A step that fails reports no end. `stream_start_session_at_session_coordinate` sends the terminal

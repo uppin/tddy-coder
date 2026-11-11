@@ -252,7 +252,7 @@ type, label, launch) feeds the Create-session pane's type toggle, the terminal "
 attach rules, which branch on the served launch kind; `StartSession`'s tool schema offers the
 declared session types plus `workspace`, and `DescribeSessionStartOptions` lists them. tddy-coder
 records the session type its host declares for the `tddy_coder` launch in every session it starts;
-a record from before that, naming none, resumes as a tool session when it names its `tool`.
+a legacy record that names none resumes as a tool session when it names its `tool`, and is refused otherwise.
 
 **What is offered.** `ListSubagents` lists, after the model rows, as `CODING_AGENT` rows:
 

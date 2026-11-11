@@ -103,7 +103,7 @@ forwarded source, and carry no `github-source.yaml`; see
 
 | Path | Commit pairs | Token handler | Where the pairs go |
 |---|---|---|---|
-| co-located CLI start / resume (claude-cli, cursor-cli, every `*-cli` agent — one launch) | yes | yes, when the session runs a toolcall listener (a managed workflow); none otherwise | the agent's process env |
+| co-located CLI start / resume (claude-cli, cursor-cli, every session type declared with the `agent_cli` launch — one launch) | yes | yes, when the session runs a toolcall listener (a managed workflow); none otherwise | the agent's process env |
 | sandboxed CLI start and relaunch | yes | yes | `session_env` |
 | agent-spawned children (`spawn-child`, `spawn-conversation`) | yes | yes, via the child's own start | as the co-located CLI start |
 | tool session (`tddy-coder`) start / resume | yes | yes — over the per-OS-user host-session socket | the child's environment, over the spawn wire |

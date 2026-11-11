@@ -1,7 +1,7 @@
 # 2026-11-10 — Legacy tool-session records name no session type
 
 **Category:** Deferred from `declared-session-types`
-**Source:** [`../1-WIP/2026-11-10-declared-session-types.md`](../1-WIP/2026-11-10-declared-session-types.md)
+**Source:** [`../changesets/2026-11-11-declared-session-types.md`](../changesets/2026-11-11-declared-session-types.md)
 
 Until `declared-session-types`, `tddy-coder` wrote its own `.session.yaml` with no `session_type`
 (an absent one silently meant `tool`). It now records the session type its host declares for the

@@ -126,7 +126,7 @@ the agents and their models come from the host's **coding-agent registry** (the 
 ### Commands
 
 - **`/start-agent <prompt>`** — the **agent keyboard** first: one button per registry agent a CLI
-  session can run (a `run:` over a PTY, `for_session_type("<id>-cli")`), labelled by id, in id order.
+  session can run (one that declares a session type with the `agent_cli` launch — `session_type_of`, `for_session_type`; see [Session types are declared](session-agent-roster.md#session-types-are-declared)), labelled by id, in id order.
   An agent dropped into `<tddyhome>/tools` is offered like a built-in. Payload
   `tsa:<agent_idx>|s:<session_id>` — an index into that list, because an agent id plus a session
   uuid would not fit Telegram's 64-byte `callback_data`.
@@ -141,7 +141,7 @@ the agents and their models come from the host's **coding-agent registry** (the 
    cannot start a claude-cli session"); a shortcut whose agent the registry does not offer is refused
    naming its session type. Otherwise a **pending session** is written: `changeset.yaml` with
    `initial_prompt`, `name` (first six words), `workflow.branch_worktree_intent:
-   new_branch_from_base`, and — for a shortcut — the raw `session_type: <id>-cli` routing marker.
+   new_branch_from_base`, and — for a shortcut — the raw `session_type` routing marker, the session type the agent's spec declares.
    The chat is bound to it, and the **agent keyboard** (`/start-agent`) or the **project keyboard**
    (`tp:`, shortcuts) is sent.
 2. **Agent pick** (`handle_telegram_agent_pick_callback`, `/start-agent` only): records the chosen
