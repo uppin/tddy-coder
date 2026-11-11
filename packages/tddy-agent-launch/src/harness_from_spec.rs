@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use tddy_actions::tool::TemplateParams;
 use tddy_coding_agent_specs::{
-    routed_agent, Capability, CodingAgentRegistry, CodingAgentSpec, Placement,
-    CLI_SESSION_TYPE_SUFFIX,
+    is_no_agent_session_type, routed_agent, Capability, CodingAgentRegistry, CodingAgentSpec,
+    LaunchKind, Placement,
 };
 use tddy_core::adapters::{LaunchAdapters, ResumeTokenAdapter};
 use tddy_core::provider_route::RoutedAgent;
@@ -153,20 +153,112 @@ fn interned(name: &str) -> &'static str {
     leaked
 }
 
+/// How a session of a requested session type is launched on this host: the one dispatch a start
+/// and a resume make, read from the declarations — never from the session type's spelling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SessionLaunch {
+    /// [`tddy_coding_agent_specs::NO_AGENT_SESSION_TYPE`]: a session with no agent of its own.
+    NoAgent,
+    /// A coding agent's CLI session, launched from its spec.
+    AgentCli(CliSessionType),
+    /// A `tddy-coder` tool session.
+    TddyCoder,
+}
+
+/// How a session of `session_type` is launched, from the session types `agents` declare. Refused
+/// (`INVALID_ARGUMENT`) when it is empty, and when it is neither the no-agent session type nor a
+/// declared one — naming the value refused and the session types this host offers. A request error,
+/// so a start checks it before it creates anything.
+pub(crate) fn requested_session_launch(
+    agents: &HostCodingAgents,
+    session_type: &str,
+) -> Result<SessionLaunch, Status> {
+    let session_type = session_type.trim();
+    if session_type.is_empty() {
+        return Err(Status::invalid_argument(format!(
+            "session_type is required; this host offers {}",
+            agents.agents().offered_session_types()
+        )));
+    }
+    declared_session_launch(agents, session_type)?.ok_or_else(|| {
+        Status::invalid_argument(
+            agents
+                .agents()
+                .undeclared_session_type_message(session_type),
+        )
+    })
+}
+
+/// How a session of `session_type` is launched, `None` when nothing declares it.
+fn declared_session_launch(
+    agents: &HostCodingAgents,
+    session_type: &str,
+) -> Result<Option<SessionLaunch>, Status> {
+    if is_no_agent_session_type(session_type) {
+        return Ok(Some(SessionLaunch::NoAgent));
+    }
+    let Some(declared) = agents.agents().session_type(session_type) else {
+        return Ok(None);
+    };
+    match declared.launch {
+        LaunchKind::AgentCli => {
+            cli_session_type(agents, session_type).map(|kind| Some(SessionLaunch::AgentCli(kind)))
+        }
+        LaunchKind::TddyCoder => Ok(Some(SessionLaunch::TddyCoder)),
+    }
+}
+
+/// How a recorded session resumes, from the session type its record names as this host declares
+/// it: as [`requested_session_launch`], except that a record is not a request, so a session type
+/// this host no longer declares is `FAILED_PRECONDITION`, naming it.
+///
+/// A record that names no session type is a legacy one: `tddy-coder` wrote its sessions without
+/// one until it began recording the session type its host declares for the `tddy_coder` launch.
+/// Such a record resumes by respawning the tool its `tool` field names; one that names neither
+/// cannot be resumed.
+///
+/// TODO(session-types): the `tool`-field rule serves only legacy records already on disk — every
+/// record written now names its session type. Drop it once no such record needs to resume.
+pub(crate) fn recorded_session_launch(
+    agents: &HostCodingAgents,
+    recorded_session_type: Option<&str>,
+    recorded_tool: Option<&str>,
+) -> Result<SessionLaunch, Status> {
+    let recorded = recorded_session_type.unwrap_or("").trim();
+    if recorded.is_empty() {
+        return match recorded_tool.map(str::trim).filter(|tool| !tool.is_empty()) {
+            Some(_) => Ok(SessionLaunch::TddyCoder),
+            None => Err(Status::failed_precondition(
+                "the session records neither a session type nor a tool, so this host cannot tell \
+                 how to resume it",
+            )),
+        };
+    }
+    declared_session_launch(agents, recorded)?.ok_or_else(|| {
+        Status::failed_precondition(format!(
+            "the session records {}",
+            agents.agents().undeclared_session_type_message(recorded)
+        ))
+    })
+}
+
 /// The CLI session type `session_type` names, from the coding agents this host has: `None` for a
-/// session type that is no agent's (a tool or workspace session), a refusal for an agent session
-/// type no installed spec launches, or when the host has no coding agents at all. Every CLI agent
-/// starts, resumes and re-attaches through the one generic launch from what this returns; nothing
-/// reads which agent it is (`#agent-tools 17/19`).
+/// declared session type that is no agent's CLI launch (a tool or no-agent session), and a refusal
+/// for one nothing on this host declares — no spec launches it — or on a host with no coding agents
+/// at all. Every CLI agent starts, resumes and re-attaches through the one generic launch from what
+/// this returns; nothing reads which agent it is (`#agent-tools 17/19`).
 pub(crate) fn cli_launcher(
     agents: Option<&HostCodingAgents>,
     session_type: &str,
 ) -> Result<Option<CliSessionType>, Status> {
-    if !session_type.ends_with(CLI_SESSION_TYPE_SUFFIX) {
-        return Ok(None);
-    }
     let agents = agents.ok_or_else(|| no_coding_agents_for(session_type))?;
-    cli_session_type(agents, session_type).map(Some)
+    match declared_session_launch(agents, session_type)? {
+        Some(SessionLaunch::AgentCli(kind)) => Ok(Some(kind)),
+        Some(SessionLaunch::NoAgent | SessionLaunch::TddyCoder) => Ok(None),
+        None => Err(Status::failed_precondition(format!(
+            "no coding agent spec launches {session_type}"
+        ))),
+    }
 }
 
 /// The refusal of a `session_type` start, resume or re-attach on a host with no coding agents: the

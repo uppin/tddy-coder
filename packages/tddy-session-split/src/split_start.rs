@@ -1,5 +1,6 @@
 pub use crate::split_claude_cli_start;
 
+use tddy_coding_agent_specs::{is_no_agent_session_type, NO_AGENT_SESSION_TYPE};
 use tddy_core::session_lifecycle::validate_session_id_segment;
 
 use tddy_service::proto::session::SplitAgentPlacement;
@@ -66,9 +67,10 @@ pub fn resolve_split_agent_placement(
         return Ok(None);
     };
     let session_type = session_type.trim();
-    if session_type != "workspace" {
+    if !is_no_agent_session_type(session_type) {
         return Err(Status::invalid_argument(format!(
-            "split_agent is only supported for session_type \"workspace\", not {session_type:?}"
+            "split_agent is only supported for session_type {NO_AGENT_SESSION_TYPE:?}, not \
+             {session_type:?}"
         )));
     }
     if is_agent_clone {
@@ -113,9 +115,10 @@ pub fn resolve_caller_chosen_session_id(
         return Ok(None);
     }
     let session_type = session_type.trim();
-    if session_type != "workspace" {
+    if !is_no_agent_session_type(session_type) {
         return Err(Status::invalid_argument(format!(
-            "requested_session_id is only supported for session_type \"workspace\", not {session_type:?}"
+            "requested_session_id is only supported for session_type {NO_AGENT_SESSION_TYPE:?}, \
+             not {session_type:?}"
         )));
     }
     validate_session_id_segment(requested).map_err(|e| {

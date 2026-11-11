@@ -733,6 +733,10 @@ fn a_tools_dir_with_a_drop_in_inline_agent(id: &str, config_env: &str) -> tempfi
     let spec = OPENCODE_SPEC_YAML
         .replace("\nid: opencode\n", &format!("\nid: {id}\n"))
         .replace(
+            "\n    session_type: opencode-cli\n",
+            &format!("\n    session_type: {id}-cli\n"),
+        )
+        .replace(
             "      config_env: OPENCODE_CONFIG_CONTENT\n",
             &format!("      config_env: {config_env}\n"),
         );

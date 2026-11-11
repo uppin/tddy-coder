@@ -48,10 +48,6 @@ pub fn offered_start_fields(choices: &StartChoices) -> Vec<String> {
 fn schema_offering(choices: Option<&StartChoices>) -> Value {
     let no_agents: &[AgentChoice] = &[];
     let agents: &[AgentChoice] = choices.map_or(no_agents, |choices| choices.agents.as_slice());
-    let session_types: Vec<&str> = ["tool", "workspace"]
-        .into_iter()
-        .chain(agents.iter().map(|agent| agent.session_type.as_str()))
-        .collect();
     let harness_list = agents
         .iter()
         .map(|agent| format!("`{}` ({})", agent.session_type, agent.label))
@@ -69,20 +65,12 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
     };
     offer(
         "session_type",
-        json!({
-            "type": "string",
-            "enum": session_types,
-            "description": format!(
-                "What to start. `tool`: a tddy-coder workflow session run by `agent`. \
-                 `workspace`: a worktree with no agent. Any other value runs that coding agent \
-                 interactively in a terminal: {harness_list}."
-            )
-        }),
+        session_type_property(choices, &harness_list),
     );
     offer("daemon_instance_id", host_property(choices));
     offer(
         "tool_path",
-        string("For `tool`: the tddy-coder binary to run, from the daemon's allowlist; empty is the daemon's default."),
+        string("For a tddy-coder session type: the tddy-coder binary to run, one of the daemon's `allowed_tools`. Required for those session types: an empty or unlisted path is refused, naming the allowlist."),
     );
     offer(
         "agent",
@@ -234,6 +222,42 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
         "required": ["session_type"],
         "allOf": conditions,
         "additionalProperties": false
+    })
+}
+
+/// `session_type`: with `choices`, an enum of the session types the daemon declares plus the
+/// no-agent one; without, a free string the daemon validates (a client without the daemon's choices
+/// asks `DescribeSessionStartOptions` for them).
+fn session_type_property(choices: Option<&StartChoices>, harness_list: &str) -> Value {
+    let no_agent = tddy_workflow::NO_AGENT_SESSION_TYPE;
+    let Some(choices) = choices else {
+        return string(&format!(
+            "What to start: a session type this daemon declares, or `{no_agent}` for a worktree \
+             with no agent. `DescribeSessionStartOptions` lists the declared ones in its \
+             `session_types`; any other value is refused."
+        ));
+    };
+    let declared = choices
+        .session_types
+        .iter()
+        .map(|choice| format!("`{}` ({})", choice.session_type, choice.label))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let session_types: Vec<&str> = choices
+        .session_types
+        .iter()
+        .map(|choice| choice.session_type.as_str())
+        .chain(std::iter::once(no_agent))
+        .collect();
+    json!({
+        "type": "string",
+        "enum": session_types,
+        "description": format!(
+            "What to start: one of the session types this daemon declares — {declared} — or \
+             `{no_agent}`, a worktree with no agent. The coding agents among them run \
+             interactively in a terminal: {harness_list}. The others run the tddy-coder \
+             workflow tool with `agent`."
+        )
     })
 }
 

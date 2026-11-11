@@ -15,7 +15,7 @@
 
 import { aClientsPortDouble } from "tddy-client-web/testkit";
 import React from "react";
-import { servedAgentWire } from "../support/servedAgents";
+import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { createClient, ConnectError, Code } from "@connectrpc/connect";
@@ -60,7 +60,7 @@ function aBaselineBackend(): InMemoryRpcBackend {
     .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => withDeclaredSessionTypes({
       agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }],
     }))
     .onUnary(CatalogService.method.listTools, () => ({

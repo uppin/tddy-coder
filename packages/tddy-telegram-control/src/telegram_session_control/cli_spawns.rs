@@ -47,12 +47,13 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             .get(proj_idx)
             .ok_or_else(|| anyhow::anyhow!("invalid project index {proj_idx}"))?;
         let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
-        let session_type = self.pending_session_agent(&session_dir).map(|spec| {
-            format!(
-                "{}{}",
-                spec.id,
-                tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX
-            )
+        let session_type = self.pending_session_agent(&session_dir).and_then(|spec| {
+            self.coding_agents
+                .session_type_of(&spec.id)
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("agent {} declares no session type to start", spec.id)
+                })
         })?;
         let cs =
             read_changeset(&session_dir).map_err(|e| anyhow::anyhow!("read changeset: {e}"))?;

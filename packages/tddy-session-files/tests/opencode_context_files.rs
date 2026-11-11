@@ -24,7 +24,7 @@ fn an_opencode_session_is_served_its_spec_row() {
     // Then
     assert_eq!(
         agent,
-        SessionContextAgent::Own(Some("opencode".to_string()))
+        SessionContextAgent::Own(Some("opencode-cli".to_string()))
     );
     for expected in ["AGENTS.md", "opencode.json", ".opencode/**"] {
         assert!(
@@ -42,11 +42,11 @@ fn cli_session_types_name_their_agents_and_workspace_names_none() {
     // Then
     assert_eq!(
         context_agent_for_session(&meta_for("claude-cli")),
-        SessionContextAgent::Own(Some("claude".to_string()))
+        SessionContextAgent::Own(Some("claude-cli".to_string()))
     );
     assert_eq!(
         context_agent_for_session(&meta_for("cursor-cli")),
-        SessionContextAgent::Own(Some("cursor".to_string()))
+        SessionContextAgent::Own(Some("cursor-cli".to_string()))
     );
     assert_eq!(
         context_agent_for_session(&meta_for("workspace")),

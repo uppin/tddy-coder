@@ -138,6 +138,7 @@ fn find_session_row<'a>(changeset: &'a Changeset, session_id: &str) -> Option<&'
 
 /// Derive list-row status fields from a session directory (`.session.yaml`, `changeset.yaml`).
 pub fn session_list_status_from_session_dir(
+    agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
     session_dir: &Path,
 ) -> anyhow::Result<SessionListStatusDisplay> {
     // `debug!`, not `info!`: this is called per row of a polled session list, and now also on the
@@ -165,11 +166,13 @@ pub fn session_list_status_from_session_dir(
     // agent/model/activity_status from metadata. The agent is the session type. A start that
     // creates a worktree still writes a changeset recording the branch it created; sessions
     // started before that have none, and list without a branch.
-    // A CLI session's type is its agent's `<id>-cli` (the spec registry's session-type
-    // spelling), so the suffix is the test — any agent's CLI session, dropped-in included,
-    // runs no workflow.
+    // A CLI session's type is one a coding agent declares (`agents`' session types), so the
+    // declaration is the test — any agent's CLI session, dropped-in included, runs no workflow.
     let session_type = meta.session_type.as_deref().unwrap_or_default();
-    if session_type.ends_with(tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX) {
+    if agents
+        .and_then(|agents| agents.for_session_type(session_type))
+        .is_some()
+    {
         return Ok(SessionListStatusDisplay {
             workflow_goal: String::new(),
             workflow_state: String::new(),
@@ -278,6 +281,7 @@ fn proto_context_doc_kind(kind: ContextDocKind) -> ProtoContextDocKind {
 
 /// Copies enrichment display strings into a proto `SessionEntry` (daemon list path).
 pub fn apply_session_list_status_to_proto(
+    agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
     session_dir: &Path,
     entry: &mut ProtoSessionEntry,
 ) -> anyhow::Result<()> {
@@ -286,7 +290,7 @@ pub fn apply_session_list_status_to_proto(
         "apply_session_list_status_to_proto session_id={}",
         entry.session_id
     );
-    let status = session_list_status_from_session_dir(session_dir)?;
+    let status = session_list_status_from_session_dir(agents, session_dir)?;
     entry.workflow_goal = status.workflow_goal;
     entry.workflow_state = status.workflow_state;
     entry.elapsed_display = status.elapsed_display;
@@ -365,7 +369,11 @@ state:
         )
         .unwrap();
 
-        let got = session_list_status_from_session_dir(session_dir).unwrap();
+        let got = session_list_status_from_session_dir(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+        )
+        .unwrap();
         assert_eq!(got.workflow_goal, "acceptance-tests");
         assert_eq!(got.workflow_state, "Red");
         assert_eq!(got.agent, "claude");
@@ -518,7 +526,12 @@ state:
             session_role: String::new(),
             reads_host_paths: false,
         };
-        apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
+        apply_session_list_status_to_proto(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+            &mut proto,
+        )
+        .unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
         assert_eq!(proto.workflow_state, "Red");
         assert_eq!(proto.agent, "claude");
@@ -570,7 +583,12 @@ state:
         };
 
         // When
-        apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
+        apply_session_list_status_to_proto(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+            &mut proto,
+        )
+        .unwrap();
 
         // Then
         assert_eq!(proto.branch, "feature/auth/token-store");
@@ -622,7 +640,12 @@ orchestrator_session_id: home-session-1
         };
 
         // When
-        apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
+        apply_session_list_status_to_proto(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+            &mut proto,
+        )
+        .unwrap();
 
         // Then
         assert_eq!(proto.branch, "test-session-smoke-1");
@@ -679,8 +702,11 @@ orchestrator_session_id: home-session-1
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         // Intentionally NO changeset.yaml — claude-cli sessions started without a worktree have none.
 
-        let got = session_list_status_from_session_dir(&session_dir)
-            .expect("enrichment must not error for claude-cli session without changeset");
+        let got = session_list_status_from_session_dir(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            &session_dir,
+        )
+        .expect("enrichment must not error for claude-cli session without changeset");
 
         assert_eq!(
             got.agent, "claude-cli",
@@ -747,8 +773,11 @@ orchestrator_session_id: home-session-1
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
-        let got =
-            session_list_status_from_session_dir(&session_dir).expect("enrichment must not error");
+        let got = session_list_status_from_session_dir(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            &session_dir,
+        )
+        .expect("enrichment must not error");
 
         assert_eq!(
             got.activity_status, "WaitingForInput",
@@ -801,8 +830,11 @@ orchestrator_session_id: home-session-1
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
-        let got =
-            session_list_status_from_session_dir(&session_dir).expect("enrichment must not error");
+        let got = session_list_status_from_session_dir(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            &session_dir,
+        )
+        .expect("enrichment must not error");
 
         assert_eq!(
             got.activity_status, "",
@@ -874,8 +906,11 @@ sessions:
         )
         .unwrap();
 
-        let got = session_list_status_from_session_dir(&session_dir)
-            .expect("enrichment must not error for tool session");
+        let got = session_list_status_from_session_dir(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            &session_dir,
+        )
+        .expect("enrichment must not error for tool session");
 
         assert_eq!(
             got.activity_status, "",
@@ -967,7 +1002,12 @@ sessions:
             session_role: String::new(),
             reads_host_paths: false,
         };
-        apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
+        apply_session_list_status_to_proto(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            &session_dir,
+            &mut proto,
+        )
+        .unwrap();
         assert_eq!(
             proto.activity_status, "Done",
             "activity_status must be propagated from .session.yaml into proto SessionEntry"
@@ -1075,8 +1115,11 @@ orchestrator_session_id: orch-sess-abc
         .unwrap();
 
         // When
-        let got = session_list_status_from_session_dir(session_dir)
-            .expect("enrichment must not error for child session with orchestrator_session_id");
+        let got = session_list_status_from_session_dir(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+        )
+        .expect("enrichment must not error for child session with orchestrator_session_id");
 
         // Then — the orchestrator back-reference is surfaced
         assert_eq!(
@@ -1129,8 +1172,11 @@ state:
         .unwrap();
 
         // When
-        let got = session_list_status_from_session_dir(session_dir)
-            .expect("enrichment must not error for regular session");
+        let got = session_list_status_from_session_dir(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+        )
+        .expect("enrichment must not error for regular session");
 
         // Then — orchestrator_session_id must be empty string
         assert_eq!(
@@ -1188,7 +1234,12 @@ orchestrator_session_id: orch-sess-proto-xyz
             session_id: "child-proto-sess-1".to_string(),
             ..Default::default()
         };
-        apply_session_list_status_to_proto(session_dir, &mut proto).expect("apply must not error");
+        apply_session_list_status_to_proto(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+            &mut proto,
+        )
+        .expect("apply must not error");
 
         assert_eq!(
             proto.orchestrator_session_id, "orch-sess-proto-xyz",
@@ -1247,8 +1298,11 @@ recipe: orchestrate-pr-stack
         .unwrap();
 
         // When
-        let got = session_list_status_from_session_dir(session_dir)
-            .expect("enrichment must not error for orchestrator session with recipe");
+        let got = session_list_status_from_session_dir(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+        )
+        .expect("enrichment must not error for orchestrator session with recipe");
 
         // Then — the recipe is surfaced in the display struct
         assert_eq!(
@@ -1300,8 +1354,11 @@ state:
         .unwrap();
 
         // When
-        let got = session_list_status_from_session_dir(session_dir)
-            .expect("enrichment must not error for session without recipe");
+        let got = session_list_status_from_session_dir(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+        )
+        .expect("enrichment must not error for session without recipe");
 
         // Then — recipe is empty string for sessions that don't specify one
         assert_eq!(
@@ -1353,8 +1410,11 @@ recipe: pr-stack
         .unwrap();
 
         // When
-        let got = session_list_status_from_session_dir(session_dir)
-            .expect("enrichment must not error for a fresh session with no session rows yet");
+        let got = session_list_status_from_session_dir(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+        )
+        .expect("enrichment must not error for a fresh session with no session rows yet");
 
         // Then — recipe surfaces even though the session's own row hasn't been added yet
         assert_eq!(
@@ -1412,7 +1472,12 @@ recipe: plan-pr-stack
             session_id: "orch-proto-recipe-sess".to_string(),
             ..Default::default()
         };
-        apply_session_list_status_to_proto(session_dir, &mut proto).expect("apply must not error");
+        apply_session_list_status_to_proto(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+            &mut proto,
+        )
+        .expect("apply must not error");
 
         assert_eq!(
             proto.recipe, "plan-pr-stack",
@@ -1475,7 +1540,12 @@ recipe: pr-stack
             session_id: "ctx-docs-sess".to_string(),
             ..Default::default()
         };
-        apply_session_list_status_to_proto(session_dir, &mut proto).expect("apply must not error");
+        apply_session_list_status_to_proto(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+            &mut proto,
+        )
+        .expect("apply must not error");
 
         // Then — the exploration context doc is surfaced on the proto row with its basename,
         // on-disk existence, and a non-empty description
@@ -1596,8 +1666,12 @@ state:
                 session_id: ATTACH_SESSION_ID.to_string(),
                 ..Default::default()
             };
-            apply_session_list_status_to_proto(self.path(), &mut entry)
-                .expect("enrichment must not error");
+            apply_session_list_status_to_proto(
+                Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+                self.path(),
+                &mut entry,
+            )
+            .expect("enrichment must not error");
             entry
         }
     }
@@ -1849,8 +1923,11 @@ stack:
         .unwrap();
 
         // When
-        let got = session_list_status_from_session_dir(session_dir)
-            .expect("enrichment must not error for orchestrator session with stack");
+        let got = session_list_status_from_session_dir(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+        )
+        .expect("enrichment must not error for orchestrator session with stack");
 
         // Then — stack_plan_json is a JSON serialization of the Stack, not the raw YAML
         assert!(
@@ -1905,8 +1982,11 @@ state:
         .unwrap();
 
         // When
-        let got = session_list_status_from_session_dir(session_dir)
-            .expect("enrichment must not error for session without stack");
+        let got = session_list_status_from_session_dir(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+        )
+        .expect("enrichment must not error for session without stack");
 
         // Then
         assert_eq!(
@@ -1970,7 +2050,12 @@ stack:
             session_id: "orch-proto-stack-sess".to_string(),
             ..Default::default()
         };
-        apply_session_list_status_to_proto(session_dir, &mut proto).expect("apply must not error");
+        apply_session_list_status_to_proto(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+            &mut proto,
+        )
+        .expect("apply must not error");
 
         assert!(
             !proto.stack_plan_json.is_empty(),

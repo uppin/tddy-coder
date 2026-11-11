@@ -12626,6 +12626,7 @@ dependencies = [
  "serde_yaml",
  "tddy-actions",
  "tddy-agent-backend",
+ "tddy-workflow",
  "tempfile",
  "thiserror 1.0.69",
 ]
@@ -14185,6 +14186,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-testing-commons",
+ "tddy-workflow",
  "tempfile",
  "tokio",
 ]
@@ -14475,6 +14477,7 @@ dependencies = [
  "tddy-session-lifecycle",
  "tddy-task",
  "tddy-testing-commons",
+ "tddy-workflow",
  "tddy-worktree-service",
  "tempfile",
  "tokio",
@@ -14531,6 +14534,7 @@ dependencies = [
  "tddy-stdio",
  "tddy-terminal-rpc",
  "tddy-tool-engine",
+ "tddy-workflow",
  "tddy-workflow-recipes",
  "tempfile",
  "tokio",

@@ -12,7 +12,7 @@
 
 import { aClientsPortDouble } from "tddy-client-web/testkit";
 import React from "react";
-import { servedAgentWire } from "../support/servedAgents";
+import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import {
   create,
@@ -84,7 +84,7 @@ function aBaselineBackend(): InMemoryRpcBackend {
     )
     .onUnary(
       CatalogService.method.listAgents,
-      answering(CatalogService.method.listAgents, { agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }] }),
+      answering(CatalogService.method.listAgents, withDeclaredSessionTypes({ agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }] })),
     )
     .onUnary(
       CatalogService.method.listTools,

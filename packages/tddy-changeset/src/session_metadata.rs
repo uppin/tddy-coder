@@ -29,7 +29,9 @@ pub struct SessionMetadata {
     /// Optional parent session when this session was created as a chain child (PRD: session chaining).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_session_id: Option<String>,
-    /// Session type: "tool" (default/empty) or "claude-cli". Absent in legacy files.
+    /// The session type the session was started as: one a tool file declares
+    /// (`extensions.session.session_type` — `tool`, `claude-cli`, …) or the no-agent
+    /// `workspace`. Absent in a record `tddy-coder` writes for its own session, and in legacy files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_type: Option<String>,
     /// Model id for claude-cli sessions (e.g. "opus", "claude-opus-5"). Absent in legacy files.
@@ -193,7 +195,10 @@ pub fn reads_host_paths(meta: &SessionMetadata) -> bool {
         && !meta.managed_codebase
         && !names_something(&meta.codebase_daemon_instance_id)
         && !names_something(&meta.ssh_config_host)
-        && meta.session_type.as_deref() != Some("workspace")
+        && !meta
+            .session_type
+            .as_deref()
+            .is_some_and(tddy_workflow::is_no_agent_session_type)
 }
 
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
@@ -208,7 +213,7 @@ pub struct InitialToolSessionMetadataOpts {
     pub livekit_room: Option<String>,
     /// When set, `.session.yaml` records the stacked-from parent session id.
     pub previous_session_id: Option<String>,
-    /// Session type: "tool" (default/empty) or "claude-cli".
+    /// The session type to record; `None` records none (what `tddy-coder` writes for itself).
     pub session_type: Option<String>,
     /// Model id for claude-cli sessions.
     pub model: Option<String>,

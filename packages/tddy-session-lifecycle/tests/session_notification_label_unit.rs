@@ -108,7 +108,11 @@ fn names_a_session_after_the_worktree_recorded_in_its_metadata() {
     write_session(sessions_tmp.path(), Some("/home/dev/my-feature-branch"));
 
     // When
-    let label = resolve_session_label(sessions_tmp.path(), SESSION_ID);
+    let label = resolve_session_label(
+        Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+        sessions_tmp.path(),
+        SESSION_ID,
+    );
 
     // Then
     assert_eq!(label, "my-feature-branch");
@@ -124,7 +128,11 @@ fn falls_back_to_the_short_session_id_when_the_session_records_neither_worktree_
     write_session(sessions_tmp.path(), None);
 
     // When
-    let label = resolve_session_label(sessions_tmp.path(), SESSION_ID);
+    let label = resolve_session_label(
+        Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+        sessions_tmp.path(),
+        SESSION_ID,
+    );
 
     // Then
     assert_eq!(label, "01900000");
@@ -138,7 +146,11 @@ fn falls_back_to_the_short_session_id_when_the_session_directory_is_missing() {
     let sessions_tmp = tempfile::tempdir().unwrap();
 
     // When
-    let label = resolve_session_label(sessions_tmp.path(), SESSION_ID);
+    let label = resolve_session_label(
+        Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+        sessions_tmp.path(),
+        SESSION_ID,
+    );
 
     // Then
     assert_eq!(label, "01900000");
@@ -151,7 +163,11 @@ fn ignores_a_worktree_path_recorded_as_the_empty_string() {
     write_session(sessions_tmp.path(), Some(""));
 
     // When
-    let label = resolve_session_label(sessions_tmp.path(), SESSION_ID);
+    let label = resolve_session_label(
+        Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+        sessions_tmp.path(),
+        SESSION_ID,
+    );
 
     // Then
     assert_eq!(label, "01900000");
@@ -167,7 +183,11 @@ fn names_a_session_after_its_workflow_goal_when_it_records_no_worktree() {
     write_tool_session(sessions_tmp.path(), None, Some("acceptance-tests"));
 
     // When
-    let label = resolve_session_label(sessions_tmp.path(), SESSION_ID);
+    let label = resolve_session_label(
+        Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+        sessions_tmp.path(),
+        SESSION_ID,
+    );
 
     // Then
     assert_eq!(label, "acceptance-tests");
@@ -183,7 +203,11 @@ fn falls_back_to_the_short_session_id_when_the_enrichment_reports_the_display_pl
     write_tool_session(sessions_tmp.path(), None, None);
 
     // When
-    let label = resolve_session_label(sessions_tmp.path(), SESSION_ID);
+    let label = resolve_session_label(
+        Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+        sessions_tmp.path(),
+        SESSION_ID,
+    );
 
     // Then
     assert_eq!(label, "01900000");
@@ -201,7 +225,11 @@ fn prefers_the_worktree_over_a_workflow_goal_when_the_session_records_both() {
     );
 
     // When
-    let label = resolve_session_label(sessions_tmp.path(), SESSION_ID);
+    let label = resolve_session_label(
+        Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+        sessions_tmp.path(),
+        SESSION_ID,
+    );
 
     // Then
     assert_eq!(label, "my-feature-branch");

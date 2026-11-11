@@ -24,7 +24,7 @@
 import { create } from "@bufbuild/protobuf";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { servedAgentWire } from "../servedAgents";
+import { servedAgentWire, withDeclaredSessionTypes } from "../servedAgents";
 import { AuthService } from "tddy-client-web/gen/auth_pb";
 import { GenerateTokenResponseSchema, RefreshTokenResponseSchema, TokenService } from "tddy-client-web/gen/token_pb";
 import {
@@ -301,9 +301,10 @@ export function aSessionServiceBackend(
           create(ToolInfoSchema, t),
         ),
       }),
-      listAgents: async () => ({
-        agents: (scenario.agents ?? DEFAULT_AGENTS).map((a) => anAgentInfo(a)),
-      }),
+      listAgents: async () =>
+        withDeclaredSessionTypes({
+          agents: (scenario.agents ?? DEFAULT_AGENTS).map((a) => anAgentInfo(a)),
+        }),
       listAgentModels: async () => ({
         models: DEFAULT_CLAUDE_CLI_MODELS,
         defaultModel: DEFAULT_CLAUDE_CLI_MODEL,

@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file catalog.proto.
  */
 export const file_catalog: GenFile = /*@__PURE__*/
-  fileDesc("Cg1jYXRhbG9nLnByb3RvEgdjYXRhbG9nIvUBCglBZ2VudEluZm8SCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSHgoEa2luZBgDIAEoDjIQLnR5cGVzLkFnZW50S2luZBIPCgdoYXJuZXNzGAQgASgJEhcKD3JvdXRlX3Byb3ZpZGVycxgFIAMoCRIUCgxzZXNzaW9uX3R5cGUYBiABKAkSFAoMY2FwYWJpbGl0aWVzGAcgAygJEhIKCnJ1bl9wYXJhbXMYCCADKAkSGAoQcGVybWlzc2lvbl9tb2RlcxgJIAMoCRIVCg1kZWZhdWx0X21vZGVsGAogASgJEhIKCnBsYWNlbWVudHMYCyADKAkiWgoWTGlzdEFnZW50TW9kZWxzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEg0KBWFnZW50GAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSJUChdMaXN0QWdlbnRNb2RlbHNSZXNwb25zZRIiCgZtb2RlbHMYASADKAsyEi5jYXRhbG9nLk1vZGVsSW5mbxIVCg1kZWZhdWx0X21vZGVsGAIgASgJIhMKEUxpc3RBZ2VudHNSZXF1ZXN0IjgKEkxpc3RBZ2VudHNSZXNwb25zZRIiCgZhZ2VudHMYASADKAsyEi5jYXRhbG9nLkFnZW50SW5mbyIWChRMaXN0U3ViYWdlbnRzUmVxdWVzdCJBChVMaXN0U3ViYWdlbnRzUmVzcG9uc2USKAoJc3ViYWdlbnRzGAEgAygLMhUuY2F0YWxvZy5TdWJhZ2VudEluZm8iEgoQTGlzdFRvb2xzUmVxdWVzdCI1ChFMaXN0VG9vbHNSZXNwb25zZRIgCgV0b29scxgBIAMoCzIRLmNhdGFsb2cuVG9vbEluZm8iJgoJTW9kZWxJbmZvEgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJIugBCgxTdWJhZ2VudEluZm8SDAoEbmFtZRgBIAEoCRINCgVsYWJlbBgCIAEoCRINCgVtb2RlbBgDIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYBCABKAkSEAoIYWdlbnRfaWQYBSABKAkSEAoIcmVwbGFjZXMYBiADKAkSDQoFdG9vbHMYByADKAkSHgoEa2luZBgIIAEoDjIQLnR5cGVzLkFnZW50S2luZBIPCgdoYXJuZXNzGAkgASgJEhEKCXRyYW5zcG9ydBgKIAEoCRIZChFwZXJtaXNzaW9uX3BvbGljeRgLIAEoCSInCghUb29sSW5mbxIMCgRwYXRoGAEgASgJEg0KBWxhYmVsGAIgASgJMsECCg5DYXRhbG9nU2VydmljZRJCCglMaXN0VG9vbHMSGS5jYXRhbG9nLkxpc3RUb29sc1JlcXVlc3QaGi5jYXRhbG9nLkxpc3RUb29sc1Jlc3BvbnNlEkUKCkxpc3RBZ2VudHMSGi5jYXRhbG9nLkxpc3RBZ2VudHNSZXF1ZXN0GhsuY2F0YWxvZy5MaXN0QWdlbnRzUmVzcG9uc2USVAoPTGlzdEFnZW50TW9kZWxzEh8uY2F0YWxvZy5MaXN0QWdlbnRNb2RlbHNSZXF1ZXN0GiAuY2F0YWxvZy5MaXN0QWdlbnRNb2RlbHNSZXNwb25zZRJOCg1MaXN0U3ViYWdlbnRzEh0uY2F0YWxvZy5MaXN0U3ViYWdlbnRzUmVxdWVzdBoeLmNhdGFsb2cuTGlzdFN1YmFnZW50c1Jlc3BvbnNlYgZwcm90bzM", [file_types]);
+  fileDesc("Cg1jYXRhbG9nLnByb3RvEgdjYXRhbG9nIvUBCglBZ2VudEluZm8SCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSHgoEa2luZBgDIAEoDjIQLnR5cGVzLkFnZW50S2luZBIPCgdoYXJuZXNzGAQgASgJEhcKD3JvdXRlX3Byb3ZpZGVycxgFIAMoCRIUCgxzZXNzaW9uX3R5cGUYBiABKAkSFAoMY2FwYWJpbGl0aWVzGAcgAygJEhIKCnJ1bl9wYXJhbXMYCCADKAkSGAoQcGVybWlzc2lvbl9tb2RlcxgJIAMoCRIVCg1kZWZhdWx0X21vZGVsGAogASgJEhIKCnBsYWNlbWVudHMYCyADKAkiWgoWTGlzdEFnZW50TW9kZWxzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEg0KBWFnZW50GAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSJUChdMaXN0QWdlbnRNb2RlbHNSZXNwb25zZRIiCgZtb2RlbHMYASADKAsyEi5jYXRhbG9nLk1vZGVsSW5mbxIVCg1kZWZhdWx0X21vZGVsGAIgASgJIhMKEUxpc3RBZ2VudHNSZXF1ZXN0ImkKEkxpc3RBZ2VudHNSZXNwb25zZRIiCgZhZ2VudHMYASADKAsyEi5jYXRhbG9nLkFnZW50SW5mbxIvCg1zZXNzaW9uX3R5cGVzGAIgAygLMhguY2F0YWxvZy5TZXNzaW9uVHlwZUluZm8iRgoPU2Vzc2lvblR5cGVJbmZvEhQKDHNlc3Npb25fdHlwZRgBIAEoCRINCgVsYWJlbBgCIAEoCRIOCgZsYXVuY2gYAyABKAkiFgoUTGlzdFN1YmFnZW50c1JlcXVlc3QiQQoVTGlzdFN1YmFnZW50c1Jlc3BvbnNlEigKCXN1YmFnZW50cxgBIAMoCzIVLmNhdGFsb2cuU3ViYWdlbnRJbmZvIhIKEExpc3RUb29sc1JlcXVlc3QiNQoRTGlzdFRvb2xzUmVzcG9uc2USIAoFdG9vbHMYASADKAsyES5jYXRhbG9nLlRvb2xJbmZvIiYKCU1vZGVsSW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSLoAQoMU3ViYWdlbnRJbmZvEgwKBG5hbWUYASABKAkSDQoFbGFiZWwYAiABKAkSDQoFbW9kZWwYAyABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAQgASgJEhAKCGFnZW50X2lkGAUgASgJEhAKCHJlcGxhY2VzGAYgAygJEg0KBXRvb2xzGAcgAygJEh4KBGtpbmQYCCABKA4yEC50eXBlcy5BZ2VudEtpbmQSDwoHaGFybmVzcxgJIAEoCRIRCgl0cmFuc3BvcnQYCiABKAkSGQoRcGVybWlzc2lvbl9wb2xpY3kYCyABKAkiJwoIVG9vbEluZm8SDAoEcGF0aBgBIAEoCRINCgVsYWJlbBgCIAEoCTLBAgoOQ2F0YWxvZ1NlcnZpY2USQgoJTGlzdFRvb2xzEhkuY2F0YWxvZy5MaXN0VG9vbHNSZXF1ZXN0GhouY2F0YWxvZy5MaXN0VG9vbHNSZXNwb25zZRJFCgpMaXN0QWdlbnRzEhouY2F0YWxvZy5MaXN0QWdlbnRzUmVxdWVzdBobLmNhdGFsb2cuTGlzdEFnZW50c1Jlc3BvbnNlElQKD0xpc3RBZ2VudE1vZGVscxIfLmNhdGFsb2cuTGlzdEFnZW50TW9kZWxzUmVxdWVzdBogLmNhdGFsb2cuTGlzdEFnZW50TW9kZWxzUmVzcG9uc2USTgoNTGlzdFN1YmFnZW50cxIdLmNhdGFsb2cuTGlzdFN1YmFnZW50c1JlcXVlc3QaHi5jYXRhbG9nLkxpc3RTdWJhZ2VudHNSZXNwb25zZWIGcHJvdG8z", [file_types]);
 
 /**
  * @generated from message catalog.AgentInfo
@@ -56,7 +56,7 @@ export type AgentInfo = Message<"catalog.AgentInfo"> & {
   routeProviders: string[];
 
   /**
-   * The session type that starts this agent (`<id>-cli`), from its spec; empty for an agent
+   * The session type that starts this agent, as its spec declares it; empty for an agent
    * with no PTY launch. The web offers session types from this, never from its own list.
    *
    * @generated from field: string session_type = 6;
@@ -185,6 +185,15 @@ export type ListAgentsResponse = Message<"catalog.ListAgentsResponse"> & {
    * @generated from field: repeated catalog.AgentInfo agents = 1;
    */
   agents: AgentInfo[];
+
+  /**
+   * Every session type this daemon's tool files declare (`extensions.session`), with its label and
+   * launch kind. The no-agent session type ("workspace") is not among them: nothing declares it. A
+   * client offers and branches on these, never on its own list of session types.
+   *
+   * @generated from field: repeated catalog.SessionTypeInfo session_types = 2;
+   */
+  sessionTypes: SessionTypeInfo[];
 };
 
 /**
@@ -193,6 +202,43 @@ export type ListAgentsResponse = Message<"catalog.ListAgentsResponse"> & {
  */
 export const ListAgentsResponseSchema: GenMessage<ListAgentsResponse> = /*@__PURE__*/
   messageDesc(file_catalog, 4);
+
+/**
+ * One session type a daemon declares.
+ *
+ * @generated from message catalog.SessionTypeInfo
+ */
+export type SessionTypeInfo = Message<"catalog.SessionTypeInfo"> & {
+  /**
+   * The wire value a StartSession names (`tool`, `claude-cli`, …).
+   *
+   * @generated from field: string session_type = 1;
+   */
+  sessionType: string;
+
+  /**
+   * What a picker calls it.
+   *
+   * @generated from field: string label = 2;
+   */
+  label: string;
+
+  /**
+   * How a session of it is launched: "agent_cli" (a coding agent's interactive CLI, the agent
+   * named by `session_type`) or "tddy_coder" (the tddy-coder workflow tool, run by
+   * `StartSessionRequest.agent` from one of the daemon's `allowed_tools`).
+   *
+   * @generated from field: string launch = 3;
+   */
+  launch: string;
+};
+
+/**
+ * Describes the message catalog.SessionTypeInfo.
+ * Use `create(SessionTypeInfoSchema)` to create a new message.
+ */
+export const SessionTypeInfoSchema: GenMessage<SessionTypeInfo> = /*@__PURE__*/
+  messageDesc(file_catalog, 5);
 
 /**
  * @generated from message catalog.ListSubagentsRequest
@@ -205,7 +251,7 @@ export type ListSubagentsRequest = Message<"catalog.ListSubagentsRequest"> & {
  * Use `create(ListSubagentsRequestSchema)` to create a new message.
  */
 export const ListSubagentsRequestSchema: GenMessage<ListSubagentsRequest> = /*@__PURE__*/
-  messageDesc(file_catalog, 5);
+  messageDesc(file_catalog, 6);
 
 /**
  * @generated from message catalog.ListSubagentsResponse
@@ -222,7 +268,7 @@ export type ListSubagentsResponse = Message<"catalog.ListSubagentsResponse"> & {
  * Use `create(ListSubagentsResponseSchema)` to create a new message.
  */
 export const ListSubagentsResponseSchema: GenMessage<ListSubagentsResponse> = /*@__PURE__*/
-  messageDesc(file_catalog, 6);
+  messageDesc(file_catalog, 7);
 
 /**
  * @generated from message catalog.ListToolsRequest
@@ -235,7 +281,7 @@ export type ListToolsRequest = Message<"catalog.ListToolsRequest"> & {
  * Use `create(ListToolsRequestSchema)` to create a new message.
  */
 export const ListToolsRequestSchema: GenMessage<ListToolsRequest> = /*@__PURE__*/
-  messageDesc(file_catalog, 7);
+  messageDesc(file_catalog, 8);
 
 /**
  * @generated from message catalog.ListToolsResponse
@@ -252,7 +298,7 @@ export type ListToolsResponse = Message<"catalog.ListToolsResponse"> & {
  * Use `create(ListToolsResponseSchema)` to create a new message.
  */
 export const ListToolsResponseSchema: GenMessage<ListToolsResponse> = /*@__PURE__*/
-  messageDesc(file_catalog, 8);
+  messageDesc(file_catalog, 9);
 
 /**
  * @generated from message catalog.ModelInfo
@@ -278,7 +324,7 @@ export type ModelInfo = Message<"catalog.ModelInfo"> & {
  * Use `create(ModelInfoSchema)` to create a new message.
  */
 export const ModelInfoSchema: GenMessage<ModelInfo> = /*@__PURE__*/
-  messageDesc(file_catalog, 9);
+  messageDesc(file_catalog, 10);
 
 /**
  * @generated from message catalog.SubagentInfo
@@ -368,7 +414,7 @@ export type SubagentInfo = Message<"catalog.SubagentInfo"> & {
  * Use `create(SubagentInfoSchema)` to create a new message.
  */
 export const SubagentInfoSchema: GenMessage<SubagentInfo> = /*@__PURE__*/
-  messageDesc(file_catalog, 10);
+  messageDesc(file_catalog, 11);
 
 /**
  * @generated from message catalog.ToolInfo
@@ -390,7 +436,7 @@ export type ToolInfo = Message<"catalog.ToolInfo"> & {
  * Use `create(ToolInfoSchema)` to create a new message.
  */
 export const ToolInfoSchema: GenMessage<ToolInfo> = /*@__PURE__*/
-  messageDesc(file_catalog, 11);
+  messageDesc(file_catalog, 12);
 
 /**
  * @generated from service catalog.CatalogService

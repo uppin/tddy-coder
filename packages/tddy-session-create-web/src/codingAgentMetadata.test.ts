@@ -9,9 +9,13 @@ import {
   agentForSessionType,
   bindsParam,
   hasCapability,
-  isCliSessionType,
 } from "./codingAgentMetadata";
-import { sessionTypeOptions } from "./cliHarnessOptions";
+import {
+  cliSessionTypeOptions,
+  sessionLaunchOf,
+  sessionTypeOptions,
+  type ServedSessionType,
+} from "./cliHarnessOptions";
 import type { SelectableAgent } from "./selectableAgentOptions";
 
 function anAgent(overrides: Partial<SelectableAgent>): SelectableAgent {
@@ -29,28 +33,62 @@ function anAgent(overrides: Partial<SelectableAgent>): SelectableAgent {
   };
 }
 
+function aServedType(overrides: Partial<ServedSessionType>): ServedSessionType {
+  return {
+    sessionType: "acme-cli",
+    label: "Acme",
+    launch: "agent_cli",
+    daemonInstanceId: "host-1",
+    ...overrides,
+  };
+}
+
 describe("sessionTypeOptions", () => {
-  it("offers tool, then every PTY agent the host serves, labelled by its product", () => {
-    // Given a host serving two agents, one with no PTY launch
-    const agents = [
-      anAgent({}),
-      anAgent({ id: "acme-acp", sessionType: "" }),
+  it("offers the session types the host declared, tddy-coder's first, each with its launch", () => {
+    // Given a host declaring a coding agent's CLI and the tddy-coder workflow tool
+    const served = [
+      aServedType({}),
+      aServedType({ sessionType: "flow", label: "Flow", launch: "tddy_coder" }),
     ];
 
     // When
-    const options = sessionTypeOptions(agents, "host-1", "");
+    const options = sessionTypeOptions(served, "host-1", "");
 
     // Then
     expect(options).toEqual([
-      { id: "tool", label: "Tool" },
-      { id: "acme-cli", label: "Acme" },
+      { id: "flow", label: "Flow", launch: "tddy_coder" },
+      { id: "acme-cli", label: "Acme", launch: "agent_cli" },
     ]);
   });
 
-  it("offers nothing of another host's agents", () => {
-    expect(sessionTypeOptions([anAgent({})], "host-2", "")).toEqual([
-      { id: "tool", label: "Tool" },
-    ]);
+  it("offers nothing of another host's session types", () => {
+    expect(sessionTypeOptions([aServedType({})], "host-2", "")).toEqual([]);
+  });
+
+  it("names the coding agents' CLI types among them by their launch, not their spelling", () => {
+    const options = sessionTypeOptions(
+      [aServedType({ sessionType: "acme" }), aServedType({ sessionType: "x-cli", launch: "tddy_coder" })],
+      "host-1",
+      "",
+    );
+    expect(cliSessionTypeOptions(options).map((option) => option.id)).toEqual(["acme"]);
+  });
+});
+
+describe("sessionLaunchOf", () => {
+  it("reads the served launch, the no-agent word, and nothing for an undeclared type", () => {
+    const options = sessionTypeOptions(
+      [aServedType({}), aServedType({ sessionType: "flow", launch: "tddy_coder" })],
+      "host-1",
+      "",
+    );
+    expect([
+      sessionLaunchOf("acme-cli", options),
+      sessionLaunchOf("flow", options),
+      sessionLaunchOf("workspace", options),
+      sessionLaunchOf("other-cli", options),
+      sessionLaunchOf(undefined, options),
+    ]).toEqual(["agent_cli", "tddy_coder", "no_agent", undefined, undefined]);
   });
 });
 
@@ -63,15 +101,6 @@ describe("agentForSessionType", () => {
     expect(
       agentForSessionType(agents, "host-1", "", "other-cli"),
     ).toBeUndefined();
-  });
-});
-
-describe("isCliSessionType", () => {
-  it("is the `<id>-cli` spelling, for any agent", () => {
-    expect(isCliSessionType("acme-cli")).toBe(true);
-    expect(isCliSessionType("acme")).toBe(false);
-    expect(isCliSessionType("tool")).toBe(false);
-    expect(isCliSessionType("")).toBe(false);
   });
 });
 

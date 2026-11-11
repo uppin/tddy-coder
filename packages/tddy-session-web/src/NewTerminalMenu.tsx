@@ -6,8 +6,9 @@ import {
   BASH_KIND,
   TMUX_KIND,
   TMUX_NEW_KIND,
-  TOOL_SESSION_TYPE,
+  TDDY_CODER_LAUNCH,
   cliSessionTypeOptions,
+  knownSessionLaunch,
   knownSessionTypes,
   terminalKindLabel,
 } from "tddy-session-create-web";
@@ -69,8 +70,10 @@ export function NewTerminalMenu({
   const newTabButtonRef = useRef<HTMLButtonElement>(null);
   const menuPanelRef = useRef<HTMLDivElement>(null);
 
-  // A tool session's participant runs bash only, so there is no tmux server on its side to list.
-  const tmux = sessionType === TOOL_SESSION_TYPE ? undefined : tmuxState;
+  // A tddy-coder session's participant runs bash only, so there is no tmux server on its side to
+  // list. Which sessions those are is the launch kind their daemon declared for the session type.
+  const isTddyCoderSession = knownSessionLaunch(sessionType) === TDDY_CODER_LAUNCH;
+  const tmux = isTddyCoderSession ? undefined : tmuxState;
 
   // Closing the menu drops an unsent name.
   useEffect(() => {
@@ -132,7 +135,7 @@ export function NewTerminalMenu({
   // Create pane offers, registered from its `ListAgents` answers.
   const menuKinds = [
     BASH_KIND,
-    ...(sessionType === TOOL_SESSION_TYPE
+    ...(isTddyCoderSession
       ? []
       : cliSessionTypeOptions(knownSessionTypes()).map(({ id }) => id)),
   ];

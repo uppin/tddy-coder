@@ -51,6 +51,7 @@ run:
     - { if: model, then: ["--model", "{model}"] }
   env: {}
 extensions:
+  session: { session_type: acme-cli, launch: agent_cli, label: Acme Code }
   coding_agent:
     product: Acme Code
     mcp: { kind: unsupported }

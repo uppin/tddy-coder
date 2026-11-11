@@ -19,6 +19,8 @@ serde_json = "1"
 anyhow = "1"
 tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "process"] }
 tddy-core = { path = "../tddy-core" }
+# `NO_AGENT_SESSION_TYPE`: the one session type the schema offers that no tool file declares.
+tddy-workflow = { path = "../tddy-workflow" }
 base64 = "0.22"
 tddy-task = { path = "../tddy-task" }
 # `PermissionAnswer`, the answer `AnswerSessionPermission` delivers (`#home-inbox` 6/8). Already in

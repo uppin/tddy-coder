@@ -84,6 +84,10 @@ pub struct CandidateSession {
 pub struct StartOptions {
     /// The host that answered: this daemon's id.
     pub daemon_instance_id: String,
+    /// The session types this host declares (its tool files' `extensions.session`), each with its
+    /// label. `workspace` — a worktree with no agent — is always startable besides, and declared by
+    /// nothing.
+    pub session_types: Vec<LabelledChoice>,
     pub agents: Vec<LabelledChoice>,
     pub models: ModelChoices,
     /// Why `models` is empty, when the query could not name a list of models. Empty when it could.
@@ -137,52 +141,69 @@ pub fn stack_base_session_candidates(
         .collect()
 }
 
-/// The harness whose provider accounts a start for `query` may run on, as the form chooses it: a CLI
-/// session type is its own harness, a tool session runs the agent it names, and an agent whose
-/// injected choice says no route can point it elsewhere runs only on its own vendor, so none.
-/// The reason when there is none.
+/// The coding agent among `agents` that `session_type` starts, when it is one's.
+fn agent_of_session_type<'a>(
+    agents: &'a [crate::start_session_args::AgentChoice],
+    session_type: &str,
+) -> Option<&'a crate::start_session_args::AgentChoice> {
+    agents
+        .iter()
+        .find(|choice| !choice.session_type.is_empty() && choice.session_type == session_type)
+}
+
+/// The harness whose provider accounts a start for `query` may run on, as the form chooses it: a
+/// coding agent's session type (one of `agents`) is its own harness, and any other session type
+/// runs the agent it names — except the no-agent session type, which runs none. An agent whose
+/// injected choice says no route can point it elsewhere runs only on its own vendor, so none. The
+/// reason when there is none.
 pub fn provider_harness(
     query: &StartOptionsQuery,
     agents: &[crate::start_session_args::AgentChoice],
 ) -> Result<String, String> {
     let session_type = query.session_type.trim();
     let agent = query.agent.trim();
-    if let Some(choice) = agents
-        .iter()
-        .find(|choice| choice.session_type == session_type)
-    {
+    if let Some(choice) = agent_of_session_type(agents, session_type) {
         if !choice.routable {
             return Err(format!(
                 "{session_type} runs only on its own vendor, so no provider account can run it"
             ));
         }
+        return Ok(session_type.to_string());
     }
-    match session_type {
-        "tool" if agent.is_empty() => {
-            Err("a tool session names its agent: provider routes are per harness".to_string())
-        }
-        "tool" => Ok(agent.to_string()),
-        "" if agent.is_empty() => {
-            Err("name a session_type or an agent: provider routes are per harness".to_string())
-        }
-        "" => Ok(agent.to_string()),
-        other => Ok(other.to_string()),
+    if tddy_workflow::is_no_agent_session_type(session_type) {
+        return Err(format!(
+            "a {session_type} session runs no agent: provider routes are per harness"
+        ));
     }
+    if !agent.is_empty() {
+        return Ok(agent.to_string());
+    }
+    if session_type.is_empty() {
+        return Err("name a session_type or an agent: provider routes are per harness".to_string());
+    }
+    Err(format!(
+        "a {session_type} session names its agent: provider routes are per harness"
+    ))
 }
 
-/// The agent whose models a query lists: the agent named, else the session type when it is a CLI
-/// harness. The reason when neither names one.
-pub fn models_agent(query: &StartOptionsQuery) -> Result<String, String> {
+/// The agent whose models a query lists: the agent named, else the session type when it is a
+/// coding agent's (one of `agents`). The reason when neither names one.
+pub fn models_agent(
+    query: &StartOptionsQuery,
+    agents: &[crate::start_session_args::AgentChoice],
+) -> Result<String, String> {
     let agent = query.agent.trim();
     if !agent.is_empty() {
         return Ok(agent.to_string());
     }
     match query.session_type.trim() {
         "" => Err("name an agent or a session_type: models are per agent".to_string()),
-        session_type @ ("tool" | "workspace") => Err(format!(
+        session_type if agent_of_session_type(agents, session_type).is_some() => {
+            Ok(session_type.to_string())
+        }
+        session_type => Err(format!(
             "a {session_type} session names no agent of its own: name the agent whose models to list"
         )),
-        session_type => Ok(session_type.to_string()),
     }
 }
 
@@ -200,7 +221,7 @@ pub fn start_options_tool_def() -> ToolDef {
                 },
                 "session_type": {
                     "type": "string",
-                    "description": "The session type the start is for. Its harness decides the provider accounts offered, and a CLI session type's models are its agent's. A tool session names its agent instead."
+                    "description": "The session type the start is for. Its harness decides the provider accounts offered, and a coding agent's session type's models are its agent's. Any other session type names its agent instead."
                 },
                 "agent": {
                     "type": "string",

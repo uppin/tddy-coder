@@ -11,7 +11,7 @@ use tddy_task::CancellationToken;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
-use crate::harness_from_spec::cli_launcher;
+use crate::harness_from_spec::{requested_session_launch, SessionLaunch};
 use crate::placement::CodebasePlacement;
 
 use tddy_session_split::split_start::resolve_split_agent_placement;
@@ -19,7 +19,8 @@ use tddy_session_split::split_start::resolve_split_agent_placement;
 use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
 use crate::start_request_checks::{
-    refuse_a_cli_start_without_a_model, refuse_an_orchestrated_tool_start,
+    refuse_a_cli_start_without_a_model, refuse_a_tool_path_the_daemon_does_not_allow,
+    refuse_an_orchestrated_tool_start,
 };
 
 use tddy_rpc::Response;
@@ -130,9 +131,12 @@ impl LaunchSessions {
         let orchestrator = trim_to_option(&req.orchestrator_session_id);
         let orchestrator_host =
             trim_to_option(&req.orchestrator_daemon_instance_id).filter(|host| *host != local_id);
+        // A session type nothing on this host declares is a request error, refused before the
+        // placement is classified or anything is created.
+        requested_session_launch(&self.coding_agents, &req.session_type)?;
         let placement =
             classify_start_placement(&req, Some(&*self.coding_agents), local_id, eligible_ids)?;
-        refuse_an_orchestrated_tool_start(&req)?;
+        refuse_an_orchestrated_tool_start(&req, &self.coding_agents)?;
         let started = self
             .start_here(req, os_user, agent_def, placement, progress, cancel)
             .await?;
@@ -191,6 +195,13 @@ impl LaunchSessions {
         progress: &AttachmentProgressSink,
         cancel: &CancellationToken,
     ) -> Result<Response<StartSessionResponse>, Status> {
+        // How the session is launched, from the session types this host declares: a type nothing
+        // declares (or none at all) is refused here, before anything is created. Every start on
+        // this daemon passes through here, the operator-keyed ones too.
+        let launch = requested_session_launch(&self.coding_agents, &req.session_type)?;
+        if launch == SessionLaunch::TddyCoder {
+            refuse_a_tool_path_the_daemon_does_not_allow(&req, &self.config)?;
+        }
         // Checked here, alongside the other request-shape decisions, so a session type that does not
         // honour a caller-chosen id refuses it before anything is created rather than generating one
         // and leaving the caller pointing at a session that does not exist.
@@ -289,8 +300,8 @@ impl LaunchSessions {
             }));
         }
 
-        // --- workspace branch: no LiveKit, no PTY; resolves project, creates a git worktree ---
-        if req.session_type.trim() == "workspace" {
+        // --- no-agent branch: no LiveKit, no PTY; resolves project, creates a git worktree ---
+        if launch == SessionLaunch::NoAgent {
             // Resolved and admitted before anything of the session is written: the session directory
             // and its attachments are created below, so a refused entry leaves no session behind. A
             // clone start seeds no roster and resolves none.
@@ -419,8 +430,9 @@ impl LaunchSessions {
         }
 
         // Every CLI agent starts through the one spec-driven launch; which agent a session type
-        // names is read from the host's registry, never from the session type's spelling.
-        if let Some(kind) = cli_launcher(Some(&*self.coding_agents), req.session_type.trim())? {
+        // names is read from the host's registry, never from the session type's spelling. The
+        // no-agent launch returned above, so what is left is a `tddy-coder` tool session.
+        if let SessionLaunch::AgentCli(kind) = launch {
             return self.start_cli_harness(kind, &req, progress, os_user).await;
         }
 

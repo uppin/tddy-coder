@@ -26,24 +26,24 @@ function anAgent(capabilities: string[]): SelectableAgent {
 describe("whyMainCannotRun", () => {
   it("lets an agent whose spec declares project_home_main run main", () => {
     expect(
-      whyMainCannotRun("acme-cli", anAgent(["project_home_main"])),
+      whyMainCannotRun("agent_cli", anAgent(["project_home_main"])),
     ).toBeNull();
   });
 
   it("explains that an agent without the capability cannot run main", () => {
-    expect(whyMainCannotRun("acme-cli", anAgent(["managed_workflow"]))).toBe(
+    expect(whyMainCannotRun("agent_cli", anAgent(["managed_workflow"]))).toBe(
       "This agent's spec does not offer it as a project's main: main needs an agent that declares it can stand as one.",
     );
   });
 
-  it("explains that a Tool session cannot be main", () => {
-    expect(whyMainCannotRun("tool", undefined)).toBe(
+  it("explains that a tddy-coder session cannot be main", () => {
+    expect(whyMainCannotRun("tddy_coder", undefined)).toBe(
       "A workflow session cannot be a project's main: main is a coding agent's own session on the project's repository.",
     );
   });
 
   it("explains that an unserved agent cannot run main", () => {
-    expect(whyMainCannotRun("acme-cli", undefined)).toBe(
+    expect(whyMainCannotRun("agent_cli", undefined)).toBe(
       "This agent's spec does not offer it as a project's main: main needs an agent that declares it can stand as one.",
     );
   });

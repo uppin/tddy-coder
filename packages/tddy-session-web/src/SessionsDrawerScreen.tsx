@@ -17,7 +17,7 @@ import { useSessionAttachment } from "./useSessionAttachment";
 import { SessionShell } from "./sessionShell";
 import { sessionsDrawerPathForSession, SESSIONS_DRAWER_ROUTE, SESSIONS_NEW_ROUTE } from "tddy-client-web";
 import { resolveShortcutsForSession } from "tddy-terminal-web";
-import { isCliSessionType } from "tddy-session-create-web";
+import { AGENT_CLI_LAUNCH, knownSessionLaunch } from "tddy-session-create-web";
 import { registerSessionTypeOptions, sessionTypeOptions } from "tddy-session-create-web";
 import { useSelectableAgents } from "tddy-session-create-web";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
@@ -193,7 +193,7 @@ export function SessionsDrawerScreen({
   const mobileShortcuts = useMemo(
     () =>
       resolveShortcutsForSession(
-        isCliSessionType(selectedSession?.agent ?? ""),
+        knownSessionLaunch(selectedSession?.sessionType) === AGENT_CLI_LAUNCH,
         selectedSession?.tool ?? "",
       ),
     [selectedSession],
@@ -452,7 +452,7 @@ export function SessionsDrawerScreen({
 /**
  * Registers the session types the selected daemon serves, from its `ListAgents` answer, for
  * readers that hold no catalog of their own (a terminal tab's label, the "+" menu's kinds).
- * Without a listing of its own this screen left those readers with only `tool` until some
+ * Without a listing of its own this screen left those readers with no session type until some
  * Create pane happened to mount. Renders nothing.
  */
 function SessionTypeOptionsRegistrar({
@@ -462,7 +462,7 @@ function SessionTypeOptionsRegistrar({
   catalogClient: Client<typeof CatalogService>;
   instanceId: string;
 }) {
-  const { agents } = useSelectableAgents(catalogClient, instanceId);
-  registerSessionTypeOptions(sessionTypeOptions(agents, instanceId, instanceId));
+  const { sessionTypes } = useSelectableAgents(catalogClient, instanceId);
+  registerSessionTypeOptions(sessionTypeOptions(sessionTypes, instanceId, instanceId));
   return null;
 }

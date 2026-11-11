@@ -78,7 +78,9 @@ impl DaemonSessionHost {
         // (the one declaring `split_host`), never the caller's `requested_agent`.
         let agent_id: Option<String> = match crate::context_files::context_agent_for_session(&meta)
         {
-            crate::context_files::SessionContextAgent::Own(id) => id,
+            crate::context_files::SessionContextAgent::Own(session_type) => session_type
+                .and_then(|session_type| registry.for_session_type(&session_type))
+                .map(|spec| spec.id.clone()),
             crate::context_files::SessionContextAgent::Paired => registry
                 .all()
                 .into_iter()

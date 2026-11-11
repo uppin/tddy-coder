@@ -340,7 +340,7 @@ fn forks_no_spawn_worker_when_a_supervisor_does_the_spawning() {
 
 /// A daemon config that names no supervisor: whether one brokers the spawn is decided by how the
 /// daemon was started, and the test hands that decision to the host directly.
-fn a_config_for(os_user: &str, repos_base: &Path) -> DaemonConfig {
+fn a_config_for(os_user: &str, repos_base: &Path, tool: &Path) -> DaemonConfig {
     let yaml = format!(
         r#"
 repos_base_path: "{repos}"
@@ -348,8 +348,11 @@ livekit:
   url: "ws://127.0.0.1:7880"
   api_key: "test-key"
   api_secret: "test-secret"
+allowed_tools:
+  - path: "{tool}"
 "#,
         repos = repos_base.display(),
+        tool = tool.display(),
     );
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
@@ -423,7 +426,7 @@ async fn refuses_to_start_a_session_when_the_declared_supervisor_is_unreachable(
     let missing_socket = tools.path().join("tddy-supervisor.sock");
     register_project(&data_dir.path().join("projects"), repo.path());
     let service = a_service(
-        a_config_for(&os_user, repos_base.path()),
+        a_config_for(&os_user, repos_base.path(), &tool),
         data_dir.path().to_path_buf(),
         SpawnBackendChoice::Supervisor {
             socket_path: missing_socket.clone(),
@@ -435,6 +438,7 @@ async fn refuses_to_start_a_session_when_the_declared_supervisor_is_unreachable(
         .start_session(Request::direct(StartSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: PROJECT_ID.to_string(),
+            session_type: "tool".to_string(),
             tool_path: tool.to_str().unwrap().to_string(),
             ..Default::default()
         }))

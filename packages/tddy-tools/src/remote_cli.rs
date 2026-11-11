@@ -264,7 +264,7 @@ async fn run_start_session(args: StartSessionArgs) -> Result<()> {
     let token = args.session_token.as_deref().unwrap_or("");
     let request = StartSessionRequest {
         session_token: token.to_string(),
-        session_type: "workspace".to_string(),
+        session_type: tddy_workflow::NO_AGENT_SESSION_TYPE.to_string(),
         specialized_agents: args.agents,
         ..Default::default()
     };

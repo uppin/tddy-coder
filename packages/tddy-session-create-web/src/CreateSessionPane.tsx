@@ -1,8 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { CreateSessionRunInTmuxToggle } from "./CreateSessionRunInTmuxToggle";
 import {
+  AGENT_CLI_LAUNCH,
   registerSessionTypeOptions,
+  sessionLaunchOf,
   sessionTypeOptions,
+  TDDY_CODER_LAUNCH,
 } from "./cliHarnessOptions";
 import {
   agentForSessionType,
@@ -71,9 +74,11 @@ export function CreateSessionPane({
   const daemons = useDaemons();
   const { selectedInstanceId } = useSelectedDaemon();
 
-  // The main variant fixes the project and host, and opens on the one type that can run main.
-  const [sessionType, setSessionType] = useState<SessionType>(
-    projectHome ? "" : (initialValues?.sessionType ?? "tool"),
+  // The type the operator chose (or the caller pre-filled). Until one is chosen the form shows its
+  // default, derived below from the session types the daemon declared. The main variant fixes the
+  // project and host, and opens on the one type that can run main.
+  const [chosenSessionType, setSessionType] = useState<SessionType>(
+    projectHome ? "" : (initialValues?.sessionType ?? ""),
   );
   const [projectId, setProjectId] = useState(projectHome?.projectId ?? initialValues?.projectId ?? "");
   // The *name* of the agent the operator picked (`claude`, an assistant's name). Which host offers it
@@ -141,6 +146,7 @@ export function CreateSessionPane({
   // session is derived, never stored (see `useCreateSessionAgentSelection`).
   const {
     offeredAgents,
+    offeredSessionTypes,
     offeredHostFailures,
     hostsAdvertised,
     agentHostInstanceId,
@@ -155,15 +161,21 @@ export function CreateSessionPane({
     agent,
   });
 
-  // The session types this form offers and the fields it shows follow the agents the target
-  // daemon served — their specs' session types, capabilities and argv params — never a list
-  // of the bundle's own.
+  // The session types this form offers and the fields it shows follow what the target daemon
+  // declared — its session types with their launch kinds, and its agents' capabilities and argv
+  // params — never a list of the bundle's own.
   const typeOptions = sessionTypeOptions(
-    offeredAgents,
+    offeredSessionTypes,
     daemonInstanceId,
     connectedInstanceId,
   );
   registerSessionTypeOptions(typeOptions);
+  // Until a type is chosen the form opens on the daemon's first offered type: one that runs the
+  // tddy-coder workflow tool when the daemon declares one (`sessionTypeOptions` puts them first).
+  // The main variant opens on the type that can run main instead (below).
+  const sessionType: SessionType =
+    chosenSessionType || (projectHome ? "" : (typeOptions[0]?.id ?? ""));
+  const sessionLaunch = sessionLaunchOf(sessionType, typeOptions);
   const sessionAgent = agentForSessionType(
     offeredAgents,
     daemonInstanceId,
@@ -175,7 +187,7 @@ export function CreateSessionPane({
   // the project's daemon serves.
   const mainSessionType = typeOptions.find(
     (option) =>
-      option.id !== "tool" &&
+      option.launch === AGENT_CLI_LAUNCH &&
       hasCapability(
         agentForSessionType(
           offeredAgents,
@@ -235,6 +247,7 @@ export function CreateSessionPane({
     accountsClient,
     sessionToken,
     sessionType,
+    sessionLaunch,
     selectedAgentId,
     daemonInstanceId,
     selectedAgentRouteProviders,
@@ -309,6 +322,7 @@ export function CreateSessionPane({
     selectedBranchToWorkOn,
     daemonInstanceId,
     sessionType,
+    sessionLaunch,
     cliFeatures: {
       bindsModel: bindsParam(sessionAgent, "model"),
       bindsPermissionMode: bindsParam(sessionAgent, "permission_mode"),
@@ -397,7 +411,7 @@ export function CreateSessionPane({
           projectHome
             ? (type) =>
                 whyMainCannotRun(
-                  type,
+                  sessionLaunchOf(type, typeOptions),
                   agentForSessionType(
                     offeredAgents,
                     daemonInstanceId,
@@ -433,7 +447,7 @@ export function CreateSessionPane({
       )}
 
       {/* Tool session fields */}
-      {sessionType === "tool" && (
+      {sessionLaunch === TDDY_CODER_LAUNCH && (
         <CreateSessionToolFields
           offeredAgents={offeredAgents}
           offeredHostFailures={offeredHostFailures}
@@ -517,7 +531,7 @@ export function CreateSessionPane({
             setSelectedBaseBranch={setSelectedBaseBranch}
             newBranchName={newBranchName}
             setNewBranchName={setNewBranchName}
-            sessionType={sessionType}
+            sessionLaunch={sessionLaunch}
             createRemoteBranch={createRemoteBranch}
             setCreateRemoteBranch={setCreateRemoteBranch}
             remoteBranches={remoteBranches}

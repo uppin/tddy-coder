@@ -9,7 +9,8 @@ use pretty_assertions::assert_eq;
 use serde_json::Value;
 use tddy_service::proto::session::StartSessionRequest;
 use tddy_tool_engine::start_session_args::{
-    start_session_schema, AgentChoice, HostChoice, StartChoices, StartContext, StartSessionArgs,
+    start_session_schema, start_session_schema_without_choices, AgentChoice, HostChoice,
+    SessionTypeChoice, StartChoices, StartContext, StartSessionArgs,
 };
 
 /// One agent a daemon offers, as injected data: a harness that must name a model (and takes
@@ -55,6 +56,13 @@ fn choices() -> StartChoices {
             "pr-stack".to_string(),
         ],
         agents: vec![an_agent("claude-cli", true), an_agent("warp-cli", false)],
+        session_types: ["tool", "claude-cli", "warp-cli"]
+            .into_iter()
+            .map(|session_type| SessionTypeChoice {
+                session_type: session_type.to_string(),
+                label: format!("{session_type} label"),
+            })
+            .collect(),
     }
 }
 
@@ -84,18 +92,35 @@ fn values_requiring(discriminant: &str, field: &str) -> BTreeSet<String> {
 }
 
 #[test]
-fn session_type_offers_tool_workspace_and_every_injected_cli_agent() {
+fn session_type_offers_every_injected_declared_session_type_and_workspace() {
     // Given
-    let mut expected = vec!["tool".to_string(), "workspace".to_string()];
-    expected.extend(
-        choices()
-            .agents
-            .iter()
-            .map(|agent| agent.session_type.clone()),
-    );
+    let mut expected: Vec<String> = choices()
+        .session_types
+        .iter()
+        .map(|choice| choice.session_type.clone())
+        .collect();
+    expected.push("workspace".to_string());
 
     // Then
     assert_eq!(enum_of("session_type"), expected);
+}
+
+#[test]
+fn without_choices_session_type_is_a_free_string_pointing_at_the_declared_types() {
+    // When
+    let property = start_session_schema_without_choices()["properties"]["session_type"].clone();
+
+    // Then
+    assert_eq!(
+        (
+            property["type"].as_str(),
+            property.get("enum").is_none(),
+            property["description"]
+                .as_str()
+                .is_some_and(|d| d.contains("DescribeSessionStartOptions")),
+        ),
+        (Some("string"), true, true)
+    );
 }
 
 #[test]

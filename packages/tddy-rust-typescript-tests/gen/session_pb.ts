@@ -1375,7 +1375,10 @@ export type StartSessionRequest = Message<"session.StartSessionRequest"> & {
   recipe: string;
 
   /**
-   * Session type: "tool" (default/empty) spawns tddy-coder; "claude-cli" spawns the Claude Code CLI in a PTY.
+   * Session type: one the daemon's tool files declare (`extensions.session.session_type` — e.g.
+   * "tool", declared by tddy-coder.yaml, spawns tddy-coder; "claude-cli" spawns the Claude Code CLI
+   * in a PTY), or "workspace", a worktree with no agent. Required: an empty or undeclared value is
+   * INVALID_ARGUMENT naming the declared ones (DescribeSessionStartOptions lists them).
    *
    * @generated from field: string session_type = 7;
    */

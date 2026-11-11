@@ -40,11 +40,7 @@ pub fn start_choices(
             .all()
             .into_iter()
             .filter_map(|spec| {
-                let session_type = format!(
-                    "{}{}",
-                    spec.id,
-                    tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX
-                );
+                let session_type = agents.session_type_of(&spec.id)?.to_string();
                 agents.for_session_type(&session_type).map(|_| {
                     tddy_tool_engine::start_session_args::AgentChoice {
                         session_type,
@@ -60,6 +56,17 @@ pub fn start_choices(
                     }
                 })
             })
+            .collect(),
+        // Every session type this daemon's tool files declare, with its label.
+        session_types: agents
+            .session_types()
+            .into_iter()
+            .map(
+                |declared| tddy_tool_engine::start_session_args::SessionTypeChoice {
+                    session_type: declared.session_type.clone(),
+                    label: declared.label.clone(),
+                },
+            )
             .collect(),
     }
 }
@@ -140,6 +147,7 @@ mod tests {
             hosts: Vec::new(),
             recipes: Vec::new(),
             agents: Vec::new(),
+            session_types: Vec::new(),
         };
         list_exec_tools_from_jail(bound, &request.encode_to_vec(), &choices).map(|bytes| {
             ListExecToolsResponse::decode(bytes.as_slice())

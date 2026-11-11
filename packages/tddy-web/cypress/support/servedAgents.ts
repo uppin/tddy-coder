@@ -125,3 +125,34 @@ const SERVED_AGENT_WIRE: Record<string, Partial<AgentInfo>> = {
 export function servedAgentWire(id: string): Partial<AgentInfo> {
   return SERVED_AGENT_WIRE[id] ?? {};
 }
+
+/** One session type a daemon declares, as `ListAgentsResponse.session_types` carries it. */
+export interface DeclaredSessionTypeWire {
+  sessionType: string;
+  label: string;
+  launch: string;
+}
+
+/**
+ * A stubbed `ListAgents` answer with the session types its daemon declares beside the agents:
+ * `tool` (tddy-coder.yaml's, the `tddy_coder` launch) and each listed agent's own session type
+ * (the `agent_cli` launch, from its spec), labelled as the agent is. A real daemon serves every
+ * session type its tool files declare; a stub serves those its agents stand for. An answer that
+ * already names its session types is left as it is.
+ */
+export function withDeclaredSessionTypes<
+  T extends { agents?: Array<Partial<AgentInfo>>; sessionTypes?: DeclaredSessionTypeWire[] },
+>(response: T): T & { sessionTypes: DeclaredSessionTypeWire[] } {
+  if (response.sessionTypes !== undefined) {
+    return response as T & { sessionTypes: DeclaredSessionTypeWire[] };
+  }
+  const declared: DeclaredSessionTypeWire[] = [
+    { sessionType: "tool", label: "Tool", launch: "tddy_coder" },
+  ];
+  for (const agent of response.agents ?? []) {
+    const sessionType = agent.sessionType ?? servedAgentWire(agent.id ?? "").sessionType ?? "";
+    if (sessionType === "" || declared.some((d) => d.sessionType === sessionType)) continue;
+    declared.push({ sessionType, label: agent.label || agent.id || sessionType, launch: "agent_cli" });
+  }
+  return { ...response, sessionTypes: declared };
+}

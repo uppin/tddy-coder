@@ -59,18 +59,33 @@ pub(super) async fn describe_start_options(
             label: agent.label.clone(),
         })
         .collect();
-    let harness_choices: Vec<tddy_tool_engine::start_session_args::AgentChoice> = listed
-        .iter()
-        .map(|agent| tddy_tool_engine::start_session_args::AgentChoice {
-            session_type: agent.session_type.clone(),
-            label: agent.label.clone(),
-            requires_model: agent.capabilities.iter().any(|c| c == "requires_model"),
-            permission_modes: agent.permission_modes.clone(),
-            routable: !agent.route_providers.is_empty(),
+    // The coding agents' session types, from this host's declarations — not from the catalogue's
+    // rows, which list only the agents daemon.yaml or a profile names.
+    let registry = sources.launch.coding_agents.agents();
+    let harness_choices: Vec<tddy_tool_engine::start_session_args::AgentChoice> = registry
+        .session_types()
+        .into_iter()
+        .filter_map(|declared| {
+            let spec = registry.for_session_type(&declared.session_type)?;
+            Some(tddy_tool_engine::start_session_args::AgentChoice {
+                session_type: declared.session_type.clone(),
+                label: declared.label.clone(),
+                requires_model: spec.has(tddy_coding_agent_specs::Capability::RequiresModel),
+                permission_modes: spec.agent.permission_modes.clone(),
+                routable: !spec.route_support().providers.is_empty(),
+            })
+        })
+        .collect();
+    let session_types = registry
+        .session_types()
+        .into_iter()
+        .map(|declared| LabelledChoice {
+            id: declared.session_type.clone(),
+            label: declared.label.clone(),
         })
         .collect();
     let subagents = subagent_names(sources.catalog).await?;
-    let (models, models_unavailable) = model_choices(&sources, &query).await?;
+    let (models, models_unavailable) = model_choices(&sources, &query, &harness_choices).await?;
     let (provider_routes, provider_routes_unavailable) =
         provider_route_choices(&sources, &query, &harness_choices).await;
     let (ssh_config_hosts, ssh_config_hosts_unavailable) =
@@ -79,6 +94,7 @@ pub(super) async fn describe_start_options(
     let sessions = session_candidates(&sources).await?;
     Ok(StartOptions {
         daemon_instance_id: sources.daemon_instance_id.to_string(),
+        session_types,
         agents,
         models,
         models_unavailable,
@@ -128,12 +144,13 @@ async fn subagent_names(catalog: &CatalogRpcHandler) -> anyhow::Result<Vec<Strin
 async fn model_choices(
     sources: &StartOptionsSources<'_>,
     query: &StartOptionsQuery,
+    agents: &[tddy_tool_engine::start_session_args::AgentChoice],
 ) -> anyhow::Result<(ModelChoices, String)> {
     let account_id = query.provider_account_id.trim();
     if !account_id.is_empty() {
         return Ok(account_models(sources, account_id).await);
     }
-    let agent = match models_agent(query) {
+    let agent = match models_agent(query, agents) {
         Ok(agent) => agent,
         Err(reason) => return Ok((ModelChoices::default(), reason)),
     };

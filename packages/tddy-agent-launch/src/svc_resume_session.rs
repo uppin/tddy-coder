@@ -11,7 +11,7 @@ use crate::session_coordinate_handlers::bridge_conn_resume_response;
 
 use tddy_core::read_session_metadata;
 
-use crate::harness_from_spec::cli_launcher;
+use crate::harness_from_spec::{recorded_session_launch, SessionLaunch};
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
@@ -53,12 +53,15 @@ impl LaunchSessions {
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
 
-        // Every CLI agent resumes through the one spec-driven launch, read from the agent its
-        // recorded session type names in the host's registry.
-        if let Some(kind) = cli_launcher(
-            Some(&*self.coding_agents),
-            metadata.session_type.as_deref().unwrap_or(""),
-        )? {
+        // How the session resumes is read from the session type it records, as this host declares
+        // it: every CLI agent through the one spec-driven launch, a no-agent session by re-provisioning
+        // its jail, and a `tddy_coder` session by respawning its recorded tool.
+        let launch = recorded_session_launch(
+            &self.coding_agents,
+            metadata.session_type.as_deref(),
+            metadata.tool.as_deref(),
+        )?;
+        if let SessionLaunch::AgentCli(kind) = launch {
             // A sandboxed session resumes in its jail and never on the host's PTY.
             if metadata.sandbox == Some(true) {
                 return bridge_conn_resume_response(
@@ -79,8 +82,8 @@ impl LaunchSessions {
             );
         }
 
-        // --- workspace branch: re-provision jail when sandboxed, no LiveKit ---
-        if metadata.session_type.as_deref() == Some("workspace") {
+        // --- no-agent branch: re-provision jail when sandboxed, no LiveKit ---
+        if launch == SessionLaunch::NoAgent {
             if metadata.sandbox == Some(true)
                 && self
                     .workspace_sandboxes

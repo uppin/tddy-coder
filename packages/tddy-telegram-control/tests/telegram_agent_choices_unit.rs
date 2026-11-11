@@ -35,6 +35,7 @@ run:
     - {{ if: model, then: ["--model", "{{model}}"] }}
   env: {{}}
 extensions:
+  session: {{ session_type: {id}-cli, launch: agent_cli, label: {id} }}
   coding_agent:
     mcp: {{ kind: unsupported }}
     tool_allow: unsupported

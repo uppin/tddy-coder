@@ -48,12 +48,3 @@ export function allowsPlacement(
 ): boolean {
   return agent?.placements.includes(placement) ?? false;
 }
-
-/**
- * A CLI session type's shape, from its spelling alone: `<id>-cli` for some agent id.
- * Used where no daemon metadata is at hand (a listed session's own type); the daemon
- * serves the authoritative list for starting one.
- */
-export function isCliSessionType(sessionType: string): boolean {
-  return sessionType.endsWith("-cli");
-}

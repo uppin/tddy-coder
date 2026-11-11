@@ -7,7 +7,7 @@
  * PRD: docs/ft/coder/1-WIP/PRD-2026-10-18-provider-route-tool-route.md
  */
 import { createClient } from "@connectrpc/connect";
-import { servedAgentWire } from "../support/servedAgents";
+import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/CreateSessionPane";
 import { SessionService } from "tddy-client-web/gen/session_pb";
@@ -26,7 +26,7 @@ function aBackend(): InMemoryRpcBackend {
     .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => withDeclaredSessionTypes({
       // As the daemon reports them from the specs: Codex can be routed to OpenAI Responses
       // endpoints, Cursor declares no provider at all.
       agents: [

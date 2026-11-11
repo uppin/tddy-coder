@@ -132,7 +132,11 @@ pub async fn start_workspace_session(
         // with and refuse the very withdrawal this placement exists to enforce.
         agent_daemon_instance_id: paired_agent.map(|a| a.daemon_instance_id.clone()),
         agent_session_id: paired_agent.map(|a| a.session_id.clone()),
-        ..crate::service_util::starting_session_metadata(session_id, project_id, "workspace")
+        ..crate::service_util::starting_session_metadata(
+            session_id,
+            project_id,
+            tddy_coding_agent_specs::NO_AGENT_SESSION_TYPE,
+        )
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -231,7 +235,11 @@ pub async fn start_agent_clone_session(
 
     let meta = tddy_core::SessionMetadata {
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
-        ..crate::service_util::starting_session_metadata(session_id, project_id, "workspace")
+        ..crate::service_util::starting_session_metadata(
+            session_id,
+            project_id,
+            tddy_coding_agent_specs::NO_AGENT_SESSION_TYPE,
+        )
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;

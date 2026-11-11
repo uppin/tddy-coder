@@ -12,16 +12,17 @@ use std::path::Path;
 use tddy_actions::tool::{ToolError, ToolRegistry};
 use thiserror::Error;
 
-use crate::{CodingAgentSpec, SpecError};
+use crate::session::{parse_session_section, DeclaredSessionType, LaunchKind, SESSION_EXTENSION};
+use crate::{CodingAgentSpec, SpecError, NO_AGENT_SESSION_TYPE};
 
-/// The suffix a CLI session type adds to the id of the agent it runs: `claude-cli` runs `claude`.
-pub const CLI_SESSION_TYPE_SUFFIX: &str = "-cli";
-
-/// Every coding agent a host knows, by id, over the tool registry they were loaded from.
+/// Every coding agent a host knows, by id, and every session type its tool files declare, over the
+/// tool registry they were loaded from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodingAgentRegistry {
     tools: ToolRegistry,
     agents: std::collections::BTreeMap<String, CodingAgentSpec>,
+    /// The session types the tool files declare (`extensions.session`), by session type.
+    session_types: std::collections::BTreeMap<String, DeclaredSessionType>,
     /// The base set every agent's environment keeps from the daemon's (`#agent-tools 28/28`).
     agent_env_base: crate::AgentEnvBase,
 }
@@ -56,6 +57,7 @@ impl CodingAgentRegistry {
         Self {
             tools: ToolRegistry::default(),
             agents: std::collections::BTreeMap::new(),
+            session_types: std::collections::BTreeMap::new(),
             agent_env_base: crate::AgentEnvBase::builtin(),
         }
     }
@@ -63,14 +65,7 @@ impl CodingAgentRegistry {
     /// The registry of the built-in specs alone, with no `<tddyhome>/tools` overrides: for a
     /// caller that has no host to read overrides from (a test fixture, an embedded render).
     pub fn builtin() -> Result<Self, RegistryError> {
-        let specs = crate::builtin_specs();
-        let sources: Vec<(&str, &str)> = tddy_actions::tool::BUILTIN_TOOLS
-            .iter()
-            .chain(tddy_actions::tool::BUILTIN_SUPPORT_TOOLS)
-            .chain(&specs)
-            .copied()
-            .collect();
-        Self::from_tools(ToolRegistry::from_embedded(&sources)?)
+        Self::from_tools(ToolRegistry::from_embedded(&crate::embedded_tool_sources())?)
     }
 
     /// The built-in registry, built once: for a caller that held only the old static agent table
@@ -87,6 +82,10 @@ impl CodingAgentRegistry {
     /// The coding agents among `tools`: every tool with a `coding_agent` extension, viewed through
     /// [`CodingAgentSpec::of`]. A tool whose extension does not validate refuses the whole
     /// registry, naming it; a tool without one (`tddy-tools`, `git`) is not an agent and is skipped.
+    ///
+    /// Every tool's `session` extension is read too ([`Self::session_types`]). Refused: a section
+    /// that does not validate, two tools declaring the same session type, and an `agent_cli`
+    /// launch declared by a tool that is not a coding agent with a PTY `run:` section.
     pub fn from_tools(tools: ToolRegistry) -> Result<Self, RegistryError> {
         let mut agents = std::collections::BTreeMap::new();
         for id in tools.ids() {
@@ -96,9 +95,11 @@ impl CodingAgentRegistry {
             }
             agents.insert(id.to_string(), CodingAgentSpec::of(def)?);
         }
+        let session_types = declared_session_types(&tools, &agents)?;
         Ok(Self {
             tools,
             agents,
+            session_types,
             agent_env_base: crate::AgentEnvBase::builtin(),
         })
     }
@@ -119,15 +120,119 @@ impl CodingAgentRegistry {
         self.agents.get(id)
     }
 
-    /// The agent a session of `session_type` runs: `<id>-cli` names agent `<id>` when that agent's
-    /// `run:` section is a PTY (`claude-cli` → `claude`, a dropped-in `acme.yaml` → `acme-cli`).
-    /// `None` for a session type no agent stands for — `tool`, `workspace`, a bare agent id, and the
-    /// `-cli` of an agent that runs only over ACP.
+    /// The coding agent a session of `session_type` runs: the agent whose tool file declares
+    /// `session_type` with an `agent_cli` launch (`claude-cli` → `claude`). `None` for a session
+    /// type no agent declares — `tool` (tddy-coder's), `workspace`, a bare agent id, an undeclared
+    /// value.
     pub fn for_session_type(&self, session_type: &str) -> Option<&CodingAgentSpec> {
-        let id = session_type.strip_suffix(CLI_SESSION_TYPE_SUFFIX)?;
-        self.get(id)
-            .filter(|spec| spec.run.transport == tddy_actions::tool::Transport::Pty)
+        let declared = self.session_type(session_type)?;
+        match declared.launch {
+            LaunchKind::AgentCli => self.get(&declared.tool_id),
+            LaunchKind::TddyCoder => None,
+        }
     }
+
+    /// The declaration of `session_type`, when a tool file declares it.
+    pub fn session_type(&self, session_type: &str) -> Option<&DeclaredSessionType> {
+        self.session_types.get(session_type)
+    }
+
+    /// Every session type the host's tool files declare, ordered by session type. The no-agent
+    /// session type ([`NO_AGENT_SESSION_TYPE`]) is not among them: nothing declares it.
+    pub fn session_types(&self) -> Vec<&DeclaredSessionType> {
+        self.session_types.values().collect()
+    }
+
+    /// The one session type declared with `launch`: `None` when none is, or when several are and
+    /// a caller could not tell which is meant.
+    pub fn sole_session_type_launching(&self, launch: LaunchKind) -> Option<&DeclaredSessionType> {
+        let mut launching = self
+            .session_types
+            .values()
+            .filter(|declared| declared.launch == launch);
+        let sole = launching.next()?;
+        launching.next().is_none().then_some(sole)
+    }
+
+    /// The session type agent `id` declares, when it declares one: an agent that runs only over
+    /// ACP or headless declares none.
+    pub fn session_type_of(&self, id: &str) -> Option<&str> {
+        self.session_types
+            .values()
+            .find(|declared| declared.tool_id == id)
+            .map(|declared| declared.session_type.as_str())
+    }
+
+    /// Every session type this host offers, comma-separated: the declared ones, then
+    /// [`NO_AGENT_SESSION_TYPE`].
+    pub fn offered_session_types(&self) -> String {
+        self.session_types
+            .keys()
+            .map(String::as_str)
+            .chain(std::iter::once(NO_AGENT_SESSION_TYPE))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// The refusal of a session type that is neither declared nor [`NO_AGENT_SESSION_TYPE`]: the
+    /// value refused (quoted) and every session type this host offers.
+    pub fn undeclared_session_type_message(&self, session_type: &str) -> String {
+        format!(
+            "session_type {session_type:?} is not a session type this host declares; it offers {}",
+            self.offered_session_types()
+        )
+    }
+}
+
+/// The session types `tools` declare, refused as [`Self::from_tools`] documents.
+fn declared_session_types(
+    tools: &ToolRegistry,
+    agents: &std::collections::BTreeMap<String, CodingAgentSpec>,
+) -> Result<std::collections::BTreeMap<String, DeclaredSessionType>, RegistryError> {
+    let mut declared: std::collections::BTreeMap<String, DeclaredSessionType> =
+        std::collections::BTreeMap::new();
+    for id in tools.ids() {
+        let Some(section) = tools
+            .get(id)
+            .and_then(|def| def.extensions.get(SESSION_EXTENSION))
+        else {
+            continue;
+        };
+        let section =
+            parse_session_section(section).map_err(|message| RegistryError::SessionType {
+                tool: id.to_string(),
+                message,
+            })?;
+        if section.launch == LaunchKind::AgentCli {
+            let is_a_pty_agent = agents
+                .get(id)
+                .is_some_and(|spec| spec.run.transport == tddy_actions::tool::Transport::Pty);
+            if !is_a_pty_agent {
+                return Err(RegistryError::SessionType {
+                    tool: id.to_string(),
+                    message: "launch agent_cli needs a coding_agent whose run transport is pty"
+                        .to_string(),
+                });
+            }
+        }
+        if let Some(first) = declared.get(&section.session_type) {
+            return Err(RegistryError::DuplicateSessionType {
+                session_type: section.session_type,
+                first: first.tool_id.clone(),
+                second: id.to_string(),
+            });
+        }
+        declared.insert(
+            section.session_type.clone(),
+            DeclaredSessionType {
+                session_type: section.session_type,
+                launch: section.launch,
+                label: section.label,
+                tool_id: id.to_string(),
+            },
+        );
+    }
+    Ok(declared)
 }
 
 /// Why a host's coding-agent registry did not load.
@@ -143,4 +248,14 @@ pub enum RegistryError {
     /// The agent-env base set did not load (`#agent-tools 28/28`).
     #[error(transparent)]
     AgentEnvBase(#[from] crate::AgentEnvBaseError),
+    /// A tool's `session` extension is not a usable session type declaration.
+    #[error("tool {tool}: session: {message}")]
+    SessionType { tool: String, message: String },
+    /// Two tool files declare the same session type.
+    #[error("session type {session_type:?} is declared by both {first} and {second}")]
+    DuplicateSessionType {
+        session_type: String,
+        first: String,
+        second: String,
+    },
 }

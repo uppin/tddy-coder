@@ -340,7 +340,7 @@ describe("CreateSessionPane — submit behaviour", () => {
       expect(req.agent).to.equal("claude");
       expect(req.recipe).to.equal("tdd");
       expect(req.toolPath).to.equal(TEST_TOOL_PATH);
-      expect(req.sessionType).to.equal("");
+      expect(req.sessionType).to.equal("tool");
       expect(req.model).to.equal(DEFAULT_MODEL);
     });
 

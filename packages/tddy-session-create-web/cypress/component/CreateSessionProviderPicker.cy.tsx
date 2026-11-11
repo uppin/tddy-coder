@@ -21,6 +21,7 @@ import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { AgentKind } from "tddy-client-web/gen/types_pb";
 import { TEST_IDS, byTestId } from "../support/testIds";
+import { withDeclaredSessionTypes } from "../support/servedAgents";
 
 /** A coding agent from the registry, routable to `routeProviders`. */
 function aCodingAgent(id: string, routeProviders: string[]) {
@@ -44,7 +45,7 @@ function aBackend(): InMemoryRpcBackend {
     .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => withDeclaredSessionTypes({
       agents: [aCodingAgent("claude", ["anthropic"]), aDefinition("reviewer")],
     }))
     .onUnary(CatalogService.method.listTools, () => ({

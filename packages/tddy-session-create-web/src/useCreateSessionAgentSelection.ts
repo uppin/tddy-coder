@@ -9,6 +9,7 @@ import {
   type SelectableAgent,
 } from "./selectableAgentOptions";
 import { type HostReadFailure } from "tddy-client-web";
+import type { ServedSessionType } from "./cliHarnessOptions";
 
 export interface CreateSessionAgentSelectionInput {
   catalogClient: Client<typeof CatalogService>;
@@ -24,6 +25,8 @@ export interface CreateSessionAgentSelectionInput {
 export interface CreateSessionAgentSelection {
   /** The agents this form may offer. */
   offeredAgents: readonly SelectableAgent[];
+  /** The session types the hosts declared, with their launch kinds. */
+  offeredSessionTypes: readonly ServedSessionType[];
   /** The hosts whose silence the form may report. */
   offeredHostFailures: readonly HostReadFailure[];
   /** Whether there is a host to name at all. */
@@ -79,6 +82,7 @@ export function useCreateSessionAgentSelection({
 
   return {
     offeredAgents,
+    offeredSessionTypes: selectableAgents.sessionTypes,
     offeredHostFailures: selectableAgents.failures,
     hostsAdvertised,
     agentHostInstanceId,

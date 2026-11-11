@@ -15,7 +15,7 @@
  */
 
 import React from "react";
-import { servedAgentWire } from "../support/servedAgents";
+import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
@@ -105,7 +105,7 @@ function openPrStackScreen(opts: MountOptions = {}) {
       ),
     )
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
-    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }] }))
+    .onUnary(CatalogService.method.listAgents, () => withDeclaredSessionTypes({ agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude"), }] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "opus", label: "Claude Opus (latest)" }],
       defaultModel: "opus",

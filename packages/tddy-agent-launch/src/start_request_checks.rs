@@ -8,7 +8,7 @@ use crate::stack_seed_validation::validate_stack_seed_base_session;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_split::service_util;
 
-use tddy_coding_agent_specs::{Capability, CodingAgentSpec};
+use tddy_coding_agent_specs::{Capability, CodingAgentSpec, LaunchKind};
 use tddy_rpc::Status;
 
 use tddy_service::proto::session::{BranchConflict, StartSessionResponse};
@@ -76,23 +76,28 @@ pub(crate) fn refuse_an_unsupported_cli_session_start(
     Ok(())
 }
 
-/// Whether `session_type` is a CLI agent's, which runs its agent in tmux when asked. Any other type
-/// ignores `run_in_tmux`.
-fn runs_in_tmux(session_type: &str) -> bool {
-    session_type.ends_with(tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX)
+/// Whether `session_type` is a CLI agent's — declared with an `agent_cli` launch — which runs its
+/// agent in tmux when asked. Any other type ignores `run_in_tmux`.
+fn runs_in_tmux(session_type: &str, agents: Option<&crate::spec_launch::HostCodingAgents>) -> bool {
+    agents
+        .and_then(|agents| agents.agents().for_session_type(session_type))
+        .is_some()
 }
 
 /// A start that asks for a tmux-run agent together with a placement that is not a plain agent on
-/// this host is refused before anything is created, for every CLI agent's session type (`*-cli`),
-/// naming the conflict:
+/// this host is refused before anything is created, for every CLI agent's session type, naming the
+/// conflict:
 ///
 /// - `sandbox` confines the agent in its own jail, which a tmux session on the host is not;
 /// - `sandboxed_codebase` withdraws the agent's native tools and jails the code, so there is no host
 ///   agent to run in tmux;
 /// - `codebase_daemon_instance_id` (split placement) puts the worktree on another daemon, while the
 ///   tmux session is as this host's OS user in a local worktree.
-pub(crate) fn refuse_a_conflicting_tmux_run_start(req: &StartSessionRequest) -> Result<(), Status> {
-    if !runs_in_tmux(req.session_type.trim()) || !req.run_in_tmux {
+pub(crate) fn refuse_a_conflicting_tmux_run_start(
+    req: &StartSessionRequest,
+    agents: Option<&crate::spec_launch::HostCodingAgents>,
+) -> Result<(), Status> {
+    if !req.run_in_tmux || !runs_in_tmux(req.session_type.trim(), agents) {
         return Ok(());
     }
     if req.sandbox {
@@ -136,28 +141,71 @@ pub(crate) fn refuse_a_cli_start_without_a_model(
     Ok(())
 }
 
-/// Refuse an orchestrator on a `tool` session: its changeset is written by its own `tddy-coder`
-/// process, not by this daemon, so the link could not be recorded.
+/// Refuse an orchestrator on a session whose type is declared with the `tddy_coder` launch: its
+/// changeset is written by its own `tddy-coder` process, not by this daemon, so the link could not be
+/// recorded.
 ///
 /// TODO(start-parity): pass the orchestrator to the spawned `tddy-coder`, which records it the way
 /// it records `--stack-parent`.
-pub(crate) fn refuse_an_orchestrated_tool_start(req: &StartSessionRequest) -> Result<(), Status> {
+pub(crate) fn refuse_an_orchestrated_tool_start(
+    req: &StartSessionRequest,
+    agents: &crate::spec_launch::HostCodingAgents,
+) -> Result<(), Status> {
     let session_type = req.session_type.trim();
-    let is_tool = session_type.is_empty() || session_type == "tool";
-    if is_tool && !req.orchestrator_session_id.trim().is_empty() {
-        return Err(Status::failed_precondition(
-            "a `tool` session cannot be started with an orchestrator yet: its changeset is written \
-             by its own tddy-coder process, which does not record one",
-        ));
+    let launches_tddy_coder = agents
+        .agents()
+        .session_type(session_type)
+        .is_some_and(|declared| declared.launch == LaunchKind::TddyCoder);
+    if launches_tddy_coder && !req.orchestrator_session_id.trim().is_empty() {
+        return Err(Status::failed_precondition(format!(
+            "a {session_type:?} session cannot be started with an orchestrator yet: its changeset \
+             is written by its own tddy-coder process, which does not record one"
+        )));
     }
     Ok(())
+}
+
+/// Refuse a `tddy_coder` start whose `tool_path` is not one of the daemon's `allowed_tools`, an
+/// empty one included: the path is executed, so only a binary the operator listed may be, and an
+/// empty one names nothing (it would resolve to the daemon's own working directory). There is no
+/// default tool: the caller picks one of the listed paths.
+pub(crate) fn refuse_a_tool_path_the_daemon_does_not_allow(
+    req: &StartSessionRequest,
+    config: &tddy_daemon_kernel::config::DaemonConfig,
+) -> Result<(), Status> {
+    let tool_path = req.tool_path.trim();
+    let allowed: Vec<&str> = config
+        .allowed_tools()
+        .iter()
+        .map(|tool| tool.path.as_str())
+        .collect();
+    if !tool_path.is_empty() && allowed.contains(&tool_path) {
+        return Ok(());
+    }
+    let refused = if tool_path.is_empty() {
+        format!(
+            "tool_path is required for a {:?} session",
+            req.session_type.trim()
+        )
+    } else {
+        format!("tool_path {tool_path:?} is not in allowed_tools")
+    };
+    Err(Status::invalid_argument(format!(
+        "{refused}; this daemon's allowed_tools are [{}]",
+        allowed
+            .iter()
+            .map(|path| format!("{path:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )))
 }
 
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 impl LaunchSessions {
-    /// The refusals a start the caller is about to begin meets before it creates anything: a CLI
-    /// session without a model, a `tool` session with an orchestrator, and a requested branch another
+    /// The refusals a start the caller is about to begin meets before it creates anything: a session
+    /// type this host does not declare, a `tddy_coder` start whose `tool_path` is not allowed, a CLI
+    /// session without a model, a `tddy_coder` session with an orchestrator, and a requested branch another
     /// session owns (`Some`, naming the owner). The start core makes the same checks once its task
     /// has named itself, which is too late for the caller to be told by refusal, so a caller that
     /// answers with a handle asks these first (`#start-parity` 4/9).
@@ -166,8 +214,15 @@ impl LaunchSessions {
         req: &StartSessionRequest,
         os_user: &str,
     ) -> Result<Option<BranchConflict>, Status> {
+        let launch = crate::harness_from_spec::requested_session_launch(
+            &self.coding_agents,
+            &req.session_type,
+        )?;
+        if launch == crate::harness_from_spec::SessionLaunch::TddyCoder {
+            refuse_a_tool_path_the_daemon_does_not_allow(req, &self.config)?;
+        }
         refuse_a_cli_start_without_a_model(req, Some(&*self.coding_agents))?;
-        refuse_an_orchestrated_tool_start(req)?;
+        refuse_an_orchestrated_tool_start(req, &self.coding_agents)?;
         self.owned_branch_conflict(os_user, req).await
     }
 

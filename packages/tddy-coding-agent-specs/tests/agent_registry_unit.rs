@@ -260,3 +260,178 @@ fn an_agent_without_a_route_section_cannot_be_routed() {
         (RouteSupport::default(), false)
     );
 }
+
+/// The built-in `id`'s YAML with its declared session type replaced by `session_type`.
+fn the_builtin_declaring(id: &str, session_type: &str) -> String {
+    let yaml = the_builtin_yaml(id);
+    let declared = format!("\n    session_type: {id}-cli\n");
+    assert!(yaml.contains(&declared), "{id}.yaml declares {id}-cli");
+    yaml.replacen(
+        &declared,
+        &format!("\n    session_type: {session_type}\n"),
+        1,
+    )
+}
+
+#[test]
+fn every_builtin_session_type_is_declared_with_its_launch_and_tool() {
+    // Given
+    let (_home, registry) = a_registry_with_tools(&[]);
+
+    // When
+    let declared: Vec<(String, String, String)> = registry
+        .session_types()
+        .into_iter()
+        .map(|declared| {
+            (
+                declared.session_type.clone(),
+                declared.launch.to_string(),
+                declared.tool_id.clone(),
+            )
+        })
+        .collect();
+
+    // Then — tddy-coder declares `tool`; no file declares `workspace`
+    assert_eq!(
+        declared,
+        [
+            ("claude-cli", "agent_cli", "claude"),
+            ("codex-cli", "agent_cli", "codex"),
+            ("cursor-cli", "agent_cli", "cursor"),
+            ("muse-cli", "agent_cli", "muse"),
+            ("opencode-cli", "agent_cli", "opencode"),
+            ("oz-cli", "agent_cli", "oz"),
+            ("tool", "tddy_coder", "tddy-coder"),
+            ("warp-cli", "agent_cli", "warp"),
+        ]
+        .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
+        .to_vec()
+    );
+}
+
+#[test]
+fn two_tool_files_declaring_one_session_type_refuse_the_registry_naming_both() {
+    // Given — an override of cursor.yaml that declares claude's session type
+    let home = tempfile::tempdir().unwrap();
+    let tools = home.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    std::fs::write(
+        tools.join("cursor.yaml"),
+        the_builtin_declaring("cursor", "claude-cli"),
+    )
+    .unwrap();
+
+    // When
+    let refused = CodingAgentRegistry::load(&tools).map(|_| ());
+
+    // Then
+    assert_eq!(
+        refused.map_err(|error| error.to_string()),
+        Err("session type \"claude-cli\" is declared by both claude and cursor".to_string())
+    );
+}
+
+#[test]
+fn a_tool_file_declaring_the_no_agent_session_type_is_refused() {
+    // Given
+    let home = tempfile::tempdir().unwrap();
+    let tools = home.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    std::fs::write(
+        tools.join("cursor.yaml"),
+        the_builtin_declaring("cursor", "workspace"),
+    )
+    .unwrap();
+
+    // When
+    let refused = CodingAgentRegistry::load(&tools).map(|_| ());
+
+    // Then
+    let message = refused.map_err(|error| error.to_string()).unwrap_err();
+    assert!(
+        message.contains("\"workspace\" is reserved for a session with no agent"),
+        "{message}"
+    );
+}
+
+#[test]
+fn an_undeclared_session_type_is_refused_naming_it_and_every_declared_one() {
+    // Given
+    let (_home, registry) = a_registry_with_tools(&[]);
+
+    // When
+    let message = registry.undeclared_session_type_message("claude");
+
+    // Then
+    assert_eq!(
+        message,
+        "session_type \"claude\" is not a session type this host declares; it offers claude-cli, \
+         codex-cli, cursor-cli, muse-cli, opencode-cli, oz-cli, tool, warp-cli, workspace"
+    );
+}
+
+/// The built-in `id`'s YAML with its `extensions.session` section struck out.
+fn the_builtin_without_its_session_section(id: &str) -> String {
+    let yaml = the_builtin_yaml(id);
+    let start = yaml
+        .find("  # The session type a session of this agent")
+        .unwrap_or_else(|| panic!("{id}.yaml documents its session section"));
+    let end = yaml[start..]
+        .find("  coding_agent:\n")
+        .map(|offset| start + offset)
+        .expect("the coding_agent section follows the session section");
+    format!("{}{}", &yaml[..start], &yaml[end..])
+}
+
+#[test]
+fn an_override_of_a_builtin_that_drops_its_session_section_is_refused_naming_the_file_and_the_builtins_values(
+) {
+    // Given — an operator's cursor.yaml written before session types were declared
+    let home = tempfile::tempdir().unwrap();
+    let tools = home.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    let override_file = tools.join("cursor.yaml");
+    std::fs::write(
+        &override_file,
+        the_builtin_without_its_session_section("cursor"),
+    )
+    .unwrap();
+
+    // When
+    let refused = CodingAgentRegistry::load(&tools).map(|_| ());
+
+    // Then
+    assert_eq!(
+        refused.map_err(|error| error.to_string()),
+        Err(format!(
+            "tool file {}: extension session: this file overrides the built-in cursor, which \
+             declares a session type, but declares none itself; add `extensions.session: {{ \
+             session_type: cursor-cli, launch: agent_cli, label: Cursor }}` (the built-in's \
+             values) or another session type of its own",
+            override_file.display()
+        ))
+    );
+}
+
+#[test]
+fn a_new_agent_dropped_in_without_a_session_section_loads_and_declares_no_session_type() {
+    // Given — cursor.yaml's content under a new id, with no session section
+    let yaml = the_builtin_without_its_session_section("cursor").replacen(
+        "\nid: cursor\n",
+        "\nid: acme\n",
+        1,
+    );
+
+    // When
+    let (_home, registry) = a_registry_with_tools(&[("acme.yaml", &yaml)]);
+
+    // Then
+    assert_eq!(
+        (
+            registry.get("acme").is_some(),
+            registry.session_type_of("acme"),
+            registry.session_type_of("cursor"),
+        ),
+        (true, None, Some("cursor-cli"))
+    );
+}

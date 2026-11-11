@@ -3,7 +3,7 @@
 //! These assert routing, per-host project paths, and cross-daemon safety.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
@@ -67,6 +67,7 @@ fn write_livekit_daemon_yaml(
     ws_url: &str,
     daemon_instance_id: Option<&str>,
     os_user: &str,
+    tddy_coder: &Path,
 ) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
@@ -75,11 +76,14 @@ fn write_livekit_daemon_yaml(
         .unwrap_or_default();
     let true_path = true_bin();
     let room = remote_acceptance_room();
+    let tddy_coder = tddy_coder.display();
     let yaml = format!(
         r#"
 {id_block}allowed_tools:
   - path: {true_path}
     label: t
+  - path: {tddy_coder}
+    label: fake tddy-coder
 livekit:
   enabled: true
   url: {ws_url}
@@ -287,9 +291,16 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     };
     // Project will be written to sessions_b/projects/ after sessions_b is created below.
 
-    let (_tmp_a, path_a) = write_livekit_daemon_yaml(&ws_url, None, &os_user);
-    let (_tmp_b, path_b) =
-        write_livekit_daemon_yaml(&ws_url, Some(REMOTE_PEER_INSTANCE_ID), &os_user);
+    // Both hosts allow the stand-in tddy-coder: a tool session's `tool_path` must be one of the
+    // daemon's `allowed_tools`.
+    let (_tmp_a, path_a) =
+        write_livekit_daemon_yaml(&ws_url, None, &os_user, &fake_tddy_coder_path);
+    let (_tmp_b, path_b) = write_livekit_daemon_yaml(
+        &ws_url,
+        Some(REMOTE_PEER_INSTANCE_ID),
+        &os_user,
+        &fake_tddy_coder_path,
+    );
     let config_a = DaemonConfig::load(&path_a).unwrap();
     let config_b = DaemonConfig::load(&path_b).unwrap();
 
@@ -432,7 +443,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         agent: String::new(),
         daemon_instance_id: REMOTE_PEER_INSTANCE_ID.to_string(),
         recipe: String::new(),
-        session_type: String::new(),
+        session_type: "tool".to_string(),
         model: String::new(),
         branch_worktree_intent: String::new(),
         new_branch_name: String::new(),

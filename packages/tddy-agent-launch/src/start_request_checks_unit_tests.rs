@@ -2,14 +2,26 @@
 //! peer acts the same way even if its own copy of the project was never set.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tddy_projects::project_storage::ProjectData;
 use tddy_service::proto::session::{GithubSource, StartSessionRequest};
 
+use crate::spec_launch::HostCodingAgents;
 use crate::start_request_checks::{
     forwarded_start_request, record_requested_github_source, refuse_a_conflicting_tmux_run_start,
-    refuse_an_orchestrated_tool_start,
+    refuse_a_tool_path_the_daemon_does_not_allow, refuse_an_orchestrated_tool_start,
 };
+
+/// The built-in coding agents and session types, on a host whose binaries are never resolved.
+fn the_builtin_coding_agents() -> HostCodingAgents {
+    let no_overrides = tempfile::tempdir().expect("an empty tools dir");
+    HostCodingAgents::new(
+        tddy_coding_agent_specs::load_agent_registry(no_overrides.path())
+            .expect("the built-in coding agents load"),
+        Arc::new(tddy_actions::tool::ProcessToolHost),
+    )
+}
 
 const PROJECT_ID: &str = "11111111-2222-4333-8444-555555555555";
 
@@ -145,22 +157,25 @@ fn an_orchestrated_start_of(session_type: &str) -> StartSessionRequest {
 
 #[test]
 fn an_orchestrated_tool_start_is_refused_naming_the_tool_session_type() {
-    for session_type in ["tool", ""] {
-        // When
-        let refused = refuse_an_orchestrated_tool_start(&an_orchestrated_start_of(session_type))
-            .expect_err("a tool session cannot record its orchestrator");
+    // When — `tool` is declared by tddy-coder.yaml with the tddy_coder launch
+    let refused = refuse_an_orchestrated_tool_start(
+        &an_orchestrated_start_of("tool"),
+        &the_builtin_coding_agents(),
+    )
+    .expect_err("a tool session cannot record its orchestrator");
 
-        // Then
-        assert_eq!(refused.code, tddy_rpc::Code::FailedPrecondition);
-        assert!(refused.message.contains("`tool`"), "{}", refused.message);
-    }
+    // Then
+    assert_eq!(refused.code, tddy_rpc::Code::FailedPrecondition);
+    assert!(refused.message.contains("\"tool\""), "{}", refused.message);
 }
 
 #[test]
 fn an_orchestrated_start_of_a_session_the_daemon_records_is_accepted() {
+    let agents = the_builtin_coding_agents();
     for session_type in ["workspace", "claude-cli"] {
         assert!(
-            refuse_an_orchestrated_tool_start(&an_orchestrated_start_of(session_type)).is_ok(),
+            refuse_an_orchestrated_tool_start(&an_orchestrated_start_of(session_type), &agents)
+                .is_ok(),
             "{session_type}"
         );
     }
@@ -168,11 +183,75 @@ fn an_orchestrated_start_of_a_session_the_daemon_records_is_accepted() {
 
 #[test]
 fn a_tool_start_with_no_orchestrator_is_accepted() {
-    assert!(refuse_an_orchestrated_tool_start(&StartSessionRequest {
-        session_type: "tool".to_string(),
-        ..Default::default()
-    })
+    assert!(refuse_an_orchestrated_tool_start(
+        &StartSessionRequest {
+            session_type: "tool".to_string(),
+            ..Default::default()
+        },
+        &the_builtin_coding_agents(),
+    )
     .is_ok());
+}
+
+/// A daemon whose `allowed_tools` is the one dev build.
+fn a_daemon_allowing_the_dev_build() -> tddy_daemon_kernel::config::DaemonConfig {
+    serde_yaml::from_str("allowed_tools:\n  - path: target/debug/tddy-coder\n")
+        .expect("a daemon config with allowed_tools")
+}
+
+fn a_tool_start_of(tool_path: &str) -> StartSessionRequest {
+    StartSessionRequest {
+        session_type: "tool".to_string(),
+        tool_path: tool_path.to_string(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_tool_start_of_an_allowed_tool_path_is_accepted() {
+    assert_eq!(
+        refuse_a_tool_path_the_daemon_does_not_allow(
+            &a_tool_start_of("target/debug/tddy-coder"),
+            &a_daemon_allowing_the_dev_build(),
+        )
+        .map_err(|status| status.message),
+        Ok(())
+    );
+}
+
+#[test]
+fn a_tool_start_of_an_empty_or_unlisted_tool_path_is_refused_naming_the_allowlist() {
+    // When
+    let refused: Vec<(tddy_rpc::Code, String)> = ["", "/bin/sh"]
+        .into_iter()
+        .map(|tool_path| {
+            refuse_a_tool_path_the_daemon_does_not_allow(
+                &a_tool_start_of(tool_path),
+                &a_daemon_allowing_the_dev_build(),
+            )
+            .map(|()| (tddy_rpc::Code::Ok, String::new()))
+            .unwrap_or_else(|status| (status.code, status.message))
+        })
+        .collect();
+
+    // Then
+    assert_eq!(
+        refused,
+        vec![
+            (
+                tddy_rpc::Code::InvalidArgument,
+                "tool_path is required for a \"tool\" session; this daemon's allowed_tools are \
+                 [\"target/debug/tddy-coder\"]"
+                    .to_string()
+            ),
+            (
+                tddy_rpc::Code::InvalidArgument,
+                "tool_path \"/bin/sh\" is not in allowed_tools; this daemon's allowed_tools are \
+                 [\"target/debug/tddy-coder\"]"
+                    .to_string()
+            ),
+        ]
+    );
 }
 
 fn a_tmux_run_claude_start() -> StartSessionRequest {
@@ -192,7 +271,8 @@ fn a_tmux_run_start_with_a_sandboxed_codebase_is_refused_naming_the_conflict() {
     };
 
     // When
-    let refusal = refuse_a_conflicting_tmux_run_start(&req).unwrap_err();
+    let refusal =
+        refuse_a_conflicting_tmux_run_start(&req, Some(&the_builtin_coding_agents())).unwrap_err();
 
     // Then
     assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
@@ -217,7 +297,8 @@ fn a_tmux_run_start_with_a_split_placement_is_refused_naming_the_conflict() {
     };
 
     // When
-    let refusal = refuse_a_conflicting_tmux_run_start(&req).unwrap_err();
+    let refusal =
+        refuse_a_conflicting_tmux_run_start(&req, Some(&the_builtin_coding_agents())).unwrap_err();
 
     // Then
     assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
@@ -230,7 +311,11 @@ fn a_tmux_run_start_with_a_split_placement_is_refused_naming_the_conflict() {
 
 #[test]
 fn a_tmux_run_start_on_a_plain_placement_is_not_refused() {
-    assert!(refuse_a_conflicting_tmux_run_start(&a_tmux_run_claude_start()).is_ok());
+    assert!(refuse_a_conflicting_tmux_run_start(
+        &a_tmux_run_claude_start(),
+        Some(&the_builtin_coding_agents())
+    )
+    .is_ok());
 }
 
 #[test]
@@ -243,5 +328,5 @@ fn a_split_placement_without_tmux_is_not_refused_here() {
     };
 
     // Then
-    assert!(refuse_a_conflicting_tmux_run_start(&req).is_ok());
+    assert!(refuse_a_conflicting_tmux_run_start(&req, Some(&the_builtin_coding_agents())).is_ok());
 }

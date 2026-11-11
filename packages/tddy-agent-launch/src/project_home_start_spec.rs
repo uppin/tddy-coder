@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use tddy_coding_agent_specs::{Capability, CLI_SESSION_TYPE_SUFFIX};
+use tddy_coding_agent_specs::Capability;
 use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 use tddy_rpc::Status;
 use tddy_service::proto::session::StartSessionRequest;
@@ -67,24 +67,24 @@ pub(crate) fn refuse_a_type_main_cannot_run(
     if runs_main {
         return Ok(());
     }
-    let named = if session_type.is_empty() {
-        "tool"
-    } else {
-        session_type
-    };
-    let can_run_main: Vec<String> = registry
+    let can_run_main: Vec<&str> = registry
         .map(|agents| {
             agents
                 .all()
                 .into_iter()
                 .filter(|spec| spec.has(Capability::ProjectHomeMain))
-                .map(|spec| format!("{}{CLI_SESSION_TYPE_SUFFIX}", spec.id))
+                .filter_map(|spec| agents.session_type_of(&spec.id))
                 .collect()
         })
         .unwrap_or_default();
+    let named = if session_type.is_empty() {
+        "session with no session_type".to_string()
+    } else {
+        format!("{session_type} session")
+    };
     Err(Status::failed_precondition(format!(
-        "a {named} session cannot enforce managed-codebase mode, so main could not be kept \
-         read-only; only {} can run main",
+        "a {named} cannot enforce managed-codebase mode, so main could not be kept read-only; \
+         only {} can run main",
         can_run_main.join(", ")
     )))
 }

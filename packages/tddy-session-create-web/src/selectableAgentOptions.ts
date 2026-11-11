@@ -22,7 +22,7 @@ export interface SelectableAgent {
    * asked for. Absent: the daemon did not say.
    */
   readonly routeProviders?: readonly string[];
-  /** The session type that starts this agent (`<id>-cli`), from its spec; empty for none. */
+  /** The session type that starts this agent as its spec declares it; empty for none. */
   readonly sessionType: string;
   /** The agent's spec capabilities (`managed_workflow`, `split_host`, …). */
   readonly capabilities: readonly string[];

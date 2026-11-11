@@ -54,10 +54,6 @@ const DAEMON_IDENTITY_PREFIX: &str = "daemon-";
 /// this" is the first thing they need from it.
 const SYNCER_IDENTITY_PREFIX: &str = "session-sync-";
 
-/// A `workspace` session has no facilitating daemon and therefore no room at all (see
-/// `docs/ft/daemon/session-room.md`), so there is nothing for this client to join.
-const WORKSPACE_SESSION_TYPE: &str = "workspace";
-
 /// Where a session lives, resolved rather than configured.
 ///
 /// AC21: these are **not** flags. A user who had to spell out the project and the daemon holding a
@@ -212,7 +208,9 @@ pub fn resolve_session(
             session_id: session_id.to_string(),
         })?;
 
-    if entry.session_type == WORKSPACE_SESSION_TYPE {
+    // A no-agent (`workspace`) session has no facilitating daemon and therefore no room at all
+    // (see `docs/ft/daemon/session-room.md`), so there is nothing for this client to join.
+    if tddy_workflow::is_no_agent_session_type(&entry.session_type) {
         return Err(AttachError::SessionHasNoRoom {
             session_id: session_id.to_string(),
             session_type: entry.session_type.clone(),

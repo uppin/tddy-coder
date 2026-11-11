@@ -70,6 +70,7 @@ run:
     - { if: prompt, then: ["{prompt}"] }
   env: {}
 extensions:
+  session: { session_type: acme-cli, launch: agent_cli, label: Acme Code }
   coding_agent:
     mcp: { kind: unsupported }
     tool_allow: unsupported
@@ -775,8 +776,7 @@ async fn a_telegram_start_on_a_host_without_coding_agents_is_refused_in_the_chat
         ),
         (
             Err(
-                "this host has no coding agents installed: Telegram cannot start a claude-cli \
-                 session"
+                "this host has no coding agents installed: Telegram cannot start a claude session"
                     .to_string()
             ),
             Vec::<String>::new(),

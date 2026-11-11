@@ -14,6 +14,7 @@ import type {
 } from "./hooks/useSessionAttachments";
 import type { CreateSessionPaneProps } from "./createSessionPaneProps";
 import { buildStartSessionRequest, type CreateSessionFormValues } from "./createSessionRequest";
+import { TDDY_CODER_LAUNCH } from "./cliHarnessOptions";
 
 type SessionAttachments = ReturnType<typeof useSessionAttachments>;
 
@@ -58,7 +59,7 @@ export function useCreateSessionSubmit({
   const [cancelling, setCancelling] = useState(false);
   const [startCancelled, setStartCancelled] = useState(false);
 
-  const { sessionType, projectId, selectedAgentId, toolPath, model } = form;
+  const { projectId, selectedAgentId, toolPath, model } = form;
   const isSubmitEnabled = (() => {
     if (submitting) return false;
     // An attachment the daemon would refuse (duplicate or unsafe basename) fails the whole creation,
@@ -67,7 +68,7 @@ export function useCreateSessionSubmit({
     // A model is required and comes from the daemon-advertised catalog; a failed/loading probe
     // leaves `model` empty, which disables Create (no fallback). An agent whose launch binds
     // no model takes none, so its Create needs only the project.
-    if (sessionType === "tool") {
+    if (form.sessionLaunch === TDDY_CODER_LAUNCH) {
       return Boolean(projectId && selectedAgentId && toolPath && model);
     }
     if (form.cliFeatures !== undefined && !form.cliFeatures.bindsModel) {

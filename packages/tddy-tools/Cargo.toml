@@ -23,6 +23,8 @@ tddy-stdio = { path = "../tddy-stdio" }
 tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
 async-trait = "0.1"
 tddy-core = { path = "../tddy-core" }
+# `NO_AGENT_SESSION_TYPE`: the session type `remote start-session` asks for. Dependency-free.
+tddy-workflow = { path = "../tddy-workflow" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 uuid = { version = "1", features = ["v4"] }

@@ -127,19 +127,25 @@ fn register_project(data_dir: &Path, repo: &Path, row: ProjectRow) {
 }
 
 /// A daemon that spawns directly (no supervisor, no worker) and asks `gh` at `gh`.
-fn a_daemon(data_dir: &Path, gh: PathBuf) -> DaemonSessionHost {
+fn a_daemon(data_dir: &Path, gh: PathBuf, tool: &Path) -> DaemonSessionHost {
     let config_dir = tempfile::tempdir().unwrap();
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
         &config_path,
-        r#"
+        // The stand-in tool is the one path this daemon allows a tool session to run.
+        format!(
+            r#"
 livekit:
   url: ws://127.0.0.1:1
   api_key: dummy-key
   api_secret: dummy-secret
 spawn_startup_grace_period_ms: 300
 spawn_startup_poll_interval_ms: 10
+allowed_tools:
+  - path: "{}"
 "#,
+            tool.display()
+        ),
     )
     .unwrap();
     std::fs::write(
@@ -247,7 +253,7 @@ fn a_host_in(
         .recording_env_to(&gh_environment)
         .build();
     register_project(data_dir.path(), repo.path(), row);
-    let daemon = a_daemon(data_dir.path(), gh);
+    let daemon = a_daemon(data_dir.path(), gh, &tool);
     World {
         _environment: environment,
         data_dir,
@@ -271,6 +277,7 @@ impl World {
             .start_session(Request::direct(StartSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 project_id: PROJECT_ID.to_string(),
+                session_type: "tool".to_string(),
                 tool_path: self.tool.to_str().unwrap().to_string(),
                 github_source: github_source as i32,
                 ..Default::default()

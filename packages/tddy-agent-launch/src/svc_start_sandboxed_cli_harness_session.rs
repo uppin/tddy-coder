@@ -221,12 +221,12 @@ impl LaunchSessions {
             &tddy_session_files::context_files::context_globs(
                 self.coding_agents
                     .agents()
-                    .get(kind.name)
+                    .get(kind.spec_id)
                     .map(|spec| spec.agent.context_globs.as_slice()),
             ),
             self.coding_agents
                 .agents()
-                .get(kind.name)
+                .get(kind.spec_id)
                 .map(|spec| spec.agent.instructions.files.as_slice())
                 .unwrap_or(&[]),
             &started_agents,

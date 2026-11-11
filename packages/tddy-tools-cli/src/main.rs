@@ -312,14 +312,9 @@ fn agent_models_catalog(
         .all()
         .into_iter()
         .map(|spec| {
-            let names = vec![
-                spec.id.clone(),
-                format!(
-                    "{}{}",
-                    spec.id,
-                    tddy_coding_agent_specs::CLI_SESSION_TYPE_SUFFIX
-                ),
-            ];
+            let names: Vec<String> = std::iter::once(spec.id.clone())
+                .chain(registry.session_type_of(&spec.id).map(str::to_string))
+                .collect();
             // The binary the listing runs: the caller's resolved one, else the name its
             // tool file declares (`binary.command`), searched on `PATH` by the OS.
             let binary = args.binary_path.clone().unwrap_or_else(|| {

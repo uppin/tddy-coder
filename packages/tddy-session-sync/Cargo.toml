@@ -19,6 +19,9 @@ tddy-room-client = { path = "../tddy-room-client" }
 # means absence. This is a shipped standalone binary; the crate that *serves* the deltas carries a
 # `livekit` and `teloxide` tree that has no business inside it.
 tddy-service = { path = "../tddy-service" }
+# `is_no_agent_session_type`: the one session type with no room, read from the crate that defines it
+# rather than spelled here. A dependency-free crate (`log`, `serde`).
+tddy-workflow = { path = "../tddy-workflow" }
 clap = { version = "4", features = ["derive", "env"] }
 log = "0.4"
 prost = "0.13"

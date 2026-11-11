@@ -44,7 +44,12 @@ impl AHost {
 
 /// `spec_yaml` as the spec of another agent, `id`.
 fn renamed(spec_yaml: &str, from: &str, id: &str) -> String {
-    spec_yaml.replace(&format!("id: {from}\n"), &format!("id: {id}\n"))
+    spec_yaml
+        .replace(&format!("id: {from}\n"), &format!("id: {id}\n"))
+        .replace(
+            &format!("session_type: {from}-cli\n"),
+            &format!("session_type: {id}-cli\n"),
+        )
 }
 
 fn the_spec<'a>(registry: &'a CodingAgentRegistry, id: &str) -> &'a CodingAgentSpec {

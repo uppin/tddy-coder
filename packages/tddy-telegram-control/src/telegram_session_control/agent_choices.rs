@@ -7,9 +7,7 @@
 
 use std::fmt;
 
-use tddy_coding_agent_specs::{
-    Capability, CodingAgentRegistry, CodingAgentSpec, CLI_SESSION_TYPE_SUFFIX,
-};
+use tddy_coding_agent_specs::{Capability, CodingAgentRegistry, CodingAgentSpec};
 
 /// `/start-agent <prompt>`: start any CLI agent the host offers — the agent keyboard comes first.
 pub const START_AGENT_CMD: &str = "/start-agent";
@@ -27,7 +25,7 @@ pub const CB_TELEGRAM_MODEL: &str = "tcm:";
 pub struct TelegramAgentChoice {
     /// The agent's id in the registry — also its button label.
     pub agent_id: String,
-    /// The session type a start of it asks for: `<id>-cli`.
+    /// The session type a start of it asks for, as its spec declares it.
     pub session_type: String,
 }
 
@@ -38,15 +36,17 @@ pub struct TelegramAgentChoices {
 }
 
 impl TelegramAgentChoices {
-    /// Every agent of `registry` a CLI session can run — those `for_session_type("<id>-cli")`
-    /// answers, so an ACP-only agent is not offered.
+    /// Every agent of `registry` a CLI session can run — those that declare a session type
+    /// `for_session_type` answers, so an ACP-only agent is not offered.
     pub fn of(registry: &CodingAgentRegistry) -> Self {
         let choices = registry
             .all()
             .into_iter()
-            .map(|spec| TelegramAgentChoice {
-                agent_id: spec.id.clone(),
-                session_type: format!("{}{CLI_SESSION_TYPE_SUFFIX}", spec.id),
+            .filter_map(|spec| {
+                Some(TelegramAgentChoice {
+                    agent_id: spec.id.clone(),
+                    session_type: registry.session_type_of(&spec.id)?.to_string(),
+                })
             })
             .filter(|choice| registry.for_session_type(&choice.session_type).is_some())
             .collect();

@@ -637,6 +637,8 @@ fn a_pr_stack_start_request(base_session_id: &str) -> StartSessionRequest {
         session_token: VALID_TOKEN.to_string(),
         project_id: TEST_PROJECT_ID.to_string(),
         session_type: "tool".to_string(),
+        // The form always sends one of the daemon's `allowed_tools`; this daemon allows `/bin/true`.
+        tool_path: "/bin/true".to_string(),
         recipe: "pr-stack".to_string(),
         pr_stack_base_session_id: base_session_id.to_string(),
         ..Default::default()

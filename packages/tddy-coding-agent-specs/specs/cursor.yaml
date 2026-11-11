@@ -35,6 +35,12 @@ run:
     - { if: prompt, then: ["{prompt}"] }
   env: {}
 extensions:
+  # The session type a session of this agent is started and recorded as, and its launch. Declared
+  # here, never derived from the id: a stored `.session.yaml` names it.
+  session:
+    session_type: cursor-cli
+    launch: agent_cli
+    label: Cursor
   coding_agent:
     pass_env: [CURSOR_API_KEY]
     product: Cursor
