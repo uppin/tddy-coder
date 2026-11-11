@@ -22,6 +22,8 @@ import {
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
+import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { worktreeCodePanePage } from "../support/pages/worktreeCodePanePage";
 import { workflowChatScreenPage } from "../support/pages/workflowChatScreenPage";
@@ -117,6 +119,9 @@ function aWorktreeBackend(sessions: Record<string, unknown>[]) {
   };
 
   return aSessionsDrawerBackend(sessions)
+    .onUnary(CatalogService.method.listAgents, () =>
+      withDeclaredSessionTypes({ agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude") }] }),
+    )
     .onUnary(WorktreeService.method.listWorktreeDirectory, (req) =>
       create(ListWorktreeDirectoryResponseSchema, {
         entries: (directories[req.relPath] ?? []).map((e) => create(WorktreeDirEntrySchema, e)),
@@ -162,6 +167,9 @@ function aProjectScopedWorktreeBackend(
   };
 
   return aSessionsDrawerBackend(sessions)
+    .onUnary(CatalogService.method.listAgents, () =>
+      withDeclaredSessionTypes({ agents: [{ id: "claude", label: "Claude", ...servedAgentWire("claude") }] }),
+    )
     .onUnary(ProjectService.method.listProjects, () => ({ projects }))
     .onUnary(WorktreeService.method.listWorktreeDirectory, (req) => {
       requireResolvedProject(req.projectId);
