@@ -37,6 +37,9 @@ export function projectHomesOnHost(
 /** `SessionEntry.sessionRole` of a project's project-home session. */
 export const PROJECT_HOME_ROLE = "project-home";
 
+/** `SessionEntry.sessionRole` of an orchestrator session: read-only, main's reach, any number. */
+export const ORCHESTRATOR_ROLE = "orchestrator";
+
 /** What one project group renders: its pinned entry (if any), the home session, the other rows. */
 export interface ProjectHomeSlot {
   home: ProjectHomeInfo | undefined;

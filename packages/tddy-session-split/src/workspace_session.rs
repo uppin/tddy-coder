@@ -60,6 +60,7 @@ pub async fn start_workspace_session(
     paired_agent: Option<&PairedAgentSession>,
     sandbox: bool,
     tddy_data_dir: &Path,
+    orchestrator: Option<&crate::service_util::OrchestratorLink>,
 ) -> Result<Response<StartSessionResponse>, Status> {
     let project_id = project_id.trim();
     if project_id.is_empty() {
@@ -97,6 +98,9 @@ pub async fn start_workspace_session(
     // Write a minimal changeset so `setup_worktree_for_session_with_optional_chain_base` can read it.
     let cs = tddy_core::Changeset {
         workflow: Some(workflow),
+        orchestrator_session_id: orchestrator.map(|link| link.session_id.clone()),
+        orchestrator_daemon_instance_id: orchestrator
+            .and_then(|link| link.daemon_instance_id.clone()),
         ..Default::default()
     };
     tddy_core::write_changeset(&session_dir, &cs)

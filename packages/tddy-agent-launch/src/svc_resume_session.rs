@@ -52,6 +52,7 @@ impl LaunchSessions {
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
+        self.fast_forward_a_resumed_orchestrators_home(os_user, &metadata)?;
 
         // How the session resumes is read from the session type it records, as this host declares
         // it: every CLI agent through the one spec-driven launch, a no-agent session by re-provisioning

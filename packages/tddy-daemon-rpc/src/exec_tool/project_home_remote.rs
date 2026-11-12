@@ -21,7 +21,7 @@
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
-use tddy_core::session_metadata::PROJECT_HOME_ROLE;
+use tddy_core::session_metadata::is_orchestrator_role;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
@@ -143,7 +143,7 @@ impl ExecToolRpcHandler {
             // answer. The listing
             // names the session's role but not its recipe, so this host cannot confirm the
             // capability. See docs/dev/todo/2026-10-26-forwarded-conversation-spawner-is-refused-the-start-tools.md
-            if owned.session_role != PROJECT_HOME_ROLE {
+            if !is_orchestrator_role(&owned.session_role) {
                 return Err(Status::permission_denied(format!(
                     "tool {} is served only to a project-home session, and daemon {peer} reports \
                      session {} is not one",

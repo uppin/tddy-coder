@@ -150,8 +150,7 @@ pub const ORCHESTRATOR_ROLE: &str = "orchestrator";
 /// none of them compares the role string itself. Auto-stop alone keeps matching main's role.
 #[must_use]
 pub fn is_orchestrator_role(role: &str) -> bool {
-    // TODO(orchestrator-role): implement — admit ORCHESTRATOR_ROLE too.
-    role == PROJECT_HOME_ROLE
+    role == PROJECT_HOME_ROLE || role == ORCHESTRATOR_ROLE
 }
 
 fn is_false(value: &bool) -> bool {

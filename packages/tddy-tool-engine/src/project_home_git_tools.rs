@@ -18,6 +18,7 @@
 
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tddy_core::session_metadata::is_orchestrator_role;
 use tddy_worktree_service::session_git_ops::{run_git_op, GitOp, GitOpOutcome, ResetMode};
 use tddy_worktree_service::session_target::HomeCaller;
 
@@ -167,6 +168,19 @@ pub async fn execute_project_home_git_tool(
         Ok(target) => target,
         Err(outcome) => return outcome,
     };
+    match port.session_role_of(&target.session_id).await {
+        Ok(Some(role)) if is_orchestrator_role(&role) => {
+            return ToolOutcome::err(format!(
+                "{tool_name}: session {} holds the {role} role: another orchestrator's worktree \
+                 is the project's home worktree",
+                target.session_id
+            ))
+        }
+        Ok(_) => {}
+        Err(e) => {
+            return ToolOutcome::err(format!("{tool_name}: cannot read the target's role: {e:#}"))
+        }
+    }
     let identity = match port.push_identity(&target).await {
         Ok(identity) => identity,
         Err(e) => {

@@ -7,6 +7,7 @@
 
 use tddy_coding_agent_specs::CodingAgentRegistry;
 use tddy_core::provider_route::{choose_route, RouteSources};
+use tddy_core::session_metadata::{is_orchestrator_role, ORCHESTRATOR_ROLE};
 use tddy_discovery::harness_profile::{load_harness_profiles, HarnessProfile};
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{StartSessionRequest, StartSessionResponse};
@@ -24,9 +25,10 @@ impl LaunchSessions {
     ///
     /// This is the start every caller-facing path takes (`StartSession`, `StreamStartSession`, a
     /// split's workspace start, a project-home `StartSession`), so a request naming a
-    /// `session_role` is refused here: a role is granted by the daemon, never asked for, since a
-    /// project-home role reaches the project's other sessions. Only
-    /// [`Self::start_session_with_role`] starts a session with one.
+    /// `session_role` is admitted here ([`admit_a_requested_role`]): only `orchestrator` may be
+    /// asked for, by a person or by an orchestrator's agent, and is then placed on the project's
+    /// home worktree. `project-home`, main's role, is the daemon's to grant: only
+    /// [`Self::start_session_with_role`] starts a session with it.
     pub async fn start_session_core(
         &self,
         req: StartSessionRequest,
@@ -44,8 +46,9 @@ impl LaunchSessions {
         progress: &AttachmentProgressSink,
         cancel: &CancellationToken,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        refuse_a_requested_role(&req)?;
+        self.admit_the_requested_role(&req)?;
         let req = self.apply_harness_profile(req)?;
+        let req = self.place_an_orchestrator(req)?;
         // Refused before routing, on the session type the profile resolved: a start this daemon
         // would refuse is not forwarded to a peer to be refused there, and nothing is created for it.
         crate::start_request_checks::refuse_a_conflicting_tmux_run_start(
@@ -138,8 +141,6 @@ pub(crate) fn refuse_a_requested_role(req: &StartSessionRequest) -> Result<(), S
 
 /// Who asks a start for a standing role (`#orchestrators` 1/11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// TODO(orchestrator-role): constructed by `start_session_core_cancellable` from the caller's token.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) enum RoleRequester<'a> {
     /// A person: a web or CLI caller presenting their own token.
     Person,
@@ -153,15 +154,21 @@ pub(crate) enum RoleRequester<'a> {
 /// (`tddy_core::session_metadata::is_orchestrator_role`). Every other agent asking for it, and
 /// anyone asking for `project-home` — main's role, the daemon's alone to grant — is refused
 /// `PERMISSION_DENIED`, since an orchestrator role reaches the project's other sessions.
-// TODO(orchestrator-role): replaces `refuse_a_requested_role` in `start_session_core_cancellable`.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn admit_a_requested_role(
     requester: RoleRequester<'_>,
     req: &StartSessionRequest,
 ) -> Result<(), Status> {
-    // TODO(orchestrator-role): implement — admit `orchestrator` by `requester`.
-    let _ = requester;
-    refuse_a_requested_role(req)
+    if req.session_role.trim() != ORCHESTRATOR_ROLE {
+        return refuse_a_requested_role(req);
+    }
+    match requester {
+        RoleRequester::Person => Ok(()),
+        RoleRequester::Agent { own_role } if own_role.is_some_and(is_orchestrator_role) => Ok(()),
+        RoleRequester::Agent { .. } => Err(Status::permission_denied(format!(
+            "only a person or an orchestrator may start a session in the {ORCHESTRATOR_ROLE} role: \
+             it reaches the project's other sessions"
+        ))),
+    }
 }
 
 /// `status`, with the profile and the account it was asked for named in its message.

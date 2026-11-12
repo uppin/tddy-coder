@@ -18,9 +18,22 @@ export interface CreateSessionOrchestratorFieldProps {
  *
  * PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-orchestrator-sessions.md
  */
-export function CreateSessionOrchestratorField(
-  _props: CreateSessionOrchestratorFieldProps,
-): null {
-  // TODO(orchestrator-role): implement — render the switch and wire it into CreateSessionPane.
-  return null;
+export function CreateSessionOrchestratorField({
+  orchestrator,
+  setOrchestrator,
+}: CreateSessionOrchestratorFieldProps) {
+  return (
+    <div>
+      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+        <input
+          data-testid="create-session-orchestrator-toggle"
+          type="checkbox"
+          className="h-4 w-4 rounded border-input"
+          checked={orchestrator}
+          onChange={(e) => setOrchestrator(e.target.checked)}
+        />
+        Session orchestrator
+      </label>
+    </div>
+  );
 }

@@ -270,7 +270,7 @@ impl StartSessionArgs {
                 .into_iter()
                 .map(HostDocumentAttachment::into_session_attachment)
                 .collect(),
-            // TODO(orchestrator-role): implement — carry `self.session_role` into the request.
+            session_role: self.session_role,
             ..Default::default()
         }
     }

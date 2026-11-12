@@ -546,6 +546,18 @@ impl SplitSessions {
     pub fn agent_session_token_for(&self, caller_token: &str) -> Result<String, Status> {
         crate::split_session::mint_agent_session_token(self.session_tokens()?, caller_token)
     }
+
+    /// Whether `token` verifies under this daemon's keys and was minted for a session's agent
+    /// ([`tddy_github::TokenPrincipal::Agent`]). A token these keys cannot verify, and every token
+    /// on a host that signs none, is not an agent's.
+    pub fn token_is_an_agents(&self, token: &str) -> bool {
+        self.session_tokens.as_ref().is_some_and(|tokens| {
+            tokens
+                .verifier()
+                .verify_now(token)
+                .is_ok_and(|claims| claims.principal == Some(tddy_github::TokenPrincipal::Agent))
+        })
+    }
 }
 
 fn record_split_answer_wait(session_dir: &Path) -> Result<u64, Status> {
