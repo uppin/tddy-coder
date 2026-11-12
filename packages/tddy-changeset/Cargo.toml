@@ -33,4 +33,3 @@ pretty_assertions = { workspace = true }
 rstest = { workspace = true }
 tempfile = "3"
 tddy-testing-commons = { path = "../tddy-testing-commons" }
-

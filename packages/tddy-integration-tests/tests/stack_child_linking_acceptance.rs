@@ -98,7 +98,7 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
         }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, orch_cs.clone());
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, orch_cs);
 
     let child_id = "018fbbbb-0002-7000-bbbb-000000000002";
     let child_dir = unified_session_dir_path(&sessions_home, child_id);
@@ -154,7 +154,7 @@ fn link_stack_node_sets_session_id_and_branch() {
         }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, cs.clone());
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, cs);
 
     // When
     link_stack_node_to_child_session(

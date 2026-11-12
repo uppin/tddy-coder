@@ -247,20 +247,33 @@ impl Stack {
     }
 }
 
-/// The project's stack store a session dir resolves to, and the project the session belongs to.
+/// Where a session's PR stack lives: the project's stack store, the session's project, and the
+/// session's own id (the `created_by_session_id` of a stack it plans).
 ///
 /// The projects directory follows the sessions layout every daemon uses — `<base>/sessions/<id>`
 /// sits beside `<base>/projects` — and the project id comes from the session's `.session.yaml`.
-pub fn session_stack_store(
-    session_dir: &Path,
-) -> Result<(ProjectStackStore, String), WorkflowError> {
-    let sessions_dir = session_dir.parent().filter(|p| p.ends_with("sessions"));
-    let base = sessions_dir.and_then(Path::parent).ok_or_else(|| {
+struct SessionStackHome {
+    store: ProjectStackStore,
+    project_id: String,
+    session_id: String,
+}
+
+fn session_stack_home(session_dir: &Path) -> Result<SessionStackHome, WorkflowError> {
+    let not_a_session_dir = || {
         WorkflowError::PlanDirInvalid(format!(
             "{} is not a session directory under <base>/sessions/",
             session_dir.display()
         ))
-    })?;
+    };
+    let session_id = session_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(not_a_session_dir)?;
+    let base = session_dir
+        .parent()
+        .filter(|p| p.ends_with("sessions"))
+        .and_then(Path::parent)
+        .ok_or_else(not_a_session_dir)?;
     let project_id = read_session_metadata(session_dir)?.project_id;
     if project_id.trim().is_empty() {
         return Err(WorkflowError::SessionMissing(format!(
@@ -268,16 +281,15 @@ pub fn session_stack_store(
             session_dir.join(SESSION_METADATA_FILENAME).display()
         )));
     }
-    Ok((ProjectStackStore::new(base.join("projects")), project_id))
+    Ok(SessionStackHome {
+        store: ProjectStackStore::new(base.join("projects")),
+        project_id,
+        session_id,
+    })
 }
 
 fn store_error(e: StackStoreError) -> WorkflowError {
     WorkflowError::ChangesetInvalid(e.to_string())
-}
-
-/// The id of the stack an orchestrator session planned, when it has planned one.
-pub fn session_stack_id(session_dir: &Path) -> Result<Option<String>, WorkflowError> {
-    Ok(read_changeset(session_dir)?.stack_id)
 }
 
 /// The stack an orchestrator session planned, read from the project's store.
@@ -299,9 +311,9 @@ pub fn read_stack_of(
         refuse_unmigrated_stack(session_dir, changeset)?;
         return Ok(None);
     };
-    let (store, project_id) = session_stack_store(session_dir)?;
-    store
-        .read(&project_id, stack_id)
+    let home = session_stack_home(session_dir)?;
+    home.store
+        .read(&home.project_id, stack_id)
         .map(|record| Some(record.stack))
         .map_err(store_error)
 }
@@ -317,7 +329,8 @@ fn refuse_unmigrated_stack(session_dir: &Path, changeset: &Changeset) -> Result<
 }
 
 /// Serializes the first-write path of [`update_stack_atomic`] (no stack id yet), so two writers
-/// of one session cannot each create a stack record.
+/// of one session cannot each create a stack record. A session that already names its stack takes
+/// only the store's per-stack lock.
 static FIRST_STACK_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Atomically update the stack of an orchestrator session: the project's stack record it names,
@@ -326,31 +339,40 @@ pub fn update_stack_atomic(
     orchestrator_session_dir: &Path,
     f: impl FnOnce(&mut Stack),
 ) -> Result<(), WorkflowError> {
-    let (store, project_id) = session_stack_store(orchestrator_session_dir)?;
+    let home = session_stack_home(orchestrator_session_dir)?;
+    if let Some(stack_id) = read_changeset(orchestrator_session_dir)?.stack_id {
+        return update_named_stack(&home, &stack_id, f);
+    }
     let _first_write = FIRST_STACK_WRITE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Re-read under the lock: another writer may have created the record since.
     let mut changeset = read_changeset(orchestrator_session_dir)?;
     if let Some(stack_id) = changeset.stack_id.as_deref() {
-        return store
-            .update(&project_id, stack_id, f)
-            .map(drop)
-            .map_err(store_error);
+        return update_named_stack(&home, stack_id, f);
     }
     refuse_unmigrated_stack(orchestrator_session_dir, &changeset)?;
-    let session_id = orchestrator_session_dir
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
     let mut stack = Stack::default();
     f(&mut stack);
     // The record is written before the changeset names it, so a failure between the two leaves an
     // unreferenced record rather than a dangling id.
-    let record = store
-        .create(&project_id, &session_id, stack)
+    let record = home
+        .store
+        .create(&home.project_id, &home.session_id, stack)
         .map_err(store_error)?;
     changeset.stack_id = Some(record.stack_id);
     write_changeset_atomic(orchestrator_session_dir, &changeset)
+}
+
+fn update_named_stack(
+    home: &SessionStackHome,
+    stack_id: &str,
+    f: impl FnOnce(&mut Stack),
+) -> Result<(), WorkflowError> {
+    home.store
+        .update(&home.project_id, stack_id, f)
+        .map(drop)
+        .map_err(store_error)
 }
 
 /// Link a stack node to its materialized child session (set session_id + branch).

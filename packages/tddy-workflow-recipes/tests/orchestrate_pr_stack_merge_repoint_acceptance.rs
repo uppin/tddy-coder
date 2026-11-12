@@ -90,7 +90,7 @@ fn init_orchestrator_with_stack(session_dir: &std::path::Path, nodes: Vec<StackN
         stack: Some(Stack { version: 1, nodes }),
         ..Default::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(session_dir, cs.clone());
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(session_dir, cs);
 }
 
 // ---------------------------------------------------------------------------

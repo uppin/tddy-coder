@@ -734,7 +734,7 @@ mod tests {
             }),
             ..Changeset::default()
         };
-        tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs.clone());
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs);
 
         // When — the operator chats a refinement that reshapes the plan into two nodes
         let result = reseed_stack_from_plan_if_unspawned(dir, &a_two_node_plan());
@@ -771,7 +771,7 @@ mod tests {
             }),
             ..Changeset::default()
         };
-        tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs.clone());
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs);
 
         // When — a chat refinement tries to reshape the plan after n1 was already spawned
         let result = reseed_stack_from_plan_if_unspawned(dir, &a_two_node_plan());
@@ -810,7 +810,7 @@ mod tests {
             }),
             ..Changeset::default()
         };
-        tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs.clone());
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs);
 
         // When — a chat refinement tries to reshape the plan
         let result = reseed_stack_from_plan_if_unspawned(dir, &a_two_node_plan());
@@ -857,7 +857,7 @@ mod tests {
             }),
             ..Changeset::default()
         };
-        tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs.clone());
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs);
 
         // When — the agent's refined plan has a cycle (n1 depends on n2, n2 depends on n1)
         let cyclic_plan = StackPlanOutput {

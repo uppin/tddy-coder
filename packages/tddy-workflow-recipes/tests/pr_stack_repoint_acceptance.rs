@@ -114,7 +114,7 @@ fn write_stack(dir: &Path, nodes: Vec<StackNode>) {
         stack: Some(Stack { version: 1, nodes }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs.clone());
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs);
 }
 
 // --- tests ------------------------------------------------------------------

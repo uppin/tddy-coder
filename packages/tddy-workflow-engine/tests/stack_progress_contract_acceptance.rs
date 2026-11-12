@@ -76,7 +76,7 @@ fn sync_stack_node_reflects_child_state_and_pr_status() {
         }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, orch_cs.clone());
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, orch_cs);
 
     // When
     sync_stack_node_from_child(&orch_dir, &sessions_home, "n1")
@@ -139,7 +139,7 @@ fn update_stack_atomic_applies_mutation_and_writes_back() {
         }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, cs.clone());
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, cs);
 
     // When — mutate the stack atomically
     update_stack_atomic(&orch_dir, |stack| {

@@ -45,7 +45,7 @@ fn an_orchestrator_with_stack(node_ids: &[&str]) -> tddy_changeset::stack_fixtur
         }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(tmp.path(), changeset.clone());
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(tmp.path(), changeset);
     tmp
 }
 

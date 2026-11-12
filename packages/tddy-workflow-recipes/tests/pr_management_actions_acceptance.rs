@@ -99,7 +99,7 @@ fn an_orchestrator_dir_with_open_pr_node(label: &str) -> std::path::PathBuf {
         }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(&dir, cs.clone());
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&dir, cs);
     dir
 }
 

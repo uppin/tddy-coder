@@ -6,8 +6,10 @@
 //! changeset and drops the stack — in that order, so a sweep interrupted between the two finds the
 //! record by `created_by_session_id` on its rerun instead of creating a second one.
 //!
-//! The daemon runs it once per mapped user at startup; the body lives here because `tddy-daemon` is
-//! wiring only.
+//! The daemon runs it at startup, before it serves, over its data directory — the one sessions base
+//! every OS user it serves resolves to (each daemon resolver passes that directory as
+//! `sessions_base_for_user`'s `config_dir`, which wins over the per-user `$HOME/.tddy` default).
+//! The body lives here because `tddy-daemon` is wiring only.
 
 use std::path::Path;
 
@@ -37,11 +39,32 @@ pub struct MigrationFailure {
 
 /// Move every `Changeset.stack` under `<sessions_base>/sessions/*` into its project's stacks under
 /// `projects_dir`. Idempotent: a session already holding only a `stack_id` is not touched.
+///
+/// Logs what it did — a summary of the sessions moved, and each session left alone or failed — so
+/// the caller need not.
 pub fn migrate_session_stacks(sessions_base: &Path, projects_dir: &Path) -> MigrationReport {
     let mut report = MigrationReport::default();
-    let sessions_dir = sessions_base.join("sessions");
-    let Ok(entries) = std::fs::read_dir(&sessions_dir) else {
-        return report;
+    let store = ProjectStackStore::new(projects_dir);
+    for session_id in session_ids_under(&sessions_base.join("sessions")) {
+        let session_dir = unified_session_dir_path(sessions_base, &session_id);
+        let outcome = migrate_one(&store, &session_dir, &session_id);
+        report.record(session_id, outcome);
+    }
+    if !report.migrated_session_ids.is_empty() {
+        log::info!(
+            target: "tddy_pr_stack::stack_migration",
+            "moved the PR stack of {} session(s) into their projects: {}",
+            report.migrated_session_ids.len(),
+            report.migrated_session_ids.join(", ")
+        );
+    }
+    report
+}
+
+/// The session directories under `sessions_dir`, sorted; none when it does not exist.
+fn session_ids_under(sessions_dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(sessions_dir) else {
+        return Vec::new();
     };
     let mut session_ids: Vec<String> = entries
         .filter_map(Result::ok)
@@ -49,33 +72,34 @@ pub fn migrate_session_stacks(sessions_base: &Path, projects_dir: &Path) -> Migr
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     session_ids.sort();
+    session_ids
+}
 
-    let store = ProjectStackStore::new(projects_dir);
-    for session_id in session_ids {
-        let session_dir = unified_session_dir_path(sessions_base, &session_id);
-        match migrate_one(&store, &session_dir, &session_id) {
+impl MigrationReport {
+    /// File one session's outcome, logging the sessions the sweep left alone or could not move.
+    fn record(&mut self, session_id: String, outcome: Result<Outcome, String>) {
+        match outcome {
             Ok(Outcome::Untouched) => {}
-            Ok(Outcome::Migrated) => report.migrated_session_ids.push(session_id),
+            Ok(Outcome::Migrated) => self.migrated_session_ids.push(session_id),
             Ok(Outcome::NoProject) => {
                 log::warn!(
                     target: "tddy_pr_stack::stack_migration",
                     "session {session_id} carries a stack but records no project; left as it is"
                 );
-                report.sessions_without_project.push(session_id);
+                self.sessions_without_project.push(session_id);
             }
             Err(message) => {
                 log::error!(
                     target: "tddy_pr_stack::stack_migration",
                     "session {session_id}: stack migration failed: {message}"
                 );
-                report.failures.push(MigrationFailure {
+                self.failures.push(MigrationFailure {
                     session_id,
                     message,
                 });
             }
         }
     }
-    report
 }
 
 enum Outcome {
@@ -93,7 +117,7 @@ fn migrate_one(
         return Ok(Outcome::Untouched);
     }
     let changeset = read_changeset(session_dir).map_err(|e| e.to_string())?;
-    let Some(legacy_stack) = changeset.stack.clone() else {
+    let Some(legacy_stack) = changeset.stack else {
         return Ok(Outcome::Untouched);
     };
     let project_id = read_session_metadata(session_dir)
@@ -102,31 +126,12 @@ fn migrate_one(
     if project_id.trim().is_empty() {
         return Ok(Outcome::NoProject);
     }
-
-    // The stack is written before its id, so a sweep that died between the two finds the record it
-    // wrote by `created_by_session_id` instead of creating a second one. A changeset that already
-    // names its record keeps that record: it may have been updated since the stale copy was left.
-    let stack_id = match &changeset.stack_id {
+    let stack_id = match changeset.stack_id {
         Some(stored) => {
-            store.read(&project_id, stored).map_err(|e| e.to_string())?;
-            stored.clone()
+            store.read(&project_id, &stored).map_err(|e| e.to_string())?;
+            stored
         }
-        None => {
-            let existing = store
-                .list(&project_id)
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .find(|r| r.created_by_session_id == session_id);
-            match existing {
-                Some(record) => record.stack_id,
-                None => {
-                    store
-                        .create(&project_id, session_id, legacy_stack)
-                        .map_err(|e| e.to_string())?
-                        .stack_id
-                }
-            }
-        }
+        None => record_for(store, &project_id, session_id, legacy_stack)?,
     };
 
     let mut migrated = read_changeset(session_dir).map_err(|e| e.to_string())?;
@@ -134,6 +139,30 @@ fn migrate_one(
     migrated.stack_id = Some(stack_id);
     write_changeset_atomic(session_dir, &migrated).map_err(|e| e.to_string())?;
     Ok(Outcome::Migrated)
+}
+
+/// The id of the record holding `session_id`'s stack: the one an interrupted earlier sweep wrote
+/// (found by `created_by_session_id`), else a new one. A changeset that already names its record
+/// keeps that record instead — it may have been updated since the stale copy was left — so this is
+/// reached only for a changeset with no `stack_id`.
+fn record_for(
+    store: &ProjectStackStore,
+    project_id: &str,
+    session_id: &str,
+    legacy_stack: tddy_core::changeset::Stack,
+) -> Result<String, String> {
+    let existing = store
+        .list(project_id)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|r| r.created_by_session_id == session_id);
+    match existing {
+        Some(record) => Ok(record.stack_id),
+        None => store
+            .create(project_id, session_id, legacy_stack)
+            .map(|record| record.stack_id)
+            .map_err(|e| e.to_string()),
+    }
 }
 
 #[cfg(test)]

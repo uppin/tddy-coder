@@ -220,7 +220,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        tddy_changeset::stack_fixtures::write_changeset_with_stack(&dir, cs.clone());
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(&dir, cs);
 
         let ctx = Context::new();
         ctx.set_sync("session_dir", dir.clone());

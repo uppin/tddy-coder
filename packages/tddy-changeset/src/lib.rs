@@ -36,9 +36,8 @@ pub use changeset::{
     QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use changeset::{
-    link_stack_node_to_child_session, read_session_stack, read_stack_of, session_stack_id,
-    session_stack_store, sync_stack_node_from_child, update_stack_atomic, PrInternalStatus, Stack,
-    StackNode,
+    link_stack_node_to_child_session, read_session_stack, read_stack_of,
+    sync_stack_node_from_child, update_stack_atomic, PrInternalStatus, Stack, StackNode,
 };
 pub use elapsed_format::format_elapsed_compact;
 pub use session_activity::{
