@@ -27,6 +27,7 @@ mod listing;
 mod notify;
 mod port;
 mod terminal;
+mod turn;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

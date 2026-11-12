@@ -58,6 +58,10 @@ pub fn project_home_inbox_tool_defs() -> Vec<ToolDef> {
         "type": "string",
         "description": "The next_cursor an earlier answer returned; only what came after it is returned. Never invent one."
     });
+    let started_by_me = json!({
+        "type": "boolean",
+        "description": "Only the records of sessions you started (whose orchestrator is you): what you wait on to learn that a session you drive finished its turn. Default false: every session of the project but your own."
+    });
     vec![
         tool_def(
             WAIT_PROJECT_NOTIFICATIONS,
@@ -72,6 +76,7 @@ pub fn project_home_inbox_tool_defs() -> Vec<ToolDef> {
                         "maximum": MAX_WAIT_MS,
                         "description": "How long to wait, in milliseconds. Capped at 20000."
                     },
+                    "started_by_me": started_by_me.clone(),
                     TARGET_DAEMON_INSTANCE_ID: host.clone()
                 },
                 "additionalProperties": false
@@ -90,6 +95,7 @@ pub fn project_home_inbox_tool_defs() -> Vec<ToolDef> {
                         "maximum": crate::session_follow::FOLLOW_PAGE_MAX,
                         "description": "Records per page. Default 50, at most 200: a larger value is clamped and the answer carries clamped_to."
                     },
+                    "started_by_me": started_by_me,
                     TARGET_DAEMON_INSTANCE_ID: host
                 },
                 "additionalProperties": false
@@ -118,7 +124,8 @@ pub struct NotificationsPage {
 #[async_trait]
 pub trait ProjectHomeInboxPort: ProjectHomePort {
     /// The records of `home`'s project on this host after `cursor`, for the caller's OS user and
-    /// excluding `home`'s own session: at most `limit` of them (the default and maximum are the
+    /// excluding `home`'s own session — with `started_by_me`, only those of sessions whose
+    /// orchestrator is `home` (`#orchestrators` 4/11): at most `limit` of them (the default and maximum are the
     /// follow tools'), with `lost` set when `cursor` was evicted. An error names why it could not be
     /// read, among them a `cursor` that no page ever returned.
     ///
@@ -129,8 +136,9 @@ pub trait ProjectHomeInboxPort: ProjectHomePort {
         home: &HomeCaller,
         cursor: &str,
         limit: Option<usize>,
+        started_by_me: bool,
     ) -> Result<NotificationsPage, String> {
-        let _ = (home, cursor, limit);
+        let _ = (home, cursor, limit, started_by_me);
         Err(NO_NOTIFICATION_LOG.to_string())
     }
 
@@ -142,8 +150,9 @@ pub trait ProjectHomeInboxPort: ProjectHomePort {
         home: &HomeCaller,
         cursor: &str,
         timeout_ms: u64,
+        started_by_me: bool,
     ) -> Result<NotificationsPage, String> {
-        let _ = (home, cursor, timeout_ms);
+        let _ = (home, cursor, timeout_ms, started_by_me);
         Err(NO_NOTIFICATION_LOG.to_string())
     }
 }
@@ -183,13 +192,15 @@ async fn answer(
     let args: Value =
         serde_json::from_str(args_json).map_err(|e| format!("invalid args_json: {e}"))?;
     let cursor = cursor_argument(&args)?;
+    // TODO(session-turn-control): implement — read `started_by_me` from the arguments.
+    let started_by_me = false;
     match tool_name {
         WAIT_PROJECT_NOTIFICATIONS => {
-            port.wait_notifications(home, &cursor, timeout_argument(&args)?)
+            port.wait_notifications(home, &cursor, timeout_argument(&args)?, started_by_me)
                 .await
         }
         _ => {
-            port.read_notifications(home, &cursor, limit_argument(&args)?)
+            port.read_notifications(home, &cursor, limit_argument(&args)?, started_by_me)
                 .await
         }
     }
