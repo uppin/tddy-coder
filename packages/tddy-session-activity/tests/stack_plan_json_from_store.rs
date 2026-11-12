@@ -80,31 +80,43 @@ fn the_listed_stack_plan_json(session_dir: &Path) -> String {
         .stack_plan_json
 }
 
+fn a_legacy_stack() -> Stack {
+    Stack {
+        version: 1,
+        nodes: vec![
+            a_node("n1", &[]),
+            a_node("n2", &["n1"]),
+            a_node("n3", &["n1"]),
+        ],
+    }
+}
+
 #[test]
-fn the_session_list_reports_the_same_stack_plan_json_before_and_after_migration() {
-    // Given — a legacy orchestrator listed once before the sweep
+fn an_unmigrated_session_lists_no_stack_plan() {
+    // Given — a legacy orchestrator the startup sweep has not reached: only the sweep reads the
+    // legacy field
     let host = a_host();
-    let session = host.with_a_legacy_orchestrator(
-        "sess-orchestrator",
-        "proj-auth",
-        Stack {
-            version: 1,
-            nodes: vec![
-                a_node("n1", &[]),
-                a_node("n2", &["n1"]),
-                a_node("n3", &["n1"]),
-            ],
-        },
-    );
-    let before = the_listed_stack_plan_json(&session);
-    assert!(
-        !before.is_empty(),
-        "precondition: a legacy orchestrator lists its stack"
-    );
+    let session =
+        host.with_a_legacy_orchestrator("sess-orchestrator", "proj-auth", a_legacy_stack());
+
+    // When
+    let listed = the_listed_stack_plan_json(&session);
+
+    // Then
+    assert_eq!(listed, "");
+}
+
+#[test]
+fn a_migrated_sessions_list_reports_the_stack_plan_it_carried_before_migration() {
+    // Given — a legacy orchestrator, and the JSON its own stack serializes to
+    let host = a_host();
+    let legacy_stack = a_legacy_stack();
+    let expected = serde_json::to_string(&legacy_stack).expect("serialize the legacy stack");
+    let session = host.with_a_legacy_orchestrator("sess-orchestrator", "proj-auth", legacy_stack);
 
     // When
     migrate_session_stacks(host.sessions_base(), &host.projects_dir());
 
     // Then
-    assert_eq!(the_listed_stack_plan_json(&session), before);
+    assert_eq!(the_listed_stack_plan_json(&session), expected);
 }

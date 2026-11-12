@@ -49,6 +49,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
+# `stack_fixtures`: the sessions layout a PR stack lives in.
+tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 # `spec_launch_acceptance.rs` deserializes an agent's tool file directly (`#agent-tools 2/12`).
 serde_yaml = "0.9"
 pretty_assertions = { workspace = true }

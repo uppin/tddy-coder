@@ -10,7 +10,6 @@
 use std::sync::Arc;
 
 use tddy_core::backend::StubBackend;
-use tddy_core::changeset::{Changeset, Stack, StackNode};
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::recipe::WorkflowRecipe;
@@ -76,41 +75,5 @@ fn resuming_a_documented_stack_drops_into_the_orchestrate_loop() {
         next.map(|g| g.as_str().to_string()),
         Some("orchestrate".to_string()),
         "a documented stack resumes into the interactive orchestrate loop, not an auto assess"
-    );
-}
-
-#[test]
-fn a_legacy_orchestrator_stuck_at_init_with_a_populated_stack_resumes_into_orchestrate() {
-    // Given — an old session whose state never left "Init" but whose stack already has nodes
-    let recipe = PrStackRecipe;
-    let state = WorkflowState::new("Init");
-    let changeset = Changeset {
-        stack: Some(Stack {
-            version: 1,
-            nodes: vec![StackNode {
-                node_id: "n1".to_string(),
-                title: "Add token store".to_string(),
-                description: String::new(),
-                branch_suggestion: None,
-                branch: None,
-                session_id: None,
-                parents: vec![],
-                pr_status: None,
-                child_state: None,
-                internal_status: None,
-                display_order: None,
-            }],
-        }),
-        ..Changeset::default()
-    };
-
-    // When
-    let next = recipe.next_goal_for_state_with_changeset(&state, &changeset);
-
-    // Then
-    assert_eq!(
-        next.map(|g| g.as_str().to_string()),
-        Some("orchestrate".to_string()),
-        "a mid-flight stack resumes into orchestrate, not the removed assess loop"
     );
 }

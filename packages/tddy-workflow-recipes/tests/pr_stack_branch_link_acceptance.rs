@@ -16,7 +16,7 @@ use tddy_workflow_recipes::pr_stack::{add_planned_pr_node, AddPlannedPrInput};
 #[test]
 fn a_manually_added_planned_pr_keeps_its_branch_name_as_a_suggestion_only() {
     // Given — a fresh orchestrator session with no stack yet
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     tddy_core::changeset::write_changeset(dir, &Changeset::default()).unwrap();
 

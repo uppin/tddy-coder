@@ -11,6 +11,11 @@
 
 use std::path::Path;
 
+use tddy_core::changeset::{read_changeset, write_changeset_atomic};
+use tddy_core::project_stack_store::ProjectStackStore;
+use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_core::session_metadata::read_session_metadata;
+
 /// What one sweep did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MigrationReport {
@@ -33,9 +38,102 @@ pub struct MigrationFailure {
 /// Move every `Changeset.stack` under `<sessions_base>/sessions/*` into its project's stacks under
 /// `projects_dir`. Idempotent: a session already holding only a `stack_id` is not touched.
 pub fn migrate_session_stacks(sessions_base: &Path, projects_dir: &Path) -> MigrationReport {
-    // TODO(project-stack-store): implement
-    let _ = (sessions_base, projects_dir);
-    todo!("project-stack-store: migrate_session_stacks")
+    let mut report = MigrationReport::default();
+    let sessions_dir = sessions_base.join("sessions");
+    let Ok(entries) = std::fs::read_dir(&sessions_dir) else {
+        return report;
+    };
+    let mut session_ids: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    session_ids.sort();
+
+    let store = ProjectStackStore::new(projects_dir);
+    for session_id in session_ids {
+        let session_dir = unified_session_dir_path(sessions_base, &session_id);
+        match migrate_one(&store, &session_dir, &session_id) {
+            Ok(Outcome::Untouched) => {}
+            Ok(Outcome::Migrated) => report.migrated_session_ids.push(session_id),
+            Ok(Outcome::NoProject) => {
+                log::warn!(
+                    target: "tddy_pr_stack::stack_migration",
+                    "session {session_id} carries a stack but records no project; left as it is"
+                );
+                report.sessions_without_project.push(session_id);
+            }
+            Err(message) => {
+                log::error!(
+                    target: "tddy_pr_stack::stack_migration",
+                    "session {session_id}: stack migration failed: {message}"
+                );
+                report.failures.push(MigrationFailure {
+                    session_id,
+                    message,
+                });
+            }
+        }
+    }
+    report
+}
+
+enum Outcome {
+    Untouched,
+    Migrated,
+    NoProject,
+}
+
+fn migrate_one(
+    store: &ProjectStackStore,
+    session_dir: &Path,
+    session_id: &str,
+) -> Result<Outcome, String> {
+    if !session_dir.join("changeset.yaml").is_file() {
+        return Ok(Outcome::Untouched);
+    }
+    let changeset = read_changeset(session_dir).map_err(|e| e.to_string())?;
+    let Some(legacy_stack) = changeset.stack.clone() else {
+        return Ok(Outcome::Untouched);
+    };
+    let project_id = read_session_metadata(session_dir)
+        .map(|m| m.project_id)
+        .unwrap_or_default();
+    if project_id.trim().is_empty() {
+        return Ok(Outcome::NoProject);
+    }
+
+    // The stack is written before its id, so a sweep that died between the two finds the record it
+    // wrote by `created_by_session_id` instead of creating a second one. A changeset that already
+    // names its record keeps that record: it may have been updated since the stale copy was left.
+    let stack_id = match &changeset.stack_id {
+        Some(stored) => {
+            store.read(&project_id, stored).map_err(|e| e.to_string())?;
+            stored.clone()
+        }
+        None => {
+            let existing = store
+                .list(&project_id)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .find(|r| r.created_by_session_id == session_id);
+            match existing {
+                Some(record) => record.stack_id,
+                None => {
+                    store
+                        .create(&project_id, session_id, legacy_stack)
+                        .map_err(|e| e.to_string())?
+                        .stack_id
+                }
+            }
+        }
+    };
+
+    let mut migrated = read_changeset(session_dir).map_err(|e| e.to_string())?;
+    migrated.stack = None;
+    migrated.stack_id = Some(stack_id);
+    write_changeset_atomic(session_dir, &migrated).map_err(|e| e.to_string())?;
+    Ok(Outcome::Migrated)
 }
 
 #[cfg(test)]

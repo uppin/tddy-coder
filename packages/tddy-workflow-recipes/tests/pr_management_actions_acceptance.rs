@@ -11,9 +11,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
 
-use tddy_core::changeset::{
-    read_changeset, write_changeset, Changeset, GithubPrStatus, Stack, StackNode,
-};
+use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
 use tddy_workflow_recipes::orchestrate_pr_stack::github::{
     GithubPrApi, PrLookupOutcome, PrRef, PrState, PrView,
 };
@@ -68,8 +66,10 @@ impl GithubPrApi for RecordingGithub {
 }
 
 fn scratch(label: &str) -> std::path::PathBuf {
-    let p = std::env::temp_dir().join(format!("tddy-pr-actions-{}-{}", label, std::process::id()));
-    let _ = std::fs::remove_dir_all(&p);
+    let base =
+        std::env::temp_dir().join(format!("tddy-pr-actions-{}-{}", label, std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let p = base.join("sessions").join("orch");
     std::fs::create_dir_all(&p).unwrap();
     p
 }
@@ -99,15 +99,12 @@ fn an_orchestrator_dir_with_open_pr_node(label: &str) -> std::path::PathBuf {
         }),
         ..Changeset::default()
     };
-    write_changeset(&dir, &cs).unwrap();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&dir, cs.clone());
     dir
 }
 
 fn node_phase(dir: &Path, node_id: &str) -> String {
-    read_changeset(dir)
-        .unwrap()
-        .stack
-        .unwrap()
+    tddy_changeset::stack_fixtures::stack_on_disk(dir)
         .node(node_id)
         .unwrap()
         .pr_status

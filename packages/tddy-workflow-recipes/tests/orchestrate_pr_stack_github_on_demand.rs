@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serial_test::serial;
-use tddy_core::changeset::{write_changeset_atomic, Changeset, Stack, StackNode};
+use tddy_core::changeset::{Changeset, Stack, StackNode};
 use tddy_core::toolcall::{GithubCredentialHandler, ToolcallRpcService};
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::recipe::WorkflowRecipe;
@@ -41,7 +41,7 @@ impl GithubCredentialHandler for RefusingHost {
 /// A session host listening on its own socket, on a runtime of its own — as it is in production, a
 /// different process — so the asker blocking its thread cannot stall it.
 struct SessionHost {
-    _dir: tempfile::TempDir,
+    _dir: tddy_changeset::stack_fixtures::ASessionDir,
     asked: Arc<AtomicUsize>,
 }
 
@@ -53,7 +53,7 @@ impl SessionHost {
 
 /// Run a refusing session host and point `TDDY_SOCKET` at it, as a managed session does.
 fn a_session_host_refusing_every_request() -> SessionHost {
-    let dir = tempfile::tempdir().expect("a temporary directory");
+    let dir = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let socket: PathBuf = dir.path().join("host.sock");
     let asked = Arc::new(AtomicUsize::new(0));
     let handler: Arc<dyn GithubCredentialHandler> = Arc::new(RefusingHost {
@@ -108,16 +108,15 @@ fn a_node(node_id: &str, branch: Option<&str>) -> StackNode {
     }
 }
 
-fn an_orchestrator_with(nodes: Vec<StackNode>) -> tempfile::TempDir {
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    write_changeset_atomic(
+fn an_orchestrator_with(nodes: Vec<StackNode>) -> tddy_changeset::stack_fixtures::ASessionDir {
+    let dir = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(
         dir.path(),
-        &Changeset {
+        Changeset {
             stack: Some(Stack { version: 1, nodes }),
             ..Default::default()
         },
-    )
-    .expect("write the changeset");
+    );
     dir
 }
 

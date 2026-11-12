@@ -98,7 +98,7 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
         }),
         ..Changeset::default()
     };
-    write_changeset(&orch_dir, &orch_cs).unwrap();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, orch_cs.clone());
 
     let child_id = "018fbbbb-0002-7000-bbbb-000000000002";
     let child_dir = unified_session_dir_path(&sessions_home, child_id);
@@ -131,7 +131,7 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
 fn link_stack_node_sets_session_id_and_branch() {
     // Given — orchestrator changeset with an unlinked node
     let base = temp_dir("link-node");
-    let orch_dir = base.join("orch");
+    let orch_dir = base.join("sessions").join("orch");
     fs::create_dir_all(&orch_dir).unwrap();
 
     let cs = Changeset {
@@ -154,7 +154,7 @@ fn link_stack_node_sets_session_id_and_branch() {
         }),
         ..Changeset::default()
     };
-    write_changeset(&orch_dir, &cs).unwrap();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, cs.clone());
 
     // When
     link_stack_node_to_child_session(
@@ -166,9 +166,8 @@ fn link_stack_node_sets_session_id_and_branch() {
     .expect("link_stack_node_to_child_session must succeed");
 
     // Then
-    let loaded = read_changeset(&orch_dir).unwrap();
+    let stack = tddy_changeset::stack_fixtures::stack_on_disk(&orch_dir);
     let _ = fs::remove_dir_all(&base);
-    let stack = loaded.stack.expect("stack must still be present");
     let n1 = stack.node("n1").expect("n1 must exist");
     assert_eq!(
         n1.session_id.as_deref(),

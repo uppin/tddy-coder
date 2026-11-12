@@ -13,9 +13,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use tddy_core::changeset::{
-    read_changeset, write_changeset, Changeset, GithubPrStatus, Stack, StackNode,
-};
+use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
 use tddy_workflow_recipes::orchestrate_pr_stack::github::{
     GithubPrApi, PrLookupOutcome, PrRef, PrState, PrView,
 };
@@ -116,7 +114,7 @@ fn write_stack(dir: &Path, nodes: Vec<StackNode>) {
         stack: Some(Stack { version: 1, nodes }),
         ..Changeset::default()
     };
-    write_changeset(dir, &cs).unwrap();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs.clone());
 }
 
 // --- tests ------------------------------------------------------------------
@@ -125,7 +123,7 @@ fn write_stack(dir: &Path, nodes: Vec<StackNode>) {
 fn repoint_planned_pr_node_drops_a_merged_parent_from_the_node_parents() {
     // Given — n2 depends on n1 (merged) and n3 (still open); its branch is remote-only here so the
     // git rebase is skipped and the test stays deterministic.
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -141,14 +139,14 @@ fn repoint_planned_pr_node_drops_a_merged_parent_from_the_node_parents() {
     repoint_planned_pr_node(dir, dir, "n2", "master", None, &gh).expect("repoint should succeed");
 
     // Then — the merged parent n1 is gone; the open parent n3 remains
-    let loaded = read_changeset(dir).unwrap().stack.unwrap();
+    let loaded = tddy_changeset::stack_fixtures::stack_on_disk(dir);
     assert_eq!(loaded.node("n2").unwrap().parents, vec!["n3".to_string()]);
 }
 
 #[test]
 fn repoint_planned_pr_node_retargets_the_open_pr_base_to_the_effective_base() {
     // Given — n2's only parent n1 has merged, so its effective base becomes the stack default
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,

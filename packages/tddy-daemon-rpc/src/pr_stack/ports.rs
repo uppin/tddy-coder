@@ -80,7 +80,8 @@ impl PrStackHandler for PrStackRpcHandler {
         // `PrStackScreen`'s `parseStackPlan` already knows how to read.
         let changeset =
             tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let stack_plan_json = session_list_enrichment::stack_plan_json_for_changeset(&changeset);
+        let stack_plan_json =
+            session_list_enrichment::stack_plan_json_for_changeset(&session_dir, &changeset);
 
         log::info!(
             "AddPlannedPr: success session_id={} node_id={} title={:?}",
@@ -420,10 +421,9 @@ impl PrStackHandler for PrStackRpcHandler {
         // Checked before the write, because `link_stack_node_to_child_session` leaves an unknown
         // node alone and reports success — which reads to the caller exactly like a link that
         // landed, and is the failure mode this whole path exists to make visible.
-        let changeset =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        if changeset
-            .stack
+        let stack = tddy_core::changeset::read_session_stack(&session_dir)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        if stack
             .as_ref()
             .is_none_or(|stack| stack.node(node_id).is_none())
         {
@@ -455,7 +455,10 @@ impl PrStackHandler for PrStackRpcHandler {
         let linked =
             tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(LinkStackNodeResponse {
-            stack_plan_json: session_list_enrichment::stack_plan_json_for_changeset(&linked),
+            stack_plan_json: session_list_enrichment::stack_plan_json_for_changeset(
+                &session_dir,
+                &linked,
+            ),
         }))
     }
 
@@ -514,9 +517,9 @@ impl PrStackHandler for PrStackRpcHandler {
 
         // The named target must be a branch this node can be based onto: the repoint retains only
         // the parents that own it, so an unvalidated target is a silent plan rewrite.
-        let changeset =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let stack = changeset.stack.unwrap_or_default();
+        let stack = tddy_core::changeset::read_session_stack(&session_dir)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .unwrap_or_default();
         let parent_branches: Vec<String> = stack
             .node(&node_id)
             .map(|node| {
@@ -601,7 +604,8 @@ impl PrStackHandler for PrStackRpcHandler {
         // already knows how to parse.
         let updated =
             tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let stack_plan_json = session_list_enrichment::stack_plan_json_for_changeset(&updated);
+        let stack_plan_json =
+            session_list_enrichment::stack_plan_json_for_changeset(&session_dir, &updated);
         Ok(Response::new(RepointPlannedPrResponse { stack_plan_json }))
     }
 
@@ -642,7 +646,8 @@ impl PrStackHandler for PrStackRpcHandler {
         // the exact wire shape `PrStackScreen`'s `parseStackPlan` already reads.
         let updated =
             tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let stack_plan_json = session_list_enrichment::stack_plan_json_for_changeset(&updated);
+        let stack_plan_json =
+            session_list_enrichment::stack_plan_json_for_changeset(&session_dir, &updated);
         Ok(Response::new(ReorderPlannedPrResponse { stack_plan_json }))
     }
 
@@ -708,9 +713,9 @@ impl PrStackHandler for PrStackRpcHandler {
         .map_err(Status::failed_precondition)?;
 
         // The branch the pull just moved, re-read from disk.
-        let branch = tddy_core::read_changeset(&session_dir)
+        let branch = tddy_core::changeset::read_session_stack(&session_dir)
             .ok()
-            .and_then(|changeset| changeset.stack)
+            .flatten()
             .and_then(|stack| stack.node(req.node_id.trim())?.branch.clone())
             .unwrap_or_default();
 

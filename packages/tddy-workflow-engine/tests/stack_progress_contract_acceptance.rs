@@ -5,8 +5,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use tddy_changeset::changeset::{
-    read_changeset, sync_stack_node_from_child, update_stack_atomic, write_changeset, Changeset,
-    ChangesetState, ChangesetWorkflow, GithubPrStatus, Stack, StackNode,
+    sync_stack_node_from_child, update_stack_atomic, write_changeset, Changeset, ChangesetState,
+    ChangesetWorkflow, GithubPrStatus, Stack, StackNode,
 };
 use tddy_changeset::session_lifecycle::unified_session_dir_path;
 use tddy_workflow_engine::workflow::ids::WorkflowState;
@@ -76,17 +76,15 @@ fn sync_stack_node_reflects_child_state_and_pr_status() {
         }),
         ..Changeset::default()
     };
-    write_changeset(&orch_dir, &orch_cs).unwrap();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, orch_cs.clone());
 
     // When
     sync_stack_node_from_child(&orch_dir, &sessions_home, "n1")
         .expect("sync_stack_node_from_child must succeed");
 
     // Then
-    let loaded = read_changeset(&orch_dir).unwrap();
+    let stack = tddy_changeset::stack_fixtures::stack_on_disk(&orch_dir);
     let _ = fs::remove_dir_all(&base);
-
-    let stack = loaded.stack.expect("orchestrator stack must be present");
     let n1 = stack.node("n1").expect("n1 must exist");
 
     let child_state = n1
@@ -118,7 +116,7 @@ fn sync_stack_node_reflects_child_state_and_pr_status() {
 fn update_stack_atomic_applies_mutation_and_writes_back() {
     // Given
     let base = scratch("update-atomic");
-    let orch_dir = base.join("orch");
+    let orch_dir = base.join("sessions").join("orch");
     fs::create_dir_all(&orch_dir).unwrap();
 
     let cs = Changeset {
@@ -141,7 +139,7 @@ fn update_stack_atomic_applies_mutation_and_writes_back() {
         }),
         ..Changeset::default()
     };
-    write_changeset(&orch_dir, &cs).unwrap();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, cs.clone());
 
     // When — mutate the stack atomically
     update_stack_atomic(&orch_dir, |stack| {
@@ -153,12 +151,8 @@ fn update_stack_atomic_applies_mutation_and_writes_back() {
     .expect("update_stack_atomic must succeed");
 
     // Then
-    let loaded = read_changeset(&orch_dir).unwrap();
+    let stack = tddy_changeset::stack_fixtures::stack_on_disk(&orch_dir);
     let _ = fs::remove_dir_all(&base);
-
-    let stack = loaded
-        .stack
-        .expect("stack must be present after atomic update");
     assert_eq!(stack.version, 2, "stack.version must be updated atomically");
     let n1 = stack.node("n1").expect("n1");
     assert_eq!(

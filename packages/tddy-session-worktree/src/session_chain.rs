@@ -111,11 +111,11 @@ pub fn resolve_chain_integration_base_ref_from_parent_session(
 }
 
 /// True when the parent session is a pr-stack orchestrator — a planning session carrying a
-/// planned `stack` (or the `pr-stack` recipe) and therefore no git branch of its own.
+/// planned stack, by `stack_id` (or the `pr-stack` recipe), and therefore no git branch of its own.
 pub fn parent_is_pr_stack_orchestrator(sessions_base: &Path, parent_session_id: &str) -> bool {
     let parent_dir = unified_session_dir_path(sessions_base, parent_session_id);
     match read_changeset(&parent_dir) {
-        Ok(cs) => cs.recipe.as_deref() == Some("pr-stack") || cs.stack.is_some(),
+        Ok(cs) => cs.recipe.as_deref() == Some("pr-stack") || cs.stack_id.is_some(),
         Err(_) => false,
     }
 }

@@ -13,5 +13,7 @@ tddy-session-store = { path = "../tddy-session-store" }
 tddy-git = { path = "../tddy-git" }
 
 [dev-dependencies]
+# `stack_fixtures`: the sessions layout a PR stack lives in.
+tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 tempfile = "3"
 tddy-workflow = { path = "../tddy-workflow" }

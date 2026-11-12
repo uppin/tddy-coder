@@ -91,11 +91,11 @@ fn write_file(path: &Path, contents: &str) {
 /// the subject, in which case the commit is made from [`StackedRepo::another_clone`] and the local
 /// remote-tracking ref is deliberately left stale.
 struct StackedRepo {
-    tmp: tempfile::TempDir,
+    tmp: tddy_changeset::stack_fixtures::ASessionDir,
 }
 
 fn a_stacked_repo() -> StackedRepo {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let repo = StackedRepo { tmp };
 
     fs::create_dir_all(repo.session_dir()).unwrap();
@@ -144,7 +144,7 @@ impl StackedRepo {
     // --- layout ---
 
     fn origin(&self) -> PathBuf {
-        self.tmp.path().join("origin.git")
+        self.tmp.host().base().join("origin.git")
     }
 
     /// The bare repo's path, as the remote url `git` is handed.
@@ -153,11 +153,11 @@ impl StackedRepo {
     }
 
     fn repo_root(&self) -> PathBuf {
-        self.tmp.path().join("clone")
+        self.tmp.host().base().join("clone")
     }
 
     fn worktrees_dir(&self) -> PathBuf {
-        self.tmp.path().join("worktrees")
+        self.tmp.host().base().join("worktrees")
     }
 
     fn worktree(&self) -> PathBuf {
@@ -165,7 +165,7 @@ impl StackedRepo {
     }
 
     fn session_dir(&self) -> PathBuf {
-        self.tmp.path().join("session")
+        self.tmp.path().to_path_buf()
     }
 
     /// A linked worktree's git directory is `<clone>/.git/worktrees/<name>`, not `<worktree>/.git` —

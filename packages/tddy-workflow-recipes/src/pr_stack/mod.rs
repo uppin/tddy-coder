@@ -35,7 +35,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tddy_core::backend::CodingBackend;
-use tddy_core::changeset::Changeset;
 use tddy_core::workflow::graph::{Graph, GraphBuilder};
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::ids::GoalId;
@@ -262,29 +261,6 @@ impl WorkflowRecipe for PrStackRecipe {
         }
     }
 
-    fn next_goal_for_state_with_changeset(
-        &self,
-        state: &WorkflowState,
-        changeset: &Changeset,
-    ) -> Option<GoalId> {
-        // "Init" is ambiguous: it's the bootstrap state AND (via the legacy
-        // "orchestrate-pr-stack" alias) the initial_state a pre-consolidation orchestrator
-        // session may still be sitting at, since that recipe's own state never advanced past
-        // "Init" during healthy operation. Disambiguate using the changeset: a populated stack
-        // means orchestration is already under way, so resume into the loop instead of
-        // restarting analysis.
-        if state.as_str() == "Init" {
-            let stack_in_progress = changeset
-                .stack
-                .as_ref()
-                .is_some_and(|s| !s.nodes.is_empty());
-            if stack_in_progress {
-                return Some(GoalId::new("orchestrate"));
-            }
-        }
-        self.next_goal_for_state(state)
-    }
-
     fn orchestration_system_prompt(&self, current: &GoalId) -> String {
         match current.as_str() {
             "orchestrate" => PR_STACK_ORCHESTRATE_PROMPT.to_string(),
@@ -409,7 +385,7 @@ impl SessionArtifactManifest for PrStackRecipe {
     }
 }
 
-/// Re-seed the orchestrator's `Changeset.stack` from a refined [`StackPlanOutput`], but only
+/// Re-seed the orchestrator's stack from a refined [`StackPlanOutput`], but only
 /// while no node has been materialized yet.
 ///
 /// Unlike [`crate::orchestrate_pr_stack::bridge::seed_orchestrator_stack_from_plan`] (which only
@@ -427,10 +403,9 @@ pub fn reseed_stack_from_plan_if_unspawned(
     crate::plan_pr_stack::validate_stack_plan(plan)
         .map_err(|e| format!("reseed_stack_from_plan_if_unspawned: {e}"))?;
 
-    let changeset = tddy_core::changeset::read_changeset(session_dir).map_err(|e| {
-        format!("reseed_stack_from_plan_if_unspawned: failed to read changeset: {e}")
-    })?;
-    if let Some(stack) = changeset.stack.as_ref() {
+    let existing = tddy_core::changeset::read_session_stack(session_dir)
+        .map_err(|e| format!("reseed_stack_from_plan_if_unspawned: failed to read stack: {e}"))?;
+    if let Some(stack) = existing.as_ref() {
         if stack
             .nodes
             .iter()
@@ -460,7 +435,7 @@ mod tests {
     use super::*;
     use rstest::rstest;
     use tddy_core::backend::StubBackend;
-    use tddy_core::changeset::{read_changeset, GithubPrStatus, Stack, StackNode};
+    use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
     use tddy_core::workflow::context::Context;
 
     // -----------------------------------------------------------------------
@@ -591,47 +566,9 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Legacy resume: a pre-consolidation "orchestrate-pr-stack" session's own state never
-    // advanced past "Init" during healthy operation, so "Init" is ambiguous between "brand new
-    // pr-stack session" and "orchestration already under way" — disambiguate via the changeset.
+    // A session at "Init" starts planning: the recipe no longer resumes into an orchestration loop
+    // (an orchestrator agent holding tools owns that now).
     // -----------------------------------------------------------------------
-
-    #[test]
-    fn a_legacy_orchestrator_session_stuck_at_init_with_a_populated_stack_resumes_into_orchestrate()
-    {
-        // Given — an old orchestrate-pr-stack session whose state never left "Init" but whose
-        // stack already has nodes (orchestration is mid-flight)
-        let recipe = PrStackRecipe;
-        let state = WorkflowState::new("Init");
-        let changeset = Changeset {
-            stack: Some(Stack {
-                version: 1,
-                nodes: vec![StackNode {
-                    node_id: "n1".to_string(),
-                    title: "Add token store".to_string(),
-                    description: String::new(),
-                    branch_suggestion: None,
-                    branch: None,
-                    session_id: None,
-                    parents: vec![],
-                    pr_status: None,
-                    child_state: None,
-                    internal_status: None,
-                    display_order: None,
-                }],
-            }),
-            ..Changeset::default()
-        };
-
-        // When
-        let next = recipe.next_goal_for_state_with_changeset(&state, &changeset);
-
-        // Then — continues orchestrating, does not restart planning
-        assert_eq!(
-            next.map(|g| g.as_str().to_string()),
-            Some("orchestrate".to_string())
-        );
-    }
 
     #[test]
     fn a_brand_new_session_at_init_with_no_stack_yet_resumes_into_analyze_stack() {
@@ -648,38 +585,6 @@ mod tests {
             next.map(|g| g.as_str().to_string()),
             Some("analyze-stack".to_string())
         );
-    }
-
-    #[test]
-    fn resuming_a_legacy_orchestrator_session_end_to_end_via_start_goal_for_session_continue() {
-        // Given — start_goal_for_session_continue is the real call site used on session resume;
-        // it has full changeset access and must route through next_goal_for_state_with_changeset.
-        let recipe = PrStackRecipe;
-        let changeset = Changeset {
-            stack: Some(Stack {
-                version: 1,
-                nodes: vec![StackNode {
-                    node_id: "n1".to_string(),
-                    title: "Add token store".to_string(),
-                    description: String::new(),
-                    branch_suggestion: None,
-                    branch: None,
-                    session_id: None,
-                    parents: vec![],
-                    pr_status: None,
-                    child_state: None,
-                    internal_status: None,
-                    display_order: None,
-                }],
-            }),
-            ..Changeset::default()
-        };
-
-        // When
-        let goal = tddy_core::changeset::start_goal_for_session_continue(&recipe, &changeset);
-
-        // Then
-        assert_eq!(goal.as_str(), "orchestrate");
     }
 
     // -----------------------------------------------------------------------
@@ -808,7 +713,7 @@ mod tests {
     #[test]
     fn reseeding_an_unspawned_stack_overwrites_it_with_the_refined_plan() {
         // Given — a session whose stack has not spawned any child yet
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
         let dir = tmp.path();
         let cs = Changeset {
             stack: Some(Stack {
@@ -829,14 +734,14 @@ mod tests {
             }),
             ..Changeset::default()
         };
-        tddy_core::changeset::write_changeset(dir, &cs).unwrap();
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs.clone());
 
         // When — the operator chats a refinement that reshapes the plan into two nodes
         let result = reseed_stack_from_plan_if_unspawned(dir, &a_two_node_plan());
 
         // Then
         assert!(result.is_ok(), "expected Ok, got {result:?}");
-        let loaded = read_changeset(dir).unwrap().stack.unwrap();
+        let loaded = tddy_changeset::stack_fixtures::stack_on_disk(dir);
         assert_eq!(loaded.nodes.len(), 2);
         let n1 = loaded.node("n1").unwrap();
         assert_eq!(n1.title, "Add token store");
@@ -845,7 +750,7 @@ mod tests {
     #[test]
     fn reseeding_refuses_to_overwrite_a_stack_once_a_node_has_a_spawned_child_session() {
         // Given — node n1 already has a materialized child session
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
         let dir = tmp.path();
         let cs = Changeset {
             stack: Some(Stack {
@@ -866,7 +771,7 @@ mod tests {
             }),
             ..Changeset::default()
         };
-        tddy_core::changeset::write_changeset(dir, &cs).unwrap();
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs.clone());
 
         // When — a chat refinement tries to reshape the plan after n1 was already spawned
         let result = reseed_stack_from_plan_if_unspawned(dir, &a_two_node_plan());
@@ -876,7 +781,7 @@ mod tests {
             result.is_err(),
             "expected Err once a node has a spawned child session"
         );
-        let loaded = read_changeset(dir).unwrap().stack.unwrap();
+        let loaded = tddy_changeset::stack_fixtures::stack_on_disk(dir);
         let n1 = loaded.node("n1").unwrap();
         assert_eq!(n1.session_id.as_deref(), Some("child-session-1"));
     }
@@ -884,7 +789,7 @@ mod tests {
     #[test]
     fn reseeding_refuses_to_overwrite_a_stack_once_a_node_owns_a_branch() {
         // Given — node n1 owns a real branch; no session is attached to it (it was closed)
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
         let dir = tmp.path();
         let cs = Changeset {
             stack: Some(Stack {
@@ -905,7 +810,7 @@ mod tests {
             }),
             ..Changeset::default()
         };
-        tddy_core::changeset::write_changeset(dir, &cs).unwrap();
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs.clone());
 
         // When — a chat refinement tries to reshape the plan
         let result = reseed_stack_from_plan_if_unspawned(dir, &a_two_node_plan());
@@ -915,7 +820,7 @@ mod tests {
             result.is_err(),
             "expected Err once a node owns a materialized branch"
         );
-        let loaded = read_changeset(dir).unwrap().stack.unwrap();
+        let loaded = tddy_changeset::stack_fixtures::stack_on_disk(dir);
         assert_eq!(
             loaded.node("n1").unwrap().branch.as_deref(),
             Some("feature/token-store")
@@ -927,7 +832,7 @@ mod tests {
         use crate::plan_pr_stack::PlannedPr;
 
         // Given — a valid, previously-persisted single-node stack
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
         let dir = tmp.path();
         let cs = Changeset {
             stack: Some(Stack {
@@ -952,7 +857,7 @@ mod tests {
             }),
             ..Changeset::default()
         };
-        tddy_core::changeset::write_changeset(dir, &cs).unwrap();
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs.clone());
 
         // When — the agent's refined plan has a cycle (n1 depends on n2, n2 depends on n1)
         let cyclic_plan = StackPlanOutput {
@@ -981,7 +886,7 @@ mod tests {
 
         // Then — rejected, and the previous valid stack is still on disk
         assert!(result.is_err(), "expected Err for a cyclic refinement");
-        let loaded = read_changeset(dir).unwrap().stack.unwrap();
+        let loaded = tddy_changeset::stack_fixtures::stack_on_disk(dir);
         assert_eq!(
             loaded.nodes.len(),
             1,

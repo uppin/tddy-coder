@@ -8,7 +8,9 @@
 //! keyed by the record's path) finished by an atomic rename, so two writers to the same stack both
 //! land and a reader never sees a half-written record.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use crate::changeset::Stack;
 
@@ -80,16 +82,25 @@ impl ProjectStackStore {
         created_by_session_id: &str,
         stack: Stack,
     ) -> Result<StackRecord, StackStoreError> {
-        // TODO(project-stack-store): implement
-        let _ = (project_id, created_by_session_id, stack);
-        todo!("project-stack-store: ProjectStackStore::create")
+        let stacks_dir = self.stacks_dir(project_id)?;
+        let stack_id = uuid::Uuid::now_v7().to_string();
+        let record = StackRecord {
+            stack_id,
+            project_id: project_id.to_string(),
+            created_by_session_id: created_by_session_id.to_string(),
+            created_at_unix_ms: now_unix_ms(),
+            stack,
+        };
+        let path = record_path(&stacks_dir, &record.stack_id);
+        with_record_lock(&path, || write_record(&path, &record))?;
+        Ok(record)
     }
 
     /// The record `stack_id` of `project_id`.
     pub fn read(&self, project_id: &str, stack_id: &str) -> Result<StackRecord, StackStoreError> {
-        // TODO(project-stack-store): implement
-        let _ = (project_id, stack_id);
-        todo!("project-stack-store: ProjectStackStore::read")
+        let stacks_dir = self.stacks_dir(project_id)?;
+        let path = self.existing_record_path(&stacks_dir, project_id, stack_id)?;
+        read_record(&path, project_id, stack_id)
     }
 
     /// Apply `f` to the stack of record `stack_id` and write it back, serialized against every
@@ -100,18 +111,145 @@ impl ProjectStackStore {
         stack_id: &str,
         f: impl FnOnce(&mut Stack),
     ) -> Result<StackRecord, StackStoreError> {
-        // TODO(project-stack-store): implement
-        let _ = (project_id, stack_id, f);
-        todo!("project-stack-store: ProjectStackStore::update")
+        let stacks_dir = self.stacks_dir(project_id)?;
+        let path = self.existing_record_path(&stacks_dir, project_id, stack_id)?;
+        with_record_lock(&path, || {
+            let mut record = read_record(&path, project_id, stack_id)?;
+            f(&mut record.stack);
+            write_record(&path, &record)?;
+            Ok(record)
+        })
     }
 
     /// Every stack record of `project_id`, sorted by `stack_id`. A project with no `stacks/`
     /// directory has none.
     pub fn list(&self, project_id: &str) -> Result<Vec<StackRecord>, StackStoreError> {
-        // TODO(project-stack-store): implement
-        let _ = project_id;
-        todo!("project-stack-store: ProjectStackStore::list")
+        let stacks_dir = self.stacks_dir(project_id)?;
+        let entries = match std::fs::read_dir(&stacks_dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(StackStoreError::Io {
+                    path: stacks_dir,
+                    source,
+                })
+            }
+        };
+        let mut stack_ids = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|source| StackStoreError::Io {
+                path: stacks_dir.clone(),
+                source,
+            })?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if let Some(stack_id) = name.strip_suffix(".yaml") {
+                stack_ids.push(stack_id.to_string());
+            }
+        }
+        stack_ids.sort();
+        stack_ids
+            .iter()
+            .map(|stack_id| read_record(&record_path(&stacks_dir, stack_id), project_id, stack_id))
+            .collect()
     }
+
+    /// `<projects dir>/<project_id>/stacks`, after `project_id` is checked to name one directory.
+    fn stacks_dir(&self, project_id: &str) -> Result<PathBuf, StackStoreError> {
+        if !names_one_path_segment(project_id) {
+            return Err(StackStoreError::InvalidProjectId(project_id.to_string()));
+        }
+        Ok(self.projects_dir.join(project_id).join("stacks"))
+    }
+
+    fn existing_record_path(
+        &self,
+        stacks_dir: &Path,
+        project_id: &str,
+        stack_id: &str,
+    ) -> Result<PathBuf, StackStoreError> {
+        if !names_one_path_segment(stack_id) {
+            return Err(StackStoreError::InvalidStackId(stack_id.to_string()));
+        }
+        let path = record_path(stacks_dir, stack_id);
+        if !path.is_file() {
+            return Err(StackStoreError::NotFound {
+                project_id: project_id.to_string(),
+                stack_id: stack_id.to_string(),
+            });
+        }
+        Ok(path)
+    }
+}
+
+/// A non-empty id that is neither `.` nor `..` and carries no path separator.
+fn names_one_path_segment(id: &str) -> bool {
+    !id.is_empty() && id != "." && id != ".." && !id.contains(['/', '\\', '\0'])
+}
+
+fn record_path(stacks_dir: &Path, stack_id: &str) -> PathBuf {
+    stacks_dir.join(format!("{stack_id}.yaml"))
+}
+
+fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// The in-process lock of one record, shared by every store handle in this process.
+fn with_record_lock<T>(path: &Path, f: impl FnOnce() -> T) -> T {
+    static LOCKS: std::sync::OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
+        std::sync::OnceLock::new();
+    let lock = {
+        let mut locks = LOCKS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(locks.entry(path.to_path_buf()).or_default())
+    };
+    let _held = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    f()
+}
+
+fn read_record(
+    path: &Path,
+    project_id: &str,
+    stack_id: &str,
+) -> Result<StackRecord, StackStoreError> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(StackStoreError::NotFound {
+                project_id: project_id.to_string(),
+                stack_id: stack_id.to_string(),
+            })
+        }
+        Err(source) => {
+            return Err(StackStoreError::Io {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+    };
+    serde_yaml::from_str(&text).map_err(|e| StackStoreError::Malformed {
+        path: path.to_path_buf(),
+        message: e.to_string(),
+    })
+}
+
+fn write_record(path: &Path, record: &StackRecord) -> Result<(), StackStoreError> {
+    let text = serde_yaml::to_string(record).map_err(|e| StackStoreError::Malformed {
+        path: path.to_path_buf(),
+        message: e.to_string(),
+    })?;
+    tddy_session_store::atomic_file::write_atomic(path, text).map_err(|source| {
+        StackStoreError::Io {
+            path: path.to_path_buf(),
+            source,
+        }
+    })
 }
 
 #[cfg(test)]

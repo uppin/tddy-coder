@@ -4,8 +4,10 @@
 //! alongside it — which is why it was the first seam the 964-line file offered.
 
 use super::io::{read_changeset, write_changeset_atomic};
-use super::model::{GithubPrStatus, PrInternalStatus};
+use super::model::{Changeset, GithubPrStatus, PrInternalStatus};
 use crate::error::WorkflowError;
+use crate::project_stack_store::{ProjectStackStore, StackStoreError};
+use crate::session_metadata::{read_session_metadata, SESSION_METADATA_FILENAME};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tddy_workflow::ids::WorkflowState;
@@ -245,14 +247,109 @@ impl Stack {
     }
 }
 
-/// Atomically update the stack on an orchestrator session.
+/// The project's stack store a session dir resolves to, and the project the session belongs to.
+///
+/// The projects directory follows the sessions layout every daemon uses — `<base>/sessions/<id>`
+/// sits beside `<base>/projects` — and the project id comes from the session's `.session.yaml`.
+pub fn session_stack_store(
+    session_dir: &Path,
+) -> Result<(ProjectStackStore, String), WorkflowError> {
+    let sessions_dir = session_dir.parent().filter(|p| p.ends_with("sessions"));
+    let base = sessions_dir.and_then(Path::parent).ok_or_else(|| {
+        WorkflowError::PlanDirInvalid(format!(
+            "{} is not a session directory under <base>/sessions/",
+            session_dir.display()
+        ))
+    })?;
+    let project_id = read_session_metadata(session_dir)?.project_id;
+    if project_id.trim().is_empty() {
+        return Err(WorkflowError::SessionMissing(format!(
+            "{} records no project, so its PR stack has no project to live in",
+            session_dir.join(SESSION_METADATA_FILENAME).display()
+        )));
+    }
+    Ok((ProjectStackStore::new(base.join("projects")), project_id))
+}
+
+fn store_error(e: StackStoreError) -> WorkflowError {
+    WorkflowError::ChangesetInvalid(e.to_string())
+}
+
+/// The id of the stack an orchestrator session planned, when it has planned one.
+pub fn session_stack_id(session_dir: &Path) -> Result<Option<String>, WorkflowError> {
+    Ok(read_changeset(session_dir)?.stack_id)
+}
+
+/// The stack an orchestrator session planned, read from the project's store.
+///
+/// `Ok(None)` when the session has planned none (an ordinary session). A changeset still carrying
+/// the pre-store `stack` field is refused, not read: the daemon's startup sweep moves it, and a
+/// reader that quietly honoured both would hide a sweep that did not run.
+pub fn read_session_stack(session_dir: &Path) -> Result<Option<Stack>, WorkflowError> {
+    let changeset = read_changeset(session_dir)?;
+    read_stack_of(session_dir, &changeset)
+}
+
+/// [`read_session_stack`] over a changeset already read.
+pub fn read_stack_of(
+    session_dir: &Path,
+    changeset: &Changeset,
+) -> Result<Option<Stack>, WorkflowError> {
+    let Some(stack_id) = changeset.stack_id.as_deref() else {
+        refuse_unmigrated_stack(session_dir, changeset)?;
+        return Ok(None);
+    };
+    let (store, project_id) = session_stack_store(session_dir)?;
+    store
+        .read(&project_id, stack_id)
+        .map(|record| Some(record.stack))
+        .map_err(store_error)
+}
+
+fn refuse_unmigrated_stack(session_dir: &Path, changeset: &Changeset) -> Result<(), WorkflowError> {
+    if changeset.stack.is_some() {
+        return Err(WorkflowError::ChangesetInvalid(format!(
+            "{} still carries its PR stack in changeset.yaml; the startup migration has not moved it into the project",
+            session_dir.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Serializes the first-write path of [`update_stack_atomic`] (no stack id yet), so two writers
+/// of one session cannot each create a stack record.
+static FIRST_STACK_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Atomically update the stack of an orchestrator session: the project's stack record it names,
+/// created (and named in the changeset) by the first write.
 pub fn update_stack_atomic(
     orchestrator_session_dir: &Path,
     f: impl FnOnce(&mut Stack),
 ) -> Result<(), WorkflowError> {
+    let (store, project_id) = session_stack_store(orchestrator_session_dir)?;
+    let _first_write = FIRST_STACK_WRITE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut changeset = read_changeset(orchestrator_session_dir)?;
-    let stack = changeset.stack.get_or_insert_with(Stack::default);
-    f(stack);
+    if let Some(stack_id) = changeset.stack_id.as_deref() {
+        return store
+            .update(&project_id, stack_id, f)
+            .map(drop)
+            .map_err(store_error);
+    }
+    refuse_unmigrated_stack(orchestrator_session_dir, &changeset)?;
+    let session_id = orchestrator_session_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut stack = Stack::default();
+    f(&mut stack);
+    // The record is written before the changeset names it, so a failure between the two leaves an
+    // unreferenced record rather than a dangling id.
+    let record = store
+        .create(&project_id, &session_id, stack)
+        .map_err(store_error)?;
+    changeset.stack_id = Some(record.stack_id);
     write_changeset_atomic(orchestrator_session_dir, &changeset)
 }
 
@@ -300,7 +397,7 @@ pub fn read_stack_with_resolved_branches(
 ) -> Result<Option<Stack>, WorkflowError> {
     let dir =
         crate::session_lifecycle::unified_session_dir_path(sessions_root, orchestrator_session_id);
-    let Some(mut stack) = read_changeset(&dir)?.stack else {
+    let Some(mut stack) = read_session_stack(&dir)? else {
         return Ok(None);
     };
     for node in &mut stack.nodes {
@@ -317,9 +414,7 @@ pub fn sync_stack_node_from_child(
     node_id: &str,
 ) -> Result<(), WorkflowError> {
     // Resolve the child session id from the current orchestrator stack before any write.
-    let orch = read_changeset(orchestrator_session_dir)?;
-    let session_id = orch
-        .stack
+    let session_id = read_session_stack(orchestrator_session_dir)?
         .as_ref()
         .and_then(|s| s.node(node_id))
         .and_then(|n| n.session_id.clone());
@@ -346,7 +441,7 @@ pub fn sync_stack_node_from_child(
 #[cfg(test)]
 mod stack_tests {
     use super::*;
-    use crate::changeset::io::write_changeset;
+
     use crate::changeset::model::{Changeset, ChangesetWorkflow};
 
     #[test]
@@ -703,59 +798,105 @@ mod stack_tests {
         assert_eq!(order, vec!["n2", "n1"]);
     }
 
+    use crate::stack_fixtures::{a_stack_host, stack_id_of, stack_on_disk};
+
+    fn a_plain_node(node_id: &str) -> StackNode {
+        StackNode {
+            node_id: node_id.to_string(),
+            title: "Node 1".to_string(),
+            ..StackNode::default()
+        }
+    }
+
     #[test]
     fn update_stack_atomic_reads_and_writes_back() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        let cs = Changeset {
-            stack: Some(Stack {
+        // Given
+        let host = a_stack_host();
+        let dir = host.orchestrator(
+            "orch",
+            Stack {
                 version: 1,
                 nodes: vec![],
-            }),
-            ..Default::default()
-        };
-        write_changeset(dir, &cs).unwrap();
+            },
+        );
 
-        update_stack_atomic(dir, |stack| {
+        // When
+        update_stack_atomic(&dir, |stack| {
             stack.version = 42;
         })
         .unwrap();
 
-        let loaded = read_changeset(dir).unwrap();
-        assert_eq!(loaded.stack.unwrap().version, 42);
+        // Then
+        assert_eq!(stack_on_disk(&dir).version, 42);
+    }
+
+    #[test]
+    fn the_first_update_of_a_session_with_no_stack_creates_its_project_record() {
+        // Given
+        let host = a_stack_host();
+        let dir = host.session("orch", Changeset::default());
+
+        // When
+        update_stack_atomic(&dir, |stack| stack.nodes.push(a_plain_node("n1"))).unwrap();
+
+        // Then — the changeset names the record, which holds the node and the planning session
+        let stack_id = stack_id_of(&dir).expect("the changeset names its stack");
+        let record = host
+            .store()
+            .read(crate::stack_fixtures::A_PROJECT, &stack_id)
+            .unwrap();
+        assert_eq!(
+            (
+                record.created_by_session_id.as_str(),
+                record.stack.nodes.len()
+            ),
+            ("orch", 1)
+        );
+    }
+
+    #[test]
+    fn a_session_still_carrying_its_stack_in_the_changeset_is_refused_not_read() {
+        // Given — a changeset the startup sweep has not reached
+        let host = a_stack_host();
+        let dir = host.session(
+            "orch",
+            Changeset {
+                stack: Some(Stack {
+                    version: 1,
+                    nodes: vec![a_plain_node("n1")],
+                }),
+                ..Changeset::default()
+            },
+        );
+
+        // When
+        let read = read_session_stack(&dir);
+        let written = update_stack_atomic(&dir, |stack| stack.version = 2);
+
+        // Then
+        assert!(read.is_err(), "a read must not honour the legacy field");
+        assert!(written.is_err(), "a write must not shadow the legacy field");
     }
 
     #[test]
     fn link_stack_node_to_child_session_sets_fields() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        let cs = Changeset {
-            stack: Some(Stack {
+        // Given
+        let host = a_stack_host();
+        let dir = host.orchestrator(
+            "orch",
+            Stack {
                 version: 1,
-                nodes: vec![StackNode {
-                    node_id: "n1".to_string(),
-                    title: "Node 1".to_string(),
-                    description: String::new(),
-                    branch_suggestion: None,
-                    branch: None,
-                    session_id: None,
-                    parents: vec![],
-                    pr_status: None,
-                    child_state: None,
-                    internal_status: None,
-                    display_order: None,
-                }],
-            }),
-            ..Default::default()
-        };
-        write_changeset(dir, &cs).unwrap();
+                nodes: vec![a_plain_node("n1")],
+            },
+        );
 
-        link_stack_node_to_child_session(dir, "n1", "sess-abc", Some("feature/n1".to_string()))
+        // When
+        link_stack_node_to_child_session(&dir, "n1", "sess-abc", Some("feature/n1".to_string()))
             .unwrap();
 
-        let loaded = read_changeset(dir).unwrap();
-        let node = loaded.stack.unwrap();
-        let n1 = node.node("n1").unwrap();
+        // Then
+        let stack = stack_on_disk(&dir);
+        let n1 = stack.node("n1").unwrap();
         assert_eq!(n1.session_id.as_deref(), Some("sess-abc"));
         assert_eq!(n1.branch.as_deref(), Some("feature/n1"));
     }
@@ -763,15 +904,9 @@ mod stack_tests {
     #[test]
     fn sync_stack_node_from_child_propagates_state_and_pr_status() {
         use tddy_workflow::ids::WorkflowState;
-        let orch_tmp = tempfile::tempdir().unwrap();
-        let sessions_tmp = tempfile::tempdir().unwrap();
-        let orch_dir = orch_tmp.path();
-        let sessions_root = sessions_tmp.path();
+        // Given — an orchestrator whose node n1 names a child session in the same host
+        let host = a_stack_host();
         let child_id = "child-session-1";
-
-        // unified_session_dir_path = sessions_root/sessions/<id>
-        let child_dir = sessions_root.join("sessions").join(child_id);
-        std::fs::create_dir_all(&child_dir).unwrap();
         let mut child_cs = Changeset::default();
         child_cs.state.current = WorkflowState::new("GreenImplementing");
         child_cs.workflow = Some(ChangesetWorkflow {
@@ -782,33 +917,24 @@ mod stack_tests {
             }),
             ..Default::default()
         });
-        write_changeset(&child_dir, &child_cs).unwrap();
-
-        let orch_cs = Changeset {
-            stack: Some(Stack {
+        host.session(child_id, child_cs);
+        let orch_dir = host.orchestrator(
+            "orch",
+            Stack {
                 version: 1,
                 nodes: vec![StackNode {
-                    node_id: "n1".to_string(),
-                    title: "Node 1".to_string(),
-                    description: String::new(),
-                    branch_suggestion: None,
                     branch: Some("feature/n1".to_string()),
                     session_id: Some(child_id.to_string()),
-                    parents: vec![],
-                    pr_status: None,
-                    child_state: None,
-                    internal_status: None,
-                    display_order: None,
+                    ..a_plain_node("n1")
                 }],
-            }),
-            ..Default::default()
-        };
-        write_changeset(orch_dir, &orch_cs).unwrap();
+            },
+        );
 
-        sync_stack_node_from_child(orch_dir, sessions_root, "n1").unwrap();
+        // When
+        sync_stack_node_from_child(&orch_dir, host.base(), "n1").unwrap();
 
-        let loaded = read_changeset(orch_dir).unwrap();
-        let stack = loaded.stack.unwrap();
+        // Then
+        let stack = stack_on_disk(&orch_dir);
         let n1 = stack.node("n1").unwrap();
         assert_eq!(
             n1.child_state,

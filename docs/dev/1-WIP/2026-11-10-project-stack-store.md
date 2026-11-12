@@ -224,6 +224,15 @@ _(populated during development)_
 
 ## Decisions & Trade-offs
 
+- **No dual read — only the sweep reads the legacy `Changeset.stack`** (developer, 2026-11-12). The
+  field stays on the model so the sweep can deserialize old changesets, and nothing else reads it: every
+  reader and writer refuses a changeset that carries it without a `stack_id`, and the session list
+  reports no stack plan for such a session. Approved test change at green:
+  `stack_plan_json_from_store::the_session_list_reports_the_same_stack_plan_json_before_and_after_migration`
+  became `a_migrated_sessions_list_reports_the_stack_plan_it_carried_before_migration` (the listed JSON
+  after the sweep equals the JSON of the legacy `Stack` written in) plus
+  `an_unmigrated_session_lists_no_stack_plan`.
+
 - **The `orchestrate` resume rule is dropped** (developer, 2026-11-12): the pr-stack recipe's
   orchestration loop is deprecated — orchestration is an orchestrator agent holding tools, and any
   workflow is optional to a session. `PrStackRecipe::next_goal_for_state_with_changeset`'s `Init`
@@ -269,7 +278,7 @@ n3 `feature/orchestrators/start-effort`.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

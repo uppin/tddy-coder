@@ -26,8 +26,8 @@ const STACK_PLAN: &str = "stack-plan.yaml";
 const STACK_PLAN_MD: &str = "pr-stack-plan.md";
 
 /// An orchestrator session directory holding the `changeset.yaml` every stack writer reads.
-fn an_orchestrator_session() -> tempfile::TempDir {
-    let tmp = tempfile::tempdir().expect("temp session dir");
+fn an_orchestrator_session() -> tddy_changeset::stack_fixtures::ASessionDir {
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     write_changeset(tmp.path(), &Changeset::default()).expect("seed changeset");
     tmp
 }

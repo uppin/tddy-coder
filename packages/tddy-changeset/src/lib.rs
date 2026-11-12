@@ -20,6 +20,8 @@ pub mod session_metadata;
 pub mod session_participant_metadata;
 pub mod session_provider_account;
 pub mod source_path;
+#[cfg(any(test, feature = "test-support"))]
+pub mod stack_fixtures;
 
 // The storage layer these modules are built on, named at the `crate::` paths they used inside
 // `tddy-core`.
@@ -34,8 +36,9 @@ pub use changeset::{
     QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use changeset::{
-    link_stack_node_to_child_session, sync_stack_node_from_child, update_stack_atomic,
-    PrInternalStatus, Stack, StackNode,
+    link_stack_node_to_child_session, read_session_stack, read_stack_of, session_stack_id,
+    session_stack_store, sync_stack_node_from_child, update_stack_atomic, PrInternalStatus, Stack,
+    StackNode,
 };
 pub use elapsed_format::format_elapsed_compact;
 pub use session_activity::{

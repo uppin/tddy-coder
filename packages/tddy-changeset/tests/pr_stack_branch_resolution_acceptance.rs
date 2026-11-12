@@ -12,9 +12,13 @@
 
 use std::path::Path;
 use tddy_changeset::changeset::{
-    read_stack_with_resolved_branches, resolve_stack_node_branch, Changeset, Stack, StackNode,
+    read_stack_with_resolved_branches, resolve_stack_node_branch, update_stack_atomic, Changeset,
+    Stack, StackNode,
 };
 use tddy_changeset::session_lifecycle::unified_session_dir_path;
+use tddy_changeset::session_metadata::{
+    write_initial_tool_session_metadata, InitialToolSessionMetadataOpts,
+};
 
 // --- builders ---------------------------------------------------------------
 
@@ -85,18 +89,27 @@ fn a_child_session(sessions_root: &Path, session_id: &str, changeset: Changeset)
     tddy_changeset::changeset::write_changeset(&dir, &changeset).expect("write child changeset");
 }
 
-/// A pr-stack orchestrator session owning `stack`.
+/// A pr-stack orchestrator session whose project holds `stack`.
 fn an_orchestrator_with_stack(sessions_root: &Path, session_id: &str, nodes: Vec<StackNode>) {
     let dir = unified_session_dir_path(sessions_root, session_id);
     std::fs::create_dir_all(&dir).expect("create orchestrator session dir");
+    write_initial_tool_session_metadata(
+        &dir,
+        InitialToolSessionMetadataOpts {
+            project_id: "proj-test".to_string(),
+            ..InitialToolSessionMetadataOpts::default()
+        },
+    )
+    .expect("write orchestrator .session.yaml");
     let changeset = Changeset {
         recipe: Some("pr-stack".to_string()),
-        stack: Some(Stack { version: 1, nodes }),
         branch: None,
         ..Changeset::default()
     };
     tddy_changeset::changeset::write_changeset(&dir, &changeset)
         .expect("write orchestrator changeset");
+    update_stack_atomic(&dir, |stack| *stack = Stack { version: 1, nodes })
+        .expect("store the orchestrator's stack");
 }
 
 fn a_sessions_root() -> tempfile::TempDir {

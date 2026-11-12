@@ -23,9 +23,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use tddy_core::changeset::{
-    read_changeset, write_changeset, Changeset, GithubPrStatus, Stack, StackNode,
-};
+use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
 use tddy_workflow_recipes::orchestrate_pr_stack::github::{
     GithubPrApi, PrLookupOutcome, PrRef, PrState, PrView,
 };
@@ -157,14 +155,11 @@ fn write_stack(dir: &Path, nodes: Vec<StackNode>) {
         stack: Some(Stack { version: 1, nodes }),
         ..Changeset::default()
     };
-    write_changeset(dir, &cs).unwrap();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs.clone());
 }
 
 fn parents_of(dir: &Path, node_id: &str) -> Vec<String> {
-    read_changeset(dir)
-        .unwrap()
-        .stack
-        .unwrap()
+    tddy_changeset::stack_fixtures::stack_on_disk(dir)
         .node(node_id)
         .unwrap()
         .parents
@@ -177,7 +172,7 @@ fn parents_of(dir: &Path, node_id: &str) -> Vec<String> {
 fn repointing_a_branchless_node_to_the_default_branch_drops_its_stranded_parent() {
     // Given — n1's PR merged on GitHub and its branch was deleted, but the plan still says "open";
     // n2 was never started, so it owns no branch
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -199,7 +194,7 @@ fn repointing_a_branchless_node_to_the_default_branch_drops_its_stranded_parent(
 #[test]
 fn repointing_a_branchless_node_makes_no_github_call() {
     // Given — the same stranded node, which owns no branch
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -223,7 +218,7 @@ fn repointing_a_branchless_node_makes_no_github_call() {
 #[test]
 fn repointing_retains_the_parent_that_owns_the_target_base_branch() {
     // Given — n3 depends on n1 (branch deleted from origin, still recorded open) and n2 (open, pushed)
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -247,7 +242,7 @@ fn repointing_retains_the_parent_that_owns_the_target_base_branch() {
 fn repointing_collapses_a_multi_parent_node_onto_the_single_target_parent() {
     // Given — n4 stacks on three predecessors, two of which are perfectly healthy: n2 owns the target
     // branch and n3 owns a different live one
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -274,7 +269,7 @@ fn repointing_collapses_a_multi_parent_node_onto_the_single_target_parent() {
 fn repointing_drops_a_parent_whose_pull_request_is_not_recorded_as_merged() {
     // Given — n1's plan status is "open" (the orchestrator agent never ran an assess pass) even though
     // its branch is gone; n2 owns a branch, so the git/PR half of the repoint also runs
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -296,7 +291,7 @@ fn repointing_drops_a_parent_whose_pull_request_is_not_recorded_as_merged() {
 #[test]
 fn repointing_onto_an_explicit_target_re_targets_the_nodes_own_open_pull_request() {
     // Given — n2 owns a branch and has an open PR of its own, so the git/PR half of the repoint runs
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -319,7 +314,7 @@ fn repointing_onto_an_explicit_target_re_targets_the_nodes_own_open_pull_request
 #[test]
 fn repointing_without_a_target_drops_merged_parents_only() {
     // Given — n2 depends on n1 (merged) and n3 (still open)
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,

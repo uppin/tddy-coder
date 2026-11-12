@@ -176,9 +176,9 @@ impl Orchestrator {
     fn record_the_plan(&self, repo_path: Option<PathBuf>) -> &Self {
         let dir = self.session_dir(ORCHESTRATOR);
         fs::create_dir_all(&dir).unwrap();
-        tddy_core::write_changeset(
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(
             &dir,
-            &Changeset {
+            Changeset {
                 recipe: Some("pr-stack".to_string()),
                 repo_path: repo_path.map(|p| p.to_string_lossy().into_owned()),
                 stack: Some(Stack {
@@ -190,8 +190,7 @@ impl Orchestrator {
                 }),
                 ..Changeset::default()
             },
-        )
-        .unwrap();
+        );
         self
     }
 

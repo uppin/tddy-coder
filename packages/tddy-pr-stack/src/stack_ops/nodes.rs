@@ -127,7 +127,7 @@ pub fn update_planned_pr_node(
     session_dir: &Path,
     input: UpdatePlannedPrInput,
 ) -> Result<StackNode, String> {
-    use tddy_core::changeset::{read_changeset, update_stack_atomic};
+    use tddy_core::changeset::update_stack_atomic;
 
     let node_id = input.node_id.clone();
     if input.title.is_none() && input.description.is_none() && input.branch_suggestion.is_none() {
@@ -137,9 +137,8 @@ pub fn update_planned_pr_node(
         ));
     }
 
-    let stack = read_changeset(session_dir)
+    let stack = tddy_core::changeset::read_session_stack(session_dir)
         .map_err(|e| format!("update_planned_pr_node: failed to read changeset: {e}"))?
-        .stack
         .unwrap_or_default();
     let node = stack
         .node(&node_id)
@@ -195,11 +194,10 @@ pub fn update_planned_pr_node(
 /// The node's branch, worktree and child session are left untouched and reported — see
 /// [`DeletedNode`].
 pub fn delete_planned_pr_node(session_dir: &Path, node_id: &str) -> Result<DeletedNode, String> {
-    use tddy_core::changeset::{read_changeset, update_stack_atomic};
+    use tddy_core::changeset::update_stack_atomic;
 
-    let stack = read_changeset(session_dir)
+    let stack = tddy_core::changeset::read_session_stack(session_dir)
         .map_err(|e| format!("delete_planned_pr_node: failed to read changeset: {e}"))?
-        .stack
         .unwrap_or_default();
     let node = stack
         .node(node_id)
@@ -318,12 +316,11 @@ pub fn set_stack_node_parents(
     default_branch: &str,
     gh: &dyn tddy_github::pr_api::GithubPrApi,
 ) -> Result<StackNode, String> {
-    use tddy_core::changeset::{read_changeset, update_stack_atomic};
+    use tddy_core::changeset::update_stack_atomic;
     const OP: &str = "set_stack_node_parents";
 
-    let stack = read_changeset(session_dir)
+    let stack = tddy_core::changeset::read_session_stack(session_dir)
         .map_err(|e| format!("{OP}: failed to read changeset: {e}"))?
-        .stack
         .unwrap_or_default();
     if stack.node(node_id).is_none() {
         return Err(format!("{OP}: node '{node_id}' not found"));
@@ -375,9 +372,8 @@ pub fn set_stack_node_parents(
 /// skip the rebase, the force-push and the PR re-target — while reporting success.
 fn reload_moved_node(session_dir: &Path, node_id: &str) -> Result<StackNode, String> {
     const OP: &str = "set_stack_node_parents";
-    tddy_core::changeset::read_changeset(session_dir)
+    tddy_core::changeset::read_session_stack(session_dir)
         .map_err(|e| format!("{OP}: failed to reload node: {e}"))?
-        .stack
         .unwrap_or_default()
         .node(node_id)
         .cloned()
@@ -388,12 +384,12 @@ fn reload_moved_node(session_dir: &Path, node_id: &str) -> Result<StackNode, Str
 mod tests {
     use super::*;
     use crate::stack_ops::test_support::{
-        a_changeset_with_stack, a_node, a_started_node, assert_rejected, node_ids, stack_on_disk,
+        a_node, a_stack_session_dir, a_started_node, assert_rejected, node_ids, stack_on_disk,
         write_stack,
     };
     use rstest::rstest;
     use std::path::Path;
-    use tddy_core::changeset::{read_changeset, Changeset, StackNode};
+    use tddy_core::changeset::{Changeset, StackNode};
 
     // -----------------------------------------------------------------------
     // add_planned_pr_node
@@ -402,7 +398,7 @@ mod tests {
     #[test]
     fn appending_a_root_planned_pr_to_an_empty_stack_assigns_n1_and_persists_it() {
         // Given — a session with no stack yet
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         tddy_core::changeset::write_changeset(dir, &Changeset::default()).unwrap();
 
@@ -430,7 +426,7 @@ mod tests {
         );
         assert_eq!(node.parents, Vec::<String>::new());
 
-        let loaded = read_changeset(dir).unwrap().stack.unwrap();
+        let loaded = stack_on_disk(dir);
         assert_eq!(loaded.nodes.len(), 1);
         assert_eq!(loaded.node("n1").unwrap().title, "Add token store");
     }
@@ -438,13 +434,15 @@ mod tests {
     #[test]
     fn appending_a_node_with_valid_parents_persists_them_and_assigns_the_next_free_id() {
         // Given — a stack with two existing nodes, n1 and n2
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
-        let cs = a_changeset_with_stack(vec![
-            a_node("n1", "Add token store", vec![]),
-            a_node("n2", "Add auth middleware", vec!["n1"]),
-        ]);
-        tddy_core::changeset::write_changeset(dir, &cs).unwrap();
+        write_stack(
+            dir,
+            vec![
+                a_node("n1", "Add token store", vec![]),
+                a_node("n2", "Add auth middleware", vec!["n1"]),
+            ],
+        );
 
         // When — the new node depends on both existing nodes
         let result = add_planned_pr_node(
@@ -464,7 +462,7 @@ mod tests {
         assert_eq!(node.node_id, "n3");
         assert_eq!(node.parents, vec!["n1".to_string(), "n2".to_string()]);
 
-        let loaded = read_changeset(dir).unwrap().stack.unwrap();
+        let loaded = stack_on_disk(dir);
         assert_eq!(loaded.nodes.len(), 3);
         assert_eq!(
             loaded.node("n3").unwrap().parents,
@@ -475,10 +473,9 @@ mod tests {
     #[test]
     fn a_dangling_parent_ref_is_rejected_and_the_stack_on_disk_is_unchanged() {
         // Given — a stack with a single node, n1
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
-        let cs = a_changeset_with_stack(vec![a_node("n1", "Add token store", vec![])]);
-        tddy_core::changeset::write_changeset(dir, &cs).unwrap();
+        write_stack(dir, vec![a_node("n1", "Add token store", vec![])]);
 
         // When — the requested ancestor "n99" does not exist
         let result = add_planned_pr_node(
@@ -495,14 +492,14 @@ mod tests {
         // Then
         assert!(result.is_err(), "expected Err for a dangling parent ref");
         assert!(result.unwrap_err().contains("n99"));
-        let loaded = read_changeset(dir).unwrap().stack.unwrap();
+        let loaded = stack_on_disk(dir);
         assert_eq!(loaded.nodes.len(), 1, "stack on disk must be unchanged");
     }
 
     #[test]
     fn the_new_node_always_stays_planned_with_no_session_id_or_pr_status() {
         // Given
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         tddy_core::changeset::write_changeset(dir, &Changeset::default()).unwrap();
 
@@ -529,13 +526,15 @@ mod tests {
     #[test]
     fn node_id_assignment_picks_up_after_a_non_contiguous_max() {
         // Given — a stack whose highest existing node id is "n5", not the node count (2)
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
-        let cs = a_changeset_with_stack(vec![
-            a_node("n1", "Add token store", vec![]),
-            a_node("n5", "Add auth middleware", vec![]),
-        ]);
-        tddy_core::changeset::write_changeset(dir, &cs).unwrap();
+        write_stack(
+            dir,
+            vec![
+                a_node("n1", "Add token store", vec![]),
+                a_node("n5", "Add auth middleware", vec![]),
+            ],
+        );
 
         // When
         let node = add_planned_pr_node(
@@ -573,7 +572,7 @@ mod tests {
     fn updating_a_nodes_title_and_description_persists_both_and_leaves_every_other_field_untouched()
     {
         // Given — n1 is fully started: it owns a branch, a child session and an open PR
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(
             dir,
@@ -608,7 +607,7 @@ mod tests {
     #[test]
     fn an_update_that_names_no_field_is_rejected_and_the_stack_on_disk_is_unchanged() {
         // Given
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(dir, vec![a_node("n1", "Original title", vec![])]);
 
@@ -626,7 +625,7 @@ mod tests {
     #[test]
     fn a_branch_suggestion_edit_is_accepted_while_the_node_is_still_planned() {
         // Given — n1 was never started, so its suggestion is still the only name it has
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(
             dir,
@@ -665,7 +664,7 @@ mod tests {
     #[test]
     fn a_branch_suggestion_edit_is_rejected_once_the_node_owns_a_branch() {
         // Given — a worktree already exists, so the suggestion has been superseded by a real ref
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(
             dir,
@@ -699,7 +698,7 @@ mod tests {
     #[test]
     fn updating_an_unknown_node_id_is_rejected() {
         // Given — a stack with no node called n9
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(dir, vec![a_node("n1", "Add token store", vec![])]);
 
@@ -723,7 +722,7 @@ mod tests {
     #[test]
     fn deleting_a_middle_node_reparents_its_children_onto_that_nodes_parents() {
         // Given — a chain n1 → n2 → n3 where n2 turned out to be unnecessary
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(
             dir,
@@ -748,7 +747,7 @@ mod tests {
     #[test]
     fn deleting_a_root_node_leaves_its_children_as_roots() {
         // Given — n1 is a root and n2 sits on it
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(
             dir,
@@ -766,7 +765,7 @@ mod tests {
     #[test]
     fn a_child_that_already_lists_the_inherited_parent_does_not_gain_a_duplicate() {
         // Given — a diamond: n3 depends on both n1 and n2, and n2 itself depends on n1
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(
             dir,
@@ -787,7 +786,7 @@ mod tests {
     #[test]
     fn no_reference_to_the_deleted_node_survives_in_any_nodes_parents() {
         // Given — two separate children both depend on n2
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(
             dir,
@@ -817,7 +816,7 @@ mod tests {
     #[test]
     fn deleting_a_node_whose_pr_is_open_is_rejected_and_the_stack_on_disk_is_unchanged() {
         // Given — n1's PR is open on GitHub
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(
             dir,
@@ -838,7 +837,7 @@ mod tests {
     #[case::errored("error")]
     fn deleting_a_node_whose_pr_is_no_longer_open_is_allowed(#[case] phase: &str) {
         // Given — a node whose PR has already left the open state
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(dir, vec![a_started_node("n1", "feature/n1", phase, vec![])]);
 
@@ -852,7 +851,7 @@ mod tests {
     #[test]
     fn deleting_a_started_node_reports_its_orphaned_branch_and_session_id() {
         // Given — n1 owns a branch and a child session, and its PR is already merged
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(
             dir,
@@ -873,7 +872,7 @@ mod tests {
     #[test]
     fn deleting_an_unknown_node_id_is_rejected() {
         // Given
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(dir, vec![a_node("n1", "one", vec![])]);
 

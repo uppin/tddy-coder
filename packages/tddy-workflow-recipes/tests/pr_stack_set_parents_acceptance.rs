@@ -49,7 +49,7 @@ fn assert_github_untouched(gh: &common::FakeStackGithub) {
 #[test]
 fn setting_parents_on_a_plan_only_node_rewrites_the_dag_without_calling_github() {
     // Given — n3 was never started, so it owns no branch and has no PR of its own
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -74,7 +74,7 @@ fn setting_parents_on_a_plan_only_node_rewrites_the_dag_without_calling_github()
 #[test]
 fn setting_parents_on_a_branch_owning_node_patches_its_open_prs_base_to_the_new_effective_base() {
     // Given — n3 owns a branch and an open PR, and currently stacks on n1
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -102,7 +102,7 @@ fn setting_parents_on_a_branch_owning_node_patches_its_open_prs_base_to_the_new_
 #[test]
 fn emptying_a_nodes_parents_makes_it_base_off_the_stack_bottom() {
     // Given — n3 stacks on n1 and owns an open PR
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -128,7 +128,7 @@ fn emptying_a_nodes_parents_makes_it_base_off_the_stack_bottom() {
 #[test]
 fn naming_an_unknown_parent_is_rejected_and_the_dag_on_disk_is_unchanged() {
     // Given — a two-node stack with no node called n9
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -151,7 +151,7 @@ fn naming_an_unknown_parent_is_rejected_and_the_dag_on_disk_is_unchanged() {
 #[test]
 fn naming_the_node_itself_as_its_own_parent_is_rejected() {
     // Given
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -174,7 +174,7 @@ fn naming_the_node_itself_as_its_own_parent_is_rejected() {
 #[test]
 fn a_parent_change_that_would_close_a_cycle_is_rejected_and_the_dag_on_disk_is_unchanged() {
     // Given — a straight chain n1 → n2 → n3
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -198,7 +198,7 @@ fn a_parent_change_that_would_close_a_cycle_is_rejected_and_the_dag_on_disk_is_u
 #[test]
 fn a_repeated_parent_id_is_rejected() {
     // Given
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
