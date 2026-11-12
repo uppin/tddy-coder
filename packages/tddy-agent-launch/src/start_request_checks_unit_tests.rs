@@ -330,3 +330,87 @@ fn a_split_placement_without_tmux_is_not_refused_here() {
     // Then
     assert!(refuse_a_conflicting_tmux_run_start(&req, Some(&the_builtin_coding_agents())).is_ok());
 }
+
+mod effort {
+    use pretty_assertions::assert_eq;
+    use tddy_rpc::Code;
+    use tddy_service::proto::session::StartSessionRequest;
+
+    use super::the_builtin_coding_agents;
+    use crate::start_request_checks::refuse_an_effort_the_agent_cannot_take;
+
+    fn a_start_of(session_type: &str, effort: &str) -> StartSessionRequest {
+        StartSessionRequest {
+            session_type: session_type.to_string(),
+            effort: effort.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn the_answer_to(start: &StartSessionRequest) -> Result<(), (Code, String)> {
+        refuse_an_effort_the_agent_cannot_take(start, Some(&the_builtin_coding_agents()))
+            .map_err(|status| (status.code, status.message))
+    }
+
+    #[test]
+    fn an_empty_effort_is_admitted_for_an_agent_with_levels_and_one_without() {
+        // When
+        let answers = (
+            the_answer_to(&a_start_of("claude-cli", "")),
+            the_answer_to(&a_start_of("opencode-cli", "")),
+        );
+
+        // Then — guard: the agent's own default needs no levels
+        assert_eq!(answers, (Ok(()), Ok(())));
+    }
+
+    #[test]
+    fn a_blank_effort_reads_as_the_agents_default() {
+        // When
+        let answer = the_answer_to(&a_start_of("opencode-cli", "  "));
+
+        // Then — guard
+        assert_eq!(answer, Ok(()));
+    }
+
+    #[test]
+    fn a_level_the_agent_declares_is_admitted() {
+        // When
+        let answer = the_answer_to(&a_start_of("claude-cli", "high"));
+
+        // Then — guard: admitted today because nothing is checked
+        assert_eq!(answer, Ok(()));
+    }
+
+    #[test]
+    fn a_level_differing_only_in_case_is_refused() {
+        // When
+        let answer = the_answer_to(&a_start_of("claude-cli", "High"));
+
+        // Then — the levels are the agent's own words, matched exactly
+        assert_eq!(
+            answer,
+            Err((
+                Code::InvalidArgument,
+                "effort \"High\" is not one of claude's effort levels (low, medium, high, xhigh, max)"
+                    .to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn an_effort_for_a_session_type_no_agent_declares_is_refused_naming_it() {
+        // When
+        let answer = the_answer_to(&a_start_of("workspace", "high"));
+
+        // Then — a workspace session runs no agent to carry it
+        assert_eq!(
+            answer,
+            Err((
+                Code::InvalidArgument,
+                "effort is not supported for workspace sessions: they run no coding agent"
+                    .to_string()
+            ))
+        );
+    }
+}

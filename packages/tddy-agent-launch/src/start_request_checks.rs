@@ -141,6 +141,20 @@ pub(crate) fn refuse_a_cli_start_without_a_model(
     Ok(())
 }
 
+/// A start naming an effort its agent cannot take is refused before anything is created
+/// (`#orchestrators` 3/11), `INVALID_ARGUMENT`: a level the agent's spec does not declare, naming
+/// the agent and its levels, and any level for an agent whose spec declares none, naming the agent.
+/// An empty effort (the agent's own default) is admitted for every agent.
+pub fn refuse_an_effort_the_agent_cannot_take(
+    _req: &StartSessionRequest,
+    _agents: Option<&crate::spec_launch::HostCodingAgents>,
+) -> Result<(), Status> {
+    // TODO(start-effort): implement — read the session type's spec's `effort` slot:
+    // `effort "turbo" is not one of claude's effort levels (low, medium, high, xhigh, max)` and
+    // `effort is not supported for opencode-cli sessions: opencode declares no effort levels`.
+    Ok(())
+}
+
 /// Refuse an orchestrator on a session whose type is declared with the `tddy_coder` launch: its
 /// changeset is written by its own `tddy-coder` process, not by this daemon, so the link could not be
 /// recorded.

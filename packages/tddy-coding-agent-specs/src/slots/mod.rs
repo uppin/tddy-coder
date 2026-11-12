@@ -284,6 +284,7 @@ mod tests {
                 permission_modes: Vec::new(),
                 usage: None,
                 pass_env: Vec::new(),
+                effort: None,
             },
         }
     }

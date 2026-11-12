@@ -1025,4 +1025,41 @@ previous_session_id: {prev}
             "SessionMetadata must accept optional previous_session_id and deserialize from .session.yaml (PRD session chaining)"
         );
     }
+
+    /// A `.session.yaml` of a session started at `effort` — the minimal record plus that key.
+    fn a_record_started_at(effort: &str) -> String {
+        format!(
+            "session_id: s1\nproject_id: p1\ncreated_at: \"2026-11-12T00:00:00Z\"\nupdated_at: \"2026-11-12T00:00:00Z\"\nstatus: active\nsession_type: claude-cli\neffort: {effort}\n"
+        )
+    }
+
+    #[test]
+    fn a_session_started_at_an_effort_keeps_it_through_a_read_and_a_write() {
+        // Given a record of a session started at high effort (`#orchestrators` 3/11)
+        let yaml = a_record_started_at("high");
+
+        // When it is read and written back
+        let written = serde_yaml::from_str::<SessionMetadata>(&yaml)
+            .map_err(|e| e.to_string())
+            .and_then(|metadata| serde_yaml::to_string(&metadata).map_err(|e| e.to_string()));
+
+        // Then the effort survives, so a resume can re-apply it
+        assert_eq!(
+            written.map(|yaml| yaml.lines().any(|line| line == "effort: high")),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn a_session_started_without_an_effort_writes_no_effort_key() {
+        // Given a record written before efforts existed
+        let yaml = "session_id: s1\nproject_id: p1\ncreated_at: \"2026-11-12T00:00:00Z\"\nupdated_at: \"2026-11-12T00:00:00Z\"\nstatus: active\n";
+
+        // When it is read and written back
+        let metadata: SessionMetadata = serde_yaml::from_str(yaml).expect("legacy metadata parses");
+        let written = serde_yaml::to_string(&metadata).expect("it serializes");
+
+        // Then — guard: no key, so an older daemon still reads it
+        assert!(!written.contains("effort"), "{written}");
+    }
 }

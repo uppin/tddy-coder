@@ -375,3 +375,25 @@ tool. DeleteSession RPC (:48, `session_deletion.rs`): no exec tool. RemoveWorktr
 RestoreSessionWorktree RPCs (worktree.proto:13,24,25): no exec tool. Send a turn to a running session:
 only `SendSessionKeys` (+claim); `PromptAgentConversation` is roster-only. Stop: `TerminateSession` exists.
 Pause/status marker: NOT FOUND.
+
+## Exploration 2 — red step (2026-11-12, head `917bb94bb`)
+
+- **Claude's carry**: Claude Code 2.1.311 `--help` → `--effort <level>  Effort level for the current
+  session (low, medium, high, xhigh, max)`. A flag, five levels, no documented default.
+- **How the web learns levels**: every per-agent picker reads `ListAgents`' `AgentInfo` rows, built from
+  the spec in `tddy-daemon-rpc/src/catalog/agent_rows.rs`; `DescribeSessionStartOptions` is assembled
+  in `tddy-daemon-rpc/src/exec_tool/project_home_start_options.rs` (the tool engine only forwards it).
+  So the levels travel as `AgentInfo.effort_levels`/`default_effort` (fields 12/13) and
+  `StartOptions.effort_levels`.
+- **Where a start/resume reaches a recorded argv**: only `tddy-session-lifecycle`'s
+  `claude_cli_from_spec_acceptance.rs` world (`DaemonSessionHost` + stub `claude`); tddy-agent-launch
+  has no world that drives `StartSession`/`ResumeSession`.
+- **`SessionMetadata` is `deny_unknown_fields` with ~80 full struct literals**; a record carrying
+  `effort:` today reads as "session not found" on resume. The field is left to green.
+- **Parity tripwire**: `tddy-tool-engine/tests/start_session_args_parity.rs` fails on any new
+  `StartSessionRequest` field until `StartSession`'s schema offers it.
+- **Red-step baseline (scoped)**: pre-existing / inherited failures only — n1's
+  `harness_profile_request::role_admission_tests` (2), `session_metadata::both_orchestrator_roles_are_orchestrator_roles`,
+  `orchestrator_role_exec_tools_acceptance` (7), `start_session_schema::every_argument_reaches_the_request_under_its_own_name`
+  (session_role); n2's `project_stack_store` unit (15) and acceptance (4); macOS `/private/tmp` noise in
+  `claude_cli_from_spec_acceptance::an_unsandboxed_claude_cli_start_runs_the_spec_binary_with_the_argv_its_template_renders`.

@@ -27,6 +27,7 @@ pub use crate::spec::acp::AcpCommandError;
 pub use crate::spec::acp::AcpSection;
 pub use crate::spec::argv::CuratedModel;
 pub use crate::spec::argv::ModelsSection;
+pub use crate::spec::effort_slot::{EffortCarry, EffortSlot};
 pub use crate::spec::headless_section::HeadlessPermissionPolicy;
 pub use crate::spec::headless_section::HeadlessSection;
 pub use crate::spec::route_slot::routed_agent;

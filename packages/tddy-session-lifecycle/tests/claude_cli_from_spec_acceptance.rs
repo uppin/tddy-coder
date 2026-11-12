@@ -148,6 +148,14 @@ struct RecordedLaunch {
 }
 
 impl RecordedLaunch {
+    /// The argv entry right after `flag`, when the launch passed it.
+    fn value_of(&self, flag: &str) -> Option<&str> {
+        self.argv
+            .windows(2)
+            .find(|pair| pair[0] == flag)
+            .map(|pair| pair[1].as_str())
+    }
+
     fn pinned_env(&self) -> BTreeMap<String, String> {
         PINNED_ENV
             .iter()
@@ -391,6 +399,19 @@ fn an_exited_host_session(sessions_base: &Path, worktree: &Path) {
     write_session_metadata(&session_dir, &meta).unwrap();
 }
 
+/// [`an_exited_host_session`] whose `.session.yaml` also records the effort it was started at, as
+/// a start at `effort` writes it (`effort: <level>`).
+fn an_exited_host_session_started_at(sessions_base: &Path, worktree: &Path, effort: &str) {
+    an_exited_host_session(sessions_base, worktree);
+    let record = sessions_base
+        .join("sessions")
+        .join(RESUMED_SESSION_ID)
+        .join(".session.yaml");
+    let mut yaml = std::fs::read_to_string(&record).unwrap();
+    yaml.push_str(&format!("effort: {effort}\n"));
+    std::fs::write(&record, yaml).unwrap();
+}
+
 /// Per-run values in a recorded launch, replaced by `<NAME>` tokens so it compares to a golden.
 struct Normalizer {
     pairs: Vec<(String, &'static str)>,
@@ -427,8 +448,18 @@ fn golden(name: &str) -> String {
 /// Start a host `claude-cli` session and wait until its agent has recorded its launch; the
 /// session id.
 async fn a_started_session(host: &DaemonSessionHost, manager: &CliSessionManager) -> String {
+    a_session_started_with(host, manager, a_claude_cli_start_request()).await
+}
+
+/// Start the host session `request` asks for and wait until its agent has recorded its launch;
+/// the session id.
+async fn a_session_started_with(
+    host: &DaemonSessionHost,
+    manager: &CliSessionManager,
+    request: StartSessionRequest,
+) -> String {
     let session_id = host
-        .start_session(Request::direct(a_claude_cli_start_request()))
+        .start_session(Request::direct(request))
         .await
         .expect("StartSession must succeed")
         .into_inner()
@@ -678,4 +709,67 @@ async fn the_daemon_yaml_claude_binary_path_still_overrides_the_spec_binary() {
             TEST_MODEL.to_string(),
         ]
     );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_claude_cli_start_at_high_effort_launches_with_that_level() {
+    // Given (`#orchestrators` 3/11)
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let _repo = a_registered_project(sessions_tmp.path());
+    let stubs = a_stub_bin();
+    let home = a_tddy_home();
+    let (_cfg, config) = a_daemon_config();
+    let manager = Arc::new(CliSessionManager::new());
+    let host = a_session_host(
+        config,
+        sessions_tmp.path().to_path_buf(),
+        Arc::clone(&manager),
+        Some(home.coding_agents(&stubs)),
+    );
+
+    // When
+    a_session_started_with(
+        &host,
+        &manager,
+        StartSessionRequest {
+            effort: "high".to_string(),
+            ..a_claude_cli_start_request()
+        },
+    )
+    .await;
+
+    // Then — carried by claude.yaml's `--effort` flag
+    assert_eq!(stubs.last_launch().value_of("--effort"), Some("high"));
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_resumed_session_launches_at_its_recorded_effort() {
+    // Given an exited session started at high effort (`#orchestrators` 3/11)
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let worktree = tempfile::tempdir().unwrap();
+    an_exited_host_session_started_at(sessions_tmp.path(), worktree.path(), "high");
+    let stubs = a_stub_bin();
+    let home = a_tddy_home();
+    let (_cfg, config) = a_daemon_config();
+    let manager = Arc::new(CliSessionManager::new());
+    let host = a_session_host(
+        config,
+        sessions_tmp.path().to_path_buf(),
+        Arc::clone(&manager),
+        Some(home.coding_agents(&stubs)),
+    );
+
+    // When
+    host.resume_session(Request::direct(ResumeSessionRequest {
+        session_token: VALID_TOKEN.to_string(),
+        session_id: RESUMED_SESSION_ID.to_string(),
+    }))
+    .await
+    .expect("ResumeSession must succeed for an exited claude-cli session");
+    agent_launched(&manager, RESUMED_SESSION_ID).await;
+
+    // Then
+    assert_eq!(stubs.last_launch().value_of("--effort"), Some("high"));
 }

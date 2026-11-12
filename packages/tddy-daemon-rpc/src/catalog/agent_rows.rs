@@ -87,6 +87,9 @@ fn agent_info(registry: &CodingAgentRegistry, id: String, label: String) -> Cata
                 .iter()
                 .map(|placement| placement.to_string())
                 .collect(),
+            // TODO(start-effort): implement — the spec's `effort.levels` and `effort.default`.
+            effort_levels: Vec::new(),
+            default_effort: String::new(),
             id,
             label,
         },

@@ -71,6 +71,13 @@ export interface CreateSessionFormValues {
   stackParentDaemonInstanceId: string;
   prStackBaseSessionId: string;
   model: string;
+  /**
+   * The effort level the session starts at, one of the agent's served `effort_levels`; empty or
+   * absent for the agent's own default (`#orchestrators` 3/11).
+   *
+   * TODO(start-effort): implement — send it as `effort` for a CLI agent, empty for a tool session.
+   */
+  effort?: string;
   /** The provider account the harness runs on; empty or absent for its vendor. */
   providerAccountId?: string;
   /** The operator explicitly chose the vendor, overriding any default account. */

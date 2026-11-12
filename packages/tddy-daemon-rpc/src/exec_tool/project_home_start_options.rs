@@ -98,6 +98,8 @@ pub(super) async fn describe_start_options(
         agents,
         models,
         models_unavailable,
+        // TODO(start-effort): implement — every declared session type's spec's `effort` slot.
+        effort_levels: Vec::new(),
         provider_routes,
         provider_routes_unavailable,
         ssh_config_hosts,

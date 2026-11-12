@@ -57,6 +57,9 @@ export const TEST_IDS = {
    */
   createSessionPrStackBaseSessionSelect: "create-session-pr-stack-base-session-select",
   createSessionModelSelect: "create-session-model-select",
+  /** Effort <select> beside Model: the agent's served `effort_levels`, an empty "agent default"
+   * choice first. Absent for an agent whose spec declares no levels. */
+  createSessionEffortSelect: "create-session-effort-select",
   /** The provider field; absent when the harness cannot be routed or no account can drive it. */
   createSessionProviderField: "create-session-provider-field",
   /** Where the session's harness runs: "builtin" (its default vendor) or a provider account id. */
