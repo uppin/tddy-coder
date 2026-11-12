@@ -690,6 +690,7 @@ fn git(cwd: &Path, args: &[&str]) -> String {
 
 fn a_managed_session(session_id: &str, repo_path: &Path) -> SessionMetadata {
     SessionMetadata {
+        effort: None,
         session_id: session_id.to_string(),
         project_id: PROJECT_ID.to_string(),
         created_at: "2026-08-16T10:00:00Z".to_string(),

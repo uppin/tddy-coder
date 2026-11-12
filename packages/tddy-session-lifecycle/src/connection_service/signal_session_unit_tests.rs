@@ -52,6 +52,7 @@ fn write_unit_session(session_dir: &std::path::Path, pid: u32) {
         .unwrap()
         .to_string();
     let metadata = SessionMetadata {
+        effort: None,
         session_id,
         project_id: "proj-unit".to_string(),
         created_at: "2026-03-21T00:00:00Z".to_string(),

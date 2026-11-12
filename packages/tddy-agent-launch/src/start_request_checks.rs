@@ -146,13 +146,34 @@ pub(crate) fn refuse_a_cli_start_without_a_model(
 /// the agent and its levels, and any level for an agent whose spec declares none, naming the agent.
 /// An empty effort (the agent's own default) is admitted for every agent.
 pub fn refuse_an_effort_the_agent_cannot_take(
-    _req: &StartSessionRequest,
-    _agents: Option<&crate::spec_launch::HostCodingAgents>,
+    req: &StartSessionRequest,
+    agents: Option<&crate::spec_launch::HostCodingAgents>,
 ) -> Result<(), Status> {
-    // TODO(start-effort): implement — read the session type's spec's `effort` slot:
-    // `effort "turbo" is not one of claude's effort levels (low, medium, high, xhigh, max)` and
-    // `effort is not supported for opencode-cli sessions: opencode declares no effort levels`.
-    Ok(())
+    let effort = req.effort.trim();
+    if effort.is_empty() {
+        return Ok(());
+    }
+    let session_type = req.session_type.trim();
+    let Some(spec) = agents.and_then(|agents| agents.agents().for_session_type(session_type))
+    else {
+        return Err(Status::invalid_argument(format!(
+            "effort is not supported for {session_type} sessions: they run no coding agent"
+        )));
+    };
+    let Some(slot) = spec.effort() else {
+        return Err(Status::invalid_argument(format!(
+            "effort is not supported for {session_type} sessions: {} declares no effort levels",
+            spec.id
+        )));
+    };
+    if slot.levels.iter().any(|level| level == effort) {
+        return Ok(());
+    }
+    Err(Status::invalid_argument(format!(
+        "effort {effort:?} is not one of {}'s effort levels ({})",
+        spec.id,
+        slot.levels.join(", ")
+    )))
 }
 
 /// Refuse an orchestrator on a session whose type is declared with the `tddy_coder` launch: its
@@ -236,6 +257,7 @@ impl LaunchSessions {
             refuse_a_tool_path_the_daemon_does_not_allow(req, &self.config)?;
         }
         refuse_a_cli_start_without_a_model(req, Some(&*self.coding_agents))?;
+        refuse_an_effort_the_agent_cannot_take(req, Some(&*self.coding_agents))?;
         refuse_an_orchestrated_tool_start(req, &self.coding_agents)?;
         self.owned_branch_conflict(os_user, req).await
     }

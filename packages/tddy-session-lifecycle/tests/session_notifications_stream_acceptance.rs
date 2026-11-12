@@ -79,6 +79,7 @@ fn write_claude_cli_session(sessions_base: &Path, session_id: &str, repo_path: &
     let session_dir = sessions_base.join("sessions").join(session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
     let meta = SessionMetadata {
+        effort: None,
         session_id: session_id.to_string(),
         project_id: "test-project".to_string(),
         created_at: "2026-08-29T10:00:00Z".to_string(),

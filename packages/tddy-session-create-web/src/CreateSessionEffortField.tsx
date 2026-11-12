@@ -1,3 +1,5 @@
+import { inputClass, labelClass } from "./createSessionFormStyles";
+
 export interface CreateSessionEffortFieldProps {
   /**
    * The effort levels the selected agent's spec declares (`AgentInfo.effort_levels`, served by the
@@ -17,7 +19,33 @@ export interface CreateSessionEffortFieldProps {
  *
  * PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-start-effort.md.
  */
-export function CreateSessionEffortField(_props: CreateSessionEffortFieldProps) {
-  // TODO(start-effort): implement — the `<select>` over `levels`, hidden when there are none.
-  return null;
+export function CreateSessionEffortField({
+  levels,
+  effort,
+  setEffort,
+}: CreateSessionEffortFieldProps) {
+  if (levels.length === 0) {
+    return null;
+  }
+  return (
+    <div>
+      <label className={labelClass} htmlFor="create-session-effort">
+        Effort
+      </label>
+      <select
+        id="create-session-effort"
+        data-testid="create-session-effort-select"
+        className={inputClass}
+        value={effort}
+        onChange={(e) => setEffort(e.target.value)}
+      >
+        <option value="">Default</option>
+        {levels.map((level) => (
+          <option key={level} value={level}>
+            {level}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 }

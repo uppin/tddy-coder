@@ -10,6 +10,7 @@ import {
   agentForSessionType,
   allowsPlacement,
   bindsParam,
+  cliAgentFeaturesOf,
   hasCapability,
 } from "./codingAgentMetadata";
 import { projectSelectOptions } from "./lib/projectSelectOptions";
@@ -37,6 +38,7 @@ import { useProjectBranches } from "./useProjectBranches";
 import { useCreateSessionCatalogs } from "./useCreateSessionCatalogs";
 import { useCreateSessionPlacement } from "./useCreateSessionPlacement";
 import { useCreateSessionModel } from "./useCreateSessionModel";
+import { useCreateSessionEffort } from "./useCreateSessionEffort";
 import { useCreateSessionSubmit } from "./useCreateSessionSubmit";
 import { useCreateSessionStack } from "./useCreateSessionStack";
 import type { CreateSessionPaneProps } from "./createSessionPaneProps";
@@ -250,6 +252,8 @@ export function CreateSessionPane({
     initialModel: initialValues?.model,
   });
 
+  const { effort, effortField } = useCreateSessionEffort(sessionAgent);
+
   // Every common-room daemon's specialized agents, each labelled with the host that offers it. A
   // host that cannot answer costs one error row rather than the whole picker — see
   // docs/ft/daemon/session-agent-roster.md § Web UI.
@@ -318,15 +322,7 @@ export function CreateSessionPane({
     daemonInstanceId,
     sessionType,
     sessionLaunch,
-    cliFeatures: {
-      bindsModel: bindsParam(sessionAgent, "model"),
-      bindsPermissionMode: bindsParam(sessionAgent, "permission_mode"),
-      bindsSkipPermissions: bindsParam(sessionAgent, "dangerously_skip_permissions"),
-      bindsPrompt: bindsParam(sessionAgent, "prompt"),
-      managedWorkflow: hasCapability(sessionAgent, "managed_workflow"),
-      splitHost: hasCapability(sessionAgent, "split_host"),
-      providerRoutable: providerHarness !== null,
-    },
+    cliFeatures: cliAgentFeaturesOf(sessionAgent, providerHarness !== null),
     toolPath,
     selectedAgentId,
     recipe,
@@ -335,6 +331,7 @@ export function CreateSessionPane({
     stackParentDaemonInstanceId,
     prStackBaseSessionId,
     model,
+    effort,
     providerAccountId,
     providerBuiltIn: providerChoice === BUILT_IN_PROVIDER,
     permissionMode,
@@ -471,6 +468,7 @@ export function CreateSessionPane({
           showsSandbox={allowsPlacement(sessionAgent, "jail")}
           showsSandboxedCodebase={hasCapability(sessionAgent, "split_host")}
           modelField={bindsParam(sessionAgent, "model") ? modelField : null}
+          effortField={effortField}
           agentPickerSection={agentPickerSection}
           permissionMode={permissionMode}
           setPermissionMode={setPermissionMode}

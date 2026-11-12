@@ -127,6 +127,11 @@ pub struct SessionMetadata {
     /// the project's read-only home session. See `#project-home` 4/7.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_role: Option<String>,
+    /// The reasoning effort level the session was started at (`StartSessionRequest.effort`), for a
+    /// resume to launch the agent at again. Absent for a session started without one, and for
+    /// legacy files; never written empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     /// The tmux session the agent runs in, when the session was started with `run_in_tmux`
     /// (docs/ft/daemon/claude-cli-session.md § tmux mode). Absent for every session whose
     /// agent is the PTY child itself, and for legacy files. For a tmux-run session `pid` is the
@@ -265,6 +270,7 @@ pub fn write_initial_tool_session_metadata(
         .to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let metadata = SessionMetadata {
+        effort: None,
         session_id,
         project_id: opts.project_id,
         created_at: now.clone(),

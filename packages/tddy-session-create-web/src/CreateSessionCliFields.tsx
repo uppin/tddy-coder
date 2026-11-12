@@ -18,6 +18,8 @@ export interface CreateSessionCliFieldsProps {
   /** The agent's spec declares `split_host`: the Sandboxed codebase placement. */
   showsSandboxedCodebase: boolean;
   modelField: ReactNode;
+  /** The effort picker, which renders nothing for an agent that declares no levels. */
+  effortField: ReactNode;
   agentPickerSection: ReactNode;
   permissionMode: string;
   setPermissionMode: (permissionMode: string) => void;
@@ -68,6 +70,7 @@ export function CreateSessionCliFields({
   showsSandbox,
   showsSandboxedCodebase,
   modelField,
+  effortField,
   agentPickerSection,
   permissionMode,
   setPermissionMode,
@@ -147,6 +150,8 @@ export function CreateSessionCliFields({
   return (
     <>
       {modelField}
+
+      {effortField}
 
       {showsPermission ? (
         <CreateSessionPermissionFields

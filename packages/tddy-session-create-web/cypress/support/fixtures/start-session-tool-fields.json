@@ -15,6 +15,7 @@
     "create_remote_branch",
     "daemon_instance_id",
     "dangerously_skip_permissions",
+    "effort",
     "initial_prompt",
     "managed_codebase",
     "model",

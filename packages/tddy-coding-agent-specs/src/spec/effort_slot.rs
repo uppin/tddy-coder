@@ -87,9 +87,28 @@ impl From<EffortSlot> for EffortSlotShape {
 /// Why `slot` cannot be loaded: no levels, a level that is blank or named twice, or a `default`
 /// that is not one of its levels. `Ok` for a slot a launch can carry. (Naming both a `flag` and an
 /// `env`, or neither, is refused as the slot is read.)
-pub(crate) fn validate_effort_slot(_slot: &EffortSlot) -> Result<(), String> {
-    // TODO(start-effort): implement — refuse an empty list, a blank or repeated level, and a default
-    // outside the levels ("default medium is not one of its levels (low, high)").
+pub(crate) fn validate_effort_slot(slot: &EffortSlot) -> Result<(), String> {
+    if slot.levels.is_empty() {
+        return Err("declares no levels".to_string());
+    }
+    let mut seen: Vec<&str> = Vec::new();
+    for level in &slot.levels {
+        if level.trim().is_empty() {
+            return Err("a level is blank".to_string());
+        }
+        if seen.contains(&level.as_str()) {
+            return Err(format!("level {level} is named twice"));
+        }
+        seen.push(level);
+    }
+    if let Some(default) = &slot.default {
+        if !slot.levels.contains(default) {
+            return Err(format!(
+                "default {default} is not one of its levels ({})",
+                slot.levels.join(", ")
+            ));
+        }
+    }
     Ok(())
 }
 

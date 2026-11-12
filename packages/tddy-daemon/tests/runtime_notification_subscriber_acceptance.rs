@@ -90,6 +90,7 @@ async fn a_free_tcp_port() -> u16 {
 fn a_claude_cli_session_in(session_dir: &Path) {
     std::fs::create_dir_all(session_dir).expect("the session directory");
     let meta = SessionMetadata {
+        effort: None,
         session_id: THE_SESSION.to_string(),
         project_id: "test-project".to_string(),
         created_at: "2026-10-25T10:00:00Z".to_string(),

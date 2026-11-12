@@ -109,6 +109,7 @@ mod tests {
         write_session_metadata(
             &session_dir,
             &SessionMetadata {
+                effort: None,
                 session_id: session_id.to_string(),
                 project_id: project_id.to_string(),
                 created_at: "2026-01-01T00:00:00Z".to_string(),

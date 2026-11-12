@@ -513,6 +513,7 @@ mod tests {
 
     fn write_session_metadata(session_dir: &std::path::Path, repo_path: Option<&str>) {
         let meta = SessionMetadata {
+            effort: None,
             session_id: SESSION_ID.to_string(),
             project_id: PROJECT_ID.to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),

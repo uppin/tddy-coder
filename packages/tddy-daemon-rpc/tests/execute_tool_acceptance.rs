@@ -252,6 +252,7 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
     std::fs::create_dir_all(&session_dir).unwrap();
     // This session has a specific session_type — use struct literal for clarity on the intent
     let metadata = SessionMetadata {
+        effort: None,
         session_id: session_id.to_string(),
         project_id: "proj-2".to_string(),
         created_at: "2026-06-13T10:00:00Z".to_string(),

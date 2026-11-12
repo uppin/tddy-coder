@@ -275,7 +275,7 @@ impl StartSessionArgs {
                 .map(HostDocumentAttachment::into_session_attachment)
                 .collect(),
             session_role: self.session_role,
-            // TODO(start-effort): implement — carry `self.effort` into the request.
+            effort: self.effort,
             ..Default::default()
         }
     }

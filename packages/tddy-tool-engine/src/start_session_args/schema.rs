@@ -186,6 +186,10 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
         boolean("Run the agent in a tmux session of its own on the host, as the session's OS user, so it outlives the terminal attached to it. Exclusive with `sandbox`, `sandboxed_codebase` and `codebase_daemon_instance_id`."),
     );
     offer(
+        "effort",
+        string("The reasoning effort level the session's agent starts at. Levels are per agent: `DescribeSessionStartOptions` lists each agent's under `effort_levels`. Empty is the agent's own default; a level the agent does not declare, or any level for an agent that declares none, refuses the start."),
+    );
+    offer(
         "specialized_agents",
         json!({
             "type": "array",

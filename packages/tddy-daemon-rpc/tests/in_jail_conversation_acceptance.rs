@@ -577,6 +577,7 @@ fn write_agent_def(tddy_data_dir: &Path, name: &str, base_url: &str) {
 
 fn a_sandboxed_session(session_id: &str) -> SessionMetadata {
     SessionMetadata {
+        effort: None,
         session_id: session_id.to_string(),
         project_id: "project-under-jailed-conversation".to_string(),
         created_at: "2026-09-09T10:00:00Z".to_string(),
