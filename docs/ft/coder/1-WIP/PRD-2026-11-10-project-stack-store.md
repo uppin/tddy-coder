@@ -33,7 +33,7 @@ stack to the project is the step that lets later nodes serve it by id.
 
 ### What's Changing
 
-- **`ProjectStackStore`** (`tddy-pr-stack`): `create(project_id) -> stack_id`, `read(project_id, stack_id)`,
+- **`ProjectStackStore`** (`tddy-changeset` — recipe-agnostic, so the store does not depend on the pr-stack workflow): `create(project_id) -> stack_id`, `read(project_id, stack_id)`,
   `update(project_id, stack_id, f)` — read-modify-write under a per-stack lock with an atomic rename,
   `list(project_id)`. A stack record carries `stack_id`, `project_id`, `created_by_session_id`,
   `created_at` and today's `Stack { version, nodes }`.

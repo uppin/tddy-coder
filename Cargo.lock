@@ -13498,6 +13498,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "log",
+ "pretty_assertions",
  "rstest 0.24.0",
  "serde",
  "tddy-core",
@@ -13950,6 +13951,7 @@ dependencies = [
  "tddy-daemon-kernel",
  "tddy-daemon-sandbox",
  "tddy-discovery",
+ "tddy-pr-stack",
  "tddy-projects",
  "tddy-rpc",
  "tddy-service",

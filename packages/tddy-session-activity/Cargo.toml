@@ -75,6 +75,9 @@ tokio = { version = "1", features = ["macros", "rt", "time"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-workflow = { path = "../tddy-workflow" }
+# `stack_plan_json_from_store` runs the startup stack migration sweep over a legacy session. A
+# dev-dependency only: tddy-pr-stack depends on nothing that depends on this crate.
+tddy-pr-stack = { path = "../tddy-pr-stack" }
 tempfile = "3"
 # `session_usage_stream_acceptance` reads the stream the handler returns.
 futures-util = "0.3"

@@ -378,3 +378,18 @@ tool. DeleteSession RPC (:48, `session_deletion.rs`): no exec tool. RemoveWorktr
 RestoreSessionWorktree RPCs (worktree.proto:13,24,25): no exec tool. Send a turn to a running session:
 only `SendSessionKeys` (+claim); `PromptAgentConversation` is roster-only. Stop: `TerminateSession` exists.
 Pause/status marker: NOT FOUND.
+
+## Exploration 2 — contract re-verification (2026-11-12, pass 2 on d020d488c)
+
+- State A lines re-checked after #876 merged: all held except `svc_pr_status_for_caller.rs` 120 → 124 and
+  `session_chain.rs` 188 → 190. `mount_host.rs:252` is the `sweep_headless_files` call.
+- `Changeset` is built by struct literal only in its own `Default` impl; every other literal in the
+  workspace uses `..Default::default()`, so the additive `stack_id` field breaks no caller.
+- `tddy_core` glob-re-exports `tddy_changeset::*`, so `tddy_core::project_stack_store` resolves for
+  `tddy-pr-stack` (which depends on `tddy-core`, not `tddy-changeset`).
+- The planning write is `PrStackHooks::after_task("write-stack-plan")` → `reseed_stack_from_plan_if_unspawned`
+  (`pr_stack/mod.rs:423`) → `update_stack_atomic`; the resume rule is
+  `next_goal_for_state_with_changeset` (`pr_stack/mod.rs:265`), reached from
+  `start_goal_for_session_continue` (tddy-workflow-engine `session_continue.rs:38`) with only a `&Changeset`.
+- "No project" in `.session.yaml` is an empty `project_id` (the field is a required `String`).
+- The PRD places `ProjectStackStore` in `tddy-pr-stack`; the changeset's decision (tddy-changeset) was followed.

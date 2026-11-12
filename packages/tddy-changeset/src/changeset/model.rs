@@ -88,6 +88,10 @@ pub struct Changeset {
     /// PR-stack DAG; present only on an orchestrator session. Omitted for normal sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stack: Option<Stack>,
+    /// The PR stack this orchestrator session planned, by its id in the project's stack store
+    /// (`<projects dir>/<project_id>/stacks/<stack_id>.yaml`). Replaces [`Self::stack`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stack_id: Option<String>,
     /// Back-reference from a CHILD session to its orchestrating session.
     /// Distinct from `previous_session_id` in `.session.yaml` (the base-branch source, which
     /// in a DAG may be a sibling node, not the orchestrator).
@@ -310,6 +314,7 @@ impl Default for Changeset {
             effective_worktree_integration_base_ref: None,
             worktree_integration_base_ref: None,
             stack: None,
+            stack_id: None,
             orchestrator_session_id: None,
             orchestrator_daemon_instance_id: None,
         }
