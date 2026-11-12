@@ -192,8 +192,7 @@ async fn answer(
     let args: Value =
         serde_json::from_str(args_json).map_err(|e| format!("invalid args_json: {e}"))?;
     let cursor = cursor_argument(&args)?;
-    // TODO(session-turn-control): implement — read `started_by_me` from the arguments.
-    let started_by_me = false;
+    let started_by_me = started_by_me_argument(&args)?;
     match tool_name {
         WAIT_PROJECT_NOTIFICATIONS => {
             port.wait_notifications(home, &cursor, timeout_argument(&args)?, started_by_me)
@@ -215,6 +214,15 @@ fn cursor_argument(args: &Value) -> Result<String, String> {
         Some(other) => Err(format!(
             "cursor must be the next_cursor a page returned, not {other}"
         )),
+    }
+}
+
+/// `started_by_me`: only the records of sessions the caller started; absent, every session's.
+fn started_by_me_argument(args: &Value) -> Result<bool, String> {
+    match args.get("started_by_me") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(flag)) => Ok(*flag),
+        Some(other) => Err(format!("started_by_me must be true or false, not {other}")),
     }
 }
 

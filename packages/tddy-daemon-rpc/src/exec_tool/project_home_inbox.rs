@@ -31,13 +31,11 @@ impl DaemonProjectHome {
     /// The records the caller may see: its own project, its own OS user, not its own session — and,
     /// with `started_by_me`, only those of the sessions it started (`#orchestrators` 4/11).
     fn scope_of(&self, home: &HomeCaller, started_by_me: bool) -> ProjectNotificationScope {
-        // TODO(session-turn-control): implement — `started_by: Some(home.session_id)` when asked.
-        let _ = started_by_me;
         ProjectNotificationScope {
             project_id: home.project_id.clone(),
             os_user: self.os_user.clone(),
             exclude_session_id: home.session_id.clone(),
-            started_by: None,
+            started_by: started_by_me.then(|| home.session_id.clone()),
         }
     }
 }
