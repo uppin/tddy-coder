@@ -40,10 +40,14 @@ pub fn test_config() -> DaemonConfig {
 }
 
 fn config_from(yaml: &str) -> DaemonConfig {
+    config_from_mapping(yaml, USERS_YAML)
+}
+
+fn config_from_mapping(yaml: &str, users_yaml: &str) -> DaemonConfig {
     let dir = tempfile::tempdir().expect("create temp dir for test config");
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).expect("write test config");
-    std::fs::write(dir.path().join("users.yaml"), USERS_YAML).expect("write test users");
+    std::fs::write(dir.path().join("users.yaml"), users_yaml).expect("write test users");
     DaemonConfig::load(&path).expect("load test config")
 }
 
@@ -194,6 +198,15 @@ pub struct SignedTestCredentials {
 /// the operator's. [`TEST_TOKEN`] is not accepted; [`SignedTestCredentials`] are.
 #[must_use]
 pub fn signing_test_host(sessions_base: PathBuf) -> (DaemonSessionHost, SignedTestCredentials) {
+    signing_test_host_as(sessions_base, "testdev")
+}
+
+/// [`signing_test_host`], whose daemon maps [`TEST_USER`] to `os_user` — an OS user that resolves
+/// in the passwd database, for a suite whose host spawns an agent process as that user.
+pub fn signing_test_host_as(
+    sessions_base: PathBuf,
+    os_user: &str,
+) -> (DaemonSessionHost, SignedTestCredentials) {
     let key_home = tempfile::tempdir().expect("create temp dir for the host's signing key");
     let key = tddy_daemon_auth::DaemonSigningKey::load_or_generate(
         &key_home.path().join(tddy_daemon_auth::SIGNING_KEY_FILE),
@@ -203,7 +216,10 @@ pub fn signing_test_host(sessions_base: PathBuf) -> (DaemonSessionHost, SignedTe
         &key,
         Arc::new(tddy_daemon_auth::StandaloneKeyDirectory),
     );
-    let config = config_from(SIGNING_CONFIG_YAML);
+    let config = config_from_mapping(
+        SIGNING_CONFIG_YAML,
+        &format!("- github_user: \"{TEST_USER}\"\n  os_user: \"{os_user}\"\n"),
+    );
     let user_resolver = crate::auth::build_auth_entries_with(
         &config,
         "127.0.0.1",

@@ -19,6 +19,7 @@ use std::path::Path;
 use crate::attached_initial_prompt::attached_initial_prompt;
 use crate::split_ports::SplitSessions;
 use tddy_daemon_kernel::daemon_hook_urls;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 /// What the split agent's claude-cli process is spawned with: its context dir, its tools' route
 /// back, and the request's model and prompt.
@@ -65,6 +66,9 @@ impl SplitSessions {
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
+        // On record before the agent exists: who may answer this session's prompts is read from it,
+        // and a link written after the spawn is a window in which the session answers to no one.
+        self.record_orchestrator_before_spawn(&session_dir, req)?;
         // Where the codebase lives is not a reason for a planned PR's child to come up without its
         // boundaries: the same rule the co-located branches apply, on the attachments this host
         // materialized into the session it is about to run the agent for.
@@ -180,6 +184,33 @@ impl SplitSessions {
             livekit_server_identity: String::new(),
             branch_conflict: None,
         }))
+    }
+
+    /// Write the changeset naming the orchestrator `req` names, when it names one. A split agent has
+    /// no worktree and so no other changeset: this is its first and only one.
+    fn record_orchestrator_before_spawn(
+        &self,
+        session_dir: &Path,
+        req: &StartSessionRequest,
+    ) -> Result<(), Status> {
+        let Some(link) = crate::service_util::OrchestratorLink::of_request(
+            &req.orchestrator_session_id,
+            &req.orchestrator_daemon_instance_id,
+            &local_instance_id_for_config(&self.config),
+        ) else {
+            return Ok(());
+        };
+        let changeset = tddy_core::Changeset {
+            orchestrator_session_id: Some(link.session_id.clone()),
+            orchestrator_daemon_instance_id: link.daemon_instance_id,
+            ..tddy_core::Changeset::default()
+        };
+        tddy_core::write_changeset(session_dir, &changeset).map_err(|e| {
+            Status::internal(format!(
+                "failed to record orchestrator {} in the session's changeset: {e}",
+                link.session_id
+            ))
+        })
     }
 
     async fn split_agent_tool_wiring(

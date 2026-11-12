@@ -17,8 +17,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use support::{
-    a_host, a_host_running_claude_as, a_project, a_repo_with_origin, a_workspace_in, git_stdout,
-    session_started_by, Host, InProcessPeers, HOST_A, HOST_B, THIS_PROJECT,
+    a_host, a_host_running_claude_as, a_project, a_repo_with_origin, a_workspace_in,
+    current_os_user, git_stdout, session_started_by, Host, InProcessPeers, HOST_A, HOST_B,
+    THIS_PROJECT,
 };
 use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_projects::project_storage::write_projects;
@@ -27,10 +28,11 @@ use tddy_service::proto::exec_tools::{
     ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
 };
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
-use tddy_session_lifecycle::test_util::{signing_test_host, SignedTestCredentials, TEST_TOKEN};
+use tddy_session_lifecycle::test_util::{signing_test_host_as, SignedTestCredentials, TEST_TOKEN};
 use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
 const ORCHESTRATOR_ROLE: &str = "orchestrator";
+const PROJECT_HOME_ROLE: &str = "project-home";
 const TEST_MODEL: &str = "claude-opus-4-8";
 
 // ── the world ───────────────────────────────────────────────────────────────────────────────
@@ -93,14 +95,6 @@ fn with_role(host: &Host, session_id: &str, role: &str) {
     let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
     meta.session_role = Some(role.to_string());
     tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
-}
-
-fn metadata_of(host: &Host, session_id: &str) -> tddy_core::SessionMetadata {
-    tddy_core::read_session_metadata(&tddy_core::session_lifecycle::unified_session_dir_path(
-        host.sessions.path(),
-        session_id,
-    ))
-    .expect("the session has metadata")
 }
 
 async fn a_project_with_main_and_an_orchestrator() -> World {
@@ -287,27 +281,38 @@ async fn an_orchestrator_is_refused_a_write_tool_as_main_is() {
 
 #[tokio::test]
 async fn main_starts_an_orchestrator_through_start_session() {
-    // Given
-    let world = a_project_with_main_and_an_orchestrator().await;
+    // Given main on a daemon that verifies tokens, whose agents run the stub `claude`
+    let world = a_main_on_a_signing_daemon().await;
 
     // When main asks StartSession for a Claude CLI session in the orchestrator role
-    let answer = world
-        .calls(
-            &world.main,
-            "StartSession",
-            serde_json::json!({
-                "session_type": "claude-cli",
-                "model": TEST_MODEL,
-                "session_role": ORCHESTRATOR_ROLE,
-            }),
-        )
-        .await
-        .expect("StartSession is served to main");
+    let answer = calls_on(
+        &world.daemon,
+        &world.credentials.user_token,
+        &world.spawner,
+        "StartSession",
+        serde_json::json!({
+            "session_type": "claude-cli",
+            "model": TEST_MODEL,
+            "session_role": ORCHESTRATOR_ROLE,
+        }),
+    )
+    .await
+    .expect("StartSession is served to main");
     assert!(!answer.is_error, "{}", answer.error_message);
-    let started = session_started_by(&world.a.daemon, &world.main, &answer.result_json).await;
+    let started = the_start_outcome(
+        &world.daemon,
+        &world.credentials.user_token,
+        &world.spawner,
+        &answer,
+    )
+    .await
+    .expect("the start succeeds");
 
     // Then the session it started holds the role, managed
-    let recorded = metadata_of(&world.a, &started);
+    let recorded = tddy_core::read_session_metadata(
+        &tddy_core::session_lifecycle::unified_session_dir_path(world.sessions.path(), &started),
+    )
+    .expect("the session has metadata");
     assert_eq!(
         (recorded.session_role.as_deref(), recorded.managed_codebase),
         (Some(ORCHESTRATOR_ROLE), true)
@@ -323,9 +328,37 @@ struct ASigningWorld {
     credentials: SignedTestCredentials,
     sessions: tempfile::TempDir,
     _repo: tempfile::TempDir,
+    _claude: AClaudeStub,
 }
 
 async fn a_conversation_spawner_on_a_signing_daemon() -> ASigningWorld {
+    let world = a_workspace_on_a_signing_daemon().await;
+    let dir = tddy_core::session_lifecycle::unified_session_dir_path(
+        world.sessions.path(),
+        &world.spawner,
+    );
+    let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
+    meta.recipe = Some("grill-me".to_string());
+    tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
+    world
+}
+
+/// [`a_workspace_on_a_signing_daemon`], whose workspace is the project's main.
+async fn a_main_on_a_signing_daemon() -> ASigningWorld {
+    let world = a_workspace_on_a_signing_daemon().await;
+    let dir = tddy_core::session_lifecycle::unified_session_dir_path(
+        world.sessions.path(),
+        &world.spawner,
+    );
+    let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
+    meta.session_role = Some(PROJECT_HOME_ROLE.to_string());
+    tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
+    world
+}
+
+/// One workspace session (`spawner`) on a daemon that verifies tokens and starts `claude` as the
+/// suite's stub.
+async fn a_workspace_on_a_signing_daemon() -> ASigningWorld {
     let sessions = tempfile::tempdir().unwrap();
     let repo = a_repo_with_origin();
     write_projects(
@@ -333,7 +366,16 @@ async fn a_conversation_spawner_on_a_signing_daemon() -> ASigningWorld {
         &[a_project(THIS_PROJECT, repo.path())],
     )
     .unwrap();
-    let (host, credentials) = signing_test_host(sessions.path().to_path_buf());
+    let claude = AClaudeStub::new();
+    claude.serving_sessions_under(sessions.path());
+    let (host, credentials) =
+        signing_test_host_as(sessions.path().to_path_buf(), &current_os_user());
+    let host = host.with_coding_agents(
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
+            "claude",
+            &claude.binary(),
+        )]),
+    );
     let daemon = TestDaemon::from_host(host);
     daemon.as_arc().install_sandbox_rpc_bridge();
     let spawner = daemon
@@ -347,16 +389,13 @@ async fn a_conversation_spawner_on_a_signing_daemon() -> ASigningWorld {
         .expect("the spawner's session starts")
         .into_inner()
         .session_id;
-    let dir = tddy_core::session_lifecycle::unified_session_dir_path(sessions.path(), &spawner);
-    let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
-    meta.recipe = Some("grill-me".to_string());
-    tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
     ASigningWorld {
         daemon,
         spawner,
         credentials,
         sessions,
         _repo: repo,
+        _claude: claude,
     }
 }
 
