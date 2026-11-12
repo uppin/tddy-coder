@@ -56,6 +56,9 @@ pub struct StartSessionArgs {
     pub specialized_agents: Vec<String>,
     pub clone_placed_agents: Vec<String>,
     pub attachments: Vec<HostDocumentAttachment>,
+    /// The standing role asked for: `orchestrator` (`#orchestrators` 1/11), or empty for an
+    /// ordinary session. The daemon admits it by who is asking and places the session itself.
+    pub session_role: String,
 }
 
 /// A document on a connected host to attach to the new session — the form's host-document
@@ -160,10 +163,6 @@ pub const INTERNAL_START_FIELDS: &[(&str, &str)] = &[
     (
         "github_source",
         "filled by a daemon forwarding a start to a peer, from its own project row",
-    ),
-    (
-        "session_role",
-        "refused on StartSession; only EnsureProjectHomeSession sets a role",
     ),
 ];
 
@@ -271,6 +270,7 @@ impl StartSessionArgs {
                 .into_iter()
                 .map(HostDocumentAttachment::into_session_attachment)
                 .collect(),
+            // TODO(orchestrator-role): implement — carry `self.session_role` into the request.
             ..Default::default()
         }
     }

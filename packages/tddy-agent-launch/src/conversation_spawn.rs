@@ -22,6 +22,8 @@ pub fn session_tool_role(
     metadata: &tddy_core::SessionMetadata,
 ) -> tddy_tool_engine::project_home_tools::SessionToolRole {
     use tddy_tool_engine::project_home_tools::SessionToolRole;
+    // TODO(orchestrator-role): implement — map every orchestrator role here, through
+    // `tddy_core::session_metadata::is_orchestrator_role`.
     if metadata.session_role.as_deref() == Some(tddy_core::session_metadata::PROJECT_HOME_ROLE) {
         SessionToolRole::ProjectHome
     } else if metadata

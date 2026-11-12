@@ -91,19 +91,33 @@ main, with only main auto-stopped (interview 2026-11-10).
 
 ## Dependencies
 
-Root node: none. Base `master` — **after #876 merges** (developer decision), so pass 2 starts there.
+Root node: none. Base `master` — #876 merged (`8797a715a`) before pass 2; this branch was rebased onto
+`4cf668a4a`. Every State A fact was re-checked against that tip (2026-11-12): two line numbers moved
+(noted inline), nothing changed shape.
 
 ## Draft PR contract
 
 The first push of this PR (pass 2, commit 2) publishes:
 
-- `tddy_changeset::session_metadata::{ORCHESTRATOR_ROLE, is_orchestrator_role}` — signatures final;
-  `is_orchestrator_role` may already be real (it is the contract children call).
-- `tddy_tool_engine::project_home_catalogue::SessionToolRole` unchanged in shape; the mapping from a
-  role to `ProjectHome` goes through `is_orchestrator_role` (`TODO(orchestrator-role)`).
-- `StartSession`'s `session_role` argument in `start_session_args.rs` (schema only).
-- `SessionDrawerItem` marker test id `sessions-drawer-item-orchestrator-<id>` and toggle test id
-  `create-session-orchestrator-toggle`, rendered nothing yet.
+- `tddy_changeset::session_metadata::{ORCHESTRATOR_ROLE, is_orchestrator_role(role: &str) -> bool}` —
+  signatures final. The body is a stub that keeps today's answer (`role == PROJECT_HOME_ROLE`,
+  `TODO(orchestrator-role)`), so its unit test is red until green; children call the signature.
+- `tddy_tool_engine::project_home_catalogue::SessionToolRole` unchanged in shape. The mapping from a
+  role to `ProjectHome` is `tddy_agent_launch::conversation_spawn::session_tool_role` (it lives in
+  agent-launch, not tool-engine), marked `TODO(orchestrator-role)` to go through `is_orchestrator_role`.
+- `StartSession`'s `session_role` argument: `StartSessionArgs.session_role: String`, offered in the
+  schema as a one-value enum (`orchestrator`), no longer in `INTERNAL_START_FIELDS`; the web parity
+  fixture (`start-session-tool-fields.json`) lists it. `into_request` does not carry it yet
+  (`TODO(orchestrator-role)`). Two existing "a withheld argument is refused by name" tests
+  (`tddy-tool-engine` `start_session_schema.rs`, `tddy-daemon-rpc` `start_session_tool_acceptance.rs`)
+  now use `repo_path`, since `session_role` is offered.
+- `pub(crate)` in `tddy-agent-launch/src/harness_profile_request.rs`: `RoleRequester<'a>
+  { Person, Agent { own_role: Option<&'a str> } }` and `admit_a_requested_role(requester, req)`, whose
+  stub delegates to today's `refuse_a_requested_role` (`TODO(orchestrator-role)`).
+- Web: test ids `sessions-drawer-item-orchestrator-<id>` (`tddy-session-web` testIds) and
+  `create-session-orchestrator-toggle` (`tddy-session-create-web` testIds), rendered nothing yet;
+  `CreateSessionOrchestratorField.tsx` (`ORCHESTRATOR_SESSION_ROLE`, props, renders `null`), not wired.
+- Test support: `tddy-daemon-rpc/tests/support::a_host_running_claude_as(instance, peers, claude)`.
 - Failing acceptance tests below, failing for this node's missing admission/placement/guard.
 
 ## Green wave
@@ -132,17 +146,18 @@ Real dependency edges, as opposed to the branch line:
 
 ### State A (Current)
 
-- One role, `project-home` (`session_metadata.rs:137`), compared by exact string at six sites
+- One role, `project-home` (`session_metadata.rs:139`, was :137), compared by exact string at six sites
   (`project_home_launch.rs:255`, `role_guard.rs:44`, `conversation_spawn.rs:25`, `project_home_idle.rs:87`,
-  `project_home_remote.rs:146`, `conversation.rs:189`).
-- `refuse_a_requested_role` (`harness_profile_request.rs:125`) refuses any role on every caller path;
+  `project_home_remote.rs:146`, `cli_agent_steps/conversation.rs:199`, was :189).
+- `refuse_a_requested_role` (`harness_profile_request.rs:128`, was :125) refuses any role on every caller path;
   only `start_session_with_role` (pub(crate), Ensure) bypasses it.
 - `on_home_worktree` (`project_home_start_spec.rs:95`) places main; `refuse_what_main_cannot_honour`
   (:24) and `refuse_a_type_main_cannot_run` (:58) check the spec.
-- Exec `StartSession` withholds `session_role` (`start_session_args.rs:164`).
+- Exec `StartSession` withholds `session_role` (`start_session_args.rs:165`).
 - The target resolver refuses only the caller (`session_target.rs:74`): another project-home-role
   session on the shared worktree is a valid git target.
-- `record_orchestrator` rewrites the child's changeset after the start returns.
+- `record_orchestrator` (`svc_start_session_core/orchestrator_record.rs`, called at
+  `svc_start_session_core.rs:144`) rewrites the child's changeset after the start returns.
 - Web: no role badge; `PROJECT_HOME_ROLE` used only by `projectHomeGroups.ts`.
 
 ### State B (Target)
@@ -194,7 +209,6 @@ through the in-memory peer forwarder, never LiveKit
 - `an_orchestrator_naming_a_placement_or_sandbox_is_refused_naming_the_field`
 - `an_orchestrator_on_an_agent_without_project_home_main_is_refused`
 - `starting_an_orchestrator_fast_forwards_the_home_worktree`
-- `requesting_project_home_on_start_session_is_still_refused`
 - `idle_auto_stop_leaves_an_orchestrator_running` (beside `project_home_idle_stop_acceptance.rs`)
 
 ### tddy-daemon-rpc — `packages/tddy-daemon-rpc/tests/orchestrator_role_exec_tools_acceptance.rs`
@@ -258,10 +272,10 @@ n2 `feature/orchestrators/project-stack-store` (the next node in the line).
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

@@ -217,18 +217,18 @@ async fn an_argument_the_form_does_not_offer_is_refused_by_name() {
     // Given
     let world = a_world().await;
 
-    // When the home session asks for a role
+    // When the home session names a local client's own checkout
     let refused = world
         .home_calls(
             START_SESSION,
-            serde_json::json!({ "session_type": "workspace", "session_role": "project-home" }),
+            serde_json::json!({ "session_type": "workspace", "repo_path": "/home/me/checkout" }),
         )
         .await;
 
     // Then the tool refuses the argument by its name
     assert!(refused.is_error);
     assert!(
-        refused.error_message.contains("session_role"),
+        refused.error_message.contains("repo_path"),
         "{}",
         refused.error_message
     );

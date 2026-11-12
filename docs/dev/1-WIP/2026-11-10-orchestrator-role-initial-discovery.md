@@ -379,3 +379,31 @@ tool. DeleteSession RPC (:48, `session_deletion.rs`): no exec tool. RemoveWorktr
 RestoreSessionWorktree RPCs (worktree.proto:13,24,25): no exec tool. Send a turn to a running session:
 only `SendSessionKeys` (+claim); `PromptAgentConversation` is roster-only. Stop: `TerminateSession` exists.
 Pause/status marker: NOT FOUND.
+
+## Exploration 2 — pass 2 contract and red tests (2026-11-12)
+
+Re-checked on `4cf668a4a` (after #876 `8797a715a` and #897 merged):
+
+- **Moved, same shape**: `PROJECT_HOME_ROLE` `session_metadata.rs:139` (was :137);
+  `refuse_a_requested_role` `harness_profile_request.rs:128` (was :125); the agent-capability gate is
+  `cli_agent_steps/conversation.rs:199` inside `refuse_a_role_the_agent_cannot_hold` (:195), not :189;
+  `INTERNAL_START_FIELDS`' `session_role` entry `start_session_args.rs:165`. Every other State A site
+  is where the changeset says.
+- **`session_tool_role` lives in `tddy-agent-launch/src/conversation_spawn.rs:21`**, returning
+  `tddy_tool_engine::project_home_tools::SessionToolRole` (defined in `project_home_catalogue.rs:92`).
+  The role → `ProjectHome` mapping is an agent-launch change, not a tool-engine one.
+- **Caller identity on the exec path.** An agent token (`TokenPrincipal::Agent`) names the user, not
+  the session it was minted for. The exec `StartSession` port (`exec_tool/project_home/port.rs:103`)
+  fills `orchestrator_session_id` with the calling session, which is the only place the asking
+  session is known. A `TEST_TOKEN` fixture daemon cannot tell an agent from a person, so the
+  "ordinary agent is refused" test runs on `signing_test_host` with the minted agent token.
+- **Where an exec start's refusal surfaces.** `begin_recorded_start` refuses synchronously only what
+  `refuse_a_start_before_it_begins` checks; a refusal inside `start_session_core` ends the recorded
+  start `failed` with `error`. The daemon-rpc suite reads either through one helper
+  (`the_start_outcome`).
+- **Placement without a main.** `home_worktree_for` (`svc_ensure_project_home.rs:372`) creates the
+  home worktree at `home_worktree_path(worktree_dir(main_repo), project_id)` whether or not a main
+  exists, so an orchestrator can be placed on a project with no main.
+- **Making `session_role` an argument ripples into three tests** whose premise was "session_role is
+  withheld" (tool-engine schema test, daemon-rpc start-tool test, the web parity fixture). The two
+  refusal tests now use `repo_path`, and the fixture lists `session_role`.
