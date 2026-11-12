@@ -82,6 +82,10 @@ pub struct ProjectNotificationRecord {
     /// What the session asks, with the `request_id` it is answered by (`#home-inbox` 3/8).
     pub question: Option<QuestionNotice>,
     pub at_unix_ms: u64,
+    /// The orchestrator that started the session — the `orchestrator_session_id` its changeset
+    /// names when the record is appended — or `None` for a session no orchestrator started
+    /// (`#orchestrators` 4/11). What a scope's [`ProjectNotificationScope::started_by`] matches.
+    pub orchestrator_session_id: Option<String>,
 }
 
 /// Whose records a read or a wait may see.
@@ -92,6 +96,10 @@ pub struct ProjectNotificationScope {
     pub os_user: String,
     /// The caller's own session, whose notifications are never returned.
     pub exclude_session_id: String,
+    /// Only the records whose [`ProjectNotificationRecord::orchestrator_session_id`] is this
+    /// session: the caller's own children, for `started_by_me` (`#orchestrators` 4/11). `None` for
+    /// every session's records.
+    pub started_by: Option<String>,
 }
 
 /// A read's answer: a page, and how many records the cursor lost to eviction.
@@ -132,6 +140,7 @@ struct Held {
 
 impl Held {
     fn visible_to(&self, scope: &ProjectNotificationScope) -> bool {
+        // TODO(session-turn-control): implement — honour `scope.started_by`.
         self.os_user == scope.os_user && self.record.session_id != scope.exclude_session_id
     }
 }
@@ -393,6 +402,9 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
                     agent: notification.agent.clone(),
                     question: notification.question.clone(),
                     at_unix_ms: notification.at_unix_ms,
+                    // TODO(session-turn-control): implement — the orchestrator the session's
+                    // changeset names.
+                    orchestrator_session_id: None,
                 },
             };
             storage::append(&path, &held)?;

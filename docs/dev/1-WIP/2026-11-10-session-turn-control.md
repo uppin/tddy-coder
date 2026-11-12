@@ -1,7 +1,7 @@
 # Changeset: orchestrators drive a session's turns
 
 **Date**: 2026-11-10
-**Status**: 🚧 In Progress — planning (commit 1)
+**Status**: 🚧 In Progress — draft-PR contract (commit 2): surface + failing tests
 **Type**: Feature
 **Complexity**: 4 — more than one crate (coding-agent-specs, tool-engine, daemon-rpc, agent-launch, session-activity), a new spec slot, cross-host forwarding, input ordering against a live terminal
 **Stack**: `#orchestrators` 4/11 · branch `feature/orchestrators/session-turn-control` · base `feature/orchestrators/start-effort` (#880)
@@ -45,6 +45,7 @@ Pass 2 waits for #876 (developer decision 2026-11-10).
 - [tddy-daemon-rpc](../../../packages/tddy-daemon-rpc/README.md) — ports, routing, forwarding
 - [tddy-agent-launch](../../../packages/tddy-agent-launch/) — resume with a first message
 - [tddy-session-activity](../../../packages/tddy-session-activity/README.md) — records carry the orchestrator; filter
+- [tddy-tools](../../../packages/tddy-tools/README.md) — `exec_tool_admission.rs` closed-world list gains the two tools (developer, 2026-11-12)
 
 ## Related Feature Documentation
 
@@ -90,12 +91,44 @@ notifications to learn that their own child finished.
 | n1 `orchestrator-role` (#878) | `is_orchestrator_role` | nothing directly — tools are registered as project-home tools, which n1's predicate already routes | re-implement role checks |
 | n2 (#879), n3 (#880) | stack store, effort | nothing — line predecessors | touch them |
 
+Verified at pass 2 (2026-11-12): **no test of this node reaches a `TODO(orchestrator-role)`,
+`TODO(project-stack-store)` or `TODO(start-effort)` stub.** The daemon-rpc suite's caller is main
+(`session_role: project-home`, already privileged on master), and its resume world starts the
+claude-cli child through `StartSession` **without** `session_role`/`effort`. It reuses n1's test
+helper `support::a_host_running_claude_as` — implemented test infrastructure, not a stub.
+
+**Closed-world lists green must extend** when it registers the two tools in the project-home
+catalogue (deliberately not done by the contract, so master's lists stay green):
+`packages/tddy-daemon-rpc/tests/project_home_session_tools_acceptance.rs`
+(`a_project_home_session_is_offered_its_read_only_tools_and_the_project_home_tools`) and
+`packages/tddy-tools/src/exec_tool_admission.rs`
+(`a_project_home_session_is_advertised_its_read_only_tools_and_the_project_home_tools`) — the
+latter is in **`tddy-tools`, a package not in Affected Packages**.
+
 ## Draft PR contract
 
-- `TurnInputSlot` and the `turn_input:` key in the spec loader.
-- Tool defs `SendSessionMessage`, `ResumeSession` (names, schemas) and `is_project_home_turn_tool`;
-  port methods `send_session_message`, `resume_session` (`TODO(session-turn-control)`).
-- `started_by_me` in the two notification tool schemas; `orchestrator_session_id` on the record DTO.
+Published in commit 2 (all bodies `TODO(session-turn-control)`):
+
+- **coding-agent-specs** — `TurnInputSlot { TerminalPaste { submit_key } | AcpPrompt }`
+  (`src/spec/turn_input_slot.rs`, YAML `turn_input: { kind: terminal_paste, submit_key: Enter }` /
+  `{ kind: acp_prompt }`, re-exported from the crate root); `CodingAgentSection.turn_input`;
+  `CodingAgentSpec::turn_input()`; load-time `validate_turn_input_slot` (stub: accepts all).
+  `claude.yaml` is **not** yet changed — that is green's.
+- **tool-engine** — `project_home_turn_tools.rs`: `SEND_SESSION_MESSAGE`, `RESUME_SESSION`,
+  `is_project_home_turn_tool`, `project_home_turn_tool_defs()` (schemas),
+  `TurnDelivery { TerminalPaste, AcpPrompt }` (`delivered_via`), `ResumeOutcome { Resumed, Running }`
+  (`outcome`), port `ProjectHomeTurnPort: ProjectHomePort` with `send_session_message(target, text)`
+  and `resume_session(target, message)` (defaults refuse), `execute_project_home_turn_tool` (stub
+  refuses). **Not** registered in `is_project_home_tool` / the catalogue / `is_project_home_target_tool`
+  — green's (see Dependencies for the closed-world lists).
+- **tool-engine inbox** — `started_by_me` (boolean) in both notification tools' schemas;
+  `ProjectHomeInboxPort::{read,wait}_notifications` take `started_by_me: bool` (the executor passes
+  `false` until green reads the argument).
+- **session-activity** — `ProjectNotificationRecord.orchestrator_session_id: Option<String>` (DTO
+  field, `serde(default)`, omitted when `None`, so old lines replay); `ProjectNotificationScope.started_by:
+  Option<String>` (filter stubbed; `deliver` records `None`).
+- **daemon-rpc** — `impl ProjectHomeTurnPort for DaemonProjectHome {}` (`exec_tool/project_home/turn.rs`,
+  trait defaults); `scope_of(home, started_by_me)` (stub passes `started_by: None`).
 - Failing tests below.
 
 ## Green wave
@@ -120,12 +153,28 @@ notifications to learn that their own child finished.
 
 ### State A (Current)
 
+Re-verified against code at pass 2 (base `d1bd6070a`, 2026-11-12):
+
 - Turn input exists only as `SendSessionKeys` after `ClaimSessionTerminal` (steals the lease, browser
-  drops to watch-only) — `project_home_terminal_tools.rs`, `exec_tool/project_home/terminal.rs`.
-- `ResumeSession` RPC exists (`session.proto:38`, `svc_resume_session.rs:34`); no exec tool.
-- The project notification log (`tddy-session-activity/src/project_notification_log/`) records
-  `activity` / `attention_required` (the latter "blocked on the operator, or finished a turn and is
-  waiting") with no orchestrator field; Wait/Read return every session's records.
+  drops to watch-only) — `tddy-tool-engine/src/project_home_terminal_tools.rs`,
+  `tddy-daemon-rpc/src/exec_tool/project_home/terminal.rs` (lease verify + `send_input` at :65-87).
+  Text is bracketed-pasted when the target's `TextGrid.bracketed_paste` is set (`terminal_keys::encode_keys`).
+- `ResumeSession` RPC exists (`tddy-service/proto/session.proto:38`,
+  `tddy-agent-launch/src/svc_resume_session.rs:34` `resume_session_at_session_coordinate`); the
+  session type → agent is `recorded_session_launch` (`harness_from_spec.rs:222`) and
+  `CodingAgentRegistry::for_session_type` (`registry.rs:127`). No exec tool.
+- The project notification log (`tddy-session-activity/src/project_notification_log.rs`, DTOs in
+  `project_notification_log/storage.rs`, `project_file()` :34) records `activity` /
+  `attention_required` (`tddy-daemon-kernel/src/session_notification.rs:8-13`, "finished a turn and
+  is waiting") with no orchestrator field; `deliver` reads only the session's metadata. Scope
+  (`ProjectNotificationScope`) is project + OS user − caller. Wait/Read return every session's
+  records. The orchestrator a child was started by is `changeset.orchestrator_session_id`
+  (read the same way by `exec_tool/project_home/caller.rs:84-86`).
+- Target tools forwarded across hosts are those `is_project_home_target_tool` lists
+  (`tddy-tool-engine/src/project_home_target_host.rs:33`), served by `served_on_target_host`.
+- Moved since pass 1: coding-agent spec slots no longer live in `spec.rs` at the cited
+  `:795`/`:1104` — `spec.rs` is now 621 lines with `CodingAgentSection` at :188 and the slots split
+  into `src/spec/*.rs` (`effort_slot.rs` is n3's model for this node's `turn_input_slot.rs`).
 
 ### State B (Target)
 
@@ -157,27 +206,49 @@ forwarding over the in-memory forwarder.
 
 ## Acceptance Tests
 
+All written at pass 2, failing for this node's missing implementation (see Exploration 2).
+
 ### tddy-daemon-rpc — `packages/tddy-daemon-rpc/tests/project_home_turn_control_acceptance.rs`
 - `main_sends_a_running_claude_cli_session_a_turn_without_taking_its_terminal`
 - `a_message_to_a_stopped_session_is_refused_naming_resume_session`
 - `a_message_to_a_session_waiting_on_a_question_is_refused_naming_the_answer_tools`
-- `a_message_to_an_agent_without_turn_input_is_refused_naming_the_agent`
-- `resume_session_with_a_message_resumes_it_and_delivers_the_message`
+- `a_message_to_an_agent_without_turn_input_is_refused_naming_the_agent` (codex-cli; asserts `codex` and `turn_input`)
+- `resume_session_with_a_message_resumes_it_and_delivers_the_message` (stub `claude` really spawned; second launch carries `--resume <id>`)
 - `resume_session_on_a_running_session_answers_running`
 - `both_tools_reach_a_session_on_another_host`
 
 ### tddy-coding-agent-specs — `packages/tddy-coding-agent-specs/tests/spec_turn_input_acceptance.rs`
-- `claude_declares_terminal_paste_turn_input`, `an_unknown_turn_input_kind_is_refused_at_load`
+- `claude_declares_terminal_paste_turn_input`
+- `an_unknown_turn_input_kind_is_refused_at_load` — ⚠ **passes on the contract**: the serde-tagged
+  `TurnInputSlot` already refuses an unknown kind, naming it. Kept as the changeset's regression.
+- `a_terminal_paste_whose_submit_key_is_not_a_key_is_refused_at_load` (added)
 
 ### tddy-session-activity — `packages/tddy-session-activity/tests/project_notification_started_by.rs`
 - `a_turn_end_record_names_the_sessions_orchestrator`
-- `started_by_me_returns_only_the_callers_sessions`
+- `started_by_me_returns_only_the_callers_sessions` (a wait)
+- `a_read_started_by_me_skips_the_records_of_sessions_it_did_not_start`,
+  `a_record_of_a_session_nobody_started_names_no_orchestrator_and_the_json_leaves_it_out`,
+  `the_orchestrator_a_record_names_survives_a_restart` (6f)
+
+### Unit (6f) — tddy-tool-engine
+- `tests/project_home_turn_tools.rs` (fake port): argument → port, delivered_via/outcome answers,
+  empty text and other-project refusals before the port, port refusal under the tool name, both tools
+  are target tools, both offered to a project-home session.
+- `tests/project_home_inbox_tools.rs` (+3): `started_by_me` in both schemas (⚠ passes on the
+  contract), reaches the port for wait/read and defaults to false, non-boolean refused.
 
 ## Technical Debt & Production Readiness
 
 _(populated during development)_
 
 ## Decisions & Trade-offs
+
+- **6e review (developer, 2026-11-12):**
+  - `tddy-tools` joins this node: registering the tools updates its closed-world admission list.
+  - The terminal key-name set **moves into `tddy-coding-agent-specs`**; `tddy-tool-engine::terminal_keys`
+    reads it from there, so the `turn_input.submit_key` is validated at load against one list.
+  - ACP turn input (`acp_prompt`) is covered by the tool-engine unit test with a fake port only, until an
+    ACP agent's YAML declares it.
 
 - **Agent-YAML-declared delivery** (developer, 2026-11-10) rather than terminal keys only.
 - **No new `turn_finished` kind**: the log already records turn end as `attention_required`; adding the
@@ -210,10 +281,10 @@ n5 `feature/orchestrators/session-lifecycle-tools`.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

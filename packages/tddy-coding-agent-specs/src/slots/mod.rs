@@ -285,6 +285,7 @@ mod tests {
                 usage: None,
                 pass_env: Vec::new(),
                 effort: None,
+                turn_input: None,
             },
         }
     }

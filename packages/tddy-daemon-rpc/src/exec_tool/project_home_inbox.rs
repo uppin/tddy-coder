@@ -28,12 +28,16 @@ impl DaemonProjectHome {
             .ok_or_else(|| NO_NOTIFICATION_LOG.to_string())
     }
 
-    /// The records the caller may see: its own project, its own OS user, not its own session.
-    fn scope_of(&self, home: &HomeCaller) -> ProjectNotificationScope {
+    /// The records the caller may see: its own project, its own OS user, not its own session — and,
+    /// with `started_by_me`, only those of the sessions it started (`#orchestrators` 4/11).
+    fn scope_of(&self, home: &HomeCaller, started_by_me: bool) -> ProjectNotificationScope {
+        // TODO(session-turn-control): implement — `started_by: Some(home.session_id)` when asked.
+        let _ = started_by_me;
         ProjectNotificationScope {
             project_id: home.project_id.clone(),
             os_user: self.os_user.clone(),
             exclude_session_id: home.session_id.clone(),
+            started_by: None,
         }
     }
 }
@@ -63,8 +67,11 @@ impl ProjectHomeInboxPort for DaemonProjectHome {
         home: &HomeCaller,
         cursor: &str,
         limit: Option<usize>,
+        started_by_me: bool,
     ) -> Result<NotificationsPage, String> {
-        let read = self.log()?.read(&self.scope_of(home), cursor, limit)?;
+        let read = self
+            .log()?
+            .read(&self.scope_of(home, started_by_me), cursor, limit)?;
         Ok(NotificationsPage {
             page: json_page(read.page)?,
             lost: (read.lost > 0).then_some(read.lost),
@@ -77,11 +84,12 @@ impl ProjectHomeInboxPort for DaemonProjectHome {
         home: &HomeCaller,
         cursor: &str,
         timeout_ms: u64,
+        started_by_me: bool,
     ) -> Result<NotificationsPage, String> {
         let wait = self
             .log()?
             .wait(
-                &self.scope_of(home),
+                &self.scope_of(home, started_by_me),
                 cursor,
                 Duration::from_millis(timeout_ms),
             )

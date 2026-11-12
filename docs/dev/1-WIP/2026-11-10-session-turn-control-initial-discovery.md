@@ -378,3 +378,34 @@ tool. DeleteSession RPC (:48, `session_deletion.rs`): no exec tool. RemoveWorktr
 RestoreSessionWorktree RPCs (worktree.proto:13,24,25): no exec tool. Send a turn to a running session:
 only `SendSessionKeys` (+claim); `PromptAgentConversation` is roster-only. Stop: `TerminateSession` exists.
 Pause/status marker: NOT FOUND.
+
+## Exploration 2 — pass 2 contract and red tests (2026-11-12)
+
+- **Delivery seam.** `SendSessionKeys` (`exec_tool/project_home/terminal.rs:65-87`) verifies the
+  caller's lease, then `terminal.send_input(bytes, 0)` on the store's main terminal. A message needs
+  the same write **without** the lease check and without `TerminalControl::claim`, so no
+  `ControlChange` is broadcast. Bracketed paste comes from `TextGrid.bracketed_paste` and
+  `terminal_keys::encode_keys`, which the daemon can reuse for the paste + submit key.
+- **Which agent.** The daemon resolves a target's agent from `metadata.session_type` through
+  `CodingAgentRegistry::for_session_type` (`claude-cli` → `claude`, `codex-cli` → `codex`); the
+  registry is on `DaemonProjectHome.launch.coding_agents`.
+- **Submit-key validation at load.** The key names live in `tddy-tool-engine::terminal_keys`, and
+  neither `tddy-coding-agent-specs` nor `tddy-tool-engine` depends on the other. Green must either
+  give the spec crate its own key-name set (duplicated) or move the names to a crate both read —
+  a plan choice, flagged in the pass-2 report.
+- **Stopped vs running.** `TargetRecord.is_active` is pid liveness (`session_reader.rs:83`); the
+  test fixtures set `pid` explicitly (alive = this test process, stopped = none) and run a live main
+  terminal for a running session, so either signal reads the same.
+- **Pending question.** `tddy_core::pending_question::write_pending_question` is what the answer
+  suites use to record one; the refusal is expected to name `AnswerSessionQuestion`.
+- **Resume world.** A stub `claude` started by main's `StartSession` (`claude-cli`, no
+  `session_role`/`effort`) and stopped by `TerminateSession` reaches "listed not active" in this
+  harness; the red failure is at `ResumeSession` itself. The resumed launch's argv carries
+  `--resume <session_id>` (`claude.yaml:22`).
+- **Notification orchestrator.** `ProjectNotificationLog::deliver` reads only metadata; the
+  orchestrator is `tddy_core::read_changeset(session_dir).orchestrator_session_id`, read at append
+  time so a record keeps it across restarts.
+- **Closed-world catalogue lists** pin the project-home tool set in
+  `tddy-daemon-rpc/tests/project_home_session_tools_acceptance.rs` and
+  `tddy-tools/src/exec_tool_admission.rs`; the contract does not register the tools so both stay
+  green until the implementation adds them.
