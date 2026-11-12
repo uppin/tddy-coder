@@ -8,7 +8,7 @@
 //! Cross-host calls go through the in-memory peer forwarder of `support`, never LiveKit.
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-orchestrator-sessions.md
-//! Changeset: docs/dev/1-WIP/2026-11-10-orchestrator-role.md
+//! Changeset: docs/dev/changesets/2026-11-12-orchestrator-role.md
 
 mod support;
 

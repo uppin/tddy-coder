@@ -6,7 +6,7 @@
 //! daemon's to grant (`#orchestrators` 1/11).
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-orchestrator-sessions.md
-//! Changeset: docs/dev/1-WIP/2026-11-10-orchestrator-role.md
+//! Changeset: docs/dev/changesets/2026-11-12-orchestrator-role.md
 
 // Both modules are shared with the `EnsureProjectHomeSession` suites; this suite uses part of each.
 #[allow(dead_code)]

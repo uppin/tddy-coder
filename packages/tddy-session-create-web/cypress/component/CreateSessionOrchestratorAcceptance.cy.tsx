@@ -9,7 +9,7 @@
  * `StartSession` request the form actually sent.
  *
  * PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-orchestrator-sessions.md
- * Changeset: docs/dev/1-WIP/2026-11-10-orchestrator-role.md
+ * Changeset: docs/dev/changesets/2026-11-12-orchestrator-role.md
  */
 import React from "react";
 import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
