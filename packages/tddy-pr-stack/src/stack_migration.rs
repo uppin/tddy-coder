@@ -128,7 +128,9 @@ fn migrate_one(
     }
     let stack_id = match changeset.stack_id {
         Some(stored) => {
-            store.read(&project_id, &stored).map_err(|e| e.to_string())?;
+            store
+                .read(&project_id, &stored)
+                .map_err(|e| e.to_string())?;
             stored
         }
         None => record_for(store, &project_id, session_id, legacy_stack)?,

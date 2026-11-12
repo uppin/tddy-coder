@@ -2,7 +2,7 @@
 //! stack store and leaves only the record's id behind — once, idempotently, and safely across an
 //! interrupted run.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-11-10-project-stack-store.md.
+//! Feature: docs/ft/coder/pr-stacking.md § Where a stack lives.
 
 use std::path::{Path, PathBuf};
 

@@ -1,7 +1,7 @@
 //! PRD acceptance: the session list's `stack_plan_json` reads the stack from the project's stack
 //! store, so the PR-stack screen lists the same planned PRs before and after the startup migration.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-11-10-project-stack-store.md.
+//! Feature: docs/ft/coder/pr-stacking.md § Where a stack lives.
 
 use std::path::{Path, PathBuf};
 

@@ -809,13 +809,10 @@ impl PrStackHandler for PrStackRpcHandler {
     }
 }
 
-/// The session's stack as `stack_plan_json`, re-read from disk through the serializer `ListSessions`
-/// enrichment uses.
-fn stack_plan_json_of(session_dir: &std::path::Path) -> Result<String, Status> {
-    let changeset =
-        tddy_core::read_changeset(session_dir).map_err(|e| Status::internal(e.to_string()))?;
+/// The session's stack as `stack_plan_json`, through the serializer `ListSessions` enrichment uses.
+fn stack_plan_json_of(dir: &std::path::Path) -> Result<String, Status> {
+    let changeset = tddy_core::read_changeset(dir).map_err(|e| Status::internal(e.to_string()))?;
     Ok(session_list_enrichment::stack_plan_json_for_changeset(
-        session_dir,
-        &changeset,
+        dir, &changeset,
     ))
 }

@@ -1,7 +1,7 @@
 //! PRD acceptance: the pr-stack recipe plans into, and resumes from, the project's stack store —
 //! the orchestrator's changeset holds only the stack's id.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-11-10-project-stack-store.md.
+//! Feature: docs/ft/coder/pr-stacking.md § Where a stack lives.
 
 use std::path::{Path, PathBuf};
 

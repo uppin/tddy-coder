@@ -16,6 +16,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 79 | 3 | 3 | 3 | first detection |
 | 2026-09-22 | 79 | 3 | 3 | 3 | moved to `tddy-pr-stack` by #496 — unchanged |
+| 2026-11-12 | 78 | 3 | 3 | 3 | touched by #879 (`#orchestrators` 2/11): the stack is read through `read_session_stack` (−1 line); no logic change |
 
 ## What the tool found
 
