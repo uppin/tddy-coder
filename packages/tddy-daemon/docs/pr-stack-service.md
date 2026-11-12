@@ -4,7 +4,7 @@ Family **P** — planned-PR stack mutations and branch resolution for `pr-stack`
 
 | RPC | Purpose |
 |-----|---------|
-| `AddPlannedPr` | Append a planned node to the orchestrator's `Changeset.stack`. |
+| `AddPlannedPr` | Append a planned node to the orchestrator's stack. |
 | `GetPrStatus` | GitHub PR status for a stack branch. |
 | `RepointPlannedPr` | Change a planned node's target base branch. |
 | `ReorderPlannedPr` | Move a planned row up/down in display order. |
