@@ -198,7 +198,6 @@ stacks through the store, not by writing `changeset.stack`).
 - `a_session_without_a_project_is_left_alone_and_reported`
 
 ### tddy-workflow-recipes — `packages/tddy-workflow-recipes/tests/pr_stack_store_resume_acceptance.rs`
-- `a_migrated_orchestrator_resumes_into_orchestrate`
 - `a_planned_stack_is_written_to_the_project_store_and_the_changeset_holds_only_its_id`
 
 ### tddy-session-activity — `packages/tddy-session-activity/tests/stack_plan_json_from_store.rs`
@@ -215,16 +214,21 @@ stacks through the store, not by writing `changeset.stack`).
   migrate and report sorted; a changeset carrying both `stack` and a stored `stack_id` keeps the stored
   copy; an unparseable changeset is a `failures` entry.
 
-Red notes for `/green`: `a_migrated_orchestrator_resumes_into_orchestrate` goes through
-`start_goal_for_session_continue` → `next_goal_for_state_with_changeset(state, &Changeset)`, which has no
-session dir, so the resume rule can only see `stack_id` (not the store) unless the trait grows a parameter;
-`tddy-session-activity` gained a dev-dependency on `tddy-pr-stack` for the sweep.
+Red notes for `/green`: the pr-stack recipe's `Init` → `orchestrate` resume rule
+(`next_goal_for_state_with_changeset` reading `changeset.stack`) is **removed, not ported** — see
+Decisions; `tddy-session-activity` gained a dev-dependency on `tddy-pr-stack` for the sweep.
 
 ## Technical Debt & Production Readiness
 
 _(populated during development)_
 
 ## Decisions & Trade-offs
+
+- **The `orchestrate` resume rule is dropped** (developer, 2026-11-12): the pr-stack recipe's
+  orchestration loop is deprecated — orchestration is an orchestrator agent holding tools, and any
+  workflow is optional to a session. `PrStackRecipe::next_goal_for_state_with_changeset`'s `Init`
+  disambiguation on `changeset.stack` is deleted with the field, not re-keyed on `stack_id`; the
+  acceptance test `a_migrated_orchestrator_resumes_into_orchestrate` was removed at 6e review.
 
 - **Store in `tddy-changeset`**, beside `Stack` and today's `update_stack_atomic`: every current caller
   already depends on it, so no crate edge is added. `tddy-pr-stack` (the obvious home) is not a

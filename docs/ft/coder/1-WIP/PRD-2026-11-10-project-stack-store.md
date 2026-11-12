@@ -65,7 +65,7 @@ stack to the project is the step that lets later nodes serve it by id.
 
 ## Acceptance Criteria
 - [ ] A new pr-stack session plans a stack; it is stored under `projects/<id>/stacks/`, the changeset holds only its id
-- [ ] A pre-existing session with `changeset.stack` is migrated at startup and resumes into `orchestrate`
+- [ ] A pre-existing session with `changeset.stack` is migrated at startup (no resume into the deprecated `orchestrate` loop)
 - [ ] A second sweep changes nothing; an interrupted sweep completes on restart
 - [ ] The PR-stack screen lists the same planned PRs before and after migration
 - [ ] Two concurrent stack writes both land

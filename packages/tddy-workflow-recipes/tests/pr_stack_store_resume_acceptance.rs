@@ -6,9 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use pretty_assertions::assert_eq;
-use tddy_core::changeset::{
-    read_changeset, start_goal_for_session_continue, write_changeset, Changeset, Stack, StackNode,
-};
+use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
 use tddy_core::project_stack_store::ProjectStackStore;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::{
@@ -17,9 +15,7 @@ use tddy_core::session_metadata::{
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::task::{NextAction, TaskResult};
-use tddy_pr_stack::stack_migration::migrate_session_stacks;
 use tddy_workflow_recipes::pr_stack::PrStackHooks;
-use tddy_workflow_recipes::PrStackRecipe;
 
 const A_TWO_PR_PLAN: &str = r#"
 version: 1
@@ -83,21 +79,6 @@ impl AHost {
     }
 }
 
-fn a_legacy_orchestrator_changeset_stuck_at_init() -> Changeset {
-    Changeset {
-        recipe: Some("pr-stack".to_string()),
-        stack: Some(Stack {
-            version: 1,
-            nodes: vec![StackNode {
-                node_id: "n1".to_string(),
-                title: "Token store".to_string(),
-                ..StackNode::default()
-            }],
-        }),
-        ..Changeset::default()
-    }
-}
-
 fn the_plan_is_written(session_dir: &Path, plan: &str) {
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.to_path_buf());
@@ -111,30 +92,6 @@ fn the_plan_is_written(session_dir: &Path, plan: &str) {
     PrStackHooks::new(None)
         .after_task("write-stack-plan", &ctx, &result)
         .expect("write-stack-plan after_task hook");
-}
-
-#[test]
-fn a_migrated_orchestrator_resumes_into_orchestrate() {
-    // Given — a pre-consolidation orchestrator sitting at "Init" with a populated stack, migrated
-    let host = a_host();
-    let session = host.with_a_pr_stack_session(
-        "sess-orchestrator",
-        "proj-auth",
-        a_legacy_orchestrator_changeset_stuck_at_init(),
-    );
-    migrate_session_stacks(host.sessions_base(), &host.projects_dir());
-    let migrated = read_changeset(&session).expect("read migrated changeset");
-    assert_eq!(
-        (migrated.stack.is_none(), migrated.stack_id.is_some()),
-        (true, true),
-        "precondition: the sweep moved the stack out of the changeset"
-    );
-
-    // When
-    let goal = start_goal_for_session_continue(&PrStackRecipe, &migrated);
-
-    // Then — the stack it references still means orchestration is under way
-    assert_eq!(goal.as_str(), "orchestrate");
 }
 
 #[test]
