@@ -241,7 +241,7 @@ impl SplitSessions {
             None => crate::split_session::colocated_jail_tool_env(
                 &daemon_hook_urls::local_daemon_hook_url(&self.config),
                 codebase_session_id,
-                &self.agent_session_token_for(&req.session_token)?,
+                &self.agent_session_token_for(&req.session_token, session_id)?,
                 Some(self.agent_tool_socket_of(os_user).await?),
             ),
         };
@@ -574,20 +574,36 @@ impl SplitSessions {
     ///
     /// Public for the placements outside this crate that hand an agent its own credential (a
     /// project-home main, launched by `tddy-agent-launch`).
-    pub fn agent_session_token_for(&self, caller_token: &str) -> Result<String, Status> {
-        crate::split_session::mint_agent_session_token(self.session_tokens()?, caller_token)
+    /// `session_id` is the session the agent runs for, which the token names.
+    pub fn agent_session_token_for(
+        &self,
+        caller_token: &str,
+        session_id: &str,
+    ) -> Result<String, Status> {
+        crate::split_session::mint_agent_session_token(
+            self.session_tokens()?,
+            caller_token,
+            session_id,
+        )
     }
 
-    /// Whether `token` verifies under this daemon's keys and was minted for a session's agent
-    /// ([`tddy_github::TokenPrincipal::Agent`]). A token these keys cannot verify, and every token
-    /// on a host that signs none, is not an agent's.
-    pub fn token_is_an_agents(&self, token: &str) -> bool {
-        self.session_tokens.as_ref().is_some_and(|tokens| {
-            tokens
-                .verifier()
-                .verify_now(token)
-                .is_ok_and(|claims| claims.principal == Some(tddy_github::TokenPrincipal::Agent))
-        })
+    /// Who bears `token`: a session's agent when it verifies under this daemon's keys and was
+    /// minted for one ([`tddy_github::TokenPrincipal::Agent`]), with the session it names; a
+    /// person otherwise. A token these keys cannot verify, and every token on a host that signs
+    /// none, is not an agent's.
+    pub fn bearer_of(&self, token: &str) -> crate::split_ports::TokenBearer {
+        let claims = self
+            .session_tokens
+            .as_ref()
+            .and_then(|tokens| tokens.verifier().verify_now(token).ok());
+        match claims {
+            Some(claims) if claims.principal == Some(tddy_github::TokenPrincipal::Agent) => {
+                crate::split_ports::TokenBearer::Agent {
+                    session_id: claims.session_id,
+                }
+            }
+            _ => crate::split_ports::TokenBearer::Person,
+        }
     }
 }
 

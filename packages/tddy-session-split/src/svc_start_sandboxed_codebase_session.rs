@@ -239,7 +239,7 @@ impl SplitSessions {
         let remote = crate::split_session::colocated_jail_tool_env(
             &tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(&self.config),
             checkout_session_id,
-            &self.agent_session_token_for(session_token)?,
+            &self.agent_session_token_for(session_token, session_id)?,
             Some(self.agent_tool_socket_of(os_user).await?),
         );
         let tddy_tools = self.resolve_tddy_tools_path()?;

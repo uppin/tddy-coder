@@ -260,7 +260,9 @@ impl LaunchSessions {
             agent_tool_socket: agent_tool_socket.to_path_buf(),
             session_dir,
             session_id,
-            agent_session_token: self.split_sessions.agent_session_token_for(session_token)?,
+            agent_session_token: self
+                .split_sessions
+                .agent_session_token_for(session_token, session_id)?,
         }))
     }
 }

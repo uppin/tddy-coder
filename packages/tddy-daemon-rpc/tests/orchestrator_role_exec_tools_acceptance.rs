@@ -426,7 +426,7 @@ async fn an_ordinary_agent_asking_start_session_for_the_orchestrator_role_is_ref
     // When its agent asks StartSession for an orchestrator, with the token minted for it
     let answer = calls_on(
         &world.daemon,
-        &world.credentials.agent_token,
+        &world.credentials.agent_token_for(&world.spawner),
         &world.spawner,
         "StartSession",
         serde_json::json!({
@@ -439,7 +439,7 @@ async fn an_ordinary_agent_asking_start_session_for_the_orchestrator_role_is_ref
     .expect("StartSession is served to a conversation spawner");
     let outcome = the_start_outcome(
         &world.daemon,
-        &world.credentials.agent_token,
+        &world.credentials.agent_token_for(&world.spawner),
         &world.spawner,
         &answer,
     )
@@ -451,6 +451,45 @@ async fn an_ordinary_agent_asking_start_session_for_the_orchestrator_role_is_ref
         refusal.contains(ORCHESTRATOR_ROLE),
         "names the refused role: {refusal}"
     );
+    assert_eq!(world.orchestrators(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn an_ordinary_agent_naming_main_as_its_orchestrator_is_still_refused_the_role() {
+    // Given a project's main and an ordinary session beside it, on a daemon that verifies tokens
+    let world = a_main_on_a_signing_daemon().await;
+    let main = world.spawner.clone();
+    let ordinary = world
+        .daemon
+        .start_session(Request::direct(StartSessionRequest {
+            session_token: world.credentials.user_token.clone(),
+            project_id: THIS_PROJECT.to_string(),
+            session_type: "workspace".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .expect("the ordinary session starts")
+        .into_inner()
+        .session_id;
+
+    // When the ordinary session's agent calls StartSession directly, naming main as the
+    // orchestrator its request comes from
+    let refusal = world
+        .daemon
+        .start_session(Request::direct(StartSessionRequest {
+            session_token: world.credentials.agent_token_for(&ordinary),
+            project_id: THIS_PROJECT.to_string(),
+            session_type: "claude-cli".to_string(),
+            model: TEST_MODEL.to_string(),
+            session_role: ORCHESTRATOR_ROLE.to_string(),
+            orchestrator_session_id: main,
+            ..Default::default()
+        }))
+        .await
+        .expect_err("the role is decided by the session the token proves, not the one named");
+
+    // Then
+    assert_eq!(refusal.code, Code::PermissionDenied, "{}", refusal.message);
     assert_eq!(world.orchestrators(), Vec::<String>::new());
 }
 

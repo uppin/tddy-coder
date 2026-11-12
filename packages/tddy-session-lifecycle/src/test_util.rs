@@ -186,10 +186,29 @@ pub struct SignedTestCredentials {
     /// The operator's own access token, as a signed-in browser holds it.
     pub user_token: String,
     /// The token a session's main agent is given: an access token under the operator's identity
-    /// that carries the agent principal, as `mint_agent_session_token` mints it.
+    /// that carries the agent principal, as `mint_agent_session_token` mints it, naming
+    /// [`TEST_AGENT_SESSION`] — a session no suite creates. For a token naming a real session, see
+    /// [`SignedTestCredentials::agent_token_for`].
     pub agent_token: String,
+    tokens: tddy_daemon_auth::SessionTokens,
+    operator: tddy_github::GitHubUser,
     /// Owns the host's signing key on disk.
     _key_home: tempfile::TempDir,
+}
+
+/// The session [`SignedTestCredentials::agent_token`] names.
+pub const TEST_AGENT_SESSION: &str = "test-agent-session";
+
+impl SignedTestCredentials {
+    /// The token the agent of `session_id` is given, as `mint_agent_session_token` mints it.
+    #[must_use]
+    pub fn agent_token_for(&self, session_id: &str) -> String {
+        self.tokens.signer().mint_agent(
+            &self.operator,
+            std::time::Duration::from_secs(600),
+            session_id,
+        )
+    }
 }
 
 /// A host wired to `sessions_base` that authenticates **real** session tokens: its user resolver is
@@ -238,9 +257,13 @@ pub fn signing_test_host_as(
     };
     let credentials = SignedTestCredentials {
         user_token: tokens.signer().mint_access(&operator),
-        agent_token: tokens
-            .signer()
-            .mint_agent(&operator, std::time::Duration::from_secs(600)),
+        agent_token: tokens.signer().mint_agent(
+            &operator,
+            std::time::Duration::from_secs(600),
+            TEST_AGENT_SESSION,
+        ),
+        tokens: tokens.clone(),
+        operator,
         _key_home: key_home,
     };
     let tddy_data_dir = sessions_base.clone();
