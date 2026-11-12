@@ -65,6 +65,9 @@ use tddy_tool_engine::project_home_terminal_tools::{
 use tddy_tool_engine::project_home_tools::{
     execute_project_home_tool, is_project_home_tool, session_offered_catalog_for,
 };
+use tddy_tool_engine::project_home_turn_tools::{
+    execute_project_home_turn_tool, is_project_home_turn_tool,
+};
 use tddy_tool_engine::start_ledger::StartLedger;
 use tddy_worktree_service::session_target::HomeCaller;
 use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
@@ -298,6 +301,8 @@ impl DaemonProjectHome {
             execute_project_home_answer_tool(self, home, &req.tool_name, &req.args_json).await
         } else if is_project_home_inbox_tool(&req.tool_name) {
             execute_project_home_inbox_tool(self, home, &req.tool_name, &req.args_json).await
+        } else if is_project_home_turn_tool(&req.tool_name) {
+            execute_project_home_turn_tool(self, home, &req.tool_name, &req.args_json).await
         } else if is_project_home_terminal_tool(&req.tool_name) {
             execute_project_home_terminal_tool(self, home, &req.tool_name, &req.args_json).await
         } else {

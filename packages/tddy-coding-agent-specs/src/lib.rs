@@ -17,6 +17,7 @@ mod route;
 mod session;
 pub mod slots;
 mod spec;
+pub mod terminal_keys;
 
 use std::path::Path;
 

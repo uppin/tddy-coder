@@ -13,6 +13,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::terminal_keys::is_key_name;
+
 /// The `turn_input` slot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -27,7 +29,10 @@ pub enum TurnInputSlot {
 
 /// Why `slot` cannot be delivered by: a terminal paste whose submit key is not a key name.
 pub(crate) fn validate_turn_input_slot(slot: &TurnInputSlot) -> Result<(), String> {
-    // TODO(session-turn-control): implement — refuse a `submit_key` that is not a key name.
-    let _ = slot;
-    Ok(())
+    match slot {
+        TurnInputSlot::TerminalPaste { submit_key } if !is_key_name(submit_key) => Err(format!(
+            "submit_key {submit_key:?} is not a key name: key names are case-sensitive, as in Enter, C-c or F1"
+        )),
+        _ => Ok(()),
+    }
 }

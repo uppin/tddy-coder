@@ -21,12 +21,13 @@
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-session-turn-control.md.
 
 use async_trait::async_trait;
-use serde_json::json;
+use serde::Deserialize;
+use serde_json::{json, Value};
 use tddy_worktree_service::session_target::{HomeCaller, SessionTarget};
 
 use crate::catalog::ToolDef;
 use crate::project_home_tools::{
-    target_host_property, tool_def, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
+    resolve_target, target_host_property, tool_def, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
 };
 use crate::ToolOutcome;
 
@@ -137,7 +138,6 @@ pub trait ProjectHomeTurnPort: ProjectHomePort {
         target: &SessionTarget,
         text: &str,
     ) -> Result<TurnDelivery, String> {
-        // TODO(session-turn-control): implement
         let _ = (target, text);
         Err(NO_TURN_DELIVERY.to_string())
     }
@@ -152,7 +152,6 @@ pub trait ProjectHomeTurnPort: ProjectHomePort {
         target: &SessionTarget,
         message: Option<&str>,
     ) -> Result<ResumeOutcome, String> {
-        // TODO(session-turn-control): implement
         let _ = (target, message);
         Err(NO_RESUME.to_string())
     }
@@ -173,8 +172,84 @@ pub async fn execute_project_home_turn_tool(
     tool_name: &str,
     args_json: &str,
 ) -> ToolOutcome {
-    // TODO(session-turn-control): implement — parse the arguments, resolve the target, call the
-    // port and answer `{session_id, delivered_via}` / `{session_id, outcome}`.
-    let _ = (port, home, args_json);
-    ToolOutcome::err(format!("{tool_name}: not implemented on this host yet"))
+    if !is_project_home_turn_tool(tool_name) {
+        return ToolOutcome::err(format!("unknown project-home turn tool: {tool_name}"));
+    }
+    let args: Value = match serde_json::from_str(args_json) {
+        Ok(v) => v,
+        Err(e) => return ToolOutcome::err(format!("invalid args_json: {e}")),
+    };
+    if tool_name == SEND_SESSION_MESSAGE {
+        send_session_message(port, home, args).await
+    } else {
+        resume_session(port, home, args).await
+    }
+}
+
+#[derive(Deserialize)]
+struct SendArgs {
+    session_id: String,
+    text: String,
+}
+
+#[derive(Deserialize)]
+struct ResumeArgs {
+    session_id: String,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+/// `SendSessionMessage`: refuse an empty text, resolve the target, deliver. Answers
+/// `{session_id, delivered_via}`.
+async fn send_session_message(
+    port: &dyn ProjectHomeTurnPort,
+    home: &HomeCaller,
+    args: Value,
+) -> ToolOutcome {
+    let args: SendArgs = match serde_json::from_value(args) {
+        Ok(a) => a,
+        Err(e) => {
+            return ToolOutcome::err(format!("{SEND_SESSION_MESSAGE}: invalid arguments: {e}"))
+        }
+    };
+    if args.text.trim().is_empty() {
+        return ToolOutcome::err(format!(
+            "{SEND_SESSION_MESSAGE}: text is empty: nothing to send"
+        ));
+    }
+    let target = match resolve_target(port, home, &args.session_id).await {
+        Ok(t) => t,
+        Err(outcome) => return outcome,
+    };
+    match port.send_session_message(&target, &args.text).await {
+        Ok(delivery) => ToolOutcome::ok(
+            json!({ "session_id": target.session_id, "delivered_via": delivery.as_str() })
+                .to_string(),
+        ),
+        Err(e) => ToolOutcome::err(format!("{SEND_SESSION_MESSAGE}: {e}")),
+    }
+}
+
+/// `ResumeSession`: resolve the target, resume it, with the first message if one was given.
+/// Answers `{session_id, outcome}`. An empty message is no message.
+async fn resume_session(
+    port: &dyn ProjectHomeTurnPort,
+    home: &HomeCaller,
+    args: Value,
+) -> ToolOutcome {
+    let args: ResumeArgs = match serde_json::from_value(args) {
+        Ok(a) => a,
+        Err(e) => return ToolOutcome::err(format!("{RESUME_SESSION}: invalid arguments: {e}")),
+    };
+    let target = match resolve_target(port, home, &args.session_id).await {
+        Ok(t) => t,
+        Err(outcome) => return outcome,
+    };
+    let message = args.message.as_deref().filter(|m| !m.trim().is_empty());
+    match port.resume_session(&target, message).await {
+        Ok(outcome) => ToolOutcome::ok(
+            json!({ "session_id": target.session_id, "outcome": outcome.as_str() }).to_string(),
+        ),
+        Err(e) => ToolOutcome::err(format!("{RESUME_SESSION}: {e}")),
+    }
 }
