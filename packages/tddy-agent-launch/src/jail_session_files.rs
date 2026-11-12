@@ -87,6 +87,9 @@ pub(super) struct JailRecord<'a> {
     /// The CLI session type the jail runs.
     pub session_type: &'a str,
     pub model: &'a str,
+    /// The effort level the start chose (blank for the agent's own default), recorded so a resume
+    /// relaunches the jail at it.
+    pub effort: &'a str,
     pub managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
     pub started_agents: Vec<tddy_core::SessionAgentRecord>,
     pub pid: u32,
@@ -113,6 +116,7 @@ pub(super) fn write_jail_session_metadata(
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
         pid: Some(record.pid),
         model: Some(record.model.to_string()),
+        effort: Some(record.effort.trim().to_string()).filter(|effort| !effort.is_empty()),
         sandbox: Some(true),
         managed_codebase: record.managed_codebase,
         session_role: Some(record.session_role.to_string()).filter(|role| !role.is_empty()),

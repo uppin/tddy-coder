@@ -190,6 +190,9 @@ world that actually exercises them (noted per section).
 - `a_claude_cli_start_at_high_effort_launches_with_that_level`
 - `a_resumed_session_launches_at_its_recorded_effort`
 
+`claude_cli_jail_from_spec_acceptance.rs` (macOS-only, real Seatbelt jail):
+- `a_jailed_claude_started_at_high_effort_runs_at_it_and_a_resume_relaunches_at_it`
+
 (Planned in tddy-agent-launch; moved because only this world drives a real `StartSession` /
 `ResumeSession` through `DaemonSessionHost` to a stub `claude` that records its argv.)
 
@@ -238,6 +241,15 @@ _(populated during development)_
 - **Levels reach the web through `ListAgents`** (`AgentInfo.effort_levels`), the same rows every other
   per-agent picker reads; `DescribeSessionStartOptions` reports them for the exec tool.
 - `SessionMetadata` refuses unknown fields: an older daemon cannot read a record carrying `effort`.
+- **Developer decision (2026-11-12): a jailed session carries its effort too.** Before it, a
+  sandboxed start accepted an effort and silently dropped it. `CliJail.effort` (the same
+  `effort_launch` the host launch uses, so no agent name in Rust) is set by the sandboxed start from
+  the request and by the sandboxed resume from the record; its arguments precede the route's and
+  its variables join the jail's env. The jailed `.session.yaml` now records `effort`.
+  Caveat: the jail's exec plan drops `TDDY_*` variables, so a spec carrying effort as an env
+  variable must not name it `TDDY_*` (claude carries it as a flag).
+- **`HarnessLaunch.effort` was not added**: the carry rides `slots.argv_extra` and the launch env,
+  beside the role's and the route's additions, on host and in jail alike.
 
 ## Refactoring Needed
 

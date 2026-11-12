@@ -320,6 +320,22 @@ impl AJailedClaudeDaemon {
         (session_id, guard)
     }
 
+    /// Start a sandboxed session at `effort`, and guard the jail it started.
+    pub async fn start_at_effort(&self, effort: &str) -> (String, AJailGuard) {
+        let session_id = self
+            .service
+            .start_session(Request::direct(StartSessionRequest {
+                effort: effort.to_string(),
+                ..self.a_sandboxed_start(false)
+            }))
+            .await
+            .expect("a sandboxed claude-cli start at an effort level succeeds")
+            .into_inner()
+            .session_id;
+        let guard = AJailGuard(self.pid_of(&session_id));
+        (session_id, guard)
+    }
+
     /// Start a sandboxed session over a managed codebase driven by `recipe`, and guard its jail.
     pub async fn start_managed(&self, recipe: &str) -> (String, AJailGuard) {
         let session_id = self

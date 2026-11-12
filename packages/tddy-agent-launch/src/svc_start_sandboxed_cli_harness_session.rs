@@ -33,6 +33,7 @@ use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
 use crate::cursor_from_spec::node_launcher_of;
+use crate::effort_launch::effort_launch;
 use crate::harness_from_spec::{harness_template_params, CliSessionAgent, HarnessLaunch};
 use crate::jail_launch::tool_ipc_socket;
 use crate::jail_session_files::{
@@ -331,6 +332,7 @@ impl LaunchSessions {
                 dirs: &dirs,
                 params,
                 route_args,
+                effort: effort_launch(&session_agent.agent.spec, &req.effort),
                 env,
                 session_env,
                 route,
@@ -352,6 +354,7 @@ impl LaunchSessions {
             JailRecord {
                 session_type: kind.name,
                 model: req.model.trim(),
+                effort: req.effort.trim(),
                 managed_recipe,
                 started_agents,
                 pid,

@@ -20,6 +20,7 @@ use crate::cli_harness_jail::{
     agent_tddy_tools, jail_route_config_env, require_jail_route, CliJail, JailWiring,
 };
 use crate::cursor_from_spec::node_launcher_of;
+use crate::effort_launch::effort_launch;
 use crate::harness_from_spec::{
     harness_template_params, resolve_session_agent, CliSessionAgent, CliSessionType, HarnessLaunch,
 };
@@ -268,6 +269,11 @@ impl LaunchSessions {
                 dirs: &dirs,
                 params,
                 route_args: Vec::new(),
+                // The level the start recorded, carried as the start carried it.
+                effort: effort_launch(
+                    &session_agent.agent.spec,
+                    metadata.effort.as_deref().unwrap_or_default(),
+                ),
                 env,
                 session_env,
                 route,
