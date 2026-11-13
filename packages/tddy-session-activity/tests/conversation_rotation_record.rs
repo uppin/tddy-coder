@@ -188,6 +188,7 @@ fn write_session(sessions_base: &Path, conversations: Vec<AgentConversation>) {
         previous_session_id: None,
         session_type: Some("claude-cli".to_string()),
         model: Some("opus".to_string()),
+        effort: None,
         cursor_chat_id: None,
         harness_resume_token: None,
         activity_status: Some("Running".to_string()),
