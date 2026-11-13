@@ -26,7 +26,8 @@ use tddy_session_activity::project_notification_log::{
     record_json, ProjectNotificationLog, ProjectNotificationRecord, ProjectNotificationScope,
 };
 use tddy_session_activity::session_notifications::{
-    SessionNotification, SessionNotificationBus, SessionNotificationKind, SessionNotificationSource,
+    SessionNotification, SessionNotificationBus, SessionNotificationKind,
+    SessionNotificationSource, SessionNotificationSubscriber,
 };
 
 const PROJECT: &str = "project-a";
@@ -237,6 +238,39 @@ async fn a_record_of_a_session_nobody_started_names_no_orchestrator_and_the_json
         .expect("the record serialises")
         .get("orchestrator_session_id")
         .is_none());
+}
+
+#[tokio::test]
+async fn a_session_whose_changeset_cannot_be_read_is_a_delivery_error_not_a_record_of_nobody() {
+    // Given main's child whose changeset exists but cannot be parsed
+    let daemon = a_daemon_holding_two_orchestrators_and_their_children();
+    let session_dir = sessions_of(daemon._data_dir.path(), ADA)
+        .join("sessions")
+        .join(MAINS_CHILD);
+    std::fs::write(
+        session_dir.join("changeset.yaml"),
+        "orchestrator_session_id: [unclosed",
+    )
+    .expect("the corrupt changeset");
+
+    // When its turn's end is delivered to the log
+    let delivered = daemon.log.deliver(&a_turn_end_of(MAINS_CHILD)).await;
+
+    // Then the delivery fails naming the unreadable changeset, and nothing is recorded — neither
+    // in main's started_by_me view nor as a record that names no orchestrator
+    let error = delivered.expect_err("an unreadable changeset is a delivery error");
+    assert!(
+        format!("{error:#}").contains("unreadable changeset"),
+        "the error names the cause: {error:#}"
+    );
+    let everyones = daemon
+        .log
+        .read(&the_scope_of(MAIN, false), "0", None)
+        .expect("the log reads");
+    assert_eq!(
+        sessions_of_records(&everyones.page.items),
+        Vec::<String>::new()
+    );
 }
 
 #[tokio::test]

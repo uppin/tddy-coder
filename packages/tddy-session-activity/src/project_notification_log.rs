@@ -38,6 +38,7 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+use tddy_core::WorkflowError;
 use tddy_daemon_kernel::session_notification::{
     AgentNotification, QuestionNotice, SessionNotificationKind, SessionNotificationSource,
 };
@@ -292,7 +293,8 @@ impl ProjectNotificationLog {
 
     /// The project a notification's session belongs to, from its own record, and the orchestrator
     /// its changeset names as having started it (`None` when nobody did); `None` for a session of
-    /// no project. A session whose OS user or record cannot be resolved is an error.
+    /// no project. A session whose OS user, record or changeset cannot be read is an error — a
+    /// missing changeset is not (it names no orchestrator).
     fn project_of(
         &self,
         notification: &SessionNotification,
@@ -312,10 +314,19 @@ impl ProjectNotificationLog {
         if metadata.project_id.is_empty() {
             return Ok(None);
         }
-        // A changeset that cannot be read names no orchestrator: the record is still worth keeping.
-        let orchestrator = tddy_core::read_changeset(&session_dir)
-            .ok()
-            .and_then(|changeset| changeset.orchestrator_session_id);
+        // No changeset at all: a session nobody started. One that exists but cannot be read is a
+        // delivery error — recording it as "no orchestrator" would silently drop it from its
+        // orchestrator's `started_by_me` view.
+        let orchestrator = match tddy_core::read_changeset(&session_dir) {
+            Ok(changeset) => changeset.orchestrator_session_id,
+            Err(WorkflowError::ChangesetMissing(_)) => None,
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "session {} has an unreadable changeset, so its orchestrator is unknown: {e}",
+                    notification.session_id
+                ))
+            }
+        };
         Ok(Some((metadata.project_id, orchestrator)))
     }
 }
