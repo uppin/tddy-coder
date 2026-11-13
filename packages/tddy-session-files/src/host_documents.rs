@@ -546,6 +546,7 @@ mod tests {
             cursor_chat_id: None,
             harness_resume_token: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         };
         tddy_core::write_session_metadata(session_dir, &meta).unwrap();
     }

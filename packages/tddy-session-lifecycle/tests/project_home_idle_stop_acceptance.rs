@@ -15,6 +15,7 @@ use project_home_support::{
     a_caller_token, a_home_daemon, a_repo_with_origin_main, ensure_main, HomeDaemon, PROJECT_ID,
 };
 use tddy_rpc::Request;
+use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 use tddy_service::proto::session::{
     EnsureProjectHomeSessionResponse, ListSessionsRequest, SessionService as SessionServiceTrait,
     StartSessionRequest,
@@ -148,6 +149,51 @@ impl World {
 
 const ELEVEN_MINUTES: Duration = Duration::from_secs(11 * 60);
 
+/// The conversation main's agent runs after `/clear` (`#orchestrators` 6/11).
+const THE_POST_CLEAR_CONVERSATION: &str = "6c1e0a00-0000-4000-8000-0000000006d1";
+
+impl World {
+    /// Main's agent ran `/clear` in the conversation it started with: its `SessionEnd` hook reports
+    /// that conversation ended and its `SessionStart` hook the fresh one, as `tddy-tools
+    /// session-hook` sends them, to this daemon's `ReportSessionStatus`.
+    async fn cleared_into(&self, session_id: &str, conversation: &str) {
+        let hook_token = tddy_core::read_session_metadata(
+            &self.home.data.path().join("sessions").join(session_id),
+        )
+        .expect("main's .session.yaml")
+        .hook_token
+        .expect("main's hooks carry a token");
+        let report = |status: &str, event: &str, (field, value): (&str, &str), id: &str| {
+            ReportSessionStatusRequest {
+                session_id: session_id.to_string(),
+                hook_token: hook_token.clone(),
+                os_user: "dev".to_string(),
+                status: status.to_string(),
+                hook_event_name: event.to_string(),
+                agent_conversation_id: id.to_string(),
+                hook_fields: [
+                    (field.to_string(), value.to_string()),
+                    ("session_id".to_string(), id.to_string()),
+                ]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            }
+        };
+        for request in [
+            report("Ended", "SessionEnd", ("reason", "clear"), session_id),
+            report("Started", "SessionStart", ("source", "clear"), conversation),
+        ] {
+            self.home
+                .service
+                .activity_service()
+                .report_session_status(Request::direct(request))
+                .await
+                .expect("the clear is reported");
+        }
+    }
+}
+
 #[tokio::test]
 async fn an_idle_project_home_session_is_stopped_after_the_configured_time() {
     // Given a home session waiting for input for eleven minutes, with a ten-minute limit
@@ -205,6 +251,33 @@ async fn ensuring_an_auto_stopped_home_session_resumes_the_same_conversation() {
     assert!(
         output.contains(&format!("--resume {home}")),
         "same conversation; got: {output:?}"
+    );
+}
+
+#[tokio::test]
+async fn main_auto_stopped_after_a_clear_resumes_the_post_clear_conversation() {
+    // Given main, whose agent ran `/clear`, stopped by the reaper once idle
+    let world = a_daemon_with_a_project(TEN_MINUTES);
+    let main = world.a_running_main().await;
+    world.cleared_into(&main, THE_POST_CLEAR_CONVERSATION).await;
+    world.reported(&main, "WaitingForInput");
+    assert_eq!(world.reap_after(ELEVEN_MINUTES).await, vec![main.clone()]);
+
+    // When
+    let resumed = world.ensure().await.expect("ensure resumes");
+
+    // Then main comes back in the conversation after the clear, not the one it started with
+    assert_eq!(resumed.outcome, "resumed");
+    let handle = world
+        .home
+        .manager
+        .get(&main)
+        .await
+        .expect("the agent runs again");
+    let output = a_capture_showing(&handle.capture, "ARGV", PTY_STUB_OUTPUT).await;
+    assert!(
+        output.contains(&format!("--resume {THE_POST_CLEAR_CONVERSATION}")),
+        "the post-clear conversation; got: {output:?}"
     );
 }
 

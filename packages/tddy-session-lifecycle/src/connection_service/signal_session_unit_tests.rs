@@ -85,6 +85,7 @@ fn write_unit_session(session_dir: &std::path::Path, pid: u32) {
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }

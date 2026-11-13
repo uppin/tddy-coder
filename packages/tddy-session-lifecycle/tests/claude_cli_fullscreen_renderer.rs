@@ -344,6 +344,7 @@ fn an_exited_host_session(sessions_base: &Path, worktree: &Path) {
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 }

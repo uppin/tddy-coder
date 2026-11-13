@@ -17,8 +17,12 @@ daemon records the new conversation id, and every later resume continues **that*
 one the session started with. Every conversation id the session has had is kept, in order, in
 `.session.yaml` (`agent_conversations: [{ id, started_at_unix_ms, reason: start | rotate }]`); the last
 is current. The mechanism is generic: an agent's YAML spec declares how a rotation is reported
-(`conversation.rotation: { hook: <event>, when: { <field>: <value> }, id_field: <field> }`); claude's
-declares its session-start hook with `source: clear` and `session_id`. No agent-specific code.
+as two hook reports, `conversation.rotation: { ends: <report>, begins: <report> }`, each
+`{ hook: <event>, when: { <field>: <value> }, id_field: <field> }`; claude's declares its session-end
+hook with `reason: clear` and its session-start hook with `source: clear`, both with `session_id`.
+A rotation happens only when the `ends` names the session's current conversation and the `begins`
+follows it, so a clear in a claude-cli agent tab — which shares the session's hooks — rotates
+nothing. No agent-specific code.
 
 ## Background
 
@@ -46,6 +50,7 @@ after auto-stop — brings back the conversation from before the clear.
 - [ ] After `/clear` in a claude-cli session, the record lists both conversations, the new one last
 - [ ] Resuming that session continues the post-clear conversation
 - [ ] Main auto-stopped after a `/clear` resumes the post-clear conversation
+- [ ] A `/clear` in an agent tab does not rotate the session's conversation
 - [ ] An agent spec without a rotation slot is unaffected; a spec naming an unknown hook is refused at load
 
 ## References

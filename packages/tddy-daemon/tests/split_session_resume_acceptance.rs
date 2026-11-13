@@ -344,6 +344,7 @@ fn a_stopped_split_session() -> SessionMetadata {
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     }
 }
 

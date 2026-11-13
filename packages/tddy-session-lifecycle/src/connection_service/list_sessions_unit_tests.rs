@@ -87,6 +87,7 @@ async fn list_sessions_unit_returns_new_metadata_fields() {
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     write_session_metadata(&session_dir, &metadata).unwrap();
 
