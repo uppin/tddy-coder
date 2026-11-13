@@ -7,7 +7,7 @@
 //! [`OrchestrationMarkKind::Paused`] mark also stops the session, and any resume of the session
 //! clears it ([`clear_a_paused_mark`]); `blocked` and `done` only mark.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-session-lifecycle-tools.md.
+//! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
 use serde::{Deserialize, Serialize};
 

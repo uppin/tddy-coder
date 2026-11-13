@@ -3,8 +3,7 @@
  * orchestrator's note on hover; an unmarked row shows none (`#orchestrators` 5/11). The drawer is
  * fed its sessions as props — it makes no RPC of its own here.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-session-lifecycle-tools.md
- * Changeset: docs/dev/1-WIP/2026-11-10-session-lifecycle-tools.md
+ * Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
  */
 
 import React from "react";

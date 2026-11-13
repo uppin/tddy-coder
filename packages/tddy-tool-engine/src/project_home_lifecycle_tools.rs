@@ -24,7 +24,6 @@
 //! asked about this host's sessions and worktrees.
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-session-lifecycle-tools.md.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};

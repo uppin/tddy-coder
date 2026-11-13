@@ -9,8 +9,6 @@
 //! caller is the project's main (`project-home`).
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-session-lifecycle-tools.md.
-//! Changeset: docs/dev/1-WIP/2026-11-10-session-lifecycle-tools.md
 
 mod support;
 
