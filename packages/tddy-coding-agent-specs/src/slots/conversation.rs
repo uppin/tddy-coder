@@ -150,6 +150,10 @@ pub enum RotationStep {
     Arm,
     /// The session rotated to this conversation; the rotation is idle again.
     RotateTo(String),
+    /// An armed rotation will not complete: another conversation ended, or the agent began a
+    /// conversation that is not the rotation's (`SessionStart` on a restart or resume). The
+    /// rotation is idle again, so a stale arm never turns a later, unrelated `begins` into one.
+    Disarm,
 }
 
 impl RotationSlot {
@@ -158,6 +162,8 @@ impl RotationSlot {
     ///
     /// - an [`Self::ends`] report naming `current` → [`RotationStep::Arm`];
     /// - a [`Self::begins`] report while [`RotationState::Armed`] → [`RotationStep::RotateTo`] its id;
+    /// - while [`RotationState::Armed`], an `ends` of another conversation, or a report of the
+    ///   `begins` event that is not a `begins` → [`RotationStep::Disarm`];
     /// - anything else → [`RotationStep::Unchanged`] — an `ends` of another conversation, and a
     ///   `begins` nothing armed, among them.
     #[must_use]
@@ -168,19 +174,20 @@ impl RotationSlot {
         hook_event_name: &str,
         hook_fields: &HashMap<String, String>,
     ) -> RotationStep {
+        let armed = state == RotationState::Armed;
         if let Some(ended) = self.ends.conversation_of(hook_event_name, hook_fields) {
-            return if ended == current {
-                RotationStep::Arm
-            } else {
-                RotationStep::Unchanged
+            return match (ended == current, armed) {
+                (true, _) => RotationStep::Arm,
+                (false, true) => RotationStep::Disarm,
+                (false, false) => RotationStep::Unchanged,
             };
         }
-        match (
-            state,
-            self.begins.conversation_of(hook_event_name, hook_fields),
-        ) {
-            (RotationState::Armed, Some(began)) => RotationStep::RotateTo(began),
-            _ => RotationStep::Unchanged,
+        if !armed || hook_event_name != self.begins.hook {
+            return RotationStep::Unchanged;
+        }
+        match self.begins.conversation_of(hook_event_name, hook_fields) {
+            Some(began) => RotationStep::RotateTo(began),
+            None => RotationStep::Disarm,
         }
     }
 

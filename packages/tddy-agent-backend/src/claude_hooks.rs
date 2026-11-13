@@ -80,16 +80,20 @@ const CLAUDE_HOOK_EVENTS: [(&str, &str); 8] = [
 ];
 
 /// The hook events [`build_claude_hooks_settings`] installs, by name.
-pub const CLAUDE_INSTALLED_EVENTS: &[&str] = &[
-    CLAUDE_HOOK_EVENTS[0].0,
-    CLAUDE_HOOK_EVENTS[1].0,
-    CLAUDE_HOOK_EVENTS[2].0,
-    CLAUDE_HOOK_EVENTS[3].0,
-    CLAUDE_HOOK_EVENTS[4].0,
-    CLAUDE_HOOK_EVENTS[5].0,
-    CLAUDE_HOOK_EVENTS[6].0,
-    CLAUDE_HOOK_EVENTS[7].0,
-];
+pub const CLAUDE_INSTALLED_EVENTS: &[&str] = &event_names(CLAUDE_HOOK_EVENTS);
+
+/// The event half of each `(event, matcher)` pair, in order.
+const fn event_names<const N: usize>(
+    events: [(&'static str, &'static str); N],
+) -> [&'static str; N] {
+    let mut names = [""; N];
+    let mut i = 0;
+    while i < N {
+        names[i] = events[i].0;
+        i += 1;
+    }
+    names
+}
 
 /// Build the `.claude/settings.local.json` value for a claude-cli worktree.
 ///

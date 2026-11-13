@@ -6,6 +6,9 @@
 //! them is a marker file in the session directory, not `ActivityServiceImpl` state: the service is
 //! built per request by its callers (`activity_service()`), so memory would not survive from the
 //! first report to the second, and `.session.yaml` (`deny_unknown_fields`) would need a new field.
+//! The marker lives in the session directory, never the worktree, so worktree sync does not carry
+//! it, and session deletion removes it with the directory. A marker left by a crash between the two
+//! reports is disarmed by the next report that cannot complete it ([`RotationStep::Disarm`]).
 
 use std::path::Path;
 
@@ -73,6 +76,7 @@ impl ActivityServiceImpl {
         match step {
             RotationStep::Unchanged => Ok(()),
             RotationStep::Arm => set_rotation_state(session_dir, RotationState::Armed),
+            RotationStep::Disarm => set_rotation_state(session_dir, RotationState::Idle),
             RotationStep::RotateTo(next) => {
                 set_rotation_state(session_dir, RotationState::Idle)?;
                 record_rotation(session_dir, &meta, next)

@@ -310,3 +310,34 @@ async fn an_agent_tab_clear_does_not_rotate_the_sessions_conversation() {
         vec![started(SESSION_ID), rotated(AFTER_THE_FIRST_CLEAR)]
     );
 }
+
+#[tokio::test]
+async fn an_arm_left_by_a_crash_does_not_turn_a_later_tab_clear_into_a_rotation() {
+    // Given the session's agent ended its conversation in a clear, and the daemon went down before
+    // the `begins` report arrived
+    let host = AnActivityHost::holding_a_claude_cli_session();
+    host.reported(a_clear_ending(SESSION_ID)).await;
+
+    // When the agent starts again afresh, and later an agent tab clears a conversation of its own
+    host.reported(a_session_start_from("startup", SESSION_ID))
+        .await
+        .after_a_clear(A_TABS_CONVERSATION, A_TABS_CONVERSATION_AFTER_ITS_CLEAR)
+        .await;
+
+    // Then the record still lists the one conversation
+    assert_eq!(host.conversations(), vec![started(SESSION_ID)]);
+}
+
+#[tokio::test]
+async fn an_arm_whose_begins_never_came_does_not_turn_a_tab_clear_into_a_rotation() {
+    // Given the session's agent ended its conversation in a clear whose `begins` was never reported
+    let host = AnActivityHost::holding_a_claude_cli_session();
+    host.reported(a_clear_ending(SESSION_ID)).await;
+
+    // When an agent tab sharing its hooks clears a conversation of its own
+    host.after_a_clear(A_TABS_CONVERSATION, A_TABS_CONVERSATION_AFTER_ITS_CLEAR)
+        .await;
+
+    // Then the tab's clear rotated nothing
+    assert_eq!(host.conversations(), vec![started(SESSION_ID)]);
+}

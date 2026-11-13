@@ -107,13 +107,41 @@ fn a_clear_beginning_that_nothing_armed_rotates_nothing() {
 }
 
 #[test]
-fn a_session_start_that_is_not_a_clear_rotates_nothing_even_when_armed() {
-    // When
+fn a_session_start_that_is_not_a_clear_disarms_an_armed_rotation() {
+    // When the agent starts afresh after a crash left the rotation armed
     let step = a_clear_rotation().step(
         RotationState::Armed,
         CURRENT,
         "SessionStart",
         &fields(&[("source", "startup"), ("session_id", NEXT)]),
+    );
+
+    // Then the stale arm cannot turn a later clear into a rotation
+    assert_eq!(step, RotationStep::Disarm);
+}
+
+#[test]
+fn another_conversation_ending_disarms_an_armed_rotation() {
+    // When an agent tab's clear follows an arm whose `begins` never came
+    let step = a_clear_rotation().step(
+        RotationState::Armed,
+        CURRENT,
+        "SessionEnd",
+        &a_clear_ending(ANOTHER),
+    );
+
+    // Then the tab's own `begins` will rotate nothing
+    assert_eq!(step, RotationStep::Disarm);
+}
+
+#[test]
+fn an_unrelated_report_leaves_an_armed_rotation_armed() {
+    // When
+    let step = a_clear_rotation().step(
+        RotationState::Armed,
+        CURRENT,
+        "PostToolUse",
+        &fields(&[("session_id", NEXT)]),
     );
 
     // Then
