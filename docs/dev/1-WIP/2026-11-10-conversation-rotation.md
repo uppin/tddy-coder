@@ -164,11 +164,11 @@ Design refinements pass 2 settled (green follows them):
 
 ## Scope
 
-- [ ] Spec slot + `claude.yaml` (`ends: SessionEnd {reason: clear}`, `begins: SessionStart {source: clear}`, `id_field: session_id`)
-- [ ] Hook parse + forward; proto fields
-- [ ] Record: first entry at start, append on rotation, dedupe; agent-tab reports ignored
-- [ ] Resume binds the newest; transcript/usage readers read the current conversation
-- [ ] Main's resume after auto-stop continues the post-clear conversation
+- [x] Spec slot + `claude.yaml` (`ends: SessionEnd {reason: clear}`, `begins: SessionStart {source: clear}`, `id_field: session_id`)
+- [x] Hook parse + forward; proto fields
+- [x] Record: first entry at start, append on rotation, dedupe; agent-tab reports ignored
+- [x] Resume binds the newest; transcript/usage readers read the current conversation
+- [x] Main's resume after auto-stop continues the post-clear conversation
 
 ## Technical Changes
 
@@ -268,6 +268,17 @@ _(populated during development)_
 - **Older sessions: seed the list** (developer, 2026-11-13): a session with no list is seeded with
   its own id as `Start` on its first rotation.
 
+- **Rotation state is a marker file** (green, 2026-11-13): `RotationState` between the `SessionEnd`
+  and `SessionStart` reports is `<session dir>/.conversation-rotation-armed`
+  (`tddy-session-activity/src/service/conversation_rotation.rs`). Not the in-memory entry this
+  changeset suggested: `activity_service()` builds a fresh `ActivityServiceImpl` per call, so memory
+  does not survive from one report to the next. Not a `.session.yaml` field either — that is
+  `deny_unknown_fields` and would touch every `SessionMetadata` literal again. The record is re-read
+  after the status write before it is rewritten with the new conversation.
+- **Load check**: `HooksAdapter::installed_events()` — claude answers `CLAUDE_INSTALLED_EVENTS`
+  (`tddy-agent-backend`), cursor answers `CURSOR_HOOK_EVENTS`; `parse_section` refuses a rotation
+  naming a hook outside it.
+
 ## Refactoring Needed
 
 ### From @red (TDD Red Phase)
@@ -297,7 +308,7 @@ n7 `feature/orchestrators/stack-plan-tools`.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

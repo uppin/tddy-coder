@@ -111,9 +111,21 @@ impl RotationHook {
         hook_event_name: &str,
         hook_fields: &HashMap<String, String>,
     ) -> Option<String> {
-        // TODO(conversation-rotation): implement — match the hook, the `when` fields and read the id.
-        let _ = (hook_event_name, hook_fields);
-        None
+        if hook_event_name != self.hook {
+            return None;
+        }
+        let matches = self
+            .when
+            .iter()
+            .all(|(field, value)| hook_fields.get(field) == Some(value));
+        if !matches {
+            return None;
+        }
+        hook_fields
+            .get(&self.id_field)
+            .map(|id| id.trim())
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
     }
 }
 
@@ -156,10 +168,20 @@ impl RotationSlot {
         hook_event_name: &str,
         hook_fields: &HashMap<String, String>,
     ) -> RotationStep {
-        // TODO(conversation-rotation): implement — arm on the current conversation's end, rotate on
-        // the begin that follows.
-        let _ = (state, current, hook_event_name, hook_fields);
-        RotationStep::Unchanged
+        if let Some(ended) = self.ends.conversation_of(hook_event_name, hook_fields) {
+            return if ended == current {
+                RotationStep::Arm
+            } else {
+                RotationStep::Unchanged
+            };
+        }
+        match (
+            state,
+            self.begins.conversation_of(hook_event_name, hook_fields),
+        ) {
+            (RotationState::Armed, Some(began)) => RotationStep::RotateTo(began),
+            _ => RotationStep::Unchanged,
+        }
     }
 
     /// The two hook events this rotation is reported by, which the spec's hooks adapter must

@@ -35,6 +35,10 @@ impl HooksAdapter for CursorHooksJson {
 
     /// Reached only through [`HooksAdapter::try_render`]: params without a daemon socket have no
     /// rendering, and a direct call with them panics naming the refusal.
+    fn installed_events(&self) -> &'static [&'static str] {
+        tddy_agent_backend::cursor_hooks::CURSOR_HOOK_EVENTS
+    }
+
     fn render(&self, workdir: &Path, params: &HookCommandParams<'_>) -> (PathBuf, Vec<u8>) {
         self.try_render(workdir, params)
             .unwrap_or_else(|refusal| panic!("{refusal}"))

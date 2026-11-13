@@ -180,9 +180,16 @@ impl HookEvent {
 /// and JSON that is not an object yields none.
 #[must_use]
 pub fn hook_event_fields(stdin_json: &str) -> std::collections::HashMap<String, String> {
-    // TODO(conversation-rotation): implement — collect the event's top-level string fields.
-    let _ = stdin_json;
-    std::collections::HashMap::new()
+    match serde_json::from_str::<serde_json::Value>(stdin_json) {
+        Ok(serde_json::Value::Object(fields)) => fields
+            .into_iter()
+            .filter_map(|(name, value)| match value {
+                serde_json::Value::String(text) => Some((name, text)),
+                _ => None,
+            })
+            .collect(),
+        _ => std::collections::HashMap::new(),
+    }
 }
 
 /// Parse the Claude Code hook event JSON delivered on stdin.

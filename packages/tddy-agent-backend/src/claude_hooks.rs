@@ -67,6 +67,30 @@ pub(crate) fn daemon_socket_arg(p: &HookCommandParams<'_>) -> String {
         .unwrap_or_default()
 }
 
+/// The `(event, matcher)` pairs [`build_claude_hooks_settings`] installs.
+const CLAUDE_HOOK_EVENTS: [(&str, &str); 8] = [
+    ("SessionStart", ""),
+    ("UserPromptSubmit", ""),
+    ("PostToolUse", ""),
+    ("Notification", ""),
+    ("PermissionRequest", ""),
+    ("PreToolUse", "AskUserQuestion"),
+    ("Stop", ""),
+    ("SessionEnd", ""),
+];
+
+/// The hook events [`build_claude_hooks_settings`] installs, by name.
+pub const CLAUDE_INSTALLED_EVENTS: &[&str] = &[
+    CLAUDE_HOOK_EVENTS[0].0,
+    CLAUDE_HOOK_EVENTS[1].0,
+    CLAUDE_HOOK_EVENTS[2].0,
+    CLAUDE_HOOK_EVENTS[3].0,
+    CLAUDE_HOOK_EVENTS[4].0,
+    CLAUDE_HOOK_EVENTS[5].0,
+    CLAUDE_HOOK_EVENTS[6].0,
+    CLAUDE_HOOK_EVENTS[7].0,
+];
+
 /// Build the `.claude/settings.local.json` value for a claude-cli worktree.
 ///
 /// Returns a `serde_json::Value` with a `hooks` object containing one entry per relevant
@@ -82,17 +106,7 @@ pub(crate) fn daemon_socket_arg(p: &HookCommandParams<'_>) -> String {
 /// process before each call of the agent's loop, and only that one tool's input is a question
 /// (`#home-inbox` 3/8).
 pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Value {
-    // (event, matcher)
-    let events: [(&str, &str); 8] = [
-        ("SessionStart", ""),
-        ("UserPromptSubmit", ""),
-        ("PostToolUse", ""),
-        ("Notification", ""),
-        ("PermissionRequest", ""),
-        ("PreToolUse", "AskUserQuestion"),
-        ("Stop", ""),
-        ("SessionEnd", ""),
-    ];
+    let events = CLAUDE_HOOK_EVENTS;
 
     let mut hooks_obj = serde_json::Map::new();
     for (event, matcher) in &events {

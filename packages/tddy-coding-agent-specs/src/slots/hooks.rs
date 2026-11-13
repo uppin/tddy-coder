@@ -3,7 +3,9 @@
 
 use std::path::{Path, PathBuf};
 
-use tddy_agent_backend::claude_hooks::{build_claude_hooks_settings, HookCommandParams};
+use tddy_agent_backend::claude_hooks::{
+    build_claude_hooks_settings, HookCommandParams, CLAUDE_INSTALLED_EVENTS,
+};
 
 use super::cursor::{CursorHooksJson, CURSOR_HOOKS_JSON};
 use super::SlotError;
@@ -20,7 +22,6 @@ pub trait HooksAdapter: Send + Sync {
     /// `conversation.rotation.hook` may name (`#orchestrators` 6/11). None for an adapter that
     /// installs no hooks.
     fn installed_events(&self) -> &'static [&'static str] {
-        // TODO(conversation-rotation): implement — each adapter answers the events it installs.
         &[]
     }
 
@@ -48,6 +49,10 @@ pub const CLAUDE_SETTINGS_LOCAL: &str = "claude-settings-local";
 impl HooksAdapter for ClaudeSettingsLocal {
     fn name(&self) -> &'static str {
         CLAUDE_SETTINGS_LOCAL
+    }
+
+    fn installed_events(&self) -> &'static [&'static str] {
+        CLAUDE_INSTALLED_EVENTS
     }
 
     fn render(&self, workdir: &Path, params: &HookCommandParams<'_>) -> (PathBuf, Vec<u8>) {

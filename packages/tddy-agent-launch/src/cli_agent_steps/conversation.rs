@@ -134,8 +134,11 @@ pub fn current_conversation_id<'a>(
     spec: &CodingAgentSpec,
 ) -> Option<&'a str> {
     match spec.conversation() {
-        // TODO(conversation-rotation): implement — the newest of `meta.agent_conversations`.
-        ConversationSlot::DaemonSessionId { .. } => Some(meta.session_id.as_str()),
+        ConversationSlot::DaemonSessionId { .. } => Some(
+            meta.agent_conversations
+                .last()
+                .map_or(meta.session_id.as_str(), |c| c.id.as_str()),
+        ),
         ConversationSlot::Minted { .. } => meta.cursor_chat_id.as_deref(),
         ConversationSlot::ResumeToken => meta.harness_resume_token.as_deref(),
         ConversationSlot::Worktree => None,
@@ -150,9 +153,11 @@ pub(crate) fn resumed_conversation(
     meta: &SessionMetadata,
 ) -> Result<LaunchConversation, Status> {
     Ok(match spec.conversation() {
-        ConversationSlot::DaemonSessionId { .. } => {
-            LaunchConversation::SessionId(meta.session_id.clone())
-        }
+        ConversationSlot::DaemonSessionId { .. } => LaunchConversation::SessionId(
+            current_conversation_id(meta, spec)
+                .unwrap_or(meta.session_id.as_str())
+                .to_string(),
+        ),
         ConversationSlot::Minted { adapter, .. } => match meta.cursor_chat_id.as_deref() {
             Some(chat) if !chat.trim().is_empty() => LaunchConversation::Minted(chat.to_string()),
             _ => {

@@ -21,8 +21,8 @@ use prost::Message as _;
 use serde::Deserialize;
 use std::io::Read;
 use tddy_core::{
-    activity_status_from_hook_with_tool, hook_event_asks_a_question, parse_hook_event,
-    SessionActivityStatus, ASK_USER_QUESTION_TOOL,
+    activity_status_from_hook_with_tool, hook_event_asks_a_question, hook_event_fields,
+    parse_hook_event, SessionActivityStatus, ASK_USER_QUESTION_TOOL,
 };
 use tddy_service::proto::activity::{
     AwaitQuestionOutcome, ReportAgentActivityRequest, ReportSessionStatusRequest,
@@ -164,6 +164,14 @@ pub fn session_status_request(
         tool_name.as_deref(),
     )?;
 
+    // Which conversation reports, and every top-level string field of the event: the daemon matches
+    // the session's agent spec's `conversation.rotation` against them (`#orchestrators` 6/11).
+    let agent_conversation_id = parsed
+        .as_ref()
+        .and_then(|ev| ev.session_id.clone())
+        .unwrap_or_default();
+    let hook_fields = hook_event_fields(stdin_json);
+
     // A permission or a question carries what is asked — the event, the tool and that tool's input —
     // and none of the agent's own words: the `Notification` hook that follows the same prompt says
     // those (`#home-inbox` 3/8).
@@ -182,9 +190,8 @@ pub fn session_status_request(
             hook_event_name: hook_event_name.to_string(),
             tool_name: tool_name.unwrap_or_default(),
             tool_input_json,
-            // TODO(conversation-rotation): implement — forward the event's conversation and fields.
-            agent_conversation_id: String::new(),
-            hook_fields: Default::default(),
+            agent_conversation_id,
+            hook_fields,
         });
     }
 
@@ -199,13 +206,11 @@ pub fn session_status_request(
         os_user: args.os_user.clone(),
         status: status.as_wire().to_string(),
         message,
-        hook_event_name: String::new(),
+        hook_event_name: hook_event_name.to_string(),
         tool_name: String::new(),
         tool_input_json: String::new(),
-        // TODO(conversation-rotation): implement — name the event, forward its conversation and
-        // fields (`hook_event_fields`).
-        agent_conversation_id: String::new(),
-        hook_fields: Default::default(),
+        agent_conversation_id,
+        hook_fields,
     })
 }
 

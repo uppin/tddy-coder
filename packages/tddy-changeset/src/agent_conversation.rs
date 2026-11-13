@@ -38,9 +38,11 @@ pub fn record_agent_conversation(
     conversations: &mut Vec<AgentConversation>,
     next: AgentConversation,
 ) -> bool {
-    // TODO(conversation-rotation): implement — append `next` unless its id is already listed.
-    let _ = (conversations, next);
-    false
+    if conversations.iter().any(|c| c.id == next.id) {
+        return false;
+    }
+    conversations.push(next);
+    true
 }
 
 #[cfg(test)]
