@@ -142,7 +142,7 @@ impl Held {
     fn visible_to(&self, scope: &ProjectNotificationScope) -> bool {
         self.os_user == scope.os_user
             && self.record.session_id != scope.exclude_session_id
-            && scope.started_by.as_ref().map_or(true, |orchestrator| {
+            && scope.started_by.as_ref().is_none_or(|orchestrator| {
                 self.record.orchestrator_session_id.as_ref() == Some(orchestrator)
             })
     }
