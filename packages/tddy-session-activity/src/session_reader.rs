@@ -36,6 +36,8 @@ pub struct SessionEntry {
     /// Whether the session's agent reads this host's filesystem directly
     /// ([`tddy_core::reads_host_paths`]).
     pub reads_host_paths: bool,
+    /// The mark an orchestrator put on this session, from `.session.yaml`.
+    pub orchestration_mark: Option<tddy_core::OrchestrationMark>,
 }
 
 /// Check if a process with the given PID is alive (same semantics as listing sessions).
@@ -101,6 +103,7 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             managed_codebase: metadata.managed_codebase,
             session_role: metadata.session_role.unwrap_or_default(),
             reads_host_paths,
+            orchestration_mark: metadata.orchestration_mark,
         });
     }
 

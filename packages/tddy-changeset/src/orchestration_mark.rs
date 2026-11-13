@@ -53,7 +53,14 @@ pub struct OrchestrationMark {
 /// resumed session is no longer paused. A `blocked` or `done` mark, and no mark, are left alone.
 /// Whether a mark was removed.
 pub fn clear_a_paused_mark(meta: &mut crate::SessionMetadata) -> bool {
-    // TODO(session-lifecycle-tools): implement — take a `paused` mark off `meta`.
-    let _ = meta;
-    false
+    if meta
+        .orchestration_mark
+        .as_ref()
+        .is_some_and(|mark| mark.mark == OrchestrationMarkKind::Paused)
+    {
+        meta.orchestration_mark = None;
+        true
+    } else {
+        false
+    }
 }

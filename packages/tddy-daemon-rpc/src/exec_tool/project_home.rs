@@ -57,6 +57,9 @@ use tddy_tool_engine::project_home_git_tools::is_project_home_git_tool;
 use tddy_tool_engine::project_home_inbox_tools::{
     execute_project_home_inbox_tool, is_project_home_inbox_tool,
 };
+use tddy_tool_engine::project_home_lifecycle_tools::{
+    execute_project_home_lifecycle_tool, is_project_home_lifecycle_tool,
+};
 use tddy_tool_engine::project_home_notify_tools::{
     execute_project_home_notify_tool, is_project_home_notify_tool,
 };
@@ -304,6 +307,8 @@ impl DaemonProjectHome {
             execute_project_home_inbox_tool(self, home, &req.tool_name, &req.args_json).await
         } else if is_project_home_turn_tool(&req.tool_name) {
             execute_project_home_turn_tool(self, home, &req.tool_name, &req.args_json).await
+        } else if is_project_home_lifecycle_tool(&req.tool_name) {
+            execute_project_home_lifecycle_tool(self, home, &req.tool_name, &req.args_json).await
         } else if is_project_home_terminal_tool(&req.tool_name) {
             execute_project_home_terminal_tool(self, home, &req.tool_name, &req.args_json).await
         } else {

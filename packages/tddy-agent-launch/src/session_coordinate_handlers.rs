@@ -426,8 +426,14 @@ fn session_entry_from_listing(
         managed_codebase: s.managed_codebase,
         session_role: s.session_role,
         reads_host_paths: s.reads_host_paths,
-        // TODO(session-lifecycle-tools): implement — list the mark `.session.yaml` records.
-        orchestration_mark: None,
+        orchestration_mark: s.orchestration_mark.map(|mark| {
+            tddy_service::proto::session::OrchestrationMark {
+                mark: mark.mark.as_str().to_string(),
+                note: mark.note.unwrap_or_default(),
+                set_by_session_id: mark.set_by_session_id,
+                at_unix_ms: mark.at_unix_ms,
+            }
+        }),
         // Inferred below from the session's own conversation
         // (docs/ft/daemon/agent-session-status.md). UNSPECIFIED with no activity is
         // the honest value for a session nothing has been observed on, and stays the

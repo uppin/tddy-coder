@@ -50,8 +50,12 @@ impl LaunchSessions {
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-        let metadata = read_session_metadata(&session_dir)
+        let mut metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
+        if tddy_core::clear_a_paused_mark(&mut metadata) {
+            tddy_core::session_metadata::write_session_metadata(&session_dir, &metadata)
+                .map_err(|e| Status::internal(format!("cannot clear the paused mark: {e}")))?;
+        }
         self.fast_forward_a_resumed_orchestrators_home(os_user, &metadata)?;
 
         // How the session resumes is read from the session type it records, as this host declares

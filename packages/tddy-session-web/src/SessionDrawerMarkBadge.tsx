@@ -8,7 +8,17 @@ import type { SessionEntry } from "tddy-client-web/gen/session_pb";
  * PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-session-lifecycle-tools.md
  */
 export function SessionDrawerMarkBadge({ session }: { session: SessionEntry }) {
-  // TODO(session-lifecycle-tools): implement — badge `session.orchestrationMark`, note on hover.
-  void session;
-  return null;
+  const mark = session.orchestrationMark;
+  if (!mark?.mark) {
+    return null;
+  }
+  return (
+    <span
+      data-testid={`sessions-drawer-item-mark-${session.sessionId}`}
+      title={mark.note || undefined}
+      className="flex-shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+    >
+      {mark.mark}
+    </span>
+  );
 }
