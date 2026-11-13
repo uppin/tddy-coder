@@ -18,7 +18,7 @@
 //! asked about this host's sessions.
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-session-turn-control.md.
+//! Feature doc: docs/ft/daemon/project-concept.md § Sending a session a turn.
 
 use async_trait::async_trait;
 use serde::Deserialize;

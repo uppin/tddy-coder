@@ -153,6 +153,8 @@ The stream is live-only; the **project notification log** is what a project-home
 - A bus subscriber on every daemon appends each `ATTENTION_REQUIRED` notification to the log of the
   project its session belongs to, read from the session's record. A session of no project is skipped;
   one whose owner or record cannot be resolved is a delivery failure the bus logs.
+- Each record names the orchestrator that started its session (`orchestrator_session_id`, from the
+  session's changeset when the record is appended), so a reader can ask for its own sessions only.
 - Records are numbered per project from 1 and never reused. The newest 1000 are kept per project.
 - The log is persisted as JSON lines at `<data dir>/projects/<project_id>/notifications.jsonl` and
   replayed when the daemon starts, so numbering continues across a restart. Once the file holds twice

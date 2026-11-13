@@ -291,8 +291,10 @@ and served the four start tools and the two answer tools, for its own project, a
 | `SendSessionKeys` | `session_id`, `daemon_instance_id?`, `text?`, `keys?` | `{sent_bytes}`: types `text`, then each named key in order, into the session's **main** terminal while this home session holds its lease. Refused, naming the holder, when it does not, and nothing is sent. See [Typing into a terminal](#typing-into-a-terminal) |
 | `AnswerSessionPermission` | `session_id`, `request_id`, `option_id` or `cancelled`, `message?`, `daemon_instance_id?` | `{session_id, request_id, answered_by, option_id, cancelled, at_unix_ms}`: answers the Claude permission prompt a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. `option_id` is `allow_once`, `reject_once` (with `message` saying why), or `allow_always` when Claude suggested a rule; `cancelled` leaves the prompt to the person at its terminal. Only the target's orchestrator may answer, and the first answer wins. See [Answering a permission prompt](#answering-a-permission-prompt) |
 | `AnswerSessionQuestion` | `session_id`, `request_id`, `answers: [{question_index, selected, other?}]`, `daemon_instance_id?` | `{session_id, request_id, answered_by, answers, at_unix_ms}`: answers the `AskUserQuestion` a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. Each answer names a question by index, the option labels chosen and, optionally, free text. Only the target's orchestrator may answer, the answers are checked against the question as asked, and the first answer wins. See [Answering a question](#answering-a-question) |
-| `WaitProjectNotifications` | `cursor?`, `timeout_ms?` (at most 20000, the default), `daemon_instance_id?` | `{items, next_cursor, has_more, timed_out, lost?}`: returns at once when the project's notification log holds records after `cursor`, otherwise holds until one arrives or `timeout_ms` passes. Without a cursor it waits for the next new record. See [Waiting for notifications](#waiting-for-notifications) |
-| `ReadProjectNotifications` | `cursor?`, `limit?` (50 by default, at most 200), `daemon_instance_id?` | `{items, next_cursor, has_more, clamped_to?, lost?}`: up to `limit` records after `cursor`, oldest first, without waiting; without a cursor, the newest page. See [Waiting for notifications](#waiting-for-notifications) |
+| `SendSessionMessage` | `session_id`, `text`, `daemon_instance_id?` | `{session_id, delivered_via}`: gives a running session's agent one new turn, delivered the way its agent spec's `turn_input` declares (`terminal_paste`: pasted into the **main** terminal, then the submit key). Takes **no** control lease. Refused, with nothing typed, for an agent that declares no `turn_input` (naming it), a stopped session (naming `ResumeSession`), and one waiting on a permission prompt or question (naming the answer tool). See [Sending a session a turn](#sending-a-session-a-turn) |
+| `ResumeSession` | `session_id`, `message?`, `daemon_instance_id?` | `{session_id, outcome}`: `resumed` — what the web UI's **Resume** does, then `message`, if any, as the resumed agent's first turn once its terminal has drawn — or `running` for a session already running, which is left alone. See [Sending a session a turn](#sending-a-session-a-turn) |
+| `WaitProjectNotifications` | `cursor?`, `timeout_ms?` (at most 20000, the default), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, timed_out, lost?}`: returns at once when the project's notification log holds records after `cursor`, otherwise holds until one arrives or `timeout_ms` passes. Without a cursor it waits for the next new record. See [Waiting for notifications](#waiting-for-notifications) |
+| `ReadProjectNotifications` | `cursor?`, `limit?` (50 by default, at most 200), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, clamped_to?, lost?}`: up to `limit` records after `cursor`, oldest first, without waiting; without a cursor, the newest page. See [Waiting for notifications](#waiting-for-notifications) |
 | `NotifyOperator` | `title`, `body_markdown`, `level?` (`info` (default), `success`, `warning`, `error`), `sound?` | `{published: true}`: notifies the operator in the agent's own words, as `tddy-tools notify` does for a session with a shell — one `AGENT` attention notification on every surface (Telegram, the desktop). The title is 1 to 200 characters after trimming and the body at most 2,000; either over its limit, or an unknown `level`, is refused saying why, never truncated. No session argument: the daemon publishes for the calling session alone, with the `hook_token` its `.session.yaml` records, through `ActivityService.ReportOperatorNotification` in process; the token never appears in the answer. A main that is not `claude-cli` / `cursor-cli`, or records no hook token, is refused naming the tool and why. See [Session notifications § A session with no shell](session-notifications.md#a-session-with-no-shell-notifyoperator) |
 
 - **Targets.** A target is a session id in the caller's project, with a worktree, on the host the
@@ -310,7 +312,7 @@ and served the four start tools and the two answer tools, for its own project, a
   limitation:** the name tie-break mirrors the browser's `localeCompare` for ASCII names (case-insensitive,
   lowercase first on a case-only difference, punctuation before digits before letters); for non-ASCII
   names it is an approximation and may order equal-sized worktrees differently from the screen.
-- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, `RefreshWorktreeDiskUsage`, `ReadSessionTerminal`, `ClaimSessionTerminal`, `SendSessionKeys`, `AnswerSessionPermission`, the two notification tools, every git tool) naming another host is
+- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, `RefreshWorktreeDiskUsage`, `ReadSessionTerminal`, `ClaimSessionTerminal`, `SendSessionKeys`, `SendSessionMessage`, `ResumeSession`, `AnswerSessionPermission`, the two notification tools, every git tool) naming another host is
   forwarded whole to that host over the peer forward and runs there unchanged: that host's path
   containment, activity gate and push identity apply. The host receiving it does not hold the calling
   session, so it confirms the caller **at the daemon that owns it**: it asks every other eligible
@@ -526,6 +528,36 @@ The rule is "type only while you hold it", since leases are never released.
   acknowledge, so a browser's un-acknowledged-input overlay is untouched.
 - Not offered: a release tool, mouse input, resizing, or typing into the home session itself.
 
+### Sending a session a turn
+
+`SendSessionMessage` and `ResumeSession` let an orchestrator drive a session the way an agent drives
+a subagent: give it a follow-up turn, resume it when it has stopped, and learn when the turn ends.
+
+- **Declared by the agent.** How a turn reaches a running agent is the agent spec's
+  `coding_agent.turn_input` ([Coding agent specs § Turn input](../../../packages/tddy-coding-agent-specs/docs/coding-agent-specs.md#turn-input-coding_agentturn_input)):
+  `terminal_paste` with a `submit_key` (claude-cli declares `Enter`), or `acp_prompt`. The daemon
+  reads the slot, never the agent's id. A session whose agent declares none is refused naming the
+  agent and `turn_input`.
+- **No lease.** A message is one turn, not control of the terminal: the daemon writes the text —
+  as a bracketed paste when the terminal enabled mode 2004 — and the submit key in one input write,
+  with offset 0, and no lease change is broadcast. A browser holding control keeps it. A person
+  typing at the same moment may interleave with the message.
+- **Refusals**, each before anything is typed: a stopped session (resume it with `ResumeSession`), a
+  session waiting on a permission prompt (`AnswerSessionPermission`) or a question
+  (`AnswerSessionQuestion`), an empty `text`, and a session without a live terminal or whose
+  terminal has not reported its size.
+- **Resume.** `ResumeSession` runs the web's Resume on the session's host. With a `message`, the
+  agent's `turn_input` is checked **before** resuming, so a message the agent cannot take never
+  leaves the session resumed with it dropped; the message is pasted once the resumed main terminal
+  shows something, within 60 s, or the call answers that it was resumed but the message was not
+  delivered. An empty message is no message.
+- **`acp_prompt` is not delivered yet.** No shipped agent declares it, and a session whose agent did
+  would be refused saying this host cannot deliver it.
+- **Learning that the turn ended.** The turn's end is the session's `attention_required` record in
+  the project notification log; `WaitProjectNotifications { started_by_me: true }` waits for the
+  caller's own sessions only. Read the result with `ReadSessionActivity`, `ReadSessionTranscript` or
+  `ReadSessionTerminal`.
+
 ### Answering a permission prompt
 
 A claude-cli session started by an orchestrator (its changeset's `orchestrator_session_id`) holds
@@ -597,7 +629,8 @@ an agent wrote it a notification.
   ([Session notifications](session-notifications.md#the-project-notification-log)) is appended to
   that project's log on the daemon that published it. A record carries `seq`, `session_id`, `label`,
   `kind`, `source`, `text`, the agent's own notification (`agent`) and the question with its
-  `request_id` (`question`), so `AnswerSessionPermission` can act on it, and `at_unix_ms`.
+  `request_id` (`question`), so `AnswerSessionPermission` can act on it, `at_unix_ms`, and the
+  session's orchestrator (`orchestrator_session_id`, left out for a session no orchestrator started).
 - **The cursor** is the decimal `seq` of the last record returned. Passing `next_cursor` back returns
   only what came after it, and it survives a daemon restart. The `next_cursor` of an empty page is
   the log's newest `seq` (`"0"` for a log that never held one), so polling from it neither repeats
@@ -609,6 +642,8 @@ an agent wrote it a notification.
   tool is inside a tool call, so it reports `Running` and [auto-stop](project-home-auto-stop.md)
   does not stop it mid-wait.
 - **Scope.** Records are those of the caller's operating-system user, never the home session's own.
+  `started_by_me: true` narrows them to the sessions whose orchestrator is the caller — what an
+  orchestrator waits on to learn that a session it drives finished its turn. A non-boolean is refused.
   One host per call: `daemon_instance_id` forwards it to that host's log, and there is no merged view
   across hosts.
 - **Tool guidance.** The descriptions tell the agent to wait with the last cursor, that a timeout means

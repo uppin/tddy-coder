@@ -4,7 +4,7 @@
 //! that cannot be delivered by is refused at load, naming the file; a spec without one loads as it
 //! did, and its sessions are refused a message.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-11-10-session-turn-control.md`.
+//! Feature doc: docs/ft/daemon/project-concept.md § Sending a session a turn.
 
 use std::path::{Path, PathBuf};
 

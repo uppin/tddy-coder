@@ -10,8 +10,8 @@
 //! `project_notification_log_acceptance.rs`. Every wait here is bounded.
 //!
 //! Feature doc: docs/ft/daemon/session-notifications.md, docs/ft/daemon/project-concept.md.
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-session-turn-control.md.
-//! Changeset: docs/dev/1-WIP/2026-11-10-session-turn-control.md
+//! Feature doc: docs/ft/daemon/project-concept.md § Sending a session a turn.
+//! History: docs/dev/changesets/2026-11-13-session-turn-control.md
 
 mod project_notification_log_support;
 

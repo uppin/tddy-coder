@@ -4,7 +4,7 @@
 //! Delivery and resume are the daemon's: here the port is a fake that records what it was asked and
 //! answers what it was given, so only the tools' rules are read.
 //!
-//! Changeset: docs/dev/1-WIP/2026-11-10-session-turn-control.md
+//! History: docs/dev/changesets/2026-11-13-session-turn-control.md
 
 use std::sync::Mutex;
 
