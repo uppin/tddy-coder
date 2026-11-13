@@ -17,7 +17,7 @@ export interface CreateSessionEffortFieldProps {
  * bundle names no agent's levels — with an empty choice first for the agent's own default, and
  * renders nothing for an agent without levels. Test id `create-session-effort-select`.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-11-10-start-effort.md.
+ * Feature: docs/ft/web/session-drawer.md § Fields.
  */
 export function CreateSessionEffortField({
   levels,

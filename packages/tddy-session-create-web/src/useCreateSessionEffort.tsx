@@ -6,7 +6,7 @@ import type { SelectableAgent } from "./selectableAgentOptions";
  * The effort the New-session form starts the selected agent at (`#orchestrators` 3/11), and its
  * picker. The levels and the preselected one are what the daemon served for the agent; until the
  * operator chooses, the agent's served default stands, and a choice the agent does not offer (left
- * from another agent's picker) reads as the empty one — the agent's own default.
+ * from another agent's picker) reads as the newly selected agent's served default.
  */
 export function useCreateSessionEffort(agent: SelectableAgent | undefined): {
   effort: string;

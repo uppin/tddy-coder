@@ -103,3 +103,10 @@ branch resolves and admits its roster seed before anything of the session is wri
 seed, plus its comment. The admission itself lives in `workspace_branch_start.rs`
 (`LaunchSessions::admitted_workspace_seed`). One branch and one early exit added; nesting not re-derived.
 Not split: the remaining seams are the early-return guards the engine refuses (E4). Not claimed by any PR.
+
+## Measurement update 2026-11-13 — effort start check
+
+Touched by #880 (`#orchestrators` 3/11), against `origin/feature/orchestrators/project-stack-store`
+(`174bea803`): **+1 line** — `refuse_an_effort_the_agent_cannot_take(&req, …)?` beside
+`refuse_a_cli_start_without_a_model`, one early exit (`?`) added, no branch or nesting. The check
+itself lives in `start_request_checks.rs`. Not split: same E4 seams as above. Not claimed by any PR.
