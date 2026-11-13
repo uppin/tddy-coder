@@ -38,20 +38,10 @@ impl ProjectHomeTurnPort for DaemonProjectHome {
             ));
         }
         self.refuse_while_waiting_on_an_answer(target)?;
-        match slot {
-            TurnInputSlot::TerminalPaste { submit_key } => {
-                self.paste_and_submit(&target.session_id, text, &submit_key)
-                    .await?;
-                Ok(TurnDelivery::TerminalPaste)
-            }
-            // TODO(acp-turn-input): no ACP agent declares `acp_prompt` yet, so the daemon holds no
-            // route to a session's ACP connection; the delivery is covered by the tool-engine unit
-            // test with a fake port only (changeset decision, 2026-11-12).
-            TurnInputSlot::AcpPrompt => Err(format!(
-                "session {}'s agent declares turn_input acp_prompt, which this host cannot deliver yet",
-                target.session_id
-            )),
-        }
+        let submit_key = terminal_submit_key(&target.session_id, slot)?;
+        self.paste_and_submit(&target.session_id, text, &submit_key)
+            .await?;
+        Ok(TurnDelivery::TerminalPaste)
     }
 
     /// Resume `target` as the web's Resume does, then give `message`, if any, to the resumed agent as
@@ -66,8 +56,11 @@ impl ProjectHomeTurnPort for DaemonProjectHome {
         }
         // Refused before anything is resumed: a message the agent cannot take must not leave the
         // session resumed with the message dropped.
-        let slot = match message {
-            Some(_) => Some(self.turn_input_of(target)?),
+        let submit_key = match message {
+            Some(_) => Some(terminal_submit_key(
+                &target.session_id,
+                self.turn_input_of(target)?,
+            )?),
             None => None,
         };
         self.launch
@@ -77,23 +70,28 @@ impl ProjectHomeTurnPort for DaemonProjectHome {
             }))
             .await
             .map_err(|status| format!("cannot resume: {}", status.message()))?;
-        if let (Some(message), Some(slot)) = (message, slot) {
-            match slot {
-                TurnInputSlot::TerminalPaste { submit_key } => {
-                    self.until_the_terminal_has_drawn(&target.session_id).await?;
-                    self.paste_and_submit(&target.session_id, message, &submit_key)
-                        .await
-                        .map_err(|e| format!("resumed, but the message was not delivered: {e}"))?;
-                }
-                TurnInputSlot::AcpPrompt => {
-                    return Err(format!(
-                        "resumed, but session {}'s agent declares turn_input acp_prompt, which this host cannot deliver yet",
-                        target.session_id
-                    ))
-                }
-            }
+        if let (Some(message), Some(submit_key)) = (message, submit_key) {
+            self.until_the_terminal_has_drawn(&target.session_id)
+                .await?;
+            self.paste_and_submit(&target.session_id, message, &submit_key)
+                .await
+                .map_err(|e| format!("resumed, but the message was not delivered: {e}"))?;
         }
         Ok(ResumeOutcome::Resumed)
+    }
+}
+
+/// The submit key of a `terminal_paste` slot, or the refusal of an `acp_prompt` one.
+fn terminal_submit_key(session_id: &str, slot: TurnInputSlot) -> Result<String, String> {
+    match slot {
+        TurnInputSlot::TerminalPaste { submit_key } => Ok(submit_key),
+        // TODO(acp-turn-input): no ACP agent declares `acp_prompt` yet, so the daemon holds no
+        // route to a session's ACP connection; the delivery is covered by the tool-engine unit
+        // test with a fake port only (developer decision, 2026-11-12;
+        // docs/dev/todo/2026-11-13-acp-turn-input-is-not-delivered.md).
+        TurnInputSlot::AcpPrompt => Err(format!(
+            "session {session_id}'s agent declares turn_input acp_prompt, which this host cannot deliver yet"
+        )),
     }
 }
 
