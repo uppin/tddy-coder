@@ -490,6 +490,7 @@ fn create_fake_sessions(base: &std::path::Path, count: usize) -> Vec<String> {
             session_role: None,
             tmux_session: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         ids.push(id);
@@ -772,6 +773,7 @@ fn an_agent_session(
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 }

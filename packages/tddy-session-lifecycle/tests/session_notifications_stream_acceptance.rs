@@ -112,6 +112,7 @@ fn write_claude_cli_session(sessions_base: &Path, session_id: &str, repo_path: &
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 }

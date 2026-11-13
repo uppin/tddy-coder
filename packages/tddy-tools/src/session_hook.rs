@@ -182,6 +182,9 @@ pub fn session_status_request(
             hook_event_name: hook_event_name.to_string(),
             tool_name: tool_name.unwrap_or_default(),
             tool_input_json,
+            // TODO(conversation-rotation): implement — forward the event's conversation and fields.
+            agent_conversation_id: String::new(),
+            hook_fields: Default::default(),
         });
     }
 
@@ -199,6 +202,10 @@ pub fn session_status_request(
         hook_event_name: String::new(),
         tool_name: String::new(),
         tool_input_json: String::new(),
+        // TODO(conversation-rotation): implement — name the event, forward its conversation and
+        // fields (`hook_event_fields`).
+        agent_conversation_id: String::new(),
+        hook_fields: Default::default(),
     })
 }
 

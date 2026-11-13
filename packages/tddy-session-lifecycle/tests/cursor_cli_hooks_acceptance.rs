@@ -98,6 +98,7 @@ fn write_cursor_cli_session(session_dir: &std::path::Path, hook_token: &str) {
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }
@@ -204,6 +205,7 @@ async fn cursor_cli_report_session_status_rejects_tool_session_type() {
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
     let service = minimal_service(sessions_base);

@@ -279,6 +279,7 @@ fn a_session(session_id: &str, session_type: &str, managed: bool) -> SessionMeta
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     }
 }
 

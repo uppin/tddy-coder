@@ -92,7 +92,7 @@ pub(crate) async fn start_conversation(
     } = start;
     let conversation = spec.conversation();
     match &conversation {
-        ConversationSlot::DaemonSessionId => {
+        ConversationSlot::DaemonSessionId { .. } => {
             Ok(LaunchConversation::SessionId(session_id.to_string()))
         }
         ConversationSlot::Worktree => Ok(LaunchConversation::Worktree),
@@ -123,6 +123,25 @@ pub(crate) async fn start_conversation(
     }
 }
 
+/// The id of the conversation `meta`'s agent is in now, as `spec`'s `coding_agent.conversation`
+/// identifies it (`#orchestrators` 6/11): for a `daemon_session_id` conversation the newest id in
+/// `agent_conversations` — the one the agent rotated to on `/clear` — or the session's own id when
+/// the record lists none; the recorded minted id; the recorded resume token; `None` for a worktree
+/// conversation. What a resume binds and what the transcript and usage readers open.
+#[must_use]
+pub fn current_conversation_id<'a>(
+    meta: &'a SessionMetadata,
+    spec: &CodingAgentSpec,
+) -> Option<&'a str> {
+    match spec.conversation() {
+        // TODO(conversation-rotation): implement — the newest of `meta.agent_conversations`.
+        ConversationSlot::DaemonSessionId { .. } => Some(meta.session_id.as_str()),
+        ConversationSlot::Minted { .. } => meta.cursor_chat_id.as_deref(),
+        ConversationSlot::ResumeToken => meta.harness_resume_token.as_deref(),
+        ConversationSlot::Worktree => None,
+    }
+}
+
 /// The conversation a resume of `meta` binds: the session id, the recorded minted id, the worktree,
 /// or the recorded resume token. A minted conversation the session never recorded is refused here;
 /// [`resumed_or_adopted_conversation`] adopts one instead.
@@ -131,7 +150,9 @@ pub(crate) fn resumed_conversation(
     meta: &SessionMetadata,
 ) -> Result<LaunchConversation, Status> {
     Ok(match spec.conversation() {
-        ConversationSlot::DaemonSessionId => LaunchConversation::SessionId(meta.session_id.clone()),
+        ConversationSlot::DaemonSessionId { .. } => {
+            LaunchConversation::SessionId(meta.session_id.clone())
+        }
         ConversationSlot::Minted { adapter, .. } => match meta.cursor_chat_id.as_deref() {
             Some(chat) if !chat.trim().is_empty() => LaunchConversation::Minted(chat.to_string()),
             _ => {

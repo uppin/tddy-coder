@@ -5,6 +5,7 @@
 //! Extracted from `tddy-core`, which re-exports every module and root item at its old path.
 
 pub mod agent_activity;
+pub mod agent_conversation;
 pub mod branch_worktree_intent;
 pub mod changeset;
 pub mod elapsed_format;
@@ -29,6 +30,9 @@ pub mod stack_fixtures;
 use tddy_session_store::error::WorkflowError;
 use tddy_session_store::{atomic_file, error, output};
 
+pub use agent_conversation::{
+    record_agent_conversation, AgentConversation, AgentConversationReason,
+};
 pub use changeset::{
     append_session_and_update_state, get_session_for_tag, merge_persisted_workflow_into_context,
     read_changeset, resolve_agent_from_changeset, resolve_model, update_state, write_changeset,
@@ -44,7 +48,7 @@ pub use elapsed_format::format_elapsed_compact;
 pub use orchestration_mark::{clear_a_paused_mark, OrchestrationMark, OrchestrationMarkKind};
 pub use session_activity::{
     activity_status_from_hook, activity_status_from_hook_with_tool, hook_event_asks_a_question,
-    parse_hook_event, HookEvent, SessionActivityStatus, ASK_USER_QUESTION_TOOL,
+    hook_event_fields, parse_hook_event, HookEvent, SessionActivityStatus, ASK_USER_QUESTION_TOOL,
 };
 pub use session_agent::{
     AgentId, AgentIdError, AgentKindRecord, AgentPlacementRecord, SessionAgentRecord,

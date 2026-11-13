@@ -347,6 +347,7 @@ async fn cursor_cli_session_enrichment_reads_from_metadata() {
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     tddy_core::write_session_metadata(&session_dir, &meta).unwrap();
 

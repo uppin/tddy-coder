@@ -16,6 +16,14 @@ pub trait HooksAdapter: Send + Sync {
     /// The hooks file for `params`, under the agent's working directory `workdir`, with its bytes.
     fn render(&self, workdir: &Path, params: &HookCommandParams<'_>) -> (PathBuf, Vec<u8>);
 
+    /// The hook events the file this adapter renders installs — what a spec's
+    /// `conversation.rotation.hook` may name (`#orchestrators` 6/11). None for an adapter that
+    /// installs no hooks.
+    fn installed_events(&self) -> &'static [&'static str] {
+        // TODO(conversation-rotation): implement — each adapter answers the events it installs.
+        &[]
+    }
+
     /// [`Self::render`], or why `params` cannot be rendered by this adapter. What a launcher calls
     /// (`#agent-tools 7/12`): an adapter that reports over the daemon's agent-tool socket refuses
     /// params without one ([`SlotError::NoDaemonSocket`]) instead of falling back to `daemon_url`.
