@@ -217,6 +217,7 @@ fn a_managed_session(session_id: &str) -> SessionMetadata {
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     }
 }
 

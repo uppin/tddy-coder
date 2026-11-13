@@ -343,6 +343,7 @@ fn an_exited_host_session(sessions_base: &Path, worktree: &Path) {
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 }

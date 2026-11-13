@@ -23,6 +23,7 @@
 
 mod answer;
 mod caller;
+mod lifecycle;
 mod listing;
 mod notify;
 mod port;

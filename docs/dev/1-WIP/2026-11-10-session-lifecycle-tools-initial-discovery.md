@@ -376,3 +376,25 @@ tool. DeleteSession RPC (:48, `session_deletion.rs`): no exec tool. RemoveWorktr
 RestoreSessionWorktree RPCs (worktree.proto:13,24,25): no exec tool. Send a turn to a running session:
 only `SendSessionKeys` (+claim); `PromptAgentConversation` is roster-only. Stop: `TerminateSession` exists.
 Pause/status marker: NOT FOUND.
+
+## Exploration 2 — pass 2 contract (6c–6f, 2026-11-12/13)
+
+- **The mark field ripples.** `SessionMetadata` has no `Default` and is built by struct literal at
+  ≈56 sites in 9 crates (mostly tests); each got `orchestration_mark: None`, found by
+  `cargo check --all-targets` rather than grep — the `tmux_session` precedent (#814, 55 sites).
+- **Restore is session-addressed.** `RestoreSessionWorktree` (`tddy-worktree-service/src/service.rs:500`)
+  takes a `session_id` and re-cuts the worktree from the session's changeset. A deleted worktree is
+  not in `ListWorktrees`, so "by path as ListWorktrees lists it" cannot hold for Restore; the
+  contract first resolved `path` to the session that recorded it; the developer chose
+  `session_id` instead (2026-11-13). The home worktree is the project's home path,
+  `home_worktree_path(worktree_dir(main_repo), project_id)`, whoever calls (developer, 2026-11-13).
+- **Web Delete terminates, it does not refuse.** `delete_session_directory` (`session_deletion.rs:246`)
+  kills a live pid; `DeleteSession`'s refusal of a running session is the tool's own check.
+- **n4's turn tools are unwired** (not in `is_project_home_tool`, the target list, the catalogue or
+  the dispatch); n5 follows suit, so every acceptance call today falls through
+  `ExecToolRpcHandler::run_locally` to the local runner and is refused there.
+- **Closed-world lists** green must extend: `tddy-tools/src/exec_tool_admission.rs`,
+  `tddy-tool-engine/src/read_only.rs` (the `mcp__tddy-tools__*` list),
+  `tddy-daemon-rpc/tests/project_home_session_tools_acceptance.rs`.
+- **Pausing reuses Terminate.** The tool records the mark, then calls the existing
+  `ProjectHomePort::terminate_session` for an active target; no new stop path.

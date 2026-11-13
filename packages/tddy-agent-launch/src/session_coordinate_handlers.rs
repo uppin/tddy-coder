@@ -426,6 +426,8 @@ fn session_entry_from_listing(
         managed_codebase: s.managed_codebase,
         session_role: s.session_role,
         reads_host_paths: s.reads_host_paths,
+        // TODO(session-lifecycle-tools): implement — list the mark `.session.yaml` records.
+        orchestration_mark: None,
         // Inferred below from the session's own conversation
         // (docs/ft/daemon/agent-session-status.md). UNSPECIFIED with no activity is
         // the honest value for a session nothing has been observed on, and stays the

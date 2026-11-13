@@ -270,6 +270,7 @@ impl SessionMetadataBuilder {
             managed_codebase: false,
             session_role: None,
             tmux_session: None,
+            orchestration_mark: None,
         }
     }
 }

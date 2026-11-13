@@ -545,6 +545,7 @@ mod tests {
             tmux_session: None,
             cursor_chat_id: None,
             harness_resume_token: None,
+            orchestration_mark: None,
         };
         tddy_core::write_session_metadata(session_dir, &meta).unwrap();
     }
