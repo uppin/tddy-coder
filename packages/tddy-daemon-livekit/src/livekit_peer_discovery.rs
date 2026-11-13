@@ -931,6 +931,7 @@ async fn connect_common_room_publish_metadata(
     VecDeque<RoomEvent>,
     String,
 )> {
+    tddy_livekit::pin_webrtc_runtime();
     let (room, mut events) = Room::connect(
         url,
         token,
