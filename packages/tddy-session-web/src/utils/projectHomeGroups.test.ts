@@ -15,6 +15,7 @@ import {
   projectHomeSlot,
   projectHomesOnHost,
   withProjectHomeGroups,
+  withEveryProjectGroup,
   PROJECT_HOME_ROLE,
 } from "./projectHomeGroups";
 import type { ProjectSessionGroup } from "./sessionProjectGroups";
@@ -64,6 +65,37 @@ describe("withProjectHomeGroups", () => {
     ]);
 
     expect(keys(groups)).toEqual([ALPHA.projectId]);
+  });
+});
+
+describe("withEveryProjectGroup (#orchestrators 8/11)", () => {
+  it("adds an empty group for every listed project without one, in name order, before Other", () => {
+    // Given alpha and gamma have sessions; beta has neither a session nor a main
+    const input = [aGroup(ALPHA, "a1"), aGroup(GAMMA, "g1"), OTHER];
+
+    // When
+    const groups = withEveryProjectGroup(input, [ALPHA, BETA, GAMMA]);
+
+    // Then
+    expect(keys(groups)).toEqual([ALPHA.projectId, BETA.projectId, GAMMA.projectId, null]);
+    expect(groups[1]).toEqual({ projectId: BETA.projectId, label: BETA.name, sessions: [] });
+  });
+
+  it("a project with no session at all still gets its group", () => {
+    // When
+    const groups = withEveryProjectGroup([], [BETA]);
+
+    // Then
+    expect(keys(groups)).toEqual([BETA.projectId]);
+  });
+
+  it("does not duplicate a project that already has a group", () => {
+    // When
+    const groups = withEveryProjectGroup([aGroup(ALPHA, "a1")], [ALPHA]);
+
+    // Then
+    expect(keys(groups)).toEqual([ALPHA.projectId]);
+    expect(groups[0].sessions.map((s) => s.sessionId)).toEqual(["a1"]);
   });
 });
 

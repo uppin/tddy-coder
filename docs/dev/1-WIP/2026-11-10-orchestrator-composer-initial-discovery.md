@@ -14,6 +14,29 @@
 - Screenshot (developer, 2026-11-10): heading "What should we build next?", centred box, controls row
   under the box, context row (host · project · worktree · branch) under that.
 
+## Exploration 2 — pass-2 re-verification (2026-11-14)
+
+Re-read every State A fact after n1 (`orchestrator-role`) and n3 (`start-effort`) went green.
+
+- n1: `CreateSessionOrchestratorField.tsx` (`ORCHESTRATOR_SESSION_ROLE = "orchestrator"`),
+  `useCreateSessionOrchestrator.tsx`, and a module-private `buildOrchestratorStartRequest(form,
+  features)` in `createSessionRequest.ts:235-246` that sends no attachments. Daemon side:
+  `tddy-agent-launch/src/orchestrator_start.rs` admits the role from a person and places it on the home
+  worktree; `project_home_start_spec.rs:38-74` refuses sandbox and off-home placements only.
+- n3: `CreateSessionEffortField.tsx`, `useCreateSessionEffort.tsx` (levels from
+  `SelectableAgent.effortLevels`), `effort` in `CreateSessionFormValues` and `cliAgentChoices`; its
+  change left `projectHomeStartSpec.test.ts` red (pins the spec's keys without `effort`).
+- `projectHomeGroups.ts`: `withProjectHomeGroups` moved to :81 (n1 added `ORCHESTRATOR_ROLE` :41).
+- `CreateSessionPane.tsx` 591 lines.
+- Test seams: session-create-web `cy.mountWithClients(jsx, backend, { clients: aClientsPortDouble(backend,
+  { daemons }) })` makes `useDaemonClient` / `useDaemons` answer from one in-memory backend; session-web
+  `mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), aSessionServiceBackend(...))`, with
+  `.onUnary` overriding a method `aSessionServiceBackend` implements. Both packages register the
+  `startSession` → `streamStartSession` fallback, and `callsTo(startSession)` records either path.
+- `servedAgentWire` returns `Partial<AgentInfo>` (with `$typeName`), so a `ListAgents` stub built from
+  it does not typecheck in either package — every existing spec carries the same error; the new specs
+  inherit exactly that one and type everything else with `create(...Schema, …)`.
+
 ## Exploration 1 — whole-work discovery for `#orchestrators` (copied 2026-11-10)
 
 The full dump the stack was planned from: interview record, combined conclusions and four Explore

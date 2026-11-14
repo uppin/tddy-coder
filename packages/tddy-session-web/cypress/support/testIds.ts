@@ -312,6 +312,8 @@ export const TEST_IDS = {
    */
   createSessionPrStackBaseSessionSelect: "create-session-pr-stack-base-session-select",
   createSessionModelSelect: "create-session-model-select",
+  /** Effort <select> beside Model: the agent's served `effort_levels` (`#orchestrators` 3/11). */
+  createSessionEffortSelect: "create-session-effort-select",
   /** Why the Project picker has nothing to offer: `ListProjects` failed. Never an empty list. */
   createSessionProjectsLoadError: "create-session-projects-load-error",
   /** Why no tool is selected for a tool session: `ListTools` failed. */
@@ -384,6 +386,14 @@ export const TEST_IDS = {
   createSessionCancelBtn: "create-session-cancel-btn",
   createSessionSubmitBtn: "create-session-submit-btn",
   createSessionError: "create-session-error",
+  // Orchestrator composer (`#orchestrators` 8/11) — opened by a project header's "+" at
+  // `/sessions/project/:projectId/new`; the pane itself is `sessionsProjectComposer(projectId)`.
+  /** The composer's prompt box: the orchestrator's first prompt. */
+  sessionsProjectComposerInput: "sessions-project-composer-input",
+  /** Starts the orchestrator (as Enter in the box does). */
+  sessionsProjectComposerSend: "sessions-project-composer-send",
+  /** The daemon's reason a start was refused, shown under the box. */
+  sessionsProjectComposerError: "sessions-project-composer-error",
   // Sessions drawer — branch-conflict prompt. Shown when the daemon refuses the creation because
   // another session already owns the requested branch (`StartSessionResponse.branch_conflict`).
   // See docs/ft/daemon/session-branch-conflict.md.
@@ -1151,3 +1161,13 @@ export const createSessionAgentSelectOption = (optionValue: string) =>
 /** One error row for a host whose agent catalog (`ListAgents`) could not be read. */
 export const createSessionAgentSelectHostError = (daemonInstanceId: string) =>
   `create-session-agent-select-host-error-${safeTestIdPart(daemonInstanceId)}`;
+
+/** `[data-testid="sessions-project-composer-<projectId>"]` — the orchestrator composer for a project
+ *  (`#orchestrators` 8/11), opened by its header's "+" at `/sessions/project/:projectId/new`. */
+export const sessionsProjectComposer = (projectId: string) =>
+  `sessions-project-composer-${projectId}`;
+
+/** `[data-testid="sessions-drawer-project-new-<projectId>"]` — the "+" on a project group's header
+ *  that opens the orchestrator composer for that project (`#orchestrators` 8/11). */
+export const sessionsDrawerProjectNew = (projectId: string) =>
+  `sessions-drawer-project-new-${projectId}`;
