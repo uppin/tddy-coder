@@ -195,6 +195,36 @@ export function PrStackScreen({
     () => parseStackPlan(stackPlanOverride ?? session.stackPlanJson),
     [stackPlanOverride, session.stackPlanJson],
   );
+  // The stack this session's changeset names, addressed by id (`#orchestrators` 9/11): every
+  // planned-PR call names it when the session carries one, and the panel is loaded by it.
+  const stackAddress = session.stackId
+    ? {
+        projectId: session.projectId,
+        stackId: session.stackId,
+        daemonInstanceId: session.daemonInstanceId,
+      }
+    : undefined;
+  const stackTargetFields = stackAddress
+    ? { stack: stackAddress }
+    : { sessionId: session.sessionId };
+  // Load the panel by the stack's id when the session names one, so the list is the store's
+  // record rather than the list snapshot the session happened to carry.
+  useEffect(() => {
+    if (!prStackClient || !stackAddress) return;
+    let cancelled = false;
+    prStackClient
+      .getProjectStack({ sessionToken, stack: stackAddress })
+      .then((res) => {
+        if (!cancelled && res.stackPlanJson) setStackPlanOverride(res.stackPlanJson);
+      })
+      .catch(() => {
+        // The session's own snapshot stays on screen; a failed read must not blank the panel.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prStackClient, sessionToken, session.stackId]);
   // Every session in this stack, on any host, in the one shape the view joins on (D38).
   const childSessions = useMemo(
     () => stackChildSessions(sessions, sessionMetadataBySessionId),
@@ -258,7 +288,7 @@ export function PrStackScreen({
   const { resolutionByBranch: branchResolutionByBranch, setResolution } = useQueryBranch(
     prStackClient,
     sessionToken,
-    session.sessionId,
+    stackAddress ? { stack: stackAddress } : { sessionId: session.sessionId },
     branchQueries,
   );
 
@@ -387,7 +417,7 @@ export function PrStackScreen({
     if (!prStackClient) return;
     const res = await prStackClient.addPlannedPr({
       sessionToken,
-      sessionId: session.sessionId,
+      ...stackTargetFields,
       title: input.title,
       description: input.description,
       branchSuggestion: input.branchSuggestion,
@@ -442,7 +472,7 @@ export function PrStackScreen({
     try {
       const res = await prStackClient.repointPlannedPr({
         sessionToken,
-        sessionId: session.sessionId,
+        ...stackTargetFields,
         nodeId,
         targetBaseBranch: resolveRepointTarget(
           node,
@@ -475,7 +505,7 @@ export function PrStackScreen({
     try {
       const res = await prStackClient.reorderPlannedPr({
         sessionToken,
-        sessionId: session.sessionId,
+        ...stackTargetFields,
         nodeId,
         direction,
       });
@@ -515,7 +545,7 @@ export function PrStackScreen({
     try {
       const res = await prStackClient.pullBaseIntoBranch({
         sessionToken,
-        sessionId: session.sessionId,
+        ...stackTargetFields,
         nodeId,
         baseBranch: pull.baseBranch,
         strategy: pull.strategy,

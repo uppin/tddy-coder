@@ -104,9 +104,14 @@ export interface SessionsProjectStackRoute {
  * `/sessions/project/:projectId/stack/:stackId`; `null` for any other path.
  */
 export function parseSessionsProjectStack(pathname: string): SessionsProjectStackRoute | null {
-  // TODO(stack-web-by-id): implement
-  void pathname;
-  return null;
+  const prefix = `${SESSIONS_PROJECT_ROUTE}/`;
+  if (!pathname.startsWith(prefix)) return null;
+  const segments = pathname.slice(prefix.length).split("/");
+  if (segments.length !== 3 || segments[1] !== PROJECT_STACK_SEGMENT) return null;
+  const projectId = decodeSegment(segments[0] === "" ? null : segments[0]);
+  const stackId = decodeSegment(segments[2] === "" ? null : segments[2]);
+  if (projectId === null || stackId === null) return null;
+  return { projectId, stackId };
 }
 
 /** Builds a `/sessions/:id` deep-link path for the given session id. */
@@ -160,7 +165,8 @@ export function isSessionsDrawerPath(pathname: string): boolean {
     pathname === SESSIONS_DRAWER_ROUTE ||
     singleSegmentAfter(pathname, SESSIONS_DRAWER_ROUTE) !== null ||
     parseSessionsProjectHomeSetupProjectId(pathname) !== null ||
-    parseSessionsProjectNew(pathname) !== null
+    parseSessionsProjectNew(pathname) !== null ||
+    parseSessionsProjectStack(pathname) !== null
   );
 }
 

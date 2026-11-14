@@ -434,7 +434,8 @@ fn session_entry_from_listing(
                 at_unix_ms: mark.at_unix_ms,
             }
         }),
-        // TODO(stack-web-by-id): implement — the stack id the session's changeset names.
+        // Populated by `apply_session_list_status_to_proto` below from the changeset's
+        // `stack_id`; left empty here so the enrichment is the single source of truth.
         stack_id: String::new(),
         // Inferred below from the session's own conversation
         // (docs/ft/daemon/agent-session-status.md). UNSPECIFIED with no activity is

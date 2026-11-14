@@ -44,6 +44,9 @@ pub struct SessionListStatusDisplay {
     /// JSON-serialized PR stack (the PR DAG) the session's `stack_id` names, present only on
     /// orchestrator sessions. Empty string when the session has none.
     pub stack_plan_json: String,
+    /// The stack the session's changeset names (`Changeset.stack_id`, proto field 38). Empty when
+    /// the session names none.
+    pub stack_id: String,
     /// The session's git branch (from `Changeset.branch`). Empty when the session has no branch
     /// yet. Lets the PR-Stack view resolve the in-progress child session for a planned node by
     /// branch.
@@ -63,6 +66,7 @@ impl SessionListStatusDisplay {
             orchestrator_session_id: String::new(),
             recipe: String::new(),
             stack_plan_json: String::new(),
+            stack_id: String::new(),
             branch: String::new(),
         }
     }
@@ -199,6 +203,10 @@ pub fn session_list_status_from_session_dir(
             orchestrator_session_id: String::new(),
             recipe: String::new(),
             stack_plan_json: String::new(),
+            stack_id: read_changeset(session_dir)
+                .ok()
+                .and_then(|c| c.stack_id)
+                .unwrap_or_default(),
             branch: read_changeset(session_dir)
                 .ok()
                 .and_then(|c| c.branch)
@@ -240,6 +248,7 @@ pub fn session_list_status_from_session_dir(
                 .unwrap_or_default(),
             recipe: changeset.recipe.clone().unwrap_or_default(),
             stack_plan_json: stack_plan_json_for_changeset(session_dir, &changeset),
+            stack_id: changeset.stack_id.clone().unwrap_or_default(),
             branch: changeset.branch.clone().unwrap_or_default(),
         });
     };
@@ -273,6 +282,7 @@ pub fn session_list_status_from_session_dir(
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
         stack_plan_json: stack_plan_json_for_changeset(session_dir, &changeset),
+        stack_id: changeset.stack_id.clone().unwrap_or_default(),
         branch: changeset.branch.clone().unwrap_or_default(),
     })
 }
@@ -315,6 +325,7 @@ pub fn apply_session_list_status_to_proto(
     entry.activity_status = status.activity_status;
     entry.orchestrator_session_id = status.orchestrator_session_id;
     entry.stack_plan_json = status.stack_plan_json;
+    entry.stack_id = status.stack_id;
     entry.branch = status.branch;
     entry.pending_elicitation =
         crate::pending_elicitation::pending_elicitation_for_session_dir(session_dir);

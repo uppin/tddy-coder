@@ -3,6 +3,7 @@
 use super::branch_legs::{base_sync_unavailable, base_sync_view, worktree_leg};
 use super::guards::{require_pr_stack_orchestrator, token_for_repoint, validate_repoint_target};
 use super::pr_status::owner_repo_from_repo_root;
+use super::project_stacks::{require_orchestrator_unless_stacked, stack_target, StackTarget};
 use super::{wire_same_anyhow, PrStackRpcHandler};
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -41,21 +42,38 @@ impl PrStackHandler for PrStackRpcHandler {
             req.session_id.trim(),
             req.title
         );
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = &self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let target = stack_target(req.stack.as_ref(), &req.session_id)?;
+        if let Some(answered) = self
+            .forward_if_addressed::<_, AddPlannedPrResponse>("AddPlannedPr", &target, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
         if req.title.trim().is_empty() {
             return Err(Status::invalid_argument("title is required"));
         }
+        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
+        let _ = &github_user;
+        let os_user = &os_user_owned;
         let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        validate_session_id_segment(&req.session_id)
+        if let StackTarget::Address(address) = &target {
+            let added = self.add_planned_pr_to_store(&sessions_base, address, &req)?;
+            log::info!(
+                "AddPlannedPr: success stack={} node_id={} title={:?}",
+                address.stack_id,
+                added.node_id,
+                req.title
+            );
+            return Ok(Response::new(added));
+        }
+        let StackTarget::Session(session_id) = &target else {
+            unreachable!("stack_target yields an address or a session")
+        };
+        validate_session_id_segment(session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-        require_pr_stack_orchestrator(&session_dir)?;
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        require_orchestrator_unless_stacked(&session_dir)?;
 
         let branch_suggestion =
             (!req.branch_suggestion.trim().is_empty()).then(|| req.branch_suggestion.clone());
@@ -98,27 +116,25 @@ impl PrStackHandler for PrStackRpcHandler {
         request: Request<GetPrStatusRequest>,
     ) -> Result<Response<GetPrStatusResponse>, Status> {
         let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = &self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let target = stack_target(req.stack.as_ref(), &req.session_id)?;
+        if let Some(answered) = self
+            .forward_if_addressed::<_, GetPrStatusResponse>("GetPrStatus", &target, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
+        let os_user = &os_user_owned;
         if req.branch.trim().is_empty() {
             return Err(Status::invalid_argument("branch is required"));
         }
         let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        validate_session_id_segment(&req.session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-        require_pr_stack_orchestrator(&session_dir)?;
-
         // An orchestrator never gets a worktree, so its `changeset.yaml` records no checkout and only
         // `.session.yaml` names the one it plans over. `pr_status_for_caller` resolves the GitHub
         // namespace from that checkout's remote and reports a lookup it cannot perform — including
         // one over an unknown checkout — as unavailable rather than failing this call.
-        let repo_root = tddy_core::repo_root_for_session(&session_dir);
+        let repo_root = self.repo_root_for_target(&sessions_base, os_user, &target)?;
 
         let status = self
             .pr_status_for_caller(&github_user, repo_root.as_deref(), req.branch.trim())
@@ -135,25 +151,23 @@ impl PrStackHandler for PrStackRpcHandler {
         use tddy_service::proto::pr_stack::{BranchRemote, BranchResolution, BranchWorktree};
 
         let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = &self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let target = stack_target(req.stack.as_ref(), &req.session_id)?;
+        if let Some(answered) = self
+            .forward_if_addressed::<_, QueryBranchResponse>("QueryBranch", &target, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
+        let os_user = &os_user_owned;
         if req.branch.trim().is_empty() {
             return Err(Status::invalid_argument("branch is required"));
         }
         let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        validate_session_id_segment(&req.session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-        require_pr_stack_orchestrator(&session_dir)?;
-
         // `None` when nothing in the session directory names a checkout: every repo-derived leg below
         // then reads as absent or unavailable, never as a confident answer about a repo we don't know.
-        let repo_root = tddy_core::repo_root_for_session(&session_dir);
+        let repo_root = self.repo_root_for_target(&sessions_base, os_user, &target)?;
         let branch = req.branch.trim().to_string();
 
         // Session — the session that owns the branch, by the one rule `branch_owner` holds for every
@@ -460,21 +474,22 @@ impl PrStackHandler for PrStackRpcHandler {
         request: Request<RepointPlannedPrRequest>,
     ) -> Result<Response<RepointPlannedPrResponse>, Status> {
         let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = &self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let target = stack_target(req.stack.as_ref(), &req.session_id)?;
+        if let Some(answered) = self
+            .forward_if_addressed::<_, RepointPlannedPrResponse>("RepointPlannedPr", &target, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
+        let _ = &github_user;
+        let os_user = &os_user_owned;
         if req.node_id.trim().is_empty() {
             return Err(Status::invalid_argument("node_id is required"));
         }
         let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        validate_session_id_segment(&req.session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-        require_pr_stack_orchestrator(&session_dir)?;
+        let session_dir = self.session_dir_for_target(&sessions_base, &target)?;
 
         // A repoint rebases a local branch and re-targets a PR base, so it needs the real checkout:
         // an unknown one is a precondition failure, not a repoint attempted in the session directory.
@@ -609,21 +624,35 @@ impl PrStackHandler for PrStackRpcHandler {
         request: Request<ReorderPlannedPrRequest>,
     ) -> Result<Response<ReorderPlannedPrResponse>, Status> {
         let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = &self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let target = stack_target(req.stack.as_ref(), &req.session_id)?;
+        if let Some(answered) = self
+            .forward_if_addressed::<_, ReorderPlannedPrResponse>("ReorderPlannedPr", &target, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+        let os_user = self.authenticated_os_user(&req.session_token)?;
         if req.node_id.trim().is_empty() {
             return Err(Status::invalid_argument("node_id is required"));
         }
-        let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+        let sessions_base = sessions_base_for_user(&os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        validate_session_id_segment(&req.session_id)
+        if let StackTarget::Address(address) = &target {
+            let stack_plan_json = self.reorder_planned_pr_in_store(
+                &sessions_base,
+                address,
+                req.node_id.trim(),
+                req.direction.trim(),
+            )?;
+            return Ok(Response::new(ReorderPlannedPrResponse { stack_plan_json }));
+        }
+        let StackTarget::Session(session_id) = &target else {
+            unreachable!("stack_target yields an address or a session")
+        };
+        validate_session_id_segment(session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-        require_pr_stack_orchestrator(&session_dir)?;
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        require_orchestrator_unless_stacked(&session_dir)?;
 
         tddy_workflow_recipes::pr_stack::move_planned_pr_node(
             &session_dir,
@@ -652,12 +681,20 @@ impl PrStackHandler for PrStackRpcHandler {
         use tddy_service::proto::pr_stack::{BranchRemote, BranchResolution, BranchWorktree};
 
         let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = &self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let target = stack_target(req.stack.as_ref(), &req.session_id)?;
+        if let Some(answered) = self
+            .forward_if_addressed::<_, PullBaseIntoBranchResponse>(
+                "PullBaseIntoBranch",
+                &target,
+                &req,
+            )
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
+        let _ = &github_user;
+        let os_user = &os_user_owned;
         if req.node_id.trim().is_empty() {
             return Err(Status::invalid_argument("node_id is required"));
         }
@@ -666,10 +703,7 @@ impl PrStackHandler for PrStackRpcHandler {
         }
         let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        validate_session_id_segment(&req.session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-        require_pr_stack_orchestrator(&session_dir)?;
+        let session_dir = self.session_dir_for_target(&sessions_base, &target)?;
 
         let repo_root = tddy_core::repo_root_for_session(&session_dir).ok_or_else(|| {
             Status::failed_precondition(
