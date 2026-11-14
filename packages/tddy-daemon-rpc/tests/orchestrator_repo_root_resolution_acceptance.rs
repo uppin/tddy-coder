@@ -191,6 +191,7 @@ async fn query(service: &TestDaemon) -> BranchResolution {
             branch: BRANCH.to_string(),
             // This file's subject is how the repo root is resolved, not the base comparison.
             base_branch: String::new(),
+            stack: None,
         }))
         .await
         .expect("QueryBranch must succeed as an RPC")
@@ -205,6 +206,7 @@ async fn pr_status(service: &TestDaemon) -> PrStatusView {
             session_token: TOKEN.to_string(),
             session_id: ORCHESTRATOR.to_string(),
             branch: BRANCH.to_string(),
+            stack: None,
         }))
         .await
         .expect("GetPrStatus must succeed as an RPC")

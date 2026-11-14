@@ -108,6 +108,9 @@ export {
   PROJECT_NEW_SEGMENT,
   sessionsProjectNewPath,
   parseSessionsProjectNew,
+  PROJECT_STACK_SEGMENT,
+  sessionsProjectStackPath,
+  parseSessionsProjectStack,
   isSessionsDrawerPath,
   parseSessionsDrawerSessionId,
   INSPECTOR_TAB_NAMES,
@@ -119,6 +122,7 @@ export {
 } from "tddy-client-web";
 export type {
   SessionsProjectHomeSetupRoute,
+  SessionsProjectStackRoute,
   InspectorTabName,
   DormantInspectorTabName,
   MediaInspectorTabName,

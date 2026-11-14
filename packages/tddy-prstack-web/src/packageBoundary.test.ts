@@ -21,6 +21,6 @@ describe("tddy-prstack-web package boundary", () => {
     const exported = Object.keys(require("../src/index.ts"));
 
     // Then
-    expect(exported).toEqual(expect.arrayContaining(["PrStackScreen", "PrStackChat", "PlannedPrList", "PlannedPrPanel", "WorkflowChatScreen"]));
+    expect(exported).toEqual(expect.arrayContaining(["PrStackScreen", "PrStackChat", "PlannedPrList", "PlannedPrPanel", "WorkflowChatScreen", "ProjectStackView"]));
   });
 });

@@ -15,6 +15,7 @@
 | 2026-09-22 | 736 | first detection — created by #494's split of `telegram_session_control.rs` |
 | 2026-11-06 | 682 | `#agent-tools 18/19`: **−54** (736 → 682). `CLAUDE_CLI_MODELS`, `CURSOR_CLI_MODELS`, the `tcm:`/`tcur:` constants and their two parsers left; the registry-backed equivalents live in `agent_choices.rs`. Still over 500; not split here (sweep node n20). |
 | 2026-11-11 | 686 | declared-session-types: +4 against HEAD~1 (682 → 686, lines to the first `#[cfg(test)]`) — the agent keyboard reads the declared session type. **Regressed, kept open** |
+| 2026-11-14 | 687 | #886 (`#orchestrators` 9/11): +1 — a `SessionEntry` literal gains `stack_id`. Touched, not materially grown; kept open |
 
 ## What the tool found
 

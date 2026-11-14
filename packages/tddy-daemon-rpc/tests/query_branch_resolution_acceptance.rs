@@ -216,6 +216,7 @@ async fn query_against(service: &TestDaemon, branch: &str, base_branch: &str) ->
             session_id: ORCHESTRATOR.to_string(),
             branch: branch.to_string(),
             base_branch: base_branch.to_string(),
+            stack: None,
         }))
         .await
         .expect("QueryBranch must succeed as an RPC")

@@ -44,6 +44,9 @@ pub struct SessionListStatusDisplay {
     /// JSON-serialized PR stack (the PR DAG) the session's `stack_id` names, present only on
     /// orchestrator sessions. Empty string when the session has none.
     pub stack_plan_json: String,
+    /// The stack the session's changeset names (`Changeset.stack_id`, proto field 38). Empty when
+    /// the session names none.
+    pub stack_id: String,
     /// The session's git branch (from `Changeset.branch`). Empty when the session has no branch
     /// yet. Lets the PR-Stack view resolve the in-progress child session for a planned node by
     /// branch.
@@ -63,6 +66,7 @@ impl SessionListStatusDisplay {
             orchestrator_session_id: String::new(),
             recipe: String::new(),
             stack_plan_json: String::new(),
+            stack_id: String::new(),
             branch: String::new(),
         }
     }
@@ -199,6 +203,10 @@ pub fn session_list_status_from_session_dir(
             orchestrator_session_id: String::new(),
             recipe: String::new(),
             stack_plan_json: String::new(),
+            stack_id: read_changeset(session_dir)
+                .ok()
+                .and_then(|c| c.stack_id)
+                .unwrap_or_default(),
             branch: read_changeset(session_dir)
                 .ok()
                 .and_then(|c| c.branch)
@@ -240,6 +248,7 @@ pub fn session_list_status_from_session_dir(
                 .unwrap_or_default(),
             recipe: changeset.recipe.clone().unwrap_or_default(),
             stack_plan_json: stack_plan_json_for_changeset(session_dir, &changeset),
+            stack_id: changeset.stack_id.clone().unwrap_or_default(),
             branch: changeset.branch.clone().unwrap_or_default(),
         });
     };
@@ -273,6 +282,7 @@ pub fn session_list_status_from_session_dir(
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
         stack_plan_json: stack_plan_json_for_changeset(session_dir, &changeset),
+        stack_id: changeset.stack_id.clone().unwrap_or_default(),
         branch: changeset.branch.clone().unwrap_or_default(),
     })
 }
@@ -315,6 +325,7 @@ pub fn apply_session_list_status_to_proto(
     entry.activity_status = status.activity_status;
     entry.orchestrator_session_id = status.orchestrator_session_id;
     entry.stack_plan_json = status.stack_plan_json;
+    entry.stack_id = status.stack_id;
     entry.branch = status.branch;
     entry.pending_elicitation =
         crate::pending_elicitation::pending_elicitation_for_session_dir(session_dir);
@@ -542,6 +553,7 @@ state:
             session_role: String::new(),
             reads_host_paths: false,
             orchestration_mark: None,
+            stack_id: String::new(),
         };
         apply_session_list_status_to_proto(
             Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
@@ -1034,6 +1046,7 @@ sessions:
             session_role: String::new(),
             reads_host_paths: false,
             orchestration_mark: None,
+            stack_id: String::new(),
         };
         apply_session_list_status_to_proto(
             Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
@@ -2043,6 +2056,90 @@ state:
             got.stack_plan_json, "",
             "stack_plan_json must be empty string when Changeset.stack is None"
         );
+    }
+
+    /// A session of project `proj-stack-id` in `<dir>/sessions/<session_id>`, whose changeset names
+    /// `stack_id` when one is given (`#orchestrators` 9/11).
+    fn a_session_naming_a_stack(
+        dir: &Path,
+        session_id: &str,
+        stack_id: Option<&str>,
+    ) -> std::path::PathBuf {
+        let session_dir = dir.join("sessions").join(session_id);
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            format!(
+                "session_id: {session_id}\nproject_id: proj-stack-id\ncreated_at: '2026-11-14T10:00:00Z'\nupdated_at: '2026-11-14T10:05:00Z'\nstatus: active\nrepo_path: /tmp/repo\npid: 42\n"
+            ),
+        )
+        .unwrap();
+        tddy_core::changeset::write_changeset(
+            &session_dir,
+            &tddy_core::changeset::Changeset {
+                stack_id: stack_id.map(str::to_string),
+                ..tddy_core::changeset::Changeset::default()
+            },
+        )
+        .unwrap();
+        session_dir
+    }
+
+    /// `SessionEntry.stack_id` names the stack the session's changeset names — the half of the
+    /// stack's address a `SessionEntry` did not carry (`#orchestrators` 9/11).
+    #[test]
+    fn apply_session_list_status_names_the_stack_the_changeset_references() {
+        // Given
+        let dir = tempdir().unwrap();
+        let record =
+            tddy_core::project_stack_store::ProjectStackStore::new(dir.path().join("projects"))
+                .create(
+                    "proj-stack-id",
+                    "orch-names-a-stack",
+                    tddy_core::changeset::Stack::default(),
+                )
+                .unwrap();
+        let session_dir =
+            a_session_naming_a_stack(dir.path(), "orch-names-a-stack", Some(&record.stack_id));
+        let mut entry = ProtoSessionEntry {
+            session_id: "orch-names-a-stack".to_string(),
+            ..ProtoSessionEntry::default()
+        };
+
+        // When
+        apply_session_list_status_to_proto(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            &session_dir,
+            &mut entry,
+        )
+        .unwrap();
+
+        // Then
+        assert_eq!(entry.stack_id, record.stack_id);
+    }
+
+    /// A session whose changeset names no stack lists an empty `stack_id`.
+    #[test]
+    fn apply_session_list_status_leaves_the_stack_id_empty_without_a_stack() {
+        // Given
+        let dir = tempdir().unwrap();
+        let session_dir = a_session_naming_a_stack(dir.path(), "plain-session", None);
+        let mut entry = ProtoSessionEntry {
+            session_id: "plain-session".to_string(),
+            stack_id: "left-over-from-a-previous-listing".to_string(),
+            ..ProtoSessionEntry::default()
+        };
+
+        // When
+        apply_session_list_status_to_proto(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            &session_dir,
+            &mut entry,
+        )
+        .unwrap();
+
+        // Then
+        assert_eq!(entry.stack_id, "");
     }
 
     /// `apply_stack_plan_json_to_proto_sets_field` — `apply_session_list_status_to_proto` must

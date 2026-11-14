@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { PrStackService, type BranchResolution } from "tddy-client-web/gen/pr_stack_pb";
+import { PrStackService, type BranchResolution, type StackAddress } from "tddy-client-web/gen/pr_stack_pb";
 import type { BranchQuery } from "./branchQueries";
 
 type PrStackClient = Client<typeof PrStackService>;
+
+/** Which stack a `QueryBranch` poll acts on: an orchestrator session, or a stack address (`#orchestrators` 9/11). */
+export type QueryBranchTarget =
+  | { sessionId: string }
+  | { stack: Pick<StackAddress, "projectId" | "stackId" | "daemonInstanceId"> };
 
 /** Interval (ms) at which the PR-Stack view re-polls `QueryBranch` for each rendered branch. */
 export const POLL_INTERVAL_MS = 5000;
@@ -50,9 +55,13 @@ export interface QueryBranchState {
 export function useQueryBranch(
   client: PrStackClient | undefined,
   sessionToken: string,
-  orchestratorSessionId: string,
+  target: QueryBranchTarget,
   queries: BranchQuery[],
 ): QueryBranchState {
+  const targetKey =
+    "stack" in target
+      ? `stack:${target.stack.projectId}/${target.stack.stackId}@${target.stack.daemonInstanceId}`
+      : `session:${target.sessionId}`;
   const [resolutionByBranch, setResolutions] = useState<Record<string, BranchResolution>>({});
   // A stable dependency for the query set so the effect re-subscribes only when it truly changes —
   // including when a branch keeps its name but its base moves, which is a different comparison.
@@ -117,7 +126,7 @@ export function useQueryBranch(
         client
           .queryBranch({
             sessionToken,
-            sessionId: orchestratorSessionId,
+            ...("stack" in target ? { stack: target.stack } : { sessionId: target.sessionId }),
             branch: query.branch,
             baseBranch: query.baseBranch,
           })
@@ -139,7 +148,7 @@ export function useQueryBranch(
     };
     // `queriesKey` stands in for `queries`; the array identity changes each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, sessionToken, orchestratorSessionId, queriesKey, applyResolution]);
+  }, [client, sessionToken, targetKey, queriesKey, applyResolution]);
 
   return { resolutionByBranch, setResolution };
 }

@@ -80,6 +80,10 @@ project's name and the number of sessions in it, followed by the group's body.
 The collapsed 12px strip, bulk selection and delete, cross-host badges and deep links are unchanged
 by grouping.
 
+### Stacks row
+
+Each project group's body carries a **Stacks** row (`sessions-drawer-project-stacks-<projectId>`, `ProjectStacksRow` in `packages/tddy-session-web/src/`) listing the project's stacks from `ListProjectStacks` — one entry per stack (`sessions-drawer-project-stack-<stackId>`), across hosts. A host that did not answer is named in the row's unreachable list rather than silently dropped. Selecting a stack opens the **stack view** in the detail area at `#/sessions/project/<projectId>/stack/<stackId>` (see [PR stacking § Opening a project stack by id](../coder/pr-stacking.md#opening-a-project-stack-by-id)).
+
 ### Orchestrator composer
 
 Each project group's header is a row: the collapse toggle, then a **"+"**

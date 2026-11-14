@@ -13,7 +13,8 @@ use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::pr_stack::{
     AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
-    LinkStackNodeRequest, LinkStackNodeResponse, PrStackService, PullBaseIntoBranchRequest,
+    GetProjectStackRequest, GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse,
+    ListProjectStacksRequest, ListProjectStacksResponse, PrStackService, PullBaseIntoBranchRequest,
     PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
     ResolveStackBaseRequest, ResolveStackBaseResponse,
@@ -22,7 +23,7 @@ use tddy_service::proto::pr_stack::{
 /// The coordinate family P is served on — `pr_stack.PrStackService`.
 pub const PR_STACK_SERVICE: &str = "pr_stack.PrStackService";
 
-/// What the eight PR-stack RPCs need from the host process.
+/// What the ten PR-stack RPCs need from the host process.
 #[async_trait]
 pub trait PrStackHandler: Send + Sync {
     async fn add_planned_pr(
@@ -64,6 +65,20 @@ pub trait PrStackHandler: Send + Sync {
         &self,
         request: Request<PullBaseIntoBranchRequest>,
     ) -> Result<Response<PullBaseIntoBranchResponse>, Status>;
+
+    /// A project's stacks on every host that holds the project, with every host that did not
+    /// answer named (`#orchestrators` 9/11).
+    async fn list_project_stacks(
+        &self,
+        request: Request<ListProjectStacksRequest>,
+    ) -> Result<Response<ListProjectStacksResponse>, Status>;
+
+    /// One project stack by its address, served by the host whose store holds it
+    /// (`#orchestrators` 9/11).
+    async fn get_project_stack(
+        &self,
+        request: Request<GetProjectStackRequest>,
+    ) -> Result<Response<GetProjectStackResponse>, Status>;
 }
 
 /// Thin `PrStackService` adapter over a [`PrStackHandler`].
@@ -134,6 +149,20 @@ impl<H: PrStackHandler + 'static> PrStackService for PrStackServiceImpl<H> {
         request: Request<PullBaseIntoBranchRequest>,
     ) -> Result<Response<PullBaseIntoBranchResponse>, Status> {
         self.host.pull_base_into_branch(request).await
+    }
+
+    async fn list_project_stacks(
+        &self,
+        request: Request<ListProjectStacksRequest>,
+    ) -> Result<Response<ListProjectStacksResponse>, Status> {
+        self.host.list_project_stacks(request).await
+    }
+
+    async fn get_project_stack(
+        &self,
+        request: Request<GetProjectStackRequest>,
+    ) -> Result<Response<GetProjectStackResponse>, Status> {
+        self.host.get_project_stack(request).await
     }
 }
 

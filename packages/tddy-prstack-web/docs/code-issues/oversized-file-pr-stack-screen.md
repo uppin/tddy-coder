@@ -13,6 +13,7 @@
 |---|---|---|
 | 2026-10-24 | 698 | base of PR #741 (`origin/feature/start-progress/progress-ui`), already over budget and unrecorded |
 | 2026-10-24 | 704 | +6 in PR #741: a `taskClient` prop (type, doc line, destructure) passed to `CreateSessionDialog`, so Cancel works in the Start-session dialog. **Deferred with the developer's consent, #start-progress 8/8** |
+| 2026-11-14 | 701 → 731 | +30 in #886 (`#orchestrators` 9/11): the panel loads by the session's stack address (`getProjectStack`) and every planned-PR call names the address when the session carries one. Already over budget before this PR; the new stack view itself is the separate `ProjectStackView` component, per the changeset's prerequisite |
 
 ## What would close it
 
