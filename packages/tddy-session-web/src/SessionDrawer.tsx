@@ -10,6 +10,9 @@ import {
   type ProjectHomeInfo,
 } from "./utils/projectHomeGroups";
 import { SessionProjectGroup, projectGroupKey } from "./SessionProjectGroup";
+import { ProjectStacksRow } from "./ProjectStacksRow";
+import type { Client } from "@connectrpc/connect";
+import type { PrStackService, ProjectStackSummary } from "tddy-client-web/gen/pr_stack_pb";
 import { ProjectHomeEntry } from "./ProjectHomeEntry";
 import { readCollapsedProjects, writeCollapsedProjects } from "./projectGroupCollapse";
 import { ScrollArea, cn } from "tddy-ui-web";
@@ -87,6 +90,11 @@ interface SessionDrawerProps {
    * with no main and no session; absent, no header shows a "+".
    */
   onNewOrchestrator?: (projectId: string) => void;
+  /** `pr_stack.PrStackService` on the selected daemon — each project group's Stacks row lists through it. */
+  prStackClient?: Client<typeof PrStackService> | null;
+  sessionToken?: string;
+  /** Open one of a project's stacks in the stack view, by the address its listing carried. */
+  onOpenProjectStack?: (summary: ProjectStackSummary) => void;
 }
 
 export type { ProjectHomeInfo } from "./utils/projectHomeGroups";
@@ -118,6 +126,9 @@ export function SessionDrawer({
   onSetUpProjectHome,
   onReplaceProjectHome,
   onNewOrchestrator,
+  prStackClient,
+  sessionToken = "",
+  onOpenProjectStack,
 }: SessionDrawerProps) {
   const owningHost: OwningHostInfo = {
     selectedInstanceId,
@@ -271,6 +282,14 @@ export function SessionDrawer({
                     onEnsure={onEnsureProjectHome}
                     onSetUpProjectHome={onSetUpProjectHome}
                     onReplaceProjectHome={onReplaceProjectHome}
+                  />
+                )}
+                {group.projectId !== null && onOpenProjectStack && (
+                  <ProjectStacksRow
+                    projectId={group.projectId}
+                    prStackClient={prStackClient}
+                    sessionToken={sessionToken}
+                    onOpenStack={onOpenProjectStack}
                   />
                 )}
                 <SessionGroupBody

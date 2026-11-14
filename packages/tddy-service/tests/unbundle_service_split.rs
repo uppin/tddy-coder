@@ -543,7 +543,7 @@ const EXEC_TOOL_METHODS: [&str; 4] = [
     "ListSessionToolCalls",
 ];
 
-const PR_STACK_METHODS: [&str; 8] = [
+const PR_STACK_METHODS: [&str; 10] = [
     "AddPlannedPr",
     "GetPrStatus",
     "RepointPlannedPr",
@@ -552,6 +552,8 @@ const PR_STACK_METHODS: [&str; 8] = [
     "QueryBranch",
     "ResolveStackBase",
     "LinkStackNode",
+    "ListProjectStacks",
+    "GetProjectStack",
 ];
 
 /// Families C, D, O and Q — the deliberate endpoint of the whole stack.
