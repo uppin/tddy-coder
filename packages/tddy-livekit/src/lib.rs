@@ -21,6 +21,7 @@ pub mod server_api_url;
 #[cfg(test)]
 pub mod test_util;
 pub mod token;
+pub mod webrtc_runtime;
 
 /// The RPC envelope (`RpcRequest`/`RpcResponse`/...) is compiled once in `tddy-rpc` and shared by
 /// every transport — re-exported here so existing `crate::proto::*` paths keep resolving.
@@ -48,3 +49,4 @@ pub use room_metadata::{livekit_http_url, RoomMetadataClient};
 pub use room_options::tddy_room_options;
 pub use tddy_rpc::Status;
 pub use token::{TokenGenerator, DEFAULT_LIVEKIT_JWT_TTL_SECS};
+pub use webrtc_runtime::pin_webrtc_runtime;

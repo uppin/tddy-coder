@@ -129,6 +129,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         log::debug!("LiveKitParticipant::connect url={}", url);
         // Whoever the room admitted sent it — stamped here, never read from the envelope.
         let server = Arc::new(ServerEngine::new(service, RequestTransport::LiveKit));
+        crate::pin_webrtc_runtime();
         let (room, events) = Room::connect(url, token, room_options).await?;
         log::info!(
             "[echo_server] LiveKitParticipant connected, identity={:?}",
@@ -163,6 +164,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         projects_registry_dir: Option<PathBuf>,
     ) -> Result<Self, livekit::RoomError> {
         log::debug!("LiveKitParticipant::connect_for_reconnect url={}", url);
+        crate::pin_webrtc_runtime();
         let (room, events) = Room::connect(url, token, room_options).await?;
         log::info!(
             "[echo_server] LiveKitParticipant connected (reconnect), identity={:?}",

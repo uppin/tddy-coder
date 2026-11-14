@@ -54,6 +54,7 @@ pub async fn connect_client(
     target_identity: &str,
     wait_for_participant: Duration,
 ) -> Result<ConnectedClient, ConnectError> {
+    crate::pin_webrtc_runtime();
     let (room, mut events) = Room::connect(
         url,
         token,
