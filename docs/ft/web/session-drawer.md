@@ -80,8 +80,32 @@ project's name and the number of sessions in it, followed by the group's body.
 The collapsed 12px strip, bulk selection and delete, cross-host badges and deep links are unchanged
 by grouping.
 
+### Orchestrator composer
+
+Each project group's header is a row: the collapse toggle, then a **"+"**
+(`sessions-drawer-project-new-<projectId>`, `SessionProjectGroupHeader` in
+`packages/tddy-session-web/src/`), then any further header actions. Every project the host lists
+gets a group — even one with no session and no main — so the "+" is always reachable
+(`withEveryProjectGroup` in `packages/tddy-session-web/src/utils/projectHomeGroups.ts`, applied
+only when the drawer offers the "+"). The **Other** group has no "+".
+
+The "+" opens the **orchestrator composer** in the detail area at
+`#/sessions/project/<projectId>/new` (`sessionsProjectNewPath` / `parseSessionsProjectNew` in
+`packages/tddy-client-web/src/appRoutes.ts`, re-exported by `packages/tddy-web/src/routing/appRoutes.ts`;
+detail-area case in `SessionsDrawerScreen`). The composer (`OrchestratorComposer` in
+`packages/tddy-session-create-web/src/`) shows a heading and a prompt box centred vertically in
+the pane, and under the box only these controls: **model**, **effort**, **provider account**,
+**host** (`CreateSessionHostField`, split out of `CreateSessionHostAndProjectFields`) and
+**attachments** — the New-session form's own field pieces. Sending (Enter or the send button)
+starts an orchestrator for the project (`buildOrchestratorComposerRequest`: `session_role:
+orchestrator`, the first `project_home_main` agent on the chosen host as its session type, the
+text as its initial prompt, and the chosen model, effort, provider account, host and staged
+attachments) and selects it as a created session is. A refusal is shown under the box with the
+daemon's reason; the text is kept.
+
 Implementation: `groupSessionsByProject` (`packages/tddy-session-web/src/utils/sessionProjectGroups.ts`),
-`SessionProjectGroup` and `projectGroupCollapse.ts` (`packages/tddy-session-web/src/`).
+`SessionProjectGroup`, `SessionProjectGroupHeader` and `projectGroupCollapse.ts`
+(`packages/tddy-session-web/src/`).
 
 ### Pinned main entry
 
@@ -117,15 +141,17 @@ the entry acts on that host.
   group's rows. Any other session carrying the `project-home` role (a main that was replaced) is an
   ordinary row.
 - **A project with no session yet** still gets its group when it has a main, so the pinned entry is
-  how main is reached; it is placed among the others by the same name order. A project with neither
-  a session nor a main gets no group.
+  how main is reached; it is placed among the others by the same name order. Every listed project
+  gets a group for its "+" (see [Orchestrator composer](#orchestrator-composer)), with or without
+  a session or a main.
 - The **Other** group has no pinned entry.
 
-Implementation: `ProjectHomeEntry`, `ProjectHomeSetupPane`, `useProjectHomeSetup`,
-`useProjectHomeStartSubmit`, `useEnsureProjectHome`, `useSessionsDrawerProjectHomes`
-(`packages/tddy-session-web/src/`), `projectHomesOnHost`, `projectHomeSlot` and `withProjectHomeGroups`
-(`packages/tddy-session-web/src/utils/projectHomeGroups.ts`), `sessionsProjectHomeSetupPath` and
-`parseSessionsProjectHomeSetup` (`src/routing/appRoutes.ts`).
+Implementation: `ProjectHomeEntry`, `useProjectHomeSetup`, `useEnsureProjectHome`,
+`useSessionsDrawerProjectHomes` (`packages/tddy-session-web/src/`), `ProjectHomeSetupPane` and
+`useProjectHomeStartSubmit` (`packages/tddy-session-create-web/src/`), `projectHomesOnHost`, `projectHomeSlot` and
+`withProjectHomeGroups` (`packages/tddy-session-web/src/utils/projectHomeGroups.ts`),
+`sessionsProjectHomeSetupPath` and `parseSessionsProjectHomeSetup`
+(`packages/tddy-client-web/src/appRoutes.ts`).
 
 ## Indicator Token
 

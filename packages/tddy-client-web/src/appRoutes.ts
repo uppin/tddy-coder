@@ -55,6 +55,32 @@ export function sessionsProjectHomeSetupPath(
   return options.replacing ? `${path}/${PROJECT_HOME_REPLACE_SEGMENT}` : path;
 }
 
+/**
+ * Prefix of the per-project pages in the drawer's detail area: `/sessions/project/:projectId/new`
+ * is the **orchestrator composer** a project header's "+" opens (`#orchestrators` 8/11). Three
+ * segments, so it can never be read as a session id.
+ */
+export const SESSIONS_PROJECT_ROUTE = `${SESSIONS_DRAWER_ROUTE}/project`;
+
+/** The trailing segment of the orchestrator composer's path. */
+export const PROJECT_NEW_SEGMENT = "new";
+
+/** Builds the `/sessions/project/:projectId/new` path that opens the composer for `projectId`. */
+export function sessionsProjectNewPath(projectId: string): string {
+  return `${SESSIONS_PROJECT_ROUTE}/${encodeURIComponent(projectId)}/${PROJECT_NEW_SEGMENT}`;
+}
+
+/**
+ * Which project the orchestrator composer is open for — read from
+ * `/sessions/project/:projectId/new`; `null` for any other path.
+ */
+export function parseSessionsProjectNew(pathname: string): string | null {
+  const suffix = `/${PROJECT_NEW_SEGMENT}`;
+  if (!pathname.endsWith(suffix)) return null;
+  const projectPath = pathname.slice(0, -suffix.length);
+  return decodeSegment(singleSegmentAfter(projectPath, SESSIONS_PROJECT_ROUTE));
+}
+
 /** Builds a `/sessions/:id` deep-link path for the given session id. */
 export function sessionsDrawerPathForSession(sessionId: string): string {
   return `${SESSIONS_DRAWER_ROUTE}/${encodeURIComponent(sessionId)}`;
@@ -105,7 +131,8 @@ export function isSessionsDrawerPath(pathname: string): boolean {
   return (
     pathname === SESSIONS_DRAWER_ROUTE ||
     singleSegmentAfter(pathname, SESSIONS_DRAWER_ROUTE) !== null ||
-    parseSessionsProjectHomeSetupProjectId(pathname) !== null
+    parseSessionsProjectHomeSetupProjectId(pathname) !== null ||
+    parseSessionsProjectNew(pathname) !== null
   );
 }
 

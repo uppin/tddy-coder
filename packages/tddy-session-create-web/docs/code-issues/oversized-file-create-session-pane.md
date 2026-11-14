@@ -20,6 +20,7 @@
 | 2026-11-07 | 526 | Moved with the file to `tddy-session-create-web` (`#web-split` 7/16), `git mv`; the measurement is unchanged by a move. **Not split here**: splitting it is not that node's change |
 | 2026-11-12 | 595 → 593 (`wc -l`) | #878 (`#orchestrators` 1/11) touched it and shrank it: the main-type effect moved out to `useOpenOnMainSessionType`, the orchestrator switch lives in `useCreateSessionOrchestrator`. Still over budget; not split here (alert-only: this PR did not grow it) |
 | 2026-11-13 | 593 → 591 (`wc -l`) | #880 (`#orchestrators` 3/11) touched it and shrank it: the inline CLI-features object moved to `cliAgentFeaturesOf` (`codingAgentMetadata.ts`), the effort picker lives in `CreateSessionEffortField` / `useCreateSessionEffort`; the pane gains the hook call and two prop lines. Still over budget; not split here (stack-shared with later `#orchestrators` nodes, and this PR did not grow it) |
+| 2026-11-14 | 591 → 591 (`wc -l`) | #885 (`#orchestrators` 8/11) re-measured at its wrap: this PR does not touch the file (the composer is its own component and reuses the extracted `CreateSessionHostField`). Still over budget; not split here — stack-shared with later `#orchestrators` nodes |
 
 ## What would close it
 
