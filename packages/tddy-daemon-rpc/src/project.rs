@@ -1,5 +1,6 @@
 //! Family D — `project.ProjectService`.
 
+mod add_to_host;
 mod clone_destination;
 mod coordinate_handlers;
 mod coordinate_route;
