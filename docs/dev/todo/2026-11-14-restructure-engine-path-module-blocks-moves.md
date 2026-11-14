@@ -33,6 +33,11 @@ all: the only engine path for it is `move_impl_members`, which the `#[path]` sca
 blocks. Even with the scan fixed, an `extract_module`-only crate would still have no way to move
 impl members into a sibling module.
 
+## Developer decision
+
+**Deferred by the developer at the #orchestrators TODO gate, 2026-11-14** — the engine capability is not added in `#orchestrators`, and the seams it
+blocks stay as recorded above until a later change closes it.
+
 ## What would close it
 
 Engine fixes in `packages/tddy-code-restructuring`:

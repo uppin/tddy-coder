@@ -18,6 +18,9 @@ No shipped agent YAML declares `acp_prompt` today, so nothing reachable is broke
 2026-11-12 (6e review of #881): ACP turn input is covered by the tool-engine unit test only, until an
 ACP agent's YAML declares it. Do not implement it in `#orchestrators`.
 
+2026-11-14: **Deferred by the developer at the #orchestrators TODO gate, 2026-11-14** — not closed by the stack's sweep or by its n13 node
+(`feature/orchestrators/stack-node-reads`); it stays open for a later change.
+
 ## What would close it
 
 The first ACP agent YAML to declare `turn_input: { kind: acp_prompt }`, together with a daemon route
