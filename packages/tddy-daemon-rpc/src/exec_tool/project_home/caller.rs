@@ -81,17 +81,16 @@ pub(super) fn refuse_a_spawner_outside_its_own_sessions(
     }
     // Same host only: a child recorded on another host has no changeset here (see
     // docs/dev/todo/2026-10-29-spawner-read-scope-is-same-host-only.md).
-    let started_by = match tddy_core::read_changeset(&unified_session_dir_path(
-        sessions_base, &target,
-    )) {
-        Ok(changeset) => changeset.orchestrator_session_id,
-        Err(tddy_core::WorkflowError::ChangesetMissing(_)) => None,
-        Err(e) => {
-            return Err(refused(&format!(
-                "the changeset of {target} could not be read ({e})"
-            )))
-        }
-    };
+    let started_by =
+        match tddy_core::read_changeset(&unified_session_dir_path(sessions_base, &target)) {
+            Ok(changeset) => changeset.orchestrator_session_id,
+            Err(tddy_core::WorkflowError::ChangesetMissing(_)) => None,
+            Err(e) => {
+                return Err(refused(&format!(
+                    "the changeset of {target} could not be read ({e})"
+                )))
+            }
+        };
     if started_by.as_deref() == Some(home.session_id.as_str()) {
         Ok(())
     } else {
@@ -136,10 +135,7 @@ mod tests {
 
     #[test]
     fn an_unreadable_target_changeset_is_refused_as_unreadable_not_as_not_started() {
-        let base = std::env::temp_dir().join(format!(
-            "tddy-caller-test-{}",
-            std::process::id()
-        ));
+        let base = std::env::temp_dir().join(format!("tddy-caller-test-{}", std::process::id()));
         let target_dir = unified_session_dir_path(&base, "target-1");
         std::fs::create_dir_all(&target_dir).unwrap();
         std::fs::write(target_dir.join("changeset.yaml"), "::: not yaml: [\n").unwrap();

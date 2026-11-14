@@ -83,7 +83,6 @@ fn write_unit_changeset_named(
     tddy_changeset::stack_fixtures::write_changeset_with_stack(session_dir, changeset);
 }
 
-
 /// Seed a stack record in the host's store for `session_id`'s project and name it in the
 /// session's changeset (the shape `require_a_stack` admits).
 fn write_unit_changeset_naming_a_store_stack(
@@ -92,9 +91,8 @@ fn write_unit_changeset_naming_a_store_stack(
     session_id: &str,
     recipe: Option<&str>,
 ) {
-    let store = tddy_core::project_stack_store::ProjectStackStore::new(
-        sessions_base.join("projects"),
-    );
+    let store =
+        tddy_core::project_stack_store::ProjectStackStore::new(sessions_base.join("projects"));
     let record = store
         .create(
             "proj-test",

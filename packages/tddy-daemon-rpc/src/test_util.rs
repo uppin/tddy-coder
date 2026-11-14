@@ -26,8 +26,8 @@ use tddy_service::proto::exec_tools::{
 use tddy_service::proto::pr_stack::{
     AddPlannedPrRequest, AddPlannedPrResponse, CreateProjectStackRequest,
     CreateProjectStackResponse, GetPrStatusRequest, GetPrStatusResponse, GetProjectStackRequest,
-    GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse,
-    ListProjectStacksRequest, ListProjectStacksResponse, PrStackService, PullBaseIntoBranchRequest,
+    GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse, ListProjectStacksRequest,
+    ListProjectStacksResponse, PrStackService, PullBaseIntoBranchRequest,
     PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
     ResolveStackBaseRequest, ResolveStackBaseResponse,

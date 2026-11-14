@@ -14,11 +14,11 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::pr_stack::{
     AddPlannedPrRequest, AddPlannedPrResponse, CreateProjectStackRequest,
     CreateProjectStackResponse, GetPrStatusRequest, GetPrStatusResponse, GetProjectStackRequest,
-    GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse,
-    ListProjectStacksRequest, ListProjectStacksResponse, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
-    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ResolveStackBaseRequest, ResolveStackBaseResponse,
+    GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse, ListProjectStacksRequest,
+    ListProjectStacksResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest, ReorderPlannedPrResponse,
+    RepointPlannedPrRequest, RepointPlannedPrResponse, ResolveStackBaseRequest,
+    ResolveStackBaseResponse,
 };
 use tddy_service::proto::types::BranchSession;
 use tddy_session_lifecycle::connection_service::{
