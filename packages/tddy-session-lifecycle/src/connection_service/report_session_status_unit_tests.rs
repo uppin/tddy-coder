@@ -62,6 +62,7 @@ fn write_claude_cli_session(session_dir: &std::path::Path, hook_token: &str) {
         .unwrap()
         .to_string();
     let metadata = SessionMetadata {
+        effort: None,
         session_id,
         project_id: "proj-hook-unit".to_string(),
         created_at: "2026-06-13T10:00:00Z".to_string(),
@@ -191,6 +192,7 @@ async fn report_session_status_rejects_non_claude_cli_session() {
 
     // Tool session — no session_type = "claude-cli", no hook_token.
     let metadata = SessionMetadata {
+        effort: None,
         session_id: session_id.to_string(),
         project_id: "proj-hook-unit".to_string(),
         created_at: "2026-06-13T10:00:00Z".to_string(),

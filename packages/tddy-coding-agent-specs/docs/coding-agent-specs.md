@@ -258,3 +258,27 @@ binding, and `specs/codex.yaml` and `specs/codex-acp.yaml` the Codex rollout bin
 threads nested by `payload.parent_thread_id`), and `specs/opencode.yaml` the OpenCode `sqlite` binding
 (`{agent_home}/.local/share/opencode/opencode.db`, `session_v2`, rooted by `directory == {worktree}`,
 spawned sessions nested by `parent_id`); no other built-in declares one yet.
+
+## Effort (`coding_agent.effort`)
+
+`CodingAgentSection.effort: Option<EffortSlot>` (`spec/effort_slot.rs`, read through
+`CodingAgentSpec::effort()`) declares the reasoning effort levels a session of the agent can be
+started at and how a launch carries the chosen one. The levels are the agent's own words; nothing
+else in the workspace names them.
+
+```yaml
+effort: { levels: [low, medium, high, xhigh, max], flag: --effort }   # claude.yaml
+effort: { levels: [low, high], default: low, env: AGENT_EFFORT }
+```
+
+| Field | Meaning |
+|---|---|
+| `levels` | every level, in picker order. Empty, blank or repeated levels are refused at load |
+| `default` | the level a picker preselects; must be one of `levels`. Absent leaves the agent's own default (an empty effort) |
+| `flag` / `env` | the carry, exactly one: `EffortCarry::Flag` appends `<flag> <level>` to the slot flags, `EffortCarry::Env` sets the variable to the level. Both or neither is refused as the slot is read |
+
+`parse_section` calls `validate_effort_slot`, so a bad slot fails the load naming the file (messages
+prefixed `effort:`). An agent without the slot takes no effort: a start naming one is refused
+(`tddy-agent-launch`'s `refuse_an_effort_the_agent_cannot_take`). An `env` carry must not be named
+`TDDY_*`: a jail's exec plan drops those from the agent's environment.
+

@@ -59,6 +59,12 @@ message AgentInfo {
   // The placements the agent's spec allows (`host`, `jail`). A client offers a sandboxed
   // (jailed) start only for an agent that lists `jail`; absence never reads as allowed.
   repeated string placements = 11;
+  // The effort levels a session of this agent can be started at (`StartSessionRequest.effort`),
+  // from its spec's `coding_agent.effort.levels`, in picker order. Empty for an agent that declares
+  // none, which is refused any effort, and for every MODEL row. (`#orchestrators` 3/11)
+  repeated string effort_levels = 12;
+  // The level the spec preselects (`coding_agent.effort.default`); empty leaves the agent's own.
+  string default_effort = 13;
 }
 
 message ListAgentModelsRequest {

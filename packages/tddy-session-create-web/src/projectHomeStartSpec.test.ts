@@ -90,6 +90,7 @@ describe("buildProjectHomeStartSpec", () => {
     expect(Object.keys(spec).sort()).toEqual([
       "clonePlacedAgents",
       "dangerouslySkipPermissions",
+      "effort",
       "initialPrompt",
       "model",
       "permissionMode",

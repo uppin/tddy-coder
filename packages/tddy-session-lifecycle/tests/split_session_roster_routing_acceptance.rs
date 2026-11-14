@@ -281,6 +281,7 @@ fn write_session(sessions_base: &Path, session_id: &str, agents: Vec<SessionAgen
     tddy_core::write_session_metadata(
         &session_dir,
         &SessionMetadata {
+            effort: None,
             session_id: session_id.to_string(),
             project_id: "project-under-routing".to_string(),
             created_at: "2026-08-19T10:00:00Z".to_string(),

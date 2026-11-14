@@ -2,6 +2,7 @@
 
 pub(crate) mod acp;
 pub(crate) mod argv;
+pub(crate) mod effort_slot;
 pub(crate) mod headless_section;
 pub(crate) mod pass_env;
 pub(crate) mod route_slot;
@@ -21,6 +22,7 @@ use crate::slots::conversation::ConversationSlot;
 use crate::slots::hooks;
 use crate::slots::tools::render_flag_per_value;
 use crate::spec::acp::AcpSection;
+use crate::spec::effort_slot::{validate_effort_slot, EffortSlot};
 use crate::spec::headless_section::HeadlessSection;
 use crate::spec::slot_shapes::InstructionsSlot;
 
@@ -161,6 +163,11 @@ fn parse_section(
             .map_err(|e| format!("usage: {e}"))
             .map_err(invalid)?;
     }
+    if let Some(effort) = &agent.effort {
+        validate_effort_slot(effort)
+            .map_err(|e| format!("effort: {e}"))
+            .map_err(invalid)?;
+    }
     Ok(agent)
 }
 
@@ -258,6 +265,11 @@ pub struct CodingAgentSection {
     /// matching `TDDY_*` is refused at load. Empty for an agent that reads none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pass_env: Vec<String>,
+    /// The reasoning effort levels a session of this agent can be started at, and how its launch
+    /// carries the chosen one (`#orchestrators` 3/11). `None` for an agent that takes no effort:
+    /// a start naming one is refused. Read through [`CodingAgentSpec::effort`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<EffortSlot>,
 }
 
 /// How long an orchestrated session's permission hook waits for its orchestrator's answer when the
@@ -303,6 +315,12 @@ impl CodingAgentSpec {
             (None, Some(_)) => ConversationSlot::ResumeToken,
             (None, None) => ConversationSlot::Worktree,
         }
+    }
+
+    /// `coding_agent.effort`: the levels the agent takes and how its launch carries one; `None`
+    /// for an agent that takes no effort.
+    pub fn effort(&self) -> Option<&EffortSlot> {
+        self.agent.effort.as_ref()
     }
 
     /// `coding_agent.product`, or the agent id when the spec declares none.

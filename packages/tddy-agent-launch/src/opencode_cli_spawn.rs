@@ -49,6 +49,7 @@ use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
 use crate::cursor_from_spec::node_launcher_of;
+use crate::effort_launch::effort_launch;
 use crate::harness_from_spec::{
     harness_template_params, resume_token_adapter, CliSessionType, HarnessLaunch,
 };
@@ -106,6 +107,9 @@ pub(crate) struct CliSessionStart<'a> {
     /// `StartSessionRequest.permission_mode`; blank leaves the spec's own default.
     pub permission_mode: &'a str,
     pub dangerously_skip_permissions: bool,
+    /// `StartSessionRequest.effort`: the level the agent's spec carries into its launch; blank
+    /// leaves the agent's own default.
+    pub effort: &'a str,
     /// The ssh `Host` alias the checkout lives on; empty for a checkout on this host.
     pub ssh_config_host: &'a str,
     /// Whether the session was started over a managed codebase; recorded on the session.
@@ -151,6 +155,7 @@ pub(crate) async fn start_cli_harness_session(
         run_in_tmux,
         permission_mode,
         dangerously_skip_permissions,
+        effort,
         ssh_config_host,
         managed_codebase,
         managed,
@@ -317,13 +322,16 @@ pub(crate) async fn start_cli_harness_session(
     )?;
     // The role's flags, then the route's arguments, follow the spec's own argv; the route's
     // environment follows the session's.
+    let carried_effort = effort_launch(spec, effort);
     slots.argv_extra.extend(role_args);
+    slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
     write_slot_files_on_target(&mut slots, remote_host)?;
     let host = PointerHost::of(remote_host);
     let pointer = place_session_pointer(wiring.session_pointer.as_ref(), &worktree_path, &host)?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, run_in_tmux);
     env.extend(std::mem::take(&mut wiring.env));
+    env.extend(carried_effort.env);
     env.extend(route.env);
     let launcher = node_launcher_of(&agent.tool.binary);
     let params = harness_template_params(&conversation.bound(HarnessLaunch {
@@ -377,6 +385,7 @@ pub(crate) async fn start_cli_harness_session(
         ssh_config_host: remote_host.map(str::to_string),
         managed_codebase,
         session_role: Some(role_name.to_string()).filter(|role| !role.is_empty()),
+        effort: Some(effort.trim().to_string()).filter(|effort| !effort.is_empty()),
         cursor_chat_id: conversation.recorded_chat_id().map(str::to_string),
         ..tddy_session_split::service_util::starting_session_metadata(
             session_id, project_id, kind.name,

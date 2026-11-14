@@ -41,6 +41,7 @@ fn an_agent_record(agent_id: &str) -> SessionAgentRecord {
 /// value sets it, and a reader never has to guess which of twenty fields the scenario turns on.
 fn a_session_metadata(session_id: &str) -> SessionMetadata {
     SessionMetadata {
+        effort: None,
         session_id: session_id.to_string(),
         project_id: "proj-roster".to_string(),
         created_at: "2026-08-16T10:00:00Z".to_string(),

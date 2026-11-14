@@ -267,3 +267,34 @@ async fn a_host_with_no_accounts_attached_answers_its_provider_routes_as_unavail
         "{options}"
     );
 }
+
+#[tokio::test]
+async fn describe_session_start_options_lists_each_agents_levels() {
+    // Given a host whose coding agents are the built-in specs
+    let world = a_world().await;
+
+    // When
+    let options = world.options(serde_json::json!({})).await;
+
+    // Then — claude's levels, under the session type that starts it, and no entry for an agent
+    // whose spec declares none (`#orchestrators` 3/11)
+    let entries = options["effort_levels"]
+        .as_array()
+        .expect("effort_levels is a list")
+        .clone();
+    let entry_for = |session_type: &str| {
+        entries
+            .iter()
+            .find(|entry| entry["session_type"] == session_type)
+            .cloned()
+    };
+    assert_eq!(
+        entry_for("claude-cli"),
+        Some(serde_json::json!({
+            "session_type": "claude-cli",
+            "default": "",
+            "levels": ["low", "medium", "high", "xhigh", "max"],
+        }))
+    );
+    assert_eq!(entry_for("opencode-cli"), None);
+}

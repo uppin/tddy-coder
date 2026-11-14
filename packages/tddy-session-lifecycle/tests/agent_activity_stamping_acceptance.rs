@@ -81,6 +81,7 @@ fn a_session_checked_out_at(worktree: &Path) -> ReportingSession {
 
 fn a_claude_cli_session(session_id: &str, worktree: &Path) -> SessionMetadata {
     SessionMetadata {
+        effort: None,
         session_id: session_id.to_string(),
         project_id: "project-under-stamping".to_string(),
         created_at: "2026-08-15T10:00:00Z".to_string(),

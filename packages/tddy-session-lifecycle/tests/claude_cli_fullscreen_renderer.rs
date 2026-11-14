@@ -311,6 +311,7 @@ fn an_exited_host_session(sessions_base: &Path, worktree: &Path) {
     let session_dir = sessions_base.join("sessions").join(RESUMED_SESSION_ID);
     std::fs::create_dir_all(&session_dir).unwrap();
     let meta = SessionMetadata {
+        effort: None,
         session_id: RESUMED_SESSION_ID.to_string(),
         project_id: TEST_PROJECT_ID.to_string(),
         created_at: "2026-10-24T08:00:00Z".to_string(),

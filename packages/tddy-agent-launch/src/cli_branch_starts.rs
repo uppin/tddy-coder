@@ -23,7 +23,8 @@ use crate::launch_ports::LaunchSessions;
 use crate::placement::managed_recipe_for;
 use crate::session_provider_route::{session_route_sources_with_default, start_route, RouteAgent};
 use crate::start_request_checks::{
-    refuse_a_cli_start_without_a_model, refuse_an_unsupported_cli_session_start,
+    refuse_a_cli_start_without_a_model, refuse_an_effort_the_agent_cannot_take,
+    refuse_an_unsupported_cli_session_start,
 };
 use tddy_service::proto::session::StartSessionRequest;
 use tddy_session_split::split_start::resolve_caller_chosen_session_id;
@@ -40,6 +41,7 @@ impl LaunchSessions {
         req: &StartSessionRequest,
     ) -> Result<(), Status> {
         refuse_a_cli_start_without_a_model(req, Some(&*self.coding_agents))?;
+        refuse_an_effort_the_agent_cannot_take(req, Some(&*self.coding_agents))?;
         resolve_caller_chosen_session_id(&req.requested_session_id, req.session_type.trim())?;
         managed_recipe_for(req)?;
         // The agent the session type names — `claude` for `claude-cli`, a dropped-in copy for its own.
@@ -225,6 +227,7 @@ impl LaunchSessions {
                 run_in_tmux: req.run_in_tmux,
                 permission_mode: req.permission_mode.trim(),
                 dangerously_skip_permissions: req.dangerously_skip_permissions,
+                effort: req.effort.trim(),
                 ssh_config_host: req.ssh_config_host.trim(),
                 managed_codebase: req.managed_codebase,
                 managed,
@@ -310,6 +313,7 @@ impl LaunchSessions {
                 run_in_tmux: false,
                 permission_mode: "",
                 dangerously_skip_permissions: false,
+                effort: "",
                 ssh_config_host: "",
                 // A spawned child is never a managed-codebase session, and has no standing role.
                 managed_codebase: false,

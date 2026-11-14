@@ -32,6 +32,10 @@ pub struct StartSessionArgs {
     pub agent: String,
     pub recipe: String,
     pub model: String,
+    /// The effort level the session's agent starts at, one its spec declares
+    /// (`DescribeSessionStartOptions` lists them per agent); empty for the agent's own default
+    /// (`#orchestrators` 3/11).
+    pub effort: String,
     pub provider_account_id: String,
     pub provider_built_in: bool,
     pub branch_worktree_intent: String,
@@ -271,6 +275,7 @@ impl StartSessionArgs {
                 .map(HostDocumentAttachment::into_session_attachment)
                 .collect(),
             session_role: self.session_role,
+            effort: self.effort,
             ..Default::default()
         }
     }

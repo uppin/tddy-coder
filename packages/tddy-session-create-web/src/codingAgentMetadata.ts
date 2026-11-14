@@ -1,3 +1,4 @@
+import type { CliAgentFeatures } from "./createSessionRequest";
 import type { SelectableAgent } from "./selectableAgentOptions";
 
 /**
@@ -47,4 +48,23 @@ export function allowsPlacement(
   placement: string,
 ): boolean {
   return agent?.placements.includes(placement) ?? false;
+}
+
+/**
+ * What the request builder may ask of the agent behind a session type, read from its served
+ * metadata; `providerRoutable` is whether a provider route can point the agent at an account.
+ */
+export function cliAgentFeaturesOf(
+  agent: SelectableAgent | undefined,
+  providerRoutable: boolean,
+): CliAgentFeatures {
+  return {
+    bindsModel: bindsParam(agent, "model"),
+    bindsPermissionMode: bindsParam(agent, "permission_mode"),
+    bindsSkipPermissions: bindsParam(agent, "dangerously_skip_permissions"),
+    bindsPrompt: bindsParam(agent, "prompt"),
+    managedWorkflow: hasCapability(agent, "managed_workflow"),
+    splitHost: hasCapability(agent, "split_host"),
+    providerRoutable,
+  };
 }

@@ -457,6 +457,7 @@ fn create_fake_sessions(base: &std::path::Path, count: usize) -> Vec<String> {
         let session_dir = sessions_dir.join(&id);
         std::fs::create_dir_all(&session_dir).unwrap();
         let metadata = tddy_core::SessionMetadata {
+            effort: None,
             session_id: id.clone(),
             project_id: "proj-1".to_string(),
             created_at: format!("2026-04-05T08:{:02}:00Z", i),
@@ -737,6 +738,7 @@ fn an_agent_session(
     let session_dir = base.join("sessions").join(session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
     let metadata = tddy_core::SessionMetadata {
+        effort: None,
         session_id: session_id.to_string(),
         project_id: "proj-1".to_string(),
         created_at: "2026-11-04T08:00:00Z".to_string(),

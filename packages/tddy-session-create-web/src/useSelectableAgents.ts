@@ -61,6 +61,8 @@ const CATALOG_READER: HostReader<CatalogClient, CatalogRow> = {
         permissionModes: info.permissionModes,
         defaultModel: info.defaultModel,
         placements: info.placements,
+        effortLevels: info.effortLevels,
+        defaultEffort: info.defaultEffort,
       },
     }));
     const sessionTypes: CatalogRow[] = response.sessionTypes.map((info) => ({

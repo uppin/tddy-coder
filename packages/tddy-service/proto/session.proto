@@ -702,6 +702,13 @@ message StartSessionRequest {
   // Claude CLI only: run the agent inside a tmux session on the host, as the session's OS user, with
   // the main terminal attached as a tmux client. Refused with `sandbox`; other session types ignore it.
   bool run_in_tmux = 47;
+  // The reasoning effort level the session's agent starts at — one of the levels its YAML spec
+  // declares (`coding_agent.effort.levels`; `CatalogService.ListAgents` serves them as
+  // `AgentInfo.effort_levels`, and the `DescribeSessionStartOptions` exec tool lists them per
+  // agent). Empty = the agent's own default. A level the agent does not declare, and any level for
+  // an agent that declares none, is refused with INVALID_ARGUMENT naming the agent. Recorded in the
+  // session's `.session.yaml` and re-applied on resume. (`#orchestrators` 3/11)
+  string effort = 48;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

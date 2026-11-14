@@ -74,6 +74,14 @@ fn a_coding_agent(id: &str, route_providers: &[&str]) -> AgentInfo {
             .iter()
             .map(|placement| placement.to_string())
             .collect(),
+        effort_levels: spec
+            .effort()
+            .map(|effort| effort.levels.clone())
+            .unwrap_or_default(),
+        default_effort: spec
+            .effort()
+            .and_then(|effort| effort.default.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -106,6 +114,40 @@ async fn the_agent_catalog_reports_kind_harness_and_route_support_per_agent() {
                 route_providers: Vec::new(),
                 ..Default::default()
             },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn the_agent_catalog_reports_each_agents_effort_levels() {
+    // Given — an agent whose spec declares effort levels and one whose spec declares none
+    let (_home, daemon) = a_daemon_allowing(&["claude", "opencode"]);
+
+    // When
+    let agents = daemon
+        .list_agents(Request::direct(ListAgentsRequest {}))
+        .await
+        .expect("ListAgents succeeds")
+        .into_inner()
+        .agents;
+
+    // Then — claude's levels from claude.yaml, with no default of its own; nothing for opencode
+    // (`#orchestrators` 3/11)
+    let efforts: Vec<(String, Vec<String>, String)> = agents
+        .into_iter()
+        .map(|agent| (agent.id, agent.effort_levels, agent.default_effort))
+        .collect();
+    assert_eq!(
+        efforts,
+        vec![
+            (
+                "claude".to_string(),
+                ["low", "medium", "high", "xhigh", "max"]
+                    .map(String::from)
+                    .to_vec(),
+                String::new(),
+            ),
+            ("opencode".to_string(), Vec::new(), String::new()),
         ]
     );
 }

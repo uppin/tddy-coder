@@ -338,6 +338,9 @@ can start any session a person can.
   (this host) and every eligible host, and `recipe` every workflow recipe the daemon supports, as the
   daemon answers `ListExecTools`. `if`/`then` blocks make `model` required for the harnesses that need
   one and `selected_branch_to_work_on` required with `work_on_selected_branch`.
+- **`effort`** is a free string, as `model` is: levels are per agent, so the schema cannot enumerate
+  them, and `effort_levels` in [Start options](#start-options) lists them. A level the agent does not
+  declare is refused ([Claude CLI session § Effort](claude-cli-session.md#effort)).
 - **A branch another session owns is refused**, naming the branch and its owner; it is never
   suffixed (`on_branch_conflict` is always `reject`).
 - **Across hosts.** A start naming another host takes the daemon's own start path, which forwards it
@@ -431,6 +434,7 @@ answers them on demand, each from the RPC the form calls, on the host `daemon_in
 | `session_types` `[{id, label}]` | the session types the host's tool files declare (`workspace` is startable besides, and declared by nothing) |
 | `models` `{default, choices: [{id, label}]}` | `AccountsService.ListProviderAccountModels` when `provider_account_id` is named (the first preselected); else `CatalogService.ListAgentModels` for `agent`, or for `session_type` when it is a coding agent's |
 | `provider_routes` `[{account_id, label, preset, supported, reason}]` | `AccountsService.ListProviderRoutes` for the harness: a coding agent's `session_type`, or the `agent` of any other session type (a `workspace` session runs none); `warp-cli` has none |
+| `effort_levels` `[{session_type, default, levels}]` | each declared session type whose coding agent's spec has an `effort` slot (`CatalogService.ListAgents` serves the same as `AgentInfo.effort_levels` / `default_effort`); a type missing from it takes no effort |
 | `ssh_config_hosts` | `HostService.ListSshConfigHosts` |
 | `subagents` | `CatalogService.ListSubagents`, each qualified `name@daemon_instance_id` as `specialized_agents` takes them |
 | `branches` | `ProjectService.ListProjectBranches` for the project's checkout on that host |

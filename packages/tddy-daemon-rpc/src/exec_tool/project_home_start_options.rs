@@ -76,6 +76,20 @@ pub(super) async fn describe_start_options(
             })
         })
         .collect();
+    let effort_levels = registry
+        .session_types()
+        .into_iter()
+        .filter_map(|declared| {
+            let slot = registry
+                .for_session_type(&declared.session_type)?
+                .effort()?;
+            Some(tddy_tool_engine::start_options::AgentEffortLevels {
+                session_type: declared.session_type.clone(),
+                default: slot.default.clone().unwrap_or_default(),
+                levels: slot.levels.clone(),
+            })
+        })
+        .collect();
     let session_types = registry
         .session_types()
         .into_iter()
@@ -98,6 +112,7 @@ pub(super) async fn describe_start_options(
         agents,
         models,
         models_unavailable,
+        effort_levels,
         provider_routes,
         provider_routes_unavailable,
         ssh_config_hosts,

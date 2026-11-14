@@ -365,4 +365,26 @@ describe("create session request builder", () => {
     // Then the list is empty — byte-for-byte the request this pane has always sent
     expect(request.attachments).to.deep.equal([]);
   });
+
+  it("sends the effort the operator chose for a CLI agent", () => {
+    // Given a claude-cli form whose effort picker holds "high"
+    const form = aFormWith({ effort: "high" });
+
+    // When the request is built
+    const request = buildStartSessionRequest(form, null, []);
+
+    // Then it goes out as `effort` (#orchestrators 3/11)
+    expect(request.effort).to.equal("high");
+  });
+
+  it("sends no effort for a tool session, whatever the form holds", () => {
+    // Given a tool session with an effort left over from a CLI agent's picker
+    const form = aFormWith({ sessionType: "tool", sessionLaunch: "tddy_coder", effort: "high" });
+
+    // When the request is built
+    const request = buildStartSessionRequest(form, null, []);
+
+    // Then it is sent empty — a tool session's agent is launched by tddy-coder, which takes none
+    expect(request.effort).to.equal("");
+  });
 });

@@ -53,7 +53,8 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
 14. Clicking **Resume** issues `ResumeSession`. The daemon:
     - Reads `session_type`, `model`, and `repo_path` from `.session.yaml`.
     - Verifies the worktree still exists (errors with a clear message if not).
-    - Spawns a new `claude --model <model>` PTY inside the existing worktree.
+    - Spawns a new `claude --model <model>` PTY inside the existing worktree, at the effort the start
+      recorded (`--effort <level>`, see [Effort](#effort)).
     - Updates `.session.yaml` with the new PID and `status: active`.
 15. Terminal access resumes immediately via the same `StreamSessionTerminalIO` stream pattern.
 16. What the agent printed outlives the process: the session's `main` terminal is recorded to
@@ -364,6 +365,20 @@ Resume re-reads that record and resolves the account against the owner's vault *
 resume**: a rotated key is what the resumed session runs on, and an account removed since the start —
 or a vault locked since — refuses the resume with the same statuses a start gets, rather than running
 it on Anthropic. A session with no record resumes on the vendor.
+
+## Effort
+
+A session can be started at a reasoning effort level (`StartSessionRequest.effort`, field 48) as well
+as a model. claude's spec declares the levels `low, medium, high, xhigh, max` and carries a level as
+`--effort <level>` ([coding-agent specs § Effort](../../../packages/tddy-coding-agent-specs/docs/coding-agent-specs.md#effort-coding_agenteffort)).
+
+- An empty effort is the agent's own default. A level the agent's spec does not declare, or any level
+  for an agent whose spec declares none, is refused `INVALID_ARGUMENT` before anything is created,
+  naming the agent and its levels.
+- The level is recorded as `effort:` in `.session.yaml` (absent when none was chosen) and a resume
+  launches at it again.
+- Host, tmux and **jailed** sessions carry it alike: the sandboxed start and resume add the same
+  spec-driven flag or variable to the jail's exec plan.
 
 ## Non-goals (out of scope)
 

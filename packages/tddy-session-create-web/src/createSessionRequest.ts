@@ -71,6 +71,12 @@ export interface CreateSessionFormValues {
   stackParentDaemonInstanceId: string;
   prStackBaseSessionId: string;
   model: string;
+  /**
+   * The effort level the session starts at, one of the agent's served `effort_levels`; empty or
+   * absent for the agent's own default (`#orchestrators` 3/11). Sent for a CLI agent, never for a
+   * tool session.
+   */
+  effort?: string;
   /** The provider account the harness runs on; empty or absent for its vendor. */
   providerAccountId?: string;
   /** The operator explicitly chose the vendor, overriding any default account. */
@@ -177,6 +183,7 @@ export function buildStartSessionRequest(
       // it as a tool session.
       sessionType,
       model,
+      effort: "",
       // The account the agent runs on, or the vendor. The daemon refuses an agent that cannot run
       // on the account it is named with, rather than starting it on the vendor.
       providerAccountId,
@@ -262,6 +269,7 @@ function cliAgentChoices(form: CreateSessionFormValues, features: CliAgentFeatur
   return {
     sessionType: form.sessionType,
     model: features.bindsModel ? form.model : "",
+    effort: form.effort ?? "",
     providerAccountId: features.providerRoutable ? form.providerAccountId : undefined,
     providerBuiltIn: features.providerRoutable ? form.providerBuiltIn : undefined,
     permissionMode: features.bindsPermissionMode ? form.permissionMode : "",
