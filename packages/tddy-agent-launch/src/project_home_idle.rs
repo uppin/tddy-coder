@@ -3,9 +3,11 @@
 //! A project-home session is **busy** while its hook-reported `activity_status` is `Running` (a
 //! turn in flight); otherwise it is idle **since** its metadata's `updated_at`, which every status
 //! report bumps — the end of its last turn, or the input that started one. Once idle for
-//! `project_home.idle_stop_secs`, the reaper stops it through the normal stop path; its
-//! `.session.yaml` keeps what resume needs, so `EnsureProjectHomeSession` resumes the same
-//! conversation. Sessions without the `project-home` role are never touched; `0` disables it.
+//! `project_home.idle_stop_secs`, the reaper stops it through the normal stop path. Since #883,
+//! `.session.yaml` *does* change on `/clear` — the rotated conversation id is recorded there —
+//! and that change is what makes "the next ensure resumes the same conversation" true:
+//! `EnsureProjectHomeSession` resumes the conversation `.session.yaml` now names. Sessions
+//! without the `project-home` role are never touched; `0` disables it.
 //!
 //! Feature: docs/ft/daemon/project-concept.md § Project-home auto-stop.
 
@@ -136,8 +138,9 @@ impl LaunchSessions {
         };
         log::info!("project-home auto-stop: stopping idle session {session_id} (pid {pid})");
         // The stop an explicit termination makes: the tracked terminal is cancelled (SIGTERM, then
-        // SIGKILL to its child) and forgotten, so ensure no longer sees it as running. Nothing in
-        // `.session.yaml` changes, so the next ensure resumes the same conversation.
+        // SIGKILL to its child) and forgotten, so ensure no longer sees it as running. The stop
+        // itself writes nothing to `.session.yaml`; a `/clear` rotation (#883) may already have
+        // changed it, and the next ensure resumes the conversation it now names.
         self.cli_manager.stop_session(session_id).await;
         if exits_within(pid, EXIT_WAIT).await {
             return true;

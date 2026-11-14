@@ -40,10 +40,10 @@ are right. They leave these cases:
 3. **No existence check on resume.** `resumed_conversation` binds the newest `agent_conversations` id
    even when `{agent_home}/.claude/projects/*/<id>.jsonl` does not exist. The failure is then whatever
    Claude does with an unknown `--resume` id, and the daemon never says why.
-4. **Stale comments.** `tddy-agent-launch/src/project_home_idle.rs` (module doc, and the comment at
-   `stop_session`) says "Nothing in `.session.yaml` changes, so the next ensure resumes the same
-   conversation". With #883, `.session.yaml` *does* change on `/clear`, and that change is what makes
-   the claim true.
+4. ~~**Stale comments.**~~ **Done in the `#orchestrators` sweep (T2).** `tddy-agent-launch/src/project_home_idle.rs`
+   (module doc, and the comment at `stop_session`) said "Nothing in `.session.yaml` changes, so the
+   next ensure resumes the same conversation". With #883, `.session.yaml` *does* change on `/clear`,
+   and that change is what makes the claim true. Both comments now say so.
 5. **No test of the whole chain.** The rotation suites (`session_hook_conversation_rotation`,
    `conversation_rotation_record`, `spec_launch_conversation_rotation`) each test one piece. None drives
    a real hook report, then a stop through the idle reaper (`reap_idle_project_home_sessions`), then
