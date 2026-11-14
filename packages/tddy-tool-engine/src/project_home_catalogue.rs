@@ -18,6 +18,9 @@ use crate::project_home_terminate::{terminate_session_tool_def, TERMINATE_SESSIO
 use crate::project_home_tools::DIFF_SESSION_WORKTREE;
 use crate::project_home_tools::LIST_PROJECT_SESSIONS;
 use crate::project_home_tools::READ_SESSION_WORKTREE;
+use crate::project_home_turn_tools::{
+    project_home_turn_tool_defs, RESUME_SESSION, SEND_SESSION_MESSAGE,
+};
 use crate::project_home_worktree_tools::{worktree_tool_defs, GET_WORKTREE, LIST_WORKTREES};
 use crate::read_only::is_project_home_allowed_tool;
 use crate::session_follow::{
@@ -58,6 +61,8 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | WAIT_PROJECT_NOTIFICATIONS
             | READ_PROJECT_NOTIFICATIONS
             | NOTIFY_OPERATOR
+            | SEND_SESSION_MESSAGE
+            | RESUME_SESSION
     )
 }
 
@@ -224,6 +229,7 @@ pub(crate) fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
     defs.extend(project_home_terminal_tool_defs());
     defs.extend(project_home_answer_tool_defs());
     defs.extend(project_home_inbox_tool_defs());
+    defs.extend(project_home_turn_tool_defs());
     defs.extend(terminate_session_tool_def());
     defs.extend(refresh_worktree_disk_usage_tool_def());
     defs.push(notify_operator_tool_def());

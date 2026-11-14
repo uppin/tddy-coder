@@ -7,6 +7,7 @@ pub(crate) mod headless_section;
 pub(crate) mod pass_env;
 pub(crate) mod route_slot;
 pub(crate) mod slot_shapes;
+pub(crate) mod turn_input_slot;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -25,6 +26,7 @@ use crate::spec::acp::AcpSection;
 use crate::spec::effort_slot::{validate_effort_slot, EffortSlot};
 use crate::spec::headless_section::HeadlessSection;
 use crate::spec::slot_shapes::InstructionsSlot;
+use crate::spec::turn_input_slot::{validate_turn_input_slot, TurnInputSlot};
 
 /// The `extensions:` key this crate owns.
 pub const CODING_AGENT_EXTENSION: &str = "coding_agent";
@@ -168,6 +170,11 @@ fn parse_section(
             .map_err(|e| format!("effort: {e}"))
             .map_err(invalid)?;
     }
+    if let Some(turn_input) = &agent.turn_input {
+        validate_turn_input_slot(turn_input)
+            .map_err(|e| format!("turn_input: {e}"))
+            .map_err(invalid)?;
+    }
     Ok(agent)
 }
 
@@ -270,6 +277,12 @@ pub struct CodingAgentSection {
     /// a start naming one is refused. Read through [`CodingAgentSpec::effort`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<EffortSlot>,
+    /// How a new turn reaches a running session of this agent (`#orchestrators` 4/11): a terminal
+    /// paste and a submit key, or an ACP prompt. `None` for an agent that takes no message: a
+    /// `SendSessionMessage` to its session is refused naming it. Read through
+    /// [`CodingAgentSpec::turn_input`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_input: Option<TurnInputSlot>,
 }
 
 /// How long an orchestrated session's permission hook waits for its orchestrator's answer when the
@@ -321,6 +334,12 @@ impl CodingAgentSpec {
     /// for an agent that takes no effort.
     pub fn effort(&self) -> Option<&EffortSlot> {
         self.agent.effort.as_ref()
+    }
+
+    /// `coding_agent.turn_input`: how a new turn reaches a running session of the agent; `None`
+    /// for an agent that takes no message.
+    pub fn turn_input(&self) -> Option<&TurnInputSlot> {
+        self.agent.turn_input.as_ref()
     }
 
     /// `coding_agent.product`, or the agent id when the spec declares none.

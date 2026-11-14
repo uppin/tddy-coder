@@ -38,6 +38,7 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+use tddy_core::WorkflowError;
 use tddy_daemon_kernel::session_notification::{
     AgentNotification, QuestionNotice, SessionNotificationKind, SessionNotificationSource,
 };
@@ -82,6 +83,10 @@ pub struct ProjectNotificationRecord {
     /// What the session asks, with the `request_id` it is answered by (`#home-inbox` 3/8).
     pub question: Option<QuestionNotice>,
     pub at_unix_ms: u64,
+    /// The orchestrator that started the session — the `orchestrator_session_id` its changeset
+    /// names when the record is appended — or `None` for a session no orchestrator started
+    /// (`#orchestrators` 4/11). What a scope's [`ProjectNotificationScope::started_by`] matches.
+    pub orchestrator_session_id: Option<String>,
 }
 
 /// Whose records a read or a wait may see.
@@ -92,6 +97,10 @@ pub struct ProjectNotificationScope {
     pub os_user: String,
     /// The caller's own session, whose notifications are never returned.
     pub exclude_session_id: String,
+    /// Only the records whose [`ProjectNotificationRecord::orchestrator_session_id`] is this
+    /// session: the caller's own children, for `started_by_me` (`#orchestrators` 4/11). `None` for
+    /// every session's records.
+    pub started_by: Option<String>,
 }
 
 /// A read's answer: a page, and how many records the cursor lost to eviction.
@@ -132,7 +141,11 @@ struct Held {
 
 impl Held {
     fn visible_to(&self, scope: &ProjectNotificationScope) -> bool {
-        self.os_user == scope.os_user && self.record.session_id != scope.exclude_session_id
+        self.os_user == scope.os_user
+            && self.record.session_id != scope.exclude_session_id
+            && scope.started_by.as_ref().is_none_or(|orchestrator| {
+                self.record.orchestrator_session_id.as_ref() == Some(orchestrator)
+            })
     }
 }
 
@@ -278,9 +291,14 @@ impl ProjectNotificationLog {
         Arc::clone(projects.entry(project_id.to_string()).or_default())
     }
 
-    /// The project a notification's session belongs to, from its own record; `None` for a session
-    /// of no project. A session whose OS user or record cannot be resolved is an error.
-    fn project_of(&self, notification: &SessionNotification) -> anyhow::Result<Option<String>> {
+    /// The project a notification's session belongs to, from its own record, and the orchestrator
+    /// its changeset names as having started it (`None` when nobody did); `None` for a session of
+    /// no project. A session whose OS user, record or changeset cannot be read is an error — a
+    /// missing changeset is not (it names no orchestrator).
+    fn project_of(
+        &self,
+        notification: &SessionNotification,
+    ) -> anyhow::Result<Option<(String, Option<String>)>> {
         validate_session_id_segment(&notification.session_id)
             .map_err(|e| anyhow::anyhow!("{}", e.message()))?;
         let sessions_base = (self.sessions_base_for)(&notification.os_user).ok_or_else(|| {
@@ -293,7 +311,23 @@ impl ProjectNotificationLog {
                 notification.session_id
             )
         })?;
-        Ok((!metadata.project_id.is_empty()).then_some(metadata.project_id))
+        if metadata.project_id.is_empty() {
+            return Ok(None);
+        }
+        // No changeset at all: a session nobody started. One that exists but cannot be read is a
+        // delivery error — recording it as "no orchestrator" would silently drop it from its
+        // orchestrator's `started_by_me` view.
+        let orchestrator = match tddy_core::read_changeset(&session_dir) {
+            Ok(changeset) => changeset.orchestrator_session_id,
+            Err(WorkflowError::ChangesetMissing(_)) => None,
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "session {} has an unreadable changeset, so its orchestrator is unknown: {e}",
+                    notification.session_id
+                ))
+            }
+        };
+        Ok(Some((metadata.project_id, orchestrator)))
     }
 }
 
@@ -365,7 +399,7 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
     }
 
     async fn deliver(&self, notification: &SessionNotification) -> anyhow::Result<()> {
-        let Some(project_id) = self.project_of(notification)? else {
+        let Some((project_id, orchestrator)) = self.project_of(notification)? else {
             // A session started without a project is a normal session, not a fault: nothing to
             // record, and nothing for the bus to warn about.
             log::debug!(
@@ -393,6 +427,7 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
                     agent: notification.agent.clone(),
                     question: notification.question.clone(),
                     at_unix_ms: notification.at_unix_ms,
+                    orchestrator_session_id: orchestrator.clone(),
                 },
             };
             storage::append(&path, &held)?;

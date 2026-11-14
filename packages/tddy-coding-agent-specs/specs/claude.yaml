@@ -107,6 +107,9 @@ extensions:
         - { id: claude-fable-5-1, label: "Claude Fable 5.1 (pinned)" }
         - { id: claude-sonnet-5, label: "Claude Sonnet 5 (pinned)" }
         - { id: claude-haiku-4-5-20251001, label: "Claude Haiku 4.5 (pinned)" }
+    # How a new turn reaches a running session (`SendSessionMessage`, `#orchestrators` 4/11): pasted into
+    # the TUI, then submitted.
+    turn_input: { kind: terminal_paste, submit_key: Enter }
     context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
     # --- Headless (`#agent-tools 6/12`): one `claude -p` per turn, for the workflow backend
     # (`tddy-coder --agent claude`) and a headless coding subagent. It renders byte-for-byte what

@@ -282,3 +282,26 @@ prefixed `effort:`). An agent without the slot takes no effort: a start naming o
 (`tddy-agent-launch`'s `refuse_an_effort_the_agent_cannot_take`). An `env` carry must not be named
 `TDDY_*`: a jail's exec plan drops those from the agent's environment.
 
+## Turn input (`coding_agent.turn_input`)
+
+`CodingAgentSection.turn_input: Option<TurnInputSlot>` (`spec/turn_input_slot.rs`, read through
+`CodingAgentSpec::turn_input`) says how a new turn reaches a running session of the agent, for the
+daemon's `SendSessionMessage` and `ResumeSession`'s first message:
+
+```yaml
+turn_input: { kind: terminal_paste, submit_key: Enter }   # paste into the main terminal, then press submit_key
+turn_input: { kind: acp_prompt }                          # a prompt over the session's ACP connection
+```
+
+The slot is serde-tagged with `deny_unknown_fields`, so an unknown `kind` or field is refused at
+load naming it; `parse_section` also calls `validate_turn_input_slot`, refusing a `submit_key` that
+is not a key name (messages prefixed `turn_input:`). An agent without the slot takes no message.
+`specs/claude.yaml` declares `terminal_paste` with `Enter`; no other built-in declares one.
+
+**Key names** live in `terminal_keys.rs` — `named_key_bytes(name)` and `is_key_name(name)`, the one
+table (`Enter`, `Escape`, `Tab`, `BTab`, `Backspace`, `Delete`, arrows, `Home`, `End`, `PageUp`,
+`PageDown`, `Space`, `C-a` … `C-z`, `F1` … `F12`, case-sensitive) that both this load check and
+`tddy-tool-engine::terminal_keys::encode_keys` (`SendSessionKeys`) read.
+
+Tests: `tests/spec_turn_input_acceptance.rs` (claude's slot, an unknown kind, a submit key that is
+not a key name).

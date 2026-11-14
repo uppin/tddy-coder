@@ -232,6 +232,10 @@ struct RecordDto {
     agent: Option<AgentDto>,
     question: Option<QuestionDto>,
     at_unix_ms: u64,
+    /// Absent from a line written before records named their orchestrator (`#orchestrators`
+    /// 4/11), and from a record of a session no orchestrator started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    orchestrator_session_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -304,6 +308,7 @@ impl From<&ProjectNotificationRecord> for RecordDto {
             agent: record.agent.as_ref().map(AgentDto::from),
             question: record.question.as_ref().map(QuestionDto::from),
             at_unix_ms: record.at_unix_ms,
+            orchestrator_session_id: record.orchestrator_session_id.clone(),
         }
     }
 }
@@ -320,6 +325,7 @@ impl From<RecordDto> for ProjectNotificationRecord {
             agent: dto.agent.map(AgentNotification::from),
             question: dto.question.map(QuestionNotice::from),
             at_unix_ms: dto.at_unix_ms,
+            orchestrator_session_id: dto.orchestrator_session_id,
         }
     }
 }

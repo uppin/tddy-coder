@@ -8,6 +8,7 @@ use crate::project_home_terminal_tools::{
 use crate::project_home_terminate::TERMINATE_SESSION;
 use crate::project_home_tools::DIFF_SESSION_WORKTREE;
 use crate::project_home_tools::READ_SESSION_WORKTREE;
+use crate::project_home_turn_tools::{RESUME_SESSION, SEND_SESSION_MESSAGE};
 use crate::project_home_worktree_tools::{GET_WORKTREE, LIST_WORKTREES};
 use crate::session_follow::{READ_SESSION_ACTIVITY, READ_SESSION_TRANSCRIPT};
 use crate::start_options::DESCRIBE_SESSION_START_OPTIONS;
@@ -49,6 +50,8 @@ pub fn is_project_home_target_tool(name: &str) -> bool {
             | ANSWER_SESSION_QUESTION
             | WAIT_PROJECT_NOTIFICATIONS
             | READ_PROJECT_NOTIFICATIONS
+            | SEND_SESSION_MESSAGE
+            | RESUME_SESSION
     ) || is_project_home_git_tool(name)
 }
 

@@ -108,6 +108,7 @@ fn the_home_agents_scope() -> ProjectNotificationScope {
         project_id: PROJECT_A.to_string(),
         os_user: ADA.to_string(),
         exclude_session_id: HOME.to_string(),
+        started_by: None,
     }
 }
 

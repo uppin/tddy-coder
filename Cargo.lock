@@ -14489,6 +14489,7 @@ dependencies = [
  "prost-types 0.13.5",
  "serde",
  "serde_json",
+ "tddy-coding-agent-specs",
  "tddy-core",
  "tddy-daemon-kernel",
  "tddy-discovery",

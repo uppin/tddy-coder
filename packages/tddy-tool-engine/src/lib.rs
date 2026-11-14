@@ -18,6 +18,7 @@ pub mod project_home_notify_tools;
 pub mod project_home_terminal_tools;
 pub mod project_home_terminate;
 pub mod project_home_tools;
+pub mod project_home_turn_tools;
 pub mod project_home_worktree_tools;
 pub mod read_only;
 pub(crate) mod read_window;

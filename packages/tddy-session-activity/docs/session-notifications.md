@@ -126,6 +126,11 @@ opens it over the data dir before the bus is assembled and installs the same `Ar
   tool's answer object. Compaction at twice the window writes a sibling `.jsonl.tmp`, `sync_all`s it,
   renames it over the file and syncs the directory. A torn last line (a crash mid-append) is ended
   with a line break on replay, so the next append does not run on into it.
+- **Orchestrator.** `deliver` reads the session's changeset beside its record and stores its
+  `orchestrator_session_id` on the `ProjectNotificationRecord` (the DTO omits it when `None`, and a
+  line written without it replays as `None`). An unreadable changeset names no orchestrator; the
+  record is still kept. `ProjectNotificationScope.started_by: Option<String>` keeps only the records
+  naming that orchestrator (`started_by_me`).
 - **Errors.** A session of no project is skipped with `Ok`; an unresolvable OS user or an unreadable
   record is an `Err` the bus logs. A failed compaction is logged and retried on the next append.
 - **Dependencies.** The paging (`FollowPage`, `page_size`, `parse_cursor`) and `MAX_WAIT_MS` are
