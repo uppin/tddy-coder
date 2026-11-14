@@ -25,3 +25,7 @@ peers that could hold the stack — so a node session is listed its two reads wh
 runs, with a test mirroring
 `a_stack_node_session_in_a_jail_is_listed_its_two_reads_as_the_daemon_lists_them` for
 the cross-host case.
+
+## Developer decision
+
+**Deferred by the developer at the #orchestrators TODO gate, 2026-11-14.** Cross-host listing gaps were accepted earlier in the stack; this one stays open until a peer lookup of node bindings is wanted.
