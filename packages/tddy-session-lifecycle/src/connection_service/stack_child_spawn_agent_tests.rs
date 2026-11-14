@@ -198,9 +198,9 @@ impl AnOrchestrator {
             ),
         )
         .expect("write orchestrator metadata");
-        tddy_core::write_changeset(
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(
             &dir,
-            &Changeset {
+            Changeset {
                 stack: Some(Stack {
                     version: 1,
                     nodes: vec![StackNode {
@@ -213,8 +213,7 @@ impl AnOrchestrator {
                 }),
                 ..Changeset::default()
             },
-        )
-        .expect("write orchestrator changeset");
+        );
     }
 
     /// The handler the `pr_spawn_child` tool reaches, wired as a pr-stack start wires it.

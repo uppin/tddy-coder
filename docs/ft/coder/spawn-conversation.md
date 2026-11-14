@@ -22,7 +22,7 @@ plan to a fresh agent that starts on a new branch/worktree — surfaced to the u
 The daemon already materializes "a new worktree + a new agent conversation tagged with a parent"
 for the **PR-stack orchestrator** via `spawn-child` (`ChildSpawnHandler` →
 `LaunchSessions::start_spawned_cli_child(stack_parent = Some(...))`). That mechanism is PR-stack-specific: it
-resolves a *planned-PR node* from the orchestrator's `changeset.stack`, which a grill-me session does
+resolves a *planned-PR node* from the orchestrator's stack, which a grill-me session does
 not have. Rather than widen the PR-stack path (and risk its live behavior), we add a **parallel,
 additive** capability: a generic `spawn_conversation` tool + `ConversationSpawnHandler` that takes an
 explicit **prompt** (and optional **branch**/**base_ref**) instead of a node id, reusing the same

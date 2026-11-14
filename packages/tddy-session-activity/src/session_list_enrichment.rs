@@ -41,8 +41,8 @@ pub struct SessionListStatusDisplay {
     pub orchestrator_session_id: String,
     /// Active workflow recipe name (from `Changeset.recipe`). Empty string when absent.
     pub recipe: String,
-    /// JSON-serialized `Changeset.stack` (the PR DAG), present only on orchestrator sessions.
-    /// Empty string when `Changeset.stack` is `None`.
+    /// JSON-serialized PR stack (the PR DAG) the session's `stack_id` names, present only on
+    /// orchestrator sessions. Empty string when the session has none.
     pub stack_plan_json: String,
     /// The session's git branch (from `Changeset.branch`). Empty when the session has no branch
     /// yet. Lets the PR-Stack view resolve the in-progress child session for a planned node by
@@ -68,17 +68,33 @@ impl SessionListStatusDisplay {
     }
 }
 
-/// Serialize `Changeset.stack` to JSON for the `stack_plan_json` proto field; empty string when
-/// `None` or on serialization failure (logged, never propagated as an error — enrichment is
-/// best-effort display data).
+/// Serialize a session's PR stack to JSON for the `stack_plan_json` proto field; empty string when
+/// the session has none or on a read or serialization failure (logged, never propagated as an
+/// error — enrichment is best-effort display data).
+///
+/// The stack is the project's record the changeset's `stack_id` names. A changeset still carrying
+/// the pre-store `stack` and no id — a session the daemon's startup sweep has not reached — lists
+/// no stack: only the sweep reads that field.
 ///
 /// Public because `tddy-daemon-rpc`'s PR-stack family reuses it to serialize its responses'
 /// `stack_plan_json` in the exact wire shape `PrStackScreen` already knows how to parse.
-pub fn stack_plan_json_for_changeset(changeset: &Changeset) -> String {
-    let Some(ref stack) = changeset.stack else {
+pub fn stack_plan_json_for_changeset(session_dir: &Path, changeset: &Changeset) -> String {
+    if changeset.stack_id.is_none() {
         return String::new();
+    }
+    let stack = match tddy_core::changeset::read_stack_of(session_dir, changeset) {
+        Ok(Some(stack)) => stack,
+        Ok(None) => return String::new(),
+        Err(e) => {
+            log::warn!(
+                target: "tddy_daemon::session_list_enrichment",
+                "stack_plan_json_for_changeset: failed to read the stack of {}: {e}",
+                session_dir.display()
+            );
+            return String::new();
+        }
     };
-    serde_json::to_string(stack).unwrap_or_else(|e| {
+    serde_json::to_string(&stack).unwrap_or_else(|e| {
         log::warn!(
             target: "tddy_daemon::session_list_enrichment",
             "stack_plan_json_for_changeset: failed to serialize stack: {e}"
@@ -223,7 +239,7 @@ pub fn session_list_status_from_session_dir(
                 .clone()
                 .unwrap_or_default(),
             recipe: changeset.recipe.clone().unwrap_or_default(),
-            stack_plan_json: stack_plan_json_for_changeset(&changeset),
+            stack_plan_json: stack_plan_json_for_changeset(session_dir, &changeset),
             branch: changeset.branch.clone().unwrap_or_default(),
         });
     };
@@ -256,7 +272,7 @@ pub fn session_list_status_from_session_dir(
             .clone()
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
-        stack_plan_json: stack_plan_json_for_changeset(&changeset),
+        stack_plan_json: stack_plan_json_for_changeset(session_dir, &changeset),
         branch: changeset.branch.clone().unwrap_or_default(),
     })
 }
@@ -1878,7 +1894,24 @@ state:
     #[test]
     fn enrichment_surfaces_stack_plan_json_from_changeset() {
         let dir = tempdir().unwrap();
-        let session_dir = dir.path();
+        let session_dir = dir.path().join("sessions").join("orch-sess-stack-1");
+        let session_dir = session_dir.as_path();
+        fs::create_dir_all(session_dir).unwrap();
+        let record =
+            tddy_core::project_stack_store::ProjectStackStore::new(dir.path().join("projects"))
+                .create(
+                    "proj-stack-json",
+                    "orch-sess-stack-1",
+                    tddy_core::changeset::Stack {
+                        version: 1,
+                        nodes: vec![tddy_core::changeset::StackNode {
+                            node_id: "n1".to_string(),
+                            title: "Add token store".to_string(),
+                            ..Default::default()
+                        }],
+                    },
+                )
+                .unwrap();
 
         fs::write(
             session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
@@ -1895,7 +1928,8 @@ pid: 42
 
         fs::write(
             session_dir.join("changeset.yaml"),
-            r"version: 1
+            format!(
+                r"version: 1
 models:
   tdd: opus
 sessions:
@@ -1911,14 +1945,10 @@ state:
     - state: Green
       at: '2026-07-01T10:05:00Z'
 recipe: pr-stack
-stack:
-  version: 1
-  nodes:
-    - node_id: n1
-      title: Add token store
-      description: ''
-      parents: []
+stack_id: {}
 ",
+                record.stack_id
+            ),
         )
         .unwrap();
 
@@ -2002,7 +2032,24 @@ state:
         use tddy_service::proto::session::SessionEntry as ProtoSessionEntry;
 
         let dir = tempdir().unwrap();
-        let session_dir = dir.path();
+        let session_dir = dir.path().join("sessions").join("orch-proto-stack-sess");
+        let session_dir = session_dir.as_path();
+        fs::create_dir_all(session_dir).unwrap();
+        let record =
+            tddy_core::project_stack_store::ProjectStackStore::new(dir.path().join("projects"))
+                .create(
+                    "proj-proto-stack",
+                    "orch-proto-stack-sess",
+                    tddy_core::changeset::Stack {
+                        version: 1,
+                        nodes: vec![tddy_core::changeset::StackNode {
+                            node_id: "n1".to_string(),
+                            title: "Root PR".to_string(),
+                            ..Default::default()
+                        }],
+                    },
+                )
+                .unwrap();
 
         fs::write(
             session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
@@ -2019,7 +2066,8 @@ pid: 77
 
         fs::write(
             session_dir.join("changeset.yaml"),
-            r"version: 1
+            format!(
+                r"version: 1
 models:
   tdd: opus
 sessions:
@@ -2035,14 +2083,10 @@ state:
     - state: Green
       at: '2026-07-01T10:05:00Z'
 recipe: pr-stack
-stack:
-  version: 1
-  nodes:
-    - node_id: n1
-      title: Root PR
-      description: ''
-      parents: []
+stack_id: {}
 ",
+                record.stack_id
+            ),
         )
         .unwrap();
 

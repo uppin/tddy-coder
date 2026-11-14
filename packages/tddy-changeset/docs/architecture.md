@@ -27,6 +27,8 @@ budget.
 | Module | Owns |
 |---|---|
 | `changeset` | `changeset.yaml`: `model`, `stack` (the PR-stack DAG), `io` (atomic reads and writes), `merge` (what a stored changeset means for the run about to start) |
+| `project_stack_store` | `ProjectStackStore`, `StackRecord`, `StackStoreError`: each project's PR stacks at `<projects dir>/<project_id>/stacks/<stack_id>.yaml`, written under a per-stack in-process lock with an atomic rename |
+| `stack_fixtures` (`cfg(test)` or feature `test-support`) | the sessions layout a stack needs in tests — `a_stack_host`, `a_stack_session_dir`, `write_changeset_with_stack`, `stack_on_disk` — for this crate and other crates' `[dev-dependencies]` |
 | `branch_worktree_intent` | `BranchWorktreeIntent`: whether a session works on a new branch cut from a base or on a selected existing one |
 | `session_lifecycle` | the unified session directory and its id rules |
 | `session_github_source` | the session's recorded GitHub source: `SessionGithubSource { Vault, LocalGh }`, `write_session_github_source`, `read_session_github_source` (`Ok(None)` when none was recorded) |
@@ -74,7 +76,7 @@ in `session_metadata.rs`: `a_session_without_a_resume_token_writes_no_resume_tok
 - **read_changeset / write_changeset**: Load and persist changeset.yaml.
 - **append_session_and_update_state**: Add session (agent from backend.name(), id, tag, system_prompt_file); update workflow state.
 
-**PR-stack DAG (`Changeset.stack`).** A stack progresses on **branches, not on sessions** — a branch can be built on whether or not a session is still attached to it. See [pr-stacking.md](../../../docs/ft/coder/pr-stacking.md).
+**PR-stack DAG (`Stack`, held by the project; the changeset names it by `Changeset.stack_id`).** The record lives in the project's stack store, not in `changeset.yaml`; `read_session_stack` / `read_stack_of` read it and `update_stack_atomic` writes it (creating the record on a session's first write). `Changeset.stack` is the pre-store field, read only by `tddy-pr-stack`'s startup sweep: every reader and writer here refuses a changeset that carries it without a `stack_id`. A stack progresses on **branches, not on sessions** — a branch can be built on whether or not a session is still attached to it. See [pr-stacking.md](../../../docs/ft/coder/pr-stacking.md).
 
 - **Stack::base_ref_for_spawn(node_id, stack_bottom_base) -> Result<String, WorkflowError>**: a node's spawn base — the nearest non-merged ancestor's `<remote>/<branch>` (the remote the project resolves, not necessarily `origin`), else `stack_bottom_base`. Refuses (`ChangesetInvalid`) when a non-merged parent owns no `branch`, naming the parent and its missing branch. A parent's `session_id` is not consulted.
 - **Stack::effective_base_refs(node_id, stack_bottom_base)**: counts only branch-bearing non-merged parents. A branchless parent contributes nothing — it is never given a synthesized `<remote>/<node_id>` ref.

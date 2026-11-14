@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "The changeset manifest, the PR-stack model, the unified session directory and per-session metadata"
 
+[features]
+# `stack_fixtures`: the sessions layout a PR stack needs, for other crates' tests.
+test-support = ["dep:tempfile"]
+
 [dependencies]
 # `session_context` moved in from `tddy-tools` with `anyhow::Result` and `with_context` messages
 # that are part of what the CLI prints (see `tddy-core`'s manifest).
@@ -14,6 +18,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 thiserror = "2"
+# Only for `stack_fixtures` (feature `test-support`), and this crate's own tests.
+tempfile = { version = "3", optional = true }
+# Stack ids are UUIDv7 (time-ordered), the version the rest of the workspace mints ids with.
+uuid = { version = "1", features = ["v7"] }
 tddy-workflow = { path = "../tddy-workflow" }
 # `atomic_file`, `error` and `output`. The store depends on no crate above it.
 tddy-session-store = { path = "../tddy-session-store" }

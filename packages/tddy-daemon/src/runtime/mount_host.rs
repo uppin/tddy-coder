@@ -247,9 +247,8 @@ impl BuildContext {
         let model_registry = &shared.model_registry;
         let session_notification_bus = Arc::clone(&shared.session_notification_bus);
         let session_tokens = &mount.session_tokens;
-        // Before the host serves, so no conversation of this run is among them: what this daemon's last
-        // run left of its headless conversations — their MCP configs carry agent credentials.
-        sweep_headless_files(config, tddy_data_dir);
+        // Before the host serves, so nothing of this run is among what they sweep.
+        sweep_what_the_last_run_left(config, tddy_data_dir);
         // One registry for the whole host: the launcher binds each headless conversation's approvals
         // into it, and the host answers those approvals through it.
         let approval_routes = Arc::default();
@@ -486,4 +485,15 @@ fn sweep_headless_files(
             tddy_data_dir.display()
         ),
     }
+}
+
+/// What earlier runs left that this one must not serve: headless conversation files (their MCP
+/// configs carry agent credentials), and PR stacks still in a `changeset.yaml`, moved into their
+/// projects' store — idempotent, self-logging; a session it cannot move lists no stack plan.
+fn sweep_what_the_last_run_left(config: &DaemonConfig, tddy_data_dir: &std::path::Path) {
+    sweep_headless_files(config, tddy_data_dir);
+    tddy_pr_stack::stack_migration::migrate_session_stacks(
+        tddy_data_dir,
+        &tddy_data_dir.join("projects"),
+    );
 }

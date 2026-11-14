@@ -1,5 +1,5 @@
 //! `begin-orchestrate` bridge task: connects the plan phase to the orchestrate loop in one
-//! session. Not a backend/agent goal — a host-only [`Task`] that seeds `Changeset.stack` from
+//! session. Not a backend/agent goal — a host-only [`Task`] that seeds the project stack from
 //! the just-written `stack-plan.yaml` (idempotent, same guard as
 //! [`crate::orchestrate_pr_stack::seed_orchestrator_stack_from_plan`]) and replays any in-flight
 //! crash-recovery journal before handing off to `assess`.
@@ -27,16 +27,12 @@ impl Default for BeginOrchestrateTask {
     }
 }
 
-/// Seed `Changeset.stack` from `stack-plan.yaml` if the stack is not already populated, then
+/// Seed the stack from `stack-plan.yaml` if the stack is not already populated, then
 /// replay any in-flight crash-recovery journal. Idempotent — safe to call on every entry.
 fn seed_and_recover(session_dir: &Path) -> Result<(), String> {
-    let changeset = tddy_core::changeset::read_changeset(session_dir)
-        .map_err(|e| format!("begin-orchestrate: failed to read changeset: {e}"))?;
-    let needs_seed = changeset
-        .stack
-        .as_ref()
-        .map(|s| s.nodes.is_empty())
-        .unwrap_or(true);
+    let stack = tddy_core::changeset::read_session_stack(session_dir)
+        .map_err(|e| format!("begin-orchestrate: failed to read stack: {e}"))?;
+    let needs_seed = stack.as_ref().map(|s| s.nodes.is_empty()).unwrap_or(true);
 
     if needs_seed {
         let plan_path = session_dir.join(STACK_PLAN_BASENAME);

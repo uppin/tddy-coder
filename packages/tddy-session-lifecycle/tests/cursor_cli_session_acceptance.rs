@@ -724,9 +724,9 @@ fn an_orchestrator_that_planned(
 ) {
     let session_dir = sessions_base.join("sessions").join(ORCHESTRATOR_SESSION_ID);
     std::fs::create_dir_all(&session_dir).expect("create the orchestrator's session dir");
-    tddy_core::changeset::write_changeset(
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(
         &session_dir,
-        &tddy_core::changeset::Changeset {
+        tddy_core::changeset::Changeset {
             branch: Some("main".to_string()),
             repo_path: Some(repo.to_string_lossy().into_owned()),
             recipe: Some("pr-stack".to_string()),
@@ -748,8 +748,7 @@ fn an_orchestrator_that_planned(
             }),
             ..Default::default()
         },
-    )
-    .expect("write the orchestrator's changeset");
+    );
 }
 
 #[tokio::test]
@@ -783,16 +782,13 @@ async fn a_cursor_cli_child_records_its_branch_on_the_planned_node_it_materializ
             .expect("a started session writes a changeset")
             .branch
             .expect("a started session records the branch it created");
-    let orchestrator = tddy_core::read_changeset(
+    let orchestrator_stack = tddy_changeset::stack_fixtures::stack_on_disk(
         &sessions
             .path()
             .join("sessions")
             .join(ORCHESTRATOR_SESSION_ID),
-    )
-    .expect("the orchestrator's changeset");
-    let node = orchestrator
-        .stack
-        .expect("the orchestrator keeps its stack")
+    );
+    let node = orchestrator_stack
         .nodes
         .into_iter()
         .find(|node| node.node_id == "attach-store")

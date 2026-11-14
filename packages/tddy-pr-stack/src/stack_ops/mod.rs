@@ -42,9 +42,8 @@ use order::next_display_order;
 /// `op` prefixes the failure so the caller's name reaches the operator — every writer below reports
 /// an unreadable changeset the same way.
 fn read_stack(dir: &Path, op: &str) -> Result<tddy_core::changeset::Stack, String> {
-    Ok(tddy_core::changeset::read_changeset(dir)
+    Ok(tddy_core::changeset::read_session_stack(dir)
         .map_err(|e| format!("{op}: failed to read changeset: {e}"))?
-        .stack
         .unwrap_or_default())
 }
 
@@ -148,14 +147,9 @@ fn next_free_node_id(stack: &tddy_core::changeset::Stack) -> String {
 #[cfg(test)]
 mod test_support {
     use std::path::Path;
-    use tddy_core::changeset::{read_changeset, Changeset, GithubPrStatus, Stack, StackNode};
+    use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
 
-    pub(super) fn a_changeset_with_stack(nodes: Vec<StackNode>) -> Changeset {
-        Changeset {
-            stack: Some(Stack { version: 1, nodes }),
-            ..Changeset::default()
-        }
-    }
+    pub(super) use tddy_changeset::stack_fixtures::a_stack_session_dir;
 
     pub(super) fn a_node(node_id: &str, title: &str, parents: Vec<&str>) -> StackNode {
         StackNode {
@@ -200,12 +194,21 @@ mod test_support {
         }
     }
 
+    /// The session at `dir` is a pr-stack orchestrator whose project holds `nodes`.
     pub(super) fn write_stack(dir: &Path, nodes: Vec<StackNode>) {
-        tddy_core::changeset::write_changeset(dir, &a_changeset_with_stack(nodes)).unwrap();
+        tddy_core::changeset::write_changeset(
+            dir,
+            &Changeset {
+                recipe: Some("pr-stack".to_string()),
+                ..Changeset::default()
+            },
+        )
+        .unwrap();
+        tddy_changeset::stack_fixtures::seed_session_stack(dir, Stack { version: 1, nodes });
     }
 
     pub(super) fn stack_on_disk(dir: &Path) -> Stack {
-        read_changeset(dir).unwrap().stack.unwrap()
+        tddy_changeset::stack_fixtures::stack_on_disk(dir)
     }
 
     pub(super) fn node_ids(dir: &Path) -> Vec<String> {

@@ -15,6 +15,7 @@ Deferred by the user, 2026-11-10 (#876 sweep): the restructure engine refused th
 | Run | Lines | Nesting | Note |
 |---|---|---|---|
 | 2026-11-10 | 90 → 74 | 1 | #876 Tier C: `build_connection_impl`, `adopt_and_build_connection` and `daemon_launcher_deps` extracted. The remaining seams are refused: the tail builder chain offers only "extract into variable", sub-expression extractions name `SplitRoomHosting`, `TerminalExposure` or `RoomTokenMinter` (spelled fully-qualified in other files' field declarations, not imported here), and the launcher expression's `approval_routes` is generated as `&_`. |
+| 2026-11-12 | 74 → 73 | 1 | #879 (`#orchestrators` 2/11): the headless-files sweep and the new PR-stack startup sweep share one `sweep_what_the_last_run_left` call. The file is 499 production lines (489 at the base) |
 
 ## What would close it
 

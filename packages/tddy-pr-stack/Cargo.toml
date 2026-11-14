@@ -18,5 +18,8 @@ async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
+# `stack_fixtures`: the sessions layout a PR stack lives in.
+tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 tempfile = "3"
+pretty_assertions = { workspace = true }
 rstest = { workspace = true }

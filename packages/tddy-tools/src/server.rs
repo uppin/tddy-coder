@@ -1290,19 +1290,15 @@ fn clear_has_conflicts_status(node_id: &str) -> Result<(), String> {
 /// and return the node summaries as JSON. Live refresh failures are surfaced (never hidden).
 fn pr_stack_status_impl() -> Result<serde_json::Value, String> {
     let dir = orchestrator_dir()?;
-    let changeset =
-        tddy_core::changeset::read_changeset(&dir).map_err(|e| format!("read changeset: {e}"))?;
-    let stack = changeset
-        .stack
-        .clone()
+    let stack = tddy_core::changeset::read_session_stack(&dir)
+        .map_err(|e| format!("read stack: {e}"))?
         .ok_or_else(|| "orchestrator changeset has no stack".to_string())?;
 
     let refresh_error = refresh_internal_statuses(&dir, &stack).err();
 
     // Re-read after the possible persist so the response reflects what is on disk.
-    let stack = tddy_core::changeset::read_changeset(&dir)
-        .map_err(|e| format!("re-read changeset: {e}"))?
-        .stack
+    let stack = tddy_core::changeset::read_session_stack(&dir)
+        .map_err(|e| format!("re-read stack: {e}"))?
         .unwrap_or(stack);
 
     let nodes: Vec<serde_json::Value> = stack
@@ -1538,9 +1534,8 @@ fn addressed_pull_number(node_id: Option<&str>, pull_number: Option<u64>) -> Res
     match (node_id, pull_number) {
         (Some(node_id), None) => {
             let dir = orchestrator_dir()?;
-            let stack = tddy_core::changeset::read_changeset(&dir)
-                .map_err(|e| format!("read changeset: {e}"))?
-                .stack
+            let stack = tddy_core::changeset::read_session_stack(&dir)
+                .map_err(|e| format!("read stack: {e}"))?
                 .ok_or_else(|| "orchestrator changeset has no stack".to_string())?;
             pr_insight::pull_number_for_node(&stack, node_id)
         }

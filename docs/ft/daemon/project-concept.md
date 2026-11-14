@@ -57,6 +57,7 @@ login rather than a vault account ([per-project GitHub identity](github-identity
 ## Storage
 
 - **Projects registry:** `~/.tddy/projects/projects.yaml` (list of projects).
+- **PR stacks:** `<projects dir>/<project_id>/stacks/<stack_id>.yaml`, one record per stack the project holds, beside the registry. A stack belongs to its project, not to the session that planned it. See [PR stacking § Where a stack lives](../coder/pr-stacking.md#where-a-stack-lives).
 - **Clone location (default):** `{home}/{repos_base_path}/{name}/` where `repos_base_path` comes from daemon config (default: `repos`).
 - **Optional override:** `CreateProject` may set **`user_relative_path`** (POSIX path relative to the user’s home, e.g. `Code/my-app` or `~/Code/my-app`). When set, the clone destination is that path instead of `{repos_base}/{name}/`.
 
