@@ -33,6 +33,7 @@ use tddy_tool_engine::project_home_tools::{
     is_project_home_target_tool, is_project_home_tool, target_daemon_instance_id,
     ListProjectSessionsResult, UnreachableHost,
 };
+use tddy_tool_engine::stack_tools::{is_stack_tool, StackCaller, StackCallerRole};
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
 use tddy_worktree_service::session_target::HomeCaller;
 
@@ -54,7 +55,10 @@ impl ExecToolRpcHandler {
         &self,
         req: &ExecuteToolRequest,
     ) -> Result<Option<ExecuteToolResponse>, Status> {
-        if !is_project_home_tool(&req.tool_name) && !is_project_home_git_tool(&req.tool_name) {
+        if !is_project_home_tool(&req.tool_name)
+            && !is_project_home_git_tool(&req.tool_name)
+            && !is_stack_tool(&req.tool_name)
+        {
             return Ok(None);
         }
         validate_session_id_segment(&req.session_id)
@@ -74,6 +78,24 @@ impl ExecToolRpcHandler {
                  this host's sessions, and it names host {host}",
                 req.tool_name, req.session_id
             )));
+        }
+        if is_stack_tool(&req.tool_name) {
+            // Confirmed only as an orchestrator-role session (the owner's `ListSessions` row names
+            // no node binding), which owns no stack on this host: its call must name one.
+            let caller = StackCaller {
+                session_id: home.session_id,
+                project_id: home.project_id,
+                role: StackCallerRole::Orchestrator { own_stack_id: None },
+            };
+            return Ok(Some(
+                self.serve_stack_tool_for_caller_held_elsewhere(
+                    req,
+                    caller,
+                    os_user,
+                    &sessions_base,
+                )
+                .await,
+            ));
         }
         let port = self.project_home_port(req, os_user, &sessions_base, None, owner)?;
         Ok(Some(port.execute(&home, req).await))
@@ -168,7 +190,7 @@ impl ExecToolRpcHandler {
         &self,
         req: &ExecuteToolRequest,
     ) -> Result<Option<ExecuteToolResponse>, Status> {
-        if !is_project_home_target_tool(&req.tool_name) {
+        if !is_project_home_target_tool(&req.tool_name) && !is_stack_tool(&req.tool_name) {
             return Ok(None);
         }
         let Some(host) = target_daemon_instance_id(&req.args_json) else {

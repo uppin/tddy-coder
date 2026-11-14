@@ -21,6 +21,7 @@ use std::sync::LazyLock;
 use tddy_session_tool_client::SessionExecToolAnswer;
 use tddy_tool_engine::project_home_git_tools::project_home_git_tool_defs;
 use tddy_tool_engine::project_home_tools::project_home_tool_defs;
+use tddy_tool_engine::stack_tools::stack_tool_defs;
 
 use crate::mcp_primitives::RemoteToolDef;
 
@@ -53,13 +54,14 @@ pub async fn admitted_exec_tool_names() -> Result<Vec<String>, String> {
     admission_from_answer(crate::session_tool_client::session_exec_tool_answer().await)
 }
 
-/// The project-home tools and the project-home git tools (`#project-home` 7/7), as MCP tool
-/// definitions. Registered at construction so a project-home session's call to one of them
-/// dispatches; advertised only to a project-home session.
+/// The project-home tools, the project-home git tools (`#project-home` 7/7) and the stack tools
+/// (`#orchestrators` 7/11), as MCP tool definitions. Registered at construction so a call to one of
+/// them dispatches; advertised only to a session the daemon admits them for.
 pub fn project_home_remote_tool_defs() -> Vec<RemoteToolDef> {
     project_home_tool_defs()
         .into_iter()
         .chain(project_home_git_tool_defs())
+        .chain(stack_tool_defs())
         .map(|tool| RemoteToolDef {
             name: tool.name,
             description: tool.description,
@@ -68,8 +70,21 @@ pub fn project_home_remote_tool_defs() -> Vec<RemoteToolDef> {
         .collect()
 }
 
-/// Every name in the exec catalog: the static catalog, the project-home tools and the project-home git
-/// tools. Built once, since `tools/list` asks it for every tool of every listing.
+/// The eleven stack tools alone, as MCP tool definitions: the daemon's exec tools that used to be
+/// this crate's `pr_*` methods.
+pub fn stack_remote_tool_defs() -> Vec<RemoteToolDef> {
+    stack_tool_defs()
+        .into_iter()
+        .map(|tool| RemoteToolDef {
+            name: tool.name,
+            description: tool.description,
+            input_schema_json: tool.input_schema_json,
+        })
+        .collect()
+}
+
+/// Every name in the exec catalog: the static catalog, the project-home tools, the project-home git
+/// tools and the stack tools. Built once, since `tools/list` asks it for every tool of every listing.
 static EXEC_CATALOG_NAMES: LazyLock<HashSet<String>> = LazyLock::new(|| {
     static_exec_tool_names()
         .into_iter()
@@ -118,8 +133,8 @@ mod tests {
         // When the advertised exec tools are read
         let advertised = advertised_exec_names(&admitted);
 
-        // Then exactly the read-only tools, the project-home tools and the seven git tools, and
-        // no write or shell tool
+        // Then exactly the read-only tools, the project-home tools, the seven git tools and the
+        // eleven stack tools, and no write or shell tool
         assert_eq!(
             advertised,
             sorted(&[
@@ -163,6 +178,17 @@ mod tests {
                 "CleanSessionWorktree",
                 "RefreshWorktreeDiskUsage",
                 "NotifyOperator",
+                "pr_stack_list",
+                "pr_stack_create",
+                "pr_stack_status",
+                "pr_read",
+                "pr_search",
+                "pr_comments",
+                "pr_add_planned",
+                "pr_update_planned",
+                "pr_delete_planned",
+                "pr_set_status",
+                "pr_adopt",
             ])
         );
     }

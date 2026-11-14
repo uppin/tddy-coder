@@ -164,12 +164,12 @@ orchestrator caller case)
 
 ## Scope
 
-- [ ] Tool family + caller classification + offered sets
-- [ ] Daemon port over store / stack_ops / pr_insight
-- [ ] `pr_stack_create`, `pr_stack_list`
-- [ ] Project-account GitHub credential
-- [ ] Forwarding to the owning host
-- [ ] Remove the eleven `tddy-tools` methods
+- [x] Tool family + caller classification + offered sets
+- [x] Daemon port over store / stack_ops / pr_insight
+- [x] `pr_stack_create`, `pr_stack_list`
+- [x] Project-account GitHub credential
+- [x] Forwarding to the owning host
+- [x] Remove the eleven `tddy-tools` methods
 - [ ] Docs via wrap (coder overview row)
 
 ## Technical Changes
@@ -218,11 +218,11 @@ Re-verified 2026-11-13 on `1c7c2e2a7` (n1 + n2 green underneath):
 
 ## Implementation Milestones
 
-- [ ] Family + caller + offering
-- [ ] Read tools (status, read, search, comments, list)
-- [ ] Plan writers (add, update, delete, set status, adopt, create)
-- [ ] Forwarding
-- [ ] tddy-tools removal
+- [x] Family + caller + offering
+- [x] Read tools (status, read, search, comments, list)
+- [x] Plan writers (add, update, delete, set status, adopt, create)
+- [x] Forwarding
+- [x] tddy-tools removal
 
 ## Testing Plan
 
@@ -330,10 +330,10 @@ n8 `feature/orchestrators/orchestrator-composer`.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -344,5 +344,5 @@ n8 `feature/orchestrators/orchestrator-composer`.
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap

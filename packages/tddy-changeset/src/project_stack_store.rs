@@ -86,19 +86,7 @@ impl ProjectStackStore {
         created_by_session_id: &str,
         stack: Stack,
     ) -> Result<StackRecord, StackStoreError> {
-        let stacks_dir = self.stacks_dir(project_id)?;
-        let stack_id = uuid::Uuid::now_v7().to_string();
-        let record = StackRecord {
-            stack_id,
-            project_id: project_id.to_string(),
-            created_by_session_id: created_by_session_id.to_string(),
-            created_at_unix_ms: now_unix_ms(),
-            title: None,
-            stack,
-        };
-        let path = record_path(&stacks_dir, &record.stack_id);
-        with_record_lock(&path, || write_record(&path, &record))?;
-        Ok(record)
+        self.create_titled(project_id, created_by_session_id, None, stack)
     }
 
     /// [`Self::create`], with the record titled `title` (`#orchestrators` 7/11).
@@ -109,9 +97,19 @@ impl ProjectStackStore {
         title: Option<String>,
         stack: Stack,
     ) -> Result<StackRecord, StackStoreError> {
-        // TODO(stack-plan-tools): implement — write `title` into the new record.
-        let _ = title;
-        self.create(project_id, created_by_session_id, stack)
+        let stacks_dir = self.stacks_dir(project_id)?;
+        let stack_id = uuid::Uuid::now_v7().to_string();
+        let record = StackRecord {
+            stack_id,
+            project_id: project_id.to_string(),
+            created_by_session_id: created_by_session_id.to_string(),
+            created_at_unix_ms: now_unix_ms(),
+            title,
+            stack,
+        };
+        let path = record_path(&stacks_dir, &record.stack_id);
+        with_record_lock(&path, || write_record(&path, &record))?;
+        Ok(record)
     }
 
     /// The record `stack_id` of `project_id`.

@@ -31,8 +31,10 @@
 //! PRD: docs/ft/coder/1-WIP/PRD-2026-11-10-stack-plan-tools.md.
 
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tddy_core::project_stack_store::StackRecord;
+use tddy_core::session_metadata::is_orchestrator_role;
 
 use crate::catalog::ToolDef;
 use crate::project_home_tools::{tool_def, TARGET_DAEMON_INSTANCE_ID};
@@ -122,26 +124,39 @@ pub struct StackCallerFacts<'a> {
 /// The role `facts` entitle a session to, or `None` for a session offered no stack tool. An
 /// orchestrator role wins over a node binding; a stack the changeset names gives no role by itself.
 pub fn stack_caller_role(facts: &StackCallerFacts<'_>) -> Option<StackCallerRole> {
-    // TODO(stack-plan-tools): implement — orchestrator role → Orchestrator { own_stack_id }; a
-    // parent stack binding this session → StackNode; anything else → None.
-    let _ = facts;
-    None
+    if facts.session_role.is_some_and(is_orchestrator_role) {
+        return Some(StackCallerRole::Orchestrator {
+            own_stack_id: facts.own_stack_id.map(str::to_string),
+        });
+    }
+    facts
+        .parent_stack
+        .filter(|parent| parent.binds_this_session)
+        .map(|parent| StackCallerRole::StackNode {
+            stack_id: parent.stack_id.to_string(),
+        })
 }
 
 /// Whether `role` is offered (and served) `tool_name`.
 pub fn is_stack_tool_offered_to(role: &StackCallerRole, tool_name: &str) -> bool {
-    // TODO(stack-plan-tools): implement — Orchestrator every stack tool, StackNode only
-    // `is_stack_read_tool`.
-    let _ = (role, tool_name);
-    false
+    match role {
+        StackCallerRole::Orchestrator { .. } => is_stack_tool(tool_name),
+        StackCallerRole::StackNode { .. } => {
+            is_stack_tool(tool_name) && is_stack_read_tool(tool_name)
+        }
+    }
 }
 
 /// The stack tools `role` is offered, in [`STACK_TOOL_NAMES`] order; none for a session with no
 /// stack role.
 pub fn stack_tools_offered_to(role: Option<&StackCallerRole>) -> Vec<ToolDef> {
-    // TODO(stack-plan-tools): implement — `stack_tool_defs` filtered by `is_stack_tool_offered_to`.
-    let _ = role;
-    Vec::new()
+    let Some(role) = role else {
+        return Vec::new();
+    };
+    stack_tool_defs()
+        .into_iter()
+        .filter(|tool| is_stack_tool_offered_to(role, &tool.name))
+        .collect()
 }
 
 /// The stack `caller`'s call of `tool_name` acts on, given the `stack_id` it `named` (if any):
@@ -154,9 +169,36 @@ pub fn addressed_stack_id(
     tool_name: &str,
     named: Option<&str>,
 ) -> Result<Option<String>, String> {
-    // TODO(stack-plan-tools): implement
-    let _ = (caller, named);
-    Err(format!("{tool_name}: not implemented on this host yet"))
+    let named = named.map(str::trim).filter(|id| !id.is_empty());
+    if matches!(tool_name, PR_STACK_LIST | PR_STACK_CREATE) {
+        return Ok(None);
+    }
+    match &caller.role {
+        StackCallerRole::StackNode { stack_id } => match named {
+            Some(other) if other != stack_id => Err(format!(
+                "{tool_name}: stack {other} is not this session's: a session bound to a node of a \
+                 stack reads only that stack ({stack_id})"
+            )),
+            _ => Ok(Some(stack_id.clone())),
+        },
+        StackCallerRole::Orchestrator { own_stack_id } => {
+            let addressed = named.or(own_stack_id.as_deref());
+            match addressed {
+                Some(stack_id) => Ok(Some(stack_id.to_string())),
+                // These three need a stack only for a node address, which the arguments decide.
+                None if matches!(tool_name, PR_SEARCH | PR_READ | PR_COMMENTS) => Ok(None),
+                None => Err(no_stack_named(tool_name)),
+            }
+        }
+    }
+}
+
+/// The refusal of a call that needs a stack and was given none to act on.
+fn no_stack_named(tool_name: &str) -> String {
+    format!(
+        "{tool_name}: name the stack with stack_id — this session owns no stack to default to; \
+         pr_stack_list lists the project's stacks"
+    )
 }
 
 /// Which pull request a read names: the one a node of the stack records, or one by number.
@@ -402,11 +444,162 @@ pub async fn execute_stack_tool(
     tool_name: &str,
     args_json: &str,
 ) -> ToolOutcome {
-    // TODO(stack-plan-tools): implement — parse the arguments into a `StackOp`, resolve the stack
-    // with `addressed_stack_id`, answer `pr_stack_list` / `pr_stack_create` from the port's records
-    // (`{"stacks": [{stack_id, title, daemon_instance_id, …}]}` / `{"stack_id": ...}`), and every other tool with `run_stack_op`.
-    let _ = (port, caller, args_json);
-    ToolOutcome::err(format!("{tool_name}: not implemented on this host yet"))
+    match run(port, caller, tool_name, args_json).await {
+        Ok(answer) => ToolOutcome::ok(answer.to_string()),
+        Err(message) => ToolOutcome::err(message),
+    }
+}
+
+/// Every argument any stack tool takes; each tool reads the ones it names and refuses the missing
+/// ones it requires ([`required`]).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct StackToolArgs {
+    stack_id: Option<String>,
+    node_id: Option<String>,
+    pull_number: Option<u64>,
+    include_files: bool,
+    query: Option<String>,
+    state: Option<String>,
+    author: Option<String>,
+    base: Option<String>,
+    limit: u32,
+    title: Option<String>,
+    description: Option<String>,
+    branch_suggestion: Option<String>,
+    parents: Vec<String>,
+    sync_pr: bool,
+    kind: Option<String>,
+    note: Option<String>,
+}
+
+/// The state a `pr_search` that expressed no preference is run with: the PRs still in play.
+const DEFAULT_SEARCH_STATE: &str = "open";
+
+/// `value`, or the refusal naming the argument `tool_name` requires.
+fn required<T>(tool_name: &str, value: Option<T>, argument: &str) -> Result<T, String> {
+    value.ok_or_else(|| format!("{tool_name}: invalid arguments: missing field `{argument}`"))
+}
+
+/// The pull request a read names: exactly one of `node_id` and `pull_number`.
+fn pr_address_of(tool_name: &str, args: &StackToolArgs) -> Result<PrAddress, String> {
+    match (&args.node_id, args.pull_number) {
+        (Some(node_id), None) => Ok(PrAddress::Node(node_id.clone())),
+        (None, Some(number)) => Ok(PrAddress::Number(number)),
+        _ => Err(format!(
+            "{tool_name}: name exactly one of node_id and pull_number — naming neither or both is \
+             rejected"
+        )),
+    }
+}
+
+/// The operation `tool_name` asks for, its arguments checked. The two project-level tools are not
+/// operations on a stack and are answered by [`run`] itself.
+fn stack_op_of(tool_name: &str, args: StackToolArgs) -> Result<StackOp, String> {
+    Ok(match tool_name {
+        PR_STACK_STATUS => StackOp::Status,
+        PR_READ => StackOp::ReadPr {
+            pr: pr_address_of(tool_name, &args)?,
+            include_files: args.include_files,
+        },
+        PR_COMMENTS => StackOp::PrComments {
+            pr: pr_address_of(tool_name, &args)?,
+        },
+        PR_SEARCH => StackOp::SearchPrs {
+            query: args.query,
+            state: args
+                .state
+                .unwrap_or_else(|| DEFAULT_SEARCH_STATE.to_string()),
+            author: args.author,
+            base: args.base,
+            limit: args.limit,
+        },
+        PR_ADD_PLANNED => StackOp::AddPlanned {
+            title: required(tool_name, args.title, "title")?,
+            description: required(tool_name, args.description, "description")?,
+            branch_suggestion: args.branch_suggestion,
+            parents: args.parents,
+        },
+        PR_UPDATE_PLANNED => StackOp::UpdatePlanned {
+            node_id: required(tool_name, args.node_id, "node_id")?,
+            title: args.title,
+            description: args.description,
+            branch_suggestion: args.branch_suggestion,
+            sync_pr: args.sync_pr,
+        },
+        PR_DELETE_PLANNED => StackOp::DeletePlanned {
+            node_id: required(tool_name, args.node_id, "node_id")?,
+        },
+        PR_SET_STATUS => StackOp::SetStatus {
+            node_id: required(tool_name, args.node_id, "node_id")?,
+            kind: required(tool_name, args.kind, "kind")?,
+            note: args.note,
+        },
+        PR_ADOPT => StackOp::Adopt {
+            pull_number: required(tool_name, args.pull_number, "pull_number")?,
+            parents: args.parents,
+        },
+        other => return Err(format!("unknown stack tool: {other}")),
+    })
+}
+
+async fn run(
+    port: &dyn StackToolPort,
+    caller: &StackCaller,
+    tool_name: &str,
+    args_json: &str,
+) -> Result<Value, String> {
+    let args: StackToolArgs = if args_json.trim().is_empty() {
+        StackToolArgs::default()
+    } else {
+        serde_json::from_str(args_json)
+            .map_err(|e| format!("{tool_name}: invalid arguments: {e}"))?
+    };
+    let refused = |why: String| format!("{tool_name}: {why}");
+    match tool_name {
+        PR_STACK_LIST => {
+            let stacks = port
+                .list_stacks(&caller.project_id)
+                .await
+                .map_err(refused)?;
+            let host = port.daemon_instance_id();
+            Ok(json!({ "stacks": stacks.iter().map(|record| json!({
+                "stack_id": record.stack_id,
+                "title": record.title,
+                "daemon_instance_id": host,
+                "created_by_session_id": record.created_by_session_id,
+                "created_at_unix_ms": record.created_at_unix_ms,
+                "node_count": record.stack.nodes.len(),
+            })).collect::<Vec<_>>() }))
+        }
+        PR_STACK_CREATE => {
+            let title = args.title.as_deref().filter(|t| !t.trim().is_empty());
+            let record = port.create_stack(caller, title).await.map_err(refused)?;
+            Ok(json!({ "stack_id": record.stack_id }))
+        }
+        _ => {
+            let named = args.stack_id.clone();
+            let stack_id = addressed_stack_id(caller, tool_name, named.as_deref())?;
+            let op = stack_op_of(tool_name, args)?;
+            let reads_a_node = matches!(
+                op,
+                StackOp::ReadPr {
+                    pr: PrAddress::Node(_),
+                    ..
+                } | StackOp::PrComments {
+                    pr: PrAddress::Node(_)
+                }
+            );
+            if stack_id.is_none() && reads_a_node {
+                return Err(no_stack_named(tool_name));
+            }
+            let scope = StackScope {
+                project_id: caller.project_id.clone(),
+                stack_id,
+            };
+            port.run_stack_op(&scope, op).await.map_err(refused)
+        }
+    }
 }
 
 #[cfg(test)]

@@ -93,7 +93,7 @@ pub(super) fn refuse_a_spawner_outside_its_own_sessions(
 
 /// Append the call to the session's tool-call log, as the local runner does for every other tool.
 /// A failed write is logged and does not fail the call.
-pub(super) fn record_call(
+pub(in crate::exec_tool) fn record_call(
     sessions_base: &Path,
     req: &ExecuteToolRequest,
     response: &ExecuteToolResponse,
