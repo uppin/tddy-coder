@@ -75,9 +75,10 @@ export function sessionsProjectNewPath(projectId: string): string {
  * `/sessions/project/:projectId/new`; `null` for any other path.
  */
 export function parseSessionsProjectNew(pathname: string): string | null {
-  // TODO(orchestrator-composer): implement
-  void pathname;
-  return null;
+  const suffix = `/${PROJECT_NEW_SEGMENT}`;
+  if (!pathname.endsWith(suffix)) return null;
+  const projectPath = pathname.slice(0, -suffix.length);
+  return decodeSegment(singleSegmentAfter(projectPath, SESSIONS_PROJECT_ROUTE));
 }
 
 /** Builds a `/sessions/:id` deep-link path for the given session id. */
@@ -130,7 +131,8 @@ export function isSessionsDrawerPath(pathname: string): boolean {
   return (
     pathname === SESSIONS_DRAWER_ROUTE ||
     singleSegmentAfter(pathname, SESSIONS_DRAWER_ROUTE) !== null ||
-    parseSessionsProjectHomeSetupProjectId(pathname) !== null
+    parseSessionsProjectHomeSetupProjectId(pathname) !== null ||
+    parseSessionsProjectNew(pathname) !== null
   );
 }
 

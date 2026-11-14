@@ -111,7 +111,17 @@ export function withEveryProjectGroup(
   groups: ProjectSessionGroup[],
   projects: ReadonlyArray<KnownProject>,
 ): ProjectSessionGroup[] {
-  // TODO(orchestrator-composer): implement
-  void projects;
-  return groups;
+  const grouped = new Set(groups.map((g) => g.projectId));
+  const added: ProjectSessionGroup[] = projects
+    .filter((p) => !grouped.has(p.projectId))
+    .map((p) => ({ projectId: p.projectId, label: p.name, sessions: [] }));
+  if (added.length === 0) return groups;
+
+  const other = groups.filter((g) => g.projectId === null);
+  const named = [...groups.filter((g) => g.projectId !== null), ...added].sort(
+    (a, b) =>
+      a.label.localeCompare(b.label, undefined, { sensitivity: "base" }) ||
+      (a.projectId ?? "").localeCompare(b.projectId ?? ""),
+  );
+  return [...named, ...other];
 }

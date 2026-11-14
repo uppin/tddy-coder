@@ -15,7 +15,13 @@ import { SessionMainPane } from "./SessionMainPane";
 import { SessionHostStatsFooter } from "./SessionHostStatsFooter";
 import { useSessionAttachment } from "./useSessionAttachment";
 import { SessionShell } from "./sessionShell";
-import { sessionsDrawerPathForSession, SESSIONS_DRAWER_ROUTE, SESSIONS_NEW_ROUTE } from "tddy-client-web";
+import {
+  parseSessionsProjectNew,
+  sessionsDrawerPathForSession,
+  sessionsProjectNewPath,
+  SESSIONS_DRAWER_ROUTE,
+  SESSIONS_NEW_ROUTE,
+} from "tddy-client-web";
 import { resolveShortcutsForSession } from "tddy-terminal-web";
 import { AGENT_CLI_LAUNCH, knownSessionLaunch } from "tddy-session-create-web";
 import { registerSessionTypeOptions, sessionTypeOptions } from "tddy-session-create-web";
@@ -24,7 +30,7 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { useSessionsDrawerInspector } from "./useSessionsDrawerInspector";
 import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
 import { useProjectHomeSetup } from "./useProjectHomeSetup";
-import { ProjectHomeSetupPane } from "tddy-session-create-web";
+import { OrchestratorComposer, ProjectHomeSetupPane } from "tddy-session-create-web";
 import { useSessionsDrawerAttachClaims } from "./useSessionsDrawerAttachClaims";
 import { useSessionsDrawerProjects } from "./useSessionsDrawerProjects";
 import { useSessionsDrawerProjectHomes } from "./useSessionsDrawerProjectHomes";
@@ -113,6 +119,7 @@ export function SessionsDrawerScreen({
   const { homes: projectHomes, projectOnHost } = useSessionsDrawerProjectHomes(projects, selectedInstanceId);
   const projectHomeSetup = useProjectHomeSetup();
   const setup = projectHomeSetup.setup;
+  const composerProjectId = parseSessionsProjectNew(location.path);
 
   // Default closed on mobile (the open 280px panel would cover the main pane);
   // open on desktop.
@@ -289,6 +296,10 @@ export function SessionsDrawerScreen({
   };
 
   const handleCreateSession = () => navigate(SESSIONS_NEW_ROUTE);
+  const handleNewOrchestrator = (projectId: string) => {
+    if (isMobile) setSessionListOpen(false);
+    navigate(sessionsProjectNewPath(projectId));
+  };
   const handleCancelCreate = () => navigate(SESSIONS_DRAWER_ROUTE);
   const handleSessionCreated = (sessionId: string) => {
     // Auto-close the sessions drawer so the new session's terminal is unobstructed.
@@ -383,11 +394,19 @@ export function SessionsDrawerScreen({
             }
             onSetUpProjectHome={openProjectHomeSetup}
             onReplaceProjectHome={(projectId) => openProjectHomeSetup(projectId, true)}
+            onNewOrchestrator={handleNewOrchestrator}
           />
           {!unknownSession && <SessionsDrawerPaneError message={paneError} />}
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
               stays visible so the operator can pick a valid session. */}
-          {setup !== null ? (
+          {composerProjectId !== null ? (
+            <OrchestratorComposer
+              projectId={composerProjectId}
+              daemonInstanceId={selectedInstanceId ?? ""}
+              sessionToken={sessionToken}
+              onStarted={handleSessionCreated}
+            />
+          ) : setup !== null ? (
             <ProjectHomeSetupPane
               {...setup}
               project={projectOnHost(setup.projectId)}

@@ -1,6 +1,7 @@
 import type { SessionAttachmentInit, StartSessionRequestInit } from "./hooks/useSessionAttachments";
 import type { SessionType } from "./createSessionRequest";
 import type { SelectableAgent } from "./selectableAgentOptions";
+import { ORCHESTRATOR_SESSION_ROLE } from "./CreateSessionOrchestratorField";
 
 /**
  * Everything the **orchestrator composer** (`#orchestrators` 8/11) sends: the project its "+" was
@@ -38,9 +39,19 @@ export interface OrchestratorComposerValues {
 export function buildOrchestratorComposerRequest(
   values: OrchestratorComposerValues,
 ): StartSessionRequestInit {
-  // TODO(orchestrator-composer): implement
-  void values;
-  return {};
+  return {
+    sessionToken: values.sessionToken,
+    sessionRole: ORCHESTRATOR_SESSION_ROLE,
+    sessionType: values.sessionType,
+    projectId: values.projectId,
+    initialPrompt: values.initialPrompt,
+    model: values.model,
+    effort: values.effort,
+    providerAccountId: values.providerAccountId,
+    providerBuiltIn: values.providerBuiltIn,
+    daemonInstanceId: values.daemonInstanceId,
+    attachments: values.attachments,
+  };
 }
 
 /**
@@ -52,8 +63,8 @@ export function orchestratorSessionTypeFor(
   agents: readonly SelectableAgent[],
   daemonInstanceId: string,
 ): SessionType | null {
-  // TODO(orchestrator-composer): implement
-  void agents;
-  void daemonInstanceId;
-  return null;
+  const agent = agents.find(
+    (a) => a.daemonInstanceId === daemonInstanceId && a.capabilities.includes("project_home_main"),
+  );
+  return agent && agent.sessionType !== "" ? agent.sessionType : null;
 }
