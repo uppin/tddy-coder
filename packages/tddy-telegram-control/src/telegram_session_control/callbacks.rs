@@ -353,6 +353,7 @@ pub(super) fn session_list_status_or_placeholders(
             orchestrator_session_id: String::new(),
             recipe: String::new(),
             stack_plan_json: String::new(),
+            stack_id: String::new(),
             branch: String::new(),
         },
     }

@@ -372,6 +372,11 @@ message SessionEntry {
   // absent for an unmarked session. A `paused` mark is cleared by any resume. See
   // `#orchestrators` 5/11.
   OrchestrationMark orchestration_mark = 37;
+  // The id, in its project's stack store, of the PR stack this session's changeset names
+  // (`Changeset.stack_id`); empty when it names none (`#orchestrators` 9/11). With `project_id` and
+  // `daemon_instance_id` it is the stack's address (`pr_stack.StackAddress`), which is how the
+  // PR-stack chat screen loads and edits its plan.
+  string stack_id = 38;
 }
 
 // An orchestrator's mark on one of its sessions, as `.session.yaml` records it.

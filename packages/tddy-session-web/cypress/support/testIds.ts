@@ -496,6 +496,8 @@ export const TEST_IDS = {
   screenSharingOverlayClose: "screen-sharing-overlay-close",
   // PR-Stack Chat Screen (per-workflow session view for the "pr-stack" recipe)
   prStackScreen: "pr-stack-screen",
+  /** The stack view — one project stack opened by its id (`#orchestrators` 9/11). */
+  projectStackView: "project-stack-view",
   prStackPlannedPrList: "pr-stack-planned-pr-list",
   // PR-Stack "Planned PRs" panel — right-side dock on desktop, full-screen overlay on mobile.
   // Always mounted; `data-state` ∈ {closed, open} drives visibility (same contract as the
@@ -1171,3 +1173,13 @@ export const sessionsProjectComposer = (projectId: string) =>
  *  that opens the orchestrator composer for that project (`#orchestrators` 8/11). */
 export const sessionsDrawerProjectNew = (projectId: string) =>
   `sessions-drawer-project-new-${projectId}`;
+
+/** `[data-testid="sessions-drawer-project-stacks-<projectId>"]` — the **Stacks** row under a project
+ *  group's header, listing that project's PR stacks on every host (`#orchestrators` 9/11). */
+export const sessionsDrawerProjectStacks = (projectId: string) =>
+  `sessions-drawer-project-stacks-${projectId}`;
+
+/** `[data-testid="sessions-drawer-project-stack-<stackId>"]` — one stack in a project's Stacks row,
+ *  which opens it in the stack view at `/sessions/project/:projectId/stack/:stackId`. */
+export const sessionsDrawerProjectStack = (stackId: string) =>
+  `sessions-drawer-project-stack-${stackId}`;

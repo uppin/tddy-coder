@@ -17,11 +17,15 @@ import { useSessionAttachment } from "./useSessionAttachment";
 import { SessionShell } from "./sessionShell";
 import {
   parseSessionsProjectNew,
+  parseSessionsProjectStack,
   sessionsDrawerPathForSession,
   sessionsProjectNewPath,
+  sessionsProjectStackPath,
   SESSIONS_DRAWER_ROUTE,
   SESSIONS_NEW_ROUTE,
 } from "tddy-client-web";
+import { ProjectStackView, type ProjectStackAddress } from "tddy-prstack-web";
+import type { ProjectStackSummary } from "tddy-client-web/gen/pr_stack_pb";
 import { resolveShortcutsForSession } from "tddy-terminal-web";
 import { AGENT_CLI_LAUNCH, knownSessionLaunch } from "tddy-session-create-web";
 import { registerSessionTypeOptions, sessionTypeOptions } from "tddy-session-create-web";
@@ -120,6 +124,59 @@ export function SessionsDrawerScreen({
   const projectHomeSetup = useProjectHomeSetup();
   const setup = projectHomeSetup.setup;
   const composerProjectId = parseSessionsProjectNew(location.path);
+  const stackRoute = parseSessionsProjectStack(location.path);
+  // The stack view's address: the route carries project and stack, the owning host comes from the
+  // drawer's `ListProjectStacks` row — resolved here by listing the route's project, unless the
+  // row that was clicked already handed its address over.
+  const [stackAddress, setStackAddress] = useState<ProjectStackAddress | null>(null);
+  const stackRouteProjectId = stackRoute?.projectId;
+  const stackRouteStackId = stackRoute?.stackId;
+  React.useEffect(() => {
+    if (!stackRouteProjectId || !stackRouteStackId) {
+      setStackAddress(null);
+      return;
+    }
+    if (
+      stackAddress?.projectId === stackRouteProjectId &&
+      stackAddress?.stackId === stackRouteStackId &&
+      stackAddress?.daemonInstanceId
+    ) {
+      return;
+    }
+    const fallback: ProjectStackAddress = {
+      projectId: stackRouteProjectId,
+      stackId: stackRouteStackId,
+      daemonInstanceId: "",
+    };
+    const stacksClient = drawerClients.prStackClient;
+    if (!stacksClient) {
+      setStackAddress(fallback);
+      return;
+    }
+    let cancelled = false;
+    stacksClient
+      .listProjectStacks({ sessionToken, projectId: stackRouteProjectId, thisHostOnly: false })
+      .then((res) => {
+        if (cancelled) return;
+        const summary = res.stacks.find((s) => s.address?.stackId === stackRouteStackId);
+        setStackAddress(
+          summary?.address
+            ? {
+                projectId: summary.address.projectId,
+                stackId: summary.address.stackId,
+                daemonInstanceId: summary.address.daemonInstanceId,
+              }
+            : fallback,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setStackAddress(fallback);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stackRouteProjectId, stackRouteStackId, drawerClients.prStackClient, sessionToken]);
 
   // Default closed on mobile (the open 280px panel would cover the main pane);
   // open on desktop.
@@ -300,6 +357,16 @@ export function SessionsDrawerScreen({
     if (isMobile) setSessionListOpen(false);
     navigate(sessionsProjectNewPath(projectId));
   };
+  const handleOpenProjectStack = (summary: ProjectStackSummary) => {
+    if (!summary.address) return;
+    setStackAddress({
+      projectId: summary.address.projectId,
+      stackId: summary.address.stackId,
+      daemonInstanceId: summary.address.daemonInstanceId,
+    });
+    if (isMobile) setSessionListOpen(false);
+    navigate(sessionsProjectStackPath(summary.address.projectId, summary.address.stackId));
+  };
   const handleCancelCreate = () => navigate(SESSIONS_DRAWER_ROUTE);
   const handleSessionCreated = (sessionId: string) => {
     // Auto-close the sessions drawer so the new session's terminal is unobstructed.
@@ -395,11 +462,38 @@ export function SessionsDrawerScreen({
             onSetUpProjectHome={openProjectHomeSetup}
             onReplaceProjectHome={(projectId) => openProjectHomeSetup(projectId, true)}
             onNewOrchestrator={handleNewOrchestrator}
+            prStackClient={drawerClients.prStackClient}
+            sessionToken={sessionToken}
+            onOpenProjectStack={handleOpenProjectStack}
           />
           {!unknownSession && <SessionsDrawerPaneError message={paneError} />}
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
               stays visible so the operator can pick a valid session. */}
-          {composerProjectId !== null ? (
+          {stackRoute !== null ? (
+            stackAddress !== null ? (
+              <ProjectStackView
+                address={stackAddress}
+                prStackClient={drawerClients.prStackClient ?? undefined}
+                sessionToken={sessionToken}
+                sessions={sortedSessions}
+                sessionMetadataBySessionId={sessionMetadataBySessionId}
+                defaultBranch={
+                  projects.find((project) => project.projectId === stackRoute.projectId)
+                    ?.mainBranchRef ?? ""
+                }
+                onOpenSession={handleSelectSession}
+                onChildSessionStarted={(entry) =>
+                  handleChildSessionStarted({ ...entry, orchestratorSessionId: "" })
+                }
+                client={drawerClients.client ?? undefined}
+                projectClient={drawerClients.projectClient ?? undefined}
+                catalogClient={drawerClients.catalogClient ?? undefined}
+                sessionFilesClient={drawerClients.sessionFilesClient ?? undefined}
+                worktreeClient={drawerClients.worktreeClient ?? undefined}
+                taskClient={drawerClients.taskClient ?? undefined}
+              />
+            ) : null
+          ) : composerProjectId !== null ? (
             <OrchestratorComposer
               projectId={composerProjectId}
               daemonInstanceId={selectedInstanceId ?? ""}
