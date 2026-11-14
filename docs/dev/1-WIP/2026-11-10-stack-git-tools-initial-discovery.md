@@ -15,6 +15,37 @@
 - Journal: `tddy-workflow-recipes/src/orchestrate_pr_stack/transient.rs:17`.
 - New edge found while writing the PRD: n4 → n10 (`delegate` uses `SendSessionMessage`).
 
+## Exploration 2 — pass 2 re-verification (2026-11-14)
+
+Queries: `grep -n` for the six `pr_*` names in `tddy-tools/src/server.rs`, `"spawn-child"` across
+packages, `PushIdentity {`, `GIT_ASKPASS|tddy-askpass`, `TODO(stack-plan-tools)`; read n7's
+`tddy-tool-engine/src/stack_tools.rs`, `tddy-daemon-rpc/src/exec_tool/stack_tools.rs` and
+`tests/stack_plan_tools_acceptance.rs`, n4's `project_home_turn_tools.rs`, `exec_tool/project_home/turn.rs`
+and `tests/project_home_turn_control_acceptance.rs`.
+
+- **n7's family is closed to extension.** `STACK_TOOL_NAMES: [&str; 11]`, `StackOp`, `StackToolPort` and
+  the private `object` / `stack_object` schema helpers are n7's; `DaemonStackTools`' fields are private
+  to its module. n10's six therefore live in a sibling module (`stack_git_tools`) with their own op and
+  port, reusing `StackCaller`, `StackCallerRole`, `STACK_ID` and `addressed_stack_id`.
+- **n7 is contract-only here**: classification (`stack_caller_of`), addressing, `execute_stack_tool`,
+  every `DaemonStackTools` method and the `run_stack_tool` routing are `TODO(stack-plan-tools)`; nothing
+  routes a stack tool from `run_locally` yet. Every daemon acceptance test of n10 is sequenced on it.
+- **n4 is green**: delegation reuses `DaemonProjectHome`'s `send_session_message` (paste + submit key on
+  the main terminal, lease untouched) and `resume_session` (web Resume + first message once the terminal
+  draws). The test harness (recording stand-in agent, stub `claude`) is copied from n4's suite.
+- **The remote prefix is hard-coded twice**: `Stack::effective_base_refs` answers `origin/<branch>` and
+  `realign_node_to_effective_base` strips only `origin/`. With a project remote named `upstream` the
+  daemon path must compute the base itself.
+- **`realign` still reads the orchestrator's changeset**, not n2's store — the daemon path cannot reuse
+  it unchanged.
+- **`tddy-askpass` is SSH-only**: it relays key-passphrase prompts to `TDDY_ASKPASS_URL` and refuses
+  every other prompt. An HTTPS token for a daemon-run push is new work (askpass prompt kind, or a
+  credential helper given through `GIT_CONFIG_*`). The acceptance case is mechanism-agnostic: a
+  `pre-push` hook runs `git credential fill` for github.com with user/system config cut off.
+- **Old answers**: merge `{merged, sha}`, close `{closed}`, repoint `{repointed, new_base}`, set parents
+  `{node_id, parents}`, resolve `{conflicts}`, spawn the toolcall reply carrying the child id.
+- **Moved line numbers** are recorded in the changeset's State A (↻).
+
 ## Exploration 1 — whole-work discovery for `#orchestrators` (copied 2026-11-10)
 
 The full dump the stack was planned from: interview record, combined conclusions and four Explore

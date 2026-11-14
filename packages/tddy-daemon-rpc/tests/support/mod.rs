@@ -551,6 +551,28 @@ pub fn a_host_as_current_user_with_gh_at(
     )
 }
 
+/// [`a_host_as_current_user_with_gh_at`] that also starts the `claude` coding agent as the
+/// executable at `claude`, as [`a_host_running_claude_as`] does (`#orchestrators` 10/11).
+pub fn a_host_running_claude_as_with_gh_at(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+    claude: &Path,
+    gh: &Path,
+) -> Host {
+    let agents =
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("claude", claude)]);
+    let gh = gh.to_path_buf();
+    host_built_with(
+        instance_id,
+        peers,
+        config_mapping_test_user_to(&current_os_user()),
+        move |host, _sessions| {
+            host.with_coding_agents(agents)
+                .with_github_cli(tddy_host_service::GithubCli::at(gh))
+        },
+    )
+}
+
 /// [`a_host_as_current_user`], whose daemon starts the `claude` coding agent as the executable at
 /// `claude` — a stub the suite writes — so a `claude-cli` session's agent is spawned for real.
 pub fn a_host_running_claude_as(
