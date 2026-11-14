@@ -146,6 +146,8 @@ mod tests {
                 "AnswerSessionQuestion",
                 "WaitProjectNotifications",
                 "ReadProjectNotifications",
+                "SendSessionMessage",
+                "ResumeSession",
                 "TerminateSession",
                 "CommitSessionWorktree",
                 "PushSessionBranch",

@@ -59,6 +59,8 @@ enum Asked {
 /// A port that records each call and answers `page`, or refuses with `refusal`.
 struct FakeInbox {
     asked: Mutex<Vec<Asked>>,
+    /// Each call's `started_by_me`, in order (`#orchestrators` 4/11).
+    started_by_me: Mutex<Vec<bool>>,
     page: NotificationsPage,
     refusal: Option<String>,
 }
@@ -79,6 +81,7 @@ fn an_empty_page() -> NotificationsPage {
 fn a_host_answering(page: NotificationsPage) -> FakeInbox {
     FakeInbox {
         asked: Mutex::new(Vec::new()),
+        started_by_me: Mutex::new(Vec::new()),
         page,
         refusal: None,
     }
@@ -104,7 +107,9 @@ impl ProjectHomeInboxPort for FakeInbox {
         home: &HomeCaller,
         cursor: &str,
         limit: Option<usize>,
+        started_by_me: bool,
     ) -> Result<NotificationsPage, String> {
+        self.started_by_me.lock().unwrap().push(started_by_me);
         self.asked.lock().unwrap().push(Asked::Read {
             caller: home.session_id.clone(),
             cursor: cursor.to_string(),
@@ -118,7 +123,9 @@ impl ProjectHomeInboxPort for FakeInbox {
         home: &HomeCaller,
         cursor: &str,
         timeout_ms: u64,
+        started_by_me: bool,
     ) -> Result<NotificationsPage, String> {
+        self.started_by_me.lock().unwrap().push(started_by_me);
         self.asked.lock().unwrap().push(Asked::Wait {
             caller: home.session_id.clone(),
             cursor: cursor.to_string(),
@@ -469,5 +476,73 @@ async fn a_name_that_is_not_an_inbox_tool_is_refused() {
 
     // Then it is refused and the port was not asked
     assert!(outcome.is_error, "{}", outcome.error_message);
+    assert_eq!(host.asked(), Vec::new());
+}
+
+// ── started_by_me (`#orchestrators` 4/11) ───────────────────────────────────────────────────
+
+#[test]
+fn both_tools_offer_started_by_me_as_a_boolean() {
+    for tool in [WAIT_PROJECT_NOTIFICATIONS, READ_PROJECT_NOTIFICATIONS] {
+        // Given the tool's schema
+        let schema = schema_of(tool);
+
+        // Then it takes started_by_me, a boolean
+        assert_eq!(
+            schema["properties"]["started_by_me"]["type"].as_str(),
+            Some("boolean"),
+            "{tool}'s schema: {schema}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn started_by_me_reaches_the_port_for_a_wait_and_a_read_and_defaults_to_false() {
+    // Given a host that answers an empty page
+    let host = a_host_answering(an_empty_page());
+
+    // When the home agent waits and reads with started_by_me, then reads without it
+    calling(
+        &host,
+        WAIT_PROJECT_NOTIFICATIONS,
+        json!({ "timeout_ms": 0, "started_by_me": true }),
+    )
+    .await;
+    calling(
+        &host,
+        READ_PROJECT_NOTIFICATIONS,
+        json!({ "started_by_me": true }),
+    )
+    .await;
+    calling(&host, READ_PROJECT_NOTIFICATIONS, json!({})).await;
+
+    // Then the port was asked for the caller's own sessions twice, then for every session
+    assert_eq!(*host.started_by_me.lock().unwrap(), vec![true, true, false]);
+}
+
+#[tokio::test]
+async fn a_started_by_me_that_is_not_a_boolean_is_refused_before_the_port_is_asked() {
+    // Given a host
+    let host = a_host_answering(an_empty_page());
+
+    // When the home agent reads with started_by_me as a string
+    let outcome = calling(
+        &host,
+        READ_PROJECT_NOTIFICATIONS,
+        json!({ "started_by_me": "yes" }),
+    )
+    .await;
+
+    // Then it is refused, naming the argument, and the port was not asked
+    assert!(
+        outcome.is_error,
+        "expected a refusal, got {}",
+        outcome.result_json
+    );
+    assert!(
+        outcome.error_message.contains("started_by_me"),
+        "refusal: {}",
+        outcome.error_message
+    );
     assert_eq!(host.asked(), Vec::new());
 }

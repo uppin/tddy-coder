@@ -17,6 +17,7 @@ mod route;
 mod session;
 pub mod slots;
 mod spec;
+pub mod terminal_keys;
 
 use std::path::Path;
 
@@ -42,6 +43,7 @@ pub use crate::spec::slot_shapes::McpFormat;
 pub use crate::spec::slot_shapes::McpSlot;
 pub use crate::spec::slot_shapes::ToolSlot;
 pub use crate::spec::slot_shapes::Unsupported;
+pub use crate::spec::turn_input_slot::TurnInputSlot;
 pub use agent_env_base::{
     AgentEnvBase, AgentEnvBaseError, AGENT_ENV_BASE_EMBEDDED_PATH, AGENT_ENV_BASE_OVERRIDE,
     AGENT_ENV_BASE_YAML,

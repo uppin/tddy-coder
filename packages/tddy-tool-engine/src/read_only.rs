@@ -116,6 +116,8 @@ mod tests {
                 "mcp__tddy-tools__AnswerSessionQuestion",
                 "mcp__tddy-tools__WaitProjectNotifications",
                 "mcp__tddy-tools__ReadProjectNotifications",
+                "mcp__tddy-tools__SendSessionMessage",
+                "mcp__tddy-tools__ResumeSession",
                 "mcp__tddy-tools__TerminateSession",
                 "mcp__tddy-tools__RefreshWorktreeDiskUsage",
                 "mcp__tddy-tools__NotifyOperator",
