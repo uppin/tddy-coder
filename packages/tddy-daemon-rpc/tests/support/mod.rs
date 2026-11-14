@@ -509,6 +509,23 @@ fn host_built_by(
     host_built_with(instance_id, peers, config, |host, _sessions| host)
 }
 
+/// [`a_host_as_current_user`], whose daemon starts the `claude` coding agent as the executable at
+/// `claude` — a stub the suite writes — so a `claude-cli` session's agent is spawned for real.
+pub fn a_host_running_claude_as(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+    claude: &Path,
+) -> Host {
+    let agents =
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("claude", claude)]);
+    host_built_with(
+        instance_id,
+        peers,
+        config_mapping_test_user_to(&current_os_user()),
+        move |host, _sessions| host.with_coding_agents(agents),
+    )
+}
+
 /// [`a_host`], whose daemon keeps a project notification log on its notification bus
 /// (`#home-inbox` 7/8): publish onto the returned bus to record a notification, as the daemon's
 /// publish sites do. The log persists under the host's sessions directory.

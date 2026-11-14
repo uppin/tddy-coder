@@ -260,6 +260,16 @@ impl ProjectHomePort for DaemonProjectHome {
         })
     }
 
+    async fn session_role_of(&self, session_id: &str) -> anyhow::Result<Option<String>> {
+        Ok(self
+            .rows()
+            .await?
+            .into_iter()
+            .find(|row| row.entry.session_id == session_id)
+            .map(|row| row.entry.session_role)
+            .filter(|role| !role.is_empty()))
+    }
+
     async fn target_records(&self) -> anyhow::Result<Vec<TargetRecord>> {
         Ok(self
             .rows()

@@ -29,7 +29,9 @@ Absent section = the default.
 ## Behaviour
 
 - A daemon task checks every **30 s** (the granularity of the stop) the listing's active sessions with
-  the `project-home` role, in every mapped user's sessions directory.
+  the `project-home` role, in every mapped user's sessions directory. Only main is stopped: an
+  [orchestrator session](project-concept.md#orchestrator-sessions) is left running however long it
+  idles.
 - The stop is the one an explicit termination makes: the tracked terminal is cancelled (SIGTERM, then
   SIGKILL to its child) and forgotten. `.session.yaml` is not written, so resume has what it needs.
 - The reaper waits up to 5 s for the process to exit before counting the session as stopped.

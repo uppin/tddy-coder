@@ -124,6 +124,18 @@ impl<'a> SpawnStackParent<'a> {
         }
     }
 
+    /// The parent as the orchestrator a session's first changeset records, on this daemon.
+    pub fn as_orchestrator_link(
+        &self,
+    ) -> Option<tddy_session_split::service_util::OrchestratorLink> {
+        self.session_id().map(
+            |session_id| tddy_session_split::service_util::OrchestratorLink {
+                session_id: session_id.to_string(),
+                daemon_instance_id: None,
+            },
+        )
+    }
+
     /// The daemon whose sessions tree holds the parent, for logging what a failed link addressed.
     pub fn daemon_instance_id(&self) -> Option<&'a str> {
         match self {

@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::session_metadata::PROJECT_HOME_ROLE;
+use tddy_core::session_metadata::is_orchestrator_role;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::daemon_hook_urls;
 use tddy_rpc::Status;
@@ -252,7 +252,7 @@ impl LaunchSessions {
         session_token: &str,
         agent_tool_socket: &Path,
     ) -> Result<Option<MainLaunchPlan<'a>>, Status> {
-        if role != Some(PROJECT_HOME_ROLE) {
+        if !role.is_some_and(is_orchestrator_role) {
             return Ok(None);
         }
         Ok(Some(MainLaunchPlan {
@@ -260,7 +260,9 @@ impl LaunchSessions {
             agent_tool_socket: agent_tool_socket.to_path_buf(),
             session_dir,
             session_id,
-            agent_session_token: self.split_sessions.agent_session_token_for(session_token)?,
+            agent_session_token: self
+                .split_sessions
+                .agent_session_token_for(session_token, session_id)?,
         }))
     }
 }

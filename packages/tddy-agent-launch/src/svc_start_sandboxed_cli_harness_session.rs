@@ -151,7 +151,9 @@ impl LaunchSessions {
             crate::harness_from_spec::cli_branch_intent(kind.clone(), &session_agent.agent.spec),
             None,
             &session_dir,
-            stack_parent.session_id(),
+            self.orchestrator_link_of(req)
+                .or_else(|| stack_parent.as_orchestrator_link())
+                .as_ref(),
             managed_recipe.as_deref(),
         )?;
         let CliWorktree {

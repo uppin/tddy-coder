@@ -130,6 +130,35 @@ records which session it is as `home_session_id` on that host's row; `ListProjec
 `ProjectEntry.home_session_id` (empty = main is not set up). The session is found by that id, never
 by scanning for the role.
 
+### Orchestrator sessions
+
+Beside its main a project can run **any number of orchestrator sessions** (role `orchestrator`). An
+orchestrator has main's reach — main's placement, read-only guard, launch wiring and tool set — but is
+not recorded as `home_session_id`, not pinned and never auto-stopped. Every "is this an
+orchestrator?" gate asks one predicate, `tddy_changeset::session_metadata::is_orchestrator_role`
+(true for `project-home` and `orchestrator`); auto-stop alone matches `project-home`.
+
+- **Requested on `StartSession`** with `session_role: "orchestrator"` — the only role a caller may ask
+  for; `project-home` stays the daemon's to grant. It is admitted from a **person**, or from an
+  **agent** whose own session holds an orchestrator role. The agent's session is the one its token was
+  minted for (the token's `session_id` claim, [session tokens](../../../packages/tddy-github/docs/session-token.md)),
+  never a session the request names; an agent token proving no session is refused. Every other
+  agent is refused `PERMISSION_DENIED`.
+- **Placed as main is**: on the project's home worktree, managed, no branch, on this host, after the
+  same refusals as main's spec (a placement field → `INVALID_ARGUMENT` naming it; an agent without
+  `project_home_main` → `FAILED_PRECONDITION`). `sandbox` is refused too: a jailed session gets none
+  of the tool wiring an orchestrator's reach is made of. The home worktree is fast-forwarded to the
+  main branch ref on start and on resume.
+- **Exec `StartSession`** offers `session_role` as a one-value enum, so main or an orchestrator can
+  start one.
+- **Git tools refuse a target holding an orchestrator role**: its worktree is the project's shared
+  home worktree.
+- **The orchestrator link is in the child's first changeset.** A session started by an orchestrator
+  records `orchestrator_session_id` / `orchestrator_daemon_instance_id` in the changeset its start
+  path first writes, before its agent spawns, so who may answer its prompts is on record from the
+  start.
+- A forwarded tool call from an orchestrator on another host is served as one from main is.
+
 `SessionService.EnsureProjectHomeSession(project_id, daemon_instance_id, start?)` owns its lifecycle
 and answers `{ session, outcome }`. Without `start` it reaches the recorded main:
 
@@ -630,7 +659,8 @@ through the same code `SessionService.SignalSession` runs (`signal_session_dir` 
 
 A project-home session can run git on **another session's worktree** in its project. Targets are
 resolved as for the project-home tools: same project, never the home worktree (refused
-naming `project-home`), and only a project-home caller may run them. They are in the project-home
+naming `project-home`), never a session holding an orchestrator role (its worktree is the home
+worktree), and only an orchestrator-role caller may run them. They are in the project-home
 session's offered set, so they are advertised to it and pre-approved in its `--allowedTools`.
 
 | Tool | Arguments | Runs |

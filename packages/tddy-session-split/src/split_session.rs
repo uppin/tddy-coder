@@ -237,8 +237,11 @@ pub fn split_remote_tool_env(
     tokens: &SessionTokens,
     target: &SplitSpawnTarget<'_>,
 ) -> Result<RemoteToolEnv, Status> {
-    let agent_session_token =
-        agent_credentials::mint_agent_session_token(tokens, target.session_token)?;
+    let agent_session_token = agent_credentials::mint_agent_session_token(
+        tokens,
+        target.session_token,
+        target.session_id,
+    )?;
     Ok(split_remote_tool_env_from_join(
         &room.join,
         &room.host_identity,

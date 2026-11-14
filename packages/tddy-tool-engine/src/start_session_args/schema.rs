@@ -1,6 +1,7 @@
 use crate::start_session_args::ATTACHMENT_SCOPES;
 use crate::start_session_args::{AgentChoice, StartChoices};
 use serde_json::{json, Map, Value};
+use tddy_core::session_metadata::ORCHESTRATOR_ROLE;
 use tddy_service::proto::types::HostDocumentScope;
 
 /// The permission modes the injected agents' launches take, in injected order, with the empty
@@ -201,6 +202,14 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
         }),
     );
     offer("attachments", attachments_property());
+    offer(
+        "session_role",
+        json!({
+            "type": "string",
+            "enum": [ORCHESTRATOR_ROLE],
+            "description": "`orchestrator`: start an orchestrator session — read-only on the project's home worktree with main's tools, as many as wanted beside main. The daemon places it (managed, no branch, no stack, on this host) and refuses a placement, a sandbox, or a session type whose agent cannot be held read-only. Only a person, main or another orchestrator may ask for it. Omit for an ordinary session."
+        }),
+    );
 
     let mut conditions: Vec<Value> = needing_a_model
         .iter()

@@ -167,6 +167,11 @@ pub struct SessionClaims {
     /// ignores it and reads an agent's token as the user's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub principal: Option<TokenPrincipal>,
+    /// The session an agent's token was minted for ([`SessionTokenSigner::mint_agent`]): the
+    /// session whose standing role decides what the agent may ask for. Omitted from a user's
+    /// token and from an agent token minted before it existed, both of which read as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 impl SessionClaims {
@@ -283,11 +288,12 @@ impl SessionTokenSigner {
     }
 
     /// Mint an access token for a session's agent acting for `user`, valid for `ttl` from now: it
-    /// names `user` and carries [`TokenPrincipal::Agent`].
-    pub fn mint_agent(&self, user: &GitHubUser, ttl: Duration) -> String {
+    /// names `user`, carries [`TokenPrincipal::Agent`] and the `session_id` it was minted for.
+    pub fn mint_agent(&self, user: &GitHubUser, ttl: Duration, session_id: &str) -> String {
         let iat = unix_seconds(SystemTime::now());
         self.sign(SessionClaims {
             principal: Some(TokenPrincipal::Agent),
+            session_id: Some(session_id.to_string()),
             ..self.claims_for(user, TokenKind::Access, iat, ttl)
         })
     }
@@ -333,6 +339,7 @@ impl SessionTokenSigner {
             exp: iat.saturating_add(ttl.as_secs()),
             kind,
             principal: None,
+            session_id: None,
         }
     }
 
@@ -759,7 +766,7 @@ mod tests {
         // Given one signer minting a user's access token and an agent's token under that user
         let signer = a_signer_for(the_first_key());
         let user = signer.mint_access(&an_operator());
-        let agent = signer.mint_agent(&an_operator(), Duration::from_secs(600));
+        let agent = signer.mint_agent(&an_operator(), Duration::from_secs(600), "s-agent");
 
         // When each is verified
         let principal_of = |token: &str| {
@@ -774,6 +781,27 @@ mod tests {
             (None, Some(TokenPrincipal::Agent))
         );
         assert_eq!(the_kind_of(&agent), TokenKind::Access);
+    }
+
+    #[test]
+    fn an_agent_token_names_the_session_it_was_minted_for_and_a_user_token_names_none() {
+        // Given
+        let signer = a_signer_for(the_first_key());
+        let user = signer.mint_access(&an_operator());
+        let agent = signer.mint_agent(&an_operator(), Duration::from_secs(600), "s-agent");
+
+        // When
+        let session_of = |token: &str| {
+            SessionTokenVerifier::verify(token, &the_first_key().verifying_key(), now())
+                .expect("a freshly minted token verifies")
+                .session_id
+        };
+
+        // Then
+        assert_eq!(
+            (session_of(&user), session_of(&agent)),
+            (None, Some("s-agent".to_string()))
+        );
     }
 
     #[test]

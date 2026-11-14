@@ -6,7 +6,7 @@ use std::path::Path;
 use tddy_coding_agent_specs::slots::conversation::ConversationSlot;
 use tddy_coding_agent_specs::{AgentEnvBase, Capability, CodingAgentSpec};
 use tddy_core::adapters::{ConversationMint, ConversationMintError, LaunchAdapters};
-use tddy_core::session_metadata::PROJECT_HOME_ROLE;
+use tddy_core::session_metadata::is_orchestrator_role;
 use tddy_core::SessionMetadata;
 use tddy_rpc::Status;
 
@@ -190,13 +190,13 @@ pub(crate) fn conversation_mint_refused(
 }
 
 /// A starting session's standing role, refused for an agent that cannot hold it: a project-home
-/// main (`PROJECT_HOME_ROLE`) of a spec that does not declare `project_home_main` is refused
-/// `FAILED_PRECONDITION` naming the agent. An ordinary session (an empty role) is admitted.
+/// main or orchestrator (`is_orchestrator_role`) of a spec that does not declare
+/// `project_home_main` is refused `FAILED_PRECONDITION` naming the agent. An ordinary session (an empty role) is admitted.
 pub(crate) fn refuse_a_role_the_agent_cannot_hold(
     spec: &CodingAgentSpec,
     session_role: &str,
 ) -> Result<(), Status> {
-    if session_role == PROJECT_HOME_ROLE && !spec.has(Capability::ProjectHomeMain) {
+    if is_orchestrator_role(session_role) && !spec.has(Capability::ProjectHomeMain) {
         return Err(Status::failed_precondition(format!(
             "{} cannot run a project's main: its spec declares no project_home_main",
             spec.id

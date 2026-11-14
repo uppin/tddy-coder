@@ -22,7 +22,11 @@ pub fn session_tool_role(
     metadata: &tddy_core::SessionMetadata,
 ) -> tddy_tool_engine::project_home_tools::SessionToolRole {
     use tddy_tool_engine::project_home_tools::SessionToolRole;
-    if metadata.session_role.as_deref() == Some(tddy_core::session_metadata::PROJECT_HOME_ROLE) {
+    if metadata
+        .session_role
+        .as_deref()
+        .is_some_and(tddy_core::session_metadata::is_orchestrator_role)
+    {
         SessionToolRole::ProjectHome
     } else if metadata
         .recipe

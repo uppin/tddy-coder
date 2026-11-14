@@ -38,6 +38,7 @@ pub mod managed_launch;
 pub mod notify_env;
 mod opencode_cli_spawn;
 pub mod operator_start;
+mod orchestrator_start;
 pub mod placement;
 pub mod project_home_idle;
 pub(crate) mod project_home_launch;

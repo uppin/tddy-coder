@@ -212,6 +212,7 @@ impl LaunchSessions {
                     },
                     None => stack_parent::SpawnStackParent::NoParent,
                 },
+                orchestrator: self.orchestrator_link_of(req),
                 initial_prompt: &start.initial_prompt,
                 agents: &mut started_agents,
                 semantic_index: req.semantic_index,
@@ -293,6 +294,7 @@ impl LaunchSessions {
                 selected_integration_base_ref: child.selected_integration_base_ref,
                 selected_branch_to_work_on: "",
                 stack_parent: child.stack_parent,
+                orchestrator: None,
                 initial_prompt: child.initial_prompt,
                 agents: &mut started_agents,
                 // A spawned child never runs its own semantic index, nor pushes a remote branch.

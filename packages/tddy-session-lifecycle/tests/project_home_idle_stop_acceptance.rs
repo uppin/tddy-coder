@@ -125,6 +125,27 @@ impl World {
     }
 }
 
+impl World {
+    /// An orchestrator session a person started (`#orchestrators` 1/11): main's placement and
+    /// reach, but not main.
+    async fn an_orchestrator_session(&self) -> String {
+        self.home
+            .service
+            .start_session(Request::direct(StartSessionRequest {
+                session_token: a_caller_token().to_string(),
+                project_id: PROJECT_ID.to_string(),
+                session_type: "claude-cli".to_string(),
+                model: "opus".to_string(),
+                session_role: "orchestrator".to_string(),
+                ..Default::default()
+            }))
+            .await
+            .expect("a person starts an orchestrator")
+            .into_inner()
+            .session_id
+    }
+}
+
 const ELEVEN_MINUTES: Duration = Duration::from_secs(11 * 60);
 
 #[tokio::test]
@@ -217,4 +238,22 @@ async fn idle_stop_secs_zero_disables_auto_stop() {
     // Then
     assert!(stopped.is_empty());
     assert!(world.is_active(&home).await);
+}
+
+#[tokio::test]
+async fn idle_auto_stop_leaves_an_orchestrator_running() {
+    // Given main and an orchestrator, both waiting for input for eleven minutes
+    let world = a_daemon_with_a_project(TEN_MINUTES);
+    let main = world.a_running_main().await;
+    let orchestrator = world.an_orchestrator_session().await;
+    world.reported(&main, "WaitingForInput");
+    world.reported(&orchestrator, "WaitingForInput");
+    let later = ELEVEN_MINUTES;
+
+    // When
+    let stopped = world.reap_after(later).await;
+
+    // Then main alone is stopped: auto-stop is main's, not every orchestrator's
+    assert_eq!(stopped, vec![main]);
+    assert!(world.is_active(&orchestrator).await);
 }
