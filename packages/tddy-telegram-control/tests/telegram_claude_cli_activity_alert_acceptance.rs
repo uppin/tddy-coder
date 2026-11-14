@@ -83,6 +83,7 @@ fn write_claude_cli_session(
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     };
     write_session_metadata(session_dir, &meta).unwrap();
 }

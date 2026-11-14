@@ -278,6 +278,7 @@ fn a_session(session_id: &str, session_type: &str, managed: bool) -> SessionMeta
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     }
 }
 

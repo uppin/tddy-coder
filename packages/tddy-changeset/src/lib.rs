@@ -8,6 +8,7 @@ pub mod agent_activity;
 pub mod branch_worktree_intent;
 pub mod changeset;
 pub mod elapsed_format;
+pub mod orchestration_mark;
 pub mod pending_question;
 pub mod project_stack_store;
 pub mod session_activity;
@@ -40,6 +41,7 @@ pub use changeset::{
     sync_stack_node_from_child, update_stack_atomic, PrInternalStatus, Stack, StackNode,
 };
 pub use elapsed_format::format_elapsed_compact;
+pub use orchestration_mark::{clear_a_paused_mark, OrchestrationMark, OrchestrationMarkKind};
 pub use session_activity::{
     activity_status_from_hook, activity_status_from_hook_with_tool, hook_event_asks_a_question,
     parse_hook_event, HookEvent, SessionActivityStatus, ASK_USER_QUESTION_TOOL,

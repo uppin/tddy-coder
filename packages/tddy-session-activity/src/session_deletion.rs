@@ -511,6 +511,7 @@ mod tests {
             managed_codebase: false,
             session_role: None,
             tmux_session: None,
+            orchestration_mark: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }
@@ -676,6 +677,7 @@ mod tests {
             managed_codebase: false,
             session_role: None,
             tmux_session: None,
+            orchestration_mark: None,
         };
         tddy_core::write_session_metadata(&dir, &metadata).unwrap();
 
@@ -738,6 +740,7 @@ mod tests {
             managed_codebase: false,
             session_role: None,
             tmux_session: None,
+            orchestration_mark: None,
         };
         tddy_core::write_session_metadata(&dir, &metadata).unwrap();
 

@@ -113,6 +113,7 @@ fn a_claude_cli_session(session_id: &str, worktree: &Path) -> SessionMetadata {
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     }
 }
 

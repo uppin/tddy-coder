@@ -94,6 +94,7 @@ fn write_claude_cli_session(session_dir: &std::path::Path, hook_token: &str) {
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     };
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }
@@ -224,6 +225,7 @@ async fn report_session_status_rejects_non_claude_cli_session() {
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 

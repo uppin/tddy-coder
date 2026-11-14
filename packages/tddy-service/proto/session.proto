@@ -368,6 +368,22 @@ message SessionEntry {
   // `tddy_changeset::reads_host_paths`. Means "this host" — the daemon named by
   // `daemon_instance_id`; a client on another machine must not read it as its own.
   bool reads_host_paths = 36;
+  // The mark an orchestrator put on the session (`SetSessionMark`), from its `.session.yaml`;
+  // absent for an unmarked session. A `paused` mark is cleared by any resume. See
+  // `#orchestrators` 5/11.
+  OrchestrationMark orchestration_mark = 37;
+}
+
+// An orchestrator's mark on one of its sessions, as `.session.yaml` records it.
+message OrchestrationMark {
+  // `paused`, `blocked` or `done`.
+  string mark = 1;
+  // Why, as the orchestrator put it; empty when it gave none.
+  string note = 2;
+  // The session that set the mark.
+  string set_by_session_id = 3;
+  // When it was set, in milliseconds since the Unix epoch.
+  uint64 at_unix_ms = 4;
 }
 
 message EnsureProjectHomeSessionRequest {

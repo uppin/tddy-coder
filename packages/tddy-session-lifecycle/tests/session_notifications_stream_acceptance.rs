@@ -111,6 +111,7 @@ fn write_claude_cli_session(sessions_base: &Path, session_id: &str, repo_path: &
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 }

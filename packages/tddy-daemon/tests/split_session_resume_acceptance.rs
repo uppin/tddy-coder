@@ -343,6 +343,7 @@ fn a_stopped_split_session() -> SessionMetadata {
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     }
 }
 

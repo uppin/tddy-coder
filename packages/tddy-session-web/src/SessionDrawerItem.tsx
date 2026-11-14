@@ -2,6 +2,7 @@ import React from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { sessionDrawerLabel } from "./utils/sessionDrawerLabel";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
+import { SessionDrawerMarkBadge } from "./SessionDrawerMarkBadge";
 import type { SessionMetadata } from "./lib/sessionParticipantMetadata";
 import { ORCHESTRATOR_ROLE } from "./utils/projectHomeGroups";
 import { Tooltip, TooltipTrigger, TooltipContent, cn } from "tddy-ui-web";
@@ -66,6 +67,8 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
           >
             {label}
           </span>
+          {/* Orchestrator mark (paused / blocked / done), its note on hover (`#orchestrators` 5/11). */}
+          <SessionDrawerMarkBadge session={session} />
           {/* Owning-host badge — only for cross-host rows (a session owned by a non-selected host). */}
           {hostLabel && (
             <span

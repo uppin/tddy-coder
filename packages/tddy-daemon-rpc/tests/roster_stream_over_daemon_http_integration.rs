@@ -112,6 +112,7 @@ fn write_managed_session(sessions_base: &Path, session_id: &str) {
             managed_codebase: false,
             session_role: None,
             tmux_session: None,
+            orchestration_mark: None,
         },
     )
     .expect("write session metadata");

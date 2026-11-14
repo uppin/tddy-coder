@@ -439,6 +439,7 @@ impl AHarnessDaemon {
             ssh_config_host: None,
             managed_codebase: false,
             session_role: None,
+            orchestration_mark: None,
         };
         write_session_metadata(&session_dir, &meta).unwrap();
     }

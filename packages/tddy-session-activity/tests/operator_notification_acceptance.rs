@@ -161,6 +161,7 @@ fn write_session(sessions_base: &Path, session_type: &str, hook_token: Option<&s
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     };
     write_session_metadata(&session_dir, &meta).expect("the session's .session.yaml");
 }

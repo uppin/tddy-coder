@@ -284,6 +284,7 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
     let service = test_service(sessions_tmp.path().to_path_buf());

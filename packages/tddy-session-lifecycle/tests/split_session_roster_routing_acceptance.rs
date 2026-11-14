@@ -313,6 +313,7 @@ fn write_session(sessions_base: &Path, session_id: &str, agents: Vec<SessionAgen
             managed_codebase: false,
             session_role: None,
             tmux_session: None,
+            orchestration_mark: None,
         },
     )
     .expect("write session metadata");

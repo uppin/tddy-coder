@@ -827,6 +827,10 @@ export const sessionsDrawerItemTooltip = (sessionId: string) =>
 export const sessionsDrawerItemOrchestrator = (sessionId: string) =>
   `sessions-drawer-item-orchestrator-${sessionId}`;
 
+/** The orchestrator's mark on a drawer row (`#orchestrators` 5/11). */
+export const sessionsDrawerItemMark = (sessionId: string) =>
+  `sessions-drawer-item-mark-${sessionId}`;
+
 /** `[data-testid="sessions-drawer-item-host-<sessionId>"]` — owning-host badge on cross-host rows */
 export const sessionsDrawerItemHost = (sessionId: string) =>
   `sessions-drawer-item-host-${sessionId}`;

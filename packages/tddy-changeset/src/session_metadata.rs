@@ -138,6 +138,12 @@ pub struct SessionMetadata {
     /// pane's process, not the tmux client's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmux_session: Option<String>,
+    /// The mark an orchestrator put on this session — paused, blocked or done, with its note — set
+    /// by `SetSessionMark` (`#orchestrators` 5/11). Absent for an unmarked session and for legacy
+    /// files; never written when absent, so an unmarked record reads exactly as before. An older
+    /// daemon cannot read a marked record: this struct refuses unknown fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestration_mark: Option<crate::orchestration_mark::OrchestrationMark>,
 }
 
 /// [`SessionMetadata::session_role`] of a project's project-home session.
@@ -305,6 +311,7 @@ pub fn write_initial_tool_session_metadata(
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     };
     write_session_metadata(session_dir, &metadata)
 }
