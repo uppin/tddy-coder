@@ -491,6 +491,7 @@ impl PrStackHandler for PrStackRpcHandler {
         let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let session_dir = self.session_dir_for_target(&sessions_base, &target)?;
+        require_a_stack(&session_dir)?;
 
         // A repoint rebases a local branch and re-targets a PR base, so it needs the real checkout:
         // an unknown one is a precondition failure, not a repoint attempted in the session directory.
@@ -705,6 +706,7 @@ impl PrStackHandler for PrStackRpcHandler {
         let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let session_dir = self.session_dir_for_target(&sessions_base, &target)?;
+        require_a_stack(&session_dir)?;
 
         let repo_root = tddy_core::repo_root_for_session(&session_dir).ok_or_else(|| {
             Status::failed_precondition(

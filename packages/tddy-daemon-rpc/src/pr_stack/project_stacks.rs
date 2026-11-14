@@ -213,8 +213,8 @@ impl PrStackRpcHandler {
     }
 
     /// The session directory a target is served through on this host: an address resolves to a
-    /// session naming its stack, a session to its own directory (guarded as
-    /// [`require_a_stack`] guards it).
+    /// session naming its stack, a session to its own directory. Reads are served for a session
+    /// naming no stack; the mutations guard their own entry with [`require_a_stack`].
     pub(crate) fn session_dir_for_target(
         &self,
         sessions_base: &Path,
@@ -233,7 +233,6 @@ impl PrStackRpcHandler {
                 validate_session_id_segment(session_id)
                     .map_err(|e| Status::invalid_argument(e.message()))?;
                 let dir = unified_session_dir_path(sessions_base, session_id);
-                require_a_stack(&dir)?;
                 Ok(dir)
             }
         }
