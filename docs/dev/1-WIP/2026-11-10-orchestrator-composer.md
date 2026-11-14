@@ -1,10 +1,10 @@
 # Changeset: start an orchestrator from the project entry
 
 **Date**: 2026-11-10
-**Status**: 🚧 In Progress — planning (commit 1)
+**Status**: 🚧 In Progress — draft-PR contract (commit 2): surface stubbed, failing tests written
 **Type**: Feature
 **Complexity**: 3 — web only, but three packages (session-web, session-create-web, client-web route) and a new screen reusing extracted form pieces
-**Stack**: `#orchestrators` 8/11 · branch `feature/orchestrators/orchestrator-composer` · base `feature/orchestrators/stack-plan-tools` (#884)
+**Stack**: `#orchestrators` 8/11 · branch `feature/orchestrators/orchestrator-composer` · PR #885 · base `feature/orchestrators/stack-plan-tools` (#884)
 
 ## Initial Discovery
 
@@ -80,12 +80,45 @@ vertically centred (screenshot, 2026-11-10), with model + effort, provider accou
 | n1 `orchestrator-role` (#878) | `session_role: orchestrator` admitted for a person and placed on the home worktree | the composer's request sets it; the acceptance asserts the request and, against the in-memory backend, the started session | change admission, placement or the toggle n1 adds to New session |
 | n3 `start-effort` (#880) | `StartSessionRequest.effort`, `CreateSessionEffortField`, levels in start options | the composer renders n3's effort field and sends `effort` | add or change the effort field or slot |
 
+Both parents are green in this tree (2026-11-14), so the tests drive the **real** n1 role admission
+surface (`ORCHESTRATOR_SESSION_ROLE`, `SessionEntry.session_role`) and the **real** n3 effort picker
+(`useCreateSessionEffort` / `CreateSessionEffortField`, `AgentInfo.effort_levels`) — no doubles at
+those seams. No test here reaches a `TODO(<other node>)`. n7 (`stack-plan-tools`) is only the line
+neighbour: nothing here touches its `TODO(stack-plan-tools)` stubs.
+
+**Inherited red, not this node's:** `tddy-session-create-web/src/projectHomeStartSpec.test.ts`
+`buildProjectHomeStartSpec > carries no project, branch, stack or placement fields` fails on the base
+— n3 added `effort` to `cliAgentChoices` and the test pins the key list without it. n3's to fix.
+
 ## Draft PR contract
 
-- Route helpers; `SessionProjectGroupHeader` with test ids `sessions-drawer-project-new-<id>`;
-  `OrchestratorComposer` shell (`sessions-project-composer-<id>`, input
-  `sessions-project-composer-input`, send `sessions-project-composer-send`); `buildOrchestratorStartRequest`
-  signature (`TODO(orchestrator-composer)`).
+Published in commit 2 (every unimplemented body marked `TODO(orchestrator-composer): implement`):
+
+- **tddy-client-web** `src/appRoutes.ts`: `SESSIONS_PROJECT_ROUTE` (`/sessions/project`),
+  `PROJECT_NEW_SEGMENT` (`new`), `sessionsProjectNewPath(projectId)` (implemented — a one-line
+  builder), `parseSessionsProjectNew(pathname): string | null` (stub → `null`); re-exported from
+  `tddy-web/src/routing/appRoutes.ts`. `isSessionsDrawerPath` accepting the path is green's.
+- **tddy-session-create-web**
+  - `OrchestratorComposer({ projectId, daemonInstanceId, sessionToken, onStarted })` (stub → `null`);
+    clients from `useDaemonClient` as `ProjectHomeSetupPane`'s are.
+  - `useOrchestratorComposerStart(client, onStarted): { start(request), starting, error }` (stub).
+  - `orchestratorStartRequest.ts`: `OrchestratorComposerValues`,
+    `buildOrchestratorComposerRequest(values): StartSessionRequestInit` (stub → `{}`),
+    `orchestratorSessionTypeFor(agents, daemonInstanceId): SessionType | null` (stub → `null`).
+  - `CreateSessionHostField({ daemons, daemonInstanceId, setDaemonInstanceId })` (stub → `null`; green
+    moves the host select out of `CreateSessionHostAndProjectFields` and renders it from both).
+  - All three modules exported from `index.ts`.
+- **tddy-session-web**
+  - `SessionProjectGroupHeader({ group, groupKey, collapsed, onToggle, onNew?, actions? })` — stub
+    renders today's toggle button; `SessionProjectGroup` now renders it and passes `onNew` through
+    (no behaviour change).
+  - `SessionDrawer` prop `onNewOrchestrator?: (projectId) => void` (declared, not read yet).
+  - `utils/projectHomeGroups.ts` `withEveryProjectGroup(groups, projects)` (stub → `groups`).
+  - Screen case in `SessionsDrawerScreen` (route → `OrchestratorComposer`, "+" → navigate,
+    `onStarted` → `handleSessionCreated`) is green's — nothing stubbed there.
+- **Test ids** (both packages' `cypress/support/testIds.ts`): `sessionsProjectComposer(projectId)`,
+  `TEST_IDS.sessionsProjectComposerInput` / `…Send` / `…Error`; session-web also
+  `sessionsDrawerProjectNew(projectId)` and `TEST_IDS.createSessionEffortSelect`.
 - Failing tests below.
 
 ## Green wave
@@ -111,14 +144,30 @@ vertically centred (screenshot, 2026-11-10), with model + effort, provider accou
 
 ### State A (Current)
 
-- `SessionProjectGroup.tsx:20-46`: the whole header is one `<button>` (toggle).
-- `withProjectHomeGroups` (`utils/projectHomeGroups.ts:78`) adds groups only for projects with a main.
+Re-verified 2026-11-14 against the tree after n1 and n3 went green (line numbers before this node's
+contract commit):
+
+- `tddy-session-web/src/SessionProjectGroup.tsx:20-46`: the whole header is one `<button>` (toggle).
+- `withProjectHomeGroups` (`utils/projectHomeGroups.ts:81`, was :78 — n1 added `ORCHESTRATOR_ROLE` at
+  :41) adds groups only for projects with a main; `SessionDrawer.tsx:116-120` applies it only when
+  `onEnsureProjectHome` is given.
 - Fields in `tddy-session-create-web`: `CreateSessionModelField.tsx`, `CreateSessionProviderField.tsx`,
   host select inside `CreateSessionHostAndProjectFields.tsx:36-56`, `CreateSessionAttachmentsSection.tsx`
   + `useSessionAttachments` (`hooks/useSessionAttachments.ts:220`); most not exported.
-- Routes `tddy-client-web/src/appRoutes.ts` (`SESSIONS_PROJECT_HOME_SETUP_ROUTE` pattern :41-93,
-  `isSessionsDrawerPath` :104).
-- Detail switch `SessionsDrawerScreen.tsx:390-398`.
+- **n1 added** `CreateSessionOrchestratorField.tsx` (`ORCHESTRATOR_SESSION_ROLE`) +
+  `useCreateSessionOrchestrator.tsx`, and a **module-private** `buildOrchestratorStartRequest(form,
+  features)` in `createSessionRequest.ts:235-246` (the New-session switch's request — no attachments).
+- **n3 added** `CreateSessionEffortField.tsx` + `useCreateSessionEffort.tsx` (`effort` from the agent's
+  served `effortLevels` / `defaultEffort`), `CreateSessionFormValues.effort` and `effort` in
+  `cliAgentChoices`.
+- `CreateSessionPane.tsx` is **591** lines (was 581).
+- The daemon admits `session_role: orchestrator` from a person and places it on the home worktree
+  (`tddy-agent-launch/src/orchestrator_start.rs`); `refuse_what_an_orchestrator_cannot_honour`
+  refuses only sandbox and off-home placements — **attachments are allowed**.
+- Routes `tddy-client-web/src/appRoutes.ts` (`SESSIONS_PROJECT_HOME_SETUP_ROUTE` pattern :41-92,
+  `isSessionsDrawerPath` :104-110).
+- Detail switch `SessionsDrawerScreen.tsx:390-439` (setup ? `ProjectHomeSetupPane` : unknown ? … :
+  `SessionMainPane`); `handleSessionCreated` :293-312 is what a started session goes through.
 - No centred composer exists (closest: `tddy-chat-web/src/LiveAgentChatView.tsx:214-231`, bottom bar).
 
 ### State B (Target)
@@ -146,21 +195,43 @@ bun unit for the request builder and group rule; route unit test in `appRoutes.t
 
 ## Acceptance Tests
 
+All written and failing for this node's missing implementation (2026-11-14).
+
 ### tddy-session-web — `packages/tddy-session-web/cypress/component/SessionsDrawerProjectComposerAcceptance.cy.tsx`
-- `the plus on a project header opens the composer for that project`
-- `a project with no sessions and no main still shows its header and plus`
-- `sending starts an orchestrator with the text as its initial prompt and selects it`
-- `a refused start keeps the text and shows the daemon's reason`
+- :79 `the plus on a project header opens the composer for that project`
+- :92 `a project with no sessions and no main still shows its header and plus`
+- :101 `sending starts an orchestrator with the text as its initial prompt and selects it`
+- :124 `a refused start keeps the text and shows the daemon's reason`
 
 ### tddy-session-create-web — `packages/tddy-session-create-web/cypress/component/OrchestratorComposerAcceptance.cy.tsx`
-- `the prompt box is vertically centred in the pane`
-- `the composer offers exactly model, effort, provider account, host and attachments`
+- :30 `the prompt box is vertically centred in the pane`
+- :39 `the composer offers exactly model, effort, provider account, host and attachments`
 
 ### tddy-session-create-web — `packages/tddy-session-create-web/src/orchestratorStartRequest.test.ts`
-- `the request names the orchestrator role, the project, the prompt, model, effort, account, host and attachments`
+- :58 `the request names the orchestrator role, the project, the prompt, model, effort, account, host and attachments`
 
 ### tddy-web — `packages/tddy-web/src/routing/appRoutes.test.ts` (new cases)
-- `the project composer path parses and is a drawer path`
+- :394 `the project composer path parses and is a drawer path`
+
+## Unit tests (TDD Red)
+
+- `tddy-session-create-web/src/orchestratorStartRequest.test.ts` — no daemon-owned field (worktree,
+  branch, placement, stack); untouched effort/account pass through as default/vendor; nothing attached
+  sends `[]`; `orchestratorSessionTypeFor`: first `project_home_main` agent on the host, ignores other
+  hosts, `null` when none (that last one passes on the stub).
+- `tddy-session-create-web/cypress/component/OrchestratorComposer.cy.tsx` — an empty box cannot be
+  sent; Enter starts the orchestrator with the text and calls `onStarted`; the host picker names the
+  host (`daemonInstanceId`).
+- `tddy-session-web/cypress/component/SessionProjectGroupHeader.cy.tsx` — "+" calls `onNew` without
+  toggling; actions slot renders after the "+"; (guards that pass on the stub) the toggle is not the
+  "+", no `onNew` → no "+".
+- `tddy-session-web/src/utils/projectHomeGroups.test.ts` — `withEveryProjectGroup`: empty groups for
+  every listed project in name order before Other; a project with no session gets one; no duplicate
+  (passes on the stub).
+- `tddy-web/src/routing/appRoutes.test.ts` — round-trips an encoded id; not a session id nor main's
+  setup path; no project without `new` or without an id (the last two pass on the stub).
+- Fixtures: `tddy-session-create-web/cypress/support/rpc/orchestratorComposerBackend.tsx`, page objects
+  `…/pages/orchestratorComposerPage.ts` and `tddy-session-web/cypress/support/pages/projectComposerPage.ts`.
 
 ## Technical Debt & Production Readiness
 
@@ -173,6 +244,27 @@ _(populated during development)_
 - **Every listed project gets a group** so "+" is always reachable (previously a project with neither a
   session nor a main had no group).
 - **Session type** = the first agent whose spec declares `project_home_main`, as main's setup form picks.
+- **Builder named `buildOrchestratorComposerRequest`**, not `buildOrchestratorStartRequest` — n1 already
+  has a module-private function of that name in `createSessionRequest.ts` with different semantics (no
+  attachments); two exported/private twins would mislead. Orchestrator decision (developer: finish
+  without stopping), 2026-11-14.
+- **`withEveryProjectGroup` is a new helper, applied only when the drawer offers the "+"**
+  (`onNewOrchestrator` given), instead of changing `withProjectHomeGroups`' rule. Keeps the existing
+  "a project with no main and no session gets no group" behaviour for a drawer with no "+", and leaves
+  #project-home's tests untouched. Orchestrator decision (developer: finish without stopping), 2026-11-14.
+- **Composer takes clients from `useDaemonClient`** (props: `projectId`, `daemonInstanceId`,
+  `sessionToken`, `onStarted`), the `ProjectHomeSetupPane` pattern, so the screen's detail case stays
+  one line. Orchestrator decision (developer: finish without stopping), 2026-11-14.
+- **The composer sends attachments**, unlike n1's New-session switch: the daemon's orchestrator
+  refusals (`refuse_what_an_orchestrator_cannot_honour`) do not cover them. Orchestrator decision
+  (developer: finish without stopping), 2026-11-14.
+- **"Exactly five controls" is asserted as a set**: the composer's `<select>`s are exactly model,
+  effort, provider, host (any order), the attachments section is present, and it has no checkbox — not
+  as a list of every New-session control that must be absent. Orchestrator decision (developer: finish
+  without stopping), 2026-11-14.
+- **"Vertically centred" = the box's centre within 15% of the pane's height of the pane's centre**,
+  with the composer filling its pane; the heading above and the controls under it shift it slightly.
+  Orchestrator decision (developer: finish without stopping), 2026-11-14.
 
 ## Refactoring Needed
 
@@ -199,10 +291,10 @@ n9 `feature/orchestrators/stack-web-by-id`.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests — skipped by developer instruction 2026-11-14
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

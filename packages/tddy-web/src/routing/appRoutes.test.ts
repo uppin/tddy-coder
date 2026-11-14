@@ -26,6 +26,9 @@ import {
   parseSessionsProjectHomeSetup,
   parseSessionsProjectHomeSetupProjectId,
   sessionsProjectHomeSetupPath,
+  SESSIONS_PROJECT_ROUTE,
+  sessionsProjectNewPath,
+  parseSessionsProjectNew,
   isSessionsNewPath,
   isInspectorTabName,
 } from "./appRoutes";
@@ -384,6 +387,49 @@ describe("sessions project-home setup route", () => {
     const result = parseSessionsDrawerSessionId(sessionsProjectHomeSetupPath("proj-beta", { replacing: true }));
     // Then
     expect(result).toBeNull();
+  });
+});
+
+describe("sessions project composer route (#orchestrators 8/11)", () => {
+  it("the project composer path parses and is a drawer path", () => {
+    // Given
+    const path = sessionsProjectNewPath("proj-beta");
+    // When
+    const projectId = parseSessionsProjectNew(path);
+    const isDrawerPath = isSessionsDrawerPath(path);
+    // Then
+    expect(path).toBe("/sessions/project/proj-beta/new");
+    expect(projectId).toBe("proj-beta");
+    expect(isDrawerPath).toBe(true);
+  });
+
+  it("round-trips a project id that needs encoding", () => {
+    // Given
+    const path = sessionsProjectNewPath("team/proj beta");
+    // When
+    const result = parseSessionsProjectNew(path);
+    // Then
+    expect(result).toBe("team/proj beta");
+  });
+
+  it("is not read as a session id, nor as main's setup pane", () => {
+    // Given
+    const path = sessionsProjectNewPath("proj-beta");
+    // When
+    const sessionId = parseSessionsDrawerSessionId(path);
+    const setup = parseSessionsProjectHomeSetup(path);
+    // Then
+    expect(sessionId).toBeNull();
+    expect(setup).toBeNull();
+  });
+
+  it("names no project without the trailing new segment or without a project", () => {
+    // When
+    const withoutNew = parseSessionsProjectNew(`${SESSIONS_PROJECT_ROUTE}/proj-beta`);
+    const withoutProject = parseSessionsProjectNew(`${SESSIONS_PROJECT_ROUTE}/new`);
+    // Then
+    expect(withoutNew).toBeNull();
+    expect(withoutProject).toBeNull();
   });
 });
 
