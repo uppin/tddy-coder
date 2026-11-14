@@ -8,7 +8,9 @@ subagent turn-control changeset
 **5.4× over**
 **Thresholds breached:** length 2,677 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
-**Status:** Open — regressed 2026-10-26 (+48 in #758, `#start-parity` 9/9) — unclaimed
+**Status:** Open — partially fixed 2026-11-14 (3,080 → 2,553 production lines in #884,
+`#orchestrators` 7/11: the eleven stack plan/read tools left this file; the six git tools
+leave in 10/11) — unclaimed
 
 ## Measurement history
 
@@ -29,6 +31,7 @@ subagent turn-control changeset
 | 2026-10-24 | +6 (wc 3,922 → 3,928) | **worse** by 6 in PR #722 (`#coagents` 3/8): `subagent_resume_tool` parses the `permission` argument and the schema registers it; the parse and the schema property live in the new `permission_answer_arg.rs`. Not split: stack-shared |
 | 2026-10-26 | 3,037 → 3,085 | **worse** by 48 in #758 (`#start-parity` 9/9), by the inline-test-block rule on `origin/feature/start-parity/disk-refresh` and HEAD: `spawn_conversation` takes `StartSession`'s arguments (`SpawnConversationInput` advertised under `StartSession`'s schema), the new `spawn_conversation_status` / `spawn_conversation_cancel` tools and their dispatch arms, and the shared `relay_to_daemon`. Split deferred by developer instruction (code issues recorded, not solved, in the `#start-parity` stack) |
 | 2026-11-12 | −5 (wc 4,161 → 4,156) | **touched, smaller** in #879 (`#orchestrators` 2/11): `pr_stack_status_impl` and `addressed_pull_number` read the stack through `read_session_stack` instead of the changeset |
+| 2026-11-14 | 3,080 → 2,553 | **improved** by 527 in #884 (`#orchestrators` 7/11), by the module-level `#[cfg(test)]` rule on the base and HEAD: the eleven stack plan/read `#[tool]` methods and their helpers left for the daemon exec-tool family (`tddy-tool-engine::stack_tools` + `tddy-daemon-rpc`); what remains here is their dynamic dispatch arm. Not split: stack-shared — `#orchestrators` 10/11 edits this file next |
 
 ## What the tool found
 

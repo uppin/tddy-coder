@@ -267,6 +267,13 @@ an ordinary, still read-only session, and main is set up once more.
 
 ### Project-home tools
 
+A session holding an orchestrator role is also offered the eleven stack plan and read tools
+(`pr_stack_list`, `pr_stack_create`, `pr_stack_status`, `pr_read`, `pr_search`, `pr_comments`,
+`pr_add_planned`, `pr_update_planned`, `pr_delete_planned`, `pr_set_status`, `pr_adopt`) as daemon
+exec tools addressing a project stack by `stack_id`; a session bound to a node of a stack is
+offered `pr_stack_status` and `pr_read` for its stack alone. See
+[PR stacking § PR-management tools](../../coder/pr-stacking.md#pr-management-tools).
+
 The exec tools below give the read-only main its reach over **its own project's** sessions. Only a
 session whose record carries the `project-home` role may run them; any other caller is refused with
 `PERMISSION_DENIED` naming the role — except that a session that can spawn conversations is offered
