@@ -16,6 +16,8 @@ import {
   ListProviderRoutesResponseSchema,
 } from "tddy-client-web/gen/accounts_pb";
 import {
+  AgentInfoSchema,
+  type AgentInfo,
   CatalogService,
   ListAgentModelsResponseSchema,
   ListAgentsResponseSchema,
@@ -49,17 +51,25 @@ export function aDaemonServingAnOrchestratorAgent(): InMemoryRpcBackend {
         projects: [{ projectId: COMPOSER_PROJECT, name: "beta", mainRepoPath: "/repo", daemonInstanceId: HOST_A }],
       }),
     )
-    .onUnary(CatalogService.method.listAgents, () =>
-      create(
-        ListAgentsResponseSchema,
-        withDeclaredSessionTypes({
-          agents: [
-            { id: "cursor", label: "Cursor", ...servedAgentWire("cursor") },
-            { id: "claude", label: "Claude", ...servedAgentWire("claude"), effortLevels: ["low", "high"] },
-          ],
+    .onUnary(CatalogService.method.listAgents, () => {
+      const agents = [
+        create(AgentInfoSchema, {
+          id: "cursor",
+          label: "Cursor",
+          ...(servedAgentWire("cursor") as Omit<Partial<AgentInfo>, "$typeName" | "$unknown">),
         }),
-      ),
-    )
+        create(AgentInfoSchema, {
+          id: "claude",
+          label: "Claude",
+          ...(servedAgentWire("claude") as Omit<Partial<AgentInfo>, "$typeName" | "$unknown">),
+          effortLevels: ["low", "high"],
+        }),
+      ];
+      return create(ListAgentsResponseSchema, {
+        agents,
+        sessionTypes: withDeclaredSessionTypes({ agents }).sessionTypes,
+      });
+    })
     .onUnary(CatalogService.method.listAgentModels, () =>
       create(ListAgentModelsResponseSchema, {
         models: [

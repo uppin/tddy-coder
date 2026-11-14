@@ -9,15 +9,20 @@
  * The whole Sessions screen over the in-memory ConnectRPC backend (`mountWithRpc`), so the
  * assertions read the typed request the screen sent.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-10-orchestrator-composer.md
- * Changeset: docs/dev/1-WIP/2026-11-10-orchestrator-composer.md
+ * Feature: docs/ft/web/session-drawer.md § Orchestrator composer
+ * Changeset: docs/dev/changesets/2026-11-14-orchestrator-composer.md
  */
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
-import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import {
+  AgentInfoSchema,
+  type AgentInfo,
+  CatalogService,
+  ListAgentsResponseSchema,
+} from "tddy-client-web/gen/catalog_pb";
 import { SessionService, StartSessionResponseSchema } from "tddy-client-web/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -52,14 +57,25 @@ function theSessionsScreen(refusal?: ConnectError) {
     sessions: [{ sessionId: "b1", projectId: BETA }],
     projectsOverride: [aListedProject(BETA, "beta"), aListedProject(GAMMA, "gamma")],
   })
-    .onUnary(CatalogService.method.listAgents, () =>
-      withDeclaredSessionTypes({
-        agents: [
-          { id: "cursor", label: "Cursor", ...servedAgentWire("cursor") },
-          { id: "claude", label: "Claude", ...servedAgentWire("claude"), effortLevels: ["low", "high"] },
-        ],
-      }),
-    )
+    .onUnary(CatalogService.method.listAgents, () => {
+      const agents = [
+        create(AgentInfoSchema, {
+          id: "cursor",
+          label: "Cursor",
+          ...(servedAgentWire("cursor") as Omit<Partial<AgentInfo>, "$typeName" | "$unknown">),
+        }),
+        create(AgentInfoSchema, {
+          id: "claude",
+          label: "Claude",
+          ...(servedAgentWire("claude") as Omit<Partial<AgentInfo>, "$typeName" | "$unknown">),
+          effortLevels: ["low", "high"],
+        }),
+      ];
+      return create(ListAgentsResponseSchema, {
+        agents,
+        sessionTypes: withDeclaredSessionTypes({ agents }).sessionTypes,
+      });
+    })
     .onUnary(SessionService.method.startSession, () => {
       if (refusal) throw refusal;
       return create(StartSessionResponseSchema, { sessionId: STARTED_ORCHESTRATOR });
