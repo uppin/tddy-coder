@@ -12,9 +12,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::pr_stack::{
-    AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
-    GetProjectStackRequest, GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse,
-    ListProjectStacksRequest, ListProjectStacksResponse, PrStackService, PullBaseIntoBranchRequest,
+    AddPlannedPrRequest, AddPlannedPrResponse, CreateProjectStackRequest,
+    CreateProjectStackResponse, GetPrStatusRequest, GetPrStatusResponse, GetProjectStackRequest,
+    GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse, ListProjectStacksRequest,
+    ListProjectStacksResponse, PrStackService, PullBaseIntoBranchRequest,
     PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
     ResolveStackBaseRequest, ResolveStackBaseResponse,
@@ -79,6 +80,12 @@ pub trait PrStackHandler: Send + Sync {
         &self,
         request: Request<GetProjectStackRequest>,
     ) -> Result<Response<GetProjectStackResponse>, Status>;
+
+    /// Create a new, empty project stack, answering its address (`#orchestrators` 12/12, B9).
+    async fn create_project_stack(
+        &self,
+        request: Request<CreateProjectStackRequest>,
+    ) -> Result<Response<CreateProjectStackResponse>, Status>;
 }
 
 /// Thin `PrStackService` adapter over a [`PrStackHandler`].
@@ -163,6 +170,13 @@ impl<H: PrStackHandler + 'static> PrStackService for PrStackServiceImpl<H> {
         request: Request<GetProjectStackRequest>,
     ) -> Result<Response<GetProjectStackResponse>, Status> {
         self.host.get_project_stack(request).await
+    }
+
+    async fn create_project_stack(
+        &self,
+        request: Request<CreateProjectStackRequest>,
+    ) -> Result<Response<CreateProjectStackResponse>, Status> {
+        self.host.create_project_stack(request).await
     }
 }
 

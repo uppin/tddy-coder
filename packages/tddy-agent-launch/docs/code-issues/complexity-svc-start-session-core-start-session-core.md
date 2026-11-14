@@ -8,6 +8,7 @@
 **Thresholds breached:** length 842 > 60; nesting 6 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
 **Status:** Open — partially fixed 2026-11-06 by #823 (`start_here` 348 → 265); both functions still over 60 — unclaimed
+**Accepted as standing debt:** developer consent, 2026-11-14 — reason: "restructure engine refused" (B8; see `docs/dev/todo/2026-11-14-restructure-engine-value-returning-arms.md`)
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs:62`
 
@@ -110,3 +111,16 @@ Touched by #880 (`#orchestrators` 3/11), against `origin/feature/orchestrators/p
 (`174bea803`): **+1 line** — `refuse_an_effort_the_agent_cannot_take(&req, …)?` beside
 `refuse_a_cli_start_without_a_model`, one early exit (`?`) added, no branch or nesting. The check
 itself lives in `start_request_checks.rs`. Not split: same E4 seams as above. Not claimed by any PR.
+
+## Measurement update 2026-11-14 — orchestrators sweep (B8): engine-refused, stopped
+
+Re-measured on the rebased sweep base: `start_session_on_request` 83 lines, `start_here_body` 273
+(fn line to closing brace) — both still over 60. The sweep attempted the changeset's three cuts
+(`r8-a` the `NoAgent` arm, `r8-b` the placement/refusal block, `r8-c` the route `match`) with
+`restructure check --deep` against the warm index. Each is refused with the same class:
+*this seam cannot be cut here: the range holds error guards and a return of a value* (the route
+match on its `return Ok(Response::new(inner))`, the `NoAgent` arm on its two `return Ok(started)`).
+Only a run whose every return is `return Err(..)` can become a function called with `?`, and these
+arms answer `Ok`. Under green-yolo consent an engine refusal is not done by hand, so B8 stops here
+with the record open. Closing it needs either an engine that converts value returns to tail
+expressions, or a hand restructure consented to outside green-yolo.

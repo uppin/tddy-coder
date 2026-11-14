@@ -25,7 +25,8 @@ use tddy_rpc::{Request, RequestMetadata, RequestTransport, Status};
 use tddy_service::proto::activity::{ActivityService as _, IsSessionTerminalServedRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_service::proto::pr_stack::{
-    AddPlannedPrRequest, GetProjectStackRequest, ListProjectStacksRequest, PrStackService,
+    AddPlannedPrRequest, CreateProjectStackRequest, GetProjectStackRequest,
+    ListProjectStacksRequest, PrStackService,
 };
 use tddy_service::proto::session::{
     ListSessionsRequest, SessionService as SessionServiceTrait, StartSessionRequest,
@@ -191,6 +192,13 @@ impl PeerForwarder for InProcessPeers {
                 let req = GetProjectStackRequest::decode(body.as_slice()).unwrap();
                 daemon
                     .get_project_stack(arriving_from_a_peer(req))
+                    .await
+                    .map(|r| r.into_inner().encode_to_vec())
+            }
+            (PR_STACK_SERVICE, "CreateProjectStack") => {
+                let req = CreateProjectStackRequest::decode(body.as_slice()).unwrap();
+                daemon
+                    .create_project_stack(arriving_from_a_peer(req))
                     .await
                     .map(|r| r.into_inner().encode_to_vec())
             }

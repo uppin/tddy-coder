@@ -245,7 +245,7 @@ async fn execute_tool_on_remote_shell(
         "Grep" => remote_tool_grep(shell, &args).await,
         "Glob" => remote_tool_glob(shell, &args).await,
         "Shell" => remote_tool_shell(shell, &args, registry, session_id, &kind).await,
-        "Await" => crate::tool_await(&args, registry).await,
+        "Await" => crate::shell_tool::tool_await(&args, registry).await,
         "ReadLints" => ToolOutcome::err("ReadLints: not available over RemoteShell"),
         "LspDiagnostics" | "LspDefinition" | "LspReferences" | "LspHover" | "LspSymbols" => {
             ToolOutcome::err(format!("{tool_name}: not available over RemoteShell"))
@@ -261,7 +261,8 @@ async fn execute_tool_on_remote_shell(
         return outcome;
     }
 
-    let task_id = crate::register_sync_task(registry, session_id, &kind, &outcome).await;
+    let task_id =
+        crate::shell_tool::register_sync_task(registry, session_id, &kind, &outcome).await;
     ToolOutcome {
         result_json: outcome.result_json,
         is_error: outcome.is_error,
@@ -450,7 +451,8 @@ async fn remote_tool_shell(
                 })
                 .to_string(),
             );
-            let task_id = crate::register_sync_task(registry, session_id, kind, &outcome).await;
+            let task_id =
+                crate::shell_tool::register_sync_task(registry, session_id, kind, &outcome).await;
             ToolOutcome {
                 job_id: task_id,
                 ..outcome

@@ -13,6 +13,7 @@ subagent turn-control changeset
 `spawn-child` relay mapping left `tddy-toolcall`) — unclaimed. Not split: stack-shared —
 successor `#orchestrators` nodes edit this file, so the split is deferred to the post-stack
 sweep per the stack-branch rule
+**Accepted as standing debt:** developer consent, 2026-11-14 — reason: "restructure engine refused" (the B6 remainder; see `docs/dev/todo/2026-11-14-restructure-engine-path-module-blocks-moves.md`)
 
 ## Measurement history
 
@@ -87,3 +88,5 @@ unrelated items, so the seam named above is real. Did **not** verify that extrac
 `restructure check` — that has to be run before anyone relies on the estimate.
 | 2026-10-25 | 2,970 → 2,984 | **worse** by 14 in PR #727 (`#coagents` 8/8), by the module-level `#[cfg(test)]` rule (wc 4,039 → 4,053): `subagent_resume_tool` reads `deferPermissionToUser`, `take_a_turn` reports `awaitingUser`, and the schema registers the argument; the parse and the property live in `permission_deferral_arg.rs`. Not split: deferred to the `#coagents` sweep node by the developer (2026-10-25) |
 | 2026-10-25 | 2,984 → 3,036 | **worse** by 52 in PR #776 (`#coagents` 9/9), by the module-level `#[cfg(test)]` rule: `subagent_cancel_tool` asks the daemon to cancel only the turn, `subagent_close_tool` and `close_conversation` carry the close it used to do, and `subagent_cancel_tool_definition` makes the advertised text testable. Not split: the developer deferred every code issue of the `#coagents` stack past its sweep node too (2026-10-25), so this is left for after the stack lands |
+
+| 2026-11-14 | 2,289 → 2,024 | **partially fixed** in the `#orchestrators` sweep (B6): the first subagent group (`SUBAGENT_NEW_SESSION` … `subagent_resume_tool`) was extracted to `server::subagent_tools` (296 lines) via `extract_module`. The remaining B6 moves (`turns`, `status`, `schemas`, `approval`, `dynamic_tools`, `tool_inputs`) are **refused by the restructure engine in this crate**: every `move_item`/`move_impl_members` plan fails `check --deep` on the crate's unrelated `#[path]` module (`mod notify_cli_unit_tests;` in `notify_cli.rs`), and the `approval` seam is `impl PermissionServer` members, which `extract_module` cannot take. Under green-yolo consent an engine refusal is not done by hand, so B6 stops here with the record open. |

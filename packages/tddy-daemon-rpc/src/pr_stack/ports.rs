@@ -1,9 +1,9 @@
 //! Family P — [`tddy_session_lifecycle::PrStackHandler`], answered by [`PrStackRpcHandler`].
 
 use super::branch_legs::{base_sync_unavailable, base_sync_view, worktree_leg};
-use super::guards::{require_pr_stack_orchestrator, token_for_repoint, validate_repoint_target};
+use super::guards::{token_for_repoint, validate_repoint_target};
 use super::pr_status::owner_repo_from_repo_root;
-use super::project_stacks::{require_orchestrator_unless_stacked, stack_target, StackTarget};
+use super::project_stacks::{require_a_stack, stack_target, StackTarget};
 use super::{wire_same_anyhow, PrStackRpcHandler};
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -12,12 +12,13 @@ use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id
 use tddy_projects::project_storage;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::pr_stack::{
-    AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
-    GetProjectStackRequest, GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse,
-    ListProjectStacksRequest, ListProjectStacksResponse, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
-    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ResolveStackBaseRequest, ResolveStackBaseResponse,
+    AddPlannedPrRequest, AddPlannedPrResponse, CreateProjectStackRequest,
+    CreateProjectStackResponse, GetPrStatusRequest, GetPrStatusResponse, GetProjectStackRequest,
+    GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse, ListProjectStacksRequest,
+    ListProjectStacksResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest, ReorderPlannedPrResponse,
+    RepointPlannedPrRequest, RepointPlannedPrResponse, ResolveStackBaseRequest,
+    ResolveStackBaseResponse,
 };
 use tddy_service::proto::types::BranchSession;
 use tddy_session_lifecycle::connection_service::{
@@ -73,7 +74,7 @@ impl PrStackHandler for PrStackRpcHandler {
         validate_session_id_segment(session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, session_id);
-        require_orchestrator_unless_stacked(&session_dir)?;
+        require_a_stack(&session_dir)?;
 
         let branch_suggestion =
             (!req.branch_suggestion.trim().is_empty()).then(|| req.branch_suggestion.clone());
@@ -428,7 +429,7 @@ impl PrStackHandler for PrStackRpcHandler {
         validate_session_id_segment(&req.orchestrator_session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.orchestrator_session_id);
-        require_pr_stack_orchestrator(&session_dir)?;
+        require_a_stack(&session_dir)?;
 
         // Checked before the write, because `link_stack_node_to_child_session` leaves an unknown
         // node alone and reports success — which reads to the caller exactly like a link that
@@ -490,6 +491,7 @@ impl PrStackHandler for PrStackRpcHandler {
         let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let session_dir = self.session_dir_for_target(&sessions_base, &target)?;
+        require_a_stack(&session_dir)?;
 
         // A repoint rebases a local branch and re-targets a PR base, so it needs the real checkout:
         // an unknown one is a precondition failure, not a repoint attempted in the session directory.
@@ -652,7 +654,7 @@ impl PrStackHandler for PrStackRpcHandler {
         validate_session_id_segment(session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, session_id);
-        require_orchestrator_unless_stacked(&session_dir)?;
+        require_a_stack(&session_dir)?;
 
         tddy_workflow_recipes::pr_stack::move_planned_pr_node(
             &session_dir,
@@ -704,6 +706,7 @@ impl PrStackHandler for PrStackRpcHandler {
         let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let session_dir = self.session_dir_for_target(&sessions_base, &target)?;
+        require_a_stack(&session_dir)?;
 
         let repo_root = tddy_core::repo_root_for_session(&session_dir).ok_or_else(|| {
             Status::failed_precondition(
@@ -856,6 +859,13 @@ impl PrStackHandler for PrStackRpcHandler {
         request: Request<GetProjectStackRequest>,
     ) -> Result<Response<GetProjectStackResponse>, Status> {
         self.get_project_stack_rpc(request).await
+    }
+
+    async fn create_project_stack(
+        &self,
+        request: Request<CreateProjectStackRequest>,
+    ) -> Result<Response<CreateProjectStackResponse>, Status> {
+        self.create_project_stack_rpc(request).await
     }
 }
 

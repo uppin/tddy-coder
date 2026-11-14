@@ -263,7 +263,9 @@ cmd_health() {
         key="$state/$fails"
       else
         [[ -n "$watch" ]] || continue
-        line="RUN=$name STATE=ended TURN=$(turns "$rd") RUN_EXIT=$(cat "$rd/exit-$(turns "$rd")" 2>/dev/null || echo ?)"
+        # A turn being launched has its prompt file but neither a live process nor an exit file yet.
+        [[ -f "$rd/exit-$(turns "$rd")" ]] || continue
+        line="RUN=$name STATE=ended TURN=$(turns "$rd") RUN_EXIT=$(cat "$rd/exit-$(turns "$rd")")"
         key=ended
       fi
       if [[ -z "$watch" ]]; then echo "$line"; continue; fi

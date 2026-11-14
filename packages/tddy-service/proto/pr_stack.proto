@@ -66,6 +66,27 @@ service PrStackService {
   // One project stack by its address, served by the daemon whose store holds it — forwarded there
   // when the address names another host (`#orchestrators` 9/11).
   rpc GetProjectStack(GetProjectStackRequest) returns (GetProjectStackResponse);
+  // Create a new, empty project stack in the store of the daemon that owns the project
+  // (`#orchestrators` 12/12, B9). The web's "New stack" action: a stack is made here, by address,
+  // never as a side effect of a session's first planned-PR write. Forwarded to
+  // `daemon_instance_id` when that names a peer. Answers the new stack's address.
+  rpc CreateProjectStack(CreateProjectStackRequest) returns (CreateProjectStackResponse);
+}
+
+message CreateProjectStackRequest {
+  string session_token = 1;
+  // The logical project the new stack belongs to.
+  string project_id = 2;
+  // Optional title for the stack; empty = untitled.
+  string title = 3;
+  // The daemon whose store holds the project. Empty or this daemon's own id = the daemon the
+  // call arrived on; a peer's id = the call is forwarded there.
+  string daemon_instance_id = 4;
+}
+
+message CreateProjectStackResponse {
+  // Where the new stack lives — the address every later request about it carries.
+  StackAddress stack = 1;
 }
 
 // Where a PR stack lives (`#orchestrators` 9/11): the project that holds it, its id in that
