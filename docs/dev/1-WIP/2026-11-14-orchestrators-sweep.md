@@ -268,11 +268,14 @@ Order for `[G]`:
 - **Complexity 5/5 is a boundary warning.** If `[G]` runs out of room, the clean split is two nodes:
   the Rust restructures plus B9, T1 and T2 in one, and the three TS hand splits in the other. The 6e
   review decides.
-- **Q1 (6e): B9 and fresh `pr-stack`-recipe sessions.** After B9, a `pr-stack`-recipe session that has
-  not yet named a stack is refused by `AddPlannedPr` from the web panel. Is a stack created for it at
-  session start, or does the panel need a create path? Discovery did not find a web-facing create RPC
-  (`pr_stack.proto` has none). `update_stack_atomic`'s create branch stays for the in-process callers.
-- **Q2 (6e): merging the `relay_approve` cfg pair** in `server.rs` by hand, if the engine refuses it.
+- **Q1 answered (developer, 2026-11-14): add a create RPC.** B9 also adds `CreateProjectStack`
+  (`pr_stack.proto`: project id, optional title, optional owning `daemon_instance_id`; answers the new
+  `StackAddress`) backed by the same `ProjectStackStore::create_titled` path as `pr_stack_create`, forwarded
+  to the owning host like the other address-based RPCs, and a "New stack" action in the web stack panel
+  (`tddy-prstack-web`) that creates a stack and then adds planned PRs to it by address. With it, B9's
+  refusal ("this session names no stack — create one with pr_stack_create or New stack") has a web
+  answer. Failing tests first (RPC acceptance + the panel's Cypress spec), as for the rest of B9.
+- **Q2 (orchestrator decision, developer: finish without stopping, 2026-11-14): merge the `relay_approve` cfg pair** in `server.rs` by hand if the engine refuses it, as one commit with no behaviour change.
 - **`server.rs` (B6) is in scope although the stack shrank it.** The sweep rule takes every stack-shared
   file `[W]` deferred to it, and this is the largest item. The developer may narrow it at 6e. A code
   issue is never deferred by the planner.
