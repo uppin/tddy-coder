@@ -98,3 +98,20 @@ export function withProjectHomeGroups(
   );
   return [...named, ...other];
 }
+
+/**
+ * Adds an empty group for every listed project that has none yet — main or not, sessions or not —
+ * so each project's header, and its "+" that opens the orchestrator composer, is reachable
+ * (`#orchestrators` 8/11). Ordered among the others by the same name rule as
+ * {@link withProjectHomeGroups}, ahead of the trailing **Other** group. The drawer applies it only
+ * when it offers the "+"; without one, a project with neither a main nor a session still has no
+ * group, since its header could do nothing.
+ */
+export function withEveryProjectGroup(
+  groups: ProjectSessionGroup[],
+  projects: ReadonlyArray<KnownProject>,
+): ProjectSessionGroup[] {
+  // TODO(orchestrator-composer): implement
+  void projects;
+  return groups;
+}

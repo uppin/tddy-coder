@@ -76,6 +76,13 @@ interface SessionDrawerProps {
   onSetUpProjectHome?: (projectId: string) => void;
   /** Take the operator to set main up again — a set-up main's **Replace main** action. */
   onReplaceProjectHome?: (projectId: string) => void;
+  /**
+   * Open the orchestrator composer for a project — the "+" on each project header
+   * (`#orchestrators` 8/11). Given, every listed project gets a group, so its "+" is reachable even
+   * with no main and no session; absent, no header shows a "+".
+   * TODO(orchestrator-composer): implement — not read yet.
+   */
+  onNewOrchestrator?: (projectId: string) => void;
 }
 
 export type { ProjectHomeInfo } from "./utils/projectHomeGroups";
