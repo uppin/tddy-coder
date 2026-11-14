@@ -200,6 +200,7 @@ async fn repoint(daemon: &TestDaemon) -> Result<(), Status> {
             session_id: ORCHESTRATOR.to_string(),
             node_id: NODE.to_string(),
             target_base_branch: String::new(),
+            stack: None,
         }))
         .await
         .map(|_| ())

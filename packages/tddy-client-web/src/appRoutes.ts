@@ -80,6 +80,34 @@ export function parseSessionsProjectNew(pathname: string): string | null {
   return null;
 }
 
+/**
+ * The segment before a stack id in the **stack view**'s path, `/sessions/project/:projectId/stack/:stackId`
+ * — a project's PR stack opened from the drawer's Stacks row (`#orchestrators` 9/11). Four segments,
+ * so it can never be read as a session id or as the composer.
+ */
+export const PROJECT_STACK_SEGMENT = "stack";
+
+/** Builds the `/sessions/project/:projectId/stack/:stackId` path that opens one of a project's stacks. */
+export function sessionsProjectStackPath(projectId: string, stackId: string): string {
+  return `${SESSIONS_PROJECT_ROUTE}/${encodeURIComponent(projectId)}/${PROJECT_STACK_SEGMENT}/${encodeURIComponent(stackId)}`;
+}
+
+/** Which project stack the stack view is open on. */
+export interface SessionsProjectStackRoute {
+  projectId: string;
+  stackId: string;
+}
+
+/**
+ * Which project stack the stack view is open on — read from
+ * `/sessions/project/:projectId/stack/:stackId`; `null` for any other path.
+ */
+export function parseSessionsProjectStack(pathname: string): SessionsProjectStackRoute | null {
+  // TODO(stack-web-by-id): implement
+  void pathname;
+  return null;
+}
+
 /** Builds a `/sessions/:id` deep-link path for the given session id. */
 export function sessionsDrawerPathForSession(sessionId: string): string {
   return `${SESSIONS_DRAWER_ROUTE}/${encodeURIComponent(sessionId)}`;

@@ -35,6 +35,8 @@ export const TEST_IDS = {
   createSessionBaseBranchSelect: "create-session-base-branch-select",
   createSessionSubmitBtn: "create-session-submit-btn",
   prStackScreen: "pr-stack-screen",
+  /** The stack view — one project stack opened by its id (`#orchestrators` 9/11). */
+  projectStackView: "project-stack-view",
   prStackPlannedPrList: "pr-stack-planned-pr-list",
   prStackPlannedPrPanel: "pr-stack-planned-pr-panel",
   prStackPlannedPrPanelToggle: "pr-stack-planned-pr-panel-toggle",

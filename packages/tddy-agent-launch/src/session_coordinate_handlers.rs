@@ -428,6 +428,8 @@ fn session_entry_from_listing(
         reads_host_paths: s.reads_host_paths,
         // TODO(session-lifecycle-tools): implement — list the mark `.session.yaml` records.
         orchestration_mark: None,
+        // TODO(stack-web-by-id): implement — the stack id the session's changeset names.
+        stack_id: String::new(),
         // Inferred below from the session's own conversation
         // (docs/ft/daemon/agent-session-status.md). UNSPECIFIED with no activity is
         // the honest value for a session nothing has been observed on, and stays the
