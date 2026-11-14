@@ -185,6 +185,7 @@ impl AHost {
 fn write_claude_cli_session(session_dir: &Path) {
     std::fs::create_dir_all(session_dir).expect("the session dir");
     let meta = SessionMetadata {
+        effort: None,
         session_id: CHILD.to_string(),
         project_id: "a-project".to_string(),
         created_at: "2026-10-29T10:00:00Z".to_string(),

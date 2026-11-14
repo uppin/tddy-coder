@@ -19,6 +19,7 @@ const SESSION_ID: &str = "01900000-0000-7000-8000-AABB00000001";
 /// A valid claude-cli session's metadata. Cases override only the field they are about.
 fn a_session_metadata() -> SessionMetadata {
     SessionMetadata {
+        effort: None,
         session_id: SESSION_ID.to_string(),
         project_id: "test-project".to_string(),
         created_at: "2026-08-29T10:00:00Z".to_string(),

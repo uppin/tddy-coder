@@ -269,6 +269,39 @@ async fn a_relaunch_uses_the_same_launcher_and_renders_the_same_spec() {
     );
 }
 
+/// The value `flag` is given on `argv`.
+fn the_value_of<'a>(argv: &'a [String], flag: &str) -> Option<&'a str> {
+    argv.windows(2)
+        .find(|pair| pair[0] == flag)
+        .map(|pair| pair[1].as_str())
+}
+
+#[tokio::test]
+async fn a_jailed_claude_started_at_high_effort_runs_at_it_and_a_resume_relaunches_at_it() {
+    // Given — a sandboxed claude started at high effort (`#orchestrators` 3/11)
+    let daemon = a_daemon_with_a_claude_home(ADaemonSpec::default());
+    let (session_id, _started_jail) = daemon.start_at_effort("high").await;
+    let started = daemon.stub_report(&session_id).await;
+
+    // When — its jail is relaunched by a resume
+    let _resumed_jail = daemon.resume(&session_id).await;
+    let resumed = daemon.stub_report(&session_id).await;
+
+    // Then — both launches carry claude.yaml's `--effort` flag at the recorded level
+    assert_eq!(
+        (
+            daemon.metadata_of(&session_id).effort.as_deref(),
+            the_value_of(&started.argv(), "--effort").map(str::to_string),
+            the_value_of(&resumed.argv(), "--effort").map(str::to_string),
+        ),
+        (
+            Some("high"),
+            Some("high".to_string()),
+            Some("high".to_string()),
+        )
+    );
+}
+
 /// The value of `--append-system-prompt-file` on `argv`.
 fn the_appended_prompt_file(argv: &[String]) -> Option<&str> {
     argv.windows(2)

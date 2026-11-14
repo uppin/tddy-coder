@@ -82,6 +82,7 @@ pub fn starting_session_metadata(
 ) -> tddy_core::SessionMetadata {
     let now = chrono::Utc::now().to_rfc3339();
     tddy_core::SessionMetadata {
+        effort: None,
         session_id: session_id.to_string(),
         project_id: project_id.to_string(),
         created_at: now.clone(),

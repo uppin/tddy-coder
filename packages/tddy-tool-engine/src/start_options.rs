@@ -68,6 +68,16 @@ pub struct ModelChoices {
     pub choices: Vec<LabelledChoice>,
 }
 
+/// The effort levels one coding agent takes (its spec's `coding_agent.effort`), under the session
+/// type that starts it (`#orchestrators` 3/11).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentEffortLevels {
+    pub session_type: String,
+    /// The level the spec preselects; empty leaves the agent's own default.
+    pub default: String,
+    pub levels: Vec<String>,
+}
+
 /// One session as the stack pickers filter it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CandidateSession {
@@ -92,6 +102,9 @@ pub struct StartOptions {
     pub models: ModelChoices,
     /// Why `models` is empty, when the query could not name a list of models. Empty when it could.
     pub models_unavailable: String,
+    /// The effort levels of every coding agent on this host that declares any, in the registry's
+    /// order; an agent missing from it takes no effort.
+    pub effort_levels: Vec<AgentEffortLevels>,
     pub provider_routes: Vec<ProviderRouteChoice>,
     /// Why `provider_routes` is empty, when no accounts could be asked: none is attached on this
     /// host, the harness is unnamed or has no provider accounts, or the caller's vault refused.

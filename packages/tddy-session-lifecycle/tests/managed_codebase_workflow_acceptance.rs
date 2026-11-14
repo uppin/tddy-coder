@@ -360,6 +360,7 @@ async fn resuming_a_managed_claude_cli_session_re_wires_orchestration_and_socket
     std::fs::create_dir_all(&session_dir).unwrap();
 
     let meta = SessionMetadata {
+        effort: None,
         session_id: session_id.to_string(),
         project_id: TEST_PROJECT_ID.to_string(),
         created_at: "2026-07-03T10:00:00Z".to_string(),

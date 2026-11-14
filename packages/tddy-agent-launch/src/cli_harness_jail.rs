@@ -22,6 +22,7 @@ use tddy_core::provider_route::HarnessRoute;
 use tddy_rpc::Status;
 use tddy_session_agents::roster_replacement::roster_replacement_pairs;
 
+use crate::effort_launch::EffortLaunch;
 use crate::harness_from_spec::CliSessionAgent;
 use crate::jail_launch::{jail_home, mcp_server_env, JailSpec, JailedSession};
 use crate::launch_ports::LaunchSessions;
@@ -56,6 +57,10 @@ pub(crate) struct CliJail<'a> {
     pub(crate) params: TemplateParams,
     /// Arguments the provider route adds to the agent's argv: a start's, not a resume's.
     pub(crate) route_args: Vec<String>,
+    /// What the session's chosen effort adds, the carry its spec declares (`coding_agent.effort`):
+    /// its arguments go ahead of the route's, its variables join [`Self::env`]. A start's and a
+    /// resume's alike, so a jailed session keeps the level it was started at.
+    pub(crate) effort: EffortLaunch,
     /// What the daemon adds for the session: the agent's environment, its route's configuration
     /// variable among them (see [`jail_route_config_env`]).
     pub(crate) env: BTreeMap<String, String>,
@@ -297,18 +302,22 @@ impl LaunchSessions {
         slots
             .argv_extra
             .splice(0..0, launch.wiring.passthrough_args.clone());
-        slots.argv_extra.extend(launch.route_args);
         let CliJail {
             jail,
             dirs,
             params,
             session_env,
-            env,
+            mut env,
+            effort,
+            route_args,
             route,
             wiring,
             usage,
             ..
         } = launch;
+        slots.argv_extra.extend(effort.args);
+        slots.argv_extra.extend(route_args);
+        env.extend(effort.env);
         self.launch_jailed(
             JailSpec {
                 agent,

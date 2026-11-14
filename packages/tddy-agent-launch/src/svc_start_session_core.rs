@@ -20,7 +20,7 @@ use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
 use crate::start_request_checks::{
     refuse_a_cli_start_without_a_model, refuse_a_tool_path_the_daemon_does_not_allow,
-    refuse_an_orchestrated_tool_start,
+    refuse_an_effort_the_agent_cannot_take, refuse_an_orchestrated_tool_start,
 };
 
 use tddy_rpc::Response;
@@ -206,6 +206,7 @@ impl LaunchSessions {
         // — a bad request should fail fast with INVALID_ARGUMENT, not a project NotFound. The
         // per-session-type handlers re-check as defense-in-depth (and for the resume/child paths).
         refuse_a_cli_start_without_a_model(&req, Some(&*self.coding_agents))?;
+        refuse_an_effort_the_agent_cannot_take(&req, Some(&*self.coding_agents))?;
 
         // Neither placement below puts a repository where the agent runs, so both skip the project
         // auto-provision and the whole worktree-bearing dispatch that follows: a split resolves the

@@ -35,6 +35,7 @@ pub fn write_session(data_dir: &Path, os_user: &str, session_id: &str, project_i
         .join(session_id);
     std::fs::create_dir_all(&session_dir).expect("the session dir");
     let meta = SessionMetadata {
+        effort: None,
         session_id: session_id.to_string(),
         project_id: project_id.to_string(),
         created_at: "2026-10-25T10:00:00Z".to_string(),

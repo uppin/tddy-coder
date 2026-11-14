@@ -34,6 +34,10 @@ export interface SelectableAgent {
   readonly defaultModel: string;
   /** The placements the agent's spec allows (`host`, `jail`). */
   readonly placements: readonly string[];
+  /** The effort levels a session of the agent can start at, from its spec; absent or empty for none. */
+  readonly effortLevels?: readonly string[];
+  /** The level the spec preselects; absent or empty leaves the agent's own default. */
+  readonly defaultEffort?: string;
 }
 
 /**

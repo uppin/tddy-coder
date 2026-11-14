@@ -479,6 +479,7 @@ mod tests {
 
     fn write_dead_pid_session(dir: &Path, sid: &str, pid: u32) {
         let metadata = SessionMetadata {
+            effort: None,
             session_id: sid.to_string(),
             project_id: "proj-u".to_string(),
             created_at: "2026-03-21T10:00:00Z".to_string(),
@@ -643,6 +644,7 @@ mod tests {
         .unwrap();
 
         let metadata = SessionMetadata {
+            effort: None,
             session_id: sid.to_string(),
             project_id: "proj-u".to_string(),
             created_at: "2026-03-21T10:00:00Z".to_string(),
@@ -704,6 +706,7 @@ mod tests {
         let dir = unified_session_dir_path(&base, sid);
         std::fs::create_dir_all(&dir).unwrap();
         let metadata = SessionMetadata {
+            effort: None,
             session_id: sid.to_string(),
             project_id: String::new(),
             created_at: "2026-07-11T10:00:00Z".to_string(),

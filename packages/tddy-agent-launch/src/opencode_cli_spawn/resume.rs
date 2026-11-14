@@ -12,6 +12,7 @@ use crate::cli_session_pointer::{
     place_session_pointer, removing_session_pointer_on_exit, PointerHost,
 };
 use crate::cursor_from_spec::node_launcher_of;
+use crate::effort_launch::effort_launch;
 use crate::harness_from_spec::{
     harness_template_params, resolve_session_agent, resume_token_adapter, CliSessionAgent,
     CliSessionType, HarnessLaunch,
@@ -217,7 +218,9 @@ async fn resume_cli_harness_session(
         },
     )?;
     slots.argv_extra.extend(split_args);
+    let carried_effort = effort_launch(spec, meta.effort.as_deref().unwrap_or_default());
     slots.argv_extra.extend(wiring.extra_args);
+    slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
     write_slot_files_on_target(&mut slots, remote_host)?;
     let host = PointerHost::of(remote_host);
@@ -226,6 +229,7 @@ async fn resume_cli_harness_session(
     let mut env = git_environment;
     env.extend(split_env);
     env.extend(wiring.env);
+    env.extend(carried_effort.env);
     env.extend(route.env);
     let launcher = node_launcher_of(&agent.tool.binary);
     let params = harness_template_params(&conversation.bound(HarnessLaunch {
