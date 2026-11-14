@@ -10,6 +10,7 @@ mod project_home_session_follow;
 mod project_home_start_options;
 mod result_frames;
 mod role_guard;
+mod stack_git_tools;
 pub mod stack_tools;
 
 pub use result_frames::EXEC_TOOL_FRAME_BYTES;

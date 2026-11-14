@@ -54,9 +54,32 @@ pub enum GitOp {
 /// The `GIT_*` environment every git command of an operation runs with — the identity the target
 /// session's own commits and pushes are made under (its project's account, or the host's `gh`).
 /// Empty when the target's identity does not resolve: the checkout's inherited identity applies.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+///
+/// A push goes to [`Self::remote_name`] — the project's remote — and authenticates with
+/// [`Self::account_token`], which a daemon-run git has no other way to obtain: it is handed to git
+/// through `tddy-askpass` (`GIT_ASKPASS`), never on a command line (`#orchestrators` 10/11).
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct PushIdentity {
     pub env: Vec<(String, String)>,
+    /// The project's remote (`ProjectData.remote_name`); `origin` when `None`.
+    pub remote_name: Option<String>,
+    /// The project account's GitHub token, for a push over HTTPS. `None` when the project resolves
+    /// no account: the checkout's own credentials apply.
+    pub account_token: Option<String>,
+}
+
+impl fmt::Debug for PushIdentity {
+    /// Never shows the token: an identity is logged with the operation it failed.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PushIdentity")
+            .field("env", &self.env)
+            .field("remote_name", &self.remote_name)
+            .field(
+                "account_token",
+                &self.account_token.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
 }
 
 /// What a git operation did.
@@ -127,6 +150,9 @@ pub fn run_git_op(
             session_id: target.session_id.clone(),
         });
     }
+    // TODO(stack-git-tools): implement — push to `push_identity.remote_name` (`origin` when
+    // `None`) and hand `account_token` to git through `tddy-askpass`; today every push goes to
+    // `origin` with the checkout's credentials.
     run::run(&target.worktree, &push_identity.env, op)
 }
 
@@ -179,5 +205,93 @@ mod tests {
         for (op, expected) in ops {
             assert_eq!(requires_inactive_target(&op), expected, "{op:?}");
         }
+    }
+
+    // ── push remote (`#orchestrators` 10/11) ──────────────────────────────────────────────────
+
+    fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "t@t.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "t@t.com")
+            .output()
+            .unwrap_or_else(|e| panic!("git {args:?}: {e}"));
+        assert!(
+            out.status.success(),
+            "git {args:?} in {dir:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// A session worktree on `feature` whose only remote is a bare repository named `upstream`.
+    /// Answers the temp dir, the worktree and the bare remote.
+    fn a_worktree_whose_only_remote_is_upstream(
+    ) -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("upstream.git");
+        let worktree = tmp.path().join("work");
+        std::fs::create_dir_all(&bare).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+        git_in(&bare, &["init", "-q", "--bare", "-b", "main"]);
+        git_in(&worktree, &["init", "-q", "-b", "feature"]);
+        git_in(&worktree, &["commit", "-q", "--allow-empty", "-m", "work"]);
+        git_in(
+            &worktree,
+            &["remote", "add", "upstream", bare.to_str().unwrap()],
+        );
+        (tmp, worktree, bare)
+    }
+
+    fn a_target_at(worktree: &std::path::Path) -> SessionTarget {
+        SessionTarget {
+            session_id: "child-1".to_string(),
+            project_id: "proj".to_string(),
+            worktree: worktree.to_path_buf(),
+            branch: "feature".to_string(),
+            base_ref: "upstream/main".to_string(),
+            is_active: false,
+        }
+    }
+
+    #[test]
+    fn a_push_goes_to_the_remote_its_identity_names() {
+        // Given a worktree whose only remote is `upstream`, and an identity naming it
+        let (_tmp, worktree, bare) = a_worktree_whose_only_remote_is_upstream();
+        let identity = PushIdentity {
+            remote_name: Some("upstream".to_string()),
+            ..PushIdentity::default()
+        };
+
+        // When its branch is pushed
+        let pushed = run_git_op(
+            &a_target_at(&worktree),
+            GitOp::Push {
+                force_with_lease: false,
+            },
+            &identity,
+        );
+
+        // Then the push lands on `upstream`
+        assert!(pushed.is_ok(), "{pushed:?}");
+        assert_eq!(
+            git_in(&bare, &["rev-parse", "refs/heads/feature"]),
+            git_in(&worktree, &["rev-parse", "HEAD"])
+        );
+    }
+
+    #[test]
+    fn a_push_identity_never_shows_its_token() {
+        // Given an identity carrying the account's token
+        let identity = PushIdentity {
+            account_token: Some("gho_secret".to_string()),
+            ..PushIdentity::default()
+        };
+
+        // Then its debug form does not show it
+        assert!(!format!("{identity:?}").contains("gho_secret"));
     }
 }

@@ -163,7 +163,11 @@ impl ProjectHomePort for DaemonProjectHome {
         })
         .await
         .map_err(|e| anyhow::anyhow!("reading the target's git identity failed: {e}"))?;
-        Ok(PushIdentity { env })
+        // TODO(stack-git-tools): implement — the project's `remote_name` and its account's token.
+        Ok(PushIdentity {
+            env,
+            ..PushIdentity::default()
+        })
     }
 
     /// The worktrees of `project_id` on this host, from the snapshot the Worktrees screen's stream
