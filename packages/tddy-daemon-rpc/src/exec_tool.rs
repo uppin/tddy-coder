@@ -10,6 +10,7 @@ mod project_home_session_follow;
 mod project_home_start_options;
 mod result_frames;
 mod role_guard;
+pub mod stack_tools;
 
 pub use result_frames::EXEC_TOOL_FRAME_BYTES;
 
@@ -90,6 +91,10 @@ pub(crate) struct ProjectHomeHost {
     /// This host's activity surface, which `NotifyOperator` publishes through in process
     /// (`#home-inbox` 11/11).
     pub(crate) activity: Arc<tddy_session_lifecycle::connection_service::PeerRoutedActivity>,
+    /// How the stack tools reach GitHub (`#orchestrators` 7/11), late-bound by
+    /// [`RpcHandlers::attach_stack_github`](crate::RpcHandlers::attach_stack_github); the GitHub REST
+    /// API itself when nothing is attached.
+    pub(crate) stack_github: Arc<OnceLock<Arc<dyn stack_tools::StackGithubClients>>>,
 }
 
 impl ExecToolRpcHandler {
@@ -127,6 +132,7 @@ impl ExecToolRpcHandler {
                 pending_answers: host.pending_answers(),
                 notification_log: host.project_notification_log(),
                 activity: Arc::new(host.activity_service()),
+                stack_github: Arc::new(OnceLock::new()),
             },
         }
     }
@@ -141,6 +147,13 @@ impl ExecToolRpcHandler {
     /// The late-bound launch cell, shared with the families that attach it.
     pub(crate) fn session_launch_cell(&self) -> Arc<OnceLock<LaunchSessions>> {
         Arc::clone(&self.session_launch)
+    }
+
+    /// The late-bound stack-tools GitHub cell, shared with the families that attach it.
+    pub(crate) fn stack_github_cell(
+        &self,
+    ) -> Arc<OnceLock<Arc<dyn stack_tools::StackGithubClients>>> {
+        Arc::clone(&self.project_home_host.stack_github)
     }
 
     /// The late-bound provider-account cell, shared with the families that attach it.

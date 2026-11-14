@@ -12,6 +12,43 @@
   `project_home_remote.rs` `served_on_target_host`.
 - `require_pr_stack_orchestrator` exists only daemon-side (`pr_stack/guards.rs:9`); tddy-tools has no guard.
 
+## Exploration 2 — pass 2 red (2026-11-13)
+
+Re-read on `1c7c2e2a7` with n1 (`orchestrator-role`) and n2 (`project-stack-store`) green underneath.
+Queries: `grep -rn` for `ProjectStackStore`, `is_orchestrator_role`, `SessionToolRole::`,
+`project_home_remote_tool_defs`, `PR_STACK_TOOL_NAMES`, `with_api_base`, `project_github_token`,
+`local_gh_github_token`, `NOT_CONFIGURED_REASON`; read `project_stack_store.rs`, `changeset/stack.rs`,
+`stack_ops/nodes.rs`, `pr_insight.rs`, `pr_api.rs`, `exec_tool.rs`, `exec_tool/{ports,project_home,
+project_home_remote,role_guard}.rs`, `project_home/caller.rs`, `families.rs`, `tests/support/mod.rs`.
+
+- **n2 moved the seams.** `read_session_stack` / `update_stack_atomic` (`stack.rs:300,338`) resolve
+  `Changeset.stack_id` against `ProjectStackStore` (`<base>/projects/<project_id>/stacks/`), the
+  project read from `.session.yaml`. `ProjectStackStore::{create,read,update,list}` and
+  `StackRecord { stack_id, project_id, created_by_session_id, created_at_unix_ms, stack }` — **no
+  title**. The daemon's store root is `sessions_base.join("projects")`, the same directory
+  `projects.yaml` lives in (`user_paths.rs:69`).
+- **`stack_ops` is session-dir keyed** (`add_planned_pr_node(session_dir, …)` etc.), so a
+  stack-id-addressed daemon port needs store-keyed variants or its own read-modify-write.
+  `tddy-daemon-rpc` does not depend on `tddy-pr-stack` today.
+- **Caller gate.** `role_guard::reject_refused_local_exec_tool` (`:21`) runs before `run_locally` and
+  refuses any tool outside `is_project_home_allowed_tool` for an orchestrator-role session — the stack
+  tools must join that predicate. `project_home_caller` (`caller.rs`) matches `SessionToolRole`;
+  adding stack variants there would widen it, hence a separate `StackCallerRole`.
+- **Forwarding.** `served_on_target_host` re-issues a target-tool call with `daemon_instance_id`; the
+  peer confirms a caller it does not hold through the owner's `ListSessions` row, which carries
+  `session_role` and `project_id` but no recipe or node binding.
+- **GitHub seam.** No daemon-level API-base or client injection exists. `RealGithubPrApi::with_api_base`
+  exists, and `tddy-workflow-recipes/tests/github_rest_call_carries_the_session_hosts_token.rs` uses a
+  loopback listener. Red added a late-bound `StackGithubClients` cell
+  (`RpcHandlers::attach_stack_github`), the same pattern as `attach_provider_accounts`.
+- **Project account in tests.** No daemon-rpc suite seeds a vault with a GitHub account; a Local gh
+  project plus `tddy_testing_commons::gh_cli::a_gh_cli(...).with_token(..)` and
+  `DaemonSessionHost::with_github_cli` is the cheap route (`repoint_local_gh_token.rs` does the same).
+- **tddy-tools.** The project-home tools are registered as dynamic routes only when a session-tool
+  transport exists (`server.rs:333-345`) and advertised only when admitted; `call_tool_by_name` has
+  arms for the eleven at `:515-528`. With no transport, `dispatch_session_tool` answers
+  `remote toolset not configured: …`.
+
 ## Exploration 1 — whole-work discovery for `#orchestrators` (copied 2026-11-10)
 
 The full dump the stack was planned from: interview record, combined conclusions and four Explore

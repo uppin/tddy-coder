@@ -178,3 +178,54 @@ fn listing_a_project_returns_each_of_its_stacks() {
     let listed_ids: Vec<String> = listed.into_iter().map(|r| r.stack_id).collect();
     assert_eq!(listed_ids, expected);
 }
+
+#[test]
+fn a_titled_stack_keeps_its_title_through_create_read_and_update() {
+    // Given
+    let host = a_projects_dir();
+
+    // When — a titled stack is created, updated, then read back
+    let created = host
+        .store
+        .create_titled(
+            "proj-auth",
+            "sess-planner",
+            Some("Orchestrator sessions".to_string()),
+            a_stack(vec![a_node("n1", &[])]),
+        )
+        .expect("create");
+    host.store
+        .update("proj-auth", &created.stack_id, |stack| {
+            stack.nodes.push(a_node("n2", &["n1"]))
+        })
+        .expect("update");
+    let read = host
+        .store
+        .read("proj-auth", &created.stack_id)
+        .expect("read");
+
+    // Then — the title was stored, and an update of the stack leaves it alone
+    assert_eq!(
+        (created.title.as_deref(), read.title.as_deref()),
+        (Some("Orchestrator sessions"), Some("Orchestrator sessions"))
+    );
+}
+
+#[test]
+fn a_record_written_without_a_title_still_reads() {
+    // Given — a record as the store wrote it before stacks had titles
+    let host = a_projects_dir();
+    let stacks_dir = host.store.projects_dir().join("proj-auth").join("stacks");
+    std::fs::create_dir_all(&stacks_dir).unwrap();
+    std::fs::write(
+        stacks_dir.join("stack-old.yaml"),
+        "stack_id: stack-old\nproject_id: proj-auth\ncreated_by_session_id: sess-planner\ncreated_at_unix_ms: 1\nstack:\n  version: 1\n  nodes: []\n",
+    )
+    .unwrap();
+
+    // When
+    let read = host.store.read("proj-auth", "stack-old").expect("read");
+
+    // Then — it reads, untitled
+    assert_eq!((read.stack_id.as_str(), read.title), ("stack-old", None));
+}
