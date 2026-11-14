@@ -108,6 +108,7 @@ fn a_project_with_a_worktree() -> AProjectWithAWorktree {
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: None,
+            orchestrator_defaults: None,
         },
     )
     .expect("the project is registered");

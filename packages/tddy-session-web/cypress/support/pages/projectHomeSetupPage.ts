@@ -130,7 +130,9 @@ export const projectHomeSetupPage = {
   },
 
   chooseModel(model: string) {
-    byTestId(TEST_IDS.createSessionModelSelect, RENDER_WAIT).select(model);
+    // The settings pane's defaults section has a model select of its own, after main's form in
+    // the DOM (`#orchestrators` 11/11): main's is the first.
+    byTestId(TEST_IDS.createSessionModelSelect, RENDER_WAIT).first().select(model);
   },
 
   choosePermissionMode(mode: string) {

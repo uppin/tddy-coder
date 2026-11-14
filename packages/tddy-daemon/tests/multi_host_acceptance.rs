@@ -140,6 +140,7 @@ fn per_host_project_path_roundtrip() {
         accounts: Vec::new(),
         local_gh: false,
         home_session_id: None,
+        orchestrator_defaults: None,
     };
     tddy_projects::project_storage::write_projects(&projects_dir, &[project]).unwrap();
 
@@ -288,6 +289,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         accounts: Vec::new(),
         local_gh: false,
         home_session_id: None,
+        orchestrator_defaults: None,
     };
     // Project will be written to sessions_b/projects/ after sessions_b is created below.
 

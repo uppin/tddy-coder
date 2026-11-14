@@ -29,6 +29,22 @@ service ProjectService {
   // most one account per provider; a second is refused rather than silently winning. See
   // `#keyring` 5/9.
   rpc SetProjectAccounts(SetProjectAccountsRequest) returns (SetProjectAccountsResponse);
+  // Save (or clear) what a new orchestrator for the project starts with on one host — the "+"
+  // composer's model, effort and provider account (`#orchestrators` 11/11). **Per-host scope**, as
+  // main is: routed to the host `daemon_instance_id` names (local or forwarded), and never fanned
+  // out to the project's other hosts. The defaults REPLACE the stored ones; absent clears them.
+  rpc SetProjectOrchestratorDefaults(SetProjectOrchestratorDefaultsRequest) returns (SetProjectOrchestratorDefaultsResponse);
+}
+
+// What a project's orchestrator composer starts with on one host (`#orchestrators` 11/11). Each
+// field empty means "the agent's own default" — the composer then shows what the agent serves.
+message OrchestratorDefaults {
+  // A model id the agent's catalogue lists.
+  string model = 1;
+  // One of the agent's served effort levels (`AgentInfo.effort_levels`).
+  string effort = 2;
+  // A provider account (`accounts.AccountSummary.account_id`) the agent runs on instead of its vendor.
+  string provider_account_id = 3;
 }
 
 // One provider's account, as assigned to a project.
@@ -129,6 +145,9 @@ message ProjectEntry {
   // The session this project runs as its **main** (project-home session) on this host, recorded by
   // `EnsureProjectHomeSession`. Empty = main is not set up.
   string home_session_id = 11;
+  // What a new orchestrator for this project starts with on this host, saved from the project's
+  // settings pane by `SetProjectOrchestratorDefaults`. Absent = none saved.
+  OrchestratorDefaults orchestrator_defaults = 12;
 }
 
 message SetProjectDefaultBranchRequest {
@@ -156,5 +175,20 @@ message SetProjectAccountsRequest {
 }
 
 message SetProjectAccountsResponse {
+  ProjectEntry project = 1;
+}
+
+message SetProjectOrchestratorDefaultsRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Host whose defaults these are. Empty or matching the local instance = local; otherwise
+  // forwarded to that peer. Only that host's row changes.
+  string daemon_instance_id = 3;
+  // The project's whole defaults on that host after this call. Absent clears them.
+  OrchestratorDefaults defaults = 4;
+}
+
+message SetProjectOrchestratorDefaultsResponse {
+  // The project's row on the host that saved the defaults.
   ProjectEntry project = 1;
 }

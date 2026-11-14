@@ -4,6 +4,7 @@ mod clone_destination;
 mod coordinate_handlers;
 mod coordinate_route;
 mod entries;
+mod orchestrator_defaults;
 mod ports;
 
 use std::path::PathBuf;

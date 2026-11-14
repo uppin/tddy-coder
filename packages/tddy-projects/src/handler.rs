@@ -1,4 +1,4 @@
-//! Port the six `project.ProjectService` RPCs are implemented against.
+//! Port the seven `project.ProjectService` RPCs are implemented against.
 
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
@@ -7,9 +7,10 @@ use tddy_service::proto::project::{
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
     ListProjectsResponse, SetProjectAccountsRequest, SetProjectAccountsResponse,
     SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
+    SetProjectOrchestratorDefaultsRequest, SetProjectOrchestratorDefaultsResponse,
 };
 
-/// What the six project RPCs need from the host process.
+/// What the seven project RPCs need from the host process.
 #[async_trait]
 pub trait ProjectHandler: Send + Sync {
     async fn list_projects(
@@ -43,4 +44,11 @@ pub trait ProjectHandler: Send + Sync {
         &self,
         request: Request<SetProjectAccountsRequest>,
     ) -> Result<Response<SetProjectAccountsResponse>, Status>;
+
+    /// Save (or clear) what a new orchestrator for the project starts with on one host. Per-host
+    /// scope: routed to the host the request names, never fanned out (`#orchestrators` 11/11).
+    async fn set_project_orchestrator_defaults(
+        &self,
+        request: Request<SetProjectOrchestratorDefaultsRequest>,
+    ) -> Result<Response<SetProjectOrchestratorDefaultsResponse>, Status>;
 }

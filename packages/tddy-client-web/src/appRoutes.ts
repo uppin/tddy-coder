@@ -82,6 +82,55 @@ export function parseSessionsProjectNew(pathname: string): string | null {
 }
 
 /**
+ * The trailing segment of a project's **settings pane** (`#orchestrators` 11/11),
+ * `/sessions/project/:projectId/settings[?host=<daemon_instance_id>]`, which the gear on a project
+ * header opens: main's setup / Replace main, and the defaults a new orchestrator starts with.
+ */
+export const PROJECT_SETTINGS_SEGMENT = "settings";
+
+/**
+ * The query param naming the host a settings pane acts on (`?host=<daemon_instance_id>`); absent,
+ * it acts on the drawer's selected host. The Projects card's link sets it to the host whose row it
+ * read, so the card and the pane cannot disagree about whose main they mean.
+ */
+export const PROJECT_SETTINGS_HOST_PARAM = "host";
+
+/**
+ * Builds the `/sessions/project/:projectId/settings` path for `projectId`, with `?host=` when
+ * `options.host` names one. A link target (`href="#…"`), not a `navigate` path: in-app navigation
+ * carries the host as a location param instead.
+ */
+export function sessionsProjectSettingsPath(projectId: string, options: { host?: string } = {}): string {
+  const path = `${SESSIONS_PROJECT_ROUTE}/${encodeURIComponent(projectId)}/${PROJECT_SETTINGS_SEGMENT}`;
+  return options.host ? `${path}?${PROJECT_SETTINGS_HOST_PARAM}=${encodeURIComponent(options.host)}` : path;
+}
+
+/** Which project the settings pane is open for, and the host it acts on. */
+export interface SessionsProjectSettingsRoute {
+  projectId: string;
+  /** The `?host=` the route names; `null` when absent — the drawer's selected host then. */
+  host: string | null;
+}
+
+/**
+ * Which project's settings pane is open, and on which host — read from
+ * `/sessions/project/:projectId/settings` and its `host` param; `null` for any other path. The old
+ * setup paths (`/sessions/project-home/:projectId[/replace]`) are not this route: the screen opens
+ * the same pane for them (see `parseSessionsProjectHomeSetup`).
+ */
+export function parseSessionsProjectSettings(location: {
+  path: string;
+  params: Readonly<Record<string, string>>;
+}): SessionsProjectSettingsRoute | null {
+  const suffix = `/${PROJECT_SETTINGS_SEGMENT}`;
+  if (!location.path.endsWith(suffix)) return null;
+  const projectPath = location.path.slice(0, -suffix.length);
+  const projectId = decodeSegment(singleSegmentAfter(projectPath, SESSIONS_PROJECT_ROUTE));
+  if (projectId === null) return null;
+  return { projectId, host: location.params[PROJECT_SETTINGS_HOST_PARAM] ?? null };
+}
+
+/**
  * The segment before a stack id in the **stack view**'s path, `/sessions/project/:projectId/stack/:stackId`
  * — a project's PR stack opened from the drawer's Stacks row (`#orchestrators` 9/11). Four segments,
  * so it can never be read as a session id or as the composer.
@@ -166,6 +215,7 @@ export function isSessionsDrawerPath(pathname: string): boolean {
     singleSegmentAfter(pathname, SESSIONS_DRAWER_ROUTE) !== null ||
     parseSessionsProjectHomeSetupProjectId(pathname) !== null ||
     parseSessionsProjectNew(pathname) !== null ||
+    parseSessionsProjectSettings({ path: pathname, params: {} }) !== null ||
     parseSessionsProjectStack(pathname) !== null
   );
 }

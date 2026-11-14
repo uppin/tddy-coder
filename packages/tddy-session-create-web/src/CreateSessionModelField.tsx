@@ -38,6 +38,11 @@ export function CreateSessionModelField({
           value={model}
           onChange={(e) => setModel(e.target.value)}
         >
+          {model !== "" && !agentModels.models.some((m) => m.id === model) && (
+            <option key={model} value={model}>
+              {model}
+            </option>
+          )}
           {agentModels.models.map((m) => (
             <option key={m.id} value={m.id}>
               {m.label}

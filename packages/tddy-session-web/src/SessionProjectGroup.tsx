@@ -23,9 +23,11 @@ export function SessionProjectGroup(props: {
   onToggle: () => void;
   /** Opens the orchestrator composer for this group's project — the header's "+". */
   onNew?: () => void;
+  /** Further header actions after the "+" — the settings gear (`#orchestrators` 11/11). */
+  actions?: React.ReactNode;
   children: React.ReactNode;
 }): React.ReactElement | null {
-  const { group, collapsed, onToggle, onNew, children } = props;
+  const { group, collapsed, onToggle, onNew, actions, children } = props;
   const key = projectGroupKey(group);
 
   return (
@@ -36,6 +38,7 @@ export function SessionProjectGroup(props: {
         collapsed={collapsed}
         onToggle={onToggle}
         onNew={onNew}
+        actions={actions}
       />
       <div style={collapsed ? { display: "none" } : undefined}>{children}</div>
     </div>

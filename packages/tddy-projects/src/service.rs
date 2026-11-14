@@ -9,6 +9,7 @@ use tddy_service::proto::project::{
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
     ListProjectsResponse, ProjectService, SetProjectAccountsRequest, SetProjectAccountsResponse,
     SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
+    SetProjectOrchestratorDefaultsRequest, SetProjectOrchestratorDefaultsResponse,
 };
 
 use crate::handler::ProjectHandler;
@@ -67,6 +68,13 @@ impl<H: ProjectHandler + 'static> ProjectService for ProjectServiceImpl<H> {
         request: Request<SetProjectAccountsRequest>,
     ) -> Result<Response<SetProjectAccountsResponse>, Status> {
         self.host.set_project_accounts(request).await
+    }
+
+    async fn set_project_orchestrator_defaults(
+        &self,
+        request: Request<SetProjectOrchestratorDefaultsRequest>,
+    ) -> Result<Response<SetProjectOrchestratorDefaultsResponse>, Status> {
+        self.host.set_project_orchestrator_defaults(request).await
     }
 }
 

@@ -567,9 +567,10 @@ const PR_STACK_METHODS: [&str; 10] = [
 /// method somebody adds afterwards both fail here rather than surviving quietly. A genuinely new
 /// method on one of these four services joins the list deliberately, in the change that adds it —
 /// `SetProjectAccounts` (`#keyring` 5/9) is the first to do so, `EnsureProjectHomeSession`
-/// (`#project-home` 4/7) the second. `SetProjectHomeAgent` (`#project-home` 1/7) joined and was
+/// (`#project-home` 4/7) the second, `SetProjectOrchestratorDefaults` (`#orchestrators` 11/11) the
+/// third. `SetProjectHomeAgent` (`#project-home` 1/7) joined and was
 /// removed again when main came to be set up with the New-session form.
-const RESIDUAL_METHODS: [&str; 19] = [
+const RESIDUAL_METHODS: [&str; 20] = [
     "ListSessions",
     "StartSession",
     "StreamStartSession",
@@ -585,6 +586,7 @@ const RESIDUAL_METHODS: [&str; 19] = [
     "ListProjectBranches",
     "SetProjectDefaultBranch",
     "SetProjectAccounts",
+    "SetProjectOrchestratorDefaults",
     "StartDemoVm",
     "StopDemoVm",
     "GetDemoVmStatus",

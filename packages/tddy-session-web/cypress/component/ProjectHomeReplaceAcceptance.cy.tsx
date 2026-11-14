@@ -1,8 +1,9 @@
 /**
- * Acceptance: a project whose main is set up offers **Replace main** on its pinned entry, which
- * opens the setup form in replace mode (`#/sessions/project-home/<projectId>/replace`) saying the
- * current main is stopped; starting from it sends `EnsureProjectHomeSession` with a start spec and
- * selects the new main. A recorded main the daemon no longer has (`NOT_FOUND`) opens the setup form.
+ * Acceptance: a project whose main is set up offers **Replace main** in its settings pane
+ * (`#orchestrators` 11/11 — it moved off the pinned entry there), which opens the setup form in
+ * replace mode saying the current main is stopped; starting from it sends
+ * `EnsureProjectHomeSession` with a start spec and selects the new main. A recorded main the
+ * daemon no longer has (`NOT_FOUND`) opens the setup form.
  *
  * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry.
  * PRD: docs/ft/web/session-drawer.md
@@ -18,6 +19,7 @@ import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSele
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { projectHomeSetupPage as setup } from "../support/pages/projectHomeSetupPage";
+import { projectSettingsPage as settings } from "../support/pages/projectSettingsPage";
 
 const ALPHA = "proj-alpha";
 const MAIN_SESSION_ID = "home-alpha-0000-0000-0000-000000000000";
@@ -90,11 +92,12 @@ it("Replace main opens the setup form saying the current main will be stopped", 
   // Given
   theSessionsScreen(replacesMain);
 
-  // When
-  setup.clickReplaceMain(ALPHA);
+  // When the operator goes through the settings pane (Replace main is no longer on the entry)
+  settings.openSettingsFor(ALPHA);
+  settings.clickReplaceMain(ALPHA);
 
   // Then
-  setup.assertAtSetupFor(ALPHA, { replacing: true });
+  settings.assertAtSettingsFor(ALPHA);
   setup.pane(ALPHA).should("contain", "Replace main for alpha");
   setup.replacingNotice(ALPHA).should("exist");
   setup.form(ALPHA).should("exist");
@@ -103,7 +106,8 @@ it("Replace main opens the setup form saying the current main will be stopped", 
 it("starting from the replace form ensures main with a start spec and selects the new main", () => {
   // Given
   const backend = theSessionsScreen(replacesMain);
-  setup.clickReplaceMain(ALPHA);
+  settings.openSettingsFor(ALPHA);
+  settings.clickReplaceMain(ALPHA);
 
   // When
   setup.startMain();
@@ -130,7 +134,8 @@ it("the pinned entry stands for the selected host's main, not the first-listed h
   // When the project is listed first on a host with no main for it, then on the selected host
   theSessionsScreen(replacesMain, [ALPHA_ON_ANOTHER_HOST_WITHOUT_MAIN, ALPHA_WITH_MAIN]);
 
-  // Then the pinned entry stands for the selected host's main
+  // Then the pinned entry stands for the selected host's main, and offers no Replace main of
+  // its own — that lives in the settings pane (`#orchestrators` 11/11)
   setup.mainEntry(ALPHA).should("exist");
-  setup.replaceAction(ALPHA).should("exist");
+  setup.replaceAction(ALPHA).should("not.exist");
 });

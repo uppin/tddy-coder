@@ -75,5 +75,14 @@ pub(super) fn project_entry_from(
             .collect(),
         local_gh: p.local_gh,
         home_session_id: p.home_session_id.clone().unwrap_or_default(),
+        orchestrator_defaults: p.orchestrator_defaults.as_ref().and_then(|d| {
+            (d.model.is_some() || d.effort.is_some() || d.provider_account_id.is_some()).then(
+                || tddy_service::proto::project::OrchestratorDefaults {
+                    model: d.model.clone().unwrap_or_default(),
+                    effort: d.effort.clone().unwrap_or_default(),
+                    provider_account_id: d.provider_account_id.clone().unwrap_or_default(),
+                },
+            )
+        }),
     }
 }

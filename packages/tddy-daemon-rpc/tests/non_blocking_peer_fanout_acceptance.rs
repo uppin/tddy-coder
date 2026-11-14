@@ -121,6 +121,7 @@ impl EligibleDaemonSource for AsyncPeerProjectsSource {
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: String::new(),
+            orchestrator_defaults: None,
         }]
     }
 }
@@ -186,6 +187,7 @@ fn a_project_entry(project_id: &str) -> ProtoProjectEntry {
         accounts: Vec::new(),
         local_gh: false,
         home_session_id: String::new(),
+        orchestrator_defaults: None,
     }
 }
 

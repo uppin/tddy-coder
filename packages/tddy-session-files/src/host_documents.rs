@@ -617,6 +617,7 @@ mod tests {
                 accounts: Vec::new(),
                 local_gh: false,
                 home_session_id: None,
+                orchestrator_defaults: None,
             }],
         )
         .unwrap();

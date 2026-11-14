@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { Replace } from "lucide-react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { cn } from "tddy-ui-web";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
@@ -10,8 +9,8 @@ import type { ProjectHomeInfo } from "./utils/projectHomeGroups";
  * project's main branch ref, main's model, and main's status dot once it is listed. Clicking it
  * ensures the session the project records as its main; a refusal is shown on the entry. With no
  * main set up it starts nothing: a click opens the setup pane for that project
- * (`onSetUpProjectHome`), and without that handler the entry is disabled. A set-up main also offers
- * **Replace main** (`onReplaceProjectHome`), which opens the setup pane in replace mode.
+ * (`onSetUpProjectHome`), and without that handler the entry is disabled. **Replace main** lives
+ * in the project's settings pane (`#orchestrators` 11/11), not on this entry.
  *
  * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry.
  * PRD: docs/ft/web/session-drawer.md
@@ -23,10 +22,8 @@ export function ProjectHomeEntry(props: {
   onEnsure: (projectId: string) => Promise<void>;
   /** Called instead of `onEnsure` when the project has no main to reach. */
   onSetUpProjectHome?: (projectId: string) => void;
-  /** Set main up again for a project whose main is set up; absent: no Replace main action. */
-  onReplaceProjectHome?: (projectId: string) => void;
 }): React.ReactElement | null {
-  const { home, homeSession, selected, onEnsure, onSetUpProjectHome, onReplaceProjectHome } = props;
+  const { home, homeSession, selected, onEnsure, onSetUpProjectHome } = props;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const hasMain = home.homeSessionId !== null;
@@ -66,9 +63,6 @@ export function ProjectHomeEntry(props: {
             <span className="ml-auto truncate text-xs text-muted-foreground">{homeSession.model}</span>
           )}
         </button>
-        {hasMain && onReplaceProjectHome && (
-          <ReplaceMainButton projectId={home.projectId} onReplace={onReplaceProjectHome} />
-        )}
       </div>
       {error !== null && (
         <div
@@ -83,24 +77,3 @@ export function ProjectHomeEntry(props: {
   );
 }
 
-/** A set-up main's **Replace main** action: opens the setup pane in replace mode. */
-function ReplaceMainButton({
-  projectId,
-  onReplace,
-}: {
-  projectId: string;
-  onReplace: (projectId: string) => void;
-}): React.ReactElement {
-  return (
-    <button
-      type="button"
-      data-testid={`sessions-drawer-project-home-replace-${projectId}`}
-      aria-label="Replace main"
-      title="Replace main"
-      onClick={() => onReplace(projectId)}
-      className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-    >
-      <Replace className="h-3.5 w-3.5" />
-    </button>
-  );
-}

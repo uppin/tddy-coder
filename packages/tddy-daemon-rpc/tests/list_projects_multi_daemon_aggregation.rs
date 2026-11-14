@@ -106,6 +106,7 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
                 accounts: Vec::new(),
                 local_gh: false,
                 home_session_id: String::new(),
+                orchestrator_defaults: None,
             },
             ProtoProjectEntry {
                 project_id: marker.to_string(),
@@ -118,6 +119,7 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
                 accounts: Vec::new(),
                 local_gh: false,
                 home_session_id: String::new(),
+                orchestrator_defaults: None,
             },
         ]
     }

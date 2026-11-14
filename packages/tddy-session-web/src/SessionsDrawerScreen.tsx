@@ -17,13 +17,16 @@ import { useSessionAttachment } from "./useSessionAttachment";
 import { SessionShell } from "./sessionShell";
 import {
   parseSessionsProjectNew,
+  parseSessionsProjectSettings,
   parseSessionsProjectStack,
   sessionsDrawerPathForSession,
   sessionsProjectNewPath,
+  sessionsProjectSettingsPath,
   sessionsProjectStackPath,
   SESSIONS_DRAWER_ROUTE,
   SESSIONS_NEW_ROUTE,
 } from "tddy-client-web";
+import { useNavigationPort } from "tddy-client-web";
 import { ProjectStackView, type ProjectStackAddress } from "tddy-prstack-web";
 import type { ProjectStackSummary } from "tddy-client-web/gen/pr_stack_pb";
 import { resolveShortcutsForSession } from "tddy-terminal-web";
@@ -34,7 +37,7 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { useSessionsDrawerInspector } from "./useSessionsDrawerInspector";
 import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
 import { useProjectHomeSetup } from "./useProjectHomeSetup";
-import { OrchestratorComposer, ProjectHomeSetupPane } from "tddy-session-create-web";
+import { OrchestratorComposer, ProjectSettingsPane } from "tddy-session-create-web";
 import { useSessionsDrawerAttachClaims } from "./useSessionsDrawerAttachClaims";
 import { useSessionsDrawerProjects } from "./useSessionsDrawerProjects";
 import { useSessionsDrawerProjectHomes } from "./useSessionsDrawerProjectHomes";
@@ -100,7 +103,7 @@ export function SessionsDrawerScreen({
 
   const {
     location,
-    navigate,
+    navigate: navigateRaw,
     setParams,
     selectedSessionId,
     mode,
@@ -120,9 +123,35 @@ export function SessionsDrawerScreen({
   const { projects, error: projectsError, reload: reloadProjects } = useSessionsDrawerProjects(projectClient, sessionToken);
   // Main is per host: the pinned entries and the setup pane read the selected host's rows, the host
   // the ensure below targets.
-  const { homes: projectHomes, projectOnHost } = useSessionsDrawerProjectHomes(projects, selectedInstanceId);
+  const { homes: projectHomes } = useSessionsDrawerProjectHomes(projects, selectedInstanceId);
   const projectHomeSetup = useProjectHomeSetup();
   const setup = projectHomeSetup.setup;
+  const navigationPort = useNavigationPort();
+  // In-app navigation away from a settings route drops its `?host=`: that host was the pane's,
+  // and keeping it would make the next screen act on the pane's host (changeset hazard).
+  const navigate = useCallback(
+    (path: string) => {
+      const settings = parseSessionsProjectSettings(location);
+      if (settings?.host) {
+        const params: Record<string, string> = { ...location.params };
+        delete params.host;
+        navigationPort.navigate({ path, params });
+      } else {
+        navigateRaw(path);
+      }
+    },
+    [location, navigateRaw, navigationPort],
+  );
+  const settingsRoute = parseSessionsProjectSettings(location);
+  const settingsProjectId = settingsRoute?.projectId ?? setup?.projectId ?? null;
+  const settingsHost = settingsRoute?.host ?? selectedInstanceId ?? "";
+  const settingsReplacing = settingsRoute ? false : (setup?.replacing ?? false);
+  const settingsProject =
+    settingsProjectId !== null
+      ? (projects.find(
+          (p) => p.projectId === settingsProjectId && p.daemonInstanceId === settingsHost,
+        ) ?? null)
+      : null;
   const composerProjectId = parseSessionsProjectNew(location.path);
   const stackRoute = parseSessionsProjectStack(location.path);
   // The stack view's address: the route carries project and stack, the owning host comes from the
@@ -393,6 +422,13 @@ export function SessionsDrawerScreen({
     if (isMobile) setSessionListOpen(false);
     projectHomeSetup.open(projectId, { replacing });
   };
+  // The gear opens the settings pane on the drawer's selected host: no `?host=` of its own, and
+  // any stale one from a previous settings route is dropped.
+  const handleOpenProjectSettings = (projectId: string) => {
+    if (isMobile) setSessionListOpen(false);
+    navigationPort.navigate({ path: sessionsProjectSettingsPath(projectId), params: {} });
+  };
+  const closeSettings = () => navigationPort.navigate({ path: SESSIONS_DRAWER_ROUTE, params: {} });
   // The pinned main entry ensures main on the selected host and selects it, or sends a project with
   // no main to set one up; a main the setup pane starts is attached like a created session.
   const homeHandlers = {
@@ -460,7 +496,7 @@ export function SessionsDrawerScreen({
               ensureProjectHome(projectId, selectedInstanceId ?? "")
             }
             onSetUpProjectHome={openProjectHomeSetup}
-            onReplaceProjectHome={(projectId) => openProjectHomeSetup(projectId, true)}
+            onOpenProjectSettings={handleOpenProjectSettings}
             onNewOrchestrator={handleNewOrchestrator}
             prStackClient={drawerClients.prStackClient}
             sessionToken={sessionToken}
@@ -500,14 +536,22 @@ export function SessionsDrawerScreen({
               sessionToken={sessionToken}
               onStarted={handleSessionCreated}
             />
-          ) : setup !== null ? (
-            <ProjectHomeSetupPane
-              {...setup}
-              project={projectOnHost(setup.projectId)}
-              daemonInstanceId={selectedInstanceId ?? ""}
+          ) : settingsProjectId !== null ? (
+            <ProjectSettingsPane
+              projectId={settingsProjectId}
+              project={settingsProject}
+              mainSession={
+                settingsProject?.homeSessionId
+                  ? (sortedSessions.find((s) => s.sessionId === settingsProject.homeSessionId) ?? null)
+                  : null
+              }
+              replacing={settingsReplacing}
+              setupForm={settingsRoute === null && setup !== null}
+              daemonInstanceId={settingsHost}
               sessionToken={sessionToken}
-              onStart={(spec) => startProjectHome(setup.projectId, selectedInstanceId ?? "", spec)}
-              onClose={projectHomeSetup.close}
+              onStartMain={(spec) => startProjectHome(settingsProjectId, settingsHost, spec)}
+              onDefaultsSaved={() => reloadProjects()}
+              onClose={closeSettings}
             />
           ) : unknownSession ? (
             <SessionsDrawerUnknownSession onHome={handleUnknownHome} />

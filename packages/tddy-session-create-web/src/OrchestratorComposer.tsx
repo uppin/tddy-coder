@@ -16,6 +16,7 @@ import { CreateSessionModelField } from "./CreateSessionModelField";
 import { BUILT_IN_PROVIDER, CreateSessionProviderField } from "./CreateSessionProviderField";
 import { useSessionAttachments } from "./hooks/useSessionAttachments";
 import { buildOrchestratorComposerRequest, orchestratorSessionTypeFor } from "./orchestratorStartRequest";
+import { orchestratorDefaultsFor } from "./orchestratorDefaults";
 import { useCreateSessionEffort } from "./useCreateSessionEffort";
 import { useCreateSessionModel } from "./useCreateSessionModel";
 import { useOrchestratorComposerStart } from "./useOrchestratorComposerStart";
@@ -127,6 +128,7 @@ function OrchestratorComposerBody({
   }, [projectClient, sessionToken]);
 
   const { agents } = useSelectableAgents(catalogClient, connectedInstanceId);
+  const savedDefaults = orchestratorDefaultsFor(projects, projectId, hostId);
   const sessionType = orchestratorSessionTypeFor(agents, hostId);
   const selectedAgent = agents.find(
     (a) => a.daemonInstanceId === hostId && a.capabilities.includes("project_home_main"),
@@ -151,10 +153,16 @@ function OrchestratorComposerBody({
     daemonInstanceId: hostId,
     selectedAgentRouteProviders: undefined,
     cliRouteProviders: selectedAgent?.routeProviders,
-    initialModel: undefined,
+    initialModel: savedDefaults.model || undefined,
   });
 
-  const { effort, effortField } = useCreateSessionEffort(selectedAgent);
+  // The saved provider account pre-fills the provider field, as the model and effort do; a
+  // change here is for this start only and saves nothing.
+  useEffect(() => {
+    if (savedDefaults.providerAccountId) setProviderChoice(savedDefaults.providerAccountId);
+  }, [savedDefaults.providerAccountId, setProviderChoice]);
+
+  const { effort, effortField } = useCreateSessionEffort(selectedAgent, savedDefaults.effort);
 
   const sessionAttachments = useSessionAttachments({
     client,

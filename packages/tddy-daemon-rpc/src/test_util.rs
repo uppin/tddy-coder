@@ -36,6 +36,7 @@ use tddy_service::proto::project::{
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
     ListProjectsResponse, ProjectService, SetProjectAccountsRequest, SetProjectAccountsResponse,
     SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
+    SetProjectOrchestratorDefaultsRequest, SetProjectOrchestratorDefaultsResponse,
 };
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_worktree_service::stream::MpscResultStream;
@@ -208,6 +209,16 @@ impl ProjectService for TestDaemon {
         self.handlers
             .project_service()
             .set_project_accounts(request)
+            .await
+    }
+
+    async fn set_project_orchestrator_defaults(
+        &self,
+        request: Request<SetProjectOrchestratorDefaultsRequest>,
+    ) -> Result<Response<SetProjectOrchestratorDefaultsResponse>, Status> {
+        self.handlers
+            .project_service()
+            .set_project_orchestrator_defaults(request)
             .await
     }
 }

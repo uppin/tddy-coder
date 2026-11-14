@@ -8,6 +8,7 @@
  */
 
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 import { TEST_IDS, byTestId, sessionsProjectComposer } from "../testIds";
 
@@ -41,6 +42,26 @@ export const orchestratorComposerPage = {
 
   send() {
     orchestratorComposerPage.sendButton().should("not.be.disabled").click();
+  },
+
+  modelSelect: () => byTestId(TEST_IDS.createSessionModelSelect, RENDER_WAIT),
+
+  effortSelect: () => byTestId(TEST_IDS.createSessionEffortSelect, RENDER_WAIT),
+
+  providerSelect: () => byTestId(TEST_IDS.createSessionProviderSelect, RENDER_WAIT),
+
+  chooseEffort(level: string) {
+    orchestratorComposerPage.effortSelect().select(level);
+  },
+
+  /** Asserts the composer never saved defaults: a change in it is for one start only. */
+  assertNoDefaultsSaved(backend: RecordingBackend) {
+    cy.wrap(backend).should((b) => {
+      expect(
+        b.callsTo(ProjectService.method.setProjectOrchestratorDefaults),
+        "SetProjectOrchestratorDefaults requests",
+      ).to.have.length(0);
+    });
   },
 
   chooseHost(instanceId: string) {
