@@ -230,7 +230,7 @@ async fn refuses_a_node_id_the_plan_does_not_hold() {
 }
 
 #[tokio::test]
-async fn refuses_a_session_that_is_not_a_pr_stack_orchestrator() {
+async fn refuses_a_session_that_names_no_stack() {
     // Given — an ordinary session, which holds no stack to write into
     let temp = tempfile::tempdir().unwrap();
     let sessions_base = temp.path().to_path_buf();
@@ -250,13 +250,18 @@ async fn refuses_a_session_that_is_not_a_pr_stack_orchestrator() {
         .await
         .expect_err("LinkStackNode must refuse a session that carries no stack");
 
-    // Then — `require_pr_stack_orchestrator` has one answer for a session whose recipe is not
-    // `pr-stack`, and accepting a second code would let a refusal for an unrelated reason pass here
+    // Then — `require_a_stack` has one answer for a session that names no stack (whatever its
+    // recipe), and accepting a second code would let a refusal for an unrelated reason pass here
     assert_eq!(
         err.code,
         Code::FailedPrecondition,
         "got {:?}: {}",
         err.code,
+        err.message
+    );
+    assert!(
+        err.message.contains("pr_stack_create"),
+        "the refusal must name pr_stack_create, got: {}",
         err.message
     );
 }

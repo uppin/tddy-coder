@@ -24,8 +24,9 @@ use tddy_service::proto::exec_tools::{
     ListSessionToolCallsResponse,
 };
 use tddy_service::proto::pr_stack::{
-    AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
-    GetProjectStackRequest, GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse,
+    AddPlannedPrRequest, AddPlannedPrResponse, CreateProjectStackRequest,
+    CreateProjectStackResponse, GetPrStatusRequest, GetPrStatusResponse, GetProjectStackRequest,
+    GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse,
     ListProjectStacksRequest, ListProjectStacksResponse, PrStackService, PullBaseIntoBranchRequest,
     PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
@@ -421,6 +422,16 @@ impl PrStackService for TestDaemon {
         self.handlers
             .pr_stack_service()
             .get_project_stack(request)
+            .await
+    }
+
+    async fn create_project_stack(
+        &self,
+        request: Request<CreateProjectStackRequest>,
+    ) -> Result<Response<CreateProjectStackResponse>, Status> {
+        self.handlers
+            .pr_stack_service()
+            .create_project_stack(request)
             .await
     }
 }

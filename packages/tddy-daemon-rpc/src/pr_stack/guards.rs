@@ -2,25 +2,9 @@
 
 use tddy_rpc::Status;
 
-/// Guard for any RPC that mutates a `"pr-stack"` orchestrator's stack: rejects a
-/// session whose recipe (or legacy alias) doesn't resolve to `"pr-stack"`, before the caller
-/// touches that session's changeset. Shared by `add_planned_pr` today; future planned-PR
-/// mutation RPCs (edit/delete) should call this too rather than re-checking inline.
-pub(crate) fn require_pr_stack_orchestrator(session_dir: &std::path::Path) -> Result<(), Status> {
-    let changeset = tddy_core::read_changeset(session_dir)
-        .map_err(|e| Status::invalid_argument(e.to_string()))?;
-    let recipe_name = changeset.recipe.as_deref().unwrap_or("");
-    let is_pr_stack =
-        tddy_workflow_recipes::recipe_resolve::resolve_workflow_recipe_from_cli_name(recipe_name)
-            .map(|r| r.name() == "pr-stack")
-            .unwrap_or(false);
-    if !is_pr_stack {
-        return Err(Status::failed_precondition(
-            "session is not a pr-stack orchestrator",
-        ));
-    }
-    Ok(())
-}
+/// (The recipe guard that stood here was deleted in `#orchestrators` 12/12, B9: a
+/// `session_id`-addressed mutation now requires the session to name a stack — see
+/// `project_stacks::require_a_stack` — whatever its recipe.)
 
 /// The GitHub token a repoint runs with: `Ok(None)` when the repoint touches no GitHub state,
 /// `Ok(Some(token))` when it does and `resolve` yields one, and a precondition failure carrying

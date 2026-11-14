@@ -109,16 +109,20 @@ pub(crate) fn store_status(error: StackStoreError) -> Status {
     }
 }
 
-/// The recipe guard, relaxed for a session that already names a stack: such a session resolves
-/// through its `stack_id` whatever its recipe, and only a session naming no stack still needs the
-/// `pr-stack` recipe, because its first write creates the stack.
-pub(crate) fn require_orchestrator_unless_stacked(session_dir: &Path) -> Result<(), Status> {
+/// The guard on a `session_id`-addressed mutation (`#orchestrators` 12/12, B9): the session's
+/// changeset must name a stack. There is no first-write create on this path any more — a session
+/// naming no stack is refused whatever its recipe, and a stack is made with `pr_stack_create`
+/// (a session) or `CreateProjectStack` (the web's "New stack"), then addressed by its
+/// `StackAddress` or through a session that names it.
+pub(crate) fn require_a_stack(session_dir: &Path) -> Result<(), Status> {
     let changeset = tddy_core::read_changeset(session_dir)
         .map_err(|e| Status::invalid_argument(e.to_string()))?;
     if changeset.stack_id.is_some() {
         return Ok(());
     }
-    super::guards::require_pr_stack_orchestrator(session_dir)
+    Err(Status::failed_precondition(
+        "this session names no stack — create one with pr_stack_create or New stack",
+    ))
 }
 
 /// Sessions on this host whose changeset names each stack, by stack id.
@@ -210,7 +214,7 @@ impl PrStackRpcHandler {
 
     /// The session directory a target is served through on this host: an address resolves to a
     /// session naming its stack, a session to its own directory (guarded as
-    /// [`require_orchestrator_unless_stacked`] guards it).
+    /// [`require_a_stack`] guards it).
     pub(crate) fn session_dir_for_target(
         &self,
         sessions_base: &Path,
@@ -229,7 +233,7 @@ impl PrStackRpcHandler {
                 validate_session_id_segment(session_id)
                     .map_err(|e| Status::invalid_argument(e.message()))?;
                 let dir = unified_session_dir_path(sessions_base, session_id);
-                require_orchestrator_unless_stacked(&dir)?;
+                require_a_stack(&dir)?;
                 Ok(dir)
             }
         }

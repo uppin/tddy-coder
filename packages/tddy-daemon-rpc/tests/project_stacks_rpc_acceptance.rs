@@ -406,3 +406,83 @@ async fn a_session_id_address_still_resolves_through_its_stack_id() {
         vec!["Add token store", "Add auth middleware"]
     );
 }
+
+#[tokio::test]
+async fn create_project_stack_answers_an_address_that_then_takes_planned_prs() {
+    // Given — two hosts in one room
+    let world = two_hosts_in_one_common_room();
+
+    // When — a stack is created by address (the web's "New stack"), with a title
+    let created = world
+        .a
+        .daemon
+        .create_project_stack(Request::direct(
+            tddy_service::proto::pr_stack::CreateProjectStackRequest {
+                session_token: TEST_TOKEN.to_string(),
+                project_id: THIS_PROJECT.to_string(),
+                title: "Auth stack".to_string(),
+                daemon_instance_id: String::new(),
+            },
+        ))
+        .await
+        .expect("CreateProjectStack on the owning host")
+        .into_inner();
+    let address = created.stack.expect("the answer names the new stack");
+
+    // Then — the record is in A's store, titled, empty, and addressable
+    let record = world
+        .a
+        .stack_store()
+        .read(THIS_PROJECT, &address.stack_id)
+        .expect("the created stack is in the creating host's store");
+    assert_eq!(record.title.as_deref(), Some("Auth stack"));
+    assert!(record.stack.nodes.is_empty());
+    add_planned_pr_by_address(&world.a, address, "Add token store")
+        .await
+        .expect("a planned PR can be added to the created stack by address");
+    assert_eq!(
+        world.a.titles_of(THIS_PROJECT, &record.stack_id),
+        vec!["Add token store"]
+    );
+}
+
+#[tokio::test]
+async fn create_project_stack_naming_another_host_is_created_there() {
+    // Given — two hosts in one room
+    let world = two_hosts_in_one_common_room();
+
+    // When — A is asked to create a stack owned by B
+    let created = world
+        .a
+        .daemon
+        .create_project_stack(Request::direct(
+            tddy_service::proto::pr_stack::CreateProjectStackRequest {
+                session_token: TEST_TOKEN.to_string(),
+                project_id: THIS_PROJECT.to_string(),
+                title: String::new(),
+                daemon_instance_id: HOST_B.to_string(),
+            },
+        ))
+        .await
+        .expect("CreateProjectStack forwarded to the owning host")
+        .into_inner();
+    let address = created.stack.expect("the answer names the new stack");
+
+    // Then — the record is in B's store, not A's
+    assert!(
+        world
+            .b
+            .stack_store()
+            .read(THIS_PROJECT, &address.stack_id)
+            .is_ok(),
+        "the created stack lives on the host the request named"
+    );
+    assert!(
+        world
+            .a
+            .stack_store()
+            .read(THIS_PROJECT, &address.stack_id)
+            .is_err(),
+        "the created stack does not also live on the asking host"
+    );
+}

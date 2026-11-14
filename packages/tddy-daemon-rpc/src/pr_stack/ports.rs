@@ -1,9 +1,9 @@
 //! Family P — [`tddy_session_lifecycle::PrStackHandler`], answered by [`PrStackRpcHandler`].
 
 use super::branch_legs::{base_sync_unavailable, base_sync_view, worktree_leg};
-use super::guards::{require_pr_stack_orchestrator, token_for_repoint, validate_repoint_target};
+use super::guards::{token_for_repoint, validate_repoint_target};
 use super::pr_status::owner_repo_from_repo_root;
-use super::project_stacks::{require_orchestrator_unless_stacked, stack_target, StackTarget};
+use super::project_stacks::{require_a_stack, stack_target, StackTarget};
 use super::{wire_same_anyhow, PrStackRpcHandler};
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -12,8 +12,9 @@ use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id
 use tddy_projects::project_storage;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::pr_stack::{
-    AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
-    GetProjectStackRequest, GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse,
+    AddPlannedPrRequest, AddPlannedPrResponse, CreateProjectStackRequest,
+    CreateProjectStackResponse, GetPrStatusRequest, GetPrStatusResponse, GetProjectStackRequest,
+    GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse,
     ListProjectStacksRequest, ListProjectStacksResponse, PullBaseIntoBranchRequest,
     PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
@@ -73,7 +74,7 @@ impl PrStackHandler for PrStackRpcHandler {
         validate_session_id_segment(session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, session_id);
-        require_orchestrator_unless_stacked(&session_dir)?;
+        require_a_stack(&session_dir)?;
 
         let branch_suggestion =
             (!req.branch_suggestion.trim().is_empty()).then(|| req.branch_suggestion.clone());
@@ -428,7 +429,7 @@ impl PrStackHandler for PrStackRpcHandler {
         validate_session_id_segment(&req.orchestrator_session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.orchestrator_session_id);
-        require_pr_stack_orchestrator(&session_dir)?;
+        require_a_stack(&session_dir)?;
 
         // Checked before the write, because `link_stack_node_to_child_session` leaves an unknown
         // node alone and reports success — which reads to the caller exactly like a link that
@@ -652,7 +653,7 @@ impl PrStackHandler for PrStackRpcHandler {
         validate_session_id_segment(session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, session_id);
-        require_orchestrator_unless_stacked(&session_dir)?;
+        require_a_stack(&session_dir)?;
 
         tddy_workflow_recipes::pr_stack::move_planned_pr_node(
             &session_dir,
@@ -856,6 +857,13 @@ impl PrStackHandler for PrStackRpcHandler {
         request: Request<GetProjectStackRequest>,
     ) -> Result<Response<GetProjectStackResponse>, Status> {
         self.get_project_stack_rpc(request).await
+    }
+
+    async fn create_project_stack(
+        &self,
+        request: Request<CreateProjectStackRequest>,
+    ) -> Result<Response<CreateProjectStackResponse>, Status> {
+        self.create_project_stack_rpc(request).await
     }
 }
 

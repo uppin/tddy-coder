@@ -1,5 +1,4 @@
 use crate::contained_shell;
-use crate::shell::Shell;
 use crate::ToolOutcome;
 use async_trait::async_trait;
 use std::path::Path;

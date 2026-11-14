@@ -9,7 +9,8 @@ use std::path::Path;
 use tddy_core::changeset::StackNode;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::pr_stack::{
-    AddPlannedPrRequest, AddPlannedPrResponse, GetProjectStackRequest, GetProjectStackResponse,
+    AddPlannedPrRequest, AddPlannedPrResponse, CreateProjectStackRequest,
+    CreateProjectStackResponse, GetProjectStackRequest, GetProjectStackResponse,
     ListProjectStacksRequest, ListProjectStacksResponse, ProjectStackSummary, StackAddress,
     UnreachableStackHost,
 };
@@ -241,6 +242,49 @@ impl PrStackRpcHandler {
         Ok(Response::new(GetProjectStackResponse {
             summary: Some(summary),
             stack_plan_json,
+        }))
+    }
+
+    /// `CreateProjectStack`: a new, empty stack in this host's store for the project, forwarded
+    /// to the daemon `daemon_instance_id` names when that is a peer (`#orchestrators` 12/12, B9).
+    /// The same `ProjectStackStore::create_titled` path `pr_stack_create` uses; created by no
+    /// session, so the record names none.
+    pub(super) async fn create_project_stack_rpc(
+        &self,
+        request: Request<CreateProjectStackRequest>,
+    ) -> Result<Response<CreateProjectStackResponse>, Status> {
+        let req = request.into_inner();
+        let os_user = self.authenticated_os_user(&req.session_token)?;
+        if req.project_id.trim().is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+        if let Some(answered) = self
+            .forward_addressed::<_, CreateProjectStackResponse>(
+                "CreateProjectStack",
+                &req.daemon_instance_id,
+                &req,
+            )
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+        let sessions_base = self.sessions_base(&os_user)?;
+        let store = self.stack_store(&sessions_base);
+        let title = (!req.title.trim().is_empty()).then(|| req.title.clone());
+        let record = store
+            .create_titled(
+                req.project_id.trim(),
+                "",
+                title,
+                tddy_core::changeset::Stack::default(),
+            )
+            .map_err(store_status)?;
+        Ok(Response::new(CreateProjectStackResponse {
+            stack: Some(StackAddress {
+                project_id: record.project_id.clone(),
+                stack_id: record.stack_id.clone(),
+                daemon_instance_id: self.local_instance_id(),
+            }),
         }))
     }
 }

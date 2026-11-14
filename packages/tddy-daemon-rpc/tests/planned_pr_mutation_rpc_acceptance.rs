@@ -4,9 +4,10 @@
 //! Both rewrite something on the operator's behalf — a plan on disk, or a child session's branch and
 //! the remote — so what they **refuse** is as much of the contract as what they do:
 //!
-//! - Neither touches a session that is not a pr-stack orchestrator. Without that guard any
-//!   `session_id` belonging to the same user would have its `changeset.yaml` rewritten with a stack
-//!   it never had, which is why the refusal is pinned for both legs rather than once.
+//! - Neither touches a session that names no stack (`require_a_stack`, `#orchestrators` 12/12
+//!   B9). Without that guard any `session_id` belonging to the same user would have its
+//!   `changeset.yaml` rewritten with a stack it never had, which is why the refusal — naming
+//!   `pr_stack_create` — is pinned for both legs rather than once.
 //! - A missing `node_id`, a missing `base_branch` and a `direction` that is neither `up` nor `down`
 //!   are `invalid_argument`: the caller sent something unusable, and guessing a node or a direction
 //!   would move a row the operator never pointed at.
@@ -406,7 +407,7 @@ impl Refusal {
 // --- ReorderPlannedPr -------------------------------------------------------
 
 #[tokio::test]
-async fn reordering_a_session_that_is_not_a_pr_stack_orchestrator_is_refused() {
+async fn reordering_a_session_that_names_no_stack_is_refused() {
     // Given — a child PR session addressed as though it held the plan
     let repo = a_pr_stack_orchestrator();
     repo.with_a_child_session_that_is_not_an_orchestrator();
@@ -414,10 +415,10 @@ async fn reordering_a_session_that_is_not_a_pr_stack_orchestrator_is_refused() {
     // When
     let result = reorder(&repo.service(), CHILD, FIRST_NODE, UP).await;
 
-    // Then — a session that owns no stack must not be given one by a reorder
+    // Then — a session that names no stack must not be given one by a reorder
     assert_refused(result)
         .with_code(Code::FailedPrecondition)
-        .naming("pr-stack orchestrator");
+        .naming("pr_stack_create");
 }
 
 #[tokio::test]
@@ -470,7 +471,7 @@ async fn a_successful_reorder_answers_with_the_reordered_plan() {
 // --- PullBaseIntoBranch -----------------------------------------------------
 
 #[tokio::test]
-async fn pulling_into_a_session_that_is_not_a_pr_stack_orchestrator_is_refused() {
+async fn pulling_into_a_session_that_names_no_stack_is_refused() {
     // Given — a child PR session addressed as though it held the plan
     let repo = a_pr_stack_orchestrator();
     repo.with_a_child_session_that_is_not_an_orchestrator();
@@ -478,10 +479,10 @@ async fn pulling_into_a_session_that_is_not_a_pr_stack_orchestrator_is_refused()
     // When
     let result = pull(&repo.service(), CHILD, FIRST_NODE, BASE_BRANCH).await;
 
-    // Then — the pull reads a node out of a stack, and a session that has none has no branch to move
+    // Then — the pull reads a node out of a stack, and a session that names none has no branch to move
     assert_refused(result)
         .with_code(Code::FailedPrecondition)
-        .naming("pr-stack orchestrator");
+        .naming("pr_stack_create");
 }
 
 #[tokio::test]

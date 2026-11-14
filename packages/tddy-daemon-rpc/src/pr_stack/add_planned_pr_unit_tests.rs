@@ -1,5 +1,6 @@
-//! Unit tests: `PrStackRpcHandler::add_planned_pr` — the recipe guard rejecting a
-//! non-"pr-stack" session before its stack is touched.
+//! Unit tests: `PrStackRpcHandler::add_planned_pr` — the stack guard (`require_a_stack`,
+//! `#orchestrators` 12/12 B9) refusing a session that names no stack, whatever its recipe,
+//! before its stack is touched. There is no first-write create on the session-addressed path.
 //!
 //! PRD: docs/ft/coder/pr-stacking.md § Manually adding a planned PR.
 //! Changeset: docs/dev/1-WIP/pr-stack-manual-add-planned-pr.md.
@@ -66,11 +67,42 @@ fn make_unit_connection(sessions_base: std::path::PathBuf) -> DaemonSessionHost 
 }
 
 fn write_unit_changeset(session_dir: &std::path::Path, recipe: Option<&str>) {
+    write_unit_changeset_named(session_dir, recipe, None);
+}
+
+fn write_unit_changeset_named(
+    session_dir: &std::path::Path,
+    recipe: Option<&str>,
+    stack_id: Option<&str>,
+) {
     let changeset = Changeset {
         recipe: recipe.map(str::to_string),
+        stack_id: stack_id.map(str::to_string),
         ..Changeset::default()
     };
     tddy_changeset::stack_fixtures::write_changeset_with_stack(session_dir, changeset);
+}
+
+
+/// Seed a stack record in the host's store for `session_id`'s project and name it in the
+/// session's changeset (the shape `require_a_stack` admits).
+fn write_unit_changeset_naming_a_store_stack(
+    sessions_base: &std::path::Path,
+    session_dir: &std::path::Path,
+    session_id: &str,
+    recipe: Option<&str>,
+) {
+    let store = tddy_core::project_stack_store::ProjectStackStore::new(
+        sessions_base.join("projects"),
+    );
+    let record = store
+        .create(
+            "proj-test",
+            session_id,
+            tddy_core::changeset::Stack::default(),
+        )
+        .expect("seed a stack record");
+    write_unit_changeset_named(session_dir, recipe, Some(&record.stack_id));
 }
 
 fn a_request(session_id: &str, title: &str) -> Request<AddPlannedPrRequest> {
@@ -86,8 +118,8 @@ fn a_request(session_id: &str, title: &str) -> Request<AddPlannedPrRequest> {
     })
 }
 
-/// A session whose changeset `recipe` is `"tdd"` (not a pr-stack orchestrator) must be
-/// rejected before its stack is ever touched.
+/// A session whose changeset `recipe` is `"tdd"` and which names no stack must be refused
+/// before its stack is ever touched, naming `pr_stack_create`.
 #[tokio::test]
 async fn add_planned_pr_rejects_a_session_whose_recipe_is_not_pr_stack() {
     // Given — a plain "tdd" session, not a pr-stack orchestrator
@@ -102,8 +134,13 @@ async fn add_planned_pr_rejects_a_session_whose_recipe_is_not_pr_stack() {
         .await;
 
     // Then
-    let err = result.expect_err("a non-pr-stack session must be rejected");
+    let err = result.expect_err("a session naming no stack must be refused");
     assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
+    assert!(
+        err.message().contains("pr_stack_create"),
+        "the refusal must name pr_stack_create, got: {}",
+        err.message()
+    );
     let loaded = read_changeset(&session_dir).unwrap();
     assert!(
         loaded.stack_id.is_none(),
@@ -111,8 +148,8 @@ async fn add_planned_pr_rejects_a_session_whose_recipe_is_not_pr_stack() {
     );
 }
 
-/// A session with no `recipe` set at all (legacy/never-tagged changeset) is not a pr-stack
-/// orchestrator either, and must be rejected the same way.
+/// A session with no `recipe` set at all (legacy/never-tagged changeset) names no stack
+/// either, and must be refused the same way.
 #[tokio::test]
 async fn add_planned_pr_rejects_a_session_with_no_recipe_set() {
     // Given
@@ -127,18 +164,53 @@ async fn add_planned_pr_rejects_a_session_with_no_recipe_set() {
         .await;
 
     // Then
-    let err = result.expect_err("a session with no recipe must be rejected");
+    let err = result.expect_err("a session naming no stack must be refused");
     assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
+    assert!(
+        err.message().contains("pr_stack_create"),
+        "the refusal must name pr_stack_create, got: {}",
+        err.message()
+    );
 }
 
-/// A genuine "pr-stack" orchestrator session is accepted and gains the new planned PR.
+/// A `pr-stack`-recipe session that names no stack is refused too: the recipe no longer
+/// creates a stack on first write (the removed path, `#orchestrators` 12/12 B9).
+#[tokio::test]
+async fn add_planned_pr_rejects_a_pr_stack_recipe_session_that_names_no_stack() {
+    // Given — a "pr-stack" recipe session whose changeset names no stack
+    let temp = tempfile::tempdir().unwrap();
+    let service = make_unit_stack_service(temp.path().to_path_buf());
+    let session_dir = unified_session_dir_path(temp.path(), "pr-stack-no-stack-1");
+    write_unit_changeset(&session_dir, Some("pr-stack"));
+
+    // When
+    let result = service
+        .add_planned_pr(a_request("pr-stack-no-stack-1", "Add auth middleware"))
+        .await;
+
+    // Then
+    let err = result.expect_err("a session naming no stack must be refused, whatever its recipe");
+    assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
+    assert!(
+        err.message().contains("pr_stack_create"),
+        "the refusal must name pr_stack_create, got: {}",
+        err.message()
+    );
+}
+
+/// A session that names a stack is accepted (whatever its recipe) and gains the new planned PR.
 #[tokio::test]
 async fn add_planned_pr_succeeds_for_a_pr_stack_orchestrator_session() {
     // Given
     let temp = tempfile::tempdir().unwrap();
     let service = make_unit_stack_service(temp.path().to_path_buf());
     let session_dir = unified_session_dir_path(temp.path(), "pr-stack-session-1");
-    write_unit_changeset(&session_dir, Some("pr-stack"));
+    write_unit_changeset_naming_a_store_stack(
+        temp.path(),
+        &session_dir,
+        "pr-stack-session-1",
+        Some("pr-stack"),
+    );
 
     // When
     let result = service
@@ -162,15 +234,20 @@ async fn add_planned_pr_succeeds_for_a_pr_stack_orchestrator_session() {
     );
 }
 
-/// A legacy alias recipe name ("orchestrate-pr-stack") resolves to the same canonical
-/// "pr-stack" recipe and must also be accepted — this guard must not regress old sessions.
+/// A session that names a stack is accepted whatever its recipe — including a legacy alias
+/// ("orchestrate-pr-stack") and including no pr-stack recipe at all.
 #[tokio::test]
 async fn add_planned_pr_succeeds_for_a_legacy_orchestrate_pr_stack_alias_session() {
     // Given
     let temp = tempfile::tempdir().unwrap();
     let service = make_unit_stack_service(temp.path().to_path_buf());
     let session_dir = unified_session_dir_path(temp.path(), "legacy-orchestrator-session");
-    write_unit_changeset(&session_dir, Some("orchestrate-pr-stack"));
+    write_unit_changeset_naming_a_store_stack(
+        temp.path(),
+        &session_dir,
+        "legacy-orchestrator-session",
+        Some("orchestrate-pr-stack"),
+    );
 
     // When
     let result = service
