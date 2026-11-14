@@ -12,6 +12,7 @@
 use std::path::Path;
 
 use tddy_core::toolcall::{request_github_token_from, SessionTokenSource};
+#[cfg(test)]
 use tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi;
 
 /// The token of the account the session's project acts as, from the host listening on `socket`.
@@ -49,15 +50,7 @@ fn github_token_of(source: &SessionTokenSource) -> Result<String, String> {
     })
 }
 
-/// A GitHub client for `repo` that authenticates as the session's project account.
-pub(crate) fn github_api_for_session(repo: String) -> Result<RealGithubPrApi, String> {
-    Ok(RealGithubPrApi::with_token(
-        repo,
-        github_token_for_session()?,
-    ))
-}
-
-/// [`github_api_for_session`] against the host listening on `socket`.
+/// A GitHub client for `repo` against the host listening on `socket`.
 #[cfg(test)]
 pub(crate) fn github_api_for(
     repo: String,

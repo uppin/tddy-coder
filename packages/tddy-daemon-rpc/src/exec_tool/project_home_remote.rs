@@ -33,6 +33,7 @@ use tddy_tool_engine::project_home_tools::{
     is_project_home_target_tool, is_project_home_tool, target_daemon_instance_id,
     ListProjectSessionsResult, UnreachableHost,
 };
+use tddy_tool_engine::stack_git_tools::is_stack_git_tool;
 use tddy_tool_engine::stack_tools::{is_stack_tool, StackCaller, StackCallerRole};
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
 use tddy_worktree_service::session_target::HomeCaller;
@@ -58,6 +59,7 @@ impl ExecToolRpcHandler {
         if !is_project_home_tool(&req.tool_name)
             && !is_project_home_git_tool(&req.tool_name)
             && !is_stack_tool(&req.tool_name)
+            && !is_stack_git_tool(&req.tool_name)
         {
             return Ok(None);
         }
@@ -89,6 +91,22 @@ impl ExecToolRpcHandler {
             };
             return Ok(Some(
                 self.serve_stack_tool_for_caller_held_elsewhere(
+                    req,
+                    caller,
+                    os_user,
+                    &sessions_base,
+                )
+                .await,
+            ));
+        }
+        if is_stack_git_tool(&req.tool_name) {
+            let caller = StackCaller {
+                session_id: home.session_id,
+                project_id: home.project_id,
+                role: StackCallerRole::Orchestrator { own_stack_id: None },
+            };
+            return Ok(Some(
+                self.serve_stack_git_tool_for_caller_held_elsewhere(
                     req,
                     caller,
                     os_user,
@@ -190,7 +208,10 @@ impl ExecToolRpcHandler {
         &self,
         req: &ExecuteToolRequest,
     ) -> Result<Option<ExecuteToolResponse>, Status> {
-        if !is_project_home_target_tool(&req.tool_name) && !is_stack_tool(&req.tool_name) {
+        if !is_project_home_target_tool(&req.tool_name)
+            && !is_stack_tool(&req.tool_name)
+            && !is_stack_git_tool(&req.tool_name)
+        {
             return Ok(None);
         }
         let Some(host) = target_daemon_instance_id(&req.args_json) else {

@@ -45,22 +45,34 @@ pub fn rebase_onto(
     old_base: &str,
     branch: &str,
 ) -> Result<(), tddy_core::WorkflowError> {
-    // TODO(stack-git-tools): implement — find the worktree holding `branch`
-    // (`tddy_git::worktree_path_for_branch`, as `pull_base_into_node_branch` does), refuse it when
-    // `worktree_is_clean` names paths, and rebase there without `git checkout`.
-    // Checkout the branch first
-    let checkout = run_git(repo_root, &["checkout", branch])?;
-    if !checkout.status.success() {
+    let worktree = tddy_git::worktree_path_for_branch(repo_root, branch).ok_or_else(|| {
+        tddy_core::WorkflowError::WriteFailed(format!(
+            "branch '{branch}' has no worktree checked out in {}, so there is nowhere to rebase it",
+            repo_root.display()
+        ))
+    })?;
+    let checked_out = tddy_git::checked_out_branch_name(&worktree)
+        .map_err(tddy_core::WorkflowError::WriteFailed)?;
+    if checked_out.as_deref() != Some(branch) {
         return Err(tddy_core::WorkflowError::WriteFailed(format!(
-            "git checkout {branch}: {}",
-            String::from_utf8_lossy(&checkout.stderr)
+            "the worktree found for '{branch}' ({}) has '{}' checked out, not '{branch}'",
+            worktree.display(),
+            checked_out.as_deref().unwrap_or("a detached HEAD")
+        )));
+    }
+    let dirty = worktree_is_clean(&worktree)?;
+    if !dirty.is_empty() {
+        return Err(tddy_core::WorkflowError::WriteFailed(format!(
+            "the worktree for '{branch}' ({}) has uncommitted changes to {} — commit or stash them before rebasing",
+            worktree.display(),
+            dirty.join(", ")
         )));
     }
 
-    let rebase = run_git(repo_root, &["rebase", "--onto", new_base, old_base, branch])?;
+    let rebase = run_git(&worktree, &["rebase", "--onto", new_base, old_base, branch])?;
     if !rebase.status.success() {
-        // Abort so the repo is left clean
-        let _ = run_git(repo_root, &["rebase", "--abort"]);
+        // Abort so the worktree is left clean
+        let _ = run_git(&worktree, &["rebase", "--abort"]);
         return Err(tddy_core::WorkflowError::WriteFailed(format!(
             "git rebase --onto {new_base} {old_base} {branch} failed: {}",
             String::from_utf8_lossy(&rebase.stderr)

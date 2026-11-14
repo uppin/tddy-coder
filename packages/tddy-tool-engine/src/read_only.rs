@@ -26,6 +26,7 @@ pub fn is_project_home_allowed_tool(name: &str) -> bool {
         || crate::project_home_tools::is_project_home_tool(name)
         || crate::project_home_git_tools::is_project_home_git_tool(name)
         || crate::stack_tools::is_stack_tool(name)
+        || crate::stack_git_tools::is_stack_git_tool(name)
 }
 
 /// The prefix `claude` gives a tool served by the `tddy-tools` MCP server.
@@ -146,6 +147,12 @@ mod tests {
                 "mcp__tddy-tools__pr_delete_planned",
                 "mcp__tddy-tools__pr_set_status",
                 "mcp__tddy-tools__pr_adopt",
+                "mcp__tddy-tools__pr_merge",
+                "mcp__tddy-tools__pr_close",
+                "mcp__tddy-tools__pr_repoint",
+                "mcp__tddy-tools__pr_set_parents",
+                "mcp__tddy-tools__pr_resolve_conflicts",
+                "mcp__tddy-tools__pr_spawn_child",
             ]
         );
     }

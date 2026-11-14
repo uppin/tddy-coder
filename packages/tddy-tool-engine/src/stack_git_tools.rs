@@ -55,18 +55,19 @@ pub fn is_stack_git_tool(name: &str) -> bool {
 /// Whether `role` is offered (and served) the stack git tool `tool_name`: an orchestrator every
 /// one, a node of a stack none.
 pub fn is_stack_git_tool_offered_to(role: &StackCallerRole, tool_name: &str) -> bool {
-    // TODO(stack-git-tools): implement — `Orchestrator` and `is_stack_git_tool`.
-    let _ = (role, tool_name);
-    false
+    matches!(role, StackCallerRole::Orchestrator { .. }) && is_stack_git_tool(tool_name)
 }
 
 /// The stack git tools `role` is offered, in [`STACK_GIT_TOOL_NAMES`] order; none for a session
 /// with no stack role and none for a node.
 pub fn stack_git_tools_offered_to(role: Option<&StackCallerRole>) -> Vec<ToolDef> {
-    // TODO(stack-git-tools): implement — `stack_git_tool_defs` filtered by
-    // `is_stack_git_tool_offered_to`.
-    let _ = role;
-    Vec::new()
+    let Some(role) = role else {
+        return Vec::new();
+    };
+    stack_git_tool_defs()
+        .into_iter()
+        .filter(|tool| is_stack_git_tool_offered_to(role, &tool.name))
+        .collect()
 }
 
 /// One stack git operation on a node of the addressed stack, its arguments parsed and checked.
@@ -210,10 +211,78 @@ pub async fn execute_stack_git_tool(
     tool_name: &str,
     args_json: &str,
 ) -> ToolOutcome {
-    // TODO(stack-git-tools): implement — parse the arguments into a `StackGitOp`, resolve the stack
-    // with `addressed_stack_id`, run it with `run_stack_git_op`.
-    let _ = (port, caller, args_json);
-    ToolOutcome::err(format!("{tool_name}: not implemented on this host yet"))
+    match run_stack_git(port, caller, tool_name, args_json).await {
+        Ok(answer) => ToolOutcome::ok(answer.to_string()),
+        Err(message) => ToolOutcome::err(message),
+    }
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default)]
+struct StackGitToolArgs {
+    stack_id: Option<String>,
+    node_id: Option<String>,
+    new_base: Option<String>,
+    parents: Option<Vec<String>>,
+    delegate: bool,
+    session_type: Option<String>,
+    model: Option<String>,
+}
+
+fn required<T>(tool_name: &str, value: Option<T>, argument: &str) -> Result<T, String> {
+    value.ok_or_else(|| format!("{tool_name}: invalid arguments: missing field `{argument}`"))
+}
+
+fn stack_git_op_of(tool_name: &str, args: StackGitToolArgs) -> Result<StackGitOp, String> {
+    let node_id = required(tool_name, args.node_id, "node_id")?;
+    Ok(match tool_name {
+        PR_MERGE => StackGitOp::Merge { node_id },
+        PR_CLOSE => StackGitOp::Close { node_id },
+        PR_REPOINT => StackGitOp::Repoint {
+            node_id,
+            new_base: args.new_base.filter(|base| !base.trim().is_empty()),
+        },
+        PR_SET_PARENTS => StackGitOp::SetParents {
+            node_id,
+            parents: required(tool_name, args.parents, "parents")?,
+        },
+        PR_RESOLVE_CONFLICTS => StackGitOp::ResolveConflicts {
+            node_id,
+            delegate: args.delegate,
+        },
+        PR_SPAWN_CHILD => StackGitOp::SpawnChild {
+            node_id,
+            session_type: args.session_type.filter(|value| !value.trim().is_empty()),
+            model: args.model.filter(|value| !value.trim().is_empty()),
+        },
+        other => return Err(format!("unknown stack git tool: {other}")),
+    })
+}
+
+async fn run_stack_git(
+    port: &dyn StackGitToolPort,
+    caller: &StackCaller,
+    tool_name: &str,
+    args_json: &str,
+) -> Result<Value, String> {
+    if !is_stack_git_tool(tool_name) {
+        return Err(format!("unknown stack git tool: {tool_name}"));
+    }
+    let args: StackGitToolArgs = if args_json.trim().is_empty() {
+        StackGitToolArgs::default()
+    } else {
+        serde_json::from_str(args_json)
+            .map_err(|e| format!("{tool_name}: invalid arguments: {e}"))?
+    };
+    let named = args.stack_id.clone();
+    let op = stack_git_op_of(tool_name, args)?;
+    let stack_id = crate::stack_tools::addressed_stack_id(caller, tool_name, named.as_deref())?
+        .ok_or_else(|| {
+            format!("{tool_name}: name the stack with stack_id — this session owns no stack to default to")
+        })?;
+    port.run_stack_git_op(caller, &stack_id, op)
+        .await
+        .map_err(|why| format!("{tool_name}: {why}"))
 }
 
 #[cfg(test)]

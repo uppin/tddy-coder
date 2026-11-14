@@ -57,7 +57,8 @@ pub enum GitOp {
 ///
 /// A push goes to [`Self::remote_name`] — the project's remote — and authenticates with
 /// [`Self::account_token`], which a daemon-run git has no other way to obtain: it is handed to git
-/// through `tddy-askpass` (`GIT_ASKPASS`), never on a command line (`#orchestrators` 10/11).
+/// through a per-command credential helper with the token in its environment, never on a command
+/// line or in a log (`#orchestrators` 10/11).
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct PushIdentity {
     pub env: Vec<(String, String)>,
@@ -150,10 +151,7 @@ pub fn run_git_op(
             session_id: target.session_id.clone(),
         });
     }
-    // TODO(stack-git-tools): implement — push to `push_identity.remote_name` (`origin` when
-    // `None`) and hand `account_token` to git through `tddy-askpass`; today every push goes to
-    // `origin` with the checkout's credentials.
-    run::run(&target.worktree, &push_identity.env, op)
+    run::run(&target.worktree, push_identity, op)
 }
 
 #[cfg(test)]

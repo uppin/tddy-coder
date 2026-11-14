@@ -496,8 +496,8 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
     // When
     let offered = offered_tool_names(&world, &world.home).await;
 
-    // Then exactly the read-only tools, the project-home tools, the seven git tools and the eleven
-    // stack tools
+    // Then exactly the read-only tools, the project-home tools, the seven git tools, the eleven
+    // stack tools and the six stack git tools
     assert_eq!(
         offered,
         sorted_names(&[
@@ -552,6 +552,12 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
             "pr_delete_planned",
             "pr_set_status",
             "pr_adopt",
+            "pr_merge",
+            "pr_close",
+            "pr_repoint",
+            "pr_set_parents",
+            "pr_resolve_conflicts",
+            "pr_spawn_child",
         ])
     );
 }

@@ -322,6 +322,11 @@ to be a git repository`), the 2 `git_ops` tests (`'feature' is already used by w
 - **Conflicts found without leaving a merge behind** — the acceptance tests assert the node's worktree
   HEAD, status and `MERGE_HEAD` are unchanged even for a running node, so green may probe with
   `git merge-tree --write-tree` rather than merge-and-abort under a working agent.
+- **HTTPS token for daemon-run pushes: per-command credential helper, not `tddy-askpass`** — green
+  decision, 2026-11-14. `tddy-askpass` answers SSH passphrases only, so the push hands git
+  `-c credential.helper=…` (plus `GIT_CONFIG_*`) whose helper echoes the token from the
+  `TDDY_PUSH_ACCOUNT_TOKEN` environment variable: the token is never in argv or logs, and a
+  `git credential fill` from a push hook answers the same way. No new package is affected.
 
 ## Refactoring Needed
 

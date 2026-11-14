@@ -99,10 +99,9 @@ You have these tools to manage the stack:\n\
 (needs-repoint / has-conflicts / ready-to-merge / merged / up-to-date). Run this to see what needs \
 action.\n\
 - pr_merge — merge a node's PR into its base.\n\
-- pr_repoint — repoint a node's PR base branch after an ancestor merges.\n\
+- pr_repoint — rebase a node's branch onto its effective base in its own worktree on the daemon, force-push it, and repoint its PR base branch after an ancestor merges.\n\
 - pr_close — close a PR without merging.\n\
-- pr_resolve_conflicts — sync a node's branch with its base and report conflicting files; then \
-resolve them in the worktree and re-run to confirm a clean tree.\n\
+- pr_resolve_conflicts — report the files a node's branch conflicts on against its base, found on the daemon without touching its worktree; with delegate, ask the node's own session to resolve them.\n\
 - pr_set_status — record a manual internal-status override with a note (e.g. blocked).\n\
 - pr_add_planned — add a new planned PR node to the stack.\n\
 - pr_spawn_child — start a child coding session for a planned node.\n\
