@@ -8,6 +8,7 @@ use super::order::assign_missing_display_order;
 use super::repoint::realign_node_to_effective_base;
 use super::{
     append_node_atomic, next_free_node_id, read_stack, reject_if_cyclic, validate_parents,
+    StackHome,
 };
 
 /// Input for [`add_planned_pr_node`]. A struct rather than positional params since several
@@ -39,7 +40,7 @@ pub struct AddPlannedPrInput {
 ///
 /// PRD: `docs/ft/coder/pr-stacking.md` § Manually adding a planned PR.
 pub fn add_planned_pr_node(
-    session_dir: &Path,
+    session_dir: &(impl StackHome + ?Sized),
     input: AddPlannedPrInput,
 ) -> Result<StackNode, String> {
     const OP: &str = "add_planned_pr_node";
@@ -124,11 +125,9 @@ pub struct DeletedNode {
 ///
 /// [`sync_node_to_github_pr`]: super::sync_node_to_github_pr
 pub fn update_planned_pr_node(
-    session_dir: &Path,
+    session_dir: &(impl StackHome + ?Sized),
     input: UpdatePlannedPrInput,
 ) -> Result<StackNode, String> {
-    use tddy_core::changeset::update_stack_atomic;
-
     let node_id = input.node_id.clone();
     if input.title.is_none() && input.description.is_none() && input.branch_suggestion.is_none() {
         return Err(format!(
@@ -137,7 +136,8 @@ pub fn update_planned_pr_node(
         ));
     }
 
-    let stack = tddy_core::changeset::read_session_stack(session_dir)
+    let stack = session_dir
+        .read_stack()
         .map_err(|e| format!("update_planned_pr_node: failed to read changeset: {e}"))?
         .unwrap_or_default();
     let node = stack
@@ -153,22 +153,23 @@ pub fn update_planned_pr_node(
     }
 
     let mut updated: Option<StackNode> = None;
-    update_stack_atomic(session_dir, |stack| {
-        assign_missing_display_order(stack);
-        if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
-            if let Some(title) = input.title {
-                node.title = title;
+    session_dir
+        .update_stack(|stack| {
+            assign_missing_display_order(stack);
+            if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
+                if let Some(title) = input.title {
+                    node.title = title;
+                }
+                if let Some(description) = input.description {
+                    node.description = description;
+                }
+                if let Some(branch_suggestion) = input.branch_suggestion {
+                    node.branch_suggestion = Some(branch_suggestion);
+                }
+                updated = Some(node.clone());
             }
-            if let Some(description) = input.description {
-                node.description = description;
-            }
-            if let Some(branch_suggestion) = input.branch_suggestion {
-                node.branch_suggestion = Some(branch_suggestion);
-            }
-            updated = Some(node.clone());
-        }
-    })
-    .map_err(|e| format!("update_planned_pr_node: failed to write stack: {e}"))?;
+        })
+        .map_err(|e| format!("update_planned_pr_node: failed to write stack: {e}"))?;
 
     // `update_stack_atomic` re-reads the file before applying the edit, so a node the check above saw
     // can still be gone by then — a concurrent writer removed it. Reporting that is not the same as
@@ -193,10 +194,12 @@ pub fn update_planned_pr_node(
 ///
 /// The node's branch, worktree and child session are left untouched and reported — see
 /// [`DeletedNode`].
-pub fn delete_planned_pr_node(session_dir: &Path, node_id: &str) -> Result<DeletedNode, String> {
-    use tddy_core::changeset::update_stack_atomic;
-
-    let stack = tddy_core::changeset::read_session_stack(session_dir)
+pub fn delete_planned_pr_node(
+    session_dir: &(impl StackHome + ?Sized),
+    node_id: &str,
+) -> Result<DeletedNode, String> {
+    let stack = session_dir
+        .read_stack()
         .map_err(|e| format!("delete_planned_pr_node: failed to read changeset: {e}"))?
         .unwrap_or_default();
     let node = stack
@@ -221,11 +224,12 @@ pub fn delete_planned_pr_node(session_dir: &Path, node_id: &str) -> Result<Delet
     reject_if_cyclic(&candidate, "delete_planned_pr_node")?;
 
     let mut removed: Option<(StackNode, Vec<String>)> = None;
-    update_stack_atomic(session_dir, |stack| {
-        assign_missing_display_order(stack);
-        removed = remove_node_reparenting_children(stack, node_id);
-    })
-    .map_err(|e| format!("delete_planned_pr_node: failed to write stack: {e}"))?;
+    session_dir
+        .update_stack(|stack| {
+            assign_missing_display_order(stack);
+            removed = remove_node_reparenting_children(stack, node_id);
+        })
+        .map_err(|e| format!("delete_planned_pr_node: failed to write stack: {e}"))?;
 
     let (node, reparented_children) = removed.ok_or_else(|| {
         format!("delete_planned_pr_node: node '{node_id}' vanished before the delete was written")

@@ -1,11 +1,10 @@
 //! Existing pull requests as stack nodes: adoption, and pushing a node's edits back to its PR.
 
-use std::path::Path;
-
 use tddy_core::changeset::StackNode;
 
 use super::{
     append_node_atomic, next_free_node_id, read_stack, reject_if_cyclic, validate_parents,
+    StackHome,
 };
 
 /// The facts about an existing pull request that a stack node is built from.
@@ -29,13 +28,14 @@ pub struct AdoptedPrFacts {
 /// A node that records no PR is a rejection, not a skip: the caller asked for something that cannot
 /// happen, and quietly doing nothing would be a fallback.
 pub fn sync_node_to_github_pr(
-    session_dir: &Path,
+    session_dir: &(impl StackHome + ?Sized),
     node_id: &str,
     title: Option<&str>,
     body: Option<&str>,
     gh: &dyn tddy_github::pr_api::GithubPrInsightApi,
 ) -> Result<u64, String> {
-    let stack = tddy_core::changeset::read_session_stack(session_dir)
+    let stack = session_dir
+        .read_stack()
         .map_err(|e| format!("sync_node_to_github_pr: failed to read changeset: {e}"))?
         .unwrap_or_default();
     // Resolving the number is also the "does this node have a PR at all" check: an unknown node and a
@@ -62,7 +62,7 @@ pub fn sync_node_to_github_pr(
 ///
 /// [`add_planned_pr_node`]: super::add_planned_pr_node
 pub fn adopt_pr_as_stack_node(
-    session_dir: &Path,
+    session_dir: &(impl StackHome + ?Sized),
     facts: AdoptedPrFacts,
     parents: Vec<String>,
 ) -> Result<StackNode, String> {
@@ -165,7 +165,7 @@ fn reject_if_pull_number_tracked(
 /// the phase says whether the PR is still in play, and every consumer of `phase` (merge readiness,
 /// delete's refusal, internal-status derivation) treats a draft as an open PR.
 pub fn adopt_pr_into_stack(
-    session_dir: &Path,
+    session_dir: &(impl StackHome + ?Sized),
     pull_number: u64,
     parents: Vec<String>,
     gh: &dyn tddy_github::pr_api::GithubPrInsightApi,

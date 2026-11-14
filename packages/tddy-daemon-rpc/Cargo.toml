@@ -36,6 +36,9 @@ tddy-code-restructuring = { path = "../tddy-code-restructuring" }
 tddy-host-service = { path = "../tddy-host-service" }
 tddy-model-registry = { path = "../tddy-model-registry" }
 tddy-projects = { path = "../tddy-projects" }
+# The stack tools' operations (`stack_ops`, `pr_insight`, `assess`) run over the host's stack store
+# (`#orchestrators` 7/11); already in this crate's tree through `tddy-agent-launch`.
+tddy-pr-stack = { path = "../tddy-pr-stack" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 tddy-spawn = { path = "../tddy-spawn" }

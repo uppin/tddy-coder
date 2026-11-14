@@ -22,7 +22,7 @@
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
 mod answer;
-mod caller;
+pub(in crate::exec_tool) mod caller;
 mod lifecycle;
 mod listing;
 mod notify;
@@ -67,11 +67,12 @@ use tddy_tool_engine::project_home_terminal_tools::{
     execute_project_home_terminal_tool, is_project_home_terminal_tool,
 };
 use tddy_tool_engine::project_home_tools::{
-    execute_project_home_tool, is_project_home_tool, session_offered_catalog_for,
+    execute_project_home_tool, is_project_home_tool, session_offered_catalog_for, SessionToolRole,
 };
 use tddy_tool_engine::project_home_turn_tools::{
     execute_project_home_turn_tool, is_project_home_turn_tool,
 };
+use tddy_tool_engine::stack_tools::{is_stack_tool, stack_tools_offered_to};
 use tddy_tool_engine::start_ledger::StartLedger;
 use tddy_worktree_service::session_target::HomeCaller;
 use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
@@ -92,6 +93,7 @@ use crate::exec_tool::project_home::caller::record_call;
 use crate::exec_tool::project_home::caller::refuse_a_spawner_outside_its_own_sessions;
 use crate::exec_tool::project_home::listing::session_rows;
 use crate::exec_tool::project_home::listing::SessionRow;
+use crate::exec_tool::stack_tools::stack_caller_of;
 use crate::families::ProviderAccountsPort;
 use crate::{CatalogRpcHandler, ProjectRpcHandler};
 
@@ -104,6 +106,9 @@ impl ExecToolRpcHandler {
         sessions_base: &Path,
         worktree_root: &Path,
     ) -> Result<ExecuteToolResponse, Status> {
+        if is_stack_tool(&req.tool_name) {
+            return self.run_stack_tool(req, sessions_base).await;
+        }
         if !is_project_home_tool(&req.tool_name) && !is_project_home_git_tool(&req.tool_name) {
             return Ok(self
                 .local_exec_tools
@@ -222,7 +227,7 @@ impl ExecToolRpcHandler {
                 "session {session_id}: cannot read its record to tell which tools it is offered ({e})"
             ))
         })?;
-        Ok(session_offered_catalog_for(
+        let mut tools = session_offered_catalog_for(
             session_tool_role(&metadata),
             &start_choices(
                 &self.peer_routing,
@@ -231,7 +236,14 @@ impl ExecToolRpcHandler {
                     .map(|launch| launch.coding_agents.agents())
                     .unwrap_or_else(|| empty_coding_agents()),
             ),
-        ))
+        );
+        // A project-home session's catalogue already carries the stack tools; a session bound to a
+        // node of a stack is offered the two reads, which only its own records can tell.
+        if session_tool_role(&metadata) != SessionToolRole::ProjectHome {
+            let caller = stack_caller_of(&sessions_base, session_id)?;
+            tools.extend(stack_tools_offered_to(caller.as_ref().map(|c| &c.role)));
+        }
+        Ok(tools)
     }
 
     /// The OS user `session_token` maps to, as the start path resolves it.

@@ -12974,6 +12974,7 @@ dependencies = [
  "tddy-livekit-testkit",
  "tddy-lsp",
  "tddy-model-registry",
+ "tddy-pr-stack",
  "tddy-projects",
  "tddy-rpc",
  "tddy-sandbox",
