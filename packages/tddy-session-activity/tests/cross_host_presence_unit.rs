@@ -218,6 +218,7 @@ fn write_claude_cli_session(session_dir: &Path) {
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     write_session_metadata(session_dir, &meta).expect("the session's .session.yaml");
 }

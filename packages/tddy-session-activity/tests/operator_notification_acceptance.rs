@@ -162,6 +162,7 @@ fn write_session(sessions_base: &Path, session_type: &str, hook_token: Option<&s
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     write_session_metadata(&session_dir, &meta).expect("the session's .session.yaml");
 }

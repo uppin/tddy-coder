@@ -155,6 +155,11 @@ pub struct HookEvent {
     /// That tool's input, as the hook sent it.
     #[serde(default)]
     pub tool_input: Option<serde_json::Value>,
+    /// Why a `SessionStart` fired — `startup`, `resume`, `clear` or `compact`. `clear` is a fresh
+    /// conversation inside the running session, which claude.yaml declares as its conversation
+    /// rotation (`#orchestrators` 6/11).
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 impl HookEvent {
@@ -165,6 +170,25 @@ impl HookEvent {
             self.notification_type.as_deref(),
             self.tool_name.as_deref(),
         )
+    }
+}
+
+/// The top-level string fields of the hook event JSON in `stdin_json`, by name — what
+/// `ReportSessionStatusRequest.hook_fields` carries, so the daemon can match an agent spec's
+/// `conversation.rotation` (`when`, `id_field`) without the hook knowing any spec
+/// (`#orchestrators` 6/11). Fields that are not strings (a tool's input, a number) are left out,
+/// and JSON that is not an object yields none.
+#[must_use]
+pub fn hook_event_fields(stdin_json: &str) -> std::collections::HashMap<String, String> {
+    match serde_json::from_str::<serde_json::Value>(stdin_json) {
+        Ok(serde_json::Value::Object(fields)) => fields
+            .into_iter()
+            .filter_map(|(name, value)| match value {
+                serde_json::Value::String(text) => Some((name, text)),
+                _ => None,
+            })
+            .collect(),
+        _ => std::collections::HashMap::new(),
     }
 }
 

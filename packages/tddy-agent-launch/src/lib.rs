@@ -5,6 +5,8 @@ pub mod claude_cli_spawn;
 pub mod claude_cli_spawn_steps;
 pub mod claude_cli_tmux;
 mod cli_agent_steps;
+/// The conversation a session's agent is in now (`#orchestrators` 6/11).
+pub use cli_agent_steps::conversation::current_conversation_id;
 pub mod cli_branch_starts;
 pub mod cli_harness_tmux;
 mod cli_resume_token;

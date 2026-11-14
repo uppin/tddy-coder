@@ -251,6 +251,35 @@ fn a_resume_binds_the_conversation_its_session_recorded() {
 }
 
 #[test]
+fn a_resume_binds_the_conversation_the_agent_rotated_to() {
+    // Given a claude session whose agent ran `/clear` once (`#orchestrators` 6/11)
+    let cleared = SessionMetadata {
+        agent_conversations: vec![
+            tddy_core::AgentConversation {
+                id: "0190-claude".to_string(),
+                started_at_unix_ms: 1_762_771_200_000,
+                reason: tddy_core::AgentConversationReason::Start,
+            },
+            tddy_core::AgentConversation {
+                id: "c-after-clear".to_string(),
+                started_at_unix_ms: 1_762_771_260_000,
+                reason: tddy_core::AgentConversationReason::Rotate,
+            },
+        ],
+        ..a_recorded_session("0190-claude")
+    };
+
+    // When
+    let resumed = resumed_conversation(&the_builtin("claude"), &cleared).map_err(|s| s.message);
+
+    // Then
+    assert_eq!(
+        resumed,
+        Ok(LaunchConversation::SessionId("c-after-clear".to_string()))
+    );
+}
+
+#[test]
 fn a_conversation_binds_its_own_template_parameter_and_records_only_a_minted_id() {
     // Given
     let session = LaunchConversation::SessionId("0190-claude".to_string());

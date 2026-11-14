@@ -115,6 +115,7 @@ pub fn starting_session_metadata(
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     }
 }
 
