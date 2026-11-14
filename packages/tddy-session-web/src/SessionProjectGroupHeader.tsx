@@ -23,7 +23,7 @@ export interface SessionProjectGroupHeaderProps {
  * and session count, `sessions-drawer-project-group-header-<key>` — then the "+" and any further
  * actions as siblings, since a button cannot hold buttons.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-10-orchestrator-composer.md
+ * Feature: docs/ft/web/session-drawer.md § Orchestrator composer
  */
 export function SessionProjectGroupHeader(props: SessionProjectGroupHeaderProps): React.ReactElement {
   const { group, groupKey, collapsed, onToggle, onNew, actions } = props;

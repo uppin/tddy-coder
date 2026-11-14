@@ -5,6 +5,7 @@ and section, their hooks, the request builder (`buildStartSessionRequest`, `buil
 codebase placement, attachment staging (`attachments/`) and start progress. `tddy-web` mounts it; it
 imports nothing from `tddy-web` or `livekit-client` (`src/packageBoundary.test.ts`).
 
+- **Orchestrator composer**: `OrchestratorComposer` — the centred prompt box a project header's "+" opens, with model, effort, provider account, host (`CreateSessionHostField`) and attachments; `buildOrchestratorComposerRequest` sends `session_role: orchestrator` with no placement fields. Product: [Session drawer § Orchestrator composer](../../../docs/ft/web/session-drawer.md#orchestrator-composer)
 - **Provider field (vendor or provider account for a CLI session)**: [create-session-provider.md](create-session-provider.md)
 - **Start progress, cancelling a start, keep-alive events**: [start-progress.md](start-progress.md)
 - **Passphrase prompt while a start clones (a slot the host application fills)**: [start-passphrase-prompt.md](start-passphrase-prompt.md)

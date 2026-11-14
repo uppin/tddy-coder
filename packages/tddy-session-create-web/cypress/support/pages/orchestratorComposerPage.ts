@@ -4,7 +4,7 @@
  *
  * All raw selectors, geometry and wire inspection live here; test bodies call named methods.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-10-orchestrator-composer.md
+ * Feature: docs/ft/web/session-drawer.md § Orchestrator composer
  */
 
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";

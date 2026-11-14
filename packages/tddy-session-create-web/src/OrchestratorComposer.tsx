@@ -47,7 +47,7 @@ export interface OrchestratorComposerProps {
  * Test ids: `sessions-project-composer-<projectId>` (the pane), `sessions-project-composer-input`,
  * `sessions-project-composer-send`, `sessions-project-composer-error`.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-10-orchestrator-composer.md
+ * Feature: docs/ft/web/session-drawer.md § Orchestrator composer
  */
 export function OrchestratorComposer(props: OrchestratorComposerProps): React.ReactElement | null {
   const client = useDaemonClient(SessionService);

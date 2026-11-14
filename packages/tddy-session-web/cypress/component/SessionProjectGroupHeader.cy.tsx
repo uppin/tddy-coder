@@ -3,7 +3,7 @@
  * the orchestrator composer, then a slot for further actions. The "+" is a sibling of the toggle,
  * so pressing it never collapses the group, and a header given no `onNew` shows none.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-10-orchestrator-composer.md
+ * Feature: docs/ft/web/session-drawer.md § Orchestrator composer
  */
 
 import React from "react";
