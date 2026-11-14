@@ -12,7 +12,8 @@ use tddy_projects::project_storage;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::pr_stack::{
     AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
-    LinkStackNodeRequest, LinkStackNodeResponse, PullBaseIntoBranchRequest,
+    GetProjectStackRequest, GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse,
+    ListProjectStacksRequest, ListProjectStacksResponse, PullBaseIntoBranchRequest,
     PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
     ResolveStackBaseRequest, ResolveStackBaseResponse,
@@ -806,6 +807,21 @@ impl PrStackHandler for PrStackRpcHandler {
             pushed: report.pushed,
             push_error: report.push_error.unwrap_or_default(),
         }))
+    }
+
+    /// See `project_stacks.rs`, which holds the project-stack RPCs (`#orchestrators` 9/11).
+    async fn list_project_stacks(
+        &self,
+        request: Request<ListProjectStacksRequest>,
+    ) -> Result<Response<ListProjectStacksResponse>, Status> {
+        self.list_project_stacks_rpc(request).await
+    }
+
+    async fn get_project_stack(
+        &self,
+        request: Request<GetProjectStackRequest>,
+    ) -> Result<Response<GetProjectStackResponse>, Status> {
+        self.get_project_stack_rpc(request).await
     }
 }
 

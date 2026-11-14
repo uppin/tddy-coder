@@ -4,6 +4,7 @@ mod branch_legs;
 mod guards;
 mod ports;
 mod pr_status;
+mod project_stacks;
 
 pub use guards::validate_repoint_target;
 
@@ -18,7 +19,7 @@ use tddy_session_lifecycle::connection_service::{wire_same, DaemonSessionHost};
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::relay_idle::RpcActivity;
 
-/// The eight PR-stack RPCs: the caller's identity, the sessions and stack plans under
+/// The ten PR-stack RPCs: the caller's identity, the sessions and stack plans under
 /// `tddy_data_dir`, the vaults the GitHub token a PR status is read with is sealed in, and the peer an orchestrator one
 /// host over is reached through.
 pub struct PrStackRpcHandler {

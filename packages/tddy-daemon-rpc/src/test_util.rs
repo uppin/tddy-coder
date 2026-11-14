@@ -25,7 +25,8 @@ use tddy_service::proto::exec_tools::{
 };
 use tddy_service::proto::pr_stack::{
     AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
-    LinkStackNodeRequest, LinkStackNodeResponse, PrStackService, PullBaseIntoBranchRequest,
+    GetProjectStackRequest, GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse,
+    ListProjectStacksRequest, ListProjectStacksResponse, PrStackService, PullBaseIntoBranchRequest,
     PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
     ResolveStackBaseRequest, ResolveStackBaseResponse,
@@ -389,6 +390,26 @@ impl PrStackService for TestDaemon {
         self.handlers
             .pr_stack_service()
             .pull_base_into_branch(request)
+            .await
+    }
+
+    async fn list_project_stacks(
+        &self,
+        request: Request<ListProjectStacksRequest>,
+    ) -> Result<Response<ListProjectStacksResponse>, Status> {
+        self.handlers
+            .pr_stack_service()
+            .list_project_stacks(request)
+            .await
+    }
+
+    async fn get_project_stack(
+        &self,
+        request: Request<GetProjectStackRequest>,
+    ) -> Result<Response<GetProjectStackResponse>, Status> {
+        self.handlers
+            .pr_stack_service()
+            .get_project_stack(request)
             .await
     }
 }
