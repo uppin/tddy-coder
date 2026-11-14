@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use tddy_core::changeset::{GithubPrStatus, Stack, StackNode};
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::{write_changeset, Changeset};
+use tddy_core::Changeset;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
@@ -235,7 +235,7 @@ fn write_orchestrator_with_materialized_parent(
         stack: Some(stack),
         ..Changeset::default()
     };
-    write_changeset(&orchestrator_dir, &cs).expect("write orchestrator changeset");
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orchestrator_dir, cs);
 }
 
 fn start_session_request(
@@ -475,7 +475,7 @@ fn write_orchestrator_with_externally_merged_parent(
         stack: Some(stack),
         ..Changeset::default()
     };
-    write_changeset(&orchestrator_dir, &cs).expect("write orchestrator changeset");
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orchestrator_dir, cs);
 }
 
 /// **explicit_base_override_bypasses_the_gate_for_an_externally_merged_parent** — When the

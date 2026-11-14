@@ -303,7 +303,8 @@ impl Task for AssessTask {
             .unwrap_or_else(|| session_dir.clone());
 
         let changeset = read_changeset(&session_dir)?;
-        let stack = changeset.stack.clone().unwrap_or_default();
+        let stack =
+            tddy_core::changeset::read_stack_of(&session_dir, &changeset)?.unwrap_or_default();
         let default_branch = context
             .get_sync::<String>("default_branch")
             .unwrap_or_else(|| "master".to_string());

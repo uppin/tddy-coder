@@ -181,7 +181,7 @@ straight in `orchestrate` ([pr-stacking.md § Seeding the
 stack](pr-stacking.md#seeding-the-stack-from-an-existing-session-added-2026-08-13)). The recipes
 crate owns both constants; the coder writes them.
 
-**A plan refinement re-runs the docs pass.** `after_write_stack_plan` re-seeds `Changeset.stack` on
+**A plan refinement re-runs the docs pass.** `after_write_stack_plan` re-seeds the stack on
 every refinement turn and then sets state to `StackPlanned` — which now routes to
 `write-stack-docs`, so the operator's next turn regenerates the documents before returning to
 `orchestrate`. This interrupts the chat deliberately: a refined plan carrying stale boundary

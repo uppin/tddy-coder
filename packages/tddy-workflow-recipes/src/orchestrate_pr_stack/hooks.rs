@@ -136,11 +136,9 @@ impl RunnerHooks for OrchestratePrStackHooks {
         let Some(dir) = session_dir_from_context(context) else {
             return Ok(());
         };
-        if let Ok(cs) = read_changeset(&dir) {
-            if let Some(ref stack) = cs.stack {
-                if let Err(e) = write_stack_status(&dir, stack) {
-                    log::warn!("[orchestrate-pr-stack hooks] write_stack_status failed: {e}");
-                }
+        if let Ok(Some(stack)) = tddy_core::changeset::read_session_stack(&dir) {
+            if let Err(e) = write_stack_status(&dir, &stack) {
+                log::warn!("[orchestrate-pr-stack hooks] write_stack_status failed: {e}");
             }
         }
         Ok(())
@@ -159,7 +157,7 @@ impl RunnerHooks for OrchestratePrStackHooks {
 mod tests {
     use std::fs;
 
-    use tddy_core::changeset::{read_changeset, write_changeset, Changeset, Stack, StackNode};
+    use tddy_core::changeset::{Changeset, Stack, StackNode};
     use tddy_core::workflow::context::Context;
     use tddy_core::workflow::ids::WorkflowState;
     use tddy_core::workflow::task::{NextAction, TaskResult};
@@ -167,10 +165,12 @@ mod tests {
     use super::*;
 
     fn tmp_session(label: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("orch-hooks-{}-{}", label, std::process::id()));
-        let _ = fs::remove_dir_all(&d);
+        let base =
+            std::env::temp_dir().join(format!("orch-hooks-{}-{}", label, std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let d = base.join("sessions").join("orch");
         fs::create_dir_all(&d).unwrap();
-        write_changeset(&d, &Changeset::default()).unwrap();
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(&d, Changeset::default());
         d
     }
 
@@ -220,7 +220,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        write_changeset(&dir, &cs).unwrap();
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(&dir, cs);
 
         let ctx = Context::new();
         ctx.set_sync("session_dir", dir.clone());

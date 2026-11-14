@@ -35,9 +35,8 @@ pub fn sync_node_to_github_pr(
     body: Option<&str>,
     gh: &dyn tddy_github::pr_api::GithubPrInsightApi,
 ) -> Result<u64, String> {
-    let stack = tddy_core::changeset::read_changeset(session_dir)
+    let stack = tddy_core::changeset::read_session_stack(session_dir)
         .map_err(|e| format!("sync_node_to_github_pr: failed to read changeset: {e}"))?
-        .stack
         .unwrap_or_default();
     // Resolving the number is also the "does this node have a PR at all" check: an unknown node and a
     // node that records no PR url both fail here, naming the node, before anything is sent.
@@ -200,7 +199,8 @@ pub fn adopt_pr_into_stack(
 mod tests {
     use super::*;
     use crate::stack_ops::test_support::{
-        a_node, a_started_node, assert_rejected, node_ids, stack_on_disk, write_stack,
+        a_node, a_stack_session_dir, a_started_node, assert_rejected, node_ids, stack_on_disk,
+        write_stack,
     };
     use tddy_core::changeset::{GithubPrStatus, StackNode};
 
@@ -222,7 +222,7 @@ mod tests {
     #[test]
     fn adopting_a_pr_creates_a_node_carrying_its_head_branch_title_body_and_url() {
         // Given — an empty plan
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(dir, vec![]);
 
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn an_adopted_node_starts_with_no_child_session_and_no_internal_status() {
         // Given
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(dir, vec![]);
 
@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn adopting_a_pr_whose_head_branch_is_already_bound_to_a_node_is_rejected() {
         // Given — n1 already owns the branch this PR is built on
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(
             dir,
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn adopting_a_pr_a_branchless_node_already_records_the_url_of_is_rejected() {
         // Given — n1 records PR #77 in its pr_status url but never recorded a branch of its own
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(
             dir,
@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn adopting_a_pr_with_a_dangling_parent_ref_is_rejected_and_the_stack_on_disk_is_unchanged() {
         // Given — a plan with no node called n9
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = a_stack_session_dir();
         let dir = tmp.path();
         write_stack(dir, vec![a_node("n1", "one", vec![])]);
 

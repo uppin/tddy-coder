@@ -28,7 +28,7 @@ mod common;
 use std::path::Path;
 
 use common::{a_planned_node, assert_rejected, stack_of, write_stack, DEFAULT_BRANCH};
-use tddy_core::changeset::{write_changeset, Changeset, Stack, StackNode};
+use tddy_core::changeset::{Changeset, Stack, StackNode};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_workflow_recipes::pr_stack::seed_stack_with_base_session;
 
@@ -41,13 +41,13 @@ const BASE_BRANCH: &str = "feat/auth-store";
 /// A sessions root holding one session directory per id, the layout
 /// `unified_session_dir_path` resolves and every stack reader expects.
 struct SessionsRoot {
-    _tmp: tempfile::TempDir,
+    _tmp: tddy_changeset::stack_fixtures::AStackHost,
     root: std::path::PathBuf,
 }
 
 fn a_sessions_root() -> SessionsRoot {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().to_path_buf();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_host();
+    let root = tmp.base().to_path_buf();
     SessionsRoot { _tmp: tmp, root }
 }
 
@@ -59,8 +59,7 @@ impl SessionsRoot {
     /// A session directory carrying `changeset.yaml`, created the way a real session's is.
     fn with_session(&self, session_id: &str, changeset: Changeset) -> std::path::PathBuf {
         let dir = unified_session_dir_path(&self.root, session_id);
-        std::fs::create_dir_all(&dir).unwrap();
-        write_changeset(&dir, &changeset).unwrap();
+        tddy_changeset::stack_fixtures::write_changeset_with_stack(&dir, changeset);
         dir
     }
 
@@ -219,7 +218,7 @@ fn refuses_a_base_session_that_owns_no_branch() {
     // the spawn gate for every descendant
     assert_rejected(result).with_reason_containing("owns no branch");
     assert_eq!(
-        tddy_core::read_changeset(&orchestrator).unwrap().stack,
+        tddy_core::read_changeset(&orchestrator).unwrap().stack_id,
         None,
         "a refused seed writes nothing"
     );
@@ -237,7 +236,7 @@ fn refuses_a_base_session_that_does_not_exist() {
     // Then it is refused, naming what could not be resolved
     assert_rejected(result).with_reason_containing("session-ghost");
     assert_eq!(
-        tddy_core::read_changeset(&orchestrator).unwrap().stack,
+        tddy_core::read_changeset(&orchestrator).unwrap().stack_id,
         None,
         "a refused seed writes nothing"
     );
@@ -285,7 +284,7 @@ fn refuses_an_orchestrator_asked_to_base_the_stack_on_itself() {
     // Then it is refused: a stack cannot contain the session that owns it
     assert_rejected(result).with_reason_containing("itself");
     assert_eq!(
-        tddy_core::read_changeset(&orchestrator).unwrap().stack,
+        tddy_core::read_changeset(&orchestrator).unwrap().stack_id,
         None,
         "a refused seed writes nothing"
     );
@@ -315,7 +314,7 @@ fn refuses_a_base_session_that_is_already_a_node_of_another_stack() {
         .with_reason_containing("already a node")
         .with_reason_containing("orchestrator-elsewhere");
     assert_eq!(
-        tddy_core::read_changeset(&orchestrator).unwrap().stack,
+        tddy_core::read_changeset(&orchestrator).unwrap().stack_id,
         None,
         "a refused seed writes nothing"
     );
@@ -360,7 +359,7 @@ fn refuses_to_base_the_stack_on_itself_when_the_sessions_root_is_reached_through
     assert_eq!(
         tddy_core::read_changeset(&orchestrator_via_link)
             .unwrap()
-            .stack,
+            .stack_id,
         None,
         "a refused seed writes nothing"
     );

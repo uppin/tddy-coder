@@ -121,7 +121,7 @@ fn order_of(dir: &Path, node_id: &str) -> Option<u32> {
 #[test]
 fn an_added_planned_pr_lands_at_the_bottom_of_the_order() {
     // Given — a two-row stack, numbered 0 and 1
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -142,7 +142,7 @@ fn an_added_planned_pr_lands_at_the_bottom_of_the_order() {
 #[test]
 fn adding_a_planned_pr_never_renumbers_the_rows_above_it() {
     // Given — a stack whose numbering already has a gap in it, left by an earlier delete
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -167,7 +167,7 @@ fn adding_a_planned_pr_never_renumbers_the_rows_above_it() {
 #[test]
 fn an_adopted_pr_lands_at_the_bottom_of_the_order() {
     // Given — a two-row stack, and a pull request the stack does not yet track
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -197,7 +197,7 @@ fn a_legacy_stack_is_numbered_on_the_next_write_in_topological_order() {
     // Given — a chain n1 <- n2 <- n3 written before display order existed, and stored in the `nodes`
     // array in reverse: the array has never been ordered by anything, so it must not be the source
     // the numbering is taken from.
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -236,7 +236,7 @@ fn a_legacy_stack_of_independent_rows_is_numbered_in_the_order_they_were_declare
     // them is ready at once, and the web places ready rows in declaration order — so `n1, n2, n10`
     // is the list the operator has been looking at all along. Sorted by node id it reads `n1, n10,
     // n2`, which is what a lexicographic tie-break would freeze into the numbers.
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -271,7 +271,7 @@ fn a_legacy_stack_of_independent_rows_is_numbered_in_the_order_they_were_declare
 #[test]
 fn deleting_a_row_leaves_the_orders_of_the_survivors_alone() {
     // Given — three numbered rows
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -294,7 +294,7 @@ fn deleting_a_row_leaves_the_orders_of_the_survivors_alone() {
 #[test]
 fn reseeding_an_unspawned_plan_renumbers_from_the_new_plan_order() {
     // Given — a two-row stack, neither node spawned, numbered 0 and 1
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -324,7 +324,7 @@ fn reseeding_an_unspawned_plan_renumbers_from_the_new_plan_order() {
 #[test]
 fn moving_a_row_up_swaps_it_with_the_row_above_it() {
     // Given
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -348,7 +348,7 @@ fn moving_a_row_up_swaps_it_with_the_row_above_it() {
 #[test]
 fn moving_a_row_down_swaps_it_with_the_row_below_it() {
     // Given
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -372,7 +372,7 @@ fn moving_a_row_down_swaps_it_with_the_row_below_it() {
 #[test]
 fn moving_the_first_row_up_changes_nothing() {
     // Given
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -392,7 +392,7 @@ fn moving_the_first_row_up_changes_nothing() {
 #[test]
 fn moving_the_last_row_down_changes_nothing() {
     // Given
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -412,7 +412,7 @@ fn moving_the_last_row_down_changes_nothing() {
 #[test]
 fn moving_a_row_leaves_the_dependency_graph_untouched() {
     // Given — a chain, so a reordering that touched `parents` would be visible
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -440,7 +440,7 @@ fn moving_a_row_leaves_the_dependency_graph_untouched() {
 #[test]
 fn moving_a_row_in_a_direction_that_is_neither_up_nor_down_is_refused_without_writing() {
     // Given — a stack whose order a bad direction must not disturb
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -463,7 +463,7 @@ fn moving_a_row_in_a_direction_that_is_neither_up_nor_down_is_refused_without_wr
 #[test]
 fn moving_an_unknown_node_is_refused_without_writing() {
     // Given — a stack with no node called n9
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,

@@ -31,7 +31,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
-use tddy_core::changeset::{write_changeset, Changeset, Stack, StackNode};
+use tddy_core::changeset::{Changeset, Stack, StackNode};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
@@ -315,8 +315,7 @@ fn a_planned_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> S
 
 fn a_session(data_dir: &Path, session_id: &str, changeset: Changeset) {
     let dir = unified_session_dir_path(data_dir, session_id);
-    std::fs::create_dir_all(&dir).expect("create session dir");
-    write_changeset(&dir, &changeset).expect("write changeset");
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&dir, changeset);
 }
 
 /// A repository with a real `origin/master` and `branch` pushed to it: the base resolver fetches the

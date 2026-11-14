@@ -11,7 +11,8 @@ use std::process::Command;
 
 use tddy_changeset::changeset::{Stack, StackNode};
 use tddy_changeset::session_lifecycle::unified_session_dir_path;
-use tddy_changeset::{write_changeset, Changeset};
+use tddy_changeset::stack_fixtures::write_changeset_with_stack;
+use tddy_changeset::Changeset;
 use tddy_session_worktree::session_chain::{
     resolve_chain_base_for_session_spawn, resolve_chain_base_ref,
 };
@@ -66,8 +67,7 @@ fn push_branch(repo: &Path, branch: &str) {
 
 fn write_parent_changeset(sessions_base: &Path, session_id: &str, cs: Changeset) {
     let dir = unified_session_dir_path(sessions_base, session_id);
-    fs::create_dir_all(&dir).expect("create parent session dir");
-    write_changeset(&dir, &cs).expect("write parent changeset");
+    write_changeset_with_stack(&dir, cs);
 }
 
 fn a_materialized_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNode {

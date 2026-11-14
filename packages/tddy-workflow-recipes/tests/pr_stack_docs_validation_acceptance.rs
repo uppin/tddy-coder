@@ -12,7 +12,7 @@
 use std::fs;
 use std::path::Path;
 
-use tddy_core::changeset::{write_changeset, Changeset, Stack, StackNode};
+use tddy_core::changeset::{Changeset, Stack, StackNode};
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::task::{NextAction, TaskResult};
@@ -36,8 +36,8 @@ fn a_planned_node(node_id: &str) -> StackNode {
     }
 }
 
-fn an_orchestrator_with_stack(node_ids: &[&str]) -> tempfile::TempDir {
-    let tmp = tempfile::tempdir().expect("temp session dir");
+fn an_orchestrator_with_stack(node_ids: &[&str]) -> tddy_changeset::stack_fixtures::ASessionDir {
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let changeset = Changeset {
         stack: Some(Stack {
             version: 1,
@@ -45,7 +45,7 @@ fn an_orchestrator_with_stack(node_ids: &[&str]) -> tempfile::TempDir {
         }),
         ..Changeset::default()
     };
-    write_changeset(tmp.path(), &changeset).expect("seed changeset with stack");
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(tmp.path(), changeset);
     tmp
 }
 

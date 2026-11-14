@@ -63,7 +63,7 @@ fn a_move_whose_rebase_conflicts_records_the_git_failure_on_the_node_and_leaves_
     // Given — n3 owns a real branch that cannot be rebased onto n2's, and an open PR #42
     let repo = tempfile::tempdir().unwrap();
     a_repo_whose_branches_conflict(repo.path());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,

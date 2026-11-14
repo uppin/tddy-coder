@@ -4,9 +4,7 @@
 
 use std::sync::Mutex;
 
-use tddy_core::changeset::{
-    read_changeset, write_changeset_atomic, Changeset, GithubPrStatus, Stack, StackNode,
-};
+use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
 use tddy_core::WorkflowError;
 use tddy_workflow_recipes::orchestrate_pr_stack::github::{
     GithubPrApi, PrLookupOutcome, PrRef, PrState, PrView,
@@ -92,7 +90,7 @@ fn init_orchestrator_with_stack(session_dir: &std::path::Path, nodes: Vec<StackN
         stack: Some(Stack { version: 1, nodes }),
         ..Default::default()
     };
-    write_changeset_atomic(session_dir, &cs).expect("write changeset");
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(session_dir, cs);
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +100,7 @@ fn init_orchestrator_with_stack(session_dir: &std::path::Path, nodes: Vec<StackN
 #[test]
 fn merge_task_writes_prmerged_journal_then_marks_node_merged() {
     // Given — orchestrator session dir with stack node n1 (PR #1 open)
-    let tmp = tempfile::tempdir().expect("temp dir");
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let session_dir = tmp.path();
     init_orchestrator_with_stack(
         session_dir,
@@ -134,8 +132,7 @@ fn merge_task_writes_prmerged_journal_then_marks_node_merged() {
     assert_eq!(mock_gh.merged_pr_numbers(), vec![1u64]);
 
     // …and the stack node n1 has pr_status.phase == "merged"
-    let cs = read_changeset(session_dir).expect("changeset readable");
-    let stack = cs.stack.expect("stack must exist");
+    let stack = tddy_changeset::stack_fixtures::stack_on_disk(session_dir);
     let n1 = stack
         .nodes
         .iter()
@@ -161,7 +158,7 @@ fn merge_task_writes_prmerged_journal_then_marks_node_merged() {
 #[test]
 fn repoint_task_repoints_each_dependent_and_clears_journal() {
     // Given — orchestrator session dir with a merged n1 and two dependents n2, n3
-    let tmp = tempfile::tempdir().expect("temp dir");
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let session_dir = tmp.path();
     init_orchestrator_with_stack(
         session_dir,

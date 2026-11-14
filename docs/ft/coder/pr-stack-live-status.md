@@ -101,7 +101,7 @@ respected.
 
 ## Orphaned-node recovery *(added 2026-07-26)*
 
-`DeleteSession` removes a session directory and never touches any orchestrator's `Changeset.stack`, so
+`DeleteSession` removes a session directory and never touches any orchestrator's stack, so
 the node keeps a dangling `session_id`. Previously the row derived its mode from that field alone
 (`isSpawned = Boolean(node.sessionId)`), so it showed a status chip forever and the planned PR became
 unworkable with no recovery path.
@@ -312,7 +312,7 @@ rpc RepointPlannedPr(RepointPlannedPrRequest) returns (RepointPlannedPrResponse)
 
 message RepointPlannedPrRequest {
   string session_token = 1;
-  // The "pr-stack" orchestrator session whose Changeset.stack holds the node.
+  // The "pr-stack" orchestrator session whose stack holds the node.
   string session_id = 2;
   // The planned node to repoint (drop merged parents, rebase, re-target PR base).
   string node_id = 3;

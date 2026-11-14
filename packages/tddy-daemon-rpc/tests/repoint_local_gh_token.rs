@@ -85,9 +85,17 @@ fn a_repoint_of_a_started_node_in_a_project(local_gh: bool) -> World {
 
     let dir = world.session_dir();
     fs::create_dir_all(&dir).unwrap();
-    tddy_core::write_changeset(
+    tddy_core::write_session_metadata(
         &dir,
-        &Changeset {
+        &a_session_metadata()
+            .with_session_id(ORCHESTRATOR)
+            .with_project_id(PROJECT_ID)
+            .build(),
+    )
+    .unwrap();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(
+        &dir,
+        Changeset {
             recipe: Some("pr-stack".to_string()),
             repo_path: Some(root.to_string_lossy().into_owned()),
             stack: Some(Stack {
@@ -102,16 +110,7 @@ fn a_repoint_of_a_started_node_in_a_project(local_gh: bool) -> World {
             }),
             ..Changeset::default()
         },
-    )
-    .unwrap();
-    tddy_core::write_session_metadata(
-        &dir,
-        &a_session_metadata()
-            .with_session_id(ORCHESTRATOR)
-            .with_project_id(PROJECT_ID)
-            .build(),
-    )
-    .unwrap();
+    );
 
     let projects_dir = world.data_dir().join("projects");
     fs::create_dir_all(&projects_dir).unwrap();

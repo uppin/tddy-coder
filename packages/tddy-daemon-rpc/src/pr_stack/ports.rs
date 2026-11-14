@@ -78,9 +78,7 @@ impl PrStackHandler for PrStackRpcHandler {
         // Re-read the just-updated changeset and reuse the same serializer as `ListSessions`
         // enrichment so the response's `stack_plan_json` is byte-for-byte the same wire shape
         // `PrStackScreen`'s `parseStackPlan` already knows how to read.
-        let changeset =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let stack_plan_json = session_list_enrichment::stack_plan_json_for_changeset(&changeset);
+        let stack_plan_json = stack_plan_json_of(&session_dir)?;
 
         log::info!(
             "AddPlannedPr: success session_id={} node_id={} title={:?}",
@@ -420,10 +418,9 @@ impl PrStackHandler for PrStackRpcHandler {
         // Checked before the write, because `link_stack_node_to_child_session` leaves an unknown
         // node alone and reports success — which reads to the caller exactly like a link that
         // landed, and is the failure mode this whole path exists to make visible.
-        let changeset =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        if changeset
-            .stack
+        let stack = tddy_core::changeset::read_session_stack(&session_dir)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        if stack
             .as_ref()
             .is_none_or(|stack| stack.node(node_id).is_none())
         {
@@ -452,10 +449,8 @@ impl PrStackHandler for PrStackRpcHandler {
         // Re-read and serialize through the same path `AddPlannedPr` / `RepointPlannedPr` /
         // `ReorderPlannedPr` answer with, so a caller that renders the plan reuses `parseStackPlan`
         // and does not re-read what this call already knows.
-        let linked =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(LinkStackNodeResponse {
-            stack_plan_json: session_list_enrichment::stack_plan_json_for_changeset(&linked),
+            stack_plan_json: stack_plan_json_of(&session_dir)?,
         }))
     }
 
@@ -514,9 +509,9 @@ impl PrStackHandler for PrStackRpcHandler {
 
         // The named target must be a branch this node can be based onto: the repoint retains only
         // the parents that own it, so an unvalidated target is a silent plan rewrite.
-        let changeset =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let stack = changeset.stack.unwrap_or_default();
+        let stack = tddy_core::changeset::read_session_stack(&session_dir)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .unwrap_or_default();
         let parent_branches: Vec<String> = stack
             .node(&node_id)
             .map(|node| {
@@ -599,9 +594,7 @@ impl PrStackHandler for PrStackRpcHandler {
         // Re-read the just-updated changeset and reuse the same serializer as `ListSessions`
         // enrichment so the response's `stack_plan_json` is the exact wire shape `PrStackScreen`
         // already knows how to parse.
-        let updated =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let stack_plan_json = session_list_enrichment::stack_plan_json_for_changeset(&updated);
+        let stack_plan_json = stack_plan_json_of(&session_dir)?;
         Ok(Response::new(RepointPlannedPrResponse { stack_plan_json }))
     }
 
@@ -640,9 +633,7 @@ impl PrStackHandler for PrStackRpcHandler {
 
         // The same serializer `ListSessions` enrichment uses, so the response's `stack_plan_json` is
         // the exact wire shape `PrStackScreen`'s `parseStackPlan` already reads.
-        let updated =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let stack_plan_json = session_list_enrichment::stack_plan_json_for_changeset(&updated);
+        let stack_plan_json = stack_plan_json_of(&session_dir)?;
         Ok(Response::new(ReorderPlannedPrResponse { stack_plan_json }))
     }
 
@@ -708,9 +699,9 @@ impl PrStackHandler for PrStackRpcHandler {
         .map_err(Status::failed_precondition)?;
 
         // The branch the pull just moved, re-read from disk.
-        let branch = tddy_core::read_changeset(&session_dir)
+        let branch = tddy_core::changeset::read_session_stack(&session_dir)
             .ok()
-            .and_then(|changeset| changeset.stack)
+            .flatten()
             .and_then(|stack| stack.node(req.node_id.trim())?.branch.clone())
             .unwrap_or_default();
 
@@ -816,4 +807,12 @@ impl PrStackHandler for PrStackRpcHandler {
             push_error: report.push_error.unwrap_or_default(),
         }))
     }
+}
+
+/// The session's stack as `stack_plan_json`, through the serializer `ListSessions` enrichment uses.
+fn stack_plan_json_of(dir: &std::path::Path) -> Result<String, Status> {
+    let changeset = tddy_core::read_changeset(dir).map_err(|e| Status::internal(e.to_string()))?;
+    Ok(session_list_enrichment::stack_plan_json_for_changeset(
+        dir, &changeset,
+    ))
 }

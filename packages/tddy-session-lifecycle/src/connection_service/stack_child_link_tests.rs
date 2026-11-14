@@ -1,7 +1,7 @@
 use super::*;
 use tddy_core::changeset::{Stack, StackNode};
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::{read_changeset, write_changeset, Changeset};
+use tddy_core::{write_changeset, Changeset};
 
 /// A planned node: it carries the branch name the planner proposed, but nothing created it yet.
 fn a_planned_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> StackNode {
@@ -24,9 +24,9 @@ fn a_planned_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> S
 fn an_orchestrator_with_a_two_node_stack(sessions_base: &std::path::Path) -> PathBuf {
     let dir = unified_session_dir_path(sessions_base, "orchestrator-1");
     std::fs::create_dir_all(&dir).expect("create orchestrator session dir");
-    write_changeset(
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(
         &dir,
-        &Changeset {
+        Changeset {
             recipe: Some("pr-stack".to_string()),
             stack: Some(Stack {
                 version: 1,
@@ -37,8 +37,7 @@ fn an_orchestrator_with_a_two_node_stack(sessions_base: &std::path::Path) -> Pat
             }),
             ..Changeset::default()
         },
-    )
-    .expect("write orchestrator changeset");
+    );
     dir
 }
 
@@ -46,9 +45,9 @@ fn an_orchestrator_with_a_two_node_stack(sessions_base: &std::path::Path) -> Pat
 fn an_orchestrator_with_a_renamed_bottom_branch(sessions_base: &std::path::Path) -> PathBuf {
     let dir = unified_session_dir_path(sessions_base, "orchestrator-1");
     std::fs::create_dir_all(&dir).expect("create orchestrator session dir");
-    write_changeset(
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(
         &dir,
-        &Changeset {
+        Changeset {
             recipe: Some("pr-stack".to_string()),
             stack: Some(Stack {
                 version: 1,
@@ -62,8 +61,7 @@ fn an_orchestrator_with_a_renamed_bottom_branch(sessions_base: &std::path::Path)
             }),
             ..Changeset::default()
         },
-    )
-    .expect("write orchestrator changeset");
+    );
     dir
 }
 
@@ -75,9 +73,9 @@ fn an_orchestrator_whose_bottom_node_lost_its_child_session(
 ) -> PathBuf {
     let dir = unified_session_dir_path(sessions_base, "orchestrator-1");
     std::fs::create_dir_all(&dir).expect("create orchestrator session dir");
-    write_changeset(
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(
         &dir,
-        &Changeset {
+        Changeset {
             recipe: Some("pr-stack".to_string()),
             stack: Some(Stack {
                 version: 1,
@@ -92,8 +90,7 @@ fn an_orchestrator_whose_bottom_node_lost_its_child_session(
             }),
             ..Changeset::default()
         },
-    )
-    .expect("write orchestrator changeset");
+    );
     dir
 }
 
@@ -115,9 +112,9 @@ fn an_orchestrator_whose_bottom_branch_only_its_session_knows(
 
     let dir = unified_session_dir_path(sessions_base, "orchestrator-1");
     std::fs::create_dir_all(&dir).expect("create orchestrator session dir");
-    write_changeset(
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(
         &dir,
-        &Changeset {
+        Changeset {
             recipe: Some("pr-stack".to_string()),
             stack: Some(Stack {
                 version: 1,
@@ -131,8 +128,7 @@ fn an_orchestrator_whose_bottom_branch_only_its_session_knows(
             }),
             ..Changeset::default()
         },
-    )
-    .expect("write orchestrator changeset");
+    );
     dir
 }
 
@@ -158,10 +154,7 @@ fn spawning_bases_a_node_on_a_parent_branch_only_its_child_session_recorded() {
 }
 
 fn stack_of(orchestrator_dir: &std::path::Path) -> Stack {
-    read_changeset(orchestrator_dir)
-        .expect("read orchestrator changeset")
-        .stack
-        .expect("orchestrator must carry a stack")
+    tddy_changeset::stack_fixtures::stack_on_disk(orchestrator_dir)
 }
 
 #[test]

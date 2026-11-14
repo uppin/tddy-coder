@@ -61,6 +61,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+# `stack_fixtures`: the sessions layout a PR stack lives in.
+tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 # The acceptance suites stand up the plugin's own peer and room wiring; dev edges are not counted by
 # the LiveKit ratchet, which only bounds what the crate builds with.
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }

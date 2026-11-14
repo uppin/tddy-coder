@@ -61,6 +61,8 @@ tokio-util = { version = "0.7", features = ["compat"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `stack_fixtures`: the sessions layout a PR stack lives in.
+tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 serial_test = "3"
 ctor = "0.2"
 tempfile = "3"

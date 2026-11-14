@@ -155,18 +155,15 @@ fn write_stack_status(
 
 /// Best-effort `stack-status.md`/`.json` rollup, run after every task tick regardless of which
 /// task just ran. Logs and swallows failures — this is derived display data, never the
-/// authoritative `Changeset.stack`.
+/// authoritative project stack record.
 fn refresh_stack_status_best_effort(context: &Context) {
     let Some(dir) = session_dir_from_context(context) else {
         return;
     };
-    let Ok(cs) = read_changeset(&dir) else {
+    let Ok(Some(stack)) = tddy_core::changeset::read_session_stack(&dir) else {
         return;
     };
-    let Some(ref stack) = cs.stack else {
-        return;
-    };
-    if let Err(e) = write_stack_status(&dir, stack) {
+    if let Err(e) = write_stack_status(&dir, &stack) {
         log::warn!("[pr-stack hooks] write_stack_status failed: {e}");
     }
 }
@@ -210,9 +207,7 @@ fn before_write_stack_plan(context: &Context, session_dir: Option<&Path>) {
 /// every one of them by id and the agent has no other list to work from.
 fn before_write_stack_docs(context: &Context, session_dir: Option<&Path>) {
     context.set_sync("system_prompt", write_stack_docs_system_prompt(RECIPE_NAME));
-    let stack = session_dir
-        .and_then(|dir| read_changeset(dir).ok())
-        .and_then(|cs| cs.stack);
+    let stack = session_dir.and_then(|dir| tddy_core::changeset::read_session_stack(dir).ok()?);
     context.set_sync("prompt", write_stack_docs_user_prompt(stack.as_ref()));
 }
 
@@ -273,7 +268,7 @@ fn after_write_stack_plan(
     let plan: StackPlanOutput = serde_yaml::from_str(&output)
         .map_err(|e| format!("failed to parse stack-plan YAML: {e}"))?;
 
-    // Seed `Changeset.stack` from the plan on the first write, and re-seed it on every
+    // Seed the project stack from the plan on the first write, and re-seed it on every
     // subsequent refinement turn. `reseed_stack_from_plan_if_unspawned` validates the plan,
     // populates the stack from an empty/absent one, and refuses to overwrite once any node has
     // spawned a child session — so the `orchestrate` goal and its `pr_*` tools always operate on
@@ -327,9 +322,8 @@ fn after_write_stack_docs(
     let docs: StackDocsOutput = serde_yaml::from_str(&output)
         .map_err(|e| format!("failed to parse stack-docs YAML: {e}"))?;
 
-    let changeset = read_changeset(dir).map_err(|e| format!("read changeset: {e}"))?;
-    let stack = changeset
-        .stack
+    let stack = tddy_core::changeset::read_session_stack(dir)
+        .map_err(|e| format!("read stack: {e}"))?
         .ok_or("write-stack-docs requires a planned stack; none is persisted")?;
 
     validate_stack_docs(&stack, &docs)?;
@@ -615,7 +609,7 @@ prs:
     #[test]
     fn write_stack_plan_writes_exploration_md_under_artifacts_when_submitted() {
         // Given — a completed write-stack-plan submission carrying an exploration doc
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
         let dir = tmp.path();
         let ctx = a_planned_session_context(dir, submit_yaml_with_exploration());
 
@@ -639,7 +633,7 @@ prs:
     #[test]
     fn write_stack_plan_writes_no_exploration_md_when_the_field_is_blank() {
         // Given — a submission whose exploration field is whitespace-only
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
         let dir = tmp.path();
         let ctx = a_planned_session_context(
             dir,
@@ -667,7 +661,7 @@ prs:
     #[test]
     fn write_stack_plan_still_persists_stack_plan_yaml_and_md_alongside_exploration() {
         // Given
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
         let dir = tmp.path();
         let ctx = a_planned_session_context(dir, submit_yaml_with_exploration());
 
@@ -696,7 +690,7 @@ prs:
     #[test]
     fn orchestrate_prompt_surfaces_the_exploration_doc_path_via_context_reminder() {
         // Given — a planned session whose exploration.md already exists on disk
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
         let dir = tmp.path();
         let artifacts = dir.join("artifacts");
         fs::create_dir_all(&artifacts).unwrap();
@@ -731,7 +725,7 @@ prs:
     #[test]
     fn orchestrate_prompt_has_no_context_reminder_when_no_docs_exist() {
         // Given — a session with an empty artifacts dir (no context docs written yet)
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
         let dir = tmp.path();
         fs::create_dir_all(dir.join("artifacts")).unwrap();
 

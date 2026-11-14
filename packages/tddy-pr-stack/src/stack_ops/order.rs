@@ -92,7 +92,7 @@ pub fn move_planned_pr_node(
     node_id: &str,
     direction: &str,
 ) -> Result<tddy_core::changeset::Stack, String> {
-    use tddy_core::changeset::{read_changeset, update_stack_atomic};
+    use tddy_core::changeset::{read_session_stack, update_stack_atomic};
     const OP: &str = "move_planned_pr_node";
 
     let up = match direction {
@@ -105,9 +105,8 @@ pub fn move_planned_pr_node(
         }
     };
 
-    let stack = read_changeset(session_dir)
+    let stack = tddy_core::changeset::read_session_stack(session_dir)
         .map_err(|e| format!("{OP}: failed to read changeset: {e}"))?
-        .stack
         .unwrap_or_default();
     if stack.node(node_id).is_none() {
         return Err(format!("{OP}: node '{node_id}' not found"));
@@ -119,9 +118,9 @@ pub fn move_planned_pr_node(
     })
     .map_err(|e| format!("{OP}: failed to write stack: {e}"))?;
 
-    read_changeset(session_dir)
+    read_session_stack(session_dir)
         .map_err(|e| format!("{OP}: failed to reload stack: {e}"))
-        .map(|changeset| changeset.stack.unwrap_or_default())
+        .map(Option::unwrap_or_default)
 }
 
 /// Swap `node_id`'s position with the row above (`up`) or below it, or leave the stack alone when

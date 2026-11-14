@@ -16,6 +16,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 159 | 4 | 10 | 15 | first detection |
 | 2026-09-22 | 158 | 4 | 10 | 15 | moved to `tddy-pr-stack` by #496 — −1 line is a rustfmt rewrap of a shortened path, no logic change |
+| 2026-11-12 | 157 | 4 | 10 | 15 | touched by #879 (`#orchestrators` 2/11): the stack is read through `read_session_stack` (−1 line); no logic change |
 
 ## What the tool found
 

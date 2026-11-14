@@ -2,7 +2,7 @@
 
 use tddy_rpc::Status;
 
-/// Guard for any RPC that mutates a `"pr-stack"` orchestrator's `Changeset.stack`: rejects a
+/// Guard for any RPC that mutates a `"pr-stack"` orchestrator's stack: rejects a
 /// session whose recipe (or legacy alias) doesn't resolve to `"pr-stack"`, before the caller
 /// touches that session's changeset. Shared by `add_planned_pr` today; future planned-PR
 /// mutation RPCs (edit/delete) should call this too rather than re-checking inline.

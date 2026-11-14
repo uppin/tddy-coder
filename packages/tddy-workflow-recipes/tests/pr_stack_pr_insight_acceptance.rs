@@ -230,7 +230,7 @@ fn changed_files_are_returned_with_a_path_and_a_status_when_requested() {
 #[test]
 fn a_node_id_resolves_to_the_pull_number_recorded_in_its_pr_status_url() {
     // Given — n1 records PR #1234, so a number derived from anything else would show
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![an_open_node("n1", BRANCH_N1, 1234, &[])]);
 
@@ -244,7 +244,7 @@ fn a_node_id_resolves_to_the_pull_number_recorded_in_its_pr_status_url() {
 #[test]
 fn a_node_that_records_no_pr_url_cannot_be_addressed_and_says_so() {
     // Given — n1 was never started, so no PR url was ever recorded on it
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![a_planned_node("n1", &[])]);
 
@@ -259,7 +259,7 @@ fn a_node_that_records_no_pr_url_cannot_be_addressed_and_says_so() {
 fn a_node_whose_recorded_pr_status_carries_no_url_cannot_be_addressed_and_says_so() {
     // Given — n1's PR is recorded as merged, but no url was ever recorded with it: a pr_status is
     // present, and it still names no pull request
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![a_merged_node("n1", BRANCH_N1, &[])]);
 
@@ -273,7 +273,7 @@ fn a_node_whose_recorded_pr_status_carries_no_url_cannot_be_addressed_and_says_s
 #[test]
 fn an_unknown_node_id_cannot_be_addressed_and_says_so() {
     // Given
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![an_open_node("n1", BRANCH_N1, PR, &[])]);
 

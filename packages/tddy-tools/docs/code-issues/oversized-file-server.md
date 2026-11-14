@@ -28,6 +28,7 @@ subagent turn-control changeset
 | 2026-10-23 | 2,832 → 2,856 | **worse** by 24 in #700 (`#project-home` 5/7), by the inline-test-block rule on `origin/feature/project-home/home-session` and HEAD: the project-home tool defs chained into the registered catalog, `advertised_tools_admitting`, and `list_tools` asking the daemon per listing (refusing on a failed ask). The admission logic is its own module (`exec_tool_admission.rs`, 77 production lines). Not split: stack-shared |
 | 2026-10-24 | +6 (wc 3,922 → 3,928) | **worse** by 6 in PR #722 (`#coagents` 3/8): `subagent_resume_tool` parses the `permission` argument and the schema registers it; the parse and the schema property live in the new `permission_answer_arg.rs`. Not split: stack-shared |
 | 2026-10-26 | 3,037 → 3,085 | **worse** by 48 in #758 (`#start-parity` 9/9), by the inline-test-block rule on `origin/feature/start-parity/disk-refresh` and HEAD: `spawn_conversation` takes `StartSession`'s arguments (`SpawnConversationInput` advertised under `StartSession`'s schema), the new `spawn_conversation_status` / `spawn_conversation_cancel` tools and their dispatch arms, and the shared `relay_to_daemon`. Split deferred by developer instruction (code issues recorded, not solved, in the `#start-parity` stack) |
+| 2026-11-12 | −5 (wc 4,161 → 4,156) | **touched, smaller** in #879 (`#orchestrators` 2/11): `pr_stack_status_impl` and `addressed_pull_number` read the stack through `read_session_stack` instead of the changeset |
 
 ## What the tool found
 

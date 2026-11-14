@@ -14,10 +14,8 @@ use crate::stack_child_spawn::StackChildSpawnHandler;
 #[async_trait::async_trait]
 impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
     async fn spawn_child(&self, node_id: &str) -> Result<String, String> {
-        let changeset = tddy_core::read_changeset(&self.orchestrator_session_dir)
-            .map_err(|e| format!("failed to read orchestrator changeset: {e}"))?;
-        let stack = changeset
-            .stack
+        let stack = tddy_core::changeset::read_session_stack(&self.orchestrator_session_dir)
+            .map_err(|e| format!("failed to read orchestrator stack: {e}"))?
             .ok_or_else(|| "orchestrator changeset has no stack".to_string())?;
         let node = stack
             .nodes

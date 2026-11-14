@@ -14,9 +14,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
 
-use tddy_core::changeset::{
-    read_changeset, write_changeset, Changeset, GithubPrStatus, Stack, StackNode,
-};
+use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
 use tddy_workflow_recipes::orchestrate_pr_stack::github::{
     CheckRun, GithubPrApi, GithubPrInsightApi, PrDetail, PrFile, PrIssueComment, PrLookupOutcome,
     PrRef, PrReview, PrReviewComment, PrSearchHit, PrSearchQuery, PrState, PrView,
@@ -71,16 +69,20 @@ pub fn a_planned_node(node_id: &str, parents: &[&str]) -> StackNode {
     }
 }
 
+/// `dir` (a session directory in the project layout, see `a_stack_session_dir`) is a pr-stack
+/// orchestrator whose project holds `nodes`.
 pub fn write_stack(dir: &Path, nodes: Vec<StackNode>) {
-    let cs = Changeset {
-        stack: Some(Stack { version: 1, nodes }),
-        ..Changeset::default()
-    };
-    write_changeset(dir, &cs).unwrap();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(
+        dir,
+        Changeset {
+            stack: Some(Stack { version: 1, nodes }),
+            ..Changeset::default()
+        },
+    );
 }
 
 pub fn stack_of(dir: &Path) -> Stack {
-    read_changeset(dir).unwrap().stack.unwrap()
+    tddy_changeset::stack_fixtures::stack_on_disk(dir)
 }
 
 pub fn node_ids(dir: &Path) -> Vec<String> {

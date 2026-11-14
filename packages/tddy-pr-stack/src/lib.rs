@@ -14,6 +14,7 @@ pub mod docs;
 pub mod git_ops;
 pub mod pr_insight;
 pub mod rpc;
+pub mod stack_migration;
 pub mod stack_ops;
 
 pub use rpc::PR_STACK_SERVICE;

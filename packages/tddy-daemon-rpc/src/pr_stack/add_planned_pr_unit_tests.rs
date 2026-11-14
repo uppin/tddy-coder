@@ -1,5 +1,5 @@
 //! Unit tests: `PrStackRpcHandler::add_planned_pr` — the recipe guard rejecting a
-//! non-"pr-stack" session before its `Changeset.stack` is touched.
+//! non-"pr-stack" session before its stack is touched.
 //!
 //! PRD: docs/ft/coder/pr-stacking.md § Manually adding a planned PR.
 //! Changeset: docs/dev/1-WIP/pr-stack-manual-add-planned-pr.md.
@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use super::PrStackRpcHandler;
-use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
+use tddy_core::changeset::{read_changeset, Changeset};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
@@ -66,12 +66,11 @@ fn make_unit_connection(sessions_base: std::path::PathBuf) -> DaemonSessionHost 
 }
 
 fn write_unit_changeset(session_dir: &std::path::Path, recipe: Option<&str>) {
-    std::fs::create_dir_all(session_dir).unwrap();
     let changeset = Changeset {
         recipe: recipe.map(str::to_string),
         ..Changeset::default()
     };
-    write_changeset(session_dir, &changeset).unwrap();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(session_dir, changeset);
 }
 
 fn a_request(session_id: &str, title: &str) -> Request<AddPlannedPrRequest> {
@@ -87,7 +86,7 @@ fn a_request(session_id: &str, title: &str) -> Request<AddPlannedPrRequest> {
 }
 
 /// A session whose changeset `recipe` is `"tdd"` (not a pr-stack orchestrator) must be
-/// rejected before `Changeset.stack` is ever touched.
+/// rejected before its stack is ever touched.
 #[tokio::test]
 async fn add_planned_pr_rejects_a_session_whose_recipe_is_not_pr_stack() {
     // Given — a plain "tdd" session, not a pr-stack orchestrator
@@ -106,8 +105,8 @@ async fn add_planned_pr_rejects_a_session_whose_recipe_is_not_pr_stack() {
     assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
     let loaded = read_changeset(&session_dir).unwrap();
     assert!(
-        loaded.stack.is_none(),
-        "the rejected session's Changeset.stack must remain untouched"
+        loaded.stack_id.is_none(),
+        "the rejected session must not gain a stack"
     );
 }
 
@@ -154,8 +153,12 @@ async fn add_planned_pr_succeeds_for_a_pr_stack_orchestrator_session() {
     assert_eq!(parsed["nodes"][0]["node_id"], "n1");
     assert_eq!(parsed["nodes"][0]["title"], "Add auth middleware");
     assert_eq!(parsed["nodes"][0]["parents"], serde_json::json!([]));
-    let loaded = read_changeset(&session_dir).unwrap();
-    assert_eq!(loaded.stack.unwrap().nodes.len(), 1);
+    assert_eq!(
+        tddy_changeset::stack_fixtures::stack_on_disk(&session_dir)
+            .nodes
+            .len(),
+        1
+    );
 }
 
 /// A legacy alias recipe name ("orchestrate-pr-stack") resolves to the same canonical

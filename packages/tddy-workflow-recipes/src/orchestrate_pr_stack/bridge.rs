@@ -2,7 +2,7 @@
 //!
 //! After a `plan-pr-stack` session completes and writes `stack-plan.yaml`, the operator
 //! creates an `orchestrate-pr-stack` session. On the first `assess` tick the orchestrator
-//! calls [`seed_orchestrator_stack_from_plan`] lazily: if `Changeset.stack` is `None` but
+//! calls [`seed_orchestrator_stack_from_plan`] lazily: if the stack is absent but
 //! `stack-plan.yaml` exists in the session dir, this function reads, validates, and persists
 //! the plan as `Stack` nodes on the orchestrator changeset.
 
@@ -16,7 +16,7 @@ use crate::plan_pr_stack::StackPlanOutput;
 /// path so existing callers keep working.
 pub use tddy_pr_stack::pr_insight::pr_number_from_status_url;
 
-/// Seed the orchestrator's `Changeset.stack` from a completed `StackPlanOutput`.
+/// Seed the orchestrator's stack from a completed `StackPlanOutput`.
 ///
 /// Reads the plan (passed directly — callers read `stack-plan.yaml` and parse it), validates
 /// it, converts to `StackNode`s, and atomically persists the `Stack` on the orchestrator.
@@ -61,8 +61,8 @@ pub fn execute_stack_merge(
 
     // 1. Write journal with Planned phase so crash recovery can resume.
     let dependents = {
-        let cs = tddy_core::changeset::read_changeset(orchestrator_session_dir)?;
-        let stack = cs.stack.as_ref().cloned().unwrap_or_default();
+        let stack =
+            tddy_core::changeset::read_session_stack(orchestrator_session_dir)?.unwrap_or_default();
         stack
             .nodes
             .iter()
@@ -110,8 +110,8 @@ pub fn repoint_reaches_github(
     orchestrator_session_dir: &Path,
     dependents: &[String],
 ) -> Result<bool, WorkflowError> {
-    let changeset = tddy_core::changeset::read_changeset(orchestrator_session_dir)?;
-    let stack = changeset.stack.unwrap_or_default();
+    let stack =
+        tddy_core::changeset::read_session_stack(orchestrator_session_dir)?.unwrap_or_default();
     Ok(dependents.iter().any(|dependent| {
         stack
             .nodes
@@ -136,7 +136,7 @@ pub fn execute_stack_repoint(
     use crate::orchestrate_pr_stack::transient::{
         delete_stack_op_journal, write_stack_op_journal, MergePhase, StackOpJournal,
     };
-    use tddy_core::changeset::{read_changeset, update_stack_atomic, GithubPrStatus};
+    use tddy_core::changeset::{read_session_stack, update_stack_atomic, GithubPrStatus};
 
     for (idx, dep_id) in dependents.iter().enumerate() {
         // Advance journal to current repoint step.
@@ -152,8 +152,7 @@ pub fn execute_stack_repoint(
         }
 
         // Read the dependent's branch from the stack.
-        let cs = read_changeset(orchestrator_session_dir)?;
-        let stack = cs.stack.as_ref().cloned().unwrap_or_default();
+        let stack = read_session_stack(orchestrator_session_dir)?.unwrap_or_default();
         let Some(dep_node) = stack.nodes.iter().find(|n| &n.node_id == dep_id).cloned() else {
             continue;
         };

@@ -100,9 +100,8 @@ pub fn pull_base_into_node_branch(
         ));
     }
 
-    let stack = tddy_core::changeset::read_changeset(session_dir)
+    let stack = tddy_core::changeset::read_session_stack(session_dir)
         .map_err(|e| format!("{OP}: failed to read changeset: {e}"))?
-        .stack
         .unwrap_or_default();
     let node = stack
         .node(node_id)

@@ -30,12 +30,11 @@ prs:
 #[test]
 fn writing_the_stack_plan_seeds_the_changeset_stack_on_the_first_write() {
     // Given — a fresh orchestrator session whose changeset has no stack yet
-    let dir = std::env::temp_dir().join(format!("pr-stack-seed-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("temp session dir");
+    let session = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let dir = session.path().to_path_buf();
     write_changeset(&dir, &Changeset::default()).expect("seed changeset.yaml");
     assert!(
-        read_changeset(&dir).unwrap().stack.is_none(),
+        read_changeset(&dir).unwrap().stack_id.is_none(),
         "precondition: no stack before the plan is written"
     );
 
@@ -56,11 +55,7 @@ fn writing_the_stack_plan_seeds_the_changeset_stack_on_the_first_write() {
         .expect("write-stack-plan after_task hook");
 
     // Then — the stack is populated from the plan, ready for the orchestrate loop's tools
-    let stack = read_changeset(&dir)
-        .expect("read changeset")
-        .stack
-        .expect("writing the plan must seed Changeset.stack");
-    let _ = std::fs::remove_dir_all(&dir);
+    let stack = tddy_changeset::stack_fixtures::stack_on_disk(&dir);
     let node_ids: Vec<&str> = stack.nodes.iter().map(|n| n.node_id.as_str()).collect();
     assert_eq!(node_ids, vec!["n1", "n2"]);
 }

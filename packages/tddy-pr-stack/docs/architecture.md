@@ -3,7 +3,7 @@
 ## Overview
 
 The PR-stack data model and its git/GitHub operations: every writer of a session's
-`Changeset.stack`, the read-side views the orchestrator decides from, the per-PR documents, the
+PR stack (held in its project's stack store), the read-side views the orchestrator decides from, the per-PR documents, the
 syncs that keep a node's branch and pull request in line with its place in the stack, and the
 `pr_stack.PrStackService` handler trait the daemon implements. Product
 behaviour is specified in [pr-stacking.md](../../../docs/ft/coder/pr-stacking.md) and
@@ -17,7 +17,7 @@ depends on this crate and re-exports every item from its historical path.
 
 | Crate | What this crate takes from it |
 |---|---|
-| `tddy-core` | `changeset::{Stack, StackNode, Changeset}`, `read_changeset`, `update_stack_atomic`, `WorkflowError` |
+| `tddy-core` | `changeset::{Stack, StackNode, Changeset}`, `read_changeset`, `read_session_stack`, `update_stack_atomic`, `project_stack_store::ProjectStackStore`, `WorkflowError` |
 | `tddy-git` | `detect_default_remote_name`, `worktree_path_for_branch`, `local_branch_name_for_remote`, `checked_out_branch_name` |
 | `tddy-github` | the PR REST client, `tddy_github::pr_api` (`GithubPrApi`, `GithubPrInsightApi`, `RealGithubPrApi`, `PrState`, `owner_repo_from_remote_url`) |
 | `tddy-workflow` | `session_artifacts_root`, which `docs::node_doc_paths` resolves the per-node document root from |
@@ -55,12 +55,14 @@ that implements it (`tddy-daemon-rpc`); a dependency back would be a cycle.
 
 ## Modules
 
-All six top-level modules are `pub`; `lib.rs` declares them and re-exports `rpc::PR_STACK_SERVICE`
+All seven top-level modules are `pub`; `lib.rs` declares them and re-exports `rpc::PR_STACK_SERVICE`
 at the crate root.
 
 ### `stack_ops/` — the stack operations
 
-Every writer of `Changeset.stack` and the git/GitHub syncs around it. The concern modules are
+Every writer of an orchestrator's stack and the git/GitHub syncs around it. Each reads through
+`read_session_stack` and writes through `update_stack_atomic`, both of which resolve the session's
+project stack record. The concern modules are
 private; `stack_ops/mod.rs` re-exports every public item, so `tddy_pr_stack::stack_ops::*` is the one
 path callers name. `mod.rs` also holds the shared private helpers — `read_stack`,
 `append_node_atomic`, `validate_parents`, `reject_if_cyclic`, `message_prefix` — and the test
@@ -128,6 +130,18 @@ The daemon's implementation is `tddy_daemon_rpc::PrStackRpcHandler`
 trait for session start's stack-base and stack-link paths, and re-exports the trait, adapter and
 entry builder from `pr_stack_rpc` and its crate root; `tddy-workflow-recipes` re-exports
 `PR_STACK_SERVICE`.
+
+### `stack_migration.rs` — the startup sweep
+
+`migrate_session_stacks(sessions_base, projects_dir) -> MigrationReport` moves every stack still
+carried in a session's `changeset.yaml` (`Changeset.stack`, the pre-store field) into its project's
+stack store, then names the record in `Changeset.stack_id` and drops the copy. It is the only reader
+of that field. Record before id, so a rerun after an interruption finds the record by
+`created_by_session_id`; a second run changes nothing. `MigrationReport { migrated_session_ids,
+sessions_without_project, failures: Vec<MigrationFailure { session_id, message }> }`, each list
+sorted; the sweep logs a summary and each session it left alone or could not move. `tddy-daemon`
+calls it at startup (`runtime/mount_host.rs`) over its data directory; the body lives here because
+the daemon crate is wiring only. See [pr-stacking.md § Where a stack lives](../../../docs/ft/coder/pr-stacking.md#where-a-stack-lives).
 
 ## What stays in `tddy-workflow-recipes`
 

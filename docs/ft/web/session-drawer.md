@@ -1188,7 +1188,7 @@ control (`tddy-service/proto/tddy/v1/remote.proto`), not a new backend concept:
   answers.
 - **Refine loop** — a refinement turn causes the recipe's `write-stack-plan` goal to re-run
   (`plan_refinement_goal()`, [PR stacking § pr-stack recipe](../coder/pr-stacking.md#pr-stack-recipe)),
-  which rewrites `stack-plan.yaml` and re-seeds `Changeset.stack`. The planned-PR list
+  which rewrites `stack-plan.yaml` and re-seeds the orchestrator's stack. The planned-PR list
   re-reads `stackPlanJson` after a `WorkflowComplete` / `StateChanged` event so edits appear
   without a manual refresh.
 

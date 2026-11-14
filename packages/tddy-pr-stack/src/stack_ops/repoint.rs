@@ -46,11 +46,11 @@ pub fn repoint_planned_pr_node(
     target_base_branch: Option<&str>,
     gh: &dyn tddy_github::pr_api::GithubPrApi,
 ) -> Result<StackNode, String> {
-    use tddy_core::changeset::{read_changeset, update_stack_atomic};
+    use tddy_core::changeset::{read_session_stack, update_stack_atomic};
 
-    let changeset = read_changeset(session_dir)
-        .map_err(|e| format!("repoint_planned_pr_node: failed to read changeset: {e}"))?;
-    let stack = changeset.stack.unwrap_or_default();
+    let stack = read_session_stack(session_dir)
+        .map_err(|e| format!("repoint_planned_pr_node: failed to read changeset: {e}"))?
+        .unwrap_or_default();
     let node = stack
         .node(node_id)
         .ok_or_else(|| format!("repoint_planned_pr_node: node '{node_id}' not found"))?
@@ -108,9 +108,8 @@ pub fn repoint_planned_pr_node(
         )?;
     }
 
-    let final_stack = read_changeset(session_dir)
+    let final_stack = tddy_core::changeset::read_session_stack(session_dir)
         .map_err(|e| format!("repoint_planned_pr_node: failed to reload node: {e}"))?
-        .stack
         .unwrap_or_default();
     final_stack
         .node(node_id)
@@ -148,13 +147,11 @@ pub(super) fn realign_node_to_effective_base(
     gh: &dyn tddy_github::pr_api::GithubPrApi,
 ) -> Result<(), String> {
     use crate::git_ops::{force_push_with_lease, local_branch_exists, merge_base, rebase_onto};
-    use tddy_core::changeset::read_changeset;
 
     // Effective base after the parent change: strip the `origin/` prefix so it names a branch usable
     // both as a rebase target and a GitHub PR base.
-    let updated = read_changeset(session_dir)
+    let updated = tddy_core::changeset::read_session_stack(session_dir)
         .map_err(|e| format!("{op}: failed to re-read changeset: {e}"))?
-        .stack
         .unwrap_or_default();
     let base_ref = updated
         .effective_base_refs(node_id, default_branch)

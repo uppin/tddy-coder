@@ -15,7 +15,7 @@ fn write_empty_orchestrator_changeset(session_dir: &std::path::Path) {
 #[test]
 fn seed_orchestrator_stack_from_plan_populates_changeset_stack() {
     // Given — an orchestrator session dir with an empty changeset (no stack yet)
-    let tmp = tempfile::tempdir().expect("temp dir");
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let session_dir = tmp.path();
     write_empty_orchestrator_changeset(session_dir);
 
@@ -48,10 +48,9 @@ fn seed_orchestrator_stack_from_plan_populates_changeset_stack() {
         .expect("seed must succeed for a valid plan");
 
     // Then — the orchestrator's changeset now carries a Stack with 2 nodes
-    let cs = read_changeset(session_dir).expect("changeset must be readable");
-    let stack = cs
-        .stack
-        .expect("Changeset.stack must be Some after seeding");
+    let stack = tddy_core::changeset::read_session_stack(session_dir)
+        .expect("stack must be readable")
+        .expect("the orchestrator must name a stack after seeding");
     assert_eq!(stack.nodes.len(), 2, "must have 2 nodes matching the plan");
     assert_eq!(stack.nodes[0].node_id, "n1");
     assert_eq!(stack.nodes[1].node_id, "n2");
@@ -73,7 +72,7 @@ fn seed_orchestrator_stack_from_plan_populates_changeset_stack() {
 #[test]
 fn seed_orchestrator_stack_from_plan_is_idempotent_on_empty_plan() {
     // Given — an orchestrator session dir and an empty plan (no PRs)
-    let tmp = tempfile::tempdir().expect("temp dir");
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let session_dir = tmp.path();
     write_empty_orchestrator_changeset(session_dir);
 
@@ -88,15 +87,17 @@ fn seed_orchestrator_stack_from_plan_is_idempotent_on_empty_plan() {
         .expect("seeding an empty plan must not error");
 
     // Then — the changeset may have a stack but it must be empty-or-None; either is OK
-    let cs = read_changeset(session_dir).expect("changeset readable");
-    let node_count = cs.stack.map(|s| s.nodes.len()).unwrap_or(0);
+    let node_count = tddy_core::changeset::read_session_stack(session_dir)
+        .expect("stack readable")
+        .map(|s| s.nodes.len())
+        .unwrap_or(0);
     assert_eq!(node_count, 0, "empty plan must produce 0 stack nodes");
 }
 
 #[test]
 fn seed_orchestrator_stack_from_plan_rejects_cyclic_plan() {
     // Given — a plan with a cycle (n1 parent=n2, n2 parent=n1)
-    let tmp = tempfile::tempdir().expect("temp dir");
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let session_dir = tmp.path();
     write_empty_orchestrator_changeset(session_dir);
 
@@ -133,8 +134,8 @@ fn seed_orchestrator_stack_from_plan_rejects_cyclic_plan() {
     // …and the changeset must not have been modified (no partial write)
     let cs = read_changeset(session_dir).expect("changeset readable");
     assert!(
-        cs.stack.is_none(),
-        "changeset.stack must remain None after a rejected cyclic plan"
+        cs.stack_id.is_none(),
+        "the orchestrator must name no stack after a rejected cyclic plan"
     );
 }
 

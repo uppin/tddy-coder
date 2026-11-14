@@ -68,6 +68,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport", "
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [dev-dependencies]
+# `stack_fixtures`: the sessions layout a PR stack lives in.
+tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 # `workspace_exec_tool_names`: the exec vocabulary the router tests walk.
 tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 serde_json = "1"

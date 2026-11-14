@@ -26,9 +26,7 @@ use clap::Parser;
 use tddy_coder::run::{
     seed_pr_stack_from_base_session_if_requested, seed_stack_and_enter_orchestrate, Args, CoderArgs,
 };
-use tddy_core::changeset::{
-    read_changeset, start_goal_for_session_continue, write_changeset, Changeset, Stack,
-};
+use tddy_core::changeset::{read_changeset, start_goal_for_session_continue, Changeset, Stack};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_workflow_recipes::recipe_resolve::resolve_workflow_recipe_from_cli_name;
 
@@ -40,8 +38,7 @@ const BASE_BRANCH: &str = "feat/auth-store";
 
 fn a_session(sessions_base: &Path, session_id: &str, changeset: Changeset) -> std::path::PathBuf {
     let dir = unified_session_dir_path(sessions_base, session_id);
-    std::fs::create_dir_all(&dir).unwrap();
-    write_changeset(&dir, &changeset).unwrap();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&dir, changeset);
     dir
 }
 
@@ -77,6 +74,16 @@ fn a_fresh_orchestrator(sessions_base: &Path, session_id: &str) -> std::path::Pa
 fn a_session_dir_with_no_changeset(sessions_base: &Path, session_id: &str) -> std::path::PathBuf {
     let dir = unified_session_dir_path(sessions_base, session_id);
     std::fs::create_dir_all(&dir).unwrap();
+    // The daemon writes the session's `.session.yaml` — and so its project — when it creates the
+    // directory; only the coder's own `changeset.yaml` is still to come.
+    tddy_core::write_initial_tool_session_metadata(
+        &dir,
+        tddy_core::InitialToolSessionMetadataOpts {
+            project_id: tddy_changeset::stack_fixtures::A_PROJECT.to_string(),
+            ..tddy_core::InitialToolSessionMetadataOpts::default()
+        },
+    )
+    .unwrap();
     dir
 }
 
@@ -112,7 +119,7 @@ fn next_goal(session_dir: &Path) -> String {
 
 /// The persisted stack, or `None` for a changeset that records none.
 fn stack_of(session_dir: &Path) -> Option<Stack> {
-    read_changeset(session_dir).unwrap().stack
+    tddy_core::changeset::read_session_stack(session_dir).unwrap()
 }
 
 // --- rejection assertions ---------------------------------------------------
@@ -165,7 +172,7 @@ fn a_coder_told_to_seed_its_stack_records_the_base_node() {
     seed_stack_and_enter_orchestrate(&orchestrator, sessions.path(), BASE_SESSION).unwrap();
 
     // Then the panel has one row, bound to that branch
-    let stack = read_changeset(&orchestrator).unwrap().stack.unwrap();
+    let stack = tddy_changeset::stack_fixtures::stack_on_disk(&orchestrator);
     assert_eq!(stack.nodes.len(), 1);
     assert_eq!(stack.nodes[0].branch.as_deref(), Some(BASE_BRANCH));
 }

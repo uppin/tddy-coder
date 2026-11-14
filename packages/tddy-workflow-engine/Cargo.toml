@@ -18,6 +18,8 @@ tddy-toolcall = { path = "../tddy-toolcall" }
 tddy-agent-backend = { path = "../tddy-agent-backend" }
 
 [dev-dependencies]
+# `stack_fixtures`: the sessions layout a PR stack lives in.
+tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 serde_yaml = "0.9"
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 tempfile = "3"

@@ -30,7 +30,7 @@ const PR: u64 = 77;
 #[test]
 fn adopting_a_pr_reads_its_title_body_and_head_branch_from_github() {
     // Given — an empty plan and a PR that exists on GitHub
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![]);
     let gh = an_insight_github().with_pr(a_pr(PR, ADOPTED_BRANCH, BASE));
@@ -60,7 +60,7 @@ fn an_adopted_node_records_the_prs_live_state_as_its_phase(
     #[case] expected_phase: &str,
 ) {
     // Given — the same PR in each of the states GitHub can report
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![]);
     let gh = an_insight_github().with_pr(
@@ -80,7 +80,7 @@ fn an_adopted_node_records_the_prs_live_state_as_its_phase(
 #[test]
 fn an_adopted_pr_can_be_stacked_onto_existing_nodes() {
     // Given — a two-node plan the adopted PR should sit behind
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -104,7 +104,7 @@ fn an_adopted_pr_can_be_stacked_onto_existing_nodes() {
 #[test]
 fn adopting_a_pr_whose_head_branch_is_already_bound_to_a_node_is_rejected() {
     // Given — n1 already owns the branch this PR is built on
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![an_open_node("n1", ADOPTED_BRANCH, PR, &[])]);
     let gh = an_insight_github().with_pr(a_pr(PR, ADOPTED_BRANCH, BASE));
@@ -120,7 +120,7 @@ fn adopting_a_pr_whose_head_branch_is_already_bound_to_a_node_is_rejected() {
 #[test]
 fn adopting_a_pr_with_a_dangling_parent_ref_is_rejected_and_nothing_is_appended() {
     // Given — a plan with no node called n9
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![an_open_node("n1", "feature/stack/n1", 1, &[])]);
     let gh = an_insight_github().with_pr(a_pr(PR, ADOPTED_BRANCH, BASE));

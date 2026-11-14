@@ -72,8 +72,7 @@ fn a_service(sessions_base: PathBuf) -> TestDaemon {
 
 fn write_changeset(sessions_base: &Path, session_id: &str, changeset: &Changeset) {
     let dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-    std::fs::create_dir_all(&dir).unwrap();
-    tddy_core::write_changeset(&dir, changeset).unwrap();
+    tddy_changeset::stack_fixtures::write_changeset_with_stack(&dir, changeset.clone());
 }
 
 fn a_planned_node(node_id: &str) -> StackNode {
@@ -122,10 +121,7 @@ fn a_link_request(node_id: &str) -> LinkStackNodeRequest {
 /// The stack the orchestrator holds on disk after a call.
 fn stack_on_disk(sessions_base: &Path) -> Stack {
     let dir = sessions_base.join(SESSIONS_SUBDIR).join(ORCHESTRATOR);
-    tddy_core::read_changeset(&dir)
-        .expect("the orchestrator's changeset must still be readable")
-        .stack
-        .expect("the orchestrator must still hold its stack")
+    tddy_changeset::stack_fixtures::stack_on_disk(&dir)
 }
 
 #[tokio::test]
