@@ -101,6 +101,10 @@ pub(crate) fn list_exec_tools_from_jail(
             bound.session_id
         ))
     })?;
+    // TODO(stack-plan-tools): a session bound to a node of a stack is offered only
+    // `pr_stack_status`/`pr_read` by the daemon's catalogue, but this jail bridge cannot classify
+    // it (that needs the orchestrator's stack record, in `tddy-daemon-rpc`); see
+    // docs/dev/todo/2026-11-14-jail-list-exec-tools-misses-stack-node-reads.md.
     let tools = session_offered_catalog_for(
         tddy_agent_launch::conversation_spawn::session_tool_role(&metadata),
         choices,

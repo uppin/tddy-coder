@@ -152,16 +152,48 @@ RUN
   echo "WATCH=tail -f $rd/stream.jsonl"
 }
 
+# A turn is stalled when its stream has not grown for this long while its process lives. Muse
+# records a tool call only when it returns, so this must outlast the slowest scoped test run.
+STALL_SECS="${MA_STALL_SECS:-1800}"
+
+# Seconds since the name's stream was last written.
+stream_idle() { echo $(( $(date +%s) - $(date -r "$1/stream.jsonl" +%s) )); }
+
+# Runs inside the current turn that ended other than `completed` — a transport or model failure
+# Muse may recover from by starting another run in the same `muse exec`. Prints "<count>\t<reason>".
+turn_failures() {
+  jq -rRs "$JQ_EVENTS"'
+    | ($last | map(select((.payload_type? // "" | startswith("run.terminal.")) and .payload.terminal != "completed"))) as $f
+    | "\($f | length)\t\($f | last | .payload.reason // "" | gsub("[\t\n]"; " ") | .[0:200])"' "$1/stream.jsonl"
+}
+
+# The facts a caller needs to judge a turn that has not ended.
+print_liveness() {
+  local f
+  f="$(turn_failures "$1")"
+  echo "STREAM_IDLE_SECS=$(stream_idle "$1")"
+  echo "RUN_FAILURES=${f%%	*}"
+  echo "LAST_RUN_FAILURE=${f#*	}"
+}
+
 # Blocks until the name's current turn has ended, or `secs` pass (a Bash call is capped at 10
 # minutes, so a long turn is followed by calling this repeatedly). A turn whose process is gone
 # without a turn-end marker was killed by a machine stop: it is marked ended with exit 16.
+# Returns early, with the turn still running, when a run inside the turn fails (WAIT=run-failed)
+# or the stream goes quiet for STALL_SECS (WAIT=stalled) — both are for the caller to report.
 cmd_wait() {
-  need_local "${1:?host}"; local name="${2:?name}" secs="${3:-540}" rd n waited=0
+  need_local "${1:?host}"; local name="${2:?name}" secs="${3:-540}" rd n waited=0 seen now
   valid_name "$name"; rd="$RUNS_DIR/$name"
   [[ -d "$rd" ]] || die $EXIT_USAGE "no turns for $name"
   n="$(turns "$rd")"
+  seen="$(turn_failures "$rd" | cut -f1)"
   while running "$rd"; do
-    [[ $waited -ge $secs ]] && { echo WAIT=still-running; echo "TURN=$n"; return 0; }
+    if [[ $((waited % 30)) -eq 0 ]]; then
+      now="$(turn_failures "$rd" | cut -f1)"
+      [[ $now -gt $seen ]] && { echo WAIT=run-failed; echo "TURN=$n"; print_liveness "$rd"; return 0; }
+      [[ $(stream_idle "$rd") -ge $STALL_SECS ]] && { echo WAIT=stalled; echo "TURN=$n"; print_liveness "$rd"; return 0; }
+    fi
+    [[ $waited -ge $secs ]] && { echo WAIT=still-running; echo "TURN=$n"; print_liveness "$rd"; return 0; }
     sleep 5; waited=$((waited + 5))
   done
   if [[ ! -f "$rd/exit-$n" ]]; then
@@ -182,14 +214,20 @@ cmd_summary() {
   valid_name "$name"; rd="$RUNS_DIR/$name"
   [[ -f "$rd/stream.jsonl" ]] || die $EXIT_USAGE "no stream for $name"
   n="$(turns "$rd")"
-  jq -rRs --arg sid "$(cat "$rd/session-id" 2>/dev/null)" "$JQ_EVENTS"'
+  # A turn is running until its turn-end marker, whatever its runs ended with: a failed run inside
+  # it (a transport error) can be followed by another run in the same `muse exec`.
+  local alive=no
+  running "$rd" && alive=yes
+  jq -rRs --arg sid "$(cat "$rd/session-id" 2>/dev/null)" --arg alive "$alive" "$JQ_EVENTS"'
     | ($last | map('"$JQ_TERMINAL"') | last) as $res
     | ($last | map(select(.type == "muse-agent" and .event == "turn-end")) | last) as $fin
     | (($res.text // "") | if test("\\S") then . else ($last | map(select(.payload_type? == "run.output.delta") | .payload.text) | join("")) end) as $shown
     | "SESSION_ID=\($sid)",
       "TURNS=\($all | map(select(.type == "muse-agent" and .event == "turn-start")) | length)",
-      "LAST_TURN_STATE=\(if $res then (if $res.terminal == "completed" then "finished" else "error" end)
-                         elif $fin then "interrupted" else "running" end)",
+      "LAST_TURN_STATE=\(if ($fin | not) and $alive == "yes" then "running"
+                         elif $res then (if $res.terminal == "completed" then "finished" else "error" end)
+                         else "interrupted" end)",
+      "RUN_FAILURES=\($last | map(select((.payload_type? // "" | startswith("run.terminal.")) and .payload.terminal != "completed")) | length)",
       "LAST_TURN_TERMINAL=\($res.terminal // "")",
       "LAST_TURN_EXIT=\($fin.exit // "")",
       "LAST_TURN_TOOL_CALLS=\($last | map(select(.payload_type? == "tool.result")) | length)",
@@ -200,6 +238,45 @@ cmd_summary() {
   if [[ $n -gt 0 && -s "$rd/stderr-$n.log" ]] && ! grep -q '"run.terminal.completed"' <(tail -c 20000 "$rd/stream.jsonl"); then
     echo "STDERR<<EOF"; tail -5 "$rd/stderr-$n.log"; echo "EOF"
   fi
+  [[ $alive == yes ]] && echo "STREAM_IDLE_SECS=$(stream_idle "$rd")"
+  return 0
+}
+
+# Every turn still running on this machine, one line each, for the agent that dispatched them — it
+# cannot rely on a driver to notice a stall, since the driver may itself be gone. `--watch [secs]`
+# prints only changes: a run newly stalled, a new failed run, a turn that ended, a driver-less run.
+cmd_health() {
+  need_local "${1:-local}"; shift || true
+  local watch="" every=60 rd name idle f fails state key prev
+  [[ "${1:-}" == --watch ]] && { watch=yes; every="${2:-60}"; }
+  local seen="$RUNS_DIR/.health"
+  mkdir -p "$seen"
+  while :; do
+    for rd in "$RUNS_DIR"/*/; do
+      rd="${rd%/}"; name="${rd##*/}"
+      [[ -f "$rd/stream.jsonl" ]] || continue
+      if running "$rd"; then
+        idle="$(stream_idle "$rd")"; f="$(turn_failures "$rd")"; fails="${f%%	*}"
+        state=running
+        [[ $idle -ge $STALL_SECS ]] && state=stalled
+        line="RUN=$name STATE=$state TURN=$(turns "$rd") STREAM_IDLE_SECS=$idle RUN_FAILURES=$fails LAST_RUN_FAILURE=${f#*	}"
+        key="$state/$fails"
+      else
+        [[ -n "$watch" ]] || continue
+        line="RUN=$name STATE=ended TURN=$(turns "$rd") RUN_EXIT=$(cat "$rd/exit-$(turns "$rd")" 2>/dev/null || echo ?)"
+        key=ended
+      fi
+      if [[ -z "$watch" ]]; then echo "$line"; continue; fi
+      prev="$(cat "$seen/$name" 2>/dev/null || true)"
+      # A first sighting of a healthy or long-ended run is not news; any change after that is.
+      if [[ "$key" != "$prev" ]]; then
+        echo "$key" >"$seen/$name"
+        [[ -z "$prev" && ( "$key" == running/0 || "$key" == ended ) ]] || echo "$line"
+      fi
+    done
+    [[ -n "$watch" ]] || return 0
+    sleep "$every"
+  done
 }
 
 # The last n tool calls and the final message of the current turn — what the agent is doing.
@@ -249,8 +326,13 @@ usage — <host> is always `local` (Muse Code runs on this machine):
                                                     start a turn (`muse exec --json --yolo`, detached) and return;
                                                     the stream is ~/.muse-runs/<name>/stream.jsonl
   muse-agent.sh wait local <name> [secs=540]        block until the turn ends: WAIT=turn-ended (+RUN_EXIT) | still-running
+                                                    | run-failed (a run inside the turn failed; it may recover) | stalled
+                                                    (stream quiet MA_STALL_SECS, default 1800); the last three add
+                                                    STREAM_IDLE_SECS, RUN_FAILURES, LAST_RUN_FAILURE
   muse-agent.sh progress local <name> [n=15]        last n tool calls and the final message of the current turn
-  muse-agent.sh summary local <name>                SESSION_ID, LAST_TURN_STATE and RESULT of the last turn
+  muse-agent.sh summary local <name>                SESSION_ID, LAST_TURN_STATE (running until the turn ends), RUN_FAILURES, RESULT
+  muse-agent.sh health local [--watch [secs=60]]    every running turn: STATE=running|stalled, idle secs, failed runs;
+                                                    --watch prints only changes (for the dispatching agent's Monitor)
   muse-agent.sh cancel local <name>                 kill the current turn
 exit codes: 2 usage · 10 not logged in (muse login) · 11 quota exhausted (wait for the reset) · 14 busy · 19 install Muse Code · 20 install jq/uuidgen
 RUN_EXIT 16 = the turn was killed by a machine stop or reboot (resume its session)
@@ -265,6 +347,7 @@ case "$sub" in
   wait) cmd_wait "$@" ;;
   progress) cmd_progress "$@" ;;
   summary) cmd_summary "$@" ;;
+  health) cmd_health "$@" ;;
   cancel) cmd_cancel "$@" ;;
   help|-h|--help) cmd_help ;;
   *) cmd_help >&2; exit $EXIT_USAGE ;;

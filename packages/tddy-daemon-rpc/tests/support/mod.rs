@@ -509,6 +509,22 @@ fn host_built_by(
     host_built_with(instance_id, peers, config, |host, _sessions| host)
 }
 
+/// [`a_host_as_current_user`], whose `gh` is the executable at `gh` — a stub the suite writes — so a
+/// Local gh project's token is the one that stub answers (`#orchestrators` 7/11).
+pub fn a_host_as_current_user_with_gh_at(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+    gh: &Path,
+) -> Host {
+    let gh = gh.to_path_buf();
+    host_built_with(
+        instance_id,
+        peers,
+        config_mapping_test_user_to(&current_os_user()),
+        move |host, _sessions| host.with_github_cli(tddy_host_service::GithubCli::at(gh)),
+    )
+}
+
 /// [`a_host_as_current_user`], whose daemon starts the `claude` coding agent as the executable at
 /// `claude` — a stub the suite writes — so a `claude-cli` session's agent is spawned for real.
 pub fn a_host_running_claude_as(

@@ -126,6 +126,18 @@ impl RpcHandlers {
         }
     }
 
+    /// Reach GitHub through `clients` from the stack tools (`#orchestrators` 7/11) instead of the
+    /// GitHub REST API — a host whose GitHub is not `api.github.com`, or a suite's stand-in. A second
+    /// attach keeps the first.
+    pub fn attach_stack_github(
+        &self,
+        clients: Arc<dyn crate::exec_tool::stack_tools::StackGithubClients>,
+    ) {
+        if self.exec_tool.stack_github_cell().set(clients).is_err() {
+            log::error!("the stack tools' GitHub was attached twice; keeping the first attachment");
+        }
+    }
+
     /// Build the handlers from `host` and install them on it as its [`DaemonRpcFamilies`] — the
     /// composition root's last step before the host goes behind its `Arc`. Returns both, so the
     /// root serves the same handlers on its own transports.

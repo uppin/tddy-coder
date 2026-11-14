@@ -30,6 +30,7 @@ use crate::read_only::is_project_home_allowed_tool;
 use crate::session_follow::{
     session_follow_tool_defs, READ_SESSION_ACTIVITY, READ_SESSION_TRANSCRIPT,
 };
+use crate::stack_tools::stack_tool_defs;
 use crate::start_ledger::{CANCEL_SESSION_START, GET_SESSION_START};
 use crate::start_options::{start_options_tool_def, DESCRIBE_SESSION_START_OPTIONS};
 use crate::start_session_args::{
@@ -166,6 +167,7 @@ pub(crate) fn project_home_catalog_with(start_schema: Value) -> Vec<ToolDef> {
         .filter(|tool| is_project_home_allowed_tool(&tool.name))
         .chain(project_home_tool_defs_with(start_schema))
         .chain(project_home_git_tool_defs())
+        .chain(stack_tool_defs())
         .collect()
 }
 

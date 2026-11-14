@@ -80,6 +80,7 @@ its changeset wraps.
 | PRD | Affects |
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
+| Stack tools served by the daemon | [PR stacking § PR-management tools](pr-stacking.md#pr-management-tools) — the eleven plan and read tools are daemon exec tools addressed by `stack_id`, offered by role: orchestrators all eleven, a stack's node sessions status and read for their stack |
 
 ## Integration Points
 

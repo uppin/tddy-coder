@@ -54,9 +54,10 @@ subagent's shell does not keep a `cd`). Never hand-roll `muse exec` lines.
 |---|---|---|
 | `ensure local` | main | `muse`, `jq`, `uuidgen` on PATH; one cheap probe turn proves the login (Muse Code has no status command); prints `MUSE_VERSION`, `MUSE_MODEL`, `READY=yes` |
 | `run --host local --name --dir --prompt-file [--model] [--effort] [--resume <sid>]` | driver | start a turn detached and **return at once** (`TURN=`, `SESSION_ID=`, `WATCH=`) |
-| `wait local <name> [secs=540]` | driver | block until the turn ends (`WAIT=turn-ended`, `RUN_EXIT=`) or `secs` pass (`WAIT=still-running`) |
+| `wait local <name> [secs=540]` | driver | block until the turn ends (`WAIT=turn-ended`, `RUN_EXIT=`) or `secs` pass (`WAIT=still-running`); returns early, turn still running, on `WAIT=run-failed` (a run inside the turn failed) or `WAIT=stalled` (stream quiet `MA_STALL_SECS`, default 1800) — each with `STREAM_IDLE_SECS`, `RUN_FAILURES`, `LAST_RUN_FAILURE` |
 | `progress local <name> [n]` | driver | the current turn's last n tool calls (command, exit code) and its final message |
-| `summary local <name>` | driver, main | `SESSION_ID`, `TURNS`, `LAST_TURN_STATE` (`finished · error · interrupted · running`), `LAST_TURN_TERMINAL`, `RESULT`, `RESULT_EMPTY`, `STDERR` when a turn did not finish |
+| `summary local <name>` | driver, main | `SESSION_ID`, `TURNS`, `LAST_TURN_STATE` (`running` until the turn-end marker, then `finished · error · interrupted`), `RUN_FAILURES`, `LAST_TURN_TERMINAL`, `RESULT`, `RESULT_EMPTY`, `STDERR` when a turn did not finish |
+| `health local [--watch [secs=60]]` | main | every running turn on the machine: `STATE=running\|stalled`, `STREAM_IDLE_SECS`, `RUN_FAILURES`, `LAST_RUN_FAILURE`; `--watch` prints only changes (a new stall, a new failed run, a turn that ended) |
 | `cancel local <name>` | driver, main | TERM the turn's process group, KILL after 10 s (`RUN_EXIT=130`) |
 | `exec local <dir> <cmd…>` | driver | a shell command in a dir — the driver uses it only to read state |
 
@@ -75,7 +76,10 @@ watch it with `tail -f ~/.muse-runs/<name>/stream.jsonl`.
 
 **The wire format** the script reads (Muse Code 1.4.x, `muse exec --json`): one JSON record per
 line with a `payload_type`. The turn's final message is the `run.terminal.<state>` record's
-`.payload.text` (`.payload.terminal` is `completed` on success; anything else is `error`); tool
+`.payload.text` (`.payload.terminal` is `completed` on success; anything else is `error`). One
+`muse exec` can hold **several runs**: after a failed run (a transport or TLS error) it may start
+another in the same turn, so a `run.terminal.failed` record does not end the turn — only the script's
+`turn-end` marker does; tool
 calls are `tool.result` records whose `.payload.text` is a JSON object with `command` and
 `exit_code`; `run.model.configured` names the model. If a Muse upgrade changes these, fix the
 script, not the driver.
@@ -134,11 +138,26 @@ standalone (`green-agent-tools-n3-202611081130`); under `/green-yolo`, `G` is `g
 and `F` share `gy-<branch>-W`; under `/yolo-pr-stack`, `yolo-<slug>-n<k>-G` and `yolo-<slug>-n<k>-W`.
 Branch slashes become `-` (the script accepts `[A-Za-z0-9._-]` only).
 
-### 4. Own restarts
+### 4. Watch, and own restarts
+
+**Watch every turn yourself, not through the driver.** A driver can die (its own API error) or be
+mid-`wait` when a turn goes wrong, and then nobody hears of it. While any driver runs, keep one
+watcher going in the background — under Claude Code, a `Monitor` on
+
+```bash
+$MA health local --watch 60
+```
+
+which prints a line only on a change: a turn newly `stalled`, a new failed run inside a turn, a turn
+that ended. On a line, check the driver: a driver that is gone is resumed with `SendMessage` or
+replaced (same `<name>`, `--resume` its session — never a second turn while one runs); a live one is
+told what the watcher saw. One watcher covers every `<name>`; stop it when the last driver reports.
 
 - **`🔴 stopped`** is a stop the command set on purpose: report it in the end-of-turn summary with
   the reason and options, and end the turn. Never answer it for the developer.
 - **`RUN_EXIT=16`** is the driver's to resume.
+- **`WAIT=run-failed`** with the turn still running is not a restart: Muse may recover on its own.
+  Restart only when the turn has ended, or `stalled` follows.
 - After a context reset, re-derive each stage from `$MA summary local <name>`. Never re-run a turn
   whose session is still running.
 

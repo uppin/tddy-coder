@@ -18,12 +18,14 @@ pub fn is_read_only_tool(name: &str) -> bool {
 
 /// Whether a project-home session may run `name`: a read-only exec tool, one of the four
 /// project-home session tools (`#project-home` 5/7), or one of the seven project-home git tools
-/// (`#project-home` 7/7). [`is_read_only_tool`] itself is unchanged, so the read-only catalog and
+/// (`#project-home` 7/7), or one of the eleven stack tools (`#orchestrators` 7/11), whose own role
+/// gate is the daemon's. [`is_read_only_tool`] itself is unchanged, so the read-only catalog and
 /// every other answer it gives stay as they were.
 pub fn is_project_home_allowed_tool(name: &str) -> bool {
     is_read_only_tool(name)
         || crate::project_home_tools::is_project_home_tool(name)
         || crate::project_home_git_tools::is_project_home_git_tool(name)
+        || crate::stack_tools::is_stack_tool(name)
 }
 
 /// The prefix `claude` gives a tool served by the `tddy-tools` MCP server.
@@ -31,7 +33,7 @@ const MCP_TOOL_PREFIX: &str = "mcp__tddy-tools__";
 
 /// What a project-home session's `claude` is pre-approved to call, in the names `--allowedTools` takes:
 /// every tool [`is_project_home_allowed_tool`] lets it run (the read-only tools, the project-home
-/// session tools and the project-home git tools), as the `mcp__tddy-tools__*` tools they are reached through. Derived from
+/// session tools, the project-home git tools and the stack tools), as the `mcp__tddy-tools__*` tools they are reached through. Derived from
 /// [`project_home_offered_catalog`](crate::project_home_tools::project_home_offered_catalog), so the
 /// set the spawn names, the set the daemon advertises and the set it executes are one set.
 pub fn project_home_allowed_tools() -> Vec<String> {
@@ -88,8 +90,8 @@ mod tests {
         // When
         let names = project_home_allowed_tools();
 
-        // Then exactly the read-only tools, the project-home tools and the seven git tools, under
-        // their MCP names
+        // Then exactly the read-only tools, the project-home tools, the seven git tools and the
+        // eleven stack tools, under their MCP names
         assert_eq!(
             names,
             vec![
@@ -133,6 +135,17 @@ mod tests {
                 "mcp__tddy-tools__ResetSessionWorktree",
                 "mcp__tddy-tools__CheckoutSessionWorktree",
                 "mcp__tddy-tools__CleanSessionWorktree",
+                "mcp__tddy-tools__pr_stack_list",
+                "mcp__tddy-tools__pr_stack_create",
+                "mcp__tddy-tools__pr_stack_status",
+                "mcp__tddy-tools__pr_read",
+                "mcp__tddy-tools__pr_search",
+                "mcp__tddy-tools__pr_comments",
+                "mcp__tddy-tools__pr_add_planned",
+                "mcp__tddy-tools__pr_update_planned",
+                "mcp__tddy-tools__pr_delete_planned",
+                "mcp__tddy-tools__pr_set_status",
+                "mcp__tddy-tools__pr_adopt",
             ]
         );
     }

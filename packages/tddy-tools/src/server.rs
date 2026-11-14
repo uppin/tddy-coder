@@ -1,7 +1,8 @@
 //! Permission server implementing the approval_prompt MCP tool and GitHub PR REST tools.
 
 use crate::exec_tool_admission::{
-    admitted_exec_tool_names, is_advertised, project_home_remote_tool_defs, static_exec_tool_names,
+    admitted_exec_tool_names, is_advertised, project_home_remote_tool_defs, stack_remote_tool_defs,
+    static_exec_tool_names,
 };
 use crate::mcp_primitives::{
     cancel_remote_conversation, open_remote_agent_session, schema_object,
@@ -20,6 +21,7 @@ use tddy_discovery::subagent::{
     resolve_replaced_tools_for_defs, MessageId, SubagentRegistry, TurnRequest,
     SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS,
 };
+use tddy_tool_engine::stack_tools::is_stack_tool;
 // The conversation runtime the seven `subagent_*` tools drive: the table of open conversations, the
 // turns that outlived the calls that started them, and the accounting of both. It moved to
 // `tddy-discovery` with the roster at `#unbundle` node 5 — it is logic over that crate's own
@@ -34,8 +36,7 @@ use tddy_workflow_recipes::github_pr::{
     UpdatePullRequestParams,
 };
 use tddy_workflow_recipes::orchestrate_pr_stack::{
-    github::{PrSearchHit, PrState},
-    pr_close_action, pr_insight, pr_merge_action, pr_resolve_conflicts_action, GithubPrApi,
+    pr_close_action, pr_merge_action, pr_resolve_conflicts_action, GithubPrApi,
 };
 
 /// Unix socket for relaying approval prompts to the tddy-coder TUI. In `cfg(test)` builds this is
@@ -129,64 +130,10 @@ pub struct PrResolveConflictsInput {
     pub base_ref: String,
 }
 
-/// Parameters for [`pr_set_status`](PermissionServer::pr_set_status).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrSetStatusInput {
-    #[schemars(description = "Stack node id to annotate.")]
-    pub node_id: String,
-    #[schemars(
-        description = "Internal status kind (e.g. blocked, needs-repoint, has-conflicts, ready-to-merge, up-to-date, merged)."
-    )]
-    pub kind: String,
-    #[schemars(description = "Optional free-text note explaining the status.")]
-    pub note: Option<String>,
-}
-
-/// Parameters for [`pr_add_planned`](PermissionServer::pr_add_planned).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrAddPlannedInput {
-    #[schemars(description = "PR title.")]
-    pub title: String,
-    #[schemars(description = "PR description / body.")]
-    pub description: String,
-    #[schemars(description = "Optional suggested branch name (feature/<stack>/<node>).")]
-    pub branch_suggestion: Option<String>,
-    #[schemars(description = "Parent node ids (chosen ancestors); empty for a root node.")]
-    #[serde(default)]
-    pub parents: Vec<String>,
-}
-
 /// Parameters for [`pr_spawn_child`](PermissionServer::pr_spawn_child).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct PrSpawnChildInput {
     #[schemars(description = "Stack node id to start a child coding session for.")]
-    pub node_id: String,
-}
-
-/// Parameters for [`pr_update_planned`](PermissionServer::pr_update_planned).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrUpdatePlannedInput {
-    #[schemars(description = "Stack node id to edit.")]
-    pub node_id: String,
-    #[schemars(description = "New PR title; omit to leave it unchanged.")]
-    pub title: Option<String>,
-    #[schemars(description = "New PR description / body; omit to leave it unchanged.")]
-    pub description: Option<String>,
-    #[schemars(
-        description = "New suggested branch name; editable only while the node owns no branch."
-    )]
-    pub branch_suggestion: Option<String>,
-    #[schemars(
-        description = "Also push the new title/description to the node's pull request. Rejected when the node has no PR."
-    )]
-    #[serde(default)]
-    pub sync_pr: bool,
-}
-
-/// Parameters for [`pr_delete_planned`](PermissionServer::pr_delete_planned).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrDeletePlannedInput {
-    #[schemars(description = "Stack node id to remove from the plan.")]
     pub node_id: String,
 }
 
@@ -204,60 +151,6 @@ pub struct PrSetParentsInput {
     #[schemars(
         description = "The node's whole new parent list (chosen ancestors); pass [] to make it a root off the stack bottom. Required — there is no default."
     )]
-    pub parents: Vec<String>,
-}
-
-/// Parameters for [`pr_read`](PermissionServer::pr_read).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrReadInput {
-    #[schemars(
-        description = "Stack node id whose PR to read; name this or pull_number, not both."
-    )]
-    pub node_id: Option<String>,
-    #[schemars(description = "Pull request number to read; name this or node_id, not both.")]
-    pub pull_number: Option<u64>,
-    #[schemars(description = "Include the changed-file list (omitted by default).")]
-    #[serde(default)]
-    pub include_files: bool,
-}
-
-/// Parameters for [`pr_search`](PermissionServer::pr_search).
-///
-/// Carries no repository: a search is always scoped to the orchestrator's own remote, resolved by
-/// the tool rather than chosen by the agent.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrSearchInput {
-    #[schemars(description = "Free text matched against PR titles and bodies.")]
-    pub query: Option<String>,
-    #[schemars(description = "open / closed / merged / all (default open).")]
-    pub state: Option<String>,
-    #[schemars(description = "Restrict to PRs opened by this GitHub login.")]
-    pub author: Option<String>,
-    #[schemars(description = "Restrict to PRs whose base branch is this one.")]
-    pub base: Option<String>,
-    #[schemars(description = "Maximum hits to return (default 20, hard cap 100).")]
-    #[serde(default)]
-    pub limit: u32,
-}
-
-/// Parameters for [`pr_comments`](PermissionServer::pr_comments).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrCommentsInput {
-    #[schemars(
-        description = "Stack node id whose PR feedback to read; name this or pull_number, not both."
-    )]
-    pub node_id: Option<String>,
-    #[schemars(description = "Pull request number to read; name this or node_id, not both.")]
-    pub pull_number: Option<u64>,
-}
-
-/// Parameters for [`pr_adopt`](PermissionServer::pr_adopt).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrAdoptInput {
-    #[schemars(description = "Number of the existing pull request to bring into the stack.")]
-    pub pull_number: u64,
-    #[schemars(description = "Parent node ids the adopted node stacks on; empty for a root node.")]
-    #[serde(default)]
     pub parents: Vec<String>,
 }
 
@@ -469,6 +362,7 @@ impl PermissionServer {
             .map(map_tool)
             .collect();
         defs.extend(exec_tool_catalog());
+        defs.extend(stack_remote_tool_defs());
         if !crate::session_agents::session_agent_roster().is_empty() {
             defs.extend(subagent_tool_router().list_all().into_iter().map(map_tool));
         }
@@ -480,8 +374,9 @@ impl PermissionServer {
     /// tool exactly as the agent would over MCP. We dispatch to the methods directly rather than via
     /// the rmcp `ToolRouter`, because a router call needs a live `Peer`/`RequestContext` that can't
     /// be fabricated outside a real MCP connection. Relay tools (`spawn_conversation`,
-    /// `pr_spawn_child`) still relay over `TDDY_SOCKET` from inside their methods; the rest run
-    /// in-process against `TDDY_SESSION_DIR`/`TDDY_REPO_DIR`.
+    /// `pr_spawn_child`) still relay over `TDDY_SOCKET` from inside their methods; the stack plan and
+    /// read tools are forwarded to the daemon as exec tools; the rest run in-process against
+    /// `TDDY_SESSION_DIR`/`TDDY_REPO_DIR`.
     pub async fn call_tool_by_name(
         &self,
         name: &str,
@@ -512,20 +407,16 @@ impl PermissionServer {
             // `async fn`, and it is safe on the Inspector's invoke path because it is a pure read
             // of process-local state under a deadline it caps itself.
             "subagent_status" => subagent_status_tool(args).await,
-            "pr_stack_status" => self.pr_stack_status(),
+            // The plan and read tools are the daemon's exec tools, addressed by stack id
+            // (`#orchestrators` 7/11): forwarded to it like any other exec tool, never run here.
+            stack_tool if is_stack_tool(stack_tool) => {
+                dispatch_dynamic_tool(stack_tool, args).await
+            }
             "pr_merge" => self.pr_merge(Parameters(parse(args)?)),
             "pr_close" => self.pr_close(Parameters(parse(args)?)),
             "pr_repoint" => self.pr_repoint(Parameters(parse(args)?)),
             "pr_resolve_conflicts" => self.pr_resolve_conflicts(Parameters(parse(args)?)),
-            "pr_set_status" => self.pr_set_status(Parameters(parse(args)?)),
-            "pr_add_planned" => self.pr_add_planned(Parameters(parse(args)?)),
-            "pr_update_planned" => self.pr_update_planned(Parameters(parse(args)?)),
-            "pr_delete_planned" => self.pr_delete_planned(Parameters(parse(args)?)),
             "pr_set_parents" => self.pr_set_parents(Parameters(parse(args)?)),
-            "pr_read" => self.pr_read(Parameters(parse(args)?)),
-            "pr_search" => self.pr_search(Parameters(parse(args)?)),
-            "pr_comments" => self.pr_comments(Parameters(parse(args)?)),
-            "pr_adopt" => self.pr_adopt(Parameters(parse(args)?)),
             "pr_spawn_child" => self.pr_spawn_child(Parameters(parse(args)?)).await,
             "spawn_conversation" => self.spawn_conversation(Parameters(parse(args)?)).await,
             "spawn_conversation_status" => {
@@ -941,13 +832,6 @@ impl PermissionServer {
         }
     }
 
-    #[tool(
-        description = "List every PR node in the orchestrator's stack with its live GitHub state and computed internal status (needs-repoint / has-conflicts / ready-to-merge / merged / up-to-date). Refreshes and persists derived statuses; agent overrides are preserved."
-    )]
-    fn pr_stack_status(&self) -> String {
-        to_wire(pr_stack_status_impl())
-    }
-
     #[tool(description = "Merge a stack node's PR into its base and mark the node merged.")]
     fn pr_merge(&self, Parameters(p): Parameters<PrNodeRefInput>) -> String {
         match (orchestrator_dir(), real_gh()) {
@@ -1007,37 +891,6 @@ impl PermissionServer {
     }
 
     #[tool(
-        description = "Record a manual internal-status override on a node (e.g. blocked) with an optional note. Overrides are not overwritten by automatic derivation."
-    )]
-    fn pr_set_status(&self, Parameters(p): Parameters<PrSetStatusInput>) -> String {
-        match set_internal_status(&p.node_id, &p.kind, p.note.as_deref(), "override") {
-            Ok(()) => serde_json::json!({ "ok": true }).to_string(),
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
-    }
-
-    #[tool(
-        description = "Add a new planned PR node to the stack, choosing its ancestors from existing node ids. Returns the server-assigned node id."
-    )]
-    fn pr_add_planned(&self, Parameters(p): Parameters<PrAddPlannedInput>) -> String {
-        let dir = match orchestrator_dir() {
-            Ok(d) => d,
-            Err(e) => return serde_json::json!({ "error": e }).to_string(),
-        };
-        let input = tddy_workflow_recipes::pr_stack::AddPlannedPrInput {
-            title: p.title,
-            description: p.description,
-            branch_suggestion: p.branch_suggestion,
-            parents: p.parents,
-            child_recipe: None,
-        };
-        match tddy_workflow_recipes::pr_stack::add_planned_pr_node(&dir, input) {
-            Ok(node) => serde_json::json!({ "node_id": node.node_id }).to_string(),
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
-    }
-
-    #[tool(
         description = "Start a child coding session for a planned PR node (with the orchestrator as its stack parent). Returns the new child session id."
     )]
     async fn pr_spawn_child(&self, Parameters(p): Parameters<PrSpawnChildInput>) -> String {
@@ -1058,52 +911,10 @@ impl PermissionServer {
     }
 
     #[tool(
-        description = "Edit a stack node's title, description and/or branch_suggestion. Title and description are editable at any time, including once the node owns a branch, a child session and an open PR; branch_suggestion only while the node owns no branch. A call naming none of the three is rejected. With sync_pr, the same title/description are also pushed to the node's pull request — rejected, before anything is written, when the node records no PR or when neither a title nor a description was given."
-    )]
-    fn pr_update_planned(&self, Parameters(p): Parameters<PrUpdatePlannedInput>) -> String {
-        to_wire(pr_update_planned_impl(p))
-    }
-
-    #[tool(
-        description = "Remove a node from the plan, reparenting its children onto that node's parents so the DAG stays connected (a deleted root's children become roots). Refuses a node whose PR is open — merge or close it first. The node's branch, worktree and child session are left untouched and reported back as now unowned."
-    )]
-    fn pr_delete_planned(&self, Parameters(p): Parameters<PrDeletePlannedInput>) -> String {
-        to_wire(pr_delete_planned_impl(&p.node_id))
-    }
-
-    #[tool(
         description = "Move a node in the stack by giving it a whole new parent list. parents is required: pass [] to make the node a root off the stack bottom. Rejects an unknown parent, self-parenthood, a duplicate entry, and any change that would close a cycle, writing nothing. When the node owns a branch, its branch is also rebased onto the new effective base, force-pushed with lease, and its open PR's base repointed. Use this when the plan changed; use pr_repoint when only the PR's base branch drifted."
     )]
     fn pr_set_parents(&self, Parameters(p): Parameters<PrSetParentsInput>) -> String {
         to_wire(pr_set_parents_impl(p))
-    }
-
-    #[tool(
-        description = "Read one pull request in full: title, body, state, base/head, mergeability, size, the latest review state per reviewer, and the head commit's check runs. Address it by exactly one of node_id or pull_number — naming neither or both is rejected, and a node that records no PR url cannot be addressed by node_id. Pass include_files for the changed-file list, which is otherwise neither fetched nor returned."
-    )]
-    fn pr_read(&self, Parameters(p): Parameters<PrReadInput>) -> String {
-        to_wire(pr_read_impl(p))
-    }
-
-    #[tool(
-        description = "Search this repository's pull requests, including ones the stack does not track, by text, state (open/closed/merged/all, default open), author and base branch. The repository is always the orchestrator's own and cannot be chosen. Returns at most limit hits (default 20, hard cap 100), each with number, title, state, draft, author, url and updated_at — GitHub's search reports no head or base branch, so follow up with pr_read when you need them."
-    )]
-    fn pr_search(&self, Parameters(p): Parameters<PrSearchInput>) -> String {
-        to_wire(pr_search_impl(p))
-    }
-
-    #[tool(
-        description = "Read a pull request's review feedback as three separate sections: submitted reviews, diff-anchored comment threads in reply order, and conversation comments. Address it by exactly one of node_id or pull_number — naming neither or both is rejected. A thread's resolved/unresolved state is not available over this API, so no thread reports one: read the replies to judge."
-    )]
-    fn pr_comments(&self, Parameters(p): Parameters<PrCommentsInput>) -> String {
-        to_wire(pr_comments_impl(p))
-    }
-
-    #[tool(
-        description = "Bring an existing pull request into the stack as a node bound to its head branch and PR reference, carrying the PR's title, body and live phase, choosing which existing nodes it stacks on (empty for a root). Refuses a PR whose head branch is already bound to a node, and an unknown or cycle-forming parent. The adopted node has no child session."
-    )]
-    fn pr_adopt(&self, Parameters(p): Parameters<PrAdoptInput>) -> String {
-        to_wire(pr_adopt_impl(p))
     }
 
     #[tool(
@@ -1166,9 +977,6 @@ async fn relay_to_daemon(tool: &str, request: serde_json::Value) -> String {
 // ---------------------------------------------------------------------------
 // PR-stack tool helpers
 // ---------------------------------------------------------------------------
-
-/// The state a `pr_search` that expressed no preference is run with: the PRs still in play.
-const DEFAULT_SEARCH_STATE: &str = "open";
 
 /// Serialize a PR-stack tool's outcome for the wire: the value itself, or `{"error": …}`.
 ///
@@ -1286,120 +1094,6 @@ fn clear_has_conflicts_status(node_id: &str) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
-/// Read the orchestrator stack, refresh derived internal statuses from live GitHub + child state,
-/// and return the node summaries as JSON. Live refresh failures are surfaced (never hidden).
-fn pr_stack_status_impl() -> Result<serde_json::Value, String> {
-    let dir = orchestrator_dir()?;
-    let stack = tddy_core::changeset::read_session_stack(&dir)
-        .map_err(|e| format!("read stack: {e}"))?
-        .ok_or_else(|| "orchestrator changeset has no stack".to_string())?;
-
-    let refresh_error = refresh_internal_statuses(&dir, &stack).err();
-
-    // Re-read after the possible persist so the response reflects what is on disk.
-    let stack = tddy_core::changeset::read_session_stack(&dir)
-        .map_err(|e| format!("re-read stack: {e}"))?
-        .unwrap_or(stack);
-
-    let nodes: Vec<serde_json::Value> = stack
-        .nodes
-        .iter()
-        .map(|n| {
-            serde_json::json!({
-                "node_id": n.node_id,
-                "title": n.title,
-                "branch": n.branch,
-                "session_id": n.session_id,
-                "pr_status": n.pr_status.as_ref().map(|s| s.phase.clone()),
-                "internal_status": n.internal_status.as_ref().map(|s| serde_json::json!({
-                    "kind": s.kind,
-                    "note": s.note,
-                    "source": s.source,
-                })),
-            })
-        })
-        .collect();
-
-    let mut out = serde_json::json!({ "nodes": nodes });
-    if let Some(err) = refresh_error {
-        out["refresh_error"] = serde_json::Value::String(err);
-    }
-    Ok(out)
-}
-
-/// Edit a node's metadata and, when asked, push the same title/body to its pull request.
-///
-/// Everything a `sync_pr` push can refuse without touching the network is checked *before* the local
-/// edit, so a refused call leaves the plan exactly as it was — the same contract every other
-/// operation on this surface keeps. Only a failure GitHub itself returns can leave the node edited
-/// and its pull request not, and that is reported as such.
-fn pr_update_planned_impl(p: PrUpdatePlannedInput) -> Result<serde_json::Value, String> {
-    let dir = orchestrator_dir()?;
-
-    // Resolved *before* the local edit. Each of these can refuse without touching the network, and a
-    // refusal that has already rewritten the plan is a partial application of a call the caller was
-    // told had failed: the payload the push would carry, the PR the node records, and the credential.
-    let sync_client = if p.sync_pr {
-        if p.title.is_none() && p.description.is_none() {
-            return Err(format!(
-                "pr_update_planned: node '{}' was asked to sync its pull request, but neither a \
-                 title nor a description was given — GitHub refuses an empty edit, so there is \
-                 nothing to push and nothing was changed",
-                p.node_id
-            ));
-        }
-        addressed_pull_number(Some(&p.node_id), None)?;
-        Some(real_gh()?)
-    } else {
-        None
-    };
-
-    let node = tddy_workflow_recipes::pr_stack::update_planned_pr_node(
-        &dir,
-        tddy_workflow_recipes::pr_stack::UpdatePlannedPrInput {
-            node_id: p.node_id.clone(),
-            title: p.title.clone(),
-            description: p.description.clone(),
-            branch_suggestion: p.branch_suggestion,
-        },
-    )?;
-    let mut out = serde_json::json!({
-        "node_id": node.node_id,
-        "title": node.title,
-        "description": node.description,
-        "branch_suggestion": node.branch_suggestion,
-        "branch": node.branch,
-        "session_id": node.session_id,
-        "parents": node.parents,
-    });
-    if let Some(gh) = sync_client {
-        // The preconditions held, so a failure here is GitHub itself refusing the write — the plan is
-        // already edited and the pull request is not, which the caller has to be told.
-        let number = tddy_workflow_recipes::pr_stack::sync_node_to_github_pr(
-            &dir,
-            &p.node_id,
-            p.title.as_deref(),
-            p.description.as_deref(),
-            &gh,
-        )
-        .map_err(|e| format!("{e} (the node was updated; its pull request was not)"))?;
-        out["pr_synced"] = serde_json::json!(number);
-    }
-    Ok(out)
-}
-
-/// Remove a node from the plan and report what the removal left behind.
-fn pr_delete_planned_impl(node_id: &str) -> Result<serde_json::Value, String> {
-    let dir = orchestrator_dir()?;
-    let deleted = tddy_workflow_recipes::pr_stack::delete_planned_pr_node(&dir, node_id)?;
-    Ok(serde_json::json!({
-        "deleted": deleted.node.node_id,
-        "reparented_children": deleted.reparented_children,
-        "orphaned_branch": deleted.orphaned_branch,
-        "orphaned_session_id": deleted.orphaned_session_id,
-    }))
-}
-
 /// Rewrite a node's parents, realigning git and its PR base when the node owns a branch.
 fn pr_set_parents_impl(p: PrSetParentsInput) -> Result<serde_json::Value, String> {
     let dir = orchestrator_dir()?;
@@ -1412,227 +1106,6 @@ fn pr_set_parents_impl(p: PrSetParentsInput) -> Result<serde_json::Value, String
         &dir, &repo_root, &p.node_id, &p.parents, &default, &gh,
     )?;
     Ok(serde_json::json!({ "node_id": node.node_id, "parents": node.parents }))
-}
-
-/// Read one pull request in full.
-fn pr_read_impl(p: PrReadInput) -> Result<serde_json::Value, String> {
-    let number = addressed_pull_number(p.node_id.as_deref(), p.pull_number)?;
-    let gh = real_gh()?;
-    let view =
-        pr_insight::read_pr(&gh, number, p.include_files).map_err(|e| format!("read pr: {e}"))?;
-    Ok(pr_read_json(&view))
-}
-
-/// Read a pull request's review feedback, split into reviews, threads and conversation.
-fn pr_comments_impl(p: PrCommentsInput) -> Result<serde_json::Value, String> {
-    let number = addressed_pull_number(p.node_id.as_deref(), p.pull_number)?;
-    let gh = real_gh()?;
-    let view =
-        pr_insight::read_pr_comments(&gh, number).map_err(|e| format!("read pr comments: {e}"))?;
-    Ok(pr_comments_json(&view))
-}
-
-/// Shape a [`pr_insight::PrCommentsView`] for the wire.
-///
-/// Owned by the tool for the same reason as [`pr_read_json`]: the agent-facing shape is a deliberate
-/// contract rather than whatever field list the Rust types happen to carry. The three sections stay
-/// separate keys because a verdict, a diff-anchored conversation and a PR-wide comment answer
-/// different questions.
-fn pr_comments_json(view: &pr_insight::PrCommentsView) -> serde_json::Value {
-    serde_json::json!({
-        "reviews": view.reviews.iter().map(|r| serde_json::json!({
-            "author": r.author,
-            "state": r.state,
-            "body": r.body,
-            "submitted_at": r.submitted_at,
-        })).collect::<Vec<_>>(),
-        // No `resolved` on a thread: resolution state exists only on GitHub's GraphQL
-        // `reviewThreads`, and emitting a guessed value would mislead the agent.
-        "threads": view.threads.iter().map(|t| serde_json::json!({
-            "path": t.path,
-            "line": t.line,
-            "diff_hunk": t.diff_hunk,
-            "comments": t.comments.iter().map(|c| serde_json::json!({
-                "author": c.author,
-                "body": c.body,
-                "created_at": c.created_at,
-            })).collect::<Vec<_>>(),
-        })).collect::<Vec<_>>(),
-        "conversation": view.conversation.iter().map(|c| serde_json::json!({
-            "author": c.author,
-            "body": c.body,
-            "created_at": c.created_at,
-        })).collect::<Vec<_>>(),
-    })
-}
-
-/// Search the orchestrator's own repository for pull requests.
-///
-/// The repository is resolved here and passed in; the agent's input carries no repository at all, so
-/// a search can never reach another one.
-fn pr_search_impl(p: PrSearchInput) -> Result<serde_json::Value, String> {
-    let repo = repo_slug()?;
-    // Built from the slug already resolved above rather than through `real_gh()`, which would run
-    // `git remote get-url origin` a second time for the same answer.
-    let gh = crate::github_credential::github_api_for_session(repo.clone())?;
-    let hits = pr_insight::search_repository_prs(
-        &gh,
-        &repo,
-        pr_insight::PrSearchInput {
-            text: p.query,
-            state: p.state.unwrap_or_else(|| DEFAULT_SEARCH_STATE.to_string()),
-            author: p.author,
-            base: p.base,
-            // `0` is "no preference" to `search_repository_prs`, which owns the default and the cap.
-            limit: p.limit,
-        },
-    )
-    .map_err(|e| format!("search prs: {e}"))?;
-    Ok(pr_search_json(&hits))
-}
-
-/// Shape a page of search hits for the wire.
-///
-/// Owned by the tool for the same reason as [`pr_read_json`]: the agent-facing shape is a deliberate
-/// contract rather than whatever field list the Rust types happen to carry. No branch fields —
-/// GitHub's search reports neither head nor base, so a hit that needs them is followed up with
-/// `pr_read`.
-fn pr_search_json(hits: &[PrSearchHit]) -> serde_json::Value {
-    serde_json::json!({
-        "hits": hits.iter().map(|h| serde_json::json!({
-            "number": h.number,
-            "title": h.title,
-            "state": h.state,
-            "draft": h.draft,
-            "author": h.author,
-            "url": h.url,
-            "updated_at": h.updated_at,
-        })).collect::<Vec<_>>(),
-    })
-}
-
-/// Create a stack node from an existing pull request.
-fn pr_adopt_impl(p: PrAdoptInput) -> Result<serde_json::Value, String> {
-    let dir = orchestrator_dir()?;
-    let gh = real_gh()?;
-    let node =
-        tddy_workflow_recipes::pr_stack::adopt_pr_into_stack(&dir, p.pull_number, p.parents, &gh)?;
-    Ok(serde_json::json!({
-        "node_id": node.node_id,
-        "branch": node.branch,
-        "parents": node.parents,
-        "pr_status": node.pr_status.as_ref().map(|s| s.phase.clone()),
-    }))
-}
-
-/// Resolve which pull request a read tool was asked about.
-///
-/// Exactly one of `node_id` / `pull_number` addresses a PR: naming neither leaves nothing to read,
-/// and naming both lets the two disagree, so both are rejected rather than settled by a precedence
-/// rule the agent would have to know about.
-fn addressed_pull_number(node_id: Option<&str>, pull_number: Option<u64>) -> Result<u64, String> {
-    match (node_id, pull_number) {
-        (Some(node_id), None) => {
-            let dir = orchestrator_dir()?;
-            let stack = tddy_core::changeset::read_session_stack(&dir)
-                .map_err(|e| format!("read stack: {e}"))?
-                .ok_or_else(|| "orchestrator changeset has no stack".to_string())?;
-            pr_insight::pull_number_for_node(&stack, node_id)
-        }
-        (None, Some(number)) => Ok(number),
-        (None, None) => {
-            Err("name the pull request to read: pass node_id or pull_number".to_string())
-        }
-        (Some(_), Some(_)) => {
-            Err("node_id and pull_number both name a pull request; pass exactly one".to_string())
-        }
-    }
-}
-
-/// Shape a [`pr_insight::PrReadView`] for the wire.
-///
-/// Owned by the tool rather than by a `Serialize` derive on the view, so the agent-facing shape is a
-/// deliberate contract instead of whatever field list the Rust type happens to carry. `files` is
-/// absent (not `null`) when the caller did not ask for it, matching "neither fetched nor returned".
-fn pr_read_json(view: &pr_insight::PrReadView) -> serde_json::Value {
-    let mut out = serde_json::json!({
-        "number": view.number,
-        "url": view.url,
-        "title": view.title,
-        "body": view.body,
-        "state": pr_state_name(view.state),
-        "base": view.base_branch,
-        "head": view.head_branch,
-        "head_sha": view.head_sha,
-        "mergeable": view.mergeable,
-        "mergeable_state": view.mergeable_state,
-        "additions": view.additions,
-        "deletions": view.deletions,
-        "changed_files": view.changed_files,
-        "reviews": view.reviews.iter().map(|r| serde_json::json!({
-            "author": r.author,
-            "state": r.state,
-        })).collect::<Vec<_>>(),
-        "checks": view.checks.iter().map(|c| serde_json::json!({
-            "name": c.name,
-            "conclusion": c.conclusion,
-        })).collect::<Vec<_>>(),
-    });
-    if let Some(files) = &view.files {
-        out["files"] = files
-            .iter()
-            .map(|f| serde_json::json!({ "path": f.path, "status": f.status }))
-            .collect::<Vec<_>>()
-            .into();
-    }
-    out
-}
-
-/// A PR's live state in the lowercase vocabulary the tool surface already uses for a node's phase,
-/// keeping `draft` distinct from `open` — the two differ to a reviewer.
-fn pr_state_name(state: PrState) -> &'static str {
-    match state {
-        PrState::Open => "open",
-        PrState::Merged => "merged",
-        PrState::Closed => "closed",
-        PrState::Draft => "draft",
-    }
-}
-
-/// Assemble live views, derive internal statuses, and persist them (override-wins).
-fn refresh_internal_statuses(
-    dir: &std::path::Path,
-    stack: &tddy_core::changeset::Stack,
-) -> Result<(), String> {
-    let sessions_root = dir
-        .parent()
-        .and_then(|p| p.parent())
-        .ok_or_else(|| "cannot derive sessions root from session dir".to_string())?;
-    let gh = real_gh()?;
-    let default = default_branch()?;
-    let views = tddy_workflow_recipes::orchestrate_pr_stack::assemble_views(
-        dir,
-        sessions_root,
-        stack,
-        &gh,
-        &default,
-    )
-    .map_err(|e| format!("assemble views: {e}"))?;
-    let derived =
-        tddy_workflow_recipes::orchestrate_pr_stack::derive_internal_status(&views, &default);
-    tddy_core::changeset::update_stack_atomic(dir, |s| {
-        for (node_id, d) in &derived {
-            if let Some(node) = s.nodes.iter_mut().find(|n| &n.node_id == node_id) {
-                node.internal_status = Some(
-                    tddy_workflow_recipes::orchestrate_pr_stack::reconcile_internal_status(
-                        node.internal_status.as_ref(),
-                        d.clone(),
-                    ),
-                );
-            }
-        }
-    })
-    .map_err(|e| format!("persist derived statuses: {e}"))
 }
 
 // Explicit `router = self.tool_router` — the default `#[tool_handler]` expansion calls the
@@ -3084,9 +2557,6 @@ mod tests {
     use rmcp::ServerHandler;
     use rstest::rstest;
     use serial_test::serial;
-    use tddy_workflow_recipes::orchestrate_pr_stack::github::{
-        CheckRun, PrFile, PrIssueComment, PrReview,
-    };
 
     #[test]
     fn mcp_server_declares_that_its_tool_list_can_change() {
@@ -3612,8 +3082,9 @@ mod tests {
     async fn call_tool_by_name_dispatches_mcp_tool_and_rejects_unknown() {
         let server = PermissionServer::new();
 
-        // pr_stack_status runs in-process; with no TDDY_SESSION_DIR it returns its own error JSON
-        // (a real result string), proving the dispatch reached the tool.
+        // pr_stack_status is forwarded to the daemon; with no daemon configured the session-tool
+        // client answers with its own error JSON (a real result string), proving the dispatch
+        // reached the forwarding path.
         let out = server
             .call_tool_by_name("pr_stack_status", serde_json::json!({}))
             .await
@@ -3647,254 +3118,6 @@ mod tests {
         assert_eq!(request["type"], "start-conversation");
         assert_eq!(request["args"]["session_type"], "workspace");
         assert_eq!(request["args"]["new_branch_name"], "implement-foo");
-    }
-
-    // -----------------------------------------------------------------------
-    // Addressing a pull request, and the JSON the PR read tools put on the wire
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn naming_neither_a_node_nor_a_pull_number_leaves_no_pull_request_to_read() {
-        // Given / When — a read tool called with an empty address
-        let result = addressed_pull_number(None, None);
-
-        // Then — named fields, so the agent is told what to pass rather than that something was wrong
-        assert_eq!(
-            result,
-            Err("name the pull request to read: pass node_id or pull_number".to_string())
-        );
-    }
-
-    #[test]
-    fn naming_both_a_node_and_a_pull_number_is_rejected_rather_than_settled_by_precedence() {
-        // Given / When — the two addresses could disagree, and here they do
-        let result = addressed_pull_number(Some("n1"), Some(1234));
-
-        // Then — a precedence rule would be one more thing the agent has to know to be right about
-        assert_eq!(
-            result,
-            Err("node_id and pull_number both name a pull request; pass exactly one".to_string())
-        );
-    }
-
-    /// A read view with one review, one check run and no file list — the shape `pr_read` returns when
-    /// the caller did not ask for files.
-    fn a_pr_read_view() -> pr_insight::PrReadView {
-        pr_insight::PrReadView {
-            number: 42,
-            url: "https://github.com/acme/repo/pull/42".to_string(),
-            title: "Add the token store".to_string(),
-            body: "Extracted from the parent PR.".to_string(),
-            state: PrState::Open,
-            base_branch: "master".to_string(),
-            head_branch: "feature/auth/token-store".to_string(),
-            head_sha: "sha-42".to_string(),
-            mergeable: Some(true),
-            mergeable_state: "clean".to_string(),
-            additions: 10,
-            deletions: 2,
-            changed_files: 3,
-            reviews: vec![pr_insight::ReviewerState {
-                author: "alice".to_string(),
-                state: "APPROVED".to_string(),
-            }],
-            checks: vec![CheckRun {
-                name: "build".to_string(),
-                conclusion: "success".to_string(),
-            }],
-            files: None,
-        }
-    }
-
-    #[test]
-    fn a_pr_read_without_files_leaves_the_files_key_out_altogether() {
-        // Given — the caller did not ask for the file list, so none was fetched
-        let view = a_pr_read_view();
-
-        // When
-        let json = pr_read_json(&view);
-
-        // Then — absent, not `null`: "neither fetched nor returned" and "fetched and empty" are
-        // different answers, and only an absent key says the first
-        assert_eq!(json.get("files"), None);
-    }
-
-    #[test]
-    fn a_pr_read_puts_the_prs_branches_on_the_wire_as_base_and_head() {
-        // Given — a PR whose file list the caller did ask for
-        let view = pr_insight::PrReadView {
-            files: Some(vec![PrFile {
-                path: "src/token_store.rs".to_string(),
-                status: "added".to_string(),
-            }]),
-            ..a_pr_read_view()
-        };
-
-        // When
-        let json = pr_read_json(&view);
-
-        // Then — the whole agent-facing contract, `base`/`head` included: the wire names are shorter
-        // than the Rust field names on purpose, and a rename would be a breaking change to the prompt
-        assert_eq!(
-            json,
-            serde_json::json!({
-                "number": 42,
-                "url": "https://github.com/acme/repo/pull/42",
-                "title": "Add the token store",
-                "body": "Extracted from the parent PR.",
-                "state": "open",
-                "base": "master",
-                "head": "feature/auth/token-store",
-                "head_sha": "sha-42",
-                "mergeable": true,
-                "mergeable_state": "clean",
-                "additions": 10,
-                "deletions": 2,
-                "changed_files": 3,
-                "reviews": [{ "author": "alice", "state": "APPROVED" }],
-                "checks": [{ "name": "build", "conclusion": "success" }],
-                "files": [{ "path": "src/token_store.rs", "status": "added" }],
-            })
-        );
-    }
-
-    #[rstest]
-    #[case::open(PrState::Open, "open")]
-    #[case::draft(PrState::Draft, "draft")]
-    #[case::merged(PrState::Merged, "merged")]
-    #[case::closed(PrState::Closed, "closed")]
-    fn a_prs_live_state_reaches_the_agent_in_the_lowercase_phase_vocabulary(
-        #[case] state: PrState,
-        #[case] expected: &str,
-    ) {
-        // Given / When — each state GitHub can report
-        let name = pr_state_name(state);
-
-        // Then — `draft` stays distinct from `open`: the two differ to a reviewer
-        assert_eq!(name, expected);
-    }
-
-    #[test]
-    fn pr_comments_puts_reviews_threads_and_conversation_on_the_wire_as_three_sections() {
-        // Given — one verdict, one two-comment thread anchored to a diff line, one PR-wide comment
-        let view = pr_insight::PrCommentsView {
-            reviews: vec![PrReview {
-                author: "alice".to_string(),
-                state: "CHANGES_REQUESTED".to_string(),
-                body: "Name the timeout.".to_string(),
-                submitted_at: "2026-07-30T10:00:00Z".to_string(),
-            }],
-            threads: vec![pr_insight::PrReviewThread {
-                path: "src/token_store.rs".to_string(),
-                line: Some(17),
-                diff_hunk: "@@ -1,3 +1,4 @@".to_string(),
-                comments: vec![
-                    pr_insight::PrThreadComment {
-                        author: "alice".to_string(),
-                        body: "Why 30?".to_string(),
-                        created_at: "2026-07-30T10:01:00Z".to_string(),
-                    },
-                    pr_insight::PrThreadComment {
-                        author: "bob".to_string(),
-                        body: "The provider's own p99.".to_string(),
-                        created_at: "2026-07-30T10:02:00Z".to_string(),
-                    },
-                ],
-            }],
-            conversation: vec![PrIssueComment {
-                author: "carol".to_string(),
-                body: "Rebased onto master.".to_string(),
-                created_at: "2026-07-30T10:03:00Z".to_string(),
-            }],
-        };
-
-        // When
-        let json = pr_comments_json(&view);
-
-        // Then — the whole agent-facing contract, and no `resolved` on the thread: resolution state
-        // exists only on GraphQL's `reviewThreads`, so a guessed value would mislead the agent
-        assert_eq!(
-            json,
-            serde_json::json!({
-                "reviews": [{
-                    "author": "alice",
-                    "state": "CHANGES_REQUESTED",
-                    "body": "Name the timeout.",
-                    "submitted_at": "2026-07-30T10:00:00Z",
-                }],
-                "threads": [{
-                    "path": "src/token_store.rs",
-                    "line": 17,
-                    "diff_hunk": "@@ -1,3 +1,4 @@",
-                    "comments": [
-                        { "author": "alice", "body": "Why 30?", "created_at": "2026-07-30T10:01:00Z" },
-                        { "author": "bob", "body": "The provider's own p99.", "created_at": "2026-07-30T10:02:00Z" },
-                    ],
-                }],
-                "conversation": [{
-                    "author": "carol",
-                    "body": "Rebased onto master.",
-                    "created_at": "2026-07-30T10:03:00Z",
-                }],
-            })
-        );
-        assert_eq!(json["threads"][0].get("resolved"), None);
-    }
-
-    #[test]
-    fn a_pr_search_puts_each_hit_on_the_wire_without_the_branches_github_does_not_report() {
-        // Given — one open PR and one draft, as a search page returns them
-        let hits = vec![
-            PrSearchHit {
-                number: 42,
-                title: "Add the token store".to_string(),
-                state: "open".to_string(),
-                draft: false,
-                author: "alice".to_string(),
-                url: "https://github.com/acme/repo/pull/42".to_string(),
-                updated_at: "2026-07-30T10:00:00Z".to_string(),
-            },
-            PrSearchHit {
-                number: 43,
-                title: "Rotate the signing key".to_string(),
-                state: "open".to_string(),
-                draft: true,
-                author: "bob".to_string(),
-                url: "https://github.com/acme/repo/pull/43".to_string(),
-                updated_at: "2026-07-30T11:00:00Z".to_string(),
-            },
-        ];
-
-        // When
-        let json = pr_search_json(&hits);
-
-        // Then — the whole agent-facing contract, in the order the search returned it; no `base` or
-        // `head`, which GitHub's search does not report — `pr_read` is where those come from
-        assert_eq!(
-            json,
-            serde_json::json!({
-                "hits": [
-                    {
-                        "number": 42,
-                        "title": "Add the token store",
-                        "state": "open",
-                        "draft": false,
-                        "author": "alice",
-                        "url": "https://github.com/acme/repo/pull/42",
-                        "updated_at": "2026-07-30T10:00:00Z",
-                    },
-                    {
-                        "number": 43,
-                        "title": "Rotate the signing key",
-                        "state": "open",
-                        "draft": true,
-                        "author": "bob",
-                        "url": "https://github.com/acme/repo/pull/43",
-                        "updated_at": "2026-07-30T11:00:00Z",
-                    },
-                ],
-            })
-        );
     }
 
     // ─── Deferring a turn that outruns its caller's patience ──────────────────

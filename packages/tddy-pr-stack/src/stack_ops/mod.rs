@@ -9,9 +9,11 @@
 //! Split by concern; every public item is re-exported here, so `tddy_pr_stack::stack_ops::*` is the
 //! one path callers name.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use tddy_core::changeset::StackNode;
+use tddy_core::changeset::{Stack, StackNode};
+use tddy_core::project_stack_store::{ProjectStackStore, StackStoreError};
+use tddy_core::WorkflowError;
 
 mod adopt;
 mod nodes;
@@ -37,12 +39,82 @@ pub use seed::{
 
 use order::next_display_order;
 
-/// The session's persisted stack, or an empty one when its changeset records none.
+/// Where a plan operation reads and writes its stack: a session (the stack its changeset names), or
+/// a record of the project's stack store addressed directly ([`StoredStack`]), as the daemon's
+/// stack tools do (`#orchestrators` 7/11).
+pub trait StackHome {
+    /// The stack, or `None` when its owner has planned none.
+    fn read_stack(&self) -> Result<Option<Stack>, WorkflowError>;
+
+    /// Apply `f` to the stack and write it back, serialized against every other writer of it.
+    fn update_stack<F: FnOnce(&mut Stack)>(&self, f: F) -> Result<(), WorkflowError>;
+}
+
+impl StackHome for Path {
+    fn read_stack(&self) -> Result<Option<Stack>, WorkflowError> {
+        tddy_core::changeset::read_session_stack(self)
+    }
+
+    fn update_stack<F: FnOnce(&mut Stack)>(&self, f: F) -> Result<(), WorkflowError> {
+        tddy_core::changeset::update_stack_atomic(self, f)
+    }
+}
+
+impl StackHome for PathBuf {
+    fn read_stack(&self) -> Result<Option<Stack>, WorkflowError> {
+        self.as_path().read_stack()
+    }
+
+    fn update_stack<F: FnOnce(&mut Stack)>(&self, f: F) -> Result<(), WorkflowError> {
+        self.as_path().update_stack(f)
+    }
+}
+
+impl<T: StackHome + ?Sized> StackHome for &T {
+    fn read_stack(&self) -> Result<Option<Stack>, WorkflowError> {
+        (**self).read_stack()
+    }
+
+    fn update_stack<F: FnOnce(&mut Stack)>(&self, f: F) -> Result<(), WorkflowError> {
+        (**self).update_stack(f)
+    }
+}
+
+/// One record of a project's stack store, named by project and stack id: a stack addressed
+/// directly, not through the session whose changeset names it.
+pub struct StoredStack<'a> {
+    pub store: &'a ProjectStackStore,
+    pub project_id: &'a str,
+    pub stack_id: &'a str,
+}
+
+fn store_error(e: StackStoreError) -> WorkflowError {
+    WorkflowError::ChangesetInvalid(e.to_string())
+}
+
+impl StackHome for StoredStack<'_> {
+    fn read_stack(&self) -> Result<Option<Stack>, WorkflowError> {
+        self.store
+            .read(self.project_id, self.stack_id)
+            .map(|record| Some(record.stack))
+            .map_err(store_error)
+    }
+
+    fn update_stack<F: FnOnce(&mut Stack)>(&self, f: F) -> Result<(), WorkflowError> {
+        self.store
+            .update(self.project_id, self.stack_id, f)
+            .map(drop)
+            .map_err(store_error)
+    }
+}
+
+/// The stack of `home`, or an empty one when it records none.
 ///
 /// `op` prefixes the failure so the caller's name reaches the operator — every writer below reports
 /// an unreadable changeset the same way.
-fn read_stack(dir: &Path, op: &str) -> Result<tddy_core::changeset::Stack, String> {
-    Ok(tddy_core::changeset::read_session_stack(dir)
+fn read_stack(home: &(impl StackHome + ?Sized), op: &str) -> Result<Stack, String> {
+    Ok(home
+        .read_stack()
         .map_err(|e| format!("{op}: failed to read changeset: {e}"))?
         .unwrap_or_default())
 }
@@ -61,9 +133,13 @@ fn read_stack(dir: &Path, op: &str) -> Result<tddy_core::changeset::Stack, Strin
 /// about to be written: `update_stack_atomic` re-reads the file before applying its closure, so a
 /// position chosen from a snapshot taken earlier could collide with a node another writer appended in
 /// between.
-fn append_node_atomic(dir: &Path, node: StackNode, op: &str) -> Result<StackNode, String> {
+fn append_node_atomic(
+    home: &(impl StackHome + ?Sized),
+    node: StackNode,
+    op: &str,
+) -> Result<StackNode, String> {
     let mut appended = node;
-    tddy_core::changeset::update_stack_atomic(dir, |stack| {
+    home.update_stack(|stack| {
         assign_missing_display_order(stack);
         appended.display_order = Some(next_display_order(stack));
         stack.nodes.push(appended.clone());
