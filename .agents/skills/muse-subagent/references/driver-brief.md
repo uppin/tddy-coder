@@ -34,7 +34,17 @@ to stop, even when it looks stale.
 3. Follow it: `$MA wait local <name> 540`, repeated while it prints `WAIT=still-running`. Between
    waits, `$MA progress local <name> 10` shows what Muse Code is doing. If `progress` shows the same
    failing command three times running, it is stuck: `$MA cancel local <name>`, then steer it in the
-   next turn.
+   next turn. Two early returns leave the turn **running** and are reported to `main` at once, with
+   `SendMessage`, in one line — then keep waiting:
+   - **`WAIT=run-failed`** → a run inside the turn failed (`LAST_RUN_FAILURE`, e.g. a TLS or
+     transport error). Muse may recover by starting another run in the same turn. Do not resume,
+     cancel or start anything: the turn is not over. If `RUN_FAILURES` keeps rising, or the stream
+     stays quiet afterwards, it has not recovered — say so to `main`.
+   - **`WAIT=stalled`** → the stream has been quiet for `STREAM_IDLE_SECS`. Check `progress`: a long
+     scoped test run is fine to wait out once; a loop, or a command that cannot succeed (a known
+     environment failure), is not — `cancel`, then steer it in the next turn.
+
+   Every progress note to `main` carries `STREAM_IDLE_SECS` and `RUN_FAILURES` from the last `wait`.
 4. **14** on `run` → a turn of `<name>` is still running, or another agent holds the worktree. `wait`
    for your own; never start a second one. If it is not yours, stop and report it.
 5. When `wait` prints `WAIT=turn-ended`, read `RUN_EXIT`:
