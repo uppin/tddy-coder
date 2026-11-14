@@ -12,7 +12,65 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file pr_stack.proto.
  */
 export const file_pr_stack: GenFile = /*@__PURE__*/
-  fileDesc("Cg5wcl9zdGFjay5wcm90bxIIcHJfc3RhY2siUAoMU3RhY2tBZGRyZXNzEhIKCnByb2plY3RfaWQYASABKAkSEAoIc3RhY2tfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIs0BChNBZGRQbGFubmVkUHJSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRINCgV0aXRsZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIZChFicmFuY2hfc3VnZ2VzdGlvbhgFIAEoCRIPCgdwYXJlbnRzGAYgAygJEhQKDGNoaWxkX3JlY2lwZRgHIAEoCRIlCgVzdGFjaxgIIAEoCzIWLnByX3N0YWNrLlN0YWNrQWRkcmVzcyJAChRBZGRQbGFubmVkUHJSZXNwb25zZRIXCg9zdGFja19wbGFuX2pzb24YASABKAkSDwoHbm9kZV9pZBgCIAEoCSLWAQoOQnJhbmNoQmFzZVN5bmMSEwoLYmFzZV9icmFuY2gYASABKAkSFAoMYmVoaW5kX2NvdW50GAIgASgNEhMKC2FoZWFkX2NvdW50GAMgASgNEhUKDWhhc19jb25mbGljdHMYBCABKAgSGAoQY29uZmxpY3RlZF9wYXRocxgFIAMoCRITCgt1bmF2YWlsYWJsZRgGIAEoCBIaChJ1bmF2YWlsYWJsZV9yZWFzb24YByABKAkSEAoIYmFzZV9yZWYYCCABKAkSEAoIaGVhZF9yZWYYCSABKAkiKwoMQnJhbmNoUmVtb3RlEg4KBmV4aXN0cxgBIAEoCBILCgNzaGEYAiABKAki7gEKEEJyYW5jaFJlc29sdXRpb24SDgoGYnJhbmNoGAEgASgJEiUKB3Nlc3Npb24YAiABKAsyFC50eXBlcy5CcmFuY2hTZXNzaW9uEioKCHdvcmt0cmVlGAMgASgLMhgucHJfc3RhY2suQnJhbmNoV29ya3RyZWUSIgoCcHIYBCABKAsyFi5wcl9zdGFjay5QclN0YXR1c1ZpZXcSJgoGcmVtb3RlGAUgASgLMhYucHJfc3RhY2suQnJhbmNoUmVtb3RlEisKCWJhc2Vfc3luYxgGIAEoCzIYLnByX3N0YWNrLkJyYW5jaEJhc2VTeW5jIlIKDkJyYW5jaFdvcmt0cmVlEg4KBmV4aXN0cxgBIAEoCBIMCgRwYXRoGAIgASgJEg0KBWRpcnR5GAMgASgIEhMKC2RpcnR5X3BhdGhzGAQgAygJInYKEkdldFByU3RhdHVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGYnJhbmNoGAMgASgJEiUKBXN0YWNrGAQgASgLMhYucHJfc3RhY2suU3RhY2tBZGRyZXNzIj0KE0dldFByU3RhdHVzUmVzcG9uc2USJgoGc3RhdHVzGAEgASgLMhYucHJfc3RhY2suUHJTdGF0dXNWaWV3IqUBChRMaW5rU3RhY2tOb2RlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIfChdvcmNoZXN0cmF0b3Jfc2Vzc2lvbl9pZBgDIAEoCRIPCgdub2RlX2lkGAQgASgJEhgKEGNoaWxkX3Nlc3Npb25faWQYBSABKAkSDgoGYnJhbmNoGAYgASgJIjAKFUxpbmtTdGFja05vZGVSZXNwb25zZRIXCg9zdGFja19wbGFuX2pzb24YASABKAkiewoMUHJTdGF0dXNWaWV3Eg4KBmV4aXN0cxgBIAEoCBIOCgZudW1iZXIYAiABKAQSCwoDdXJsGAMgASgJEg0KBXN0YXRlGAQgASgJEhMKC3VuYXZhaWxhYmxlGAUgASgIEhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgGIAEoCSLcAQoZUHVsbEJhc2VJbnRvQnJhbmNoUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDwoHbm9kZV9pZBgDIAEoCRITCgtiYXNlX2JyYW5jaBgEIAEoCRIQCghzdHJhdGVneRgFIAEoCRIdChVkaXJ0eV93b3JrdHJlZV9hY3Rpb24YBiABKAkSFgoOY29tbWl0X21lc3NhZ2UYByABKAkSJQoFc3RhY2sYCCABKAsyFi5wcl9zdGFjay5TdGFja0FkZHJlc3MikwEKGlB1bGxCYXNlSW50b0JyYW5jaFJlc3BvbnNlEi4KCnJlc29sdXRpb24YASABKAsyGi5wcl9zdGFjay5CcmFuY2hSZXNvbHV0aW9uEhAKCHN0cmF0ZWd5GAIgASgJEg8KB2NoYW5nZWQYAyABKAgSDgoGcHVzaGVkGAQgASgIEhIKCnB1c2hfZXJyb3IYBSABKAkiiwEKElF1ZXJ5QnJhbmNoUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGYnJhbmNoGAMgASgJEhMKC2Jhc2VfYnJhbmNoGAQgASgJEiUKBXN0YWNrGAUgASgLMhYucHJfc3RhY2suU3RhY2tBZGRyZXNzIkUKE1F1ZXJ5QnJhbmNoUmVzcG9uc2USLgoKcmVzb2x1dGlvbhgBIAEoCzIaLnByX3N0YWNrLkJyYW5jaFJlc29sdXRpb24ijwEKF1Jlb3JkZXJQbGFubmVkUHJSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIPCgdub2RlX2lkGAMgASgJEhEKCWRpcmVjdGlvbhgEIAEoCRIlCgVzdGFjaxgFIAEoCzIWLnByX3N0YWNrLlN0YWNrQWRkcmVzcyIzChhSZW9yZGVyUGxhbm5lZFByUmVzcG9uc2USFwoPc3RhY2tfcGxhbl9qc29uGAEgASgJIpgBChdSZXBvaW50UGxhbm5lZFByUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDwoHbm9kZV9pZBgDIAEoCRIaChJ0YXJnZXRfYmFzZV9icmFuY2gYBCABKAkSJQoFc3RhY2sYBSABKAsyFi5wcl9zdGFjay5TdGFja0FkZHJlc3MiMwoYUmVwb2ludFBsYW5uZWRQclJlc3BvbnNlEhcKD3N0YWNrX3BsYW5fanNvbhgBIAEoCSKmAQoXUmVzb2x2ZVN0YWNrQmFzZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSFAoMc3RhY2tfcGFyZW50GAMgASgJEhIKCnByb2plY3RfaWQYBCABKAkSFwoPbmV3X2JyYW5jaF9uYW1lGAUgASgJEhUKDXN0YWNrX25vZGVfaWQYBiABKAkiLAoYUmVzb2x2ZVN0YWNrQmFzZVJlc3BvbnNlEhAKCGJhc2VfcmVmGAEgASgJIl0KGExpc3RQcm9qZWN0U3RhY2tzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFgoOdGhpc19ob3N0X29ubHkYAyABKAgiQQoPU3RhY2tOb2RlQ291bnRzEg0KBXRvdGFsGAEgASgNEg8KB3N0YXJ0ZWQYAiABKA0SDgoGbWVyZ2VkGAMgASgNItkBChNQcm9qZWN0U3RhY2tTdW1tYXJ5EicKB2FkZHJlc3MYASABKAsyFi5wcl9zdGFjay5TdGFja0FkZHJlc3MSDQoFdGl0bGUYAiABKAkSLgoLbm9kZV9jb3VudHMYAyABKAsyGS5wcl9zdGFjay5TdGFja05vZGVDb3VudHMSHwoXcmVmZXJlbmNpbmdfc2Vzc2lvbl9pZHMYBCADKAkSHQoVY3JlYXRlZF9ieV9zZXNzaW9uX2lkGAUgASgJEhoKEmNyZWF0ZWRfYXRfdW5peF9tcxgGIAEoBCJCChRVbnJlYWNoYWJsZVN0YWNrSG9zdBIaChJkYWVtb25faW5zdGFuY2VfaWQYASABKAkSDgoGcmVhc29uGAIgASgJIoUBChlMaXN0UHJvamVjdFN0YWNrc1Jlc3BvbnNlEi0KBnN0YWNrcxgBIAMoCzIdLnByX3N0YWNrLlByb2plY3RTdGFja1N1bW1hcnkSOQoRdW5yZWFjaGFibGVfaG9zdHMYAiADKAsyHi5wcl9zdGFjay5VbnJlYWNoYWJsZVN0YWNrSG9zdCJWChZHZXRQcm9qZWN0U3RhY2tSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSJQoFc3RhY2sYAiABKAsyFi5wcl9zdGFjay5TdGFja0FkZHJlc3MiYgoXR2V0UHJvamVjdFN0YWNrUmVzcG9uc2USLgoHc3VtbWFyeRgBIAEoCzIdLnByX3N0YWNrLlByb2plY3RTdGFja1N1bW1hcnkSFwoPc3RhY2tfcGxhbl9qc29uGAIgASgJMvEGCg5QclN0YWNrU2VydmljZRJNCgxBZGRQbGFubmVkUHISHS5wcl9zdGFjay5BZGRQbGFubmVkUHJSZXF1ZXN0Gh4ucHJfc3RhY2suQWRkUGxhbm5lZFByUmVzcG9uc2USSgoLR2V0UHJTdGF0dXMSHC5wcl9zdGFjay5HZXRQclN0YXR1c1JlcXVlc3QaHS5wcl9zdGFjay5HZXRQclN0YXR1c1Jlc3BvbnNlElkKEFJlcG9pbnRQbGFubmVkUHISIS5wcl9zdGFjay5SZXBvaW50UGxhbm5lZFByUmVxdWVzdBoiLnByX3N0YWNrLlJlcG9pbnRQbGFubmVkUHJSZXNwb25zZRJZChBSZW9yZGVyUGxhbm5lZFByEiEucHJfc3RhY2suUmVvcmRlclBsYW5uZWRQclJlcXVlc3QaIi5wcl9zdGFjay5SZW9yZGVyUGxhbm5lZFByUmVzcG9uc2USXwoSUHVsbEJhc2VJbnRvQnJhbmNoEiMucHJfc3RhY2suUHVsbEJhc2VJbnRvQnJhbmNoUmVxdWVzdBokLnByX3N0YWNrLlB1bGxCYXNlSW50b0JyYW5jaFJlc3BvbnNlEkoKC1F1ZXJ5QnJhbmNoEhwucHJfc3RhY2suUXVlcnlCcmFuY2hSZXF1ZXN0Gh0ucHJfc3RhY2suUXVlcnlCcmFuY2hSZXNwb25zZRJZChBSZXNvbHZlU3RhY2tCYXNlEiEucHJfc3RhY2suUmVzb2x2ZVN0YWNrQmFzZVJlcXVlc3QaIi5wcl9zdGFjay5SZXNvbHZlU3RhY2tCYXNlUmVzcG9uc2USUAoNTGlua1N0YWNrTm9kZRIeLnByX3N0YWNrLkxpbmtTdGFja05vZGVSZXF1ZXN0Gh8ucHJfc3RhY2suTGlua1N0YWNrTm9kZVJlc3BvbnNlElwKEUxpc3RQcm9qZWN0U3RhY2tzEiIucHJfc3RhY2suTGlzdFByb2plY3RTdGFja3NSZXF1ZXN0GiMucHJfc3RhY2suTGlzdFByb2plY3RTdGFja3NSZXNwb25zZRJWCg9HZXRQcm9qZWN0U3RhY2sSIC5wcl9zdGFjay5HZXRQcm9qZWN0U3RhY2tSZXF1ZXN0GiEucHJfc3RhY2suR2V0UHJvamVjdFN0YWNrUmVzcG9uc2ViBnByb3RvMw", [file_types]);
+  fileDesc("Cg5wcl9zdGFjay5wcm90bxIIcHJfc3RhY2sicQoZQ3JlYXRlUHJvamVjdFN0YWNrUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSDQoFdGl0bGUYAyABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAQgASgJIkMKGkNyZWF0ZVByb2plY3RTdGFja1Jlc3BvbnNlEiUKBXN0YWNrGAEgASgLMhYucHJfc3RhY2suU3RhY2tBZGRyZXNzIlAKDFN0YWNrQWRkcmVzcxISCgpwcm9qZWN0X2lkGAEgASgJEhAKCHN0YWNrX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSLNAQoTQWRkUGxhbm5lZFByUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDQoFdGl0bGUYAyABKAkSEwoLZGVzY3JpcHRpb24YBCABKAkSGQoRYnJhbmNoX3N1Z2dlc3Rpb24YBSABKAkSDwoHcGFyZW50cxgGIAMoCRIUCgxjaGlsZF9yZWNpcGUYByABKAkSJQoFc3RhY2sYCCABKAsyFi5wcl9zdGFjay5TdGFja0FkZHJlc3MiQAoUQWRkUGxhbm5lZFByUmVzcG9uc2USFwoPc3RhY2tfcGxhbl9qc29uGAEgASgJEg8KB25vZGVfaWQYAiABKAki1gEKDkJyYW5jaEJhc2VTeW5jEhMKC2Jhc2VfYnJhbmNoGAEgASgJEhQKDGJlaGluZF9jb3VudBgCIAEoDRITCgthaGVhZF9jb3VudBgDIAEoDRIVCg1oYXNfY29uZmxpY3RzGAQgASgIEhgKEGNvbmZsaWN0ZWRfcGF0aHMYBSADKAkSEwoLdW5hdmFpbGFibGUYBiABKAgSGgoSdW5hdmFpbGFibGVfcmVhc29uGAcgASgJEhAKCGJhc2VfcmVmGAggASgJEhAKCGhlYWRfcmVmGAkgASgJIisKDEJyYW5jaFJlbW90ZRIOCgZleGlzdHMYASABKAgSCwoDc2hhGAIgASgJIu4BChBCcmFuY2hSZXNvbHV0aW9uEg4KBmJyYW5jaBgBIAEoCRIlCgdzZXNzaW9uGAIgASgLMhQudHlwZXMuQnJhbmNoU2Vzc2lvbhIqCgh3b3JrdHJlZRgDIAEoCzIYLnByX3N0YWNrLkJyYW5jaFdvcmt0cmVlEiIKAnByGAQgASgLMhYucHJfc3RhY2suUHJTdGF0dXNWaWV3EiYKBnJlbW90ZRgFIAEoCzIWLnByX3N0YWNrLkJyYW5jaFJlbW90ZRIrCgliYXNlX3N5bmMYBiABKAsyGC5wcl9zdGFjay5CcmFuY2hCYXNlU3luYyJSCg5CcmFuY2hXb3JrdHJlZRIOCgZleGlzdHMYASABKAgSDAoEcGF0aBgCIAEoCRINCgVkaXJ0eRgDIAEoCBITCgtkaXJ0eV9wYXRocxgEIAMoCSJ2ChJHZXRQclN0YXR1c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBmJyYW5jaBgDIAEoCRIlCgVzdGFjaxgEIAEoCzIWLnByX3N0YWNrLlN0YWNrQWRkcmVzcyI9ChNHZXRQclN0YXR1c1Jlc3BvbnNlEiYKBnN0YXR1cxgBIAEoCzIWLnByX3N0YWNrLlByU3RhdHVzVmlldyKlAQoUTGlua1N0YWNrTm9kZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSHwoXb3JjaGVzdHJhdG9yX3Nlc3Npb25faWQYAyABKAkSDwoHbm9kZV9pZBgEIAEoCRIYChBjaGlsZF9zZXNzaW9uX2lkGAUgASgJEg4KBmJyYW5jaBgGIAEoCSIwChVMaW5rU3RhY2tOb2RlUmVzcG9uc2USFwoPc3RhY2tfcGxhbl9qc29uGAEgASgJInsKDFByU3RhdHVzVmlldxIOCgZleGlzdHMYASABKAgSDgoGbnVtYmVyGAIgASgEEgsKA3VybBgDIAEoCRINCgVzdGF0ZRgEIAEoCRITCgt1bmF2YWlsYWJsZRgFIAEoCBIaChJ1bmF2YWlsYWJsZV9yZWFzb24YBiABKAki3AEKGVB1bGxCYXNlSW50b0JyYW5jaFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg8KB25vZGVfaWQYAyABKAkSEwoLYmFzZV9icmFuY2gYBCABKAkSEAoIc3RyYXRlZ3kYBSABKAkSHQoVZGlydHlfd29ya3RyZWVfYWN0aW9uGAYgASgJEhYKDmNvbW1pdF9tZXNzYWdlGAcgASgJEiUKBXN0YWNrGAggASgLMhYucHJfc3RhY2suU3RhY2tBZGRyZXNzIpMBChpQdWxsQmFzZUludG9CcmFuY2hSZXNwb25zZRIuCgpyZXNvbHV0aW9uGAEgASgLMhoucHJfc3RhY2suQnJhbmNoUmVzb2x1dGlvbhIQCghzdHJhdGVneRgCIAEoCRIPCgdjaGFuZ2VkGAMgASgIEg4KBnB1c2hlZBgEIAEoCBISCgpwdXNoX2Vycm9yGAUgASgJIosBChJRdWVyeUJyYW5jaFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBmJyYW5jaBgDIAEoCRITCgtiYXNlX2JyYW5jaBgEIAEoCRIlCgVzdGFjaxgFIAEoCzIWLnByX3N0YWNrLlN0YWNrQWRkcmVzcyJFChNRdWVyeUJyYW5jaFJlc3BvbnNlEi4KCnJlc29sdXRpb24YASABKAsyGi5wcl9zdGFjay5CcmFuY2hSZXNvbHV0aW9uIo8BChdSZW9yZGVyUGxhbm5lZFByUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDwoHbm9kZV9pZBgDIAEoCRIRCglkaXJlY3Rpb24YBCABKAkSJQoFc3RhY2sYBSABKAsyFi5wcl9zdGFjay5TdGFja0FkZHJlc3MiMwoYUmVvcmRlclBsYW5uZWRQclJlc3BvbnNlEhcKD3N0YWNrX3BsYW5fanNvbhgBIAEoCSKYAQoXUmVwb2ludFBsYW5uZWRQclJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg8KB25vZGVfaWQYAyABKAkSGgoSdGFyZ2V0X2Jhc2VfYnJhbmNoGAQgASgJEiUKBXN0YWNrGAUgASgLMhYucHJfc3RhY2suU3RhY2tBZGRyZXNzIjMKGFJlcG9pbnRQbGFubmVkUHJSZXNwb25zZRIXCg9zdGFja19wbGFuX2pzb24YASABKAkipgEKF1Jlc29sdmVTdGFja0Jhc2VSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEhQKDHN0YWNrX3BhcmVudBgDIAEoCRISCgpwcm9qZWN0X2lkGAQgASgJEhcKD25ld19icmFuY2hfbmFtZRgFIAEoCRIVCg1zdGFja19ub2RlX2lkGAYgASgJIiwKGFJlc29sdmVTdGFja0Jhc2VSZXNwb25zZRIQCghiYXNlX3JlZhgBIAEoCSJdChhMaXN0UHJvamVjdFN0YWNrc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhYKDnRoaXNfaG9zdF9vbmx5GAMgASgIIkEKD1N0YWNrTm9kZUNvdW50cxINCgV0b3RhbBgBIAEoDRIPCgdzdGFydGVkGAIgASgNEg4KBm1lcmdlZBgDIAEoDSLZAQoTUHJvamVjdFN0YWNrU3VtbWFyeRInCgdhZGRyZXNzGAEgASgLMhYucHJfc3RhY2suU3RhY2tBZGRyZXNzEg0KBXRpdGxlGAIgASgJEi4KC25vZGVfY291bnRzGAMgASgLMhkucHJfc3RhY2suU3RhY2tOb2RlQ291bnRzEh8KF3JlZmVyZW5jaW5nX3Nlc3Npb25faWRzGAQgAygJEh0KFWNyZWF0ZWRfYnlfc2Vzc2lvbl9pZBgFIAEoCRIaChJjcmVhdGVkX2F0X3VuaXhfbXMYBiABKAQiQgoUVW5yZWFjaGFibGVTdGFja0hvc3QSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSKFAQoZTGlzdFByb2plY3RTdGFja3NSZXNwb25zZRItCgZzdGFja3MYASADKAsyHS5wcl9zdGFjay5Qcm9qZWN0U3RhY2tTdW1tYXJ5EjkKEXVucmVhY2hhYmxlX2hvc3RzGAIgAygLMh4ucHJfc3RhY2suVW5yZWFjaGFibGVTdGFja0hvc3QiVgoWR2V0UHJvamVjdFN0YWNrUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEiUKBXN0YWNrGAIgASgLMhYucHJfc3RhY2suU3RhY2tBZGRyZXNzImIKF0dldFByb2plY3RTdGFja1Jlc3BvbnNlEi4KB3N1bW1hcnkYASABKAsyHS5wcl9zdGFjay5Qcm9qZWN0U3RhY2tTdW1tYXJ5EhcKD3N0YWNrX3BsYW5fanNvbhgCIAEoCTLSBwoOUHJTdGFja1NlcnZpY2USTQoMQWRkUGxhbm5lZFByEh0ucHJfc3RhY2suQWRkUGxhbm5lZFByUmVxdWVzdBoeLnByX3N0YWNrLkFkZFBsYW5uZWRQclJlc3BvbnNlEkoKC0dldFByU3RhdHVzEhwucHJfc3RhY2suR2V0UHJTdGF0dXNSZXF1ZXN0Gh0ucHJfc3RhY2suR2V0UHJTdGF0dXNSZXNwb25zZRJZChBSZXBvaW50UGxhbm5lZFByEiEucHJfc3RhY2suUmVwb2ludFBsYW5uZWRQclJlcXVlc3QaIi5wcl9zdGFjay5SZXBvaW50UGxhbm5lZFByUmVzcG9uc2USWQoQUmVvcmRlclBsYW5uZWRQchIhLnByX3N0YWNrLlJlb3JkZXJQbGFubmVkUHJSZXF1ZXN0GiIucHJfc3RhY2suUmVvcmRlclBsYW5uZWRQclJlc3BvbnNlEl8KElB1bGxCYXNlSW50b0JyYW5jaBIjLnByX3N0YWNrLlB1bGxCYXNlSW50b0JyYW5jaFJlcXVlc3QaJC5wcl9zdGFjay5QdWxsQmFzZUludG9CcmFuY2hSZXNwb25zZRJKCgtRdWVyeUJyYW5jaBIcLnByX3N0YWNrLlF1ZXJ5QnJhbmNoUmVxdWVzdBodLnByX3N0YWNrLlF1ZXJ5QnJhbmNoUmVzcG9uc2USWQoQUmVzb2x2ZVN0YWNrQmFzZRIhLnByX3N0YWNrLlJlc29sdmVTdGFja0Jhc2VSZXF1ZXN0GiIucHJfc3RhY2suUmVzb2x2ZVN0YWNrQmFzZVJlc3BvbnNlElAKDUxpbmtTdGFja05vZGUSHi5wcl9zdGFjay5MaW5rU3RhY2tOb2RlUmVxdWVzdBofLnByX3N0YWNrLkxpbmtTdGFja05vZGVSZXNwb25zZRJcChFMaXN0UHJvamVjdFN0YWNrcxIiLnByX3N0YWNrLkxpc3RQcm9qZWN0U3RhY2tzUmVxdWVzdBojLnByX3N0YWNrLkxpc3RQcm9qZWN0U3RhY2tzUmVzcG9uc2USVgoPR2V0UHJvamVjdFN0YWNrEiAucHJfc3RhY2suR2V0UHJvamVjdFN0YWNrUmVxdWVzdBohLnByX3N0YWNrLkdldFByb2plY3RTdGFja1Jlc3BvbnNlEl8KEkNyZWF0ZVByb2plY3RTdGFjaxIjLnByX3N0YWNrLkNyZWF0ZVByb2plY3RTdGFja1JlcXVlc3QaJC5wcl9zdGFjay5DcmVhdGVQcm9qZWN0U3RhY2tSZXNwb25zZWIGcHJvdG8z", [file_types]);
+
+/**
+ * @generated from message pr_stack.CreateProjectStackRequest
+ */
+export type CreateProjectStackRequest = Message<"pr_stack.CreateProjectStackRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * The logical project the new stack belongs to.
+   *
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * Optional title for the stack; empty = untitled.
+   *
+   * @generated from field: string title = 3;
+   */
+  title: string;
+
+  /**
+   * The daemon whose store holds the project. Empty or this daemon's own id = the daemon the
+   * call arrived on; a peer's id = the call is forwarded there.
+   *
+   * @generated from field: string daemon_instance_id = 4;
+   */
+  daemonInstanceId: string;
+};
+
+/**
+ * Describes the message pr_stack.CreateProjectStackRequest.
+ * Use `create(CreateProjectStackRequestSchema)` to create a new message.
+ */
+export const CreateProjectStackRequestSchema: GenMessage<CreateProjectStackRequest> = /*@__PURE__*/
+  messageDesc(file_pr_stack, 0);
+
+/**
+ * @generated from message pr_stack.CreateProjectStackResponse
+ */
+export type CreateProjectStackResponse = Message<"pr_stack.CreateProjectStackResponse"> & {
+  /**
+   * Where the new stack lives — the address every later request about it carries.
+   *
+   * @generated from field: pr_stack.StackAddress stack = 1;
+   */
+  stack?: StackAddress;
+};
+
+/**
+ * Describes the message pr_stack.CreateProjectStackResponse.
+ * Use `create(CreateProjectStackResponseSchema)` to create a new message.
+ */
+export const CreateProjectStackResponseSchema: GenMessage<CreateProjectStackResponse> = /*@__PURE__*/
+  messageDesc(file_pr_stack, 1);
 
 /**
  * Where a PR stack lives (`#orchestrators` 9/11): the project that holds it, its id in that
@@ -54,7 +112,7 @@ export type StackAddress = Message<"pr_stack.StackAddress"> & {
  * Use `create(StackAddressSchema)` to create a new message.
  */
 export const StackAddressSchema: GenMessage<StackAddress> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 0);
+  messageDesc(file_pr_stack, 2);
 
 /**
  * @generated from message pr_stack.AddPlannedPrRequest
@@ -118,7 +176,7 @@ export type AddPlannedPrRequest = Message<"pr_stack.AddPlannedPrRequest"> & {
  * Use `create(AddPlannedPrRequestSchema)` to create a new message.
  */
 export const AddPlannedPrRequestSchema: GenMessage<AddPlannedPrRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 1);
+  messageDesc(file_pr_stack, 3);
 
 /**
  * @generated from message pr_stack.AddPlannedPrResponse
@@ -149,7 +207,7 @@ export type AddPlannedPrResponse = Message<"pr_stack.AddPlannedPrResponse"> & {
  * Use `create(AddPlannedPrResponseSchema)` to create a new message.
  */
 export const AddPlannedPrResponseSchema: GenMessage<AddPlannedPrResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 2);
+  messageDesc(file_pr_stack, 4);
 
 /**
  * How a branch stands against its base: how far behind, how far ahead, and whether taking the
@@ -238,7 +296,7 @@ export type BranchBaseSync = Message<"pr_stack.BranchBaseSync"> & {
  * Use `create(BranchBaseSyncSchema)` to create a new message.
  */
 export const BranchBaseSyncSchema: GenMessage<BranchBaseSync> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 3);
+  messageDesc(file_pr_stack, 5);
 
 /**
  * The remote-tracking state of a branch on `origin`.
@@ -266,7 +324,7 @@ export type BranchRemote = Message<"pr_stack.BranchRemote"> & {
  * Use `create(BranchRemoteSchema)` to create a new message.
  */
 export const BranchRemoteSchema: GenMessage<BranchRemote> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 4);
+  messageDesc(file_pr_stack, 6);
 
 /**
  * Everything the PR-Stack view needs about one branch, resolved server-side by branch name.
@@ -324,7 +382,7 @@ export type BranchResolution = Message<"pr_stack.BranchResolution"> & {
  * Use `create(BranchResolutionSchema)` to create a new message.
  */
 export const BranchResolutionSchema: GenMessage<BranchResolution> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 5);
+  messageDesc(file_pr_stack, 7);
 
 /**
  * @generated from message pr_stack.BranchWorktree
@@ -366,7 +424,7 @@ export type BranchWorktree = Message<"pr_stack.BranchWorktree"> & {
  * Use `create(BranchWorktreeSchema)` to create a new message.
  */
 export const BranchWorktreeSchema: GenMessage<BranchWorktree> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 6);
+  messageDesc(file_pr_stack, 8);
 
 /**
  * @generated from message pr_stack.GetPrStatusRequest
@@ -405,7 +463,7 @@ export type GetPrStatusRequest = Message<"pr_stack.GetPrStatusRequest"> & {
  * Use `create(GetPrStatusRequestSchema)` to create a new message.
  */
 export const GetPrStatusRequestSchema: GenMessage<GetPrStatusRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 7);
+  messageDesc(file_pr_stack, 9);
 
 /**
  * @generated from message pr_stack.GetPrStatusResponse
@@ -422,7 +480,7 @@ export type GetPrStatusResponse = Message<"pr_stack.GetPrStatusResponse"> & {
  * Use `create(GetPrStatusResponseSchema)` to create a new message.
  */
 export const GetPrStatusResponseSchema: GenMessage<GetPrStatusResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 8);
+  messageDesc(file_pr_stack, 10);
 
 /**
  * Record a child session and its branch on a planned node of a pr-stack orchestrator, on the daemon
@@ -479,7 +537,7 @@ export type LinkStackNodeRequest = Message<"pr_stack.LinkStackNodeRequest"> & {
  * Use `create(LinkStackNodeRequestSchema)` to create a new message.
  */
 export const LinkStackNodeRequestSchema: GenMessage<LinkStackNodeRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 9);
+  messageDesc(file_pr_stack, 11);
 
 /**
  * @generated from message pr_stack.LinkStackNodeResponse
@@ -498,7 +556,7 @@ export type LinkStackNodeResponse = Message<"pr_stack.LinkStackNodeResponse"> & 
  * Use `create(LinkStackNodeResponseSchema)` to create a new message.
  */
 export const LinkStackNodeResponseSchema: GenMessage<LinkStackNodeResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 10);
+  messageDesc(file_pr_stack, 12);
 
 /**
  * Live GitHub PR status for one head branch.
@@ -551,7 +609,7 @@ export type PrStatusView = Message<"pr_stack.PrStatusView"> & {
  * Use `create(PrStatusViewSchema)` to create a new message.
  */
 export const PrStatusViewSchema: GenMessage<PrStatusView> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 11);
+  messageDesc(file_pr_stack, 13);
 
 /**
  * @generated from message pr_stack.PullBaseIntoBranchRequest
@@ -622,7 +680,7 @@ export type PullBaseIntoBranchRequest = Message<"pr_stack.PullBaseIntoBranchRequ
  * Use `create(PullBaseIntoBranchRequestSchema)` to create a new message.
  */
 export const PullBaseIntoBranchRequestSchema: GenMessage<PullBaseIntoBranchRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 12);
+  messageDesc(file_pr_stack, 14);
 
 /**
  * @generated from message pr_stack.PullBaseIntoBranchResponse
@@ -672,7 +730,7 @@ export type PullBaseIntoBranchResponse = Message<"pr_stack.PullBaseIntoBranchRes
  * Use `create(PullBaseIntoBranchResponseSchema)` to create a new message.
  */
 export const PullBaseIntoBranchResponseSchema: GenMessage<PullBaseIntoBranchResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 13);
+  messageDesc(file_pr_stack, 15);
 
 /**
  * @generated from message pr_stack.QueryBranchRequest
@@ -724,7 +782,7 @@ export type QueryBranchRequest = Message<"pr_stack.QueryBranchRequest"> & {
  * Use `create(QueryBranchRequestSchema)` to create a new message.
  */
 export const QueryBranchRequestSchema: GenMessage<QueryBranchRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 14);
+  messageDesc(file_pr_stack, 16);
 
 /**
  * @generated from message pr_stack.QueryBranchResponse
@@ -741,7 +799,7 @@ export type QueryBranchResponse = Message<"pr_stack.QueryBranchResponse"> & {
  * Use `create(QueryBranchResponseSchema)` to create a new message.
  */
 export const QueryBranchResponseSchema: GenMessage<QueryBranchResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 15);
+  messageDesc(file_pr_stack, 17);
 
 /**
  * @generated from message pr_stack.ReorderPlannedPrRequest
@@ -788,7 +846,7 @@ export type ReorderPlannedPrRequest = Message<"pr_stack.ReorderPlannedPrRequest"
  * Use `create(ReorderPlannedPrRequestSchema)` to create a new message.
  */
 export const ReorderPlannedPrRequestSchema: GenMessage<ReorderPlannedPrRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 16);
+  messageDesc(file_pr_stack, 18);
 
 /**
  * @generated from message pr_stack.ReorderPlannedPrResponse
@@ -807,7 +865,7 @@ export type ReorderPlannedPrResponse = Message<"pr_stack.ReorderPlannedPrRespons
  * Use `create(ReorderPlannedPrResponseSchema)` to create a new message.
  */
 export const ReorderPlannedPrResponseSchema: GenMessage<ReorderPlannedPrResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 17);
+  messageDesc(file_pr_stack, 19);
 
 /**
  * @generated from message pr_stack.RepointPlannedPrRequest
@@ -857,7 +915,7 @@ export type RepointPlannedPrRequest = Message<"pr_stack.RepointPlannedPrRequest"
  * Use `create(RepointPlannedPrRequestSchema)` to create a new message.
  */
 export const RepointPlannedPrRequestSchema: GenMessage<RepointPlannedPrRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 18);
+  messageDesc(file_pr_stack, 20);
 
 /**
  * @generated from message pr_stack.RepointPlannedPrResponse
@@ -876,7 +934,7 @@ export type RepointPlannedPrResponse = Message<"pr_stack.RepointPlannedPrRespons
  * Use `create(RepointPlannedPrResponseSchema)` to create a new message.
  */
 export const RepointPlannedPrResponseSchema: GenMessage<RepointPlannedPrResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 19);
+  messageDesc(file_pr_stack, 21);
 
 /**
  * What a child spawn's branch bases off, asked of the daemon that owns the stack parent.
@@ -943,7 +1001,7 @@ export type ResolveStackBaseRequest = Message<"pr_stack.ResolveStackBaseRequest"
  * Use `create(ResolveStackBaseRequestSchema)` to create a new message.
  */
 export const ResolveStackBaseRequestSchema: GenMessage<ResolveStackBaseRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 20);
+  messageDesc(file_pr_stack, 22);
 
 /**
  * @generated from message pr_stack.ResolveStackBaseResponse
@@ -966,7 +1024,7 @@ export type ResolveStackBaseResponse = Message<"pr_stack.ResolveStackBaseRespons
  * Use `create(ResolveStackBaseResponseSchema)` to create a new message.
  */
 export const ResolveStackBaseResponseSchema: GenMessage<ResolveStackBaseResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 21);
+  messageDesc(file_pr_stack, 23);
 
 /**
  * @generated from message pr_stack.ListProjectStacksRequest
@@ -998,7 +1056,7 @@ export type ListProjectStacksRequest = Message<"pr_stack.ListProjectStacksReques
  * Use `create(ListProjectStacksRequestSchema)` to create a new message.
  */
 export const ListProjectStacksRequestSchema: GenMessage<ListProjectStacksRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 22);
+  messageDesc(file_pr_stack, 24);
 
 /**
  * How far one stack has come, counted over its planned nodes.
@@ -1033,7 +1091,7 @@ export type StackNodeCounts = Message<"pr_stack.StackNodeCounts"> & {
  * Use `create(StackNodeCountsSchema)` to create a new message.
  */
 export const StackNodeCountsSchema: GenMessage<StackNodeCounts> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 23);
+  messageDesc(file_pr_stack, 25);
 
 /**
  * One stack of a project, as the drawer lists it.
@@ -1085,7 +1143,7 @@ export type ProjectStackSummary = Message<"pr_stack.ProjectStackSummary"> & {
  * Use `create(ProjectStackSummarySchema)` to create a new message.
  */
 export const ProjectStackSummarySchema: GenMessage<ProjectStackSummary> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 24);
+  messageDesc(file_pr_stack, 26);
 
 /**
  * A host the listing asked and got no answer from.
@@ -1111,7 +1169,7 @@ export type UnreachableStackHost = Message<"pr_stack.UnreachableStackHost"> & {
  * Use `create(UnreachableStackHostSchema)` to create a new message.
  */
 export const UnreachableStackHostSchema: GenMessage<UnreachableStackHost> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 25);
+  messageDesc(file_pr_stack, 27);
 
 /**
  * @generated from message pr_stack.ListProjectStacksResponse
@@ -1138,7 +1196,7 @@ export type ListProjectStacksResponse = Message<"pr_stack.ListProjectStacksRespo
  * Use `create(ListProjectStacksResponseSchema)` to create a new message.
  */
 export const ListProjectStacksResponseSchema: GenMessage<ListProjectStacksResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 26);
+  messageDesc(file_pr_stack, 28);
 
 /**
  * @generated from message pr_stack.GetProjectStackRequest
@@ -1162,7 +1220,7 @@ export type GetProjectStackRequest = Message<"pr_stack.GetProjectStackRequest"> 
  * Use `create(GetProjectStackRequestSchema)` to create a new message.
  */
 export const GetProjectStackRequestSchema: GenMessage<GetProjectStackRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 27);
+  messageDesc(file_pr_stack, 29);
 
 /**
  * @generated from message pr_stack.GetProjectStackResponse
@@ -1187,7 +1245,7 @@ export type GetProjectStackResponse = Message<"pr_stack.GetProjectStackResponse"
  * Use `create(GetProjectStackResponseSchema)` to create a new message.
  */
 export const GetProjectStackResponseSchema: GenMessage<GetProjectStackResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 28);
+  messageDesc(file_pr_stack, 30);
 
 /**
  * @generated from service pr_stack.PrStackService
@@ -1324,6 +1382,19 @@ export const PrStackService: GenService<{
     methodKind: "unary";
     input: typeof GetProjectStackRequestSchema;
     output: typeof GetProjectStackResponseSchema;
+  },
+  /**
+   * Create a new, empty project stack in the store of the daemon that owns the project
+   * (`#orchestrators` 12/12, B9). The web's "New stack" action: a stack is made here, by address,
+   * never as a side effect of a session's first planned-PR write. Forwarded to
+   * `daemon_instance_id` when that names a peer. Answers the new stack's address.
+   *
+   * @generated from rpc pr_stack.PrStackService.CreateProjectStack
+   */
+  createProjectStack: {
+    methodKind: "unary";
+    input: typeof CreateProjectStackRequestSchema;
+    output: typeof CreateProjectStackResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_pr_stack, 0);
