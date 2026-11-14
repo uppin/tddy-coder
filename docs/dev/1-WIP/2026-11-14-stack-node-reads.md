@@ -1,10 +1,10 @@
 # Changeset: a stack node's session sees its stack read tools in a jail and on another host
 
 **Date**: 2026-11-14
-**Status**: 🚧 In Progress — planned (commit 1)
+**Status**: 🚧 In Progress — draft-PR contract written (commit 2, 2026-11-14)
 **Type**: Feature
-**Complexity**: 2 — three crates, no proto or schema change. The work moves one existing classifier down a layer, appends its result in the jail bridge, and adds one branch in the forwarded-caller confirmation.
-**Stack**: `#orchestrators` 13/13 · branch `feature/orchestrators/stack-node-reads` · base `feature/orchestrators/sweep` (#901)
+**Complexity**: 2 — three crates, no proto or schema change. The work moves one existing classifier down a layer, appends its result in the jail bridge, and adds one branch in the forwarded-caller confirmation. Re-scored at 6g: unchanged
+**Stack**: `#orchestrators` 13/13 · branch `feature/orchestrators/stack-node-reads` · base `feature/orchestrators/sweep` (#901) · PR [#902](https://github.com/uppin/tddy-coder/pull/902)
 
 ## Initial Discovery
 
@@ -113,13 +113,29 @@ here collides with the PR that owns it. All are merged except #901.
 
 ## Draft PR contract
 
-The first push of this PR publishes the surface below as stubs marked `TODO(stack-node-reads)`,
-plus the failing tests that specify it:
+Written 2026-11-14. Each stub is marked `TODO(stack-node-reads)`.
 
-- `tddy_tool_engine::stack_tools::caller_records`: `StackCallerUnreadable`,
-  `stack_caller_from_records`, `stack_bound_to_session_here`, `forwarded_stack_caller_role`,
-  `stack_and_git_tools_offered_to`.
-- `BoundJailSession::sessions_base()` (`pub(crate)`).
+- `packages/tddy-tool-engine/src/stack_tools/caller_records.rs` (new, `pub mod caller_records` in
+  `stack_tools.rs`):
+  - `StackCallerUnreadable { session_id, what: &'static str, why }` (Display, Error). Written in
+    full.
+  - `stack_caller_from_records(&Path, &str) -> Result<Option<StackCaller>, StackCallerUnreadable>`.
+    Stub: `Ok(None)`.
+  - `stack_bound_to_session_here(&Path, project_id, session_id) -> Result<Option<String>, StackCallerUnreadable>`.
+    Stub: `Ok(None)`.
+  - `forwarded_stack_caller_role(listed_session_role: &str, bound_stack_id: Option<&str>) -> Option<StackCallerRole>`.
+    Stub: `None`.
+  - `stack_and_git_tools_offered_to(Option<&StackCallerRole>) -> Vec<ToolDef>`. Stub: empty.
+- `BoundJailSession::sessions_base(&self) -> Option<&Path>` (`pub(crate)`,
+  `daemon_rpc_handler.rs`). Stub: `None`. It carries `#[cfg_attr(not(test), allow(dead_code))]`
+  until green calls it.
+- `list_exec_tools_from_jail`: the `TODO(stack-plan-tools)` marker is re-pointed to
+  `TODO(stack-node-reads)`, naming the calls green adds. No behaviour change.
+- `tddy-tool-engine` `[dev-dependencies]`: `tddy-changeset` with `test-support`, for
+  `stack_fixtures`. It is internal and already in the tree through `tddy-core`; `Cargo.lock` gains
+  the one edge.
+- Nothing in `tddy-daemon-rpc/src` changes in the contract. Its acceptance tests reach the jail
+  bridge through `DaemonSessionHost::sandbox_rpc_handler`, which needs no new dependency.
 
 ## Green wave
 
@@ -188,6 +204,14 @@ Verified on `1ce80419a`.
   field would change `sandbox_rpc_handler`'s signature, which the daemon's jail build calls. The
   layout is the documented `<base>/sessions/<id>`, and an off-layout directory answers `None`, which
   the bridge refuses. Orchestrator decision (developer: finish without stopping), 2026-11-14.
+- **Two guard tests are kept, though they pass on the contract** (the orchestrator jail parity, and
+  a stranger on another host is refused). Each pins a behaviour green could break: a duplicated
+  offer, or a forwarded caller let through without a binding. Orchestrator decision (developer:
+  finish without stopping), 2026-11-14.
+- **The acceptance tests extend #884's `stack_plan_tools_acceptance.rs`** instead of starting a new
+  file. They reuse its two-host `World` and its node and orchestrator fixtures; a new file would
+  copy about 150 lines of them. Orchestrator decision (developer: finish without stopping),
+  2026-11-14.
 - **The other-host listing gap stays out of scope** (Boundaries). It is recorded as a future
   enhancement in this changeset only, not as a TODO file, because no planned scope is deferred.
   Orchestrator decision (developer: finish without stopping), 2026-11-14.
@@ -208,21 +232,63 @@ forwarder, never LiveKit.
 
 ## Acceptance Tests
 
-Planned, in `packages/tddy-daemon-rpc/tests/stack_plan_tools_acceptance.rs`:
+Written and run 2026-11-14 (fluent-tests style). Local runs were scoped to single test targets with
+a name filter, as the developer asked, to confirm each failure. CI verifies the rest.
 
-- a stack node session in a jail is listed its two reads, as the daemon lists them
-- an orchestrator's jail is listed every stack tool the daemon lists it (guard)
-- a stack node session on another host reads its stack where the stack is held; its write is refused
-- a session on another host bound to no node there is refused the stack reads (guard)
+### tddy-daemon-rpc — `packages/tddy-daemon-rpc/tests/stack_plan_tools_acceptance.rs`
+
+These four tests are appended to #884's suite and reuse its two-host `World`. The jail is the
+daemon's production `sandbox_rpc_handler`. Hosts talk over the in-memory peer forwarder, never
+LiveKit.
+
+| Test | Checks | On the contract |
+|---|---|---|
+| `a_stack_node_session_in_a_jail_is_listed_its_two_reads_as_the_daemon_lists_them` (:818) | the jail lists `[pr_stack_status, pr_read]`, the same as the daemon's `ListExecTools` | ❌ FAILS: the jail lists `[]` |
+| `an_orchestrators_jail_is_listed_every_stack_tool_the_daemon_lists_it` (:836) | an orchestrator's jail lists all eleven, the same as the daemon | ✅ passes — **guard**: an `orchestrator` role has the `ProjectHome` tool role, whose catalogue already carries them. It pins that green's append is skipped for `ProjectHome` (no duplicates) |
+| `a_stack_node_session_on_another_host_reads_its_stack_where_the_stack_is_held` (:851) | a node on host-b gets `pr_stack_status` answered by host-a with its stack's nodes; its `pr_add_planned` is refused as `PermissionDenied`; the stack is unchanged | ❌ FAILS: `PermissionDenied`, "tool pr_stack_status is served only to a project-home session, and daemon host-b reports session … is not one" |
+| `a_session_on_another_host_bound_to_no_node_there_is_refused_the_stack_reads` (:893) | a host-b session that no node is bound to is refused `pr_stack_status` on host-a as `PermissionDenied` | ✅ passes — **guard**: green must keep refusing it |
+
+### Unit tests
+
+`packages/tddy-tool-engine/src/stack_tools/caller_records.rs` (`--lib caller_records`: 9 fail and
+3 pass, the 3 being guards):
+
+- ❌ `a_session_its_orchestrators_stack_binds_is_classified_a_node_of_that_stack` (:144)
+- ❌ `an_orchestrator_role_session_is_classified_owning_the_stack_its_changeset_names` (:165)
+- ✅ guard `a_child_its_orchestrators_stack_does_not_bind_is_classified_with_no_stack_role` (:183)
+- ❌ `a_session_with_no_record_cannot_be_classified` (:197) — expects `Err { "ghost", "record" }`
+- ❌ `the_stack_with_a_node_bound_to_the_session_is_found_on_the_host_that_holds_it` (:215)
+- ✅ guard `a_session_no_stack_of_the_project_binds_is_bound_to_none` (:228)
+- ❌ `a_forwarded_caller_its_owner_lists_as_an_orchestrator_owns_no_stack_here` (:243)
+- ❌ `a_forwarded_caller_bound_to_a_node_here_is_a_node_of_that_stack` (:257)
+- ❌ `an_orchestrator_role_wins_over_a_node_binding_for_a_forwarded_caller` (:273)
+- ✅ guard `a_forwarded_caller_with_no_role_and_no_binding_has_no_stack_role` (:287)
+- ❌ `a_node_is_offered_status_and_read_and_no_git_tool` (:300)
+- ❌ `an_orchestrator_is_offered_every_stack_tool_then_every_stack_git_tool` (:314)
+
+`packages/tddy-session-lifecycle/src/connection_service/svc_list_exec_tools_wiring.rs`
+(`--lib svc_list_exec_tools_wiring`: 2 new tests fail and 1 new guard passes; the 3 existing tests pass):
+
+- ❌ `a_stack_node_jail_is_answered_status_and_read_for_its_stack` (:198) — left `[]`
+- ❌ `a_jails_sessions_base_is_the_directory_holding_its_sessions_directory` (:241) — left `None`
+- ✅ guard `a_session_dir_outside_a_sessions_directory_has_no_sessions_base` (:257)
+
+`cargo clippy -p tddy-tool-engine -p tddy-session-lifecycle --lib --tests -- -D warnings` is clean.
+The workspace `--all-targets` run is CI's.
+
+**Green moves `stack_caller_of`'s five unit tests** (`tddy-daemon-rpc/src/exec_tool/stack_tools.rs`)
+or keeps them as adapter tests. The tests above already cover the records reader, so green may drop
+the daemon-side copies that duplicate them.
 
 ## TODO
 
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests: waived. The developer said "finish the remaining PRs without
+  stopping" (orchestrator decision, 2026-11-14)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] Green
 - [ ] Wrap

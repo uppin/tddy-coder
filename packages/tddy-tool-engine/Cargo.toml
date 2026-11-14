@@ -45,6 +45,8 @@ prost = "0.13"
 prost-types = "0.13"
 futures-util = "0.3"
 pretty_assertions = { workspace = true }
+# `stack_fixtures`: the sessions layout a PR stack lives in (`stack_tools::caller_records`).
+tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "process"] }
 tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }

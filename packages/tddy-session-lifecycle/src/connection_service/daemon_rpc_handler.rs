@@ -20,6 +20,19 @@ pub(crate) struct BoundJailSession {
     pub(crate) session_dir: std::path::PathBuf,
 }
 
+impl BoundJailSession {
+    /// The sessions base the jail's session lives in — `session_dir` is
+    /// `<base>/sessions/<session_id>` — where its orchestrator's records and the project's stack
+    /// store are read; `None` for a directory not laid out that way (`#orchestrators` 13/13).
+    // TODO(stack-node-reads): `list_exec_tools_from_jail` classifies the session's stack role from
+    // this base; the allow goes with that call.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn sessions_base(&self) -> Option<&std::path::Path> {
+        // TODO(stack-node-reads): implement.
+        None
+    }
+}
+
 /// The coordinate an in-jail agent relays family B at, read from the crate that serves it so this
 /// bridge and `tddy-sandbox-runner`'s allowlist cannot disagree about the name.
 const SESSION_AGENT_SERVICE: &str = tddy_session_agents::SERVICE_NAME;
