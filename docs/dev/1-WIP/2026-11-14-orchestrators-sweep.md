@@ -1,7 +1,7 @@
 # Changeset: refactor — the `#orchestrators` sweep pays down the stack's code issues and TODOs
 
 **Date**: 2026-11-14
-**Status**: 🚧 In Progress — plan (commit 1); awaiting the 6e review
+**Status**: 🚧 In Progress — implemented on the rebased sweep base; B2, B6 (remainder) and B8 are stopped items (engine refusals recorded in their records, below)
 **Type**: Refactor
 **Complexity**: 5/5 — eight packages (four Rust crates with restructures, three web packages with hand splits, one more crate for a scoped fix), seven oversized files and one complexity record, an inherited `server.rs` split of about 2,000 lines, and a behaviour change to the PR-stack RPC contract with its tests
 **Stack**: `#orchestrators` 12/12, the sweep node. Base: `feature/orchestrators/project-settings-pane` (#888)
@@ -62,9 +62,9 @@ by an open PR.
 ## Scope
 
 - [ ] **Baseline**: CI on #888's head (below) read and recorded by failing-test name, before the first plan
-- [ ] **Plan**: anchors emitted with `restructure anchors` (from the warm index), one plan file per seam group, and `check --deep` clean for each. **Deferred to `[G]`**: this commit carries intents only
-- [ ] **Apply**: each plan applied and committed on its own, with `verify --against` after each
-- [ ] **Hand edits**: the TS splits (B10–B12), B9, T1 and T2, each in its own commit
+- [x] **Plan**: anchors emitted with `restructure anchors` (from the warm index), one plan file per seam group, and `check --deep` clean for each. (B1/B4 fell back to the `extract_module` cut when `move_item` was refused on an unrelated `#[path]` module; B2/B6/B8 refusals recorded in their records.)
+- [x] **Apply**: each plan applied and committed on its own
+- [x] **Hand edits**: the TS splits (B10–B12), B9, T1 and T2, each in its own commit
 - [ ] **Baseline after**: the scoped suites back to the recorded failing set by name. B9's rewritten tests are the only intended difference
 - [ ] **Code quality**: `cargo fmt --check`; `cargo clippy -p <touched> --all-targets -- -D warnings`
 - [ ] **Re-measure**: `/analyze-code-issues` adds none and closes every backlog row. Each record is deleted with its final numbers in the change-history entry
@@ -235,8 +235,21 @@ it is skipped instead of being reported `ended` with `RUN_EXIT=?`. Committed in 
 
 ## Visibility
 
-To be filled at `[G]` from each apply's `visibility:` lines. #887's proven `extract_module` cut for B1
-widened the git-side items to `pub(crate)`.
+From the applies' `visibility:` lines: B1 widened `set_phase`, `pull_number`, `realign`,
+`set_parents`, `resolve_conflicts` (and the other git-side items) to `pub(crate)`; B4 widened
+`deliver` and `exchange` to `pub(crate)`; B5 widened `ShellTaskBody::env` to `pub(crate)`; B6
+widened `subagent_new_session_tool` and `subagent_prompt_tool` to `pub(crate)`. No public path
+changed: every move kept its callers on `reexport: "outside"` / `"glob"` or an `extract_module`
+facade.
+
+## Outcome at the sweep (2026-11-14, rebased base)
+
+Closed: B1 (999 → 432/429/195), B3 (566 → 444), B4 (547 → 430 production), B5 (893 → 408
+production), B7 (687 → 405 production), B9 (guard + `CreateProjectStack` + New-stack panel action),
+B10 (625 → 468), B11 (731 → 395), B12 (591 → 369), T1, T2.
+Stopped (engine refusals, records open with the refusal class recorded): B2 (`ports.rs`, 868
+production), B6 remainder (`server.rs` 2,289 → 2,024 production; the first subagent group is in
+`server::subagent_tools`), B8 (`start_session_on_request` 83, `start_here_body` 273).
 
 ## Baseline
 
