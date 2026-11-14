@@ -90,7 +90,7 @@ function unpushedPullReason(baseBranch: string, branch: string, pushError: strin
  */
 export function ProjectStackView(props: ProjectStackViewProps): React.ReactElement {
   const {
-    address,
+    address: openedAddress,
     prStackClient,
     sessionToken = "",
     sessions = [],
@@ -106,6 +106,11 @@ export function ProjectStackView(props: ProjectStackViewProps): React.ReactEleme
     worktreeClient,
     taskClient,
   } = props;
+
+  // "New stack" (`#orchestrators` 12/12, B9): the stack this view acts on after the operator
+  // creates one — created by address, then planned PRs are added to it by that address.
+  const [createdAddress, setCreatedAddress] = useState<ProjectStackAddress | null>(null);
+  const address = createdAddress ?? openedAddress;
 
   const [stackPlanJson, setStackPlanJson] = useState("");
   const [createdBySessionId, setCreatedBySessionId] = useState("");
@@ -349,13 +354,39 @@ export function ProjectStackView(props: ProjectStackViewProps): React.ReactEleme
     });
   };
 
+  const handleNewStack = async () => {
+    if (!prStackClient) return;
+    const res = await prStackClient.createProjectStack({
+      sessionToken,
+      projectId: address.projectId,
+      title: "",
+      daemonInstanceId: address.daemonInstanceId,
+    });
+    if (!res.stack) return;
+    setCreatedAddress({
+      projectId: res.stack.projectId,
+      stackId: res.stack.stackId,
+      daemonInstanceId: res.stack.daemonInstanceId,
+    });
+    setStackPlanJson("");
+    setIsAddingPlannedPr(true);
+  };
+
   return (
     <div
       data-testid="project-stack-view"
       data-stack-id={address.stackId}
       className="flex-1 min-h-0 flex flex-col overflow-hidden"
     >
-      <div className="flex-shrink-0 flex justify-end p-3 pb-0">
+      <div className="flex-shrink-0 flex justify-end gap-2 p-3 pb-0">
+        <Button
+          data-testid="project-stack-new-stack-btn"
+          size="sm"
+          variant="outline"
+          onClick={() => void handleNewStack()}
+        >
+          New stack
+        </Button>
         <Button
           data-testid="pr-stack-add-planned-pr-btn"
           size="sm"

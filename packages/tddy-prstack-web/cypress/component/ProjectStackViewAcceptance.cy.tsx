@@ -93,3 +93,52 @@ it("the stack view lists the stack's planned prs and its controls act on that st
   projectStackViewPage.expectPlannedPrAddedTo(backend, THE_STACK, "Add logout");
   prStackScreenPage.plannedPrRow("n3").should("contain.text", "Add logout");
 });
+
+it("new stack creates a stack by address and adds planned prs to it", () => {
+  // Given — a view on THE_STACK, and a daemon that creates a fresh stack
+  const NEW_STACK: ExpectedStackAddress = {
+    projectId: "proj-auth",
+    stackId: "0190b000-0000-7000-8000-0000000000bb",
+    daemonInstanceId: "host-b",
+  };
+  const backend = anInMemoryRpcBackend()
+    .onUnary(PrStackService.method.getProjectStack, (req) =>
+      create(PrStackService.method.getProjectStack.output, {
+        stackPlanJson:
+          req.stack?.stackId === NEW_STACK.stackId ? aPlan([]) : aPlan([TOKEN_STORE, MIDDLEWARE]),
+      }),
+    )
+    .onUnary(PrStackService.method.createProjectStack, () =>
+      create(PrStackService.method.createProjectStack.output, { stack: NEW_STACK }),
+    )
+    .onUnary(PrStackService.method.addPlannedPr, () =>
+      create(PrStackService.method.addPlannedPr.output, {
+        stackPlanJson: aPlan([LOGOUT]),
+        nodeId: "n3",
+      }),
+    );
+  cy.mountWithClients(
+    <ProjectStackView
+      address={THE_STACK}
+      prStackClient={createClient(PrStackService, backend.transport())}
+      sessionToken="fake-token"
+    />,
+    backend,
+  );
+  projectStackViewPage.view().should("exist");
+
+  // When — the operator makes a new stack, then adds a planned PR to it
+  cy.get('[data-testid="project-stack-new-stack-btn"]').click();
+  prStackScreenPage.fillAndSubmitAddPlannedPrForm({ title: "Add logout" });
+
+  // Then — the create named the project and its owning host, the add went to the new
+  // stack's address, and the view now shows the new stack
+  cy.wrap(backend).should((b) => {
+    const creates = b.callsTo(PrStackService.method.createProjectStack);
+    expect(creates).to.have.length(1);
+    expect(creates[0].projectId).to.equal("proj-auth");
+    expect(creates[0].daemonInstanceId).to.equal("host-b");
+  });
+  projectStackViewPage.expectPlannedPrAddedTo(backend, NEW_STACK, "Add logout");
+  projectStackViewPage.view().should("have.attr", "data-stack-id", NEW_STACK.stackId);
+});
