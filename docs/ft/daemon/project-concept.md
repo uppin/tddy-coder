@@ -19,6 +19,7 @@ A **Project** is a named configuration linking a **git URL** to a **main reposit
 | `accounts` | Optional. The accounts the project uses, as provider and account id pairs, at most one per provider. Ids are minted by the credential vault of the host that stored them. Empty means no account is assigned. Set from the Projects UI; see [Account assignment](#account-assignment). |
 | `local_gh` | Optional, off by default. The project's sessions take their GitHub identity from the host's own `gh` login instead of an account; see [Local gh](#local-gh). |
 | `home_session_id` | Optional, per host. The session the project runs as its **main** ([project-home session](#project-home-session)) on this host, recorded by `EnsureProjectHomeSession`. Absent means main is not set up. A `home_agent` key in an older row is ignored on read and not written back. |
+| `orchestrator_defaults` | Optional, per host. The defaults the orchestrator composer starts with: `model`, `effort` and `provider_account_id`, each optional (absent means the agent's default). Set by `SetProjectOrchestratorDefaults` to the one host the request names and listed on `ProjectEntry.orchestrator_defaults`; an all-default save clears the field. See [Session drawer § Project settings pane](../web/session-drawer.md#project-settings-pane). |
 | `host_repo_paths` | Per-host (or per-daemon-instance) checkout paths keyed by host key; see multi-host daemon docs. |
 
 ## Account assignment

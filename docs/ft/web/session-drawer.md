@@ -111,6 +111,15 @@ Implementation: `groupSessionsByProject` (`packages/tddy-session-web/src/utils/s
 `SessionProjectGroup`, `SessionProjectGroupHeader` and `projectGroupCollapse.ts`
 (`packages/tddy-session-web/src/`).
 
+### Project settings pane
+
+Each project group's header carries a **gear** (`sessions-drawer-project-settings-<projectId>`, in the header's actions slot beside the "+") that opens the project's **session settings** in the detail area at `#/sessions/project/<projectId>/settings` (`sessionsProjectSettingsPath` / `parseSessionsProjectSettings` in `packages/tddy-client-web/src/appRoutes.ts`, re-exported by `packages/tddy-web/src/routing/appRoutes.ts`). The pane (`ProjectSettingsPane` in `packages/tddy-session-create-web/src/`) holds two sections:
+
+- **Main** — the [setup form](#pinned-main-entry) (*Set up main*), or, when main is set up, its model and status and **Replace main**. Replace main lives only here; the pinned entry carries no Replace action.
+- **New orchestrators** — defaults the "+" [composer](#orchestrator-composer) starts with: **model**, **effort** and **provider account**, stored per project on the host (`SetProjectOrchestratorDefaults`, listed on `ProjectEntry.orchestrator_defaults`; see [Project concept § Data model](../daemon/project-concept.md#data-model)). The composer pre-fills them from its own `ListProjects` answer for the chosen project and host; changing them in the composer affects one start and never saves. A control at its agent-default value saves as absent, and saving every control at the default clears the saved defaults.
+
+The route carries the host the pane acts on as `?host=<daemon_instance_id>`; absent, the pane acts on the drawer's selected host. `#/sessions/project-home/<id>` and its `/replace` form open the same pane in place (the `/replace` form in replace mode). The Projects card's **Set up main** link opens `#/sessions/project/<id>/settings?host=<daemon_instance_id>` naming the host whose row it read; **Open main** keeps opening the session.
+
 ### Pinned main entry
 
 Each **project** group starts with a pinned **main** entry for the project's
@@ -123,15 +132,13 @@ the entry acts on that host.
 - **Click on a configured entry** calls `EnsureProjectHomeSession` for the project on the selected
   host with no start spec, and selects the session it answers — resumed or already running. A
   refusal is shown under the entry. When the daemon answers `NOT_FOUND` (the recorded main no longer
-  exists, and the daemon cleared it), the drawer re-reads `ListProjects` and opens the setup pane.
-- **No main set up**: the entry starts nothing and shows no hint. Clicking it opens the **setup
-  pane** in the detail area at `#/sessions/project-home/<id>` (a pushed history entry, so Back
+  exists, and the daemon cleared it), the drawer re-reads `ListProjects` and opens the settings pane.
+- **No main set up**: the entry starts nothing and shows no hint. Clicking it opens the **settings
+  pane** in the detail area at `#/sessions/project/<projectId>/settings` (a pushed history entry, so Back
   returns to what was showing). On mobile the click also closes the session list. The entry is
   `aria-disabled` only where no setup handler is wired (`onSetUpProjectHome` absent).
-- **Replace main**: a configured entry has a **Replace main** action
-  (`sessions-drawer-project-home-replace-<id>`) that opens the setup pane in replace mode at
-  `#/sessions/project-home/<id>/replace`. It starts nothing itself.
-- **Setup pane**: *Set up main for &lt;project&gt;* (or *Replace main for &lt;project&gt;*), a line
+- **Replace main** lives in the [settings pane](#project-settings-pane), not on the pinned entry.
+- **Settings pane (main section)**: *Set up main for &lt;project&gt;* (or *Replace main for &lt;project&gt;*), a line
   saying what main is, and the [New-session form in its main variant](#main-variant). In replace
   mode the pane also says that starting stops the current main and that it stays in the list as an
   ordinary session (`sessions-project-home-setup-replacing-<id>`). **Start main session** calls
@@ -706,7 +713,7 @@ closes the pane, and a finished start cannot be cancelled (use Delete).
 
 ### Main variant
 
-The [setup pane](#pinned-main-entry) renders the form as its **main** variant
+The [settings pane](#project-settings-pane) renders the form as its **main** variant
 (`CreateSessionPane.projectHome`: `projectId`, `daemonInstanceId`, `onStart`):
 
 - The project and host are fixed. The host and project selects, branch mode, PR-stack parent,
