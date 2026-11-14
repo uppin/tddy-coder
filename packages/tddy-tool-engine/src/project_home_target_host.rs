@@ -2,6 +2,9 @@ use crate::project_home_answer_tools::{ANSWER_SESSION_PERMISSION, ANSWER_SESSION
 use crate::project_home_disk_refresh::REFRESH_WORKTREE_DISK_USAGE;
 use crate::project_home_git_tools::is_project_home_git_tool;
 use crate::project_home_inbox_tools::{READ_PROJECT_NOTIFICATIONS, WAIT_PROJECT_NOTIFICATIONS};
+use crate::project_home_lifecycle_tools::{
+    CLEAR_WORKTREE, DELETE_SESSION, DELETE_WORKTREE, RESTORE_WORKTREE, SET_SESSION_MARK,
+};
 use crate::project_home_terminal_tools::{
     CLAIM_SESSION_TERMINAL, READ_SESSION_TERMINAL, SEND_SESSION_KEYS,
 };
@@ -52,6 +55,11 @@ pub fn is_project_home_target_tool(name: &str) -> bool {
             | READ_PROJECT_NOTIFICATIONS
             | SEND_SESSION_MESSAGE
             | RESUME_SESSION
+            | SET_SESSION_MARK
+            | DELETE_SESSION
+            | CLEAR_WORKTREE
+            | DELETE_WORKTREE
+            | RESTORE_WORKTREE
     ) || is_project_home_git_tool(name)
 }
 

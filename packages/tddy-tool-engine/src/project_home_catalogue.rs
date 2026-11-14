@@ -9,6 +9,10 @@ use crate::project_home_git_tools::project_home_git_tool_defs;
 use crate::project_home_inbox_tools::{
     project_home_inbox_tool_defs, READ_PROJECT_NOTIFICATIONS, WAIT_PROJECT_NOTIFICATIONS,
 };
+use crate::project_home_lifecycle_tools::{
+    project_home_lifecycle_tool_defs, CLEAR_WORKTREE, DELETE_SESSION, DELETE_WORKTREE,
+    RESTORE_WORKTREE, SET_SESSION_MARK,
+};
 use crate::project_home_notify_tools::{notify_operator_tool_def, NOTIFY_OPERATOR};
 use crate::project_home_terminal_tools::{
     project_home_terminal_tool_defs, CLAIM_SESSION_TERMINAL, READ_SESSION_TERMINAL,
@@ -63,6 +67,11 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | NOTIFY_OPERATOR
             | SEND_SESSION_MESSAGE
             | RESUME_SESSION
+            | SET_SESSION_MARK
+            | DELETE_SESSION
+            | CLEAR_WORKTREE
+            | DELETE_WORKTREE
+            | RESTORE_WORKTREE
     )
 }
 
@@ -230,6 +239,7 @@ pub(crate) fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
     defs.extend(project_home_answer_tool_defs());
     defs.extend(project_home_inbox_tool_defs());
     defs.extend(project_home_turn_tool_defs());
+    defs.extend(project_home_lifecycle_tool_defs());
     defs.extend(terminate_session_tool_def());
     defs.extend(refresh_worktree_disk_usage_tool_def());
     defs.push(notify_operator_tool_def());

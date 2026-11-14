@@ -114,6 +114,7 @@ pub fn starting_session_metadata(
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
+        orchestration_mark: None,
     }
 }
 

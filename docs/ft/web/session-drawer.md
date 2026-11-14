@@ -45,6 +45,9 @@ Each `SessionDrawerItem` shows:
 - An **orchestrator** badge (`sessions-drawer-item-orchestrator-<id>`) on a session holding the
   `orchestrator` role ([Orchestrator sessions](../daemon/project-concept.md#orchestrator-sessions)).
   Main is marked by its pinned slot instead
+- A **mark** badge (`sessions-drawer-item-mark-<id>`) on a session an orchestrator marked
+  `paused`, `blocked` or `done` with `SetSessionMark`, its note as the hover text. An unmarked
+  session shows none
 
 The New-session form offers a **Session orchestrator** switch (`create-session-orchestrator-toggle`)
 for an agent whose spec declares `project_home_main`. On, the start asks for `session_role:

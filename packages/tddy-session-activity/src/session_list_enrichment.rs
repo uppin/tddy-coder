@@ -541,6 +541,7 @@ state:
             managed_codebase: false,
             session_role: String::new(),
             reads_host_paths: false,
+            orchestration_mark: None,
         };
         apply_session_list_status_to_proto(
             Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
@@ -715,6 +716,7 @@ orchestrator_session_id: home-session-1
             managed_codebase: false,
             session_role: None,
             tmux_session: None,
+            orchestration_mark: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         // Intentionally NO changeset.yaml — claude-cli sessions started without a worktree have none.
@@ -788,6 +790,7 @@ orchestrator_session_id: home-session-1
             managed_codebase: false,
             session_role: None,
             tmux_session: None,
+            orchestration_mark: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -846,6 +849,7 @@ orchestrator_session_id: home-session-1
             managed_codebase: false,
             session_role: None,
             tmux_session: None,
+            orchestration_mark: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -904,6 +908,7 @@ orchestrator_session_id: home-session-1
             managed_codebase: false,
             session_role: None,
             tmux_session: None,
+            orchestration_mark: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -982,6 +987,7 @@ sessions:
             managed_codebase: false,
             session_role: None,
             tmux_session: None,
+            orchestration_mark: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -1022,6 +1028,7 @@ sessions:
             managed_codebase: false,
             session_role: String::new(),
             reads_host_paths: false,
+            orchestration_mark: None,
         };
         apply_session_list_status_to_proto(
             Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
@@ -1076,6 +1083,7 @@ sessions:
             managed_codebase: false,
             session_role: None,
             tmux_session: None,
+            orchestration_mark: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(

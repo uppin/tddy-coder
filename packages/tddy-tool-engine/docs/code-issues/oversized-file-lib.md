@@ -4,7 +4,7 @@
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — hand-measured during `/plan-red` Step 2b for the
 subagent turn-control changeset
-**Metrics:** **890 production lines** (2026-11-13) · budget 500 · **1.6× over**
+**Metrics:** **891 production lines** (2026-11-13) · budget 500 · **1.6× over**
 **Thresholds breached:** length 884 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
 **Status:** Open — unclaimed (882 production lines, 2026-10-25)
@@ -117,3 +117,4 @@ budget to time out on) and green after. Re-grepped the crate for `process::Comma
 | 2026-10-29 | 888 | +1 in `#home-inbox` 7/9 (#772): `pub mod project_home_inbox_tools;`. Stack-shared (`#home-inbox` 8/9 and 9/9 edit this module list), so no split here |
 | 2026-10-29 | 889 | +1 in `#home-inbox` 11/11 (#788): `pub mod project_home_notify_tools;` (the three private `mod project_home_catalogue/listing/target_host;` lines that split `project_home_tools.rs` sit past the first `#[cfg(test)]`). Not split here: the growth is one declaration for a module that holds the tool (159 lines), and the shell-surface extraction `## What would close it` names is a separate restructure, left to a follow-up |
 | 2026-11-13 | 890 | **regressed** +1 in `#orchestrators` 4/11 (#881): `pub mod project_home_turn_tools;` (the tools, 255 production lines, live there). Stack-shared — `#orchestrators` 5/11 (#882, session-lifecycle-tools) and #883 (conversation-rotation) edit this module list — so no split here |
+| 2026-11-13 | 891 | **regressed** +1 in `#orchestrators` 5/11 (#882): `pub mod project_home_lifecycle_tools;` (the tools, 480 production lines, live there). Not split: stack-shared — successor `#orchestrators` nodes edit this module list; recorded per `yolo-pr-stack` Stage W exception |
