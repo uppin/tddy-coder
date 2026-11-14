@@ -136,6 +136,7 @@ fn a_project_with_worktree(os_user: &str) -> Fixture {
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: None,
+            orchestrator_defaults: None,
         },
     )
     .unwrap();

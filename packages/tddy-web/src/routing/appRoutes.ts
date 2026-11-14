@@ -108,6 +108,10 @@ export {
   PROJECT_NEW_SEGMENT,
   sessionsProjectNewPath,
   parseSessionsProjectNew,
+  PROJECT_SETTINGS_SEGMENT,
+  PROJECT_SETTINGS_HOST_PARAM,
+  sessionsProjectSettingsPath,
+  parseSessionsProjectSettings,
   PROJECT_STACK_SEGMENT,
   sessionsProjectStackPath,
   parseSessionsProjectStack,
@@ -123,6 +127,7 @@ export {
 export type {
   SessionsProjectHomeSetupRoute,
   SessionsProjectStackRoute,
+  SessionsProjectSettingsRoute,
   InspectorTabName,
   DormantInspectorTabName,
   MediaInspectorTabName,

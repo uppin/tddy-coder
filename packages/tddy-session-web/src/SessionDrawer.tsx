@@ -95,6 +95,13 @@ interface SessionDrawerProps {
   sessionToken?: string;
   /** Open one of a project's stacks in the stack view, by the address its listing carried. */
   onOpenProjectStack?: (summary: ProjectStackSummary) => void;
+  /**
+   * Open a project's settings pane — the gear in each project header's actions slot
+   * (`sessions-drawer-project-settings-<projectId>`, `#orchestrators` 11/11): main's setup and
+   * Replace main, and the defaults a new orchestrator starts with. Absent, no header shows a gear.
+   * TODO(project-settings-pane): implement — not read yet.
+   */
+  onOpenProjectSettings?: (projectId: string) => void;
 }
 
 export type { ProjectHomeInfo } from "./utils/projectHomeGroups";

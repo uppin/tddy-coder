@@ -29,3 +29,5 @@ export * from "./CreateSessionHostField";
 export * from "./OrchestratorComposer";
 export * from "./useOrchestratorComposerStart";
 export * from "./orchestratorStartRequest";
+export * from "./ProjectSettingsPane";
+export * from "./orchestratorDefaults";

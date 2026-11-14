@@ -173,3 +173,18 @@ it("a project on two hosts links to its primary host's main from its Projects ca
     .should("have.text", "Set up main")
     .and("have.attr", "href", `#/sessions/project-home/${ALPHA.projectId}`);
 });
+
+it("a projects card link opens the settings pane for the host its row names", () => {
+  // When ALPHA's first-listed (primary) host is not the selected one, and has no main for it
+  theProjectsPageListing([
+    aProject({ ...ALPHA, daemonInstanceId: PROJECTS_REMOTE_HOST, homeSessionId: "" }),
+    aProject({ ...ALPHA, daemonInstanceId: PROJECTS_LOCAL_HOST, homeSessionId: ALPHA_MAIN_SESSION }),
+  ]);
+
+  // Then the card's Set up main opens the settings pane on that host, not on the selected one
+  // (`#orchestrators` 11/11; closes docs/dev/todo/2026-10-24-project-card-setup-link-ignores-card-host.md)
+  setup
+    .projectCardLink(ALPHA.projectId)
+    .should("have.text", "Set up main")
+    .and("have.attr", "href", `#/sessions/project/${ALPHA.projectId}/settings?host=${PROJECTS_REMOTE_HOST}`);
+});

@@ -24,7 +24,7 @@ import {
   ListSubagentsResponseSchema,
   ListToolsResponseSchema,
 } from "tddy-client-web/gen/catalog_pb";
-import { ListProjectsResponseSchema, ProjectService } from "tddy-client-web/gen/project_pb";
+import { ListProjectsResponseSchema, ProjectService, type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ListSessionsResponseSchema, SessionService, StartSessionResponseSchema } from "tddy-client-web/gen/session_pb";
 import { OrchestratorComposer } from "../../../src/OrchestratorComposer";
 import { servedAgentWire, withDeclaredSessionTypes } from "../servedAgents";
@@ -41,14 +41,22 @@ export const STARTED_ORCHESTRATOR = "orchestrator-1";
 /** The height of the detail pane the composer is mounted in. */
 export const PANE_HEIGHT = 760;
 
-export function aDaemonServingAnOrchestratorAgent(): InMemoryRpcBackend {
+/**
+ * `projectRow` adds fields to {@link COMPOSER_PROJECT}'s `ListProjects` row on {@link HOST_A} — its
+ * saved orchestrator defaults, for one (`#orchestrators` 11/11).
+ */
+export function aDaemonServingAnOrchestratorAgent(
+  projectRow: Partial<Pick<ProjectEntry, "orchestratorDefaults">> = {},
+): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
     .onUnary(SessionService.method.listSessions, () => create(ListSessionsResponseSchema, { sessions: [] }))
     .onUnary(CatalogService.method.listSubagents, () => create(ListSubagentsResponseSchema, { subagents: [] }))
     .onUnary(CatalogService.method.listTools, () => create(ListToolsResponseSchema, { tools: [] }))
     .onUnary(ProjectService.method.listProjects, () =>
       create(ListProjectsResponseSchema, {
-        projects: [{ projectId: COMPOSER_PROJECT, name: "beta", mainRepoPath: "/repo", daemonInstanceId: HOST_A }],
+        projects: [
+          { projectId: COMPOSER_PROJECT, name: "beta", mainRepoPath: "/repo", daemonInstanceId: HOST_A, ...projectRow },
+        ],
       }),
     )
     .onUnary(CatalogService.method.listAgents, () => {

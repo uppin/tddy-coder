@@ -185,6 +185,7 @@ export function ProjectCard({
       <ProjectMainSessionLink
         projectId={group.projectId}
         homeSessionId={group.hosts[0]?.homeSessionId ?? ""}
+        daemonInstanceId={group.hosts[0]?.daemonInstanceId ?? ""}
       />
 
       <LocalGhToggle projectId={group.projectId} checked={group.localGh} onChange={setLocalGh} />

@@ -188,6 +188,7 @@ fn acceptance_project_storage_roundtrip() {
         accounts: Vec::new(),
         local_gh: false,
         home_session_id: None,
+        orchestrator_defaults: None,
     };
 
     // When

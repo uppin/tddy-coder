@@ -251,6 +251,7 @@ async fn a_served_project(suffix: &str) -> AServedProject {
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: None,
+            orchestrator_defaults: None,
         }],
     )
     .expect("write projects.yaml");

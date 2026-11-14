@@ -31,9 +31,12 @@ import {
   parseSessionsProjectNew,
   sessionsProjectStackPath,
   parseSessionsProjectStack,
+  sessionsProjectSettingsPath,
+  parseSessionsProjectSettings,
   isSessionsNewPath,
   isInspectorTabName,
 } from "./appRoutes";
+import { parseAppLocation } from "tddy-client-web";
 
 describe("appRoutes helpers (canonical path rules)", () => {
   // The standalone-mode hash-strip effect still parses legacy /terminal/:id links, so this
@@ -536,5 +539,69 @@ describe("inspector tab param", () => {
     const result = isInspectorTabName("");
     // Then
     expect(result).toBe(false);
+  });
+});
+
+describe("sessions project settings route (#orchestrators 11/11)", () => {
+  /** The location a link to `path` (which may carry a query) opens. */
+  const locationOf = (path: string) => parseAppLocation(`#${path}`);
+
+  it("the settings path parses to its project with no host and is a drawer path", () => {
+    // Given
+    const path = sessionsProjectSettingsPath("proj-beta");
+
+    // When
+    const route = parseSessionsProjectSettings(locationOf(path));
+
+    // Then
+    expect(route).toEqual({ projectId: "proj-beta", host: null });
+    expect(isSessionsDrawerPath(path)).toBe(true);
+  });
+
+  it("a settings link naming a host parses to that host", () => {
+    // Given
+    const path = sessionsProjectSettingsPath("proj-beta", { host: "server-2" });
+
+    // When
+    const route = parseSessionsProjectSettings(locationOf(path));
+
+    // Then
+    expect(path).toBe("/sessions/project/proj-beta/settings?host=server-2");
+    expect(route).toEqual({ projectId: "proj-beta", host: "server-2" });
+  });
+
+  it("round-trips a project id and a host that need encoding", () => {
+    // Given
+    const path = sessionsProjectSettingsPath("team/proj beta", { host: "host a/1" });
+
+    // When
+    const route = parseSessionsProjectSettings(locationOf(path));
+
+    // Then
+    expect(route).toEqual({ projectId: "team/proj beta", host: "host a/1" });
+  });
+
+  it("is neither the composer, the stack view nor the old setup route", () => {
+    // Given
+    const path = sessionsProjectSettingsPath("proj-beta");
+
+    // When
+    const composer = parseSessionsProjectNew(path);
+    const stack = parseSessionsProjectStack(path);
+    const setup = parseSessionsProjectHomeSetup(path);
+    const sessionId = parseSessionsDrawerSessionId(path);
+
+    // Then
+    expect([composer, stack, setup, sessionId]).toEqual([null, null, null, null]);
+  });
+
+  it("other project paths are not the settings route", () => {
+    // When
+    const composerPath = parseSessionsProjectSettings(locationOf(sessionsProjectNewPath("proj-beta")));
+    const withoutProject = parseSessionsProjectSettings(locationOf(`${SESSIONS_PROJECT_ROUTE}/settings`));
+    const setupPath = parseSessionsProjectSettings(locationOf(sessionsProjectHomeSetupPath("proj-beta")));
+
+    // Then
+    expect([composerPath, withoutProject, setupPath]).toEqual([null, null, null]);
   });
 });

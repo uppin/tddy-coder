@@ -75,5 +75,7 @@ pub(super) fn project_entry_from(
             .collect(),
         local_gh: p.local_gh,
         home_session_id: p.home_session_id.clone().unwrap_or_default(),
+        // TODO(project-settings-pane): implement — carry `p.orchestrator_defaults`.
+        orchestrator_defaults: None,
     }
 }

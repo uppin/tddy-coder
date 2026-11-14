@@ -1183,3 +1183,28 @@ export const sessionsDrawerProjectStacks = (projectId: string) =>
  *  which opens it in the stack view at `/sessions/project/:projectId/stack/:stackId`. */
 export const sessionsDrawerProjectStack = (stackId: string) =>
   `sessions-drawer-project-stack-${stackId}`;
+
+/** `[data-testid="sessions-drawer-project-settings-<projectId>"]` — the gear in a project group's
+ *  header that opens the project's settings pane (`#orchestrators` 11/11). */
+export const sessionsDrawerProjectSettings = (projectId: string) =>
+  `sessions-drawer-project-settings-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-<projectId>"]` — a project's settings pane, at
+ *  `/sessions/project/:projectId/settings[?host=]` (and the old `/sessions/project-home/…` routes). */
+export const sessionsProjectSettings = (projectId: string) =>
+  `sessions-project-settings-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-main-<projectId>"]` — the settings pane's **Main**
+ *  section: main's setup form, or main's summary and **Replace main**. */
+export const sessionsProjectSettingsMain = (projectId: string) =>
+  `sessions-project-settings-main-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-replace-main-<projectId>"]` — **Replace main** in the
+ *  settings pane, offered once main is set up; it opens main's form in replace mode. */
+export const sessionsProjectSettingsReplaceMain = (projectId: string) =>
+  `sessions-project-settings-replace-main-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-defaults-<projectId>"]` — the settings pane's **New
+ *  orchestrators** section: the defaults the "+" composer starts with. */
+export const sessionsProjectSettingsDefaults = (projectId: string) =>
+  `sessions-project-settings-defaults-${projectId}`;

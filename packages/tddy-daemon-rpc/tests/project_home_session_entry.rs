@@ -89,6 +89,7 @@ fn a_registered_project(data_dir: &Path, os_user: &str, home_session_id: Option<
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: home_session_id.map(str::to_string),
+            orchestrator_defaults: None,
         },
     )
     .expect("seed project");

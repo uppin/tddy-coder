@@ -9,6 +9,7 @@ use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolRequest};
 use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, SetProjectAccountsRequest,
     SetProjectAccountsResponse, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
+    SetProjectOrchestratorDefaultsRequest, SetProjectOrchestratorDefaultsResponse,
 };
 use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
 use tddy_service::proto::session::{
@@ -247,6 +248,24 @@ pub async fn forward_set_project_accounts(
         peer_instance_id,
         "project.ProjectService",
         "SetProjectAccounts",
+        request,
+    )
+    .await
+}
+
+/// Forward **SetProjectOrchestratorDefaults** to another daemon in the common room.
+///
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer`].
+pub async fn forward_set_project_orchestrator_defaults(
+    room: &CommonRoom,
+    peer_instance_id: &str,
+    request: &SetProjectOrchestratorDefaultsRequest,
+) -> Result<SetProjectOrchestratorDefaultsResponse, Status> {
+    forward_unary(
+        room,
+        peer_instance_id,
+        "project.ProjectService",
+        "SetProjectOrchestratorDefaults",
         request,
     )
     .await

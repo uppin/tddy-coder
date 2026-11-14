@@ -94,6 +94,7 @@ fn a_served_worktree_capped_at(cap: u64) -> ServedWorktree {
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: None,
+            orchestrator_defaults: None,
         },
     )
     .expect("register project");

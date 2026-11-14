@@ -54,4 +54,15 @@ impl ProjectHandler for ProjectRpcHandler {
         self.set_project_accounts_at_project_coordinate(request)
             .await
     }
+
+    async fn set_project_orchestrator_defaults(
+        &self,
+        request: Request<tddy_service::proto::project::SetProjectOrchestratorDefaultsRequest>,
+    ) -> Result<
+        Response<tddy_service::proto::project::SetProjectOrchestratorDefaultsResponse>,
+        Status,
+    > {
+        self.set_project_orchestrator_defaults_at_project_coordinate(request)
+            .await
+    }
 }

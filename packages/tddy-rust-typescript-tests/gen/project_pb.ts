@@ -10,7 +10,43 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file project.proto.
  */
 export const file_project: GenFile = /*@__PURE__*/
-  fileDesc("Cg1wcm9qZWN0LnByb3RvEgdwcm9qZWN0IjkKEUFjY291bnRBc3NpZ25tZW50EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkitAEKF0FkZFByb2plY3RUb0hvc3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEg8KB2dpdF91cmwYBCABKAkSFwoPbWFpbl9icmFuY2hfcmVmGAUgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgGIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYByABKAkiQgoYQWRkUHJvamVjdFRvSG9zdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJoChRDcmVhdGVQcm9qZWN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHZ2l0X3VybBgDIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYBCABKAkiPwoVQ3JlYXRlUHJvamVjdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJjChpMaXN0UHJvamVjdEJyYW5jaGVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIkcKG0xpc3RQcm9qZWN0QnJhbmNoZXNSZXNwb25zZRIQCghicmFuY2hlcxgBIAMoCRIWCg5kZWZhdWx0X3JlbW90ZRgCIAEoCSJAChNMaXN0UHJvamVjdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKbG9jYWxfb25seRgCIAEoCCI/ChRMaXN0UHJvamVjdHNSZXNwb25zZRInCghwcm9qZWN0cxgBIAMoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5IpECCgxQcm9qZWN0RW50cnkSEgoKcHJvamVjdF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg8KB2dpdF91cmwYAyABKAkSFgoObWFpbl9yZXBvX3BhdGgYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEhcKD21haW5fYnJhbmNoX3JlZhgGIAEoCRIWCg5kZWZhdWx0X3JlbW90ZRgHIAEoCRIsCghhY2NvdW50cxgIIAMoCzIaLnByb2plY3QuQWNjb3VudEFzc2lnbm1lbnQSEAoIbG9jYWxfZ2gYCSABKAgSFwoPaG9tZV9zZXNzaW9uX2lkGAsgASgJSgQIChALUgpob21lX2FnZW50IoABCh5TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhcKD21haW5fYnJhbmNoX3JlZhgDIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYBCABKAkiSQofU2V0UHJvamVjdERlZmF1bHRCcmFuY2hSZXNwb25zZRImCgdwcm9qZWN0GAEgASgLMhUucHJvamVjdC5Qcm9qZWN0RW50cnkiogEKGVNldFByb2plY3RBY2NvdW50c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEiwKCGFjY291bnRzGAMgAygLMhoucHJvamVjdC5BY2NvdW50QXNzaWdubWVudBIaChJkYWVtb25faW5zdGFuY2VfaWQYBCABKAkSEAoIbG9jYWxfZ2gYBSABKAgiRAoaU2V0UHJvamVjdEFjY291bnRzUmVzcG9uc2USJgoHcHJvamVjdBgBIAEoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5MrUECg5Qcm9qZWN0U2VydmljZRJLCgxMaXN0UHJvamVjdHMSHC5wcm9qZWN0Lkxpc3RQcm9qZWN0c1JlcXVlc3QaHS5wcm9qZWN0Lkxpc3RQcm9qZWN0c1Jlc3BvbnNlEk4KDUNyZWF0ZVByb2plY3QSHS5wcm9qZWN0LkNyZWF0ZVByb2plY3RSZXF1ZXN0Gh4ucHJvamVjdC5DcmVhdGVQcm9qZWN0UmVzcG9uc2USVwoQQWRkUHJvamVjdFRvSG9zdBIgLnByb2plY3QuQWRkUHJvamVjdFRvSG9zdFJlcXVlc3QaIS5wcm9qZWN0LkFkZFByb2plY3RUb0hvc3RSZXNwb25zZRJgChNMaXN0UHJvamVjdEJyYW5jaGVzEiMucHJvamVjdC5MaXN0UHJvamVjdEJyYW5jaGVzUmVxdWVzdBokLnByb2plY3QuTGlzdFByb2plY3RCcmFuY2hlc1Jlc3BvbnNlEmwKF1NldFByb2plY3REZWZhdWx0QnJhbmNoEicucHJvamVjdC5TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlcXVlc3QaKC5wcm9qZWN0LlNldFByb2plY3REZWZhdWx0QnJhbmNoUmVzcG9uc2USXQoSU2V0UHJvamVjdEFjY291bnRzEiIucHJvamVjdC5TZXRQcm9qZWN0QWNjb3VudHNSZXF1ZXN0GiMucHJvamVjdC5TZXRQcm9qZWN0QWNjb3VudHNSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("Cg1wcm9qZWN0LnByb3RvEgdwcm9qZWN0IlIKFE9yY2hlc3RyYXRvckRlZmF1bHRzEg0KBW1vZGVsGAEgASgJEg4KBmVmZm9ydBgCIAEoCRIbChNwcm92aWRlcl9hY2NvdW50X2lkGAMgASgJIjkKEUFjY291bnRBc3NpZ25tZW50EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkitAEKF0FkZFByb2plY3RUb0hvc3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEg8KB2dpdF91cmwYBCABKAkSFwoPbWFpbl9icmFuY2hfcmVmGAUgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgGIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYByABKAkiQgoYQWRkUHJvamVjdFRvSG9zdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJoChRDcmVhdGVQcm9qZWN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHZ2l0X3VybBgDIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYBCABKAkiPwoVQ3JlYXRlUHJvamVjdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJjChpMaXN0UHJvamVjdEJyYW5jaGVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIkcKG0xpc3RQcm9qZWN0QnJhbmNoZXNSZXNwb25zZRIQCghicmFuY2hlcxgBIAMoCRIWCg5kZWZhdWx0X3JlbW90ZRgCIAEoCSJAChNMaXN0UHJvamVjdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKbG9jYWxfb25seRgCIAEoCCI/ChRMaXN0UHJvamVjdHNSZXNwb25zZRInCghwcm9qZWN0cxgBIAMoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5Is8CCgxQcm9qZWN0RW50cnkSEgoKcHJvamVjdF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg8KB2dpdF91cmwYAyABKAkSFgoObWFpbl9yZXBvX3BhdGgYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEhcKD21haW5fYnJhbmNoX3JlZhgGIAEoCRIWCg5kZWZhdWx0X3JlbW90ZRgHIAEoCRIsCghhY2NvdW50cxgIIAMoCzIaLnByb2plY3QuQWNjb3VudEFzc2lnbm1lbnQSEAoIbG9jYWxfZ2gYCSABKAgSFwoPaG9tZV9zZXNzaW9uX2lkGAsgASgJEjwKFW9yY2hlc3RyYXRvcl9kZWZhdWx0cxgMIAEoCzIdLnByb2plY3QuT3JjaGVzdHJhdG9yRGVmYXVsdHNKBAgKEAtSCmhvbWVfYWdlbnQigAEKHlNldFByb2plY3REZWZhdWx0QnJhbmNoUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFwoPbWFpbl9icmFuY2hfcmVmGAMgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgEIAEoCSJJCh9TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSKiAQoZU2V0UHJvamVjdEFjY291bnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSLAoIYWNjb3VudHMYAyADKAsyGi5wcm9qZWN0LkFjY291bnRBc3NpZ25tZW50EhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgEIAEoCRIQCghsb2NhbF9naBgFIAEoCCJEChpTZXRQcm9qZWN0QWNjb3VudHNSZXNwb25zZRImCgdwcm9qZWN0GAEgASgLMhUucHJvamVjdC5Qcm9qZWN0RW50cnkinwEKJVNldFByb2plY3RPcmNoZXN0cmF0b3JEZWZhdWx0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIvCghkZWZhdWx0cxgEIAEoCzIdLnByb2plY3QuT3JjaGVzdHJhdG9yRGVmYXVsdHMiUAomU2V0UHJvamVjdE9yY2hlc3RyYXRvckRlZmF1bHRzUmVzcG9uc2USJgoHcHJvamVjdBgBIAEoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5MrkFCg5Qcm9qZWN0U2VydmljZRJLCgxMaXN0UHJvamVjdHMSHC5wcm9qZWN0Lkxpc3RQcm9qZWN0c1JlcXVlc3QaHS5wcm9qZWN0Lkxpc3RQcm9qZWN0c1Jlc3BvbnNlEk4KDUNyZWF0ZVByb2plY3QSHS5wcm9qZWN0LkNyZWF0ZVByb2plY3RSZXF1ZXN0Gh4ucHJvamVjdC5DcmVhdGVQcm9qZWN0UmVzcG9uc2USVwoQQWRkUHJvamVjdFRvSG9zdBIgLnByb2plY3QuQWRkUHJvamVjdFRvSG9zdFJlcXVlc3QaIS5wcm9qZWN0LkFkZFByb2plY3RUb0hvc3RSZXNwb25zZRJgChNMaXN0UHJvamVjdEJyYW5jaGVzEiMucHJvamVjdC5MaXN0UHJvamVjdEJyYW5jaGVzUmVxdWVzdBokLnByb2plY3QuTGlzdFByb2plY3RCcmFuY2hlc1Jlc3BvbnNlEmwKF1NldFByb2plY3REZWZhdWx0QnJhbmNoEicucHJvamVjdC5TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlcXVlc3QaKC5wcm9qZWN0LlNldFByb2plY3REZWZhdWx0QnJhbmNoUmVzcG9uc2USXQoSU2V0UHJvamVjdEFjY291bnRzEiIucHJvamVjdC5TZXRQcm9qZWN0QWNjb3VudHNSZXF1ZXN0GiMucHJvamVjdC5TZXRQcm9qZWN0QWNjb3VudHNSZXNwb25zZRKBAQoeU2V0UHJvamVjdE9yY2hlc3RyYXRvckRlZmF1bHRzEi4ucHJvamVjdC5TZXRQcm9qZWN0T3JjaGVzdHJhdG9yRGVmYXVsdHNSZXF1ZXN0Gi8ucHJvamVjdC5TZXRQcm9qZWN0T3JjaGVzdHJhdG9yRGVmYXVsdHNSZXNwb25zZWIGcHJvdG8z");
+
+/**
+ * What a project's orchestrator composer starts with on one host (`#orchestrators` 11/11). Each
+ * field empty means "the agent's own default" — the composer then shows what the agent serves.
+ *
+ * @generated from message project.OrchestratorDefaults
+ */
+export type OrchestratorDefaults = Message<"project.OrchestratorDefaults"> & {
+  /**
+   * A model id the agent's catalogue lists.
+   *
+   * @generated from field: string model = 1;
+   */
+  model: string;
+
+  /**
+   * One of the agent's served effort levels (`AgentInfo.effort_levels`).
+   *
+   * @generated from field: string effort = 2;
+   */
+  effort: string;
+
+  /**
+   * A provider account (`accounts.AccountSummary.account_id`) the agent runs on instead of its vendor.
+   *
+   * @generated from field: string provider_account_id = 3;
+   */
+  providerAccountId: string;
+};
+
+/**
+ * Describes the message project.OrchestratorDefaults.
+ * Use `create(OrchestratorDefaultsSchema)` to create a new message.
+ */
+export const OrchestratorDefaultsSchema: GenMessage<OrchestratorDefaults> = /*@__PURE__*/
+  messageDesc(file_project, 0);
 
 /**
  * One provider's account, as assigned to a project.
@@ -42,7 +78,7 @@ export type AccountAssignment = Message<"project.AccountAssignment"> & {
  * Use `create(AccountAssignmentSchema)` to create a new message.
  */
 export const AccountAssignmentSchema: GenMessage<AccountAssignment> = /*@__PURE__*/
-  messageDesc(file_project, 0);
+  messageDesc(file_project, 1);
 
 /**
  * @generated from message project.AddProjectToHostRequest
@@ -97,7 +133,7 @@ export type AddProjectToHostRequest = Message<"project.AddProjectToHostRequest">
  * Use `create(AddProjectToHostRequestSchema)` to create a new message.
  */
 export const AddProjectToHostRequestSchema: GenMessage<AddProjectToHostRequest> = /*@__PURE__*/
-  messageDesc(file_project, 1);
+  messageDesc(file_project, 2);
 
 /**
  * @generated from message project.AddProjectToHostResponse
@@ -116,7 +152,7 @@ export type AddProjectToHostResponse = Message<"project.AddProjectToHostResponse
  * Use `create(AddProjectToHostResponseSchema)` to create a new message.
  */
 export const AddProjectToHostResponseSchema: GenMessage<AddProjectToHostResponse> = /*@__PURE__*/
-  messageDesc(file_project, 2);
+  messageDesc(file_project, 3);
 
 /**
  * @generated from message project.CreateProjectRequest
@@ -151,7 +187,7 @@ export type CreateProjectRequest = Message<"project.CreateProjectRequest"> & {
  * Use `create(CreateProjectRequestSchema)` to create a new message.
  */
 export const CreateProjectRequestSchema: GenMessage<CreateProjectRequest> = /*@__PURE__*/
-  messageDesc(file_project, 3);
+  messageDesc(file_project, 4);
 
 /**
  * @generated from message project.CreateProjectResponse
@@ -168,7 +204,7 @@ export type CreateProjectResponse = Message<"project.CreateProjectResponse"> & {
  * Use `create(CreateProjectResponseSchema)` to create a new message.
  */
 export const CreateProjectResponseSchema: GenMessage<CreateProjectResponse> = /*@__PURE__*/
-  messageDesc(file_project, 4);
+  messageDesc(file_project, 5);
 
 /**
  * @generated from message project.ListProjectBranchesRequest
@@ -195,7 +231,7 @@ export type ListProjectBranchesRequest = Message<"project.ListProjectBranchesReq
  * Use `create(ListProjectBranchesRequestSchema)` to create a new message.
  */
 export const ListProjectBranchesRequestSchema: GenMessage<ListProjectBranchesRequest> = /*@__PURE__*/
-  messageDesc(file_project, 5);
+  messageDesc(file_project, 6);
 
 /**
  * @generated from message project.ListProjectBranchesResponse
@@ -221,7 +257,7 @@ export type ListProjectBranchesResponse = Message<"project.ListProjectBranchesRe
  * Use `create(ListProjectBranchesResponseSchema)` to create a new message.
  */
 export const ListProjectBranchesResponseSchema: GenMessage<ListProjectBranchesResponse> = /*@__PURE__*/
-  messageDesc(file_project, 6);
+  messageDesc(file_project, 7);
 
 /**
  * @generated from message project.ListProjectsRequest
@@ -246,7 +282,7 @@ export type ListProjectsRequest = Message<"project.ListProjectsRequest"> & {
  * Use `create(ListProjectsRequestSchema)` to create a new message.
  */
 export const ListProjectsRequestSchema: GenMessage<ListProjectsRequest> = /*@__PURE__*/
-  messageDesc(file_project, 7);
+  messageDesc(file_project, 8);
 
 /**
  * @generated from message project.ListProjectsResponse
@@ -263,7 +299,7 @@ export type ListProjectsResponse = Message<"project.ListProjectsResponse"> & {
  * Use `create(ListProjectsResponseSchema)` to create a new message.
  */
 export const ListProjectsResponseSchema: GenMessage<ListProjectsResponse> = /*@__PURE__*/
-  messageDesc(file_project, 8);
+  messageDesc(file_project, 9);
 
 /**
  * @generated from message project.ProjectEntry
@@ -339,6 +375,14 @@ export type ProjectEntry = Message<"project.ProjectEntry"> & {
    * @generated from field: string home_session_id = 11;
    */
   homeSessionId: string;
+
+  /**
+   * What a new orchestrator for this project starts with on this host, saved from the project's
+   * settings pane by `SetProjectOrchestratorDefaults`. Absent = none saved.
+   *
+   * @generated from field: project.OrchestratorDefaults orchestrator_defaults = 12;
+   */
+  orchestratorDefaults?: OrchestratorDefaults;
 };
 
 /**
@@ -346,7 +390,7 @@ export type ProjectEntry = Message<"project.ProjectEntry"> & {
  * Use `create(ProjectEntrySchema)` to create a new message.
  */
 export const ProjectEntrySchema: GenMessage<ProjectEntry> = /*@__PURE__*/
-  messageDesc(file_project, 9);
+  messageDesc(file_project, 10);
 
 /**
  * @generated from message project.SetProjectDefaultBranchRequest
@@ -378,7 +422,7 @@ export type SetProjectDefaultBranchRequest = Message<"project.SetProjectDefaultB
  * Use `create(SetProjectDefaultBranchRequestSchema)` to create a new message.
  */
 export const SetProjectDefaultBranchRequestSchema: GenMessage<SetProjectDefaultBranchRequest> = /*@__PURE__*/
-  messageDesc(file_project, 10);
+  messageDesc(file_project, 11);
 
 /**
  * @generated from message project.SetProjectDefaultBranchResponse
@@ -395,7 +439,7 @@ export type SetProjectDefaultBranchResponse = Message<"project.SetProjectDefault
  * Use `create(SetProjectDefaultBranchResponseSchema)` to create a new message.
  */
 export const SetProjectDefaultBranchResponseSchema: GenMessage<SetProjectDefaultBranchResponse> = /*@__PURE__*/
-  messageDesc(file_project, 11);
+  messageDesc(file_project, 12);
 
 /**
  * @generated from message project.SetProjectAccountsRequest
@@ -440,7 +484,7 @@ export type SetProjectAccountsRequest = Message<"project.SetProjectAccountsReque
  * Use `create(SetProjectAccountsRequestSchema)` to create a new message.
  */
 export const SetProjectAccountsRequestSchema: GenMessage<SetProjectAccountsRequest> = /*@__PURE__*/
-  messageDesc(file_project, 12);
+  messageDesc(file_project, 13);
 
 /**
  * @generated from message project.SetProjectAccountsResponse
@@ -457,7 +501,63 @@ export type SetProjectAccountsResponse = Message<"project.SetProjectAccountsResp
  * Use `create(SetProjectAccountsResponseSchema)` to create a new message.
  */
 export const SetProjectAccountsResponseSchema: GenMessage<SetProjectAccountsResponse> = /*@__PURE__*/
-  messageDesc(file_project, 13);
+  messageDesc(file_project, 14);
+
+/**
+ * @generated from message project.SetProjectOrchestratorDefaultsRequest
+ */
+export type SetProjectOrchestratorDefaultsRequest = Message<"project.SetProjectOrchestratorDefaultsRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * Host whose defaults these are. Empty or matching the local instance = local; otherwise
+   * forwarded to that peer. Only that host's row changes.
+   *
+   * @generated from field: string daemon_instance_id = 3;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * The project's whole defaults on that host after this call. Absent clears them.
+   *
+   * @generated from field: project.OrchestratorDefaults defaults = 4;
+   */
+  defaults?: OrchestratorDefaults;
+};
+
+/**
+ * Describes the message project.SetProjectOrchestratorDefaultsRequest.
+ * Use `create(SetProjectOrchestratorDefaultsRequestSchema)` to create a new message.
+ */
+export const SetProjectOrchestratorDefaultsRequestSchema: GenMessage<SetProjectOrchestratorDefaultsRequest> = /*@__PURE__*/
+  messageDesc(file_project, 15);
+
+/**
+ * @generated from message project.SetProjectOrchestratorDefaultsResponse
+ */
+export type SetProjectOrchestratorDefaultsResponse = Message<"project.SetProjectOrchestratorDefaultsResponse"> & {
+  /**
+   * The project's row on the host that saved the defaults.
+   *
+   * @generated from field: project.ProjectEntry project = 1;
+   */
+  project?: ProjectEntry;
+};
+
+/**
+ * Describes the message project.SetProjectOrchestratorDefaultsResponse.
+ * Use `create(SetProjectOrchestratorDefaultsResponseSchema)` to create a new message.
+ */
+export const SetProjectOrchestratorDefaultsResponseSchema: GenMessage<SetProjectOrchestratorDefaultsResponse> = /*@__PURE__*/
+  messageDesc(file_project, 16);
 
 /**
  * @generated from service project.ProjectService
@@ -524,6 +624,19 @@ export const ProjectService: GenService<{
     methodKind: "unary";
     input: typeof SetProjectAccountsRequestSchema;
     output: typeof SetProjectAccountsResponseSchema;
+  },
+  /**
+   * Save (or clear) what a new orchestrator for the project starts with on one host — the "+"
+   * composer's model, effort and provider account (`#orchestrators` 11/11). **Per-host scope**, as
+   * main is: routed to the host `daemon_instance_id` names (local or forwarded), and never fanned
+   * out to the project's other hosts. The defaults REPLACE the stored ones; absent clears them.
+   *
+   * @generated from rpc project.ProjectService.SetProjectOrchestratorDefaults
+   */
+  setProjectOrchestratorDefaults: {
+    methodKind: "unary";
+    input: typeof SetProjectOrchestratorDefaultsRequestSchema;
+    output: typeof SetProjectOrchestratorDefaultsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_project, 0);

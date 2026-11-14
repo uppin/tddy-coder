@@ -98,6 +98,7 @@ fn register_project(sessions_base: &Path, repo_path: &Path, main_branch_ref: Opt
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: None,
+            orchestrator_defaults: None,
         }],
     )
     .expect("register project");

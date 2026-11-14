@@ -91,6 +91,7 @@ fn given_a_registered_project(data_dir: &std::path::Path, os_user: &str, project
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: None,
+            orchestrator_defaults: None,
         },
     )
     .expect("seed project");

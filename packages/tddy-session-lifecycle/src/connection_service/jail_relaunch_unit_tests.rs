@@ -236,6 +236,7 @@ async fn a_sandboxed_workspace_session_served_by(
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: None,
+            orchestrator_defaults: None,
         }],
     )
     .expect("register project");

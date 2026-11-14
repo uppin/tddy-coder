@@ -233,3 +233,25 @@ export const createSessionAgentSelectHostError = (daemonInstanceId: string) =>
  *  (`#orchestrators` 8/11), opened by its header's "+" at `/sessions/project/:projectId/new`. */
 export const sessionsProjectComposer = (projectId: string) =>
   `sessions-project-composer-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-<projectId>"]` — a project's settings pane (`#orchestrators` 11/11). */
+export const sessionsProjectSettings = (projectId: string) => `sessions-project-settings-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-main-<projectId>"]` — the pane's **Main** section. */
+export const sessionsProjectSettingsMain = (projectId: string) => `sessions-project-settings-main-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-replace-main-<projectId>"]` — **Replace main** in the pane. */
+export const sessionsProjectSettingsReplaceMain = (projectId: string) =>
+  `sessions-project-settings-replace-main-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-defaults-<projectId>"]` — the pane's **New orchestrators** section. */
+export const sessionsProjectSettingsDefaults = (projectId: string) =>
+  `sessions-project-settings-defaults-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-defaults-save-<projectId>"]` — saves the defaults. */
+export const sessionsProjectSettingsDefaultsSave = (projectId: string) =>
+  `sessions-project-settings-defaults-save-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-defaults-error-<projectId>"]` — the daemon's reason a save was refused. */
+export const sessionsProjectSettingsDefaultsError = (projectId: string) =>
+  `sessions-project-settings-defaults-error-${projectId}`;

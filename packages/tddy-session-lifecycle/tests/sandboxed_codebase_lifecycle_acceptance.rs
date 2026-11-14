@@ -135,6 +135,7 @@ fn register_project(sessions_base: &Path, repo_path: &Path) {
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: None,
+            orchestrator_defaults: None,
         }],
     )
     .expect("register project");

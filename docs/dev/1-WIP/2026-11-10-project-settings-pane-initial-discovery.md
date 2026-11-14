@@ -377,3 +377,33 @@ tool. DeleteSession RPC (:48, `session_deletion.rs`): no exec tool. RemoveWorktr
 RestoreSessionWorktree RPCs (worktree.proto:13,24,25): no exec tool. Send a turn to a running session:
 only `SendSessionKeys` (+claim); `PromptAgentConversation` is roster-only. Stop: `TerminateSession` exists.
 Pause/status marker: NOT FOUND.
+
+## Exploration 2 — pass 2 contract (2026-11-14)
+
+- **n8's green is not in this tree.** The branch sits on n8's contract (`cff07d20f`); its green
+  (`origin/feature/orchestrators/orchestrator-composer`, `660218735`) is based on the later nodes'
+  greens. `OrchestratorComposer`, `SessionProjectGroupHeader`'s `onNew`/`actions`, `SessionDrawer`'s
+  `onNewOrchestrator` and `parseSessionsProjectNew` are stubs here. n8 green's composer already loads
+  `ListProjects` itself and keeps model/effort/provider in `useCreateSessionModel` /
+  `useCreateSessionEffort`, so the pre-fill needs no new prop — only seeding those hooks once the
+  row arrives (`initialModel` is read at mount only). `SessionProjectGroup` forwards `onNew` but not
+  `actions`.
+- **`ProjectData` literal fan-out:** 90 `ProjectData {` sites; 72 carry `home_session_id: None`
+  (54 files, 12 crates), plus one `home_session_id: home_session_id.map(…)` and 5 proto
+  `ProjectEntry` literals (`home_session_id: String::new()`). `tddy-livekit/src/projects_registry.rs`
+  has its own unrelated `ProjectData`.
+- **Per-host routing** is `ProjectRpcHandler::coordinate_route` (`coordinate_route.rs:25`): empty or
+  local id → local, eligible peer → `forward_*` over the common room. A test daemon put in a common
+  room with **no room connected** refuses a forward with "LiveKit common room is not connected on
+  this daemon; cannot forward … to a peer" (`tddy-daemon-livekit/src/livekit_peer_forwarder.rs:53`)
+  — the cheap observable `cross_host_stack_parent_acceptance.rs` already uses.
+- **Hash routing:** `parseAppLocation` splits `#path?query` into `{ path, params }`;
+  `navigate(path)` sets the path only and `withPath` keeps the params on the same screen. Hence the
+  settings parser takes the location, and the path builder's `?host=` is for `href`s.
+- **`anInMemoryRpcBackend`** registers `.onUnary` handlers on a router in order; a second handler for
+  the same method is not a supported override, so the composer test backend takes the project row's
+  extra fields as a parameter instead.
+- **Typecheck:** `Partial<ProjectEntry>` spread into `create(ProjectEntrySchema, …)` errors in several
+  existing helpers (`responses.ts:155`, `daemonSessionHostBackend.ts:129`, `builders.ts:68`) — present
+  before this change (checked against the pre-change generated `project_pb.ts`).
+

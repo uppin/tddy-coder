@@ -53,6 +53,27 @@ pub struct ProjectData {
     /// such a row may carry is ignored on read and not written back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_session_id: Option<String>,
+    /// What a new orchestrator on this host starts with unless the operator changes it in the
+    /// composer (`#orchestrators` 11/11). Absent means none saved: every control starts at the
+    /// agent's own default. A row written by an older daemon reads that way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator_defaults: Option<OrchestratorDefaults>,
+}
+
+/// The defaults a project's orchestrator composer starts with on one host — saved from the
+/// project's settings pane, never sent by the composer itself. Each field absent means "the
+/// agent's own default"; an empty string is never stored.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OrchestratorDefaults {
+    /// A model id the agent's catalogue lists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// One of the agent's served effort levels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// A provider account the agent runs on, instead of its vendor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_account_id: Option<String>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -356,6 +377,19 @@ pub fn set_project_home_session(
     write_projects(projects_dir, &projects)
 }
 
+/// Saves (`Some`) or clears (`None`) the orchestrator defaults `project_id` has on this host,
+/// replacing whatever was saved. A defaults value whose every field is absent is stored as none.
+/// Errors when `project_id` is unknown, leaving the registry as it was.
+pub fn set_project_orchestrator_defaults(
+    projects_dir: &Path,
+    project_id: &str,
+    defaults: Option<&OrchestratorDefaults>,
+) -> anyhow::Result<()> {
+    // TODO(project-settings-pane): implement
+    let _ = (projects_dir, defaults);
+    anyhow::bail!("set_project_orchestrator_defaults is not implemented yet (project {project_id})")
+}
+
 /// Resolved `main_repo_path` for `project_id` on `host_key` (simulated host or daemon instance id).
 ///
 /// Multi-host: returns [`ProjectData::host_repo_paths`]\[host_key] when non-empty, else
@@ -410,6 +444,7 @@ mod per_host_path_unit_tests {
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: None,
+            orchestrator_defaults: None,
         };
         write_projects(&projects_dir, &[project]).unwrap();
         let px = main_repo_path_for_host(&projects_dir, "p1", "unit-host-x")
@@ -643,6 +678,7 @@ mod project_integration_base_acceptance_tests {
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: None,
+            orchestrator_defaults: None,
         };
         let r = add_project(&projects_dir, project);
         assert!(
@@ -674,6 +710,7 @@ mod project_integration_base_acceptance_tests {
             accounts: Vec::new(),
             local_gh: false,
             home_session_id: None,
+            orchestrator_defaults: None,
         };
         add_project(&projects_dir, project).expect(
             "a safe <remote>/<path> must be accepted at the boundary regardless of the remote name",
@@ -713,6 +750,7 @@ mod set_project_default_branch_unit_tests {
                 accounts: Vec::new(),
                 local_gh: false,
                 home_session_id: None,
+                orchestrator_defaults: None,
             },
         )
         .expect("seed project");
