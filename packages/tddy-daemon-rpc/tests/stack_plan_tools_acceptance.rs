@@ -14,6 +14,13 @@
 //!
 //! PRD: docs/ft/coder/1-WIP/PRD-2026-11-10-stack-plan-tools.md
 //! Changeset: docs/dev/1-WIP/2026-11-10-stack-plan-tools.md
+//!
+//! `#orchestrators` 13/13 adds a node's two reads where #884 left them out: a node session in a
+//! jail is listed them by the jail's own `ListExecTools` bridge (driven here through the daemon's
+//! production `sandbox_rpc_handler`, with no jail spawned), and a node session on another host is
+//! served them by the host that holds its stack, which finds the node bound to it in its own store.
+//! PRD: docs/ft/coder/1-WIP/PRD-2026-11-14-stack-node-reads.md
+//! Changeset: docs/dev/1-WIP/2026-11-14-stack-node-reads.md
 
 mod support;
 
@@ -21,6 +28,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use pretty_assertions::assert_eq;
+use prost::Message as _;
 use serde_json::{json, Value};
 use support::{
     a_host_as_current_user_with_gh_at, a_workspace_in, Host, InProcessPeers, HOST_A, HOST_B,
@@ -36,9 +44,11 @@ use tddy_github::pr_api::{
     PrRef, PrReview, PrReviewComment, PrSearchHit, PrSearchQuery,
 };
 use tddy_projects::project_storage::{read_projects, write_projects};
+use tddy_rpc::RpcResult;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::exec_tools::{
     ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
+    ListExecToolsResponse,
 };
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_testing_commons::gh_cli::a_gh_cli;
@@ -314,6 +324,55 @@ impl Host {
             .map(|r| r.into_inner())
     }
 
+    /// Call `tool` as `session_id` with the request addressed at host `addressed` — how an agent's
+    /// call reaches the host that holds its stack: this host forwards it there whole.
+    async fn call_addressed_at(
+        &self,
+        addressed: &str,
+        session_id: &str,
+        tool: &str,
+        args: Value,
+    ) -> Result<ExecuteToolResponse, Status> {
+        self.daemon
+            .execute_tool(Request::direct(ExecuteToolRequest {
+                session_token: TEST_TOKEN.to_string(),
+                session_id: session_id.to_string(),
+                tool_name: tool.to_string(),
+                args_json: args.to_string(),
+                daemon_instance_id: addressed.to_string(),
+                conversation_id: String::new(),
+            }))
+            .await
+            .map(|r| r.into_inner())
+    }
+
+    /// The stack tools the jail built for `session_id` is listed by its `ListExecTools` bridge —
+    /// the daemon's production `sandbox_rpc_handler`, relayed to as an in-jail agent's `tddy-tools`
+    /// is, with no jail spawned — in the order listed.
+    async fn stack_tools_listed_in_the_jail_of(&self, session_id: &str) -> Vec<String> {
+        let service = self.daemon.as_arc();
+        service.install_sandbox_rpc_bridge();
+        let bridge = service.sandbox_rpc_handler(session_id, &self.session_dir(session_id));
+        let asked = ListExecToolsRequest {
+            session_id: session_id.to_string(),
+            ..Default::default()
+        };
+        let RpcResult::Unary(answer) = bridge
+            .handle_rpc(EXEC_TOOL_SERVICE, "ListExecTools", &asked.encode_to_vec())
+            .await
+        else {
+            panic!("ListExecTools is unary");
+        };
+        let answer = answer.unwrap_or_else(|status| panic!("the jail is answered: {status:?}"));
+        ListExecToolsResponse::decode(answer.as_slice())
+            .expect("a ListExecToolsResponse")
+            .tools
+            .into_iter()
+            .map(|tool| tool.name)
+            .filter(|name| is_stack_tool(name))
+            .collect()
+    }
+
     /// [`Self::call_as`], which must be served without error; its JSON answer.
     async fn answer_to(&self, session_id: &str, tool: &str, args: Value) -> Value {
         let answer = self
@@ -341,6 +400,35 @@ impl Host {
             .filter(|name| is_stack_tool(name))
             .collect()
     }
+}
+
+/// A session of the project held by `session_host`, started by `orchestrator` for `node_id` of
+/// `stack_id`, which `stack_host` holds: the node is bound to it in `stack_host`'s store, and its
+/// changeset names `orchestrator`.
+async fn a_node_session_held_by(
+    session_host: &Host,
+    stack_host: &Host,
+    orchestrator: &str,
+    stack_id: &str,
+    node_id: &str,
+) -> String {
+    let session_id = a_workspace_in(&session_host.daemon, THIS_PROJECT).await;
+    let dir = session_host.session_dir(&session_id);
+    let mut changeset = read_changeset(&dir).unwrap_or_default();
+    changeset.orchestrator_session_id = Some(orchestrator.to_string());
+    write_changeset(&dir, &changeset).unwrap();
+    stack_host
+        .stacks()
+        .update(THIS_PROJECT, stack_id, |stack| {
+            let node = stack
+                .nodes
+                .iter_mut()
+                .find(|n| n.node_id == node_id)
+                .expect("the node is planned");
+            node.session_id = Some(session_id.clone());
+        })
+        .unwrap();
+    session_id
 }
 
 fn a_stack_of(titles: &[&str]) -> Stack {
@@ -722,4 +810,105 @@ async fn pr_update_planned_with_sync_pr_publishes_with_the_project_accounts_toke
         world.github.title_body_edits(),
         vec![(42, Some("Project stack store".to_string()), None)]
     );
+}
+
+// ── #orchestrators 13/13: a node's reads in a jail and on another host ──────────────────────
+
+#[tokio::test]
+async fn a_stack_node_session_in_a_jail_is_listed_its_two_reads_as_the_daemon_lists_them() {
+    // Given an orchestrator whose node n1 is bound to a session it started, which runs in a jail
+    let world = a_world().await;
+    let a = &world.a;
+    let (orchestrator, own_stack) = a
+        .an_orchestrator_owning_a_stack_of(&["Store", "Tools"])
+        .await;
+    let child = a.a_node_session_of(&orchestrator, &own_stack, "n1").await;
+
+    // When the jail's agent asks which tools its session is offered
+    let in_the_jail = a.stack_tools_listed_in_the_jail_of(&child).await;
+
+    // Then the jail lists the node's two reads — exactly what the daemon lists it
+    assert_eq!(in_the_jail, names(&["pr_stack_status", "pr_read"]));
+    assert_eq!(in_the_jail, a.stack_tools_offered_to(&child).await);
+}
+
+#[tokio::test]
+async fn an_orchestrators_jail_is_listed_every_stack_tool_the_daemon_lists_it() {
+    // Given an orchestrator owning a stack, running in a jail
+    let world = a_world().await;
+    let a = &world.a;
+    let (orchestrator, _own_stack) = a.an_orchestrator_owning_a_stack_of(&["Store"]).await;
+
+    // When the jail's agent asks which tools its session is offered
+    let in_the_jail = a.stack_tools_listed_in_the_jail_of(&orchestrator).await;
+
+    // Then the jail lists all eleven stack tools — exactly what the daemon lists it
+    assert_eq!(in_the_jail, names(&EVERY_STACK_TOOL));
+    assert_eq!(in_the_jail, a.stack_tools_offered_to(&orchestrator).await);
+}
+
+#[tokio::test]
+async fn a_stack_node_session_on_another_host_reads_its_stack_where_the_stack_is_held() {
+    // Given an orchestrator on host-a owning a stack, whose node n1 is bound to a session on host-b
+    let world = a_world().await;
+    let (orchestrator, own_stack) = world
+        .a
+        .an_orchestrator_owning_a_stack_of(&["Store", "Tools"])
+        .await;
+    let child = a_node_session_held_by(&world.b, &world.a, &orchestrator, &own_stack, "n1").await;
+
+    // When the node's agent reads its stack's status and plans a PR, each call addressed at host-a
+    let status = world
+        .b
+        .call_addressed_at(HOST_A, &child, "pr_stack_status", json!({}))
+        .await
+        .expect("host-a serves a node bound to the caller its stack's status");
+    let planning = world
+        .b
+        .call_addressed_at(
+            HOST_A,
+            &child,
+            "pr_add_planned",
+            json!({ "stack_id": own_stack, "title": "More", "description": "more" }),
+        )
+        .await
+        .expect_err("a node may not plan its stack");
+
+    // Then host-a answers the status of the stack it holds, refuses the write as permission denied,
+    // and its stack is untouched
+    assert!(!status.is_error, "{}", status.error_message);
+    let status: Value = serde_json::from_str(&status.result_json).expect("the answer is JSON");
+    assert_eq!(
+        status_nodes(&status),
+        vec![pair("n1", "Store"), pair("n2", "Tools")]
+    );
+    assert_eq!(planning.code(), Code::PermissionDenied, "{planning:?}");
+    assert_eq!(
+        world.a.nodes_of(&own_stack),
+        vec![node("n1", "Store", &[]), node("n2", "Tools", &[])]
+    );
+}
+
+#[tokio::test]
+async fn a_session_on_another_host_bound_to_no_node_there_is_refused_the_stack_reads() {
+    // Given an orchestrator on host-a owning a stack, and an ordinary session on host-b that no
+    // node of it is bound to
+    let world = a_world().await;
+    let (_orchestrator, own_stack) = world.a.an_orchestrator_owning_a_stack_of(&["Store"]).await;
+    let stranger = a_workspace_in(&world.b.daemon, THIS_PROJECT).await;
+
+    // When it reads that stack's status, addressed at host-a
+    let refusal = world
+        .b
+        .call_addressed_at(
+            HOST_A,
+            &stranger,
+            "pr_stack_status",
+            json!({ "stack_id": own_stack }),
+        )
+        .await
+        .expect_err("a session bound to no node of a stack is not served it");
+
+    // Then host-a refuses it as permission denied
+    assert_eq!(refusal.code(), Code::PermissionDenied, "{refusal:?}");
 }

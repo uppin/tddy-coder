@@ -31,3 +31,8 @@ green left the handler in place.
   `svc_pr_status_for_caller.rs`, `stack_parent.rs` and `conversation_spawn.rs`.
   Recommendation (taken at #887's wrap, developer instruction "finish without stopping"):
   follow-up PR, not #887.
+
+## Developer decision
+
+**Deferred by the developer at the #orchestrators TODO gate, 2026-11-14** — the follow-up PR is not added to `#orchestrators`; it stays open for a later
+change.

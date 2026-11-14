@@ -34,7 +34,12 @@ use tddy_tool_engine::project_home_tools::{
     ListProjectSessionsResult, UnreachableHost,
 };
 use tddy_tool_engine::stack_git_tools::is_stack_git_tool;
-use tddy_tool_engine::stack_tools::{is_stack_tool, StackCaller, StackCallerRole};
+use tddy_tool_engine::stack_tools::caller_records::{
+    forwarded_stack_caller_role, stack_bound_to_session_here,
+};
+use tddy_tool_engine::stack_tools::{
+    is_stack_tool, is_stack_tool_offered_to, StackCaller, StackCallerRole,
+};
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
 use tddy_worktree_service::session_target::HomeCaller;
 
@@ -71,7 +76,7 @@ impl ExecToolRpcHandler {
         if unified_session_dir_path(&sessions_base, &req.session_id).is_dir() {
             return Ok(None);
         }
-        let (home, owner) = self.home_caller_confirmed_at_owner(req).await?;
+        let (home, owner, listed_role) = self.home_caller_confirmed_at_owner(req).await?;
         if let Some(host) = target_daemon_instance_id(&req.args_json)
             .filter(|host| *host != local_instance_id_for_config(&self.config))
         {
@@ -81,30 +86,53 @@ impl ExecToolRpcHandler {
                 req.tool_name, req.session_id
             )));
         }
-        if is_stack_tool(&req.tool_name) {
-            // Confirmed only as an orchestrator-role session (the owner's `ListSessions` row names
-            // no node binding), which owns no stack on this host: its call must name one.
+        if is_stack_tool(&req.tool_name) || is_stack_git_tool(&req.tool_name) {
+            // The owner's row is confirmed first; the role is then decided per tool family from
+            // that row and this host's own store, which holds the stack a node is bound to.
+            let bound =
+                stack_bound_to_session_here(&sessions_base, &home.project_id, &home.session_id)
+                    .map_err(|e| {
+                        Status::permission_denied(format!("the stack tools are refused: {e}"))
+                    })?;
+            let role =
+                forwarded_stack_caller_role(&listed_role, bound.as_deref()).ok_or_else(|| {
+                    Status::permission_denied(format!(
+                    "tool {} is served only to an orchestrator session, or a session bound to a \
+                     node of a stack held here, and daemon {owner} reports session {} is neither",
+                    req.tool_name, req.session_id
+                ))
+                })?;
             let caller = StackCaller {
                 session_id: home.session_id,
                 project_id: home.project_id,
-                role: StackCallerRole::Orchestrator { own_stack_id: None },
+                role,
             };
-            return Ok(Some(
-                self.serve_stack_tool_for_caller_held_elsewhere(
-                    req,
-                    caller,
-                    os_user,
-                    &sessions_base,
-                )
-                .await,
-            ));
-        }
-        if is_stack_git_tool(&req.tool_name) {
-            let caller = StackCaller {
-                session_id: home.session_id,
-                project_id: home.project_id,
-                role: StackCallerRole::Orchestrator { own_stack_id: None },
-            };
+            if is_stack_tool(&req.tool_name) {
+                if !is_stack_tool_offered_to(&caller.role, &req.tool_name) {
+                    return Err(Status::permission_denied(format!(
+                        "tool {} is not offered to a session bound to a node of a stack: it may \
+                         read its stack's status and its pull requests only",
+                        req.tool_name
+                    )));
+                }
+                return Ok(Some(
+                    self.serve_stack_tool_for_caller_held_elsewhere(
+                        req,
+                        caller,
+                        os_user,
+                        &sessions_base,
+                    )
+                    .await,
+                ));
+            }
+            // The stack git tools still require an orchestrator role, forwarded or not.
+            if !matches!(caller.role, StackCallerRole::Orchestrator { .. }) {
+                return Err(Status::permission_denied(format!(
+                    "tool {} is served only to an orchestrator session, and daemon {owner} \
+                     reports session {} is not one",
+                    req.tool_name, req.session_id
+                )));
+            }
             return Ok(Some(
                 self.serve_stack_git_tool_for_caller_held_elsewhere(
                     req,
@@ -114,6 +142,13 @@ impl ExecToolRpcHandler {
                 )
                 .await,
             ));
+        }
+        if !is_orchestrator_role(&listed_role) {
+            return Err(Status::permission_denied(format!(
+                "tool {} is served only to a project-home session, and daemon {owner} reports \
+                 session {} is not one",
+                req.tool_name, req.session_id
+            )));
         }
         let port = self.project_home_port(req, os_user, &sessions_base, None, owner)?;
         Ok(Some(port.execute(&home, req).await))
@@ -148,13 +183,15 @@ impl ExecToolRpcHandler {
             .collect()
     }
 
-    /// The calling session as the daemon that owns it reports it, when that is a project-home
-    /// session, with that daemon's instance id; PERMISSION_DENIED otherwise. Every other eligible
-    /// daemon is asked, and only a row the owner reports for itself is believed.
+    /// The calling session as the daemon that owns it reports it, with that daemon's instance id
+    /// and the role its `ListSessions` row lists for it; PERMISSION_DENIED when no daemon reports
+    /// the session as its own. Every other eligible daemon is asked, and only a row the owner
+    /// reports for itself is believed. Whether that role entitles the caller to the tool it called
+    /// is decided by the caller of this, per tool family.
     async fn home_caller_confirmed_at_owner(
         &self,
         req: &ExecuteToolRequest,
-    ) -> Result<(HomeCaller, String), Status> {
+    ) -> Result<(HomeCaller, String, String), Status> {
         for asked in self.ask_every_peer_for_sessions(req) {
             let (peer, answer) = asked.await.map_err(|e| {
                 Status::internal(format!("asking a daemon for its sessions failed: {e}"))
@@ -179,22 +216,16 @@ impl ExecToolRpcHandler {
                 continue;
             };
             // TODO(start-parity): a conversation spawner (a grill-me session) held on another host
-            // is refused here, though its own host serves it the start tools and the permission
-            // answer. The listing
-            // names the session's role but not its recipe, so this host cannot confirm the
-            // capability. See docs/dev/todo/2026-10-26-forwarded-conversation-spawner-is-refused-the-start-tools.md
-            if !is_orchestrator_role(&owned.session_role) {
-                return Err(Status::permission_denied(format!(
-                    "tool {} is served only to a project-home session, and daemon {peer} reports \
-                     session {} is not one",
-                    req.tool_name, req.session_id
-                )));
-            }
+            // is refused by the project-home branch, though its own host serves it the start tools
+            // and the permission answer. The listing names the session's role but not its recipe,
+            // so this host cannot confirm the capability. See
+            // docs/dev/todo/2026-10-26-forwarded-conversation-spawner-is-refused-the-start-tools.md
+            let listed_role = owned.session_role.clone();
             let home = HomeCaller {
                 session_id: owned.session_id,
                 project_id: owned.project_id,
             };
-            return Ok((home, peer));
+            return Ok((home, peer, listed_role));
         }
         Err(Status::permission_denied(format!(
             "tool {} is refused: no daemon confirms session {} as a project-home session",

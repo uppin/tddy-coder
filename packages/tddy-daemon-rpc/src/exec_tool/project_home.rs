@@ -72,8 +72,9 @@ use tddy_tool_engine::project_home_tools::{
 use tddy_tool_engine::project_home_turn_tools::{
     execute_project_home_turn_tool, is_project_home_turn_tool,
 };
-use tddy_tool_engine::stack_git_tools::{is_stack_git_tool, stack_git_tools_offered_to};
-use tddy_tool_engine::stack_tools::{is_stack_tool, stack_tools_offered_to};
+use tddy_tool_engine::stack_git_tools::is_stack_git_tool;
+use tddy_tool_engine::stack_tools::caller_records::stack_and_git_tools_offered_to;
+use tddy_tool_engine::stack_tools::is_stack_tool;
 use tddy_tool_engine::start_ledger::StartLedger;
 use tddy_worktree_service::session_target::HomeCaller;
 use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
@@ -246,8 +247,9 @@ impl ExecToolRpcHandler {
         // node of a stack is offered the two reads, which only its own records can tell.
         if session_tool_role(&metadata) != SessionToolRole::ProjectHome {
             let caller = stack_caller_of(&sessions_base, session_id)?;
-            tools.extend(stack_tools_offered_to(caller.as_ref().map(|c| &c.role)));
-            tools.extend(stack_git_tools_offered_to(caller.as_ref().map(|c| &c.role)));
+            tools.extend(stack_and_git_tools_offered_to(
+                caller.as_ref().map(|c| &c.role),
+            ));
         }
         Ok(tools)
     }

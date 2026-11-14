@@ -51,7 +51,10 @@ are right. They leave these cases:
 
 ## Developer decision
 
-None yet. Rejected during the investigation: recording "the newest transcript in the project dir" at
+**Deferred by the developer at the #orchestrators TODO gate, 2026-11-14** — every item under *What is left open* and *What would close it*.
+None of them is closed in `#orchestrators`; they stay open for a later change.
+
+Rejected during the investigation: recording "the newest transcript in the project dir" at
 stop or idle-stop. It guesses from mtimes, and the project directory is shared by every `claude` run in
 that cwd, which is the same foreign-run ambiguity #883's arm exists to prevent.
 

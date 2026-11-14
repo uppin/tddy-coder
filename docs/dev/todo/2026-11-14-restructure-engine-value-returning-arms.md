@@ -22,6 +22,11 @@ Under green-yolo consent an engine refusal is not done by hand. The developer ac
 standing debt on 2026-11-14, reason: "restructure engine refused" — recorded on the record above.
 Closing it today would need a hand restructure consented to outside green-yolo.
 
+## Developer decision
+
+**Deferred by the developer at the #orchestrators TODO gate, 2026-11-14** — the engine capability is not added in `#orchestrators`, and the seams it
+blocks stay as recorded above until a later change closes it.
+
 ## What would close it
 
 Engine work in `packages/tddy-code-restructuring` (and the rust-analyzer assist it drives):

@@ -30,6 +30,7 @@
 //! Feature doc: docs/ft/coder/pr-stacking.md § PR-management tools.
 //! PRD: docs/ft/coder/1-WIP/PRD-2026-11-10-stack-plan-tools.md.
 
+pub mod caller_records;
 mod defs;
 
 use async_trait::async_trait;

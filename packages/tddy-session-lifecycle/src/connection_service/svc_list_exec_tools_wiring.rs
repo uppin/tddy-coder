@@ -10,7 +10,10 @@ use prost::Message as _;
 use tddy_host_service::peer_routing::PeerRouting;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ListExecToolsRequest, ListExecToolsResponse, ToolDef};
-use tddy_tool_engine::project_home_tools::session_offered_catalog_for;
+use tddy_tool_engine::project_home_tools::{session_offered_catalog_for, SessionToolRole};
+use tddy_tool_engine::stack_tools::caller_records::{
+    stack_and_git_tools_offered_to, stack_caller_from_records,
+};
 use tddy_tool_engine::start_session_args::{HostChoice, StartChoices};
 
 /// What `StartSession`'s schema offers on this daemon: every eligible host on `routing`'s roster,
@@ -101,27 +104,41 @@ pub(crate) fn list_exec_tools_from_jail(
             bound.session_id
         ))
     })?;
-    // TODO(stack-plan-tools): a session bound to a node of a stack is offered only
-    // `pr_stack_status`/`pr_read` by the daemon's catalogue, but this jail bridge cannot classify
-    // it (that needs the orchestrator's stack record, in `tddy-daemon-rpc`); see
-    // docs/dev/todo/2026-11-14-jail-list-exec-tools-misses-stack-node-reads.md.
-    let tools = session_offered_catalog_for(
-        tddy_agent_launch::conversation_spawn::session_tool_role(&metadata),
-        choices,
-    )
-    .into_iter()
-    .map(|tool| ToolDef {
-        name: tool.name,
-        description: tool.description,
-        input_schema_json: tool.input_schema_json,
-    })
-    .collect();
+    let role = tddy_agent_launch::conversation_spawn::session_tool_role(&metadata);
+    let mut tools: Vec<ToolDef> = session_offered_catalog_for(role, choices)
+        .into_iter()
+        .map(|tool| ToolDef {
+            name: tool.name,
+            description: tool.description,
+            input_schema_json: tool.input_schema_json,
+        })
+        .collect();
+    // A project-home session's catalogue already carries the stack tools.
+    if role != SessionToolRole::ProjectHome {
+        if let Some(sessions_base) = bound.sessions_base() {
+            let caller =
+                stack_caller_from_records(sessions_base, &bound.session_id).map_err(|e| {
+                    Status::permission_denied(format!("the stack tools are refused: {e}"))
+                })?;
+            tools.extend(
+                stack_and_git_tools_offered_to(caller.as_ref().map(|c| &c.role))
+                    .into_iter()
+                    .map(|tool| ToolDef {
+                        name: tool.name,
+                        description: tool.description,
+                        input_schema_json: tool.input_schema_json,
+                    }),
+            );
+        }
+    }
     Ok(ListExecToolsResponse { tools }.encode_to_vec())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tddy_changeset::stack_fixtures::a_stack_host;
+    use tddy_core::changeset::{Changeset, Stack, StackNode};
     use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 
     fn jail_of(session_id: &str, role: Option<&str>) -> (tempfile::TempDir, BoundJailSession) {
@@ -188,6 +205,80 @@ mod tests {
             !names.contains(&"ListProjectSessions".to_string()),
             "{names:?}"
         );
+    }
+
+    #[test]
+    fn a_stack_node_jail_is_answered_status_and_read_for_its_stack() {
+        // Given an orchestrator whose node n1 is bound to a session that runs in a jail
+        let host = a_stack_host();
+        let orch = host.orchestrator(
+            "orch",
+            Stack {
+                version: 1,
+                nodes: vec![StackNode {
+                    node_id: "n1".to_string(),
+                    title: "Store".to_string(),
+                    session_id: Some("child".to_string()),
+                    ..StackNode::default()
+                }],
+            },
+        );
+        let mut meta = tddy_core::read_session_metadata(&orch).unwrap();
+        meta.session_role = Some("orchestrator".to_string());
+        tddy_core::session_metadata::write_session_metadata(&orch, &meta).unwrap();
+        let child = host.session(
+            "child",
+            Changeset {
+                orchestrator_session_id: Some("orch".to_string()),
+                ..Changeset::default()
+            },
+        );
+        let bound = BoundJailSession {
+            session_id: "child".to_string(),
+            session_dir: child,
+        };
+
+        // When the jail asks which tools its session is offered
+        let names = names_answered(&bound, "child").expect("answered");
+
+        // Then its stack tools are the two reads alone
+        let stack_tools: Vec<&str> = names
+            .iter()
+            .map(String::as_str)
+            .filter(|name| tddy_tool_engine::stack_tools::is_stack_tool(name))
+            .collect();
+        assert_eq!(stack_tools, vec!["pr_stack_status", "pr_read"]);
+    }
+
+    #[test]
+    fn a_jails_sessions_base_is_the_directory_holding_its_sessions_directory() {
+        // Given a jail bound to `<base>/sessions/s-1`
+        let base = std::path::Path::new("/data/alice");
+        let bound = BoundJailSession {
+            session_id: "s-1".to_string(),
+            session_dir: base.join("sessions").join("s-1"),
+        };
+
+        // When its sessions base is asked
+        let answered = bound.sessions_base();
+
+        // Then it is `<base>`
+        assert_eq!(answered, Some(base));
+    }
+
+    #[test]
+    fn a_session_dir_outside_a_sessions_directory_has_no_sessions_base() {
+        // Given a jail bound to a directory not under `sessions/`
+        let bound = BoundJailSession {
+            session_id: "s-1".to_string(),
+            session_dir: std::path::PathBuf::from("/data/alice/elsewhere/s-1"),
+        };
+
+        // When its sessions base is asked
+        let answered = bound.sessions_base();
+
+        // Then there is none
+        assert_eq!(answered, None);
     }
 
     #[test]

@@ -72,14 +72,13 @@ export const orchestratorComposerPage = {
   selectTestIds: (projectId: string): Cypress.Chainable<string[]> =>
     orchestratorComposerPage
       .pane(projectId)
-      // Wait for the served controls before reading the set, so it is not read off a mounting pane.
-      .find(`[data-testid='${TEST_IDS.createSessionModelSelect}']`, RENDER_WAIT)
-      .then(() =>
-        orchestratorComposerPage
-          .pane(projectId)
-          .find("select")
-          .then(($selects) => [...$selects].map((s) => s.getAttribute("data-testid") ?? "")),
-      ),
+      // Wait for the whole served set before reading it: the four controls render as their RPCs
+      // answer (model and host at once, effort with the agents, the provider with the routes), so
+      // a snapshot taken when the first select appears can miss the rest. Four is the whole set
+      // the composer ever renders, so a read at that length cannot be overtaken by another select.
+      .find("select", RENDER_WAIT)
+      .should("have.length", 4)
+      .then(($selects) => [...$selects].map((s) => s.getAttribute("data-testid") ?? "")),
 
   /** The composer's checkboxes — the New-session form's toggles, none of which it offers. */
   checkboxes: (projectId: string) => orchestratorComposerPage.pane(projectId).find("input[type='checkbox']"),
@@ -100,14 +99,18 @@ export const orchestratorComposerPage = {
    * a box at the top or the bottom of the pane is far off.
    */
   assertBoxVerticallyCentredIn(projectId: string, tolerance: number) {
-    orchestratorComposerPage.pane(projectId).then(($pane) => {
+    // One retrying assertion over the live pane: it re-reads the pane and the box inside it on
+    // every attempt, so a mounting pane (the not-connected placeholder carries the same test id
+    // and is replaced by the body) or controls still rendering under the box cannot freeze the
+    // measurement at a stale element or an unsettled layout.
+    orchestratorComposerPage.pane(projectId).should(($pane) => {
       const pane = $pane[0];
-      orchestratorComposerPage.box().should(($box) => {
-        const offset = Math.abs(verticalCentre($box[0]) - verticalCentre(pane));
-        expect(offset, "box centre's distance from the pane's").to.be.lessThan(
-          pane.getBoundingClientRect().height * tolerance,
-        );
-      });
+      const box = $pane.find(`[data-testid='${TEST_IDS.sessionsProjectComposerInput}']`)[0];
+      expect(box, "prompt box").to.not.equal(undefined);
+      const offset = Math.abs(verticalCentre(box) - verticalCentre(pane));
+      expect(offset, "box centre's distance from the pane's").to.be.lessThan(
+        pane.getBoundingClientRect().height * tolerance,
+      );
     });
   },
 
