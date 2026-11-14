@@ -42,6 +42,7 @@ impl PrStackHandler for PrStackRpcHandler {
             req.session_id.trim(),
             req.title
         );
+        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
         let target = stack_target(req.stack.as_ref(), &req.session_id)?;
         if let Some(answered) = self
             .forward_if_addressed::<_, AddPlannedPrResponse>("AddPlannedPr", &target, &req)
@@ -52,7 +53,6 @@ impl PrStackHandler for PrStackRpcHandler {
         if req.title.trim().is_empty() {
             return Err(Status::invalid_argument("title is required"));
         }
-        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
         let _ = &github_user;
         let os_user = &os_user_owned;
         let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
@@ -116,6 +116,7 @@ impl PrStackHandler for PrStackRpcHandler {
         request: Request<GetPrStatusRequest>,
     ) -> Result<Response<GetPrStatusResponse>, Status> {
         let req = request.into_inner();
+        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
         let target = stack_target(req.stack.as_ref(), &req.session_id)?;
         if let Some(answered) = self
             .forward_if_addressed::<_, GetPrStatusResponse>("GetPrStatus", &target, &req)
@@ -123,7 +124,6 @@ impl PrStackHandler for PrStackRpcHandler {
         {
             return Ok(Response::new(answered));
         }
-        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
         let os_user = &os_user_owned;
         if req.branch.trim().is_empty() {
             return Err(Status::invalid_argument("branch is required"));
@@ -151,6 +151,7 @@ impl PrStackHandler for PrStackRpcHandler {
         use tddy_service::proto::pr_stack::{BranchRemote, BranchResolution, BranchWorktree};
 
         let req = request.into_inner();
+        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
         let target = stack_target(req.stack.as_ref(), &req.session_id)?;
         if let Some(answered) = self
             .forward_if_addressed::<_, QueryBranchResponse>("QueryBranch", &target, &req)
@@ -158,7 +159,6 @@ impl PrStackHandler for PrStackRpcHandler {
         {
             return Ok(Response::new(answered));
         }
-        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
         let os_user = &os_user_owned;
         if req.branch.trim().is_empty() {
             return Err(Status::invalid_argument("branch is required"));
@@ -474,6 +474,7 @@ impl PrStackHandler for PrStackRpcHandler {
         request: Request<RepointPlannedPrRequest>,
     ) -> Result<Response<RepointPlannedPrResponse>, Status> {
         let req = request.into_inner();
+        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
         let target = stack_target(req.stack.as_ref(), &req.session_id)?;
         if let Some(answered) = self
             .forward_if_addressed::<_, RepointPlannedPrResponse>("RepointPlannedPr", &target, &req)
@@ -481,7 +482,6 @@ impl PrStackHandler for PrStackRpcHandler {
         {
             return Ok(Response::new(answered));
         }
-        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
         let _ = &github_user;
         let os_user = &os_user_owned;
         if req.node_id.trim().is_empty() {
@@ -624,6 +624,7 @@ impl PrStackHandler for PrStackRpcHandler {
         request: Request<ReorderPlannedPrRequest>,
     ) -> Result<Response<ReorderPlannedPrResponse>, Status> {
         let req = request.into_inner();
+        let os_user = self.authenticated_os_user(&req.session_token)?;
         let target = stack_target(req.stack.as_ref(), &req.session_id)?;
         if let Some(answered) = self
             .forward_if_addressed::<_, ReorderPlannedPrResponse>("ReorderPlannedPr", &target, &req)
@@ -631,7 +632,6 @@ impl PrStackHandler for PrStackRpcHandler {
         {
             return Ok(Response::new(answered));
         }
-        let os_user = self.authenticated_os_user(&req.session_token)?;
         if req.node_id.trim().is_empty() {
             return Err(Status::invalid_argument("node_id is required"));
         }
@@ -681,6 +681,7 @@ impl PrStackHandler for PrStackRpcHandler {
         use tddy_service::proto::pr_stack::{BranchRemote, BranchResolution, BranchWorktree};
 
         let req = request.into_inner();
+        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
         let target = stack_target(req.stack.as_ref(), &req.session_id)?;
         if let Some(answered) = self
             .forward_if_addressed::<_, PullBaseIntoBranchResponse>(
@@ -692,7 +693,6 @@ impl PrStackHandler for PrStackRpcHandler {
         {
             return Ok(Response::new(answered));
         }
-        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
         let _ = &github_user;
         let os_user = &os_user_owned;
         if req.node_id.trim().is_empty() {

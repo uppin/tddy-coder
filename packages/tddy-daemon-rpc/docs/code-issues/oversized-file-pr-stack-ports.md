@@ -6,7 +6,7 @@
 **Metrics:** **775 production lines** of 775 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.6× over**
 **Thresholds breached:** length 775 > 500
 **Restructure:** not designed
-**Status:** Open — regressed 2026-10-08 (775 → 808 in #516, `#keyring` 9/9, `RepointPlannedPr` resolves the project's account; deferred with consent) — **unclaimed**
+**Status:** Open — regressed 2026-11-14 (818 → 868 in #886, `#orchestrators` 9/11; split deferred under the stack-branch rule — n10 also edits this file) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
 ## Measurement history
@@ -17,6 +17,7 @@
 | 2026-10-08 | 808 | 775 on `origin/master` → 808 after `#keyring` 9/9 (#516); split deferred with the developer's consent — see the backlog entry "`#keyring` 9/9 left files over the 500-production-line budget" (2026-10-08): +33, `repoint_planned_pr` resolving the project's account (`token_for_repoint`, `project_github_token`). File has no `#[cfg(test)]` module |
 | 2026-10-24 | 819 | **Not touched** by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`): 819 production lines at both (counted to the first `#[cfg(test)]`; there is none) |
 | 2026-11-12 | 819 → 818 | **Touched, not grown** by #879 (`#orchestrators` 2/11): four RPCs re-read `stack_plan_json` through one `stack_plan_json_of` helper, offsetting the store call-site swaps (`read_session_stack`). Not split: unchanged size, alert-only |
+| 2026-11-14 | 818 → 868 | **Regressed** by #886 (`#orchestrators` 9/11): the six `session_id`-addressed handlers resolve a `StackAddress` (or forward it) beside the session path. Not split here: this file is stack-shared (n10 also edits it), so the split is deferred to the post-stack sweep per the stack-branch rule. The new RPCs themselves live in `pr_stack/project_stacks.rs` / `project_stack_queries.rs`, kept under budget |
 
 ## What would close it — candidate seams (not proven)
 
