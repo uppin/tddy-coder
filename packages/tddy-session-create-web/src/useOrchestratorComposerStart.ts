@@ -1,4 +1,6 @@
+import { useState } from "react";
 import type { Client } from "@connectrpc/connect";
+import { hostNotConnectedText, rpcFailureText } from "tddy-client-web";
 import type { SessionService } from "tddy-client-web/gen/session_pb";
 import type { StartSessionRequestInit } from "./hooks/useSessionAttachments";
 
@@ -24,8 +26,25 @@ export function useOrchestratorComposerStart(
   client: Client<typeof SessionService> | null,
   onStarted: (sessionId: string) => void,
 ): OrchestratorComposerStart {
-  // TODO(orchestrator-composer): implement
-  void client;
-  void onStarted;
-  return { start: async () => undefined, starting: false, error: null };
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const start = async (request: StartSessionRequestInit): Promise<void> => {
+    if (!client) {
+      setError(hostNotConnectedText(null));
+      return;
+    }
+    setStarting(true);
+    setError(null);
+    try {
+      const res = await client.startSession(request);
+      onStarted(res.sessionId);
+    } catch (err) {
+      setError(rpcFailureText(err));
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  return { start, starting, error };
 }

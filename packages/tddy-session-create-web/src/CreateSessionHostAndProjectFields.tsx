@@ -3,6 +3,7 @@ import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
 import type { projectSelectOptions } from "./lib/projectSelectOptions";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import { InlineError } from "tddy-ui-web";
+import { CreateSessionHostField } from "./CreateSessionHostField";
 
 export interface CreateSessionHostAndProjectFieldsProps {
   daemons: DaemonHost[];
@@ -33,27 +34,11 @@ export function CreateSessionHostAndProjectFields({
 }: CreateSessionHostAndProjectFieldsProps) {
   return (
     <>
-      {/* Host — which daemon runs the session. Only shown when the common room advertises daemons. */}
-      {daemons.length > 0 && (
-        <div>
-          <label className={labelClass} htmlFor="create-session-host">
-            Host
-          </label>
-          <select
-            id="create-session-host"
-            data-testid="create-session-host-select"
-            className={inputClass}
-            value={daemonInstanceId}
-            onChange={(e) => setDaemonInstanceId(e.target.value)}
-          >
-            {daemons.map((d) => (
-              <option key={d.instanceId} value={d.instanceId}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+      <CreateSessionHostField
+        daemons={daemons}
+        daemonInstanceId={daemonInstanceId}
+        setDaemonInstanceId={setDaemonInstanceId}
+      />
 
       <div>
         <label className={labelClass} htmlFor="create-session-project">
