@@ -24,6 +24,10 @@ pub struct StackRecord {
     /// carried it). The migration sweep keys on it so a rerun never creates a duplicate.
     pub created_by_session_id: String,
     pub created_at_unix_ms: u64,
+    /// What the stack is for, as `pr_stack_create` named it (`#orchestrators` 7/11). Absent from a
+    /// record written before titles existed, or created without one; such a record still reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub stack: Stack,
 }
 
@@ -89,11 +93,25 @@ impl ProjectStackStore {
             project_id: project_id.to_string(),
             created_by_session_id: created_by_session_id.to_string(),
             created_at_unix_ms: now_unix_ms(),
+            title: None,
             stack,
         };
         let path = record_path(&stacks_dir, &record.stack_id);
         with_record_lock(&path, || write_record(&path, &record))?;
         Ok(record)
+    }
+
+    /// [`Self::create`], with the record titled `title` (`#orchestrators` 7/11).
+    pub fn create_titled(
+        &self,
+        project_id: &str,
+        created_by_session_id: &str,
+        title: Option<String>,
+        stack: Stack,
+    ) -> Result<StackRecord, StackStoreError> {
+        // TODO(stack-plan-tools): implement — write `title` into the new record.
+        let _ = title;
+        self.create(project_id, created_by_session_id, stack)
     }
 
     /// The record `stack_id` of `project_id`.
