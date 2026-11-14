@@ -17,8 +17,18 @@
 
 use std::path::Path;
 
-use super::{StackCaller, StackCallerRole};
+use tddy_core::changeset::Changeset;
+use tddy_core::project_stack_store::{ProjectStackStore, StackStoreError};
+use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_core::session_metadata::is_orchestrator_role;
+use tddy_core::WorkflowError;
+
+use super::{
+    stack_caller_role, stack_tools_offered_to, ParentStack, StackCaller, StackCallerFacts,
+    StackCallerRole,
+};
 use crate::catalog::ToolDef;
+use crate::stack_git_tools::stack_git_tools_offered_to;
 
 /// A session whose records cannot be read, so whose stack role cannot be known. The daemon refuses
 /// such a caller rather than treating it as ordinary.
@@ -50,10 +60,81 @@ pub fn stack_caller_from_records(
     sessions_base: &Path,
     session_id: &str,
 ) -> Result<Option<StackCaller>, StackCallerUnreadable> {
-    // TODO(stack-node-reads): implement — move `stack_caller_of`'s record reads
-    // (`tddy-daemon-rpc/src/exec_tool/stack_tools.rs`) here.
-    let _ = (sessions_base, session_id);
-    Ok(None)
+    let unreadable = |what: &'static str, why: String| StackCallerUnreadable {
+        session_id: session_id.to_string(),
+        what,
+        why,
+    };
+    let session_dir = unified_session_dir_path(sessions_base, session_id);
+    let metadata = tddy_core::read_session_metadata(&session_dir)
+        .map_err(|e| unreadable("record", e.to_string()))?;
+    let changeset =
+        changeset_of(&session_dir).map_err(|e| unreadable("changeset", e.to_string()))?;
+    let parent_stack = match changeset.orchestrator_session_id.as_deref() {
+        Some(orchestrator) => node_binding(
+            sessions_base,
+            &metadata.project_id,
+            orchestrator,
+            session_id,
+        )
+        .map_err(|e| unreadable("orchestrator's stack", e))?,
+        None => None,
+    };
+    let facts = StackCallerFacts {
+        session_role: metadata.session_role.as_deref(),
+        own_stack_id: changeset.stack_id.as_deref(),
+        parent_stack: parent_stack
+            .as_ref()
+            .map(|(stack_id, binds_this_session)| ParentStack {
+                stack_id,
+                binds_this_session: *binds_this_session,
+            }),
+    };
+    Ok(stack_caller_role(&facts).map(|role| StackCaller {
+        session_id: session_id.to_string(),
+        project_id: metadata.project_id.clone(),
+        role,
+    }))
+}
+
+/// The session's changeset; a session that has none yet (an ordinary one) has the default.
+fn changeset_of(session_dir: &Path) -> Result<Changeset, WorkflowError> {
+    match tddy_core::read_changeset(session_dir) {
+        Err(WorkflowError::ChangesetMissing(_)) => Ok(Default::default()),
+        read => read,
+    }
+}
+
+/// The stack `orchestrator`'s changeset names and whether one of its nodes is bound to
+/// `session_id`; `None` when that orchestrator is not on this host, names no stack, or names one the
+/// project no longer holds.
+fn node_binding(
+    sessions_base: &Path,
+    project_id: &str,
+    orchestrator: &str,
+    session_id: &str,
+) -> Result<Option<(String, bool)>, String> {
+    let orchestrator_dir = unified_session_dir_path(sessions_base, orchestrator);
+    let changeset = match tddy_core::read_changeset(&orchestrator_dir) {
+        Ok(changeset) => changeset,
+        Err(WorkflowError::ChangesetMissing(_)) => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
+    let Some(stack_id) = changeset.stack_id else {
+        return Ok(None);
+    };
+    let store = ProjectStackStore::new(sessions_base.join("projects"));
+    let record = match store.read(project_id, &stack_id) {
+        Ok(record) => record,
+        Err(StackStoreError::NotFound { .. }) => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
+    let binds_this_session = record
+        .stack
+        .nodes
+        .iter()
+        .any(|node| node.session_id.as_deref() == Some(session_id));
+    Ok(Some((stack_id, binds_this_session)))
 }
 
 /// The stack of `project_id` held under `sessions_base` that has a node bound to `session_id`
@@ -64,9 +145,20 @@ pub fn stack_bound_to_session_here(
     project_id: &str,
     session_id: &str,
 ) -> Result<Option<String>, StackCallerUnreadable> {
-    // TODO(stack-node-reads): implement — scan the project's stacks in `<base>/projects`.
-    let _ = (sessions_base, project_id, session_id);
-    Ok(None)
+    let store = ProjectStackStore::new(sessions_base.join("projects"));
+    let records = store.list(project_id).map_err(|e| StackCallerUnreadable {
+        session_id: session_id.to_string(),
+        what: "stack store",
+        why: e.to_string(),
+    })?;
+    Ok(records.into_iter().find_map(|record| {
+        record
+            .stack
+            .nodes
+            .iter()
+            .any(|node| node.session_id.as_deref() == Some(session_id))
+            .then_some(record.stack_id)
+    }))
 }
 
 /// The stack role of a caller another host holds, given the role its owner reports for it
@@ -76,17 +168,20 @@ pub fn forwarded_stack_caller_role(
     listed_session_role: &str,
     bound_stack_id: Option<&str>,
 ) -> Option<StackCallerRole> {
-    // TODO(stack-node-reads): implement.
-    let _ = (listed_session_role, bound_stack_id);
-    None
+    if is_orchestrator_role(listed_session_role) {
+        return Some(StackCallerRole::Orchestrator { own_stack_id: None });
+    }
+    bound_stack_id.map(|stack_id| StackCallerRole::StackNode {
+        stack_id: stack_id.to_string(),
+    })
 }
 
 /// Every stack tool and stack git tool `role` is offered, stack tools first — what a session's
 /// `ListExecTools` appends to its catalogue on the daemon and in its jail alike.
 pub fn stack_and_git_tools_offered_to(role: Option<&StackCallerRole>) -> Vec<ToolDef> {
-    // TODO(stack-node-reads): implement — `stack_tools_offered_to` then `stack_git_tools_offered_to`.
-    let _ = role;
-    Vec::new()
+    let mut tools = stack_tools_offered_to(role);
+    tools.extend(stack_git_tools_offered_to(role));
+    tools
 }
 
 #[cfg(test)]

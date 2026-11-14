@@ -10,7 +10,10 @@ use prost::Message as _;
 use tddy_host_service::peer_routing::PeerRouting;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ListExecToolsRequest, ListExecToolsResponse, ToolDef};
-use tddy_tool_engine::project_home_tools::session_offered_catalog_for;
+use tddy_tool_engine::project_home_tools::{session_offered_catalog_for, SessionToolRole};
+use tddy_tool_engine::stack_tools::caller_records::{
+    stack_and_git_tools_offered_to, stack_caller_from_records,
+};
 use tddy_tool_engine::start_session_args::{HostChoice, StartChoices};
 
 /// What `StartSession`'s schema offers on this daemon: every eligible host on `routing`'s roster,
@@ -101,23 +104,33 @@ pub(crate) fn list_exec_tools_from_jail(
             bound.session_id
         ))
     })?;
-    // TODO(stack-node-reads): append the stack tools the session's stack role is offered, as the
-    // daemon's catalogue does — classified by
-    // `tddy_tool_engine::stack_tools::caller_records::stack_caller_from_records` from
-    // `bound.sessions_base()`, offered by `stack_and_git_tools_offered_to` (skipped for a
-    // project-home session, whose catalogue already carries them); see
-    // docs/dev/todo/2026-11-14-jail-list-exec-tools-misses-stack-node-reads.md.
-    let tools = session_offered_catalog_for(
-        tddy_agent_launch::conversation_spawn::session_tool_role(&metadata),
-        choices,
-    )
-    .into_iter()
-    .map(|tool| ToolDef {
-        name: tool.name,
-        description: tool.description,
-        input_schema_json: tool.input_schema_json,
-    })
-    .collect();
+    let role = tddy_agent_launch::conversation_spawn::session_tool_role(&metadata);
+    let mut tools: Vec<ToolDef> = session_offered_catalog_for(role, choices)
+        .into_iter()
+        .map(|tool| ToolDef {
+            name: tool.name,
+            description: tool.description,
+            input_schema_json: tool.input_schema_json,
+        })
+        .collect();
+    // A project-home session's catalogue already carries the stack tools.
+    if role != SessionToolRole::ProjectHome {
+        if let Some(sessions_base) = bound.sessions_base() {
+            let caller =
+                stack_caller_from_records(sessions_base, &bound.session_id).map_err(|e| {
+                    Status::permission_denied(format!("the stack tools are refused: {e}"))
+                })?;
+            tools.extend(
+                stack_and_git_tools_offered_to(caller.as_ref().map(|c| &c.role))
+                    .into_iter()
+                    .map(|tool| ToolDef {
+                        name: tool.name,
+                        description: tool.description,
+                        input_schema_json: tool.input_schema_json,
+                    }),
+            );
+        }
+    }
     Ok(ListExecToolsResponse { tools }.encode_to_vec())
 }
 

@@ -24,12 +24,12 @@ impl BoundJailSession {
     /// The sessions base the jail's session lives in — `session_dir` is
     /// `<base>/sessions/<session_id>` — where its orchestrator's records and the project's stack
     /// store are read; `None` for a directory not laid out that way (`#orchestrators` 13/13).
-    // TODO(stack-node-reads): `list_exec_tools_from_jail` classifies the session's stack role from
-    // this base; the allow goes with that call.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn sessions_base(&self) -> Option<&std::path::Path> {
-        // TODO(stack-node-reads): implement.
-        None
+        let sessions_dir = self.session_dir.parent()?;
+        if sessions_dir.file_name()? != "sessions" {
+            return None;
+        }
+        sessions_dir.parent()
     }
 }
 

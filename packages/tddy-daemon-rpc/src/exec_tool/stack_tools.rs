@@ -28,17 +28,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 use tddy_core::changeset::Stack;
-use tddy_core::project_stack_store::{ProjectStackStore, StackRecord, StackStoreError};
-use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::WorkflowError;
+use tddy_core::project_stack_store::{ProjectStackStore, StackRecord};
 use tddy_github::pr_api::{GithubPrApi, GithubPrInsightApi, RealGithubPrApi};
 use tddy_host_service::GithubCli;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
 use tddy_tool_engine::stack_tools::{
-    execute_stack_tool, is_stack_tool_offered_to, stack_caller_role, ParentStack, StackCaller,
-    StackCallerFacts, StackOp, StackScope, StackToolPort,
+    execute_stack_tool, is_stack_tool_offered_to, StackCaller, StackOp, StackScope, StackToolPort,
 };
 use tddy_tool_engine::ToolOutcome;
 
@@ -79,81 +76,11 @@ pub(super) fn stack_caller_of(
     sessions_base: &Path,
     session_id: &str,
 ) -> Result<Option<StackCaller>, Status> {
-    let refused = |what: &str, why: &dyn std::fmt::Display| {
-        Status::permission_denied(format!(
-            "the stack tools are refused: session {session_id}'s {what} cannot be read ({why})"
-        ))
-    };
-    let session_dir = unified_session_dir_path(sessions_base, session_id);
-    let metadata =
-        tddy_core::read_session_metadata(&session_dir).map_err(|e| refused("record", &e))?;
-    let changeset = changeset_of(&session_dir).map_err(|e| refused("changeset", &e))?;
-    let parent_stack = match changeset.orchestrator_session_id.as_deref() {
-        Some(orchestrator) => node_binding(
-            sessions_base,
-            &metadata.project_id,
-            orchestrator,
-            session_id,
-        )
-        .map_err(|e| refused("orchestrator's stack", &e))?,
-        None => None,
-    };
-    let facts = StackCallerFacts {
-        session_role: metadata.session_role.as_deref(),
-        own_stack_id: changeset.stack_id.as_deref(),
-        parent_stack: parent_stack
-            .as_ref()
-            .map(|(stack_id, binds_this_session)| ParentStack {
-                stack_id,
-                binds_this_session: *binds_this_session,
-            }),
-    };
-    Ok(stack_caller_role(&facts).map(|role| StackCaller {
-        session_id: session_id.to_string(),
-        project_id: metadata.project_id.clone(),
-        role,
-    }))
-}
-
-/// The session's changeset; a session that has none yet (an ordinary one) has the default.
-fn changeset_of(session_dir: &Path) -> Result<tddy_core::changeset::Changeset, WorkflowError> {
-    match tddy_core::read_changeset(session_dir) {
-        Err(WorkflowError::ChangesetMissing(_)) => Ok(Default::default()),
-        read => read,
-    }
-}
-
-/// The stack `orchestrator`'s changeset names and whether one of its nodes is bound to
-/// `session_id`; `None` when that orchestrator is not on this host, names no stack, or names one the
-/// project no longer holds.
-fn node_binding(
-    sessions_base: &Path,
-    project_id: &str,
-    orchestrator: &str,
-    session_id: &str,
-) -> Result<Option<(String, bool)>, String> {
-    let orchestrator_dir = unified_session_dir_path(sessions_base, orchestrator);
-    let changeset = match tddy_core::read_changeset(&orchestrator_dir) {
-        Ok(changeset) => changeset,
-        Err(WorkflowError::ChangesetMissing(_)) => return Ok(None),
-        Err(e) => return Err(e.to_string()),
-    };
-    let Some(stack_id) = changeset.stack_id else {
-        return Ok(None);
-    };
-    let store = ProjectStackStore::new(sessions_base.join("projects"));
-    let record = match store.read(project_id, &stack_id) {
-        Ok(record) => record,
-        // A stack the project no longer holds binds no node.
-        Err(StackStoreError::NotFound { .. }) => return Ok(None),
-        Err(e) => return Err(e.to_string()),
-    };
-    let binds_this_session = record
-        .stack
-        .nodes
-        .iter()
-        .any(|node| node.session_id.as_deref() == Some(session_id));
-    Ok(Some((stack_id, binds_this_session)))
+    tddy_tool_engine::stack_tools::caller_records::stack_caller_from_records(
+        sessions_base,
+        session_id,
+    )
+    .map_err(|e| Status::permission_denied(format!("the stack tools are refused: {e}")))
 }
 
 impl ExecToolRpcHandler {

@@ -146,9 +146,9 @@ Written 2026-11-14. Each stub is marked `TODO(stack-node-reads)`.
 
 ## Scope
 
-- [ ] Classification moved to `tddy-tool-engine`; `stack_caller_of` delegates
-- [ ] Jail bridge lists a node's two reads
-- [ ] Forwarded node caller served the two reads by the host that holds its stack
+- [x] Classification moved to `tddy-tool-engine`; `stack_caller_of` delegates
+- [x] Jail bridge lists a node's two reads
+- [x] Forwarded node caller served the two reads by the host that holds its stack
 - [ ] ✅ [jail TODO](../todo/2026-11-14-jail-list-exec-tools-misses-stack-node-reads.md) deleted at wrap
 - [ ] ✅ [forwarded TODO](../todo/2026-10-26-forwarded-conversation-spawner-is-refused-the-start-tools.md): stack section removed at wrap
 
@@ -218,9 +218,9 @@ Verified on `1ce80419a`.
 
 ## Implementation Milestones
 
-- [ ] `caller_records` implemented; `stack_caller_of` delegates
-- [ ] Jail bridge appends the offer
-- [ ] Forwarded stack-tool caller decided per family
+- [x] `caller_records` implemented; `stack_caller_of` delegates
+- [x] Jail bridge appends the offer
+- [x] Forwarded stack-tool caller decided per family
 
 ## Testing Plan
 
@@ -290,5 +290,5 @@ the daemon-side copies that duplicate them.
 - [x] USER REVIEW — acceptance tests: waived. The developer said "finish the remaining PRs without
   stopping" (orchestrator decision, 2026-11-14)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] Green
+- [x] Green
 - [ ] Wrap
