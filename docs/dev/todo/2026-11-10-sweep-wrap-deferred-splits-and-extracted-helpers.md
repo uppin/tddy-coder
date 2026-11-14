@@ -19,7 +19,7 @@ refused during `[G]`. This entry holds what the wrap measured afterwards.
 |---|---|---|
 | `packages/tddy-pty/src/runtime.rs` | 451 → 523 | `packages/tddy-pty/docs/code-issues/oversized-file-runtime.md` |
 | `packages/tddy-session-lifecycle/src/connection_service/svc_host_builders.rs` | 493 → 531 | `packages/tddy-session-lifecycle/docs/code-issues/oversized-file-svc-host-builders.md` |
-| `packages/tddy-session-split/src/svc_spawn_split_agent.rs` | 497 → 575 | `packages/tddy-session-split/docs/code-issues/oversized-file-svc-spawn-split-agent.md` |
+| ~~`packages/tddy-session-split/src/svc_spawn_split_agent.rs`~~ | 497 → 575 | Closed 2026-11-12 by #878 (`#orchestrators` 1/11): 618 → 422, launch helpers moved to `svc_spawn_split_agent/launch.rs` (224); record deleted |
 
 ## Extracted helpers over a function threshold
 

@@ -30,6 +30,7 @@
     "selected_branch_to_work_on",
     "selected_integration_base_ref",
     "semantic_index",
+    "session_role",
     "session_type",
     "specialized_agents",
     "ssh_config_host",

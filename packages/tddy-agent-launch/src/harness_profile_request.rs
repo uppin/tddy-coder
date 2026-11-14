@@ -7,6 +7,7 @@
 
 use tddy_coding_agent_specs::CodingAgentRegistry;
 use tddy_core::provider_route::{choose_route, RouteSources};
+use tddy_core::session_metadata::{is_orchestrator_role, ORCHESTRATOR_ROLE};
 use tddy_discovery::harness_profile::{load_harness_profiles, HarnessProfile};
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{StartSessionRequest, StartSessionResponse};
@@ -24,9 +25,10 @@ impl LaunchSessions {
     ///
     /// This is the start every caller-facing path takes (`StartSession`, `StreamStartSession`, a
     /// split's workspace start, a project-home `StartSession`), so a request naming a
-    /// `session_role` is refused here: a role is granted by the daemon, never asked for, since a
-    /// project-home role reaches the project's other sessions. Only
-    /// [`Self::start_session_with_role`] starts a session with one.
+    /// `session_role` is admitted here ([`admit_a_requested_role`]): only `orchestrator` may be
+    /// asked for, by a person or by an orchestrator's agent, and is then placed on the project's
+    /// home worktree. `project-home`, main's role, is the daemon's to grant: only
+    /// [`Self::start_session_with_role`] starts a session with it.
     pub async fn start_session_core(
         &self,
         req: StartSessionRequest,
@@ -44,8 +46,9 @@ impl LaunchSessions {
         progress: &AttachmentProgressSink,
         cancel: &CancellationToken,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        refuse_a_requested_role(&req)?;
+        self.admit_the_requested_role(&req)?;
         let req = self.apply_harness_profile(req)?;
+        let req = self.place_an_orchestrator(req)?;
         // Refused before routing, on the session type the profile resolved: a start this daemon
         // would refuse is not forwarded to a peer to be refused there, and nothing is created for it.
         crate::start_request_checks::refuse_a_conflicting_tmux_run_start(
@@ -136,6 +139,38 @@ pub(crate) fn refuse_a_requested_role(req: &StartSessionRequest) -> Result<(), S
     )))
 }
 
+/// Who asks a start for a standing role (`#orchestrators` 1/11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RoleRequester<'a> {
+    /// A person: a web or CLI caller presenting their own token.
+    Person,
+    /// A session's agent (its token carries `TokenPrincipal::Agent`), with the role its own
+    /// session holds — `None` for an ordinary session.
+    Agent { own_role: Option<&'a str> },
+}
+
+/// Admit the standing role `req` asks for, by who asks: an ordinary start (no role) from anyone;
+/// `orchestrator` from a person, or from an agent whose own session holds an orchestrator role
+/// (`tddy_core::session_metadata::is_orchestrator_role`). Every other agent asking for it, and
+/// anyone asking for `project-home` — main's role, the daemon's alone to grant — is refused
+/// `PERMISSION_DENIED`, since an orchestrator role reaches the project's other sessions.
+pub(crate) fn admit_a_requested_role(
+    requester: RoleRequester<'_>,
+    req: &StartSessionRequest,
+) -> Result<(), Status> {
+    if req.session_role.trim() != ORCHESTRATOR_ROLE {
+        return refuse_a_requested_role(req);
+    }
+    match requester {
+        RoleRequester::Person => Ok(()),
+        RoleRequester::Agent { own_role } if own_role.is_some_and(is_orchestrator_role) => Ok(()),
+        RoleRequester::Agent { .. } => Err(Status::permission_denied(format!(
+            "only a person or an orchestrator may start a session in the {ORCHESTRATOR_ROLE} role: \
+             it reaches the project's other sessions"
+        ))),
+    }
+}
+
 /// `status`, with the profile and the account it was asked for named in its message.
 fn profile_refusal(profile: &HarnessProfile, account: &str, status: Status) -> Status {
     Status {
@@ -144,5 +179,95 @@ fn profile_refusal(profile: &HarnessProfile, account: &str, status: Status) -> S
             "harness profile {:?} runs on provider account {account:?}: {}",
             profile.name, status.message
         ),
+    }
+}
+
+#[cfg(test)]
+mod role_admission_tests {
+    use super::*;
+    use tddy_core::session_metadata::{ORCHESTRATOR_ROLE, PROJECT_HOME_ROLE};
+    use tddy_rpc::Code;
+
+    fn a_start_asking_for(role: &str) -> StartSessionRequest {
+        StartSessionRequest {
+            session_type: "claude-cli".to_string(),
+            session_role: role.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn an_agent_of(own_role: Option<&str>) -> RoleRequester<'_> {
+        RoleRequester::Agent { own_role }
+    }
+
+    /// The code each start is answered with: `None` admitted, `Some(code)` refused.
+    fn answered(requester: RoleRequester<'_>, role: &str) -> Option<Code> {
+        admit_a_requested_role(requester, &a_start_asking_for(role))
+            .err()
+            .map(|status| status.code)
+    }
+
+    #[test]
+    fn a_person_may_ask_for_the_orchestrator_role() {
+        assert_eq!(answered(RoleRequester::Person, ORCHESTRATOR_ROLE), None);
+    }
+
+    #[test]
+    fn mains_agent_and_an_orchestrators_agent_may_ask_for_it() {
+        // When
+        let answers = [PROJECT_HOME_ROLE, ORCHESTRATOR_ROLE]
+            .map(|own| answered(an_agent_of(Some(own)), ORCHESTRATOR_ROLE));
+
+        // Then
+        assert_eq!(answers, [None, None]);
+    }
+
+    #[test]
+    fn an_agent_holding_no_orchestrator_role_is_refused_it() {
+        // When
+        let answers =
+            [None, Some("reviewer")].map(|own| answered(an_agent_of(own), ORCHESTRATOR_ROLE));
+
+        // Then
+        assert_eq!(
+            answers,
+            [Some(Code::PermissionDenied), Some(Code::PermissionDenied)]
+        );
+    }
+
+    #[test]
+    fn nobody_may_ask_for_project_home() {
+        // When
+        let answers = [
+            RoleRequester::Person,
+            an_agent_of(Some(PROJECT_HOME_ROLE)),
+            an_agent_of(Some(ORCHESTRATOR_ROLE)),
+        ]
+        .map(|requester| answered(requester, PROJECT_HOME_ROLE));
+
+        // Then
+        assert_eq!(answers, [Some(Code::PermissionDenied); 3]);
+    }
+
+    #[test]
+    fn a_role_nobody_defines_is_refused_naming_it() {
+        // When
+        let refusal =
+            admit_a_requested_role(RoleRequester::Person, &a_start_asking_for("reviewer"))
+                .expect_err("an unknown role is refused");
+
+        // Then
+        assert_eq!(refusal.code, Code::PermissionDenied);
+        assert!(refusal.message.contains("reviewer"), "{}", refusal.message);
+    }
+
+    #[test]
+    fn an_ordinary_start_is_admitted_from_anyone() {
+        // When
+        let answers =
+            [RoleRequester::Person, an_agent_of(None)].map(|requester| answered(requester, ""));
+
+        // Then
+        assert_eq!(answers, [None, None]);
     }
 }

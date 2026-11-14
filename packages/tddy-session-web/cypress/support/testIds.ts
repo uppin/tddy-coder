@@ -820,6 +820,13 @@ export const sessionsDrawerItemStatus = (sessionId: string) =>
 export const sessionsDrawerItemTooltip = (sessionId: string) =>
   `sessions-drawer-item-tooltip-${sessionId}`;
 
+/**
+ * `[data-testid="sessions-drawer-item-orchestrator-<sessionId>"]` — the *orchestrator* marker on a row
+ * whose session holds the `orchestrator` role (`#orchestrators` 1/11). Absent on every other row.
+ */
+export const sessionsDrawerItemOrchestrator = (sessionId: string) =>
+  `sessions-drawer-item-orchestrator-${sessionId}`;
+
 /** `[data-testid="sessions-drawer-item-host-<sessionId>"]` — owning-host badge on cross-host rows */
 export const sessionsDrawerItemHost = (sessionId: string) =>
   `sessions-drawer-item-host-${sessionId}`;

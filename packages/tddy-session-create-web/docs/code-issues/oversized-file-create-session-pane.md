@@ -18,6 +18,7 @@
 | 2026-11-03 | 524 | +15 in PR #816 (`#tmux-agent` 3/3), measured against `origin/feature/tmux-agent/tmux-resume` (509): the shared `runInTmuxToggle` element (`CreateSessionRunInTmuxToggle`, built once and handed to the claude-cli fields), its slot for the other CLI harness types (`showsTheSharedTmuxToggle`), and the import. **Deferred by the developer** (2026-11-03): pre-existing over budget; split after the `#tmux-agent` stack lands |
 | 2026-11-04 | 526 | +2 in PR #801 (`#agent-tools` 12/19), against `origin/feature/agent-tools/acp-agents` (524): `selectedAgentRouteProviders` out of `useCreateSessionAgentSelection` and into `useCreateSessionModel`, so the provider picker asks for routes only where the agent has route support. **Not split**: restructuring deferred to the `#agent-tools` sweep node by the developer (2026-11-04) |
 | 2026-11-07 | 526 | Moved with the file to `tddy-session-create-web` (`#web-split` 7/16), `git mv`; the measurement is unchanged by a move. **Not split here**: splitting it is not that node's change |
+| 2026-11-12 | 595 → 593 (`wc -l`) | #878 (`#orchestrators` 1/11) touched it and shrank it: the main-type effect moved out to `useOpenOnMainSessionType`, the orchestrator switch lives in `useCreateSessionOrchestrator`. Still over budget; not split here (alert-only: this PR did not grow it) |
 
 ## What would close it
 

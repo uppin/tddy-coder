@@ -393,6 +393,7 @@ fn an_agent_token_from_a_key_nobody_trusts() -> String {
             name: TEST_USER.to_string(),
         },
         Duration::from_secs(600),
+        tddy_session_lifecycle::test_util::TEST_AGENT_SESSION,
     )
 }
 

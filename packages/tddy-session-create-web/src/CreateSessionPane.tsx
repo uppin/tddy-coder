@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { CreateSessionRunInTmuxToggle } from "./CreateSessionRunInTmuxToggle";
 import {
-  AGENT_CLI_LAUNCH,
   registerSessionTypeOptions,
   sessionLaunchOf,
   sessionTypeOptions,
@@ -44,6 +43,8 @@ import type { CreateSessionPaneProps } from "./createSessionPaneProps";
 import { useCreateSessionAgentSelection } from "./useCreateSessionAgentSelection";
 import { BranchConflictDialog } from "./BranchConflictDialog";
 import { StartPassphrasePrompt } from "./StartPassphrasePrompt";
+import { useCreateSessionOrchestrator } from "./useCreateSessionOrchestrator";
+import { useOpenOnMainSessionType } from "./useOpenOnMainSessionType";
 import { useDaemons, useSelectedDaemon } from "tddy-client-web";
 
 type BranchIntent = BranchWorktreeIntent;
@@ -183,26 +184,20 @@ export function CreateSessionPane({
     sessionType,
   );
 
-  // The main variant opens on the one type that can run main: the first main-capable agent
-  // the project's daemon serves.
-  const mainSessionType = typeOptions.find(
-    (option) =>
-      option.launch === AGENT_CLI_LAUNCH &&
-      hasCapability(
-        agentForSessionType(
-          offeredAgents,
-          daemonInstanceId,
-          connectedInstanceId,
-          option.id,
-        ),
-        "project_home_main",
-      ),
-  )?.id;
-  React.useEffect(() => {
-    if (projectHome && mainSessionType && sessionType !== mainSessionType) {
-      setSessionType(mainSessionType);
-    }
-  }, [projectHome, mainSessionType, sessionType]);
+  useOpenOnMainSessionType({
+    isMainVariant: projectHome !== undefined,
+    typeOptions,
+    offeredAgents,
+    daemonInstanceId,
+    connectedInstanceId,
+    sessionType,
+    setSessionType,
+  });
+
+  const { asOrchestrator, orchestratorField } = useCreateSessionOrchestrator(
+    sessionAgent,
+    projectHome,
+  );
 
   const {
     sandbox,
@@ -356,6 +351,7 @@ export function CreateSessionPane({
     semanticIndex,
     codebaseDaemonInstanceId,
     sshConfigHost,
+    orchestrator: asOrchestrator,
   };
   const created = useCreateSessionSubmit({
     form,
@@ -507,12 +503,14 @@ export function CreateSessionPane({
           sessionToken={sessionToken}
           sshConfigHost={sshConfigHost}
           setSshConfigHost={setSshConfigHost}
-          placementFixed={projectHome !== undefined}
+          placementFixed={projectHome !== undefined || asOrchestrator}
         />
       )}
 
-      {/* main's worktree, branch and stack are its project's; it is started with nothing attached. */}
-      {!projectHome && (
+      {orchestratorField}
+
+      {/* main's and an orchestrator's worktree, branch and stack are their project's. */}
+      {!projectHome && !asOrchestrator && (
         <>
           <CreateSessionStackParentSelect
             stackParentOptions={stackParentOptions}

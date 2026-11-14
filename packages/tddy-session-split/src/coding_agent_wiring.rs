@@ -55,7 +55,7 @@ impl CodingAgentToolHost {
         let env = colocated_jail_tool_env(
             &tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(&self.config),
             session_id,
-            &mint_agent_session_token(tokens, caller_token)?,
+            &mint_agent_session_token(tokens, caller_token, session_id)?,
             Some(agent_tool_socket.to_string_lossy().into_owned()),
         );
         Ok((tddy_tools, env.env_pairs()))

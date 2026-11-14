@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::session_metadata::PROJECT_HOME_ROLE;
+use tddy_core::session_metadata::is_orchestrator_role;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_tool_engine::read_only::is_project_home_allowed_tool;
@@ -41,7 +41,10 @@ fn reject_non_read_only_tool_for_project_home(
             "tool {tool_name} is refused: session {session_id}'s metadata cannot be read ({e})"
         ))
     })?;
-    if metadata.session_role.as_deref() == Some(PROJECT_HOME_ROLE)
+    if metadata
+        .session_role
+        .as_deref()
+        .is_some_and(is_orchestrator_role)
         && !is_project_home_allowed_tool(tool_name)
     {
         return Err(Status::permission_denied(format!(

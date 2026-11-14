@@ -42,6 +42,13 @@ Each `SessionDrawerItem` shows:
   2. `workflowGoal` — fallback
   3. `sessionId.slice(0, 8)` — last resort
 - A **tooltip** on focus/hover revealing the full session id
+- An **orchestrator** badge (`sessions-drawer-item-orchestrator-<id>`) on a session holding the
+  `orchestrator` role ([Orchestrator sessions](../daemon/project-concept.md#orchestrator-sessions)).
+  Main is marked by its pinned slot instead
+
+The New-session form offers a **Session orchestrator** switch (`create-session-orchestrator-toggle`)
+for an agent whose spec declares `project_home_main`. On, the start asks for `session_role:
+"orchestrator"` and the form hides placement, branch and stack, which the daemon owns.
 
 Sessions are ordered newest-first by `createdAt` (`sortSessionsByCreation()`). Within that order
 the list is split into an **Active** and a **Remaining** partition (see

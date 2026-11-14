@@ -80,6 +80,7 @@ impl LaunchSessions {
             paired_agent.as_ref(),
             req.sandbox,
             &self.tddy_data_dir,
+            self.orchestrator_link_of(req).as_ref(),
         )
         .await?;
         // Written before this call answers, because the answer is what releases the agent

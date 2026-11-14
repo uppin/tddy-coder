@@ -1,4 +1,4 @@
-mod orchestrator_record;
+mod orchestrator_link;
 
 use tddy_session_split::service_util;
 use tddy_spawn::spawner;
@@ -32,8 +32,6 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_service::proto::session::StartSessionRequest;
 
 use tddy_service::proto::session::start_phase::Step as StartStep;
-
-use tddy_daemon_kernel::trim_to_option;
 
 use crate::launch_ports::LaunchSessions;
 use crate::start_deadline::StartDeadline;
@@ -126,24 +124,14 @@ impl LaunchSessions {
         // refused split is a malformed request, so it is classified before anything is created and
         // before the project is provisioned — a session whose codebase host is wrong should not
         // leave a clone behind on the way to being rejected.
-        // The orchestrator is recorded by this daemon — the one that created the session — so a
-        // start forwarded from the orchestrator's host links the session here, where it lives.
-        let orchestrator = trim_to_option(&req.orchestrator_session_id);
-        let orchestrator_host =
-            trim_to_option(&req.orchestrator_daemon_instance_id).filter(|host| *host != local_id);
         // A session type nothing on this host declares is a request error, refused before the
         // placement is classified or anything is created.
         requested_session_launch(&self.coding_agents, &req.session_type)?;
         let placement =
             classify_start_placement(&req, Some(&*self.coding_agents), local_id, eligible_ids)?;
         refuse_an_orchestrated_tool_start(&req, &self.coding_agents)?;
-        let started = self
-            .start_here(req, os_user, agent_def, placement, progress, cancel)
-            .await?;
-        if let Some(orchestrator) = orchestrator {
-            self.record_orchestrator(os_user, started.get_ref(), &orchestrator, orchestrator_host)?;
-        }
-        Ok(started)
+        self.start_here(req, os_user, agent_def, placement, progress, cancel)
+            .await
     }
 
     /// Start `req` on this daemon, the route and the placement already decided, under the daemon's

@@ -3,6 +3,7 @@ import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { sessionDrawerLabel } from "./utils/sessionDrawerLabel";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import type { SessionMetadata } from "./lib/sessionParticipantMetadata";
+import { ORCHESTRATOR_ROLE } from "./utils/projectHomeGroups";
 import { Tooltip, TooltipTrigger, TooltipContent, cn } from "tddy-ui-web";
 
 interface SessionDrawerItemProps {
@@ -83,6 +84,16 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
               className="flex-shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded border border-primary/40 bg-primary/10 text-primary"
             >
               {codebaseHostLabel}
+            </span>
+          )}
+          {/* Orchestrator marker — a session holding the orchestrator role (read-only, with main's
+              reach over the project). Main is marked by its pinned slot, not by this badge. */}
+          {session.sessionRole === ORCHESTRATOR_ROLE && (
+            <span
+              data-testid={`sessions-drawer-item-orchestrator-${session.sessionId}`}
+              className="flex-shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded border border-primary/40 text-primary"
+            >
+              orchestrator
             </span>
           )}
           </button>

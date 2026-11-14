@@ -32,12 +32,17 @@ use tddy_daemon_auth::SessionTokens;
 /// It carries [`tddy_github::TokenPrincipal::Agent`]: every agent token this daemon hands out —
 /// local, split or project-home — is minted here, and the principal is how a daemon tells a call
 /// the main agent made (`subagent_cancel`) from one the user made, though both name the same login.
+/// It names `session_id`, the session the agent runs for: what the agent may ask of a start is
+/// decided by that session's standing role, proven by the token rather than claimed by a request.
 pub(crate) fn mint_agent_session_token(
     tokens: &SessionTokens,
     caller_token: &str,
+    session_id: &str,
 ) -> Result<String, Status> {
     let caller = verified_caller(tokens, caller_token)?;
-    Ok(tokens.signer().mint_agent(&caller, SPLIT_AGENT_TOKEN_TTL))
+    Ok(tokens
+        .signer()
+        .mint_agent(&caller, SPLIT_AGENT_TOKEN_TTL, session_id))
 }
 
 /// The identity a caller's token *proves*, or a refusal.

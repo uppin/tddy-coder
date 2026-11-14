@@ -138,6 +138,21 @@ pub struct SessionMetadata {
 /// [`SessionMetadata::session_role`] of a project's project-home session.
 pub const PROJECT_HOME_ROLE: &str = "project-home";
 
+/// [`SessionMetadata::session_role`] of an **orchestrator** session: a read-only session on the
+/// project's home worktree with main's reach, of which a project may run any number beside its
+/// main. Requested on `StartSession` (`#orchestrators` 1/11); unlike [`PROJECT_HOME_ROLE`] it is
+/// never auto-stopped and never recorded as the project's main.
+pub const ORCHESTRATOR_ROLE: &str = "orchestrator";
+
+/// Whether `role` grants main's reach: true for [`PROJECT_HOME_ROLE`] and [`ORCHESTRATOR_ROLE`],
+/// false for an empty or any other role. The one decision point every "is this an orchestrator?"
+/// gate asks — the read-only guard, the offered tool set, the launch wiring, the owner check — so
+/// none of them compares the role string itself. Auto-stop alone keeps matching main's role.
+#[must_use]
+pub fn is_orchestrator_role(role: &str) -> bool {
+    role == PROJECT_HOME_ROLE || role == ORCHESTRATOR_ROLE
+}
+
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -374,6 +389,25 @@ pub fn repo_root_for_session(session_dir: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn both_orchestrator_roles_are_orchestrator_roles() {
+        // When
+        let roles = [PROJECT_HOME_ROLE, ORCHESTRATOR_ROLE].map(is_orchestrator_role);
+
+        // Then
+        assert_eq!(roles, [true, true]);
+    }
+
+    #[test]
+    fn an_empty_or_unknown_role_is_not() {
+        // When
+        let roles =
+            ["", "  ", "Orchestrator", "project-home-ish", "reviewer"].map(is_orchestrator_role);
+
+        // Then
+        assert_eq!(roles, [false; 5]);
+    }
 
     #[test]
     fn a_session_yaml_without_the_key_reads_as_not_managed() {

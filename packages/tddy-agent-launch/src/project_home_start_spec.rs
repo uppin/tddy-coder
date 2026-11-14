@@ -11,7 +11,6 @@
 use std::path::Path;
 
 use tddy_coding_agent_specs::Capability;
-use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 use tddy_rpc::Status;
 use tddy_service::proto::session::StartSessionRequest;
 
@@ -29,6 +28,31 @@ pub(crate) fn refuse_what_main_cannot_honour(spec: &StartSessionRequest) -> Resu
             spec.session_role
         )));
     }
+    refuse_a_placement_off_the_home_worktree("main", spec)
+}
+
+/// Refuses a spec asking for what an orchestrator cannot be given: a jail (`sandbox` — a jailed
+/// session gets none of the tool wiring an orchestrator's reach is made of, see
+/// `docs/dev/todo/2026-10-24-sandboxed-main-needs-session-role.md`) or any placement main is
+/// refused. Both are `INVALID_ARGUMENT` naming the field.
+pub(crate) fn refuse_what_an_orchestrator_cannot_honour(
+    spec: &StartSessionRequest,
+) -> Result<(), Status> {
+    if spec.sandbox {
+        return Err(Status::invalid_argument(
+            "an orchestrator runs on its project's home worktree on this host, unjailed: its \
+             start spec may not set sandbox",
+        ));
+    }
+    refuse_a_placement_off_the_home_worktree("an orchestrator", spec)
+}
+
+/// Refuses a placement other than the home worktree on this host (a sandboxed codebase, another
+/// codebase host, an SSH exec target, an agent clone or a split agent) for `who`.
+fn refuse_a_placement_off_the_home_worktree(
+    who: &str,
+    spec: &StartSessionRequest,
+) -> Result<(), Status> {
     let placement = [
         (spec.sandboxed_codebase, "sandboxed_codebase"),
         (
@@ -42,7 +66,7 @@ pub(crate) fn refuse_what_main_cannot_honour(spec: &StartSessionRequest) -> Resu
     ];
     if let Some((_, field)) = placement.iter().find(|(set, _)| *set) {
         return Err(Status::invalid_argument(format!(
-            "main runs on its project's home worktree on this host: its start spec may not set \
+            "{who} runs on its project's home worktree on this host: its start spec may not set \
              {field}"
         )));
     }
@@ -89,11 +113,12 @@ pub(crate) fn refuse_a_type_main_cannot_run(
     )))
 }
 
-/// `spec` placed as `project_id`'s main on `home_worktree`: managed, with the project-home role,
-/// on no branch and on this host. Everything else the spec chose (model, account, agent,
+/// `spec` placed as `project_id`'s `role` session (main's `project-home`, or `orchestrator`) on
+/// `home_worktree`: managed, with that role, on no branch and on this host. Everything else the spec chose (model, account, agent,
 /// permission mode, initial prompt, specialized agents, semantic index, …) is kept.
 pub(crate) fn on_home_worktree(
     spec: StartSessionRequest,
+    role: &str,
     project_id: &str,
     home_worktree: &Path,
 ) -> StartSessionRequest {
@@ -101,7 +126,7 @@ pub(crate) fn on_home_worktree(
         project_id: project_id.to_string(),
         repo_path: home_worktree.to_string_lossy().into_owned(),
         managed_codebase: true,
-        session_role: PROJECT_HOME_ROLE.to_string(),
+        session_role: role.to_string(),
         daemon_instance_id: String::new(),
         branch_worktree_intent: String::new(),
         selected_branch_to_work_on: String::new(),

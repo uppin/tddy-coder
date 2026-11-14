@@ -116,9 +116,35 @@ pub fn starting_session_metadata(
     }
 }
 
+/// The orchestrator a starting session answers to, written into its first changeset so the link is
+/// on record before its agent is spawned: who may answer its prompts is read from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrchestratorLink {
+    pub session_id: String,
+    /// The daemon the orchestrator runs on, when that is not the daemon creating the session.
+    pub daemon_instance_id: Option<String>,
+}
+
+impl OrchestratorLink {
+    /// The link a start request names: its `orchestrator_session_id`, on its
+    /// `orchestrator_daemon_instance_id` unless that is `local_instance_id`. `None` when it names
+    /// no orchestrator.
+    pub fn of_request(
+        orchestrator_session_id: &str,
+        orchestrator_daemon_instance_id: &str,
+        local_instance_id: &str,
+    ) -> Option<Self> {
+        Some(Self {
+            session_id: trim_to_option(orchestrator_session_id)?,
+            daemon_instance_id: trim_to_option(orchestrator_daemon_instance_id)
+                .filter(|host| host != local_instance_id),
+        })
+    }
+}
+
 /// Resolve a starting session's branch intent and write the changeset its worktree setup reads.
 ///
-/// The changeset names the orchestrator a stack child was spawned by, and a managed session's
+/// The changeset names the orchestrator a session was started by or a stack child was spawned by, and a managed session's
 /// recipe. A managed session also seeds the recipe's start goal, so `changeset.yaml` reflects the
 /// workflow position immediately; the per-session controller advances it from there on
 /// `transition`. Returns the intent, which decides whether the new branch is pushed.
@@ -128,7 +154,7 @@ pub fn write_initial_changeset(
     policy: tddy_worktree_service::branch_intent::BranchIntentPolicy,
     project_main_branch_ref: Option<&str>,
     session_dir: &Path,
-    orchestrator_session_id: Option<&str>,
+    orchestrator: Option<&OrchestratorLink>,
     managed_recipe: Option<&dyn tddy_core::workflow::recipe::WorkflowRecipe>,
 ) -> Result<BranchWorktreeIntent, Status> {
     let tddy_worktree_service::branch_intent::ResolvedBranchWorkflow { intent, workflow } =
@@ -140,7 +166,9 @@ pub fn write_initial_changeset(
         )?;
     let mut cs = tddy_core::Changeset {
         workflow: Some(workflow),
-        orchestrator_session_id: orchestrator_session_id.map(str::to_string),
+        orchestrator_session_id: orchestrator.map(|link| link.session_id.clone()),
+        orchestrator_daemon_instance_id: orchestrator
+            .and_then(|link| link.daemon_instance_id.clone()),
         recipe: managed_recipe.map(|r| r.name().to_string()),
         ..tddy_core::Changeset::default()
     };

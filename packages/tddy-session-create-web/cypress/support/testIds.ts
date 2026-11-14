@@ -90,6 +90,10 @@ export const TEST_IDS = {
   /** Collapsible "Managed codebase" section header — claude-cli sessions only. See
    * docs/ft/coder/specialized-subagents.md. */
   createSessionManagedCodebaseToggle: "create-session-managed-codebase-toggle",
+  /** "Session orchestrator" switch — asks `StartSession` for `session_role: "orchestrator"`; offered
+   * only for an agent whose spec declares `project_home_main`. On, it hides the placement, branch and
+   * stack fields. See docs/ft/daemon/1-WIP/PRD-2026-11-10-orchestrator-sessions.md. */
+  createSessionOrchestratorToggle: "create-session-orchestrator-toggle",
   /** Expanded "Managed codebase" section content (specialized-subagent multi-select). */
   createSessionAgentPickerSection: "create-session-agent-picker-section",
   /** "Semantic index" checkbox inside the Managed codebase section — when on, the daemon indexes the

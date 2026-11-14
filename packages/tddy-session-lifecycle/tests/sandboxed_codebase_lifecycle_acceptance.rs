@@ -246,6 +246,50 @@ fn a_deletion_of(session_id: &str) -> DeleteSessionRequest {
 }
 
 // ---------------------------------------------------------------------------
+// Orchestrator link
+// ---------------------------------------------------------------------------
+
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
+              provisioned without them, and GitHub's ubuntu runners set \
+              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
+              FailedPrecondition rather than starting an unconfined session, which is correct — see \
+              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
+)]
+#[tokio::test]
+async fn a_jailed_codebase_session_started_by_an_orchestrator_records_it_in_its_first_changeset() {
+    // Given a daemon, and an orchestrator on another host
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
+
+    // When that orchestrator starts a jailed-codebase session
+    let started = service
+        .start_session(Request::direct(StartSessionRequest {
+            orchestrator_session_id: "an-orchestrator".to_string(),
+            orchestrator_daemon_instance_id: "another-host".to_string(),
+            ..a_sandboxed_codebase_request()
+        }))
+        .await
+        .expect("a jailed-codebase session must start")
+        .into_inner();
+
+    // Then the agent half's changeset names the orchestrator and its host
+    let recorded = tddy_core::read_changeset(&unified_session_dir_path(
+        sessions_tmp.path(),
+        &started.session_id,
+    ))
+    .expect("the agent half has a changeset");
+    assert_eq!(
+        (
+            recorded.orchestrator_session_id.as_deref(),
+            recorded.orchestrator_daemon_instance_id.as_deref()
+        ),
+        (Some("an-orchestrator"), Some("another-host"))
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Delete
 // ---------------------------------------------------------------------------
 

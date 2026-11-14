@@ -237,6 +237,7 @@ fn every_argument_reaches_the_request_under_its_own_name() {
         "specialized_agents": ["fastcontext"],
         "clone_placed_agents": ["fastcontext"],
         "attachments": [],
+        "session_role": "orchestrator",
     }))
     .expect("every argument parses");
 
@@ -281,6 +282,7 @@ fn every_argument_reaches_the_request_under_its_own_name() {
             run_in_tmux: true,
             specialized_agents: vec!["fastcontext".to_string()],
             clone_placed_agents: vec!["fastcontext".to_string()],
+            session_role: "orchestrator".to_string(),
             ..Default::default()
         }
     );
@@ -327,10 +329,10 @@ fn an_argument_the_tool_does_not_offer_is_refused_by_name() {
     // When
     let refused = serde_json::from_value::<StartSessionArgs>(serde_json::json!({
         "session_type": "workspace",
-        "session_role": "project-home",
+        "repo_path": "/home/me/checkout",
     }))
     .expect_err("a withheld field is not an argument");
 
     // Then
-    assert!(refused.to_string().contains("session_role"), "{refused}");
+    assert!(refused.to_string().contains("repo_path"), "{refused}");
 }

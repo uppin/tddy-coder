@@ -190,3 +190,13 @@ impl RemoteSnapshotSource for HostWorktreeSnapshots {
             .await
     }
 }
+
+/// Who bears a session token, as this daemon's keys prove it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TokenBearer {
+    /// A person's own token.
+    Person,
+    /// A token minted for a session's agent, naming the session it was minted for — `None` for an
+    /// agent token minted before tokens named their session, which proves no session.
+    Agent { session_id: Option<String> },
+}

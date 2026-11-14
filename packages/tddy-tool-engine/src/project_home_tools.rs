@@ -139,6 +139,14 @@ pub trait ProjectHomePort: Send + Sync {
     /// Every session on this daemon, as [`tddy_worktree_service::session_target`] resolves them.
     async fn target_records(&self) -> anyhow::Result<Vec<TargetRecord>>;
 
+    /// The standing role `session_id` holds on this daemon: `None` for a session that holds none
+    /// or is not here. A worktree-writing tool refuses a target holding an orchestrator role,
+    /// whose worktree is the project's shared home worktree. A port that reads no roles (a test
+    /// double over records) reports none.
+    async fn session_role_of(&self, _session_id: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
+
     /// The git environment `target`'s own commits and pushes run under, from its project's
     /// identity (`#project-home` 7/7). Empty when that identity does not resolve.
     async fn push_identity(&self, target: &SessionTarget) -> anyhow::Result<PushIdentity>;

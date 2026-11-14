@@ -1,5 +1,6 @@
 import type { BranchFieldOverrides, BranchWorktreeIntent } from "./lib/branchConflict";
 import { TDDY_CODER_LAUNCH, type SessionLaunch } from "./cliHarnessOptions";
+import { ORCHESTRATOR_SESSION_ROLE } from "./CreateSessionOrchestratorField";
 import type {
   SessionAttachmentInit,
   StartSessionRequestInit,
@@ -90,6 +91,8 @@ export interface CreateSessionFormValues {
   semanticIndex: boolean;
   codebaseDaemonInstanceId: string;
   sshConfigHost: string;
+  /** The **Session orchestrator** switch is on: the start asks for the orchestrator role. */
+  orchestrator?: boolean;
 }
 
 /**
@@ -184,6 +187,9 @@ export function buildStartSessionRequest(
     };
   }
   const features = form.cliFeatures ?? NO_CLI_FEATURES;
+  if (form.orchestrator) {
+    return buildOrchestratorStartRequest(form, features);
+  }
   // A split placement only exists for an agent whose spec declares it can stand on one
   // host against a codebase on another; for any other agent a codebase host picked while
   // the form showed a different agent must not survive into the request.
@@ -211,6 +217,24 @@ export function buildStartSessionRequest(
     // The SSH host belongs to the managed block: it names the exec catalog's OpenSSH host
     // for a managed session, split or co-located.
     sshConfigHost: features.managedWorkflow && managedCodebase ? sshConfigHost : "",
+  };
+}
+
+/**
+ * The start of a **Session orchestrator**: the CLI request without the fields the daemon owns for
+ * it — worktree, branch, placement, stack and attachments, as for main's spec — and asking for
+ * the orchestrator role. The project and host are the operator's.
+ */
+function buildOrchestratorStartRequest(
+  form: CreateSessionFormValues,
+  features: CliAgentFeatures,
+): StartSessionRequestInit {
+  return {
+    sessionToken: form.sessionToken,
+    projectId: form.projectId,
+    daemonInstanceId: form.daemonInstanceId,
+    ...cliAgentChoices(form, features),
+    sessionRole: ORCHESTRATOR_SESSION_ROLE,
   };
 }
 

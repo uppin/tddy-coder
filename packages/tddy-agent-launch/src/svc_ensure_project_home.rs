@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 use tddy_projects::project_storage::{self, ProjectData};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
@@ -181,7 +182,7 @@ impl LaunchSessions {
         })?;
         refuse_a_type_main_cannot_run(Some(&*self.coding_agents), &spec)?;
         let home = home_worktree_for(project)?;
-        let start = on_home_worktree(spec, &project.project_id, &home);
+        let start = on_home_worktree(spec, PROJECT_HOME_ROLE, &project.project_id, &home);
         self.refuse_a_claude_cli_start_up_front(&start)?;
 
         let previous = self.recorded_main(scope)?;
@@ -359,7 +360,7 @@ fn main_branch_ref_of(project: &ProjectData) -> Result<String, Status> {
 }
 
 /// Fast-forward `home` to `project`'s main branch ref.
-fn fast_forward_home(home: &Path, project: &ProjectData) -> Result<(), Status> {
+pub(crate) fn fast_forward_home(home: &Path, project: &ProjectData) -> Result<(), Status> {
     fast_forward_home_worktree(home, &main_branch_ref_of(project)?).map_err(home_worktree_failure)
 }
 
@@ -369,7 +370,7 @@ fn home_worktree_failure(error: impl std::fmt::Display) -> Status {
 }
 
 /// The project's home worktree, created at its main branch ref when absent.
-fn home_worktree_for(project: &ProjectData) -> Result<PathBuf, Status> {
+pub(crate) fn home_worktree_for(project: &ProjectData) -> Result<PathBuf, Status> {
     let main_repo = tddy_session_split::service_util::project_repo_root(project)?;
     let worktrees_root = tddy_core::worktree_dir(&main_repo);
     ensure_home_worktree(

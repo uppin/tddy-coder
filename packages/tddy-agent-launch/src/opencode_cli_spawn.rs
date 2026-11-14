@@ -58,6 +58,7 @@ use crate::spec_launch::HostAgent;
 use crate::stack_parent::SpawnStackParent;
 use crate::usage_context::{record_usage_context, UsageSubject};
 use harness_launch::{launch, HarnessRun, HarnessSession, HarnessSpecLaunch};
+use tddy_session_split::service_util::OrchestratorLink;
 
 /// Everything one CLI harness start reads.
 pub(crate) struct CliSessionStart<'a> {
@@ -85,6 +86,9 @@ pub(crate) struct CliSessionStart<'a> {
     pub selected_integration_base_ref: &'a str,
     pub selected_branch_to_work_on: &'a str,
     pub stack_parent: SpawnStackParent<'a>,
+    /// The orchestrator that started the session, recorded in its first changeset. Absent, the
+    /// stack parent (if any) is the orchestrator recorded.
+    pub orchestrator: Option<OrchestratorLink>,
     pub initial_prompt: &'a str,
     /// The session's starting agent roster, already resolved by the caller.
     pub agents: &'a mut [tddy_core::SessionAgentRecord],
@@ -134,6 +138,7 @@ pub(crate) async fn start_cli_harness_session(
         selected_integration_base_ref,
         selected_branch_to_work_on,
         stack_parent,
+        orchestrator,
         initial_prompt,
         agents,
         semantic_index,
@@ -183,7 +188,9 @@ pub(crate) async fn start_cli_harness_session(
         crate::harness_from_spec::cli_branch_intent(kind.clone(), &agent.spec),
         None,
         &session_dir,
-        stack_parent.session_id(),
+        orchestrator
+            .or_else(|| stack_parent.as_orchestrator_link())
+            .as_ref(),
         managed.as_ref().map(|managed| managed.recipe.as_ref()),
     )?;
 
