@@ -3,7 +3,12 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { SessionMetadata } from "./lib/sessionParticipantMetadata";
 import { groupSessionsByProject } from "./utils/sessionProjectGroups";
-import { projectHomeSlot, withProjectHomeGroups, type ProjectHomeInfo } from "./utils/projectHomeGroups";
+import {
+  projectHomeSlot,
+  withEveryProjectGroup,
+  withProjectHomeGroups,
+  type ProjectHomeInfo,
+} from "./utils/projectHomeGroups";
 import { SessionProjectGroup, projectGroupKey } from "./SessionProjectGroup";
 import { ProjectHomeEntry } from "./ProjectHomeEntry";
 import { readCollapsedProjects, writeCollapsedProjects } from "./projectGroupCollapse";
@@ -76,6 +81,12 @@ interface SessionDrawerProps {
   onSetUpProjectHome?: (projectId: string) => void;
   /** Take the operator to set main up again — a set-up main's **Replace main** action. */
   onReplaceProjectHome?: (projectId: string) => void;
+  /**
+   * Open the orchestrator composer for a project — the "+" on each project header
+   * (`#orchestrators` 8/11). Given, every listed project gets a group, so its "+" is reachable even
+   * with no main and no session; absent, no header shows a "+".
+   */
+  onNewOrchestrator?: (projectId: string) => void;
 }
 
 export type { ProjectHomeInfo } from "./utils/projectHomeGroups";
@@ -106,6 +117,7 @@ export function SessionDrawer({
   onEnsureProjectHome,
   onSetUpProjectHome,
   onReplaceProjectHome,
+  onNewOrchestrator,
 }: SessionDrawerProps) {
   const owningHost: OwningHostInfo = {
     selectedInstanceId,
@@ -113,11 +125,12 @@ export function SessionDrawer({
   };
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(readCollapsedProjects);
   // A project with a main but no listed session still gets its group, when its entry can act.
-  const projectGroups = withProjectHomeGroups(
+  const homeGroups = withProjectHomeGroups(
     groupSessionsByProject(sessions, projects),
     projects,
     onEnsureProjectHome ? projectHomes : [],
   );
+  const projectGroups = onNewOrchestrator ? withEveryProjectGroup(homeGroups, projects) : homeGroups;
   const selectedGroupKey = projectGroupKeyContaining(projectGroups, selectedSessionId);
 
   // Selecting a session expands its project group; the viewer can still collapse it afterwards.
@@ -244,6 +257,11 @@ export function SessionDrawer({
                 group={group}
                 collapsed={collapsedProjects.has(key)}
                 onToggle={() => toggleProjectGroup(key)}
+                onNew={
+                  group.projectId !== null && onNewOrchestrator
+                    ? () => onNewOrchestrator(group.projectId as string)
+                    : undefined
+                }
               >
                 {home && onEnsureProjectHome && (
                   <ProjectHomeEntry

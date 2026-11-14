@@ -25,3 +25,7 @@ export * from "./lib/branchNames";
 export * from "./codebasePlacement";
 export * from "./selectableAgentOptions";
 export * from "./projectHomeSessionTypes";
+export * from "./CreateSessionHostField";
+export * from "./OrchestratorComposer";
+export * from "./useOrchestratorComposerStart";
+export * from "./orchestratorStartRequest";

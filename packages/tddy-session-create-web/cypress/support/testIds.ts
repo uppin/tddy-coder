@@ -134,6 +134,14 @@ export const TEST_IDS = {
   createSessionCancelBtn: "create-session-cancel-btn",
   createSessionSubmitBtn: "create-session-submit-btn",
   createSessionError: "create-session-error",
+  // Orchestrator composer (`#orchestrators` 8/11) — opened by a project header's "+" at
+  // `/sessions/project/:projectId/new`; the pane itself is `sessionsProjectComposer(projectId)`.
+  /** The composer's prompt box: the orchestrator's first prompt. */
+  sessionsProjectComposerInput: "sessions-project-composer-input",
+  /** Starts the orchestrator (as Enter in the box does). */
+  sessionsProjectComposerSend: "sessions-project-composer-send",
+  /** The daemon's reason a start was refused, shown under the box. */
+  sessionsProjectComposerError: "sessions-project-composer-error",
 
   // Sessions drawer — branch-conflict prompt. Shown when the daemon refuses the creation because
   // another session already owns the requested branch (`StartSessionResponse.branch_conflict`).
@@ -220,3 +228,8 @@ export const createSessionAgentSelectOption = (optionValue: string) =>
 export const createSessionAgentSelectHostError = (daemonInstanceId: string) =>
   `create-session-agent-select-host-error-${safeTestIdPart(daemonInstanceId)}`;
 
+
+/** `[data-testid="sessions-project-composer-<projectId>"]` — the orchestrator composer for a project
+ *  (`#orchestrators` 8/11), opened by its header's "+" at `/sessions/project/:projectId/new`. */
+export const sessionsProjectComposer = (projectId: string) =>
+  `sessions-project-composer-${projectId}`;
