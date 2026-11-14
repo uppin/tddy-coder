@@ -13,6 +13,7 @@ subagent turn-control changeset
 `spawn-child` relay mapping left `tddy-toolcall`) — unclaimed. Not split: stack-shared —
 successor `#orchestrators` nodes edit this file, so the split is deferred to the post-stack
 sweep per the stack-branch rule
+**Accepted as standing debt:** developer consent, 2026-11-14 — reason: "restructure engine refused" (the B6 remainder; see `docs/dev/todo/2026-11-14-restructure-engine-path-module-blocks-moves.md`)
 
 ## Measurement history
 

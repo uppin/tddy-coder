@@ -7,6 +7,7 @@
 **Thresholds breached:** length 775 > 500
 **Restructure:** not designed
 **Status:** Open — regressed 2026-11-14 (818 → 868 in #886, `#orchestrators` 9/11; split deferred under the stack-branch rule — n10 also edits this file) — **unclaimed**
+**Accepted as standing debt:** developer consent, 2026-11-14 — reason: "restructure engine refused" (see `docs/dev/todo/2026-11-14-restructure-engine-path-module-blocks-moves.md` and `docs/dev/todo/2026-11-14-restructure-engine-no-extract-for-guarded-ranges.md`)
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
 ## Measurement history

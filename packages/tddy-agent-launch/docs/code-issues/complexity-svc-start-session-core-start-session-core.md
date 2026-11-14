@@ -8,6 +8,7 @@
 **Thresholds breached:** length 842 > 60; nesting 6 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
 **Status:** Open — partially fixed 2026-11-06 by #823 (`start_here` 348 → 265); both functions still over 60 — unclaimed
+**Accepted as standing debt:** developer consent, 2026-11-14 — reason: "restructure engine refused" (B8; see `docs/dev/todo/2026-11-14-restructure-engine-value-returning-arms.md`)
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs:62`
 
