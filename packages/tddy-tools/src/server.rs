@@ -21,6 +21,7 @@ use tddy_discovery::subagent::{
     resolve_replaced_tools_for_defs, MessageId, SubagentRegistry, TurnRequest,
     SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS,
 };
+use tddy_tool_engine::stack_git_tools::is_stack_git_tool;
 use tddy_tool_engine::stack_tools::is_stack_tool;
 // The conversation runtime the seven `subagent_*` tools drive: the table of open conversations, the
 // turns that outlived the calls that started them, and the accounting of both. It moved to
@@ -34,9 +35,6 @@ use tddy_discovery::subagent_runtime::{
 use tddy_workflow_recipes::github_pr::{
     create_pull_request_via_rest_api, update_pull_request_via_rest_api, CreatePullRequestParams,
     UpdatePullRequestParams,
-};
-use tddy_workflow_recipes::orchestrate_pr_stack::{
-    pr_close_action, pr_merge_action, pr_resolve_conflicts_action, GithubPrApi,
 };
 
 /// Unix socket for relaying approval prompts to the tddy-coder TUI. In `cfg(test)` builds this is
@@ -99,59 +97,6 @@ pub struct GithubUpdatePullRequestToolInput {
     pub title: Option<String>,
     pub body: Option<String>,
     pub draft: Option<bool>,
-}
-
-/// Parameters for a PR-stack tool that acts on one node's open PR by number.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrNodeRefInput {
-    #[schemars(description = "Stack node id (e.g. \"n1\").")]
-    pub node_id: String,
-    #[schemars(description = "The node's open pull request number.")]
-    pub pull_number: u64,
-}
-
-/// Parameters for [`pr_repoint`](PermissionServer::pr_repoint).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrRepointInput {
-    #[schemars(description = "The pull request number to repoint.")]
-    pub pull_number: u64,
-    #[schemars(description = "New base branch name (e.g. master, or the next unmerged ancestor).")]
-    pub new_base: String,
-}
-
-/// Parameters for [`pr_resolve_conflicts`](PermissionServer::pr_resolve_conflicts).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrResolveConflictsInput {
-    #[schemars(description = "Stack node id whose branch is being synced.")]
-    pub node_id: String,
-    #[schemars(description = "Absolute path to the node's git worktree.")]
-    pub worktree_dir: String,
-    #[schemars(description = "Base ref to merge in (e.g. origin/master or an ancestor branch).")]
-    pub base_ref: String,
-}
-
-/// Parameters for [`pr_spawn_child`](PermissionServer::pr_spawn_child).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrSpawnChildInput {
-    #[schemars(description = "Stack node id to start a child coding session for.")]
-    pub node_id: String,
-}
-
-/// Parameters for [`pr_set_parents`](PermissionServer::pr_set_parents).
-///
-/// `parents` carries **no** `#[serde(default)]`, unlike every other list on this surface: an empty
-/// list is a meaningful instruction here (make this node a root), and on a branch-owning node it
-/// rebases the branch, force-pushes it with lease and re-targets the pull request. A field the caller
-/// forgot must not be read as that instruction, so an omitted `parents` is a parse error and the
-/// caller has to write `[]` to mean it.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PrSetParentsInput {
-    #[schemars(description = "Stack node id to move.")]
-    pub node_id: String,
-    #[schemars(
-        description = "The node's whole new parent list (chosen ancestors); pass [] to make it a root off the stack bottom. Required — there is no default."
-    )]
-    pub parents: Vec<String>,
 }
 
 /// Parameters for [`spawn_conversation`](PermissionServer::spawn_conversation): exactly
@@ -373,9 +318,9 @@ impl PermissionServer {
     /// string. Used by `tddy-tools call-tool` (the web Inspector → Tools "invoke" button) to run a
     /// tool exactly as the agent would over MCP. We dispatch to the methods directly rather than via
     /// the rmcp `ToolRouter`, because a router call needs a live `Peer`/`RequestContext` that can't
-    /// be fabricated outside a real MCP connection. Relay tools (`spawn_conversation`,
-    /// `pr_spawn_child`) still relay over `TDDY_SOCKET` from inside their methods; the stack plan and
-    /// read tools are forwarded to the daemon as exec tools; the rest run in-process against
+    /// be fabricated outside a real MCP connection. Relay tools (`spawn_conversation`) still relay
+    /// over `TDDY_SOCKET` from inside their methods; the stack plan, read and git tools are
+    /// forwarded to the daemon as exec tools; the rest run in-process against
     /// `TDDY_SESSION_DIR`/`TDDY_REPO_DIR`.
     pub async fn call_tool_by_name(
         &self,
@@ -412,12 +357,9 @@ impl PermissionServer {
             stack_tool if is_stack_tool(stack_tool) => {
                 dispatch_dynamic_tool(stack_tool, args).await
             }
-            "pr_merge" => self.pr_merge(Parameters(parse(args)?)),
-            "pr_close" => self.pr_close(Parameters(parse(args)?)),
-            "pr_repoint" => self.pr_repoint(Parameters(parse(args)?)),
-            "pr_resolve_conflicts" => self.pr_resolve_conflicts(Parameters(parse(args)?)),
-            "pr_set_parents" => self.pr_set_parents(Parameters(parse(args)?)),
-            "pr_spawn_child" => self.pr_spawn_child(Parameters(parse(args)?)).await,
+            // The git tools are the daemon's exec tools too (`#orchestrators` 10/11): forwarded
+            // to it like any other exec tool, never run here.
+            git_tool if is_stack_git_tool(git_tool) => dispatch_dynamic_tool(git_tool, args).await,
             "spawn_conversation" => self.spawn_conversation(Parameters(parse(args)?)).await,
             "spawn_conversation_status" => {
                 self.spawn_conversation_status(Parameters(parse(args)?))
@@ -832,91 +774,6 @@ impl PermissionServer {
         }
     }
 
-    #[tool(description = "Merge a stack node's PR into its base and mark the node merged.")]
-    fn pr_merge(&self, Parameters(p): Parameters<PrNodeRefInput>) -> String {
-        match (orchestrator_dir(), real_gh()) {
-            (Ok(dir), Ok(gh)) => match pr_merge_action(&dir, &gh, &p.node_id, p.pull_number) {
-                Ok(sha) => serde_json::json!({ "merged": true, "sha": sha }).to_string(),
-                Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
-            },
-            (Err(e), _) | (_, Err(e)) => serde_json::json!({ "error": e }).to_string(),
-        }
-    }
-
-    #[tool(description = "Close a stack node's PR without merging and mark the node closed.")]
-    fn pr_close(&self, Parameters(p): Parameters<PrNodeRefInput>) -> String {
-        match (orchestrator_dir(), real_gh()) {
-            (Ok(dir), Ok(gh)) => match pr_close_action(&dir, &gh, &p.node_id, p.pull_number) {
-                Ok(()) => serde_json::json!({ "closed": true }).to_string(),
-                Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
-            },
-            (Err(e), _) | (_, Err(e)) => serde_json::json!({ "error": e }).to_string(),
-        }
-    }
-
-    #[tool(
-        description = "Repoint a PR's base branch (e.g. after an ancestor merges) via the GitHub REST API."
-    )]
-    fn pr_repoint(&self, Parameters(p): Parameters<PrRepointInput>) -> String {
-        match real_gh() {
-            Ok(gh) => match gh.patch_pr_base(p.pull_number, &p.new_base) {
-                Ok(()) => {
-                    serde_json::json!({ "repointed": true, "new_base": p.new_base }).to_string()
-                }
-                Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
-            },
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
-    }
-
-    #[tool(
-        description = "Detect conflicts between a node's worktree branch and its base and report the conflicting files. Detect-only: resolve the reported files in the worktree yourself (edit, git add, commit the merge), then re-run to confirm none remain. Marks the node has-conflicts while conflicts exist and clears that marker once the branch merges cleanly."
-    )]
-    fn pr_resolve_conflicts(&self, Parameters(p): Parameters<PrResolveConflictsInput>) -> String {
-        match pr_resolve_conflicts_action(std::path::Path::new(&p.worktree_dir), &p.base_ref) {
-            Ok(conflicts) => {
-                if conflicts.is_empty() {
-                    // Clean now — clear the has-conflicts marker so derivation resumes. Leaves any
-                    // other status (e.g. an agent `blocked` override) untouched.
-                    let _ = clear_has_conflicts_status(&p.node_id);
-                } else {
-                    // Sticky (`override`) so a later `pr_stack_status` refresh does not clobber the
-                    // conflict signal with a view-derived status.
-                    let _ = set_internal_status(&p.node_id, "has-conflicts", None, "override");
-                }
-                serde_json::json!({ "conflicts": conflicts }).to_string()
-            }
-            Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
-        }
-    }
-
-    #[tool(
-        description = "Start a child coding session for a planned PR node (with the orchestrator as its stack parent). Returns the new child session id."
-    )]
-    async fn pr_spawn_child(&self, Parameters(p): Parameters<PrSpawnChildInput>) -> String {
-        // Relay to the daemon over the per-session TDDY_SOCKET. The daemon resolves the node against
-        // the orchestrator's stack and spawns a child claude-cli session with stack_parent set —
-        // this avoids depending on TDDY_REMOTE_* env (absent for a managed orchestrator).
-        let Some(socket) = permission_relay_socket_path() else {
-            return serde_json::json!({
-                "error": "TDDY_SOCKET is not set; pr_spawn_child requires a managed orchestrator session"
-            })
-            .to_string();
-        };
-        let request = serde_json::json!({ "type": "spawn-child", "node_id": p.node_id });
-        match tddy_core::toolcall::dispatch_toolcall(&socket, request).await {
-            Ok(resp) => resp.to_string(),
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
-    }
-
-    #[tool(
-        description = "Move a node in the stack by giving it a whole new parent list. parents is required: pass [] to make the node a root off the stack bottom. Rejects an unknown parent, self-parenthood, a duplicate entry, and any change that would close a cycle, writing nothing. When the node owns a branch, its branch is also rebased onto the new effective base, force-pushed with lease, and its open PR's base repointed. Use this when the plan changed; use pr_repoint when only the PR's base branch drifted."
-    )]
-    fn pr_set_parents(&self, Parameters(p): Parameters<PrSetParentsInput>) -> String {
-        to_wire(pr_set_parents_impl(p))
-    }
-
     #[tool(
         description = "Start a session — any type, on this host or another eligible one, with any option the New-session form offers — in this session's own project, tagged with the current session as its orchestrator. Returns at once with start_id, task_id and daemon_instance_id: follow it with spawn_conversation_status, stop it with spawn_conversation_cancel. A start the form would refuse outright (a CLI session without a model, a branch another session owns) is refused now, naming why."
     )]
@@ -978,39 +835,6 @@ async fn relay_to_daemon(tool: &str, request: serde_json::Value) -> String {
 // PR-stack tool helpers
 // ---------------------------------------------------------------------------
 
-/// Serialize a PR-stack tool's outcome for the wire: the value itself, or `{"error": …}`.
-///
-/// Every `#[tool]` here returns a `String`, so a failure has to reach the agent as JSON rather than
-/// as a transport error — this is the one envelope all of them share.
-fn to_wire(result: Result<serde_json::Value, String>) -> String {
-    match result {
-        Ok(v) => v.to_string(),
-        Err(e) => serde_json::json!({ "error": e }).to_string(),
-    }
-}
-
-/// The orchestrator session directory (holds `changeset.yaml` with the stack).
-fn orchestrator_dir() -> Result<PathBuf, String> {
-    std::env::var_os("TDDY_SESSION_DIR")
-        .map(PathBuf::from)
-        .ok_or_else(|| "TDDY_SESSION_DIR not set (no orchestrator session in scope)".to_string())
-}
-
-/// `owner/repo` slug parsed from the repo's `origin` remote.
-fn repo_slug() -> Result<String, String> {
-    let repo = std::env::var_os("TDDY_REPO_DIR")
-        .map(PathBuf::from)
-        .ok_or_else(|| "TDDY_REPO_DIR not set".to_string())?;
-    let out = std::process::Command::new("git")
-        .args(["remote", "get-url", "origin"])
-        .current_dir(&repo)
-        .output()
-        .map_err(|e| format!("git remote get-url origin failed: {e}"))?;
-    let url = String::from_utf8_lossy(&out.stdout);
-    tddy_workflow_recipes::orchestrate_pr_stack::github::owner_repo_from_remote_url(url.trim())
-        .ok_or_else(|| format!("could not parse owner/repo from remote url: {}", url.trim()))
-}
-
 /// The GitHub credential the agent's PR tools authenticate with: the token of the account the
 /// session's project acts as, asked of the session's host over `TDDY_SOCKET` at call time.
 ///
@@ -1018,94 +842,6 @@ fn repo_slug() -> Result<String, String> {
 /// host's own refusal (or the absence of a host), returned to the agent as the tool's error.
 fn github_token_for_agent() -> Result<String, String> {
     crate::github_credential::github_token_for_session()
-}
-
-fn real_gh() -> Result<tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi, String> {
-    crate::github_credential::github_api_for_session(repo_slug()?)
-}
-
-/// Default branch of the repo (`origin/HEAD` target). Returns an error rather than guessing a name:
-/// a wrong default silently mis-derives `needs-repoint`, so the caller surfaces the failure instead.
-fn default_branch() -> Result<String, String> {
-    let repo = std::env::var_os("TDDY_REPO_DIR")
-        .map(PathBuf::from)
-        .ok_or_else(|| "TDDY_REPO_DIR not set; cannot resolve the default branch".to_string())?;
-    let out = std::process::Command::new("git")
-        .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-        .current_dir(&repo)
-        .output()
-        .map_err(|e| format!("git symbolic-ref refs/remotes/origin/HEAD failed to run: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "could not resolve origin/HEAD (run `git remote set-head origin -a`): {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    let s = String::from_utf8_lossy(&out.stdout);
-    let name = s.trim().strip_prefix("origin/").unwrap_or(s.trim());
-    if name.is_empty() {
-        return Err("origin/HEAD resolved to an empty branch name".to_string());
-    }
-    Ok(name.to_string())
-}
-
-/// Write one node's `internal_status`, applying the override-wins rule for derived writes.
-fn set_internal_status(
-    node_id: &str,
-    kind: &str,
-    note: Option<&str>,
-    source: &str,
-) -> Result<(), String> {
-    let dir = orchestrator_dir()?;
-    let new_status = tddy_core::changeset::PrInternalStatus {
-        kind: kind.to_string(),
-        note: note.map(|s| s.to_string()),
-        source: source.to_string(),
-    };
-    tddy_core::changeset::update_stack_atomic(&dir, |stack| {
-        if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
-            node.internal_status = Some(
-                tddy_workflow_recipes::orchestrate_pr_stack::reconcile_internal_status(
-                    node.internal_status.as_ref(),
-                    new_status.clone(),
-                ),
-            );
-        }
-    })
-    .map_err(|e| e.to_string())
-}
-
-/// Clear a node's `internal_status` only when it is currently `has-conflicts` (so a resolved
-/// conflict stops being sticky and view-derivation resumes). Any other status — including an agent
-/// `blocked` override — is left untouched.
-fn clear_has_conflicts_status(node_id: &str) -> Result<(), String> {
-    let dir = orchestrator_dir()?;
-    tddy_core::changeset::update_stack_atomic(&dir, |stack| {
-        if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
-            if node
-                .internal_status
-                .as_ref()
-                .is_some_and(|s| s.kind == "has-conflicts")
-            {
-                node.internal_status = None;
-            }
-        }
-    })
-    .map_err(|e| e.to_string())
-}
-
-/// Rewrite a node's parents, realigning git and its PR base when the node owns a branch.
-fn pr_set_parents_impl(p: PrSetParentsInput) -> Result<serde_json::Value, String> {
-    let dir = orchestrator_dir()?;
-    let repo_root = std::env::var_os("TDDY_REPO_DIR")
-        .map(PathBuf::from)
-        .ok_or_else(|| "TDDY_REPO_DIR not set; cannot realign a moved node's branch".to_string())?;
-    let gh = real_gh()?;
-    let default = default_branch()?;
-    let node = tddy_workflow_recipes::pr_stack::set_stack_node_parents(
-        &dir, &repo_root, &p.node_id, &p.parents, &default, &gh,
-    )?;
-    Ok(serde_json::json!({ "node_id": node.node_id, "parents": node.parents }))
 }
 
 // Explicit `router = self.tool_router` — the default `#[tool_handler]` expansion calls the

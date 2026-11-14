@@ -33,8 +33,11 @@ pub fn local_branch_exists(repo: &std::path::Path, branch: &str) -> bool {
     .unwrap_or(false)
 }
 
-/// Rebase `branch` onto `new_base`, replacing `old_base` as the fork point.
-/// Aborts the rebase on conflict and returns `Err`.
+/// Rebase `branch` onto `new_base`, replacing `old_base` as the fork point, **in the worktree of
+/// `repo_root` that holds `branch`** (`#orchestrators` 10/11) — a node's branch is checked out in
+/// its session's worktree, where git refuses to check it out a second time, and `repo_root`'s own
+/// checkout is never switched. A worktree with uncommitted changes is refused naming them, before
+/// anything is rebased. Aborts the rebase on conflict and returns `Err`.
 #[allow(dead_code)]
 pub fn rebase_onto(
     repo_root: &std::path::Path,
@@ -42,19 +45,34 @@ pub fn rebase_onto(
     old_base: &str,
     branch: &str,
 ) -> Result<(), tddy_core::WorkflowError> {
-    // Checkout the branch first
-    let checkout = run_git(repo_root, &["checkout", branch])?;
-    if !checkout.status.success() {
+    let worktree = tddy_git::worktree_path_for_branch(repo_root, branch).ok_or_else(|| {
+        tddy_core::WorkflowError::WriteFailed(format!(
+            "branch '{branch}' has no worktree checked out in {}, so there is nowhere to rebase it",
+            repo_root.display()
+        ))
+    })?;
+    let checked_out = tddy_git::checked_out_branch_name(&worktree)
+        .map_err(tddy_core::WorkflowError::WriteFailed)?;
+    if checked_out.as_deref() != Some(branch) {
         return Err(tddy_core::WorkflowError::WriteFailed(format!(
-            "git checkout {branch}: {}",
-            String::from_utf8_lossy(&checkout.stderr)
+            "the worktree found for '{branch}' ({}) has '{}' checked out, not '{branch}'",
+            worktree.display(),
+            checked_out.as_deref().unwrap_or("a detached HEAD")
+        )));
+    }
+    let dirty = worktree_is_clean(&worktree)?;
+    if !dirty.is_empty() {
+        return Err(tddy_core::WorkflowError::WriteFailed(format!(
+            "the worktree for '{branch}' ({}) has uncommitted changes to {} — commit or stash them before rebasing",
+            worktree.display(),
+            dirty.join(", ")
         )));
     }
 
-    let rebase = run_git(repo_root, &["rebase", "--onto", new_base, old_base, branch])?;
+    let rebase = run_git(&worktree, &["rebase", "--onto", new_base, old_base, branch])?;
     if !rebase.status.success() {
-        // Abort so the repo is left clean
-        let _ = run_git(repo_root, &["rebase", "--abort"]);
+        // Abort so the worktree is left clean
+        let _ = run_git(&worktree, &["rebase", "--abort"]);
         return Err(tddy_core::WorkflowError::WriteFailed(format!(
             "git rebase --onto {new_base} {old_base} {branch} failed: {}",
             String::from_utf8_lossy(&rebase.stderr)
@@ -852,6 +870,116 @@ mod tests {
              rebase-merge: {}, rebase-apply: {}",
             rebase_merge_dir.exists(),
             rebase_apply_dir.exists()
+        );
+    }
+
+    // ── rebase in the worktree that holds the branch (`#orchestrators` 10/11) ─────────────────
+
+    /// A repository whose own checkout stays on `master`, with `feature` checked out in a linked
+    /// worktree of its own — a node's worktree — forked from the initial commit, and `new-base` one
+    /// commit ahead of that fork point.
+    struct ANodeInItsOwnWorktree {
+        _tmp: tempfile::TempDir,
+        root: std::path::PathBuf,
+        worktree: std::path::PathBuf,
+        fork_point: String,
+    }
+
+    fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap_or_else(|e| panic!("git {args:?}: {e}"));
+        assert!(
+            out.status.success(),
+            "git {args:?} in {dir:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    fn a_node_in_its_own_worktree() -> ANodeInItsOwnWorktree {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        let fork_point = init_repo_with_commit(&root);
+        git_in(&root, &["checkout", "-q", "-b", "new-base"]);
+        std::fs::write(root.join("base.txt"), "base change").unwrap();
+        git_in(&root, &["add", "."]);
+        git_in(&root, &["commit", "-q", "-m", "new base change"]);
+        git_in(&root, &["checkout", "-q", "master"]);
+        let worktree = tmp.path().join("node");
+        git_in(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature",
+                worktree.to_str().unwrap(),
+                &fork_point,
+            ],
+        );
+        std::fs::write(worktree.join("feature.txt"), "feature change").unwrap();
+        git_in(&worktree, &["add", "."]);
+        git_in(&worktree, &["commit", "-q", "-m", "feature change"]);
+        ANodeInItsOwnWorktree {
+            _tmp: tmp,
+            root,
+            worktree,
+            fork_point,
+        }
+    }
+
+    impl ANodeInItsOwnWorktree {
+        fn tip(&self, reference: &str) -> String {
+            git_in(&self.root, &["rev-parse", reference])
+        }
+    }
+
+    #[test]
+    fn rebase_onto_runs_in_the_worktree_that_holds_the_branch() {
+        // Given `feature` checked out in a node's own worktree, the repository's checkout on master
+        let node = a_node_in_its_own_worktree();
+
+        // When it is rebased onto new-base, from the repository
+        let result = rebase_onto(&node.root, "new-base", &node.fork_point, "feature");
+
+        // Then it succeeds, the node's worktree holds the rebased branch with new-base's work on
+        // disk, and the repository's own checkout is still on master
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(
+            git_in(&node.worktree, &["rev-parse", "HEAD~1"]),
+            node.tip("new-base")
+        );
+        assert!(node.worktree.join("base.txt").exists());
+        assert_eq!(
+            git_in(&node.root, &["rev-parse", "--abbrev-ref", "HEAD"]),
+            "master"
+        );
+    }
+
+    #[test]
+    fn rebase_onto_refuses_a_dirty_node_worktree_and_leaves_it_untouched() {
+        // Given `feature` in a node's own worktree with an uncommitted edit
+        let node = a_node_in_its_own_worktree();
+        std::fs::write(node.worktree.join("feature.txt"), "not committed").unwrap();
+        let before = node.tip("feature");
+
+        // When it is rebased onto new-base
+        let result = rebase_onto(&node.root, "new-base", &node.fork_point, "feature");
+
+        // Then it is refused naming the uncommitted file, and neither the branch nor the edit moved
+        let refusal = result
+            .expect_err("a dirty worktree is not rebased")
+            .to_string();
+        assert!(refusal.contains("feature.txt"), "{refusal}");
+        assert_eq!(node.tip("feature"), before);
+        assert_eq!(
+            std::fs::read_to_string(node.worktree.join("feature.txt")).unwrap(),
+            "not committed"
         );
     }
 }

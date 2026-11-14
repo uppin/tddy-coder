@@ -141,12 +141,13 @@ impl ProjectHomePort for DaemonProjectHome {
 
     async fn push_identity(&self, target: &SessionTarget) -> anyhow::Result<PushIdentity> {
         let identity = self.identity.clone();
+        let github_cli = self.github_cli.clone();
         let os_user = self.os_user.clone();
         let sessions_base = self.sessions_base.clone();
         let tddy_data_dir = self.tddy_data_dir.clone();
         let session_id = target.session_id.clone();
         let project_id = target.project_id.clone();
-        let env = tokio::task::spawn_blocking(move || {
+        let (env, remote_name, account_token) = tokio::task::spawn_blocking(move || {
             let project = match registered_project(&tddy_data_dir, &os_user, &project_id) {
                 Ok(project) => Some(project),
                 Err(reason) => {
@@ -157,13 +158,44 @@ impl ProjectHomePort for DaemonProjectHome {
                 }
             };
             let session_dir = unified_session_dir_path(&sessions_base, &session_id);
-            identity
+            let env = identity
                 .session_identity_in(&session_id, &os_user, &session_dir, project.as_ref())
-                .git_environment
+                .git_environment;
+            let remote_name = project
+                .as_ref()
+                .and_then(|project| project.remote_name.clone());
+            let account_token = project.as_ref().and_then(|project| {
+                let token = if project.local_gh {
+                    tddy_agent_launch::session_acting_identity::local_gh_github_token(
+                        &github_cli,
+                        &os_user,
+                        &project.git_url,
+                    )
+                } else {
+                    identity
+                        .acting_identity(&project.accounts)
+                        .map(|acting| acting.token)
+                        .map_err(|refusal| refusal.to_string())
+                };
+                match token {
+                    Ok(token) => Some(token),
+                    Err(reason) => {
+                        log::warn!(
+                            "project-home git: target session {session_id} has no push token: {reason}"
+                        );
+                        None
+                    }
+                }
+            });
+            (env, remote_name, account_token)
         })
         .await
         .map_err(|e| anyhow::anyhow!("reading the target's git identity failed: {e}"))?;
-        Ok(PushIdentity { env })
+        Ok(PushIdentity {
+            env,
+            remote_name,
+            account_token,
+        })
     }
 
     /// The worktrees of `project_id` on this host, from the snapshot the Worktrees screen's stream

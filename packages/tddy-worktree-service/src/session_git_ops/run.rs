@@ -6,15 +6,30 @@
 use std::path::Path;
 use std::process::Command;
 
-use super::{GitOp, GitOpError, GitOpOutcome, ResetMode};
+use super::{GitOp, GitOpError, GitOpOutcome, PushIdentity, ResetMode};
 
-/// Run `op` in `worktree` with `env` applied to every git command it starts.
+/// The environment variable a push's credential helper reads the account token from. The token
+/// itself is only ever in this variable — never in an argument or a log line.
+const PUSH_TOKEN_ENV: &str = "TDDY_PUSH_ACCOUNT_TOKEN";
+
+/// A credential helper that answers with the token in [`PUSH_TOKEN_ENV`]. Handed to git per
+/// command (`-c credential.helper=…` and the `GIT_CONFIG_*` environment), so it also answers a
+/// `git credential fill` run by a push hook.
+const CREDENTIAL_HELPER: &str =
+    "!f() { echo username=x-access-token; echo \"password=$TDDY_PUSH_ACCOUNT_TOKEN\"; }; f";
+
+/// Run `op` in `worktree` with `identity` applied to every git command it starts.
 pub(super) fn run(
     worktree: &Path,
-    env: &[(String, String)],
+    identity: &PushIdentity,
     op: GitOp,
 ) -> Result<GitOpOutcome, GitOpError> {
-    let git = Git { worktree, env };
+    let git = Git {
+        worktree,
+        env: &identity.env,
+        remote_name: identity.remote_name.as_deref(),
+        account_token: identity.account_token.as_deref(),
+    };
     match op {
         GitOp::Commit { message, paths } => commit(&git, &message, &paths),
         GitOp::Push { force_with_lease } => push(&git, force_with_lease),
@@ -45,12 +60,35 @@ pub(super) fn run(
 struct Git<'a> {
     worktree: &'a Path,
     env: &'a [(String, String)],
+    remote_name: Option<&'a str>,
+    account_token: Option<&'a str>,
 }
 
 impl Git<'_> {
     /// Run `git args…` and return its trimmed stdout, or its stderr as the refusal.
     fn run(&self, args: &[&str]) -> Result<String, GitOpError> {
-        let output = Command::new("git")
+        self.run_inner(args, false)
+    }
+
+    /// Run a push, handing git the account token through a per-command credential helper when
+    /// the identity carries one.
+    fn run_push(&self, args: &[&str]) -> Result<String, GitOpError> {
+        self.run_inner(args, true)
+    }
+
+    fn run_inner(&self, args: &[&str], credential: bool) -> Result<String, GitOpError> {
+        let mut command = Command::new("git");
+        if credential {
+            if let Some(token) = self.account_token {
+                command
+                    .args(["-c", &format!("credential.helper={CREDENTIAL_HELPER}")])
+                    .env(PUSH_TOKEN_ENV, token)
+                    .env("GIT_CONFIG_COUNT", "1")
+                    .env("GIT_CONFIG_KEY_0", "credential.helper")
+                    .env("GIT_CONFIG_VALUE_0", CREDENTIAL_HELPER);
+            }
+        }
+        let output = command
             .args(args)
             .current_dir(self.worktree)
             .envs(self.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
@@ -108,16 +146,18 @@ fn commit(git: &Git<'_>, message: &str, paths: &[String]) -> Result<GitOpOutcome
     Ok(done(format!("committed {head}")))
 }
 
-/// Push the worktree's branch to `origin` under its own name.
+/// Push the worktree's branch to the remote its identity names (`origin` when it names none)
+/// under its own name.
 fn push(git: &Git<'_>, force_with_lease: bool) -> Result<GitOpOutcome, GitOpError> {
     let branch = git.run(&["symbolic-ref", "--short", "HEAD"])?;
+    let remote = git.remote_name.unwrap_or("origin");
     let refspec = format!("HEAD:refs/heads/{branch}");
     if force_with_lease {
-        git.run(&["push", "--force-with-lease", "origin", &refspec])?;
+        git.run_push(&["push", "--force-with-lease", remote, &refspec])?;
     } else {
-        git.run(&["push", "origin", &refspec])?;
+        git.run_push(&["push", remote, &refspec])?;
     }
-    Ok(done(format!("pushed {branch} to origin")))
+    Ok(done(format!("pushed {branch} to {remote}")))
 }
 
 /// Rebase the worktree's branch onto `onto`. A conflict aborts the rebase, leaving the worktree

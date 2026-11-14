@@ -203,7 +203,12 @@ pub fn execute_stack_repoint(
             Err(e) => {
                 let err_msg = e.to_string();
                 // If the branch simply doesn't exist locally, skip git rebase (remote-only branch).
-                if err_msg.contains("pathspec") || err_msg.contains("did not match") {
+                // `rebase_onto` now rebases in the worktree holding the branch, so a branch with
+                // no worktree is the same remote-only case (`#orchestrators` 10/11).
+                if err_msg.contains("pathspec")
+                    || err_msg.contains("did not match")
+                    || err_msg.contains("has no worktree checked out")
+                {
                     log::debug!(
                         "execute_stack_repoint: branch {dep_branch} not local; skipping rebase"
                     );

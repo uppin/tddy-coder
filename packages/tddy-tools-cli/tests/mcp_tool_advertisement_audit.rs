@@ -4,7 +4,7 @@
 //! Changeset: docs/dev/1-WIP/2026-09-09-unbundle-tools-thinning.md § Testing Plan.
 //!
 //! The tools this server advertises are now assembled from six crates — `tddy-tools` itself
-//! (`approval_prompt`, the six `pr_*` git tools and 2 `github_*` tools, `spawn_conversation` with its `_status` and `_cancel`, the six
+//! (`approval_prompt` and 2 `github_*` tools, `spawn_conversation` with its `_status` and `_cancel`, the six
 //! `subagent_*` tools), `tddy-tool-engine` (the ten exec tools), `tddy-lsp-executor` (the five
 //! `Lsp*` tools) and `tddy-core` (the action surface's gate). An omission in any one of them
 //! would otherwise surface as a capability an agent silently no longer has, at that agent's
@@ -22,8 +22,8 @@
 //! every call answered `{"error":"unknown tool: ListActions","is_error":true}`. They are now
 //! merged only where the host claims to serve them, with
 //! `tddy_core::session_actions::SESSION_ACTION_TOOLS_ENV`, which `tddy-sandbox-app`'s spawn path
-//! sets and the daemon path does not. The surface is therefore **40** where they are served and
-//! **37** where they are not, differing in exactly those three.
+//! sets and the daemon path does not. The surface is therefore **34** where they are served and
+//! **31** where they are not, differing in exactly those three.
 
 #[path = "support/exec_catalog.rs"]
 mod exec_catalog;
@@ -41,9 +41,9 @@ const IO_TIMEOUT: Duration = Duration::from_secs(10);
 /// Every tool a session with all four of its optional surfaces present advertises, sorted.
 ///
 /// Held as names rather than a length so that a tool renamed, dropped or re-homed during a crate
-/// move fails here by name. The count is the array's own length — `[&str; 40]` is the "exactly 40"
+/// move fails here by name. The count is the array's own length — `[&str; 34]` is the "exactly 34"
 /// half of the assertion, checked by the compiler.
-const EVERY_ADVERTISED_TOOL: [&str; 40] = [
+const EVERY_ADVERTISED_TOOL: [&str; 34] = [
     "Await",
     "Delete",
     "Glob",
@@ -64,12 +64,6 @@ const EVERY_ADVERTISED_TOOL: [&str; 40] = [
     "github_update_pull_request",
     "invoke_action",
     "list_actions",
-    "pr_close",
-    "pr_merge",
-    "pr_repoint",
-    "pr_resolve_conflicts",
-    "pr_set_parents",
-    "pr_spawn_child",
     "request_action",
     "spawn_conversation",
     "spawn_conversation_cancel",
@@ -271,9 +265,10 @@ async fn initialize_mcp_session(stdin: &mut ChildStdin, stdout: &mut BufReader<C
 /// when they all lived in one, plus `subagent_end`, `subagent_diff` and `subagent_pull`, and
 /// `spawn_conversation_status` and `spawn_conversation_cancel` (`#start-parity` 9/9) — minus
 /// the nine stack plan and read tools that are the daemon's now (`#orchestrators` 7/11; the
-/// two it adds, `pr_stack_list` and `pr_stack_create`, were never this server's own).
+/// two it adds, `pr_stack_list` and `pr_stack_create`, were never this server's own) and
+/// minus the six stack git tools that are the daemon's now (`#orchestrators` 10/11).
 #[tokio::test]
-async fn advertises_all_forty_tool_names_where_the_host_serves_the_action_tools() {
+async fn advertises_all_thirty_four_tool_names_where_the_host_serves_the_action_tools() {
     // Given
     let session = a_fully_configured_session().whose_host_serves_the_action_tools();
 
@@ -284,15 +279,15 @@ async fn advertises_all_forty_tool_names_where_the_host_serves_the_action_tools(
     assert_eq!(
         advertised,
         names(&EVERY_ADVERTISED_TOOL),
-        "the fully configured MCP surface must be exactly these 40 tools"
+        "the fully configured MCP surface must be exactly these 34 tools"
     );
 }
 
-/// The daemon path advertises 37, and the audit records that rather than reconciling it: the
+/// The daemon path advertises 31, and the audit records that rather than reconciling it: the
 /// daemon's tool handler has no arm for any of the three action tools, so advertising them there
 /// was a false advertisement an agent could only discover by calling one.
 #[tokio::test]
-async fn advertises_thirty_seven_tool_names_on_the_daemon_path_which_serves_no_action_tool() {
+async fn advertises_thirty_one_tool_names_on_the_daemon_path_which_serves_no_action_tool() {
     // Given
     let session = a_fully_configured_session();
 

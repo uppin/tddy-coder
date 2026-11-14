@@ -21,6 +21,7 @@ use std::sync::LazyLock;
 use tddy_session_tool_client::SessionExecToolAnswer;
 use tddy_tool_engine::project_home_git_tools::project_home_git_tool_defs;
 use tddy_tool_engine::project_home_tools::project_home_tool_defs;
+use tddy_tool_engine::stack_git_tools::stack_git_tool_defs;
 use tddy_tool_engine::stack_tools::stack_tool_defs;
 
 use crate::mcp_primitives::RemoteToolDef;
@@ -62,6 +63,7 @@ pub fn project_home_remote_tool_defs() -> Vec<RemoteToolDef> {
         .into_iter()
         .chain(project_home_git_tool_defs())
         .chain(stack_tool_defs())
+        .chain(stack_git_tool_defs())
         .map(|tool| RemoteToolDef {
             name: tool.name,
             description: tool.description,
@@ -70,11 +72,12 @@ pub fn project_home_remote_tool_defs() -> Vec<RemoteToolDef> {
         .collect()
 }
 
-/// The eleven stack tools alone, as MCP tool definitions: the daemon's exec tools that used to be
-/// this crate's `pr_*` methods.
+/// The eleven stack plan tools and six stack git tools alone, as MCP tool definitions: the
+/// daemon's exec tools that used to be this crate's `pr_*` methods.
 pub fn stack_remote_tool_defs() -> Vec<RemoteToolDef> {
     stack_tool_defs()
         .into_iter()
+        .chain(stack_git_tool_defs())
         .map(|tool| RemoteToolDef {
             name: tool.name,
             description: tool.description,
@@ -133,8 +136,8 @@ mod tests {
         // When the advertised exec tools are read
         let advertised = advertised_exec_names(&admitted);
 
-        // Then exactly the read-only tools, the project-home tools, the seven git tools and the
-        // eleven stack tools, and no write or shell tool
+        // Then exactly the read-only tools, the project-home tools, the seven git tools, the
+        // eleven stack plan tools and the six stack git tools, and no write or shell tool
         assert_eq!(
             advertised,
             sorted(&[
@@ -189,6 +192,12 @@ mod tests {
                 "pr_delete_planned",
                 "pr_set_status",
                 "pr_adopt",
+                "pr_merge",
+                "pr_close",
+                "pr_repoint",
+                "pr_set_parents",
+                "pr_resolve_conflicts",
+                "pr_spawn_child",
             ])
         );
     }

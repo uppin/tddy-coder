@@ -72,6 +72,7 @@ use tddy_tool_engine::project_home_tools::{
 use tddy_tool_engine::project_home_turn_tools::{
     execute_project_home_turn_tool, is_project_home_turn_tool,
 };
+use tddy_tool_engine::stack_git_tools::{is_stack_git_tool, stack_git_tools_offered_to};
 use tddy_tool_engine::stack_tools::{is_stack_tool, stack_tools_offered_to};
 use tddy_tool_engine::start_ledger::StartLedger;
 use tddy_worktree_service::session_target::HomeCaller;
@@ -106,6 +107,9 @@ impl ExecToolRpcHandler {
         sessions_base: &Path,
         worktree_root: &Path,
     ) -> Result<ExecuteToolResponse, Status> {
+        if is_stack_git_tool(&req.tool_name) {
+            return self.run_stack_git_tool(req, sessions_base).await;
+        }
         if is_stack_tool(&req.tool_name) {
             return self.run_stack_tool(req, sessions_base).await;
         }
@@ -161,6 +165,7 @@ impl ExecToolRpcHandler {
             )
             .with_github_cli(self.project_home_host.github_cli.clone()),
             daemon_instance_id: local_instance_id_for_config(&self.config),
+            github_cli: self.project_home_host.github_cli.clone(),
             peers,
             worktree_sizes: Arc::clone(&self.project_home_host.worktree_sizes),
             catalog: Arc::clone(&self.project_home_host.catalog),
@@ -242,6 +247,7 @@ impl ExecToolRpcHandler {
         if session_tool_role(&metadata) != SessionToolRole::ProjectHome {
             let caller = stack_caller_of(&sessions_base, session_id)?;
             tools.extend(stack_tools_offered_to(caller.as_ref().map(|c| &c.role)));
+            tools.extend(stack_git_tools_offered_to(caller.as_ref().map(|c| &c.role)));
         }
         Ok(tools)
     }
@@ -270,6 +276,8 @@ pub(super) struct DaemonProjectHome {
     identity: SessionAccountAccess,
     /// This host, as the eligible-daemon roster names it; every session it lists carries it.
     daemon_instance_id: String,
+    /// The `gh` a Local gh project's push token is asked of (`#orchestrators` 10/11).
+    pub(super) github_cli: tddy_host_service::GithubCli,
     /// The other hosts' listings, for a caller held here; `None` for one held elsewhere, whose own
     /// host fans out.
     peers: Option<PeerSessionLists>,

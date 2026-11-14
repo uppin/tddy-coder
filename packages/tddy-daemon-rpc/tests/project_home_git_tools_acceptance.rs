@@ -409,3 +409,141 @@ async fn the_home_worktree_is_never_a_git_target() {
         commit.error_message
     );
 }
+
+// ── the project's remote and account (`#orchestrators` 10/11) ────────────────────────────────
+
+mod support;
+
+/// The token a Local gh project's account resolves to: what the host's `gh` stub answers.
+const PROJECTS_ACCOUNT_TOKEN: &str = "gho_the_projects_account";
+
+/// A host whose project is on GitHub as the host's `gh` login (Local gh), its repository's only
+/// remote a bare `upstream` the project's row names, and a `pre-push` hook recording into
+/// `credential_record` the credential git can obtain for github.com from inside that push. The hook
+/// reads no user or system git config, so only what the daemon hands its git can answer.
+struct AnUpstreamProject {
+    host: support::Host,
+    upstream: tempfile::TempDir,
+    credential_record: PathBuf,
+    _scratch: tempfile::TempDir,
+}
+
+fn an_upstream_project_on_github() -> AnUpstreamProject {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = tempfile::tempdir().unwrap();
+    let gh = tddy_testing_commons::gh_cli::a_gh_cli(scratch.path())
+        .logged_in_as("acme-bot", 7)
+        .with_token(PROJECTS_ACCOUNT_TOKEN)
+        .build();
+    let peers = std::sync::Arc::new(support::InProcessPeers::default());
+    let host = support::a_host_as_current_user_with_gh_at(support::HOST_A, &peers, &gh);
+    let projects_dir = host.sessions.path().join("projects");
+    let mut rows = tddy_projects::project_storage::read_projects(&projects_dir).unwrap();
+    let row = rows
+        .iter_mut()
+        .find(|row| row.project_id == support::THIS_PROJECT)
+        .expect("the project is registered");
+    let repo = PathBuf::from(&row.main_repo_path);
+    let upstream = tempfile::tempdir().unwrap();
+    git(upstream.path(), &["init", "-q", "--bare", "-b", "main"]);
+    git(&repo, &["remote", "remove", "origin"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "upstream",
+            upstream.path().to_str().unwrap(),
+        ],
+    );
+    git(&repo, &["push", "-q", "-u", "upstream", "main"]);
+    git(&repo, &["fetch", "-q", "upstream"]);
+    row.remote_name = Some("upstream".to_string());
+    row.main_branch_ref = Some("upstream/main".to_string());
+    row.git_url = "https://github.com/acme/alpha.git".to_string();
+    row.local_gh = true;
+    write_projects(&projects_dir, &rows).unwrap();
+
+    let hooks = repo.join(".git").join("hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    git(
+        &repo,
+        &["config", "core.hooksPath", hooks.to_str().unwrap()],
+    );
+    let credential_record = scratch.path().join("credential.txt");
+    let isolated_home = scratch.path().join("home");
+    std::fs::create_dir_all(&isolated_home).unwrap();
+    let hook = hooks.join("pre-push");
+    std::fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\nprintf 'protocol=https\\nhost=github.com\\n\\n' | HOME='{home}' XDG_CONFIG_HOME='{home}' GIT_CONFIG_NOSYSTEM=1 git credential fill > '{record}' 2>/dev/null\nexit 0\n",
+            home = isolated_home.display(),
+            record = credential_record.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    AnUpstreamProject {
+        host,
+        upstream,
+        credential_record,
+        _scratch: scratch,
+    }
+}
+
+impl AnUpstreamProject {
+    /// Whether the push's git could obtain the project account's token for github.com.
+    fn the_push_could_authenticate_as_the_projects_account(&self) -> bool {
+        std::fs::read_to_string(&self.credential_record)
+            .unwrap_or_default()
+            .lines()
+            .any(|line| line == format!("password={PROJECTS_ACCOUNT_TOKEN}"))
+    }
+}
+
+#[tokio::test]
+async fn push_session_branch_pushes_to_the_projects_remote_with_the_account_token() {
+    // Given a project whose only remote is `upstream`, acting as the host's gh login, and a session
+    // of it with a commit on its branch; main is the project's home
+    let project = an_upstream_project_on_github();
+    let host = &project.host;
+    let main = support::a_workspace_in(&host.daemon, support::THIS_PROJECT).await;
+    host.make_project_home(&main);
+    let sibling = support::a_workspace_in(&host.daemon, support::THIS_PROJECT).await;
+    let worktree = host.worktree_of(&sibling);
+    std::fs::write(worktree.join("done.txt"), "done\n").unwrap();
+    git(&worktree, &["add", "done.txt"]);
+    git(&worktree, &["commit", "-q", "-m", "land the work"]);
+
+    // When main pushes the sibling's branch
+    let pushed = host
+        .daemon
+        .execute_tool(Request::direct(ExecuteToolRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: main.clone(),
+            tool_name: "PushSessionBranch".to_string(),
+            args_json: serde_json::json!({ "session_id": sibling }).to_string(),
+            daemon_instance_id: String::new(),
+            conversation_id: String::new(),
+        }))
+        .await
+        .expect("PushSessionBranch is served to main")
+        .into_inner();
+
+    // Then the branch landed on the project's remote, `upstream` ...
+    assert!(!pushed.is_error, "{}", pushed.error_message);
+    let branch = git(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    assert_eq!(
+        git(
+            project.upstream.path(),
+            &["rev-parse", &format!("refs/heads/{branch}")]
+        ),
+        git(&worktree, &["rev-parse", "HEAD"])
+    );
+    // ... and the push's git could authenticate as the project's account
+    assert!(
+        project.the_push_could_authenticate_as_the_projects_account(),
+        "git, pushing for the daemon, could not obtain the project account's token for github.com"
+    );
+}
