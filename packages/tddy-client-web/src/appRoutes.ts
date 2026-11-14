@@ -122,9 +122,12 @@ export function parseSessionsProjectSettings(location: {
   path: string;
   params: Readonly<Record<string, string>>;
 }): SessionsProjectSettingsRoute | null {
-  // TODO(project-settings-pane): implement
-  void location;
-  return null;
+  const suffix = `/${PROJECT_SETTINGS_SEGMENT}`;
+  if (!location.path.endsWith(suffix)) return null;
+  const projectPath = location.path.slice(0, -suffix.length);
+  const projectId = decodeSegment(singleSegmentAfter(projectPath, SESSIONS_PROJECT_ROUTE));
+  if (projectId === null) return null;
+  return { projectId, host: location.params[PROJECT_SETTINGS_HOST_PARAM] ?? null };
 }
 
 /**
@@ -212,6 +215,7 @@ export function isSessionsDrawerPath(pathname: string): boolean {
     singleSegmentAfter(pathname, SESSIONS_DRAWER_ROUTE) !== null ||
     parseSessionsProjectHomeSetupProjectId(pathname) !== null ||
     parseSessionsProjectNew(pathname) !== null ||
+    parseSessionsProjectSettings({ path: pathname, params: {} }) !== null ||
     parseSessionsProjectStack(pathname) !== null
   );
 }

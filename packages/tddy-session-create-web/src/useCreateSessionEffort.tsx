@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { CreateSessionEffortField } from "./CreateSessionEffortField";
 import type { SelectableAgent } from "./selectableAgentOptions";
 
@@ -8,11 +8,19 @@ import type { SelectableAgent } from "./selectableAgentOptions";
  * operator chooses, the agent's served default stands, and a choice the agent does not offer (left
  * from another agent's picker) reads as the newly selected agent's served default.
  */
-export function useCreateSessionEffort(agent: SelectableAgent | undefined): {
+export function useCreateSessionEffort(
+  agent: SelectableAgent | undefined,
+  initialEffort = "",
+): {
   effort: string;
   effortField: ReactNode;
 } {
   const [chosen, setChosen] = useState<string | null>(null);
+  // A caller-supplied pre-fill (a project's saved defaults) becomes the choice when it arrives;
+  // a later change by the operator is theirs and is not overwritten while it stays the same.
+  useEffect(() => {
+    if (initialEffort) setChosen(initialEffort);
+  }, [initialEffort]);
   const levels = agent?.effortLevels ?? [];
   const served = agent?.defaultEffort ?? "";
   const effort =

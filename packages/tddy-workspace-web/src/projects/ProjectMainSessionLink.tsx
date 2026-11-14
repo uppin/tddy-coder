@@ -1,4 +1,4 @@
-import { sessionsDrawerPathForSession, sessionsProjectHomeSetupPath } from "tddy-client-web";
+import { sessionsDrawerPathForSession, sessionsProjectSettingsPath } from "tddy-client-web";
 
 /**
  * A Projects card's link to the project's **main** session: **Set up main** opens the sessions
@@ -18,15 +18,13 @@ export function ProjectMainSessionLink({
   projectId: string;
   /** The session the project records as its main; empty when main is not set up. */
   homeSessionId: string;
-  /**
-   * The host whose row `homeSessionId` was read from — the card's primary host.
-   * TODO(project-settings-pane): implement — not read yet; the link still names no host.
-   */
+  /** The host whose row `homeSessionId` was read from — the card's primary host. */
   daemonInstanceId: string;
 }) {
-  void daemonInstanceId;
   const hasMain = homeSessionId !== "";
-  const path = hasMain ? sessionsDrawerPathForSession(homeSessionId) : sessionsProjectHomeSetupPath(projectId);
+  const path = hasMain
+    ? sessionsDrawerPathForSession(homeSessionId)
+    : sessionsProjectSettingsPath(projectId, daemonInstanceId ? { host: daemonInstanceId } : {});
   return (
     <div className="mb-3 text-sm">
       <a

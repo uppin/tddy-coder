@@ -31,11 +31,14 @@ export function orchestratorDefaultsFor(
   projectId: string,
   daemonInstanceId: string,
 ): OrchestratorDefaultsChoice {
-  // TODO(project-settings-pane): implement
-  void projects;
-  void projectId;
-  void daemonInstanceId;
-  return NO_ORCHESTRATOR_DEFAULTS;
+  const row = projects.find((p) => p.projectId === projectId && p.daemonInstanceId === daemonInstanceId);
+  const defaults = row?.orchestratorDefaults;
+  if (!defaults) return NO_ORCHESTRATOR_DEFAULTS;
+  return {
+    model: defaults.model ?? "",
+    effort: defaults.effort ?? "",
+    providerAccountId: defaults.providerAccountId ?? "",
+  };
 }
 
 /**
@@ -46,7 +49,6 @@ export function orchestratorDefaultsFor(
 export function orchestratorDefaultsMessage(
   choice: OrchestratorDefaultsChoice,
 ): Omit<OrchestratorDefaults, "$typeName" | "$unknown"> | undefined {
-  // TODO(project-settings-pane): implement
-  void choice;
-  return undefined;
+  if (choice.model === "" && choice.effort === "" && choice.providerAccountId === "") return undefined;
+  return { model: choice.model, effort: choice.effort, providerAccountId: choice.providerAccountId };
 }

@@ -4,7 +4,7 @@
  * it (`EnsureProjectHomeSession`, no start spec) and selects it; main is not repeated among the
  * group's rows, and is labelled with its model; another session carrying the project-home role (a
  * replaced main) is an ordinary row; a project with no main starts nothing and shows no hint (its
- * click opens the setup pane); a set-up main offers **Replace main**; the **Other** group has no
+ * click opens the setup pane); the pinned entry offers no **Replace main** (that lives in the settings pane, `#orchestrators` 11/11); the **Other** group has no
  * pinned entry.
  *
  * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry.
@@ -67,7 +67,6 @@ const ALPHA_REPLACED_MAIN = aSession("old-alpha", ALPHA.projectId, {
 function aDrawer(
   sessions: SessionEntry[],
   onEnsure: (projectId: string) => Promise<void> = cy.stub().resolves(),
-  onReplaceProjectHome: (projectId: string) => void = cy.stub(),
 ) {
   cy.mount(
     <TooltipProvider delayDuration={0}>
@@ -76,7 +75,6 @@ function aDrawer(
         projects={[ALPHA, BETA]}
         projectHomes={[ALPHA_HOME, BETA_NO_MAIN]}
         onEnsureProjectHome={onEnsure}
-        onReplaceProjectHome={onReplaceProjectHome}
         selectedSessionId={null}
         onSelectSession={cy.stub()}
         isOpen
@@ -226,25 +224,23 @@ it("a session with the project-home role that is not the recorded main is an ord
   ]);
 });
 
-it("a set-up main offers Replace main; a project with no main does not", () => {
+it("the pinned entry offers no Replace main — that lives in the settings pane", () => {
   // When
   aDrawer([ALPHA_HOME_SESSION, aSession("b1", BETA.projectId)]);
 
-  // Then
-  drawer.replaceAction(ALPHA.projectId).should("exist");
+  // Then (`#orchestrators` 11/11: Replace main moved off the pinned entry)
+  drawer.replaceAction(ALPHA.projectId).should("not.exist");
   drawer.replaceAction(BETA.projectId).should("not.exist");
 });
 
-it("Replace main asks to set that project's main up again, and starts nothing", () => {
+it("clicking a set-up main still ensures it — Replace main is not on the entry", () => {
   // Given
   const onEnsure = cy.stub().as("onEnsure").resolves();
-  const onReplace = cy.stub().as("onReplace");
-  aDrawer([ALPHA_HOME_SESSION], onEnsure, onReplace);
+  aDrawer([ALPHA_HOME_SESSION], onEnsure);
 
   // When
-  drawer.clickReplaceMain(ALPHA.projectId);
+  drawer.clickMain(ALPHA.projectId);
 
   // Then
-  cy.get("@onReplace").should("have.been.calledOnceWith", ALPHA.projectId);
-  cy.get("@onEnsure").should("not.have.been.called");
+  cy.get("@onEnsure").should("have.been.calledOnceWith", ALPHA.projectId);
 });

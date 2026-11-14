@@ -385,9 +385,16 @@ pub fn set_project_orchestrator_defaults(
     project_id: &str,
     defaults: Option<&OrchestratorDefaults>,
 ) -> anyhow::Result<()> {
-    // TODO(project-settings-pane): implement
-    let _ = (projects_dir, defaults);
-    anyhow::bail!("set_project_orchestrator_defaults is not implemented yet (project {project_id})")
+    let mut projects = read_projects(projects_dir)?;
+    let project = projects
+        .iter_mut()
+        .find(|p| p.project_id == project_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown project: {}", project_id))?;
+    project.orchestrator_defaults = defaults.and_then(|d| {
+        (d.model.is_some() || d.effort.is_some() || d.provider_account_id.is_some())
+            .then(|| d.clone())
+    });
+    write_projects(projects_dir, &projects)
 }
 
 /// Resolved `main_repo_path` for `project_id` on `host_key` (simulated host or daemon instance id).

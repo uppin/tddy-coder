@@ -101,9 +101,10 @@ export function useCreateSessionModel({
 
   // Reset the model selection to the backend's advertised default whenever the catalog changes
   // (agent switch, session-type switch, provider switch). Empty while loading or on a failed probe.
+  // A caller-supplied pre-fill (`initialModel`) wins over the advertised default.
   useEffect(() => {
-    setModel(agentModels.defaultModel);
-  }, [agentModels.defaultModel]);
+    setModel(initialModel ? initialModel : agentModels.defaultModel);
+  }, [agentModels.defaultModel, initialModel]);
 
   return {
     model,

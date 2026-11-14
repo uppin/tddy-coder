@@ -146,7 +146,7 @@ it("a project with no main links to Set up main from its Projects card", () => {
   setup
     .projectCardLink(BETA.projectId)
     .should("have.text", "Set up main")
-    .and("have.attr", "href", `#/sessions/project-home/${BETA.projectId}`);
+    .and("have.attr", "href", `#/sessions/project/${BETA.projectId}/settings?host=${PROJECTS_LOCAL_HOST}`);
 });
 
 it("a project with a main links to Open main from its Projects card", () => {
@@ -171,7 +171,7 @@ it("a project on two hosts links to its primary host's main from its Projects ca
   setup
     .projectCardLink(ALPHA.projectId)
     .should("have.text", "Set up main")
-    .and("have.attr", "href", `#/sessions/project-home/${ALPHA.projectId}`);
+    .and("have.attr", "href", `#/sessions/project/${ALPHA.projectId}/settings?host=${PROJECTS_LOCAL_HOST}`);
 });
 
 it("a projects card link opens the settings pane for the host its row names", () => {

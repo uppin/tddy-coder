@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Settings } from "lucide-react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { SessionMetadata } from "./lib/sessionParticipantMetadata";
 import { groupSessionsByProject } from "./utils/sessionProjectGroups";
@@ -82,8 +82,6 @@ interface SessionDrawerProps {
   onEnsureProjectHome?: (projectId: string) => Promise<void>;
   /** Take the operator to set main up for a project that has none — its pinned entry's click. */
   onSetUpProjectHome?: (projectId: string) => void;
-  /** Take the operator to set main up again — a set-up main's **Replace main** action. */
-  onReplaceProjectHome?: (projectId: string) => void;
   /**
    * Open the orchestrator composer for a project — the "+" on each project header
    * (`#orchestrators` 8/11). Given, every listed project gets a group, so its "+" is reachable even
@@ -99,7 +97,6 @@ interface SessionDrawerProps {
    * Open a project's settings pane — the gear in each project header's actions slot
    * (`sessions-drawer-project-settings-<projectId>`, `#orchestrators` 11/11): main's setup and
    * Replace main, and the defaults a new orchestrator starts with. Absent, no header shows a gear.
-   * TODO(project-settings-pane): implement — not read yet.
    */
   onOpenProjectSettings?: (projectId: string) => void;
 }
@@ -131,11 +128,11 @@ export function SessionDrawer({
   projectHomes = [],
   onEnsureProjectHome,
   onSetUpProjectHome,
-  onReplaceProjectHome,
   onNewOrchestrator,
   prStackClient,
   sessionToken = "",
   onOpenProjectStack,
+  onOpenProjectSettings,
 }: SessionDrawerProps) {
   const owningHost: OwningHostInfo = {
     selectedInstanceId,
@@ -148,7 +145,8 @@ export function SessionDrawer({
     projects,
     onEnsureProjectHome ? projectHomes : [],
   );
-  const projectGroups = onNewOrchestrator ? withEveryProjectGroup(homeGroups, projects) : homeGroups;
+  const projectGroups =
+    onNewOrchestrator || onOpenProjectSettings ? withEveryProjectGroup(homeGroups, projects) : homeGroups;
   const selectedGroupKey = projectGroupKeyContaining(projectGroups, selectedSessionId);
 
   // Selecting a session expands its project group; the viewer can still collapse it afterwards.
@@ -280,6 +278,20 @@ export function SessionDrawer({
                     ? () => onNewOrchestrator(group.projectId as string)
                     : undefined
                 }
+                actions={
+                  group.projectId !== null && onOpenProjectSettings ? (
+                    <button
+                      type="button"
+                      data-testid={`sessions-drawer-project-settings-${group.projectId}`}
+                      onClick={() => onOpenProjectSettings(group.projectId as string)}
+                      className="px-1 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                      title={`Settings for ${group.label}`}
+                      aria-label={`Settings for ${group.label}`}
+                    >
+                      <Settings className="h-3.5 w-3.5" />
+                    </button>
+                  ) : undefined
+                }
               >
                 {home && onEnsureProjectHome && (
                   <ProjectHomeEntry
@@ -288,7 +300,6 @@ export function SessionDrawer({
                     selected={homeSession !== null && homeSession.sessionId === selectedSessionId}
                     onEnsure={onEnsureProjectHome}
                     onSetUpProjectHome={onSetUpProjectHome}
-                    onReplaceProjectHome={onReplaceProjectHome}
                   />
                 )}
                 {group.projectId !== null && onOpenProjectStack && (
