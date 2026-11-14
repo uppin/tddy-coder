@@ -132,6 +132,7 @@ fn write_minimal_running_session(sessions_base: &std::path::Path, session_id: &s
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 }

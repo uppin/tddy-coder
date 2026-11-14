@@ -218,6 +218,7 @@ fn a_managed_session(session_id: &str) -> SessionMetadata {
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     }
 }
 

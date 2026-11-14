@@ -50,7 +50,7 @@ extensions:
     hooks: { adapter: claude-settings-local }
     # What a session of this agent offers (`#agent-tools 12/12`): the gates read these, never the
     # agent's name. Unknown words are refused at load.
-    conversation: { kind: daemon_session_id }
+    conversation: { kind: daemon_session_id, rotation: { ends: { hook: SessionEnd, when: { reason: clear }, id_field: session_id }, begins: { hook: SessionStart, when: { source: clear }, id_field: session_id } } }
     capabilities: [hooks, managed_workflow, ask_user_question, split_host, project_home_main, requires_model, branch_name_required, operator_notify]
     # Which providers a route can point the agent at, and how it reaches it (`#agent-tools 12/12`).
     route:

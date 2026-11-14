@@ -717,6 +717,7 @@ orchestrator_session_id: home-session-1
             session_role: None,
             tmux_session: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         // Intentionally NO changeset.yaml — claude-cli sessions started without a worktree have none.
@@ -791,6 +792,7 @@ orchestrator_session_id: home-session-1
             session_role: None,
             tmux_session: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -850,6 +852,7 @@ orchestrator_session_id: home-session-1
             session_role: None,
             tmux_session: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -909,6 +912,7 @@ orchestrator_session_id: home-session-1
             session_role: None,
             tmux_session: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -988,6 +992,7 @@ sessions:
             session_role: None,
             tmux_session: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -1084,6 +1089,7 @@ sessions:
             session_role: None,
             tmux_session: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(

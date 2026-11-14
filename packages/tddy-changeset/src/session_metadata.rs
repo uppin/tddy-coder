@@ -144,6 +144,14 @@ pub struct SessionMetadata {
     /// daemon cannot read a marked record: this struct refuses unknown fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub orchestration_mark: Option<crate::orchestration_mark::OrchestrationMark>,
+    /// Every conversation the session's agent has had, oldest first; the last is the one a resume
+    /// continues (`#orchestrators` 6/11). The first is written at start and each conversation
+    /// rotation the agent's spec declares (`/clear` in Claude Code) is appended — none is ever
+    /// dropped. Empty for a session recorded before the list existed, which resumes by its own
+    /// id; never written when empty. An older daemon cannot read a record carrying it: this struct
+    /// refuses unknown fields.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_conversations: Vec<crate::agent_conversation::AgentConversation>,
 }
 
 /// [`SessionMetadata::session_role`] of a project's project-home session.
@@ -312,6 +320,7 @@ pub fn write_initial_tool_session_metadata(
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     write_session_metadata(session_dir, &metadata)
 }

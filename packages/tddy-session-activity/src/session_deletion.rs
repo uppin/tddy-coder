@@ -512,6 +512,7 @@ mod tests {
             session_role: None,
             tmux_session: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }
@@ -678,6 +679,7 @@ mod tests {
             session_role: None,
             tmux_session: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         };
         tddy_core::write_session_metadata(&dir, &metadata).unwrap();
 
@@ -741,6 +743,7 @@ mod tests {
             session_role: None,
             tmux_session: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         };
         tddy_core::write_session_metadata(&dir, &metadata).unwrap();
 

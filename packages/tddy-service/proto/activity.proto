@@ -290,6 +290,14 @@ message ReportSessionStatusRequest {
   string tool_name = 7;
   // That tool's input exactly as the hook received it, as a JSON string.
   string tool_input_json = 8;
+  // The agent's own id for the conversation the event came from — Claude Code's `session_id`,
+  // which after `/clear` is no longer the daemon's session id. Empty when the event names none
+  // (`#orchestrators` 6/11).
+  string agent_conversation_id = 9;
+  // The event's top-level string fields by name (`source`, `session_id`, ...): what the session's
+  // agent spec matches its `conversation.rotation` against. The hook matches nothing itself
+  // (`#orchestrators` 6/11).
+  map<string, string> hook_fields = 10;
 }
 
 message ReportSessionStatusResponse {

@@ -11,7 +11,7 @@ use std::time::Duration;
 use pretty_assertions::assert_eq;
 use tddy_actions::tool::RunSection;
 use tddy_coding_agent_specs::slots::conversation::{
-    ConversationSlot, DEFAULT_CONVERSATION_MINT_DEADLINE_SECS,
+    ConversationSlot, RotationHook, RotationSlot, DEFAULT_CONVERSATION_MINT_DEADLINE_SECS,
 };
 use tddy_coding_agent_specs::{
     builtin_specs, Capability, CodingAgentRegistry, CodingAgentSection, CodingAgentSpec,
@@ -111,12 +111,29 @@ fn each_builtin_cli_agent_converses_the_way_its_launch_resumes_it() {
             .map(|id| (id, the_spec_in(id, the_builtin_yaml(id)).conversation()))
             .collect();
 
-    // Then — claude by the daemon's session id, cursor by a minted chat, opencode and muse by their
-    // worktree, warp by the token its resume adapter reads
+    // Then — claude by the daemon's session id, followed through `/clear` (`#orchestrators` 6/11),
+    // cursor by a minted chat, opencode and muse by their worktree, warp by the token its resume
+    // adapter reads
     assert_eq!(
         conversations,
         BTreeMap::from([
-            ("claude", ConversationSlot::DaemonSessionId),
+            (
+                "claude",
+                ConversationSlot::DaemonSessionId {
+                    rotation: Some(RotationSlot {
+                        ends: RotationHook {
+                            hook: "SessionEnd".to_string(),
+                            when: BTreeMap::from([("reason".to_string(), "clear".to_string())]),
+                            id_field: "session_id".to_string(),
+                        },
+                        begins: RotationHook {
+                            hook: "SessionStart".to_string(),
+                            when: BTreeMap::from([("source".to_string(), "clear".to_string())]),
+                            id_field: "session_id".to_string(),
+                        },
+                    }),
+                }
+            ),
             (
                 "cursor",
                 ConversationSlot::Minted {
@@ -147,7 +164,7 @@ fn a_minted_conversation_is_bounded_by_its_declared_deadline_or_the_default() {
     let deadlines = (
         declared.mint_deadline(),
         undeclared.mint_deadline(),
-        ConversationSlot::DaemonSessionId.mint_deadline(),
+        ConversationSlot::DaemonSessionId { rotation: None }.mint_deadline(),
     );
 
     // Then

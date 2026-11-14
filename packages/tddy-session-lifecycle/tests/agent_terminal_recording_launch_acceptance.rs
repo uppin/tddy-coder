@@ -249,6 +249,7 @@ async fn a_resumed_session_records_its_main_terminal() {
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     write_session_metadata(&session_dir, &meta).unwrap();
     let stub_dir = tempfile::tempdir().unwrap();

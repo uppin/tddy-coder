@@ -393,6 +393,7 @@ async fn resuming_a_managed_claude_cli_session_re_wires_orchestration_and_socket
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 

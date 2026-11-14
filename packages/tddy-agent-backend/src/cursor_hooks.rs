@@ -8,7 +8,7 @@
 use crate::claude_hooks::{daemon_socket_arg, shell_quote, HookCommandParams};
 
 /// Cursor lifecycle hooks wired for activity status reporting.
-const CURSOR_HOOK_EVENTS: &[&str] = &[
+pub const CURSOR_HOOK_EVENTS: &[&str] = &[
     "sessionStart",
     "beforeSubmitPrompt",
     "postToolUse",

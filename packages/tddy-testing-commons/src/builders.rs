@@ -271,6 +271,7 @@ impl SessionMetadataBuilder {
             session_role: None,
             tmux_session: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         }
     }
 }

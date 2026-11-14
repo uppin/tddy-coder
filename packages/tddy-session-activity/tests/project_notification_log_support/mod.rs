@@ -68,6 +68,7 @@ pub fn write_session(data_dir: &Path, os_user: &str, session_id: &str, project_i
         session_role: None,
         tmux_session: None,
         orchestration_mark: None,
+        agent_conversations: Vec::new(),
     };
     write_session_metadata(&session_dir, &meta).expect("the session's .session.yaml");
 }

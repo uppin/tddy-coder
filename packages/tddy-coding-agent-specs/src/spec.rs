@@ -151,7 +151,20 @@ fn parse_section(
     };
     let agent: CodingAgentSection =
         serde_yaml::from_value(section.clone()).map_err(|e| invalid(e.to_string()))?;
-    hooks::adapter(&agent.hooks.adapter).map_err(|e| invalid(e.to_string()))?;
+    let hooks_adapter = hooks::adapter(&agent.hooks.adapter).map_err(|e| invalid(e.to_string()))?;
+    if let Some(rotation) = agent.conversation.as_ref().and_then(|c| c.rotation()) {
+        let installed = hooks_adapter.installed_events();
+        if let Some(missing) = rotation
+            .hooks()
+            .into_iter()
+            .find(|h| !installed.contains(h))
+        {
+            return Err(invalid(format!(
+                "conversation.rotation: hook {missing} is not installed by the {} hooks adapter",
+                agent.hooks.adapter
+            )));
+        }
+    }
     validate_env_entries(&agent.pass_env)
         .map_err(|e| format!("pass_env: {e}"))
         .map_err(invalid)?;

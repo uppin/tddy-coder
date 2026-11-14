@@ -411,6 +411,7 @@ impl ACursorDaemon {
             managed_codebase: false,
             session_role: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         };
         write_session_metadata(&session_dir, &meta).unwrap();
     }

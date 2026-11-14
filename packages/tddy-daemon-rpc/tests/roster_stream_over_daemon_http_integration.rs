@@ -113,6 +113,7 @@ fn write_managed_session(sessions_base: &Path, session_id: &str) {
             session_role: None,
             tmux_session: None,
             orchestration_mark: None,
+            agent_conversations: Vec::new(),
         },
     )
     .expect("write session metadata");

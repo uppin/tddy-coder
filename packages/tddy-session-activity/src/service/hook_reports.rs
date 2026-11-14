@@ -192,6 +192,8 @@ impl ActivityServiceImpl {
         tddy_core::update_activity_status(&session_dir, &req.status)
             .map_err(|e| Status::internal(format!("failed to update activity status: {}", e)))?;
 
+        self.follow_conversation_rotation(&session_dir, &req)?;
+
         // What the session waits on is kept next to the status that says it waits: a reader that is
         // not watching live (an orchestrator's `ReadSessionActivity`) sees the agent's question.
         let change = record_pending_question(&session_dir, &req, asked)?;

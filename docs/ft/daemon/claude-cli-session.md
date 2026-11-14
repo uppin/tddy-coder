@@ -62,6 +62,25 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
     start and on resume, and a stopped session's `GetTerminalHistory(main)` is served from it — see
     [Terminal sessions § History of a stopped agent terminal](terminal-sessions.md#history-of-a-stopped-agent-terminal).
 
+### Resume after `/clear`
+
+17. When the agent runs `/clear`, its `SessionEnd` hook reports the session's current conversation
+    ended with `reason: clear` and its `SessionStart` hook reports the new one with `source: clear`.
+    The daemon appends the new id to `.session.yaml` `agent_conversations`
+    (`[{ id, started_at_unix_ms, reason: start | rotate }]`, every id kept, newest last; the same id
+    twice is one entry). A session recorded before the list existed is seeded with its own id first.
+18. Every later resume — including a project-home main resumed by `EnsureProjectHomeSession` after
+    auto-stop — passes `--resume <newest id>`, so it continues the post-clear conversation; usage
+    readers follow the same id. A session with no list resumes by its session id, as before.
+19. A `/clear` in a claude-cli agent tab, which shares the session's hooks, ends a conversation that
+    is not the session's current one and rotates nothing. A rotation armed by an `ends` whose
+    `begins` never arrived (a crash between the two) is disarmed by the next report that cannot
+    complete it — a `SessionStart` that is not a clear, or another conversation's end.
+20. The mechanism is declared in the agent's YAML (`coding_agent.conversation.rotation`, see
+    [Coding agent specs](../../../packages/tddy-coding-agent-specs/docs/coding-agent-specs.md)); no
+    agent name appears in Rust. An older daemon cannot read a record carrying `agent_conversations`
+    (`SessionMetadata` refuses unknown fields).
+
 ### Connect (reattach)
 16. When the `claude` process is still running and the web client disconnects/reconnects, `ConnectSession` finds the existing PTY and reopens the stream — no new process is spawned.
 

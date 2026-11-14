@@ -149,6 +149,22 @@ it learns is one boolean about a session id it already knows.
 - **`orchestrator_presence::OrchestratorPresence`** — the port: whether this daemon serves a
   session's main terminal.
 
+## Following a conversation rotation (`#orchestrators` 6/11)
+
+`ReportSessionStatus` carries `hook_event_name`, `agent_conversation_id` and `hook_fields` (every
+top-level string field of the hook event) on every report. After the status is written,
+`follow_conversation_rotation` (`service/conversation_rotation.rs`) runs the report through the
+session's agent spec's `conversation.rotation` slot (`RotationSlot::step`) and, on `RotateTo`, appends
+the new conversation to `.session.yaml` `agent_conversations` (seeding a list-less session with its own
+id). The "current" conversation is the newest entry, or the session id.
+
+The state between the `ends` and `begins` reports is the marker
+`<session dir>/.conversation-rotation-armed`, not service state: callers build an
+`ActivityServiceImpl` per request, and `.session.yaml` is `deny_unknown_fields`. It lives in the
+session directory, never the worktree, so worktree sync never carries it, and session deletion
+removes it with the directory. A marker a crash left behind is cleared by `Disarm` on the next report
+that cannot complete the rotation.
+
 ## What is deliberately not here
 
 `daemon_instance_id` routing, for the reason node 6's `tddy-session-files` gives: forwarding a call
