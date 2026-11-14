@@ -50,6 +50,8 @@ import { useSessionsDrawerActivation } from "./useSessionsDrawerActivation";
 import { useSessionsDrawerDeleteSelection } from "./useSessionsDrawerDeleteSelection";
 import { SessionsDrawerOpenListButton, SessionsDrawerUnknownSession } from "./SessionsDrawerScreenParts";
 import { useSessionsDrawerPaneActions } from "./useSessionsDrawerPaneActions";
+import { SessionsDrawerDetailPane, SessionTypeOptionsRegistrar } from "./SessionsDrawerDetailPane";
+import { useSessionsDrawerScreenActions } from "./useSessionsDrawerScreenActions";
 import { useResumedSessionLiveness } from "./useResumedSessionLiveness";
 import { sessionPaneClients } from "./sessionPaneClients";
 import {
@@ -142,71 +144,10 @@ export function SessionsDrawerScreen({
     },
     [location, navigateRaw, navigationPort],
   );
-  const settingsRoute = parseSessionsProjectSettings(location);
-  const settingsProjectId = settingsRoute?.projectId ?? setup?.projectId ?? null;
-  const settingsHost = settingsRoute?.host ?? selectedInstanceId ?? "";
-  const settingsReplacing = settingsRoute ? false : (setup?.replacing ?? false);
-  const settingsProject =
-    settingsProjectId !== null
-      ? (projects.find(
-          (p) => p.projectId === settingsProjectId && p.daemonInstanceId === settingsHost,
-        ) ?? null)
-      : null;
-  const composerProjectId = parseSessionsProjectNew(location.path);
-  const stackRoute = parseSessionsProjectStack(location.path);
   // The stack view's address: the route carries project and stack, the owning host comes from the
   // drawer's `ListProjectStacks` row — resolved here by listing the route's project, unless the
   // row that was clicked already handed its address over.
   const [stackAddress, setStackAddress] = useState<ProjectStackAddress | null>(null);
-  const stackRouteProjectId = stackRoute?.projectId;
-  const stackRouteStackId = stackRoute?.stackId;
-  React.useEffect(() => {
-    if (!stackRouteProjectId || !stackRouteStackId) {
-      setStackAddress(null);
-      return;
-    }
-    if (
-      stackAddress?.projectId === stackRouteProjectId &&
-      stackAddress?.stackId === stackRouteStackId &&
-      stackAddress?.daemonInstanceId
-    ) {
-      return;
-    }
-    const fallback: ProjectStackAddress = {
-      projectId: stackRouteProjectId,
-      stackId: stackRouteStackId,
-      daemonInstanceId: "",
-    };
-    const stacksClient = drawerClients.prStackClient;
-    if (!stacksClient) {
-      setStackAddress(fallback);
-      return;
-    }
-    let cancelled = false;
-    stacksClient
-      .listProjectStacks({ sessionToken, projectId: stackRouteProjectId, thisHostOnly: false })
-      .then((res) => {
-        if (cancelled) return;
-        const summary = res.stacks.find((s) => s.address?.stackId === stackRouteStackId);
-        setStackAddress(
-          summary?.address
-            ? {
-                projectId: summary.address.projectId,
-                stackId: summary.address.stackId,
-                daemonInstanceId: summary.address.daemonInstanceId,
-              }
-            : fallback,
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setStackAddress(fallback);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stackRouteProjectId, stackRouteStackId, drawerClients.prStackClient, sessionToken]);
-
   // Default closed on mobile (the open 280px panel would cover the main pane);
   // open on desktop.
   const [sessionListOpen, setSessionListOpen] = useState(() => !detectIsMobile());
@@ -351,98 +292,40 @@ export function SessionsDrawerScreen({
     },
   });
 
-  const handleUnknownHome = () => {
-    setUnknownSession(false);
-    navigate(SESSIONS_DRAWER_ROUTE);
-  };
-
-  // A pr-stack orchestrator's "Start session" CTA spawns a child immediately in the
-  // background (no navigation, no auto-connect — the operator stays on the orchestrator's
-  // chat screen). Add a minimal optimistic entry so the drawer reflects it right away. Unlike
-  // handleTerminate's refresh() (which needs an authoritative isActive from the daemon), a full
-  // refetch here isn't safe to chain: the daemon's session-list enrichment may not have indexed the
-  // brand-new session yet. The optimistic overlay is merged into the list (a fetched entry with the
-  // same id always wins), and its remaining fields fill in on the next fan-out refresh.
-  const handleChildSessionStarted = (entry: {
-    sessionId: string;
-    recipe: string;
-    orchestratorSessionId: string;
-    projectId: string;
-  }) => {
-    addOptimisticSession(
-      create(SessionEntrySchema, {
-        sessionId: entry.sessionId,
-        recipe: entry.recipe,
-        orchestratorSessionId: entry.orchestratorSessionId,
-        projectId: entry.projectId,
-        isActive: true,
-        createdAt: new Date().toISOString(),
-      }),
-    );
-  };
-
-  const handleCreateSession = () => navigate(SESSIONS_NEW_ROUTE);
-  const handleNewOrchestrator = (projectId: string) => {
-    if (isMobile) setSessionListOpen(false);
-    navigate(sessionsProjectNewPath(projectId));
-  };
-  const handleOpenProjectStack = (summary: ProjectStackSummary) => {
-    if (!summary.address) return;
-    setStackAddress({
-      projectId: summary.address.projectId,
-      stackId: summary.address.stackId,
-      daemonInstanceId: summary.address.daemonInstanceId,
-    });
-    if (isMobile) setSessionListOpen(false);
-    navigate(sessionsProjectStackPath(summary.address.projectId, summary.address.stackId));
-  };
-  const handleCancelCreate = () => navigate(SESSIONS_DRAWER_ROUTE);
-  const handleSessionCreated = (sessionId: string) => {
-    // Auto-close the sessions drawer so the new session's terminal is unobstructed.
-    setSessionListOpen(false);
-    awaitingCreatedSessionIdRef.current = sessionId;
-    navigate(sessionsDrawerPathForSession(sessionId));
-    const creatingHost = connectHost(selectedInstanceId);
-    if (creatingHost) {
-      // Never rejects — a failed attach is the attachment's `error` state.
-      void connectSession(sessionId, sessionToken, creatingHost).then((attached) =>
-        settleAttach(sessionId, attached),
-      );
-    } else {
-      // The session was created, but the wire to its host is gone: say so on its pane rather than
-      // leaving it blank. The liveness effect attaches once a wire returns.
-      reportAttachFailure(hostNotConnected(hostLabelForInstance(selectedInstanceId ?? "")));
-    }
-    // Refresh the sessions list so the newly-created session appears in the drawer
-    // and selectedSession resolves to a non-null value.
-    requestSessionsRefresh();
-  };
-
-  const openProjectHomeSetup = (projectId: string, replacing = false) => {
-    if (isMobile) setSessionListOpen(false);
-    projectHomeSetup.open(projectId, { replacing });
-  };
-  // The gear opens the settings pane on the drawer's selected host: no `?host=` of its own, and
-  // any stale one from a previous settings route is dropped.
-  const handleOpenProjectSettings = (projectId: string) => {
-    if (isMobile) setSessionListOpen(false);
-    navigationPort.navigate({ path: sessionsProjectSettingsPath(projectId), params: {} });
-  };
-  const closeSettings = () => navigationPort.navigate({ path: SESSIONS_DRAWER_ROUTE, params: {} });
-  // The pinned main entry ensures main on the selected host and selects it, or sends a project with
-  // no main to set one up; a main the setup pane starts is attached like a created session.
-  const homeHandlers = {
-    onStarted: (sessionId: string) => {
-      reloadProjects();
-      handleSessionCreated(sessionId);
-    },
-    onNoMain: (projectId: string) => {
-      reloadProjects();
-      openProjectHomeSetup(projectId);
-    },
-  };
-  const { ensure: ensureProjectHome, start: startProjectHome } =
-    useEnsureProjectHome(client, sessionToken, handleSelectSession, homeHandlers);
+  const {
+    handleUnknownHome,
+    handleChildSessionStarted,
+    handleCreateSession,
+    handleNewOrchestrator,
+    handleOpenProjectStack,
+    handleCancelCreate,
+    handleSessionCreated,
+    openProjectHomeSetup,
+    handleOpenProjectSettings,
+    closeSettings,
+    ensureProjectHome,
+    startProjectHome,
+  } = useSessionsDrawerScreenActions({
+    navigate,
+    isMobile,
+    setSessionListOpen,
+    setStackAddress,
+    setUnknownSession,
+    addOptimisticSession,
+    selectedInstanceId,
+    connectHost,
+    connectSession,
+    settleAttach,
+    awaitingCreatedSessionIdRef,
+    reportAttachFailure,
+    hostLabelForInstance,
+    projectHomeSetup,
+    navigationPort,
+    client,
+    sessionToken,
+    handleSelectSession,
+    reloadProjects,
+  });
 
   return (
     <UploadProgressProvider>
@@ -505,57 +388,34 @@ export function SessionsDrawerScreen({
           {!unknownSession && <SessionsDrawerPaneError message={paneError} />}
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
               stays visible so the operator can pick a valid session. */}
-          {stackRoute !== null ? (
-            stackAddress !== null ? (
-              <ProjectStackView
-                address={stackAddress}
-                prStackClient={drawerClients.prStackClient ?? undefined}
-                sessionToken={sessionToken}
-                sessions={sortedSessions}
-                sessionMetadataBySessionId={sessionMetadataBySessionId}
-                defaultBranch={
-                  projects.find((project) => project.projectId === stackRoute.projectId)
-                    ?.mainBranchRef ?? ""
-                }
-                onOpenSession={handleSelectSession}
-                onChildSessionStarted={(entry) =>
-                  handleChildSessionStarted({ ...entry, orchestratorSessionId: "" })
-                }
-                client={drawerClients.client ?? undefined}
-                projectClient={drawerClients.projectClient ?? undefined}
-                catalogClient={drawerClients.catalogClient ?? undefined}
-                sessionFilesClient={drawerClients.sessionFilesClient ?? undefined}
-                worktreeClient={drawerClients.worktreeClient ?? undefined}
-                taskClient={drawerClients.taskClient ?? undefined}
-              />
-            ) : null
-          ) : composerProjectId !== null ? (
-            <OrchestratorComposer
-              projectId={composerProjectId}
-              daemonInstanceId={selectedInstanceId ?? ""}
-              sessionToken={sessionToken}
-              onStarted={handleSessionCreated}
-            />
-          ) : settingsProjectId !== null ? (
-            <ProjectSettingsPane
-              projectId={settingsProjectId}
-              project={settingsProject}
-              mainSession={
-                settingsProject?.homeSessionId
-                  ? (sortedSessions.find((s) => s.sessionId === settingsProject.homeSessionId) ?? null)
-                  : null
-              }
-              replacing={settingsReplacing}
-              setupForm={settingsRoute === null && setup !== null}
-              daemonInstanceId={settingsHost}
-              sessionToken={sessionToken}
-              onStartMain={(spec) => startProjectHome(settingsProjectId, settingsHost, spec)}
-              onDefaultsSaved={() => reloadProjects()}
-              onClose={closeSettings}
-            />
-          ) : unknownSession ? (
-            <SessionsDrawerUnknownSession onHome={handleUnknownHome} />
-          ) : (
+          <SessionsDrawerDetailPane
+            location={location}
+            setup={setup}
+            stackAddress={stackAddress}
+            setStackAddress={setStackAddress}
+            prStackClient={drawerClients.prStackClient}
+            sessionToken={sessionToken}
+            sortedSessions={sortedSessions}
+            sessionMetadataBySessionId={sessionMetadataBySessionId}
+            projects={projects}
+            onSelectSession={handleSelectSession}
+            onChildSessionStarted={handleChildSessionStarted}
+            viewClients={{
+              client: drawerClients.client ?? undefined,
+              projectClient: drawerClients.projectClient ?? undefined,
+              catalogClient: drawerClients.catalogClient ?? undefined,
+              sessionFilesClient: drawerClients.sessionFilesClient ?? undefined,
+              worktreeClient: drawerClients.worktreeClient ?? undefined,
+              taskClient: drawerClients.taskClient ?? undefined,
+            }}
+            selectedInstanceId={selectedInstanceId ?? ""}
+            onSessionCreated={handleSessionCreated}
+            onStartMainFor={(projectId, host, spec) => startProjectHome(projectId, host, spec)}
+            onDefaultsSaved={() => reloadProjects()}
+            onCloseSettings={closeSettings}
+            unknownSession={unknownSession}
+            onUnknownHome={handleUnknownHome}
+            sessionPane={(
             <SessionMainPane
               selectedSession={liveSelectedSession}
               attachment={attachment}
@@ -593,7 +453,8 @@ export function SessionsDrawerScreen({
               buildSessionActivityClient={buildSessionActivityClient}
               sessionMetadataBySessionId={sessionMetadataBySessionId}
             />
-          )}
+            )}
+          />
         </div>
         <SessionHostStatsFooter
           attachment={attachment}
@@ -604,22 +465,4 @@ export function SessionsDrawerScreen({
     </TooltipProvider>
     </UploadProgressProvider>
   );
-}
-
-/**
- * Registers the session types the selected daemon serves, from its `ListAgents` answer, for
- * readers that hold no catalog of their own (a terminal tab's label, the "+" menu's kinds).
- * Without a listing of its own this screen left those readers with no session type until some
- * Create pane happened to mount. Renders nothing.
- */
-function SessionTypeOptionsRegistrar({
-  catalogClient,
-  instanceId,
-}: {
-  catalogClient: Client<typeof CatalogService>;
-  instanceId: string;
-}) {
-  const { sessionTypes } = useSelectableAgents(catalogClient, instanceId);
-  registerSessionTypeOptions(sessionTypeOptions(sessionTypes, instanceId, instanceId));
-  return null;
 }
