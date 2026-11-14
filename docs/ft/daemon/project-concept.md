@@ -735,8 +735,11 @@ session's offered set, so they are advertised to it and pre-approved in its `--a
 - **Identity.** Every git command runs with the `GIT_*` environment the target session itself
   starts with (its project's account, or the host's `gh`). When that does not resolve, the
   checkout's own git identity applies. A ref argument that starts with `-` is refused.
-- **Push** goes to `origin` under the worktree's branch name, with the checkout's own credentials for
-  an HTTPS remote ([TODO](../../dev/todo/2026-10-23-project-home-git-push-remote-and-token.md)).
+- **Push** goes to the project's remote (`ProjectData.remote_name`, default `origin`) under the
+  worktree's branch name. A daemon-run push carries the project account's token through a
+  per-command credential helper (`TDDY_PUSH_ACCOUNT_TOKEN` in the environment, never in argv or
+  logs), so an HTTPS remote is answered with the account's credential; a Local gh project answers
+  with its `gh` token.
 - No merge, PR or branch-creation tools here — the `pr_*` tools cover those.
 
 ## Related

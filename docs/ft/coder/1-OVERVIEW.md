@@ -81,7 +81,7 @@ its changeset wraps.
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
 | Stack tools served by the daemon | [PR stacking § PR-management tools](pr-stacking.md#pr-management-tools) — the eleven plan and read tools are daemon exec tools addressed by `stack_id`, offered by role: orchestrators all eleven, a stack's node sessions status and read for their stack |
-| [Stack git tools run by the daemon](1-WIP/PRD-2026-11-10-stack-git-tools.md) | [PR stacking § Merge and repoint](pr-stacking.md#merge-and-repoint) — merge, repoint, rebase and conflicts run daemon-side in each node's worktree, addressed by `stack_id` |
+| Stack git tools run by the daemon | [PR stacking § Merge and repoint](pr-stacking.md#merge-and-repoint) — merge, repoint, rebase and conflicts run daemon-side in each node's worktree, addressed by `stack_id`, offered to orchestrators alone |
 
 ## Integration Points
 

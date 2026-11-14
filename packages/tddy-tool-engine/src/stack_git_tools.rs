@@ -20,7 +20,6 @@
 //! untouched.
 //!
 //! Feature doc: docs/ft/coder/pr-stacking.md § Merge and repoint.
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-11-10-stack-git-tools.md.
 
 use async_trait::async_trait;
 use serde_json::{json, Value};

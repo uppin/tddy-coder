@@ -24,7 +24,6 @@
 //! (`<projects>/<project_id>/stacks/<stack_id>.op.json`) for an operation an orchestrator started.
 //!
 //! Feature doc: docs/ft/coder/pr-stacking.md § Merge and repoint.
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-11-10-stack-git-tools.md.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

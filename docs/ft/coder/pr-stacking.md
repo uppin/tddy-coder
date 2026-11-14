@@ -225,20 +225,20 @@ During the `orchestrate` goal the agent has a set of `pr_*` tools that let it ma
 
 The eleven plan and read tools — `pr_stack_list`, `pr_stack_create`, `pr_stack_status`, `pr_read`, `pr_search`, `pr_comments`, `pr_add_planned`, `pr_update_planned`, `pr_delete_planned`, `pr_set_status`, `pr_adopt` — are **daemon exec tools** (`tddy-tool-engine::stack_tools`, served by `tddy-daemon-rpc` over the project's `ProjectStackStore`). Each addresses a stack by `stack_id`; `daemon_instance_id` forwards the call whole to the host that holds the stack. Who is offered them is decided by role alone, never by recipe: an orchestrator-role session (main and every orchestrator) is offered all eleven, for any stack of its project — the stack its changeset names (`Changeset.stack_id`) is its own stack and the default when a call names none; a session bound to a node of a stack is offered only `pr_stack_status` and `pr_read`, for that stack alone; every other session is offered none, and the daemon refuses its call. `pr_stack_create` takes an optional `title` and answers the new `stack_id`; `pr_stack_list` answers the project's stacks on the host, each with its title. GitHub calls use the **project account's** token, not the calling session's. A read-only session may call all eleven: they write only the project's stack store and, for `pr_update_planned` with `sync_pr`, the PR's title and body on GitHub. `tddy-tools` keeps no copy of these eleven; it advertises them from the daemon's `ListExecTools` and forwards calls to it.
 
-The six git tools — `pr_merge`, `pr_repoint`, `pr_close`, `pr_resolve_conflicts`, `pr_set_parents`, `pr_spawn_child` — remain `tddy-tools` MCP tools operating on the orchestrator session's stack (read/write via `changeset::{read_session_stack, update_stack_atomic}`) until `#orchestrators` 10/11.
+The six git tools — `pr_merge`, `pr_repoint`, `pr_close`, `pr_resolve_conflicts`, `pr_set_parents`, `pr_spawn_child` — are **daemon exec tools** too, in the sibling family `tddy-tool-engine::stack_git_tools`, served by `tddy-daemon-rpc` over the same store and addressing: each names a `node_id` (and accepts `stack_id` and `daemon_instance_id`, forwarding whole to the holding host). Only an orchestrator-role session is offered them — a session bound to a node of a stack, and every other session, is offered none. Every git step runs on the daemon **in the node's own worktree** — the worktree of the project's repository that holds the node's branch — never in the caller's checkout. A rebase is refused, untouched, while that worktree has uncommitted changes or the node's session is running, then force-pushes with lease to the project's remote with the project account's token. `pr_resolve_conflicts` finds the conflicting paths with `git merge-tree --write-tree`, leaving the worktree exactly as it was, marks the node `has-conflicts`, and with `delegate: true` asks the node's session to resolve them — `SendSessionMessage` when it is running, `ResumeSession` with the message when it is stopped. `pr_spawn_child` starts the node's session through the daemon's start path with the caller as its stack parent, defaulting `session_type` and `model` to the caller's own, and binds the node to the started session. `tddy-tools` keeps no copy of the six; it advertises them from the daemon's `ListExecTools` and forwards calls to it.
 
 | Tool | Purpose | Reuses |
 |------|---------|--------|
 | `pr_stack_list` | List the project's stacks on a host, each with its `stack_id`, title, holding host, creating session and node count. | `ProjectStackStore::list` |
 | `pr_stack_create` | Create a new, empty stack in the project with an optional title; answers its `stack_id`. Creating one never makes it the caller's own stack. | `ProjectStackStore::create_titled` |
 | `pr_stack_status` | List every node with its live GitHub state (`PrLiveStatus`) and its computed [internal status](#internal-pr-status); writes derived statuses back to the changeset. | `assemble_views`, `effective_base_ref`, `PrLiveStatus` |
-| `pr_merge` | Merge a node's PR into its base. | `RealGithubPrApi::merge_pr` / `execute_stack_merge` |
-| `pr_repoint` | Repoint a node's PR base branch after an ancestor merges. | `RealGithubPrApi::patch_pr_base` / `execute_stack_repoint`, `effective_base_ref` |
-| `pr_close` | Close a PR without merging. | new `close_pr` helper (`PATCH /pulls/{n}` `{state: "closed"}`) |
-| `pr_resolve_conflicts` | Sync a node's branch with its base, detect conflicts (`git ls-files -u`), and return the conflicted paths so the agent resolves them in the worktree; marks the node `has-conflicts`. | `merge_pr/git_ops.rs::sync_feature_with_origin_main`, `ensure_no_unmerged_paths` |
+| `pr_merge` | Merge a node's PR into its base, as the project account. | daemon `DaemonStackGitTools`, `StackOpJournal` beside the stack |
+| `pr_repoint` | Rebase a node's branch onto its effective base (or a named base) in its own worktree and repoint its PR base branch after an ancestor merges. | daemon realign: `git_ops::rebase_onto` in the node's worktree, force-push with lease, `patch_pr_base` |
+| `pr_close` | Close a node's PR without merging, as the project account. | daemon `DaemonStackGitTools` |
+| `pr_resolve_conflicts` | Return the paths a node's branch conflicts on against its base, probed without touching its worktree; marks the node `has-conflicts`. With `delegate`, the node's session is asked to resolve them. | `git merge-tree --write-tree`; `SendSessionMessage` / `ResumeSession` |
 | `pr_set_status` | Agent override: set a node's internal status `kind` + `note` with `source = "override"`. | `update_stack_atomic` |
 | `pr_add_planned` | Append a planned PR node mid-flow. Additive only — it never touches an existing node; editing one is `pr_update_planned`. | `stack_ops::add_planned_pr_node` |
-| `pr_spawn_child` | Start a child coding session for a node (with `stack_parent` set) — the same effect as the web "Start session" CTA, driven from chat. | `StartSession` daemon path (via the toolcall relay) |
+| `pr_spawn_child` | Start a child coding session for a node (with the caller as `stack_parent`) — the same effect as the web "Start session" CTA, driven from chat. | daemon start path (`StartSession` through `DaemonProjectHome`) |
 | `pr_update_planned` | Edit a node's `title` / `description` (any time, including once it owns a branch, a session and an open PR) and its `branch_suggestion` (only while it owns no branch). Opt-in `sync_pr` also publishes the new title/body to the node's PR. | `stack_ops::{update_planned_pr_node, sync_node_to_github_pr}` |
 | `pr_delete_planned` | Remove a node, reparenting its children onto that node's parents. Refuses a node whose PR is open. Branch, worktree and child session are left alone and reported back as unowned. | `stack_ops::delete_planned_pr_node` |
 | `pr_set_parents` | Give a node a whole new parent list — the plan-level move, and the only reorder primitive (stack order is derived from `parents`). When the node owns a branch it is realigned exactly as a repoint realigns it. | `stack_ops::set_stack_node_parents` |
@@ -320,12 +320,12 @@ The orchestrator reads `changeset.yaml` as authoritative and `stack-progress.jso
 
 ## Merge and repoint
 
-After the operator approves (or autonomous mode is enabled) the orchestrator merges via the GitHub REST API (`GithubPrApi::merge_pr`). For each dependent node of the just-merged node:
+After the operator approves (or autonomous mode is enabled) the orchestrator merges via the GitHub REST API, as the project account, on the daemon (`pr_merge`). For each dependent node of the just-merged node:
 
 1. **GitHub base update:** `patch_pr_base(dependent_pr_number, new_base)` where `new_base` is the recomputed effective base (now `main` or the next non-skipped ancestor).
-2. **Git history repoint:** in a dedicated scratch worktree for the dependent branch: `git rebase --onto <new_base> <old_base> <branch>`, then `git push --force-with-lease=<branch>:<expected-sha>`. A `git merge-base` fallback guards against a stale `<old_base>`. `git rerere` is enabled at bootstrap.
+2. **Git history repoint:** on the daemon, in the worktree that holds the dependent branch: `git rebase --onto <new_base> <old_base> <branch>`, then a force-push with lease to the project's remote. A `git merge-base` fallback guards against a stale `<old_base>`. A worktree with uncommitted changes, or a node whose session is running, is refused untouched.
 
-Rebase/merge conflicts are surfaced to the agent via `pr_resolve_conflicts`: the tool syncs the branch, detects unmerged paths, marks the node `has-conflicts`, and returns the conflicted file list. The agent then resolves the conflicts directly in the node's worktree (the `orchestrate` goal runs with `AcceptEdits`) and re-runs the tool to confirm a clean tree — replacing the old "mark Failed and pause" behavior.
+Rebase/merge conflicts are surfaced to the agent via `pr_resolve_conflicts`: the daemon probes the branch against its base with `git merge-tree --write-tree` — no merge is started, so the worktree is left exactly as it was — marks the node `has-conflicts`, and returns the conflicted file list. With `delegate: true` the node's own session is asked to resolve them; otherwise the agent resolves them and re-runs the tool to confirm a clean tree.
 
 ## Full DAG handling
 
@@ -356,7 +356,7 @@ The daemon honors the explicit choice at the spawn seam — see [Git integration
 
 **Loop resumability** is free: `assess` is idempotent, and every non-terminal state maps to `assess`. Restarting the orchestrator session re-enters `assess` exactly as if the previous tick completed.
 
-**Merge+repoint atomicity:** a transient journal file `parent_dir/.workflow/stack-op.json` (written via temp-then-rename) records the in-flight operation:
+**Merge+repoint atomicity:** a transient journal file records the in-flight operation — beside the stack (`<projects>/<project_id>/stacks/<stack_id>.op.json`) for an operation a daemon stack git tool started, and at `parent_dir/.workflow/stack-op.json` for a pr-stack session's own operation, whose in-flight recovery is unchanged:
 
 ```
 StackOpJournal { op_id, merged_node_id, merge_phase, pre_op_snapshot, dependents }
