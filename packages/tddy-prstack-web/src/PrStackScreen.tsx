@@ -25,7 +25,10 @@ import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
 import { baseBranchChoice } from "./baseBranchChoice";
 import { resolveRepointTarget, startBlockers } from "./startBlockers";
 import { stackDocAttachments } from "./stackDocAttachments";
-import { CreateSessionDialog, remoteTrackingName, type CreateSessionInitialValues } from "tddy-session-create-web";
+import { usePrStackStartSession } from "./usePrStackStartSession";
+import { usePrStackPlan } from "./usePrStackPlan";
+import { usePrStackBranchMutations } from "./usePrStackBranchMutations";
+import { PrStackStartSessionDialog } from "./PrStackStartSessionDialog";
 
 type ConnectionClient = Client<typeof SessionService>;
 type ProjectClient = Client<typeof ProjectService>;
@@ -184,234 +187,45 @@ export function PrStackScreen({
 }: PrStackScreenProps) {
   const { room, status: roomStatus, error: roomError } = useMediaPort().usePresenterRoom(attachmentHint);
   const livekitServerIdentity = attachmentHint?.serverIdentity;
-  // Overrides `session.stackPlanJson` immediately after a successful `AddPlannedPr`, since the
-  // `session` prop itself only refreshes once the caller separately refetches the session list.
-  // Reset whenever the prop actually changes so a later real refetch isn't masked by a stale one.
-  const [stackPlanOverride, setStackPlanOverride] = useState<string | null>(null);
-  useEffect(() => {
-    setStackPlanOverride(null);
-  }, [session.stackPlanJson]);
-  const stack = useMemo(
-    () => parseStackPlan(stackPlanOverride ?? session.stackPlanJson),
-    [stackPlanOverride, session.stackPlanJson],
-  );
-  // The stack this session's changeset names, addressed by id (`#orchestrators` 9/11): every
-  // planned-PR call names it when the session carries one, and the panel is loaded by it.
-  const stackAddress = session.stackId
-    ? {
-        projectId: session.projectId,
-        stackId: session.stackId,
-        daemonInstanceId: session.daemonInstanceId,
-      }
-    : undefined;
-  const stackTargetFields = stackAddress
-    ? { stack: stackAddress }
-    : { sessionId: session.sessionId };
-  // Load the panel by the stack's id when the session names one, so the list is the store's
-  // record rather than the list snapshot the session happened to carry.
-  useEffect(() => {
-    if (!prStackClient || !stackAddress) return;
-    let cancelled = false;
-    prStackClient
-      .getProjectStack({ sessionToken, stack: stackAddress })
-      .then((res) => {
-        if (!cancelled && res.stackPlanJson) setStackPlanOverride(res.stackPlanJson);
-      })
-      .catch(() => {
-        // The session's own snapshot stays on screen; a failed read must not blank the panel.
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prStackClient, sessionToken, session.stackId]);
-  // Every session in this stack, on any host, in the one shape the view joins on (D38).
-  const childSessions = useMemo(
-    () => stackChildSessions(sessions, sessionMetadataBySessionId),
-    [sessions, sessionMetadataBySessionId],
-  );
-  // The plan as it stands, plus the `branch` and `session_id` a cross-host spawn wrote on the child's
-  // own disk and this orchestrator's `changeset.yaml` therefore never learned. Hydrated once, here,
-  // so `nodes` is what the whole screen reads: the poll set, base resolution, the spawn gate, the
-  // parent picker and each row's branch line all become correct without a case of their own.
-  const nodes = useMemo(
-    () => hydrateStackNodes(stack.nodes, childSessions, session.sessionId),
-    [stack.nodes, childSessions, session.sessionId],
-  );
-  const [startSessionNode, setStartSessionNode] = useState<StackNode | null>(null);
+  const {
+    nodes,
+    childSessions,
+    stackTargetFields,
+    branchResolutionByBranch,
+    branchQueries,
+    setResolution,
+    setStackPlanOverride,
+  } = usePrStackPlan({
+    session,
+    prStackClient,
+    sessionToken,
+    sessions,
+    sessionMetadataBySessionId,
+    defaultBranch,
+  });
+
   const [isAddingPlannedPr, setIsAddingPlannedPr] = useState(false);
-  // Why a node's last repoint did not happen, keyed by node id. Per node rather than one banner: the
-  // list shows several nodes at once and only the one that was refused is still blocked.
-  const [repointErrorByNodeId, setRepointErrorByNodeId] = useState<Record<string, string>>({});
-  // Nodes with a mutation of their branch in flight — a repoint *or* a pull from the base. One set
-  // covering both, because both rewrite the same branch: a repoint rebases and force-pushes it, and a
-  // pull merges or rebases the base into it. The daemon serializes neither, so the two running side by
-  // side leaves a half-rebased worktree or force-pushes over a merge commit — and the state where both
-  // controls are offered at once is the normal post-merge one, since a node becomes repointable
-  // exactly when the parent whose merge also left it behind its new base landed.
-  //
-  // A set rather than a single id: mutations of *different* nodes touch different branches and may
-  // legitimately overlap. Only the guard is shared — each operation still reports its own failure.
-  const [branchMutatingNodeIds, setBranchMutatingNodeIds] = useState<ReadonlySet<string>>(new Set());
-  // Why a node's last reorder did not happen. Nothing moved, so the row would otherwise look as
-  // though the click was simply ignored.
-  const [reorderErrorByNodeId, setReorderErrorByNodeId] = useState<Record<string, string>>({});
-  // Nodes with a reorder in flight — the plan is rewritten from the response, so a second click
-  // would race the first for which returned order wins.
-  const [reorderingNodeIds, setReorderingNodeIds] = useState<ReadonlySet<string>>(new Set());
-  // Why a node's last pull from its base did not happen, keyed by node id. Kept apart from the repoint
-  // reasons: the two operations fail for different causes and the row states each where it happened.
-  const [syncErrorByNodeId, setSyncErrorByNodeId] = useState<Record<string, string>>({});
-  // The pull the operator asked for that is waiting on what to do about uncommitted work in the
-  // node's worktree. Null when nothing is pending — the prompt is the only thing standing between
-  // the click and the call.
-  const [dirtyWorktreePrompt, setDirtyWorktreePrompt] = useState<DirtyWorktreePrompt | null>(null);
   // The panel keeps today's at-a-glance view of the plan on desktop, where there is room for it, and
   // starts out of the way on mobile, where it covers the chat entirely (same seed as the session
   // list's own `sessionListOpen`).
   const [plannedPrPanelOpen, setPlannedPrPanelOpen] = useState(() => !detectIsMobile());
   const isMobile = useIsMobile();
 
-  // What to ask `QueryBranch` to resolve: one call per branch a node owns, each paired with that
-  // node's base so the daemon can also report how the two stand against each other. `QueryBranch`
-  // resolves each branch's live GitHub PR itself, so the screen makes no second PR lookup:
-  // `GetPrStatus` reaches the same authenticated `GET /pulls` on the daemon, and polling both would
-  // double the GitHub request rate for no extra information — enough to exhaust a 5000/hour user
-  // limit within the hour on a five-node stack, after which every row reads "PR status unavailable"
-  // and stays there.
-  const branchQueries = useMemo(
-    () => buildBranchQueries(nodes, defaultBranch),
-    [nodes, defaultBranch],
-  );
-  // One-call branch resolution (worktree + in-progress session + remote + PR + base sync) per branch,
-  // polled on the same interval and independent of the agent.
-  const { resolutionByBranch: branchResolutionByBranch, setResolution } = useQueryBranch(
-    prStackClient,
-    sessionToken,
-    stackAddress ? { stack: stackAddress } : { sessionId: session.sessionId },
-    branchQueries,
-  );
-
-  // Opening "Start session" no longer spawns the child directly — it opens the shared creation
-  // form pre-filled from the planned node, so the operator can review/adjust before spawning.
-  const handleStartSession = (node: StackNode) => {
-    // The dialog is only rendered when a daemon client is available; without one, opening it
-    // would leave the row in its "starting" state with no dialog to clear it.
-    if (!client) return;
-    setStartSessionNode(node);
-  };
-
-  // The daemon's `selected_integration_base_ref` is a remote-tracking ref (`<remote>/<branch>`), but a
-  // stack node's `branch` and the base-branch picker's options are local names. Lift the local names
-  // into the form the daemon fetches (`git fetch <remote> <branch>`), using the project's resolved
-  // default remote — falling back to `origin` (the daemon's own last resort) for a legacy project that
-  // stored none. `remoteTrackingName` is idempotent, so a `defaultBranch` that is already
-  // `<remote>/<branch>` (e.g. `origin/master`) passes through unchanged.
-  const remote = defaultRemote || "origin";
-
-  // Planned-PR sessions default to a Claude Code CLI session, stack-parented to this orchestrator so
-  // the child's worktree chains onto its branch, and pre-fill the planned branch and title/description.
-  //
-  // A node that already owns a branch is *resumed* onto it rather than asked to create it: the branch,
-  // its worktree and its remote ref all outlive the session that made them, so `new_branch_from_base`
-  // would fail on "branch already exists" — which is exactly the node this recovery path is for.
-  const ownedBranch = startSessionNode?.branch ?? "";
-  // Options and pre-selection come from one resolver, so the picker cannot contradict the base label
-  // below — both read `deriveStackBaseBranch`. Each option's ref is lifted into remote-tracking form,
-  // and with it any label that IS that branch. A label that differs is prose, not a ref — today only a
-  // legacy project's "project default", which names an empty ref in words — so it is left as written.
-  const choice = startSessionNode
-    ? baseBranchChoice(startSessionNode, nodes, defaultBranch)
-    : { options: [], selected: "" };
-  const baseBranchOptions = choice.options.map((option) => {
-    const ref = remoteTrackingName(option.value, remote);
-    return { value: ref, label: option.label === option.value ? ref : option.label };
+  const {
+    startSessionNode,
+    setStartSessionNode,
+    handleStartSession,
+    startSessionInitialValues,
+    handleChildSessionCreated,
+  } = usePrStackStartSession({
+    session,
+    nodes,
+    defaultBranch,
+    defaultRemote,
+    branchResolutionByBranch,
+    hasSessionClient: Boolean(client),
+    onChildSessionStarted,
   });
-  // Every reason this spawn may not succeed, as the row states them.
-  const startBlockersForNode = startSessionNode
-    ? startBlockers(startSessionNode, nodes, branchResolutionByBranch)
-    : [];
-  // A blocked node sends **no** explicit base, so the daemon resolves the chain base itself.
-  //
-  // `selected_integration_base_ref` is an override: `select_worktree_base_ref` gives it precedence
-  // over `resolve_chain_base_ref`, which is where `Stack::base_ref_for_spawn` — the daemon's own
-  // ordering gate — lives. And the value it would be given here is derived from a base the view could
-  // not resolve: `deriveStackBaseBranch` flattens an unresolvable base (`no-ancestor-branch`,
-  // `parent-has-no-branch`) to the project default. Sending it would cut the child's worktree from
-  // `origin/<default>` for a node whose non-merged parent owns no branch, record that branch on the
-  // node, and leave every descendant based onto a branch missing its parent's work — silently, with a
-  // healthy status chip on the row.
-  //
-  // Force start hands the decision to the daemon's gate (D42), so the view must not pre-empt that gate
-  // with an override. The picker keeps every option: a base the operator chooses on purpose is a
-  // decision, not a guess — only the pre-selection is dropped.
-  // A blocked node's pre-selection is dropped only when there is more than one option to choose
-  // from: the operator must then pick a base on purpose, and submitting without picking sends an
-  // empty override so the daemon's own ordering gate decides (D42). When the project default is the
-  // sole option — a child of a parent merged externally, whose branch is gone and whose work is
-  // already in the default — the default is the escape and is pre-selected, so confirming sends it
-  // as the explicit repoint the daemon honors past the gate. The caption always names the derived
-  // base (D43: the dialog "showing the base branch"), never blanked.
-  const blankBaseBranchSelection =
-    startBlockersForNode.length > 0 && baseBranchOptions.length !== 1;
-  const selectedBaseBranch = blankBaseBranchSelection
-    ? ""
-    : remoteTrackingName(choice.selected, remote);
-  const startSessionInitialValues: CreateSessionInitialValues | undefined = startSessionNode
-    ? {
-        projectId: session.projectId,
-        daemonInstanceId: session.daemonInstanceId,
-        stackParent: session.sessionId,
-        // The planned node this spawn materializes, sent so the daemon links it by identity rather
-        // than re-deriving it from the branch (D34) — a branch the operator can still rename in the
-        // dialog before confirming, and one the spawning daemon cannot look up at all when the
-        // orchestrator lives on another host.
-        stackNodeId: startSessionNode.nodeId,
-        // The child runs as the same kind of session as its orchestrator parent.
-        sessionType: session.sessionType,
-        branchIntent: ownedBranch ? "work_on_selected_branch" : "new_branch_from_base",
-        selectedBranch: ownedBranch,
-        // The planned branch (feature/<stack>/<node>, pre-filled by the pr-stack agent) — only
-        // meaningful when a branch still has to be created.
-        newBranchName: ownedBranch ? "" : (startSessionNode.branchSuggestion ?? ""),
-        // The concrete base branch the child will branch from — the node's nearest non-merged
-        // ancestor's branch (predecessor stack branch), collapsing to the project's default branch
-        // for a root. Lifted to `<remote>/<branch>` so the label matches the picker's options and
-        // reads the same ref the daemon will fetch.
-        //
-        // Blank for a blocked node, for the same reason `selectedBaseBranch` is: the base that
-        // `deriveStackBaseBranch` flattens to is a guess this spawn no longer submits, and a dialog
-        // naming a ref it will not send is the drift D18 exists to prevent. The option then reads
-        // "New branch from base" with no ref, which is the truth — the daemon resolves it, and
-        // refuses the spawn when the chain has no base to give.
-        baseBranchLabel:
-          remoteTrackingName(deriveStackBaseBranch(startSessionNode, nodes, defaultBranch), remote),
-        baseBranchOptions,
-        selectedBaseBranch,
-        // A stack node's branch is the base its successors' PRs target, so it goes to origin at
-        // start — unlike an ad-hoc session, where the toggle defaults to unchecked.
-        createRemoteBranch: true,
-        initialPrompt: [startSessionNode.title, startSessionNode.description]
-          .filter(Boolean)
-          .join("\n\n"),
-        // The orchestrator's documents, attached by reference so the child agent reads its own
-        // boundaries rather than inferring them. Rows, not an invariant: an operator restarting an
-        // orphaned node whose child already holds them drops them here.
-        attachments: stackDocAttachments(session, startSessionNode.nodeId),
-      }
-    : undefined;
-
-  const handleChildSessionCreated = (sessionId: string) => {
-    const node = startSessionNode;
-    setStartSessionNode(null);
-    if (!node) return;
-    onChildSessionStarted?.({
-      sessionId,
-      recipe: node.childRecipe,
-      orchestratorSessionId: session.sessionId,
-      projectId: session.projectId,
-    });
-  };
 
   const handleAddPlannedPr = async (input: AddPlannedPrFormSubmission) => {
     if (!prStackClient) return;
@@ -457,176 +271,28 @@ export function PrStackScreen({
   // The target is the same value the row's control named, so the daemon does exactly what the operator
   // was promised rather than re-deriving it from a git probe that cannot tell "absent from origin"
   // from "could not tell" (D18).
-  const handleRepoint = async (nodeId: string) => {
-    if (!prStackClient) return;
-    const node = nodes.find((n) => n.nodeId === nodeId);
-    if (!node) return;
-    // The control is disabled while any mutation of this branch is in flight, but a second call must
-    // be impossible rather than merely hard to trigger: a rebase and force-push landing beside a pull
-    // that is merging into the same branch is not a repeat of a harmless read.
-    if (branchMutatingNodeIds.has(nodeId)) return;
-    setBranchMutatingNodeIds((prev) => new Set(prev).add(nodeId));
-    // A new attempt clears the previous reason: keeping it beside a repoint that is in flight would
-    // report a failure that is no longer the current state.
-    setRepointErrorByNodeId((prev) => withoutNode(prev, nodeId));
-    try {
-      const res = await prStackClient.repointPlannedPr({
-        sessionToken,
-        ...stackTargetFields,
-        nodeId,
-        targetBaseBranch: resolveRepointTarget(
-          node,
-          nodes,
-          branchResolutionByBranch,
-          defaultBranch,
-        ),
-      });
-      setStackPlanOverride(res.stackPlanJson);
-    } catch (err) {
-      // The daemon refuses a target that names neither the default branch nor any parent's branch, and
-      // the repoint can still fail on an unresolvable default branch or a rebase conflict. Nothing was
-      // persisted in either case, so the row stays blocked and has to say why.
-      setRepointErrorByNodeId((errors) => ({ ...errors, [nodeId]: failureReason(err) }));
-    } finally {
-      setBranchMutatingNodeIds((prev) => withoutNodeInFlight(prev, nodeId));
-    }
-  };
-
-  // Move a row one position in the persisted reading order. The plan comes back renumbered and is
-  // re-rendered through the same override `handleAddPlannedPr` uses, since the `session` prop only
-  // refreshes on a later refetch.
-  const handleReorder = async (nodeId: string, direction: "up" | "down") => {
-    if (!prStackClient) return;
-    // The control is disabled while a reorder is in flight, but a second call must be impossible
-    // rather than merely hard to trigger: two reorders of one node race over which returned plan wins.
-    if (reorderingNodeIds.has(nodeId)) return;
-    setReorderingNodeIds((prev) => new Set(prev).add(nodeId));
-    setReorderErrorByNodeId((prev) => withoutNode(prev, nodeId));
-    try {
-      const res = await prStackClient.reorderPlannedPr({
-        sessionToken,
-        ...stackTargetFields,
-        nodeId,
-        direction,
-      });
-      setStackPlanOverride(res.stackPlanJson);
-    } catch (err) {
-      // Nothing was persisted, so nothing moved — without a reason the row would look as though the
-      // click was simply swallowed.
-      setReorderErrorByNodeId((errors) => ({ ...errors, [nodeId]: failureReason(err) }));
-    } finally {
-      setReorderingNodeIds((prev) => withoutNodeInFlight(prev, nodeId));
-    }
-  };
-
-  // Take the base's commits into a node's branch. The base sent is the one the row's badge and the
-  // control's own label named — the same discipline repoint follows (D18) — so the daemon does
-  // exactly what the operator was promised rather than re-deriving a base of its own.
-  const runPull = async (pull: {
-    nodeId: string;
-    /** The branch that takes the commits — the key the fresh resolution is written back under. */
-    branch: string;
-    baseBranch: string;
-    strategy: "merge" | "rebase";
-    /** "commit" commits and pushes the worktree's outstanding work first; empty leaves it to fail. */
-    dirtyWorktreeAction: "" | "commit";
-    commitMessage: string;
-  }) => {
-    if (!prStackClient) return;
-    const { nodeId, branch } = pull;
-    // Every control that touches this branch is disabled while one of them runs, but a concurrent
-    // merge, rebase or repoint of one branch is destructive rather than merely wasteful, so it must
-    // be impossible rather than merely unreachable through the UI.
-    if (branchMutatingNodeIds.has(nodeId)) return;
-    setBranchMutatingNodeIds((prev) => new Set(prev).add(nodeId));
-    // A new attempt clears the previous reason: a failure kept beside a pull that is now in flight
-    // reports a state that is no longer true.
-    setSyncErrorByNodeId((prev) => withoutNode(prev, nodeId));
-    try {
-      const res = await prStackClient.pullBaseIntoBranch({
-        sessionToken,
-        ...stackTargetFields,
-        nodeId,
-        baseBranch: pull.baseBranch,
-        strategy: pull.strategy,
-        dirtyWorktreeAction: pull.dirtyWorktreeAction,
-        commitMessage: pull.commitMessage,
-      });
-      // The refs just moved, so the row repaints from the pull's own re-resolution instead of
-      // waiting up to a full poll interval to stop claiming the branch is behind. Written into the
-      // poll's own map rather than layered over it, so the next tick simply supersedes it.
-      if (res.resolution) setResolution(branch, res.resolution);
-      // A successful call is not necessarily a completed pull: the local merge or rebase can land
-      // while the push that follows it fails, which the daemon reports rather than rolling back
-      // (D32). The re-resolution above then repaints the row as in sync with the base — true of the
-      // local branch, and not true of the PR anyone is reviewing — so the one surface that can say
-      // so has to.
-      if (!res.pushed && res.pushError) {
-        setSyncErrorByNodeId((errors) => ({
-          ...errors,
-          [nodeId]: unpushedPullReason(pull.baseBranch, branch, res.pushError),
-        }));
-      }
-    } catch (err) {
-      // A conflict aborts the pull and a push can fail on its own; either way the row still reads
-      // "behind", so it has to say why it stayed that way.
-      setSyncErrorByNodeId((errors) => ({ ...errors, [nodeId]: failureReason(err) }));
-    } finally {
-      setBranchMutatingNodeIds((prev) => withoutNodeInFlight(prev, nodeId));
-    }
-  };
-
-  // The click on a merge or rebase control. A worktree holding uncommitted work is a prompt rather
-  // than a refusal (D31): a child session's agent may be mid-turn in that checkout, so the operator
-  // sees what is outstanding and chooses to commit it before anything is touched.
-  const handleSyncFromBase = (nodeId: string, strategy: "merge" | "rebase") => {
-    const node = nodes.find((n) => n.nodeId === nodeId);
-    if (!node?.branch) return;
-    // Refused here as well as in `runPull`, so a pull that cannot run never gets as far as opening
-    // the dirty-worktree prompt — a prompt whose confirm button does nothing is its own dead end.
-    if (branchMutatingNodeIds.has(nodeId)) return;
-    const resolution = branchResolutionByBranch[node.branch];
-    const view = baseSyncView(resolution);
-    // The controls render only for a clean behind-count, and the base they name comes from the same
-    // view — so a pull can never be issued against a comparison that was not made.
-    if (!canPullFromBase(view)) return;
-    if (resolution?.worktree?.dirty) {
-      setDirtyWorktreePrompt({
-        nodeId,
-        branch: node.branch,
-        baseBranch: view.baseBranch,
-        strategy,
-        dirtyPaths: resolution.worktree.dirtyPaths,
-      });
-      return;
-    }
-    void runPull({
-      nodeId,
-      branch: node.branch,
-      baseBranch: view.baseBranch,
-      strategy,
-      dirtyWorktreeAction: "",
-      commitMessage: "",
-    });
-  };
-
-  // The operator confirmed the prompt: commit and push the outstanding work first, then pull with
-  // the strategy they originally clicked.
-  const handleCommitDirtyWorktreeAndPull = (commitMessage: string) => {
-    const prompt = dirtyWorktreePrompt;
-    if (!prompt) return;
-    setDirtyWorktreePrompt(null);
-    void runPull({
-      nodeId: prompt.nodeId,
-      branch: prompt.branch,
-      baseBranch: prompt.baseBranch,
-      // The strategy the operator originally clicked, not a reset to the default: confirming the
-      // prompt answers what to do about the worktree, not which pull to run.
-      strategy: prompt.strategy,
-      dirtyWorktreeAction: "commit",
-      commitMessage,
-    });
-  };
+  const {
+    repointErrorByNodeId,
+    branchMutatingNodeIds,
+    reorderErrorByNodeId,
+    reorderingNodeIds,
+    syncErrorByNodeId,
+    dirtyWorktreePrompt,
+    setDirtyWorktreePrompt,
+    handleRepoint,
+    handleReorder,
+    handleSyncFromBase,
+    handleCommitDirtyWorktreeAndPull,
+  } = usePrStackBranchMutations({
+    prStackClient,
+    sessionToken,
+    stackTargetFields,
+    nodes,
+    defaultBranch,
+    branchResolutionByBranch,
+    setResolution,
+    setStackPlanOverride,
+  });
 
   const plannedPrPanelState = plannedPrPanelOpen ? "open" : "closed";
   // Docked (desktop) the panel takes a column of its own; as a mobile overlay it covers the chat.
@@ -711,21 +377,19 @@ export function PrStackScreen({
         onCommitAndPull={handleCommitDirtyWorktreeAndPull}
         onCancel={() => setDirtyWorktreePrompt(null)}
       />
-      {client && projectClient && catalogClient && sessionFilesClient && worktreeClient && (
-        <CreateSessionDialog
-          open={startSessionNode !== null}
-          client={client}
-          projectClient={projectClient}
-          catalogClient={catalogClient}
-          sessionFilesClient={sessionFilesClient}
-          worktreeClient={worktreeClient}
-          taskClient={taskClient}
-          sessionToken={sessionToken}
-          initialValues={startSessionInitialValues}
-          onClose={() => setStartSessionNode(null)}
-          onCreated={handleChildSessionCreated}
-        />
-      )}
+      <PrStackStartSessionDialog
+        open={startSessionNode !== null}
+        client={client}
+        projectClient={projectClient}
+        catalogClient={catalogClient}
+        sessionFilesClient={sessionFilesClient}
+        worktreeClient={worktreeClient}
+        taskClient={taskClient}
+        sessionToken={sessionToken}
+        initialValues={startSessionInitialValues}
+        onClose={() => setStartSessionNode(null)}
+        onCreated={handleChildSessionCreated}
+      />
     </div>
   );
 }
