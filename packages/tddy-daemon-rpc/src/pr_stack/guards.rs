@@ -2,9 +2,9 @@
 
 use tddy_rpc::Status;
 
-/// (The recipe guard that stood here was deleted in `#orchestrators` 12/12, B9: a
-/// `session_id`-addressed mutation now requires the session to name a stack — see
-/// `project_stacks::require_a_stack` — whatever its recipe.)
+// (The recipe guard that stood here was deleted in `#orchestrators` 12/12, B9: a
+// `session_id`-addressed mutation now requires the session to name a stack — see
+// `project_stacks::require_a_stack` — whatever its recipe.)
 
 /// The GitHub token a repoint runs with: `Ok(None)` when the repoint touches no GitHub state,
 /// `Ok(Some(token))` when it does and `resolve` yields one, and a precondition failure carrying
