@@ -58,6 +58,31 @@ service PrStackService {
   // stays unspawnable because `Stack::base_ref_for_spawn` gates on a parent owning a branch. See
   // docs/ft/coder/pr-stack-live-status.md (D35).
   rpc LinkStackNode(LinkStackNodeRequest) returns (LinkStackNodeResponse);
+  // A project's PR stacks on every host that holds the project (`#orchestrators` 9/11). The daemon
+  // the call arrives on answers from its own project stack store and asks each eligible peer for
+  // its own; a peer that does not answer is named in `unreachable_hosts`, never silently dropped.
+  // See docs/ft/coder/pr-stacking.md.
+  rpc ListProjectStacks(ListProjectStacksRequest) returns (ListProjectStacksResponse);
+  // One project stack by its address, served by the daemon whose store holds it — forwarded there
+  // when the address names another host (`#orchestrators` 9/11).
+  rpc GetProjectStack(GetProjectStackRequest) returns (GetProjectStackResponse);
+}
+
+// Where a PR stack lives (`#orchestrators` 9/11): the project that holds it, its id in that
+// project's stack store, and the daemon whose store holds it.
+//
+// Carried by every request that reads or edits one stack, beside the orchestrator `session_id` those
+// requests were addressed by before stacks became project records. One of the two is required, and
+// the address wins when both are set: a `session_id` is resolved through the stack its changeset
+// names (`Changeset.stack_id`), which is a lookup a caller holding the address does not need.
+message StackAddress {
+  // The logical project id — the same on every host that holds the project.
+  string project_id = 1;
+  // The stack's id in that project's store (`ProjectStackStore`), a UUIDv7.
+  string stack_id = 2;
+  // The daemon whose store holds the stack. Empty or this daemon's own id = the daemon the call
+  // arrived on; a peer's id = the call is forwarded there.
+  string daemon_instance_id = 3;
 }
 
 message AddPlannedPrRequest {
@@ -73,6 +98,9 @@ message AddPlannedPrRequest {
   repeated string parents = 6;
   // Optional workflow recipe for the eventual child session (e.g. "tdd"). Empty = default ("tdd").
   string child_recipe = 7;
+  // The stack this request acts on (`#orchestrators` 9/11). Required unless `session_id` names a
+  // session whose changeset names its stack; wins over `session_id` when both are set.
+  StackAddress stack = 8;
 }
 
 message AddPlannedPrResponse {
@@ -166,6 +194,9 @@ message GetPrStatusRequest {
   string session_id = 2;
   // Head branch to look up (the planned PR's branch).
   string branch = 3;
+  // The stack whose project resolves the repo (`#orchestrators` 9/11). Required unless `session_id`
+  // names a session whose changeset names its stack; wins over `session_id` when both are set.
+  StackAddress stack = 4;
 }
 
 message GetPrStatusResponse {
@@ -228,6 +259,9 @@ message PullBaseIntoBranchRequest {
   string dirty_worktree_action = 6;
   // The commit message for dirty_worktree_action = "commit". Meaningless otherwise.
   string commit_message = 7;
+  // The stack this request acts on (`#orchestrators` 9/11). Required unless `session_id` names a
+  // session whose changeset names its stack; wins over `session_id` when both are set.
+  StackAddress stack = 8;
 }
 
 message PullBaseIntoBranchResponse {
@@ -259,6 +293,10 @@ message QueryBranchRequest {
   // reported as `base_sync.unavailable` rather than substituting one: the count beside a row must
   // describe the same base the row's own base line shows.
   string base_branch = 4;
+  // The stack whose project resolves the repo and the sessions to scan (`#orchestrators` 9/11).
+  // Required unless `session_id` names a session whose changeset names its stack; wins over
+  // `session_id` when both are set.
+  StackAddress stack = 5;
 }
 
 message QueryBranchResponse {
@@ -274,6 +312,9 @@ message ReorderPlannedPrRequest {
   // "up" or "down". Moving past either end is a successful no-op — the control at the end of the
   // list is inert, not wrong.
   string direction = 4;
+  // The stack this request acts on (`#orchestrators` 9/11). Required unless `session_id` names a
+  // session whose changeset names its stack; wins over `session_id` when both are set.
+  StackAddress stack = 5;
 }
 
 message ReorderPlannedPrResponse {
@@ -293,6 +334,9 @@ message RepointPlannedPrRequest {
   // collapses to the project default. Rejected when it names neither the resolved default branch
   // nor any parent's branch. Empty keeps the original behaviour: drop merged parents only.
   string target_base_branch = 4;
+  // The stack this request acts on (`#orchestrators` 9/11). Required unless `session_id` names a
+  // session whose changeset names its stack; wins over `session_id` when both are set.
+  StackAddress stack = 5;
 }
 
 message RepointPlannedPrResponse {
@@ -335,4 +379,65 @@ message ResolveStackBaseResponse {
   // error, and is deliberately distinct from one: a spawn refused here reports the owner's own
   // refusal verbatim.
   string base_ref = 1;
+}
+
+message ListProjectStacksRequest {
+  string session_token = 1;
+  // The logical project whose stacks are listed.
+  string project_id = 2;
+  // True on the copy a daemon forwards to its peers: answer from this daemon's own store only, so a
+  // listing fans out exactly one hop.
+  bool this_host_only = 3;
+}
+
+// How far one stack has come, counted over its planned nodes.
+message StackNodeCounts {
+  // Every planned node.
+  uint32 total = 1;
+  // Nodes a child session has materialized — they record a session or a branch.
+  uint32 started = 2;
+  // Nodes whose pull request merged.
+  uint32 merged = 3;
+}
+
+// One stack of a project, as the drawer lists it.
+message ProjectStackSummary {
+  // Where the stack lives — the address every other request about it carries.
+  StackAddress address = 1;
+  // What the stack is for, as it was created with; empty for a stack created without a title.
+  string title = 2;
+  StackNodeCounts node_counts = 3;
+  // The sessions on the owning host whose changeset names this stack.
+  repeated string referencing_session_ids = 4;
+  // The session that planned the stack (or, for a migrated one, the session that carried it).
+  string created_by_session_id = 5;
+  uint64 created_at_unix_ms = 6;
+}
+
+// A host the listing asked and got no answer from.
+message UnreachableStackHost {
+  string daemon_instance_id = 1;
+  // Operator-facing reason: the forwarding error the peer call ended with.
+  string reason = 2;
+}
+
+message ListProjectStacksResponse {
+  // Every stack of the project on every host that answered.
+  repeated ProjectStackSummary stacks = 1;
+  // Every eligible host that did not answer. Its stacks are missing from `stacks`, and saying so is
+  // the difference between "no stacks there" and "could not ask".
+  repeated UnreachableStackHost unreachable_hosts = 2;
+}
+
+message GetProjectStackRequest {
+  string session_token = 1;
+  // The stack to read. Forwarded to `stack.daemon_instance_id` when that names a peer.
+  StackAddress stack = 2;
+}
+
+message GetProjectStackResponse {
+  ProjectStackSummary summary = 1;
+  // The stack, same wire shape as `SessionEntry.stack_plan_json` (field 23) — read with the
+  // existing `parseStackPlan`.
+  string stack_plan_json = 2;
 }

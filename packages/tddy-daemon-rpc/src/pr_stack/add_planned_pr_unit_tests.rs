@@ -82,6 +82,7 @@ fn a_request(session_id: &str, title: &str) -> Request<AddPlannedPrRequest> {
         branch_suggestion: String::new(),
         parents: vec![],
         child_recipe: String::new(),
+        stack: None,
     })
 }
 

@@ -377,3 +377,35 @@ tool. DeleteSession RPC (:48, `session_deletion.rs`): no exec tool. RemoveWorktr
 RestoreSessionWorktree RPCs (worktree.proto:13,24,25): no exec tool. Send a turn to a running session:
 only `SendSessionKeys` (+claim); `PromptAgentConversation` is roster-only. Stop: `TerminateSession` exists.
 Pause/status marker: NOT FOUND.
+
+## Exploration 2 — pass 2 (draft-PR contract), 2026-11-14
+
+Re-read against the tree after n2 (#879) went green and n7/n8 published their contracts.
+
+- **The store** is `tddy_core::project_stack_store::ProjectStackStore` (`tddy-changeset/src/project_stack_store.rs`),
+  rooted at `<sessions base>/projects` (`projects_path_for_user`); `list(project_id)` sorts by stack id;
+  `StackRecord.title` exists (n7), `create_titled` is still n7's `TODO(stack-plan-tools)` stub — so this
+  node's tests seed untitled records with `create` and never assert a title read from disk.
+- **A session's stack** resolves through `Changeset.stack_id` (`tddy-changeset/src/changeset/stack.rs`
+  `read_session_stack` / `update_stack_atomic`); a session that names none gets one created by its
+  first write. The PR-stack RPCs still gate every `session_id` on the `pr-stack` recipe
+  (`require_pr_stack_orchestrator`, `pr_stack/guards.rs:9`, called at seven sites in `ports.rs`).
+- **Forwarding**: `PeerRouting::rpc_served_by_peer` (`tddy-host-service/src/peer_routing.rs:165`) is
+  the one-hop forward `ResolveStackBase`/`LinkStackNode` already use; `classify_addressed_daemon_route`
+  treats an empty id as local. The fan-out a listing needs has no shared helper —
+  `PeerRouting::eligible_instance_ids` + `CommonRoom::forward_to_peer` per peer.
+- **Tests' peers**: `tddy-daemon-rpc/tests/support/mod.rs` `InProcessPeers::call_unary` serves a closed
+  set of `(service, method)` pairs; `host-c` (`SILENT_HOST`) is on every roster with no daemon, so a
+  forward to it is `Unavailable` at once. Extended here with `ListProjectStacks`, `GetProjectStack`
+  and `AddPlannedPr`.
+- **Field budget**: `rpc_handlers_shape.rs` caps `PrStackRpcHandler` at 7 fields — it has 7. The fan-out
+  must come from `peer_routing`, not a new field.
+- **Web**: `SessionEntry` carried no stack id, so the chat screen could not address its stack by id;
+  `stack_id = 38` added. `SessionEntry` field 37 is n5's `orchestration_mark`. `PrStackScreen` reads
+  `parseStackPlan(stackPlanOverride ?? session.stackPlanJson)` at `PrStackScreen.tsx:195`; recipe
+  routing `workflowViews.tsx:106`. The drawer's project group (`SessionProjectGroup.tsx`) is n8's,
+  mid-green — its header is still the single toggle button (`TODO(orchestrator-composer)`); the Stacks
+  row goes in the group body, not the header.
+- **Routes**: the client-web route grammar (`tddy-client-web/src/appRoutes.ts`) is re-exported by
+  `tddy-web/src/routing/appRoutes.ts`, whose `appRoutes.test.ts` holds the route unit tests (n8's
+  composer route tests are there, red until n8 is green).

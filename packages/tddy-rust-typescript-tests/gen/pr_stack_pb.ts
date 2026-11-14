@@ -12,7 +12,49 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file pr_stack.proto.
  */
 export const file_pr_stack: GenFile = /*@__PURE__*/
-  fileDesc("Cg5wcl9zdGFjay5wcm90bxIIcHJfc3RhY2sipgEKE0FkZFBsYW5uZWRQclJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg0KBXRpdGxlGAMgASgJEhMKC2Rlc2NyaXB0aW9uGAQgASgJEhkKEWJyYW5jaF9zdWdnZXN0aW9uGAUgASgJEg8KB3BhcmVudHMYBiADKAkSFAoMY2hpbGRfcmVjaXBlGAcgASgJIkAKFEFkZFBsYW5uZWRQclJlc3BvbnNlEhcKD3N0YWNrX3BsYW5fanNvbhgBIAEoCRIPCgdub2RlX2lkGAIgASgJItYBCg5CcmFuY2hCYXNlU3luYxITCgtiYXNlX2JyYW5jaBgBIAEoCRIUCgxiZWhpbmRfY291bnQYAiABKA0SEwoLYWhlYWRfY291bnQYAyABKA0SFQoNaGFzX2NvbmZsaWN0cxgEIAEoCBIYChBjb25mbGljdGVkX3BhdGhzGAUgAygJEhMKC3VuYXZhaWxhYmxlGAYgASgIEhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgHIAEoCRIQCghiYXNlX3JlZhgIIAEoCRIQCghoZWFkX3JlZhgJIAEoCSIrCgxCcmFuY2hSZW1vdGUSDgoGZXhpc3RzGAEgASgIEgsKA3NoYRgCIAEoCSLuAQoQQnJhbmNoUmVzb2x1dGlvbhIOCgZicmFuY2gYASABKAkSJQoHc2Vzc2lvbhgCIAEoCzIULnR5cGVzLkJyYW5jaFNlc3Npb24SKgoId29ya3RyZWUYAyABKAsyGC5wcl9zdGFjay5CcmFuY2hXb3JrdHJlZRIiCgJwchgEIAEoCzIWLnByX3N0YWNrLlByU3RhdHVzVmlldxImCgZyZW1vdGUYBSABKAsyFi5wcl9zdGFjay5CcmFuY2hSZW1vdGUSKwoJYmFzZV9zeW5jGAYgASgLMhgucHJfc3RhY2suQnJhbmNoQmFzZVN5bmMiUgoOQnJhbmNoV29ya3RyZWUSDgoGZXhpc3RzGAEgASgIEgwKBHBhdGgYAiABKAkSDQoFZGlydHkYAyABKAgSEwoLZGlydHlfcGF0aHMYBCADKAkiTwoSR2V0UHJTdGF0dXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIOCgZicmFuY2gYAyABKAkiPQoTR2V0UHJTdGF0dXNSZXNwb25zZRImCgZzdGF0dXMYASABKAsyFi5wcl9zdGFjay5QclN0YXR1c1ZpZXcipQEKFExpbmtTdGFja05vZGVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEh8KF29yY2hlc3RyYXRvcl9zZXNzaW9uX2lkGAMgASgJEg8KB25vZGVfaWQYBCABKAkSGAoQY2hpbGRfc2Vzc2lvbl9pZBgFIAEoCRIOCgZicmFuY2gYBiABKAkiMAoVTGlua1N0YWNrTm9kZVJlc3BvbnNlEhcKD3N0YWNrX3BsYW5fanNvbhgBIAEoCSJ7CgxQclN0YXR1c1ZpZXcSDgoGZXhpc3RzGAEgASgIEg4KBm51bWJlchgCIAEoBBILCgN1cmwYAyABKAkSDQoFc3RhdGUYBCABKAkSEwoLdW5hdmFpbGFibGUYBSABKAgSGgoSdW5hdmFpbGFibGVfcmVhc29uGAYgASgJIrUBChlQdWxsQmFzZUludG9CcmFuY2hSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIPCgdub2RlX2lkGAMgASgJEhMKC2Jhc2VfYnJhbmNoGAQgASgJEhAKCHN0cmF0ZWd5GAUgASgJEh0KFWRpcnR5X3dvcmt0cmVlX2FjdGlvbhgGIAEoCRIWCg5jb21taXRfbWVzc2FnZRgHIAEoCSKTAQoaUHVsbEJhc2VJbnRvQnJhbmNoUmVzcG9uc2USLgoKcmVzb2x1dGlvbhgBIAEoCzIaLnByX3N0YWNrLkJyYW5jaFJlc29sdXRpb24SEAoIc3RyYXRlZ3kYAiABKAkSDwoHY2hhbmdlZBgDIAEoCBIOCgZwdXNoZWQYBCABKAgSEgoKcHVzaF9lcnJvchgFIAEoCSJkChJRdWVyeUJyYW5jaFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBmJyYW5jaBgDIAEoCRITCgtiYXNlX2JyYW5jaBgEIAEoCSJFChNRdWVyeUJyYW5jaFJlc3BvbnNlEi4KCnJlc29sdXRpb24YASABKAsyGi5wcl9zdGFjay5CcmFuY2hSZXNvbHV0aW9uImgKF1Jlb3JkZXJQbGFubmVkUHJSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIPCgdub2RlX2lkGAMgASgJEhEKCWRpcmVjdGlvbhgEIAEoCSIzChhSZW9yZGVyUGxhbm5lZFByUmVzcG9uc2USFwoPc3RhY2tfcGxhbl9qc29uGAEgASgJInEKF1JlcG9pbnRQbGFubmVkUHJSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIPCgdub2RlX2lkGAMgASgJEhoKEnRhcmdldF9iYXNlX2JyYW5jaBgEIAEoCSIzChhSZXBvaW50UGxhbm5lZFByUmVzcG9uc2USFwoPc3RhY2tfcGxhbl9qc29uGAEgASgJIqYBChdSZXNvbHZlU3RhY2tCYXNlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIUCgxzdGFja19wYXJlbnQYAyABKAkSEgoKcHJvamVjdF9pZBgEIAEoCRIXCg9uZXdfYnJhbmNoX25hbWUYBSABKAkSFQoNc3RhY2tfbm9kZV9pZBgGIAEoCSIsChhSZXNvbHZlU3RhY2tCYXNlUmVzcG9uc2USEAoIYmFzZV9yZWYYASABKAkyuwUKDlByU3RhY2tTZXJ2aWNlEk0KDEFkZFBsYW5uZWRQchIdLnByX3N0YWNrLkFkZFBsYW5uZWRQclJlcXVlc3QaHi5wcl9zdGFjay5BZGRQbGFubmVkUHJSZXNwb25zZRJKCgtHZXRQclN0YXR1cxIcLnByX3N0YWNrLkdldFByU3RhdHVzUmVxdWVzdBodLnByX3N0YWNrLkdldFByU3RhdHVzUmVzcG9uc2USWQoQUmVwb2ludFBsYW5uZWRQchIhLnByX3N0YWNrLlJlcG9pbnRQbGFubmVkUHJSZXF1ZXN0GiIucHJfc3RhY2suUmVwb2ludFBsYW5uZWRQclJlc3BvbnNlElkKEFJlb3JkZXJQbGFubmVkUHISIS5wcl9zdGFjay5SZW9yZGVyUGxhbm5lZFByUmVxdWVzdBoiLnByX3N0YWNrLlJlb3JkZXJQbGFubmVkUHJSZXNwb25zZRJfChJQdWxsQmFzZUludG9CcmFuY2gSIy5wcl9zdGFjay5QdWxsQmFzZUludG9CcmFuY2hSZXF1ZXN0GiQucHJfc3RhY2suUHVsbEJhc2VJbnRvQnJhbmNoUmVzcG9uc2USSgoLUXVlcnlCcmFuY2gSHC5wcl9zdGFjay5RdWVyeUJyYW5jaFJlcXVlc3QaHS5wcl9zdGFjay5RdWVyeUJyYW5jaFJlc3BvbnNlElkKEFJlc29sdmVTdGFja0Jhc2USIS5wcl9zdGFjay5SZXNvbHZlU3RhY2tCYXNlUmVxdWVzdBoiLnByX3N0YWNrLlJlc29sdmVTdGFja0Jhc2VSZXNwb25zZRJQCg1MaW5rU3RhY2tOb2RlEh4ucHJfc3RhY2suTGlua1N0YWNrTm9kZVJlcXVlc3QaHy5wcl9zdGFjay5MaW5rU3RhY2tOb2RlUmVzcG9uc2ViBnByb3RvMw", [file_types]);
+  fileDesc("Cg5wcl9zdGFjay5wcm90bxIIcHJfc3RhY2siUAoMU3RhY2tBZGRyZXNzEhIKCnByb2plY3RfaWQYASABKAkSEAoIc3RhY2tfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIs0BChNBZGRQbGFubmVkUHJSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRINCgV0aXRsZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIZChFicmFuY2hfc3VnZ2VzdGlvbhgFIAEoCRIPCgdwYXJlbnRzGAYgAygJEhQKDGNoaWxkX3JlY2lwZRgHIAEoCRIlCgVzdGFjaxgIIAEoCzIWLnByX3N0YWNrLlN0YWNrQWRkcmVzcyJAChRBZGRQbGFubmVkUHJSZXNwb25zZRIXCg9zdGFja19wbGFuX2pzb24YASABKAkSDwoHbm9kZV9pZBgCIAEoCSLWAQoOQnJhbmNoQmFzZVN5bmMSEwoLYmFzZV9icmFuY2gYASABKAkSFAoMYmVoaW5kX2NvdW50GAIgASgNEhMKC2FoZWFkX2NvdW50GAMgASgNEhUKDWhhc19jb25mbGljdHMYBCABKAgSGAoQY29uZmxpY3RlZF9wYXRocxgFIAMoCRITCgt1bmF2YWlsYWJsZRgGIAEoCBIaChJ1bmF2YWlsYWJsZV9yZWFzb24YByABKAkSEAoIYmFzZV9yZWYYCCABKAkSEAoIaGVhZF9yZWYYCSABKAkiKwoMQnJhbmNoUmVtb3RlEg4KBmV4aXN0cxgBIAEoCBILCgNzaGEYAiABKAki7gEKEEJyYW5jaFJlc29sdXRpb24SDgoGYnJhbmNoGAEgASgJEiUKB3Nlc3Npb24YAiABKAsyFC50eXBlcy5CcmFuY2hTZXNzaW9uEioKCHdvcmt0cmVlGAMgASgLMhgucHJfc3RhY2suQnJhbmNoV29ya3RyZWUSIgoCcHIYBCABKAsyFi5wcl9zdGFjay5QclN0YXR1c1ZpZXcSJgoGcmVtb3RlGAUgASgLMhYucHJfc3RhY2suQnJhbmNoUmVtb3RlEisKCWJhc2Vfc3luYxgGIAEoCzIYLnByX3N0YWNrLkJyYW5jaEJhc2VTeW5jIlIKDkJyYW5jaFdvcmt0cmVlEg4KBmV4aXN0cxgBIAEoCBIMCgRwYXRoGAIgASgJEg0KBWRpcnR5GAMgASgIEhMKC2RpcnR5X3BhdGhzGAQgAygJInYKEkdldFByU3RhdHVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGYnJhbmNoGAMgASgJEiUKBXN0YWNrGAQgASgLMhYucHJfc3RhY2suU3RhY2tBZGRyZXNzIj0KE0dldFByU3RhdHVzUmVzcG9uc2USJgoGc3RhdHVzGAEgASgLMhYucHJfc3RhY2suUHJTdGF0dXNWaWV3IqUBChRMaW5rU3RhY2tOb2RlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIfChdvcmNoZXN0cmF0b3Jfc2Vzc2lvbl9pZBgDIAEoCRIPCgdub2RlX2lkGAQgASgJEhgKEGNoaWxkX3Nlc3Npb25faWQYBSABKAkSDgoGYnJhbmNoGAYgASgJIjAKFUxpbmtTdGFja05vZGVSZXNwb25zZRIXCg9zdGFja19wbGFuX2pzb24YASABKAkiewoMUHJTdGF0dXNWaWV3Eg4KBmV4aXN0cxgBIAEoCBIOCgZudW1iZXIYAiABKAQSCwoDdXJsGAMgASgJEg0KBXN0YXRlGAQgASgJEhMKC3VuYXZhaWxhYmxlGAUgASgIEhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgGIAEoCSLcAQoZUHVsbEJhc2VJbnRvQnJhbmNoUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDwoHbm9kZV9pZBgDIAEoCRITCgtiYXNlX2JyYW5jaBgEIAEoCRIQCghzdHJhdGVneRgFIAEoCRIdChVkaXJ0eV93b3JrdHJlZV9hY3Rpb24YBiABKAkSFgoOY29tbWl0X21lc3NhZ2UYByABKAkSJQoFc3RhY2sYCCABKAsyFi5wcl9zdGFjay5TdGFja0FkZHJlc3MikwEKGlB1bGxCYXNlSW50b0JyYW5jaFJlc3BvbnNlEi4KCnJlc29sdXRpb24YASABKAsyGi5wcl9zdGFjay5CcmFuY2hSZXNvbHV0aW9uEhAKCHN0cmF0ZWd5GAIgASgJEg8KB2NoYW5nZWQYAyABKAgSDgoGcHVzaGVkGAQgASgIEhIKCnB1c2hfZXJyb3IYBSABKAkiiwEKElF1ZXJ5QnJhbmNoUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGYnJhbmNoGAMgASgJEhMKC2Jhc2VfYnJhbmNoGAQgASgJEiUKBXN0YWNrGAUgASgLMhYucHJfc3RhY2suU3RhY2tBZGRyZXNzIkUKE1F1ZXJ5QnJhbmNoUmVzcG9uc2USLgoKcmVzb2x1dGlvbhgBIAEoCzIaLnByX3N0YWNrLkJyYW5jaFJlc29sdXRpb24ijwEKF1Jlb3JkZXJQbGFubmVkUHJSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIPCgdub2RlX2lkGAMgASgJEhEKCWRpcmVjdGlvbhgEIAEoCRIlCgVzdGFjaxgFIAEoCzIWLnByX3N0YWNrLlN0YWNrQWRkcmVzcyIzChhSZW9yZGVyUGxhbm5lZFByUmVzcG9uc2USFwoPc3RhY2tfcGxhbl9qc29uGAEgASgJIpgBChdSZXBvaW50UGxhbm5lZFByUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDwoHbm9kZV9pZBgDIAEoCRIaChJ0YXJnZXRfYmFzZV9icmFuY2gYBCABKAkSJQoFc3RhY2sYBSABKAsyFi5wcl9zdGFjay5TdGFja0FkZHJlc3MiMwoYUmVwb2ludFBsYW5uZWRQclJlc3BvbnNlEhcKD3N0YWNrX3BsYW5fanNvbhgBIAEoCSKmAQoXUmVzb2x2ZVN0YWNrQmFzZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSFAoMc3RhY2tfcGFyZW50GAMgASgJEhIKCnByb2plY3RfaWQYBCABKAkSFwoPbmV3X2JyYW5jaF9uYW1lGAUgASgJEhUKDXN0YWNrX25vZGVfaWQYBiABKAkiLAoYUmVzb2x2ZVN0YWNrQmFzZVJlc3BvbnNlEhAKCGJhc2VfcmVmGAEgASgJIl0KGExpc3RQcm9qZWN0U3RhY2tzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFgoOdGhpc19ob3N0X29ubHkYAyABKAgiQQoPU3RhY2tOb2RlQ291bnRzEg0KBXRvdGFsGAEgASgNEg8KB3N0YXJ0ZWQYAiABKA0SDgoGbWVyZ2VkGAMgASgNItkBChNQcm9qZWN0U3RhY2tTdW1tYXJ5EicKB2FkZHJlc3MYASABKAsyFi5wcl9zdGFjay5TdGFja0FkZHJlc3MSDQoFdGl0bGUYAiABKAkSLgoLbm9kZV9jb3VudHMYAyABKAsyGS5wcl9zdGFjay5TdGFja05vZGVDb3VudHMSHwoXcmVmZXJlbmNpbmdfc2Vzc2lvbl9pZHMYBCADKAkSHQoVY3JlYXRlZF9ieV9zZXNzaW9uX2lkGAUgASgJEhoKEmNyZWF0ZWRfYXRfdW5peF9tcxgGIAEoBCJCChRVbnJlYWNoYWJsZVN0YWNrSG9zdBIaChJkYWVtb25faW5zdGFuY2VfaWQYASABKAkSDgoGcmVhc29uGAIgASgJIoUBChlMaXN0UHJvamVjdFN0YWNrc1Jlc3BvbnNlEi0KBnN0YWNrcxgBIAMoCzIdLnByX3N0YWNrLlByb2plY3RTdGFja1N1bW1hcnkSOQoRdW5yZWFjaGFibGVfaG9zdHMYAiADKAsyHi5wcl9zdGFjay5VbnJlYWNoYWJsZVN0YWNrSG9zdCJWChZHZXRQcm9qZWN0U3RhY2tSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSJQoFc3RhY2sYAiABKAsyFi5wcl9zdGFjay5TdGFja0FkZHJlc3MiYgoXR2V0UHJvamVjdFN0YWNrUmVzcG9uc2USLgoHc3VtbWFyeRgBIAEoCzIdLnByX3N0YWNrLlByb2plY3RTdGFja1N1bW1hcnkSFwoPc3RhY2tfcGxhbl9qc29uGAIgASgJMvEGCg5QclN0YWNrU2VydmljZRJNCgxBZGRQbGFubmVkUHISHS5wcl9zdGFjay5BZGRQbGFubmVkUHJSZXF1ZXN0Gh4ucHJfc3RhY2suQWRkUGxhbm5lZFByUmVzcG9uc2USSgoLR2V0UHJTdGF0dXMSHC5wcl9zdGFjay5HZXRQclN0YXR1c1JlcXVlc3QaHS5wcl9zdGFjay5HZXRQclN0YXR1c1Jlc3BvbnNlElkKEFJlcG9pbnRQbGFubmVkUHISIS5wcl9zdGFjay5SZXBvaW50UGxhbm5lZFByUmVxdWVzdBoiLnByX3N0YWNrLlJlcG9pbnRQbGFubmVkUHJSZXNwb25zZRJZChBSZW9yZGVyUGxhbm5lZFByEiEucHJfc3RhY2suUmVvcmRlclBsYW5uZWRQclJlcXVlc3QaIi5wcl9zdGFjay5SZW9yZGVyUGxhbm5lZFByUmVzcG9uc2USXwoSUHVsbEJhc2VJbnRvQnJhbmNoEiMucHJfc3RhY2suUHVsbEJhc2VJbnRvQnJhbmNoUmVxdWVzdBokLnByX3N0YWNrLlB1bGxCYXNlSW50b0JyYW5jaFJlc3BvbnNlEkoKC1F1ZXJ5QnJhbmNoEhwucHJfc3RhY2suUXVlcnlCcmFuY2hSZXF1ZXN0Gh0ucHJfc3RhY2suUXVlcnlCcmFuY2hSZXNwb25zZRJZChBSZXNvbHZlU3RhY2tCYXNlEiEucHJfc3RhY2suUmVzb2x2ZVN0YWNrQmFzZVJlcXVlc3QaIi5wcl9zdGFjay5SZXNvbHZlU3RhY2tCYXNlUmVzcG9uc2USUAoNTGlua1N0YWNrTm9kZRIeLnByX3N0YWNrLkxpbmtTdGFja05vZGVSZXF1ZXN0Gh8ucHJfc3RhY2suTGlua1N0YWNrTm9kZVJlc3BvbnNlElwKEUxpc3RQcm9qZWN0U3RhY2tzEiIucHJfc3RhY2suTGlzdFByb2plY3RTdGFja3NSZXF1ZXN0GiMucHJfc3RhY2suTGlzdFByb2plY3RTdGFja3NSZXNwb25zZRJWCg9HZXRQcm9qZWN0U3RhY2sSIC5wcl9zdGFjay5HZXRQcm9qZWN0U3RhY2tSZXF1ZXN0GiEucHJfc3RhY2suR2V0UHJvamVjdFN0YWNrUmVzcG9uc2ViBnByb3RvMw", [file_types]);
+
+/**
+ * Where a PR stack lives (`#orchestrators` 9/11): the project that holds it, its id in that
+ * project's stack store, and the daemon whose store holds it.
+ *
+ * Carried by every request that reads or edits one stack, beside the orchestrator `session_id` those
+ * requests were addressed by before stacks became project records. One of the two is required, and
+ * the address wins when both are set: a `session_id` is resolved through the stack its changeset
+ * names (`Changeset.stack_id`), which is a lookup a caller holding the address does not need.
+ *
+ * @generated from message pr_stack.StackAddress
+ */
+export type StackAddress = Message<"pr_stack.StackAddress"> & {
+  /**
+   * The logical project id — the same on every host that holds the project.
+   *
+   * @generated from field: string project_id = 1;
+   */
+  projectId: string;
+
+  /**
+   * The stack's id in that project's store (`ProjectStackStore`), a UUIDv7.
+   *
+   * @generated from field: string stack_id = 2;
+   */
+  stackId: string;
+
+  /**
+   * The daemon whose store holds the stack. Empty or this daemon's own id = the daemon the call
+   * arrived on; a peer's id = the call is forwarded there.
+   *
+   * @generated from field: string daemon_instance_id = 3;
+   */
+  daemonInstanceId: string;
+};
+
+/**
+ * Describes the message pr_stack.StackAddress.
+ * Use `create(StackAddressSchema)` to create a new message.
+ */
+export const StackAddressSchema: GenMessage<StackAddress> = /*@__PURE__*/
+  messageDesc(file_pr_stack, 0);
 
 /**
  * @generated from message pr_stack.AddPlannedPrRequest
@@ -61,6 +103,14 @@ export type AddPlannedPrRequest = Message<"pr_stack.AddPlannedPrRequest"> & {
    * @generated from field: string child_recipe = 7;
    */
   childRecipe: string;
+
+  /**
+   * The stack this request acts on (`#orchestrators` 9/11). Required unless `session_id` names a
+   * session whose changeset names its stack; wins over `session_id` when both are set.
+   *
+   * @generated from field: pr_stack.StackAddress stack = 8;
+   */
+  stack?: StackAddress;
 };
 
 /**
@@ -68,7 +118,7 @@ export type AddPlannedPrRequest = Message<"pr_stack.AddPlannedPrRequest"> & {
  * Use `create(AddPlannedPrRequestSchema)` to create a new message.
  */
 export const AddPlannedPrRequestSchema: GenMessage<AddPlannedPrRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 0);
+  messageDesc(file_pr_stack, 1);
 
 /**
  * @generated from message pr_stack.AddPlannedPrResponse
@@ -99,7 +149,7 @@ export type AddPlannedPrResponse = Message<"pr_stack.AddPlannedPrResponse"> & {
  * Use `create(AddPlannedPrResponseSchema)` to create a new message.
  */
 export const AddPlannedPrResponseSchema: GenMessage<AddPlannedPrResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 1);
+  messageDesc(file_pr_stack, 2);
 
 /**
  * How a branch stands against its base: how far behind, how far ahead, and whether taking the
@@ -188,7 +238,7 @@ export type BranchBaseSync = Message<"pr_stack.BranchBaseSync"> & {
  * Use `create(BranchBaseSyncSchema)` to create a new message.
  */
 export const BranchBaseSyncSchema: GenMessage<BranchBaseSync> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 2);
+  messageDesc(file_pr_stack, 3);
 
 /**
  * The remote-tracking state of a branch on `origin`.
@@ -216,7 +266,7 @@ export type BranchRemote = Message<"pr_stack.BranchRemote"> & {
  * Use `create(BranchRemoteSchema)` to create a new message.
  */
 export const BranchRemoteSchema: GenMessage<BranchRemote> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 3);
+  messageDesc(file_pr_stack, 4);
 
 /**
  * Everything the PR-Stack view needs about one branch, resolved server-side by branch name.
@@ -274,7 +324,7 @@ export type BranchResolution = Message<"pr_stack.BranchResolution"> & {
  * Use `create(BranchResolutionSchema)` to create a new message.
  */
 export const BranchResolutionSchema: GenMessage<BranchResolution> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 4);
+  messageDesc(file_pr_stack, 5);
 
 /**
  * @generated from message pr_stack.BranchWorktree
@@ -316,7 +366,7 @@ export type BranchWorktree = Message<"pr_stack.BranchWorktree"> & {
  * Use `create(BranchWorktreeSchema)` to create a new message.
  */
 export const BranchWorktreeSchema: GenMessage<BranchWorktree> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 5);
+  messageDesc(file_pr_stack, 6);
 
 /**
  * @generated from message pr_stack.GetPrStatusRequest
@@ -340,6 +390,14 @@ export type GetPrStatusRequest = Message<"pr_stack.GetPrStatusRequest"> & {
    * @generated from field: string branch = 3;
    */
   branch: string;
+
+  /**
+   * The stack whose project resolves the repo (`#orchestrators` 9/11). Required unless `session_id`
+   * names a session whose changeset names its stack; wins over `session_id` when both are set.
+   *
+   * @generated from field: pr_stack.StackAddress stack = 4;
+   */
+  stack?: StackAddress;
 };
 
 /**
@@ -347,7 +405,7 @@ export type GetPrStatusRequest = Message<"pr_stack.GetPrStatusRequest"> & {
  * Use `create(GetPrStatusRequestSchema)` to create a new message.
  */
 export const GetPrStatusRequestSchema: GenMessage<GetPrStatusRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 6);
+  messageDesc(file_pr_stack, 7);
 
 /**
  * @generated from message pr_stack.GetPrStatusResponse
@@ -364,7 +422,7 @@ export type GetPrStatusResponse = Message<"pr_stack.GetPrStatusResponse"> & {
  * Use `create(GetPrStatusResponseSchema)` to create a new message.
  */
 export const GetPrStatusResponseSchema: GenMessage<GetPrStatusResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 7);
+  messageDesc(file_pr_stack, 8);
 
 /**
  * Record a child session and its branch on a planned node of a pr-stack orchestrator, on the daemon
@@ -421,7 +479,7 @@ export type LinkStackNodeRequest = Message<"pr_stack.LinkStackNodeRequest"> & {
  * Use `create(LinkStackNodeRequestSchema)` to create a new message.
  */
 export const LinkStackNodeRequestSchema: GenMessage<LinkStackNodeRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 8);
+  messageDesc(file_pr_stack, 9);
 
 /**
  * @generated from message pr_stack.LinkStackNodeResponse
@@ -440,7 +498,7 @@ export type LinkStackNodeResponse = Message<"pr_stack.LinkStackNodeResponse"> & 
  * Use `create(LinkStackNodeResponseSchema)` to create a new message.
  */
 export const LinkStackNodeResponseSchema: GenMessage<LinkStackNodeResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 9);
+  messageDesc(file_pr_stack, 10);
 
 /**
  * Live GitHub PR status for one head branch.
@@ -493,7 +551,7 @@ export type PrStatusView = Message<"pr_stack.PrStatusView"> & {
  * Use `create(PrStatusViewSchema)` to create a new message.
  */
 export const PrStatusViewSchema: GenMessage<PrStatusView> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 10);
+  messageDesc(file_pr_stack, 11);
 
 /**
  * @generated from message pr_stack.PullBaseIntoBranchRequest
@@ -549,6 +607,14 @@ export type PullBaseIntoBranchRequest = Message<"pr_stack.PullBaseIntoBranchRequ
    * @generated from field: string commit_message = 7;
    */
   commitMessage: string;
+
+  /**
+   * The stack this request acts on (`#orchestrators` 9/11). Required unless `session_id` names a
+   * session whose changeset names its stack; wins over `session_id` when both are set.
+   *
+   * @generated from field: pr_stack.StackAddress stack = 8;
+   */
+  stack?: StackAddress;
 };
 
 /**
@@ -556,7 +622,7 @@ export type PullBaseIntoBranchRequest = Message<"pr_stack.PullBaseIntoBranchRequ
  * Use `create(PullBaseIntoBranchRequestSchema)` to create a new message.
  */
 export const PullBaseIntoBranchRequestSchema: GenMessage<PullBaseIntoBranchRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 11);
+  messageDesc(file_pr_stack, 12);
 
 /**
  * @generated from message pr_stack.PullBaseIntoBranchResponse
@@ -606,7 +672,7 @@ export type PullBaseIntoBranchResponse = Message<"pr_stack.PullBaseIntoBranchRes
  * Use `create(PullBaseIntoBranchResponseSchema)` to create a new message.
  */
 export const PullBaseIntoBranchResponseSchema: GenMessage<PullBaseIntoBranchResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 12);
+  messageDesc(file_pr_stack, 13);
 
 /**
  * @generated from message pr_stack.QueryBranchRequest
@@ -642,6 +708,15 @@ export type QueryBranchRequest = Message<"pr_stack.QueryBranchRequest"> & {
    * @generated from field: string base_branch = 4;
    */
   baseBranch: string;
+
+  /**
+   * The stack whose project resolves the repo and the sessions to scan (`#orchestrators` 9/11).
+   * Required unless `session_id` names a session whose changeset names its stack; wins over
+   * `session_id` when both are set.
+   *
+   * @generated from field: pr_stack.StackAddress stack = 5;
+   */
+  stack?: StackAddress;
 };
 
 /**
@@ -649,7 +724,7 @@ export type QueryBranchRequest = Message<"pr_stack.QueryBranchRequest"> & {
  * Use `create(QueryBranchRequestSchema)` to create a new message.
  */
 export const QueryBranchRequestSchema: GenMessage<QueryBranchRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 13);
+  messageDesc(file_pr_stack, 14);
 
 /**
  * @generated from message pr_stack.QueryBranchResponse
@@ -666,7 +741,7 @@ export type QueryBranchResponse = Message<"pr_stack.QueryBranchResponse"> & {
  * Use `create(QueryBranchResponseSchema)` to create a new message.
  */
 export const QueryBranchResponseSchema: GenMessage<QueryBranchResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 14);
+  messageDesc(file_pr_stack, 15);
 
 /**
  * @generated from message pr_stack.ReorderPlannedPrRequest
@@ -698,6 +773,14 @@ export type ReorderPlannedPrRequest = Message<"pr_stack.ReorderPlannedPrRequest"
    * @generated from field: string direction = 4;
    */
   direction: string;
+
+  /**
+   * The stack this request acts on (`#orchestrators` 9/11). Required unless `session_id` names a
+   * session whose changeset names its stack; wins over `session_id` when both are set.
+   *
+   * @generated from field: pr_stack.StackAddress stack = 5;
+   */
+  stack?: StackAddress;
 };
 
 /**
@@ -705,7 +788,7 @@ export type ReorderPlannedPrRequest = Message<"pr_stack.ReorderPlannedPrRequest"
  * Use `create(ReorderPlannedPrRequestSchema)` to create a new message.
  */
 export const ReorderPlannedPrRequestSchema: GenMessage<ReorderPlannedPrRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 15);
+  messageDesc(file_pr_stack, 16);
 
 /**
  * @generated from message pr_stack.ReorderPlannedPrResponse
@@ -724,7 +807,7 @@ export type ReorderPlannedPrResponse = Message<"pr_stack.ReorderPlannedPrRespons
  * Use `create(ReorderPlannedPrResponseSchema)` to create a new message.
  */
 export const ReorderPlannedPrResponseSchema: GenMessage<ReorderPlannedPrResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 16);
+  messageDesc(file_pr_stack, 17);
 
 /**
  * @generated from message pr_stack.RepointPlannedPrRequest
@@ -759,6 +842,14 @@ export type RepointPlannedPrRequest = Message<"pr_stack.RepointPlannedPrRequest"
    * @generated from field: string target_base_branch = 4;
    */
   targetBaseBranch: string;
+
+  /**
+   * The stack this request acts on (`#orchestrators` 9/11). Required unless `session_id` names a
+   * session whose changeset names its stack; wins over `session_id` when both are set.
+   *
+   * @generated from field: pr_stack.StackAddress stack = 5;
+   */
+  stack?: StackAddress;
 };
 
 /**
@@ -766,7 +857,7 @@ export type RepointPlannedPrRequest = Message<"pr_stack.RepointPlannedPrRequest"
  * Use `create(RepointPlannedPrRequestSchema)` to create a new message.
  */
 export const RepointPlannedPrRequestSchema: GenMessage<RepointPlannedPrRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 17);
+  messageDesc(file_pr_stack, 18);
 
 /**
  * @generated from message pr_stack.RepointPlannedPrResponse
@@ -785,7 +876,7 @@ export type RepointPlannedPrResponse = Message<"pr_stack.RepointPlannedPrRespons
  * Use `create(RepointPlannedPrResponseSchema)` to create a new message.
  */
 export const RepointPlannedPrResponseSchema: GenMessage<RepointPlannedPrResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 18);
+  messageDesc(file_pr_stack, 19);
 
 /**
  * What a child spawn's branch bases off, asked of the daemon that owns the stack parent.
@@ -852,7 +943,7 @@ export type ResolveStackBaseRequest = Message<"pr_stack.ResolveStackBaseRequest"
  * Use `create(ResolveStackBaseRequestSchema)` to create a new message.
  */
 export const ResolveStackBaseRequestSchema: GenMessage<ResolveStackBaseRequest> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 19);
+  messageDesc(file_pr_stack, 20);
 
 /**
  * @generated from message pr_stack.ResolveStackBaseResponse
@@ -875,7 +966,228 @@ export type ResolveStackBaseResponse = Message<"pr_stack.ResolveStackBaseRespons
  * Use `create(ResolveStackBaseResponseSchema)` to create a new message.
  */
 export const ResolveStackBaseResponseSchema: GenMessage<ResolveStackBaseResponse> = /*@__PURE__*/
-  messageDesc(file_pr_stack, 20);
+  messageDesc(file_pr_stack, 21);
+
+/**
+ * @generated from message pr_stack.ListProjectStacksRequest
+ */
+export type ListProjectStacksRequest = Message<"pr_stack.ListProjectStacksRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * The logical project whose stacks are listed.
+   *
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * True on the copy a daemon forwards to its peers: answer from this daemon's own store only, so a
+   * listing fans out exactly one hop.
+   *
+   * @generated from field: bool this_host_only = 3;
+   */
+  thisHostOnly: boolean;
+};
+
+/**
+ * Describes the message pr_stack.ListProjectStacksRequest.
+ * Use `create(ListProjectStacksRequestSchema)` to create a new message.
+ */
+export const ListProjectStacksRequestSchema: GenMessage<ListProjectStacksRequest> = /*@__PURE__*/
+  messageDesc(file_pr_stack, 22);
+
+/**
+ * How far one stack has come, counted over its planned nodes.
+ *
+ * @generated from message pr_stack.StackNodeCounts
+ */
+export type StackNodeCounts = Message<"pr_stack.StackNodeCounts"> & {
+  /**
+   * Every planned node.
+   *
+   * @generated from field: uint32 total = 1;
+   */
+  total: number;
+
+  /**
+   * Nodes a child session has materialized — they record a session or a branch.
+   *
+   * @generated from field: uint32 started = 2;
+   */
+  started: number;
+
+  /**
+   * Nodes whose pull request merged.
+   *
+   * @generated from field: uint32 merged = 3;
+   */
+  merged: number;
+};
+
+/**
+ * Describes the message pr_stack.StackNodeCounts.
+ * Use `create(StackNodeCountsSchema)` to create a new message.
+ */
+export const StackNodeCountsSchema: GenMessage<StackNodeCounts> = /*@__PURE__*/
+  messageDesc(file_pr_stack, 23);
+
+/**
+ * One stack of a project, as the drawer lists it.
+ *
+ * @generated from message pr_stack.ProjectStackSummary
+ */
+export type ProjectStackSummary = Message<"pr_stack.ProjectStackSummary"> & {
+  /**
+   * Where the stack lives — the address every other request about it carries.
+   *
+   * @generated from field: pr_stack.StackAddress address = 1;
+   */
+  address?: StackAddress;
+
+  /**
+   * What the stack is for, as it was created with; empty for a stack created without a title.
+   *
+   * @generated from field: string title = 2;
+   */
+  title: string;
+
+  /**
+   * @generated from field: pr_stack.StackNodeCounts node_counts = 3;
+   */
+  nodeCounts?: StackNodeCounts;
+
+  /**
+   * The sessions on the owning host whose changeset names this stack.
+   *
+   * @generated from field: repeated string referencing_session_ids = 4;
+   */
+  referencingSessionIds: string[];
+
+  /**
+   * The session that planned the stack (or, for a migrated one, the session that carried it).
+   *
+   * @generated from field: string created_by_session_id = 5;
+   */
+  createdBySessionId: string;
+
+  /**
+   * @generated from field: uint64 created_at_unix_ms = 6;
+   */
+  createdAtUnixMs: bigint;
+};
+
+/**
+ * Describes the message pr_stack.ProjectStackSummary.
+ * Use `create(ProjectStackSummarySchema)` to create a new message.
+ */
+export const ProjectStackSummarySchema: GenMessage<ProjectStackSummary> = /*@__PURE__*/
+  messageDesc(file_pr_stack, 24);
+
+/**
+ * A host the listing asked and got no answer from.
+ *
+ * @generated from message pr_stack.UnreachableStackHost
+ */
+export type UnreachableStackHost = Message<"pr_stack.UnreachableStackHost"> & {
+  /**
+   * @generated from field: string daemon_instance_id = 1;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * Operator-facing reason: the forwarding error the peer call ended with.
+   *
+   * @generated from field: string reason = 2;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message pr_stack.UnreachableStackHost.
+ * Use `create(UnreachableStackHostSchema)` to create a new message.
+ */
+export const UnreachableStackHostSchema: GenMessage<UnreachableStackHost> = /*@__PURE__*/
+  messageDesc(file_pr_stack, 25);
+
+/**
+ * @generated from message pr_stack.ListProjectStacksResponse
+ */
+export type ListProjectStacksResponse = Message<"pr_stack.ListProjectStacksResponse"> & {
+  /**
+   * Every stack of the project on every host that answered.
+   *
+   * @generated from field: repeated pr_stack.ProjectStackSummary stacks = 1;
+   */
+  stacks: ProjectStackSummary[];
+
+  /**
+   * Every eligible host that did not answer. Its stacks are missing from `stacks`, and saying so is
+   * the difference between "no stacks there" and "could not ask".
+   *
+   * @generated from field: repeated pr_stack.UnreachableStackHost unreachable_hosts = 2;
+   */
+  unreachableHosts: UnreachableStackHost[];
+};
+
+/**
+ * Describes the message pr_stack.ListProjectStacksResponse.
+ * Use `create(ListProjectStacksResponseSchema)` to create a new message.
+ */
+export const ListProjectStacksResponseSchema: GenMessage<ListProjectStacksResponse> = /*@__PURE__*/
+  messageDesc(file_pr_stack, 26);
+
+/**
+ * @generated from message pr_stack.GetProjectStackRequest
+ */
+export type GetProjectStackRequest = Message<"pr_stack.GetProjectStackRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * The stack to read. Forwarded to `stack.daemon_instance_id` when that names a peer.
+   *
+   * @generated from field: pr_stack.StackAddress stack = 2;
+   */
+  stack?: StackAddress;
+};
+
+/**
+ * Describes the message pr_stack.GetProjectStackRequest.
+ * Use `create(GetProjectStackRequestSchema)` to create a new message.
+ */
+export const GetProjectStackRequestSchema: GenMessage<GetProjectStackRequest> = /*@__PURE__*/
+  messageDesc(file_pr_stack, 27);
+
+/**
+ * @generated from message pr_stack.GetProjectStackResponse
+ */
+export type GetProjectStackResponse = Message<"pr_stack.GetProjectStackResponse"> & {
+  /**
+   * @generated from field: pr_stack.ProjectStackSummary summary = 1;
+   */
+  summary?: ProjectStackSummary;
+
+  /**
+   * The stack, same wire shape as `SessionEntry.stack_plan_json` (field 23) — read with the
+   * existing `parseStackPlan`.
+   *
+   * @generated from field: string stack_plan_json = 2;
+   */
+  stackPlanJson: string;
+};
+
+/**
+ * Describes the message pr_stack.GetProjectStackResponse.
+ * Use `create(GetProjectStackResponseSchema)` to create a new message.
+ */
+export const GetProjectStackResponseSchema: GenMessage<GetProjectStackResponse> = /*@__PURE__*/
+  messageDesc(file_pr_stack, 28);
 
 /**
  * @generated from service pr_stack.PrStackService
@@ -988,6 +1300,30 @@ export const PrStackService: GenService<{
     methodKind: "unary";
     input: typeof LinkStackNodeRequestSchema;
     output: typeof LinkStackNodeResponseSchema;
+  },
+  /**
+   * A project's PR stacks on every host that holds the project (`#orchestrators` 9/11). The daemon
+   * the call arrives on answers from its own project stack store and asks each eligible peer for
+   * its own; a peer that does not answer is named in `unreachable_hosts`, never silently dropped.
+   * See docs/ft/coder/pr-stacking.md.
+   *
+   * @generated from rpc pr_stack.PrStackService.ListProjectStacks
+   */
+  listProjectStacks: {
+    methodKind: "unary";
+    input: typeof ListProjectStacksRequestSchema;
+    output: typeof ListProjectStacksResponseSchema;
+  },
+  /**
+   * One project stack by its address, served by the daemon whose store holds it — forwarded there
+   * when the address names another host (`#orchestrators` 9/11).
+   *
+   * @generated from rpc pr_stack.PrStackService.GetProjectStack
+   */
+  getProjectStack: {
+    methodKind: "unary";
+    input: typeof GetProjectStackRequestSchema;
+    output: typeof GetProjectStackResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_pr_stack, 0);

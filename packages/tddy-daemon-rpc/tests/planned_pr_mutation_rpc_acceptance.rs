@@ -313,6 +313,7 @@ async fn reorder(
             session_id: session_id.to_string(),
             node_id: node_id.to_string(),
             direction: direction.to_string(),
+            stack: None,
         }))
         .await
         .map(|response| response.into_inner())
@@ -335,6 +336,7 @@ async fn pull(
             strategy: String::new(),
             dirty_worktree_action: String::new(),
             commit_message: String::new(),
+            stack: None,
         }))
         .await
         .map(|response| response.into_inner())
