@@ -53,11 +53,13 @@ use tddy_telegram::telegram_tracked_session::{
 pub use crate::telegram_session_control::types::*;
 
 mod agent_choices;
+mod callback_data;
 mod callbacks;
 mod chaining_and_listing;
 mod cli_spawns;
 mod elicitation;
 mod pickers;
+mod session_list_entries;
 mod session_start;
 mod types;
 mod workflow_launch;
