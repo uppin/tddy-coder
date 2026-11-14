@@ -19,3 +19,18 @@ sources and are pinned by tests as written, not as observed:
 **What would close it:** run `muse --help` (and the resume/auth docs) on a machine with Muse Code,
 correct whichever of the four differs, and update `muse_cli_acceptance.rs` and the
 [Muse CLI session](../../ft/daemon/muse-cli-session.md) feature doc to match.
+
+## Evidence from a real Muse Code 1.4.12 (2026-11-14)
+
+Muse Code is now installed on the development Mac
+(`/opt/homebrew/Caskroom/muse-code/1.4.12-R6909.1/muse-aarch64-macos`). From `muse --help`:
+
+| Fact | Finding |
+|---|---|
+| `--model <id>` | **Confirmed** (`--model <MODEL>`, "Model id for non-echo providers"). |
+| `--continue` | **Not in the help.** Resume is a subcommand: `muse resume --last` (most recent session in this workspace) or `muse resume <uuid\|name>`. A probe could not show whether `--continue` is silently accepted (Muse's parser ignored a bogus flag beside `-V`/`--help`), so `muse.yaml`'s resume argv is likely wrong. `muse resume <uuid>` with the Muse session id read from its log (see [2026-11-14-muse-transcript-not-read.md](2026-11-14-muse-transcript-not-read.md)) would resume exactly this session. |
+| `META_API_KEY` | Not checked. The help offers `muse auth`, `muse login` and `muse exec --api-key-stdin`. |
+| `.muse/` tree | Muse reads project `.muse/hooks.json` (binary strings). User config lives in `~/.config/muse/`, sessions in `~/.local/share/muse/sessions/`. |
+
+Also wrong in `muse.yaml`: `hooks: unsupported`. See
+[2026-11-14-muse-hooks-not-wired.md](2026-11-14-muse-hooks-not-wired.md).
