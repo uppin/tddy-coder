@@ -3,7 +3,7 @@
  * the orchestrator role and the operator's five choices go out, and nothing the daemon decides for
  * an orchestrator does — it places one on the project's home worktree itself.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-10-orchestrator-composer.md
+ * Feature: docs/ft/web/session-drawer.md § Orchestrator composer
  */
 
 import { describe, expect, it } from "bun:test";

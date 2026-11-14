@@ -3,7 +3,7 @@
  * Enter sends the text as an orchestrator's first prompt and hands the started session to the
  * screen; the host picker names the host the orchestrator runs on.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-10-orchestrator-composer.md
+ * Feature: docs/ft/web/session-drawer.md § Orchestrator composer
  */
 
 import {

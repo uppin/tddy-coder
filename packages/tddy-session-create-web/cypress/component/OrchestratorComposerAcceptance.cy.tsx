@@ -6,8 +6,8 @@
  * Uses the in-memory ConnectRPC backend (`mountWithClients` + `anInMemoryRpcBackend`), so the
  * controls render what the daemon double served.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-10-orchestrator-composer.md
- * Changeset: docs/dev/1-WIP/2026-11-10-orchestrator-composer.md
+ * Feature: docs/ft/web/session-drawer.md § Orchestrator composer
+ * Changeset: docs/dev/changesets/2026-11-14-orchestrator-composer.md
  */
 
 import {
