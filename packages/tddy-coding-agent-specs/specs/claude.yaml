@@ -164,6 +164,7 @@ extensions:
     # they would reach this host's disk, not the codebase's.
     variants:
       host_agent:
+        hooks_flag: --settings
         args: [--strict-mcp-config, --setting-sources, user]
         withdraw_native: [Read, Write, Edit, MultiEdit, NotebookEdit, Bash, BashOutput, KillShell, Glob, Grep, LS]
 # --- Jail sections (`#agent-tools 5/12`): what a sandboxed launch lowers into the jail. ----------

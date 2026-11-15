@@ -376,6 +376,11 @@ pub struct AgentVariant {
     /// The agent's own tools the variant withdraws, each passed through the `tool_deny` slot.
     #[serde(default)]
     pub withdraw_native: Vec<String>,
+    /// The flag that loads the hooks file the daemon writes for this launch, for a variant whose
+    /// own `args` keep the agent from finding that file by itself (Claude's `--setting-sources
+    /// user` skips `.claude/settings.local.json`). `None`: the variant loads hooks as usual.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hooks_flag: Option<String>,
 }
 
 /// Why a variant cannot be rendered.
@@ -420,6 +425,29 @@ impl CodingAgentSpec {
             args.extend(render_flag_per_value(deny, &variant.withdraw_native));
         }
         Ok(args)
+    }
+
+    /// The flags variant `name` loads the hooks file at `hooks_file` with: its `hooks_flag` and the
+    /// path, or nothing when it declares none. Refused, as [`Self::variant_args`] is, for a variant
+    /// the agent does not declare.
+    pub fn variant_hooks_args(
+        &self,
+        name: &str,
+        hooks_file: &std::path::Path,
+    ) -> Result<Vec<String>, VariantError> {
+        let variant = self
+            .agent
+            .variants
+            .get(name)
+            .ok_or_else(|| VariantError::Unknown {
+                agent: self.id.clone(),
+                variant: name.to_string(),
+                declared: self.agent.variants.keys().cloned().collect(),
+            })?;
+        Ok(match &variant.hooks_flag {
+            Some(flag) => vec![flag.clone(), hooks_file.to_string_lossy().into_owned()],
+            None => Vec::new(),
+        })
     }
 }
 

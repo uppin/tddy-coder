@@ -27,7 +27,16 @@ pub(crate) async fn spawn_split_agent_pty(
             pty.context_dir,
             pty.model,
             pty.argv,
-            base.agent_env(spec, std::env::vars_os(), &[]),
+            base.agent_env(
+                spec,
+                std::env::vars_os(),
+                &spec
+                    .run
+                    .env
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect::<Vec<_>>(),
+            ),
             pty.os_user,
             pty.on_exit,
         )

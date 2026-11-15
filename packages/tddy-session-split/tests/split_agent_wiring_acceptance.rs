@@ -142,6 +142,74 @@ fn a_split_agents_flags_still_withdraw_what_its_roster_took_over() {
     );
 }
 
+#[test]
+fn a_split_agent_loads_the_hooks_file_its_daemon_writes_as_settings() {
+    // Given a facilitating daemon wiring a split agent
+    let daemon = AFacilitatingDaemon::new();
+
+    // When the agent's wiring is prepared
+    let wiring = daemon.wires_a_split_agent_with_an_explorer_attached();
+
+    // Then the hooks file in its context dir is loaded by name — `--setting-sources user` would
+    // skip it, and with it every status, question and notification the agent reports
+    let hooks_file = wiring
+        .context_dir
+        .join(".claude")
+        .join("settings.local.json")
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(
+        flag_values(&wiring.extra_args, "--settings"),
+        vec![hooks_file],
+        "flags were {:?}",
+        wiring.extra_args
+    );
+}
+
+#[test]
+fn a_split_agent_still_keeps_the_checkouts_settings_out() {
+    // Given a facilitating daemon wiring a split agent
+    let daemon = AFacilitatingDaemon::new();
+
+    // When the agent's wiring is prepared
+    let wiring = daemon.wires_a_split_agent_with_an_explorer_attached();
+
+    // Then the checkout's own settings and MCP servers still configure nothing here
+    assert_eq!(
+        (
+            flag_values(&wiring.extra_args, "--setting-sources"),
+            wiring
+                .extra_args
+                .contains(&"--strict-mcp-config".to_string()),
+        ),
+        (vec!["user".to_string()], true),
+        "flags were {:?}",
+        wiring.extra_args
+    );
+}
+
+#[test]
+fn a_resumed_split_agent_carries_its_specs_launch_variables() {
+    // Given a facilitating daemon wiring a split agent — the wiring a resume relaunches it with
+    let daemon = AFacilitatingDaemon::new();
+
+    // When the agent's wiring is prepared
+    let wiring = daemon.wires_a_split_agent_with_an_explorer_attached();
+
+    // Then its process env carries the spec's own launch variables, and still no TDDY_* variable
+    assert_eq!(
+        (
+            wiring
+                .env
+                .iter()
+                .find(|(name, _)| name == "CLAUDE_CODE_NO_FLICKER")
+                .map(|(_, value)| value.clone()),
+            tddy_names_in(&wiring.env),
+        ),
+        (Some("1".to_string()), Vec::<String>::new())
+    );
+}
+
 // ─── the facilitating daemon ────────────────────────────────────────────────────
 
 struct AFacilitatingDaemon {

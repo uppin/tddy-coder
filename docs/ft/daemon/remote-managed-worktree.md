@@ -421,7 +421,10 @@ message ExecuteToolChunk {
    project (auto-provisioning by clone if it does not have it yet) and creates the worktree.
 3. A mints a scoped LiveKit join token for the session and spawns the agent with the
    `TDDY_REMOTE_*` env above, a read-only context directory, and an allowlist that excludes every
-   native filesystem tool.
+   native filesystem tool. The launch also carries `--settings <context>/.claude/settings.local.json`
+   (the `host_agent` variant's `hooks_flag`), loading the hooks file A writes there explicitly:
+   `--setting-sources user` stays, to keep the checkout's own settings out, but on its own it
+   would also skip that hooks file.
 4. A writes `.session.yaml` recording `codebase_daemon_instance_id` and `codebase_session_id`, with
    `repo_path: None`.
 
