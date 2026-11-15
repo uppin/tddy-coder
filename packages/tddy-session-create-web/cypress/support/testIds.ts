@@ -60,6 +60,9 @@ export const TEST_IDS = {
   /** Effort <select> beside Model: the agent's served `effort_levels`, an empty "agent default"
    * choice first. Absent for an agent whose spec declares no levels. */
   createSessionEffortSelect: "create-session-effort-select",
+  /** Optional "Name" text input: the session's display name, sent trimmed as
+   * `StartSessionRequest.display_name`. Absent for a tool session (tddy_coder launch) and on main. */
+  createSessionNameInput: "create-session-name-input",
   /** The provider field; absent when the harness cannot be routed or no account can drive it. */
   createSessionProviderField: "create-session-provider-field",
   /** Where the session's harness runs: "builtin" (its default vendor) or a provider account id. */

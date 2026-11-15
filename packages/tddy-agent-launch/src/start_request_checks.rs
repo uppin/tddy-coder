@@ -176,6 +176,38 @@ pub fn refuse_an_effort_the_agent_cannot_take(
     )))
 }
 
+/// The name `req` asks its session to be created with, normalised; `None` for an unnamed start. A
+/// name the rules refuse (`tddy_core::session_display_name`) refuses the start, before anything is
+/// created.
+pub(crate) fn requested_display_name(req: &StartSessionRequest) -> Result<Option<String>, Status> {
+    tddy_core::session_display_name::normalize_display_name(&req.display_name)
+        .map_err(|e| Status::invalid_argument(e.to_string()))
+}
+
+/// Refuse a name on a session whose type is declared with the `tddy_coder` launch: its
+/// `.session.yaml` is written by its own `tddy-coder` process after it is spawned, so a name this
+/// daemon recorded would race that write and be lost. Rename it once it runs.
+///
+/// TODO(session-display-name): pass the name to the spawned `tddy-coder`, which records it in
+/// `write_initial_tool_session_metadata`.
+pub(crate) fn refuse_a_named_tool_start(
+    req: &StartSessionRequest,
+    agents: &crate::spec_launch::HostCodingAgents,
+) -> Result<(), Status> {
+    let session_type = req.session_type.trim();
+    let launches_tddy_coder = agents
+        .agents()
+        .session_type(session_type)
+        .is_some_and(|declared| declared.launch == LaunchKind::TddyCoder);
+    if launches_tddy_coder && !req.display_name.trim().is_empty() {
+        return Err(Status::invalid_argument(format!(
+            "a {session_type:?} session cannot be named at its start yet: its record is written by \
+             its own tddy-coder process; rename it once it runs"
+        )));
+    }
+    Ok(())
+}
+
 /// Refuse an orchestrator on a session whose type is declared with the `tddy_coder` launch: its
 /// changeset is written by its own `tddy-coder` process, not by this daemon, so the link could not be
 /// recorded.

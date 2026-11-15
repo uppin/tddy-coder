@@ -68,6 +68,7 @@ impl ProjectHomePort for DaemonProjectHome {
             .into_iter()
             .filter(|s| s.project_id == project_id && s.session_id != home_session_id)
             .map(|s| ListedSession {
+                display_name: Some(s.display_name).filter(|name| !name.is_empty()),
                 agent_status: if s.activity_status.is_empty() {
                     s.status
                 } else {

@@ -529,6 +529,7 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
             "SendSessionMessage",
             "ResumeSession",
             "SetSessionMark",
+            "RenameSession",
             "DeleteSession",
             "ClearWorktree",
             "DeleteWorktree",

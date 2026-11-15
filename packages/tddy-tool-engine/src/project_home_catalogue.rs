@@ -11,7 +11,7 @@ use crate::project_home_inbox_tools::{
 };
 use crate::project_home_lifecycle_tools::{
     project_home_lifecycle_tool_defs, CLEAR_WORKTREE, DELETE_SESSION, DELETE_WORKTREE,
-    RESTORE_WORKTREE, SET_SESSION_MARK,
+    RENAME_SESSION, RESTORE_WORKTREE, SET_SESSION_MARK,
 };
 use crate::project_home_notify_tools::{notify_operator_tool_def, NOTIFY_OPERATOR};
 use crate::project_home_terminal_tools::{
@@ -70,6 +70,7 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | SEND_SESSION_MESSAGE
             | RESUME_SESSION
             | SET_SESSION_MARK
+            | RENAME_SESSION
             | DELETE_SESSION
             | CLEAR_WORKTREE
             | DELETE_WORKTREE

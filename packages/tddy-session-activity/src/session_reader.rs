@@ -38,6 +38,8 @@ pub struct SessionEntry {
     pub reads_host_paths: bool,
     /// The mark an orchestrator put on this session, from `.session.yaml`.
     pub orchestration_mark: Option<tddy_core::OrchestrationMark>,
+    /// The name the session was given (`.session.yaml`'s `display_name`); empty when it has none.
+    pub display_name: String,
 }
 
 /// Check if a process with the given PID is alive (same semantics as listing sessions).
@@ -104,6 +106,7 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             session_role: metadata.session_role.unwrap_or_default(),
             reads_host_paths,
             orchestration_mark: metadata.orchestration_mark,
+            display_name: metadata.display_name.unwrap_or_default(),
         });
     }
 
@@ -149,6 +152,7 @@ mod tests {
         fs::create_dir_all(&session_dir).unwrap();
 
         let metadata = SessionMetadata {
+            display_name: None,
             effort: None,
             session_id: session_id.to_string(),
             project_id: "".to_string(),

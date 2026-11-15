@@ -27,6 +27,7 @@ const PR_STACK_SESSION = {
   createdAt: "2026-07-01T10:00:00Z",
   status: "active",
   repoPath: "/home/dev/pr-stack-project",
+  displayName: "",
   pid: 0,
   isActive: true,
   projectId: "proj-pr-stack-presenter-room",

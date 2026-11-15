@@ -167,6 +167,7 @@ mod tests {
                 "SendSessionMessage",
                 "ResumeSession",
                 "SetSessionMark",
+                "RenameSession",
                 "DeleteSession",
                 "ClearWorktree",
                 "DeleteWorktree",

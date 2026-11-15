@@ -56,6 +56,10 @@ pub struct ActivityPage {
     pub page: FollowPage<AgentActivityRecord>,
     /// The question the session is waiting on, if it is waiting.
     pub pending_question: Option<PendingQuestion>,
+    /// The name the session was given, or `null` for an unnamed session — so an orchestrator
+    /// following a session reads the name an operator knows it by.
+    #[serde(default)]
+    pub display_name: Option<String>,
 }
 
 /// One transcript entry as `ReadSessionTranscript` returns it.
@@ -72,13 +76,15 @@ pub struct TranscriptItem {
     pub truncated: bool,
 }
 
-/// What the daemon reads for [`READ_SESSION_ACTIVITY`]: every call of the session, and the question
-/// it waits on.
+/// What the daemon reads for [`READ_SESSION_ACTIVITY`]: every call of the session, the question
+/// it waits on, and the name it was given.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SessionActivity {
     /// Every call, coalesced by `call_id`, in first-seen order — not the capped tail.
     pub records: Vec<AgentActivityRecord>,
     pub pending_question: Option<PendingQuestion>,
+    /// The name the session was given (`RenameSession`), or `None` for an unnamed session.
+    pub display_name: Option<String>,
 }
 
 /// One tool call's whole input and output (`GetAcpToolCallDetail`'s answer).
@@ -336,6 +342,7 @@ async fn read_activity(
     serde_json::to_value(ActivityPage {
         page,
         pending_question: read.pending_question,
+        display_name: read.display_name,
     })
     .map_err(|e| e.to_string())
 }

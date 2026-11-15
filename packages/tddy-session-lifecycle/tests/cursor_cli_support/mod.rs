@@ -378,6 +378,7 @@ impl ACursorDaemon {
         let session_dir = self.session_dir(RESUMED_SESSION_ID);
         std::fs::create_dir_all(&session_dir).unwrap();
         let meta = SessionMetadata {
+            display_name: None,
             effort: None,
             session_id: RESUMED_SESSION_ID.to_string(),
             project_id: TEST_PROJECT_ID.to_string(),

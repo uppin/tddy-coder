@@ -70,6 +70,7 @@ pub mod svc_ensure_project_home;
 pub mod svc_index_workspace_worktree;
 pub mod svc_pr_status_for_caller;
 pub mod svc_relaunch_sandboxed_runner;
+pub mod svc_rename_session;
 pub mod svc_resume_claude_cli_session;
 pub mod svc_resume_sandboxed_cli_harness_session;
 pub mod svc_resume_session;

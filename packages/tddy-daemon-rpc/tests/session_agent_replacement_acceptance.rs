@@ -246,6 +246,7 @@ fn write_agent_defs(tddy_data_dir: &Path, agents: &[(&str, &str)]) {
 
 fn a_session(session_id: &str, session_type: &str, managed: bool) -> SessionMetadata {
     SessionMetadata {
+        display_name: None,
         effort: None,
         session_id: session_id.to_string(),
         project_id: "project-under-replacement".to_string(),

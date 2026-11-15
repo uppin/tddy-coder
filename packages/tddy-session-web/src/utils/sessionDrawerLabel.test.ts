@@ -124,4 +124,39 @@ describe("sessionDrawerLabel — derived display label for drawer items", () => 
     // Then
     expect(label).toBe("deadbeef");
   });
+  // The three display-name cases mirror `packages/tddy-changeset/tests/session_display_label_acceptance.rs`
+  // case for case: the Rust twin labels a Telegram notification by the same rule.
+
+  it("labels a named session by its name even when it has a repoPath", () => {
+    // Given
+    const session = anActiveSession({ displayName: "Fix the login flow", repoPath: "/home/dev/my-feature-branch" });
+
+    // When
+    const label = sessionDrawerLabel(session);
+
+    // Then
+    expect(label).toBe("Fix the login flow");
+  });
+
+  it("trims whitespace surrounding the name", () => {
+    // Given
+    const session = anActiveSession({ displayName: "  Fix the login flow  ", repoPath: "/home/dev/my-feature-branch" });
+
+    // When
+    const label = sessionDrawerLabel(session);
+
+    // Then
+    expect(label).toBe("Fix the login flow");
+  });
+
+  it("ignores a whitespace-only name and falls back to the derived label", () => {
+    // Given
+    const session = anActiveSession({ displayName: "   ", repoPath: "/home/dev/my-feature-branch" });
+
+    // When
+    const label = sessionDrawerLabel(session);
+
+    // Then
+    expect(label).toBe("my-feature-branch");
+  });
 });

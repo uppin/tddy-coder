@@ -82,6 +82,13 @@ service ActivityService {
   // hooks this refuses loudly: a title or body over its limit is INVALID_ARGUMENT, never truncated
   // (`#home-inbox` 1/8).
   rpc ReportOperatorNotification(ReportOperatorNotificationRequest) returns (ReportOperatorNotificationResponse);
+  // An agent naming its own session — `tddy-tools rename-session` from a claude-cli or cursor-cli
+  // session. Authenticated exactly like ReportOperatorNotification (the session's agent must declare
+  // operator_notify, the capability its launch exports the tddy-tools environment under, and
+  // `hook_token` must match its .session.yaml), so it reaches only the caller's own session. The
+  // name follows `session.RenameSessionRequest.display_name`'s rules: trimmed, empty clears it, at
+  // most 80 characters on one line, else INVALID_ARGUMENT.
+  rpc RenameOwnSession(RenameOwnSessionRequest) returns (RenameOwnSessionResponse);
   // The `PermissionRequest` hook of an orchestrated claude-cli session, holding until the session's
   // orchestrator answers the pending question `request_id` names, or the daemon's deadline
   // (`claude_cli.answer_wait_secs`) passes (`#home-inbox` 6/8). Authenticated exactly like
@@ -324,6 +331,19 @@ message ReportOperatorNotificationRequest {
 
 message ReportOperatorNotificationResponse {
   bool ok = 1;
+}
+
+message RenameOwnSessionRequest {
+  string session_id   = 1;
+  string hook_token   = 2;
+  string os_user      = 3;
+  // The session's new name; empty clears it.
+  string display_name = 4;
+}
+
+message RenameOwnSessionResponse {
+  // The name as recorded: trimmed, and empty when the request cleared it.
+  string display_name = 1;
 }
 
 message AwaitQuestionAnswerRequest {

@@ -80,6 +80,7 @@ fn write_managed_session(sessions_base: &Path, session_id: &str) {
     tddy_core::write_session_metadata(
         &session_dir,
         &SessionMetadata {
+            display_name: None,
             effort: None,
             session_id: session_id.to_string(),
             project_id: "project-under-roster".to_string(),

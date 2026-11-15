@@ -23,15 +23,25 @@ pub fn resolve_session_label(
 ) -> String {
     let session_dir = tddy_core::unified_session_dir_path(sessions_base, session_id);
 
-    let repo_path = tddy_core::read_session_metadata(&session_dir)
-        .map(|meta| meta.repo_path.unwrap_or_default())
+    let (display_name, repo_path) = tddy_core::read_session_metadata(&session_dir)
+        .map(|meta| {
+            (
+                meta.display_name.unwrap_or_default(),
+                meta.repo_path.unwrap_or_default(),
+            )
+        })
         .unwrap_or_else(|e| {
             log::debug!(
                 target: "tddy_daemon::session_notifications",
                 "resolve_session_label: no readable .session.yaml for session {session_id}: {e}"
             );
-            String::new()
+            (String::new(), String::new())
         });
+
+    // A name the session was given wins over anything derived, and costs nothing more to read.
+    if !display_name.trim().is_empty() {
+        return session_display_label(&display_name, "", "", session_id);
+    }
 
     // The worktree wins outright when there is one, and there is one for most sessions — so ask
     // that first and skip the enrichment entirely. This runs on every reported hook, twice per
@@ -53,7 +63,7 @@ pub fn resolve_session_label(
                 String::new()
             });
 
-    session_display_label(&repo_path, &workflow_goal, session_id)
+    session_display_label(&display_name, &repo_path, &workflow_goal, session_id)
 }
 
 /// What a publish site needs to raise a notification for a session: the bus, the OS user the

@@ -1,6 +1,6 @@
-//! `SetSessionMark`, `DeleteSession`, `ClearWorktree`, `DeleteWorktree` and `RestoreWorktree`
-//! answered on this host (`#orchestrators` 5/11): the mark is written to the target's
-//! `.session.yaml`, a delete is the web's Delete, and the three worktree actions call the
+//! `SetSessionMark`, `RenameSession`, `DeleteSession`, `ClearWorktree`, `DeleteWorktree` and
+//! `RestoreWorktree` answered on this host (`#orchestrators` 5/11): the mark and the name are
+//! written to the target's `.session.yaml`, a delete is the web's Delete, and the three worktree actions call the
 //! `tddy-worktree-service` functions the Worktrees screen's RPCs call.
 
 use std::path::{Path, PathBuf};
@@ -40,6 +40,23 @@ impl ProjectHomeLifecyclePort for DaemonProjectHome {
         })
         .await
         .map_err(|e| format!("recording the mark failed: {e}"))?
+    }
+
+    async fn rename_session(
+        &self,
+        target: &SessionTarget,
+        display_name: Option<&str>,
+    ) -> Result<(), String> {
+        let session_dir = unified_session_dir_path(&self.sessions_base, &target.session_id);
+        let display_name = display_name.unwrap_or_default().to_string();
+        let session_id = target.session_id.clone();
+        tokio::task::spawn_blocking(move || {
+            tddy_core::session_display_name::rename_session(&session_dir, &display_name)
+                .map(|_| ())
+                .map_err(|e| format!("cannot name session {session_id}: {e}"))
+        })
+        .await
+        .map_err(|e| format!("recording the name failed: {e}"))?
     }
 
     async fn delete_session(&self, target: &SessionTarget) -> Result<(), String> {

@@ -1,6 +1,6 @@
-//! `SetSessionMark`, `DeleteSession`, `ClearWorktree`, `DeleteWorktree` and `RestoreWorktree`: the
-//! tools' own rules — how arguments reach the port, what is refused before it is asked, and what
-//! they answer (`#orchestrators` 5/11).
+//! `SetSessionMark`, `RenameSession`, `DeleteSession`, `ClearWorktree`, `DeleteWorktree` and
+//! `RestoreWorktree`: the tools' own rules — how arguments reach the port, what is refused before it
+//! is asked, and what they answer (`#orchestrators` 5/11; `RenameSession` with session names).
 //!
 //! Writing the mark, deleting and the git work are the daemon's: here the port is a fake that
 //! records what it was asked and answers what it was given, so only the tools' rules are read.
@@ -16,8 +16,9 @@ use serde_json::{json, Value};
 use tddy_core::orchestration_mark::{OrchestrationMark, OrchestrationMarkKind};
 use tddy_tool_engine::project_home_disk_refresh::RefreshQueued;
 use tddy_tool_engine::project_home_lifecycle_tools::{
-    execute_project_home_lifecycle_tool, ProjectHomeLifecyclePort, SessionMark, CLEAR_WORKTREE,
-    DELETE_SESSION, DELETE_WORKTREE, RESTORE_WORKTREE, SET_SESSION_MARK,
+    execute_project_home_lifecycle_tool, is_project_home_lifecycle_tool, rename_session_tool_def,
+    ProjectHomeLifecyclePort, SessionMark, CLEAR_WORKTREE, DELETE_SESSION, DELETE_WORKTREE,
+    RENAME_SESSION, RESTORE_WORKTREE, SET_SESSION_MARK,
 };
 use tddy_tool_engine::project_home_tools::{
     is_project_home_target_tool, ListProjectSessionsResult, ListedSession, ProjectHomePort,
@@ -47,6 +48,7 @@ const PROJECT_HOME_WORKTREE: &str = "/worktrees/proj-a/home";
 /// An orchestrator of the project, on the home worktree beside main.
 const ORCHESTRATOR: &str = "orchestrator";
 const NOTE: &str = "waiting on #881";
+const NAME: &str = "Fix the login flow";
 
 fn worktree_of(session_id: &str) -> String {
     format!("/worktrees/{session_id}")
@@ -95,6 +97,10 @@ enum Asked {
         mark: Option<(OrchestrationMarkKind, Option<String>, String)>,
     },
     Terminate(String),
+    Rename {
+        session_id: String,
+        display_name: Option<String>,
+    },
     DeleteSession(String),
     Clear(String),
     DeleteWorktree(String),
@@ -151,6 +157,17 @@ impl ProjectHomeLifecyclePort for FakeHost {
         self.records(Asked::Mark {
             session_id: target.session_id.clone(),
             mark: mark.map(|m| (m.mark, m.note.clone(), m.set_by_session_id.clone())),
+        })
+    }
+
+    async fn rename_session(
+        &self,
+        target: &SessionTarget,
+        display_name: Option<&str>,
+    ) -> Result<(), String> {
+        self.records(Asked::Rename {
+            session_id: target.session_id.clone(),
+            display_name: display_name.map(str::to_string),
         })
     }
 
@@ -479,6 +496,160 @@ async fn a_session_of_another_project_is_not_marked() {
     assert_eq!(host.asked(), Vec::<Asked>::new());
 }
 
+// ── RenameSession ────────────────────────────────────────────────────────────────────────────
+
+fn renamed(session_id: &str, display_name: Option<&str>) -> Asked {
+    Asked::Rename {
+        session_id: session_id.to_string(),
+        display_name: display_name.map(str::to_string),
+    }
+}
+
+#[tokio::test]
+async fn rename_session_records_the_trimmed_name_and_answers_it() {
+    // Given
+    let host = a_host();
+
+    // When the home agent names a stopped session
+    let outcome = calling(
+        &host,
+        RENAME_SESSION,
+        json!({ "session_id": IDLE, "display_name": format!("  {NAME} ") }),
+    )
+    .await;
+
+    // Then the port recorded the trimmed name, and the answer names the session and its name
+    assert_eq!(host.asked(), vec![renamed(IDLE, Some(NAME))]);
+    assert_eq!(
+        answer_of(&outcome),
+        json!({ "session_id": IDLE, "display_name": NAME })
+    );
+}
+
+#[tokio::test]
+async fn a_running_session_is_renamed_and_left_running() {
+    // Given
+    let host = a_host();
+
+    // When the home agent names a running session
+    let outcome = calling(
+        &host,
+        RENAME_SESSION,
+        json!({ "session_id": RUNNING, "display_name": NAME }),
+    )
+    .await;
+
+    // Then it is renamed, and nothing else is asked of it
+    assert_eq!(answer_of(&outcome)["display_name"], json!(NAME));
+    assert_eq!(host.asked(), vec![renamed(RUNNING, Some(NAME))]);
+}
+
+#[tokio::test]
+async fn an_empty_name_clears_the_sessions_name() {
+    // Given
+    let host = a_host();
+
+    // When the home agent names a session with nothing
+    let outcome = calling(
+        &host,
+        RENAME_SESSION,
+        json!({ "session_id": IDLE, "display_name": "  " }),
+    )
+    .await;
+
+    // Then the port was asked to clear its name, and the answer says it has none
+    assert_eq!(host.asked(), vec![renamed(IDLE, None)]);
+    assert_eq!(answer_of(&outcome)["display_name"], Value::Null);
+}
+
+#[tokio::test]
+async fn a_name_over_the_limit_or_on_two_lines_is_refused_before_the_port_is_asked() {
+    // Given
+    let host = a_host();
+
+    // When the home agent names a session too long, and then on two lines
+    let too_long = calling(
+        &host,
+        RENAME_SESSION,
+        json!({ "session_id": IDLE, "display_name": "x".repeat(81) }),
+    )
+    .await;
+    let two_lines = calling(
+        &host,
+        RENAME_SESSION,
+        json!({ "session_id": IDLE, "display_name": "Fix the\nlogin flow" }),
+    )
+    .await;
+
+    // Then both are refused saying why, and nothing was asked
+    assert_mentions(&refusal_of(&too_long), &[RENAME_SESSION, "80"]);
+    assert_mentions(&refusal_of(&two_lines), &[RENAME_SESSION, "one line"]);
+    assert_eq!(host.asked(), Vec::<Asked>::new());
+}
+
+#[tokio::test]
+async fn a_session_of_another_project_is_not_renamed() {
+    // Given
+    let host = a_host();
+
+    // When the home agent names a session of another project
+    let outcome = calling(
+        &host,
+        RENAME_SESSION,
+        json!({ "session_id": ELSEWHERE, "display_name": NAME }),
+    )
+    .await;
+
+    // Then it is refused naming the session, and nothing was asked
+    assert_mentions(&refusal_of(&outcome), &[ELSEWHERE]);
+    assert_eq!(host.asked(), Vec::<Asked>::new());
+}
+
+#[tokio::test]
+async fn rename_session_passes_the_ports_refusal_through() {
+    // Given a host that cannot write the record
+    let host = a_host_refusing("the record is read-only");
+
+    // When the home agent names a session
+    let outcome = calling(
+        &host,
+        RENAME_SESSION,
+        json!({ "session_id": IDLE, "display_name": NAME }),
+    )
+    .await;
+
+    // Then the refusal says so
+    assert_mentions(
+        &refusal_of(&outcome),
+        &[RENAME_SESSION, "the record is read-only"],
+    );
+}
+
+#[test]
+fn rename_session_takes_a_session_a_name_and_a_host() {
+    // Given
+    let def = rename_session_tool_def();
+    let schema: Value = serde_json::from_str(&def.input_schema_json).unwrap();
+
+    // Then
+    assert_eq!(
+        (
+            def.name.as_str(),
+            schema["required"].clone(),
+            schema["properties"]["display_name"]["type"].clone(),
+            schema["properties"]["daemon_instance_id"]["type"].clone(),
+            is_project_home_lifecycle_tool(RENAME_SESSION),
+        ),
+        (
+            RENAME_SESSION,
+            json!(["session_id", "display_name"]),
+            json!("string"),
+            json!("string"),
+            true,
+        )
+    );
+}
+
 // ── DeleteSession ────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -683,10 +854,11 @@ async fn restore_worktree_refuses_another_projects_session_before_the_port_is_as
 // ── routing ──────────────────────────────────────────────────────────────────────────────────
 
 #[test]
-fn all_five_are_target_tools_so_a_call_naming_another_host_is_forwarded() {
+fn all_six_are_target_tools_so_a_call_naming_another_host_is_forwarded() {
     // When / Then
     for tool in [
         SET_SESSION_MARK,
+        RENAME_SESSION,
         DELETE_SESSION,
         CLEAR_WORKTREE,
         DELETE_WORKTREE,

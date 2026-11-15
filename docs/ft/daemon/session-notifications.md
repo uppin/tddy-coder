@@ -19,13 +19,20 @@ matched to a row in the drawer.
 
 ## One label, everywhere
 
-An **activity alert** names a session the way the web session drawer names it: the basename of its
+An **activity alert** names a session the way the web session drawer names it: the **name it was
+given** (`display_name` — by the web's rename, at its start, by an orchestrator's `RenameSession` or
+by its own agent's `tddy-tools rename-session`; see
+[Session names](../web/session-drawer.md#session-names)), falling back to the basename of its
 `repo_path`, falling back to its `workflow_goal`, falling back to the first eight characters of its
-id. A session working in `/home/dev/my-feature-branch` reads as `Session my-feature-branch` in a
-chat *and* on its drawer row.
+id. A session named "Fix the login flow" reads as `Session Fix the login flow`, and an unnamed one
+working in `/home/dev/my-feature-branch` as `Session my-feature-branch`, in a chat *and* on its
+drawer row. The rule is `tddy_changeset::session_label::session_display_label`, mirrored by the
+web's `sessionDrawerLabel`; the daemon reads the name first, so a named session costs no worktree or
+goal lookup.
 
 The other Telegram surfaces — the metadata-tick status line, presenter elicitation, the `/sessions`
-list, chain-parent buttons — still use the short-id label. Unifying those is a tracked follow-up.
+list, chain-parent buttons — still use the short-id label, and so do not show a session's name yet.
+Unifying those is a tracked follow-up.
 
 ## What is notified
 

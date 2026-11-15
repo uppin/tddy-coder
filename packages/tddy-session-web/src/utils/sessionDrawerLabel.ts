@@ -15,16 +15,24 @@ const WORKFLOW_GOAL_PLACEHOLDER = "—";
  * Derives a human-readable display label for a session in the drawer.
  *
  * Priority:
- * 1. Basename of `repoPath` (when non-empty and yields a non-empty segment).
- * 2. `workflowGoal` (when non-empty and not the display placeholder).
- * 3. First 8 characters of `sessionId` as a last-resort fallback.
+ * 1. `displayName` — the name an operator or orchestrator gave the session — trimmed, when that
+ *    leaves anything.
+ * 2. Basename of `repoPath` (when non-empty and yields a non-empty segment).
+ * 3. `workflowGoal` (when non-empty and not the display placeholder).
+ * 4. First 8 characters of `sessionId` as a last-resort fallback.
  *
- * `packages/tddy-core/src/session_label.rs` mirrors this rule so a Telegram notification and a
+ * `packages/tddy-changeset/src/session_label.rs` mirrors this rule so a Telegram notification and a
  * drawer row name the same session identically (PRD FR1,
- * docs/ft/daemon/session-notifications.md). The two must stay in
- * step: a change here without the matching change there splits the naming again.
+ * docs/ft/daemon/session-notifications.md). The parity is pinned case for case against
+ * `packages/tddy-changeset/tests/session_display_label_acceptance.rs`. The two must stay in step: a
+ * change here without the matching change there splits the naming again.
  */
 export function sessionDrawerLabel(session: SessionEntry): string {
+  const trimmedName = session.displayName.trim();
+  if (trimmedName !== "") {
+    return trimmedName;
+  }
+
   const trimmedRepo = session.repoPath.trim();
   if (trimmedRepo !== "" && trimmedRepo !== "/") {
     const basename = trimmedRepo.split("/").filter(Boolean).at(-1);

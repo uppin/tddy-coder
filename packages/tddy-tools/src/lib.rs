@@ -25,6 +25,7 @@ pub mod permission_deferral_arg;
 pub mod pty_relay;
 mod pull_ledger;
 pub mod remote_cli;
+pub mod rename_session_cli;
 mod reset_worktree_choice;
 pub mod restructure_tools;
 pub mod server;

@@ -19,14 +19,17 @@ fn session_dir(sessions_base: &Path, target: &SessionTarget) -> PathBuf {
     unified_session_dir_path(sessions_base, &target.session_id)
 }
 
-/// Every call `target` has made, uncapped, and the question it waits on.
+/// Every call `target` has made, uncapped, the question it waits on, and the name it was given.
 pub(super) async fn session_activity(
     sessions_base: &Path,
     target: &SessionTarget,
 ) -> anyhow::Result<SessionActivity> {
     let session_dir = session_dir(sessions_base, target);
     tokio::task::spawn_blocking(move || {
+        let metadata = tddy_core::read_session_metadata(&session_dir)
+            .map_err(|e| anyhow::anyhow!("reading the session's record failed: {e}"))?;
         Ok(SessionActivity {
+            display_name: metadata.display_name,
             records: tddy_core::agent_activity::read_all_agent_activity(&session_dir)?,
             pending_question: tddy_core::pending_question::read_pending_question(&session_dir)?,
         })

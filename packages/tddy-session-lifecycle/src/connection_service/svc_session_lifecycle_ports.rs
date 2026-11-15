@@ -5,9 +5,9 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
-    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, ResumeSessionRequest,
-    ResumeSessionResponse, SessionService, SignalSessionRequest, SignalSessionResponse,
-    StartSessionRequest, StartSessionResponse,
+    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, RenameSessionRequest,
+    RenameSessionResponse, ResumeSessionRequest, ResumeSessionResponse, SessionService,
+    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
 };
 
 use crate::SessionHandler;
@@ -103,6 +103,15 @@ impl SessionHandler for DaemonSessionHost {
             .await
     }
 
+    async fn rename_session(
+        &self,
+        request: Request<RenameSessionRequest>,
+    ) -> Result<Response<RenameSessionResponse>, Status> {
+        self.launch_sessions()
+            .rename_session_at_session_coordinate(request)
+            .await
+    }
+
     async fn get_worktree_snapshot(
         &self,
         request: Request<tddy_service::proto::session::GetWorktreeSnapshotRequest>,
@@ -172,6 +181,13 @@ impl SessionService for DaemonSessionHost {
         request: Request<DeleteSessionRequest>,
     ) -> Result<Response<DeleteSessionResponse>, Status> {
         SessionHandler::delete_session(self, request).await
+    }
+
+    async fn rename_session(
+        &self,
+        request: Request<RenameSessionRequest>,
+    ) -> Result<Response<RenameSessionResponse>, Status> {
+        SessionHandler::rename_session(self, request).await
     }
 
     async fn get_worktree_snapshot(

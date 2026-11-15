@@ -37,10 +37,15 @@ found" state with a Home link.
 
 Each `SessionDrawerItem` shows:
 - A **status dot**: green (`connected`), grey (`disconnected`), yellow (`needs-input`)
-- A **derived label** via `sessionDrawerLabel()`:
-  1. `basename(repoPath)` — if non-empty
-  2. `workflowGoal` — fallback
-  3. `sessionId.slice(0, 8)` — last resort
+- A **label** via `sessionDrawerLabel()`:
+  1. `displayName` — the name the session was given (see [Session names](#session-names)), trimmed,
+     if non-empty
+  2. `basename(repoPath)` — if non-empty
+  3. `workflowGoal` — fallback (not the `—` placeholder)
+  4. `sessionId.slice(0, 8)` — last resort
+
+  The Rust twin `tddy_changeset::session_label::session_display_label` applies the same rule to
+  Telegram alerts; the two are pinned case for case.
 - A **tooltip** on focus/hover revealing the full session id
 - An **orchestrator** badge (`sessions-drawer-item-orchestrator-<id>`) on a session holding the
   `orchestrator` role ([Orchestrator sessions](../daemon/project-concept.md#orchestrator-sessions)).
@@ -52,6 +57,33 @@ Each `SessionDrawerItem` shows:
 The New-session form offers a **Session orchestrator** switch (`create-session-orchestrator-toggle`)
 for an agent whose spec declares `project_home_main`. On, the start asks for `session_role:
 "orchestrator"` and the form hides placement, branch and stack, which the daemon owns.
+
+### Session names
+
+A session has no name until someone gives it one; until then it is called by the derived label
+above. Once named, the name is its label everywhere — the drawer row, the inspector, Telegram
+activity alerts, and what an orchestrator's tools report (`display_name`).
+
+- **Rules.** Surrounding whitespace is trimmed; an empty name clears it (the session is called by
+  its derived label again); at most **80 characters**, on one line — a longer name, or one with a
+  control character, is refused rather than cut. Stored as `display_name` in the session's
+  `.session.yaml` and listed as `SessionEntry.display_name` (field 39).
+- **Rename from the web.** The inspector's Details tab opens with the session's name
+  (`SessionNameEditor`): double-click it or press **Rename** (`session-name-rename-<id>`), type, then
+  **Enter** saves and **Escape** (or leaving the field) cancels. Saving calls
+  `SessionService.RenameSession` on the session's owning host, then refreshes the list. A refusal is
+  shown under the field (`session-name-error-<id>`) with the editor kept open. Without a connection to
+  the owning host the name is shown with no rename control.
+- **Name at start.** The New-session form's optional **Name** field (`create-session-name-input`)
+  sends `StartSessionRequest.display_name` (field 49); the daemon validates it before anything is
+  created. Hidden for a tool session type, whose record is written by its own `tddy-coder` process —
+  name it once it runs.
+- **By an orchestrator.** The `RenameSession` project-home tool, and `StartSession`'s `display_name`
+  ([Project-home tools](../daemon/project-concept.md#project-home-tools)).
+- **By the session's own agent.** `tddy-tools rename-session "<name>"` from inside a claude-cli or
+  cursor-cli session, authenticated by the session's hook token like `tddy-tools notify`
+  (`ActivityService.RenameOwnSession`); the agent's appended guidance names it.
+- A rename is not pushed to other open browsers: they see it on their next list refresh.
 
 Sessions are ordered newest-first by `createdAt` (`sortSessionsByCreation()`). Within that order
 the list is split into an **Active** and a **Remaining** partition (see
@@ -464,7 +496,8 @@ Title "Inspector", plus expand/restore icon button and close icon button.
 
 ### Inspector Metadata Section
 
-All `SessionEntry` proto fields, empty values omitted. Displayed fields:
+Opens with the session's name and its Rename control ([Session names](#session-names)). Then all
+`SessionEntry` proto fields, empty values omitted. Displayed fields:
 - Goal (workflowGoal), Status (status), Repo (repoPath), Session ID (sessionId)
 - PID (pid, shown when > 0), Workflow state (workflowState)
 - Activity status (activityStatus), Agent (agent), Model (model)
@@ -506,6 +539,7 @@ Adds to `src/components/ui/`:
 - `StreamTerminalOutput` / `SendTerminalInput` (`terminal_session.TerminalSessionService`) — gRPC
   terminal stream (claude-cli path)
 - `DeleteSession` — delete session (two-click confirm)
+- `RenameSession` — name a session or clear its name, on its owning host ([Session names](#session-names))
 - `SignalSession` — SIGTERM for active sessions
 
 ## Inspector Tabs
@@ -585,6 +619,7 @@ A toggle at the top of the form switches between:
 | Base the stack on | tool | conditional — `<select>` naming the existing session that seeds the new stack's bottom node; shown only while the recipe is `pr-stack` (see [Stack Base Session Picker](#stack-base-session-picker)) |
 | Model | claude-cli | yes — dropdown of `CLAUDE_CLI_MODELS` |
 | Effort | any CLI agent whose spec declares levels | no — `<select>` (`create-session-effort-select`) beside Model listing the agent's served `AgentInfo.effort_levels`, a **Default** choice first; preselects `default_effort`; hidden for an agent without levels; sends `StartSessionRequest.effort` (field 48), never for a tool session |
+| Name | any session type but a tool session | no — text input (`create-session-name-input`); sent trimmed as `StartSessionRequest.display_name` (field 49), omitted when blank — see [Session names](#session-names) |
 | Permission mode | claude-cli | no — auto/default/acceptEdits/plan/bypassPermissions |
 | Initial prompt | claude-cli | no — textarea |
 | Run the agent in tmux | claude-cli, cursor-cli, opencode-cli, muse-cli, warp-cli | no — checkbox (`create-session-tmux-toggle`, one control for every CLI harness type), unchecked; sends `StartSessionRequest.run_in_tmux` (field 47) — see [Claude CLI session § tmux mode](../daemon/claude-cli-session.md#tmux-mode-startsessionrequestrun_in_tmux--true) and the harness docs' § tmux mode. Disabled while the sandbox, the sandboxed codebase or a split placement is chosen (the daemon refuses each with it), and choosing one of them clears it, so the request never carries the pair. Switching to a session type without a Sandbox control (opencode, muse, warp, tool) clears the sandbox, and to any type but claude-cli clears the sandboxed codebase, so a placement left on from another type never disables it unseen. Not shown on the [main variant](#main-variant) |

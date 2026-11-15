@@ -16,9 +16,9 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
-    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, ResumeSessionRequest,
-    ResumeSessionResponse, SessionService, SignalSessionRequest, SignalSessionResponse,
-    StartSessionRequest, StartSessionResponse,
+    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, RenameSessionRequest,
+    RenameSessionResponse, ResumeSessionRequest, ResumeSessionResponse, SessionService,
+    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
 };
 
 use crate::cli_session_manager::CliSessionManager;
@@ -354,6 +354,16 @@ impl SessionService for TestDaemon {
         self.inner
             .session_lifecycle_service()
             .delete_session(request)
+            .await
+    }
+
+    async fn rename_session(
+        &self,
+        request: Request<RenameSessionRequest>,
+    ) -> Result<Response<RenameSessionResponse>, Status> {
+        self.inner
+            .session_lifecycle_service()
+            .rename_session(request)
             .await
     }
 

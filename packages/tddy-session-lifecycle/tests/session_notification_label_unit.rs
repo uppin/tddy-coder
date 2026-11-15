@@ -19,6 +19,7 @@ const SESSION_ID: &str = "01900000-0000-7000-8000-AABB00000001";
 /// A valid claude-cli session's metadata. Cases override only the field they are about.
 fn a_session_metadata() -> SessionMetadata {
     SessionMetadata {
+        display_name: None,
         effort: None,
         session_id: SESSION_ID.to_string(),
         project_id: "test-project".to_string(),
@@ -236,4 +237,30 @@ fn prefers_the_worktree_over_a_workflow_goal_when_the_session_records_both() {
 
     // Then
     assert_eq!(label, "my-feature-branch");
+}
+
+/// A session given a name is called by it — on a Telegram alert as in the drawer — ahead of the
+/// worktree it works in.
+#[test]
+fn names_a_session_after_the_name_it_was_given_ahead_of_its_worktree() {
+    // Given a named session with a worktree
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let session_dir = sessions_tmp.path().join("sessions").join(SESSION_ID);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let meta = SessionMetadata {
+        repo_path: Some("/home/dev/my-feature-branch".to_string()),
+        display_name: Some("Fix the login flow".to_string()),
+        ..a_session_metadata()
+    };
+    write_session_metadata(&session_dir, &meta).unwrap();
+
+    // When
+    let label = resolve_session_label(
+        Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+        sessions_tmp.path(),
+        SESSION_ID,
+    );
+
+    // Then
+    assert_eq!(label, "Fix the login flow");
 }

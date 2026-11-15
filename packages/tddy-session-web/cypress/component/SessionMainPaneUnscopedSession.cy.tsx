@@ -31,6 +31,7 @@ const anUnscopedSession: Partial<SessionEntry> = {
   isActive: true,
   status: "active",
   repoPath: `${PROJECT_MAIN_REPO}/worktrees/feature-x`,
+  displayName: "",
 };
 
 /** The project whose main repo is the prefix of the unscoped session's worktree. */

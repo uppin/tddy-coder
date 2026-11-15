@@ -1,6 +1,7 @@
 import { Button, ScrollArea } from "tddy-ui-web";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { formatLastDataReceived } from "./lastDataReceivedFormat";
+import { SessionNameEditor } from "./SessionNameEditor";
 import { formatBytes } from "tddy-ui-web";
 
 /** Inspector I/O traffic: byte counters and the last time data arrived. */
@@ -22,6 +23,11 @@ export interface SessionInspectorDetailsTabProps {
   onResume: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
   onTerminate: (sessionId: string) => void;
+  /**
+   * Renames the session on its owning host (`""` clears the name). Absent when nothing reaches that
+   * host: the name is shown without a way to edit it.
+   */
+  onRename?: (displayName: string) => Promise<void>;
 }
 
 function MetaRow({ label, value }: { label: string; value: string | number | undefined | null }) {
@@ -43,12 +49,14 @@ export function SessionInspectorDetailsTab({
   onResume,
   onDelete,
   onTerminate,
+  onRename,
 }: SessionInspectorDetailsTabProps) {
   return (
     <ScrollArea className="flex-1 min-h-0">
       <div className="px-3 py-3 flex flex-col gap-4">
         {/* Metadata */}
         <div data-testid="sessions-inspector-metadata" className="flex flex-col gap-2">
+          <SessionNameEditor session={session} onRename={onRename} />
           <MetaRow label="Goal" value={session.workflowGoal} />
           <MetaRow label="Status" value={session.status} />
           <MetaRow label="Repo" value={session.repoPath} />

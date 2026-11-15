@@ -31,6 +31,7 @@ const FAKE_SESSION = {
   createdAt: "2026-06-30T10:00:00Z",
   status: "active",
   repoPath: "/home/dev/my-recipe-session",
+  displayName: "",
   pid: 43001,
   isActive: true,
   projectId: "proj-livekit-terminal-1",

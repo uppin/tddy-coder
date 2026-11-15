@@ -152,6 +152,16 @@ pub struct SessionMetadata {
     /// refuses unknown fields.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub agent_conversations: Vec<crate::agent_conversation::AgentConversation>,
+    /// The name an operator or an orchestrator gave the session — `RenameSession`, or the start's
+    /// `display_name` — already normalised by [`crate::session_display_name::normalize_display_name`]
+    /// (trimmed, never empty, at most [`crate::session_display_name::DISPLAY_NAME_MAX_CHARS`]
+    /// characters). It names the session ahead of the derived label
+    /// ([`crate::session_label::session_display_label`]). Absent for a session never named, or whose
+    /// name was cleared, and for legacy files; never written when absent, so an unnamed record reads
+    /// exactly as before. An older daemon cannot read a named record: this struct refuses unknown
+    /// fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
 }
 
 /// [`SessionMetadata::session_role`] of a project's project-home session.
@@ -321,6 +331,7 @@ pub fn write_initial_tool_session_metadata(
         tmux_session: None,
         orchestration_mark: None,
         agent_conversations: Vec::new(),
+        display_name: None,
     };
     write_session_metadata(session_dir, &metadata)
 }

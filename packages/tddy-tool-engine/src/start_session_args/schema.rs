@@ -190,6 +190,10 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
         string("The reasoning effort level the session's agent starts at. Levels are per agent: `DescribeSessionStartOptions` lists each agent's under `effort_levels`. Empty is the agent's own default; a level the agent does not declare, or any level for an agent that declares none, refuses the start."),
     );
     offer(
+        "display_name",
+        string("The session's name, as the operator will see it called in the web UI and in Telegram alerts — one line, at most 80 characters. Omit for a session called by its worktree or goal; rename it later with RenameSession. Refused for a tool session type."),
+    );
+    offer(
         "specialized_agents",
         json!({
             "type": "array",

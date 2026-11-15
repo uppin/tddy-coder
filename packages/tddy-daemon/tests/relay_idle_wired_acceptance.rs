@@ -45,12 +45,17 @@ fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> TestDaemon 
 #[tokio::test]
 async fn rpc_call_bumps_idle_tracker_so_shutdown_is_not_triggered() {
     // Given
-    // Let the timeout expire before the RPC call. It is long enough that the check after the call
-    // cannot itself outlive it: with a 1 ms timeout, any scheduling delay between the RPC's bump and
-    // `should_shutdown` read as "the RPC never bumped it".
-    let timeout = Duration::from_millis(500);
-    let tracker = Arc::new(IdleTimeoutTracker::new(timeout));
-    std::thread::sleep(timeout + Duration::from_millis(100));
+    // A tracker idle from the start: last active two minutes ago, with a one-minute timeout. The
+    // check after the call then has a minute to run in, so it cannot race the clock — with a short
+    // timeout, any scheduling delay between the RPC's bump and `should_shutdown` read as "the RPC
+    // never bumped it" — and nothing sleeps waiting for the tracker to expire.
+    let two_minutes_ago = std::time::Instant::now()
+        .checked_sub(Duration::from_secs(120))
+        .expect("the clock reaches two minutes back");
+    let tracker = Arc::new(IdleTimeoutTracker::last_active_at(
+        Duration::from_secs(60),
+        two_minutes_ago,
+    ));
 
     assert!(
         tracker.should_shutdown(),

@@ -48,6 +48,7 @@ export * from "./lib/terminalGridMeasure";
 export * from "./SessionMainPane";
 export * from "./sessionMainPaneProps";
 export * from "./SessionInspectorDrawer";
+export * from "./SessionNameEditor";
 export * from "./InspectorTabs";
 export * from "./SessionActivitySidebar";
 export * from "./SessionWithActivitySidebar";

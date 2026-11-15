@@ -122,6 +122,7 @@ mod tests {
                 "mcp__tddy-tools__SendSessionMessage",
                 "mcp__tddy-tools__ResumeSession",
                 "mcp__tddy-tools__SetSessionMark",
+                "mcp__tddy-tools__RenameSession",
                 "mcp__tddy-tools__DeleteSession",
                 "mcp__tddy-tools__ClearWorktree",
                 "mcp__tddy-tools__DeleteWorktree",

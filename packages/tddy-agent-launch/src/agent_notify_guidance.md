@@ -10,3 +10,15 @@ tddy-tools notify "<one-line title>" --body "<markdown>" --level info|success|wa
 The title is at most 200 characters and the body at most 2,000; `--body -` reads the body from
 stdin. The command exits non-zero and says why when the notification was not sent. Never use it
 for routine progress — every notification interrupts a person.
+
+## Naming your session
+
+Your operator sees this session listed beside others. Once you know what the work is, give it a
+short name they will recognise — and rename it if the work changes:
+
+```bash
+tddy-tools rename-session "<one-line name>"
+```
+
+At most 80 characters; an empty name clears it. The command exits non-zero and says why when the
+name was not recorded.

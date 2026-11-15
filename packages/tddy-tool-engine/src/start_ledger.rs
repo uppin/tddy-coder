@@ -90,20 +90,32 @@ pub struct StartLedgerRecord {
     /// Why the start failed or was cancelled.
     pub error: Option<String>,
     pub updated_at_unix_ms: u64,
+    /// The started session's name, as the host running it lists it; set with `session_id` when the
+    /// session has one. Defaulted, so a record written before names existed still reads.
+    #[serde(default)]
+    pub display_name: Option<String>,
 }
 
-/// Looks up a started session as the host running it lists it, for the record's branch and
-/// worktree. The drain asks once, when the start succeeds, before the record is written as
+/// A started session as the host running it lists it: what its record carries beside its id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartedSessionListing {
+    pub branch: String,
+    pub worktree: String,
+    /// Empty for a session with no name.
+    pub display_name: String,
+}
+
+/// Looks up a started session as the host running it lists it, for the record's branch, worktree
+/// and name. The drain asks once, when the start succeeds, before the record is written as
 /// succeeded, so a reader never sees a session without its branch.
 #[async_trait]
 pub trait StartedSessionDetails: Send + Sync {
-    /// The branch and worktree of `session_id` on `daemon_instance_id`, or `None` when that host
-    /// does not list it.
-    async fn branch_and_worktree(
+    /// `session_id` as `daemon_instance_id` lists it, or `None` when that host does not list it.
+    async fn listing(
         &self,
         daemon_instance_id: &str,
         session_id: &str,
-    ) -> Option<(String, String)>;
+    ) -> Option<StartedSessionListing>;
 }
 
 /// The ledgers this process has already recovered, by their session directory.
@@ -263,6 +275,7 @@ where
         worktree: None,
         error: None,
         updated_at_unix_ms: now_unix_ms(),
+        display_name: None,
     };
     ledger
         .persist(&record)
@@ -281,6 +294,7 @@ enum Ending {
         session_id: String,
         branch: Option<String>,
         worktree: Option<String>,
+        display_name: Option<String>,
     },
     Failed(String),
     Cancelled(String),
@@ -337,20 +351,21 @@ async fn ending_of_result(
     if response.session_id.is_empty() {
         return Ending::Failed("the start ended without a session".to_string());
     }
-    let (branch, worktree) = match details {
-        Some(details) => match details
-            .branch_and_worktree(&record.daemon_instance_id, &response.session_id)
-            .await
-        {
-            Some((branch, worktree)) => (Some(branch), Some(worktree)),
-            None => (None, None),
-        },
-        None => (None, None),
+    let listed = match details {
+        Some(details) => {
+            details
+                .listing(&record.daemon_instance_id, &response.session_id)
+                .await
+        }
+        None => None,
     };
     Ending::Succeeded {
         session_id: response.session_id,
-        branch,
-        worktree,
+        branch: listed.as_ref().map(|l| l.branch.clone()),
+        worktree: listed.as_ref().map(|l| l.worktree.clone()),
+        display_name: listed
+            .map(|l| l.display_name)
+            .filter(|name| !name.is_empty()),
     }
 }
 
@@ -360,11 +375,13 @@ fn apply_ending(record: &mut StartLedgerRecord, ending: Ending) {
             session_id,
             branch,
             worktree,
+            display_name,
         } => {
             record.state = StartState::Succeeded;
             record.session_id = Some(session_id);
             record.branch = branch;
             record.worktree = worktree;
+            record.display_name = display_name;
         }
         Ending::Failed(message) => {
             record.state = StartState::Failed;

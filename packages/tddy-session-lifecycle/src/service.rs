@@ -7,9 +7,9 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
-    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, ResumeSessionRequest,
-    ResumeSessionResponse, SessionService, SignalSessionRequest, SignalSessionResponse,
-    StartSessionRequest, StartSessionResponse,
+    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, RenameSessionRequest,
+    RenameSessionResponse, ResumeSessionRequest, ResumeSessionResponse, SessionService,
+    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
 };
 
 use crate::handler::{SessionHandler, SessionStartEventStream};
@@ -84,6 +84,13 @@ impl<H: SessionHandler + 'static> SessionService for SessionServiceImpl<H> {
         request: Request<DeleteSessionRequest>,
     ) -> Result<Response<DeleteSessionResponse>, Status> {
         self.host.delete_session(request).await
+    }
+
+    async fn rename_session(
+        &self,
+        request: Request<RenameSessionRequest>,
+    ) -> Result<Response<RenameSessionResponse>, Status> {
+        self.host.rename_session(request).await
     }
 
     async fn get_worktree_snapshot(

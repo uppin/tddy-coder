@@ -99,6 +99,7 @@ fn write_minimal_running_session(sessions_base: &std::path::Path, session_id: &s
     let session_dir = sessions_base.join("sessions").join(session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
     let metadata = SessionMetadata {
+        display_name: None,
         effort: None,
         session_id: session_id.to_string(),
         project_id: "proj-acceptance".to_string(),
