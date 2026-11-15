@@ -155,6 +155,25 @@ impl SplitSessions {
             })
             .await?;
 
+        let recording = tddy_cli_sessions::cli_session_manager::main_capture_recording_path(
+            &self.tddy_data_dir,
+            session_id,
+        );
+        self.cli_manager
+            .record_main_capture(session_id, recording.clone())
+            .await;
+        startup::ensure_split_agent_started(
+            &handle,
+            startup::SplitAgentStartup::from_config(&self.config),
+        )
+        .await
+        .map_err(|died| Status::failed_precondition(died.to_string()))?;
+        // Recorded again now the agent has survived startup: the snapshot at registration can
+        // predate its first output, and this one holds it.
+        self.cli_manager
+            .record_main_capture(session_id, recording)
+            .await;
+
         write_split_agent_metadata(
             session_id,
             codebase_instance_id,
@@ -422,6 +441,7 @@ mod launch;
 mod split_agent_pty;
 #[cfg(test)]
 mod split_agent_pty_tests;
+mod startup;
 
 pub use crate::svc_paired_codebase_teardown;
 use crate::svc_split_agent_metadata::write_split_agent_metadata;

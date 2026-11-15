@@ -160,6 +160,7 @@ impl CliSessionManager {
             session_id.to_string(),
             terminal_id.to_string(),
             handle.task_id.clone(),
+            super::main_exit::MainExitWatch::new(handle.pid),
             on_exit,
             TmuxRun::new(tmux_session, os_user),
         );
@@ -232,6 +233,7 @@ impl CliSessionManager {
             pid: ready.pid,
             master: ready.master,
             pty_done: pty_done_rx,
+            status_rx: task.status_watch(),
             current_size: ready.current_size,
             task_id: task.id.clone(),
             channel,
@@ -243,6 +245,7 @@ impl CliSessionManager {
         session_id: String,
         terminal_id: String,
         task_id: TaskId,
+        main_exit: super::main_exit::MainExitWatch,
         on_exit: Option<PendingExit>,
         tmux_run: TmuxRun,
     ) {
@@ -263,6 +266,9 @@ impl CliSessionManager {
                 if status_rx.changed().await.is_err() {
                     break;
                 }
+            }
+            if terminal_id == MAIN_TERMINAL_ID {
+                super::main_exit::log_main_exit(&session_id, &main_exit, &task.status());
             }
             // The process has exited and its output is complete. The hook finishes before the
             // terminal leaves the index, and before a waiting resume goes on.

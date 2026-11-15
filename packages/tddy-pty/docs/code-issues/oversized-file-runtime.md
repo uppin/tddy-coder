@@ -15,6 +15,7 @@ Deferred by the user, 2026-11-10 (#876 wrap): left for a later refactoring node
 | Run | Production lines | Note |
 |---|---:|---|
 | 2026-11-10 | 451 → 523 | #876: the Tier C extracts out of `open_pty_and_pump` (179/9 → 40) added each helper's signature and struct (`spawn_child_and_pump`, `PtyMasterSetup`, `spawn_reader_with_master`, `wait_for_reader_drain`, `spawn_pty_writer`, `spawn_pty_reader`), pushing the file past the budget |
+| 2026-11-15 | 523 → 523 | #905 touched the exit monitor (one line: the status now comes from `exit_status::task_status_of`) and added its tests below `#[cfg(test)]`; production lines unchanged |
 
 ## What would close it
 

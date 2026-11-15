@@ -15,6 +15,7 @@ Deferred by the user, 2026-11-10 (#876 wrap): left for a later refactoring node
 | Run | Lines | Nesting | Note |
 |---|---|---|---|
 | 2026-11-10 | 67 | 3 | new in #876: extracted from `open_pty_and_pump` (Tier C), which fell 179/9 → 40 |
+| 2026-11-15 | 67 | 3 | #905 touched the exit monitor inside it (one line swapped for `exit_status::task_status_of`); length and nesting unchanged |
 
 ## What would close it
 

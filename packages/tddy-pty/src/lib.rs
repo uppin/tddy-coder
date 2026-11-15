@@ -6,6 +6,7 @@
 //! pre-computes the final `argv`/`env` and passes them in via [`PtySpawnSpec`]. This crate has no
 //! notion of an `os_user`.
 
+pub mod exit_status;
 pub mod registry;
 pub mod resize;
 pub mod runtime;

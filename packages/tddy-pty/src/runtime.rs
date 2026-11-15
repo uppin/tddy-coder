@@ -351,7 +351,7 @@ fn spawn_child_and_pump(
     let mut child_monitor = child;
     std::thread::spawn(move || {
         let status = match child_monitor.wait() {
-            Ok(_) => TaskStatus::Completed { exit_code: Some(0) },
+            Ok(status) => crate::exit_status::task_status_of(&status),
             Err(e) => TaskStatus::Failed {
                 message: format!("child wait error: {e}"),
             },
@@ -671,6 +671,43 @@ mod tests {
         .await;
         let _ready = ready_rx.await.expect("ready signal").expect("PTY spawned");
         task
+    }
+
+    /// A child's exit code is what its task reports — a failing agent must not read as a clean exit.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_child_that_exits_non_zero_reports_its_exit_code() {
+        // Given a child that exits with code 3
+        let task = a_running_shell("exit 3").await;
+
+        // When its exit is reported
+        assert!(
+            reaches_terminal_within(&task, std::time::Duration::from_secs(5)).await,
+            "PTY task never reached terminal status"
+        );
+
+        // Then the task carries that code
+        assert_eq!(task.status(), TaskStatus::Completed { exit_code: Some(3) });
+    }
+
+    /// A child killed by a signal reports a failure naming it, so whoever reads the exit can tell a
+    /// kill from a clean or a failing exit.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_child_killed_by_a_signal_reports_the_signal() {
+        // Given a child that kills itself with SIGKILL
+        let task = a_running_shell("kill -9 $$").await;
+
+        // When its exit is reported
+        assert!(
+            reaches_terminal_within(&task, std::time::Duration::from_secs(5)).await,
+            "PTY task never reached terminal status"
+        );
+
+        // Then the task failed, naming the signal
+        let status = task.status();
+        assert!(
+            matches!(&status, TaskStatus::Failed { message } if message.starts_with("terminated by signal")),
+            "a killed child must report the signal, got {status:?}"
+        );
     }
 
     /// The exit is reported only once the reader has drained the terminal, so the capture holds
