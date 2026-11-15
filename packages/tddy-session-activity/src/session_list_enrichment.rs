@@ -194,28 +194,7 @@ pub fn session_list_status_from_session_dir(
         .is_some()
     {
         let changeset = read_changeset(session_dir).ok();
-        return Ok(SessionListStatusDisplay {
-            workflow_goal: String::new(),
-            workflow_state: String::new(),
-            elapsed_display: String::new(),
-            agent: session_type.to_string(),
-            model: meta.model.clone().unwrap_or_default(),
-            activity_status: meta.activity_status.clone().unwrap_or_default(),
-            orchestrator_session_id: changeset
-                .as_ref()
-                .and_then(|c| c.orchestrator_session_id.clone())
-                .unwrap_or_default(),
-            recipe: changeset
-                .as_ref()
-                .and_then(|c| c.recipe.clone())
-                .unwrap_or_default(),
-            stack_plan_json: String::new(),
-            stack_id: changeset
-                .as_ref()
-                .and_then(|c| c.stack_id.clone())
-                .unwrap_or_default(),
-            branch: changeset.and_then(|c| c.branch).unwrap_or_default(),
-        });
+        return Ok(cli_harness_row(&meta, session_type, changeset));
     }
 
     let changeset = match read_changeset(session_dir) {
@@ -289,6 +268,35 @@ pub fn session_list_status_from_session_dir(
         stack_id: changeset.stack_id.clone().unwrap_or_default(),
         branch: changeset.branch.clone().unwrap_or_default(),
     })
+}
+
+fn cli_harness_row(
+    meta: &tddy_core::SessionMetadata,
+    session_type: &str,
+    changeset: Option<Changeset>,
+) -> SessionListStatusDisplay {
+    SessionListStatusDisplay {
+        workflow_goal: String::new(),
+        workflow_state: String::new(),
+        elapsed_display: String::new(),
+        agent: session_type.to_string(),
+        model: meta.model.clone().unwrap_or_default(),
+        activity_status: meta.activity_status.clone().unwrap_or_default(),
+        orchestrator_session_id: changeset
+            .as_ref()
+            .and_then(|c| c.orchestrator_session_id.clone())
+            .unwrap_or_default(),
+        recipe: changeset
+            .as_ref()
+            .and_then(|c| c.recipe.clone())
+            .unwrap_or_default(),
+        stack_plan_json: String::new(),
+        stack_id: changeset
+            .as_ref()
+            .and_then(|c| c.stack_id.clone())
+            .unwrap_or_default(),
+        branch: changeset.and_then(|c| c.branch).unwrap_or_default(),
+    }
 }
 
 /// Maps `changeset.models[tag]` to the effective model label.
