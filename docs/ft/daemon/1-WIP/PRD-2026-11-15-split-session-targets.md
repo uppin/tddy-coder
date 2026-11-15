@@ -65,10 +65,10 @@ codebase half's id from `ListProjectSessions` and name its host to diff it.
 
 ## Success Criteria
 
-- [ ] Agent-side tools on a split agent half succeed on the agent host.
-- [ ] `DiffSessionWorktree` / `ReadSessionWorktree` / the git tools on a split agent half's id act on
+- [x] Agent-side tools on a split agent half succeed on the agent host.
+- [x] `DiffSessionWorktree` / `ReadSessionWorktree` / the git tools on a split agent half's id act on
       the codebase half on the codebase host, and report the codebase session id.
-- [ ] Worktree tools on a session with no worktree and no codebase half are refused as before.
+- [x] Worktree tools on a session with no worktree and no codebase half are refused as before.
 
 ## Out of Scope
 

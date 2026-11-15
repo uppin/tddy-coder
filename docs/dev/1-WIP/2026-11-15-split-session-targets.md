@@ -92,10 +92,10 @@ Real dependency edges: none.
 
 ## Scope
 
-- [ ] Agent-side tools resolve worktree-less sessions
-- [ ] Worktree tools require the worktree explicitly and refuse as before when there is none and no codebase half
-- [ ] Records carry the codebase half; worktree tools on a split agent half are redirected to it
-- [ ] Docs: `project-concept.md` § Project-home tools states how a split session is targeted
+- [x] Agent-side tools resolve worktree-less sessions
+- [x] Worktree tools require the worktree explicitly and refuse as before when there is none and no codebase half
+- [x] Records carry the codebase half; worktree tools on a split agent half are redirected to it
+- [x] Docs: `project-concept.md` § Project-home tools states how a split session is targeted
 
 ## Technical Changes
 
@@ -159,12 +159,15 @@ no LiveKit), with the split pair written as `.session.yaml` records on each host
 - [x] USER REVIEW — acceptance tests (waived by the developer for this stack, 2026-11-15: "finish both passes without approvals")
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green
-- [ ] Validate changes
-- [ ] Wrap docs
+- [x] Validate changes
+- [x] Wrap docs
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+No mock or test-only code in production paths, no new fallbacks, no `println!`/`eprintln!`/`dbg!`
+in changed code, and no `TODO(split-targets)` markers remain. `retarget_args` returns its input
+unchanged for non-object JSON and `codebase_half_here` returns `None` for an unreadable record;
+both leave the local path to answer with its own refusal, as their doc comments state.
 
 ## Decisions & Trade-offs
 
@@ -177,10 +180,68 @@ _(populated during development)_
 
 ### From /validate-changes
 
-### From /pr-wrap
+None. Every Responsibility item is implemented, nothing from Dependencies is implemented
+here, Boundaries are respected, and the diff contains only this PR's files.
+
+### From /validate-tests
+
+None. The new tests follow the fluent style (Given/When/Then, one behaviour each, real
+assertions); the refusal case guards the pre-existing "has no worktree" behaviour.
+
+### From /validate-prod-ready
+
+None blocking. See Technical Debt & Production Readiness above.
+
+### From /analyze-clean-code
+
+`project_home_tools.rs` crossed the 500-production-line budget in this PR (493 → 501):
+decomposed at wrap by moving the worktree read/diff tools into
+`project_home_worktree_read.rs` (see the Restructuring section in the wrap's changeset
+entry). `served_on_target_host` (`project_home_remote.rs`) is 44 lines — needs attention,
+not a must-refactor; left as is, since extracting its split-redirect arm is the only cut
+and the three arms read as one dispatch.
+
+## Restructuring
+
+`packages/tddy-tool-engine/src/project_home_tools.rs`: 501 production lines at the wrap
+gate (493 at the base, +8 from this PR's `worktree()` handling in the read/diff tools).
+The read/diff seam (`TargetArgs`, `parse_target_args`, `read_session_worktree`,
+`read_or_list`, `contained_rel_path`, `diff_session_worktree`) moves to
+`project_home_worktree_read.rs` via `tddy-tools restructure` (`move_item`, reexport
+none), leaving the dispatcher, listing and start tools in `project_home_tools.rs`.
 
 ## Validation Results
 
 ### /validate-changes
 
+2026-11-15 — Stack gate: base `feature/split-alive/split-hooks` resolved by the PR's
+`baseRefName`; `/pr-stack-rebase` single mode already current (base tip `6bf97ab65` is an
+ancestor) and leak-free (`origin/<base>..HEAD` is this PR's three commits only). Boundary:
+all changeset items implemented, no parent-owned symbol implemented, no dependent
+behaviour, no unplanned deletions. Build/test (scoped, this Mac): `./test -p
+tddy-worktree-service -p tddy-tool-engine -p tddy-daemon-rpc` — every target green
+except four pre-existing local failures named in the run brief:
+`tddy-worktree-service`'s `remote_git_livekit_acceptance` ("tddy-remote-git-repo is not
+built"; 411 passed / 12 failed in the two smaller packages) and `tddy-daemon-rpc`'s three
+sandboxed-codebase suites (`/bin/cat: illegal option` on macOS). CI on Linux is the gate
+for those. Critical 0, Warning 0.
+
 ### /pr-wrap
+
+2026-11-15 — /validate-tests: no issues (fluent style, real assertions, the refusal
+case guards pre-existing behaviour). /validate-prod-ready: no blockers (no mocks, no
+fallbacks, no debug output, no leftover `TODO(split-targets)`). File-length gate:
+`project_home_tools.rs` 493 → 501 in this PR, decomposed by `tddy-tools restructure`
+(`move_item`, `restructure verify --against HEAD`: every statement accounted for) to
+372 production lines, with the new `project_home_worktree_read.rs` at 144; no other
+touched non-test source file is at or over 500. /analyze-clean-code: no must-refactor
+items in changed code (`served_on_target_host` at 44 lines is needs-attention and
+stays, as recorded above). Final gates (scoped): `cargo fmt --check` clean;
+`CARGO_INCREMENTAL=0 cargo clippy -p tddy-worktree-service -p tddy-tool-engine -p
+tddy-daemon-rpc --all-targets -- -D warnings` clean; `./test -p tddy-tool-engine -p
+tddy-worktree-service` 411 passed / 12 failed, the failing set identical to the
+pre-split baseline (all `remote_git_livekit_acceptance`, pre-existing on this Mac);
+`tddy-daemon-rpc --test project_home_remote_targets_acceptance` 12/12. Code issues
+re-measured (step 7.5): `complexity-exec-tool-ports-execute-tool` untouched by this
+PR and left open as written; the `tddy-worktree-service` oversized-file records name
+untouched files and are left as written; no code-issue record was added by this PR.

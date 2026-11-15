@@ -24,8 +24,9 @@ use tddy_task::{crop, highlighted_rows, GridRegion, RowStyles, StyleRun, TextGri
 use tddy_worktree_service::session_target::{HomeCaller, SessionTarget};
 
 use crate::catalog::ToolDef;
+use crate::project_home_tools::resolve_target;
 use crate::project_home_tools::{
-    resolve_target, target_host_property, tool_def, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
+    target_host_property, tool_def, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
 };
 use crate::terminal_keys::encode_keys;
 use crate::ToolOutcome;
