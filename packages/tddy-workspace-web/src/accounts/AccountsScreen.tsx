@@ -20,6 +20,7 @@ import {
   PROVIDER_PRESET_OPTIONS,
   type ConnectProviderAccountInput,
 } from "./ConnectProviderAccountForm";
+import { ConnectCoderAccountForm, type ConnectCoderAccountInput } from "./ConnectCoderAccountForm";
 
 /**
  * `#keyring` 6/9's aggregate sync standing for one account, worst peer first. `null` means
@@ -107,6 +108,12 @@ export interface AccountsScreenProps {
   onConnectProviderAccount?: (input: ConnectProviderAccountInput) => Promise<boolean>;
   /** The daemon's reason the last connect was refused, verbatim. */
   connectError?: string | null;
+  /**
+   * Connect a Coder deployment from its URL and a session token; resolves true once it was added.
+   */
+  onConnectCoderAccount?: (input: ConnectCoderAccountInput) => Promise<boolean>;
+  /** The daemon's reason the last Coder connect was refused, verbatim. */
+  coderConnectError?: string | null;
   /** The models a provider account's endpoint serves, asked for when its row is expanded. */
   onListModels?: (accountId: string) => Promise<string[]>;
   /** Make a provider account the default for these harnesses. When absent the row has no control. */
@@ -123,6 +130,8 @@ export function AccountsScreen({
   onAddAccount,
   onConnectProviderAccount,
   connectError = null,
+  onConnectCoderAccount,
+  coderConnectError = null,
   onListModels,
   onSetDefaults,
   harnessOptions = [],
@@ -131,6 +140,20 @@ export function AccountsScreen({
     <div data-testid="accounts-screen">
       {onConnectProviderAccount && outcome.kind === "listed" ? (
         <ConnectApiKey onConnect={onConnectProviderAccount} error={connectError} />
+      ) : null}
+      {outcome.kind === "listed" ? (
+        <section data-testid="accounts-coder-connect" className="mb-4">
+          {/* TODO(coder-account): implement — the control that opens the form
+              (`accounts-connect-coder`), pending state, and closing once the account was added. */}
+          <ConnectCoderAccountForm
+            pending={false}
+            error={coderConnectError}
+            onCancel={() => {}}
+            onSubmit={(input) => {
+              void onConnectCoderAccount?.(input);
+            }}
+          />
+        </section>
       ) : null}
       {renderOutcome(outcome, onRename, onRemove, onAddAccount, onListModels, onSetDefaults, harnessOptions)}
       {linkAttempt ? <LinkAttemptView attempt={linkAttempt} /> : null}

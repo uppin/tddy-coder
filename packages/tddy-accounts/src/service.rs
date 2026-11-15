@@ -9,12 +9,13 @@ use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::accounts::{
     AccountSummary, AccountsService, BeginLinkAccountRequest, BeginLinkAccountResponse,
-    ConnectProviderAccountRequest, ConnectProviderAccountResponse, LinkState, ListAccountsRequest,
-    ListAccountsResponse, ListProviderAccountModelsRequest, ListProviderAccountModelsResponse,
-    ListProviderRoutesRequest, ListProviderRoutesResponse, PollLinkAccountRequest,
-    PollLinkAccountResponse, ProviderAccounts, ProviderRouteOption, RemoveAccountRequest,
-    RemoveAccountResponse, SessionAccount, SetAccountLabelRequest, SetAccountLabelResponse,
-    SetProviderAccountDefaultsRequest, SetProviderAccountDefaultsResponse, SyncStatus,
+    ConnectCoderAccountRequest, ConnectCoderAccountResponse, ConnectProviderAccountRequest,
+    ConnectProviderAccountResponse, LinkState, ListAccountsRequest, ListAccountsResponse,
+    ListProviderAccountModelsRequest, ListProviderAccountModelsResponse, ListProviderRoutesRequest,
+    ListProviderRoutesResponse, PollLinkAccountRequest, PollLinkAccountResponse, ProviderAccounts,
+    ProviderRouteOption, RemoveAccountRequest, RemoveAccountResponse, SessionAccount,
+    SetAccountLabelRequest, SetAccountLabelResponse, SetProviderAccountDefaultsRequest,
+    SetProviderAccountDefaultsResponse, SyncStatus,
 };
 
 use crate::attempts::{Attempts, PollAdmission};
@@ -67,6 +68,8 @@ pub struct AccountsServiceImpl<S> {
     provider_accounts: Option<ProviderAccountPorts>,
     route_support: Option<Arc<dyn RouteSupport>>,
     defaults: Option<Arc<dyn ProviderAccountDefaults>>,
+    /// The Coder half — see `coder_account`, which owns its builder and its RPC's answer.
+    pub(crate) coder: Option<Arc<crate::coder_account::CoderAccounts>>,
 }
 
 impl<S> AccountsServiceImpl<S> {
@@ -80,6 +83,7 @@ impl<S> AccountsServiceImpl<S> {
             provider_accounts: None,
             route_support: None,
             defaults: None,
+            coder: None,
         }
     }
 
@@ -217,6 +221,20 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
             .put_provider_account(&session_token, &account)
             .map_err(status_for)?;
         Ok(Response::new(ConnectProviderAccountResponse {
+            account: Some(summary_of(&record, self.sync_status.as_deref())),
+        }))
+    }
+
+    async fn connect_coder_account(
+        &self,
+        request: Request<ConnectCoderAccountRequest>,
+    ) -> Result<Response<ConnectCoderAccountResponse>, Status> {
+        let record = crate::coder_account::connect_coder_account(
+            self.coder.as_deref(),
+            request.into_inner(),
+        )
+        .await?;
+        Ok(Response::new(ConnectCoderAccountResponse {
             account: Some(summary_of(&record, self.sync_status.as_deref())),
         }))
     }

@@ -2,6 +2,7 @@
 
 pub mod account_linking;
 pub mod agent_tool_socket;
+pub mod coder_deployment_probe;
 pub mod common_room_key_directory;
 pub mod config;
 pub mod credential_sync;

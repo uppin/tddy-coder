@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — a proto contract change, two packages (daemon and web), an HTTP probe seam, a secret at rest
-**Branch**: `feature/remote-shell/coder-account`, base `feature/remote-shell/shell-port` — `#remote-shell 2/7`
+**Branch**: `feature/remote-shell/coder-account`, base `feature/remote-shell/shell-port` — `#remote-shell 2/7` — PR #916 (https://github.com/uppin/tddy-coder/pull/916)
 
 ## Initial Discovery
 
@@ -97,6 +97,27 @@ The first push after the plan (commit 2) publishes, as the start of this same PR
 - The failing tests below.
 
 This PR goes on to implement all of it. It does not merge in that state.
+
+## Contract as published
+
+Published in the contract commit.
+
+- **Proto**: `AccountsService.ConnectCoderAccount`, `ConnectCoderAccountRequest { session_token, deployment_url, token, label }`, `ConnectCoderAccountResponse { account }`. `accounts_pb.ts` is regenerated in `tddy-client-web` and `tddy-rust-typescript-tests` (`scripts/generated-code.sh write`). No residual-methods or roster list names accounts RPCs, so nothing was registered.
+- **`tddy_accounts::coder_account`**: `CODER_PROVIDER`; `CoderDeploymentUrl` (`parse`, `as_str`, `host`); `CoderUser { id, username }`; `CoderProbeError::{Rejected, Unreachable, Unusable}`; `trait CoderDeploymentProbe { async fn whoami(&self, url: &CoderDeploymentUrl, token: &SecretString) }`; `CoderAccount { account_id, label, deployment_url, username, user_id }` with `for_user`, `from_record`, `into_record(self, token, now)`; `CoderCredentials { url, token }`; `CoderAccountError::{InvalidUrl, MissingToken, Rejected, Unreachable, NotFound, Vault}`; `CoderAccounts::{new(vaults, subject_of, probe), connect, credentials_for(subject, account_id)}`; `AccountsServiceImpl::with_coder_accounts`. Bodies are `TODO(coder-account)`.
+- **`tddy_daemon::coder_deployment_probe::HttpCoderDeploymentProbe::new(reqwest::Client)`**.
+- **Web**: `ConnectCoderAccountForm` (`ConnectCoderAccountInput { deploymentUrl, token, label }`), an empty shell section on `AccountsScreen`. Test ids: `accounts-connect-coder`, `accounts-coder-url`, `accounts-coder-token`, `accounts-coder-label`, `accounts-coder-submit`, `accounts-coder-error`.
+
+Where the contract differs from the plan above:
+
+- **The HTTP probe and its test are in `tddy-daemon`**, beside `provider_model_probe.rs`. `tddy-accounts` has no HTTP client by design ("this crate stays free of a network stack"), and putting the probe there would add `reqwest` to it. `packages/tddy-accounts/tests/coder_deployment_probe.rs` is therefore `packages/tddy-daemon/tests/coder_deployment_probe.rs`.
+- **`CoderDeploymentUrl` replaces `url::Url`**: `tddy-accounts` has no `url` crate.
+- **A third probe outcome, `Unusable`**: something answered, and it is not a Coder deployment. It is refused as its own cause, distinct from a rejected token.
+- **`CoderAccounts` is a concrete type over `SessionVaults`**, because `credentials_for` is by subject. The acceptance tests seal a real vault in a temp directory.
+- **Reconnecting keeps the first label** even when another is typed; the test pins it.
+- **`service.rs` is 790 lines** (was 772): one delegating arm, one field, two imports. No helper was added.
+- The daemon does not wire `with_coder_accounts` yet; that is implementation.
+
+Red state at the contract commit: `coder_account_acceptance` 0 passed / 12 failed (the eight planned and four more: empty token, unwired daemon, locked-vault read, unknown account); `tddy-daemon` `coder_deployment_probe` 0 / 4; `coder_account.rs` unit tests 0 / 11 (the lib target's 29 existing tests pass); Cypress `ConnectCoderAccountAcceptance` 0 / 3, each waiting for `accounts-connect-coder`. The three existing accounts specs still pass (4, 14, 25). Clippy and fmt are clean on `tddy-accounts` and `tddy-daemon`. The full `tddy-daemon` suite was not run locally.
 
 ## Green wave
 
@@ -245,10 +266,10 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved in advance on 2026-11-15: "proceed with your recommended option"; the titles are listed in the PR body)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
