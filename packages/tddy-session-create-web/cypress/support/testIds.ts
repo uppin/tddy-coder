@@ -225,6 +225,19 @@ export const createSessionAgentOptionKind = (agentId: string) =>
 export const createSessionAgentHostError = (daemonInstanceId: string) =>
   `create-session-agent-host-error-${safeTestIdPart(daemonInstanceId)}`;
 
+/**
+ * `[data-testid="create-session-host-derived-group-<parentInstanceId>"]` — the `<optgroup>` of the
+ * Host select holding the hosts derived from one daemon (`#remote-shell 5/7`).
+ */
+export const createSessionHostDerivedGroup = (parentInstanceId: string) =>
+  `create-session-host-derived-group-${safeTestIdPart(parentInstanceId)}`;
+
+/**
+ * The note under the Host select while a derived host is chosen: the agent runs on a machine with
+ * no tddy software, so its permission prompts are answered in the terminal.
+ */
+export const CREATE_SESSION_DERIVED_HOST_NOTE = "create-session-derived-host-note";
+
 export const createSessionAgentSelectOption = (optionValue: string) =>
   `create-session-agent-select-option-${safeTestIdPart(optionValue)}`;
 

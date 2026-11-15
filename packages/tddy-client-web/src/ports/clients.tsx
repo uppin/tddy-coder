@@ -17,6 +17,7 @@ import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import type { ConnectionProviderRegistry } from "../connections/registry";
 import type { ConnectionStatus, HostConnection } from "../connections/types";
+import type { SessionTarget } from "../gen/session_pb";
 import { hostLabelOf } from "../hostLabel";
 
 /** A daemon a client can be built for, as the host directory lists it. */
@@ -29,6 +30,10 @@ export interface DaemonHost {
   maxAttachmentBytes?: number;
   /** What this host's workspace jail confines. Absent = the sandboxed-codebase placement is not served. */
   sandboxedCodebase?: { confinesFilesystem: boolean };
+  /** The daemon this host is derived from (`HostDescriptor.parent`). Absent on a daemon. */
+  parent?: string;
+  /** What a start on this host carries as its target (`HostDescriptor.target`). Absent on a daemon. */
+  target?: SessionTarget;
 }
 
 /** The daemon selection every daemon-scoped hook resolves against. */

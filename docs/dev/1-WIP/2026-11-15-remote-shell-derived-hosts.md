@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — a proto contract change, four packages across daemon and web, a new host-directory source
-**Branch**: `feature/remote-shell/derived-hosts`, base `feature/remote-shell/coder-shell` — `#remote-shell 5/7`
+**Branch**: `feature/remote-shell/derived-hosts`, base `feature/remote-shell/coder-shell` — `#remote-shell 5/7` — PR #919 (https://github.com/uppin/tddy-coder/pull/919)
 
 ## Initial Discovery
 
@@ -96,6 +96,27 @@ The first push after the plan (commit 2) publishes, as the start of this same PR
 - The failing tests below.
 
 This PR goes on to implement all of it. It does not merge in that state.
+
+## Contract as published
+
+Published in the contract commit.
+
+- **Proto**: `host.proto` imports `session.proto`. `HostService.ListDerivedHosts`; `DerivedHostKind { UNSPECIFIED, SSH }`; `DerivedHost { id, label, kind, parent_instance_id, session.SessionTarget target }`; `ListDerivedHostsRequest { session_token, daemon_instance_id }`; `ListDerivedHostsResponse { outcome, failure_reason, hosts }`. `host_pb.ts` regenerated. `HOST_METHODS` names the method.
+- **`tddy_host_service::derived_hosts`** (`TODO(derived-hosts)` bodies): `kind_segment`, `ssh_derived_host_id(parent_instance_id, alias)`, `trait DerivedHostSource { fn kind(); async fn list(os_user) }`, `SshConfigDerivedHosts::new(files, parent_instance_id)`. The trait and source use the wire `DerivedHost` directly. The handler is `src/service/derived_hosts.rs`.
+- **`tddy-client-web`**: `hostDirectory/derivedSource.ts` with `DERIVED_SOURCE_ID`, `DerivedHostParent`, `DerivedHostListingFailure`, `DerivedHostDirectorySource`, `NO_DERIVED_HOSTS`, `derivedHostDescriptorOf`, `listDerivedHosts(parents, sessionToken)`; `HostDescriptor.parent` and `.target`.
+- **`tddy-hosts-web`**: `DerivedHostRows({ parentInstanceId, parentOnline })`, mounted in `HostsScreen` after each daemon's row and rendering nothing yet; `derivedHostRowTestId`, `derivedHostsFailureTestId`.
+
+Where the contract differs from the plan above:
+
+- **The proto import needed a build change** in `packages/tddy-service/build/unbundled_families.rs`: the host prost and tonic passes take `.extern_path(".session", …)` and `.extern_path(".types", …)`, so the host pass does not write a second `session.rs` into `OUT_DIR`. `tddy-service` is therefore an affected package of this PR.
+- **`DaemonHost` (the clients port) also carries `parent` and `target`**, not only `HostDescriptor`: the create form reads hosts from that port, so a derived host cannot reach the Host field otherwise. `daemonHostOf` / `hostDescriptorOf` drop the fields until implemented; two unit tests pin that.
+- **`listDerivedHosts` is an async function, not a hook, and `selectedDaemon.tsx` does not register it yet.** Registration needs each parent's `HostConnection` above `ConnectionProviders`; that is implementation, and it has no test here. The implementation adds one where the wiring lands.
+- **`tddy-session-create-web` and `tddy-session-web` have no `src` change yet**: their specs mount the existing pane and drawer and fail on assertions. Test ids fixed by the specs: `create-session-derived-host-note`, `sessions-drawer-item-derived-host-<session id>`, `hosts-derived-row-<parent>_ssh_<alias>`, `hosts-row-<parent>-derived-hosts-failure`.
+- **The start test duplicates the stand-in SSH target** from `ssh-agent-launch`'s test file, which keeps it inside the file. Lifting it into a shared support module is that PR's to do, or the sweep's.
+
+Sequencing: `a_start_addressed_at_a_listed_derived_host_runs_on_that_host` fails here on the listing stub. Its start half runs `ssh-agent-launch`'s behaviour, so it goes green only after that PR and `shell-port` are.
+
+Red state at the contract commit: `derived_hosts_acceptance` 0 passed / 4 failed; `derived_hosts.rs` unit tests 0 / 7; handler tests 0 / 2; `derived_host_start_acceptance` 0 / 1; `derivedSource.test.ts` 0 / 7 (three planned, four more); Cypress `DerivedHostsAcceptance` 0 / 3, `CreateSessionDerivedHostAcceptance` 0 / 3, `SessionDrawerDerivedHostAcceptance` 0 / 1. The two existing HostsScreen specs pass (6, 2); `unbundle_service_split` passes (28). Clippy and fmt clean on `tddy-service`, `tddy-host-service`, `tddy-session-lifecycle`; typecheck clean on `tddy-client-web` and `tddy-hosts-web`. Not run locally: the other specs of the create-session and session-web packages, and any crate outside the three built; whether another crate implements the `HostService` trait is CI's to show.
 
 ## Green wave
 
@@ -254,10 +275,10 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved in advance on 2026-11-15: "proceed with your recommended option"; the titles are listed in the PR body)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

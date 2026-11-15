@@ -9,6 +9,8 @@
  * it, so an offline host is rendered with its last-seen time rather than omitted.
  */
 
+import { Fragment } from "react";
+import { DerivedHostRows } from "./DerivedHostRows";
 import { formatLastSeen } from "./hostRowFormat";
 import { HostRowTelemetry } from "./HostRowTelemetry";
 import { HostRowToolingCell } from "./HostRowToolingCell";
@@ -73,7 +75,8 @@ export function HostsScreen({ rows, nowUnixMs }: HostsScreenProps) {
           </thead>
           <tbody>
             {ordered.map((row) => (
-              <tr key={row.instanceId} data-testid={`hosts-row-${row.instanceId}`}>
+              <Fragment key={row.instanceId}>
+              <tr data-testid={`hosts-row-${row.instanceId}`}>
                 <td className="py-2 pr-4">
                   {row.label}
                   {/* Every daemon self-labels "<id> (this daemon)" in its own advertisement, so in
@@ -115,6 +118,9 @@ export function HostsScreen({ rows, nowUnixMs }: HostsScreenProps) {
                 <td className="py-2 pr-4 font-mono text-xs">{row.instanceId}</td>
                 <td className="py-2 font-mono text-xs">{row.reposBasePath}</td>
               </tr>
+              {/* The hosts this daemon reaches through a remote shell, beneath its own row. */}
+              <DerivedHostRows parentInstanceId={row.instanceId} parentOnline={row.online} />
+              </Fragment>
             ))}
           </tbody>
         </table>

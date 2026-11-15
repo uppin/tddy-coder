@@ -4,13 +4,15 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { SessionTarget } from "./session_pb";
+import { file_session } from "./session_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file host.proto.
  */
 export const file_host: GenFile = /*@__PURE__*/
-  fileDesc("Cgpob3N0LnByb3RvEgRob3N0IlcKEUFkZEhvc3RLZXlSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEg8KB3N1YmplY3QYAyABKAkiegoSQWRkSG9zdEtleVJlc3BvbnNlEg0KBWFkZGVkGAEgASgIEigKB291dGNvbWUYAiABKA4yFy5ob3N0LkFkZEhvc3RLZXlPdXRjb21lEhMKC2ZpbmdlcnByaW50GAMgASgJEhYKDmZhaWx1cmVfcmVhc29uGAQgASgJInkKF0Fuc3dlckhvc3RQcm9tcHRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEhEKCXByb21wdF9pZBgDIAEoCRIYChBlbmNyeXB0ZWRfYW5zd2VyGAQgASgMIkYKGEFuc3dlckhvc3RQcm9tcHRSZXNwb25zZRIQCghhY2NlcHRlZBgBIAEoCBIYChByZWplY3Rpb25fcmVhc29uGAIgASgJIk4KDkNvZGVyV29ya3NwYWNlEg0KBW93bmVyGAEgASgJEgwKBG5hbWUYAiABKAkSDgoGc3RhdHVzGAMgASgJEg8KB3J1bm5pbmcYBCABKAgiSwoTRWxpZ2libGVEYWVtb25FbnRyeRITCgtpbnN0YW5jZV9pZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIQCghpc19sb2NhbBgDIAEoCCJjChVHZXRIb3N0VG9vbGluZ1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSFwoPZ2l0aHViX2hvc3RuYW1lGAMgASgJIoACChZHZXRIb3N0VG9vbGluZ1Jlc3BvbnNlEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgBIAEoCRIiCgNnaXQYAiABKAsyFS5ob3N0Lkhvc3RHaXRJZGVudGl0eRInCgpnaXRodWJfY2xpGAMgASgLMhMuaG9zdC5Ib3N0R2l0aHViQ2xpEiUKCXNzaF9hZ2VudBgEIAEoCzISLmhvc3QuSG9zdFNzaEFnZW50Ei8KDnJlbW90ZV9kZXNrdG9wGAUgAygLMhcuaG9zdC5Ib3N0UmVtb3RlRGVza3RvcBIlCgljb2Rlcl9jbGkYBiABKAsyEi5ob3N0Lkhvc3RDb2RlckNsaSIyCgxIb3N0Q29kZXJDbGkSEQoJaW5zdGFsbGVkGAEgASgIEg8KB3ZlcnNpb24YAiABKAkiPwoMSG9zdENwdVN0YXRzEhgKEHBlcl9jb3JlX3BlcmNlbnQYASADKAISFQoNbG9naWNhbF9jb3JlcxgCIAEoDSJSCg1Ib3N0RGlza1N0YXRzEhcKD2F2YWlsYWJsZV9ieXRlcxgBIAEoBBITCgt0b3RhbF9ieXRlcxgCIAEoBBITCgtwcm9qZWN0X2RpchgDIAEoCSKJAQoPSG9zdEdpdElkZW50aXR5EiMKB291dGNvbWUYASABKA4yEi5ob3N0LlByb2JlT3V0Y29tZRISCgpjb25maWd1cmVkGAIgASgIEhEKCXVzZXJfbmFtZRgDIAEoCRISCgp1c2VyX2VtYWlsGAQgASgJEhYKDmZhaWx1cmVfcmVhc29uGAUgASgJIoUBCg1Ib3N0R2l0aHViQ2xpEiMKB291dGNvbWUYASABKA4yEi5ob3N0LlByb2JlT3V0Y29tZRIRCglpbnN0YWxsZWQYAiABKAgSFQoNYXV0aGVudGljYXRlZBgDIAEoCBINCgVsb2dpbhgEIAEoCRIWCg5mYWlsdXJlX3JlYXNvbhgFIAEoCSJHChBIb3N0S2V5Q2FuZGlkYXRlEgwKBHBhdGgYASABKAkSEAoIa2V5X3R5cGUYAiABKAkSEwoLZmluZ2VycHJpbnQYAyABKAkiUgoNSG9zdExvYWRTdGF0cxISCgpvbmVfbWludXRlGAEgASgBEhQKDGZpdmVfbWludXRlcxgCIAEoARIXCg9maWZ0ZWVuX21pbnV0ZXMYAyABKAEiPwoPSG9zdE1lbW9yeVN0YXRzEhcKD2F2YWlsYWJsZV9ieXRlcxgBIAEoBBITCgt0b3RhbF9ieXRlcxgCIAEoBCLtAQoPSG9zdFByb21wdEV2ZW50EhEKCXByb21wdF9pZBgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSIgoEa2luZBgDIAEoDjIULmhvc3QuSG9zdFByb21wdEtpbmQSDwoHc3ViamVjdBgEIAEoCRIXCg9ob3N0X3B1YmxpY19rZXkYBSABKAwSIwobaG9zdF9wdWJsaWNfa2V5X2ZpbmdlcnByaW50GAYgASgJEhoKEmV4cGlyZXNfYXRfdW5peF9tcxgHIAEoAxIcChRvZmZlcmVkX2F1dGhfbWV0aG9kcxgIIAMoBSL7AQoRSG9zdFJlbW90ZURlc2t0b3ASIwoHb3V0Y29tZRgBIAEoDjISLmhvc3QuUHJvYmVPdXRjb21lEhAKCHByb3RvY29sGAIgASgFEhIKCmNhbl9icmlkZ2UYAyABKAgSGQoRZGVza3RvcF9yZWFjaGFibGUYBCABKAgSDAoEcG9ydBgFIAEoDRIWCg5mYWlsdXJlX3JlYXNvbhgGIAEoCRISCgpjaGFubmVsX2lkGAcgASgJEiYKBGtpbmQYCCABKA4yGC5ob3N0LkRlc2t0b3BDaGFubmVsS2luZBIPCgdkaXNwbGF5GAkgASgNEg0KBWxhYmVsGAogASgJIn8KDEhvc3RTc2hBZ2VudBIjCgdvdXRjb21lGAEgASgOMhIuaG9zdC5Qcm9iZU91dGNvbWUSEQoJcmVhY2hhYmxlGAIgASgIEh8KBGtleXMYAyADKAsyES5ob3N0LlNzaEFnZW50S2V5EhYKDmZhaWx1cmVfcmVhc29uGAQgASgJIp4BCg5Ib3N0U3RhdHNFdmVudBIfCgNjcHUYASABKAsyEi5ob3N0Lkhvc3RDcHVTdGF0cxIhCgRkaXNrGAIgASgLMhMuaG9zdC5Ib3N0RGlza1N0YXRzEiUKBm1lbW9yeRgDIAEoCzIVLmhvc3QuSG9zdE1lbW9yeVN0YXRzEiEKBGxvYWQYBCABKAsyEy5ob3N0Lkhvc3RMb2FkU3RhdHMixAEKDktub3duSG9zdEVudHJ5EhMKC2luc3RhbmNlX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEg4KBm9ubGluZRgDIAEoCBIaChJmaXJzdF9zZWVuX3VuaXhfbXMYBCABKAMSGQoRbGFzdF9zZWVuX3VuaXhfbXMYBSABKAMSFwoPcmVwb3NfYmFzZV9wYXRoGAYgASgJEhwKFG1heF9hdHRhY2htZW50X2J5dGVzGAcgASgEEhAKCGlzX2xvY2FsGAggASgIImMKGkxpc3RDb2RlcldvcmtzcGFjZXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEhIKCmFjY291bnRfaWQYAyABKAkihAEKG0xpc3RDb2RlcldvcmtzcGFjZXNSZXNwb25zZRIjCgdvdXRjb21lGAEgASgOMhIuaG9zdC5Qcm9iZU91dGNvbWUSFgoOZmFpbHVyZV9yZWFzb24YAiABKAkSKAoKd29ya3NwYWNlcxgDIAMoCzIULmhvc3QuQ29kZXJXb3Jrc3BhY2UiMwoaTGlzdEVsaWdpYmxlRGFlbW9uc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJJChtMaXN0RWxpZ2libGVEYWVtb25zUmVzcG9uc2USKgoHZGFlbW9ucxgBIAMoCzIZLmhvc3QuRWxpZ2libGVEYWVtb25FbnRyeSJRChxMaXN0SG9zdEtleUNhbmRpZGF0ZXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJIksKHUxpc3RIb3N0S2V5Q2FuZGlkYXRlc1Jlc3BvbnNlEioKCmNhbmRpZGF0ZXMYASADKAsyFi5ob3N0Lkhvc3RLZXlDYW5kaWRhdGUiTgoZTGlzdFNzaENvbmZpZ0hvc3RzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCSIeCg1Tc2hDb25maWdIb3N0Eg0KBWFsaWFzGAEgASgJIn0KGkxpc3RTc2hDb25maWdIb3N0c1Jlc3BvbnNlEiMKB291dGNvbWUYASABKA4yEi5ob3N0LlByb2JlT3V0Y29tZRIWCg5mYWlsdXJlX3JlYXNvbhgCIAEoCRIiCgVob3N0cxgDIAMoCzITLmhvc3QuU3NoQ29uZmlnSG9zdCIuChVMaXN0S25vd25Ib3N0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSI9ChZMaXN0S25vd25Ib3N0c1Jlc3BvbnNlEiMKBWhvc3RzGAEgAygLMhQuaG9zdC5Lbm93bkhvc3RFbnRyeSJFCgtTc2hBZ2VudEtleRIQCghrZXlfdHlwZRgBIAEoCRITCgtmaW5nZXJwcmludBgCIAEoCRIPCgdjb21tZW50GAMgASgJIk0KGFN0cmVhbUhvc3RQcm9tcHRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCSIvChZTdHJlYW1Ib3N0U3RhdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkq+QEKEUFkZEhvc3RLZXlPdXRjb21lEiQKIEFERF9IT1NUX0tFWV9PVVRDT01FX1VOU1BFQ0lGSUVEEAASHgoaQUREX0hPU1RfS0VZX09VVENPTUVfQURERUQQARIpCiVBRERfSE9TVF9LRVlfT1VUQ09NRV9XUk9OR19QQVNTUEhSQVNFEAISJwojQUREX0hPU1RfS0VZX09VVENPTUVfUFJPTVBUX0VYUElSRUQQAxIhCh1BRERfSE9TVF9LRVlfT1VUQ09NRV9OT19BR0VOVBAEEicKI0FERF9IT1NUX0tFWV9PVVRDT01FX0tFWV9VTlJFQURBQkxFEAUqrAEKDkhvc3RQcm9tcHRLaW5kEiAKHEhPU1RfUFJPTVBUX0tJTkRfVU5TUEVDSUZJRUQQABInCiNIT1NUX1BST01QVF9LSU5EX1NTSF9LRVlfUEFTU1BIUkFTRRABEiUKIUhPU1RfUFJPTVBUX0tJTkRfREVTS1RPUF9QQVNTV09SRBACEigKJEhPU1RfUFJPTVBUX0tJTkRfREVTS1RPUF9DUkVERU5USUFMUxADKoMBChJEZXNrdG9wQ2hhbm5lbEtpbmQSJAogREVTS1RPUF9DSEFOTkVMX0tJTkRfVU5TUEVDSUZJRUQQABIhCh1ERVNLVE9QX0NIQU5ORUxfS0lORF9FTkRQT0lOVBABEiQKIERFU0tUT1BfQ0hBTk5FTF9LSU5EX1gxMV9ESVNQTEFZEAIqfAoMUHJvYmVPdXRjb21lEh0KGVBST0JFX09VVENPTUVfVU5TUEVDSUZJRUQQABIUChBQUk9CRV9PVVRDT01FX09LEAESGAoUUFJPQkVfT1VUQ09NRV9GQUlMRUQQAhIdChlQUk9CRV9PVVRDT01FX1VOU1VQUE9SVEVEEAMyxQYKC0hvc3RTZXJ2aWNlEloKE0xpc3RFbGlnaWJsZURhZW1vbnMSIC5ob3N0Lkxpc3RFbGlnaWJsZURhZW1vbnNSZXF1ZXN0GiEuaG9zdC5MaXN0RWxpZ2libGVEYWVtb25zUmVzcG9uc2USSwoOTGlzdEtub3duSG9zdHMSGy5ob3N0Lkxpc3RLbm93bkhvc3RzUmVxdWVzdBocLmhvc3QuTGlzdEtub3duSG9zdHNSZXNwb25zZRJLCg5HZXRIb3N0VG9vbGluZxIbLmhvc3QuR2V0SG9zdFRvb2xpbmdSZXF1ZXN0GhwuaG9zdC5HZXRIb3N0VG9vbGluZ1Jlc3BvbnNlEkwKEVN0cmVhbUhvc3RQcm9tcHRzEh4uaG9zdC5TdHJlYW1Ib3N0UHJvbXB0c1JlcXVlc3QaFS5ob3N0Lkhvc3RQcm9tcHRFdmVudDABElEKEEFuc3dlckhvc3RQcm9tcHQSHS5ob3N0LkFuc3dlckhvc3RQcm9tcHRSZXF1ZXN0Gh4uaG9zdC5BbnN3ZXJIb3N0UHJvbXB0UmVzcG9uc2USPwoKQWRkSG9zdEtleRIXLmhvc3QuQWRkSG9zdEtleVJlcXVlc3QaGC5ob3N0LkFkZEhvc3RLZXlSZXNwb25zZRJgChVMaXN0SG9zdEtleUNhbmRpZGF0ZXMSIi5ob3N0Lkxpc3RIb3N0S2V5Q2FuZGlkYXRlc1JlcXVlc3QaIy5ob3N0Lkxpc3RIb3N0S2V5Q2FuZGlkYXRlc1Jlc3BvbnNlElcKEkxpc3RTc2hDb25maWdIb3N0cxIfLmhvc3QuTGlzdFNzaENvbmZpZ0hvc3RzUmVxdWVzdBogLmhvc3QuTGlzdFNzaENvbmZpZ0hvc3RzUmVzcG9uc2USWgoTTGlzdENvZGVyV29ya3NwYWNlcxIgLmhvc3QuTGlzdENvZGVyV29ya3NwYWNlc1JlcXVlc3QaIS5ob3N0Lkxpc3RDb2RlcldvcmtzcGFjZXNSZXNwb25zZRJHCg9TdHJlYW1Ib3N0U3RhdHMSHC5ob3N0LlN0cmVhbUhvc3RTdGF0c1JlcXVlc3QaFC5ob3N0Lkhvc3RTdGF0c0V2ZW50MAFiBnByb3RvMw");
+  fileDesc("Cgpob3N0LnByb3RvEgRob3N0IlcKEUFkZEhvc3RLZXlSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEg8KB3N1YmplY3QYAyABKAkiegoSQWRkSG9zdEtleVJlc3BvbnNlEg0KBWFkZGVkGAEgASgIEigKB291dGNvbWUYAiABKA4yFy5ob3N0LkFkZEhvc3RLZXlPdXRjb21lEhMKC2ZpbmdlcnByaW50GAMgASgJEhYKDmZhaWx1cmVfcmVhc29uGAQgASgJInkKF0Fuc3dlckhvc3RQcm9tcHRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEhEKCXByb21wdF9pZBgDIAEoCRIYChBlbmNyeXB0ZWRfYW5zd2VyGAQgASgMIkYKGEFuc3dlckhvc3RQcm9tcHRSZXNwb25zZRIQCghhY2NlcHRlZBgBIAEoCBIYChByZWplY3Rpb25fcmVhc29uGAIgASgJIk4KDkNvZGVyV29ya3NwYWNlEg0KBW93bmVyGAEgASgJEgwKBG5hbWUYAiABKAkSDgoGc3RhdHVzGAMgASgJEg8KB3J1bm5pbmcYBCABKAgiSwoTRWxpZ2libGVEYWVtb25FbnRyeRITCgtpbnN0YW5jZV9pZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIQCghpc19sb2NhbBgDIAEoCCJjChVHZXRIb3N0VG9vbGluZ1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSFwoPZ2l0aHViX2hvc3RuYW1lGAMgASgJIoACChZHZXRIb3N0VG9vbGluZ1Jlc3BvbnNlEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgBIAEoCRIiCgNnaXQYAiABKAsyFS5ob3N0Lkhvc3RHaXRJZGVudGl0eRInCgpnaXRodWJfY2xpGAMgASgLMhMuaG9zdC5Ib3N0R2l0aHViQ2xpEiUKCXNzaF9hZ2VudBgEIAEoCzISLmhvc3QuSG9zdFNzaEFnZW50Ei8KDnJlbW90ZV9kZXNrdG9wGAUgAygLMhcuaG9zdC5Ib3N0UmVtb3RlRGVza3RvcBIlCgljb2Rlcl9jbGkYBiABKAsyEi5ob3N0Lkhvc3RDb2RlckNsaSIyCgxIb3N0Q29kZXJDbGkSEQoJaW5zdGFsbGVkGAEgASgIEg8KB3ZlcnNpb24YAiABKAkiPwoMSG9zdENwdVN0YXRzEhgKEHBlcl9jb3JlX3BlcmNlbnQYASADKAISFQoNbG9naWNhbF9jb3JlcxgCIAEoDSJSCg1Ib3N0RGlza1N0YXRzEhcKD2F2YWlsYWJsZV9ieXRlcxgBIAEoBBITCgt0b3RhbF9ieXRlcxgCIAEoBBITCgtwcm9qZWN0X2RpchgDIAEoCSKJAQoPSG9zdEdpdElkZW50aXR5EiMKB291dGNvbWUYASABKA4yEi5ob3N0LlByb2JlT3V0Y29tZRISCgpjb25maWd1cmVkGAIgASgIEhEKCXVzZXJfbmFtZRgDIAEoCRISCgp1c2VyX2VtYWlsGAQgASgJEhYKDmZhaWx1cmVfcmVhc29uGAUgASgJIoUBCg1Ib3N0R2l0aHViQ2xpEiMKB291dGNvbWUYASABKA4yEi5ob3N0LlByb2JlT3V0Y29tZRIRCglpbnN0YWxsZWQYAiABKAgSFQoNYXV0aGVudGljYXRlZBgDIAEoCBINCgVsb2dpbhgEIAEoCRIWCg5mYWlsdXJlX3JlYXNvbhgFIAEoCSJHChBIb3N0S2V5Q2FuZGlkYXRlEgwKBHBhdGgYASABKAkSEAoIa2V5X3R5cGUYAiABKAkSEwoLZmluZ2VycHJpbnQYAyABKAkiUgoNSG9zdExvYWRTdGF0cxISCgpvbmVfbWludXRlGAEgASgBEhQKDGZpdmVfbWludXRlcxgCIAEoARIXCg9maWZ0ZWVuX21pbnV0ZXMYAyABKAEiPwoPSG9zdE1lbW9yeVN0YXRzEhcKD2F2YWlsYWJsZV9ieXRlcxgBIAEoBBITCgt0b3RhbF9ieXRlcxgCIAEoBCLtAQoPSG9zdFByb21wdEV2ZW50EhEKCXByb21wdF9pZBgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSIgoEa2luZBgDIAEoDjIULmhvc3QuSG9zdFByb21wdEtpbmQSDwoHc3ViamVjdBgEIAEoCRIXCg9ob3N0X3B1YmxpY19rZXkYBSABKAwSIwobaG9zdF9wdWJsaWNfa2V5X2ZpbmdlcnByaW50GAYgASgJEhoKEmV4cGlyZXNfYXRfdW5peF9tcxgHIAEoAxIcChRvZmZlcmVkX2F1dGhfbWV0aG9kcxgIIAMoBSL7AQoRSG9zdFJlbW90ZURlc2t0b3ASIwoHb3V0Y29tZRgBIAEoDjISLmhvc3QuUHJvYmVPdXRjb21lEhAKCHByb3RvY29sGAIgASgFEhIKCmNhbl9icmlkZ2UYAyABKAgSGQoRZGVza3RvcF9yZWFjaGFibGUYBCABKAgSDAoEcG9ydBgFIAEoDRIWCg5mYWlsdXJlX3JlYXNvbhgGIAEoCRISCgpjaGFubmVsX2lkGAcgASgJEiYKBGtpbmQYCCABKA4yGC5ob3N0LkRlc2t0b3BDaGFubmVsS2luZBIPCgdkaXNwbGF5GAkgASgNEg0KBWxhYmVsGAogASgJIn8KDEhvc3RTc2hBZ2VudBIjCgdvdXRjb21lGAEgASgOMhIuaG9zdC5Qcm9iZU91dGNvbWUSEQoJcmVhY2hhYmxlGAIgASgIEh8KBGtleXMYAyADKAsyES5ob3N0LlNzaEFnZW50S2V5EhYKDmZhaWx1cmVfcmVhc29uGAQgASgJIp4BCg5Ib3N0U3RhdHNFdmVudBIfCgNjcHUYASABKAsyEi5ob3N0Lkhvc3RDcHVTdGF0cxIhCgRkaXNrGAIgASgLMhMuaG9zdC5Ib3N0RGlza1N0YXRzEiUKBm1lbW9yeRgDIAEoCzIVLmhvc3QuSG9zdE1lbW9yeVN0YXRzEiEKBGxvYWQYBCABKAsyEy5ob3N0Lkhvc3RMb2FkU3RhdHMixAEKDktub3duSG9zdEVudHJ5EhMKC2luc3RhbmNlX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEg4KBm9ubGluZRgDIAEoCBIaChJmaXJzdF9zZWVuX3VuaXhfbXMYBCABKAMSGQoRbGFzdF9zZWVuX3VuaXhfbXMYBSABKAMSFwoPcmVwb3NfYmFzZV9wYXRoGAYgASgJEhwKFG1heF9hdHRhY2htZW50X2J5dGVzGAcgASgEEhAKCGlzX2xvY2FsGAggASgIImMKGkxpc3RDb2RlcldvcmtzcGFjZXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEhIKCmFjY291bnRfaWQYAyABKAkihAEKG0xpc3RDb2RlcldvcmtzcGFjZXNSZXNwb25zZRIjCgdvdXRjb21lGAEgASgOMhIuaG9zdC5Qcm9iZU91dGNvbWUSFgoOZmFpbHVyZV9yZWFzb24YAiABKAkSKAoKd29ya3NwYWNlcxgDIAMoCzIULmhvc3QuQ29kZXJXb3Jrc3BhY2UikQEKC0Rlcml2ZWRIb3N0EgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJEiMKBGtpbmQYAyABKA4yFS5ob3N0LkRlcml2ZWRIb3N0S2luZBIaChJwYXJlbnRfaW5zdGFuY2VfaWQYBCABKAkSJgoGdGFyZ2V0GAUgASgLMhYuc2Vzc2lvbi5TZXNzaW9uVGFyZ2V0IkwKF0xpc3REZXJpdmVkSG9zdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJInkKGExpc3REZXJpdmVkSG9zdHNSZXNwb25zZRIjCgdvdXRjb21lGAEgASgOMhIuaG9zdC5Qcm9iZU91dGNvbWUSFgoOZmFpbHVyZV9yZWFzb24YAiABKAkSIAoFaG9zdHMYAyADKAsyES5ob3N0LkRlcml2ZWRIb3N0IjMKGkxpc3RFbGlnaWJsZURhZW1vbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiSQobTGlzdEVsaWdpYmxlRGFlbW9uc1Jlc3BvbnNlEioKB2RhZW1vbnMYASADKAsyGS5ob3N0LkVsaWdpYmxlRGFlbW9uRW50cnkiUQocTGlzdEhvc3RLZXlDYW5kaWRhdGVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCSJLCh1MaXN0SG9zdEtleUNhbmRpZGF0ZXNSZXNwb25zZRIqCgpjYW5kaWRhdGVzGAEgAygLMhYuaG9zdC5Ib3N0S2V5Q2FuZGlkYXRlIk4KGUxpc3RTc2hDb25maWdIb3N0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkiHgoNU3NoQ29uZmlnSG9zdBINCgVhbGlhcxgBIAEoCSJ9ChpMaXN0U3NoQ29uZmlnSG9zdHNSZXNwb25zZRIjCgdvdXRjb21lGAEgASgOMhIuaG9zdC5Qcm9iZU91dGNvbWUSFgoOZmFpbHVyZV9yZWFzb24YAiABKAkSIgoFaG9zdHMYAyADKAsyEy5ob3N0LlNzaENvbmZpZ0hvc3QiLgoVTGlzdEtub3duSG9zdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiPQoWTGlzdEtub3duSG9zdHNSZXNwb25zZRIjCgVob3N0cxgBIAMoCzIULmhvc3QuS25vd25Ib3N0RW50cnkiRQoLU3NoQWdlbnRLZXkSEAoIa2V5X3R5cGUYASABKAkSEwoLZmluZ2VycHJpbnQYAiABKAkSDwoHY29tbWVudBgDIAEoCSJNChhTdHJlYW1Ib3N0UHJvbXB0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkiLwoWU3RyZWFtSG9zdFN0YXRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJKvkBChFBZGRIb3N0S2V5T3V0Y29tZRIkCiBBRERfSE9TVF9LRVlfT1VUQ09NRV9VTlNQRUNJRklFRBAAEh4KGkFERF9IT1NUX0tFWV9PVVRDT01FX0FEREVEEAESKQolQUREX0hPU1RfS0VZX09VVENPTUVfV1JPTkdfUEFTU1BIUkFTRRACEicKI0FERF9IT1NUX0tFWV9PVVRDT01FX1BST01QVF9FWFBJUkVEEAMSIQodQUREX0hPU1RfS0VZX09VVENPTUVfTk9fQUdFTlQQBBInCiNBRERfSE9TVF9LRVlfT1VUQ09NRV9LRVlfVU5SRUFEQUJMRRAFKqwBCg5Ib3N0UHJvbXB0S2luZBIgChxIT1NUX1BST01QVF9LSU5EX1VOU1BFQ0lGSUVEEAASJwojSE9TVF9QUk9NUFRfS0lORF9TU0hfS0VZX1BBU1NQSFJBU0UQARIlCiFIT1NUX1BST01QVF9LSU5EX0RFU0tUT1BfUEFTU1dPUkQQAhIoCiRIT1NUX1BST01QVF9LSU5EX0RFU0tUT1BfQ1JFREVOVElBTFMQAyqDAQoSRGVza3RvcENoYW5uZWxLaW5kEiQKIERFU0tUT1BfQ0hBTk5FTF9LSU5EX1VOU1BFQ0lGSUVEEAASIQodREVTS1RPUF9DSEFOTkVMX0tJTkRfRU5EUE9JTlQQARIkCiBERVNLVE9QX0NIQU5ORUxfS0lORF9YMTFfRElTUExBWRACKk8KD0Rlcml2ZWRIb3N0S2luZBIhCh1ERVJJVkVEX0hPU1RfS0lORF9VTlNQRUNJRklFRBAAEhkKFURFUklWRURfSE9TVF9LSU5EX1NTSBABKnwKDFByb2JlT3V0Y29tZRIdChlQUk9CRV9PVVRDT01FX1VOU1BFQ0lGSUVEEAASFAoQUFJPQkVfT1VUQ09NRV9PSxABEhgKFFBST0JFX09VVENPTUVfRkFJTEVEEAISHQoZUFJPQkVfT1VUQ09NRV9VTlNVUFBPUlRFRBADMpgHCgtIb3N0U2VydmljZRJaChNMaXN0RWxpZ2libGVEYWVtb25zEiAuaG9zdC5MaXN0RWxpZ2libGVEYWVtb25zUmVxdWVzdBohLmhvc3QuTGlzdEVsaWdpYmxlRGFlbW9uc1Jlc3BvbnNlEksKDkxpc3RLbm93bkhvc3RzEhsuaG9zdC5MaXN0S25vd25Ib3N0c1JlcXVlc3QaHC5ob3N0Lkxpc3RLbm93bkhvc3RzUmVzcG9uc2USSwoOR2V0SG9zdFRvb2xpbmcSGy5ob3N0LkdldEhvc3RUb29saW5nUmVxdWVzdBocLmhvc3QuR2V0SG9zdFRvb2xpbmdSZXNwb25zZRJMChFTdHJlYW1Ib3N0UHJvbXB0cxIeLmhvc3QuU3RyZWFtSG9zdFByb21wdHNSZXF1ZXN0GhUuaG9zdC5Ib3N0UHJvbXB0RXZlbnQwARJRChBBbnN3ZXJIb3N0UHJvbXB0Eh0uaG9zdC5BbnN3ZXJIb3N0UHJvbXB0UmVxdWVzdBoeLmhvc3QuQW5zd2VySG9zdFByb21wdFJlc3BvbnNlEj8KCkFkZEhvc3RLZXkSFy5ob3N0LkFkZEhvc3RLZXlSZXF1ZXN0GhguaG9zdC5BZGRIb3N0S2V5UmVzcG9uc2USYAoVTGlzdEhvc3RLZXlDYW5kaWRhdGVzEiIuaG9zdC5MaXN0SG9zdEtleUNhbmRpZGF0ZXNSZXF1ZXN0GiMuaG9zdC5MaXN0SG9zdEtleUNhbmRpZGF0ZXNSZXNwb25zZRJXChJMaXN0U3NoQ29uZmlnSG9zdHMSHy5ob3N0Lkxpc3RTc2hDb25maWdIb3N0c1JlcXVlc3QaIC5ob3N0Lkxpc3RTc2hDb25maWdIb3N0c1Jlc3BvbnNlEloKE0xpc3RDb2RlcldvcmtzcGFjZXMSIC5ob3N0Lkxpc3RDb2RlcldvcmtzcGFjZXNSZXF1ZXN0GiEuaG9zdC5MaXN0Q29kZXJXb3Jrc3BhY2VzUmVzcG9uc2USUQoQTGlzdERlcml2ZWRIb3N0cxIdLmhvc3QuTGlzdERlcml2ZWRIb3N0c1JlcXVlc3QaHi5ob3N0Lkxpc3REZXJpdmVkSG9zdHNSZXNwb25zZRJHCg9TdHJlYW1Ib3N0U3RhdHMSHC5ob3N0LlN0cmVhbUhvc3RTdGF0c1JlcXVlc3QaFC5ob3N0Lkhvc3RTdGF0c0V2ZW50MAFiBnByb3RvMw", [file_session]);
 
 /**
  * @generated from message host.AddHostKeyRequest
@@ -953,6 +955,118 @@ export const ListCoderWorkspacesResponseSchema: GenMessage<ListCoderWorkspacesRe
   messageDesc(file_host, 22);
 
 /**
+ * A machine a daemon reaches through a remote shell, offered wherever a host is chosen. It has no
+ * daemon, no vault, no accounts and no projects of its own: those are its parent's, and so is the
+ * connection everything about it travels on.
+ *
+ * @generated from message host.DerivedHost
+ */
+export type DerivedHost = Message<"host.DerivedHost"> & {
+  /**
+   * `<parent_instance_id>/ssh/<alias>` for an SSH host: unique across daemons, and stable for as
+   * long as the alias is in the parent's config.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * What an operator reads: the alias, for an SSH host.
+   *
+   * @generated from field: string label = 2;
+   */
+  label: string;
+
+  /**
+   * @generated from field: host.DerivedHostKind kind = 3;
+   */
+  kind: DerivedHostKind;
+
+  /**
+   * The daemon that reaches this host, as KnownHostEntry.instance_id names it. A session on this
+   * host is started on, owned by and served from that daemon.
+   *
+   * @generated from field: string parent_instance_id = 4;
+   */
+  parentInstanceId: string;
+
+  /**
+   * What StartSessionRequest.target carries to run a session's agent on this host, with
+   * `daemon_instance_id` set to `parent_instance_id`.
+   *
+   * @generated from field: session.SessionTarget target = 5;
+   */
+  target?: SessionTarget;
+};
+
+/**
+ * Describes the message host.DerivedHost.
+ * Use `create(DerivedHostSchema)` to create a new message.
+ */
+export const DerivedHostSchema: GenMessage<DerivedHost> = /*@__PURE__*/
+  messageDesc(file_host, 23);
+
+/**
+ * @generated from message host.ListDerivedHostsRequest
+ */
+export type ListDerivedHostsRequest = Message<"host.ListDerivedHostsRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * The daemon whose derived hosts are listed. Empty means the daemon serving the call. Honoured
+   * as ListSshConfigHostsRequest.daemon_instance_id is.
+   *
+   * @generated from field: string daemon_instance_id = 2;
+   */
+  daemonInstanceId: string;
+};
+
+/**
+ * Describes the message host.ListDerivedHostsRequest.
+ * Use `create(ListDerivedHostsRequestSchema)` to create a new message.
+ */
+export const ListDerivedHostsRequestSchema: GenMessage<ListDerivedHostsRequest> = /*@__PURE__*/
+  messageDesc(file_host, 24);
+
+/**
+ * @generated from message host.ListDerivedHostsResponse
+ */
+export type ListDerivedHostsResponse = Message<"host.ListDerivedHostsResponse"> & {
+  /**
+   * OK with an empty `hosts` is "this daemon reaches no hosts". FAILED is a listing that could not
+   * be made. The two must not be collapsed: a failure rendered as no hosts hides the hosts.
+   *
+   * @generated from field: host.ProbeOutcome outcome = 1;
+   */
+  outcome: ProbeOutcome;
+
+  /**
+   * Why the listing failed, when outcome is FAILED — an SSH config that could not be read or
+   * parsed. For an operator, not for parsing.
+   *
+   * @generated from field: string failure_reason = 2;
+   */
+  failureReason: string;
+
+  /**
+   * The source's own order: first-seen order of explicit aliases. Empty unless outcome is OK.
+   *
+   * @generated from field: repeated host.DerivedHost hosts = 3;
+   */
+  hosts: DerivedHost[];
+};
+
+/**
+ * Describes the message host.ListDerivedHostsResponse.
+ * Use `create(ListDerivedHostsResponseSchema)` to create a new message.
+ */
+export const ListDerivedHostsResponseSchema: GenMessage<ListDerivedHostsResponse> = /*@__PURE__*/
+  messageDesc(file_host, 25);
+
+/**
  * @generated from message host.ListEligibleDaemonsRequest
  */
 export type ListEligibleDaemonsRequest = Message<"host.ListEligibleDaemonsRequest"> & {
@@ -967,7 +1081,7 @@ export type ListEligibleDaemonsRequest = Message<"host.ListEligibleDaemonsReques
  * Use `create(ListEligibleDaemonsRequestSchema)` to create a new message.
  */
 export const ListEligibleDaemonsRequestSchema: GenMessage<ListEligibleDaemonsRequest> = /*@__PURE__*/
-  messageDesc(file_host, 23);
+  messageDesc(file_host, 26);
 
 /**
  * @generated from message host.ListEligibleDaemonsResponse
@@ -984,7 +1098,7 @@ export type ListEligibleDaemonsResponse = Message<"host.ListEligibleDaemonsRespo
  * Use `create(ListEligibleDaemonsResponseSchema)` to create a new message.
  */
 export const ListEligibleDaemonsResponseSchema: GenMessage<ListEligibleDaemonsResponse> = /*@__PURE__*/
-  messageDesc(file_host, 24);
+  messageDesc(file_host, 27);
 
 /**
  * @generated from message host.ListHostKeyCandidatesRequest
@@ -1009,7 +1123,7 @@ export type ListHostKeyCandidatesRequest = Message<"host.ListHostKeyCandidatesRe
  * Use `create(ListHostKeyCandidatesRequestSchema)` to create a new message.
  */
 export const ListHostKeyCandidatesRequestSchema: GenMessage<ListHostKeyCandidatesRequest> = /*@__PURE__*/
-  messageDesc(file_host, 25);
+  messageDesc(file_host, 28);
 
 /**
  * @generated from message host.ListHostKeyCandidatesResponse
@@ -1029,7 +1143,7 @@ export type ListHostKeyCandidatesResponse = Message<"host.ListHostKeyCandidatesR
  * Use `create(ListHostKeyCandidatesResponseSchema)` to create a new message.
  */
 export const ListHostKeyCandidatesResponseSchema: GenMessage<ListHostKeyCandidatesResponse> = /*@__PURE__*/
-  messageDesc(file_host, 26);
+  messageDesc(file_host, 29);
 
 /**
  * @generated from message host.ListSshConfigHostsRequest
@@ -1054,7 +1168,7 @@ export type ListSshConfigHostsRequest = Message<"host.ListSshConfigHostsRequest"
  * Use `create(ListSshConfigHostsRequestSchema)` to create a new message.
  */
 export const ListSshConfigHostsRequestSchema: GenMessage<ListSshConfigHostsRequest> = /*@__PURE__*/
-  messageDesc(file_host, 27);
+  messageDesc(file_host, 30);
 
 /**
  * @generated from message host.SshConfigHost
@@ -1073,7 +1187,7 @@ export type SshConfigHost = Message<"host.SshConfigHost"> & {
  * Use `create(SshConfigHostSchema)` to create a new message.
  */
 export const SshConfigHostSchema: GenMessage<SshConfigHost> = /*@__PURE__*/
-  messageDesc(file_host, 28);
+  messageDesc(file_host, 31);
 
 /**
  * @generated from message host.ListSshConfigHostsResponse
@@ -1105,7 +1219,7 @@ export type ListSshConfigHostsResponse = Message<"host.ListSshConfigHostsRespons
  * Use `create(ListSshConfigHostsResponseSchema)` to create a new message.
  */
 export const ListSshConfigHostsResponseSchema: GenMessage<ListSshConfigHostsResponse> = /*@__PURE__*/
-  messageDesc(file_host, 29);
+  messageDesc(file_host, 32);
 
 /**
  * @generated from message host.ListKnownHostsRequest
@@ -1122,7 +1236,7 @@ export type ListKnownHostsRequest = Message<"host.ListKnownHostsRequest"> & {
  * Use `create(ListKnownHostsRequestSchema)` to create a new message.
  */
 export const ListKnownHostsRequestSchema: GenMessage<ListKnownHostsRequest> = /*@__PURE__*/
-  messageDesc(file_host, 30);
+  messageDesc(file_host, 33);
 
 /**
  * @generated from message host.ListKnownHostsResponse
@@ -1139,7 +1253,7 @@ export type ListKnownHostsResponse = Message<"host.ListKnownHostsResponse"> & {
  * Use `create(ListKnownHostsResponseSchema)` to create a new message.
  */
 export const ListKnownHostsResponseSchema: GenMessage<ListKnownHostsResponse> = /*@__PURE__*/
-  messageDesc(file_host, 31);
+  messageDesc(file_host, 34);
 
 /**
  * One key an ssh-agent is holding. The agent knows the public key blob and a free-text comment; it
@@ -1175,7 +1289,7 @@ export type SshAgentKey = Message<"host.SshAgentKey"> & {
  * Use `create(SshAgentKeySchema)` to create a new message.
  */
 export const SshAgentKeySchema: GenMessage<SshAgentKey> = /*@__PURE__*/
-  messageDesc(file_host, 32);
+  messageDesc(file_host, 35);
 
 /**
  * @generated from message host.StreamHostPromptsRequest
@@ -1205,7 +1319,7 @@ export type StreamHostPromptsRequest = Message<"host.StreamHostPromptsRequest"> 
  * Use `create(StreamHostPromptsRequestSchema)` to create a new message.
  */
 export const StreamHostPromptsRequestSchema: GenMessage<StreamHostPromptsRequest> = /*@__PURE__*/
-  messageDesc(file_host, 33);
+  messageDesc(file_host, 36);
 
 /**
  * @generated from message host.StreamHostStatsRequest
@@ -1222,7 +1336,7 @@ export type StreamHostStatsRequest = Message<"host.StreamHostStatsRequest"> & {
  * Use `create(StreamHostStatsRequestSchema)` to create a new message.
  */
 export const StreamHostStatsRequestSchema: GenMessage<StreamHostStatsRequest> = /*@__PURE__*/
-  messageDesc(file_host, 34);
+  messageDesc(file_host, 37);
 
 /**
  * Why an add did not put a key in the agent. Every arm is something an operator can act on.
@@ -1360,6 +1474,31 @@ export const DesktopChannelKindSchema: GenEnum<DesktopChannelKind> = /*@__PURE__
   enumDesc(file_host, 2);
 
 /**
+ * What a derived host is reached through.
+ *
+ * @generated from enum host.DerivedHostKind
+ */
+export enum DerivedHostKind {
+  /**
+   * @generated from enum value: DERIVED_HOST_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * An explicit `Host` alias of the parent daemon's OS user's `~/.ssh/config`.
+   *
+   * @generated from enum value: DERIVED_HOST_KIND_SSH = 1;
+   */
+  SSH = 1,
+}
+
+/**
+ * Describes the enum host.DerivedHostKind.
+ */
+export const DerivedHostKindSchema: GenEnum<DerivedHostKind> = /*@__PURE__*/
+  enumDesc(file_host, 3);
+
+/**
  * Whether a probe could run at all, before asking what it found.
  *
  * @generated from enum host.ProbeOutcome
@@ -1397,7 +1536,7 @@ export enum ProbeOutcome {
  * Describes the enum host.ProbeOutcome.
  */
 export const ProbeOutcomeSchema: GenEnum<ProbeOutcome> = /*@__PURE__*/
-  enumDesc(file_host, 3);
+  enumDesc(file_host, 4);
 
 /**
  * @generated from service host.HostService
@@ -1551,6 +1690,28 @@ export const HostService: GenService<{
     methodKind: "unary";
     input: typeof ListCoderWorkspacesRequestSchema;
     output: typeof ListCoderWorkspacesResponseSchema;
+  },
+  /**
+   * The hosts one daemon can reach through a remote shell and run a session's agent on — hosts
+   * *derived* from that daemon, as opposed to the daemons ListKnownHosts answers.
+   *
+   * Addressed by `daemon_instance_id` and honoured the way ListSshConfigHosts honours it: a derived
+   * host is reached from one machine, and a listing served by whichever daemon took the call would
+   * offer hosts the addressed daemon cannot reach.
+   *
+   * Listed live from their source on every call — the explicit aliases of the OS user's
+   * `~/.ssh/config` are the first kind — and never persisted: a derived host has no first-seen or
+   * last-seen, and is not probed for reachability, telemetry or tooling.
+   *
+   * Honest the way ListSshConfigHosts is: OK with no hosts is a daemon that reaches none. FAILED
+   * is a listing that could not be made, and `failure_reason` says why.
+   *
+   * @generated from rpc host.HostService.ListDerivedHosts
+   */
+  listDerivedHosts: {
+    methodKind: "unary";
+    input: typeof ListDerivedHostsRequestSchema;
+    output: typeof ListDerivedHostsResponseSchema;
   },
   /**
    * Host Stats Footer (see docs/ft/web/host-stats-footer.md) — host-level telemetry for the

@@ -19,8 +19,12 @@ import type { HostDescriptor } from "./types";
  * The optional fields are only set when the source actually advertised them: `undefined` and
  * "absent" are the same thing to every consumer, but an explicitly-present `undefined` would make
  * a descriptor unequal to one built from the same advertisement a render earlier.
+ *
+ * A derived host's `parent` and `target` cross in both directions, here and in
+ * {@link daemonHostOf}: the Start-Session form reads them off the `DaemonHost` it is given.
  */
 export function hostDescriptorOf(host: DaemonHost, sourceId: string): HostDescriptor {
+  // TODO(derived-hosts): carry `parent` and `target`
   return {
     hostId: host.instanceId,
     label: host.label,
@@ -37,6 +41,7 @@ export function hostDescriptorOf(host: DaemonHost, sourceId: string): HostDescri
 
 /** The same host in the vocabulary the daemon-mode screens read. */
 export function daemonHostOf(descriptor: HostDescriptor): DaemonHost {
+  // TODO(derived-hosts): carry `parent` and `target`
   return {
     instanceId: descriptor.hostId,
     label: descriptor.label,

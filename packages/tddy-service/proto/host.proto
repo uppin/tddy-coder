@@ -2,6 +2,10 @@ syntax = "proto3";
 
 package host;
 
+// `DerivedHost.target` is the `session.SessionTarget` a start is addressed with, so there is one
+// definition of a target rather than a copy that has to be converted on the way to StartSession.
+import "session.proto";
+
 // Everything about the hosts a daemon knows: the durable registry, each host's tooling probe, its
 // telemetry, the prompts it raises and the ssh keys it can be given.
 //
@@ -89,6 +93,20 @@ service HostService {
   // FAILED is a listing that could not be made, and `failure_reason` says which of a locked vault,
   // a token the deployment rejected and a deployment that could not be reached it was.
   rpc ListCoderWorkspaces(ListCoderWorkspacesRequest) returns (ListCoderWorkspacesResponse);
+  // The hosts one daemon can reach through a remote shell and run a session's agent on — hosts
+  // *derived* from that daemon, as opposed to the daemons ListKnownHosts answers.
+  //
+  // Addressed by `daemon_instance_id` and honoured the way ListSshConfigHosts honours it: a derived
+  // host is reached from one machine, and a listing served by whichever daemon took the call would
+  // offer hosts the addressed daemon cannot reach.
+  //
+  // Listed live from their source on every call — the explicit aliases of the OS user's
+  // `~/.ssh/config` are the first kind — and never persisted: a derived host has no first-seen or
+  // last-seen, and is not probed for reachability, telemetry or tooling.
+  //
+  // Honest the way ListSshConfigHosts is: OK with no hosts is a daemon that reaches none. FAILED
+  // is a listing that could not be made, and `failure_reason` says why.
+  rpc ListDerivedHosts(ListDerivedHostsRequest) returns (ListDerivedHostsResponse);
   // Host Stats Footer (see docs/ft/web/host-stats-footer.md) — host-level telemetry for the
   // selected daemon. Addressed to the daemon directly over the common-room LiveKit connection (no
   // daemon_instance_id payload needed) and validates `session_token`. The server owns the cadence:
@@ -428,6 +446,49 @@ message ListCoderWorkspacesResponse {
   string failure_reason = 2;
   // The account's own workspaces, in the deployment's order. Empty unless outcome is OK.
   repeated CoderWorkspace workspaces = 3;
+}
+
+// What a derived host is reached through.
+enum DerivedHostKind {
+  DERIVED_HOST_KIND_UNSPECIFIED = 0;
+  // An explicit `Host` alias of the parent daemon's OS user's `~/.ssh/config`.
+  DERIVED_HOST_KIND_SSH = 1;
+}
+
+// A machine a daemon reaches through a remote shell, offered wherever a host is chosen. It has no
+// daemon, no vault, no accounts and no projects of its own: those are its parent's, and so is the
+// connection everything about it travels on.
+message DerivedHost {
+  // `<parent_instance_id>/ssh/<alias>` for an SSH host: unique across daemons, and stable for as
+  // long as the alias is in the parent's config.
+  string id = 1;
+  // What an operator reads: the alias, for an SSH host.
+  string label = 2;
+  DerivedHostKind kind = 3;
+  // The daemon that reaches this host, as KnownHostEntry.instance_id names it. A session on this
+  // host is started on, owned by and served from that daemon.
+  string parent_instance_id = 4;
+  // What StartSessionRequest.target carries to run a session's agent on this host, with
+  // `daemon_instance_id` set to `parent_instance_id`.
+  session.SessionTarget target = 5;
+}
+
+message ListDerivedHostsRequest {
+  string session_token = 1;
+  // The daemon whose derived hosts are listed. Empty means the daemon serving the call. Honoured
+  // as ListSshConfigHostsRequest.daemon_instance_id is.
+  string daemon_instance_id = 2;
+}
+
+message ListDerivedHostsResponse {
+  // OK with an empty `hosts` is "this daemon reaches no hosts". FAILED is a listing that could not
+  // be made. The two must not be collapsed: a failure rendered as no hosts hides the hosts.
+  ProbeOutcome outcome = 1;
+  // Why the listing failed, when outcome is FAILED — an SSH config that could not be read or
+  // parsed. For an operator, not for parsing.
+  string failure_reason = 2;
+  // The source's own order: first-seen order of explicit aliases. Empty unless outcome is OK.
+  repeated DerivedHost hosts = 3;
 }
 
 message ListEligibleDaemonsRequest {
