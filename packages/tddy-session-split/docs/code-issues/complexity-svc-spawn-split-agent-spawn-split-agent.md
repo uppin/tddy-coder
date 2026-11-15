@@ -6,7 +6,7 @@
 **Metrics:** **233 lines** · **nesting 5** · **9 parameters** · budget 60 / 4 / 5
 **Thresholds breached:** length 233 > 60; nesting 5 > 4; parameters 9 > 5
 **Restructure:** `extract_method --variant module` for the length; an options struct for the parameters
-**Status:** Open — narrowed 2026-09-24 by #524 (254 → 110); parameters unchanged — **unclaimed**
+**Status:** Open — regressed 2026-11-15 by #905 (133 → 152, stack-shared split deferred until stack `#split-alive` lands); parameters unchanged — **unclaimed**
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-session-split`, from `packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs:57`
 
 ## Measurement history
@@ -24,6 +24,7 @@
 | 2026-10-20 | 118 | — | 9 | touched by `#satellite` 12/13 (#634) and **unchanged by it** (fn line to closing brace, 118 at `origin/feature/satellite/agent-clones` and at HEAD): the `livekit` parameter became `room: Option<&SplitAgentRoom>`, and `join_split_livekit_room` became `host_split_room`, which calls `SplitRoomHosting::host_remote_worktree` and keeps the no-room gate for a jailed-codebase start. Still 9 parameters; still open, unclaimed. Now at `:55` |
 | 2026-11-07 | 127 | — | 9 | touched by `#agent-tools` 25/28 (#833): **+8** (119 to 127, fn line to closing brace at `origin/feature/agent-tools/dead-launch-code` and at HEAD): the roster seed is joined with the transport into `tool_server_env`, which the context and flags build registers on the `tddy-tools` server. Same function's neighbour `spawn_split_agent_process` went 117 to 131 (the pointer placed before the spawn and removed on its failure) and has no record of its own; the file is 493 production lines (`write_split_agent_metadata` moved to `svc_split_agent_metadata.rs`). Parameters unchanged; still open, unclaimed |
 | 2026-11-07 | 130 | — | 9 | **worse by 3** in #834 (`#agent-tools` 26/28): `split_agent_tool_wiring` takes the session's `os_user` and is awaited (it resolves that user's agent-tool socket before anything is cut), which rustfmt wraps from seven lines to ten; 127 → 130, measured fn line to closing brace on `origin/feature/agent-tools/split-remote-env` (`cd9026d9d`) and HEAD; no coverage run. Parameters unchanged; still open, unclaimed |
+| 2026-11-15 | 152 | — | 9 | **worse by 19** in #905 (`#split-alive` 1/4): 133 at its base (`305f99b86`) → 152, measured fn line to closing brace; the recording registration and startup watch are wired inline after the spawn (their logic lives in `svc_spawn_split_agent/startup.rs`). Not decomposed in #905: `svc_spawn_split_agent.rs` is also modified by #906, #907 and #908, so its split is deferred to a follow-up branch after stack `#split-alive` lands. Parameters unchanged; still open, unclaimed |
 
 ## What grew it
 
