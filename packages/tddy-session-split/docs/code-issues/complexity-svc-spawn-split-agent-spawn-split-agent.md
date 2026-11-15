@@ -1,12 +1,12 @@
 # complexity: spawn_split_agent
 
-**Location:** `packages/tddy-session-split/src/svc_spawn_split_agent.rs:55` — `spawn_split_agent`
+**Location:** `packages/tddy-session-split/src/svc_spawn_split_agent.rs:52` — `spawn_split_agent`
 **Category:** complexity
 **Detected:** 2026-09-19 — `/analyze-clean-code` on PR #518; **missed by the #507 sweep**
 **Metrics:** **233 lines** · **nesting 5** · **9 parameters** · budget 60 / 4 / 5
 **Thresholds breached:** length 233 > 60; nesting 5 > 4; parameters 9 > 5
 **Restructure:** `extract_method --variant module` for the length; an options struct for the parameters
-**Status:** Open — regressed 2026-11-15 by #905 (133 → 152, stack-shared split deferred until stack `#split-alive` lands); parameters unchanged — **unclaimed**
+**Status:** Open — regressed 2026-11-15 by #905 (133 → 152) and by #908 (152 → 157, stack-shared split deferred until stack `#split-alive` lands); parameters unchanged — **unclaimed**
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-session-split`, from `packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs:57`
 
 ## Measurement history
@@ -25,6 +25,7 @@
 | 2026-11-07 | 127 | — | 9 | touched by `#agent-tools` 25/28 (#833): **+8** (119 to 127, fn line to closing brace at `origin/feature/agent-tools/dead-launch-code` and at HEAD): the roster seed is joined with the transport into `tool_server_env`, which the context and flags build registers on the `tddy-tools` server. Same function's neighbour `spawn_split_agent_process` went 117 to 131 (the pointer placed before the spawn and removed on its failure) and has no record of its own; the file is 493 production lines (`write_split_agent_metadata` moved to `svc_split_agent_metadata.rs`). Parameters unchanged; still open, unclaimed |
 | 2026-11-07 | 130 | — | 9 | **worse by 3** in #834 (`#agent-tools` 26/28): `split_agent_tool_wiring` takes the session's `os_user` and is awaited (it resolves that user's agent-tool socket before anything is cut), which rustfmt wraps from seven lines to ten; 127 → 130, measured fn line to closing brace on `origin/feature/agent-tools/split-remote-env` (`cd9026d9d`) and HEAD; no coverage run. Parameters unchanged; still open, unclaimed |
 | 2026-11-15 | 152 | — | 9 | **worse by 19** in #905 (`#split-alive` 1/4): 133 at its base (`305f99b86`) → 152, measured fn line to closing brace; the recording registration and startup watch are wired inline after the spawn (their logic lives in `svc_spawn_split_agent/startup.rs`). Not decomposed in #905: `svc_spawn_split_agent.rs` is also modified by #906, #907 and #908, so its split is deferred to a follow-up branch after stack `#split-alive` lands. Parameters unchanged; still open, unclaimed |
+| 2026-11-15 | 157 | — | 9 | **worse by 5** in #908 (`#split-alive` 4/4): 152 at its base (`dc2b97fd3`) → 157, measured fn line to closing brace; the first-changeset write moved later in the body, after the codebase half exists, so its branch can be recorded (`record_first_changeset` in `split_codebase_branch.rs`, replacing `record_orchestrator_before_spawn`). Not decomposed in #908 for the same stack-shared reason as #905; the split is deferred to a follow-up branch after stack `#split-alive` lands. Parameters unchanged; still open, unclaimed. Now at `:52` |
 
 ## What grew it
 

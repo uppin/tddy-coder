@@ -143,3 +143,28 @@ it("badges the codebase host even when the session's agent runs on the selected 
     .codebaseHostBadge(SPLIT_SESSION_ID)
     .should("have.text", HOST_LABELS[CODEBASE_HOST]);
 });
+
+it("shows the branch a split session's codebase works on beside its codebase host", () => {
+  // Given a split session whose codebase half works on `test-split-udoo-4`, beside a co-located
+  // session on its own branch
+  mountDrawerWith([
+    create(SessionEntrySchema, { ...aSplitSession(), branch: "test-split-udoo-4" }),
+    create(SessionEntrySchema, { ...aCoLocatedSession(), branch: "feature" }),
+  ]);
+
+  // Then the split row names its branch — the agent half has no worktree of its own to name it
+  // by — and the co-located row, labelled by its worktree, carries no such slot
+  sessionsDrawerPage.splitBranch(SPLIT_SESSION_ID).should("have.text", "test-split-udoo-4");
+  sessionsDrawerPage.expectNoSplitBranch(COLOCATED_SESSION_ID);
+});
+
+it("shows no branch slot on a split session that has not recorded one", () => {
+  // Given a split session started before the agent half recorded its codebase branch
+  mountDrawerWith([aSplitSession()]);
+
+  // Then the row shows its codebase host and no empty branch slot
+  sessionsDrawerPage
+    .codebaseHostBadge(SPLIT_SESSION_ID)
+    .should("have.text", HOST_LABELS[CODEBASE_HOST]);
+  sessionsDrawerPage.expectNoSplitBranch(SPLIT_SESSION_ID);
+});
