@@ -134,6 +134,7 @@ async fn a_peer_daemon_accepts_a_token_minted_by_a_daemon_whose_key_it_has_learn
     let request = Request::direct(ListProjectsRequest {
         session_token: token,
         local_only: true,
+        ..ListProjectsRequest::default()
     });
     let result = service.list_projects(request).await;
 
@@ -164,6 +165,7 @@ async fn a_peer_daemon_rejects_a_token_signed_by_a_daemon_it_has_never_heard_of(
     let request = Request::direct(ListProjectsRequest {
         session_token: token,
         local_only: true,
+        ..ListProjectsRequest::default()
     });
     let result = service.list_projects(request).await;
 

@@ -30,6 +30,7 @@ fn a_project(project_id: &str) -> ProjectData {
         local_gh: false,
         home_session_id: None,
         orchestrator_defaults: None,
+        lifecycle: Default::default(),
     }
 }
 

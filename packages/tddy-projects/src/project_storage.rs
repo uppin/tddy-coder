@@ -58,6 +58,44 @@ pub struct ProjectData {
     /// agent's own default. A row written by an older daemon reads that way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub orchestrator_defaults: Option<OrchestratorDefaults>,
+    /// The project's soft-delete tombstone and last restore, flattened onto the row
+    /// (`deleted_at`, `deleted_by`, `restored_at`). Absent keys read as a live project that never
+    /// saw either event, so a row an older daemon wrote loads unchanged; a live row writes none.
+    #[serde(flatten, default)]
+    pub lifecycle: ProjectLifecycle,
+}
+
+/// A project row's soft-delete state. Deleting keeps everything the project owns on disk — this
+/// tombstone is the only thing that changes — and the newest delete or restore event across the
+/// hosts owning a project decides whether the logical project is deleted ([`Self::newest`]).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProjectLifecycle {
+    /// RFC 3339 time the project was soft-deleted. Present = deleted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
+    /// The GitHub user who deleted it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_by: Option<String>,
+    /// RFC 3339 time the project was last restored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restored_at: Option<String>,
+}
+
+impl ProjectLifecycle {
+    pub fn is_deleted(&self) -> bool {
+        unimplemented!("red: ProjectLifecycle::is_deleted")
+    }
+
+    /// The lifecycle that wins among one logical project's rows on several hosts.
+    pub fn newest<'a>(_rows: impl IntoIterator<Item = &'a ProjectLifecycle>) -> ProjectLifecycle {
+        unimplemented!("red: ProjectLifecycle::newest")
+    }
+}
+
+impl ProjectData {
+    pub fn is_deleted(&self) -> bool {
+        self.lifecycle.is_deleted()
+    }
 }
 
 /// The defaults a project's orchestrator composer starts with on one host — saved from the
@@ -397,6 +435,67 @@ pub fn set_project_orchestrator_defaults(
     write_projects(projects_dir, &projects)
 }
 
+/// The time a lifecycle event is stamped with.
+pub fn lifecycle_timestamp_now() -> String {
+    unimplemented!("red: lifecycle_timestamp_now")
+}
+
+/// A project name as `CreateProject` accepts one, trimmed.
+pub fn validate_project_name(_name: &str) -> Result<&str, String> {
+    unimplemented!("red: validate_project_name")
+}
+
+/// Rename `project_id`. `None` when it is not registered here.
+pub fn rename_project(
+    _projects_dir: &Path,
+    _project_id: &str,
+    _name: &str,
+) -> anyhow::Result<Option<ProjectData>> {
+    unimplemented!("red: rename_project")
+}
+
+/// Tombstone `project_id`. `None` when it is not registered here.
+pub fn mark_project_deleted(
+    _projects_dir: &Path,
+    _project_id: &str,
+    _deleted_at: &str,
+    _deleted_by: &str,
+) -> anyhow::Result<Option<ProjectData>> {
+    unimplemented!("red: mark_project_deleted")
+}
+
+/// Clear `project_id`'s tombstone. `None` when it is not registered here.
+pub fn mark_project_restored(
+    _projects_dir: &Path,
+    _project_id: &str,
+    _restored_at: &str,
+) -> anyhow::Result<Option<ProjectData>> {
+    unimplemented!("red: mark_project_restored")
+}
+
+/// Adopt another host's lifecycle for `project_id` when it is newer. `true` when the row changed.
+pub fn adopt_project_lifecycle(
+    _projects_dir: &Path,
+    _project_id: &str,
+    _winner: &ProjectLifecycle,
+) -> anyhow::Result<bool> {
+    unimplemented!("red: adopt_project_lifecycle")
+}
+
+/// A deleted project of the same repository or checkout.
+pub fn find_deleted_project_matching(
+    _projects_dir: &Path,
+    _git_url: &str,
+    _main_repo_path: &str,
+) -> anyhow::Result<Option<ProjectData>> {
+    unimplemented!("red: find_deleted_project_matching")
+}
+
+/// Refuse new work on a deleted project.
+pub fn refuse_if_deleted(_project: &ProjectData) -> Result<(), tddy_rpc::Status> {
+    unimplemented!("red: refuse_if_deleted")
+}
+
 /// Resolved `main_repo_path` for `project_id` on `host_key` (simulated host or daemon instance id).
 ///
 /// Multi-host: returns [`ProjectData::host_repo_paths`]\[host_key] when non-empty, else
@@ -452,6 +551,7 @@ mod per_host_path_unit_tests {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         };
         write_projects(&projects_dir, &[project]).unwrap();
         let px = main_repo_path_for_host(&projects_dir, "p1", "unit-host-x")
@@ -686,6 +786,7 @@ mod project_integration_base_acceptance_tests {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         };
         let r = add_project(&projects_dir, project);
         assert!(
@@ -718,6 +819,7 @@ mod project_integration_base_acceptance_tests {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         };
         add_project(&projects_dir, project).expect(
             "a safe <remote>/<path> must be accepted at the boundary regardless of the remote name",
@@ -758,6 +860,7 @@ mod set_project_default_branch_unit_tests {
                 local_gh: false,
                 home_session_id: None,
                 orchestrator_defaults: None,
+                lifecycle: Default::default(),
             },
         )
         .expect("seed project");

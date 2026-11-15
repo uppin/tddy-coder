@@ -721,10 +721,7 @@ impl EligibleDaemonSource for LiveKitEligibleDaemonSource {
             let common_room = common_room.clone();
             let session_token = session_token.clone();
             async move {
-                let req = ListProjectsRequest {
-                    session_token,
-                    local_only: true,
-                };
+                let req = peer_listing_request(session_token);
                 let bytes = common_room
                     .forward_to_peer(
                         &peer_id,
@@ -743,6 +740,16 @@ impl EligibleDaemonSource for LiveKitEligibleDaemonSource {
             }
         })
         .await
+    }
+}
+
+/// The `ListProjects` a listing sends each peer: that peer's own rows only, so it does not fan out
+/// in turn.
+fn peer_listing_request(session_token: String) -> ListProjectsRequest {
+    ListProjectsRequest {
+        session_token,
+        local_only: true,
+        include_deleted: false,
     }
 }
 
@@ -2085,7 +2092,19 @@ mod tests {
             local_gh: false,
             home_session_id: String::new(),
             orchestrator_defaults: None,
+            ..ProtoProjectEntry::default()
         }
+    }
+
+    /// A tombstone on any host must win over a peer's live row, so the listing asks each peer for
+    /// its deleted rows too — and only its own, so the peer does not fan out in turn.
+    #[test]
+    fn a_peer_listing_asks_for_the_peers_own_rows_tombstones_included() {
+        let req = peer_listing_request("tok".to_string());
+
+        assert_eq!(req.session_token, "tok");
+        assert!(req.local_only);
+        assert!(req.include_deleted);
     }
 
     #[tokio::test]

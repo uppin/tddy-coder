@@ -19,6 +19,7 @@ fn a_project_row() -> ProjectData {
         local_gh: false,
         home_session_id: None,
         orchestrator_defaults: None,
+        lifecycle: Default::default(),
     }
 }
 

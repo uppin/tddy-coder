@@ -95,6 +95,33 @@ mod tests {
             > {
                 Err(tddy_rpc::Status::unimplemented("test stub"))
             }
+            async fn update_project(
+                &self,
+                _request: tddy_rpc::Request<tddy_service::proto::project::UpdateProjectRequest>,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::project::UpdateProjectResponse>,
+                tddy_rpc::Status,
+            > {
+                Err(tddy_rpc::Status::unimplemented("test stub"))
+            }
+            async fn delete_project(
+                &self,
+                _request: tddy_rpc::Request<tddy_service::proto::project::DeleteProjectRequest>,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::project::DeleteProjectResponse>,
+                tddy_rpc::Status,
+            > {
+                Err(tddy_rpc::Status::unimplemented("test stub"))
+            }
+            async fn restore_project(
+                &self,
+                _request: tddy_rpc::Request<tddy_service::proto::project::RestoreProjectRequest>,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::project::RestoreProjectResponse>,
+                tddy_rpc::Status,
+            > {
+                Err(tddy_rpc::Status::unimplemented("test stub"))
+            }
         }
 
         let entry = build_project_entry(ProjectServiceImpl::new(Arc::new(Noop)));

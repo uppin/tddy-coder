@@ -252,6 +252,7 @@ async fn a_served_project(suffix: &str) -> AServedProject {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         }],
     )
     .expect("write projects.yaml");

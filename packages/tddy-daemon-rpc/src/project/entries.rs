@@ -84,5 +84,8 @@ pub(super) fn project_entry_from(
                 },
             )
         }),
+        deleted_at: p.lifecycle.deleted_at.clone().unwrap_or_default(),
+        deleted_by: p.lifecycle.deleted_by.clone().unwrap_or_default(),
+        restored_at: p.lifecycle.restored_at.clone().unwrap_or_default(),
     }
 }

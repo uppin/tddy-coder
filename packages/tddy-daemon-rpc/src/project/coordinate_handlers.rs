@@ -180,6 +180,7 @@ impl ProjectRpcHandler {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         };
         let repo_root = PathBuf::from(&project.main_repo_path);
         let default_remote = entries::resolve_default_remote_or_empty(

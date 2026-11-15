@@ -127,6 +127,7 @@ pub fn a_project_with_a_session_on_its_worktree() -> AProjectWithASession {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .expect("the project is registered");

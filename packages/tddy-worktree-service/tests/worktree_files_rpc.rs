@@ -137,6 +137,7 @@ fn a_project_with_worktree(os_user: &str) -> Fixture {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .unwrap();

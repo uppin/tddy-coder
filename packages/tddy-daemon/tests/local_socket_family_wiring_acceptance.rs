@@ -154,6 +154,7 @@ async fn the_assembled_daemon_answers_every_family_on_its_local_socket() {
             .list_projects(tddy_service::proto::project::ListProjectsRequest {
                 session_token: A_TOKEN_NO_DAEMON_ISSUED.to_string(),
                 local_only: true,
+                ..Default::default()
             })
             .await,
     );

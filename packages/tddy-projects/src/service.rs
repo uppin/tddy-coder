@@ -12,6 +12,11 @@ use tddy_service::proto::project::{
     SetProjectOrchestratorDefaultsRequest, SetProjectOrchestratorDefaultsResponse,
 };
 
+use tddy_service::proto::project::{
+    DeleteProjectRequest, DeleteProjectResponse, RestoreProjectRequest, RestoreProjectResponse,
+    UpdateProjectRequest, UpdateProjectResponse,
+};
+
 use crate::handler::ProjectHandler;
 
 /// Thin `ProjectService` adapter over a [`ProjectHandler`].
@@ -75,6 +80,27 @@ impl<H: ProjectHandler + 'static> ProjectService for ProjectServiceImpl<H> {
         request: Request<SetProjectOrchestratorDefaultsRequest>,
     ) -> Result<Response<SetProjectOrchestratorDefaultsResponse>, Status> {
         self.host.set_project_orchestrator_defaults(request).await
+    }
+
+    async fn update_project(
+        &self,
+        request: Request<UpdateProjectRequest>,
+    ) -> Result<Response<UpdateProjectResponse>, Status> {
+        self.host.update_project(request).await
+    }
+
+    async fn delete_project(
+        &self,
+        request: Request<DeleteProjectRequest>,
+    ) -> Result<Response<DeleteProjectResponse>, Status> {
+        self.host.delete_project(request).await
+    }
+
+    async fn restore_project(
+        &self,
+        request: Request<RestoreProjectRequest>,
+    ) -> Result<Response<RestoreProjectResponse>, Status> {
+        self.host.restore_project(request).await
     }
 }
 

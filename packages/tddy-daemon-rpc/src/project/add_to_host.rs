@@ -115,6 +115,7 @@ impl ProjectRpcHandler {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         };
         let (stored, _created) = project_storage::add_or_get_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;

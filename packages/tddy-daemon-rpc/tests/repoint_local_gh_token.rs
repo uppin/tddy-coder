@@ -128,6 +128,7 @@ fn a_repoint_of_a_started_node_in_a_project(local_gh: bool) -> World {
             local_gh,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .unwrap();

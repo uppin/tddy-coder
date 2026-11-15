@@ -142,6 +142,7 @@ repos_base_path: "{repos}"
                 local_gh: false,
                 home_session_id: None,
                 orchestrator_defaults: None,
+                lifecycle: Default::default(),
             },
         )
         .expect("register the project");

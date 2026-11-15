@@ -7,6 +7,8 @@ mod coordinate_route;
 mod entries;
 mod orchestrator_defaults;
 mod ports;
+mod soft_delete;
+mod update;
 
 use std::path::PathBuf;
 use std::sync::Arc;

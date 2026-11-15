@@ -108,6 +108,7 @@ where
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .map_err(|e| Status::internal(format!("register provisioned project: {e}")))?;
@@ -190,6 +191,7 @@ where
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .map_err(|e| Status::internal(format!("register provisioned project: {e}")))?;
@@ -244,6 +246,7 @@ mod tests {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         }
     }
 

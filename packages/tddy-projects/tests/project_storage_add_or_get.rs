@@ -21,6 +21,7 @@ fn a_project(name: &str, repo_path: &str) -> ProjectData {
         local_gh: false,
         home_session_id: None,
         orchestrator_defaults: None,
+        lifecycle: Default::default(),
     }
 }
 

@@ -1,3 +1,4 @@
+import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 
 /** One project's slice of the drawer: its header label and the sessions under it. */
@@ -61,4 +62,20 @@ export function groupSessionsByProject(
     groups.push({ projectId: null, label: "Other", sessions: other });
   }
   return groups;
+}
+
+/** A `ListProjects` answer (asked with `includeDeleted`) split into live rows and deleted project ids. */
+export function splitDeletedProjects(_projects: ReadonlyArray<ProjectEntry>): {
+  live: ProjectEntry[];
+  deletedProjectIds: ReadonlySet<string>;
+} {
+  throw new Error("red: splitDeletedProjects");
+}
+
+/** `sessions` without those of a soft-deleted project. */
+export function withoutDeletedProjectsSessions(
+  _sessions: SessionEntry[],
+  _deletedProjectIds: ReadonlySet<string>,
+): SessionEntry[] {
+  throw new Error("red: withoutDeletedProjectsSessions");
 }

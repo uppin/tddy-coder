@@ -478,6 +478,7 @@ mod local_gh_tests {
             local_gh: true,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         }
     }
 
