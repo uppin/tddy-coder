@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file host.proto.
  */
 export const file_host: GenFile = /*@__PURE__*/
-  fileDesc("Cgpob3N0LnByb3RvEgRob3N0IlcKEUFkZEhvc3RLZXlSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEg8KB3N1YmplY3QYAyABKAkiegoSQWRkSG9zdEtleVJlc3BvbnNlEg0KBWFkZGVkGAEgASgIEigKB291dGNvbWUYAiABKA4yFy5ob3N0LkFkZEhvc3RLZXlPdXRjb21lEhMKC2ZpbmdlcnByaW50GAMgASgJEhYKDmZhaWx1cmVfcmVhc29uGAQgASgJInkKF0Fuc3dlckhvc3RQcm9tcHRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEhEKCXByb21wdF9pZBgDIAEoCRIYChBlbmNyeXB0ZWRfYW5zd2VyGAQgASgMIkYKGEFuc3dlckhvc3RQcm9tcHRSZXNwb25zZRIQCghhY2NlcHRlZBgBIAEoCBIYChByZWplY3Rpb25fcmVhc29uGAIgASgJIksKE0VsaWdpYmxlRGFlbW9uRW50cnkSEwoLaW5zdGFuY2VfaWQYASABKAkSDQoFbGFiZWwYAiABKAkSEAoIaXNfbG9jYWwYAyABKAgiYwoVR2V0SG9zdFRvb2xpbmdSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEhcKD2dpdGh1Yl9ob3N0bmFtZRgDIAEoCSLZAQoWR2V0SG9zdFRvb2xpbmdSZXNwb25zZRIaChJkYWVtb25faW5zdGFuY2VfaWQYASABKAkSIgoDZ2l0GAIgASgLMhUuaG9zdC5Ib3N0R2l0SWRlbnRpdHkSJwoKZ2l0aHViX2NsaRgDIAEoCzITLmhvc3QuSG9zdEdpdGh1YkNsaRIlCglzc2hfYWdlbnQYBCABKAsyEi5ob3N0Lkhvc3RTc2hBZ2VudBIvCg5yZW1vdGVfZGVza3RvcBgFIAMoCzIXLmhvc3QuSG9zdFJlbW90ZURlc2t0b3AiPwoMSG9zdENwdVN0YXRzEhgKEHBlcl9jb3JlX3BlcmNlbnQYASADKAISFQoNbG9naWNhbF9jb3JlcxgCIAEoDSJSCg1Ib3N0RGlza1N0YXRzEhcKD2F2YWlsYWJsZV9ieXRlcxgBIAEoBBITCgt0b3RhbF9ieXRlcxgCIAEoBBITCgtwcm9qZWN0X2RpchgDIAEoCSKJAQoPSG9zdEdpdElkZW50aXR5EiMKB291dGNvbWUYASABKA4yEi5ob3N0LlByb2JlT3V0Y29tZRISCgpjb25maWd1cmVkGAIgASgIEhEKCXVzZXJfbmFtZRgDIAEoCRISCgp1c2VyX2VtYWlsGAQgASgJEhYKDmZhaWx1cmVfcmVhc29uGAUgASgJIoUBCg1Ib3N0R2l0aHViQ2xpEiMKB291dGNvbWUYASABKA4yEi5ob3N0LlByb2JlT3V0Y29tZRIRCglpbnN0YWxsZWQYAiABKAgSFQoNYXV0aGVudGljYXRlZBgDIAEoCBINCgVsb2dpbhgEIAEoCRIWCg5mYWlsdXJlX3JlYXNvbhgFIAEoCSJHChBIb3N0S2V5Q2FuZGlkYXRlEgwKBHBhdGgYASABKAkSEAoIa2V5X3R5cGUYAiABKAkSEwoLZmluZ2VycHJpbnQYAyABKAkiUgoNSG9zdExvYWRTdGF0cxISCgpvbmVfbWludXRlGAEgASgBEhQKDGZpdmVfbWludXRlcxgCIAEoARIXCg9maWZ0ZWVuX21pbnV0ZXMYAyABKAEiPwoPSG9zdE1lbW9yeVN0YXRzEhcKD2F2YWlsYWJsZV9ieXRlcxgBIAEoBBITCgt0b3RhbF9ieXRlcxgCIAEoBCLtAQoPSG9zdFByb21wdEV2ZW50EhEKCXByb21wdF9pZBgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSIgoEa2luZBgDIAEoDjIULmhvc3QuSG9zdFByb21wdEtpbmQSDwoHc3ViamVjdBgEIAEoCRIXCg9ob3N0X3B1YmxpY19rZXkYBSABKAwSIwobaG9zdF9wdWJsaWNfa2V5X2ZpbmdlcnByaW50GAYgASgJEhoKEmV4cGlyZXNfYXRfdW5peF9tcxgHIAEoAxIcChRvZmZlcmVkX2F1dGhfbWV0aG9kcxgIIAMoBSL7AQoRSG9zdFJlbW90ZURlc2t0b3ASIwoHb3V0Y29tZRgBIAEoDjISLmhvc3QuUHJvYmVPdXRjb21lEhAKCHByb3RvY29sGAIgASgFEhIKCmNhbl9icmlkZ2UYAyABKAgSGQoRZGVza3RvcF9yZWFjaGFibGUYBCABKAgSDAoEcG9ydBgFIAEoDRIWCg5mYWlsdXJlX3JlYXNvbhgGIAEoCRISCgpjaGFubmVsX2lkGAcgASgJEiYKBGtpbmQYCCABKA4yGC5ob3N0LkRlc2t0b3BDaGFubmVsS2luZBIPCgdkaXNwbGF5GAkgASgNEg0KBWxhYmVsGAogASgJIn8KDEhvc3RTc2hBZ2VudBIjCgdvdXRjb21lGAEgASgOMhIuaG9zdC5Qcm9iZU91dGNvbWUSEQoJcmVhY2hhYmxlGAIgASgIEh8KBGtleXMYAyADKAsyES5ob3N0LlNzaEFnZW50S2V5EhYKDmZhaWx1cmVfcmVhc29uGAQgASgJIp4BCg5Ib3N0U3RhdHNFdmVudBIfCgNjcHUYASABKAsyEi5ob3N0Lkhvc3RDcHVTdGF0cxIhCgRkaXNrGAIgASgLMhMuaG9zdC5Ib3N0RGlza1N0YXRzEiUKBm1lbW9yeRgDIAEoCzIVLmhvc3QuSG9zdE1lbW9yeVN0YXRzEiEKBGxvYWQYBCABKAsyEy5ob3N0Lkhvc3RMb2FkU3RhdHMixAEKDktub3duSG9zdEVudHJ5EhMKC2luc3RhbmNlX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEg4KBm9ubGluZRgDIAEoCBIaChJmaXJzdF9zZWVuX3VuaXhfbXMYBCABKAMSGQoRbGFzdF9zZWVuX3VuaXhfbXMYBSABKAMSFwoPcmVwb3NfYmFzZV9wYXRoGAYgASgJEhwKFG1heF9hdHRhY2htZW50X2J5dGVzGAcgASgEEhAKCGlzX2xvY2FsGAggASgIIjMKGkxpc3RFbGlnaWJsZURhZW1vbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiSQobTGlzdEVsaWdpYmxlRGFlbW9uc1Jlc3BvbnNlEioKB2RhZW1vbnMYASADKAsyGS5ob3N0LkVsaWdpYmxlRGFlbW9uRW50cnkiUQocTGlzdEhvc3RLZXlDYW5kaWRhdGVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCSJLCh1MaXN0SG9zdEtleUNhbmRpZGF0ZXNSZXNwb25zZRIqCgpjYW5kaWRhdGVzGAEgAygLMhYuaG9zdC5Ib3N0S2V5Q2FuZGlkYXRlIk4KGUxpc3RTc2hDb25maWdIb3N0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkiHgoNU3NoQ29uZmlnSG9zdBINCgVhbGlhcxgBIAEoCSJ9ChpMaXN0U3NoQ29uZmlnSG9zdHNSZXNwb25zZRIjCgdvdXRjb21lGAEgASgOMhIuaG9zdC5Qcm9iZU91dGNvbWUSFgoOZmFpbHVyZV9yZWFzb24YAiABKAkSIgoFaG9zdHMYAyADKAsyEy5ob3N0LlNzaENvbmZpZ0hvc3QiLgoVTGlzdEtub3duSG9zdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiPQoWTGlzdEtub3duSG9zdHNSZXNwb25zZRIjCgVob3N0cxgBIAMoCzIULmhvc3QuS25vd25Ib3N0RW50cnkiRQoLU3NoQWdlbnRLZXkSEAoIa2V5X3R5cGUYASABKAkSEwoLZmluZ2VycHJpbnQYAiABKAkSDwoHY29tbWVudBgDIAEoCSJNChhTdHJlYW1Ib3N0UHJvbXB0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkiLwoWU3RyZWFtSG9zdFN0YXRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJKvkBChFBZGRIb3N0S2V5T3V0Y29tZRIkCiBBRERfSE9TVF9LRVlfT1VUQ09NRV9VTlNQRUNJRklFRBAAEh4KGkFERF9IT1NUX0tFWV9PVVRDT01FX0FEREVEEAESKQolQUREX0hPU1RfS0VZX09VVENPTUVfV1JPTkdfUEFTU1BIUkFTRRACEicKI0FERF9IT1NUX0tFWV9PVVRDT01FX1BST01QVF9FWFBJUkVEEAMSIQodQUREX0hPU1RfS0VZX09VVENPTUVfTk9fQUdFTlQQBBInCiNBRERfSE9TVF9LRVlfT1VUQ09NRV9LRVlfVU5SRUFEQUJMRRAFKqwBCg5Ib3N0UHJvbXB0S2luZBIgChxIT1NUX1BST01QVF9LSU5EX1VOU1BFQ0lGSUVEEAASJwojSE9TVF9QUk9NUFRfS0lORF9TU0hfS0VZX1BBU1NQSFJBU0UQARIlCiFIT1NUX1BST01QVF9LSU5EX0RFU0tUT1BfUEFTU1dPUkQQAhIoCiRIT1NUX1BST01QVF9LSU5EX0RFU0tUT1BfQ1JFREVOVElBTFMQAyqDAQoSRGVza3RvcENoYW5uZWxLaW5kEiQKIERFU0tUT1BfQ0hBTk5FTF9LSU5EX1VOU1BFQ0lGSUVEEAASIQodREVTS1RPUF9DSEFOTkVMX0tJTkRfRU5EUE9JTlQQARIkCiBERVNLVE9QX0NIQU5ORUxfS0lORF9YMTFfRElTUExBWRACKnwKDFByb2JlT3V0Y29tZRIdChlQUk9CRV9PVVRDT01FX1VOU1BFQ0lGSUVEEAASFAoQUFJPQkVfT1VUQ09NRV9PSxABEhgKFFBST0JFX09VVENPTUVfRkFJTEVEEAISHQoZUFJPQkVfT1VUQ09NRV9VTlNVUFBPUlRFRBADMukFCgtIb3N0U2VydmljZRJaChNMaXN0RWxpZ2libGVEYWVtb25zEiAuaG9zdC5MaXN0RWxpZ2libGVEYWVtb25zUmVxdWVzdBohLmhvc3QuTGlzdEVsaWdpYmxlRGFlbW9uc1Jlc3BvbnNlEksKDkxpc3RLbm93bkhvc3RzEhsuaG9zdC5MaXN0S25vd25Ib3N0c1JlcXVlc3QaHC5ob3N0Lkxpc3RLbm93bkhvc3RzUmVzcG9uc2USSwoOR2V0SG9zdFRvb2xpbmcSGy5ob3N0LkdldEhvc3RUb29saW5nUmVxdWVzdBocLmhvc3QuR2V0SG9zdFRvb2xpbmdSZXNwb25zZRJMChFTdHJlYW1Ib3N0UHJvbXB0cxIeLmhvc3QuU3RyZWFtSG9zdFByb21wdHNSZXF1ZXN0GhUuaG9zdC5Ib3N0UHJvbXB0RXZlbnQwARJRChBBbnN3ZXJIb3N0UHJvbXB0Eh0uaG9zdC5BbnN3ZXJIb3N0UHJvbXB0UmVxdWVzdBoeLmhvc3QuQW5zd2VySG9zdFByb21wdFJlc3BvbnNlEj8KCkFkZEhvc3RLZXkSFy5ob3N0LkFkZEhvc3RLZXlSZXF1ZXN0GhguaG9zdC5BZGRIb3N0S2V5UmVzcG9uc2USYAoVTGlzdEhvc3RLZXlDYW5kaWRhdGVzEiIuaG9zdC5MaXN0SG9zdEtleUNhbmRpZGF0ZXNSZXF1ZXN0GiMuaG9zdC5MaXN0SG9zdEtleUNhbmRpZGF0ZXNSZXNwb25zZRJXChJMaXN0U3NoQ29uZmlnSG9zdHMSHy5ob3N0Lkxpc3RTc2hDb25maWdIb3N0c1JlcXVlc3QaIC5ob3N0Lkxpc3RTc2hDb25maWdIb3N0c1Jlc3BvbnNlEkcKD1N0cmVhbUhvc3RTdGF0cxIcLmhvc3QuU3RyZWFtSG9zdFN0YXRzUmVxdWVzdBoULmhvc3QuSG9zdFN0YXRzRXZlbnQwAWIGcHJvdG8z");
+  fileDesc("Cgpob3N0LnByb3RvEgRob3N0IlcKEUFkZEhvc3RLZXlSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEg8KB3N1YmplY3QYAyABKAkiegoSQWRkSG9zdEtleVJlc3BvbnNlEg0KBWFkZGVkGAEgASgIEigKB291dGNvbWUYAiABKA4yFy5ob3N0LkFkZEhvc3RLZXlPdXRjb21lEhMKC2ZpbmdlcnByaW50GAMgASgJEhYKDmZhaWx1cmVfcmVhc29uGAQgASgJInkKF0Fuc3dlckhvc3RQcm9tcHRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEhEKCXByb21wdF9pZBgDIAEoCRIYChBlbmNyeXB0ZWRfYW5zd2VyGAQgASgMIkYKGEFuc3dlckhvc3RQcm9tcHRSZXNwb25zZRIQCghhY2NlcHRlZBgBIAEoCBIYChByZWplY3Rpb25fcmVhc29uGAIgASgJIk4KDkNvZGVyV29ya3NwYWNlEg0KBW93bmVyGAEgASgJEgwKBG5hbWUYAiABKAkSDgoGc3RhdHVzGAMgASgJEg8KB3J1bm5pbmcYBCABKAgiSwoTRWxpZ2libGVEYWVtb25FbnRyeRITCgtpbnN0YW5jZV9pZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIQCghpc19sb2NhbBgDIAEoCCJjChVHZXRIb3N0VG9vbGluZ1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSFwoPZ2l0aHViX2hvc3RuYW1lGAMgASgJIoACChZHZXRIb3N0VG9vbGluZ1Jlc3BvbnNlEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgBIAEoCRIiCgNnaXQYAiABKAsyFS5ob3N0Lkhvc3RHaXRJZGVudGl0eRInCgpnaXRodWJfY2xpGAMgASgLMhMuaG9zdC5Ib3N0R2l0aHViQ2xpEiUKCXNzaF9hZ2VudBgEIAEoCzISLmhvc3QuSG9zdFNzaEFnZW50Ei8KDnJlbW90ZV9kZXNrdG9wGAUgAygLMhcuaG9zdC5Ib3N0UmVtb3RlRGVza3RvcBIlCgljb2Rlcl9jbGkYBiABKAsyEi5ob3N0Lkhvc3RDb2RlckNsaSIyCgxIb3N0Q29kZXJDbGkSEQoJaW5zdGFsbGVkGAEgASgIEg8KB3ZlcnNpb24YAiABKAkiPwoMSG9zdENwdVN0YXRzEhgKEHBlcl9jb3JlX3BlcmNlbnQYASADKAISFQoNbG9naWNhbF9jb3JlcxgCIAEoDSJSCg1Ib3N0RGlza1N0YXRzEhcKD2F2YWlsYWJsZV9ieXRlcxgBIAEoBBITCgt0b3RhbF9ieXRlcxgCIAEoBBITCgtwcm9qZWN0X2RpchgDIAEoCSKJAQoPSG9zdEdpdElkZW50aXR5EiMKB291dGNvbWUYASABKA4yEi5ob3N0LlByb2JlT3V0Y29tZRISCgpjb25maWd1cmVkGAIgASgIEhEKCXVzZXJfbmFtZRgDIAEoCRISCgp1c2VyX2VtYWlsGAQgASgJEhYKDmZhaWx1cmVfcmVhc29uGAUgASgJIoUBCg1Ib3N0R2l0aHViQ2xpEiMKB291dGNvbWUYASABKA4yEi5ob3N0LlByb2JlT3V0Y29tZRIRCglpbnN0YWxsZWQYAiABKAgSFQoNYXV0aGVudGljYXRlZBgDIAEoCBINCgVsb2dpbhgEIAEoCRIWCg5mYWlsdXJlX3JlYXNvbhgFIAEoCSJHChBIb3N0S2V5Q2FuZGlkYXRlEgwKBHBhdGgYASABKAkSEAoIa2V5X3R5cGUYAiABKAkSEwoLZmluZ2VycHJpbnQYAyABKAkiUgoNSG9zdExvYWRTdGF0cxISCgpvbmVfbWludXRlGAEgASgBEhQKDGZpdmVfbWludXRlcxgCIAEoARIXCg9maWZ0ZWVuX21pbnV0ZXMYAyABKAEiPwoPSG9zdE1lbW9yeVN0YXRzEhcKD2F2YWlsYWJsZV9ieXRlcxgBIAEoBBITCgt0b3RhbF9ieXRlcxgCIAEoBCLtAQoPSG9zdFByb21wdEV2ZW50EhEKCXByb21wdF9pZBgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSIgoEa2luZBgDIAEoDjIULmhvc3QuSG9zdFByb21wdEtpbmQSDwoHc3ViamVjdBgEIAEoCRIXCg9ob3N0X3B1YmxpY19rZXkYBSABKAwSIwobaG9zdF9wdWJsaWNfa2V5X2ZpbmdlcnByaW50GAYgASgJEhoKEmV4cGlyZXNfYXRfdW5peF9tcxgHIAEoAxIcChRvZmZlcmVkX2F1dGhfbWV0aG9kcxgIIAMoBSL7AQoRSG9zdFJlbW90ZURlc2t0b3ASIwoHb3V0Y29tZRgBIAEoDjISLmhvc3QuUHJvYmVPdXRjb21lEhAKCHByb3RvY29sGAIgASgFEhIKCmNhbl9icmlkZ2UYAyABKAgSGQoRZGVza3RvcF9yZWFjaGFibGUYBCABKAgSDAoEcG9ydBgFIAEoDRIWCg5mYWlsdXJlX3JlYXNvbhgGIAEoCRISCgpjaGFubmVsX2lkGAcgASgJEiYKBGtpbmQYCCABKA4yGC5ob3N0LkRlc2t0b3BDaGFubmVsS2luZBIPCgdkaXNwbGF5GAkgASgNEg0KBWxhYmVsGAogASgJIn8KDEhvc3RTc2hBZ2VudBIjCgdvdXRjb21lGAEgASgOMhIuaG9zdC5Qcm9iZU91dGNvbWUSEQoJcmVhY2hhYmxlGAIgASgIEh8KBGtleXMYAyADKAsyES5ob3N0LlNzaEFnZW50S2V5EhYKDmZhaWx1cmVfcmVhc29uGAQgASgJIp4BCg5Ib3N0U3RhdHNFdmVudBIfCgNjcHUYASABKAsyEi5ob3N0Lkhvc3RDcHVTdGF0cxIhCgRkaXNrGAIgASgLMhMuaG9zdC5Ib3N0RGlza1N0YXRzEiUKBm1lbW9yeRgDIAEoCzIVLmhvc3QuSG9zdE1lbW9yeVN0YXRzEiEKBGxvYWQYBCABKAsyEy5ob3N0Lkhvc3RMb2FkU3RhdHMixAEKDktub3duSG9zdEVudHJ5EhMKC2luc3RhbmNlX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEg4KBm9ubGluZRgDIAEoCBIaChJmaXJzdF9zZWVuX3VuaXhfbXMYBCABKAMSGQoRbGFzdF9zZWVuX3VuaXhfbXMYBSABKAMSFwoPcmVwb3NfYmFzZV9wYXRoGAYgASgJEhwKFG1heF9hdHRhY2htZW50X2J5dGVzGAcgASgEEhAKCGlzX2xvY2FsGAggASgIImMKGkxpc3RDb2RlcldvcmtzcGFjZXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEhIKCmFjY291bnRfaWQYAyABKAkihAEKG0xpc3RDb2RlcldvcmtzcGFjZXNSZXNwb25zZRIjCgdvdXRjb21lGAEgASgOMhIuaG9zdC5Qcm9iZU91dGNvbWUSFgoOZmFpbHVyZV9yZWFzb24YAiABKAkSKAoKd29ya3NwYWNlcxgDIAMoCzIULmhvc3QuQ29kZXJXb3Jrc3BhY2UiMwoaTGlzdEVsaWdpYmxlRGFlbW9uc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJJChtMaXN0RWxpZ2libGVEYWVtb25zUmVzcG9uc2USKgoHZGFlbW9ucxgBIAMoCzIZLmhvc3QuRWxpZ2libGVEYWVtb25FbnRyeSJRChxMaXN0SG9zdEtleUNhbmRpZGF0ZXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJIksKHUxpc3RIb3N0S2V5Q2FuZGlkYXRlc1Jlc3BvbnNlEioKCmNhbmRpZGF0ZXMYASADKAsyFi5ob3N0Lkhvc3RLZXlDYW5kaWRhdGUiTgoZTGlzdFNzaENvbmZpZ0hvc3RzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCSIeCg1Tc2hDb25maWdIb3N0Eg0KBWFsaWFzGAEgASgJIn0KGkxpc3RTc2hDb25maWdIb3N0c1Jlc3BvbnNlEiMKB291dGNvbWUYASABKA4yEi5ob3N0LlByb2JlT3V0Y29tZRIWCg5mYWlsdXJlX3JlYXNvbhgCIAEoCRIiCgVob3N0cxgDIAMoCzITLmhvc3QuU3NoQ29uZmlnSG9zdCIuChVMaXN0S25vd25Ib3N0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSI9ChZMaXN0S25vd25Ib3N0c1Jlc3BvbnNlEiMKBWhvc3RzGAEgAygLMhQuaG9zdC5Lbm93bkhvc3RFbnRyeSJFCgtTc2hBZ2VudEtleRIQCghrZXlfdHlwZRgBIAEoCRITCgtmaW5nZXJwcmludBgCIAEoCRIPCgdjb21tZW50GAMgASgJIk0KGFN0cmVhbUhvc3RQcm9tcHRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCSIvChZTdHJlYW1Ib3N0U3RhdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkq+QEKEUFkZEhvc3RLZXlPdXRjb21lEiQKIEFERF9IT1NUX0tFWV9PVVRDT01FX1VOU1BFQ0lGSUVEEAASHgoaQUREX0hPU1RfS0VZX09VVENPTUVfQURERUQQARIpCiVBRERfSE9TVF9LRVlfT1VUQ09NRV9XUk9OR19QQVNTUEhSQVNFEAISJwojQUREX0hPU1RfS0VZX09VVENPTUVfUFJPTVBUX0VYUElSRUQQAxIhCh1BRERfSE9TVF9LRVlfT1VUQ09NRV9OT19BR0VOVBAEEicKI0FERF9IT1NUX0tFWV9PVVRDT01FX0tFWV9VTlJFQURBQkxFEAUqrAEKDkhvc3RQcm9tcHRLaW5kEiAKHEhPU1RfUFJPTVBUX0tJTkRfVU5TUEVDSUZJRUQQABInCiNIT1NUX1BST01QVF9LSU5EX1NTSF9LRVlfUEFTU1BIUkFTRRABEiUKIUhPU1RfUFJPTVBUX0tJTkRfREVTS1RPUF9QQVNTV09SRBACEigKJEhPU1RfUFJPTVBUX0tJTkRfREVTS1RPUF9DUkVERU5USUFMUxADKoMBChJEZXNrdG9wQ2hhbm5lbEtpbmQSJAogREVTS1RPUF9DSEFOTkVMX0tJTkRfVU5TUEVDSUZJRUQQABIhCh1ERVNLVE9QX0NIQU5ORUxfS0lORF9FTkRQT0lOVBABEiQKIERFU0tUT1BfQ0hBTk5FTF9LSU5EX1gxMV9ESVNQTEFZEAIqfAoMUHJvYmVPdXRjb21lEh0KGVBST0JFX09VVENPTUVfVU5TUEVDSUZJRUQQABIUChBQUk9CRV9PVVRDT01FX09LEAESGAoUUFJPQkVfT1VUQ09NRV9GQUlMRUQQAhIdChlQUk9CRV9PVVRDT01FX1VOU1VQUE9SVEVEEAMyxQYKC0hvc3RTZXJ2aWNlEloKE0xpc3RFbGlnaWJsZURhZW1vbnMSIC5ob3N0Lkxpc3RFbGlnaWJsZURhZW1vbnNSZXF1ZXN0GiEuaG9zdC5MaXN0RWxpZ2libGVEYWVtb25zUmVzcG9uc2USSwoOTGlzdEtub3duSG9zdHMSGy5ob3N0Lkxpc3RLbm93bkhvc3RzUmVxdWVzdBocLmhvc3QuTGlzdEtub3duSG9zdHNSZXNwb25zZRJLCg5HZXRIb3N0VG9vbGluZxIbLmhvc3QuR2V0SG9zdFRvb2xpbmdSZXF1ZXN0GhwuaG9zdC5HZXRIb3N0VG9vbGluZ1Jlc3BvbnNlEkwKEVN0cmVhbUhvc3RQcm9tcHRzEh4uaG9zdC5TdHJlYW1Ib3N0UHJvbXB0c1JlcXVlc3QaFS5ob3N0Lkhvc3RQcm9tcHRFdmVudDABElEKEEFuc3dlckhvc3RQcm9tcHQSHS5ob3N0LkFuc3dlckhvc3RQcm9tcHRSZXF1ZXN0Gh4uaG9zdC5BbnN3ZXJIb3N0UHJvbXB0UmVzcG9uc2USPwoKQWRkSG9zdEtleRIXLmhvc3QuQWRkSG9zdEtleVJlcXVlc3QaGC5ob3N0LkFkZEhvc3RLZXlSZXNwb25zZRJgChVMaXN0SG9zdEtleUNhbmRpZGF0ZXMSIi5ob3N0Lkxpc3RIb3N0S2V5Q2FuZGlkYXRlc1JlcXVlc3QaIy5ob3N0Lkxpc3RIb3N0S2V5Q2FuZGlkYXRlc1Jlc3BvbnNlElcKEkxpc3RTc2hDb25maWdIb3N0cxIfLmhvc3QuTGlzdFNzaENvbmZpZ0hvc3RzUmVxdWVzdBogLmhvc3QuTGlzdFNzaENvbmZpZ0hvc3RzUmVzcG9uc2USWgoTTGlzdENvZGVyV29ya3NwYWNlcxIgLmhvc3QuTGlzdENvZGVyV29ya3NwYWNlc1JlcXVlc3QaIS5ob3N0Lkxpc3RDb2RlcldvcmtzcGFjZXNSZXNwb25zZRJHCg9TdHJlYW1Ib3N0U3RhdHMSHC5ob3N0LlN0cmVhbUhvc3RTdGF0c1JlcXVlc3QaFC5ob3N0Lkhvc3RTdGF0c0V2ZW50MAFiBnByb3RvMw");
 
 /**
  * @generated from message host.AddHostKeyRequest
@@ -163,6 +163,50 @@ export const AnswerHostPromptResponseSchema: GenMessage<AnswerHostPromptResponse
   messageDesc(file_host, 3);
 
 /**
+ * One workspace of a Coder deployment, as its owner's account sees it.
+ *
+ * @generated from message host.CoderWorkspace
+ */
+export type CoderWorkspace = Message<"host.CoderWorkspace"> & {
+  /**
+   * The login name of the user the workspace belongs to.
+   *
+   * @generated from field: string owner = 1;
+   */
+  owner: string;
+
+  /**
+   * The workspace's name, unique among its owner's.
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * The deployment's own word for the state of the workspace's latest build, e.g. "running",
+   * "stopped", "starting", "failed". For an operator; `running` is the one to branch on.
+   *
+   * @generated from field: string status = 3;
+   */
+  status: string;
+
+  /**
+   * True when the workspace is running, which is the only state a command can be run on it in.
+   * Nothing here starts a workspace.
+   *
+   * @generated from field: bool running = 4;
+   */
+  running: boolean;
+};
+
+/**
+ * Describes the message host.CoderWorkspace.
+ * Use `create(CoderWorkspaceSchema)` to create a new message.
+ */
+export const CoderWorkspaceSchema: GenMessage<CoderWorkspace> = /*@__PURE__*/
+  messageDesc(file_host, 4);
+
+/**
  * @generated from message host.EligibleDaemonEntry
  */
 export type EligibleDaemonEntry = Message<"host.EligibleDaemonEntry"> & {
@@ -187,7 +231,7 @@ export type EligibleDaemonEntry = Message<"host.EligibleDaemonEntry"> & {
  * Use `create(EligibleDaemonEntrySchema)` to create a new message.
  */
 export const EligibleDaemonEntrySchema: GenMessage<EligibleDaemonEntry> = /*@__PURE__*/
-  messageDesc(file_host, 4);
+  messageDesc(file_host, 5);
 
 /**
  * @generated from message host.GetHostToolingRequest
@@ -219,7 +263,7 @@ export type GetHostToolingRequest = Message<"host.GetHostToolingRequest"> & {
  * Use `create(GetHostToolingRequestSchema)` to create a new message.
  */
 export const GetHostToolingRequestSchema: GenMessage<GetHostToolingRequest> = /*@__PURE__*/
-  messageDesc(file_host, 5);
+  messageDesc(file_host, 6);
 
 /**
  * @generated from message host.GetHostToolingResponse
@@ -252,6 +296,14 @@ export type GetHostToolingResponse = Message<"host.GetHostToolingResponse"> & {
    * @generated from field: repeated host.HostRemoteDesktop remote_desktop = 5;
    */
   remoteDesktop: HostRemoteDesktop[];
+
+  /**
+   * Whether the `coder` CLI — what a session on a Coder workspace is run through — is on this
+   * host's path.
+   *
+   * @generated from field: host.HostCoderCli coder_cli = 6;
+   */
+  coderCli?: HostCoderCli;
 };
 
 /**
@@ -259,7 +311,36 @@ export type GetHostToolingResponse = Message<"host.GetHostToolingResponse"> & {
  * Use `create(GetHostToolingResponseSchema)` to create a new message.
  */
 export const GetHostToolingResponseSchema: GenMessage<GetHostToolingResponse> = /*@__PURE__*/
-  messageDesc(file_host, 6);
+  messageDesc(file_host, 7);
+
+/**
+ * The state of the Coder CLI on this host.
+ *
+ * @generated from message host.HostCoderCli
+ */
+export type HostCoderCli = Message<"host.HostCoderCli"> & {
+  /**
+   * True when a `coder` executable is on the path the daemon's children are given.
+   *
+   * @generated from field: bool installed = 1;
+   */
+  installed: boolean;
+
+  /**
+   * The version that executable reports, e.g. "v2.16.0". Empty when it is not installed, or when
+   * what it printed named none.
+   *
+   * @generated from field: string version = 2;
+   */
+  version: string;
+};
+
+/**
+ * Describes the message host.HostCoderCli.
+ * Use `create(HostCoderCliSchema)` to create a new message.
+ */
+export const HostCoderCliSchema: GenMessage<HostCoderCli> = /*@__PURE__*/
+  messageDesc(file_host, 8);
 
 /**
  * @generated from message host.HostCpuStats
@@ -286,7 +367,7 @@ export type HostCpuStats = Message<"host.HostCpuStats"> & {
  * Use `create(HostCpuStatsSchema)` to create a new message.
  */
 export const HostCpuStatsSchema: GenMessage<HostCpuStats> = /*@__PURE__*/
-  messageDesc(file_host, 7);
+  messageDesc(file_host, 9);
 
 /**
  * @generated from message host.HostDiskStats
@@ -319,7 +400,7 @@ export type HostDiskStats = Message<"host.HostDiskStats"> & {
  * Use `create(HostDiskStatsSchema)` to create a new message.
  */
 export const HostDiskStatsSchema: GenMessage<HostDiskStats> = /*@__PURE__*/
-  messageDesc(file_host, 8);
+  messageDesc(file_host, 10);
 
 /**
  * The git identity commits made on this host would carry.
@@ -363,7 +444,7 @@ export type HostGitIdentity = Message<"host.HostGitIdentity"> & {
  * Use `create(HostGitIdentitySchema)` to create a new message.
  */
 export const HostGitIdentitySchema: GenMessage<HostGitIdentity> = /*@__PURE__*/
-  messageDesc(file_host, 9);
+  messageDesc(file_host, 11);
 
 /**
  * The state of the GitHub CLI on this host.
@@ -405,7 +486,7 @@ export type HostGithubCli = Message<"host.HostGithubCli"> & {
  * Use `create(HostGithubCliSchema)` to create a new message.
  */
 export const HostGithubCliSchema: GenMessage<HostGithubCli> = /*@__PURE__*/
-  messageDesc(file_host, 10);
+  messageDesc(file_host, 12);
 
 /**
  * One private key an operator could pick, described entirely from its PUBLIC half.
@@ -446,7 +527,7 @@ export type HostKeyCandidate = Message<"host.HostKeyCandidate"> & {
  * Use `create(HostKeyCandidateSchema)` to create a new message.
  */
 export const HostKeyCandidateSchema: GenMessage<HostKeyCandidate> = /*@__PURE__*/
-  messageDesc(file_host, 11);
+  messageDesc(file_host, 13);
 
 /**
  * 1/5/15-minute load averages, on platforms that have them. See HostStatsEvent.load: a host that
@@ -476,7 +557,7 @@ export type HostLoadStats = Message<"host.HostLoadStats"> & {
  * Use `create(HostLoadStatsSchema)` to create a new message.
  */
 export const HostLoadStatsSchema: GenMessage<HostLoadStats> = /*@__PURE__*/
-  messageDesc(file_host, 12);
+  messageDesc(file_host, 14);
 
 /**
  * Total and available physical memory, in bytes. Refreshed on the fast (CPU) tick.
@@ -500,7 +581,7 @@ export type HostMemoryStats = Message<"host.HostMemoryStats"> & {
  * Use `create(HostMemoryStatsSchema)` to create a new message.
  */
 export const HostMemoryStatsSchema: GenMessage<HostMemoryStats> = /*@__PURE__*/
-  messageDesc(file_host, 13);
+  messageDesc(file_host, 15);
 
 /**
  * A question the host is waiting on. Carries the key material the answer must be encrypted under, so
@@ -570,7 +651,7 @@ export type HostPromptEvent = Message<"host.HostPromptEvent"> & {
  * Use `create(HostPromptEventSchema)` to create a new message.
  */
 export const HostPromptEventSchema: GenMessage<HostPromptEvent> = /*@__PURE__*/
-  messageDesc(file_host, 14);
+  messageDesc(file_host, 16);
 
 /**
  * Whether a host's desktop can be reached, per protocol.
@@ -658,7 +739,7 @@ export type HostRemoteDesktop = Message<"host.HostRemoteDesktop"> & {
  * Use `create(HostRemoteDesktopSchema)` to create a new message.
  */
 export const HostRemoteDesktopSchema: GenMessage<HostRemoteDesktop> = /*@__PURE__*/
-  messageDesc(file_host, 15);
+  messageDesc(file_host, 17);
 
 /**
  * Whether a host has a reachable ssh-agent, and what it is holding.
@@ -695,7 +776,7 @@ export type HostSshAgent = Message<"host.HostSshAgent"> & {
  * Use `create(HostSshAgentSchema)` to create a new message.
  */
 export const HostSshAgentSchema: GenMessage<HostSshAgent> = /*@__PURE__*/
-  messageDesc(file_host, 16);
+  messageDesc(file_host, 18);
 
 /**
  * A single host-telemetry sample pushed by the daemon. Both blocks are always populated with the
@@ -739,7 +820,7 @@ export type HostStatsEvent = Message<"host.HostStatsEvent"> & {
  * Use `create(HostStatsEventSchema)` to create a new message.
  */
 export const HostStatsEventSchema: GenMessage<HostStatsEvent> = /*@__PURE__*/
-  messageDesc(file_host, 17);
+  messageDesc(file_host, 19);
 
 /**
  * One host the daemon has seen. Everything except `online` is read from the durable registry;
@@ -802,7 +883,74 @@ export type KnownHostEntry = Message<"host.KnownHostEntry"> & {
  * Use `create(KnownHostEntrySchema)` to create a new message.
  */
 export const KnownHostEntrySchema: GenMessage<KnownHostEntry> = /*@__PURE__*/
-  messageDesc(file_host, 18);
+  messageDesc(file_host, 20);
+
+/**
+ * @generated from message host.ListCoderWorkspacesRequest
+ */
+export type ListCoderWorkspacesRequest = Message<"host.ListCoderWorkspacesRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * The daemon whose vault holds the account. Empty means the daemon serving the call.
+   *
+   * @generated from field: string daemon_instance_id = 2;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * The Coder account whose workspaces are listed, as AccountsService lists it.
+   *
+   * @generated from field: string account_id = 3;
+   */
+  accountId: string;
+};
+
+/**
+ * Describes the message host.ListCoderWorkspacesRequest.
+ * Use `create(ListCoderWorkspacesRequestSchema)` to create a new message.
+ */
+export const ListCoderWorkspacesRequestSchema: GenMessage<ListCoderWorkspacesRequest> = /*@__PURE__*/
+  messageDesc(file_host, 21);
+
+/**
+ * @generated from message host.ListCoderWorkspacesResponse
+ */
+export type ListCoderWorkspacesResponse = Message<"host.ListCoderWorkspacesResponse"> & {
+  /**
+   * OK with an empty `workspaces` is "this account has no workspaces". FAILED is a listing that
+   * could not be made. The two must not be collapsed.
+   *
+   * @generated from field: host.ProbeOutcome outcome = 1;
+   */
+  outcome: ProbeOutcome;
+
+  /**
+   * Why the listing failed, when outcome is FAILED: the vault is locked, the deployment rejected
+   * the account's token, or the deployment could not be reached. For an operator, not for parsing.
+   * Never carries the token.
+   *
+   * @generated from field: string failure_reason = 2;
+   */
+  failureReason: string;
+
+  /**
+   * The account's own workspaces, in the deployment's order. Empty unless outcome is OK.
+   *
+   * @generated from field: repeated host.CoderWorkspace workspaces = 3;
+   */
+  workspaces: CoderWorkspace[];
+};
+
+/**
+ * Describes the message host.ListCoderWorkspacesResponse.
+ * Use `create(ListCoderWorkspacesResponseSchema)` to create a new message.
+ */
+export const ListCoderWorkspacesResponseSchema: GenMessage<ListCoderWorkspacesResponse> = /*@__PURE__*/
+  messageDesc(file_host, 22);
 
 /**
  * @generated from message host.ListEligibleDaemonsRequest
@@ -819,7 +967,7 @@ export type ListEligibleDaemonsRequest = Message<"host.ListEligibleDaemonsReques
  * Use `create(ListEligibleDaemonsRequestSchema)` to create a new message.
  */
 export const ListEligibleDaemonsRequestSchema: GenMessage<ListEligibleDaemonsRequest> = /*@__PURE__*/
-  messageDesc(file_host, 19);
+  messageDesc(file_host, 23);
 
 /**
  * @generated from message host.ListEligibleDaemonsResponse
@@ -836,7 +984,7 @@ export type ListEligibleDaemonsResponse = Message<"host.ListEligibleDaemonsRespo
  * Use `create(ListEligibleDaemonsResponseSchema)` to create a new message.
  */
 export const ListEligibleDaemonsResponseSchema: GenMessage<ListEligibleDaemonsResponse> = /*@__PURE__*/
-  messageDesc(file_host, 20);
+  messageDesc(file_host, 24);
 
 /**
  * @generated from message host.ListHostKeyCandidatesRequest
@@ -861,7 +1009,7 @@ export type ListHostKeyCandidatesRequest = Message<"host.ListHostKeyCandidatesRe
  * Use `create(ListHostKeyCandidatesRequestSchema)` to create a new message.
  */
 export const ListHostKeyCandidatesRequestSchema: GenMessage<ListHostKeyCandidatesRequest> = /*@__PURE__*/
-  messageDesc(file_host, 21);
+  messageDesc(file_host, 25);
 
 /**
  * @generated from message host.ListHostKeyCandidatesResponse
@@ -881,7 +1029,7 @@ export type ListHostKeyCandidatesResponse = Message<"host.ListHostKeyCandidatesR
  * Use `create(ListHostKeyCandidatesResponseSchema)` to create a new message.
  */
 export const ListHostKeyCandidatesResponseSchema: GenMessage<ListHostKeyCandidatesResponse> = /*@__PURE__*/
-  messageDesc(file_host, 22);
+  messageDesc(file_host, 26);
 
 /**
  * @generated from message host.ListSshConfigHostsRequest
@@ -906,7 +1054,7 @@ export type ListSshConfigHostsRequest = Message<"host.ListSshConfigHostsRequest"
  * Use `create(ListSshConfigHostsRequestSchema)` to create a new message.
  */
 export const ListSshConfigHostsRequestSchema: GenMessage<ListSshConfigHostsRequest> = /*@__PURE__*/
-  messageDesc(file_host, 23);
+  messageDesc(file_host, 27);
 
 /**
  * @generated from message host.SshConfigHost
@@ -925,7 +1073,7 @@ export type SshConfigHost = Message<"host.SshConfigHost"> & {
  * Use `create(SshConfigHostSchema)` to create a new message.
  */
 export const SshConfigHostSchema: GenMessage<SshConfigHost> = /*@__PURE__*/
-  messageDesc(file_host, 24);
+  messageDesc(file_host, 28);
 
 /**
  * @generated from message host.ListSshConfigHostsResponse
@@ -957,7 +1105,7 @@ export type ListSshConfigHostsResponse = Message<"host.ListSshConfigHostsRespons
  * Use `create(ListSshConfigHostsResponseSchema)` to create a new message.
  */
 export const ListSshConfigHostsResponseSchema: GenMessage<ListSshConfigHostsResponse> = /*@__PURE__*/
-  messageDesc(file_host, 25);
+  messageDesc(file_host, 29);
 
 /**
  * @generated from message host.ListKnownHostsRequest
@@ -974,7 +1122,7 @@ export type ListKnownHostsRequest = Message<"host.ListKnownHostsRequest"> & {
  * Use `create(ListKnownHostsRequestSchema)` to create a new message.
  */
 export const ListKnownHostsRequestSchema: GenMessage<ListKnownHostsRequest> = /*@__PURE__*/
-  messageDesc(file_host, 26);
+  messageDesc(file_host, 30);
 
 /**
  * @generated from message host.ListKnownHostsResponse
@@ -991,7 +1139,7 @@ export type ListKnownHostsResponse = Message<"host.ListKnownHostsResponse"> & {
  * Use `create(ListKnownHostsResponseSchema)` to create a new message.
  */
 export const ListKnownHostsResponseSchema: GenMessage<ListKnownHostsResponse> = /*@__PURE__*/
-  messageDesc(file_host, 27);
+  messageDesc(file_host, 31);
 
 /**
  * One key an ssh-agent is holding. The agent knows the public key blob and a free-text comment; it
@@ -1027,7 +1175,7 @@ export type SshAgentKey = Message<"host.SshAgentKey"> & {
  * Use `create(SshAgentKeySchema)` to create a new message.
  */
 export const SshAgentKeySchema: GenMessage<SshAgentKey> = /*@__PURE__*/
-  messageDesc(file_host, 28);
+  messageDesc(file_host, 32);
 
 /**
  * @generated from message host.StreamHostPromptsRequest
@@ -1057,7 +1205,7 @@ export type StreamHostPromptsRequest = Message<"host.StreamHostPromptsRequest"> 
  * Use `create(StreamHostPromptsRequestSchema)` to create a new message.
  */
 export const StreamHostPromptsRequestSchema: GenMessage<StreamHostPromptsRequest> = /*@__PURE__*/
-  messageDesc(file_host, 29);
+  messageDesc(file_host, 33);
 
 /**
  * @generated from message host.StreamHostStatsRequest
@@ -1074,7 +1222,7 @@ export type StreamHostStatsRequest = Message<"host.StreamHostStatsRequest"> & {
  * Use `create(StreamHostStatsRequestSchema)` to create a new message.
  */
 export const StreamHostStatsRequestSchema: GenMessage<StreamHostStatsRequest> = /*@__PURE__*/
-  messageDesc(file_host, 30);
+  messageDesc(file_host, 34);
 
 /**
  * Why an add did not put a key in the agent. Every arm is something an operator can act on.
@@ -1382,6 +1530,27 @@ export const HostService: GenService<{
     methodKind: "unary";
     input: typeof ListSshConfigHostsRequestSchema;
     output: typeof ListSshConfigHostsResponseSchema;
+  },
+  /**
+   * The workspaces one Coder account can reach on its deployment, with their status.
+   *
+   * Addressed by `daemon_instance_id` and honoured the way ListSshConfigHosts honours it: the
+   * account is in a vault on one daemon, and that daemon's host is where a workspace would be
+   * reached from.
+   *
+   * Asked of the deployment over HTTP, not through the `coder` CLI, so a host without the CLI
+   * still lists — GetHostTooling's `coder_cli` is what says whether a listed workspace can be used.
+   *
+   * Honest the way ListSshConfigHosts is: OK with no workspaces is an account that has none.
+   * FAILED is a listing that could not be made, and `failure_reason` says which of a locked vault,
+   * a token the deployment rejected and a deployment that could not be reached it was.
+   *
+   * @generated from rpc host.HostService.ListCoderWorkspaces
+   */
+  listCoderWorkspaces: {
+    methodKind: "unary";
+    input: typeof ListCoderWorkspacesRequestSchema;
+    output: typeof ListCoderWorkspacesResponseSchema;
   },
   /**
    * Host Stats Footer (see docs/ft/web/host-stats-footer.md) — host-level telemetry for the

@@ -102,6 +102,8 @@ fn a_host_committing_as(name: &str, email: &str, gh_login: &str) -> HostTooling 
         // Likewise for the block `#hosts-screen 7/8` added beside it: no protocol was probed,
         // so this host claims nothing either way about a desktop.
         remote_desktop: Vec::new(),
+        // And for the block `#remote-shell 4/7` added: no `coder` CLI on this host.
+        coder_cli: crate::host_tooling::CoderCliStatus::not_installed(),
     }
 }
 

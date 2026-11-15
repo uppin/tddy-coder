@@ -13263,8 +13263,10 @@ dependencies = [
  "sysinfo",
  "tddy-askpass",
  "tddy-core",
+ "tddy-credentials",
  "tddy-daemon-extensions",
  "tddy-daemon-kernel",
+ "tddy-remote-shell",
  "tddy-rpc",
  "tddy-service",
  "tddy-task",
@@ -13636,6 +13638,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "pretty_assertions",
+ "tddy-credentials",
  "tddy-remote-shell",
  "tempfile",
  "tokio",

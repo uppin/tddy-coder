@@ -10,7 +10,9 @@
 //!   ([`InteractiveCommand`]). The port opens no PTY of its own.
 //!
 //! [`SshShell`] is the OpenSSH transport, and the only place this workspace spawns `ssh` for a
-//! remote command. A failure says which of four things happened ([`RemoteShellError`]).
+//! remote command. [`CoderShell`] is the Coder transport: a workspace of a Coder deployment,
+//! reached through the `coder` CLI. A failure says which of four things happened
+//! ([`RemoteShellError`]).
 //!
 //! Behind the `test-support` feature: `InMemoryShell`, a scriptable double, and
 //! `contract::assert_behaves_like_a_remote_shell`, the behaviour every transport is held to.
@@ -21,6 +23,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
+mod coder;
 mod error;
 mod ssh;
 mod streamed;
@@ -30,6 +33,7 @@ pub mod contract;
 #[cfg(feature = "test-support")]
 mod in_memory;
 
+pub use coder::{CoderCredentials, CoderShell, CoderWorkspaceRef};
 pub use error::RemoteShellError;
 pub use ssh::SshShell;
 pub use streamed::{ShellOutput, ShellStdin, StreamedExec, StreamedExit};

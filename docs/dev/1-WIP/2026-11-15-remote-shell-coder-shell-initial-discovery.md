@@ -3,7 +3,7 @@
 **Changeset**: [2026-11-15-remote-shell-coder-shell.md](./2026-11-15-remote-shell-coder-shell.md)
 **Stack**: `#remote-shell 4/7` — `feature/remote-shell/coder-shell`
 **Date**: 2026-11-15
-**Passes**: 4
+**Passes**: 5
 
 > Explorations 1–4 are the whole-stack discovery, copied in full: every PR of this stack was planned from
 > the same passes. Node-specific follow-up is appended as later Exploration sections.
@@ -1487,3 +1487,30 @@ pub(crate) fn hook_entry_for_event(…)
   go over ssh); the argv adapter's entries join the remote command line.
 - Muse and Cursor adapters refuse params without a daemon socket (`SlotError::NoDaemonSocket`); a
   remote carrier needs that refusal to recognise the remote case.
+## Exploration 5: the `coder` CLI and API as documented — 2026-11-15
+
+**Agent**: parent WebFetch
+**Scope**: confirm the command shape and listing API `coder-shell` plans against
+
+### Sequence
+
+1. WebFetch `https://coder.com/docs/reference/cli/ssh` — usage and flags of `coder ssh`.
+2. WebFetch `https://coder.com/docs/reference/api/workspaces` — the listing endpoint and its auth header.
+
+### Findings
+
+- Usage: `coder ssh [flags] <workspace> [command]`; a command goes after `--`
+  (`coder ssh <workspace> -- ls -la`).
+- `-t, --tty` (`CODER_SSH_TTY`): interactive shells get a pseudo-terminal by default; **a command
+  session does not unless `-t` is set**. The interactive agent launch therefore passes `-t`.
+- `--disable-autostart` (`CODER_SSH_DISABLE_AUTOSTART`): by default `coder ssh` **starts a stopped
+  workspace**. This stack does not start workspaces, so every call passes `--disable-autostart`.
+- `-e, --env key=value,…` sets session environment variables. Not used: the agent's environment
+  travels inside the remote command (`env -i …`), the same as over SSH.
+- `--wait yes|no|auto`, `--no-wait`, `--stdio`, `-R/--remote-forward`, `-A`, `-G` exist; none is needed.
+- The page does not document the `owner/workspace.agent` argument form or the `CODER_URL` /
+  `CODER_SESSION_TOKEN` variables. Both are taken from general knowledge of the CLI and are
+  **unverified against a real deployment**.
+- `GET /api/v2/workspaces`, header `Coder-Session-Token`, `q` in `key:value` form with `owner` a
+  listed key. Response: `workspaces[] { name, owner_name, latest_build { status, resources[] {
+  agents[] { name, status } } } }`. The full status enums were not on the fetched part of the page.

@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — two crates plus a proto contract change, a spawned-process seam (`coder` CLI), an HTTP seam, a secret passed to a child process
-**Branch**: `feature/remote-shell/coder-shell`, base `feature/remote-shell/ssh-agent-launch` — `#remote-shell 4/7`
+**Branch**: `feature/remote-shell/coder-shell`, base `feature/remote-shell/ssh-agent-launch` — `#remote-shell 4/7` — PR #918 (https://github.com/uppin/tddy-coder/pull/918)
 
 ## Initial Discovery
 
@@ -87,6 +87,32 @@ The first push after the plan (commit 2) publishes, as the start of this same PR
 - The failing tests below.
 
 This PR goes on to implement all of it. It does not merge in that state.
+
+## Contract as published
+
+Published in the contract commit.
+
+- **`tddy_remote_shell::coder`** (`TODO(coder-shell)` bodies): `CoderCredentials { url: String, token: SecretString }`; `CoderWorkspaceRef { owner, name, agent }` (`new`, `on_agent`, `Display` as `<owner>/<name>[.<agent>]`); `CoderShell::{new, through}`, `TRANSPORT = "coder"`, `URL_VARIABLE = "CODER_URL"`, `SESSION_TOKEN_VARIABLE = "CODER_SESSION_TOKEN"`. `tddy-remote-shell` gains a dependency on the leaf crate `tddy-credentials` for `SecretString`.
+- **Proto**: `HostService.ListCoderWorkspaces`, `ListCoderWorkspacesRequest { session_token, daemon_instance_id, account_id }`, `ListCoderWorkspacesResponse { outcome, failure_reason, workspaces }`, `CoderWorkspace { owner, name, status, running }`, `HostCoderCli { installed, version }` as `GetHostToolingResponse.coder_cli = 6`. `host_pb.ts` regenerated. `HOST_METHODS` in `unbundle_service_split.rs` names the new method.
+- **`tddy_host_service::coder_workspaces`**: `trait CoderCredentialSource { fn credentials_for(&self, subject, account_id) }`, `CoderCredentialError::{VaultLocked, NoSuchAccount, Unavailable}`, `CoderWorkspace { owner, name, status }` with `is_running`, `trait CoderWorkspaceSource { async fn workspaces(&self, credentials) }`, `CoderWorkspaceListError::{Rejected, Unreachable, Unusable}`; `HostServiceImpl::{with_coder_credentials, with_coder_workspaces}`; the handler in `src/service/coder_workspaces.rs`. `host_tooling`: `CoderCliStatus`, `classify_coder_version`.
+- **`tddy_daemon::coder_workspace_source::HttpCoderWorkspaceSource::new(reqwest::Client)`**.
+
+Where the contract differs from the plan above:
+
+- **The HTTP workspace source and its test are in `tddy-daemon`**; `tddy-host-service` has no HTTP client. The host-service tests use a stand-in `CoderWorkspaceSource`.
+- **One `CoderCredentials`**, owned by `tddy-remote-shell` and re-exported by `tddy-host-service`. `tddy_accounts::CoderCredentials` is `coder-account`'s and is converted by the daemon's adapter.
+- **`running` is derived** from `status == "running"`.
+- **The daemon wiring is implementation**: the `CoderCredentialSource` adapter over `CoderAccounts::credentials_for`, the mapping of its errors to `VaultLocked` / `NoSuchAccount` / `Unavailable`, and the `with_coder_*` calls in `runtime/mount_host.rs`. The adapter needs its own test.
+
+Decision for the implementation — telling a stopped workspace from a failed command:
+
+- `coder ssh` exits 1 both when the workspace cannot be entered and when the remote command exits 1. OpenSSH's 255 has no equivalent. The contract suite requires a failed command to be `Ok` with its status (or `Exited`), and `a_stopped_workspace_is_unreachable_not_a_failed_command` requires `Unreachable`.
+- **`CoderShell` wraps the remote command with a start marker**: the wrapper prints a fixed marker line to stderr before running the command. A non-zero exit with no marker is `Unreachable`, carrying the CLI's stderr; with the marker it is the command's own result, and the marker is removed from the returned stderr. The test pins only the argv prefix `ssh --disable-autostart ada/devbox.main -- sh -c `, which leaves room for it.
+- The CLI's own error text is **not** matched: it is unverified and may change.
+
+Unverified against a real `coder` CLI or deployment, and pinned only by the stand-in: that arguments after `--` are joined for the workspace's shell; the `owner/name.agent` form; the two environment variables; `coder version`'s output; the `latest_build.status` values.
+
+Red state at the contract commit: `coder_shell_acceptance` 0 passed / 6 failed; `coder.rs` unit tests 1 / 3; `coder_workspaces_acceptance` 0 / 9 (six planned and three more: unknown account, no session, unknown host); `tddy-host-service` lib 182 / 3; `tddy-daemon` `coder_workspace_source` 0 / 6. Every failure is this PR's own stub. `unbundle_service_split` passes (28). Clippy and fmt are clean on the four packages. The other `tddy-host-service` integration binaries and the full `tddy-daemon` suite were not run locally.
 
 ## Green wave
 
@@ -229,10 +255,10 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved in advance on 2026-11-15: "proceed with your recommended option"; the titles are listed in the PR body)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

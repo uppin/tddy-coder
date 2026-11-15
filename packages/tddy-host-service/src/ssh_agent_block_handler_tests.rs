@@ -58,6 +58,8 @@ fn a_probed_host() -> HostTooling {
         // These tests are about the agent block; no protocol was probed, which is the neutral
         // value for the block `#hosts-screen 7/8` added beside it.
         remote_desktop: Vec::new(),
+        // Likewise for the block `#remote-shell 4/7` added: no `coder` CLI on this host.
+        coder_cli: crate::host_tooling::CoderCliStatus::not_installed(),
     }
 }
 

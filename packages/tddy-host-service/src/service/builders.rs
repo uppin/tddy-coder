@@ -87,6 +87,9 @@ impl HostServiceImpl {
             host_stats: Arc::new(SysinfoHostStats::new(
                 crate::host_stats::resolve_default_project_dir(&config),
             )),
+            // A daemon that hands in neither answers every Coder listing FAILED, saying so.
+            coder_credentials: Arc::new(crate::coder_workspaces::CoderNotWired),
+            coder_workspaces: Arc::new(crate::coder_workspaces::CoderNotWired),
             host_cpu_interval: HOST_CPU_INTERVAL,
             host_disk_interval: HOST_DISK_INTERVAL,
             user_resolver,
@@ -162,6 +165,26 @@ impl HostServiceImpl {
     #[must_use]
     pub fn with_host_stats(mut self, host_stats: Arc<dyn HostStats>) -> Self {
         self.host_stats = host_stats;
+        self
+    }
+
+    /// Read Coder accounts from the daemon's vaults.
+    #[must_use]
+    pub fn with_coder_credentials(
+        mut self,
+        credentials: Arc<dyn crate::coder_workspaces::CoderCredentialSource>,
+    ) -> Self {
+        self.coder_credentials = credentials;
+        self
+    }
+
+    /// Ask Coder deployments for their workspaces through `workspaces`.
+    #[must_use]
+    pub fn with_coder_workspaces(
+        mut self,
+        workspaces: Arc<dyn crate::coder_workspaces::CoderWorkspaceSource>,
+    ) -> Self {
+        self.coder_workspaces = workspaces;
         self
     }
 
