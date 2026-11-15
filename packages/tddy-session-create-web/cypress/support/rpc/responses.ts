@@ -348,7 +348,7 @@ export const DEFAULT_CLAUDE_CLI_MODELS: Array<{ id: string; label: string }> = [
   { id: "sonnet", label: "Claude Sonnet (latest)" },
   { id: "haiku", label: "Claude Haiku (latest)" },
   { id: "claude-opus-5", label: "Claude Opus 5 (pinned)" },
-  { id: "claude-fable-5-1", label: "Claude Fable 5.1 (pinned)" },
+  { id: "claude-fable-5-2", label: "Claude Fable 5.2 (pinned)" },
   { id: "claude-sonnet-5", label: "Claude Sonnet 5 (pinned)" },
   { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (pinned)" },
 ];

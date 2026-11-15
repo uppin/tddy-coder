@@ -617,7 +617,7 @@ response's `default_model`. The web holds no model list of its own; the catalog 
 - `sonnet` → "Claude Sonnet (latest)"
 - `haiku` → "Claude Haiku (latest)"
 - `claude-opus-5` → "Claude Opus 5 (pinned)"
-- `claude-fable-5-1` → "Claude Fable 5.1 (pinned)"
+- `claude-fable-5-2` → "Claude Fable 5.2 (pinned)"
 - `claude-sonnet-5` → "Claude Sonnet 5 (pinned)"
 - `claude-haiku-4-5-20251001` → "Claude Haiku 4.5 (pinned)"
 
