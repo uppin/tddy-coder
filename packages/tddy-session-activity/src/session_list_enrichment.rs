@@ -218,22 +218,12 @@ pub fn session_list_status_from_session_dir(
             "session_id {} not found in changeset sessions list; showing state/elapsed only",
             meta.session_id
         );
-        return Ok(SessionListStatusDisplay {
-            workflow_goal: "—".to_string(),
+        return Ok(state_only_row(
+            session_dir,
+            &changeset,
             workflow_state,
             elapsed_display,
-            agent: "—".to_string(),
-            model: "—".to_string(),
-            activity_status: String::new(),
-            orchestrator_session_id: changeset
-                .orchestrator_session_id
-                .clone()
-                .unwrap_or_default(),
-            recipe: changeset.recipe.clone().unwrap_or_default(),
-            stack_plan_json: stack_plan_json_for_changeset(session_dir, &changeset),
-            stack_id: changeset.stack_id.clone().unwrap_or_default(),
-            branch: changeset.branch.clone().unwrap_or_default(),
-        });
+        ));
     };
 
     Ok(workflow_row(
@@ -243,6 +233,30 @@ pub fn session_list_status_from_session_dir(
         workflow_state,
         elapsed_display,
     ))
+}
+
+fn state_only_row(
+    session_dir: &Path,
+    changeset: &Changeset,
+    workflow_state: String,
+    elapsed_display: String,
+) -> SessionListStatusDisplay {
+    SessionListStatusDisplay {
+        workflow_goal: "—".to_string(),
+        workflow_state,
+        elapsed_display,
+        agent: "—".to_string(),
+        model: "—".to_string(),
+        activity_status: String::new(),
+        orchestrator_session_id: changeset
+            .orchestrator_session_id
+            .clone()
+            .unwrap_or_default(),
+        recipe: changeset.recipe.clone().unwrap_or_default(),
+        stack_plan_json: stack_plan_json_for_changeset(session_dir, changeset),
+        stack_id: changeset.stack_id.clone().unwrap_or_default(),
+        branch: changeset.branch.clone().unwrap_or_default(),
+    }
 }
 
 fn workflow_row(
