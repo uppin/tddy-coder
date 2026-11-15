@@ -70,7 +70,9 @@ impl ProjectRpcHandler {
         let caller = self.project_caller(&req.session_token)?;
         let project_id = required_project_id(&req.project_id)?;
         if req.local_only {
-            return self.delete_here(&caller, &req, &project_id).map(Response::new);
+            return self
+                .delete_here(&caller, &req, &project_id)
+                .map(Response::new);
         }
 
         // Phase one: every reachable host's running sessions of the project refuse the delete.
@@ -88,9 +90,13 @@ impl ProjectRpcHandler {
             ..req.clone()
         };
         let checked = self
-            .fan_out_to_peers("DeleteProject", preflight.clone(), |room, peer, r| async move {
-                tddy_daemon_kernel::peer_calls::forward_delete_project(&room, &peer, &r).await
-            })
+            .fan_out_to_peers(
+                "DeleteProject",
+                preflight.clone(),
+                |room, peer, r| async move {
+                    tddy_daemon_kernel::peer_calls::forward_delete_project(&room, &peer, &r).await
+                },
+            )
             .await;
         blocking.extend(
             checked
@@ -120,9 +126,13 @@ impl ProjectRpcHandler {
             Err(status) => return Err(status),
         };
         let peers = self
-            .fan_out_to_peers("DeleteProject", stamped.clone(), |room, peer, r| async move {
-                tddy_daemon_kernel::peer_calls::forward_delete_project(&room, &peer, &r).await
-            })
+            .fan_out_to_peers(
+                "DeleteProject",
+                stamped.clone(),
+                |room, peer, r| async move {
+                    tddy_daemon_kernel::peer_calls::forward_delete_project(&room, &peer, &r).await
+                },
+            )
             .await;
         let unconfirmed_hosts = peers.unconfirmed();
         let answers = here
@@ -139,7 +149,10 @@ impl ProjectRpcHandler {
         );
         Ok(Response::new(DeleteProjectResponse {
             project: first.project.clone(),
-            applied_hosts: answers.iter().flat_map(|a| a.applied_hosts.clone()).collect(),
+            applied_hosts: answers
+                .iter()
+                .flat_map(|a| a.applied_hosts.clone())
+                .collect(),
             unconfirmed_hosts,
             stopped_session_ids: answers
                 .iter()
@@ -196,7 +209,9 @@ impl ProjectRpcHandler {
         let caller = self.project_caller(&req.session_token)?;
         let project_id = required_project_id(&req.project_id)?;
         if req.local_only {
-            return self.restore_here(&caller, &req, &project_id).map(Response::new);
+            return self
+                .restore_here(&caller, &req, &project_id)
+                .map(Response::new);
         }
         self.restore_everywhere(&caller, &req.session_token, &project_id)
             .await
@@ -223,9 +238,13 @@ impl ProjectRpcHandler {
             Err(status) => return Err(status),
         };
         let peers = self
-            .fan_out_to_peers("RestoreProject", stamped.clone(), |room, peer, r| async move {
-                tddy_daemon_kernel::peer_calls::forward_restore_project(&room, &peer, &r).await
-            })
+            .fan_out_to_peers(
+                "RestoreProject",
+                stamped.clone(),
+                |room, peer, r| async move {
+                    tddy_daemon_kernel::peer_calls::forward_restore_project(&room, &peer, &r).await
+                },
+            )
             .await;
         let unconfirmed_hosts = peers.unconfirmed();
         let answers = here
@@ -241,7 +260,10 @@ impl ProjectRpcHandler {
         );
         Ok(RestoreProjectResponse {
             project: first.project.clone(),
-            applied_hosts: answers.iter().flat_map(|a| a.applied_hosts.clone()).collect(),
+            applied_hosts: answers
+                .iter()
+                .flat_map(|a| a.applied_hosts.clone())
+                .collect(),
             unconfirmed_hosts,
         })
     }
@@ -253,9 +275,10 @@ impl ProjectRpcHandler {
         project_id: &str,
     ) -> Result<RestoreProjectResponse, Status> {
         let restored_at = non_empty_or(&req.restored_at, project_storage::lifecycle_timestamp_now);
-        let row = project_storage::mark_project_restored(&caller.projects_dir, project_id, &restored_at)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
+        let row =
+            project_storage::mark_project_restored(&caller.projects_dir, project_id, &restored_at)
+                .map_err(|e| Status::internal(e.to_string()))?
+                .ok_or_else(|| Status::not_found("project not found"))?;
         Ok(RestoreProjectResponse {
             project: Some(self.local_entry(caller, &row)),
             applied_hosts: vec![caller.local_id.clone()],

@@ -2,7 +2,7 @@
 //! and reconciled between hosts — and that nothing but the row changes.
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Deleting a project.
-//! Changeset: docs/dev/1-WIP/2026-11-15-project-update-and-soft-delete.md
+//! Changeset: docs/dev/changesets/2026-11-15-project-update-and-soft-delete.md
 
 use pretty_assertions::assert_eq;
 use tddy_projects::project_storage::{self, ProjectData, ProjectLifecycle};
@@ -122,10 +122,14 @@ fn deleting_an_unknown_project_reports_no_row_and_writes_nothing() {
     let dir = a_registry_with_alpha("");
     let before = std::fs::read_to_string(dir.path().join("projects.yaml")).unwrap();
 
-    let outcome = project_storage::mark_project_deleted(dir.path(), UNKNOWN, EARLY, "octocat").unwrap();
+    let outcome =
+        project_storage::mark_project_deleted(dir.path(), UNKNOWN, EARLY, "octocat").unwrap();
 
     assert_eq!(outcome, None);
-    assert_eq!(std::fs::read_to_string(dir.path().join("projects.yaml")).unwrap(), before);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("projects.yaml")).unwrap(),
+        before
+    );
 }
 
 #[test]
@@ -142,7 +146,10 @@ fn restoring_clears_the_tombstone_and_records_when() {
     // Then it is live again, and the restore is recorded
     assert!(!row.is_deleted());
     assert_eq!(stored_row(dir.path()).lifecycle, restored(LATER));
-    assert_eq!(stored_row(dir.path()).home_session_id.as_deref(), Some("main-1"));
+    assert_eq!(
+        stored_row(dir.path()).home_session_id.as_deref(),
+        Some("main-1")
+    );
 }
 
 #[test]
@@ -155,7 +162,10 @@ fn restoring_a_live_project_changes_nothing() {
         .expect("the row exists");
 
     assert!(!row.is_deleted());
-    assert_eq!(std::fs::read_to_string(dir.path().join("projects.yaml")).unwrap(), before);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("projects.yaml")).unwrap(),
+        before
+    );
 }
 
 #[test]
@@ -183,12 +193,18 @@ fn renaming_changes_only_the_name() {
 #[test]
 fn renaming_an_unknown_project_reports_no_row() {
     let dir = a_registry_with_alpha("");
-    assert_eq!(project_storage::rename_project(dir.path(), UNKNOWN, "x").unwrap(), None);
+    assert_eq!(
+        project_storage::rename_project(dir.path(), UNKNOWN, "x").unwrap(),
+        None
+    );
 }
 
 #[test]
 fn a_project_name_follows_the_create_rules() {
-    assert_eq!(project_storage::validate_project_name("  Alpha App "), Ok("Alpha App"));
+    assert_eq!(
+        project_storage::validate_project_name("  Alpha App "),
+        Ok("Alpha App")
+    );
     assert!(project_storage::validate_project_name("   ").is_err());
     assert!(project_storage::validate_project_name("a/b").is_err());
     assert!(project_storage::validate_project_name("..").is_err());
@@ -202,7 +218,10 @@ fn a_tombstone_on_any_host_wins_over_rows_that_never_saw_an_event() {
     let rows = [ProjectLifecycle::default(), deleted(EARLY, "octocat")];
 
     // Then the logical project is deleted
-    assert_eq!(ProjectLifecycle::newest(rows.iter()), deleted(EARLY, "octocat"));
+    assert_eq!(
+        ProjectLifecycle::newest(rows.iter()),
+        deleted(EARLY, "octocat")
+    );
 }
 
 #[test]
@@ -217,7 +236,10 @@ fn a_restore_newer_than_a_stale_tombstone_wins() {
 fn a_delete_newer_than_an_earlier_restore_wins() {
     let rows = [restored(LATER), deleted(LATEST, "octocat")];
 
-    assert_eq!(ProjectLifecycle::newest(rows.iter()), deleted(LATEST, "octocat"));
+    assert_eq!(
+        ProjectLifecycle::newest(rows.iter()),
+        deleted(LATEST, "octocat")
+    );
 }
 
 #[test]
@@ -235,11 +257,17 @@ fn a_host_adopts_a_newer_tombstone_and_ignores_an_older_one() {
     project_storage::mark_project_restored(dir.path(), ALPHA, LATER).unwrap();
 
     // When an older tombstone from another host is offered, nothing changes
-    assert!(!project_storage::adopt_project_lifecycle(dir.path(), ALPHA, &deleted(EARLY, "old")).unwrap());
+    assert!(
+        !project_storage::adopt_project_lifecycle(dir.path(), ALPHA, &deleted(EARLY, "old"))
+            .unwrap()
+    );
     assert_eq!(stored_row(dir.path()).lifecycle, restored(LATER));
 
     // When a newer one is offered, it is adopted as is
-    assert!(project_storage::adopt_project_lifecycle(dir.path(), ALPHA, &deleted(LATEST, "new")).unwrap());
+    assert!(
+        project_storage::adopt_project_lifecycle(dir.path(), ALPHA, &deleted(LATEST, "new"))
+            .unwrap()
+    );
     assert_eq!(stored_row(dir.path()).lifecycle, deleted(LATEST, "new"));
 }
 
@@ -256,9 +284,12 @@ fn a_deleted_project_is_found_by_its_git_url_or_its_checkout() {
         "/elsewhere",
     )
     .unwrap();
-    let by_path =
-        project_storage::find_deleted_project_matching(dir.path(), "https://x/y.git", "/repos/alpha")
-            .unwrap();
+    let by_path = project_storage::find_deleted_project_matching(
+        dir.path(),
+        "https://x/y.git",
+        "/repos/alpha",
+    )
+    .unwrap();
     assert_eq!(by_url.map(|p| p.project_id), Some(ALPHA.to_string()));
     assert_eq!(by_path.map(|p| p.project_id), Some(ALPHA.to_string()));
 }

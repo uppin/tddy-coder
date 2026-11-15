@@ -77,7 +77,9 @@ pub(super) fn spawn_project_clone(
                 let rows: Vec<_> = peer_entries.iter().filter(|p| p.project_id == id).collect();
                 let lifecycles: Vec<_> = rows
                     .iter()
-                    .map(|p| ProjectLifecycle::from_wire(&p.deleted_at, &p.deleted_by, &p.restored_at))
+                    .map(|p| {
+                        ProjectLifecycle::from_wire(&p.deleted_at, &p.deleted_by, &p.restored_at)
+                    })
                     .collect();
                 if ProjectLifecycle::newest(lifecycles.iter()).is_deleted() {
                     return None;

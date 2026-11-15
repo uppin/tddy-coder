@@ -135,8 +135,8 @@ The worktree service's read paths, such as listing worktrees, are deliberately l
 
 ### Modules
 
-- `tddy-projects`: `project_lifecycle.rs` holds the tombstone type and every lifecycle and rename
-  write, re-exported from `project_storage`.
+- `tddy-projects`: `project_storage.rs` holds the tombstone type (`ProjectLifecycle`) and every
+  lifecycle and rename write.
 - `tddy-daemon-rpc/src/project/`:
   - `fan_out.rs`: the peer fan-out.
   - `update.rs`, `soft_delete.rs`: the handlers.
@@ -149,20 +149,30 @@ The worktree service's read paths, such as listing worktrees, are deliberately l
 - No `tddy-tools` tool to update, delete or restore a project (per the brief).
 - No hard delete, anywhere.
 
-## Feature-doc changes (applied at wrap)
+## Docs
 
-- **docs/ft/daemon/project-concept.md**
-  - Data model: add `deleted_at`, `deleted_by` and `restored_at`.
-  - New section "Renaming, deleting and restoring a project". It covers the fan-out and
-    `unconfirmed_hosts`, retention, the running-session refusal, stopping main, the reconciliation
-    rule, auto-restore on create and add, and the refusal of new work.
-- **docs/ft/web/projects-screen-multi-host.md**
-  - New section "Deleted projects": Show deleted projects and Restore.
-  - State that rename and delete live in the drawer's project settings pane.
-- **docs/ft/web/session-drawer.md** § Project settings pane: the name field and Delete project.
-  Drawer: deleted projects are hidden together with their sessions.
-- **packages/tddy-projects/docs/project-service.md** and **packages/tddy-daemon-rpc/docs/architecture.md**:
-  the three RPCs, the fan-out module and the reconciliation step in `ListProjects`.
+- [docs/ft/daemon/project-concept.md](../../ft/daemon/project-concept.md):
+  - § Data model;
+  - § Create project behavior;
+  - § Renaming, deleting and restoring a project;
+  - § API.
+- [docs/ft/web/projects-screen-multi-host.md](../../ft/web/projects-screen-multi-host.md):
+  § Deleted projects and § Cross-host visibility.
+- [docs/ft/web/session-drawer.md](../../ft/web/session-drawer.md): § Project settings pane.
+- [packages/tddy-projects/docs/project-service.md](../../../packages/tddy-projects/docs/project-service.md):
+  § The surface and § Soft delete.
+- [packages/tddy-daemon-rpc/docs/architecture.md](../../../packages/tddy-daemon-rpc/docs/architecture.md):
+  § Module layout.
+- Backlog: [2026-11-15-project-rename-reaches-offline-hosts-only-on-retry](../todo/2026-11-15-project-rename-reaches-offline-hosts-only-on-retry.md)
+  opened.
+- [2026-10-14-project-account-assignment-reaches-one-host](../todo/2026-10-14-project-account-assignment-reaches-one-host.md)
+  stays open. Default branch and accounts are still single-host.
+
+## Code issues
+
+`complexity-project-coordinate-handlers-add-project-to-host-at-project-coordinate` went from
+120 lines to **126**. The restore branch is a single call into `recreate.rs`, and the issue stays
+open.
 
 ## Tests (red first)
 

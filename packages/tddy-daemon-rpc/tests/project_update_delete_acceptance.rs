@@ -8,7 +8,7 @@
 //! never answers. A host "goes offline" by being left out of the transport.
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Renaming, deleting and restoring a project.
-//! Changeset: docs/dev/1-WIP/2026-11-15-project-update-and-soft-delete.md
+//! Changeset: docs/dev/changesets/2026-11-15-project-update-and-soft-delete.md
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -309,8 +309,12 @@ impl Host {
             .spawn()
             .expect("spawn a stand-in main process");
         self.a_session(session_id, Some(child.id()), Some("project-home"));
-        project_storage::set_project_home_session(&self.projects_dir(), THE_PROJECT, Some(session_id))
-            .unwrap();
+        project_storage::set_project_home_session(
+            &self.projects_dir(),
+            THE_PROJECT,
+            Some(session_id),
+        )
+        .unwrap();
         child
     }
 
@@ -416,7 +420,11 @@ async fn renaming_a_project_renames_it_on_every_host_owning_it() {
     let world = two_hosts_owning_the_project();
 
     // When host-a renames it
-    let renamed = world.a.rename("  The Project ").await.expect("the rename succeeds");
+    let renamed = world
+        .a
+        .rename("  The Project ")
+        .await
+        .expect("the rename succeeds");
 
     // Then both hosts' rows carry the new name, trimmed
     assert_eq!(renamed.project.expect("a row").name, "The Project");
@@ -424,7 +432,10 @@ async fn renaming_a_project_renames_it_on_every_host_owning_it() {
     assert_eq!(world.b.stored_row().name, "The Project");
     // And the answer says which hosts applied it and which could not be reached
     assert_eq!(sorted(renamed.applied_hosts), vec![HOST_A, HOST_B]);
-    assert_eq!(unconfirmed_ids(&renamed.unconfirmed_hosts), vec![SILENT_HOST]);
+    assert_eq!(
+        unconfirmed_ids(&renamed.unconfirmed_hosts),
+        vec![SILENT_HOST]
+    );
 }
 
 #[tokio::test]
@@ -498,7 +509,11 @@ async fn deleting_a_project_tombstones_it_on_every_host_and_keeps_its_data() {
     world.b.a_session("stopped-1", None, None);
 
     // When host-a deletes it
-    let deleted = world.a.delete(THE_PROJECT).await.expect("the delete succeeds");
+    let deleted = world
+        .a
+        .delete(THE_PROJECT)
+        .await
+        .expect("the delete succeeds");
 
     // Then both rows are tombstoned by the caller
     for host in [&world.a, &world.b] {
@@ -512,7 +527,10 @@ async fn deleting_a_project_tombstones_it_on_every_host_and_keeps_its_data() {
         world.b.stored_row().lifecycle.deleted_at
     );
     assert_eq!(sorted(deleted.applied_hosts), vec![HOST_A, HOST_B]);
-    assert_eq!(unconfirmed_ids(&deleted.unconfirmed_hosts), vec![SILENT_HOST]);
+    assert_eq!(
+        unconfirmed_ids(&deleted.unconfirmed_hosts),
+        vec![SILENT_HOST]
+    );
     // And nothing is removed from disk: checkout, stack record, session directory
     for host in [&world.a, &world.b] {
         assert!(host.checkout.path().join("README.md").is_file());
@@ -523,7 +541,11 @@ async fn deleting_a_project_tombstones_it_on_every_host_and_keeps_its_data() {
             .join("stack-1.yaml")
             .is_file());
     }
-    assert!(world.b.session_dir("stopped-1").join(".session.yaml").is_file());
+    assert!(world
+        .b
+        .session_dir("stopped-1")
+        .join(".session.yaml")
+        .is_file());
 }
 
 #[tokio::test]
@@ -538,7 +560,12 @@ async fn a_deleted_project_is_listed_only_when_deleted_projects_are_asked_for() 
     // And asking for deleted projects lists every host's row with its tombstone
     let with_deleted = world.a.listed(true).await;
     assert_eq!(
-        sorted(with_deleted.iter().map(|p| p.daemon_instance_id.clone()).collect()),
+        sorted(
+            with_deleted
+                .iter()
+                .map(|p| p.daemon_instance_id.clone())
+                .collect()
+        ),
         vec![HOST_A, HOST_B]
     );
     for row in &with_deleted {
@@ -553,7 +580,11 @@ async fn deleting_twice_keeps_the_first_tombstone() {
     world.a.delete(THE_PROJECT).await.unwrap();
     let first = world.b.stored_row().lifecycle;
 
-    world.b.delete(THE_PROJECT).await.expect("a repeated delete is a no-op");
+    world
+        .b
+        .delete(THE_PROJECT)
+        .await
+        .expect("a repeated delete is a no-op");
 
     assert_eq!(world.b.stored_row().lifecycle, first);
 }
@@ -592,14 +623,25 @@ async fn deleting_stops_the_project_home_session_and_keeps_its_record() {
     let mut main = world.a.a_running_main("main-1");
 
     // When the project is deleted
-    let deleted = world.a.delete(THE_PROJECT).await.expect("main does not block a delete");
+    let deleted = world
+        .a
+        .delete(THE_PROJECT)
+        .await
+        .expect("main does not block a delete");
 
     // Then main's process is stopped, and the answer names it
     assert!(wait_for_exit(&mut main), "main's process was stopped");
     assert_eq!(deleted.stopped_session_ids, vec!["main-1".to_string()]);
     // And its session record and the project's pointer to it are kept for a restore
-    assert!(world.a.session_dir("main-1").join(".session.yaml").is_file());
-    assert_eq!(world.a.stored_row().home_session_id.as_deref(), Some("main-1"));
+    assert!(world
+        .a
+        .session_dir("main-1")
+        .join(".session.yaml")
+        .is_file());
+    assert_eq!(
+        world.a.stored_row().home_session_id.as_deref(),
+        Some("main-1")
+    );
 }
 
 // ── a host that missed the change ────────────────────────────────────────────────────────────
@@ -609,9 +651,16 @@ async fn a_host_that_missed_the_delete_does_not_bring_the_project_back() {
     // Given host-b is offline while host-a deletes the project
     let world = two_hosts_owning_the_project();
     world.take_offline(&world.b);
-    let deleted = world.a.delete(THE_PROJECT).await.expect("the delete succeeds");
+    let deleted = world
+        .a
+        .delete(THE_PROJECT)
+        .await
+        .expect("the delete succeeds");
     assert_eq!(deleted.applied_hosts, vec![HOST_A.to_string()]);
-    assert_eq!(unconfirmed_ids(&deleted.unconfirmed_hosts), vec![HOST_B, SILENT_HOST]);
+    assert_eq!(
+        unconfirmed_ids(&deleted.unconfirmed_hosts),
+        vec![HOST_B, SILENT_HOST]
+    );
     assert!(!world.b.stored_row().is_deleted());
 
     // When host-b comes back and re-advertises its live row
@@ -621,7 +670,10 @@ async fn a_host_that_missed_the_delete_does_not_bring_the_project_back() {
     assert_eq!(world.a.listed(false).await, vec![]);
     assert_eq!(world.b.listed(false).await, vec![]);
     // And host-b has adopted the tombstone as host-a stamped it
-    assert_eq!(world.b.stored_row().lifecycle, world.a.stored_row().lifecycle);
+    assert_eq!(
+        world.b.stored_row().lifecycle,
+        world.a.stored_row().lifecycle
+    );
 }
 
 #[tokio::test]
@@ -663,7 +715,11 @@ async fn restoring_a_live_project_changes_nothing() {
     let world = two_hosts_owning_the_project();
     let before = world.a.stored_row();
 
-    world.a.restore().await.expect("a restore of a live project is a no-op");
+    world
+        .a
+        .restore()
+        .await
+        .expect("a restore of a live project is a no-op");
 
     assert_eq!(world.a.stored_row(), before);
 }
@@ -696,7 +752,9 @@ async fn creating_a_project_for_a_deleted_projects_repository_restores_it() {
     assert!(!world.a.stored_row().is_deleted());
     assert!(!world.b.stored_row().is_deleted());
     assert_eq!(
-        project_storage::read_projects(&world.a.projects_dir()).unwrap().len(),
+        project_storage::read_projects(&world.a.projects_dir())
+            .unwrap()
+            .len(),
         1
     );
 }
@@ -748,7 +806,12 @@ async fn a_deleted_project_starts_no_session() {
         .await
         .unwrap_err();
 
-    assert_eq!(refusal.code, Code::FailedPrecondition, "{}", refusal.message);
+    assert_eq!(
+        refusal.code,
+        Code::FailedPrecondition,
+        "{}",
+        refusal.message
+    );
     assert!(refusal.message.contains("deleted"), "{}", refusal.message);
 }
 
@@ -768,7 +831,12 @@ async fn a_deleted_project_sets_up_no_main() {
         .await
         .unwrap_err();
 
-    assert_eq!(refusal.code, Code::FailedPrecondition, "{}", refusal.message);
+    assert_eq!(
+        refusal.code,
+        Code::FailedPrecondition,
+        "{}",
+        refusal.message
+    );
     assert!(refusal.message.contains("deleted"), "{}", refusal.message);
 }
 
@@ -789,9 +857,18 @@ async fn a_session_of_a_deleted_project_is_not_resumed() {
         .await
         .unwrap_err();
 
-    assert_eq!(refusal.code, Code::FailedPrecondition, "{}", refusal.message);
+    assert_eq!(
+        refusal.code,
+        Code::FailedPrecondition,
+        "{}",
+        refusal.message
+    );
     assert!(refusal.message.contains("deleted"), "{}", refusal.message);
-    assert!(world.a.session_dir("stopped-1").join(".session.yaml").is_file());
+    assert!(world
+        .a
+        .session_dir("stopped-1")
+        .join(".session.yaml")
+        .is_file());
 }
 
 #[tokio::test]
@@ -848,6 +925,11 @@ async fn a_deleted_projects_main_reaches_no_project_home_tool() {
         .unwrap_err();
 
     // Then the tool is refused because the project is deleted
-    assert_eq!(refusal.code, Code::FailedPrecondition, "{}", refusal.message);
+    assert_eq!(
+        refusal.code,
+        Code::FailedPrecondition,
+        "{}",
+        refusal.message
+    );
     assert!(refusal.message.contains("deleted"), "{}", refusal.message);
 }

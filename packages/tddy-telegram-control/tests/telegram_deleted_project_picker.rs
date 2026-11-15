@@ -2,7 +2,7 @@
 //! hides it from every project picker, and Telegram's is one.
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Renaming, deleting and restoring a project.
-//! Changeset: docs/dev/1-WIP/2026-11-15-project-update-and-soft-delete.md
+//! Changeset: docs/dev/changesets/2026-11-15-project-update-and-soft-delete.md
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

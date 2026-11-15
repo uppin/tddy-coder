@@ -7,7 +7,7 @@
  * `ListProjects` answers the way the daemon does: deleted rows only when asked for.
  *
  * Feature doc: docs/ft/web/projects-screen-multi-host.md § Deleted projects.
- * Changeset: docs/dev/1-WIP/2026-11-15-project-update-and-soft-delete.md
+ * Changeset: docs/dev/changesets/2026-11-15-project-update-and-soft-delete.md
  */
 
 import React from "react";

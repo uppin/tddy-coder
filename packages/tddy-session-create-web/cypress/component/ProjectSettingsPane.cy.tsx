@@ -9,7 +9,7 @@
  * serves the orchestrator agent the composer's specs use, and records the save.
  *
  * PRD: docs/ft/web/1-WIP/PRD-2026-11-10-project-settings-pane.md
- * Changeset: docs/dev/1-WIP/2026-11-15-project-update-and-soft-delete.md
+ * Changeset: docs/dev/changesets/2026-11-15-project-update-and-soft-delete.md
  */
 
 import React from "react";

@@ -99,6 +99,17 @@ The link is `project-main-session-link-<id>`. Main is configured in the drawer's
 acts on the drawer's selected host: when that is not the card's primary host, the link reflects one
 host and the pane acts on another.
 
+## Deleted projects
+
+A soft-deleted project ([Project concept § Renaming, deleting and restoring a
+project](../daemon/project-concept.md#renaming-deleting-and-restoring-a-project)) is left out of the
+list. **Show deleted projects** (`projects-show-deleted`) lists them too, each as a deleted card
+(`project-deleted-<projectId>`): its name, who deleted it and when, and that its checkout, worktrees,
+sessions and stacks are kept on disk. **Restore** (`project-restore-<projectId>`) sends
+`RestoreProject` and refreshes the list; a refusal is shown on the card
+(`project-restore-error-<projectId>`). A project is renamed and deleted from its
+[settings pane](session-drawer.md#project-settings-pane) in the sessions drawer.
+
 ## Adding a project to a host
 
 **`AddProjectToHost`** makes an existing project available on a target host while
@@ -134,7 +145,9 @@ LiveKit fan-out for **`EligibleDaemonSource::peer_project_entries`**: it calls e
 discovered peer's **`ListProjects`** (with **`local_only = true`** to prevent recursive
 fan-out) and tags returned rows with the peer's `daemon_instance_id`. A new
 **`local_only`** flag on **`ListProjectsRequest`** returns only the local registry's rows
-and skips the merge.
+and skips the merge. A peer is asked with **`include_deleted = true`**, so a tombstone on any host
+reaches the merge, which lists each project with its newest delete or restore event and hides it
+when that event is a delete.
 
 ## Auto-provisioning on session start
 

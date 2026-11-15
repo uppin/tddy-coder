@@ -37,9 +37,13 @@ impl ProjectRpcHandler {
             ..req
         };
         let peers = self
-            .fan_out_to_peers("UpdateProject", forwarded.clone(), |room, peer, r| async move {
-                tddy_daemon_kernel::peer_calls::forward_update_project(&room, &peer, &r).await
-            })
+            .fan_out_to_peers(
+                "UpdateProject",
+                forwarded.clone(),
+                |room, peer, r| async move {
+                    tddy_daemon_kernel::peer_calls::forward_update_project(&room, &peer, &r).await
+                },
+            )
             .await;
         let unconfirmed_hosts = peers.unconfirmed();
         let answers = here
@@ -55,7 +59,10 @@ impl ProjectRpcHandler {
         );
         Ok(Response::new(UpdateProjectResponse {
             project: first.project.clone(),
-            applied_hosts: answers.iter().flat_map(|a| a.applied_hosts.clone()).collect(),
+            applied_hosts: answers
+                .iter()
+                .flat_map(|a| a.applied_hosts.clone())
+                .collect(),
             unconfirmed_hosts,
         }))
     }

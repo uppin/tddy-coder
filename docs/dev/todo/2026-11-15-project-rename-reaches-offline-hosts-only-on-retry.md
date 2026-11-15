@@ -1,7 +1,7 @@
 # 2026-11-15 — A project rename reaches a host that was offline only when the rename is repeated
 
 **Category:** Deferred scope
-**Source:** [2026-11-15-project-update-and-soft-delete.md](../1-WIP/2026-11-15-project-update-and-soft-delete.md)
+**Source:** [2026-11-15-project-update-and-soft-delete.md](../changesets/2026-11-15-project-update-and-soft-delete.md)
 
 ## What is wrong
 

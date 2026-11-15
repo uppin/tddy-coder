@@ -10,6 +10,7 @@ mod lifecycle_listing;
 mod orchestrator_defaults;
 mod ports;
 mod project_sessions;
+mod recreate;
 mod soft_delete;
 mod update;
 

@@ -101,7 +101,11 @@ use crate::{CatalogRpcHandler, ProjectRpcHandler};
 
 impl ExecToolRpcHandler {
     /// Refuse a project-home tool whose caller's project is soft-deleted on this host.
-    fn refuse_a_deleted_project(&self, session_token: &str, project_id: &str) -> Result<(), Status> {
+    fn refuse_a_deleted_project(
+        &self,
+        session_token: &str,
+        project_id: &str,
+    ) -> Result<(), Status> {
         let os_user = self.os_user_of(session_token)?;
         let projects_dir = projects_path_for_user(&os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;

@@ -7,13 +7,13 @@ use prost::Message;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolRequest};
 use tddy_service::proto::project::{
-    DeleteProjectRequest, DeleteProjectResponse, RestoreProjectRequest, RestoreProjectResponse,
-    UpdateProjectRequest, UpdateProjectResponse,
-};
-use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, SetProjectAccountsRequest,
     SetProjectAccountsResponse, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
     SetProjectOrchestratorDefaultsRequest, SetProjectOrchestratorDefaultsResponse,
+};
+use tddy_service::proto::project::{
+    DeleteProjectRequest, DeleteProjectResponse, RestoreProjectRequest, RestoreProjectResponse,
+    UpdateProjectRequest, UpdateProjectResponse,
 };
 use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
 use tddy_service::proto::session::{
@@ -284,7 +284,14 @@ pub async fn forward_update_project(
     peer_instance_id: &str,
     request: &UpdateProjectRequest,
 ) -> Result<UpdateProjectResponse, Status> {
-    forward_unary(room, peer_instance_id, "project.ProjectService", "UpdateProject", request).await
+    forward_unary(
+        room,
+        peer_instance_id,
+        "project.ProjectService",
+        "UpdateProject",
+        request,
+    )
+    .await
 }
 
 /// Forward **DeleteProject** to another daemon in the common room — one leg of the logical-project
@@ -296,7 +303,14 @@ pub async fn forward_delete_project(
     peer_instance_id: &str,
     request: &DeleteProjectRequest,
 ) -> Result<DeleteProjectResponse, Status> {
-    forward_unary(room, peer_instance_id, "project.ProjectService", "DeleteProject", request).await
+    forward_unary(
+        room,
+        peer_instance_id,
+        "project.ProjectService",
+        "DeleteProject",
+        request,
+    )
+    .await
 }
 
 /// Forward **RestoreProject** to another daemon in the common room — one leg of the logical-project
@@ -308,7 +322,14 @@ pub async fn forward_restore_project(
     peer_instance_id: &str,
     request: &RestoreProjectRequest,
 ) -> Result<RestoreProjectResponse, Status> {
-    forward_unary(room, peer_instance_id, "project.ProjectService", "RestoreProject", request).await
+    forward_unary(
+        room,
+        peer_instance_id,
+        "project.ProjectService",
+        "RestoreProject",
+        request,
+    )
+    .await
 }
 
 /// Forward **UploadStagedAttachmentChunk** to another daemon in the common room.

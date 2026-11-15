@@ -8,6 +8,7 @@ use super::clone_destination::project_path_under_home_from_user_relative;
 use super::coordinate_route::CoordinateRoute;
 use super::entries::{self, merge_listed_projects_with_peers};
 use super::lifecycle_listing;
+use super::recreate::{checkout_of, deleted_project_at};
 use super::ProjectRpcHandler;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::user_paths::{
@@ -166,7 +167,9 @@ impl ProjectRpcHandler {
         // second row over the checkout it kept: matched by its git URL first, which needs no clone
         // destination, then by the destination it would be cloned to.
         if let Some(deleted) = deleted_project_at(&projects_dir, git_url, "")? {
-            return self.restore_instead_of_creating(&req.session_token, git_url, deleted).await;
+            return self
+                .restore_instead_of_creating(&req.session_token, git_url, deleted)
+                .await;
         }
         let user_rel = req.user_relative_path.trim();
         let destination = if !user_rel.is_empty() {
@@ -177,8 +180,12 @@ impl ProjectRpcHandler {
                 .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
             base.join(name)
         };
-        if let Some(deleted) = deleted_project_at(&projects_dir, git_url, &checkout_of(&destination))? {
-            return self.restore_instead_of_creating(&req.session_token, git_url, deleted).await;
+        if let Some(deleted) =
+            deleted_project_at(&projects_dir, git_url, &checkout_of(&destination))?
+        {
+            return self
+                .restore_instead_of_creating(&req.session_token, git_url, deleted)
+                .await;
         }
         self.clone_without_deadline("create_project", os_user, git_url, &destination)
             .await?;
@@ -219,26 +226,6 @@ impl ProjectRpcHandler {
 
         Ok(Response::new(CreateProjectResponse {
             project: Some(wire_same(&entry)?),
-        }))
-    }
-
-    /// Answer a `CreateProject` that met `deleted` by restoring it on every host owning it.
-    async fn restore_instead_of_creating(
-        &self,
-        session_token: &str,
-        git_url: &str,
-        deleted: ProjectData,
-    ) -> Result<Response<CreateProjectResponse>, Status> {
-        log::info!(
-            "create_project: {git_url} is deleted project {}; restoring it",
-            deleted.project_id
-        );
-        let caller = self.project_caller(session_token)?;
-        let restored = self
-            .restore_everywhere(&caller, session_token, &deleted.project_id)
-            .await?;
-        Ok(Response::new(CreateProjectResponse {
-            project: restored.project,
         }))
     }
 
@@ -483,23 +470,4 @@ impl ProjectRpcHandler {
             default_remote: remote,
         }))
     }
-}
-
-/// A deleted project on this host for `git_url` or for the checkout at `checkout`.
-fn deleted_project_at(
-    projects_dir: &std::path::Path,
-    git_url: &str,
-    checkout: &str,
-) -> Result<Option<ProjectData>, Status> {
-    project_storage::find_deleted_project_matching(projects_dir, git_url, checkout)
-        .map_err(|e| Status::internal(e.to_string()))
-}
-
-/// `destination` as a registered row records it: canonical when it exists.
-fn checkout_of(destination: &std::path::Path) -> String {
-    destination
-        .canonicalize()
-        .unwrap_or_else(|_| destination.to_path_buf())
-        .display()
-        .to_string()
 }
