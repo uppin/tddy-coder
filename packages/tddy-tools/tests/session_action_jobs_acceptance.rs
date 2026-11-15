@@ -13,10 +13,8 @@ use tddy_core::session_action_jobs::{
     SessionActionJobsError, SessionActionStopOutcome, SessionActionWaitOutcome,
 };
 
-/// Safety net for a wait that returns the moment the job drains — not a prediction of how long
-/// that takes. The stub sleeps 0.25s, so the wait normally returns in about that; the ceiling only
-/// decides when to give up. The previous 1500ms read as a budget and failed on a loaded machine,
-/// reporting a scheduling delay as a job that never reached a terminal state.
+/// Safety net for a wait that returns the moment a released job drains — not a prediction of how
+/// long that takes; the ceiling only decides when to give up.
 const A_JOB_HAS_TIME_TO_DRAIN_MS: u64 = 30_000;
 
 fn write_sample_action(session: &Path, body: &str) {
@@ -25,8 +23,43 @@ fn write_sample_action(session: &Path, body: &str) {
     fs::write(dir.join("sleep-touch.yaml"), body).expect("write manifest");
 }
 
-/// Session fixture: slow script + sentinel file so premature success is detectable.
-fn session_with_bounded_sleep_touch_action() -> PathBuf {
+/// A session whose `sleep-touch` action runs a job the test holds: the job runs until the test
+/// [releases](HeldJobSession::release) it, then touches its sentinel and exits 17.
+///
+/// The test, not the clock, decides whether a job is still running. A job that slept a fixed
+/// quarter second raced every assertion about its state: on a loaded host it could outlive a bounded
+/// wait (so "stop after it finished" found it running) or finish before the next call (so "stop a
+/// running job" found it done).
+struct HeldJobSession {
+    dir: PathBuf,
+}
+
+impl HeldJobSession {
+    /// Let the session's job finish: it touches its sentinel and exits.
+    fn release(&self) {
+        fs::write(self.dir.join("release"), "").expect("release the job");
+    }
+
+    /// Release the job from another thread once `after` has passed — for a call that blocks on the
+    /// job and so cannot release it itself.
+    fn release_after(&self, after: std::time::Duration) {
+        let release = self.dir.join("release");
+        std::thread::spawn(move || {
+            std::thread::sleep(after);
+            fs::write(release, "").expect("release the job");
+        });
+    }
+}
+
+/// A job a test never released would poll forever after the test is gone.
+impl Drop for HeldJobSession {
+    fn drop(&mut self) {
+        let _ = fs::write(self.dir.join("release"), "");
+    }
+}
+
+/// Session fixture: a held job + sentinel file so premature success is detectable.
+fn session_with_a_held_sleep_touch_action() -> HeldJobSession {
     let session = std::env::temp_dir().join(format!(
         "tddy_sess_jobs_accept_{}_{}",
         std::process::id(),
@@ -38,14 +71,16 @@ fn session_with_bounded_sleep_touch_action() -> PathBuf {
     let _ = fs::remove_dir_all(&session);
     fs::create_dir_all(&session).expect("mkdir session");
 
-    let stub = session.join("sleep_then_touch.sh");
+    let stub = session.join("wait_then_touch.sh");
     let sentinel = session.join("job_done.marker");
+    let release = session.join("release");
     let sh = format!(
         r#"#!/bin/sh
-sleep 0.25
+while [ ! -f "{}" ]; do sleep 0.01; done
 touch "{}"
 exit 17
 "#,
+        release.display(),
         sentinel.display()
     );
     fs::write(&stub, &sh).expect("write stub");
@@ -63,7 +98,7 @@ exit 17
             r#"
 version: 1
 id: sleep-touch
-summary: Sleeps before marker for blocked invoke semantics
+summary: Runs until released, then touches its marker
 architecture: native
 command: ["{}"]
 input_schema:
@@ -73,7 +108,7 @@ input_schema:
             stub.display()
         ),
     );
-    session
+    HeldJobSession { dir: session }
 }
 
 fn parse_record(outcome: SessionActionInvokeOutcome) -> Value {
@@ -89,10 +124,12 @@ fn parse_record(outcome: SessionActionInvokeOutcome) -> Value {
 #[test]
 fn session_action_blocking_matches_legacy_semantics() {
     // Given
-    let session_dir = session_with_bounded_sleep_touch_action();
+    let held = session_with_a_held_sleep_touch_action();
+    let session_dir = held.dir.clone();
     let sentinel = session_dir.join("job_done.marker");
     let repo: Option<PathBuf> = None;
     let t0 = std::time::Instant::now();
+    held.release_after(std::time::Duration::from_millis(250));
 
     // When
     let outcome = invoke_session_action(
@@ -107,7 +144,7 @@ fn session_action_blocking_matches_legacy_semantics() {
     // Then
     assert!(
         t0.elapsed().as_secs_f64() >= 0.18,
-        "blocking invoke must await subprocess work (sleeps ~0.25s); elapsed={:?}",
+        "blocking invoke must await subprocess work (released after 0.25s); elapsed={:?}",
         t0.elapsed()
     );
 
@@ -128,7 +165,8 @@ fn session_action_blocking_matches_legacy_semantics() {
 #[test]
 fn session_action_async_returns_job_and_log_paths() {
     // Given
-    let session_dir = session_with_bounded_sleep_touch_action();
+    let held = session_with_a_held_sleep_touch_action();
+    let session_dir = held.dir.clone();
 
     // When / Then
     match invoke_session_action(
@@ -190,7 +228,8 @@ fn session_action_async_returns_job_and_log_paths() {
 #[test]
 fn session_action_wait_until_complete_without_timeout() {
     // Given
-    let session_dir = session_with_bounded_sleep_touch_action();
+    let held = session_with_a_held_sleep_touch_action();
+    let session_dir = held.dir.clone();
 
     let job_id = match invoke_session_action(
         &session_dir,
@@ -205,7 +244,8 @@ fn session_action_wait_until_complete_without_timeout() {
         other => panic!("expected AsyncStarted for wait baseline; got {other:?}"),
     };
 
-    // When
+    // When the job is released and waited for
+    held.release();
     let wait_out = wait_session_action_job(&session_dir, &job_id, None)
         .expect("wait(jobId) without timeout must complete");
 
@@ -232,7 +272,8 @@ fn session_action_wait_until_complete_without_timeout() {
 #[test]
 fn session_action_wait_times_out_while_running() {
     // Given
-    let session_dir = session_with_bounded_sleep_touch_action();
+    let held = session_with_a_held_sleep_touch_action();
+    let session_dir = held.dir.clone();
 
     let job_id = match invoke_session_action(
         &session_dir,
@@ -260,7 +301,8 @@ fn session_action_wait_times_out_while_running() {
         other => panic!("expected TimedOut for short-timeout wait on long job; got {other:?}"),
     }
 
-    // Second wait until completion or stop observes allowed transitions.
+    // Second wait, once the job is released, observes it drain to a terminal state.
+    held.release();
     let subsequent =
         wait_session_action_job(&session_dir, &job_id, Some(A_JOB_HAS_TIME_TO_DRAIN_MS))
             .expect("subsequent wait");
@@ -278,7 +320,8 @@ fn session_action_wait_times_out_while_running() {
 #[test]
 fn session_action_stop_cancels_running_job() {
     // Given
-    let session_dir = session_with_bounded_sleep_touch_action();
+    let held = session_with_a_held_sleep_touch_action();
+    let session_dir = held.dir.clone();
 
     let (job_id, stdout_path) = match invoke_session_action(
         &session_dir,
@@ -319,7 +362,8 @@ fn session_action_stop_cancels_running_job() {
 #[test]
 fn session_action_stop_idempotent_after_terminal() {
     // Given
-    let session_dir = session_with_bounded_sleep_touch_action();
+    let held = session_with_a_held_sleep_touch_action();
+    let session_dir = held.dir.clone();
 
     let job_id = match invoke_session_action(
         &session_dir,
@@ -334,8 +378,18 @@ fn session_action_stop_idempotent_after_terminal() {
         other => panic!("expected AsyncStarted; got {other:?}"),
     };
 
-    // When
-    wait_session_action_job(&session_dir, &job_id, Some(3500)).expect("let job settle");
+    // When the job is released and has finished — the wait returns only once it has, so the stops
+    // below meet a job that is terminal, not one still running on a loaded host
+    held.release();
+    let settled = wait_session_action_job(&session_dir, &job_id, Some(A_JOB_HAS_TIME_TO_DRAIN_MS))
+        .expect("let job settle");
+    assert!(
+        matches!(
+            settled,
+            SessionActionWaitOutcome::Completed { .. } | SessionActionWaitOutcome::Failed { .. }
+        ),
+        "precondition: the released job reached a terminal state; got {settled:?}"
+    );
 
     let first = stop_session_action_job(&session_dir, &job_id).expect("first stop succeeds");
     let second =
@@ -362,7 +416,8 @@ fn session_action_stop_idempotent_after_terminal() {
 #[test]
 fn session_action_unknown_job_returns_structured_error() {
     // Given
-    let session_dir = session_with_bounded_sleep_touch_action();
+    let held = session_with_a_held_sleep_touch_action();
+    let session_dir = held.dir.clone();
 
     // When
     let err =

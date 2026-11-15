@@ -171,9 +171,19 @@ impl ARunningDaemon {
 
 /// An idle tracker whose timeout has already elapsed, so any recorded activity is observable as
 /// `should_shutdown()` turning false.
+///
+/// Its timeout is a minute and its last activity two minutes back: idle from the start, with no
+/// sleep, and a minute for the check after the call to run in. A timeout of milliseconds made that
+/// check race the clock — any scheduling delay between the handler's bump and the check read as
+/// "the handler never bumped it".
 fn an_idle_tracker_that_has_already_timed_out() -> Arc<IdleTimeoutTracker> {
-    let tracker = Arc::new(IdleTimeoutTracker::new(Duration::from_millis(1)));
-    std::thread::sleep(Duration::from_millis(10));
+    let two_minutes_ago = std::time::Instant::now()
+        .checked_sub(Duration::from_secs(120))
+        .expect("the clock reaches two minutes back");
+    let tracker = Arc::new(IdleTimeoutTracker::last_active_at(
+        Duration::from_secs(60),
+        two_minutes_ago,
+    ));
     assert!(
         tracker.should_shutdown(),
         "the fixture's tracker must start out idle, or activity would not be observable"

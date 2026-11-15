@@ -153,27 +153,37 @@ async fn relay_idle_monitor_triggers_server_shutdown() {
 /// is functional by driving the tracker directly and verifying it does not fire prematurely.
 #[tokio::test]
 async fn relay_activity_defers_idle_shutdown() {
+    // Given a tracker that has been idle past its timeout. The timeout is a minute, so the check
+    // after the activity has a minute to run in: with a timeout of milliseconds any scheduling delay
+    // between the activity and the check read as "the activity never deferred the shutdown".
+    let two_minutes_ago = std::time::Instant::now()
+        .checked_sub(Duration::from_secs(120))
+        .expect("the clock reaches two minutes back");
+    let tracker = Arc::new(IdleTimeoutTracker::last_active_at(
+        Duration::from_secs(60),
+        two_minutes_ago,
+    ));
+    assert!(
+        tracker.should_shutdown(),
+        "precondition: the tracker is idle before any activity"
+    );
+
+    // When
+    tracker.record_activity();
+
+    // Then
+    assert!(
+        !tracker.should_shutdown(),
+        "activity must defer the idle shutdown"
+    );
+}
+
+/// A tracker with no activity expires once its timeout has passed. Waiting longer than the timeout
+/// can only make it more idle, so this direction cannot race the clock.
+#[tokio::test]
+async fn relay_idle_tracker_expires_after_a_full_idle_period() {
     // Given
     let tracker = Arc::new(IdleTimeoutTracker::new(Duration::from_millis(80)));
-
-    // When
-    tracker.record_activity();
-
-    // Then
-    assert!(
-        !tracker.should_shutdown(),
-        "tracker must not expire immediately after record_activity"
-    );
-
-    // When
-    tokio::time::sleep(Duration::from_millis(40)).await;
-    tracker.record_activity();
-
-    // Then
-    assert!(
-        !tracker.should_shutdown(),
-        "tracker must not expire after activity was just recorded mid-interval"
-    );
 
     // When
     tokio::time::sleep(Duration::from_millis(120)).await;
