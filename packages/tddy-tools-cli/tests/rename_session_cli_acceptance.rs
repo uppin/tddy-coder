@@ -121,9 +121,14 @@ impl Drop for AnAgentToolSocket {
     }
 }
 
+/// `tddy-tools` with none of the session environment inherited from whoever runs this suite, run
+/// from the system temp directory so no session pointer (`.tddy/session.json`) above the checkout
+/// is adopted in place of the environment each test sets — a checkout that is itself a tddy
+/// session's worktree has one, and the command would reach that session's real daemon.
 fn tddy_tools_without_a_session_environment() -> Command {
     let mut cmd = cargo_bin_cmd!("tddy-tools");
-    cmd.env_remove("TDDY_SOCKET")
+    cmd.current_dir(std::env::temp_dir())
+        .env_remove("TDDY_SOCKET")
         .env_remove(notify_env::SESSION_ID)
         .env_remove(notify_env::OS_USER)
         .env_remove(notify_env::HOOK_TOKEN)

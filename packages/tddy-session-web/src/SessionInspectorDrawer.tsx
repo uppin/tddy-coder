@@ -31,6 +31,7 @@ import { SessionScreenSharingTab } from "./SessionScreenSharingTab";
 import { SessionInspectorDetailsTab, type InspectorTraffic } from "./SessionInspectorDetailsTab";
 import { SessionInspectorHeader } from "./SessionInspectorHeader";
 import { PARAM_INSPECTOR, useHttpClient } from "tddy-client-web";
+import { requestSessionsRefresh } from "./lib/sessionsRefreshBridge";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -169,6 +170,20 @@ export function SessionInspectorDrawer({
     (next: InspectorTab) => setParams({ [PARAM_INSPECTOR]: next }),
     [setParams],
   );
+  // Renames on the session's owning host — `client` is that host's — then has the sessions list
+  // re-read so the drawer row picks the new name up. No client or no token, no wire to that host
+  // the rename could authenticate over: no rename.
+  const renameSession =
+    client && session && sessionToken
+      ? async (displayName: string) => {
+          await client.renameSession({
+            sessionToken,
+            sessionId: session.sessionId,
+            displayName,
+          });
+          requestSessionsRefresh();
+        }
+      : undefined;
   const vncClient = useHttpClient(VncService);
   const screenSharingClient = useHttpClient(ScreenSharingService);
 
@@ -211,6 +226,7 @@ export function SessionInspectorDrawer({
             onResume={onResume}
             onDelete={onDelete}
             onTerminate={onTerminate}
+            onRename={renameSession}
           />
         ) : tab === "activity" ? (
           // The recorded transcript of a stopped session, scrolled by its own transcript view, so it

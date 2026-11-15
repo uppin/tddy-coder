@@ -30,6 +30,7 @@ import { CreateSessionToolFields } from "./CreateSessionToolFields";
 import { CreateSessionCliFields } from "./CreateSessionCliFields";
 import { CreateSessionBranchFields } from "./CreateSessionBranchFields";
 import { CreateSessionHostAndProjectFields } from "./CreateSessionHostAndProjectFields";
+import { CreateSessionNameField } from "./CreateSessionNameField";
 import { CreateSessionAttachmentsSection } from "./CreateSessionAttachmentsSection";
 import { CreateSessionActions } from "./CreateSessionActions";
 import { CreateSessionStartProgress } from "./CreateSessionStartProgress";
@@ -94,6 +95,7 @@ export function CreateSessionPane(props: CreateSessionPaneProps) {
     daemonInstanceId,
     daemons,
     dangerouslySkipPermissions,
+    displayName,
     effortField,
     error,
     handleSubmit,
@@ -142,6 +144,7 @@ export function CreateSessionPane(props: CreateSessionPaneProps) {
     setCreateRemoteBranch,
     setDaemonInstanceId,
     setDangerouslySkipPermissions,
+    setDisplayName,
     setInitialPrompt,
     setManagedCodebase,
     setNewBranchName,
@@ -210,6 +213,12 @@ export function CreateSessionPane(props: CreateSessionPaneProps) {
           projectId={projectId}
           setProjectId={setProjectId}
         />
+      )}
+
+      {/* A tool session's tddy-coder writes its own record, and main is named by its project:
+          the daemon names neither, so neither offers a name. */}
+      {!projectHome && sessionLaunch !== TDDY_CODER_LAUNCH && (
+        <CreateSessionNameField displayName={displayName} setDisplayName={setDisplayName} />
       )}
 
       {accountsClient && providerHarness !== null && (

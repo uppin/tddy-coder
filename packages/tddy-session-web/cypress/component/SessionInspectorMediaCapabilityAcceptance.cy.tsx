@@ -67,6 +67,7 @@ const SESSION: Partial<SessionEntry> = {
   createdAt: "2026-09-05T09:00:00Z",
   status: "active",
   repoPath: "/home/dev/capability-project",
+  displayName: "",
   pid: 4242,
   isActive: true,
   projectId: "proj-capability-gating",

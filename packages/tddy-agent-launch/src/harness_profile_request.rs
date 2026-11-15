@@ -47,6 +47,9 @@ impl LaunchSessions {
         cancel: &CancellationToken,
     ) -> Result<Response<StartSessionResponse>, Status> {
         self.admit_the_requested_role(&req)?;
+        // A refused name is a malformed request wherever the session would start: refused here,
+        // before a start is forwarded to a peer or anything is created.
+        crate::start_request_checks::requested_display_name(&req)?;
         let req = self.apply_harness_profile(req)?;
         let req = self.place_an_orchestrator(req)?;
         // Refused before routing, on the session type the profile resolved: a start this daemon

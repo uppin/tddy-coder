@@ -32,9 +32,21 @@ pub enum DisplayNameError {
 /// or with a control character (a newline, a tab) inside it, is refused rather than cut or cleaned:
 /// the caller learns the name they asked for is not the one that would be shown.
 pub fn normalize_display_name(raw: &str) -> Result<Option<String>, DisplayNameError> {
-    // TODO(session-display-name): green phase.
-    let _ = raw;
-    todo!("normalize_display_name")
+    let name = raw.trim();
+    if name.is_empty() {
+        return Ok(None);
+    }
+    if name.chars().any(char::is_control) {
+        return Err(DisplayNameError::ControlCharacter);
+    }
+    let chars = name.chars().count();
+    if chars > DISPLAY_NAME_MAX_CHARS {
+        return Err(DisplayNameError::TooLong {
+            chars,
+            max: DISPLAY_NAME_MAX_CHARS,
+        });
+    }
+    Ok(Some(name.to_string()))
 }
 
 /// Why [`rename_session`] recorded nothing.
@@ -52,7 +64,11 @@ pub enum RenameSessionError {
 /// `raw` is empty; the name as recorded. Every other field of the record is left as it was —
 /// `updated_at` included, since naming a session is not activity in it.
 pub fn rename_session(session_dir: &Path, raw: &str) -> Result<Option<String>, RenameSessionError> {
-    // TODO(session-display-name): green phase.
-    let _ = (session_dir, raw);
-    todo!("rename_session")
+    let display_name = normalize_display_name(raw)?;
+    let mut metadata = crate::session_metadata::read_session_metadata(session_dir)
+        .map_err(RenameSessionError::Unreadable)?;
+    metadata.display_name = display_name.clone();
+    crate::session_metadata::write_session_metadata(session_dir, &metadata)
+        .map_err(RenameSessionError::Unwritable)?;
+    Ok(display_name)
 }

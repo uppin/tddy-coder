@@ -63,6 +63,7 @@ const DORMANT = {
   createdAt: "2026-08-01T09:00:00Z",
   status: "exited",
   repoPath: "/home/dev/finished-work",
+  displayName: "",
   pid: 0,
   isActive: false,
   projectId: "proj-activities-1",

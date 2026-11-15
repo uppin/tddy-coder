@@ -38,6 +38,11 @@ pub fn resolve_session_label(
             (String::new(), String::new())
         });
 
+    // A name the session was given wins over anything derived, and costs nothing more to read.
+    if !display_name.trim().is_empty() {
+        return session_display_label(&display_name, "", "", session_id);
+    }
+
     // The worktree wins outright when there is one, and there is one for most sessions — so ask
     // that first and skip the enrichment entirely. This runs on every reported hook, twice per
     // agent tool call, and the enrichment is a second parse of the file just read plus, for a

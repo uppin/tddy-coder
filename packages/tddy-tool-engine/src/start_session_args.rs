@@ -279,6 +279,7 @@ impl StartSessionArgs {
                 .collect(),
             session_role: self.session_role,
             effort: self.effort,
+            display_name: self.display_name,
             ..Default::default()
         }
     }

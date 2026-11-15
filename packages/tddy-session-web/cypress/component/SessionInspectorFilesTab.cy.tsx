@@ -24,6 +24,7 @@ const SESSION = {
   createdAt: "2026-07-25T09:00:00Z",
   status: "active",
   repoPath: "/home/dev/feature-files",
+  displayName: "",
   pid: 4242,
   isActive: true,
   projectId: "proj-files-1",

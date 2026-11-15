@@ -1,11 +1,12 @@
-//! `SetSessionMark`, `DeleteSession`, `ClearWorktree`, `DeleteWorktree` and `RestoreWorktree`: an
-//! orchestrator keeps a ledger of its sessions in the sessions themselves and cleans up after
+//! `SetSessionMark`, `RenameSession`, `DeleteSession`, `ClearWorktree`, `DeleteWorktree` and
+//! `RestoreWorktree`: an orchestrator keeps a ledger of its sessions in the sessions themselves and cleans up after
 //! them, with every action the web offers for a session and its worktree (`#orchestrators` 5/11).
 //!
 //! - **`SetSessionMark`** records `paused`, `blocked` or `done`, with a note, in the session's
 //!   `.session.yaml` ([`OrchestrationMark`]); `none` removes the mark. **`paused` also stops the
 //!   session**, as `TerminateSession` does, and any resume clears it. `blocked` and `done` only
 //!   mark.
+//! - **`RenameSession`** names a session, or clears its name ([`rename_session`]).
 //! - **`DeleteSession`** does what the web's Delete does, for a stopped session. A running session
 //!   is refused: stop it first.
 //! - **`ClearWorktree`**, **`DeleteWorktree`** and **`RestoreWorktree`** are the Worktrees
@@ -18,7 +19,7 @@
 //!   worktree** — the one path main and every orchestrator share
 //!   ([`ProjectHomeLifecyclePort::project_home_worktree`]), whoever calls (developer, 2026-11-13).
 //!
-//! All five are target tools: they take
+//! All six are target tools: they take
 //! [`TARGET_DAEMON_INSTANCE_ID`](crate::project_home_tools::TARGET_DAEMON_INSTANCE_ID) and the
 //! daemon forwards a call naming another host to that host whole, so the port below is only ever
 //! asked about this host's sessions and worktrees.
@@ -50,11 +51,16 @@ pub const CLEAR_WORKTREE: &str = "ClearWorktree";
 pub const DELETE_WORKTREE: &str = "DeleteWorktree";
 pub const RESTORE_WORKTREE: &str = "RestoreWorktree";
 
-/// Whether `name` is one of the five lifecycle tools.
+/// Whether `name` is one of the six lifecycle tools.
 pub fn is_project_home_lifecycle_tool(name: &str) -> bool {
     matches!(
         name,
-        SET_SESSION_MARK | DELETE_SESSION | CLEAR_WORKTREE | DELETE_WORKTREE | RESTORE_WORKTREE
+        SET_SESSION_MARK
+            | RENAME_SESSION
+            | DELETE_SESSION
+            | CLEAR_WORKTREE
+            | DELETE_WORKTREE
+            | RESTORE_WORKTREE
     )
 }
 
@@ -88,7 +94,7 @@ impl SessionMark {
     }
 }
 
-/// The five tools' definitions.
+/// The six tools' definitions.
 pub fn project_home_lifecycle_tool_defs() -> Vec<ToolDef> {
     let session_property = json!({
         "type": "string",
@@ -120,6 +126,7 @@ pub fn project_home_lifecycle_tool_defs() -> Vec<ToolDef> {
                 "required": ["session_id", "mark"]
             }),
         ),
+        rename_session_tool_def(),
         tool_def(
             DELETE_SESSION,
             "Delete a stopped session of this project, as the web UI's Delete does: its record, its worktree and its process are removed. A running session is refused: stop it first with TerminateSession, or mark it paused with SetSessionMark.",
@@ -241,7 +248,7 @@ pub trait ProjectHomeLifecyclePort: ProjectHomePort {
 /// The refusal of a port that does none of the lifecycle actions.
 pub const NO_LIFECYCLE: &str = "this host marks, deletes and clears nothing";
 
-/// Run one of the five lifecycle tools for `home`.
+/// Run one of the six lifecycle tools for `home`.
 ///
 /// Bad arguments, a target or path refusal, the activity gate and a refusal of the port come back
 /// as an `is_error` outcome naming what was refused; the role refusal is the daemon's and happens
@@ -261,6 +268,7 @@ pub async fn execute_project_home_lifecycle_tool(
     };
     match tool_name {
         SET_SESSION_MARK => set_session_mark(port, home, args).await,
+        RENAME_SESSION => rename_session::rename_session(port, home, args).await,
         DELETE_SESSION => delete_session(port, home, args).await,
         CLEAR_WORKTREE => clear_worktree(port, home, args).await,
         DELETE_WORKTREE => delete_worktree(port, home, args).await,

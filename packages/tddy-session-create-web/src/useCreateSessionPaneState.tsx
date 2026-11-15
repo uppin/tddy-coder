@@ -98,6 +98,8 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     initialValues?.dangerouslySkipPermissions ?? false,
   );
   const [initialPrompt, setInitialPrompt] = useState(initialValues?.initialPrompt ?? "");
+  // The session's optional display name, as typed; the request builder trims it.
+  const [displayName, setDisplayName] = useState("");
   const [branchIntent, setBranchIntent] = useState<BranchIntent>(
     initialValues?.branchIntent ?? "new_branch_from_base",
   );
@@ -355,6 +357,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     codebaseDaemonInstanceId,
     sshConfigHost,
     orchestrator: asOrchestrator,
+    displayName,
   };
   const created = useCreateSessionSubmit({
     form,
@@ -410,6 +413,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     daemonInstanceId,
     daemons,
     dangerouslySkipPermissions,
+    displayName,
     effortField,
     error,
     handleSubmit,
@@ -458,6 +462,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     setCreateRemoteBranch,
     setDaemonInstanceId,
     setDangerouslySkipPermissions,
+    setDisplayName,
     setInitialPrompt,
     setManagedCodebase,
     setNewBranchName,

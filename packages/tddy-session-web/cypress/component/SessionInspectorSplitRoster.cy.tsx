@@ -46,6 +46,7 @@ const SPLIT_SESSION = {
   createdAt: "2026-08-29T09:00:00Z",
   status: "active",
   repoPath: "/home/dev/feature-split",
+  displayName: "",
   pid: 8181,
   isActive: true,
   projectId: "proj-split-1",

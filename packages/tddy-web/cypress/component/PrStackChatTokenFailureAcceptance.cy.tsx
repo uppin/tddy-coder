@@ -20,6 +20,7 @@ const PR_STACK_SESSION = {
   createdAt: "2026-07-02T09:00:00Z",
   status: "idle",
   repoPath: "/home/dev/pr-stack-project",
+  displayName: "",
   pid: 0,
   isActive: false,
   projectId: "proj-pr-stack-silent-failure",

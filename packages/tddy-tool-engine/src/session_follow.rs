@@ -342,8 +342,7 @@ async fn read_activity(
     serde_json::to_value(ActivityPage {
         page,
         pending_question: read.pending_question,
-        // TODO(session-display-name): green phase.
-        display_name: None,
+        display_name: read.display_name,
     })
     .map_err(|e| e.to_string())
 }

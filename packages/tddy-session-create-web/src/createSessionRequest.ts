@@ -230,6 +230,7 @@ export function buildStartSessionRequest(
     // The SSH host belongs to the managed block: it names the exec catalog's OpenSSH host
     // for a managed session, split or co-located.
     sshConfigHost: features.managedWorkflow && managedCodebase ? sshConfigHost : "",
+    displayName: sessionDisplayName(form),
   };
 }
 
@@ -248,7 +249,17 @@ function buildOrchestratorStartRequest(
     daemonInstanceId: form.daemonInstanceId,
     ...cliAgentChoices(form, features),
     sessionRole: ORCHESTRATOR_SESSION_ROLE,
+    displayName: sessionDisplayName(form),
   };
+}
+
+/**
+ * The name the session starts under: the **Name** field, trimmed, so a blank one starts it unnamed.
+ * Only the CLI and orchestrator requests carry it — the daemon refuses a name on a `tddy_coder`
+ * launch, whose tddy-coder writes the session's record itself.
+ */
+function sessionDisplayName(form: CreateSessionFormValues): string {
+  return (form.displayName ?? "").trim();
 }
 
 /**

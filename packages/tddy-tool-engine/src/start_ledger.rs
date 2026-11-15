@@ -294,6 +294,7 @@ enum Ending {
         session_id: String,
         branch: Option<String>,
         worktree: Option<String>,
+        display_name: Option<String>,
     },
     Failed(String),
     Cancelled(String),
@@ -350,21 +351,21 @@ async fn ending_of_result(
     if response.session_id.is_empty() {
         return Ending::Failed("the start ended without a session".to_string());
     }
-    let (branch, worktree) = match details {
-        Some(details) => match details
-            .listing(&record.daemon_instance_id, &response.session_id)
-            .await
-        {
-            // TODO(session-display-name): green phase — the record carries the listed name.
-            Some(listed) => (Some(listed.branch), Some(listed.worktree)),
-            None => (None, None),
-        },
-        None => (None, None),
+    let listed = match details {
+        Some(details) => {
+            details
+                .listing(&record.daemon_instance_id, &response.session_id)
+                .await
+        }
+        None => None,
     };
     Ending::Succeeded {
         session_id: response.session_id,
-        branch,
-        worktree,
+        branch: listed.as_ref().map(|l| l.branch.clone()),
+        worktree: listed.as_ref().map(|l| l.worktree.clone()),
+        display_name: listed
+            .map(|l| l.display_name)
+            .filter(|name| !name.is_empty()),
     }
 }
 
@@ -374,11 +375,13 @@ fn apply_ending(record: &mut StartLedgerRecord, ending: Ending) {
             session_id,
             branch,
             worktree,
+            display_name,
         } => {
             record.state = StartState::Succeeded;
             record.session_id = Some(session_id);
             record.branch = branch;
             record.worktree = worktree;
+            record.display_name = display_name;
         }
         Ending::Failed(message) => {
             record.state = StartState::Failed;

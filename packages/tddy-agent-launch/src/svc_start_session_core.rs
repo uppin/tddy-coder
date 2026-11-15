@@ -19,8 +19,9 @@ use tddy_session_split::split_start::resolve_split_agent_placement;
 use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
 use crate::start_request_checks::{
-    refuse_a_cli_start_without_a_model, refuse_a_tool_path_the_daemon_does_not_allow,
-    refuse_an_effort_the_agent_cannot_take, refuse_an_orchestrated_tool_start,
+    refuse_a_cli_start_without_a_model, refuse_a_named_tool_start,
+    refuse_a_tool_path_the_daemon_does_not_allow, refuse_an_effort_the_agent_cannot_take,
+    refuse_an_orchestrated_tool_start, requested_display_name,
 };
 
 use tddy_rpc::Response;
@@ -130,8 +131,48 @@ impl LaunchSessions {
         let placement =
             classify_start_placement(&req, Some(&*self.coding_agents), local_id, eligible_ids)?;
         refuse_an_orchestrated_tool_start(&req, &self.coding_agents)?;
-        self.start_here(req, os_user, agent_def, placement, progress, cancel)
-            .await
+        refuse_a_named_tool_start(&req, &self.coding_agents)?;
+        let display_name = requested_display_name(&req)?;
+        let started = self
+            .start_here(req, os_user, agent_def, placement, progress, cancel)
+            .await?;
+        self.record_the_started_sessions_name(os_user, &started, display_name)
+            .await?;
+        Ok(started)
+    }
+
+    /// Record `display_name` in the `.session.yaml` of the session `started` names, once the start
+    /// has created it here. One place for every session type this daemon writes the record of — a
+    /// forwarded start is named by the peer that creates it, and a start refused for an owned branch
+    /// created nothing. A record that cannot be written fails the start's answer rather than leaving
+    /// a session silently unnamed.
+    async fn record_the_started_sessions_name(
+        &self,
+        os_user: &str,
+        started: &Response<StartSessionResponse>,
+        display_name: Option<String>,
+    ) -> Result<(), Status> {
+        let session_id = started.get_ref().session_id.clone();
+        let Some(display_name) = display_name.filter(|_| !session_id.is_empty()) else {
+            return Ok(());
+        };
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &session_id);
+        tokio::task::spawn_blocking(move || {
+            tddy_core::session_display_name::rename_session(&session_dir, &display_name)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("naming the started session failed: {e}")))?
+        .map_err(|e| {
+            Status::internal(format!(
+                "session {session_id} started, but its name could not be recorded: {e}"
+            ))
+        })?;
+        Ok(())
     }
 
     /// Start `req` on this daemon, the route and the placement already decided, under the daemon's

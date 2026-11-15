@@ -380,7 +380,8 @@ fn session_entry_from_listing(
         .join(SESSIONS_SUBDIR)
         .join(&s.session_id);
     let mut entry = SessionEntry {
-        display_name: String::new(),
+        // The name the session was given, straight from `.session.yaml`; empty when it has none.
+        display_name: s.display_name,
         session_id: s.session_id,
         created_at: s.created_at,
         status: s.status,

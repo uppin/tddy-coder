@@ -49,8 +49,11 @@ pub fn session_display_label(
     workflow_goal: &str,
     session_id: &str,
 ) -> String {
-    // TODO(session-display-name): green phase — the name comes first.
-    let _ = display_name;
+    let display_name = display_name.trim();
+    if !display_name.is_empty() {
+        return display_name.to_string();
+    }
+
     if let Some(basename) = label_from_repo_path(repo_path) {
         return basename;
     }

@@ -28,6 +28,7 @@ const aSelectedSession: Partial<SessionEntry> = {
   isActive: true,
   status: "active",
   repoPath: "/home/user/my-project",
+  displayName: "",
 };
 
 /** A session its host serves itself — plain RPC, no room. */

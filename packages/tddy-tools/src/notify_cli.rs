@@ -96,11 +96,14 @@ impl NotifySession {
     /// variable is an error naming it.
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> anyhow::Result<Self> {
         let required = |name: &str| {
-            lookup(name).filter(|value| !value.is_empty()).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "{name} is not set: `tddy-tools notify` runs inside a session the daemon launched"
+            lookup(name)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                    "{name} is not set: `tddy-tools` reaches its session's daemon only inside a \
+                     session the daemon launched"
                 )
-            })
+                })
         };
         Ok(Self {
             session_id: required(notify_env::SESSION_ID)?,
@@ -113,7 +116,10 @@ impl NotifySession {
     /// Read the body `args` names, then send the notification to this session's daemon.
     async fn send(&self, args: &NotifyArgs) -> anyhow::Result<()> {
         let request = self.request(args, body_markdown(args.body.as_deref()).await?);
-        self.transport.send(request.encode_to_vec()).await
+        self.transport
+            .call(METHOD, request.encode_to_vec())
+            .await
+            .map(|_| ())
     }
 
     /// The request `args` (with its body already read) becomes for this session.
@@ -156,7 +162,8 @@ async fn read_stdin() -> anyhow::Result<String> {
 }
 
 /// How the daemon is reached: its agent-tool socket when the session was given one, which an
-/// embedded daemon serves instead of HTTP, its URL otherwise.
+/// embedded daemon serves instead of HTTP, its URL otherwise. Shared by every command a session's
+/// agent runs against its own daemon (`notify`, `rename-session`).
 #[derive(Debug, PartialEq, Eq)]
 pub enum Transport {
     Socket(PathBuf),
@@ -178,36 +185,36 @@ impl Transport {
         })
     }
 
-    async fn send(&self, body: Vec<u8>) -> anyhow::Result<()> {
+    /// Call `method` of [`ACTIVITY_SERVICE`] with the encoded request `body`; the encoded response.
+    pub(crate) async fn call(&self, method: &str, body: Vec<u8>) -> anyhow::Result<Vec<u8>> {
         match self {
-            Self::Socket(socket) => call_over_socket(socket, body).await,
-            Self::Http(url) => post_proto(url, body).await,
+            Self::Socket(socket) => call_over_socket(socket, method, body).await,
+            Self::Http(url) => post_proto(url, method, body).await,
         }
     }
 }
 
-async fn call_over_socket(socket: &Path, body: Vec<u8>) -> anyhow::Result<()> {
-    let context = format!("{ACTIVITY_SERVICE}/{METHOD} over {}", socket.display());
+async fn call_over_socket(socket: &Path, method: &str, body: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+    let context = format!("{ACTIVITY_SERVICE}/{method} over {}", socket.display());
     let call = async {
         let client = tddy_session_tool_client::connect_sandbox_ipc(socket)
             .await
             .map_err(|e| anyhow::anyhow!("{context}: {e}"))?;
         client
-            .call_unary(ACTIVITY_SERVICE, METHOD, body)
+            .call_unary(ACTIVITY_SERVICE, method, body)
             .await
             .map_err(|e| anyhow::anyhow!("{context}: {e}"))
     };
     tokio::time::timeout(NOTIFY_TIMEOUT, call)
         .await
-        .map_err(|_| anyhow::anyhow!("{context}: timed out"))??;
-    Ok(())
+        .map_err(|_| anyhow::anyhow!("{context}: timed out"))?
 }
 
 /// POST the request over the Connect protocol. A refusal's body carries the daemon's reason, so
 /// it is passed on rather than reduced to a status code.
-async fn post_proto(daemon: &str, body: Vec<u8>) -> anyhow::Result<()> {
+async fn post_proto(daemon: &str, method: &str, body: Vec<u8>) -> anyhow::Result<Vec<u8>> {
     let url = format!(
-        "{}/rpc/{ACTIVITY_SERVICE}/{METHOD}",
+        "{}/rpc/{ACTIVITY_SERVICE}/{method}",
         daemon.trim_end_matches('/')
     );
     let client = reqwest::Client::builder()
@@ -226,7 +233,11 @@ async fn post_proto(daemon: &str, body: Vec<u8>) -> anyhow::Result<()> {
         let reason = response.text().await.unwrap_or_default();
         anyhow::bail!("POST {url} → HTTP {status}: {reason}");
     }
-    Ok(())
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| anyhow::anyhow!("POST {url}: reading the answer: {e}"))?;
+    Ok(bytes.to_vec())
 }
 
 #[cfg(test)]
