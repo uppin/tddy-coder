@@ -1,8 +1,8 @@
 # `session.SessionService` (tddy-session-lifecycle)
 
-Eight RPCs over a session's whole life: listing, starting (unary or streamed with attachment
-materialization), connecting, resuming, signalling, deleting, and measuring a checkout for a session
-room. The proto is `packages/tddy-service/proto/session.proto`; handlers live under
+Ten RPCs over a session's whole life: listing, starting (unary or streamed with attachment
+materialization), connecting, resuming, setting up the project's main, signalling, deleting,
+renaming, and measuring a checkout for a session room. The proto is `packages/tddy-service/proto/session.proto`; handlers live under
 `packages/tddy-session-lifecycle/src/` (the modules moved from `tddy-daemon` in `#unbundle` node 9),
 laid out as [module-layout.md](module-layout.md) describes. Listing's enrichment, reading and
 deletion are `tddy-session-activity`'s modules, reached here through facades.
@@ -18,6 +18,7 @@ deletion are `tddy-session-activity`'s modules, reached here through facades.
 | `ResumeSession` | unary | Resume a stopped session |
 | `SignalSession` | unary | Deliver a signal to a running session |
 | `DeleteSession` | unary | Tear down a session |
+| `RenameSession` | unary | Record or clear the session's name (`display_name` in `.session.yaml`) on the daemon holding it — a client sends it to the session's owning host, as it does `DeleteSession`. `NOT_FOUND` for a session this daemon does not hold, `INVALID_ARGUMENT` for a name over 80 characters or with a control character (`tddy_agent_launch::svc_rename_session`) |
 | `GetWorktreeSnapshot` | unary | One checkout measurement for a session room (local or peer-fetched) |
 
 `types.proto` types (`HostDocumentScope`, `SessionAgentStatus`, `SessionAgentActivity`,
@@ -44,6 +45,16 @@ phase's end; a forwarding task that ends abnormally is logged.
 report no phases and announce no worktree. Children spawned by a PR-stack orchestrator
 (`StackChildSpawnHandler`) and by a grill-me conversation (`GrillMeConversationSpawnHandler`) pass a
 discarding sink and announce nothing.
+
+## Naming a session at its start
+
+`StartSessionRequest.display_name` is held to `RenameSession`'s rules in `start_session_core`, before
+a start is forwarded to a peer or anything is created, so a refused name creates nothing. A
+`tddy_coder` session type that carries a name is refused (`refuse_a_named_tool_start`): its
+`.session.yaml` is written by its own process after spawn, so a name this daemon wrote would race that
+write. Every other start records the name once, centrally, after a **local** start answers with its
+session id (`record_the_started_sessions_name` in `start_session_on_request`); a forwarded start is
+named by the peer that creates it, and a start refused for an owned branch created nothing to name.
 
 ## The worktree observer port
 

@@ -16,6 +16,12 @@ Session utilities such as **`tddy-tools set-session-context`** are **not** liste
 
 The build script validates that every referenced schema and proto file exists under `generated/{recipe}/`, writes **`generated/schema-manifest.json`** (includes `proto` per goal), and emits **`generated/proto_basenames.rs`** for `schema_pipeline::expected_proto_basenames()`.
 
+The manifest is byte-identical whichever packages a cargo invocation builds alongside this one: its
+objects are assembled with their keys inserted in sorted order, which `serde_json` writes the same
+with or without its `preserve_order` feature — a feature any other crate in the same build (tree-sitter,
+schemars, the tauri crates) can switch on. The committed file therefore only changes when
+`goals.json` does.
+
 ## Module `schema_pipeline`
 
 Exposes **`proto_root()`**, **`expected_proto_basenames()`**, and **`generated_manifest_path()`** for tests and diagnostics.

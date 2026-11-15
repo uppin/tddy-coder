@@ -53,15 +53,17 @@ The label is resolved on the daemon's side of the boundary (`tddy-session-lifecy
 session-list enrichment that serves `ListSessions`. This crate receives the resolved label through
 [`SessionLabels`](../src/service/ports.rs), which is the seam.
 
-`tddy_core::session_label::session_display_label(repo_path, workflow_goal, session_id)` is the one
-rule: the basename of `repo_path`, else `workflow_goal`, else the first eight characters of the id.
+`tddy_core::session_label::session_display_label(display_name, repo_path, workflow_goal, session_id)`
+is the one rule: the name the session was given (`display_name`, trimmed; blank counts as none),
+else the basename of `repo_path`, else `workflow_goal`, else the first eight characters of the id.
 It mirrors `packages/tddy-session-web/src/utils/sessionDrawerLabel.ts` case for case, and the em-dash
 display placeholder counts as absent on both sides.
 
-`resolve_session_label(agents, sessions_base, session_id)` performs the lookup from **the same three values
+`resolve_session_label(agents, sessions_base, session_id)` performs the lookup from **the same four values
 `ListSessions` reports** — anything else would agree with the drawer only until the two sources
-diverged. It asks the worktree first and pays for the goal lookup only when the rule will consult
-it: this runs on every reported hook, twice per agent tool call.
+diverged. It reads `display_name` and `repo_path` from the one `.session.yaml` parse, returns the name
+when there is one, asks the worktree next, and pays for the goal lookup only when the rule will
+consult it: this runs on every reported hook, twice per agent tool call.
 
 ## Classification
 

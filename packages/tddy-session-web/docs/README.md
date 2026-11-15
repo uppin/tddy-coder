@@ -23,7 +23,7 @@ the app and `tddy-web`'s Cypress `mount` both have them; a missing provider thro
 | Path | Contents |
 |---|---|
 | `src/lib/` | `sessionIndicator` (the drawer dot), `sessionNotificationRegistry`, `sessionParticipantMetadata`, `sessionsRefreshBridge`, `sessionReadsLocalPaths` |
-| `src/utils/` | `crossHostSessions`, `projectHomeGroups`, `sessionProjectGroups`, `sessionDrawerLabel` (mirrored case for case by `tddy-changeset`'s `session_display_label`), `sessionSort`, `sessionDisplay`, `sessionSelection`, `connectionStatusForSession`, `sessionStackGroups`, `sessionProjectTable` |
+| `src/utils/` | `crossHostSessions`, `projectHomeGroups`, `sessionProjectGroups`, `sessionDrawerLabel` (the session's `displayName` first, then the derived label; mirrored case for case by `tddy-changeset`'s `session_display_label`), `sessionSort`, `sessionDisplay`, `sessionSelection`, `connectionStatusForSession`, `sessionStackGroups`, `sessionProjectTable` |
 | `src/rpc/` | `trafficMeter`, `daemonTransportFlavour`, `livekitPing`, `useSessionNotifications` (token through the auth port) |
 
 ## Runtime and terminals (#860)
@@ -46,7 +46,7 @@ browser observer identity").
 | Area | Source | Reference |
 |---|---|---|
 | Main pane | `src/SessionMainPane.tsx`, `src/sessionMainPaneProps.ts`, `src/sessionBaseView.ts`, `src/workflowViews.tsx` | over the 500-line budget: [code-issues/](code-issues/) |
-| Inspector | `src/SessionInspectorDrawer.tsx`, `src/SessionInspectorHeader.tsx`, `src/InspectorTabs.tsx`, the tabs (`SessionInspectorDetailsTab`, `SessionInspectorActivityTab`, `SessionFilesTab`, `SessionToolsTab`, `SessionUsageTab`, `SessionScreenSharingTab`, `SessionVncTab` + `VncPassphraseDialog`) and their state helpers | [inactive-session-activities.md](inactive-session-activities.md) |
+| Inspector | `src/SessionInspectorDrawer.tsx`, `src/SessionInspectorHeader.tsx`, `src/InspectorTabs.tsx`, the tabs (`SessionInspectorDetailsTab`, `SessionInspectorActivityTab`, `SessionFilesTab`, `SessionToolsTab`, `SessionUsageTab`, `SessionScreenSharingTab`, `SessionVncTab` + `VncPassphraseDialog`), `SessionNameEditor` (the session's name at the top of the Details tab: double-click or **Rename**, Enter saves, Escape or blur cancels, an empty name clears; it saves through `onRename`, which the drawer wires to `SessionService.RenameSession` on the owning host and then a sessions refresh, and offers no rename without a client and a session token) and their state helpers | [inactive-session-activities.md](inactive-session-activities.md) |
 | Agents | `src/SessionAgentRosterPane.tsx`, `src/SessionAgentTree.tsx` (`agentTree`), `src/AgentPicker.tsx`, `src/SessionAgentConversationLayer.tsx`, `src/SessionAgentConversationPane.tsx`, `src/useAgentConversation.ts`, `src/SessionActivitySidebar.tsx`, `src/SessionWithActivitySidebar.tsx` | [session-agent-tree.md](session-agent-tree.md), [session-agent-conversation.md](session-agent-conversation.md) |
 | Code pane | `src/code/` (`WorktreeCodePane`, code navigation, indexing indicator, restructure plan dialog, workflow files) | [code-navigation.md](code-navigation.md), [indexing-indicator.md](indexing-indicator.md) |
 

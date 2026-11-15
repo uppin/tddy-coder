@@ -2,7 +2,7 @@
 
 A `tddy-tools` process reports to one session: the toolcall socket `submit`, `ask`, `transition`
 and the MCP server's relays talk to, with the session's directory, repository and remote tool
-environment, and the operator-notify session `tddy-tools notify` reads. Neither a headless coding
+environment, and the operator-notify session `tddy-tools notify` and `tddy-tools rename-session` read. Neither a headless coding
 agent's environment nor a daemon-launched CLI agent's (claude-cli, cursor-cli, any `*-cli` agent)
 carries a `TDDY_*` variable, so the `tddy-tools` it runs — from its shell (`tddy-tools submit …`, the
 command every workflow prompt names; `tddy-tools notify`) or as its MCP server, which runs in the
@@ -70,12 +70,25 @@ locally in its place (a `branch-review` submission's `review.md` included;
 `adopt_session` makes it the process's own environment — `TDDY_SOCKET` (when the session has one),
 `TDDY_SESSION_DIR`, `TDDY_REPO_DIR`, the `TDDY_REMOTE_*` pair and the notify session — so the code
 that reads those variables (the MCP server's permission relays and path rules, the session tool
-client, `tddy-tools notify`) finds the session whichever source named it. `session_environment`
-lists what is set: of a pointer's `notify` map only the five names `tddy-tools notify` reads
+client, `tddy-tools notify`, `tddy-tools rename-session`) finds the session whichever source named
+it. `session_environment` lists what is set: of a pointer's `notify` map only the five names
+`tddy-tools notify` reads
 (`session_activity::notify_env`'s) are admitted, so a pointer found by walking up from the cwd cannot
 set `PATH` or any other variable. Writing the environment happens while the process is still single-threaded. A
 `Nowhere` result adopts nothing and leaves each command to report it; an unreadable pointer stops the
 process at start-up (`tddy-tools: the session pointer <path> could not be read: …`, exit 1).
+
+`notify` and `rename-session` share `notify_cli::NotifySession` (the session id, OS user and hook
+token those five names carry) and its `Transport`, which calls one `activity.ActivityService` method
+over the agent-tool socket when one is named, over the daemon URL otherwise, and returns the encoded
+answer: `notify` sends `ReportOperatorNotification`, `rename-session` sends `RenameOwnSession` and
+prints the name as recorded (`Session renamed: <name>`, or `Session name cleared`). Both refuse
+loudly — exit non-zero with the reason — when the environment names no session or the daemon refuses.
+
+A checkout that is itself a tddy session's worktree has a pointer of its own above every directory
+under it. A test that runs the `tddy-tools` binary to exercise a fake daemon therefore runs it from a
+directory outside the checkout (`std::env::temp_dir()`); run from inside, the binary adopts that
+pointer and reaches the session's real daemon instead.
 
 The agent that ran this `tddy-tools` never had those variables, and a command it runs through the
 exec tools (`tddy-tool-engine`'s contained shell) starts with every `TDDY_*` variable removed —
