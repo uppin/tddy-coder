@@ -49,6 +49,13 @@ pub struct HookCommandParams<'a> {
     /// is this plus [`AWAIT_CLIENT_MARGIN_SECS`], and Claude's `timeout` for it this plus
     /// [`CLAUDE_HOOK_TIMEOUT_MARGIN_SECS`] (`#home-inbox` 6/8, 8/9).
     pub answer_wait_secs: u64,
+    /// The hook carrier. `None` is the `tddy-tools session-hook` command every field above
+    /// describes. `Some(log)` is a session whose agent runs on a **target**, a machine with no
+    /// tddy software on it: every hook is
+    /// [`remote_hook_command`](crate::remote_hook_command::remote_hook_command), which appends one
+    /// line to the file `log` there, no hook that waits for an answer is installed, and no daemon
+    /// socket is needed (`#remote-shell` 6/7).
+    pub remote_log: Option<&'a str>,
 }
 
 /// How far the hook's own client bound sits past the daemon's deadline: the daemon answers
@@ -182,6 +189,7 @@ mod tests {
             hook_token: "tok-xyz",
             daemon_socket: None,
             answer_wait_secs: 120,
+            remote_log: None,
         }
     }
 

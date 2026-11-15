@@ -12,6 +12,7 @@ pub mod cursor_hooks;
 pub mod muse_hooks;
 pub mod provider_route;
 pub mod provider_route_file;
+pub mod remote_hook_command;
 pub mod session_pointer;
 pub mod spawn_env;
 pub mod stream;
@@ -53,4 +54,5 @@ pub use claude_hooks::{
 };
 pub use cursor_hooks::build_cursor_hooks_settings;
 pub use muse_hooks::build_muse_hooks_config_value;
+pub use remote_hook_command::{remote_hook_command, REMOTE_HOOK_LOG};
 pub use stream::ProgressEvent;

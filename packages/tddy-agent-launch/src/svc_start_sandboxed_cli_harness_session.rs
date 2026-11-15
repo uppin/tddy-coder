@@ -428,6 +428,7 @@ fn write_jail_hooks(
         hook_token: &hook_token,
         daemon_socket: Some(&daemon_socket),
         answer_wait_secs: spec.answer_wait_secs(),
+        remote_log: None,
     };
     crate::claude_cli_spawn_steps::record_answer_wait_secs(session_dir, spec.answer_wait_secs())?;
     let RenderedHooks::File(path, bytes) = adapter

@@ -38,6 +38,7 @@ impl ClaudeCliHooks {
             hook_token: &self.hook_token,
             daemon_socket: self.daemon_socket.as_deref(),
             answer_wait_secs: self.answer_wait_secs,
+            remote_log: None,
         }
     }
 }

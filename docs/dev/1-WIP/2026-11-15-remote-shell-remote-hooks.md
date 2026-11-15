@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — three crates (agent-backend, coding-agent-specs, agent-launch), a long-lived streamed reader with reconnect and ordering, an untrusted input stream
-**Branch**: `feature/remote-shell/remote-hooks`, base `feature/remote-shell/derived-hosts` — `#remote-shell 6/7`
+**Branch**: `feature/remote-shell/remote-hooks`, base `feature/remote-shell/derived-hosts` — `#remote-shell 6/7` — PR #920 (https://github.com/uppin/tddy-coder/pull/920)
 
 ## Initial Discovery
 
@@ -90,6 +90,35 @@ The first push after the plan (commit 2) publishes, as the start of this same PR
 
 This PR goes on to implement all of it. It does not merge in that state.
 
+## Contract as published
+
+Published in the contract commit.
+
+- **`tddy_agent_backend::remote_hook_command`**: `REMOTE_HOOK_LOG = ".tddy/hooks.log"`, `remote_hook_command(event, hook_token, log_path) -> String`. Both re-exported, so reachable as `tddy_core::…`.
+- **`HookCommandParams.remote_log: Option<&str>`**: `None` is today's `tddy-tools` command, `Some(log)` is the remote log carrier. The builders do not honour it yet.
+- **`tddy_agent_launch::remote_hook_follower`** (`TODO(remote-hooks)` bodies): `HookLine { event, payload: serde_json::Value }`, `HookLine::parse(line, expected_token)`, `HookLineError::{Malformed, WrongToken, UnknownEvent, BrokenPayload}`, `trait HookSink { async fn deliver(&self, line) }`, `follow_command(log_path, offset)`, `create_remote_hook_log(shell, worktree)`, `remove_remote_hook_log(shell, worktree)`, `RemoteHookFollower::{start(shell, log_path, hook_token, sink), dropped_lines, stop}`.
+- 13 other `HookCommandParams` literals gained `remote_log: None`. Mechanical.
+
+Where the contract differs from the plan above:
+
+- **The carrier is a field, not the `HookCarrier` enum.** The enum would move seven fields into a variant and rewrite all 14 literals and every read of them, including the split launch and the jail hooks. The cost of the field: a remote session's params carry tools and daemon fields nobody reads.
+- **The planned one-liner is wrong and is replaced.** `{ printf …; cat | tr -d '\n'; printf '\n'; } >> L` writes three times, so two hooks firing together interleave; it fails `two_hooks_fired_together_each_leave_a_whole_line`. The command is:
+
+  ```sh
+  printf '%s\t%s\t%s\n' 'E' 'T' "$(cat | tr -d '\n')" >> 'L'
+  ```
+
+  One write, after the payload has been read. It passed all seven shell tests in a trial that was then reverted. It still uses only `sh`, `printf`, `cat` and `tr`.
+- **`follow_command`, `create_remote_hook_log`, `remove_remote_hook_log` and `dropped_lines` are added** so the tail command, the log's lifecycle and "dropped and counted" are each pinned by a test.
+
+Decisions for the implementation:
+
+- **"No hook that waits" is per agent, not per event name.** Claude Code's `PermissionRequest` and its `PreToolUse` question matcher wait for an answer locally, so on a target they are not installed; the render test pins Claude to its six reporting events. Muse's hooks of the same names only report and never wait, so on a target Muse keeps all eight with the log command. Cursor installs none that wait.
+- **Delivery target**: `ActivityServiceImpl::report_session_status_impl` and `report_agent_activity_impl` in `packages/tddy-session-activity/src/service/hook_reports.rs`. The payload-to-request mapping is `tddy_tools::session_hook::session_status_request`, which takes the CLI's clap struct and lives in a crate the launch cannot depend on. The implementation moves that mapping to where both `tddy-tools` and the daemon reach it (`tddy-session-activity` already is a dependency of `tddy-agent-launch`), with `tddy-tools` calling the moved function. No second copy.
+- **Wiring**: the launch passes `remote_log` when rendering hooks on a target and starts the follower after the agent; the exit and delete paths stop it and remove the log. The end-to-end tests drive `follower.stop()` and `remove_remote_hook_log` directly, so the implementation adds a test that deleting a target session through the service removes the log.
+
+Red state at the contract commit: `remote_hook_command` unit tests 0 passed / 7 failed (each runs the command under a real `/bin/sh`); `remote_hooks_render_acceptance` 2 / 4 (the two passing guard unchanged local behaviour); `remote_hook_follower` unit tests 1 / 10; `remote_hook_follower_acceptance` 0 / 5; `remote_hooks_acceptance` 0 / 2, both at this PR's own stubs. After this PR's stubs are filled, the end-to-end pair next reaches `shell-port`'s `SshShell` and `ssh-agent-launch`'s `launch_on_target`: it goes green only once both are. `./test -p tddy-agent-backend -p tddy-coding-agent-specs`: 480 passed, 11 failed, the 11 being new. Clippy and fmt clean on the four touched packages. `the_command_names_no_tddy_binary` was verified on macOS only.
+
 ## Green wave
 
 **Wave:** 3 of 4
@@ -154,10 +183,10 @@ graph LR
 
 ```sh
 # the hook command on a target, for event E, token T, log L
-{ printf '%s\t%s\t' 'E' 'T'; cat | tr -d '\n'; printf '\n'; } >> 'L'
+printf '%s\t%s\t%s\n' 'E' 'T' "$(cat | tr -d '\n')" >> 'L'
 ```
 
-- One line per hook: event, token, the payload with newlines removed (a JSON payload stays valid without them). `>>` on a short line is atomic enough for concurrent hooks on a local filesystem; the follower tolerates a torn line by dropping it.
+- One line per hook: event, token, the payload with newlines removed (a JSON payload stays valid without them). The line is written by one `printf` after the payload has been read, so two hooks firing together each leave a whole line; the follower still drops a line it cannot parse.
 - The follower: `tail -c +<offset+1> -f '<log>'` through `exec_streamed`; it counts bytes, splits on newlines, checks the token, parses the payload, delivers. On a stream end it reconnects with back-off and the offset it had reached.
 - Delivery calls the same function the `session-hook` RPC handler calls, with the session's id and OS user.
 - Under `RemoteLog` the builders skip awaiting entries; Muse and Cursor's socket requirement is satisfied by the carrier.
@@ -248,10 +277,10 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved in advance on 2026-11-15: "proceed with your recommended option"; the titles are listed in the PR body)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

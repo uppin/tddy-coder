@@ -229,6 +229,7 @@ mod tests {
             hook_token: "a-hook-token",
             daemon_socket: Some("/var/folders/xy/T/tddy-agent-tools-1a2b.sock"),
             answer_wait_secs: 120,
+            remote_log: None,
         };
 
         // When
@@ -293,6 +294,7 @@ mod tests {
             hook_token: "a-hook-token",
             daemon_socket: None,
             answer_wait_secs: 120,
+            remote_log: None,
         };
 
         // When
@@ -363,6 +365,7 @@ mod tests {
             hook_token: "a-hook-token",
             daemon_socket: None,
             answer_wait_secs: 120,
+            remote_log: None,
         };
 
         // When
