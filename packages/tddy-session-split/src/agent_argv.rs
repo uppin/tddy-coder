@@ -133,13 +133,7 @@ pub fn split_claude_extra_args(
     // The variant carries the flags that keep the checkout's own configuration off this host
     // (`--strict-mcp-config`, `--setting-sources user`) and withdraws every native filesystem and
     // shell tool, so the slots below add only what the session's roster changes.
-    let mut args = spec
-        .variant_args(HOST_AGENT_VARIANT)
-        .map_err(|e| Status::internal(e.to_string()))?;
-    args.extend(
-        spec.variant_hooks_args(HOST_AGENT_VARIANT, &split_hooks_file(session_dir))
-            .map_err(|e| Status::internal(e.to_string()))?,
-    );
+    let mut args = host_variant_args(spec, session_dir)?;
     let withdrawn = withdrawn_tools(withdrawals);
     let withdrawn_refs: Vec<&str> = withdrawn.iter().map(String::as_str).collect();
     // Every exec tool the roster leaves alone is pre-approved: they are all reachable, they simply
@@ -155,16 +149,7 @@ pub fn split_claude_extra_args(
     // `mcp__tddy-tools__` form is the route this agent actually had, and it stays callable through
     // the permission prompt until `--disallowedTools` names it (`PermissionServer::decide` allows
     // every `mcp__tddy-tools__*` call it is asked about).
-    let natives = spec
-        .agent
-        .variants
-        .get(HOST_AGENT_VARIANT)
-        .map(|variant| variant.withdraw_native.as_slice())
-        .unwrap_or_default();
-    let denied_tools: Vec<String> = build_claude_disallowlist(&withdrawn_refs)
-        .into_iter()
-        .filter(|tool| !natives.contains(tool))
-        .collect();
+    let denied_tools = split_denied_tools(spec, &withdrawn_refs);
     let mut rendered = slots::render(
         &without_strict_mcp_flag(spec),
         &SlotInputs {
@@ -188,6 +173,31 @@ pub fn split_claude_extra_args(
     write_registrations(&mut rendered.files)?;
     args.extend(rendered.argv_extra);
     Ok(args)
+}
+
+fn host_variant_args(spec: &CodingAgentSpec, session_dir: &Path) -> Result<Vec<String>, Status> {
+    let mut args = spec
+        .variant_args(HOST_AGENT_VARIANT)
+        .map_err(|e| Status::internal(e.to_string()))?;
+    args.extend(
+        spec.variant_hooks_args(HOST_AGENT_VARIANT, &split_hooks_file(session_dir))
+            .map_err(|e| Status::internal(e.to_string()))?,
+    );
+    Ok(args)
+}
+
+fn split_denied_tools(spec: &CodingAgentSpec, withdrawn_refs: &[&str]) -> Vec<String> {
+    let natives = spec
+        .agent
+        .variants
+        .get(HOST_AGENT_VARIANT)
+        .map(|variant| variant.withdraw_native.as_slice())
+        .unwrap_or_default();
+    let denied_tools: Vec<String> = build_claude_disallowlist(withdrawn_refs)
+        .into_iter()
+        .filter(|tool| !natives.contains(tool))
+        .collect();
+    denied_tools
 }
 
 /// The hooks file a split agent's launch writes into its context dir under `session_dir` — the
