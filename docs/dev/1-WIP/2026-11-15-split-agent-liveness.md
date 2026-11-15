@@ -5,7 +5,7 @@
 **Type**: Bug Fix
 **Complexity**: 4 — three crates (`tddy-pty`, `tddy-cli-sessions`, `tddy-session-split`), a spawned-process seam, a cross-host acceptance test over the LiveKit testkit harness
 **Stack**: `#split-alive` 1/4 — branch `feature/split-alive/agent-liveness`, base `master`
-**PR**: _(set in pass 2)_
+**PR**: [#905](https://github.com/uppin/tddy-coder/pull/905)
 
 ## Initial Discovery
 
@@ -80,8 +80,16 @@ The first push of this PR (pass 2, commit 2) publishes:
 
 - `packages/tddy-pty/src/exit_status.rs` — `pub fn task_status_of(status: &portable_pty::ExitStatus) -> TaskStatus` (`// TODO(agent-liveness): implement`).
 - `packages/tddy-cli-sessions/src/cli_session_manager/main_exit.rs` — `pub(crate) fn describe_main_exit(...) -> String` (stub).
-- `packages/tddy-session-split/src/svc_spawn_split_agent/startup.rs` — `SplitAgentStartup { grace, poll }`, `SplitAgentDied { outcome, last_output }` with `Display`, `await_split_agent_startup(..) -> Result<(), SplitAgentDied>` (stubs).
+- `packages/tddy-session-split/src/svc_spawn_split_agent/startup.rs` — `SplitAgentStartup { grace, poll }` with `from_config`,
+  `StartupOutcome { Survived, Exited }`, `await_split_agent_startup(done: watch::Receiver<bool>, SplitAgentStartup) -> StartupOutcome`
+  (watches `PtyHandle::pty_done`), `SplitAgentDied { outcome, last_output }` with `from_capture(outcome, capture_bytes)` and
+  `Display` (stubs). How the outcome string is obtained for an ended terminal (the task's `TaskStatus`, which `PtyHandle` does
+  not expose today) is the implementer's call inside `tddy-cli-sessions` / `tddy-session-split`.
+- The monitor already calls `task_status_of` (stub keeps today's behaviour).
 - The failing tests listed below.
+
+**Published (commit 2):** as above; `describe_main_exit(session_id, pid, &TaskStatus, Duration)` in
+`tddy-cli-sessions/src/cli_session_manager/main_exit.rs`; `task_status_of` in `tddy-pty/src/exit_status.rs`.
 
 ## Green wave
 
@@ -165,19 +173,20 @@ fake terminal status so its timing is not tested through LiveKit.
 
 | Test | File |
 |---|---|
-| `a_normal_exit_keeps_its_code`, `a_signal_is_a_failure_naming_it` | `packages/tddy-pty/src/exit_status.rs` |
-| `an_ended_main_is_described_with_its_outcome_and_lifetime`, `a_cancelled_main_says_the_daemon_stopped_it` | `packages/tddy-cli-sessions/src/cli_session_manager/main_exit.rs` |
-| `an_agent_still_running_after_the_window_has_started`, `an_agent_that_exits_inside_the_window_is_reported_with_its_last_lines`, `the_last_lines_are_capped_and_stripped_of_terminal_escapes` | `packages/tddy-session-split/src/svc_spawn_split_agent/startup.rs` |
+| `a_normal_exit_keeps_its_code`, `a_clean_exit_is_a_completion_with_code_zero` (passes today, guards the mapping), `a_signal_is_a_failure_naming_it` | `packages/tddy-pty/src/exit_status.rs` |
+| `an_ended_main_is_described_with_its_outcome_and_lifetime`, `a_signalled_main_names_the_signal`, `a_cancelled_main_says_the_daemon_stopped_it` | `packages/tddy-cli-sessions/src/cli_session_manager/main_exit.rs` |
+| `an_agent_still_running_after_the_window_has_started` (passes on the stub), `an_agent_that_exits_inside_the_window_has_not_started`, `an_agent_whose_terminal_is_already_gone_has_not_started`, `the_last_lines_are_capped_and_stripped_of_terminal_escapes`, `a_death_reads_as_a_startup_failure_quoting_the_agent` | `packages/tddy-session-split/src/svc_spawn_split_agent/startup.rs` |
+| `a_split_agent_that_exits_during_startup_fails_the_start_with_its_last_output`, `a_split_agents_terminal_is_recorded_in_its_session_dir` | `packages/tddy-daemon/tests/remote_managed_worktree_cross_host_acceptance.rs` (acceptance, above) |
 
 ## TODO
 
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer for this stack, 2026-11-15: "finish both passes without approvals")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green
 - [ ] Validate changes
 - [ ] Wrap docs

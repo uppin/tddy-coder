@@ -994,6 +994,95 @@ async fn a_failed_agent_spawn_tears_down_the_workspace_session_on_the_codebase_d
     );
 }
 
+#[tokio::test]
+#[serial]
+async fn a_split_agent_that_exits_during_startup_fails_the_start_with_its_last_output() {
+    // Given an agent host whose claude says why it cannot go on and exits with code 3 at once —
+    // spawned fine, dead before its startup window closes
+    let stubs = tempfile::tempdir().unwrap();
+    let dying_claude = a_stub_agent_script(stubs.path(), "dying-claude.sh")
+        .then_running("echo 'boom: cannot reach the codebase'; exit 3")
+        .build();
+    let hosts = split_hosts_with_agent_claude_binary(Some(
+        dying_claude.to_str().expect("stub path is valid UTF-8"),
+    ))
+    .await;
+    let before = sessions_on(&hosts.codebase).await;
+
+    // When the agent host starts a split session
+    let refused = hosts
+        .agent
+        .start_session(Request::direct(a_split_session_request()))
+        .await
+        .expect_err("a split start whose agent dies during startup must fail");
+
+    // Then the failure says how the agent ended and what it said last
+    assert!(
+        refused.message().contains("exit code 3"),
+        "the failure must name the agent's exit status, got: {}",
+        refused.message()
+    );
+    assert!(
+        refused
+            .message()
+            .contains("boom: cannot reach the codebase"),
+        "the failure must quote the agent's last output, got: {}",
+        refused.message()
+    );
+
+    // And the codebase host is left exactly as it was
+    assert_eq!(
+        sessions_on(&hosts.codebase).await,
+        before,
+        "a split start whose agent died must leave no workspace session behind on the codebase host"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_split_agents_terminal_is_recorded_in_its_session_dir() {
+    // Given an agent host whose claude prints a marker and then stays up
+    let stubs = tempfile::tempdir().unwrap();
+    let talking_claude = a_stub_agent_script(stubs.path(), "talking-claude.sh")
+        .then_running("echo 'split-agent-marker'")
+        .then_reading_stdin()
+        .build();
+    let hosts = split_hosts_with_agent_claude_binary(Some(
+        talking_claude.to_str().expect("stub path is valid UTF-8"),
+    ))
+    .await;
+
+    // When a split session starts
+    let started = hosts
+        .agent
+        .start_session(Request::direct(a_split_session_request()))
+        .await
+        .expect("a split start whose agent stays up must succeed")
+        .into_inner();
+
+    // Then the agent's terminal is recorded in its session dir, as every other agent's is
+    let recording = unified_session_dir_path(&hosts.agent_sessions_base, &started.session_id)
+        .join("terminals")
+        .join("main.capture");
+    tddy_testing_commons::wait::eventually(
+        "the split agent's terminal recording holds what it printed",
+        Duration::from_secs(10),
+        || {
+            let recorded = std::fs::read(&recording)
+                .map_err(|e| format!("{} is not readable: {e}", recording.display()))?;
+            if String::from_utf8_lossy(&recorded).contains("split-agent-marker") {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{} does not hold the marker yet",
+                    recording.display()
+                ))
+            }
+        },
+    )
+    .await;
+}
+
 // ---------------------------------------------------------------------------
 // Sandbox on the codebase half of a split placement
 // ---------------------------------------------------------------------------

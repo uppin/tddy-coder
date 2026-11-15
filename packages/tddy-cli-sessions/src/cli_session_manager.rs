@@ -191,6 +191,8 @@ mod argv;
 mod pty_spawn;
 pub use pty_spawn::ExitHook;
 
+mod main_exit;
+
 mod capture_recorder;
 pub use capture_recorder::{
     main_capture_recording_path, MAIN_CAPTURE_RECORDING, RECORDING_INTERVAL,

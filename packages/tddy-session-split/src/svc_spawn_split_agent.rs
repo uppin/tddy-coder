@@ -422,6 +422,7 @@ mod launch;
 mod split_agent_pty;
 #[cfg(test)]
 mod split_agent_pty_tests;
+mod startup;
 
 pub use crate::svc_paired_codebase_teardown;
 use crate::svc_split_agent_metadata::write_split_agent_metadata;
