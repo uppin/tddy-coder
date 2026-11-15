@@ -435,9 +435,19 @@ impl CodingAgentSpec {
         name: &str,
         hooks_file: &std::path::Path,
     ) -> Result<Vec<String>, VariantError> {
-        // TODO(split-hooks): implement
-        let _ = (name, hooks_file);
-        Ok(Vec::new())
+        let variant = self
+            .agent
+            .variants
+            .get(name)
+            .ok_or_else(|| VariantError::Unknown {
+                agent: self.id.clone(),
+                variant: name.to_string(),
+                declared: self.agent.variants.keys().cloned().collect(),
+            })?;
+        Ok(match &variant.hooks_flag {
+            Some(flag) => vec![flag.clone(), hooks_file.to_string_lossy().into_owned()],
+            None => Vec::new(),
+        })
     }
 }
 

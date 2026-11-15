@@ -83,10 +83,10 @@ Real dependency edges: none.
 
 ## Scope
 
-- [ ] `host_agent` variant declares its hooks flag; Claude's is `--settings`
-- [ ] Split start and resume pass the hooks file with that flag
-- [ ] Split agent env carries the spec's `run.env` on start and resume
-- [ ] Docs: `remote-managed-worktree.md` § Session start names the flag and why `--setting-sources user` stays
+- [x] `host_agent` variant declares its hooks flag; Claude's is `--settings`
+- [x] Split start and resume pass the hooks file with that flag
+- [x] Split agent env carries the spec's `run.env` on start and resume
+- [x] Docs: `remote-managed-worktree.md` § Session start names the flag and why `--setting-sources user` stays
 
 ## Technical Changes
 
@@ -115,9 +115,9 @@ already extends its env with `wiring.env`, so it needs no change.
 
 ## Implementation Milestones
 
-- [ ] Spec field + renderer + YAML, unit tests green
-- [ ] Split args carry the flag (start and resume), wiring tests green
-- [ ] Split env carries `run.env`, tests green
+- [x] Spec field + renderer + YAML, unit tests green
+- [x] Split args carry the flag (start and resume), wiring tests green
+- [x] Split env carries `run.env`, tests green
 
 ## Testing Plan
 
@@ -150,7 +150,7 @@ the hook *fires* is Claude's behaviour, verified once by hand (2026-11-15) and r
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer for this stack, 2026-11-15: "finish both passes without approvals")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green
+- [x] TDD Green
 - [ ] Validate changes
 - [ ] Wrap docs
 

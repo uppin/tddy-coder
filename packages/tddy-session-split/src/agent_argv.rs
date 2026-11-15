@@ -136,6 +136,10 @@ pub fn split_claude_extra_args(
     let mut args = spec
         .variant_args(HOST_AGENT_VARIANT)
         .map_err(|e| Status::internal(e.to_string()))?;
+    args.extend(
+        spec.variant_hooks_args(HOST_AGENT_VARIANT, &split_hooks_file(session_dir))
+            .map_err(|e| Status::internal(e.to_string()))?,
+    );
     let natives = spec
         .agent
         .variants
@@ -190,9 +194,9 @@ pub fn split_claude_extra_args(
 /// The hooks file a split agent's launch writes into its context dir under `session_dir` — the
 /// file the `host_agent` variant's `hooks_flag` loads.
 pub fn split_hooks_file(session_dir: &Path) -> PathBuf {
-    // TODO(split-hooks): implement
-    let _ = session_dir;
-    PathBuf::new()
+    crate::split_session::split_context_dir(session_dir)
+        .join(".claude")
+        .join("settings.local.json")
 }
 
 /// The coding agent a split session runs (split placement is `claude-cli` only).

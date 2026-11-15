@@ -397,7 +397,12 @@ pub fn prepare_split_agent_wiring(
             &tool_server_env,
             withdrawals,
         )?,
-        env: Vec::new(),
+        env: spec
+            .run
+            .env
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect(),
         session_pointer,
     })
 }
