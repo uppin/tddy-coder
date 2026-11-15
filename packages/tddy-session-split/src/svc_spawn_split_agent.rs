@@ -72,6 +72,97 @@ impl SplitSessions {
             codebase_instance_id,
             codebase_session_id,
         } = *start;
+        let (session_dir, initial_prompt, tddy_tools_path, remote) = self
+            .prepare_split_launch(
+                room,
+                req,
+                progress,
+                os_user,
+                session_id,
+                sessions_base,
+                codebase_instance_id,
+                codebase_session_id,
+            )
+            .await?;
+
+        // A split session's roster lives on the codebase daemon, in the workspace session the
+        // forward created moments ago — which is where this start's seed was recorded, before that
+        // call answered. So the withdrawals are read back from the host that holds them, exactly as
+        // the resume path reads them (`resume_split_wiring`): `--allowedTools` is fixed at launch,
+        // and a seeded agent whose `replaces` reached the spawn as an empty list would leave the
+        // main agent holding the tools it gave away until the first resume.
+        //
+        // A start that seeded nothing wrote nothing, so there is nothing to read and no forward is
+        // spent asking: agents on such a session arrive later through `AttachSessionAgent`, which
+        // relaunches the agent against the roster it just changed.
+        let (context_dir, extra_args) = self
+            .split_agent_launch_args(
+                req,
+                codebase_instance_id,
+                codebase_session_id,
+                &session_dir,
+                &tddy_tools_path,
+                &remote,
+            )
+            .await?;
+
+        // Claude Code reads `.claude/settings.local.json` from its working directory, which for a
+        // split session is the context dir rather than a worktree. Best-effort, as elsewhere: a
+        // missing hook file costs status reporting, not the session.
+        let (hook_token, handle) = self
+            .spawn_split_agent_process(SplitAgentProcess {
+                os_user,
+                session_id,
+                req,
+                initial_prompt,
+                tddy_tools_path,
+                remote,
+                context_dir,
+                extra_args,
+                session_dir: &session_dir,
+            })
+            .await?;
+
+        self.ensure_split_agent_alive(session_id, &handle).await?;
+
+        write_split_agent_metadata(
+            session_id,
+            codebase_instance_id,
+            codebase_session_id,
+            req,
+            session_dir,
+            hook_token,
+            &handle,
+        )?;
+
+        split_start_response(
+            room,
+            session_id,
+            codebase_instance_id,
+            codebase_session_id,
+            handle,
+        )
+    }
+
+    async fn prepare_split_launch(
+        &self,
+        room: Option<&crate::split_session::SplitAgentRoom>,
+        req: &StartSessionRequest,
+        progress: &AttachmentProgressSink,
+        os_user: &str,
+        session_id: &str,
+        sessions_base: &Path,
+        codebase_instance_id: &str,
+        codebase_session_id: &str,
+    ) -> Result<
+        (
+            std::path::PathBuf,
+            String,
+            std::path::PathBuf,
+            tddy_core::RemoteToolEnv,
+        ),
+        Status,
+    > {
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
@@ -87,7 +178,6 @@ impl SplitSessions {
             progress,
         )
         .await?;
-
         let (tddy_tools_path, remote) = self
             .split_agent_tool_wiring(
                 os_user,
@@ -107,7 +197,6 @@ impl SplitSessions {
             &session_dir,
         )
         .await?;
-
         // On record before the agent exists: who may answer this session's prompts is read from
         // it, and a link written after the spawn is a window in which the session answers to no
         // one. The codebase branch rides in the same changeset — read back from the codebase
@@ -115,17 +204,18 @@ impl SplitSessions {
         // caller's Err path tears the codebase half down.
         self.record_first_changeset(&session_dir, codebase_instance_id, codebase_session_id, req)
             .await?;
+        Ok((session_dir, initial_prompt, tddy_tools_path, remote))
+    }
 
-        // A split session's roster lives on the codebase daemon, in the workspace session the
-        // forward created moments ago — which is where this start's seed was recorded, before that
-        // call answered. So the withdrawals are read back from the host that holds them, exactly as
-        // the resume path reads them (`resume_split_wiring`): `--allowedTools` is fixed at launch,
-        // and a seeded agent whose `replaces` reached the spawn as an empty list would leave the
-        // main agent holding the tools it gave away until the first resume.
-        //
-        // A start that seeded nothing wrote nothing, so there is nothing to read and no forward is
-        // spent asking: agents on such a session arrive later through `AttachSessionAgent`, which
-        // relaunches the agent against the roster it just changed.
+    async fn split_agent_launch_args(
+        &self,
+        req: &StartSessionRequest,
+        codebase_instance_id: &str,
+        codebase_session_id: &str,
+        session_dir: &std::path::Path,
+        tddy_tools_path: &std::path::Path,
+        remote: &tddy_core::RemoteToolEnv,
+    ) -> Result<(std::path::PathBuf, Vec<String>), Status> {
         let roster = self
             .split_agent_roster(codebase_instance_id, codebase_session_id, req)
             .await?;
@@ -147,30 +237,20 @@ impl SplitSessions {
                 codebase_instance_id,
                 codebase_session_id,
                 req,
-                &session_dir,
-                &tddy_tools_path,
+                session_dir,
+                tddy_tools_path,
                 &tool_server_env,
                 withdrawals,
             )
             .await?;
+        Ok((context_dir, extra_args))
+    }
 
-        // Claude Code reads `.claude/settings.local.json` from its working directory, which for a
-        // split session is the context dir rather than a worktree. Best-effort, as elsewhere: a
-        // missing hook file costs status reporting, not the session.
-        let (hook_token, handle) = self
-            .spawn_split_agent_process(SplitAgentProcess {
-                os_user,
-                session_id,
-                req,
-                initial_prompt,
-                tddy_tools_path,
-                remote,
-                context_dir,
-                extra_args,
-                session_dir: &session_dir,
-            })
-            .await?;
-
+    async fn ensure_split_agent_alive(
+        &self,
+        session_id: &str,
+        handle: &Arc<tddy_cli_sessions::cli_session_manager::PtyHandle>,
+    ) -> Result<(), Status> {
         let recording = tddy_cli_sessions::cli_session_manager::main_capture_recording_path(
             &self.tddy_data_dir,
             session_id,
@@ -179,7 +259,7 @@ impl SplitSessions {
             .record_main_capture(session_id, recording.clone())
             .await;
         startup::ensure_split_agent_started(
-            &handle,
+            handle,
             startup::SplitAgentStartup::from_config(&self.config),
         )
         .await
@@ -189,34 +269,7 @@ impl SplitSessions {
         self.cli_manager
             .record_main_capture(session_id, recording)
             .await;
-
-        write_split_agent_metadata(
-            session_id,
-            codebase_instance_id,
-            codebase_session_id,
-            req,
-            session_dir,
-            hook_token,
-            &handle,
-        )?;
-
-        let placement = match room {
-            Some(_) => "split",
-            None => "jailed-codebase",
-        };
-        log::info!(
-            target: "tddy_daemon::connection_service",
-            "started {placement} claude-cli session {session_id} pid={} codebase_daemon={codebase_instance_id} codebase_session={codebase_session_id}",
-            handle.pid
-        );
-
-        Ok(Response::new(StartSessionResponse {
-            session_id: session_id.to_string(),
-            livekit_room: String::new(),
-            livekit_url: String::new(),
-            livekit_server_identity: String::new(),
-            branch_conflict: None,
-        }))
+        Ok(())
     }
 
     async fn split_agent_tool_wiring(
@@ -424,6 +477,32 @@ impl SplitSessions {
             _ => crate::split_ports::TokenBearer::Person,
         }
     }
+}
+
+fn split_start_response(
+    room: Option<&crate::split_session::SplitAgentRoom>,
+    session_id: &str,
+    codebase_instance_id: &str,
+    codebase_session_id: &str,
+    handle: Arc<tddy_cli_sessions::cli_session_manager::PtyHandle>,
+) -> Result<Response<StartSessionResponse>, Status> {
+    let placement = match room {
+        Some(_) => "split",
+        None => "jailed-codebase",
+    };
+    log::info!(
+        target: "tddy_daemon::connection_service",
+        "started {placement} claude-cli session {session_id} pid={} codebase_daemon={codebase_instance_id} codebase_session={codebase_session_id}",
+        handle.pid
+    );
+
+    Ok(Response::new(StartSessionResponse {
+        session_id: session_id.to_string(),
+        livekit_room: String::new(),
+        livekit_url: String::new(),
+        livekit_server_identity: String::new(),
+        branch_conflict: None,
+    }))
 }
 
 mod launch;
