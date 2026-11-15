@@ -68,21 +68,12 @@ impl SplitSessions {
         let SplitAgentStart {
             os_user,
             session_id,
-            sessions_base,
             codebase_instance_id,
             codebase_session_id,
+            ..
         } = *start;
         let (session_dir, initial_prompt, tddy_tools_path, remote) = self
-            .prepare_split_launch(
-                room,
-                req,
-                progress,
-                os_user,
-                session_id,
-                sessions_base,
-                codebase_instance_id,
-                codebase_session_id,
-            )
+            .prepare_split_launch(start, room, req, progress)
             .await?;
 
         // A split session's roster lives on the codebase daemon, in the workspace session the
@@ -146,14 +137,10 @@ impl SplitSessions {
 
     async fn prepare_split_launch(
         &self,
+        start: &SplitAgentStart<'_>,
         room: Option<&crate::split_session::SplitAgentRoom>,
         req: &StartSessionRequest,
         progress: &AttachmentProgressSink,
-        os_user: &str,
-        session_id: &str,
-        sessions_base: &Path,
-        codebase_instance_id: &str,
-        codebase_session_id: &str,
     ) -> Result<
         (
             std::path::PathBuf,
@@ -163,6 +150,13 @@ impl SplitSessions {
         ),
         Status,
     > {
+        let SplitAgentStart {
+            os_user,
+            session_id,
+            sessions_base,
+            codebase_instance_id,
+            codebase_session_id,
+        } = *start;
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
