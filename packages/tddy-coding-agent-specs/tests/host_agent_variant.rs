@@ -96,6 +96,7 @@ fn a_variant_that_withdraws_tools_through_an_unsupported_deny_slot_is_refused() 
         tddy_coding_agent_specs::AgentVariant {
             args: vec![],
             withdraw_native: vec!["Shell".to_string()],
+            hooks_flag: None,
         },
     );
 
@@ -109,5 +110,70 @@ fn a_variant_that_withdraws_tools_through_an_unsupported_deny_slot_is_refused() 
             agent: "cursor".to_string(),
             variant: HOST_AGENT_VARIANT.to_string(),
         })
+    );
+}
+
+#[test]
+fn claudes_host_agent_loads_the_daemons_hooks_file_with_settings() {
+    // Given Claude, whose host_agent variant keeps the checkout's settings out with
+    // `--setting-sources user` — which also skips the hooks file the daemon writes
+    let claude = the_embedded_spec("claude");
+    let hooks_file = std::path::Path::new("/sessions/s1/context/.claude/settings.local.json");
+
+    // When the variant's hooks flags are rendered for that file
+    let args = claude
+        .variant_hooks_args(HOST_AGENT_VARIANT, hooks_file)
+        .expect("claude declares a host_agent variant");
+
+    // Then the file is loaded explicitly with `--settings`
+    assert_eq!(
+        args,
+        vec![
+            "--settings".to_string(),
+            "/sessions/s1/context/.claude/settings.local.json".to_string()
+        ]
+    );
+}
+
+#[test]
+fn a_variant_declaring_no_hooks_flag_loads_no_hooks_file() {
+    // Given an agent whose host_agent variant declares no hooks flag
+    let mut claude = the_embedded_spec("claude");
+    claude.agent.variants.insert(
+        HOST_AGENT_VARIANT.to_string(),
+        tddy_coding_agent_specs::AgentVariant {
+            args: vec!["--strict-mcp-config".to_string()],
+            withdraw_native: vec![],
+            hooks_flag: None,
+        },
+    );
+
+    // When its hooks flags are rendered
+    let args = claude
+        .variant_hooks_args(
+            HOST_AGENT_VARIANT,
+            std::path::Path::new("/any/.claude/settings.local.json"),
+        )
+        .expect("the variant is declared");
+
+    // Then there are none
+    assert_eq!(args, Vec::<String>::new());
+}
+
+#[test]
+fn hooks_flags_for_an_undeclared_variant_are_refused() {
+    // Given Cursor, which declares no host_agent variant
+    let cursor = the_embedded_spec("cursor");
+
+    // When its host_agent hooks flags are asked for
+    let refused = cursor.variant_hooks_args(
+        HOST_AGENT_VARIANT,
+        std::path::Path::new("/any/.claude/settings.local.json"),
+    );
+
+    // Then the variant is refused, as its args would be
+    assert!(
+        matches!(refused, Err(VariantError::Unknown { .. })),
+        "an undeclared variant must be refused, got {refused:?}"
     );
 }

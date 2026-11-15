@@ -187,6 +187,14 @@ pub fn split_claude_extra_args(
     Ok(args)
 }
 
+/// The hooks file a split agent's launch writes into its context dir under `session_dir` — the
+/// file the `host_agent` variant's `hooks_flag` loads.
+pub fn split_hooks_file(session_dir: &Path) -> PathBuf {
+    // TODO(split-hooks): implement
+    let _ = session_dir;
+    PathBuf::new()
+}
+
 /// The coding agent a split session runs (split placement is `claude-cli` only).
 pub const SPLIT_AGENT_ID: &str = "claude";
 

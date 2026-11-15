@@ -112,3 +112,38 @@ async fn the_split_agents_pty_sees_no_unlisted_daemon_variable() {
     }
     assert!(env.contains_key("PATH"), "PATH is a base variable");
 }
+
+#[tokio::test]
+async fn the_split_agents_pty_carries_its_specs_launch_variables() {
+    // Given — the split agent's spec, whose run section asks for the fullscreen renderer
+    let spec = tddy_coding_agent_specs::embedded_spec("claude").expect("claude is built in");
+    let stub = an_env_recording_agent();
+    let context_dir = tempfile::tempdir().expect("context dir");
+    let manager = CliSessionManager::new();
+
+    // When the split agent is spawned
+    let _handle = spawn_split_agent_pty(
+        &manager,
+        &spec,
+        &tddy_coding_agent_specs::AgentEnvBase::builtin(),
+        SplitAgentPty {
+            session_id: "019d105b-ac0f-78d3-9a89-409731145a61",
+            session_type: "claude-cli",
+            context_dir: context_dir.path().to_path_buf(),
+            model: "opus",
+            argv: vec![stub.program().to_string_lossy().into_owned()],
+            os_user: None,
+            on_exit: None,
+        },
+    )
+    .await
+    .expect("the split agent is spawned");
+    let env = stub.environment().await;
+
+    // Then it runs with the spec's own launch variables, as a co-located agent does
+    assert_eq!(
+        env.get("CLAUDE_CODE_NO_FLICKER").map(String::as_str),
+        Some("1"),
+        "the split agent must get the spec's run.env"
+    );
+}

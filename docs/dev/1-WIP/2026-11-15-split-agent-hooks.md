@@ -5,7 +5,7 @@
 **Type**: Bug Fix
 **Complexity**: 4 — two crates (`tddy-coding-agent-specs` YAML schema + `tddy-session-split`), start and resume paths, unit and wiring-level tests only
 **Stack**: `#split-alive` 2/4 — branch `feature/split-alive/split-hooks`, base `feature/split-alive/agent-liveness`
-**PR**: _(set in pass 2)_
+**PR**: [#906](https://github.com/uppin/tddy-coder/pull/906)
 
 ## Initial Discovery
 
@@ -68,9 +68,9 @@ fire under `--setting-sources user`; they do with `--settings <file>` added.
 
 ## Draft PR contract
 
-First push (pass 2, commit 2): `AgentVariant.hooks_flag`, `variant_hooks_args` and `split_hooks_file`
-as stubs (`// TODO(split-hooks): implement`), `claude.yaml` unchanged until green, plus the failing
-tests below.
+First push (pass 2, commit 2): `AgentVariant.hooks_flag` (field, real), `variant_hooks_args` and
+`split_hooks_file` as stubs (`// TODO(split-hooks): implement`), `claude.yaml` unchanged until green
+(green adds `hooks_flag: --settings` to `variants.host_agent`), plus the failing tests below.
 
 ## Green wave
 
@@ -131,25 +131,25 @@ the hook *fires* is Claude's behaviour, verified once by hand (2026-11-15) and r
 | Test | File | Validates |
 |---|---|---|
 | `a_split_agent_loads_the_hooks_file_its_daemon_writes_as_settings` | `packages/tddy-session-split/tests/split_agent_wiring_acceptance.rs` | `extra_args` holds `--settings <session_dir>/context/.claude/settings.local.json` |
-| `a_split_agent_still_keeps_the_checkouts_settings_out` | same | `--setting-sources user` and `--strict-mcp-config` remain |
+| `a_split_agent_still_keeps_the_checkouts_settings_out` | same | `--setting-sources user` and `--strict-mcp-config` remain (passes today; guards the decision) |
 | `a_resumed_split_agent_carries_its_specs_launch_variables` | same | `wiring.env` holds `CLAUDE_CODE_NO_FLICKER=1` and still no `TDDY_*` |
 
 ## Unit / Integration Tests
 
 | Test | File |
 |---|---|
-| `a_variant_declaring_a_hooks_flag_renders_it_with_the_file`, `a_variant_without_a_hooks_flag_renders_nothing`, `claudes_host_agent_loads_hooks_with_settings` | `packages/tddy-coding-agent-specs/src/spec.rs` (tests) |
-| `the_split_agent_pty_env_carries_the_specs_run_env` | `packages/tddy-session-split/src/svc_spawn_split_agent/split_agent_pty_tests.rs` |
+| `claudes_host_agent_loads_the_daemons_hooks_file_with_settings`, `a_variant_declaring_no_hooks_flag_loads_no_hooks_file` (passes on the stub; guards the empty case), `hooks_flags_for_an_undeclared_variant_are_refused` | `packages/tddy-coding-agent-specs/tests/host_agent_variant.rs` |
+| `the_split_agents_pty_carries_its_specs_launch_variables` | `packages/tddy-session-split/src/svc_spawn_split_agent/split_agent_pty_tests.rs` |
 
 ## TODO
 
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer for this stack, 2026-11-15: "finish both passes without approvals")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green
 - [ ] Validate changes
 - [ ] Wrap docs
