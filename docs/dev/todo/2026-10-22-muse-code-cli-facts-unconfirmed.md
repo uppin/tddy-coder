@@ -32,5 +32,7 @@ Muse Code is now installed on the development Mac
 | `META_API_KEY` | Not checked. The help offers `muse auth`, `muse login` and `muse exec --api-key-stdin`. |
 | `.muse/` tree | Muse reads project `.muse/hooks.json` (binary strings). User config lives in `~/.config/muse/`, sessions in `~/.local/share/muse/sessions/`. |
 
-Also wrong in `muse.yaml`: `hooks: unsupported`. See
-[2026-11-14-muse-hooks-not-wired.md](2026-11-14-muse-hooks-not-wired.md).
+Also wrong in `muse.yaml` was `hooks: unsupported` — fixed 2026-11-15 by the
+`muse-config-arg` adapter (`-c hooks=…`, `capabilities: [hooks]`; see
+`docs/dev/1-WIP/2026-11-15-muse-hooks-wired.md`, whose probe section records the hook behavior).
+The four rows above are unchanged.

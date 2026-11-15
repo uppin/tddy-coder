@@ -22,7 +22,7 @@ use serde::Deserialize;
 use std::io::Read;
 use tddy_core::{
     activity_status_from_hook_with_tool, hook_event_asks_a_question, hook_event_fields,
-    parse_hook_event, SessionActivityStatus, ASK_USER_QUESTION_TOOL,
+    parse_hook_event, SessionActivityStatus, ASK_USER_QUESTION_TOOL, REQUEST_USER_INPUT_TOOL,
 };
 use tddy_service::proto::activity::{
     AwaitQuestionOutcome, ReportAgentActivityRequest, ReportSessionStatusRequest,
@@ -377,12 +377,15 @@ fn agent_activity_request(
     // A malformed payload degrades to empty fields rather than failing the hook.
     let payload: HookToolPayload = serde_json::from_str(stdin_json).unwrap_or_default();
 
-    // An `AskUserQuestion` is a question, not a tool call, so neither of its hooks is reported as
-    // one: the question goes to the daemon by `ReportSessionStatus` instead (`#home-inbox` 3/8).
-    // Its `PreToolUse` would leave a pending call that a declined question never completes, and so
-    // its `PostToolUse` would have nothing to pair with and write an unpaired `completed` row under
-    // a fresh id. Nothing reads such a row.
-    if payload.tool_name.as_deref() == Some(ASK_USER_QUESTION_TOOL) {
+    // A question tool (`AskUserQuestion`, `request_user_input`) is a question, not a tool
+    // call, so neither of its hooks is reported as one: the question goes to the daemon by
+    // `ReportSessionStatus` instead (`#home-inbox` 3/8). Its `PreToolUse` would leave a pending
+    // call that a declined question never completes, and so its `PostToolUse` would have nothing
+    // to pair with and write an unpaired `completed` row under a fresh id. Nothing reads such a
+    // row.
+    if payload.tool_name.as_deref() == Some(ASK_USER_QUESTION_TOOL)
+        || payload.tool_name.as_deref() == Some(REQUEST_USER_INPUT_TOOL)
+    {
         return None;
     }
 
@@ -603,6 +606,25 @@ mod tests {
         assert_eq!(
             req, None,
             "a question must not leave an unpaired completed row in the activity log"
+        );
+    }
+
+    /// Muse's `request_user_input` is a question, not a tool call either: neither of its hooks is
+    /// reported as one, as for `AskUserQuestion`.
+    #[test]
+    fn neither_hook_of_request_user_input_is_reported_as_a_tool_call() {
+        // Given
+        let pre = r#"{"hook_event_name":"PreToolUse","tool_name":"request_user_input","tool_input":{"questions":[]}}"#;
+        let post = r#"{"hook_event_name":"PostToolUse","tool_name":"request_user_input","tool_input":{"questions":[]},"tool_response":{}}"#;
+
+        // When
+        let requests = (map("PreToolUse", pre), map("PostToolUse", post));
+
+        // Then
+        assert_eq!(
+            requests,
+            (None, None),
+            "a question must leave neither a pending call nor an unpaired row"
         );
     }
 }

@@ -83,7 +83,7 @@ const CLAUDE_HOOK_EVENTS: [(&str, &str); 8] = [
 pub const CLAUDE_INSTALLED_EVENTS: &[&str] = &event_names(CLAUDE_HOOK_EVENTS);
 
 /// The event half of each `(event, matcher)` pair, in order.
-const fn event_names<const N: usize>(
+pub(crate) const fn event_names<const N: usize>(
     events: [(&'static str, &'static str); N],
 ) -> [&'static str; N] {
     let mut names = [""; N];
@@ -93,6 +93,44 @@ const fn event_names<const N: usize>(
         i += 1;
     }
     names
+}
+
+/// One `[{"matcher", "hooks": [...]}}]` entry for `event`: the `tddy-tools session-hook` command
+/// with the session's identity baked in, awaiting the orchestrator's answer when
+/// `awaits_an_answer`. Shared by the Claude settings builder and the Muse `-c hooks=` builder —
+/// the two agents take the same hook commands.
+pub(crate) fn hook_entry_for_event(
+    p: &HookCommandParams<'_>,
+    event: &str,
+    matcher: &str,
+    awaits_an_answer: bool,
+) -> serde_json::Value {
+    let cmd = format!(
+        "{} session-hook --session {} --daemon {}{} --os-user {} --hook-token {} --event {}",
+        shell_quote(p.tddy_tools_path),
+        p.session_id,
+        p.daemon_url,
+        daemon_socket_arg(p),
+        p.os_user,
+        p.hook_token,
+        event,
+    );
+    let hook = if awaits_an_answer {
+        serde_json::json!({
+            "type": "command",
+            "command": format!(
+                "{cmd} --await-answer --await-timeout-secs {}",
+                p.answer_wait_secs + AWAIT_CLIENT_MARGIN_SECS
+            ),
+            "timeout": p.answer_wait_secs + CLAUDE_HOOK_TIMEOUT_MARGIN_SECS,
+        })
+    } else {
+        serde_json::json!({"type": "command", "command": cmd})
+    };
+    serde_json::json!([{
+        "matcher": matcher,
+        "hooks": [hook]
+    }])
 }
 
 /// Build the `.claude/settings.local.json` value for a claude-cli worktree.
@@ -114,37 +152,14 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
 
     let mut hooks_obj = serde_json::Map::new();
     for (event, matcher) in &events {
-        let cmd = format!(
-            "{} session-hook --session {} --daemon {}{} --os-user {} --hook-token {} --event {}",
-            shell_quote(p.tddy_tools_path),
-            p.session_id,
-            p.daemon_url,
-            daemon_socket_arg(p),
-            p.os_user,
-            p.hook_token,
-            event,
-        );
         // A permission prompt, and a question (`PreToolUse` matched to `AskUserQuestion` alone), wait
         // for the orchestrator's answer; the daemon decides whether anyone is there.
         let awaits_an_answer = *event == "PermissionRequest"
             || (*event == "PreToolUse" && *matcher == "AskUserQuestion");
-        let hook = if awaits_an_answer {
-            serde_json::json!({
-                "type": "command",
-                "command": format!(
-                    "{cmd} --await-answer --await-timeout-secs {}",
-                    p.answer_wait_secs + AWAIT_CLIENT_MARGIN_SECS
-                ),
-                "timeout": p.answer_wait_secs + CLAUDE_HOOK_TIMEOUT_MARGIN_SECS,
-            })
-        } else {
-            serde_json::json!({"type": "command", "command": cmd})
-        };
-        let hook_entry = serde_json::json!([{
-            "matcher": matcher,
-            "hooks": [hook]
-        }]);
-        hooks_obj.insert(event.to_string(), hook_entry);
+        hooks_obj.insert(
+            event.to_string(),
+            hook_entry_for_event(p, event, matcher, awaits_an_answer),
+        );
     }
 
     serde_json::json!({ "hooks": hooks_obj })

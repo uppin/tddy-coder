@@ -56,11 +56,29 @@ pub(super) fn claude_cli_hooks(
     spec: &CodingAgentSpec,
     tddy_tools_path: &str,
 ) -> ClaudeCliHooks {
+    claude_cli_hooks_with_token(
+        config,
+        agent_tool_socket,
+        spec,
+        tddy_tools_path,
+        Uuid::new_v4().to_string(),
+    )
+}
+
+/// A resume's hooks: the start's wiring rebuilt around the recorded `hook_token`, for an adapter
+/// that delivers its hooks on argv and so renders them again on every launch.
+pub(super) fn claude_cli_hooks_with_token(
+    config: &DaemonConfig,
+    agent_tool_socket: &Path,
+    spec: &CodingAgentSpec,
+    tddy_tools_path: &str,
+    hook_token: String,
+) -> ClaudeCliHooks {
     ClaudeCliHooks {
         tddy_tools_path: tddy_tools_path.to_string(),
         daemon_url: daemon_hook_urls::advertise_daemon_url(config),
         daemon_socket: Some(agent_tool_socket.to_string_lossy().into_owned()),
-        hook_token: Uuid::new_v4().to_string(),
+        hook_token,
         answer_wait_secs: spec.answer_wait_secs(),
     }
 }

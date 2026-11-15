@@ -43,10 +43,18 @@ impl PendingChange {
         &self,
         req: &ReportSessionStatusRequest,
         label: &str,
+        product: &str,
         now: u64,
     ) -> Option<SessionNotification> {
         let status = || {
-            notification_for_activity_status(&req.session_id, &req.os_user, label, &req.status, now)
+            notification_for_activity_status(
+                &req.session_id,
+                &req.os_user,
+                label,
+                product,
+                &req.status,
+                now,
+            )
         };
         match self {
             Self::Recorded(question) => Some(notification_for_pending_question(
@@ -152,7 +160,7 @@ fn set_pending_elicitation(session_dir: &Path, pending: bool) -> Result<(), Stat
 }
 
 impl ActivityServiceImpl {
-    /// The per-worktree `claude` / `cursor` hook reporting what its session is doing.
+    /// The per-worktree agent hook reporting what its session is doing.
     ///
     /// Everything is validated before any IO, and the credential before any write: an unknown
     /// status or a bad `hook_token` must not be able to touch a session directory at all.
@@ -171,13 +179,19 @@ impl ActivityServiceImpl {
         // A session whose agent declares `hooks` supports hook status reporting. Refused rather than
         // recorded for anything else: a status on a session type that never raises one would be a
         // row nothing keeps current — and refused *before* the credential, so a hook wired to the
-        // wrong session is told that rather than that its token is bad.
+        // wrong session is told that rather than that its token is bad. The same lookup names the
+        // agent's product for the notification below.
         let session_type = meta.session_type.as_deref().unwrap_or("");
-        if !self.session_offers(session_type, Capability::Hooks) {
+        let Some(spec) = self
+            .agents
+            .for_session_type(session_type)
+            .filter(|spec| spec.has(Capability::Hooks))
+        else {
             return Err(Status::failed_precondition(format!(
                 "session_type {session_type:?} is not an agent session that declares hooks"
             )));
-        }
+        };
+        let product = spec.product().to_string();
 
         // A local-process string comparison: the token is a per-session secret written into the
         // hook command at worktree-prep time, and both ends are on this host.
@@ -214,7 +228,7 @@ impl ActivityServiceImpl {
         // operator's clients and to no one else's. A recorded question is one notification of its
         // own; the status it came with is not published a second time.
         self.publish_for_session(&sessions_base, &req.session_id, |label| {
-            change.notification(&req, label, now)
+            change.notification(&req, label, &product, now)
         })
         .await;
 

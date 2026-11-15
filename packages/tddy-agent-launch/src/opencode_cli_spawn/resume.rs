@@ -176,7 +176,7 @@ async fn resume_cli_harness_session(
         git_environment,
         split,
         os_user,
-        wiring,
+        mut wiring,
         tddy_data_dir,
     } = session;
     let SplitLaunchParts {
@@ -207,12 +207,17 @@ async fn resume_cli_harness_session(
         .ssh_config_host
         .as_deref()
         .filter(|alias| !alias.is_empty());
+    // Argv hooks (Muse's `-c hooks=…`) render again from the recorded token; a file
+    // adapter's file is kept as the start wrote it.
+    let toolset = std::mem::take(&mut wiring.toolset);
+    let hook_params = wiring.hook_params(spec, session_id, os_user);
     let mut slots = render_host_launch_slots(
         agent,
         &worktree_path,
         session_dir,
         HostLaunchSlots {
-            toolset: wiring.toolset,
+            toolset,
+            hooks: hook_params,
             system_prompt_file: wiring.system_prompt_file.as_deref(),
             ..HostLaunchSlots::default()
         },

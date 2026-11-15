@@ -402,10 +402,15 @@ impl AHarnessDaemon {
     }
 
     /// An inactive host session of the daemon's harness whose process has exited, running in
-    /// `worktree`, with `resume_token` recorded when given.
+    /// `worktree`, with `resume_token` recorded when given. A Muse session records the hook token
+    /// its start wired, as a start with hooks does; the others record none, as their starts do.
     pub fn an_exited_host_session(&self, worktree: &Path, resume_token: Option<&str>) {
         let session_dir = self.session_dir(RESUMED_SESSION_ID);
         std::fs::create_dir_all(&session_dir).unwrap();
+        let hook_token = match self.harness {
+            AHarness::Muse => Some("hook-token-from-the-start".to_string()),
+            AHarness::OpenCode | AHarness::Warp => None,
+        };
         let meta = SessionMetadata {
             effort: None,
             session_id: RESUMED_SESSION_ID.to_string(),
@@ -425,7 +430,7 @@ impl AHarnessDaemon {
             tmux_session: None,
             harness_resume_token: resume_token.map(str::to_string),
             activity_status: None,
-            hook_token: None,
+            hook_token,
             sandbox: None,
             agent: None,
             recipe: None,

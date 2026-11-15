@@ -14,7 +14,7 @@ pub mod mcp;
 pub mod tools;
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tddy_agent_backend::claude_hooks::HookCommandParams;
 use thiserror::Error;
@@ -176,12 +176,25 @@ pub fn render(spec: &CodingAgentSpec, inputs: &SlotInputs<'_>) -> Result<Rendere
         rendered.argv_extra.extend(argv);
     }
     if let Some(params) = &inputs.hooks {
-        let adapter = hooks::adapter(&agent.hooks.adapter)?;
-        rendered
-            .files
-            .push(adapter.try_render(&inputs.workdir, params)?);
+        render_hooks_slot(&agent.hooks.adapter, &inputs.workdir, params, &mut rendered)?;
     }
     Ok(rendered)
+}
+
+/// The `hooks` slot: what the named adapter renders for `params` — a file to write, or argv
+/// entries to splice into the launch.
+fn render_hooks_slot(
+    adapter_name: &str,
+    workdir: &Path,
+    params: &HookCommandParams<'_>,
+    rendered: &mut RenderedSlots,
+) -> Result<(), SlotError> {
+    let adapter = hooks::adapter(adapter_name)?;
+    match adapter.try_render(workdir, params)? {
+        hooks::RenderedHooks::File(path, bytes) => rendered.files.push((path, bytes)),
+        hooks::RenderedHooks::Argv(argv) => rendered.argv_extra.extend(argv),
+    }
+    Ok(())
 }
 
 /// `values` as `slot`'s flags; values for an `unsupported` slot are refused, never dropped.
@@ -590,6 +603,44 @@ mod tests {
 
         // Then
         assert_eq!(rendered, RenderedSlots::default());
+    }
+
+    /// Hooks an adapter delivers as argv (Muse's `-c hooks=…`) land in `argv_extra` and
+    /// write no file.
+    #[test]
+    fn hook_params_for_an_argv_hooks_adapter_render_argv_and_no_file() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+        let mut spec = a_claude_spec();
+        spec.agent.hooks = HooksSlot {
+            adapter: "muse-config-arg".to_string(),
+        };
+        let params = HookCommandParams {
+            tddy_tools_path: "/opt/tddy/bin/tddy-tools",
+            daemon_url: "http://127.0.0.1:8899",
+            session_id: "0190-a",
+            os_user: "dev",
+            hook_token: "token-1",
+            daemon_socket: Some("/var/folders/xy/T/tddy-agent-tools-1a2b.sock"),
+            answer_wait_secs: 300,
+        };
+        let inputs = SlotInputs {
+            hooks: Some(params),
+            ..no_inputs(dir.path(), dir.path())
+        };
+
+        // When
+        let rendered = render(&spec, &inputs).expect("argv hooks render");
+
+        // Then
+        assert!(rendered.files.is_empty(), "argv hooks write no file");
+        assert_eq!(rendered.argv_extra.len(), 2);
+        assert_eq!(rendered.argv_extra[0], "-c");
+        assert!(
+            rendered.argv_extra[1].starts_with("hooks={"),
+            "the second entry carries the hooks map: {}",
+            rendered.argv_extra[1]
+        );
     }
 
     /// An agent whose hooks are `unsupported` refuses hook params instead of writing no hooks file

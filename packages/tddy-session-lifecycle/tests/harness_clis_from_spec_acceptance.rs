@@ -283,6 +283,72 @@ mod host {
         );
     }
 
+    /// `argv` renders the stub plus `expected` plus `-c hooks=<the eight hooks>`, whose
+    /// commands report the session `session_id` over the agent-tool socket (`None` matches the
+    /// id the daemon minted for the start). `hook_token`, when given, is the recorded token the
+    /// resumed hooks must reuse — a resume mints none.
+    fn assert_muse_argv_carries_hooks(
+        argv: &[String],
+        stub: &str,
+        expected: &[&str],
+        session_id: Option<&str>,
+        hook_token: Option<&str>,
+    ) {
+        let head: Vec<&str> = argv[..expected.len() + 1]
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let mut want = vec![stub];
+        want.extend(expected.iter().copied());
+        assert_eq!(head, want);
+        let tail = &argv[expected.len() + 1..];
+        assert_eq!(tail.len(), 2, "one -c hooks entry after {expected:?}");
+        assert_eq!(tail[0], "-c");
+        let value = tail[1]
+            .strip_prefix("hooks=")
+            .expect("the entry is hooks=<json>");
+        let hooks: serde_json::Value = serde_json::from_str(value).expect("the entry is JSON");
+        let hooks = hooks.as_object().expect("the JSON is the hooks map");
+        let mut events: Vec<&str> = hooks.keys().map(String::as_str).collect();
+        events.sort_unstable();
+        assert_eq!(
+            events,
+            vec![
+                "Notification",
+                "PermissionRequest",
+                "PostToolUse",
+                "PreToolUse",
+                "SessionEnd",
+                "SessionStart",
+                "Stop",
+                "UserPromptSubmit",
+            ]
+        );
+        assert_eq!(
+            hooks["PreToolUse"][0]["matcher"].as_str(),
+            Some("request_user_input")
+        );
+        let stop = hooks["Stop"][0]["hooks"][0]["command"]
+            .as_str()
+            .expect("a command string");
+        assert!(
+            stop.contains("session-hook") && stop.contains("--daemon-socket"),
+            "the hook reports over the agent-tool socket: {stop}"
+        );
+        if let Some(session_id) = session_id {
+            assert!(
+                stop.contains(&format!("--session {session_id}")),
+                "the resumed hooks report the resumed session: {stop}"
+            );
+        }
+        if let Some(hook_token) = hook_token {
+            assert!(
+                stop.contains(&format!("--hook-token {hook_token}")),
+                "the resumed hooks reuse the recorded token: {stop}"
+            );
+        }
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn a_host_muse_start_and_resume_render_muse_yamls_argv() {
@@ -292,26 +358,25 @@ mod host {
         // When
         let run = a_host_start_and_resume(&daemon).await;
 
-        // Then — the spec's argv, each in its session's checkout
+        // Then — the spec's argv, each in its session's checkout, each carrying `-c hooks=…`
         let stub = daemon.stub_path();
+        assert_muse_argv_carries_hooks(
+            &run.started_argv,
+            &stub,
+            &["--model", TEST_MODEL, "fix the build"],
+            None,
+            None,
+        );
+        assert_muse_argv_carries_hooks(
+            &run.resumed_argv,
+            &stub,
+            &["--continue"],
+            Some(RESUMED_SESSION_ID),
+            Some("hook-token-from-the-start"),
+        );
         assert_eq!(
-            (
-                run.started_argv,
-                run.started_cwd,
-                run.resumed_argv,
-                run.resumed_cwd,
-            ),
-            (
-                vec![
-                    stub.clone(),
-                    "--model".to_string(),
-                    TEST_MODEL.to_string(),
-                    "fix the build".to_string(),
-                ],
-                run.started_worktree,
-                vec![stub, "--continue".to_string()],
-                run.exited_worktree,
-            )
+            (run.started_cwd, run.resumed_cwd),
+            (run.started_worktree, run.exited_worktree),
         );
     }
 }

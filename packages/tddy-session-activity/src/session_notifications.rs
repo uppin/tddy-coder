@@ -237,6 +237,7 @@ pub fn notification_for_activity_status(
     session_id: &str,
     os_user: &str,
     label: &str,
+    product: &str,
     status: &str,
     at_unix_ms: u64,
 ) -> Option<SessionNotification> {
@@ -244,12 +245,12 @@ pub fn notification_for_activity_status(
         SessionActivityStatus::WaitingForInput => (
             SessionNotificationKind::AttentionRequired,
             format!(
-                "🔔 Session {label}: Claude Code needs your input (permission, question, or your next prompt). Attach via the web UI or `tddy-tools pty-relay`."
+                "🔔 Session {label}: {product} needs your input (permission, question, or your next prompt). Attach via the web UI or `tddy-tools pty-relay`."
             ),
         ),
         SessionActivityStatus::Done => (
             SessionNotificationKind::AttentionRequired,
-            format!("✅ Session {label}: Claude Code finished this turn. Attach to continue."),
+            format!("✅ Session {label}: {product} finished this turn. Attach to continue."),
         ),
         SessionActivityStatus::Started => (
             SessionNotificationKind::Activity,
@@ -290,7 +291,9 @@ pub fn notification_for_pending_question(
     at_unix_ms: u64,
 ) -> SessionNotification {
     let text = match pending.tool_name.as_str() {
-        tool if tool == tddy_core::ASK_USER_QUESTION_TOOL => {
+        tool if tool == tddy_core::ASK_USER_QUESTION_TOOL
+            || tool == tddy_core::REQUEST_USER_INPUT_TOOL =>
+        {
             format!("🔔 Session {label} asks: {}", pending.summary())
         }
         tool => format!(
@@ -425,5 +428,55 @@ impl LastDeliveredPerSession {
         };
         let previous = last.insert(session_id.to_string(), text.to_string());
         previous.as_deref() != Some(text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tddy_core::pending_question::PendingQuestionItem;
+
+    /// A pending question asked by `tool_name`, in the flat fields.
+    fn a_pending_question(
+        tool_name: &str,
+        question: &str,
+    ) -> tddy_core::pending_question::PendingQuestion {
+        tddy_core::pending_question::PendingQuestion {
+            kind: "select".to_string(),
+            header: "Color".to_string(),
+            question: question.to_string(),
+            options: vec!["red".to_string(), "blue".to_string()],
+            allow_other: true,
+            request_id: "request-9".to_string(),
+            tool_name: tool_name.to_string(),
+            tool_input_json: "{}".to_string(),
+            questions: vec![PendingQuestionItem {
+                header: "Color".to_string(),
+                question: question.to_string(),
+                options: vec![],
+                multi_select: false,
+            }],
+            at_unix_ms: 7,
+        }
+    }
+
+    /// A Muse `request_user_input` question reads as asked, as an `AskUserQuestion` does — not as
+    /// a tool the session wants to run.
+    #[test]
+    fn a_request_user_input_question_reads_as_asked() {
+        // When
+        let notification = notification_for_pending_question(
+            "sess-1",
+            "alice",
+            "muse-feature",
+            &a_pending_question("request_user_input", "What is your favorite color?"),
+            7,
+        );
+
+        // Then
+        assert_eq!(
+            notification.text,
+            "🔔 Session muse-feature asks: What is your favorite color?"
+        );
     }
 }
