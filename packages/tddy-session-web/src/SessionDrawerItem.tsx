@@ -69,11 +69,14 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
           </span>
           {/* Orchestrator mark (paused / blocked / done), its note on hover (`#orchestrators` 5/11). */}
           <SessionDrawerMarkBadge session={session} />
-          {/* Owning-host badge — only for cross-host rows (a session owned by a non-selected host). */}
+          {/* Owning-host badge — only for cross-host rows (a session owned by a non-selected host).
+              A host name has no length limit, so the host badges are capped and truncate, and give
+              way first when the badges outgrow a narrow drawer: the marks after them stay in view. */}
           {hostLabel && (
             <span
               data-testid={`sessions-drawer-item-host-${session.sessionId}`}
-              className="flex-shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+              title={hostLabel}
+              className="min-w-0 max-w-20 truncate text-[10px] leading-none px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
             >
               {hostLabel}
             </span>
@@ -84,7 +87,7 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
             <span
               data-testid={`sessions-drawer-item-codebase-host-${session.sessionId}`}
               title={`Codebase on ${codebaseHostLabel}`}
-              className="flex-shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded border border-primary/40 bg-primary/10 text-primary"
+              className="min-w-0 max-w-20 truncate text-[10px] leading-none px-1.5 py-0.5 rounded border border-primary/40 bg-primary/10 text-primary"
             >
               {codebaseHostLabel}
             </span>

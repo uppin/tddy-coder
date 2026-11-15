@@ -51,16 +51,20 @@ export function ProjectHomeEntry(props: {
           aria-disabled={!hasMain && !onSetUpProjectHome}
           onClick={activate}
           className={cn(
-            "flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
+            // The session rows' box (`SessionDrawerItem`), so main's dot sits in their dot column.
+            "flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted",
             selected && "bg-muted",
             !hasMain && "text-muted-foreground",
           )}
         >
           {homeSession && <SessionIndicatorDot session={homeSession} sizeClassName="h-2 w-2" />}
-          <span className="font-medium">main</span>
-          <span className="truncate text-xs text-muted-foreground">{home.mainBranchRef}</span>
+          <span className="flex-shrink-0 font-medium">main</span>
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{home.mainBranchRef}</span>
           {homeSession?.model && (
-            <span className="ml-auto truncate text-xs text-muted-foreground">{homeSession.model}</span>
+            // Never shrinks to nothing: capped, then truncated, so it stays in view beside the ref.
+            <span className="max-w-[50%] flex-shrink-0 truncate text-xs text-muted-foreground">
+              {homeSession.model}
+            </span>
           )}
         </button>
       </div>

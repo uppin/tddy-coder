@@ -262,7 +262,10 @@ export function SessionDrawer({
         </button>
       </div>
       {notices && <div className="px-3 py-2 border-b border-border space-y-1">{notices}</div>}
-      <ScrollArea className="flex-1 min-h-0">
+      {/* Radix wraps the viewport's content in a `display: table` div that grows to the widest row,
+          and with no horizontal scrollbar the excess is only clipped — the rows' right-hand items
+          with it. A block of the viewport's width makes the rows truncate their labels instead. */}
+      <ScrollArea className="flex-1 min-h-0 [&_[data-radix-scroll-area-viewport]>div]:block!">
         <div className="py-1 px-2 space-y-0.5">
           {projectGroups.map((group) => {
             const key = projectGroupKey(group);
@@ -284,7 +287,7 @@ export function SessionDrawer({
                       type="button"
                       data-testid={`sessions-drawer-project-settings-${group.projectId}`}
                       onClick={() => onOpenProjectSettings(group.projectId as string)}
-                      className="px-1 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                      className="flex-shrink-0 px-1 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
                       title={`Settings for ${group.label}`}
                       aria-label={`Settings for ${group.label}`}
                     >

@@ -39,14 +39,14 @@ export function SessionProjectGroupHeader(props: SessionProjectGroupHeaderProps)
       >
         <Chevron className="h-3.5 w-3.5 flex-shrink-0" />
         <span className="flex-1 truncate text-left">{group.label}</span>
-        <span className="font-normal tabular-nums">{group.sessions.length}</span>
+        <span className="flex-shrink-0 font-normal tabular-nums">{group.sessions.length}</span>
       </button>
       {onNew && (
         <button
           type="button"
           data-testid={`sessions-drawer-project-new-${groupKey}`}
           onClick={onNew}
-          className="px-1 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          className="flex-shrink-0 px-1 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
           title={`New orchestrator for ${group.label}`}
           aria-label={`New orchestrator for ${group.label}`}
         >

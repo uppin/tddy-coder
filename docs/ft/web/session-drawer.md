@@ -282,6 +282,13 @@ the selected host's sessions. (Active cross-host rows need no refresh — presen
 **Owning-host badge** — a drawer item whose owning host differs from the selected host renders a
 small muted host-label badge (`DaemonHost.label`, with the `" (this daemon)"` suffix stripped).
 
+**Row overflow** *(2026-11-15)* — whatever sits on the right of a drawer row stays in view however
+long the label and however narrow the drawer: the project header's count, "+" and gear; a row's
+mark, host, codebase-host and orchestrator badges; the main entry's model. The label truncates with
+an ellipsis instead. The host and codebase-host badges are capped and truncate too (full name on
+hover), since a host name has no length limit. The pinned **main** entry uses the session rows' box,
+so its status dot sits in their dot column.
+
 **Owning-daemon routing** — selecting a cross-host row does **not** change the selected host.
 Attach/resume/delete/terminate RPCs for the selected session route to that session's **owning**
 daemon (`useDaemonClientFor(ConnectionService, owningHost)`), while the **create** flow targets the
