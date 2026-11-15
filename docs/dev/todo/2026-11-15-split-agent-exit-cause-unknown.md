@@ -14,6 +14,10 @@
    long multi-line prompt. Since #905 the agent's terminal is recorded and its exit is
    logged, so the next failed split start reports the agent's own last output — read that
    first.
+
+   Deferred by the user, 2026-11-15 (`#split-alive` TODO gate): "Defer" — diagnose from the first
+   real split-start failure once #905 is deployed, using the recorded terminal and exit log.
+
 2. **Fixes 6–7 of the original entry landed in the rest of stack `#split-alive`:**
    fixes 6–7 (the start result's branch/worktree and the drawer's pairing) are done in
    [#908](https://github.com/uppin/tddy-coder/pull/908) (`#split-alive` 4/4). Fix 3 (the
