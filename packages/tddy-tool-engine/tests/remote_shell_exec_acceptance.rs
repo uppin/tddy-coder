@@ -148,3 +148,75 @@ fn session_shell_picks_remote_when_an_alias_is_set() {
     assert_eq!(shell.kind(), ShellKind::Remote);
     assert_eq!(shell.root(), tmp.path().to_string_lossy());
 }
+
+#[tokio::test]
+async fn a_shell_tool_on_an_ssh_checkout_runs_through_the_remote_shell_port() {
+    // Given — an exec catalog over a remote-shell port whose target answers the command
+    let port = tddy_remote_shell::InMemoryShell::new("buildbox");
+    port.answers(
+        "cd '/home/dev/repo/.worktrees/sess' && echo hi",
+        tddy_remote_shell::ExecOutput::succeeded("hi\n"),
+    );
+    let shell = RemoteShell::over(
+        std::sync::Arc::new(port.clone()),
+        "/home/dev/repo/.worktrees/sess",
+    );
+    let registry = registry();
+
+    // When
+    let outcome = execute_tool_on_shell(
+        &shell,
+        "Shell",
+        r#"{"command":"echo hi"}"#,
+        &registry,
+        "ssh-exec-session",
+    )
+    .await;
+
+    // Then — the tool's result is what the port's target answered, and the command ran there once
+    assert!(
+        !outcome.is_error,
+        "Shell over the port must succeed; got: {}",
+        outcome.error_message
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&outcome.result_json).expect("json");
+    assert_eq!(
+        parsed,
+        serde_json::json!({ "stdout": "hi\n", "stderr": "", "exit_code": 0 })
+    );
+    assert_eq!(
+        port.commands_run(),
+        vec!["cd '/home/dev/repo/.worktrees/sess' && echo hi".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn an_unreachable_checkout_fails_the_tool_with_the_ports_reason() {
+    // Given — an exec catalog over a remote-shell port that cannot reach its target
+    let port = tddy_remote_shell::InMemoryShell::new("buildbox");
+    port.has_file(
+        "/home/dev/repo/hello.txt",
+        "from-the-target",
+        tddy_remote_shell::FileMode::TargetDefault,
+    )
+    .is_unreachable("Could not resolve hostname buildbox");
+    let shell = RemoteShell::over(std::sync::Arc::new(port.clone()), "/home/dev/repo");
+    let registry = registry();
+
+    // When
+    let outcome = execute_tool_on_shell(
+        &shell,
+        "Read",
+        r#"{"path":"hello.txt"}"#,
+        &registry,
+        "ssh-fail-session",
+    )
+    .await;
+
+    // Then — the tool fails with what the port said: which target, and why it was not reached
+    assert!(outcome.is_error, "an unreachable target must be an error");
+    assert_eq!(
+        outcome.error_message,
+        "Read: in-memory target buildbox is unreachable: Could not resolve hostname buildbox"
+    );
+}

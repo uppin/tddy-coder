@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Refactor + Feature
 **Complexity**: 4 — a new crate consumed by four others (tool-engine, git, agent-launch, worktree-service), a spawned-process I/O seam, streamed exec with deadlines (ordering)
-**Branch**: `feature/remote-shell/shell-port`, base `master` — `#remote-shell 1/7`
+**Branch**: `feature/remote-shell/shell-port`, base `master` — `#remote-shell 1/7` — PR #915 (https://github.com/uppin/tddy-coder/pull/915)
 
 ## Initial Discovery
 
@@ -95,6 +95,27 @@ The first push after the plan (commit 2) publishes, as the start of this same PR
 - The failing tests below.
 
 This PR goes on to implement all of it. It does not merge in that state.
+
+## Contract as published
+
+Published in the contract commit. Signatures are in `packages/tddy-remote-shell/src/`.
+
+- **Port**: `RemoteShell { address, exec, exec_streamed, interactive, read_file, write_file }`, `ShellAddress { transport: String, name }`, `ExecRequest` (`new`, `with_stdin`, `within`; `DEFAULT_EXEC_DEADLINE` 60 s), `ExecOutput` (`succeeded`, `exited`, `success_or_exited`), `InteractiveCommand`, `FileMode::{TargetDefault, OwnerOnly}`, `RemoteShellError::{Unreachable, TimedOut, Exited, Spawn}`.
+- **`StreamedExec { stdin: ShellStdin, stdout: ShellOutput, stderr: ShellOutput, exit: StreamedExit }`** holds boxed `AsyncWrite` / `AsyncRead` and an exit future, not `tokio::process` child handles. A transport that is not a local child, and the in-memory shell, could not produce those. `GitChildRelay` stores a `ChildStdin` and a pid today, so its remote path changes shape in the implementation.
+- **`ShellAddress.transport` is a string** so a later transport adds its tag without editing this type.
+- **`SshShell`**: `new`, `through`, `ssh_options`, `TRANSPORT = "ssh"`. Bodies are `TODO(shell-port)`.
+- **`InMemoryShell`** (feature `test-support`) is fully working: `answers`, `answers_when`, `hangs_on`, `is_unreachable`, `has_file`, `streams` → `ScriptedStream`; `calls`, `commands_run`, `file`, `file_mode`. An unscripted command exits 127.
+- **`contract::assert_behaves_like_a_remote_shell(shell, scratch_dir)`** and `an_in_memory_shell_for_the_contract()`.
+- **Call-site seams** (`TODO(shell-port)` bodies; the call sites are not moved yet): `tddy_tool_engine::shell::RemoteShell::over(port, remote_root)`; `tddy_agent_launch::slot_files_over_shell::{write_slot_files_through, place_session_pointer_through}`; `GitChildRelay::spawn_remote_pack_verb(shell, argv, remote_repo_path)`.
+
+What the tests found that the plan did not:
+
+- **A fifth SSH site**: `tddy-agent-launch/src/svc_signal_delete_session.rs:211` (pointer removal on delete). It is in scope and the ratchet flags it. Six lines are flagged in all, because `cli_session_pointer.rs` and `slot_file_over_ssh.rs` are separate hits.
+- **Two exemptions in the ratchet**, each listed with its reason in `NOT_A_REMOTE_COMMAND`: `clone_planner.rs:27` runs `ssh -V`, a local version probe; `tddy-vm/src/qemu.rs` reaches a QEMU guest with its own key and port. Neither runs a command on a session's target. The acceptance criterion reads accordingly: no other crate spawns `ssh` to run a command on a target.
+- **The session pointer is placed in two steps** through the port (one `exec` for the git exclude, then `write_file` owner-only) where it is one SSH command today. One extra round trip per placement.
+- **`tddy-git`'s worktree setup is synchronous** and the port is async. The implementation makes it async or bridges it; no test pins which.
+
+Red state at the contract commit: `tddy-remote-shell` lib 18 passed / 3 failed, `ssh_shell_acceptance` 0 / 8, `shell_contract` 1 / 2 (the in-memory shell passes the contract), `one_ssh_spawn_site` 1 / 1; `tddy-tool-engine` `remote_shell_exec_acceptance` 5 existing passed / 2 new failed; `tddy-agent-launch` `slot_files_over_shell_acceptance` 0 / 1; `tddy-worktree-service` `remote_pack_over_shell_acceptance` 0 / 1. Every failure is this PR's own missing implementation. Clippy and fmt are clean on the four packages.
 
 ## Green wave
 
@@ -263,10 +284,10 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved in advance on 2026-11-15: "proceed with your recommended option"; the titles are listed in the PR body)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

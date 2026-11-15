@@ -680,6 +680,23 @@ impl GitChildRelay {
         }
     }
 
+    /// Start the pack verb `argv` names on the target `shell` reaches, packing `remote_repo_path`
+    /// there, and relay it as [`Self::spawn_pack_verb`] relays a local child: stdin written
+    /// through, stdout and stderr in frames of their own, one final `done` frame with the exit
+    /// status. The repo path in `argv` is replaced with `remote_repo_path`, so the target never
+    /// packs a path the session did not authorize.
+    pub async fn spawn_remote_pack_verb(
+        shell: &dyn tddy_remote_shell::RemoteShell,
+        argv: Vec<String>,
+        remote_repo_path: &str,
+    ) -> Result<(GitChildRelay, GitServerFrames), Status> {
+        // TODO(shell-port): implement — `remote_pack_shell_command` through `exec_streamed`.
+        let _ = (shell, argv, remote_repo_path);
+        Err(Status::unimplemented(
+            "a remote pack verb is not streamed through the remote-shell port yet",
+        ))
+    }
+
     /// Spawn the child with all three stdio streams piped, and start pumping:
     /// stdout → `GitServerFrame.stdout`, stderr → `GitServerFrame.stderr`, each chunked to at most
     /// [`MAX_GIT_FRAME_BYTES`]; on exit, one final frame carrying `exit_code` and `done = true`.

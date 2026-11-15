@@ -6,6 +6,7 @@
 //! fallback to the host filesystem.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_core::{contain_remote_path, run_ssh_batch, shell_single_quote};
@@ -98,6 +99,9 @@ impl Shell for LocalShell {
 pub struct RemoteShell {
     host_alias: String,
     remote_root: String,
+    /// The port every command of this shell runs through, when it was built over one
+    /// ([`RemoteShell::over`]).
+    port: Option<Arc<dyn tddy_remote_shell::RemoteShell>>,
 }
 
 impl RemoteShell {
@@ -105,6 +109,20 @@ impl RemoteShell {
         Self {
             host_alias: host_alias.into(),
             remote_root: remote_root.into(),
+            port: None,
+        }
+    }
+
+    /// The exec catalog on the target `port` reaches, contained against `remote_root` there. Every
+    /// read, write and command runs through the port; a failure of the port is the tool's result.
+    pub fn over(
+        port: Arc<dyn tddy_remote_shell::RemoteShell>,
+        remote_root: impl Into<String>,
+    ) -> Self {
+        Self {
+            host_alias: port.address().name,
+            remote_root: remote_root.into(),
+            port: Some(port),
         }
     }
 
@@ -133,6 +151,12 @@ impl RemoteShell {
         &self,
         remote_shell_command: &str,
     ) -> Result<std::process::Output, ShellError> {
+        if self.port.is_some() {
+            // TODO(shell-port): implement — run `remote_shell_command` through the port.
+            return Err(ShellError::Unimplemented(
+                "RemoteShell::over does not run commands through its port yet".to_string(),
+            ));
+        }
         let host = self.host_alias.clone();
         let cmd = remote_shell_command.to_string();
         tokio::task::spawn_blocking(move || run_ssh_batch(&host, &cmd))

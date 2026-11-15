@@ -1,0 +1,24 @@
+[package]
+name = "tddy-remote-shell"
+version = "0.1.0"
+edition = "2021"
+description = "The remote-shell port: run a command on a machine the daemon does not serve — one-shot, streamed, or as an argv for a local PTY — with OpenSSH as its first transport"
+
+[lib]
+name = "tddy_remote_shell"
+path = "src/lib.rs"
+
+[features]
+# `InMemoryShell` and the `contract` suite, for other crates' tests and later transports.
+test-support = []
+
+[dependencies]
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "process", "io-util"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+# This crate's own suites drive the double and the contract it ships to others.
+tddy-remote-shell = { path = ".", features = ["test-support"] }
