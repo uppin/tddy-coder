@@ -6,7 +6,9 @@ use tddy_rpc::Status;
 
 use std::path::Path;
 
-use tddy_coding_agent_specs::CodingAgentSpec;
+use tddy_coding_agent_specs::slots;
+use tddy_coding_agent_specs::{Capability, CodingAgentSpec};
+use tddy_core::SessionMetadata;
 use tddy_daemon_kernel::config::DaemonConfig;
 
 use tddy_daemon_kernel::daemon_hook_urls;
@@ -56,11 +58,60 @@ pub(super) fn claude_cli_hooks(
     spec: &CodingAgentSpec,
     tddy_tools_path: &str,
 ) -> ClaudeCliHooks {
+    claude_cli_hooks_with_token(
+        config,
+        agent_tool_socket,
+        spec,
+        tddy_tools_path,
+        Uuid::new_v4().to_string(),
+    )
+}
+
+/// The hooks a resume renders again: only an argv adapter's (Muse's `-c hooks=…`), rebuilt
+/// around the start's recorded token. A file adapter's file is kept as its start wrote it, and a
+/// session that recorded no token (started before its agent declared hooks) resumes hookless, as
+/// before.
+pub(super) fn resumed_argv_hooks(
+    spec: &CodingAgentSpec,
+    config: &DaemonConfig,
+    agent_tool_socket: &Path,
+    tddy_tools_path: &str,
+    meta: &SessionMetadata,
+) -> Result<Option<ClaudeCliHooks>, Status> {
+    if !spec.has(Capability::Hooks) {
+        return Ok(None);
+    }
+    let adapter = slots::hooks::adapter(&spec.agent.hooks.adapter)
+        .map_err(|e| Status::internal(e.to_string()))?;
+    if adapter.delivery() != slots::hooks::HooksDelivery::Argv {
+        return Ok(None);
+    }
+    let Some(hook_token) = meta.hook_token.clone() else {
+        return Ok(None);
+    };
+    Ok(Some(claude_cli_hooks_with_token(
+        config,
+        agent_tool_socket,
+        spec,
+        tddy_tools_path,
+        hook_token,
+    )))
+}
+
+/// A resume's hooks: the start's wiring rebuilt around the recorded `hook_token`, for an adapter
+/// that delivers its hooks on argv and so renders them again on every launch.
+pub(super) fn claude_cli_hooks_with_token(
+    config: &DaemonConfig,
+    agent_tool_socket: &Path,
+    spec: &CodingAgentSpec,
+    tddy_tools_path: &str,
+    hook_token: String,
+) -> ClaudeCliHooks {
     ClaudeCliHooks {
         tddy_tools_path: tddy_tools_path.to_string(),
         daemon_url: daemon_hook_urls::advertise_daemon_url(config),
         daemon_socket: Some(agent_tool_socket.to_string_lossy().into_owned()),
-        hook_token: Uuid::new_v4().to_string(),
+        hook_token,
         answer_wait_secs: spec.answer_wait_secs(),
     }
 }

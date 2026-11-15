@@ -58,8 +58,15 @@ pub fn a_status_report(status: &str) -> SessionNotification {
 }
 
 pub fn a_status_report_for(session_id: &str, status: &str) -> SessionNotification {
-    notification_for_activity_status(session_id, THE_OPERATOR, THE_LABEL, status, A_MOMENT)
-        .unwrap_or_else(|| panic!("the daemon raises no notification for status {status}"))
+    notification_for_activity_status(
+        session_id,
+        THE_OPERATOR,
+        THE_LABEL,
+        "Claude Code",
+        status,
+        A_MOMENT,
+    )
+    .unwrap_or_else(|| panic!("the daemon raises no notification for status {status}"))
 }
 
 pub fn an_agent_notification() -> AgentNotificationBuilder {

@@ -320,3 +320,71 @@ async fn answer_session_question_from_the_childs_home_wakes_the_waiting_hook() {
         "the tool's answer: {answer}"
     );
 }
+
+/// One host holding a project-home session and a muse-cli child of it, whose waiting is recorded
+/// as a bare message — all a Muse `Notification` report carries, since its `PreToolUse` never
+/// fires for `request_user_input`.
+async fn a_world_whose_muse_child_waits() -> World {
+    let peers = Arc::new(InProcessPeers::default());
+    let a = a_host(HOST_A, &peers);
+    let home = a_workspace_in(&a.daemon, THIS_PROJECT).await;
+    a.make_project_home(&home);
+    let child = a_workspace_in(&a.daemon, THIS_PROJECT).await;
+    a.make_muse_cli_child_of(&child, &home);
+    write_pending_question(
+        &a.session_dir(&child),
+        &PendingQuestion {
+            kind: "permission".to_string(),
+            question: "muse-worktree — waiting for your answer".to_string(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let terminals = tempfile::tempdir().unwrap();
+    a.runs_a_terminal_for(&home, &terminals).await;
+    World {
+        a,
+        home,
+        child,
+        _terminals: terminals,
+    }
+}
+
+impl Host {
+    /// Make `child` a muse-cli session started by `orchestrator` on this host.
+    fn make_muse_cli_child_of(&self, child: &str, orchestrator: &str) {
+        let dir = self.session_dir(child);
+        let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
+        meta.session_type = Some("muse-cli".to_string());
+        meta.hook_token = Some(HOOK_TOKEN.to_string());
+        tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
+        let mut changeset = tddy_core::read_changeset(&dir).unwrap_or_default();
+        changeset.orchestrator_session_id = Some(orchestrator.to_string());
+        changeset.orchestrator_daemon_instance_id = None;
+        tddy_core::write_changeset(&dir, &changeset).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn answer_session_question_to_a_muse_child_is_refused_naming_the_terminal_tools() {
+    // Given a muse-cli child of the home, waiting with no structured question
+    let world = a_world_whose_muse_child_waits().await;
+
+    // When the home answers
+    let answer = world.the_home_answers_rust_with_fmt_and_clippy().await;
+
+    // Then the tool refuses, naming the agent and the terminal tools that can answer it
+    assert!(answer.refused, "expected a refusal, got: {}", answer.text);
+    for expected in [
+        "Muse Code",
+        "takes no structured answer",
+        "ClaimSessionTerminal",
+        "SendSessionKeys",
+    ] {
+        assert!(
+            answer.text.contains(expected),
+            "the refusal names {expected:?}: {}",
+            answer.text
+        );
+    }
+}

@@ -22,6 +22,8 @@ const SESSION_ID: &str = "01900000-0000-7000-8000-AABB00000001";
 /// stream scopes a subscribed client to.
 const OS_USER: &str = "testuser";
 const LABEL: &str = "my-feature-branch";
+/// The agent product the telegram-copy tests pin: notification texts name it.
+const PRODUCT: &str = "Claude Code";
 const AT: u64 = 1_756_000_000_000;
 
 // ---------------------------------------------------------------------------
@@ -75,9 +77,15 @@ impl SessionNotificationSubscriber for FailingSubscriber {
 #[test]
 fn classifies_waiting_for_input_as_attention_required() {
     // Given / When
-    let notification =
-        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, "WaitingForInput", AT)
-            .expect("WaitingForInput must produce a notification");
+    let notification = notification_for_activity_status(
+        SESSION_ID,
+        OS_USER,
+        LABEL,
+        PRODUCT,
+        "WaitingForInput",
+        AT,
+    )
+    .expect("WaitingForInput must produce a notification");
 
     // Then
     assert_eq!(
@@ -97,9 +105,15 @@ fn classifies_waiting_for_input_as_attention_required() {
 #[test]
 fn writes_the_waiting_for_input_notification_in_the_words_telegram_already_uses() {
     // Given / When
-    let notification =
-        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, "WaitingForInput", AT)
-            .unwrap();
+    let notification = notification_for_activity_status(
+        SESSION_ID,
+        OS_USER,
+        LABEL,
+        PRODUCT,
+        "WaitingForInput",
+        AT,
+    )
+    .unwrap();
 
     // Then
     assert_eq!(
@@ -111,8 +125,9 @@ fn writes_the_waiting_for_input_notification_in_the_words_telegram_already_uses(
 #[test]
 fn classifies_done_as_attention_required() {
     // Given / When
-    let notification = notification_for_activity_status(SESSION_ID, OS_USER, LABEL, "Done", AT)
-        .expect("Done must produce a notification");
+    let notification =
+        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, PRODUCT, "Done", AT)
+            .expect("Done must produce a notification");
 
     // Then
     assert_eq!(
@@ -125,7 +140,7 @@ fn classifies_done_as_attention_required() {
 fn writes_the_done_notification_in_the_words_telegram_already_uses() {
     // Given / When
     let notification =
-        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, "Done", AT).unwrap();
+        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, PRODUCT, "Done", AT).unwrap();
 
     // Then
     assert_eq!(
@@ -134,11 +149,48 @@ fn writes_the_done_notification_in_the_words_telegram_already_uses() {
     );
 }
 
+/// The waiting-for-input text names the session's agent product, not Claude Code.
+#[test]
+fn names_the_sessions_product_in_the_waiting_for_input_text() {
+    // Given / When
+    let notification = notification_for_activity_status(
+        SESSION_ID,
+        OS_USER,
+        LABEL,
+        "Muse Code",
+        "WaitingForInput",
+        AT,
+    )
+    .unwrap();
+
+    // Then
+    assert_eq!(
+        notification.text,
+        "🔔 Session my-feature-branch: Muse Code needs your input (permission, question, or your next prompt). Attach via the web UI or `tddy-tools pty-relay`."
+    );
+}
+
+/// The done text names the session's agent product, not Claude Code.
+#[test]
+fn names_the_sessions_product_in_the_done_text() {
+    // Given / When
+    let notification =
+        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, "Muse Code", "Done", AT)
+            .unwrap();
+
+    // Then
+    assert_eq!(
+        notification.text,
+        "✅ Session my-feature-branch: Muse Code finished this turn. Attach to continue."
+    );
+}
+
 #[test]
 fn classifies_a_running_status_as_activity() {
     // Given / When
-    let notification = notification_for_activity_status(SESSION_ID, OS_USER, LABEL, "Running", AT)
-        .expect("Running must produce a notification");
+    let notification =
+        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, PRODUCT, "Running", AT)
+            .expect("Running must produce a notification");
 
     // Then
     assert_eq!(notification.kind, SessionNotificationKind::Activity);
@@ -152,7 +204,7 @@ fn classifies_a_running_status_as_activity() {
 fn classifies_executing_tool_as_activity() {
     // Given / When
     let notification =
-        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, "ExecutingTool", AT)
+        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, PRODUCT, "ExecutingTool", AT)
             .expect("ExecutingTool must produce a notification");
 
     // Then
@@ -166,8 +218,9 @@ fn classifies_executing_tool_as_activity() {
 #[test]
 fn classifies_a_started_session_as_activity() {
     // Given / When
-    let notification = notification_for_activity_status(SESSION_ID, OS_USER, LABEL, "Started", AT)
-        .expect("Started must produce a notification");
+    let notification =
+        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, PRODUCT, "Started", AT)
+            .expect("Started must produce a notification");
 
     // Then
     assert_eq!(notification.kind, SessionNotificationKind::Activity);
@@ -182,7 +235,8 @@ fn classifies_a_started_session_as_activity() {
 #[test]
 fn raises_no_notification_for_a_session_that_ended() {
     // Given / When
-    let notification = notification_for_activity_status(SESSION_ID, OS_USER, LABEL, "Ended", AT);
+    let notification =
+        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, PRODUCT, "Ended", AT);
 
     // Then
     assert_eq!(notification, None);
@@ -192,7 +246,7 @@ fn raises_no_notification_for_a_session_that_ended() {
 fn raises_no_notification_for_a_status_it_does_not_recognise() {
     // Given / When
     let notification =
-        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, "Rebooting", AT);
+        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, PRODUCT, "Rebooting", AT);
 
     // Then
     assert_eq!(notification, None);
@@ -201,7 +255,8 @@ fn raises_no_notification_for_a_status_it_does_not_recognise() {
 #[test]
 fn raises_no_notification_for_an_empty_status() {
     // Given / When
-    let notification = notification_for_activity_status(SESSION_ID, OS_USER, LABEL, "", AT);
+    let notification =
+        notification_for_activity_status(SESSION_ID, OS_USER, LABEL, PRODUCT, "", AT);
 
     // Then
     assert_eq!(notification, None);

@@ -4,10 +4,10 @@
 **Moved:** 2026-11-07 by #829 (`#agent-tools` 21/28), from `opencode_cli_spawn.rs` to `opencode_cli_spawn/resume.rs`
 **Category:** complexity
 **Detected:** 2026-11-03 — `/pr-wrap` on #797 (`#agent-tools` 8/12), fn line to closing brace on `origin/feature/agent-tools/cursor-cli` (`ca7814b57`) and HEAD; no coverage run
-**Metrics:** **121 lines**
+**Metrics:** **136 lines**
 **Thresholds breached:** length 74 > 60 (`/analyze-clean-code`)
 **Restructure:** not designed — deferred to the #agent-tools sweep node (developer, 2026-11-02)
-**Status:** Open — regressed 2026-11-06 by #823 (97 → 121) — unclaimed
+**Status:** Open — regressed 2026-11-15 by #911 (131 → 136): the toolset take, the `hook_params` call, the hooks slot field and its comment, mirroring the start path — unclaimed
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured
 
 ## Measurement history
@@ -22,6 +22,7 @@
 | 2026-11-07 | 115 → 117 | touched by `#agent-tools` 25/28 (#833): **+2**, fn line to closing brace on `origin/feature/agent-tools/dead-launch-code` and HEAD. A split session's pointer is chosen by session kind and a split wiring without one is refused; that selection is `split_launch_parts`, a helper beside the function (the inline form was 125) |
 | 2026-11-10 | 117 → 118 | **worse by 1** across #835–#865 (`#agent-tools` 27–32), brace-matched on `b8d9b769c` against `153b3c05d`. Not extracted: the `#agent-tools` sweep (#876) scoped Tier C to functions grown by 5 or more lines or with no record (user, 6e, 2026-11-10) |
 | 2026-11-11 | 118 → 128 | **worse by 10** in #891 (`#usage-binding 2/5`): the host resume rewrites its usage context before relaunching; br |
+| 2026-11-15 | 131 → 136 | **worse by 5** in #911: argv hooks render again on resume (the toolset take, the `hook_params` call, the hooks slot field, a two-line comment), mirroring the start path; the 131 base is growth since #891. Brace-matched on `origin/master` (`66bb45213`) and HEAD at #911's wrap |
 
 ## What would close it
 

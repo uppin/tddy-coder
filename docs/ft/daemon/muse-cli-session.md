@@ -33,8 +33,9 @@ protocols (`muse exec --json`, `muse serve`) are undocumented, so there is no Mu
    [Running on a Meta account](#running-on-a-meta-account)).
 4. The daemon cuts a worktree for the session on `muse-cli/<short id>` when `new_branch_name` is empty
    (`harness_from_spec::cli_branch_intent`: `BranchIntentPolicy::cli_agent("muse-cli", false)` — the spec declares no `branch_name_required`), pushing it when **Create remote branch** is set.
-5. The daemon spawns `muse [--model <model>] [<first prompt>]` in the worktree. `--model` is passed only
-   when a model was chosen, and a blank first prompt is none.
+5. The daemon spawns `muse [--model <model>] [<first prompt>] -c hooks=<json>` in the worktree.
+   `--model` is passed only when a model was chosen, and a blank first prompt is none. The `-c`
+   entry carries the session's lifecycle hooks (see [Lifecycle hooks](#lifecycle-hooks)).
 6. `StartSessionResponse` returns `session_id`; LiveKit fields are empty.
 
 Refused starts:
@@ -97,7 +98,8 @@ account's models instead.
 As for [OpenCode](opencode-cli-session.md#terminal-access): the PTY is served over the daemon's own
 connection and `ConnectSession` names no terminal room. `.session.yaml` holds `session_type: muse-cli`,
 `model`, `repo_path` (the worktree), `pid` and `status: active`; `ListSessions` shows `agent` as
-`muse-cli`. There are no activity-status hooks.
+`muse-cli`. Activity status, pending questions and notifications arrive through the session's
+lifecycle hooks (see [Lifecycle hooks](#lifecycle-hooks)).
 
 Context files served to the session's agent: `AGENTS.md`, `.agents/**` and `.muse/**`, on top of the
 shared base.
@@ -111,6 +113,25 @@ client-supplied checkout is kept).
 session owns its worktree, so the worktree's last Muse Code session is this one. The provider route is
 re-resolved from the owner's vault as it stands now. A resume whose worktree is gone is refused with
 `FAILED_PRECONDITION`.
+
+## Lifecycle hooks
+
+The launch wires eight lifecycle hooks — `SessionStart`, `UserPromptSubmit`, `PostToolUse`,
+`Notification`, `PermissionRequest`, `PreToolUse`, `Stop`, `SessionEnd` — each running
+`tddy-tools session-hook` to report activity, status and questions over the session OS user's
+agent-tool socket. They travel on the command line as `muse -c hooks=<json>`, not in a file:
+project `.muse/hooks.json` loads only in a trusted workspace, while `-c` installs the same hooks
+without one, and merges with the user's `managed_hooks_path` hooks instead of replacing them. A
+resume renders them again from the recorded hook token, minting none. A jailed session installs
+none.
+
+Every hook is report-only. Muse's `PreToolUse` never fires for `request_user_input`, so no hook
+can carry an orchestrator's answer back. A session waiting in the question UI reports
+`WaitingForInput` through the `Notification` hook (`notification_type: question_prompt`) and raises
+notifications under the **Muse Code** product name; its pending question carries the notification
+message alone, since nothing in the hook stream carries the questions. `AnswerSessionQuestion` on
+a `muse-cli` session is refused naming `ClaimSessionTerminal` and `SendSessionKeys`, which drive
+the selection UI through the terminal.
 
 ## tmux mode
 
@@ -138,8 +159,9 @@ own sign-in instead.
 
 ## Unconfirmed
 
-The key variable (`META_API_KEY`), `--model`, `--continue` and the `.muse/` tree come from secondary
-sources; no real `muse` was available to check them against. Tests pin them as written.
+The key variable (`META_API_KEY`), `--model` and `--continue` come from secondary sources and
+are unprobed; tests pin them as written. The `.muse/` tree is confirmed: project hooks live at
+`.muse/hooks.json` and load only in a trusted workspace.
 
 ## Out of scope
 

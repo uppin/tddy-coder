@@ -79,8 +79,8 @@ the daemon sends a Telegram alert. Recipients are resolved with a **tracked-firs
 
 | New status | Meaning | Message sent? |
 |------------|---------|---------------|
-| **`WaitingForInput`** | Claude Code hit a permission prompt, MCP elicitation dialog, or is idle waiting for the next user prompt | ✓ |
-| **`Done`** | Claude Code finished responding for this turn | ✓ |
+| **`WaitingForInput`** | The agent hit a permission prompt, an elicitation dialog or a question, or is idle waiting for the next user prompt | ✓ |
+| **`Done`** | The agent finished responding for this turn | ✓ |
 | `Started` / `Running` / `ExecutingTool` / `Ended` | Startup, agentic loop, tool execution, session end | — |
 
 Repeated delivery of the **same status** (e.g. `WaitingForInput` sent again without a status
@@ -88,14 +88,14 @@ change in between) does **not** send a second message. Only a genuine transition
 
 ### Message copy
 
-- **`WaitingForInput`**: `"🔔 Session <label>: Claude Code needs your input (permission, question, or your next prompt). Attach via the web UI or \`tddy-tools pty-relay\`."`
-- **`Done`**: `"✅ Session <label>: Claude Code finished this turn. Attach to continue."`
+- **`WaitingForInput`**: `"🔔 Session <label>: <product> needs your input (permission, question, or your next prompt). Attach via the web UI or \`tddy-tools pty-relay\`."`
+- **`Done`**: `"✅ Session <label>: <product> finished this turn. Attach to continue."`
 
-`<label>` is the session's **drawer label** — the basename of its `repo_path`, else its `workflow_goal`, else the first eight characters of its id (`tddy_core::session_label::session_display_label`). A session working in `/home/dev/my-feature-branch` reads as `Session my-feature-branch`.
+`<label>` is the session's **drawer label** — the basename of its `repo_path`, else its `workflow_goal`, else the first eight characters of its id (`tddy_core::session_label::session_display_label`). A session working in `/home/dev/my-feature-branch` reads as `Session my-feature-branch`. `<product>` is the session agent's product name from its spec (`Claude Code`, `Muse Code`, …).
 
 ### What the session is asking
 
-A claude-cli permission prompt or `AskUserQuestion` is alerted with its content instead of the
+A permission prompt or a question call (`AskUserQuestion`, `request_user_input`) is alerted with its content instead of the
 generic `WaitingForInput` line ([claude-cli-session.md § What a session is asking](claude-cli-session.md#what-a-session-is-asking)).
 Sent loud, in Telegram's HTML mode, once per `request_id`; the session's own words have `&`, `<` and
 `>` escaped:

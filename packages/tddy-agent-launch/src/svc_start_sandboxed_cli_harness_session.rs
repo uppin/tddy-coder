@@ -10,6 +10,7 @@
 
 use std::collections::BTreeMap;
 
+use tddy_coding_agent_specs::slots::hooks::{HooksDelivery, RenderedHooks};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::provider_route::HarnessRoute;
 use tddy_core::HookCommandParams;
@@ -408,6 +409,14 @@ fn write_jail_hooks(
     {
         return Ok(None);
     }
+    let adapter = tddy_coding_agent_specs::slots::hooks::adapter(&spec.agent.hooks.adapter)
+        .map_err(|e| Status::internal(e.to_string()))?;
+    // A jail takes no argv hooks: its launch renders slots with `hooks: None`, and this file is
+    // the only hooks a jailed start installs. An argv adapter (Muse's `-c hooks=…`) installs
+    // nothing here, and the jailed session runs hookless — as a jailed Claude session does.
+    if adapter.delivery() == HooksDelivery::Argv {
+        return Ok(None);
+    }
     let hook_token = uuid::Uuid::new_v4().to_string();
     let daemon_socket = tool_ipc_socket(session_id).to_string_lossy().into_owned();
     let daemon_url = tddy_daemon_kernel::daemon_hook_urls::advertise_daemon_url(config);
@@ -421,11 +430,12 @@ fn write_jail_hooks(
         answer_wait_secs: spec.answer_wait_secs(),
     };
     crate::claude_cli_spawn_steps::record_answer_wait_secs(session_dir, spec.answer_wait_secs())?;
-    let adapter = tddy_coding_agent_specs::slots::hooks::adapter(&spec.agent.hooks.adapter)
-        .map_err(|e| Status::internal(e.to_string()))?;
-    let (path, bytes) = adapter
+    let RenderedHooks::File(path, bytes) = adapter
         .try_render(worktree, &params)
-        .map_err(|e| Status::internal(e.to_string()))?;
+        .map_err(|e| Status::internal(e.to_string()))?
+    else {
+        return Ok(None);
+    };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| Status::internal(format!("create {}: {e}", parent.display())))?;

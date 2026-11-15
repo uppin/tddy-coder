@@ -499,16 +499,25 @@ async fn starting_a_muse_session_opens_with_its_first_prompt() {
     // When
     let session_id = daemon.start(req).await.unwrap();
 
-    // Then the prompt is Muse Code's positional argument, last, with no `--prompt` before it
+    // Then the prompt is Muse Code's positional argument, with no `--prompt` before it —
+    // followed by the `-c hooks=…` argv entries wiring its lifecycle hooks
     daemon.assert_agent_is_running(&session_id).await;
+    let argv = daemon.last_spawn_args().await;
     assert_eq!(
-        daemon.last_spawn_args().await,
+        argv[..3],
         vec![
             "--model".to_string(),
             MUSE_MODEL.to_string(),
             "fix the flaky test".to_string(),
         ]
     );
+    assert_eq!(argv.len(), 5, "one -c hooks entry: {argv:?}");
+    assert_eq!(argv[3], "-c");
+    let value = argv[4]
+        .strip_prefix("hooks=")
+        .expect("the entry is hooks=<json>");
+    let hooks: serde_json::Value = serde_json::from_str(value).expect("the entry is JSON");
+    assert_eq!(hooks.as_object().map(|hooks| hooks.len()), Some(8));
 }
 
 #[tokio::test]

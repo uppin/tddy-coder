@@ -32,7 +32,9 @@ use tddy_daemon_kernel::config::DaemonConfig;
 
 use tddy_core::session_pointer::SessionPointer;
 
-use crate::claude_cli_spawn_steps::{claude_cli_hooks, record_hook_answer_wait, ClaudeCliHooks};
+use crate::claude_cli_spawn_steps::{
+    claude_cli_hooks, record_hook_answer_wait, resumed_argv_hooks, ClaudeCliHooks,
+};
 use crate::cli_session_pointer::session_pointer_of;
 use crate::launch_ports::LaunchSessions;
 use crate::managed_launch;
@@ -46,7 +48,8 @@ pub(crate) struct HostLaunchSlots<'a> {
     /// The tool server registered and the tools pre-approved and withdrawn.
     pub toolset: AgentToolset,
     /// The session its `hooks` slot writes settings for; `None` writes none (a spec without
-    /// `hooks`, or a resume, which keeps the file its start wrote).
+    /// `hooks`, or a resume of a file adapter, which keeps the file its start wrote — argv
+    /// adapters render again).
     pub hooks: Option<HookCommandParams<'a>>,
     /// Passed with the spec's `instructions.append_system_prompt` flag.
     pub system_prompt_file: Option<&'a Path>,
@@ -262,9 +265,11 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
 
 /// What a resumed generic launch re-wires: a main's tool restriction, the managed workflow resumed
 /// at the goal it persisted, and the operator-notify wiring a session recorded a hook token for. The
-/// hooks file its start wrote is kept as it is.
+/// hooks file its start wrote is kept as it is; argv hooks (Muse's `-c hooks=…`) are rendered again.
 #[derive(Default)]
 pub(crate) struct ResumedWiring {
+    /// The session's hooks, rebuilt around its recorded token — for an argv adapter only.
+    pub hooks: Option<ClaudeCliHooks>,
     pub workflow: Option<ManagedWorkflow>,
     pub system_prompt_file: Option<PathBuf>,
     /// Never a `TDDY_*` variable.
@@ -360,7 +365,9 @@ impl LaunchSessions {
             &tddy_tools_path,
             session_dir,
         );
+        let hooks = resumed_argv_hooks(spec, &self.config, &tool_socket, &tddy_tools_path, meta)?;
         Ok(ResumedWiring {
+            hooks,
             workflow,
             system_prompt_file,
             env: process_env,
@@ -393,6 +400,22 @@ pub(crate) fn hooks_report_over_the_agent_tool_socket(spec: &CodingAgentSpec) ->
 
 impl SessionWiring {
     /// The hook parameters of `session_id`'s start, when the spec declares `hooks`.
+    pub(crate) fn hook_params<'a>(
+        &'a self,
+        spec: &CodingAgentSpec,
+        session_id: &'a str,
+        os_user: &'a str,
+    ) -> Option<HookCommandParams<'a>> {
+        let hooks = self
+            .hooks
+            .as_ref()
+            .filter(|_| spec.has(Capability::Hooks))?;
+        Some(hooks.params(session_id, os_user))
+    }
+}
+
+impl ResumedWiring {
+    /// The hook parameters of the resumed launch, when the start's wiring was argv-delivered.
     pub(crate) fn hook_params<'a>(
         &'a self,
         spec: &CodingAgentSpec,

@@ -21,8 +21,8 @@ pub enum SessionActivityStatus {
     Running,
     /// `PostToolUse` — a tool call completed; still in the agentic loop.
     ExecutingTool,
-    /// `Notification` (permission_prompt / elicitation_dialog / idle_prompt) — waiting on the
-    /// user to approve a tool, answer a question, or re-engage.
+    /// `Notification` (permission_prompt / elicitation_dialog / idle_prompt / question_prompt)
+    /// — waiting on the user to approve a tool, answer a question, or re-engage.
     WaitingForInput,
     /// `Stop` — Claude finished responding for this turn.
     Done,
@@ -84,19 +84,26 @@ pub fn activity_status_from_hook(
 /// The tool whose input is a set of questions for the operator, rather than an action.
 pub const ASK_USER_QUESTION_TOOL: &str = "AskUserQuestion";
 
+/// Muse Code's counterpart of [`ASK_USER_QUESTION_TOOL`]: its input is Claude's shape plus a
+/// per-question `id`, without `multiSelect`.
+pub const REQUEST_USER_INPUT_TOOL: &str = "request_user_input";
+
 /// Whether a hook event asks the operator something: a `PermissionRequest`, or a `PreToolUse` of
-/// [`ASK_USER_QUESTION_TOOL`] (`#home-inbox` 3/8). Both are hooks Claude waits on.
+/// [`ASK_USER_QUESTION_TOOL`] or [`REQUEST_USER_INPUT_TOOL`] (`#home-inbox` 3/8). Each is a hook
+/// its agent waits on.
 pub fn hook_event_asks_a_question(hook_event_name: &str, tool_name: Option<&str>) -> bool {
     match hook_event_name {
         "PermissionRequest" => true,
-        "PreToolUse" => tool_name == Some(ASK_USER_QUESTION_TOOL),
+        "PreToolUse" => {
+            tool_name == Some(ASK_USER_QUESTION_TOOL) || tool_name == Some(REQUEST_USER_INPUT_TOOL)
+        }
         _ => false,
     }
 }
 
 /// [`activity_status_from_hook`] for an event that may name a tool: `PermissionRequest`, and
-/// `PreToolUse` of `AskUserQuestion`, map to `WaitingForInput` (`#home-inbox` 3/8). Every other
-/// `PreToolUse` maps to `None`, as it always has.
+/// `PreToolUse` of `AskUserQuestion` or `request_user_input`, map to `WaitingForInput`
+/// (`#home-inbox` 3/8). Every other `PreToolUse` maps to `None`, as it always has.
 ///
 /// `tool_name` is the `tool_name` field of the hook stdin JSON, present on tool events.
 pub fn activity_status_from_hook_with_tool(
@@ -113,9 +120,10 @@ pub fn activity_status_from_hook_with_tool(
         "UserPromptSubmit" | "beforeSubmitPrompt" => Some(SessionActivityStatus::Running),
         "PostToolUse" | "postToolUse" => Some(SessionActivityStatus::ExecutingTool),
         "Notification" => match notification_type {
-            Some("permission_prompt") | Some("elicitation_dialog") | Some("idle_prompt") => {
-                Some(SessionActivityStatus::WaitingForInput)
-            }
+            Some("permission_prompt")
+            | Some("elicitation_dialog")
+            | Some("idle_prompt")
+            | Some("question_prompt") => Some(SessionActivityStatus::WaitingForInput),
             _ => None,
         },
         "Stop" | "stop" => Some(SessionActivityStatus::Done),
@@ -263,6 +271,17 @@ mod tests {
     fn notification_idle_prompt_maps_to_waiting_for_input() {
         // When
         let status = activity_status_from_hook("Notification", Some("idle_prompt"));
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::WaitingForInput));
+    }
+
+    /// `Notification` with `notification_type = question_prompt` (Muse Code waiting in its
+    /// `request_user_input` selection UI) → `WaitingForInput`.
+    #[test]
+    fn notification_question_prompt_maps_to_waiting_for_input() {
+        // When
+        let status = activity_status_from_hook("Notification", Some("question_prompt"));
 
         // Then
         assert_eq!(status, Some(SessionActivityStatus::WaitingForInput));
@@ -449,6 +468,18 @@ mod tests {
         // When
         let status =
             activity_status_from_hook_with_tool("PreToolUse", None, Some("AskUserQuestion"));
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::WaitingForInput));
+    }
+
+    /// `PreToolUse` of Muse's `request_user_input` → `WaitingForInput`, as for
+    /// `AskUserQuestion`.
+    #[test]
+    fn pre_tool_use_of_request_user_input_maps_to_waiting_for_input() {
+        // When
+        let status =
+            activity_status_from_hook_with_tool("PreToolUse", None, Some("request_user_input"));
 
         // Then
         assert_eq!(status, Some(SessionActivityStatus::WaitingForInput));

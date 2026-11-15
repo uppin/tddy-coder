@@ -11,9 +11,11 @@ on 2026-11-14
 The transcript is built from tddy's own stores, never from the agent's.
 `read_session_transcript` (`packages/tddy-service/src/acp_replay.rs:88-112`) merges
 `acp-transcript.jsonl` (written by the tddy-coder presenter only, `:90-92`) with
-`agent-activity.jsonl` (hooks). A Muse PTY session writes neither. Even with hooks wired
-([2026-11-14-muse-hooks-not-wired.md](2026-11-14-muse-hooks-not-wired.md)) it would hold tool calls
-only, no messages or reasoning, which is the limitation a `claude-cli` session has today.
+`agent-activity.jsonl` (hooks). A Muse PTY session writes no `acp-transcript.jsonl`; since
+2026-11-15 its hooks write `agent-activity.jsonl`
+([2026-11-15-muse-hooks-wired](../changesets/2026-11-15-muse-hooks-wired.md)). Even so the merged
+transcript holds tool calls only, no messages or reasoning, which is the limitation a `claude-cli`
+session has today.
 
 `muse.yaml`'s `reads: []` is not a transcript source: `reads` is extra host paths a sandboxed tool
 needs readable (`packages/tddy-actions/src/tool/def.rs:31-33`). The only agent-file readers in specs

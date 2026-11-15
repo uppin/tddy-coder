@@ -152,7 +152,8 @@ fn every_builtin_agent_declares_the_capabilities_its_old_gates_granted() {
         .map(|spec| (spec.id.as_str(), spec.capabilities().clone()))
         .collect();
 
-    // Then — claude-cli held every gate, cursor-cli the hook, model, notify and worktree ones
+    // Then — claude-cli held every gate, cursor-cli the hook, model, notify and worktree ones,
+    // muse-cli the hook one
     assert_eq!(
         declared,
         vec![
@@ -182,7 +183,7 @@ fn every_builtin_agent_declares_the_capabilities_its_old_gates_granted() {
                     Capability::OperatorNotify,
                 ])
             ),
-            ("muse", capabilities(&[])),
+            ("muse", capabilities(&[Capability::Hooks])),
             ("opencode", capabilities(&[])),
             ("oz", capabilities(&[])),
             ("warp", capabilities(&[])),

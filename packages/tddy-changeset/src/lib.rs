@@ -50,6 +50,7 @@ pub use orchestration_mark::{clear_a_paused_mark, OrchestrationMark, Orchestrati
 pub use session_activity::{
     activity_status_from_hook, activity_status_from_hook_with_tool, hook_event_asks_a_question,
     hook_event_fields, parse_hook_event, HookEvent, SessionActivityStatus, ASK_USER_QUESTION_TOOL,
+    REQUEST_USER_INPUT_TOOL,
 };
 pub use session_agent::{
     AgentId, AgentIdError, AgentKindRecord, AgentPlacementRecord, SessionAgentRecord,

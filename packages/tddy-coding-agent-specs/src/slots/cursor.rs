@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use tddy_agent_backend::claude_hooks::HookCommandParams;
 
-use super::hooks::HooksAdapter;
+use super::hooks::{HooksAdapter, RenderedHooks};
 use super::mcp::mcp_servers_json;
 use super::{McpServerCommand, SlotError};
 
@@ -40,15 +40,22 @@ impl HooksAdapter for CursorHooksJson {
     }
 
     fn render(&self, workdir: &Path, params: &HookCommandParams<'_>) -> (PathBuf, Vec<u8>) {
-        self.try_render(workdir, params)
+        match self
+            .try_render(workdir, params)
             .unwrap_or_else(|refusal| panic!("{refusal}"))
+        {
+            RenderedHooks::File(path, bytes) => (path, bytes),
+            RenderedHooks::Argv(_) => {
+                unreachable!("the cursor adapter renders a file, never argv")
+            }
+        }
     }
 
     fn try_render(
         &self,
         workdir: &Path,
         params: &HookCommandParams<'_>,
-    ) -> Result<(PathBuf, Vec<u8>), SlotError> {
+    ) -> Result<RenderedHooks, SlotError> {
         render_cursor_hooks_json(workdir, params)
     }
 }
@@ -60,7 +67,7 @@ impl HooksAdapter for CursorHooksJson {
 pub fn render_cursor_hooks_json(
     workdir: &Path,
     params: &HookCommandParams<'_>,
-) -> Result<(PathBuf, Vec<u8>), SlotError> {
+) -> Result<RenderedHooks, SlotError> {
     if params.daemon_socket.is_none() {
         return Err(SlotError::NoDaemonSocket {
             adapter: CURSOR_HOOKS_JSON.to_string(),
@@ -68,7 +75,7 @@ pub fn render_cursor_hooks_json(
     }
     let settings = tddy_agent_backend::build_cursor_hooks_settings(params);
     // `{:#}` is `serde_json`'s pretty form, and unlike `to_string_pretty` cannot fail.
-    Ok((
+    Ok(RenderedHooks::File(
         workdir.join(CURSOR_HOOKS_FILE),
         format!("{settings:#}").into_bytes(),
     ))
@@ -259,7 +266,7 @@ mod tests {
         });
         assert_eq!(
             rendered,
-            Ok((
+            Ok(RenderedHooks::File(
                 workdir.join(CURSOR_HOOKS_FILE),
                 serde_json::to_string_pretty(&expected)
                     .unwrap()

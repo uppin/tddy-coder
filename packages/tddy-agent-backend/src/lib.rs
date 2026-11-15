@@ -9,6 +9,7 @@ pub mod agent_env;
 pub mod backend;
 pub mod claude_hooks;
 pub mod cursor_hooks;
+pub mod muse_hooks;
 pub mod provider_route;
 pub mod provider_route_file;
 pub mod session_pointer;
@@ -51,4 +52,5 @@ pub use claude_hooks::{
     CLAUDE_HOOK_TIMEOUT_MARGIN_SECS,
 };
 pub use cursor_hooks::build_cursor_hooks_settings;
+pub use muse_hooks::build_muse_hooks_config_value;
 pub use stream::ProgressEvent;
