@@ -170,64 +170,23 @@ pub fn session_list_status_from_session_dir(
         session_dir.display()
     );
 
-    let meta = match read_session_metadata(session_dir) {
-        Ok(m) => m,
-        Err(e) => {
-            log::debug!(
-                target: "tddy_daemon::session_list_enrichment",
-                "no readable .session.yaml in {}: {e}",
-                session_dir.display()
-            );
-            return Ok(SessionListStatusDisplay::all_placeholders());
-        }
+    let Some(meta) = read_or_log(
+        ".session.yaml",
+        session_dir,
+        read_session_metadata(session_dir),
+    ) else {
+        return Ok(SessionListStatusDisplay::all_placeholders());
     };
 
-    // CLI harness sessions (claude-cli, cursor-cli, opencode-cli, ...) run no workflow — read
-    // agent/model/activity_status from metadata. The agent is the session type. A start that
-    // creates a worktree still writes a changeset recording the branch it created; sessions
-    // started before that have none, and list without a branch.
-    // A CLI session's type is one a coding agent declares (`agents`' session types), so the
-    // declaration is the test — any agent's CLI session, dropped-in included, runs no workflow.
     let session_type = meta.session_type.as_deref().unwrap_or_default();
-    if agents
-        .and_then(|agents| agents.for_session_type(session_type))
-        .is_some()
-    {
+    if runs_no_workflow(agents, session_type) {
         let changeset = read_changeset(session_dir).ok();
-        return Ok(SessionListStatusDisplay {
-            workflow_goal: String::new(),
-            workflow_state: String::new(),
-            elapsed_display: String::new(),
-            agent: session_type.to_string(),
-            model: meta.model.clone().unwrap_or_default(),
-            activity_status: meta.activity_status.clone().unwrap_or_default(),
-            orchestrator_session_id: changeset
-                .as_ref()
-                .and_then(|c| c.orchestrator_session_id.clone())
-                .unwrap_or_default(),
-            recipe: changeset
-                .as_ref()
-                .and_then(|c| c.recipe.clone())
-                .unwrap_or_default(),
-            stack_plan_json: String::new(),
-            stack_id: changeset
-                .as_ref()
-                .and_then(|c| c.stack_id.clone())
-                .unwrap_or_default(),
-            branch: changeset.and_then(|c| c.branch).unwrap_or_default(),
-        });
+        return Ok(cli_harness_row(&meta, session_type, changeset));
     }
 
-    let changeset = match read_changeset(session_dir) {
-        Ok(c) => c,
-        Err(e) => {
-            log::debug!(
-                target: "tddy_daemon::session_list_enrichment",
-                "no readable changeset.yaml in {}: {e}",
-                session_dir.display()
-            );
-            return Ok(SessionListStatusDisplay::all_placeholders());
-        }
+    let Some(changeset) = read_or_log("changeset.yaml", session_dir, read_changeset(session_dir))
+    else {
+        return Ok(SessionListStatusDisplay::all_placeholders());
     };
 
     let workflow_state = changeset.state.current.to_string();
@@ -239,33 +198,93 @@ pub fn session_list_status_from_session_dir(
             "session_id {} not found in changeset sessions list; showing state/elapsed only",
             meta.session_id
         );
-        return Ok(SessionListStatusDisplay {
-            workflow_goal: "—".to_string(),
+        return Ok(state_only_row(
+            session_dir,
+            &changeset,
             workflow_state,
             elapsed_display,
-            agent: "—".to_string(),
-            model: "—".to_string(),
-            activity_status: String::new(),
-            orchestrator_session_id: changeset
-                .orchestrator_session_id
-                .clone()
-                .unwrap_or_default(),
-            recipe: changeset.recipe.clone().unwrap_or_default(),
-            stack_plan_json: stack_plan_json_for_changeset(session_dir, &changeset),
-            stack_id: changeset.stack_id.clone().unwrap_or_default(),
-            branch: changeset.branch.clone().unwrap_or_default(),
-        });
+        ));
     };
 
+    Ok(workflow_row(
+        session_dir,
+        &changeset,
+        row,
+        workflow_state,
+        elapsed_display,
+    ))
+}
+
+/// The value of a read of `file` in `session_dir`, or `None` after logging why it is absent.
+fn read_or_log<T, E: std::fmt::Display>(
+    file: &str,
+    session_dir: &Path,
+    read: Result<T, E>,
+) -> Option<T> {
+    read.map_err(|e| {
+        log::debug!(
+            target: "tddy_daemon::session_list_enrichment",
+            "no readable {file} in {}: {e}",
+            session_dir.display()
+        );
+    })
+    .ok()
+}
+
+// CLI harness sessions (claude-cli, cursor-cli, opencode-cli, ...) run no workflow — read
+// agent/model/activity_status from metadata. The agent is the session type. A start that
+// creates a worktree still writes a changeset recording the branch it created; sessions
+// started before that have none, and list without a branch.
+// A CLI session's type is one a coding agent declares (`agents`' session types), so the
+// declaration is the test — any agent's CLI session, dropped-in included, runs no workflow.
+fn runs_no_workflow(
+    agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
+    session_type: &str,
+) -> bool {
+    agents
+        .and_then(|agents| agents.for_session_type(session_type))
+        .is_some()
+}
+
+fn state_only_row(
+    session_dir: &Path,
+    changeset: &Changeset,
+    workflow_state: String,
+    elapsed_display: String,
+) -> SessionListStatusDisplay {
+    SessionListStatusDisplay {
+        workflow_goal: "—".to_string(),
+        workflow_state,
+        elapsed_display,
+        agent: "—".to_string(),
+        model: "—".to_string(),
+        activity_status: String::new(),
+        orchestrator_session_id: changeset
+            .orchestrator_session_id
+            .clone()
+            .unwrap_or_default(),
+        recipe: changeset.recipe.clone().unwrap_or_default(),
+        stack_plan_json: stack_plan_json_for_changeset(session_dir, changeset),
+        stack_id: changeset.stack_id.clone().unwrap_or_default(),
+        branch: changeset.branch.clone().unwrap_or_default(),
+    }
+}
+
+fn workflow_row(
+    session_dir: &Path,
+    changeset: &Changeset,
+    row: &CsSessionEntry,
+    workflow_state: String,
+    elapsed_display: String,
+) -> SessionListStatusDisplay {
     let workflow_goal = row.tag.clone();
     let agent = row.agent.clone();
-    let model =
-        resolve_model_label_for_tag(&changeset, &row.tag).unwrap_or_else(|| "—".to_string());
+    let model = resolve_model_label_for_tag(changeset, &row.tag).unwrap_or_else(|| "—".to_string());
 
     log::debug!(
         target: "tddy_daemon::session_list_enrichment",
         "enriched session {}: goal={} state={} agent={} model={} elapsed={}",
-        meta.session_id,
+        row.id,
         workflow_goal,
         workflow_state,
         agent,
@@ -273,7 +292,7 @@ pub fn session_list_status_from_session_dir(
         elapsed_display
     );
 
-    Ok(SessionListStatusDisplay {
+    SessionListStatusDisplay {
         workflow_goal,
         workflow_state,
         elapsed_display,
@@ -285,10 +304,39 @@ pub fn session_list_status_from_session_dir(
             .clone()
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
-        stack_plan_json: stack_plan_json_for_changeset(session_dir, &changeset),
+        stack_plan_json: stack_plan_json_for_changeset(session_dir, changeset),
         stack_id: changeset.stack_id.clone().unwrap_or_default(),
         branch: changeset.branch.clone().unwrap_or_default(),
-    })
+    }
+}
+
+fn cli_harness_row(
+    meta: &tddy_core::SessionMetadata,
+    session_type: &str,
+    changeset: Option<Changeset>,
+) -> SessionListStatusDisplay {
+    SessionListStatusDisplay {
+        workflow_goal: String::new(),
+        workflow_state: String::new(),
+        elapsed_display: String::new(),
+        agent: session_type.to_string(),
+        model: meta.model.clone().unwrap_or_default(),
+        activity_status: meta.activity_status.clone().unwrap_or_default(),
+        orchestrator_session_id: changeset
+            .as_ref()
+            .and_then(|c| c.orchestrator_session_id.clone())
+            .unwrap_or_default(),
+        recipe: changeset
+            .as_ref()
+            .and_then(|c| c.recipe.clone())
+            .unwrap_or_default(),
+        stack_plan_json: String::new(),
+        stack_id: changeset
+            .as_ref()
+            .and_then(|c| c.stack_id.clone())
+            .unwrap_or_default(),
+        branch: changeset.and_then(|c| c.branch).unwrap_or_default(),
+    }
 }
 
 /// Maps `changeset.models[tag]` to the effective model label.
