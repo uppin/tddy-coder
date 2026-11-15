@@ -170,43 +170,23 @@ pub fn session_list_status_from_session_dir(
         session_dir.display()
     );
 
-    let meta = match read_session_metadata(session_dir) {
-        Ok(m) => m,
-        Err(e) => {
-            log::debug!(
-                target: "tddy_daemon::session_list_enrichment",
-                "no readable .session.yaml in {}: {e}",
-                session_dir.display()
-            );
-            return Ok(SessionListStatusDisplay::all_placeholders());
-        }
+    let Some(meta) = read_or_log(
+        ".session.yaml",
+        session_dir,
+        read_session_metadata(session_dir),
+    ) else {
+        return Ok(SessionListStatusDisplay::all_placeholders());
     };
 
-    // CLI harness sessions (claude-cli, cursor-cli, opencode-cli, ...) run no workflow — read
-    // agent/model/activity_status from metadata. The agent is the session type. A start that
-    // creates a worktree still writes a changeset recording the branch it created; sessions
-    // started before that have none, and list without a branch.
-    // A CLI session's type is one a coding agent declares (`agents`' session types), so the
-    // declaration is the test — any agent's CLI session, dropped-in included, runs no workflow.
     let session_type = meta.session_type.as_deref().unwrap_or_default();
-    if agents
-        .and_then(|agents| agents.for_session_type(session_type))
-        .is_some()
-    {
+    if runs_no_workflow(agents, session_type) {
         let changeset = read_changeset(session_dir).ok();
         return Ok(cli_harness_row(&meta, session_type, changeset));
     }
 
-    let changeset = match read_changeset(session_dir) {
-        Ok(c) => c,
-        Err(e) => {
-            log::debug!(
-                target: "tddy_daemon::session_list_enrichment",
-                "no readable changeset.yaml in {}: {e}",
-                session_dir.display()
-            );
-            return Ok(SessionListStatusDisplay::all_placeholders());
-        }
+    let Some(changeset) = read_or_log("changeset.yaml", session_dir, read_changeset(session_dir))
+    else {
+        return Ok(SessionListStatusDisplay::all_placeholders());
     };
 
     let workflow_state = changeset.state.current.to_string();
@@ -233,6 +213,37 @@ pub fn session_list_status_from_session_dir(
         workflow_state,
         elapsed_display,
     ))
+}
+
+/// The value of a read of `file` in `session_dir`, or `None` after logging why it is absent.
+fn read_or_log<T, E: std::fmt::Display>(
+    file: &str,
+    session_dir: &Path,
+    read: Result<T, E>,
+) -> Option<T> {
+    read.map_err(|e| {
+        log::debug!(
+            target: "tddy_daemon::session_list_enrichment",
+            "no readable {file} in {}: {e}",
+            session_dir.display()
+        );
+    })
+    .ok()
+}
+
+// CLI harness sessions (claude-cli, cursor-cli, opencode-cli, ...) run no workflow — read
+// agent/model/activity_status from metadata. The agent is the session type. A start that
+// creates a worktree still writes a changeset recording the branch it created; sessions
+// started before that have none, and list without a branch.
+// A CLI session's type is one a coding agent declares (`agents`' session types), so the
+// declaration is the test — any agent's CLI session, dropped-in included, runs no workflow.
+fn runs_no_workflow(
+    agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
+    session_type: &str,
+) -> bool {
+    agents
+        .and_then(|agents| agents.for_session_type(session_type))
+        .is_some()
 }
 
 fn state_only_row(
