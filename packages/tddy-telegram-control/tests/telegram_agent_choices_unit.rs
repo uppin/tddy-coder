@@ -168,7 +168,7 @@ fn the_model_choices_are_the_specs_default_then_its_other_curated_models_labelle
             "sonnet",
             "haiku",
             "claude-opus-5",
-            "claude-fable-5-1",
+            "claude-fable-5-2",
             "claude-sonnet-5",
             "claude-haiku-4-5-20251001"
         ]))
