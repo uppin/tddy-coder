@@ -1,7 +1,7 @@
 # Changeset: refactor — the `#split-alive` sweep pays down the stack's code issues
 
 **Date**: 2026-11-15
-**Status**: 🚧 In Progress — plan (commit 1)
+**Status**: 🚧 In Progress — [G] applied; [W] pending
 **Type**: Refactor
 **Complexity**: 3/5 — two crates (`tddy-session-split`, `tddy-session-activity`), three functions that the stack grew, nine `extract_method` operations, and one hand-written parameter struct with its two call sites
 **Stack**: `#split-alive` 5/5, the sweep node. Base: `feature/split-alive/split-pairing` (#908)
@@ -53,12 +53,12 @@ the touched packages carries `Claimed by`.
 
 ## Scope
 
-- [ ] **Baseline**: CI on #908's head `2e53ab061`, recorded by failing-test name before the first plan is applied
-- [ ] **Plan**: anchors emitted with `restructure anchors` from the warm index and `check --deep` clean. **Deferred to `[G]`**: this commit carries intents only
-- [ ] **Hand edit H1**: the `SplitAgentStart` parameter struct and its two call sites, in a commit of its own
-- [ ] **Apply**: each group applied and committed on its own, with `verify --against` after each
-- [ ] **Baseline after**: the scoped suites match the recorded set by name
-- [ ] **Code quality**: `cargo fmt --check`; `./dev cargo clippy -p tddy-session-split -p tddy-session-activity --all-targets -- -D warnings`
+- [x] **Baseline**: CI on #908's head `2e53ab061` (read before the first plan): `Rust tests` 12773 run, 12773 passed, 0 failed; `Rust e2e tests` 653/653; web shards 788 + 381 + 606 all passed; no failing test by name. Rust shards 1-3 were still pending when read, so the figures are the aggregate report's
+- [x] **Plan**: anchors emitted with `restructure anchors` from the warm index and `check --deep` clean. **Deferred to `[G]`**: this commit carries intents only
+- [x] **Hand edit H1**: the `SplitAgentStart` parameter struct and its two call sites, in a commit of its own
+- [x] **Apply**: each group applied and committed on its own, with `verify --against` after each
+- [x] **Baseline after**: the scoped suites match the recorded set by name (`./test -p tddy-session-split -p tddy-session-activity`: 28 targets, 291 passed, 0 failed, 0 ignored; clippy `-D warnings` and `cargo fmt --check` clean)
+- [x] **Code quality**: `cargo fmt --check`; `./dev cargo clippy -p tddy-session-split -p tddy-session-activity --all-targets -- -D warnings`
 - [ ] **Re-measure**: `/analyze-code-issues` adds no record and closes every backlog row. B1's record is deleted, and its final numbers go in the change-history entry
 - [ ] **Documentation**: the Final Checklist executed
 
@@ -117,6 +117,34 @@ literals. Each is extracted into a free function and its call site becomes one l
   `variant_hooks_args` extend.
 - `b3-x2` → `split_denied_tools(spec, &withdrawn_refs)`: the `natives` lookup and the
   `build_claude_disallowlist` filter.
+
+## Execution record ([G])
+
+Commits after `252a33292`, in order:
+
+| Commit | What | Engine or hand |
+|---|---|---|
+| H1 | `SplitAgentStart` struct, `#[allow(too_many_arguments)]` removed, two callers | hand |
+| b1-x1..x4 | `prepare_split_launch`, `split_agent_launch_args`, `ensure_split_agent_alive`, `split_start_response` (one group, applied bottom-up) | engine |
+| b1 fix-ups | `prepare_split_launch` 8 params -> `(&self, start, room, req, progress)` (the engine's own note: `clippy::too_many_arguments` fires above 7); the roster comment moves into `split_agent_launch_args`; `split_start_response(room, start, handle)` | hand |
+| b3 prep | `natives` lookup moved beside the denylist that filters by it | hand |
+| b3-x1, b3-x2 | `host_variant_args`, `split_denied_tools` | engine |
+| b2-x1 | `cli_harness_row` (the literal expression; `return Ok(` stays in the caller, so the range cannot hold the `let changeset`) | engine |
+| b2-x3 | `workflow_row(session_dir, &changeset, row, workflow_state, elapsed_display)` | hand. Engine refusal at apply: `session_list_enrichment.rs:239:37: error[E0505]: cannot move out of \`changeset\` because it is borrowed` (the assist moved `changeset` while `row` borrowed it); `check --deep` had reported no findings |
+| b2-x2 | `state_only_row` | hand. Engine refusal at apply: `session_list_enrichment.rs:236:9: error: expected identifier, found \`*\`` (shorthand fields `workflow_state`/`elapsed_display` rewritten to `*workflow_state,`); `check --deep` had reported no findings |
+| b2 fix-up | `read_or_log` and `runs_no_workflow` helpers, because the three row extracts alone left the function at 77 lines | hand |
+
+`restructure verify --against HEAD` after each engine group reports only the statements whose
+arguments changed shape by extraction (`&session_dir` -> `session_dir`, `&withdrawn_refs` -> parameter),
+which it cannot excuse; nothing else was lost.
+
+### Re-measured (fn line to closing brace; nesting; parameters)
+
+| Function | Before | After | Nesting | Params |
+|---|---|---|---|---|
+| `spawn_split_agent` | 157 lines, 9 params | 60 lines | 2 | 5 (with `self`) |
+| `session_list_status_from_session_dir` | 133 | 57 | 2 | 2 |
+| `split_claude_extra_args` | 67 | 51 | 1 | 5 |
 
 ## Green wave
 
