@@ -64,18 +64,33 @@ export function groupSessionsByProject(
   return groups;
 }
 
-/** A `ListProjects` answer (asked with `includeDeleted`) split into live rows and deleted project ids. */
-export function splitDeletedProjects(_projects: ReadonlyArray<ProjectEntry>): {
+/**
+ * A `ListProjects` answer (asked with `includeDeleted`) split into live rows and deleted project ids.
+ *
+ * The daemon gives every row of one project the same lifecycle, so a row's own `deletedAt`
+ * decides which side it lands on.
+ */
+export function splitDeletedProjects(projects: ReadonlyArray<ProjectEntry>): {
   live: ProjectEntry[];
   deletedProjectIds: ReadonlySet<string>;
 } {
-  throw new Error("red: splitDeletedProjects");
+  const live: ProjectEntry[] = [];
+  const deletedProjectIds = new Set<string>();
+  for (const project of projects) {
+    if (project.deletedAt) {
+      deletedProjectIds.add(project.projectId);
+    } else {
+      live.push(project);
+    }
+  }
+  return { live, deletedProjectIds };
 }
 
 /** `sessions` without those of a soft-deleted project. */
 export function withoutDeletedProjectsSessions(
-  _sessions: SessionEntry[],
-  _deletedProjectIds: ReadonlySet<string>,
+  sessions: SessionEntry[],
+  deletedProjectIds: ReadonlySet<string>,
 ): SessionEntry[] {
-  throw new Error("red: withoutDeletedProjectsSessions");
+  if (deletedProjectIds.size === 0) return sessions;
+  return sessions.filter((session) => !deletedProjectIds.has(session.projectId));
 }

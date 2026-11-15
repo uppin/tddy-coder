@@ -5,7 +5,7 @@ use crate::launch_ports::LaunchSessions;
 use std::path::Path;
 use std::path::PathBuf;
 use tddy_daemon_kernel::user_paths::repos_base_for_user;
-use tddy_projects::project_storage;
+use tddy_projects::project_storage::{self, ProjectLifecycle};
 use tddy_rpc::Status;
 use tddy_service::proto::session::start_phase::Step as StartStep;
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
@@ -71,11 +71,18 @@ pub(super) fn spawn_project_clone(
                 cloner,
             )
         } else {
+            // The peers' rows carry their tombstones: a project deleted there is not provisioned
+            // here, whichever peer's row is newest.
             let peer_lookup = |id: &str| {
-                peer_entries
+                let rows: Vec<_> = peer_entries.iter().filter(|p| p.project_id == id).collect();
+                let lifecycles: Vec<_> = rows
                     .iter()
-                    .find(|p| p.project_id == id)
-                    .map(|p| (p.name.clone(), p.git_url.clone()))
+                    .map(|p| ProjectLifecycle::from_wire(&p.deleted_at, &p.deleted_by, &p.restored_at))
+                    .collect();
+                if ProjectLifecycle::newest(lifecycles.iter()).is_deleted() {
+                    return None;
+                }
+                rows.first().map(|p| (p.name.clone(), p.git_url.clone()))
             };
             tddy_projects::project_provision::ensure_project_available_locally(
                 &projects_dir_owned,

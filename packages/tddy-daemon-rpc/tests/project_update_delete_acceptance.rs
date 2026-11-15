@@ -101,6 +101,12 @@ impl PeerForwarder for InProcessPeers {
                 ))
                 .await
                 .map(|r| r.into_inner().encode_to_vec()),
+            (PROJECT_SERVICE, "AddProjectToHost") => daemon
+                .add_project_to_host(arriving_from_a_peer(
+                    AddProjectToHostRequest::decode(body.as_slice()).unwrap(),
+                ))
+                .await
+                .map(|r| r.into_inner().encode_to_vec()),
             (PROJECT_SERVICE, "UpdateProject") => daemon
                 .update_project(arriving_from_a_peer(
                     UpdateProjectRequest::decode(body.as_slice()).unwrap(),
@@ -284,7 +290,8 @@ impl Host {
         let dir = self.session_dir(session_id);
         std::fs::create_dir_all(&dir).unwrap();
         let mut yaml = format!(
-            "session_id: {session_id}\nproject_id: {THE_PROJECT}\ncreated_at: '2026-11-15T10:00:00Z'\nupdated_at: '2026-11-15T10:00:00Z'\nstatus: active\nsession_type: workspace\n"
+            "session_id: {session_id}\nproject_id: {THE_PROJECT}\ncreated_at: '2026-11-15T10:00:00Z'\nupdated_at: '2026-11-15T10:00:00Z'\nstatus: active\nsession_type: workspace\nrepo_path: {}\n",
+            self.checkout.path().display()
         );
         if let Some(pid) = pid {
             yaml.push_str(&format!("pid: {pid}\n"));

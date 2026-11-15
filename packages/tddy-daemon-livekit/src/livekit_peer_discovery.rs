@@ -744,12 +744,12 @@ impl EligibleDaemonSource for LiveKitEligibleDaemonSource {
 }
 
 /// The `ListProjects` a listing sends each peer: that peer's own rows only, so it does not fan out
-/// in turn.
+/// in turn — tombstones included, so a delete on any host wins over another host's live row.
 fn peer_listing_request(session_token: String) -> ListProjectsRequest {
     ListProjectsRequest {
         session_token,
         local_only: true,
-        include_deleted: false,
+        include_deleted: true,
     }
 }
 

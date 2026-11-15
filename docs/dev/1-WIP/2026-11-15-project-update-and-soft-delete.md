@@ -112,8 +112,8 @@ The worktree service's read paths, such as listing worktrees, are deliberately l
 
 ### Create and add restore a deleted project
 
-- `CreateProject` matches a deleted project by `git_url` (trimmed) or by the clone destination
-  across this host's rows. On a match it restores the project with the fan-out and returns the
+- `CreateProject` matches a deleted project among this host's rows: first by `git_url` (trimmed),
+  which needs no clone destination, then by the destination it would clone to. On a match it restores the project with the fan-out and returns the
   restored row. It does not clone again, and the project keeps its old name.
 - `AddProjectToHost` restores the project when the target host holds its tombstone.
 
@@ -128,9 +128,21 @@ The worktree service's read paths, such as listing worktrees, are deliberately l
 - **Projects screen:** a **Show deleted projects** checkbox lists deleted projects as deleted cards
   (who, when, "its data is kept") with **Restore** (`RestoreProject`).
 - **Drawer:** it lists projects with `includeDeleted`. Deleted projects get no group, and their
-  sessions are dropped rather than moved to **Other**.
+  sessions are dropped rather than moved to **Other**. They are also left out of the bulk-delete
+  selection, so **Select all** cannot hard-delete a deleted project's kept sessions.
 - **Pickers:** every other `ListProjects` caller (create-session, orchestrator composer, worktrees,
   chat workspace) uses the default and so never sees a deleted project.
+
+### Modules
+
+- `tddy-projects`: `project_lifecycle.rs` holds the tombstone type and every lifecycle and rename
+  write, re-exported from `project_storage`.
+- `tddy-daemon-rpc/src/project/`:
+  - `fan_out.rs`: the peer fan-out.
+  - `update.rs`, `soft_delete.rs`: the handlers.
+  - `project_sessions.rs`: the running and project-home sessions.
+  - `lifecycle_listing.rs`: the `ListProjects` reconciliation.
+  - `recreate.rs`: create and add meeting a deleted project.
 
 ### Not in scope
 

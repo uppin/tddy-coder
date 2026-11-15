@@ -36,7 +36,8 @@ export function SessionsDrawerDetailPane(props: {
   selectedInstanceId: string;
   onSessionCreated: (sessionId: string) => void;
   onStartMainFor: (projectId: string, host: string, spec: Parameters<React.ComponentProps<typeof ProjectSettingsPane>["onStartMain"]>[0]) => Promise<void>;
-  onDefaultsSaved: () => void;
+  /** Read the registry again: the settings pane saved a change to the project (name, defaults) or deleted it. */
+  onProjectChanged: () => void;
   onCloseSettings: () => void;
   unknownSession: boolean;
   onUnknownHome: () => void;
@@ -58,7 +59,7 @@ export function SessionsDrawerDetailPane(props: {
     selectedInstanceId,
     onSessionCreated,
     onStartMainFor,
-    onDefaultsSaved,
+    onProjectChanged,
     onCloseSettings,
     unknownSession,
     onUnknownHome,
@@ -178,7 +179,13 @@ export function SessionsDrawerDetailPane(props: {
               daemonInstanceId={settingsHost}
               sessionToken={sessionToken}
               onStartMain={onStartMain}
-              onDefaultsSaved={onDefaultsSaved}
+              onDefaultsSaved={onProjectChanged}
+              onProjectChanged={onProjectChanged}
+              onDeleted={() => {
+                // A deleted project leaves the drawer; its settings have nothing left to show.
+                onProjectChanged();
+                onCloseSettings();
+              }}
               onClose={onCloseSettings}
             />
           ) : unknownSession ? (

@@ -14,6 +14,7 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 async-trait = "0.1"
 anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"

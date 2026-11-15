@@ -93,8 +93,10 @@ fn project_for_workflow_spawn(
     project_id: &str,
 ) -> anyhow::Result<ProjectData> {
     let projects_dir = projects_dir_for_telegram_workflow_spawn(deps)?;
-    project_storage::find_project(&projects_dir, project_id)?
-        .ok_or_else(|| anyhow::anyhow!("project not found"))
+    let project = project_storage::find_project(&projects_dir, project_id)?
+        .ok_or_else(|| anyhow::anyhow!("project not found"))?;
+    project_storage::refuse_if_deleted(&project).map_err(|s| anyhow::anyhow!(s.message))?;
+    Ok(project)
 }
 
 /// The integration base the operator set on the session's changeset, if any.

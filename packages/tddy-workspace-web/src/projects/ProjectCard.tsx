@@ -30,6 +30,10 @@ export interface ProjectGroup {
    * host). `homeSessionId` is that host's recorded main — main is per host — empty when not set up.
    */
   hosts: { daemonInstanceId: string; mainRepoPath: string; homeSessionId: string }[];
+  /** RFC 3339 time of the project's soft delete; empty while it is live. */
+  deletedAt: string;
+  /** Who deleted it; empty while it is live. */
+  deletedBy: string;
 }
 
 /**

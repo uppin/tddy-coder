@@ -52,6 +52,17 @@ impl LaunchSessions {
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         let mut metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
+        // A session of a soft-deleted project is kept on disk, but does not run again until the
+        // project is restored.
+        if let Some(projects_dir) = tddy_daemon_kernel::user_paths::projects_path_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        ) {
+            tddy_projects::project_storage::refuse_if_project_deleted(
+                &projects_dir,
+                &metadata.project_id,
+            )?;
+        }
         if tddy_core::clear_a_paused_mark(&mut metadata) {
             tddy_core::session_metadata::write_session_metadata(&session_dir, &metadata)
                 .map_err(|e| Status::internal(format!("cannot clear the paused mark: {e}")))?;

@@ -6,6 +6,7 @@ import { InlineError } from "tddy-ui-web";
 import type { AssignableAccount } from "./ProjectAccountAssignment";
 import type { LoadHostGithubCli } from "./ProjectLocalGh";
 import { ProjectCard, type ProjectGroup } from "./ProjectCard";
+import { DeletedProjectCard } from "./DeletedProjectCard";
 
 export type { AssignableAccount };
 
@@ -16,6 +17,9 @@ export type { AssignableAccount };
  *
  * Every action prop returns a promise that rejects with why it failed, and the reason is shown
  * where the action was taken: the create form, or the project's card. Nothing is swallowed.
+ *
+ * A soft-deleted project (listed only while "Show deleted projects" is ticked) is a
+ * {@link DeletedProjectCard} with **Restore**, not an ordinary card.
  */
 
 export interface ProjectsScreenProps {
@@ -65,6 +69,12 @@ export interface ProjectsScreenProps {
    * `githubHostname`). Asked for each host of a Local gh project.
    */
   loadHostGithubCli: LoadHostGithubCli;
+  /** Whether soft-deleted projects are listed (the "Show deleted projects" checkbox). */
+  showDeleted?: boolean;
+  /** Tick or untick "Show deleted projects". Absent: the checkbox is not offered. */
+  onShowDeletedChange?: (showDeleted: boolean) => void;
+  /** Restore a soft-deleted project (`RestoreProject`). Absent: deleted cards offer no Restore. */
+  onRestoreProject?: (projectId: string) => Promise<void>;
 }
 
 
@@ -83,9 +93,16 @@ function groupByProject(projects: ProjectEntry[]): ProjectGroup[] {
         accounts: p.accounts.map((a) => ({ provider: a.provider, accountId: a.accountId })),
         localGh: p.localGh,
         hosts: [],
+        deletedAt: "",
+        deletedBy: "",
       };
       byId.set(p.projectId, group);
       groups.push(group);
+    }
+    // The daemon gives every row of a project the same lifecycle; any deleted row marks the group.
+    if (!group.deletedAt && p.deletedAt) {
+      group.deletedAt = p.deletedAt;
+      group.deletedBy = p.deletedBy;
     }
     group.hosts.push({
       daemonInstanceId: p.daemonInstanceId,
@@ -109,6 +126,9 @@ export function ProjectsScreen({
   accounts,
   onSetProjectAccounts,
   loadHostGithubCli,
+  showDeleted = false,
+  onShowDeletedChange,
+  onRestoreProject,
 }: ProjectsScreenProps) {
   const groups = useMemo(() => groupByProject(projects), [projects]);
 
@@ -186,23 +206,39 @@ export function ProjectsScreen({
         ) : null}
       </div>
 
+      {onShowDeletedChange ? (
+        <label className="mb-4 flex items-center gap-2 text-sm text-muted-foreground">
+          <input
+            type="checkbox"
+            data-testid="projects-show-deleted"
+            checked={showDeleted}
+            onChange={(e) => onShowDeletedChange(e.target.checked)}
+          />
+          Show deleted projects
+        </label>
+      ) : null}
+
       <InlineError testId="projects-load-error" message={loadError} className="mb-4" />
       <InlineError testId="projects-accounts-load-error" message={accountsLoadError} className="mb-4" />
 
       <div data-testid="projects-list" className="flex flex-col gap-4">
-        {groups.map((group) => (
-          <ProjectCard
-            key={group.projectId}
-            group={group}
-            daemons={daemons}
-            onAddProjectToHost={onAddProjectToHost}
-            onSetDefaultBranch={onSetDefaultBranch}
-            loadProjectBranches={loadProjectBranches}
-            accounts={accounts}
-            onSetProjectAccounts={onSetProjectAccounts}
-            loadHostGithubCli={loadHostGithubCli}
-          />
-        ))}
+        {groups.map((group) =>
+          group.deletedAt ? (
+            <DeletedProjectCard key={group.projectId} group={group} onRestoreProject={onRestoreProject} />
+          ) : (
+            <ProjectCard
+              key={group.projectId}
+              group={group}
+              daemons={daemons}
+              onAddProjectToHost={onAddProjectToHost}
+              onSetDefaultBranch={onSetDefaultBranch}
+              loadProjectBranches={loadProjectBranches}
+              accounts={accounts}
+              onSetProjectAccounts={onSetProjectAccounts}
+              loadHostGithubCli={loadHostGithubCli}
+            />
+          ),
+        )}
       </div>
     </div>
   );

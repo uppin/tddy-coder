@@ -8,6 +8,7 @@ import { rpcFailureText, useDaemonClient } from "tddy-client-web";
 import { Button } from "tddy-ui-web";
 import type { StartSessionRequestInit } from "./hooks/useSessionAttachments";
 import { ProjectHomeSetupPane } from "./ProjectHomeSetupPane";
+import { ProjectDeleteSection, ProjectNameSection } from "./ProjectSettingsProjectSection";
 import { CreateSessionEffortField } from "./CreateSessionEffortField";
 import { BUILT_IN_PROVIDER, CreateSessionProviderField } from "./CreateSessionProviderField";
 import { inputClass, labelClass } from "./createSessionFormStyles";
@@ -50,6 +51,10 @@ export interface ProjectSettingsPaneProps {
   onStartMain: (spec: StartSessionRequestInit) => Promise<void>;
   /** The defaults were saved on {@link daemonInstanceId}: the answer's row, so the listing can refresh. */
   onDefaultsSaved?: (project: ProjectEntry) => void;
+  /** The project was renamed (`UpdateProject`): the answer's row, so the listing can refresh. */
+  onProjectChanged?: (project: ProjectEntry) => void;
+  /** The project was soft-deleted (`DeleteProject`) on every host that owns it. */
+  onDeleted?: (projectId: string) => void;
   onClose: () => void;
 }
 
@@ -64,13 +69,19 @@ export interface ProjectSettingsPaneProps {
  * - **New orchestrators** — the defaults the "+" composer starts with: model, effort and provider
  *   account, the New-session form's own fields, each with an "agent default" choice. **Save** sends
  *   `SetProjectOrchestratorDefaults` for the pane's host; clearing every control clears them.
+ * - **The project** — its name (`UpdateProject`) and **Delete project** (`DeleteProject`, a soft
+ *   delete behind a confirmation), both fanned out by the daemon to every host owning the project
+ *   (`ProjectSettingsProjectSection`).
  *
  * The clients are the selected daemon's, as `ProjectHomeSetupPane`'s are; the request names the
  * pane's host, which routes it.
  *
  * Test ids: `sessions-project-settings-<projectId>` (the pane), `…-main-<projectId>` (main's
  * section), `…-replace-main-<projectId>`, `…-defaults-<projectId>` (the defaults section),
- * `…-defaults-save-<projectId>`, `…-defaults-error-<projectId>`, `…-defaults-saved-<projectId>`.
+ * `…-defaults-save-<projectId>`, `…-defaults-error-<projectId>`, `…-defaults-saved-<projectId>`,
+ * `…-name-<projectId>` (the name field), `…-name-save-<projectId>`, `…-name-saved-<projectId>`,
+ * `…-name-error-<projectId>`, `…-delete-<projectId>`, `…-delete-confirm-<projectId>`,
+ * `…-delete-confirm-yes-<projectId>`, `…-delete-cancel-<projectId>`, `…-delete-error-<projectId>`.
  *
  * PRD: docs/ft/web/1-WIP/PRD-2026-11-10-project-settings-pane.md
  */
@@ -88,6 +99,14 @@ export function ProjectSettingsPane(props: ProjectSettingsPaneProps): React.Reac
         className="w-full max-w-xl rounded-md border border-border p-4"
       >
         <h2 className="mb-3 text-base font-medium">{project ? `${project.name} settings` : "Project settings"}</h2>
+        {project !== null && (
+          <ProjectNameSection
+            projectId={projectId}
+            name={project.name}
+            sessionToken={sessionToken}
+            onProjectChanged={props.onProjectChanged}
+          />
+        )}
         <div data-testid={`sessions-project-settings-main-${projectId}`}>
           {project !== null && !showForm ? (
             <div className="mb-4">
@@ -124,6 +143,14 @@ export function ProjectSettingsPane(props: ProjectSettingsPaneProps): React.Reac
             daemonInstanceId={daemonInstanceId}
             sessionToken={sessionToken}
             onDefaultsSaved={props.onDefaultsSaved}
+          />
+        )}
+        {project !== null && (
+          <ProjectDeleteSection
+            projectId={projectId}
+            name={project.name}
+            sessionToken={sessionToken}
+            onDeleted={props.onDeleted}
           />
         )}
       </section>

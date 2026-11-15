@@ -57,6 +57,9 @@ pub fn resolve_remote_git_repo_path() -> String {
 ///    `repos_base_dir/<name>`, and register the row (reusing `project_id`).
 /// 4. If it is unknown locally and on every peer, return [`tddy_rpc::Code::NotFound`].
 ///
+/// A project soft-deleted here is refused (`failed_precondition`) rather than provisioned; a
+/// project deleted on the peers is never offered by `peer_lookup`.
+///
 /// `cloner(git_url, dest)` performs (or fakes) the clone; it must be idempotent for an existing
 /// `dest`. `peer_lookup(project_id)` returns `(name, git_url)` for a project known only on a peer.
 ///
@@ -77,6 +80,7 @@ where
     if let Some(project) = project_storage::find_project(projects_dir, project_id)
         .map_err(|e| Status::internal(format!("read project registry: {e}")))?
     {
+        project_storage::refuse_if_deleted(&project)?;
         let dest = PathBuf::from(&project.main_repo_path);
         if dest.exists() {
             return Ok(project);
@@ -129,7 +133,8 @@ where
 /// daemon that has never seen the project takes (PRD AC37).
 ///
 /// Resolution mirrors [`ensure_project_available_locally`] for the registered-locally cases
-/// (1–2): a project already on this host is returned or re-cloned from its stored `git_url`. The
+/// (1–2): a project already on this host is returned or re-cloned from its stored `git_url`, and a
+/// project soft-deleted here is refused. The
 /// unregistered case (3) is the difference: rather than fanning out `ListProjects` across the
 /// common room and cloning from a peer-discovered forge URL — which fails for a peer that keeps
 /// no room of its own and for a project whose `git_url` names a forge the peer cannot reach — the
@@ -162,6 +167,7 @@ where
     if let Some(project) = project_storage::find_project(projects_dir, project_id)
         .map_err(|e| Status::internal(format!("read project registry: {e}")))?
     {
+        project_storage::refuse_if_deleted(&project)?;
         let dest = PathBuf::from(&project.main_repo_path);
         if dest.exists() {
             return Ok(project);

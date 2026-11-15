@@ -62,6 +62,24 @@ impl ProjectRpcHandler {
         if let Some(existing) = project_storage::find_project(&projects_dir, project_id)
             .map_err(|e| Status::internal(e.to_string()))?
         {
+            // Adding a deleted project to a host that holds its tombstone restores it everywhere.
+            if existing.is_deleted() {
+                log::info!("AddProjectToHost: project_id={project_id} is deleted; restoring it");
+                let caller = self.project_caller(&req.session_token)?;
+                let restored = self
+                    .restore_everywhere(&caller, &req.session_token, project_id)
+                    .await?;
+                let row = project_storage::find_project(&projects_dir, project_id)
+                    .map_err(|e| Status::internal(e.to_string()))?
+                    .ok_or_else(|| Status::internal("project vanished after restore"))?;
+                log::debug!(
+                    "AddProjectToHost: restored on {} hosts",
+                    restored.applied_hosts.len()
+                );
+                return Ok(Response::new(AddProjectToHostResponse {
+                    project: Some(self.local_entry(&caller, &row)),
+                }));
+            }
             log::info!(
                 "AddProjectToHost: project_id={} already present on this host, returning existing row",
                 project_id

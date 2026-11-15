@@ -82,13 +82,54 @@ pub struct ProjectLifecycle {
 }
 
 impl ProjectLifecycle {
-    pub fn is_deleted(&self) -> bool {
-        unimplemented!("red: ProjectLifecycle::is_deleted")
+    /// The lifecycle a `ProjectEntry` carries on the wire, where an empty string means absent.
+    pub fn from_wire(deleted_at: &str, deleted_by: &str, restored_at: &str) -> Self {
+        let some = |v: &str| (!v.is_empty()).then(|| v.to_string());
+        Self {
+            deleted_at: some(deleted_at),
+            deleted_by: some(deleted_by),
+            restored_at: some(restored_at),
+        }
     }
 
-    /// The lifecycle that wins among one logical project's rows on several hosts.
-    pub fn newest<'a>(_rows: impl IntoIterator<Item = &'a ProjectLifecycle>) -> ProjectLifecycle {
-        unimplemented!("red: ProjectLifecycle::newest")
+    pub fn is_deleted(&self) -> bool {
+        self.deleted_at.is_some()
+    }
+
+    /// When this row's newest event happened: its delete when deleted, else its restore. `None`
+    /// for a row that never saw either. An unreadable stamp sorts before every readable one, so it
+    /// still beats "never" but loses to any real event.
+    fn last_event_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        let stamp = if self.is_deleted() {
+            self.deleted_at.as_deref()
+        } else {
+            self.restored_at.as_deref()
+        }?;
+        Some(
+            chrono::DateTime::parse_from_rfc3339(stamp)
+                .map(|t| t.with_timezone(&chrono::Utc))
+                .unwrap_or(chrono::DateTime::<chrono::Utc>::MIN_UTC),
+        )
+    }
+
+    /// The lifecycle that wins among one logical project's rows on several hosts: the row with the
+    /// newest delete or restore event. Any event beats a row that never saw one; a delete and a
+    /// restore at the same instant resolve to deleted, the conservative answer.
+    pub fn newest<'a>(rows: impl IntoIterator<Item = &'a ProjectLifecycle>) -> ProjectLifecycle {
+        let mut winner: Option<&ProjectLifecycle> = None;
+        for row in rows {
+            let Some(at) = row.last_event_at() else {
+                continue;
+            };
+            let replaces = match winner.and_then(ProjectLifecycle::last_event_at) {
+                None => true,
+                Some(best) => at > best || (at == best && row.is_deleted()),
+            };
+            if replaces {
+                winner = Some(row);
+            }
+        }
+        winner.cloned().unwrap_or_default()
     }
 }
 
@@ -435,65 +476,161 @@ pub fn set_project_orchestrator_defaults(
     write_projects(projects_dir, &projects)
 }
 
-/// The time a lifecycle event is stamped with.
+/// The time a lifecycle event is stamped with: RFC 3339 in UTC, to the millisecond.
 pub fn lifecycle_timestamp_now() -> String {
-    unimplemented!("red: lifecycle_timestamp_now")
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
-/// A project name as `CreateProject` accepts one, trimmed.
-pub fn validate_project_name(_name: &str) -> Result<&str, String> {
-    unimplemented!("red: validate_project_name")
+/// A project name as `CreateProject` accepts one, trimmed: not empty, no `/`, no `..`. The name is
+/// also the default clone directory, which is why it may not be a path.
+pub fn validate_project_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("project name is required".to_string());
+    }
+    if name.contains('/') || name.contains("..") {
+        return Err("invalid project name".to_string());
+    }
+    Ok(name)
 }
 
-/// Rename `project_id`. `None` when it is not registered here.
+/// Apply `change` to `project_id`'s row and write the registry when it reports a change. `None`
+/// when the project is not registered here (nothing is written); otherwise the row as stored.
+fn update_project_row(
+    projects_dir: &Path,
+    project_id: &str,
+    change: impl FnOnce(&mut ProjectData) -> bool,
+) -> anyhow::Result<Option<ProjectData>> {
+    let mut projects = read_projects(projects_dir)?;
+    let Some(project) = projects.iter_mut().find(|p| p.project_id == project_id) else {
+        return Ok(None);
+    };
+    let changed = change(project);
+    let row = project.clone();
+    if changed {
+        write_projects(projects_dir, &projects)?;
+    }
+    Ok(Some(row))
+}
+
+/// Rename `project_id`. Only `name` changes: the checkout path is stored, not derived from it.
+/// `None` when it is not registered here.
 pub fn rename_project(
-    _projects_dir: &Path,
-    _project_id: &str,
-    _name: &str,
+    projects_dir: &Path,
+    project_id: &str,
+    name: &str,
 ) -> anyhow::Result<Option<ProjectData>> {
-    unimplemented!("red: rename_project")
+    log::info!("rename_project: project_id={project_id} name={name}");
+    update_project_row(projects_dir, project_id, |p| {
+        let changed = p.name != name;
+        p.name = name.to_string();
+        changed
+    })
 }
 
-/// Tombstone `project_id`. `None` when it is not registered here.
+/// Tombstone `project_id` as deleted at `deleted_at` by `deleted_by`. Only the row changes —
+/// nothing the project owns on disk is touched. An already deleted project keeps its first
+/// tombstone. `None` when it is not registered here.
 pub fn mark_project_deleted(
-    _projects_dir: &Path,
-    _project_id: &str,
-    _deleted_at: &str,
-    _deleted_by: &str,
+    projects_dir: &Path,
+    project_id: &str,
+    deleted_at: &str,
+    deleted_by: &str,
 ) -> anyhow::Result<Option<ProjectData>> {
-    unimplemented!("red: mark_project_deleted")
+    log::info!("mark_project_deleted: project_id={project_id} deleted_by={deleted_by}");
+    update_project_row(projects_dir, project_id, |p| {
+        if p.is_deleted() {
+            return false;
+        }
+        p.lifecycle.deleted_at = Some(deleted_at.to_string());
+        p.lifecycle.deleted_by = Some(deleted_by.to_string());
+        true
+    })
 }
 
-/// Clear `project_id`'s tombstone. `None` when it is not registered here.
+/// Clear `project_id`'s tombstone, recording `restored_at`. A live project is left as it is.
+/// `None` when it is not registered here.
 pub fn mark_project_restored(
-    _projects_dir: &Path,
-    _project_id: &str,
-    _restored_at: &str,
+    projects_dir: &Path,
+    project_id: &str,
+    restored_at: &str,
 ) -> anyhow::Result<Option<ProjectData>> {
-    unimplemented!("red: mark_project_restored")
+    log::info!("mark_project_restored: project_id={project_id}");
+    update_project_row(projects_dir, project_id, |p| {
+        if !p.is_deleted() {
+            return false;
+        }
+        p.lifecycle = ProjectLifecycle {
+            restored_at: Some(restored_at.to_string()),
+            ..ProjectLifecycle::default()
+        };
+        true
+    })
 }
 
-/// Adopt another host's lifecycle for `project_id` when it is newer. `true` when the row changed.
+/// Adopt `winner` — another host's lifecycle for `project_id` — when it is newer than this row's,
+/// as [`ProjectLifecycle::newest`] decides. `true` when the row changed; an unregistered project
+/// changes nothing.
 pub fn adopt_project_lifecycle(
-    _projects_dir: &Path,
-    _project_id: &str,
-    _winner: &ProjectLifecycle,
+    projects_dir: &Path,
+    project_id: &str,
+    winner: &ProjectLifecycle,
 ) -> anyhow::Result<bool> {
-    unimplemented!("red: adopt_project_lifecycle")
+    let mut adopted = false;
+    update_project_row(projects_dir, project_id, |p| {
+        if &p.lifecycle == winner || ProjectLifecycle::newest([&p.lifecycle, winner]) != *winner {
+            return false;
+        }
+        log::info!(
+            "adopt_project_lifecycle: project_id={project_id} deleted={}",
+            winner.is_deleted()
+        );
+        p.lifecycle = winner.clone();
+        adopted = true;
+        true
+    })?;
+    Ok(adopted)
 }
 
-/// A deleted project of the same repository or checkout.
+/// A deleted project on this host for the same repository (`git_url`, compared trimmed) or the
+/// same checkout (`main_repo_path`) — what creating that repository again restores.
 pub fn find_deleted_project_matching(
-    _projects_dir: &Path,
-    _git_url: &str,
-    _main_repo_path: &str,
+    projects_dir: &Path,
+    git_url: &str,
+    main_repo_path: &str,
 ) -> anyhow::Result<Option<ProjectData>> {
-    unimplemented!("red: find_deleted_project_matching")
+    let git_url = git_url.trim();
+    Ok(read_projects(projects_dir)?.into_iter().find(|p| {
+        p.is_deleted()
+            && ((!git_url.is_empty() && p.git_url.trim() == git_url)
+                || (!main_repo_path.is_empty() && p.main_repo_path == main_repo_path))
+    }))
 }
 
-/// Refuse new work on a deleted project.
-pub fn refuse_if_deleted(_project: &ProjectData) -> Result<(), tddy_rpc::Status> {
-    unimplemented!("red: refuse_if_deleted")
+/// Refuse new work — a session start, a resume, a project-home tool — on a deleted project,
+/// naming it and saying how to bring it back.
+pub fn refuse_if_deleted(project: &ProjectData) -> Result<(), tddy_rpc::Status> {
+    if !project.is_deleted() {
+        return Ok(());
+    }
+    Err(tddy_rpc::Status::failed_precondition(format!(
+        "project {} ({}) is deleted; restore it to use it again",
+        project.name, project.project_id
+    )))
+}
+
+/// [`refuse_if_deleted`] for `project_id` as this host's registry holds it. A project this host
+/// does not register is not refused here: whatever resolves it next says what is missing.
+pub fn refuse_if_project_deleted(
+    projects_dir: &Path,
+    project_id: &str,
+) -> Result<(), tddy_rpc::Status> {
+    match find_project(projects_dir, project_id)
+        .map_err(|e| tddy_rpc::Status::internal(format!("read project registry: {e}")))?
+    {
+        Some(project) => refuse_if_deleted(&project),
+        None => Ok(()),
+    }
 }
 
 /// Resolved `main_repo_path` for `project_id` on `host_key` (simulated host or daemon instance id).

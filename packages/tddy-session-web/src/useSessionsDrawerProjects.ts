@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ProjectService, type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { hostNotConnectedText, rpcFailureText } from "tddy-client-web";
 import { useHostLabel, useSelectedDaemon } from "tddy-client-web";
+import { splitDeletedProjects } from "./utils/sessionProjectGroups";
 
 /** The registry the drawer read, and why the last read failed (`null` while it has not). */
 export interface SessionsDrawerProjects {
+  /** The live projects — the drawer's groups. */
   projects: ProjectEntry[];
+  /** Soft-deleted projects: they get no group, and their sessions are hidden rather than put in **Other**. */
+  deletedProjectIds: ReadonlySet<string>;
   error: string | null;
   /** Read the registry again — after a change this screen made, such as main being set up. */
   reload: () => void;
@@ -18,6 +22,9 @@ export interface SessionsDrawerProjects {
  * require a non-empty `project_id`. A failed read keeps the last good list and reports why in
  * `error`, as does having no client at all (no daemon selected, or no wire reaches it): an empty
  * registry would otherwise leave unscoped sessions without a project and nothing saying why.
+ *
+ * The registry is read with `includeDeleted`, so the drawer knows which projects are deleted and
+ * can hide their sessions instead of listing them under **Other**.
  */
 export function useSessionsDrawerProjects(
   projectClient: Client<typeof ProjectService> | null,
@@ -26,7 +33,7 @@ export function useSessionsDrawerProjects(
   const { selectedInstanceId } = useSelectedDaemon();
   const hostLabel = useHostLabel();
   const selectedHost = hostLabel(selectedInstanceId ?? "");
-  const [projects, setProjects] = useState<ProjectEntry[]>([]);
+  const [listed, setListed] = useState<ProjectEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((g) => g + 1), []);
@@ -37,10 +44,10 @@ export function useSessionsDrawerProjects(
     }
     let cancelled = false;
     projectClient
-      .listProjects({ sessionToken })
+      .listProjects({ sessionToken, includeDeleted: true })
       .then((res) => {
         if (cancelled) return;
-        setProjects(res.projects);
+        setListed(res.projects);
         setError(null);
       })
       .catch((e: unknown) => {
@@ -50,5 +57,6 @@ export function useSessionsDrawerProjects(
       cancelled = true;
     };
   }, [projectClient, sessionToken, selectedHost, generation]);
-  return { projects, error, reload };
+  const { live: projects, deletedProjectIds } = useMemo(() => splitDeletedProjects(listed), [listed]);
+  return { projects, deletedProjectIds, error, reload };
 }

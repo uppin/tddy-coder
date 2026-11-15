@@ -92,10 +92,16 @@ fn deleting_a_project_tombstones_its_row_at_the_row_level_and_keeps_every_other_
         },
         before
     );
-    // And the keys sit on the row itself, beside `name`
+    // And the keys sit on the row itself, at the same depth as `name`
     let yaml = std::fs::read_to_string(dir.path().join("projects.yaml")).unwrap();
-    assert!(yaml.contains(&format!("    deleted_at: '{EARLY}'")) || yaml.contains(&format!("    deleted_at: {EARLY}")), "{yaml}");
-    assert!(yaml.contains("    deleted_by: octocat"), "{yaml}");
+    let indent_of = |key: &str| {
+        yaml.lines()
+            .find(|l| l.trim_start().starts_with(key))
+            .map(|l| l.len() - l.trim_start().len())
+            .unwrap_or_else(|| panic!("{key} is written: {yaml}"))
+    };
+    assert_eq!(indent_of("deleted_at:"), indent_of("name:"), "{yaml}");
+    assert_eq!(indent_of("deleted_by:"), indent_of("name:"), "{yaml}");
 }
 
 #[test]
@@ -225,6 +231,7 @@ fn a_delete_and_a_restore_at_the_same_instant_resolve_to_deleted() {
 fn a_host_adopts_a_newer_tombstone_and_ignores_an_older_one() {
     // Given a host whose row was restored after an early delete
     let dir = a_registry_with_alpha("");
+    project_storage::mark_project_deleted(dir.path(), ALPHA, EARLY, "first").unwrap();
     project_storage::mark_project_restored(dir.path(), ALPHA, LATER).unwrap();
 
     // When an older tombstone from another host is offered, nothing changes
