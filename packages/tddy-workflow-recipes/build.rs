@@ -61,21 +61,25 @@ fn main() -> io::Result<()> {
 
     fs::create_dir_all(&generated)?;
 
+    // Every object is built with its keys inserted in sorted order, so the file reads the same
+    // whether `serde_json`'s map keeps insertion order or sorts. `preserve_order` is switched on by
+    // any other crate in the same build that enables it, so with `json!` the key order — and the
+    // committed file — changed with the set of packages a build happened to include.
     let manifest_goals: Vec<serde_json::Value> = goals_arr
         .iter()
         .map(|g| {
-            serde_json::json!({
-                "name": g["name"],
-                "schema": g["schema"],
-                "proto": g["proto"],
-            })
+            let mut goal = serde_json::Map::new();
+            for key in ["name", "proto", "schema"] {
+                goal.insert(key.to_string(), g[key].clone());
+            }
+            serde_json::Value::Object(goal)
         })
         .collect();
 
-    let manifest = serde_json::json!({
-        "version": 1,
-        "goals": manifest_goals
-    });
+    let mut manifest = serde_json::Map::new();
+    manifest.insert("goals".to_string(), serde_json::Value::Array(manifest_goals));
+    manifest.insert("version".to_string(), serde_json::Value::from(1));
+    let manifest = serde_json::Value::Object(manifest);
 
     let manifest_path = generated.join("schema-manifest.json");
     fs::write(
