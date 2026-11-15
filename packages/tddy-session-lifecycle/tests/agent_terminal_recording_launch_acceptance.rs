@@ -246,6 +246,7 @@ async fn a_resumed_session_records_its_main_terminal() {
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        target: None,
         managed_codebase: false,
         session_role: None,
         tmux_session: None,

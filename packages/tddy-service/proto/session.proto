@@ -403,6 +403,26 @@ message SessionEntry {
   // When set it is the session's label everywhere — the drawer row, a Telegram alert — ahead of the
   // derived one (`tddy_changeset::session_label`, `sessionDrawerLabel`).
   string display_name = 39;
+  // Where the session's agent runs when that is not the daemon's own host, from its
+  // `.session.yaml`; unset for every session whose agent runs on the daemon's host. `repo_path` is
+  // then the worktree on the target. See StartSessionRequest.target.
+  SessionTarget target = 40;
+}
+
+// A machine a session's agent runs on that the serving daemon reaches through a remote shell, with
+// no tddy software on it: the daemon creates the worktree there, starts the agent there in an
+// interactive shell, and serves its terminal as it serves a local one.
+message SessionTarget {
+  oneof kind {
+    // An OpenSSH host of the serving daemon's user.
+    SshTarget ssh = 1;
+  }
+}
+
+// An SSH host a session's agent runs on.
+message SshTarget {
+  // An explicit `Host` alias from the serving daemon's `~/.ssh/config`.
+  string config_host = 1;
 }
 
 // An orchestrator's mark on one of its sessions, as `.session.yaml` records it.
@@ -761,6 +781,14 @@ message StartSessionRequest {
   // control character). Refused with INVALID_ARGUMENT for a `tddy_coder` session type, whose record
   // is written by its own process.
   string display_name = 49;
+  // Run the session's agent on this target instead of on the serving daemon's host: the worktree is
+  // created there and the agent is started there, using its own file and shell tools, while the
+  // daemon keeps the terminal and the session record. Unset = the daemon's host. Unlike
+  // `ssh_config_host`, which keeps the agent local and runs only its tools on the SSH host, and
+  // with which it is mutually exclusive. Refused with INVALID_ARGUMENT, naming the field, together
+  // with `managed_codebase`, `sandbox`, `sandboxed_codebase`, a split placement
+  // (`codebase_daemon_instance_id`) or a project-home `session_role`.
+  SessionTarget target = 50;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

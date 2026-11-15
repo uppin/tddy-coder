@@ -425,6 +425,8 @@ fn session_entry_from_listing(
         codebase_daemon_instance_id: s.codebase_daemon_instance_id,
         codebase_session_id: s.codebase_session_id,
         ssh_config_host: s.ssh_config_host,
+        // TODO(ssh-agent-launch): list the target the session's `.session.yaml` records.
+        target: None,
         managed_codebase: s.managed_codebase,
         session_role: s.session_role,
         reads_host_paths: s.reads_host_paths,

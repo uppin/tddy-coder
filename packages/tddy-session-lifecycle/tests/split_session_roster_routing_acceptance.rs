@@ -311,6 +311,7 @@ fn write_session(sessions_base: &Path, session_id: &str, agents: Vec<SessionAgen
             agent_daemon_instance_id: None,
             agent_session_id: None,
             ssh_config_host: None,
+            target: None,
             managed_codebase: false,
             session_role: None,
             tmux_session: None,

@@ -22,6 +22,7 @@ pub mod session_lifecycle;
 pub mod session_metadata;
 pub mod session_participant_metadata;
 pub mod session_provider_account;
+pub mod session_target;
 pub mod source_path;
 #[cfg(any(test, feature = "test-support"))]
 pub mod stack_fixtures;
@@ -74,4 +75,5 @@ pub use session_provider_account::{
     read_session_provider_account, write_session_provider_account, SessionProviderAccount,
     SESSION_PROVIDER_ACCOUNT_FILENAME,
 };
+pub use session_target::SessionTarget;
 pub use source_path::{classify_rust_source_path, RustSourcePathKind};

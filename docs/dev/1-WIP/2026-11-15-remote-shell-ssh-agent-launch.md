@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 5 — a proto contract change, three crates (service, agent-launch, session-lifecycle), a spawned remote process with exit and ownership ordering, session metadata gaining a field
-**Branch**: `feature/remote-shell/ssh-agent-launch`, base `feature/remote-shell/coder-account` — `#remote-shell 3/7`
+**Branch**: `feature/remote-shell/ssh-agent-launch`, base `feature/remote-shell/coder-account` — `#remote-shell 3/7` — PR #917 (https://github.com/uppin/tddy-coder/pull/917)
 
 ## Initial Discovery
 
@@ -100,6 +100,30 @@ The first push after the plan (commit 2) publishes, as the start of this same PR
 - The failing tests below.
 
 This PR goes on to implement all of it. It does not merge in that state.
+
+## Contract as published
+
+Published in the contract commit.
+
+- **Proto**: `SshTarget { config_host = 1 }`, `SessionTarget { oneof kind { SshTarget ssh = 1; } }`, `SessionEntry.target = 40`, `StartSessionRequest.target = 50`. `session_pb.ts` regenerated in both gen directories. `unbundle_service_split` lists methods only; it still passes (28).
+- **`tddy_changeset::SessionTarget`** (re-exported as `tddy_core::SessionTarget`): `enum SessionTarget { Ssh { config_host } }`, internally tagged, so `.session.yaml` reads `target: { kind: ssh, config_host: buildbox }`. `SessionMetadata.target: Option<SessionTarget>`; absent reads `None` and is not written. `reads_host_paths` is false for a target session. This half is real code and its five tests pass.
+- **`tddy_agent_launch::remote_agent_launch`** (`TODO(ssh-agent-launch)` bodies): `TargetError::{NoSshHost, Unsupported}`; `shell_for_target(&SessionTarget)`; `remote_agent_command(worktree, argv, env)`; `RemoteLaunch { shell, worktree, session_dir, pointer, startup_window }`; `RemoteLaunched { handle, owner }`; `RemoteLaunchError::{Plan, Shell, Spawn, ExitedDuringStartup { status, last_output }}`; `launch_on_target(agent, params, slots, remote, session, on_exit)`, shaped like `spec_launch::launch_host_pty`.
+- 58 exhaustive `SessionMetadata` literals in 47 files gained `target: None`. Mechanical.
+
+Where the contract differs from the plan above:
+
+- **Two `SessionTarget` types**: the proto one on the wire, a serde one in `tddy-changeset` for metadata and `shell_for_target`, because `tddy-changeset` cannot depend on `tddy-service`. The conversion is implementation.
+- **`launch_on_target` takes the pointer, not the crate-private `PointerHost`**. The owner lookup therefore runs through the port, or `record_remote_owner` is adapted to it; it calls `run_over_ssh` directly today.
+- **Refusals are pinned** as `InvalidArgument` with the message prefix `target cannot be combined with <field>`, the style `start_request_checks.rs` already uses.
+- **The project-home-main refusal has no test here.** The harness has no session tokens for that start. It belongs in `project_home_start_spec::refuse_a_placement_off_the_home_worktree`, which already lists `ssh_config_host`; the implementation adds the target there with a unit test.
+
+Decisions for the implementation that the tests surfaced:
+
+- **Nothing the agent is told to read may be a local path.** A spec's argv can name a file in the local session directory (`--append-system-prompt-file`). Every such file is written on the target, and the argument names the target's copy. The tests cannot catch a miss, because their target is this machine.
+- **The remote agent keeps `PATH` and `HOME` from the target's login shell and nothing else from it.** The command is `env -i PATH="$PATH" HOME="$HOME" K='V' …`. The daemon's own `PATH` and `HOME` must not be sent.
+- **An unreachable target** may surface as the shell's `Unreachable` or as an early exit with status 255; the test pins only that the SSH complaint is in the error.
+
+Red state at the contract commit: `remote_agent_launch_acceptance` 0 passed / 6 failed, all at `launch_on_target`; `remote_target_session_acceptance` 0 / 9, all because the start ignores `target` (the harness starts a local session, which shows the harness itself works); `remote_agent_launch` unit tests 1 / 8. After this PR's stubs are filled, the two acceptance suites next reach `shell-port`'s `SshShell` stubs: they go green only once that PR is. Clippy and fmt are clean on the touched packages. Only the new test binaries, `./test -p tddy-changeset` and `unbundle_service_split` were run locally.
 
 ## Green wave
 
@@ -259,10 +283,10 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved in advance on 2026-11-15: "proceed with your recommended option"; the titles are listed in the PR body)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

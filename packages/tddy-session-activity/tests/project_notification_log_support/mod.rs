@@ -65,6 +65,7 @@ pub fn write_session(data_dir: &Path, os_user: &str, session_id: &str, project_i
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        target: None,
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
