@@ -319,6 +319,11 @@ the selected host's sessions. (Active cross-host rows need no refresh — presen
 **Owning-host badge** — a drawer item whose owning host differs from the selected host renders a
 small muted host-label badge (`DaemonHost.label`, with the `" (this daemon)"` suffix stripped).
 
+**Split branch** — a split session's row (one carrying a codebase-host badge) shows the branch
+its codebase half works on beside that badge (`sessions-drawer-item-branch-<id>`), when the
+agent half recorded one at start. A split row with no recorded branch, and every co-located
+row, shows no branch slot.
+
 **Row overflow** *(2026-11-15)* — whatever sits on the right of a drawer row stays in view however
 long the label and however narrow the drawer: the project header's count, "+" and gear; a row's
 mark, host, codebase-host and orchestrator badges; the main entry's model. The label truncates with

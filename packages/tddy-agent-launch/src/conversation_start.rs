@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{
-    ListSessionsRequest, ListSessionsResponse, StartSessionRequest,
+    ListSessionsRequest, ListSessionsResponse, SessionEntry, StartSessionRequest,
 };
 use tddy_service::proto::tasks::CancelTaskRequest;
 use tddy_tool_engine::start_ledger::{
@@ -135,12 +135,12 @@ struct StartedSessionListings {
 }
 
 #[async_trait]
-impl StartedSessionDetails for StartedSessionListings {
-    async fn listing(
+impl ListedSessions for StartedSessionListings {
+    async fn listed_session(
         &self,
         daemon_instance_id: &str,
         session_id: &str,
-    ) -> Option<StartedSessionListing> {
+    ) -> Option<SessionEntry> {
         let request = ListSessionsRequest {
             session_token: self.session_token.clone(),
         };
@@ -179,10 +179,172 @@ impl StartedSessionDetails for StartedSessionListings {
             .sessions
             .into_iter()
             .find(|s| s.session_id == session_id)
-            .map(|s| StartedSessionListing {
-                branch: s.branch,
-                worktree: s.repo_path,
-                display_name: s.display_name,
-            })
+    }
+}
+
+#[async_trait]
+impl StartedSessionDetails for StartedSessionListings {
+    async fn listing(
+        &self,
+        daemon_instance_id: &str,
+        session_id: &str,
+    ) -> Option<StartedSessionListing> {
+        reported_listing(self, daemon_instance_id, session_id).await
+    }
+}
+
+/// A host's listing of one session, as the start ledger reads it.
+#[async_trait]
+trait ListedSessions: Send + Sync {
+    /// `session_id` as `daemon_instance_id` lists it, or `None` when it does not (or cannot).
+    async fn listed_session(
+        &self,
+        daemon_instance_id: &str,
+        session_id: &str,
+    ) -> Option<SessionEntry>;
+}
+
+/// What a start reports for `session_id` on `daemon_instance_id`: its branch, worktree and name as
+/// that host lists it — or, for a split session's agent half, which holds no checkout, the branch and
+/// worktree its codebase half is listed with on the codebase host. The name is the agent half's own.
+async fn reported_listing(
+    listings: &dyn ListedSessions,
+    daemon_instance_id: &str,
+    session_id: &str,
+) -> Option<StartedSessionListing> {
+    let listed = listings
+        .listed_session(daemon_instance_id, session_id)
+        .await?;
+    let display_name = listed.display_name;
+    let (branch, worktree) =
+        if listed.codebase_daemon_instance_id.is_empty() || listed.codebase_session_id.is_empty() {
+            (listed.branch, listed.repo_path)
+        } else {
+            let codebase = listings
+                .listed_session(
+                    &listed.codebase_daemon_instance_id,
+                    &listed.codebase_session_id,
+                )
+                .await?;
+            (codebase.branch, codebase.repo_path)
+        };
+    Some(StartedSessionListing {
+        branch,
+        worktree,
+        display_name,
+    })
+}
+
+#[cfg(test)]
+mod reported_listing_tests {
+    use super::*;
+
+    async fn branch_and_worktree(
+        hosts: &dyn ListedSessions,
+        host: &str,
+        session_id: &str,
+    ) -> Option<(String, String)> {
+        reported_listing(hosts, host, session_id)
+            .await
+            .map(|l| (l.branch, l.worktree))
+    }
+    use std::collections::HashMap;
+
+    /// Hosts that list the sessions they were given, keyed by (host, session id).
+    struct Hosts(HashMap<(String, String), SessionEntry>);
+
+    #[async_trait]
+    impl ListedSessions for Hosts {
+        async fn listed_session(&self, host: &str, session_id: &str) -> Option<SessionEntry> {
+            self.0
+                .get(&(host.to_string(), session_id.to_string()))
+                .cloned()
+        }
+    }
+
+    fn listed(host: &str, entry: SessionEntry) -> ((String, String), SessionEntry) {
+        ((host.to_string(), entry.session_id.clone()), entry)
+    }
+
+    #[tokio::test]
+    async fn a_split_agent_is_reported_with_its_codebase_halfs_branch_and_worktree() {
+        // Given a split session: its agent half on the mac holds no checkout, its codebase half on
+        // udoo does
+        let hosts = Hosts(HashMap::from([
+            listed(
+                "mac",
+                SessionEntry {
+                    session_id: "agent-half".to_string(),
+                    codebase_daemon_instance_id: "udoo".to_string(),
+                    codebase_session_id: "codebase-half".to_string(),
+                    ..Default::default()
+                },
+            ),
+            listed(
+                "udoo",
+                SessionEntry {
+                    session_id: "codebase-half".to_string(),
+                    branch: "test-split-udoo-4".to_string(),
+                    repo_path: "/home/mantas/Code/tddy-coder/.worktrees/test-split-udoo-4"
+                        .to_string(),
+                    ..Default::default()
+                },
+            ),
+        ]));
+
+        // When the start reports the agent half's branch and worktree
+        let reported = branch_and_worktree(&hosts, "mac", "agent-half").await;
+
+        // Then they are the codebase half's
+        assert_eq!(
+            reported,
+            Some((
+                "test-split-udoo-4".to_string(),
+                "/home/mantas/Code/tddy-coder/.worktrees/test-split-udoo-4".to_string()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_with_no_codebase_half_is_reported_as_listed() {
+        // Given a co-located session
+        let hosts = Hosts(HashMap::from([listed(
+            "mac",
+            SessionEntry {
+                session_id: "s1".to_string(),
+                branch: "feature/s1".to_string(),
+                repo_path: "/worktrees/s1".to_string(),
+                ..Default::default()
+            },
+        )]));
+
+        // When its start reports its branch and worktree
+        let reported = branch_and_worktree(&hosts, "mac", "s1").await;
+
+        // Then they are its own
+        assert_eq!(
+            reported,
+            Some(("feature/s1".to_string(), "/worktrees/s1".to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_split_agent_whose_codebase_host_does_not_list_its_half_reports_nothing() {
+        // Given a split agent half whose codebase host no longer lists the codebase half
+        let hosts = Hosts(HashMap::from([listed(
+            "mac",
+            SessionEntry {
+                session_id: "agent-half".to_string(),
+                codebase_daemon_instance_id: "udoo".to_string(),
+                codebase_session_id: "codebase-half".to_string(),
+                ..Default::default()
+            },
+        )]));
+
+        // When the start reports its branch and worktree
+        let reported = branch_and_worktree(&hosts, "mac", "agent-half").await;
+
+        // Then it reports none rather than the agent half's empty ones
+        assert_eq!(reported, None);
     }
 }

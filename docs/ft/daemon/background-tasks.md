@@ -149,6 +149,11 @@ Cancelling that task (`CancelTask`) stops the start where it stands, and the str
 If the session a cancelled start created cannot be removed, the stream ends `INTERNAL` and names the
 session, so it is not left behind silently.
 
+A succeeded split start reports the codebase half's branch and worktree: the agent half holds
+no checkout, so the start ledger follows its `codebase_*` pairing to the codebase host's listing
+of the codebase half and answers that half's `branch` and `repo_path`. When the codebase host
+does not list its half, the start reports neither rather than the agent half's empty values.
+
 **A cancelled start deletes the branch it cut.** When the start's changeset resolved to
 `new_branch_from_base` (an empty intent resolves to it) and its worktree is a daemon-managed one
 under the project's `.worktrees`, the branch the changeset records is force-deleted

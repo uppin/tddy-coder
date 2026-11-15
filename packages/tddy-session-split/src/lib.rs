@@ -5,6 +5,7 @@ pub mod attached_initial_prompt;
 pub mod coding_agent_wiring;
 pub mod service_util;
 pub mod split_claude_cli_start;
+mod split_codebase_branch;
 pub mod split_forward_stream;
 pub mod split_ports;
 pub mod split_session;

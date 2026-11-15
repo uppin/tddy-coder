@@ -92,6 +92,17 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
               {codebaseHostLabel}
             </span>
           )}
+          {/* The branch the codebase half works on — the agent half holds no checkout of its
+              own to name it by. Only a split row that has recorded one carries it. */}
+          {codebaseHostLabel && session.branch && (
+            <span
+              data-testid={`sessions-drawer-item-branch-${session.sessionId}`}
+              title={session.branch}
+              className="min-w-0 max-w-28 truncate text-[10px] leading-none px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+            >
+              {session.branch}
+            </span>
+          )}
           {/* Orchestrator marker — a session holding the orchestrator role (read-only, with main's
               reach over the project). Main is marked by its pinned slot, not by this badge. */}
           {session.sessionRole === ORCHESTRATOR_ROLE && (

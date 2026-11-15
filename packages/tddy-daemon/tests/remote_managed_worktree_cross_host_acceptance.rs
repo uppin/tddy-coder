@@ -566,6 +566,54 @@ async fn sessions_on(service: &DaemonSessionHost) -> Vec<String> {
         .collect()
 }
 
+/// `session_id` as `service` lists it.
+async fn listed_on(
+    service: &DaemonSessionHost,
+    session_id: &str,
+) -> tddy_service::proto::session::SessionEntry {
+    service
+        .list_sessions(Request::direct(ListSessionsRequest {
+            session_token: a_caller_token().to_string(),
+        }))
+        .await
+        .expect("ListSessions")
+        .into_inner()
+        .sessions
+        .into_iter()
+        .find(|s| s.session_id == session_id)
+        .unwrap_or_else(|| panic!("session {session_id} is listed"))
+}
+
+#[tokio::test]
+#[serial]
+async fn a_split_agent_half_lists_its_codebase_branch() {
+    // Given two hosts and a split session started on the agent host
+    let hosts = split_hosts().await;
+    let started = hosts
+        .agent
+        .start_session(Request::direct(a_split_session_request()))
+        .await
+        .expect("a split start succeeds")
+        .into_inner();
+    let codebase_session_id = session_metadata_on(&hosts.agent_sessions_base, &started.session_id)
+        .codebase_session_id
+        .expect("a split session records its codebase session");
+
+    // When the agent host lists the agent half, and the codebase host its codebase half
+    let agent_half = listed_on(&hosts.agent, &started.session_id).await;
+    let codebase_half = listed_on(&hosts.codebase, &codebase_session_id).await;
+
+    // Then the agent half carries the codebase half's branch — and still holds no checkout
+    assert_eq!(
+        (
+            agent_half.branch.as_str(),
+            agent_half.repo_path.as_str(),
+            codebase_half.branch.is_empty(),
+        ),
+        (codebase_half.branch.as_str(), "", false)
+    );
+}
+
 // ---------------------------------------------------------------------------
 // A recording workspace sandbox for the codebase host
 // ---------------------------------------------------------------------------

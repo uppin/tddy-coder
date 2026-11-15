@@ -427,6 +427,12 @@ message ExecuteToolChunk {
    would also skip that hooks file.
 4. A writes `.session.yaml` recording `codebase_daemon_instance_id` and `codebase_session_id`, with
    `repo_path: None`.
+5. Before the agent is spawned, A reads the branch B lists for its codebase half and writes the
+   agent half's first changeset with that branch (and the orchestrator that started it, when one
+   did). The agent half therefore lists with the codebase branch while its `repo_path` stays
+   empty. A branch that cannot be read fails the start, and the codebase half is torn down as
+   for any other failed agent step. The branch is recorded at start; a branch renamed later on
+   B is not followed.
 
 The spawned agent's `main` terminal is recorded in its session directory
 (`terminals/main.capture`, rewritten while it runs and once more when it exits), as every other

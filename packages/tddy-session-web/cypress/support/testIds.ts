@@ -855,6 +855,13 @@ export const sessionsDrawerItemHost = (sessionId: string) =>
 export const sessionsDrawerItemCodebaseHost = (sessionId: string) =>
   `sessions-drawer-item-codebase-host-${sessionId}`;
 
+/**
+ * `[data-testid="sessions-drawer-item-branch-<sessionId>"]` — the branch a split session's codebase
+ * half works on, shown beside its codebase-host badge. Absent for co-located sessions.
+ */
+export const sessionsDrawerItemBranch = (sessionId: string) =>
+  `sessions-drawer-item-branch-${sessionId}`;
+
 /** `[data-testid="sessions-detail-resume-<sessionId>"]` — Resume button in detail pane */
 export const sessionsDetailResumeBtn = (sessionId: string) =>
   `sessions-detail-resume-${sessionId}`;

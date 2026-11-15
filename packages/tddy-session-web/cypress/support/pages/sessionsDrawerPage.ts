@@ -13,6 +13,7 @@ import {
   sessionsDrawerItemTooltip,
   sessionsDrawerItemHost,
   sessionsDrawerItemCodebaseHost,
+  sessionsDrawerItemBranch,
   sessionsDetailResumeBtn,
   sessionsDetailDeleteBtn,
   sessionsInspectorResumeBtn,
@@ -192,6 +193,15 @@ export const sessionsDrawerPage = {
   /** The row's codebase is on the same daemon as its agent, so no second badge is rendered. */
   expectNoCodebaseHostBadge(sessionId: string) {
     byTestId(sessionsDrawerItemCodebaseHost(sessionId)).should("not.exist");
+  },
+
+  /** The branch a split session's codebase half works on, shown on its row. */
+  splitBranch: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsDrawerItemBranch(sessionId), { timeout: 5000, ...options }),
+
+  /** The row shows no split branch: its checkout is on its own host. */
+  expectNoSplitBranch(sessionId: string) {
+    byTestId(sessionsDrawerItemBranch(sessionId)).should("not.exist");
   },
 
   // ---------------------------------------------------------------------------

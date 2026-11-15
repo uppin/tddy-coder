@@ -193,6 +193,7 @@ pub fn session_list_status_from_session_dir(
         .and_then(|agents| agents.for_session_type(session_type))
         .is_some()
     {
+        let changeset = read_changeset(session_dir).ok();
         return Ok(SessionListStatusDisplay {
             workflow_goal: String::new(),
             workflow_state: String::new(),
@@ -200,17 +201,20 @@ pub fn session_list_status_from_session_dir(
             agent: session_type.to_string(),
             model: meta.model.clone().unwrap_or_default(),
             activity_status: meta.activity_status.clone().unwrap_or_default(),
-            orchestrator_session_id: String::new(),
-            recipe: String::new(),
+            orchestrator_session_id: changeset
+                .as_ref()
+                .and_then(|c| c.orchestrator_session_id.clone())
+                .unwrap_or_default(),
+            recipe: changeset
+                .as_ref()
+                .and_then(|c| c.recipe.clone())
+                .unwrap_or_default(),
             stack_plan_json: String::new(),
-            stack_id: read_changeset(session_dir)
-                .ok()
-                .and_then(|c| c.stack_id)
+            stack_id: changeset
+                .as_ref()
+                .and_then(|c| c.stack_id.clone())
                 .unwrap_or_default(),
-            branch: read_changeset(session_dir)
-                .ok()
-                .and_then(|c| c.branch)
-                .unwrap_or_default(),
+            branch: changeset.and_then(|c| c.branch).unwrap_or_default(),
         });
     }
 
@@ -682,6 +686,77 @@ orchestrator_session_id: home-session-1
         assert_eq!(proto.agent, "claude-cli");
         assert_eq!(proto.model, "opus");
         assert_eq!(proto.activity_status, "WaitingForInput");
+    }
+
+    /// A CLI agent session listed with the orchestrator, and the recipe, its changeset records.
+    fn a_cli_session_listed(session_type: &str, changeset_tail: &str) -> ProtoSessionEntry {
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            format!(
+                "session_id: cli-orch-1\nproject_id: proj-1\ncreated_at: '2026-11-15T08:12:19Z'\nupdated_at: '2026-11-15T08:12:19Z'\nstatus: active\nrepo_path: null\npid: 0\nsession_type: {session_type}\nmodel: sonnet\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            format!(
+                "version: 1\nmodels: {{}}\nsessions: []\nstate:\n  current: Init\n  updated_at: '2026-11-15T08:12:04Z'\n  history: []\n{changeset_tail}"
+            ),
+        )
+        .unwrap();
+        let mut proto = ProtoSessionEntry {
+            session_id: "cli-orch-1".to_string(),
+            ..Default::default()
+        };
+        apply_session_list_status_to_proto(
+            Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
+            session_dir,
+            &mut proto,
+        )
+        .unwrap();
+        proto
+    }
+
+    #[test]
+    fn claude_cli_session_lists_the_orchestrator_its_changeset_records() {
+        // Given — a claude-cli session an orchestrator started (a split session's agent half has
+        // exactly this changeset: its orchestrator and its codebase branch)
+        // When
+        let proto = a_cli_session_listed(
+            "claude-cli",
+            "branch: test-split-udoo-4\norchestrator_session_id: 01a16dc6-ab4c-7dc3-844e-baca4514f86e\n",
+        );
+
+        // Then
+        assert_eq!(
+            (
+                proto.orchestrator_session_id.as_str(),
+                proto.branch.as_str()
+            ),
+            ("01a16dc6-ab4c-7dc3-844e-baca4514f86e", "test-split-udoo-4")
+        );
+    }
+
+    #[test]
+    fn cursor_cli_session_lists_the_orchestrator_its_changeset_records() {
+        // Given — a cursor-cli session spawned under a stack parent
+        // When
+        let proto = a_cli_session_listed("cursor-cli", "orchestrator_session_id: stack-parent-1\n");
+
+        // Then
+        assert_eq!(proto.orchestrator_session_id, "stack-parent-1");
+    }
+
+    #[test]
+    fn cli_session_without_an_orchestrator_lists_none() {
+        // Given — a claude-cli session nobody orchestrates
+        // When
+        let proto = a_cli_session_listed("claude-cli", "branch: feature/solo\n");
+
+        // Then
+        assert_eq!(proto.orchestrator_session_id, "");
     }
 
     /// **claude_cli_session_enrichment_uses_metadata_not_changeset**: when `.session.yaml` has
