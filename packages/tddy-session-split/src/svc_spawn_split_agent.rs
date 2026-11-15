@@ -43,6 +43,15 @@ pub(crate) struct SplitAgentStart<'a> {
     pub(crate) codebase_session_id: &'a str,
 }
 
+/// What `prepare_split_launch` leaves in hand for the rest of the start: the session's directory,
+/// the prompt it opens with, and the tools' way back to the codebase session.
+struct SplitLaunch {
+    session_dir: std::path::PathBuf,
+    initial_prompt: String,
+    tddy_tools_path: std::path::PathBuf,
+    remote: tddy_core::RemoteToolEnv,
+}
+
 impl SplitSessions {
     /// Spawn the agent half of a session whose checkout it does not hold, and record the pairing.
     ///
@@ -72,20 +81,11 @@ impl SplitSessions {
             codebase_session_id,
             ..
         } = *start;
-        let (session_dir, initial_prompt, tddy_tools_path, remote) = self
+        let launch = self
             .prepare_split_launch(start, room, req, progress)
             .await?;
 
-        let (context_dir, extra_args) = self
-            .split_agent_launch_args(
-                req,
-                codebase_instance_id,
-                codebase_session_id,
-                &session_dir,
-                &tddy_tools_path,
-                &remote,
-            )
-            .await?;
+        let (context_dir, extra_args) = self.split_agent_launch_args(start, req, &launch).await?;
 
         // Claude Code reads `.claude/settings.local.json` from its working directory, which for a
         // split session is the context dir rather than a worktree. Best-effort, as elsewhere: a
@@ -95,12 +95,12 @@ impl SplitSessions {
                 os_user,
                 session_id,
                 req,
-                initial_prompt,
-                tddy_tools_path,
-                remote,
+                initial_prompt: launch.initial_prompt,
+                tddy_tools_path: launch.tddy_tools_path,
+                remote: launch.remote,
                 context_dir,
                 extra_args,
-                session_dir: &session_dir,
+                session_dir: &launch.session_dir,
             })
             .await?;
 
@@ -111,7 +111,7 @@ impl SplitSessions {
             codebase_instance_id,
             codebase_session_id,
             req,
-            session_dir,
+            launch.session_dir,
             hook_token,
             &handle,
         )?;
@@ -125,15 +125,7 @@ impl SplitSessions {
         room: Option<&crate::split_session::SplitAgentRoom>,
         req: &StartSessionRequest,
         progress: &AttachmentProgressSink,
-    ) -> Result<
-        (
-            std::path::PathBuf,
-            String,
-            std::path::PathBuf,
-            tddy_core::RemoteToolEnv,
-        ),
-        Status,
-    > {
+    ) -> Result<SplitLaunch, Status> {
         let SplitAgentStart {
             os_user,
             session_id,
@@ -141,9 +133,7 @@ impl SplitSessions {
             codebase_instance_id,
             codebase_session_id,
         } = *start;
-        let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-        std::fs::create_dir_all(&session_dir)
-            .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
+        let session_dir = create_split_session_dir(sessions_base, session_id)?;
         // Where the codebase lives is not a reason for a planned PR's child to come up without its
         // boundaries: the same rule the co-located branches apply, on the attachments this host
         // materialized into the session it is about to run the agent for.
@@ -182,18 +172,31 @@ impl SplitSessions {
         // caller's Err path tears the codebase half down.
         self.record_first_changeset(&session_dir, codebase_instance_id, codebase_session_id, req)
             .await?;
-        Ok((session_dir, initial_prompt, tddy_tools_path, remote))
+        Ok(SplitLaunch {
+            session_dir,
+            initial_prompt,
+            tddy_tools_path,
+            remote,
+        })
     }
 
     async fn split_agent_launch_args(
         &self,
+        start: &SplitAgentStart<'_>,
         req: &StartSessionRequest,
-        codebase_instance_id: &str,
-        codebase_session_id: &str,
-        session_dir: &std::path::Path,
-        tddy_tools_path: &std::path::Path,
-        remote: &tddy_core::RemoteToolEnv,
+        launch: &SplitLaunch,
     ) -> Result<(std::path::PathBuf, Vec<String>), Status> {
+        let SplitAgentStart {
+            codebase_instance_id,
+            codebase_session_id,
+            ..
+        } = *start;
+        let SplitLaunch {
+            session_dir,
+            tddy_tools_path,
+            remote,
+            ..
+        } = launch;
         // A split session's roster lives on the codebase daemon, in the workspace session the
         // forward created moments ago — which is where this start's seed was recorded, before that
         // call answered. So the withdrawals are read back from the host that holds them, exactly as
@@ -465,6 +468,16 @@ impl SplitSessions {
             _ => crate::split_ports::TokenBearer::Person,
         }
     }
+}
+
+fn create_split_session_dir(
+    sessions_base: &Path,
+    session_id: &str,
+) -> Result<std::path::PathBuf, Status> {
+    let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+    std::fs::create_dir_all(&session_dir)
+        .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
+    Ok(session_dir)
 }
 
 fn split_start_response(

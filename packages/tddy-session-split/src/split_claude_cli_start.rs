@@ -182,25 +182,21 @@ impl SplitSessions {
             )
             .await;
 
-        match started {
-            Ok(response) => {
-                progress.end_phase(StartStep::Agent);
-                Ok(response)
-            }
-            Err(status) => {
-                // The agent spawn is this daemon's own work: the peer already answered, and
-                // whatever it built is there to be reclaimed.
-                self.tear_down_codebase_session(
-                    &slot,
-                    codebase_instance_id,
-                    &codebase_session_id,
-                    &req.session_token,
-                    SplitStartFailure::PeerAnswered,
-                )
-                .await;
-                Err(status)
-            }
+        if started.is_ok() {
+            progress.end_phase(StartStep::Agent);
+        } else {
+            // The agent spawn is this daemon's own work: the peer already answered, and
+            // whatever it built is there to be reclaimed.
+            self.tear_down_codebase_session(
+                &slot,
+                codebase_instance_id,
+                &codebase_session_id,
+                &req.session_token,
+                SplitStartFailure::PeerAnswered,
+            )
+            .await;
         }
+        started
     }
 }
 

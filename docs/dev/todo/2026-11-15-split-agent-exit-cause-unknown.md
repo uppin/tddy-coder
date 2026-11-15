@@ -21,8 +21,3 @@
    [#906](https://github.com/uppin/tddy-coder/pull/906) (`#split-alive` 2/4), and fix 5
    (the project-home inspection tools are split-aware) is done in
    [#907](https://github.com/uppin/tddy-coder/pull/907) (`#split-alive` 3/4).
-3. **`spawn_split_agent` is 157 lines** (`complexity-svc-spawn-split-agent-spawn-split-agent`
-   in `packages/tddy-session-split/docs/code-issues/`). #905 grew it 133 → 152 and #908 grew
-   it 152 → 157; neither split it because `svc_spawn_split_agent.rs` is also modified by the
-   other nodes of stack `#split-alive`; decompose it in a follow-up branch after the stack
-   lands.

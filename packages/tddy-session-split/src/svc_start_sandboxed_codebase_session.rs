@@ -113,18 +113,11 @@ impl SplitSessions {
             )
             .await;
 
-        match started {
-            Ok(response) => Ok(response),
-            Err(status) => {
-                self.tear_down_local_checkout_session(
-                    &sessions_base,
-                    os_user,
-                    &checkout_session_id,
-                )
+        if started.is_err() {
+            self.tear_down_local_checkout_session(&sessions_base, os_user, &checkout_session_id)
                 .await;
-                Err(status)
-            }
         }
+        started
     }
 
     /// Remove the jailed `workspace` session a failed jailed-codebase start left behind.
