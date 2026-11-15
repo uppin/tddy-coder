@@ -181,10 +181,11 @@ impl GitEnv {
             .map(|record| SessionTarget {
                 session_id: record.session_id.clone(),
                 project_id: record.project_id.clone(),
-                worktree: record.worktree.clone().unwrap_or_default(),
+                worktree: record.worktree.clone(),
                 branch: record.branch.clone(),
                 base_ref: record.base_ref.clone(),
                 is_active: record.is_active,
+                codebase: record.codebase.clone(),
             })
     }
 
@@ -202,14 +203,13 @@ impl GitEnv {
             .branch
             .as_deref()
             .ok_or_else(|| format!("node '{}' owns no branch yet", node.node_id))?;
-        if let Some(target) = self.target_for(node) {
-            if !target.worktree.as_os_str().is_empty()
-                && git(&target.worktree, &["rev-parse", "--abbrev-ref", "HEAD"])
-                    .ok()
-                    .as_deref()
-                    == Some(branch)
+        if let Some(worktree) = self.target_for(node).and_then(|target| target.worktree) {
+            if git(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"])
+                .ok()
+                .as_deref()
+                == Some(branch)
             {
-                return Ok(target.worktree);
+                return Ok(worktree);
             }
         }
         let listing = git(repo_root, &["worktree", "list", "--porcelain"])?;
@@ -364,10 +364,11 @@ impl GitEnv {
         let target = SessionTarget {
             session_id: node.session_id.clone().unwrap_or_default(),
             project_id: self.project_id.clone(),
-            worktree: worktree.clone(),
+            worktree: Some(worktree.clone()),
             branch: branch.to_string(),
             base_ref: base_ref.to_string(),
             is_active: false,
+            codebase: None,
         };
         tddy_worktree_service::session_git_ops::run_git_op(
             &target,

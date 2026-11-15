@@ -316,6 +316,8 @@ impl ProjectHomePort for DaemonProjectHome {
                 branch: row.branch,
                 base_ref: row.base_ref,
                 is_active: row.entry.is_active,
+                // TODO(split-targets): the codebase half from `row.entry.codebase_*`.
+                codebase: None,
             })
             .collect())
     }

@@ -11,8 +11,8 @@ use tddy_tool_engine::project_home_terminal_tools::{
 };
 use tddy_tool_engine::project_home_terminate::TERMINATE_SESSION;
 use tddy_tool_engine::project_home_tools::{
-    project_home_tool_defs, target_daemon_instance_id, DIFF_SESSION_WORKTREE,
-    READ_SESSION_WORKTREE, TARGET_DAEMON_INSTANCE_ID,
+    is_worktree_target_tool, project_home_tool_defs, retarget_args, target_daemon_instance_id,
+    DIFF_SESSION_WORKTREE, READ_SESSION_WORKTREE, TARGET_DAEMON_INSTANCE_ID,
 };
 use tddy_tool_engine::project_home_worktree_tools::{GET_WORKTREE, LIST_WORKTREES};
 use tddy_tool_engine::session_follow::{READ_SESSION_ACTIVITY, READ_SESSION_TRANSCRIPT};
@@ -104,4 +104,72 @@ fn an_empty_or_absent_host_is_this_host() {
 
     // Then
     assert_eq!((absent, empty, blank), (None, None, None));
+}
+
+#[test]
+fn worktree_tools_are_the_ones_that_need_a_checkout() {
+    // Given every tool that reads, diffs, restores or runs git in a checkout, and the tools that act
+    // on a session's agent instead
+    let mut need_a_checkout: Vec<String> = [READ_SESSION_WORKTREE, DIFF_SESSION_WORKTREE]
+        .map(str::to_string)
+        .to_vec();
+    need_a_checkout
+        .push(tddy_tool_engine::project_home_lifecycle_tools::RESTORE_WORKTREE.to_string());
+    need_a_checkout.extend(
+        project_home_git_tool_defs()
+            .into_iter()
+            .map(|tool| tool.name),
+    );
+    let act_on_the_agent = [
+        READ_SESSION_TERMINAL,
+        CLAIM_SESSION_TERMINAL,
+        SEND_SESSION_KEYS,
+        READ_SESSION_ACTIVITY,
+        READ_SESSION_TRANSCRIPT,
+        TERMINATE_SESSION,
+        tddy_tool_engine::project_home_lifecycle_tools::DELETE_SESSION,
+        tddy_tool_engine::project_home_lifecycle_tools::SET_SESSION_MARK,
+        tddy_tool_engine::project_home_turn_tools::SEND_SESSION_MESSAGE,
+        tddy_tool_engine::project_home_turn_tools::RESUME_SESSION,
+    ];
+
+    // When each is classified
+    let misclassified: Vec<String> = need_a_checkout
+        .iter()
+        .filter(|name| !is_worktree_target_tool(name))
+        .cloned()
+        .chain(
+            act_on_the_agent
+                .iter()
+                .filter(|name| is_worktree_target_tool(name))
+                .map(|name| name.to_string()),
+        )
+        .collect();
+
+    // Then the checkout tools are worktree tools and the agent tools are not
+    assert_eq!(misclassified, Vec::<String>::new());
+}
+
+#[test]
+fn retargeting_names_the_codebase_host_and_session_and_keeps_the_rest() {
+    // Given a diff aimed at a split session's agent half, and that session's codebase half
+    let args = r#"{"session_id":"agent-half","path":"src/lib.rs"}"#;
+    let codebase = tddy_worktree_service::session_target::CodebaseHalf {
+        daemon_instance_id: "udoo".to_string(),
+        session_id: "codebase-half".to_string(),
+    };
+
+    // When the arguments are retargeted at the codebase half
+    let retargeted: Value =
+        serde_json::from_str(&retarget_args(args, &codebase)).expect("retargeted args are JSON");
+
+    // Then they name the codebase session on its host, and keep every other argument
+    assert_eq!(
+        retargeted,
+        serde_json::json!({
+            "session_id": "codebase-half",
+            "daemon_instance_id": "udoo",
+            "path": "src/lib.rs"
+        })
+    );
 }

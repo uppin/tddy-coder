@@ -86,7 +86,8 @@ pub use crate::project_home_listing::{ListProjectSessionsResult, ListedSession, 
 
 pub(crate) use crate::project_home_target_host::target_host_property;
 pub use crate::project_home_target_host::{
-    is_project_home_target_tool, target_daemon_instance_id, TARGET_DAEMON_INSTANCE_ID,
+    is_project_home_target_tool, is_worktree_target_tool, retarget_args, target_daemon_instance_id,
+    TARGET_DAEMON_INSTANCE_ID,
 };
 
 /// What the tools need from the daemon.
@@ -401,11 +402,14 @@ async fn read_session_worktree(
         Ok(t) => t,
         Err(outcome) => return outcome,
     };
-    let rel = match contained_rel_path(&target.worktree, &args.path) {
+    let root = match target.worktree() {
+        Ok(root) => root.to_path_buf(),
+        Err(refused) => return ToolOutcome::err(refused.to_string()),
+    };
+    let rel = match contained_rel_path(&root, &args.path) {
         Ok(rel) => rel,
         Err(message) => return ToolOutcome::err(message),
     };
-    let root = target.worktree;
     let read = tokio::task::spawn_blocking(move || read_or_list(&root, &rel)).await;
     match read {
         Ok(Ok(value)) => ToolOutcome::ok(value.to_string()),
@@ -483,7 +487,11 @@ async fn diff_session_worktree(
     } else {
         target.base_ref.clone()
     };
-    match worktree_diff(&target.worktree, &base_ref).await {
+    let worktree = match target.worktree() {
+        Ok(worktree) => worktree,
+        Err(refused) => return ToolOutcome::err(refused.to_string()),
+    };
+    match worktree_diff(worktree, &base_ref).await {
         Ok(diff) => ToolOutcome::ok(
             json!({ "session_id": target.session_id, "base_ref": base_ref, "diff": diff })
                 .to_string(),

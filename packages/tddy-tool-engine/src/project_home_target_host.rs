@@ -70,3 +70,22 @@ pub(crate) fn target_host_property() -> Value {
         "description": "The host the session runs on, as ListProjectSessions reports it in its daemon_instance_id; empty for this host."
     })
 }
+
+/// Whether `name` acts on a session's checkout: read, diff, restore and the git tools. Named with a
+/// split session's agent half — which has no checkout — such a tool acts on its codebase half.
+pub fn is_worktree_target_tool(name: &str) -> bool {
+    // TODO(split-targets): implement
+    let _ = name;
+    false
+}
+
+/// `args_json` aimed at `codebase` instead: its `session_id` and [`TARGET_DAEMON_INSTANCE_ID`]
+/// replaced, every other argument kept.
+pub fn retarget_args(
+    args_json: &str,
+    codebase: &tddy_worktree_service::session_target::CodebaseHalf,
+) -> String {
+    // TODO(split-targets): implement
+    let _ = codebase;
+    args_json.to_string()
+}

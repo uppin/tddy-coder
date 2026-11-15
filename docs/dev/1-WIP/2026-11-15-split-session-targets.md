@@ -5,7 +5,7 @@
 **Type**: Bug Fix
 **Complexity**: 4 — three crates (`tddy-worktree-service`, `tddy-tool-engine`, `tddy-daemon-rpc`), a type change every target consumer sees, cross-host forwarding with two-daemon acceptance tests
 **Stack**: `#split-alive` 3/4 — branch `feature/split-alive/split-targets`, base `feature/split-alive/split-hooks`
-**PR**: _(set in pass 2)_
+**PR**: [#907](https://github.com/uppin/tddy-coder/pull/907)
 
 ## Initial Discovery
 
@@ -74,10 +74,12 @@ PRD § Background; discovery Exploration 2 § A.
 ## Draft PR contract
 
 First push (pass 2, commit 2): `CodebaseHalf`, `TargetRecord.codebase`, `SessionTarget.worktree:
-Option<PathBuf>` with `worktree()` (implemented, since the type change must compile everywhere), the
-resolver still refusing (`// TODO(split-targets): admit worktree-less targets`),
-`is_worktree_target_tool` / `retarget_args` stubs, `target_records` still leaving `codebase: None`,
-plus the failing tests below.
+Option<PathBuf>` + `SessionTarget.codebase` with `worktree()` (implemented, since the type change must
+compile everywhere: `project_home_tools.rs` read/diff, `session_git_ops.rs` — new
+`GitOpError::NoWorktree` —, `stack_git_tools/git_work.rs`), the resolver still refusing
+(`// TODO(split-targets)`), `is_worktree_target_tool` / `retarget_args` stubs (re-exported from
+`project_home_tools`), `target_records` leaving `codebase: None` (`// TODO(split-targets)`), plus the
+failing tests below. The redirect in `project_home_remote.rs` is green's.
 
 ## Green wave
 
@@ -120,7 +122,7 @@ host resolves its own workspace record exactly as it does today for an explicit
 
 ## Implementation Milestones
 
-- [ ] Type change compiles everywhere (contract commit)
+- [x] Type change compiles everywhere (contract commit)
 - [ ] Resolver admits worktree-less targets; unit + fake-port tests green
 - [ ] Records carry the codebase half; redirect; two-host acceptance green
 
@@ -134,28 +136,28 @@ no LiveKit), with the split pair written as `.session.yaml` records on each host
 
 | Test | File | Validates |
 |---|---|---|
-| `a_split_agents_activity_is_read_where_the_agent_runs` | `packages/tddy-daemon-rpc/tests/project_home_split_targets_acceptance.rs` (new) | `ReadSessionActivity` on the agent half (no worktree) answers instead of refusing |
+| `a_split_agents_activity_is_read_where_the_agent_runs` | `packages/tddy-daemon-rpc/tests/project_home_remote_targets_acceptance.rs` (extends its `two_hosts()` harness; split agent half written as a record on host-a) | `ReadSessionActivity` on the agent half (no worktree) answers instead of refusing |
 | `diffing_a_split_agent_diffs_its_codebase_on_the_codebase_host` | same | `DiffSessionWorktree{session_id: agent half}` with no host returns the codebase half's id and B's diff |
 | `reading_a_split_agents_worktree_reads_the_codebase_host` | same | `ReadSessionWorktree` on the agent id lists B's worktree file |
-| `a_session_with_no_worktree_and_no_codebase_is_still_refused_by_worktree_tools` | same | `DiffSessionWorktree` → "has no worktree" |
+| `a_session_with_no_worktree_and_no_codebase_is_still_refused_by_worktree_tools` | same | `DiffSessionWorktree` → "has no worktree" (passes today; guards the refusal) |
 
 ## Unit / Integration Tests
 
 | Test | File |
 |---|---|
-| `resolving_a_session_without_a_worktree_targets_it`, `a_target_without_a_worktree_refuses_to_give_one`, `a_split_agent_record_names_its_codebase_half` | `packages/tddy-worktree-service/src/session_target.rs` (tests) |
+| `resolving_a_session_without_a_worktree_targets_it`, `a_target_without_a_worktree_refuses_to_give_one` (accessor implemented in the contract; passes), `a_split_agent_record_names_its_codebase_half` | `packages/tddy-worktree-service/src/session_target.rs` (tests) |
 | `reading_the_terminal_of_a_session_without_a_worktree_answers` | `packages/tddy-tool-engine/tests/project_home_terminal_tools.rs` |
-| `worktree_tools_are_the_ones_that_need_a_checkout`, `retargeting_names_the_codebase_host_and_session` | `packages/tddy-tool-engine/tests/project_home_target_host.rs` |
+| `worktree_tools_are_the_ones_that_need_a_checkout`, `retargeting_names_the_codebase_host_and_session_and_keeps_the_rest` | `packages/tddy-tool-engine/tests/project_home_target_host.rs` |
 
 ## TODO
 
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer for this stack, 2026-11-15: "finish both passes without approvals")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green
 - [ ] Validate changes
 - [ ] Wrap docs
