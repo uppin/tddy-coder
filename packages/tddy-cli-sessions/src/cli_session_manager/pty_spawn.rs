@@ -160,8 +160,7 @@ impl CliSessionManager {
             session_id.to_string(),
             terminal_id.to_string(),
             handle.task_id.clone(),
-            handle.pid,
-            std::time::Instant::now(),
+            super::main_exit::MainExitWatch::new(handle.pid),
             on_exit,
             TmuxRun::new(tmux_session, os_user),
         );
@@ -241,14 +240,12 @@ impl CliSessionManager {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn spawn_terminal_cleanup(
         &self,
         session_id: String,
         terminal_id: String,
         task_id: TaskId,
-        pid: u32,
-        started: std::time::Instant,
+        main_exit: super::main_exit::MainExitWatch,
         on_exit: Option<PendingExit>,
         tmux_run: TmuxRun,
     ) {
@@ -271,25 +268,7 @@ impl CliSessionManager {
                 }
             }
             if terminal_id == MAIN_TERMINAL_ID {
-                let status = task.status();
-                let line = super::main_exit::describe_main_exit(
-                    &session_id,
-                    pid,
-                    &status,
-                    started.elapsed(),
-                );
-                let failed = match &status {
-                    tddy_task::TaskStatus::Failed { .. } => true,
-                    tddy_task::TaskStatus::Completed { exit_code } => {
-                        exit_code.is_some_and(|code| code != 0)
-                    }
-                    _ => false,
-                };
-                if failed {
-                    log::warn!(target: "tddy_daemon::claude_cli_session", "{line}");
-                } else {
-                    log::info!(target: "tddy_daemon::claude_cli_session", "{line}");
-                }
+                super::main_exit::log_main_exit(&session_id, &main_exit, &task.status());
             }
             // The process has exited and its output is complete. The hook finishes before the
             // terminal leaves the index, and before a waiting resume goes on.

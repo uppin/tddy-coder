@@ -188,12 +188,17 @@ fake terminal status so its timing is not tested through LiveKit.
 - [x] USER REVIEW — acceptance tests (waived by the developer for this stack, 2026-11-15: "finish both passes without approvals")
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green
-- [ ] Validate changes
-- [ ] Wrap docs
+- [x] Validate changes
+- [x] Wrap docs
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+No mock, fallback, debug output or test-only branch in production code. The startup watch's
+capture lock falls back to an empty quote only when the lock is poisoned; the failure still
+reports the exit outcome. `spawn_split_agent` grew 133 → 152 lines (see Refactoring Needed):
+splitting it is deferred to a follow-up after stack `#split-alive` lands, because
+`feature/split-alive/split-hooks`, `feature/split-alive/split-targets` and
+`feature/split-alive/split-pairing` also modify `svc_spawn_split_agent.rs`.
 
 ## Decisions & Trade-offs
 
@@ -206,10 +211,53 @@ _(populated during development)_
 
 ### From /validate-changes
 
+- Fixed: `pty_spawn.rs` added `#[allow(clippy::too_many_arguments)]` for the new cleanup
+  parameters — replaced by `main_exit::MainExitWatch { pid, started }`, and the exit logging
+  moved into `main_exit::log_main_exit`, so `spawn_terminal_cleanup` is 55 → 59 lines.
+- Deferred (stack-shared file): `spawn_split_agent` is 133 → 152 lines in
+  `svc_spawn_split_agent.rs`, which #906–#908 also modify; its decomposition is recorded in
+  `packages/tddy-session-split/docs/code-issues/complexity-svc-spawn-split-agent-spawn-split-agent.md`
+  and deferred to a follow-up branch after the stack lands.
+- Noted (info): the six-line `TaskStatus` → outcome-string match exists in both
+  `main_exit::outcome_of` and `startup::outcome_of` (different crates); extracting it would add
+  a public API to `tddy-task`/`tddy-cli-sessions` outside this PR's scope.
+
 ### From /pr-wrap
+
+- File length gate: `packages/tddy-pty/src/runtime.rs` 523 → 523 production lines (alert only,
+  pre-existing record); `packages/tddy-daemon/tests/remote_managed_worktree_cross_host_acceptance.rs`
+  is a test file, excluded from the budget, and is modified by later stack nodes, so it is not split here.
 
 ## Validation Results
 
 ### /validate-changes
+
+**2026-11-15 — no gaps.** Stack gate: base `master` (PR #905 is the stack root), rebased onto
+`origin/master` (`305f99b86`), leak check clean (`origin/master..HEAD` is this PR's three
+commits only). Every Scope item and acceptance test is implemented; `## Responsibility`
+delivered with no stubs; `## Boundaries` and `## Dependencies` respected (no parent surface,
+no dependent behaviour). Build validation scoped: `./test -p tddy-pty -p tddy-cli-sessions
+-p tddy-session-split` — 131 passed, 0 failed. Risk summary: Critical 0, Warning 1 (fixed,
+above), Info 1.
+
+### /validate-tests
+
+**2026-11-15 — clean.** 15 new tests analysed (3 `exit_status`, 3 `main_exit`, 5 `startup`,
+2 PTY runtime, 2 cross-host acceptance): fluent Given/When/Then, exact assertions, one
+behaviour each, no skips, no always-passing tests. The startup unit tests use a 10 ms death
+against a 2 s window and a 50 ms window against a never-ending terminal.
+
+### /validate-prod-ready
+
+**2026-11-15 — ready.** No mock/fake/stub in production paths, no added fallback, no
+`TODO`/`FIXME` added, no `println!`/`eprintln!`/`dbg!` in changed production code (the exit
+line goes through `log`), no suppression added after the refactor above.
+
+### /analyze-clean-code
+
+**2026-11-15 — score C, both must-refactor items pre-existing.** `spawn_split_agent`
+152 lines (133 at base; stack-shared, deferred above) and `spawn_child_and_pump` 67 lines
+(unchanged). All new functions are ≤ 30 lines; new files are 17–183 production lines;
+`LAST_OUTPUT_LINES` names the one magic value. `runtime.rs` stays 523 production lines.
 
 ### /pr-wrap

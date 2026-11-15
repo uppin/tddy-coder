@@ -73,12 +73,12 @@ operator learned of the failure only by noticing that nothing happened.
 
 ## Success Criteria
 
-- [ ] A split start whose agent exits within the startup window fails; the error names the exit status
+- [x] A split start whose agent exits within the startup window fails; the error names the exit status
       and includes the agent's last output; the codebase host has no session or worktree left.
-- [ ] A split agent that stays up starts as before.
-- [ ] A split agent's terminal recording exists while it runs and holds its final output after it exits.
-- [ ] Every ended `main` terminal produces one daemon log line with session, pid, outcome and lifetime.
-- [ ] The PTY task's terminal status carries the child's real exit code (non-zero exits are no longer `0`).
+- [x] A split agent that stays up starts as before.
+- [x] A split agent's terminal recording exists while it runs and holds its final output after it exits.
+- [x] Every ended `main` terminal produces one daemon log line with session, pid, outcome and lifetime.
+- [x] The PTY task's terminal status carries the child's real exit code (non-zero exits are no longer `0`).
 
 ## Out of Scope
 
