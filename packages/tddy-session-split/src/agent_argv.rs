@@ -140,13 +140,6 @@ pub fn split_claude_extra_args(
         spec.variant_hooks_args(HOST_AGENT_VARIANT, &split_hooks_file(session_dir))
             .map_err(|e| Status::internal(e.to_string()))?,
     );
-    let natives = spec
-        .agent
-        .variants
-        .get(HOST_AGENT_VARIANT)
-        .map(|variant| variant.withdraw_native.as_slice())
-        .unwrap_or_default();
-
     let withdrawn = withdrawn_tools(withdrawals);
     let withdrawn_refs: Vec<&str> = withdrawn.iter().map(String::as_str).collect();
     // Every exec tool the roster leaves alone is pre-approved: they are all reachable, they simply
@@ -162,6 +155,12 @@ pub fn split_claude_extra_args(
     // `mcp__tddy-tools__` form is the route this agent actually had, and it stays callable through
     // the permission prompt until `--disallowedTools` names it (`PermissionServer::decide` allows
     // every `mcp__tddy-tools__*` call it is asked about).
+    let natives = spec
+        .agent
+        .variants
+        .get(HOST_AGENT_VARIANT)
+        .map(|variant| variant.withdraw_native.as_slice())
+        .unwrap_or_default();
     let denied_tools: Vec<String> = build_claude_disallowlist(&withdrawn_refs)
         .into_iter()
         .filter(|tool| !natives.contains(tool))
