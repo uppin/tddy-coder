@@ -107,13 +107,6 @@ pub fn resolve_session_target(
             target_session_id.to_string(),
         ));
     }
-    // TODO(split-targets): admit a target without a worktree — the tools that need one ask
-    // `SessionTarget::worktree`.
-    if record.worktree.is_none() {
-        return Err(SessionTargetError::NoWorktree(
-            target_session_id.to_string(),
-        ));
-    }
     Ok(SessionTarget {
         session_id: record.session_id.clone(),
         project_id: record.project_id.clone(),

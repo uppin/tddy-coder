@@ -20,7 +20,7 @@ use tddy_tool_engine::start_options::{StartOptions, StartOptionsQuery};
 use tddy_tool_engine::start_session_args::{StartContext, StartSessionArgs};
 use tddy_worktree_service::service::project_main_repo_on_host;
 use tddy_worktree_service::session_git_ops::PushIdentity;
-use tddy_worktree_service::session_target::{SessionTarget, TargetRecord};
+use tddy_worktree_service::session_target::{CodebaseHalf, SessionTarget, TargetRecord};
 use tddy_worktree_service::worktrees::{
     list_worktree_diff_rows, project_worktree_snapshot, worktree_path_is_listed,
 };
@@ -316,8 +316,18 @@ impl ProjectHomePort for DaemonProjectHome {
                 branch: row.branch,
                 base_ref: row.base_ref,
                 is_active: row.entry.is_active,
-                // TODO(split-targets): the codebase half from `row.entry.codebase_*`.
-                codebase: None,
+                codebase: match (
+                    row.entry.codebase_daemon_instance_id.trim(),
+                    row.entry.codebase_session_id.trim(),
+                ) {
+                    (daemon, session) if !daemon.is_empty() && !session.is_empty() => {
+                        Some(CodebaseHalf {
+                            daemon_instance_id: daemon.to_string(),
+                            session_id: session.to_string(),
+                        })
+                    }
+                    _ => None,
+                },
             })
             .collect())
     }

@@ -123,8 +123,8 @@ host resolves its own workspace record exactly as it does today for an explicit
 ## Implementation Milestones
 
 - [x] Type change compiles everywhere (contract commit)
-- [ ] Resolver admits worktree-less targets; unit + fake-port tests green
-- [ ] Records carry the codebase half; redirect; two-host acceptance green
+- [x] Resolver admits worktree-less targets; unit + fake-port tests green
+- [x] Records carry the codebase half; redirect; two-host acceptance green
 
 ## Testing Plan
 
@@ -158,7 +158,7 @@ no LiveKit), with the split pair written as `.session.yaml` records on each host
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer for this stack, 2026-11-15: "finish both passes without approvals")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green
+- [x] TDD Green
 - [ ] Validate changes
 - [ ] Wrap docs
 

@@ -30,8 +30,8 @@ use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
 use tddy_tool_engine::project_home_git_tools::is_project_home_git_tool;
 use tddy_tool_engine::project_home_tools::{
-    is_project_home_target_tool, is_project_home_tool, target_daemon_instance_id,
-    ListProjectSessionsResult, UnreachableHost,
+    is_project_home_target_tool, is_project_home_tool, is_worktree_target_tool, retarget_args,
+    target_daemon_instance_id, ListProjectSessionsResult, UnreachableHost,
 };
 use tddy_tool_engine::stack_git_tools::is_stack_git_tool;
 use tddy_tool_engine::stack_tools::caller_records::{
@@ -41,7 +41,7 @@ use tddy_tool_engine::stack_tools::{
     is_stack_tool, is_stack_tool_offered_to, StackCaller, StackCallerRole,
 };
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
-use tddy_worktree_service::session_target::HomeCaller;
+use tddy_worktree_service::session_target::{CodebaseHalf, HomeCaller};
 
 use super::ExecToolRpcHandler;
 
@@ -245,17 +245,70 @@ impl ExecToolRpcHandler {
         {
             return Ok(None);
         }
-        let Some(host) = target_daemon_instance_id(&req.args_json) else {
+        if let Some(host) = target_daemon_instance_id(&req.args_json) {
+            let addressed = ExecuteToolRequest {
+                daemon_instance_id: host.clone(),
+                ..req.clone()
+            };
+            return self
+                .peer_routing
+                .rpc_served_by_peer(EXEC_TOOL_SERVICE, "ExecuteTool", &host, &addressed)
+                .await;
+        }
+        // A worktree tool named with a split session's agent half, naming no host: its checkout
+        // is the codebase half, so the call is forwarded there exactly as an explicit host is.
+        if !is_worktree_target_tool(&req.tool_name) {
+            return Ok(None);
+        }
+        let Some(target_session_id) = target_session_id_of(&req.args_json) else {
             return Ok(None);
         };
+        let Some(codebase) = self.codebase_half_here(req, &target_session_id) else {
+            return Ok(None);
+        };
+        let host = codebase.daemon_instance_id.clone();
         let addressed = ExecuteToolRequest {
             daemon_instance_id: host.clone(),
+            args_json: retarget_args(&req.args_json, &codebase),
             ..req.clone()
         };
         self.peer_routing
             .rpc_served_by_peer(EXEC_TOOL_SERVICE, "ExecuteTool", &host, &addressed)
             .await
     }
+
+    /// The codebase half this host's record names for `target_session_id`, when it is a split
+    /// session's agent half; `None` for every other session, and for a record that cannot be read
+    /// here (the local path then answers with its own refusal).
+    fn codebase_half_here(
+        &self,
+        req: &ExecuteToolRequest,
+        target_session_id: &str,
+    ) -> Option<CodebaseHalf> {
+        if validate_session_id_segment(target_session_id).is_err() {
+            return None;
+        }
+        let os_user = self.os_user_of(&req.session_token).ok()?;
+        let sessions_base = sessions_base_for_user(&os_user, Some(&self.tddy_data_dir))?;
+        let session_dir = unified_session_dir_path(&sessions_base, target_session_id);
+        let metadata = tddy_core::read_session_metadata(&session_dir).ok()?;
+        let daemon = metadata.codebase_daemon_instance_id?.trim().to_string();
+        let session = metadata.codebase_session_id?.trim().to_string();
+        if daemon.is_empty() || session.is_empty() {
+            return None;
+        }
+        Some(CodebaseHalf {
+            daemon_instance_id: daemon,
+            session_id: session,
+        })
+    }
+}
+
+/// The `session_id` a target tool's arguments name, when they name one.
+fn target_session_id_of(args_json: &str) -> Option<String> {
+    let args: serde_json::Value = serde_json::from_str(args_json).ok()?;
+    let session_id = args.get("session_id")?.as_str()?.trim();
+    (!session_id.is_empty()).then(|| session_id.to_string())
 }
 
 /// Every eligible host but `local_id`, in roster order.
