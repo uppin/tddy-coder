@@ -102,11 +102,11 @@ Real dependency edges, as opposed to the branch line: none.
 
 ## Scope
 
-- [ ] PTY exit monitor reports the real exit code; a signal is a failure naming it
-- [ ] Ended `main` terminals are logged with session, pid, outcome and lifetime
-- [ ] The split agent's terminal is recorded in its session dir
-- [ ] A split start fails, with the agent's last output, when its agent exits inside the startup window; the codebase half is torn down
-- [ ] Docs: `remote-managed-worktree.md` § Session start states the startup window and the recording
+- [x] PTY exit monitor reports the real exit code; a signal is a failure naming it
+- [x] Ended `main` terminals are logged with session, pid, outcome and lifetime
+- [x] The split agent's terminal is recorded in its session dir
+- [x] A split start fails, with the agent's last output, when its agent exits inside the startup window; the codebase half is torn down
+- [x] Docs: `remote-managed-worktree.md` § Session start states the startup window and the recording
 
 ## Technical Changes
 
@@ -144,10 +144,10 @@ Real dependency edges, as opposed to the branch line: none.
 
 ## Implementation Milestones
 
-- [ ] `task_status_of` + monitor wiring, unit tests green
-- [ ] `describe_main_exit` + log call, unit tests green
-- [ ] split recording registered; recording acceptance green
-- [ ] startup watch; failure acceptance green; existing cross-host suite still green
+- [x] `task_status_of` + monitor wiring, unit tests green
+- [x] `describe_main_exit` + log call, unit tests green
+- [x] split recording registered; recording acceptance green
+- [x] startup watch; failure acceptance green; existing cross-host suite still green
 
 ## Testing Plan
 
@@ -187,7 +187,7 @@ fake terminal status so its timing is not tested through LiveKit.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer for this stack, 2026-11-15: "finish both passes without approvals")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green
+- [x] TDD Green
 - [ ] Validate changes
 - [ ] Wrap docs
 

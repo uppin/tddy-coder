@@ -1,11 +1,12 @@
 //! The split agent's startup window: a split start reports success only once its agent has
 //! survived the daemon's startup grace period, and fails with the agent's own last words otherwise.
-#![allow(dead_code)] // TODO(agent-liveness): wired into `spawn_split_agent` once implemented.
 
 use std::fmt;
 use std::time::Duration;
 
+use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_task::TaskStatus;
 use tokio::sync::watch;
 
 /// How many of the agent's last non-empty output lines a startup failure quotes.
@@ -40,12 +41,69 @@ pub(crate) enum StartupOutcome {
 
 /// Watch `done` — the agent terminal's "has ended" signal — for `startup.grace`.
 pub(crate) async fn await_split_agent_startup(
-    done: watch::Receiver<bool>,
+    mut done: watch::Receiver<bool>,
     startup: SplitAgentStartup,
 ) -> StartupOutcome {
-    // TODO(agent-liveness): implement
-    let _ = (done, startup);
-    StartupOutcome::Survived
+    if *done.borrow() {
+        return StartupOutcome::Exited;
+    }
+    let deadline = tokio::time::Instant::now() + startup.grace;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return StartupOutcome::Survived;
+        }
+        let poll = startup.poll.min(remaining);
+        match tokio::time::timeout(poll, done.changed()).await {
+            Ok(Ok(())) => {
+                if *done.borrow() {
+                    return StartupOutcome::Exited;
+                }
+            }
+            // The sender is gone: the terminal ended without setting the flag.
+            Ok(Err(_)) => return StartupOutcome::Exited,
+            Err(_) => {
+                if *done.borrow() {
+                    return StartupOutcome::Exited;
+                }
+            }
+        }
+    }
+}
+
+/// How an ended agent's status reads in a startup failure (`exit code 3`, the failure itself).
+fn outcome_of(status: &TaskStatus) -> String {
+    match status {
+        TaskStatus::Completed {
+            exit_code: Some(code),
+        } => format!("exit code {code}"),
+        TaskStatus::Completed { exit_code: None } => "exit code unknown".to_string(),
+        TaskStatus::Failed { message } => message.clone(),
+        TaskStatus::Cancelled => "stopped by the daemon".to_string(),
+        TaskStatus::Pending | TaskStatus::Running => "still running".to_string(),
+    }
+}
+
+/// Watch `handle`'s agent through its startup window: `Ok` once it has survived it, or the death
+/// to fail the start with — its outcome and the tail of its capture — when it ended inside it.
+pub(crate) async fn ensure_split_agent_started(
+    handle: &PtyHandle,
+    startup: SplitAgentStartup,
+) -> Result<(), SplitAgentDied> {
+    match await_split_agent_startup(handle.pty_done.clone(), startup).await {
+        StartupOutcome::Survived => Ok(()),
+        StartupOutcome::Exited => {
+            let capture = handle
+                .capture
+                .lock()
+                .map(|capture| capture.buffered_bytes().to_vec())
+                .unwrap_or_default();
+            Err(SplitAgentDied::from_capture(
+                &outcome_of(&handle.task_status()),
+                &capture,
+            ))
+        }
+    }
 }
 
 /// A split agent that exited inside its startup window: how it ended, and the tail of what it
@@ -60,20 +118,67 @@ impl SplitAgentDied {
     /// The death of an agent that ended with `outcome` (`exit code 3`, `terminated by signal …`),
     /// quoting the last [`LAST_OUTPUT_LINES`] non-empty lines of `capture`, terminal escapes removed.
     pub(crate) fn from_capture(outcome: &str, capture: &[u8]) -> Self {
-        // TODO(agent-liveness): implement
-        let _ = capture;
+        let text = strip_terminal_escapes(&String::from_utf8_lossy(capture));
+        let mut lines: Vec<&str> = text
+            .lines()
+            .map(|line| line.trim_end())
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+        if lines.len() > LAST_OUTPUT_LINES {
+            lines.drain(..lines.len() - LAST_OUTPUT_LINES);
+        }
         Self {
             outcome: outcome.to_string(),
-            last_output: String::new(),
+            last_output: lines.join("\n"),
         }
     }
 }
 
 impl fmt::Display for SplitAgentDied {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO(agent-liveness): implement
-        write!(f, "{}", self.outcome)
+        if self.last_output.is_empty() {
+            write!(f, "split agent exited during startup ({})", self.outcome)
+        } else {
+            write!(
+                f,
+                "split agent exited during startup ({}): {}",
+                self.outcome, self.last_output
+            )
+        }
     }
+}
+
+/// `text` with terminal escape sequences removed: CSI (`ESC [ … final`), OSC (`ESC ] … BEL` or
+/// `ESC \`), and the two-byte `ESC <byte>` forms.
+fn strip_terminal_escapes(text: &str) -> String {
+    let mut stripped = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            stripped.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                for next in chars.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&next) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                let mut previous = '\0';
+                for next in chars.by_ref() {
+                    if next == '\u{7}' || (previous == '\u{1b}' && next == '\\') {
+                        break;
+                    }
+                    previous = next;
+                }
+            }
+            Some(_) | None => {}
+        }
+    }
+    stripped
 }
 
 #[cfg(test)]

@@ -425,6 +425,14 @@ message ExecuteToolChunk {
 4. A writes `.session.yaml` recording `codebase_daemon_instance_id` and `codebase_session_id`, with
    `repo_path: None`.
 
+The spawned agent's `main` terminal is recorded in its session directory
+(`terminals/main.capture`, rewritten while it runs and once more when it exits), as every other
+agent's is. The start then watches the agent for the daemon's startup window
+(`spawn_startup_grace_period_ms`): if the agent exits inside it, the start fails — naming how it
+ended and quoting the tail of what it printed — and the worktree created on B is removed, as for
+any other failed agent step. An agent that dies after the window leaves the start succeeded; its
+exit is logged with its real status and its recording kept.
+
 If step 2 or 3 fails, the whole start fails and any worktree already created on B is removed — no
 half-built split session is left behind.
 

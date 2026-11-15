@@ -6,16 +6,25 @@ use tddy_task::TaskStatus;
 
 /// Describe the end of `session_id`'s `main` terminal: its pid, how it ended and how long it ran.
 /// An agent that dies unseen is otherwise indistinguishable from one still running.
-#[allow(dead_code)] // TODO(agent-liveness): called from `spawn_terminal_cleanup` once implemented.
 pub(crate) fn describe_main_exit(
     session_id: &str,
     pid: u32,
     status: &TaskStatus,
     ran: Duration,
 ) -> String {
-    // TODO(agent-liveness): implement
-    let _ = (session_id, pid, status, ran);
-    String::new()
+    let outcome = match status {
+        TaskStatus::Completed {
+            exit_code: Some(code),
+        } => format!("exit code {code}"),
+        TaskStatus::Completed { exit_code: None } => "exit code unknown".to_string(),
+        TaskStatus::Failed { message } => message.clone(),
+        TaskStatus::Cancelled => "stopped by the daemon".to_string(),
+        TaskStatus::Pending | TaskStatus::Running => "still running".to_string(),
+    };
+    format!(
+        "main exited: session={session_id} pid={pid} outcome={outcome} ran={:.1}s",
+        ran.as_secs_f64()
+    )
 }
 
 #[cfg(test)]

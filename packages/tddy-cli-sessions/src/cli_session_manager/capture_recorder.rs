@@ -107,7 +107,7 @@ impl CliSessionManager {
 }
 
 /// Rewrites `recording` every `interval`, for as long as it is open and its `main` terminal is still
-/// in the index.
+/// in the index. The first rewrite is immediate, so the recording exists from registration on.
 async fn record_periodically(
     recording: Arc<MainRecording>,
     terminals: TerminalIndex,
@@ -115,12 +115,13 @@ async fn record_periodically(
     interval: Duration,
 ) {
     loop {
-        tokio::time::sleep(interval).await;
         let closed = recording.closed.lock().await;
         if *closed || !is_indexed(&terminals, &session_id, &recording.task_id).await {
             return;
         }
         recording.write_snapshot().await;
+        drop(closed);
+        tokio::time::sleep(interval).await;
     }
 }
 

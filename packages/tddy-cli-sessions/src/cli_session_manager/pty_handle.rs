@@ -5,7 +5,7 @@ use tddy_pty::runtime::DEFAULT_TERM_COLS;
 use tddy_pty::runtime::DEFAULT_TERM_ROWS;
 
 use portable_pty::PtySize;
-use tddy_task::{TaskChannel, TaskId};
+use tddy_task::{TaskChannel, TaskId, TaskStatus};
 
 use tddy_task::TerminalCapture;
 use tokio::sync::{broadcast, mpsc, watch};
@@ -43,6 +43,8 @@ pub struct PtyHandle {
     pub(crate) master: Arc<std::sync::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     /// Becomes true (and sender drops) when the task reaches a terminal status.
     pub pty_done: watch::Receiver<bool>,
+    /// The owning task's status as it changes; read through [`task_status`](Self::task_status).
+    pub(crate) status_rx: watch::Receiver<TaskStatus>,
     /// Current PTY dimensions, updated by `resize()`.
     pub(crate) current_size: Arc<std::sync::Mutex<PtySize>>,
     /// Owning task in the shared registry.
@@ -54,6 +56,11 @@ pub struct PtyHandle {
 }
 
 impl PtyHandle {
+    /// How the terminal's process ended, once it has: the task's current status.
+    pub fn task_status(&self) -> TaskStatus {
+        self.status_rx.borrow().clone()
+    }
+
     /// Resize the PTY to the given dimensions and signal the child with SIGWINCH.
     pub fn resize(&self, rows: u16, cols: u16) {
         let size = PtySize {

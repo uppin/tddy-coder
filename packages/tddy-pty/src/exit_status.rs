@@ -5,9 +5,14 @@ use tddy_task::TaskStatus;
 /// The terminal status a child that exited with `status` reports: a normal exit keeps its code, and
 /// an exit by signal is a failure naming the signal.
 pub fn task_status_of(status: &portable_pty::ExitStatus) -> TaskStatus {
-    // TODO(agent-liveness): implement — today every exit still reads as a clean one.
-    let _ = status;
-    TaskStatus::Completed { exit_code: Some(0) }
+    if let Some(signal) = status.signal() {
+        return TaskStatus::Failed {
+            message: format!("terminated by signal {signal}"),
+        };
+    }
+    TaskStatus::Completed {
+        exit_code: Some(status.exit_code() as i32),
+    }
 }
 
 #[cfg(test)]
