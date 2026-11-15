@@ -98,11 +98,13 @@ impl SplitSessions {
 
         let started = self
             .spawn_split_agent(
-                os_user,
-                &session_id,
-                &sessions_base,
-                &local_instance_id,
-                &checkout_session_id,
+                &crate::svc_spawn_split_agent::SplitAgentStart {
+                    os_user,
+                    session_id: &session_id,
+                    sessions_base: &sessions_base,
+                    codebase_instance_id: &local_instance_id,
+                    codebase_session_id: &checkout_session_id,
+                },
                 // No room: both halves are on this host, so the agent reaches its checkout over
                 // this daemon's own URL and the placement needs no LiveKit at all.
                 None,

@@ -33,6 +33,16 @@ struct SplitAgentProcess<'a> {
     session_dir: &'a std::path::Path,
 }
 
+/// Who a split start is for and which two halves it pairs: the identity half of
+/// `spawn_split_agent`'s inputs, so the method takes one value for them.
+pub(crate) struct SplitAgentStart<'a> {
+    pub(crate) os_user: &'a str,
+    pub(crate) session_id: &'a str,
+    pub(crate) sessions_base: &'a Path,
+    pub(crate) codebase_instance_id: &'a str,
+    pub(crate) codebase_session_id: &'a str,
+}
+
 impl SplitSessions {
     /// Spawn the agent half of a session whose checkout it does not hold, and record the pairing.
     ///
@@ -48,18 +58,20 @@ impl SplitSessions {
     /// The argv is deliberately identical either way: both agents run outside the checkout with
     /// every native filesystem and shell tool withdrawn, and the jailed-codebase placement's whole
     /// confinement claim rests on that list (`split_session::withdrawal_contract_tests`).
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_split_agent(
         &self,
-        os_user: &str,
-        session_id: &str,
-        sessions_base: &Path,
-        codebase_instance_id: &str,
-        codebase_session_id: &str,
+        start: &SplitAgentStart<'_>,
         room: Option<&crate::split_session::SplitAgentRoom>,
         req: &StartSessionRequest,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
+        let SplitAgentStart {
+            os_user,
+            session_id,
+            sessions_base,
+            codebase_instance_id,
+            codebase_session_id,
+        } = *start;
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;

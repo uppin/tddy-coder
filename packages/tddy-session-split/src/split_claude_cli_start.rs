@@ -169,11 +169,13 @@ impl SplitSessions {
         progress.begin_phase(StartStep::Agent);
         let started = self
             .spawn_split_agent(
-                os_user,
-                &session_id,
-                &sessions_base,
-                codebase_instance_id,
-                &codebase_session_id,
+                &crate::svc_spawn_split_agent::SplitAgentStart {
+                    os_user,
+                    session_id: &session_id,
+                    sessions_base: &sessions_base,
+                    codebase_instance_id,
+                    codebase_session_id: &codebase_session_id,
+                },
                 Some(&room),
                 req,
                 progress,
