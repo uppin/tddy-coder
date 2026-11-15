@@ -76,16 +76,6 @@ impl SplitSessions {
             .prepare_split_launch(start, room, req, progress)
             .await?;
 
-        // A split session's roster lives on the codebase daemon, in the workspace session the
-        // forward created moments ago — which is where this start's seed was recorded, before that
-        // call answered. So the withdrawals are read back from the host that holds them, exactly as
-        // the resume path reads them (`resume_split_wiring`): `--allowedTools` is fixed at launch,
-        // and a seeded agent whose `replaces` reached the spawn as an empty list would leave the
-        // main agent holding the tools it gave away until the first resume.
-        //
-        // A start that seeded nothing wrote nothing, so there is nothing to read and no forward is
-        // spent asking: agents on such a session arrive later through `AttachSessionAgent`, which
-        // relaunches the agent against the roster it just changed.
         let (context_dir, extra_args) = self
             .split_agent_launch_args(
                 req,
@@ -126,13 +116,7 @@ impl SplitSessions {
             &handle,
         )?;
 
-        split_start_response(
-            room,
-            session_id,
-            codebase_instance_id,
-            codebase_session_id,
-            handle,
-        )
+        split_start_response(room, start, handle)
     }
 
     async fn prepare_split_launch(
@@ -210,6 +194,16 @@ impl SplitSessions {
         tddy_tools_path: &std::path::Path,
         remote: &tddy_core::RemoteToolEnv,
     ) -> Result<(std::path::PathBuf, Vec<String>), Status> {
+        // A split session's roster lives on the codebase daemon, in the workspace session the
+        // forward created moments ago — which is where this start's seed was recorded, before that
+        // call answered. So the withdrawals are read back from the host that holds them, exactly as
+        // the resume path reads them (`resume_split_wiring`): `--allowedTools` is fixed at launch,
+        // and a seeded agent whose `replaces` reached the spawn as an empty list would leave the
+        // main agent holding the tools it gave away until the first resume.
+        //
+        // A start that seeded nothing wrote nothing, so there is nothing to read and no forward is
+        // spent asking: agents on such a session arrive later through `AttachSessionAgent`, which
+        // relaunches the agent against the roster it just changed.
         let roster = self
             .split_agent_roster(codebase_instance_id, codebase_session_id, req)
             .await?;
@@ -475,11 +469,15 @@ impl SplitSessions {
 
 fn split_start_response(
     room: Option<&crate::split_session::SplitAgentRoom>,
-    session_id: &str,
-    codebase_instance_id: &str,
-    codebase_session_id: &str,
+    start: &SplitAgentStart<'_>,
     handle: Arc<tddy_cli_sessions::cli_session_manager::PtyHandle>,
 ) -> Result<Response<StartSessionResponse>, Status> {
+    let SplitAgentStart {
+        session_id,
+        codebase_instance_id,
+        codebase_session_id,
+        ..
+    } = *start;
     let placement = match room {
         Some(_) => "split",
         None => "jailed-codebase",
