@@ -102,6 +102,8 @@ pub enum GitOpError {
     TargetActive {
         session_id: String,
     },
+    /// The target has no checkout of its own to run git in.
+    NoWorktree(crate::session_target::SessionTargetError),
     Git(String),
 }
 
@@ -114,6 +116,7 @@ impl fmt::Display for GitOpError {
                     "session {session_id} is active; stop it before rewriting its worktree"
                 )
             }
+            Self::NoWorktree(refused) => write!(f, "{refused}"),
             Self::Git(msg) => write!(f, "git failed: {msg}"),
         }
     }
@@ -151,7 +154,8 @@ pub fn run_git_op(
             session_id: target.session_id.clone(),
         });
     }
-    run::run(&target.worktree, push_identity, op)
+    let worktree = target.worktree().map_err(GitOpError::NoWorktree)?;
+    run::run(worktree, push_identity, op)
 }
 
 #[cfg(test)]
@@ -248,10 +252,11 @@ mod tests {
         SessionTarget {
             session_id: "child-1".to_string(),
             project_id: "proj".to_string(),
-            worktree: worktree.to_path_buf(),
+            worktree: Some(worktree.to_path_buf()),
             branch: "feature".to_string(),
             base_ref: "upstream/main".to_string(),
             is_active: false,
+            codebase: None,
         }
     }
 

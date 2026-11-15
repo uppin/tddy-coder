@@ -587,3 +587,139 @@ async fn the_home_sessions_own_host_still_answers_for_its_own_sessions() {
     // Then it is read on host-a, as before
     assert_eq!(listed(&read)["content"], "on host a\n");
 }
+
+// ─── a split session: the agent half on host-a, its checkout on host-b ──────────
+
+/// The agent half of a split session on host-a, of the home's project, whose checkout is the
+/// workspace session `on_b` on host-b — the records a split start leaves on host-a.
+const SPLIT_AGENT_HALF: &str = "019d105b-ac0f-78d3-9a89-4097311450aa";
+
+impl TwoHosts {
+    fn a_split_agent_half_whose_checkout_is_on_b(&self) -> String {
+        let model = tddy_core::session_lifecycle::unified_session_dir_path(
+            self.a.sessions.path(),
+            &self.on_a,
+        );
+        let mut meta = tddy_core::read_session_metadata(&model).expect("session metadata");
+        meta.session_id = SPLIT_AGENT_HALF.to_string();
+        meta.session_type = Some("claude-cli".to_string());
+        meta.repo_path = None;
+        meta.pid = None;
+        meta.managed_codebase = true;
+        meta.codebase_daemon_instance_id = Some(HOST_B.to_string());
+        meta.codebase_session_id = Some(self.on_b.clone());
+        let dir = tddy_core::session_lifecycle::unified_session_dir_path(
+            self.a.sessions.path(),
+            SPLIT_AGENT_HALF,
+        );
+        std::fs::create_dir_all(&dir).unwrap();
+        tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
+        SPLIT_AGENT_HALF.to_string()
+    }
+}
+
+#[tokio::test]
+async fn a_split_agents_activity_is_read_where_the_agent_runs() {
+    // Given the agent half of a split session on host-a, which holds no checkout
+    let world = two_hosts().await;
+    let agent_half = world.a_split_agent_half_whose_checkout_is_on_b();
+
+    // When the home session reads its activity
+    let activity = world
+        .home_calls(
+            "ReadSessionActivity",
+            serde_json::json!({ "session_id": agent_half }),
+        )
+        .await;
+
+    // Then it is answered — reading an agent's activity needs no checkout
+    assert!(
+        !activity.is_error,
+        "a split agent's activity must be readable: {}",
+        activity.error_message
+    );
+}
+
+#[tokio::test]
+async fn diffing_a_split_agent_diffs_its_codebase_on_the_codebase_host() {
+    // Given a split session whose checkout, on host-b, has an uncommitted change
+    let world = two_hosts().await;
+    let agent_half = world.a_split_agent_half_whose_checkout_is_on_b();
+    std::fs::write(
+        world.b.worktree_of(&world.on_b).join("split.rs"),
+        "fn written_by_the_split_agent() {}\n",
+    )
+    .unwrap();
+
+    // When the home session diffs it by the agent half's id, naming no host
+    let diff = world
+        .home_calls(
+            "DiffSessionWorktree",
+            serde_json::json!({ "session_id": agent_half }),
+        )
+        .await;
+
+    // Then it is host-b's change, reported against the codebase session it came from
+    let diff = listed(&diff);
+    assert_eq!(
+        (
+            diff["session_id"].as_str().map(str::to_string),
+            diff["diff"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("fn written_by_the_split_agent()"),
+        ),
+        (Some(world.on_b.clone()), true)
+    );
+}
+
+#[tokio::test]
+async fn reading_a_split_agents_worktree_reads_the_codebase_host() {
+    // Given a split session whose checkout, on host-b, holds a file
+    let world = two_hosts().await;
+    let agent_half = world.a_split_agent_half_whose_checkout_is_on_b();
+    std::fs::write(
+        world.b.worktree_of(&world.on_b).join("notes.md"),
+        "split checkout on host b\n",
+    )
+    .unwrap();
+
+    // When the home session reads it by the agent half's id
+    let read = world
+        .home_calls(
+            "ReadSessionWorktree",
+            serde_json::json!({ "session_id": agent_half, "path": "notes.md" }),
+        )
+        .await;
+
+    // Then it reads host-b's file
+    assert_eq!(listed(&read)["content"], "split checkout on host b\n");
+}
+
+#[tokio::test]
+async fn a_session_with_no_worktree_and_no_codebase_is_still_refused_by_worktree_tools() {
+    // Given a session on host-a with neither a checkout nor a codebase half
+    let world = two_hosts().await;
+    let dir = tddy_core::session_lifecycle::unified_session_dir_path(
+        world.a.sessions.path(),
+        &world.on_a,
+    );
+    let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
+    meta.repo_path = None;
+    tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
+
+    // When the home session diffs it
+    let diff = world
+        .home_calls(
+            "DiffSessionWorktree",
+            serde_json::json!({ "session_id": world.on_a }),
+        )
+        .await;
+
+    // Then it is refused as having no worktree
+    assert!(
+        diff.is_error && diff.error_message.contains("has no worktree"),
+        "a worktree tool must refuse a session with no checkout and no codebase half, got: {:?}",
+        diff
+    );
+}

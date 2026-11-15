@@ -48,6 +48,7 @@ fn a_record(session_id: &str, project_id: &str) -> TargetRecord {
         branch: format!("feature/{session_id}"),
         base_ref: "origin/main".to_string(),
         is_active: true,
+        codebase: None,
     }
 }
 

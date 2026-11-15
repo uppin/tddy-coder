@@ -459,6 +459,7 @@ mod lsp_tools;
 mod project_home_catalogue;
 mod project_home_listing;
 mod project_home_target_host;
+mod project_home_worktree_read;
 mod search_tools;
 mod shell_tool;
 pub mod tool_call_log;

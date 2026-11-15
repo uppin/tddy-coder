@@ -72,3 +72,32 @@ pub(crate) fn target_host_property() -> Value {
         "description": "The host the session runs on, as ListProjectSessions reports it in its daemon_instance_id; empty for this host."
     })
 }
+
+/// Whether `name` acts on a session's checkout: read, diff, restore and the git tools. Named with a
+/// split session's agent half — which has no checkout — such a tool acts on its codebase half.
+pub fn is_worktree_target_tool(name: &str) -> bool {
+    matches!(
+        name,
+        READ_SESSION_WORKTREE | DIFF_SESSION_WORKTREE | RESTORE_WORKTREE
+    ) || is_project_home_git_tool(name)
+}
+
+/// `args_json` aimed at `codebase` instead: its `session_id` and [`TARGET_DAEMON_INSTANCE_ID`]
+/// replaced, every other argument kept.
+pub fn retarget_args(
+    args_json: &str,
+    codebase: &tddy_worktree_service::session_target::CodebaseHalf,
+) -> String {
+    let Ok(Value::Object(mut args)) = serde_json::from_str::<Value>(args_json) else {
+        return args_json.to_string();
+    };
+    args.insert(
+        "session_id".to_string(),
+        Value::String(codebase.session_id.clone()),
+    );
+    args.insert(
+        TARGET_DAEMON_INSTANCE_ID.to_string(),
+        Value::String(codebase.daemon_instance_id.clone()),
+    );
+    Value::Object(args).to_string()
+}

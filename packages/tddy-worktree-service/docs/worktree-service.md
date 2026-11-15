@@ -102,10 +102,13 @@ runs on a dedicated checkout, not a per-session branch worktree:
 
 `resolve_session_target(records, home, target_session_id)` is the one resolver from a session id a
 project-home session names to a `SessionTarget` (`session_id`, `project_id`, `worktree`, `branch`,
-`base_ref`, `is_active`). It is pure: the daemon builds the `TargetRecord`s from `.session.yaml` and
+`base_ref`, `is_active`, `codebase`). It is pure: the daemon builds the `TargetRecord`s from `.session.yaml` and
 each session's changeset. The rules, as `SessionTargetError`: an unknown id is `NotFound`, a session
-of another project `OtherProject`, the home session itself `IsHome`, and one with no worktree
-`NoWorktree`. The project-home read and git tools resolve every target through it; see
+of another project `OtherProject`, and the home session itself `IsHome`. A session with no worktree
+— a split session's agent half — still resolves; its `worktree` is `None`, `SessionTarget::worktree()`
+refuses it as `NoWorktree` for the tools that need a checkout, and `codebase` names its codebase
+half (`CodebaseHalf`: the daemon and workspace session holding the checkout), which the daemon
+builds from the record's `codebase_*` fields. The project-home read and git tools resolve every target through it; see
 [project-home tools](../../../docs/ft/daemon/project-concept.md#project-home-tools).
 
 ## Session git operations (`session_git_ops.rs`)
@@ -118,7 +121,8 @@ The [project-home git tools](../../../docs/ft/daemon/project-concept.md#git-tool
 - `requires_inactive_target(op)` — false for commit and a plain push, true for everything else.
 - `run_git_op(target, op, &PushIdentity)` checks that gate **before** any git process starts
   (`GitOpError::TargetActive { session_id }`), then runs the commands in `session_git_ops/run.rs` in
-  the target's worktree with `PushIdentity.env` and `GIT_TERMINAL_PROMPT=0`. A failing command is
+  the target's worktree with `PushIdentity.env` and `GIT_TERMINAL_PROMPT=0`. A target with no
+  checkout of its own is `GitOpError::NoWorktree`. A failing command is
   `GitOpError::Git` with its stderr.
 - A rebase that leaves unmerged paths is aborted and answered `GitOpOutcome::RebaseConflict { paths }`;
   a rebase that fails without conflicts is the error.

@@ -78,6 +78,7 @@ fn a_record_on(
         branch: format!("feature/{session_id}"),
         base_ref: "origin/main".to_string(),
         is_active,
+        codebase: None,
     }
 }
 
@@ -189,7 +190,7 @@ impl ProjectHomeLifecyclePort for FakeHost {
 
     async fn restore_worktree(&self, target: &SessionTarget) -> Result<PathBuf, String> {
         self.records(Asked::Restore(target.session_id.clone()))?;
-        Ok(target.worktree.clone())
+        Ok(target.worktree.clone().unwrap_or_default())
     }
 }
 

@@ -47,6 +47,7 @@ fn a_record(session_id: &str) -> TargetRecord {
         branch: format!("feature/{session_id}"),
         base_ref: "origin/main".to_string(),
         is_active: true,
+        codebase: None,
     }
 }
 
@@ -219,5 +220,25 @@ async fn a_terminal_that_cannot_be_read_is_refused_with_the_ports_reason() {
                 .contains("terminal size is not known yet"),
         "{}",
         outcome.error_message
+    );
+}
+
+#[tokio::test]
+async fn reading_the_terminal_of_a_session_without_a_worktree_answers() {
+    // Given the agent half of a split session: a terminal on this host, its checkout elsewhere
+    let mut host = a_host_whose("agent-half", Ok(a_grid()));
+    for record in &mut host.records {
+        if record.session_id == "agent-half" {
+            record.worktree = None;
+        }
+    }
+
+    // When the home session reads its terminal
+    let outcome = reading(&host, serde_json::json!({ "session_id": "agent-half" })).await;
+
+    // Then the screen is answered — reading a terminal needs no checkout
+    assert_eq!(
+        answer_of(&outcome)["lines"],
+        serde_json::json!(["Proceed? (y/n)", ""])
     );
 }

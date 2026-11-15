@@ -383,10 +383,16 @@ and served the four start tools and the two answer tools, for its own project, a
 | `DeleteWorktree` | `path` (as `ListWorktrees` lists it), `daemon_instance_id?` | `{path}`: what the Worktrees screen's Delete does (`git worktree remove`); the branch is kept. Refused while a session owning the worktree is active, for a worktree with uncommitted changes (naming `CommitSessionWorktree` and `StashSessionWorktree`), and for the project's home worktree, whoever calls |
 | `RestoreWorktree` | `session_id`, `daemon_instance_id?` | `{session_id, worktree_path}`: what the Worktrees screen's Restore does — the session's deleted worktree is cut again from the base it recorded. Addressed by `session_id`, since a deleted worktree is no longer listed. Refused while that session is active |
 
-- **Targets.** A target is a session id in the caller's project, with a worktree, on the host the
+- **Targets.** A target is a session id in the caller's project, on the host the
   optional `daemon_instance_id` argument names (as `ListProjectSessions` reports it; empty or absent
-  is the caller's own host). Another project's session, the home session itself, an unknown id and a session without a
-  worktree are refused as an `is_error` result naming why ("another project", …).
+  is the caller's own host). Another project's session, the home session itself and an unknown id
+  are refused as an `is_error` result naming why ("another project", …). A session without a
+  worktree — the agent half of a split session — is a target for the tools that act on the agent
+  (terminal, activity, transcript, messages, answers, terminate, delete, marks), which run where
+  the agent runs. The worktree tools (read, diff, restore and the git tools) act on a split
+  session's codebase half: named with the agent half's id and no host, they are forwarded to the
+  codebase half on its host and answer with that session's id. A session with neither a worktree
+  nor a codebase half is refused by the worktree tools as having no worktree.
 - **Paths.** An absolute path, one climbing above the worktree, or one resolving through a symlink to
   outside it is refused as an `is_error` result naming "outside the worktree". A base ref that git
   would read as an option is refused too.

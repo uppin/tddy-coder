@@ -23,9 +23,8 @@ use tddy_worktree_service::session_git_ops::{run_git_op, GitOp, GitOpOutcome, Re
 use tddy_worktree_service::session_target::HomeCaller;
 
 use crate::catalog::ToolDef;
-use crate::project_home_tools::{
-    resolve_target, target_host_property, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
-};
+use crate::project_home_tools::resolve_target;
+use crate::project_home_tools::{target_host_property, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID};
 use crate::ToolOutcome;
 
 pub const COMMIT_SESSION_WORKTREE: &str = "CommitSessionWorktree";
