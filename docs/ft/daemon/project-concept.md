@@ -21,6 +21,12 @@ A **Project** is a named configuration linking a **git URL** to a **main reposit
 | `home_session_id` | Optional, per host. The session the project runs as its **main** ([project-home session](#project-home-session)) on this host, recorded by `EnsureProjectHomeSession`. Absent means main is not set up. A `home_agent` key in an older row is ignored on read and not written back. |
 | `orchestrator_defaults` | Optional, per host. The defaults the orchestrator composer starts with: `model`, `effort` and `provider_account_id`, each optional (absent means the agent's default). Set by `SetProjectOrchestratorDefaults` to the one host the request names and listed on `ProjectEntry.orchestrator_defaults`; an all-default save clears the field. See [Session drawer § Project settings pane](../web/session-drawer.md#project-settings-pane). |
 | `host_repo_paths` | Per-host (or per-daemon-instance) checkout paths keyed by host key; see multi-host daemon docs. |
+| `deleted_at` | Optional. RFC 3339 time the project was soft-deleted; present means deleted. See [Renaming, deleting and restoring a project](#renaming-deleting-and-restoring-a-project). |
+| `deleted_by` | Optional. The GitHub user who deleted the project. |
+| `restored_at` | Optional. RFC 3339 time the project was last restored. |
+
+`deleted_at`, `deleted_by` and `restored_at` sit on the row itself and are written only when set, so a
+live row carries none of them and a row written before they existed reads as live.
 
 ## Account assignment
 
@@ -71,11 +77,74 @@ repos_base_path: "repos"
 
 ## Create project behavior
 
+0. **A deleted project of the same repository is restored instead.** A soft-deleted project on this
+   host with the same `git_url` (compared trimmed), or whose checkout is the destination resolved in
+   step 1, is [restored](#restoring) on every host owning it and returned. Nothing is cloned and no
+   second row is added; the project keeps its own name.
 1. Resolve destination: `{repos_base}/{name}/`, **unless** `user_relative_path` is non-empty — then `{home}/{user_relative_path}` (normalized; `..` and absolute paths are rejected).
 2. **If that path already exists** (checked as the target OS user): **no clone** — the existing directory is registered as `main_repo_path`.
 3. Otherwise: run `git clone` as the target OS user, then register the project. The clone has no deadline,
    and it lands the way a session-start clone does (below): complete at the destination, or not at all.
    `CreateProject` and `AddProjectToHost` are unary, so they report no clone progress.
+
+## Renaming, deleting and restoring a project
+
+`UpdateProject`, `DeleteProject` and `RestoreProject` act on the **logical project**: every host
+holding a row for its `project_id`. The daemon that receives the request applies it to its own row,
+then forwards the same request, marked `local_only`, to every eligible peer at once. A peer without
+the row answers `not_found` and is skipped. A peer that does not answer, or answers with another
+error, is listed in the response's `unconfirmed_hosts` with the reason; whether it holds the project
+is unknown. The response also lists `applied_hosts` and carries the row of the first host that applied
+the change (the receiving host's, when it owns one). A project no reachable host owns is `not_found`.
+
+### Renaming
+
+`UpdateProject` sets the project's display `name`, validated as `CreateProject` validates it (not
+empty, no `/`, no `..`), and refused before any host changes. Only the name is editable here:
+`git_url`, `main_repo_path` and `project_id` are the project's identity, and the default branch and
+accounts have their own requests. Renaming does not move the checkout. A host that missed a rename
+keeps the old name until the rename is repeated
+([TODO](../../dev/todo/2026-11-15-project-rename-reaches-offline-hosts-only-on-retry.md)).
+
+### Deleting
+
+Deleting is **soft**. Each host's row is tombstoned with `deleted_at` and `deleted_by`, and nothing
+else changes: the main checkout, worktrees, session directories, PR stacks and settings all stay on
+disk. Deleting a deleted project keeps its first tombstone.
+
+- **Running sessions refuse it.** The delete first asks every reachable host for the project's
+  running sessions (a recorded process that is alive), its project-home sessions excepted;
+  orchestrator sessions count. Any answer refuses the whole delete (`failed_precondition`), naming each
+  session and its host, and no host is tombstoned. A host that cannot be reached is not checked.
+- **One tombstone everywhere.** The receiving host stamps the time and author once; every host
+  stores the same tombstone.
+- **Main is stopped, not removed.** Each host that applies the delete sends SIGTERM to the project's
+  running project-home sessions, as [Terminating a session](#terminating-a-session) does. Their
+  records and the row's `home_session_id` are kept, so main comes back with
+  `EnsureProjectHomeSession` after a restore. The stopped ids are returned in `stopped_session_ids`.
+- **A deleted project is hidden.** `ListProjects` leaves it out unless `include_deleted` is set.
+- **A deleted project takes no new work.** Starting a session, setting up or resuming main,
+  orchestrator starts, resuming any of its sessions, the project-home tools, Telegram's start
+  commands and provisioning the project on a host are refused (`failed_precondition`, naming the
+  project and saying to restore it). Its existing sessions stay on disk. Telegram's project pickers
+  leave it out.
+
+### Restoring
+
+`RestoreProject` clears the tombstone on every host owning the project and records `restored_at`.
+Restoring a live project changes nothing. `CreateProject` for a deleted project's repository
+([above](#create-project-behavior)) and `AddProjectToHost` on a host that holds the project's
+tombstone restore it the same way.
+
+### A host that missed a delete or a restore
+
+A listing asks each reachable peer for its own rows, tombstones included. For each project the
+**newest delete or restore event** across its rows decides whether it is deleted: any event wins over
+a row that never saw one, and a delete and a restore at the same instant resolve to deleted. Every
+listed row of the project carries that outcome, and the listing host adopts it into its own row when
+it is newer — stopping the project's main there when it adopts a delete. A host that was offline
+during a delete therefore never brings the project back: the first listing that reaches it heals it.
+A peer never provisions a project whose newest event is a delete.
 
 ## Cloning at session start
 
@@ -110,7 +179,10 @@ failed clone's error carries git's last lines.
 
 ## API (ConnectionService)
 
-- `ListProjects` / `CreateProject` — manage projects.
+- `ListProjects` / `CreateProject` — manage projects; `ListProjects` leaves soft-deleted projects out
+  unless `include_deleted` is set.
+- `UpdateProject` / `DeleteProject` / `RestoreProject` — rename, soft-delete and restore a project on
+  every host owning it ([above](#renaming-deleting-and-restoring-a-project)).
 - `StartSession` takes **`project_id`** (replaces ad-hoc `repo_path`); the daemon resolves the working directory from the project’s `main_repo_path`.
 - `ListSessions` returns `project_id` per session.
 

@@ -100,6 +100,18 @@ use crate::families::ProviderAccountsPort;
 use crate::{CatalogRpcHandler, ProjectRpcHandler};
 
 impl ExecToolRpcHandler {
+    /// Refuse a project-home tool whose caller's project is soft-deleted on this host.
+    fn refuse_a_deleted_project(
+        &self,
+        session_token: &str,
+        project_id: &str,
+    ) -> Result<(), Status> {
+        let os_user = self.os_user_of(session_token)?;
+        let projects_dir = projects_path_for_user(&os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        tddy_projects::project_storage::refuse_if_project_deleted(&projects_dir, project_id)
+    }
+
     /// Run `req`'s tool on this host. The one place the exec-tool handlers reach the local runner,
     /// so the project-home tools are answered here, ahead of it, and every other tool is not.
     pub(super) async fn run_locally(
@@ -122,6 +134,7 @@ impl ExecToolRpcHandler {
         }
         let (home, role) = project_home_caller(sessions_base, &req.session_id, &req.tool_name)?;
         refuse_a_spawner_outside_its_own_sessions(sessions_base, &home, role, req)?;
+        self.refuse_a_deleted_project(&req.session_token, &home.project_id)?;
         let response = match self.served_on_target_host(req).await? {
             Some(answered) => answered,
             None => {

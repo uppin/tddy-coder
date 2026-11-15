@@ -108,7 +108,11 @@ pub(super) fn sorted_projects_for_workflow_spawn(
     deps: &TelegramWorkflowSpawn,
 ) -> anyhow::Result<Vec<ProjectData>> {
     let projects_dir = projects_dir_for_telegram_workflow_spawn(deps)?;
-    let mut projects = project_storage::read_projects(&projects_dir)?;
+    // A soft-deleted project is offered by no picker.
+    let mut projects: Vec<ProjectData> = project_storage::read_projects(&projects_dir)?
+        .into_iter()
+        .filter(|p| !p.is_deleted())
+        .collect();
     projects.sort_by(|a, b| a.project_id.cmp(&b.project_id));
     Ok(projects)
 }
@@ -178,6 +182,7 @@ impl TelegramWorkflowSpawn {
             .ok_or_else(|| anyhow::anyhow!("could not resolve projects path"))?;
         let project = project_storage::find_project(&projects_dir, project_id)?
             .ok_or_else(|| anyhow::anyhow!("project not found"))?;
+        project_storage::refuse_if_deleted(&project).map_err(|s| anyhow::anyhow!(s.message))?;
         let repo_path = PathBuf::from(&project.main_repo_path);
         if !repo_path.exists() {
             anyhow::bail!("project main repo path does not exist");
@@ -478,6 +483,7 @@ mod local_gh_tests {
             local_gh: true,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         }
     }
 

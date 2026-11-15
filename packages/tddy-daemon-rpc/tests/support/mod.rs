@@ -430,6 +430,7 @@ pub fn a_project(project_id: &str, repo: &Path) -> ProjectData {
         local_gh: false,
         home_session_id: None,
         orchestrator_defaults: None,
+        lifecycle: Default::default(),
     }
 }
 

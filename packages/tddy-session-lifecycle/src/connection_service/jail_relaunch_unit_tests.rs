@@ -237,6 +237,7 @@ async fn a_sandboxed_workspace_session_served_by(
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         }],
     )
     .expect("register project");

@@ -90,6 +90,7 @@ fn a_registered_project(data_dir: &Path, os_user: &str, home_session_id: Option<
             local_gh: false,
             home_session_id: home_session_id.map(str::to_string),
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .expect("seed project");
@@ -100,6 +101,7 @@ async fn the_listed_project(daemon: &TestDaemon) -> ProjectEntry {
         .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: true,
+            ..ListProjectsRequest::default()
         }))
         .await
         .expect("list_projects succeeds")

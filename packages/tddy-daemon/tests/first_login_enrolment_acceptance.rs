@@ -370,6 +370,7 @@ impl Deployment {
             ListProjectsRequest {
                 session_token: session_token.to_string(),
                 local_only: true,
+                ..ListProjectsRequest::default()
             },
         )
         .await

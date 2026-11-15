@@ -10,7 +10,35 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file project.proto.
  */
 export const file_project: GenFile = /*@__PURE__*/
-  fileDesc("Cg1wcm9qZWN0LnByb3RvEgdwcm9qZWN0IlIKFE9yY2hlc3RyYXRvckRlZmF1bHRzEg0KBW1vZGVsGAEgASgJEg4KBmVmZm9ydBgCIAEoCRIbChNwcm92aWRlcl9hY2NvdW50X2lkGAMgASgJIjkKEUFjY291bnRBc3NpZ25tZW50EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkitAEKF0FkZFByb2plY3RUb0hvc3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEg8KB2dpdF91cmwYBCABKAkSFwoPbWFpbl9icmFuY2hfcmVmGAUgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgGIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYByABKAkiQgoYQWRkUHJvamVjdFRvSG9zdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJoChRDcmVhdGVQcm9qZWN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHZ2l0X3VybBgDIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYBCABKAkiPwoVQ3JlYXRlUHJvamVjdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJjChpMaXN0UHJvamVjdEJyYW5jaGVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIkcKG0xpc3RQcm9qZWN0QnJhbmNoZXNSZXNwb25zZRIQCghicmFuY2hlcxgBIAMoCRIWCg5kZWZhdWx0X3JlbW90ZRgCIAEoCSJAChNMaXN0UHJvamVjdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKbG9jYWxfb25seRgCIAEoCCI/ChRMaXN0UHJvamVjdHNSZXNwb25zZRInCghwcm9qZWN0cxgBIAMoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5Is8CCgxQcm9qZWN0RW50cnkSEgoKcHJvamVjdF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg8KB2dpdF91cmwYAyABKAkSFgoObWFpbl9yZXBvX3BhdGgYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEhcKD21haW5fYnJhbmNoX3JlZhgGIAEoCRIWCg5kZWZhdWx0X3JlbW90ZRgHIAEoCRIsCghhY2NvdW50cxgIIAMoCzIaLnByb2plY3QuQWNjb3VudEFzc2lnbm1lbnQSEAoIbG9jYWxfZ2gYCSABKAgSFwoPaG9tZV9zZXNzaW9uX2lkGAsgASgJEjwKFW9yY2hlc3RyYXRvcl9kZWZhdWx0cxgMIAEoCzIdLnByb2plY3QuT3JjaGVzdHJhdG9yRGVmYXVsdHNKBAgKEAtSCmhvbWVfYWdlbnQigAEKHlNldFByb2plY3REZWZhdWx0QnJhbmNoUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFwoPbWFpbl9icmFuY2hfcmVmGAMgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgEIAEoCSJJCh9TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSKiAQoZU2V0UHJvamVjdEFjY291bnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSLAoIYWNjb3VudHMYAyADKAsyGi5wcm9qZWN0LkFjY291bnRBc3NpZ25tZW50EhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgEIAEoCRIQCghsb2NhbF9naBgFIAEoCCJEChpTZXRQcm9qZWN0QWNjb3VudHNSZXNwb25zZRImCgdwcm9qZWN0GAEgASgLMhUucHJvamVjdC5Qcm9qZWN0RW50cnkinwEKJVNldFByb2plY3RPcmNoZXN0cmF0b3JEZWZhdWx0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIvCghkZWZhdWx0cxgEIAEoCzIdLnByb2plY3QuT3JjaGVzdHJhdG9yRGVmYXVsdHMiUAomU2V0UHJvamVjdE9yY2hlc3RyYXRvckRlZmF1bHRzUmVzcG9uc2USJgoHcHJvamVjdBgBIAEoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5MrkFCg5Qcm9qZWN0U2VydmljZRJLCgxMaXN0UHJvamVjdHMSHC5wcm9qZWN0Lkxpc3RQcm9qZWN0c1JlcXVlc3QaHS5wcm9qZWN0Lkxpc3RQcm9qZWN0c1Jlc3BvbnNlEk4KDUNyZWF0ZVByb2plY3QSHS5wcm9qZWN0LkNyZWF0ZVByb2plY3RSZXF1ZXN0Gh4ucHJvamVjdC5DcmVhdGVQcm9qZWN0UmVzcG9uc2USVwoQQWRkUHJvamVjdFRvSG9zdBIgLnByb2plY3QuQWRkUHJvamVjdFRvSG9zdFJlcXVlc3QaIS5wcm9qZWN0LkFkZFByb2plY3RUb0hvc3RSZXNwb25zZRJgChNMaXN0UHJvamVjdEJyYW5jaGVzEiMucHJvamVjdC5MaXN0UHJvamVjdEJyYW5jaGVzUmVxdWVzdBokLnByb2plY3QuTGlzdFByb2plY3RCcmFuY2hlc1Jlc3BvbnNlEmwKF1NldFByb2plY3REZWZhdWx0QnJhbmNoEicucHJvamVjdC5TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlcXVlc3QaKC5wcm9qZWN0LlNldFByb2plY3REZWZhdWx0QnJhbmNoUmVzcG9uc2USXQoSU2V0UHJvamVjdEFjY291bnRzEiIucHJvamVjdC5TZXRQcm9qZWN0QWNjb3VudHNSZXF1ZXN0GiMucHJvamVjdC5TZXRQcm9qZWN0QWNjb3VudHNSZXNwb25zZRKBAQoeU2V0UHJvamVjdE9yY2hlc3RyYXRvckRlZmF1bHRzEi4ucHJvamVjdC5TZXRQcm9qZWN0T3JjaGVzdHJhdG9yRGVmYXVsdHNSZXF1ZXN0Gi8ucHJvamVjdC5TZXRQcm9qZWN0T3JjaGVzdHJhdG9yRGVmYXVsdHNSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("Cg1wcm9qZWN0LnByb3RvEgdwcm9qZWN0Ij0KD1VuY29uZmlybWVkSG9zdBIaChJkYWVtb25faW5zdGFuY2VfaWQYASABKAkSDgoGcmVhc29uGAIgASgJIlIKFE9yY2hlc3RyYXRvckRlZmF1bHRzEg0KBW1vZGVsGAEgASgJEg4KBmVmZm9ydBgCIAEoCRIbChNwcm92aWRlcl9hY2NvdW50X2lkGAMgASgJIjkKEUFjY291bnRBc3NpZ25tZW50EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkitAEKF0FkZFByb2plY3RUb0hvc3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEg8KB2dpdF91cmwYBCABKAkSFwoPbWFpbl9icmFuY2hfcmVmGAUgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgGIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYByABKAkiQgoYQWRkUHJvamVjdFRvSG9zdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJoChRDcmVhdGVQcm9qZWN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHZ2l0X3VybBgDIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYBCABKAkiPwoVQ3JlYXRlUHJvamVjdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJjChpMaXN0UHJvamVjdEJyYW5jaGVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIkcKG0xpc3RQcm9qZWN0QnJhbmNoZXNSZXNwb25zZRIQCghicmFuY2hlcxgBIAMoCRIWCg5kZWZhdWx0X3JlbW90ZRgCIAEoCSJZChNMaXN0UHJvamVjdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKbG9jYWxfb25seRgCIAEoCBIXCg9pbmNsdWRlX2RlbGV0ZWQYAyABKAgiPwoUTGlzdFByb2plY3RzUmVzcG9uc2USJwoIcHJvamVjdHMYASADKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSKMAwoMUHJvamVjdEVudHJ5EhIKCnByb2plY3RfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhYKDm1haW5fcmVwb19wYXRoGAQgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgFIAEoCRIXCg9tYWluX2JyYW5jaF9yZWYYBiABKAkSFgoOZGVmYXVsdF9yZW1vdGUYByABKAkSLAoIYWNjb3VudHMYCCADKAsyGi5wcm9qZWN0LkFjY291bnRBc3NpZ25tZW50EhAKCGxvY2FsX2doGAkgASgIEhcKD2hvbWVfc2Vzc2lvbl9pZBgLIAEoCRI8ChVvcmNoZXN0cmF0b3JfZGVmYXVsdHMYDCABKAsyHS5wcm9qZWN0Lk9yY2hlc3RyYXRvckRlZmF1bHRzEhIKCmRlbGV0ZWRfYXQYDSABKAkSEgoKZGVsZXRlZF9ieRgOIAEoCRITCgtyZXN0b3JlZF9hdBgPIAEoCUoECAoQC1IKaG9tZV9hZ2VudCKAAQoeU2V0UHJvamVjdERlZmF1bHRCcmFuY2hSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIXCg9tYWluX2JyYW5jaF9yZWYYAyABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAQgASgJIkkKH1NldFByb2plY3REZWZhdWx0QnJhbmNoUmVzcG9uc2USJgoHcHJvamVjdBgBIAEoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5IqIBChlTZXRQcm9qZWN0QWNjb3VudHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIsCghhY2NvdW50cxgDIAMoCzIaLnByb2plY3QuQWNjb3VudEFzc2lnbm1lbnQSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAQgASgJEhAKCGxvY2FsX2doGAUgASgIIkQKGlNldFByb2plY3RBY2NvdW50c1Jlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSKfAQolU2V0UHJvamVjdE9yY2hlc3RyYXRvckRlZmF1bHRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEi8KCGRlZmF1bHRzGAQgASgLMh0ucHJvamVjdC5PcmNoZXN0cmF0b3JEZWZhdWx0cyJQCiZTZXRQcm9qZWN0T3JjaGVzdHJhdG9yRGVmYXVsdHNSZXNwb25zZRImCgdwcm9qZWN0GAEgASgLMhUucHJvamVjdC5Qcm9qZWN0RW50cnkiYwoUVXBkYXRlUHJvamVjdFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEgwKBG5hbWUYAyABKAkSEgoKbG9jYWxfb25seRgEIAEoCCKLAQoVVXBkYXRlUHJvamVjdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeRIVCg1hcHBsaWVkX2hvc3RzGAIgAygJEjMKEXVuY29uZmlybWVkX2hvc3RzGAMgAygLMhgucHJvamVjdC5VbmNvbmZpcm1lZEhvc3QilQEKFERlbGV0ZVByb2plY3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRISCgpsb2NhbF9vbmx5GAMgASgIEhYKDnByZWZsaWdodF9vbmx5GAQgASgIEhIKCmRlbGV0ZWRfYXQYBSABKAkSEgoKZGVsZXRlZF9ieRgGIAEoCSKoAQoVRGVsZXRlUHJvamVjdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeRIVCg1hcHBsaWVkX2hvc3RzGAIgAygJEjMKEXVuY29uZmlybWVkX2hvc3RzGAMgAygLMhgucHJvamVjdC5VbmNvbmZpcm1lZEhvc3QSGwoTc3RvcHBlZF9zZXNzaW9uX2lkcxgEIAMoCSJrChVSZXN0b3JlUHJvamVjdFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhIKCmxvY2FsX29ubHkYAyABKAgSEwoLcmVzdG9yZWRfYXQYBCABKAkijAEKFlJlc3RvcmVQcm9qZWN0UmVzcG9uc2USJgoHcHJvamVjdBgBIAEoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5EhUKDWFwcGxpZWRfaG9zdHMYAiADKAkSMwoRdW5jb25maXJtZWRfaG9zdHMYAyADKAsyGC5wcm9qZWN0LlVuY29uZmlybWVkSG9zdDKsBwoOUHJvamVjdFNlcnZpY2USSwoMTGlzdFByb2plY3RzEhwucHJvamVjdC5MaXN0UHJvamVjdHNSZXF1ZXN0Gh0ucHJvamVjdC5MaXN0UHJvamVjdHNSZXNwb25zZRJOCg1DcmVhdGVQcm9qZWN0Eh0ucHJvamVjdC5DcmVhdGVQcm9qZWN0UmVxdWVzdBoeLnByb2plY3QuQ3JlYXRlUHJvamVjdFJlc3BvbnNlElcKEEFkZFByb2plY3RUb0hvc3QSIC5wcm9qZWN0LkFkZFByb2plY3RUb0hvc3RSZXF1ZXN0GiEucHJvamVjdC5BZGRQcm9qZWN0VG9Ib3N0UmVzcG9uc2USYAoTTGlzdFByb2plY3RCcmFuY2hlcxIjLnByb2plY3QuTGlzdFByb2plY3RCcmFuY2hlc1JlcXVlc3QaJC5wcm9qZWN0Lkxpc3RQcm9qZWN0QnJhbmNoZXNSZXNwb25zZRJsChdTZXRQcm9qZWN0RGVmYXVsdEJyYW5jaBInLnByb2plY3QuU2V0UHJvamVjdERlZmF1bHRCcmFuY2hSZXF1ZXN0GigucHJvamVjdC5TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlc3BvbnNlEl0KElNldFByb2plY3RBY2NvdW50cxIiLnByb2plY3QuU2V0UHJvamVjdEFjY291bnRzUmVxdWVzdBojLnByb2plY3QuU2V0UHJvamVjdEFjY291bnRzUmVzcG9uc2USgQEKHlNldFByb2plY3RPcmNoZXN0cmF0b3JEZWZhdWx0cxIuLnByb2plY3QuU2V0UHJvamVjdE9yY2hlc3RyYXRvckRlZmF1bHRzUmVxdWVzdBovLnByb2plY3QuU2V0UHJvamVjdE9yY2hlc3RyYXRvckRlZmF1bHRzUmVzcG9uc2USTgoNVXBkYXRlUHJvamVjdBIdLnByb2plY3QuVXBkYXRlUHJvamVjdFJlcXVlc3QaHi5wcm9qZWN0LlVwZGF0ZVByb2plY3RSZXNwb25zZRJOCg1EZWxldGVQcm9qZWN0Eh0ucHJvamVjdC5EZWxldGVQcm9qZWN0UmVxdWVzdBoeLnByb2plY3QuRGVsZXRlUHJvamVjdFJlc3BvbnNlElEKDlJlc3RvcmVQcm9qZWN0Eh4ucHJvamVjdC5SZXN0b3JlUHJvamVjdFJlcXVlc3QaHy5wcm9qZWN0LlJlc3RvcmVQcm9qZWN0UmVzcG9uc2ViBnByb3RvMw");
+
+/**
+ * A host that a fanned-out project write (UpdateProject, DeleteProject, RestoreProject) could not
+ * confirm: it did not answer, or answered with an error other than not_found. Whether it holds the
+ * project is unknown; it converges the next time any host lists projects with it reachable.
+ *
+ * @generated from message project.UnconfirmedHost
+ */
+export type UnconfirmedHost = Message<"project.UnconfirmedHost"> & {
+  /**
+   * @generated from field: string daemon_instance_id = 1;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * Why it is unconfirmed, as the forward failed.
+   *
+   * @generated from field: string reason = 2;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message project.UnconfirmedHost.
+ * Use `create(UnconfirmedHostSchema)` to create a new message.
+ */
+export const UnconfirmedHostSchema: GenMessage<UnconfirmedHost> = /*@__PURE__*/
+  messageDesc(file_project, 0);
 
 /**
  * What a project's orchestrator composer starts with on one host (`#orchestrators` 11/11). Each
@@ -46,7 +74,7 @@ export type OrchestratorDefaults = Message<"project.OrchestratorDefaults"> & {
  * Use `create(OrchestratorDefaultsSchema)` to create a new message.
  */
 export const OrchestratorDefaultsSchema: GenMessage<OrchestratorDefaults> = /*@__PURE__*/
-  messageDesc(file_project, 0);
+  messageDesc(file_project, 1);
 
 /**
  * One provider's account, as assigned to a project.
@@ -78,7 +106,7 @@ export type AccountAssignment = Message<"project.AccountAssignment"> & {
  * Use `create(AccountAssignmentSchema)` to create a new message.
  */
 export const AccountAssignmentSchema: GenMessage<AccountAssignment> = /*@__PURE__*/
-  messageDesc(file_project, 1);
+  messageDesc(file_project, 2);
 
 /**
  * @generated from message project.AddProjectToHostRequest
@@ -133,7 +161,7 @@ export type AddProjectToHostRequest = Message<"project.AddProjectToHostRequest">
  * Use `create(AddProjectToHostRequestSchema)` to create a new message.
  */
 export const AddProjectToHostRequestSchema: GenMessage<AddProjectToHostRequest> = /*@__PURE__*/
-  messageDesc(file_project, 2);
+  messageDesc(file_project, 3);
 
 /**
  * @generated from message project.AddProjectToHostResponse
@@ -152,7 +180,7 @@ export type AddProjectToHostResponse = Message<"project.AddProjectToHostResponse
  * Use `create(AddProjectToHostResponseSchema)` to create a new message.
  */
 export const AddProjectToHostResponseSchema: GenMessage<AddProjectToHostResponse> = /*@__PURE__*/
-  messageDesc(file_project, 3);
+  messageDesc(file_project, 4);
 
 /**
  * @generated from message project.CreateProjectRequest
@@ -187,7 +215,7 @@ export type CreateProjectRequest = Message<"project.CreateProjectRequest"> & {
  * Use `create(CreateProjectRequestSchema)` to create a new message.
  */
 export const CreateProjectRequestSchema: GenMessage<CreateProjectRequest> = /*@__PURE__*/
-  messageDesc(file_project, 4);
+  messageDesc(file_project, 5);
 
 /**
  * @generated from message project.CreateProjectResponse
@@ -204,7 +232,7 @@ export type CreateProjectResponse = Message<"project.CreateProjectResponse"> & {
  * Use `create(CreateProjectResponseSchema)` to create a new message.
  */
 export const CreateProjectResponseSchema: GenMessage<CreateProjectResponse> = /*@__PURE__*/
-  messageDesc(file_project, 5);
+  messageDesc(file_project, 6);
 
 /**
  * @generated from message project.ListProjectBranchesRequest
@@ -231,7 +259,7 @@ export type ListProjectBranchesRequest = Message<"project.ListProjectBranchesReq
  * Use `create(ListProjectBranchesRequestSchema)` to create a new message.
  */
 export const ListProjectBranchesRequestSchema: GenMessage<ListProjectBranchesRequest> = /*@__PURE__*/
-  messageDesc(file_project, 6);
+  messageDesc(file_project, 7);
 
 /**
  * @generated from message project.ListProjectBranchesResponse
@@ -257,7 +285,7 @@ export type ListProjectBranchesResponse = Message<"project.ListProjectBranchesRe
  * Use `create(ListProjectBranchesResponseSchema)` to create a new message.
  */
 export const ListProjectBranchesResponseSchema: GenMessage<ListProjectBranchesResponse> = /*@__PURE__*/
-  messageDesc(file_project, 7);
+  messageDesc(file_project, 8);
 
 /**
  * @generated from message project.ListProjectsRequest
@@ -275,6 +303,14 @@ export type ListProjectsRequest = Message<"project.ListProjectsRequest"> & {
    * @generated from field: bool local_only = 2;
    */
   localOnly: boolean;
+
+  /**
+   * When true, soft-deleted projects are listed too (their rows carry `deleted_at`). Default:
+   * deleted projects are left out. A peer aggregation asks for them so a tombstone on any host wins.
+   *
+   * @generated from field: bool include_deleted = 3;
+   */
+  includeDeleted: boolean;
 };
 
 /**
@@ -282,7 +318,7 @@ export type ListProjectsRequest = Message<"project.ListProjectsRequest"> & {
  * Use `create(ListProjectsRequestSchema)` to create a new message.
  */
 export const ListProjectsRequestSchema: GenMessage<ListProjectsRequest> = /*@__PURE__*/
-  messageDesc(file_project, 8);
+  messageDesc(file_project, 9);
 
 /**
  * @generated from message project.ListProjectsResponse
@@ -299,7 +335,7 @@ export type ListProjectsResponse = Message<"project.ListProjectsResponse"> & {
  * Use `create(ListProjectsResponseSchema)` to create a new message.
  */
 export const ListProjectsResponseSchema: GenMessage<ListProjectsResponse> = /*@__PURE__*/
-  messageDesc(file_project, 9);
+  messageDesc(file_project, 10);
 
 /**
  * @generated from message project.ProjectEntry
@@ -383,6 +419,29 @@ export type ProjectEntry = Message<"project.ProjectEntry"> & {
    * @generated from field: project.OrchestratorDefaults orchestrator_defaults = 12;
    */
   orchestratorDefaults?: OrchestratorDefaults;
+
+  /**
+   * RFC 3339 time the logical project was soft-deleted (DeleteProject). Empty = not deleted. A
+   * listing reconciles every host's row of a project to its newest delete or restore event, so a
+   * host that missed a delete shows the tombstone too.
+   *
+   * @generated from field: string deleted_at = 13;
+   */
+  deletedAt: string;
+
+  /**
+   * The GitHub user who deleted it. Empty when not deleted.
+   *
+   * @generated from field: string deleted_by = 14;
+   */
+  deletedBy: string;
+
+  /**
+   * RFC 3339 time the project was last restored (RestoreProject). Empty = never restored.
+   *
+   * @generated from field: string restored_at = 15;
+   */
+  restoredAt: string;
 };
 
 /**
@@ -390,7 +449,7 @@ export type ProjectEntry = Message<"project.ProjectEntry"> & {
  * Use `create(ProjectEntrySchema)` to create a new message.
  */
 export const ProjectEntrySchema: GenMessage<ProjectEntry> = /*@__PURE__*/
-  messageDesc(file_project, 10);
+  messageDesc(file_project, 11);
 
 /**
  * @generated from message project.SetProjectDefaultBranchRequest
@@ -422,7 +481,7 @@ export type SetProjectDefaultBranchRequest = Message<"project.SetProjectDefaultB
  * Use `create(SetProjectDefaultBranchRequestSchema)` to create a new message.
  */
 export const SetProjectDefaultBranchRequestSchema: GenMessage<SetProjectDefaultBranchRequest> = /*@__PURE__*/
-  messageDesc(file_project, 11);
+  messageDesc(file_project, 12);
 
 /**
  * @generated from message project.SetProjectDefaultBranchResponse
@@ -439,7 +498,7 @@ export type SetProjectDefaultBranchResponse = Message<"project.SetProjectDefault
  * Use `create(SetProjectDefaultBranchResponseSchema)` to create a new message.
  */
 export const SetProjectDefaultBranchResponseSchema: GenMessage<SetProjectDefaultBranchResponse> = /*@__PURE__*/
-  messageDesc(file_project, 12);
+  messageDesc(file_project, 13);
 
 /**
  * @generated from message project.SetProjectAccountsRequest
@@ -484,7 +543,7 @@ export type SetProjectAccountsRequest = Message<"project.SetProjectAccountsReque
  * Use `create(SetProjectAccountsRequestSchema)` to create a new message.
  */
 export const SetProjectAccountsRequestSchema: GenMessage<SetProjectAccountsRequest> = /*@__PURE__*/
-  messageDesc(file_project, 13);
+  messageDesc(file_project, 14);
 
 /**
  * @generated from message project.SetProjectAccountsResponse
@@ -501,7 +560,7 @@ export type SetProjectAccountsResponse = Message<"project.SetProjectAccountsResp
  * Use `create(SetProjectAccountsResponseSchema)` to create a new message.
  */
 export const SetProjectAccountsResponseSchema: GenMessage<SetProjectAccountsResponse> = /*@__PURE__*/
-  messageDesc(file_project, 14);
+  messageDesc(file_project, 15);
 
 /**
  * @generated from message project.SetProjectOrchestratorDefaultsRequest
@@ -538,7 +597,7 @@ export type SetProjectOrchestratorDefaultsRequest = Message<"project.SetProjectO
  * Use `create(SetProjectOrchestratorDefaultsRequestSchema)` to create a new message.
  */
 export const SetProjectOrchestratorDefaultsRequestSchema: GenMessage<SetProjectOrchestratorDefaultsRequest> = /*@__PURE__*/
-  messageDesc(file_project, 15);
+  messageDesc(file_project, 16);
 
 /**
  * @generated from message project.SetProjectOrchestratorDefaultsResponse
@@ -557,7 +616,223 @@ export type SetProjectOrchestratorDefaultsResponse = Message<"project.SetProject
  * Use `create(SetProjectOrchestratorDefaultsResponseSchema)` to create a new message.
  */
 export const SetProjectOrchestratorDefaultsResponseSchema: GenMessage<SetProjectOrchestratorDefaultsResponse> = /*@__PURE__*/
-  messageDesc(file_project, 16);
+  messageDesc(file_project, 17);
+
+/**
+ * @generated from message project.UpdateProjectRequest
+ */
+export type UpdateProjectRequest = Message<"project.UpdateProjectRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * The new display name. Required; the same rules as CreateProject's name. Renaming does not move
+   * the main checkout: `main_repo_path` is stored, not derived.
+   *
+   * @generated from field: string name = 3;
+   */
+  name: string;
+
+  /**
+   * Apply on this host only, without fanning out. Set on the forwarded calls of a fan-out.
+   *
+   * @generated from field: bool local_only = 4;
+   */
+  localOnly: boolean;
+};
+
+/**
+ * Describes the message project.UpdateProjectRequest.
+ * Use `create(UpdateProjectRequestSchema)` to create a new message.
+ */
+export const UpdateProjectRequestSchema: GenMessage<UpdateProjectRequest> = /*@__PURE__*/
+  messageDesc(file_project, 18);
+
+/**
+ * @generated from message project.UpdateProjectResponse
+ */
+export type UpdateProjectResponse = Message<"project.UpdateProjectResponse"> & {
+  /**
+   * The project's row on the first host that applied the change (this host when it owns one).
+   *
+   * @generated from field: project.ProjectEntry project = 1;
+   */
+  project?: ProjectEntry;
+
+  /**
+   * Every host that applied it.
+   *
+   * @generated from field: repeated string applied_hosts = 2;
+   */
+  appliedHosts: string[];
+
+  /**
+   * @generated from field: repeated project.UnconfirmedHost unconfirmed_hosts = 3;
+   */
+  unconfirmedHosts: UnconfirmedHost[];
+};
+
+/**
+ * Describes the message project.UpdateProjectResponse.
+ * Use `create(UpdateProjectResponseSchema)` to create a new message.
+ */
+export const UpdateProjectResponseSchema: GenMessage<UpdateProjectResponse> = /*@__PURE__*/
+  messageDesc(file_project, 19);
+
+/**
+ * @generated from message project.DeleteProjectRequest
+ */
+export type DeleteProjectRequest = Message<"project.DeleteProjectRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * Apply on this host only, without fanning out. Set on the forwarded calls of a fan-out.
+   *
+   * @generated from field: bool local_only = 3;
+   */
+  localOnly: boolean;
+
+  /**
+   * Check, do not write: answer failed_precondition naming the project's running ordinary sessions
+   * on this host, or OK. The fan-out's first phase, so no host is tombstoned while another refuses.
+   *
+   * @generated from field: bool preflight_only = 4;
+   */
+  preflightOnly: boolean;
+
+  /**
+   * The tombstone's time and author as the coordinating host stamped them; set on forwarded calls
+   * so every host stores the same tombstone. Empty = stamp here.
+   *
+   * @generated from field: string deleted_at = 5;
+   */
+  deletedAt: string;
+
+  /**
+   * @generated from field: string deleted_by = 6;
+   */
+  deletedBy: string;
+};
+
+/**
+ * Describes the message project.DeleteProjectRequest.
+ * Use `create(DeleteProjectRequestSchema)` to create a new message.
+ */
+export const DeleteProjectRequestSchema: GenMessage<DeleteProjectRequest> = /*@__PURE__*/
+  messageDesc(file_project, 20);
+
+/**
+ * @generated from message project.DeleteProjectResponse
+ */
+export type DeleteProjectResponse = Message<"project.DeleteProjectResponse"> & {
+  /**
+   * @generated from field: project.ProjectEntry project = 1;
+   */
+  project?: ProjectEntry;
+
+  /**
+   * @generated from field: repeated string applied_hosts = 2;
+   */
+  appliedHosts: string[];
+
+  /**
+   * @generated from field: repeated project.UnconfirmedHost unconfirmed_hosts = 3;
+   */
+  unconfirmedHosts: UnconfirmedHost[];
+
+  /**
+   * Project-home sessions the delete stopped (their data is kept), on every host that applied it.
+   *
+   * @generated from field: repeated string stopped_session_ids = 4;
+   */
+  stoppedSessionIds: string[];
+};
+
+/**
+ * Describes the message project.DeleteProjectResponse.
+ * Use `create(DeleteProjectResponseSchema)` to create a new message.
+ */
+export const DeleteProjectResponseSchema: GenMessage<DeleteProjectResponse> = /*@__PURE__*/
+  messageDesc(file_project, 21);
+
+/**
+ * @generated from message project.RestoreProjectRequest
+ */
+export type RestoreProjectRequest = Message<"project.RestoreProjectRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * Apply on this host only, without fanning out. Set on the forwarded calls of a fan-out.
+   *
+   * @generated from field: bool local_only = 3;
+   */
+  localOnly: boolean;
+
+  /**
+   * The restore's time as the coordinating host stamped it; set on forwarded calls. Empty = stamp
+   * here.
+   *
+   * @generated from field: string restored_at = 4;
+   */
+  restoredAt: string;
+};
+
+/**
+ * Describes the message project.RestoreProjectRequest.
+ * Use `create(RestoreProjectRequestSchema)` to create a new message.
+ */
+export const RestoreProjectRequestSchema: GenMessage<RestoreProjectRequest> = /*@__PURE__*/
+  messageDesc(file_project, 22);
+
+/**
+ * @generated from message project.RestoreProjectResponse
+ */
+export type RestoreProjectResponse = Message<"project.RestoreProjectResponse"> & {
+  /**
+   * @generated from field: project.ProjectEntry project = 1;
+   */
+  project?: ProjectEntry;
+
+  /**
+   * @generated from field: repeated string applied_hosts = 2;
+   */
+  appliedHosts: string[];
+
+  /**
+   * @generated from field: repeated project.UnconfirmedHost unconfirmed_hosts = 3;
+   */
+  unconfirmedHosts: UnconfirmedHost[];
+};
+
+/**
+ * Describes the message project.RestoreProjectResponse.
+ * Use `create(RestoreProjectResponseSchema)` to create a new message.
+ */
+export const RestoreProjectResponseSchema: GenMessage<RestoreProjectResponse> = /*@__PURE__*/
+  messageDesc(file_project, 23);
 
 /**
  * @generated from service project.ProjectService
@@ -637,6 +912,45 @@ export const ProjectService: GenService<{
     methodKind: "unary";
     input: typeof SetProjectOrchestratorDefaultsRequestSchema;
     output: typeof SetProjectOrchestratorDefaultsResponseSchema;
+  },
+  /**
+   * Edit a project's metadata — its display name — on every host owning it (**logical-project
+   * scope, daemon fan-out**): the receiving daemon writes its own row, then forwards the request
+   * with `local_only` to every eligible peer. A peer without the row answers not_found and is
+   * skipped. The repository identity (git_url, main_repo_path) and project_id are not editable;
+   * the default branch and accounts keep their own RPCs. See docs/ft/daemon/project-concept.md.
+   *
+   * @generated from rpc project.ProjectService.UpdateProject
+   */
+  updateProject: {
+    methodKind: "unary";
+    input: typeof UpdateProjectRequestSchema;
+    output: typeof UpdateProjectResponseSchema;
+  },
+  /**
+   * **Soft-delete** a project on every host owning it (same fan-out as UpdateProject): each row is
+   * tombstoned (`deleted_at`, `deleted_by`) and nothing is removed from disk — the main checkout,
+   * worktrees, session directories, stacks and settings are all kept. Refused (failed_precondition,
+   * naming them) while any reachable host runs one of the project's ordinary sessions; the
+   * project's read-only project-home session is stopped, not removed. Repeating it is a no-op.
+   *
+   * @generated from rpc project.ProjectService.DeleteProject
+   */
+  deleteProject: {
+    methodKind: "unary";
+    input: typeof DeleteProjectRequestSchema;
+    output: typeof DeleteProjectResponseSchema;
+  },
+  /**
+   * Clear a project's tombstone on every host owning it (same fan-out), recording `restored_at`.
+   * Restoring a project that is not deleted is a no-op.
+   *
+   * @generated from rpc project.ProjectService.RestoreProject
+   */
+  restoreProject: {
+    methodKind: "unary";
+    input: typeof RestoreProjectRequestSchema;
+    output: typeof RestoreProjectResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_project, 0);

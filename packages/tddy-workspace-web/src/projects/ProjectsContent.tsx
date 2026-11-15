@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
@@ -36,6 +36,10 @@ interface ProjectsRpcOptions {
  * {@link hostNotConnected} when `client` is `null` (no daemon selected / no wire reaches it) — so
  * the screen can say why next to the control that was used. A failed poll is kept in `loadError`
  * rather than leaving the list looking empty; the last good list stays shown beside it.
+ *
+ * Soft-deleted projects are listed only while `includeDeleted` is on; toggling it reads the
+ * registry again at once. Only the latest read is applied, so an answer to the previous setting
+ * that arrives late cannot overwrite the current one.
  */
 function useProjectsRpc({
   client,
@@ -46,6 +50,8 @@ function useProjectsRpc({
 }: ProjectsRpcOptions) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [includeDeleted, setIncludeDeleted] = useState(false);
+  const latestRead = useRef(0);
 
   const connected = useCallback((): Client<typeof ProjectService> => {
     if (!client) throw hostNotConnected(hostLabel(selectedInstanceId ?? ""));
@@ -57,14 +63,18 @@ function useProjectsRpc({
       setLoadError(hostNotConnectedText(hostLabel(selectedInstanceId ?? "")));
       return;
     }
+    const read = ++latestRead.current;
     client
-      .listProjects({ sessionToken })
+      .listProjects({ sessionToken, includeDeleted })
       .then((res) => {
+        if (read !== latestRead.current) return;
         setProjects(res.projects);
         setLoadError(null);
       })
-      .catch((e: unknown) => setLoadError(rpcFailureText(e)));
-  }, [client, sessionToken, hostLabel, selectedInstanceId]);
+      .catch((e: unknown) => {
+        if (read === latestRead.current) setLoadError(rpcFailureText(e));
+      });
+  }, [client, sessionToken, hostLabel, selectedInstanceId, includeDeleted]);
 
   useEffect(() => {
     loadProjects();
@@ -125,9 +135,20 @@ function useProjectsRpc({
     [connected, sessionToken, loadProjects],
   );
 
+  const restoreProject = useCallback(
+    async (projectId: string) => {
+      await connected().restoreProject({ sessionToken, projectId });
+      loadProjects();
+    },
+    [connected, sessionToken, loadProjects],
+  );
+
   return {
     projects,
     loadError,
+    includeDeleted,
+    setIncludeDeleted,
+    restoreProject,
     createProject,
     addProjectToHost,
     setDefaultBranch,
@@ -232,6 +253,9 @@ export function ProjectsContent() {
   const {
     projects,
     loadError,
+    includeDeleted,
+    setIncludeDeleted,
+    restoreProject,
     createProject,
     addProjectToHost,
     setDefaultBranch,
@@ -259,6 +283,9 @@ export function ProjectsContent() {
         accounts={accounts}
         onSetProjectAccounts={setProjectAccounts}
         loadHostGithubCli={loadHostGithubCli}
+        showDeleted={includeDeleted}
+        onShowDeletedChange={setIncludeDeleted}
+        onRestoreProject={restoreProject}
       />
     </>
   );

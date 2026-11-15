@@ -638,6 +638,7 @@ fn write_project_registry(tddy_data_dir: &Path, repo_path: &Path) {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         }],
     )
     .expect("write projects registry");

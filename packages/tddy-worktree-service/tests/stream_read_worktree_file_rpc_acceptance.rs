@@ -95,6 +95,7 @@ fn a_served_worktree_capped_at(cap: u64) -> ServedWorktree {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .expect("register project");

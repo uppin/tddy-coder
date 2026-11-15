@@ -1,4 +1,4 @@
-//! Port the seven `project.ProjectService` RPCs are implemented against.
+//! Port the ten `project.ProjectService` RPCs are implemented against.
 
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
@@ -9,8 +9,12 @@ use tddy_service::proto::project::{
     SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
     SetProjectOrchestratorDefaultsRequest, SetProjectOrchestratorDefaultsResponse,
 };
+use tddy_service::proto::project::{
+    DeleteProjectRequest, DeleteProjectResponse, RestoreProjectRequest, RestoreProjectResponse,
+    UpdateProjectRequest, UpdateProjectResponse,
+};
 
-/// What the seven project RPCs need from the host process.
+/// What the ten project RPCs need from the host process.
 #[async_trait]
 pub trait ProjectHandler: Send + Sync {
     async fn list_projects(
@@ -38,8 +42,8 @@ pub trait ProjectHandler: Send + Sync {
         request: Request<SetProjectDefaultBranchRequest>,
     ) -> Result<Response<SetProjectDefaultBranchResponse>, Status>;
 
-    /// Replace which account the project uses at each provider. Logical-project scope: the host
-    /// forwards it to peers owning the same `project_id`, as it does the default branch.
+    /// Replace which account the project uses at each provider, on the one host the request names
+    /// (see `docs/dev/todo/2026-10-14-project-account-assignment-reaches-one-host.md`).
     async fn set_project_accounts(
         &self,
         request: Request<SetProjectAccountsRequest>,
@@ -51,4 +55,24 @@ pub trait ProjectHandler: Send + Sync {
         &self,
         request: Request<SetProjectOrchestratorDefaultsRequest>,
     ) -> Result<Response<SetProjectOrchestratorDefaultsResponse>, Status>;
+
+    /// Rename the project on every host owning it: written here, then fanned out to every eligible
+    /// peer unless the request is `local_only`.
+    async fn update_project(
+        &self,
+        request: Request<UpdateProjectRequest>,
+    ) -> Result<Response<UpdateProjectResponse>, Status>;
+
+    /// Soft-delete the project on every host owning it, with the same fan-out. Nothing is removed
+    /// from disk.
+    async fn delete_project(
+        &self,
+        request: Request<DeleteProjectRequest>,
+    ) -> Result<Response<DeleteProjectResponse>, Status>;
+
+    /// Clear the project's tombstone on every host owning it, with the same fan-out.
+    async fn restore_project(
+        &self,
+        request: Request<RestoreProjectRequest>,
+    ) -> Result<Response<RestoreProjectResponse>, Status>;
 }

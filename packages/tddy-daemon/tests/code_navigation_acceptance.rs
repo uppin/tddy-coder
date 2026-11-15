@@ -109,6 +109,7 @@ fn a_project_with_a_worktree() -> AProjectWithAWorktree {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .expect("the project is registered");

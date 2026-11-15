@@ -92,6 +92,7 @@ fn given_a_registered_project(data_dir: &std::path::Path, os_user: &str, project
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .expect("seed project");
@@ -156,6 +157,7 @@ async fn assigning_an_account_to_a_project_persists_it_and_list_projects_carries
         .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: true,
+            ..ListProjectsRequest::default()
         }))
         .await
         .expect("list_projects succeeds")
@@ -192,6 +194,7 @@ async fn a_project_nobody_assigned_an_account_to_is_listed_as_unassigned() {
         .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: true,
+            ..ListProjectsRequest::default()
         }))
         .await
         .expect("list_projects succeeds")

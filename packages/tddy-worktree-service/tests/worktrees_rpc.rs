@@ -177,6 +177,7 @@ async fn list_worktrees_refresh_returns_git_worktree_rows() {
         local_gh: false,
         home_session_id: None,
         orchestrator_defaults: None,
+        lifecycle: Default::default(),
     };
 
     project_storage::add_project(&projects_dir, project).unwrap();
@@ -285,6 +286,7 @@ async fn clean_worktree_primary_is_failed_precondition() {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .unwrap();
@@ -359,6 +361,7 @@ async fn clean_worktree_clears_secondary_and_invalidates_cache() {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .unwrap();
@@ -472,6 +475,7 @@ async fn restore_session_worktree_recreates_worktree_from_changeset() {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .unwrap();

@@ -59,6 +59,7 @@ fn a_project(name: &str, project_id: &str, main_repo_path: &std::path::Path) -> 
         local_gh: false,
         home_session_id: None,
         orchestrator_defaults: None,
+        lifecycle: Default::default(),
     }
 }
 

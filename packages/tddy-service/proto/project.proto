@@ -34,6 +34,30 @@ service ProjectService {
   // main is: routed to the host `daemon_instance_id` names (local or forwarded), and never fanned
   // out to the project's other hosts. The defaults REPLACE the stored ones; absent clears them.
   rpc SetProjectOrchestratorDefaults(SetProjectOrchestratorDefaultsRequest) returns (SetProjectOrchestratorDefaultsResponse);
+  // Edit a project's metadata — its display name — on every host owning it (**logical-project
+  // scope, daemon fan-out**): the receiving daemon writes its own row, then forwards the request
+  // with `local_only` to every eligible peer. A peer without the row answers not_found and is
+  // skipped. The repository identity (git_url, main_repo_path) and project_id are not editable;
+  // the default branch and accounts keep their own RPCs. See docs/ft/daemon/project-concept.md.
+  rpc UpdateProject(UpdateProjectRequest) returns (UpdateProjectResponse);
+  // **Soft-delete** a project on every host owning it (same fan-out as UpdateProject): each row is
+  // tombstoned (`deleted_at`, `deleted_by`) and nothing is removed from disk — the main checkout,
+  // worktrees, session directories, stacks and settings are all kept. Refused (failed_precondition,
+  // naming them) while any reachable host runs one of the project's ordinary sessions; the
+  // project's read-only project-home session is stopped, not removed. Repeating it is a no-op.
+  rpc DeleteProject(DeleteProjectRequest) returns (DeleteProjectResponse);
+  // Clear a project's tombstone on every host owning it (same fan-out), recording `restored_at`.
+  // Restoring a project that is not deleted is a no-op.
+  rpc RestoreProject(RestoreProjectRequest) returns (RestoreProjectResponse);
+}
+
+// A host that a fanned-out project write (UpdateProject, DeleteProject, RestoreProject) could not
+// confirm: it did not answer, or answered with an error other than not_found. Whether it holds the
+// project is unknown; it converges the next time any host lists projects with it reachable.
+message UnconfirmedHost {
+  string daemon_instance_id = 1;
+  // Why it is unconfirmed, as the forward failed.
+  string reason = 2;
 }
 
 // What a project's orchestrator composer starts with on one host (`#orchestrators` 11/11). Each
@@ -110,6 +134,9 @@ message ListProjectsRequest {
   // When true, return only this daemon's local registry rows and skip peer fan-out. Set by the
   // peer-project aggregation path so a fanned-out ListProjects does not recurse back into peers.
   bool local_only = 2;
+  // When true, soft-deleted projects are listed too (their rows carry `deleted_at`). Default:
+  // deleted projects are left out. A peer aggregation asks for them so a tombstone on any host wins.
+  bool include_deleted = 3;
 }
 
 message ListProjectsResponse {
@@ -148,6 +175,14 @@ message ProjectEntry {
   // What a new orchestrator for this project starts with on this host, saved from the project's
   // settings pane by `SetProjectOrchestratorDefaults`. Absent = none saved.
   OrchestratorDefaults orchestrator_defaults = 12;
+  // RFC 3339 time the logical project was soft-deleted (DeleteProject). Empty = not deleted. A
+  // listing reconciles every host's row of a project to its newest delete or restore event, so a
+  // host that missed a delete shows the tombstone too.
+  string deleted_at = 13;
+  // The GitHub user who deleted it. Empty when not deleted.
+  string deleted_by = 14;
+  // RFC 3339 time the project was last restored (RestoreProject). Empty = never restored.
+  string restored_at = 15;
 }
 
 message SetProjectDefaultBranchRequest {
@@ -191,4 +226,60 @@ message SetProjectOrchestratorDefaultsRequest {
 message SetProjectOrchestratorDefaultsResponse {
   // The project's row on the host that saved the defaults.
   ProjectEntry project = 1;
+}
+
+message UpdateProjectRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // The new display name. Required; the same rules as CreateProject's name. Renaming does not move
+  // the main checkout: `main_repo_path` is stored, not derived.
+  string name = 3;
+  // Apply on this host only, without fanning out. Set on the forwarded calls of a fan-out.
+  bool local_only = 4;
+}
+
+message UpdateProjectResponse {
+  // The project's row on the first host that applied the change (this host when it owns one).
+  ProjectEntry project = 1;
+  // Every host that applied it.
+  repeated string applied_hosts = 2;
+  repeated UnconfirmedHost unconfirmed_hosts = 3;
+}
+
+message DeleteProjectRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Apply on this host only, without fanning out. Set on the forwarded calls of a fan-out.
+  bool local_only = 3;
+  // Check, do not write: answer failed_precondition naming the project's running ordinary sessions
+  // on this host, or OK. The fan-out's first phase, so no host is tombstoned while another refuses.
+  bool preflight_only = 4;
+  // The tombstone's time and author as the coordinating host stamped them; set on forwarded calls
+  // so every host stores the same tombstone. Empty = stamp here.
+  string deleted_at = 5;
+  string deleted_by = 6;
+}
+
+message DeleteProjectResponse {
+  ProjectEntry project = 1;
+  repeated string applied_hosts = 2;
+  repeated UnconfirmedHost unconfirmed_hosts = 3;
+  // Project-home sessions the delete stopped (their data is kept), on every host that applied it.
+  repeated string stopped_session_ids = 4;
+}
+
+message RestoreProjectRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Apply on this host only, without fanning out. Set on the forwarded calls of a fan-out.
+  bool local_only = 3;
+  // The restore's time as the coordinating host stamped it; set on forwarded calls. Empty = stamp
+  // here.
+  string restored_at = 4;
+}
+
+message RestoreProjectResponse {
+  ProjectEntry project = 1;
+  repeated string applied_hosts = 2;
+  repeated UnconfirmedHost unconfirmed_hosts = 3;
 }

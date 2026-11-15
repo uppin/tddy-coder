@@ -122,6 +122,7 @@ impl EligibleDaemonSource for AsyncPeerProjectsSource {
             local_gh: false,
             home_session_id: String::new(),
             orchestrator_defaults: None,
+            ..ProtoProjectEntry::default()
         }]
     }
 }
@@ -156,6 +157,7 @@ async fn list_projects_awaits_an_async_peer_source_on_a_current_thread_runtime()
         .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: false,
+            ..ListProjectsRequest::default()
         }))
         .await
         .expect("list_projects succeeds");
@@ -188,6 +190,7 @@ fn a_project_entry(project_id: &str) -> ProtoProjectEntry {
         local_gh: false,
         home_session_id: String::new(),
         orchestrator_defaults: None,
+        ..ProtoProjectEntry::default()
     }
 }
 

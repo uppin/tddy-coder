@@ -568,9 +568,10 @@ const PR_STACK_METHODS: [&str; 10] = [
 /// method on one of these four services joins the list deliberately, in the change that adds it —
 /// `SetProjectAccounts` (`#keyring` 5/9) is the first to do so, `EnsureProjectHomeSession`
 /// (`#project-home` 4/7) the second, `SetProjectOrchestratorDefaults` (`#orchestrators` 11/11) the
-/// third. `SetProjectHomeAgent` (`#project-home` 1/7) joined and was
+/// third, and `UpdateProject`, `DeleteProject` and `RestoreProject` (project update and soft
+/// delete) the fourth to sixth. `SetProjectHomeAgent` (`#project-home` 1/7) joined and was
 /// removed again when main came to be set up with the New-session form.
-const RESIDUAL_METHODS: [&str; 20] = [
+const RESIDUAL_METHODS: [&str; 23] = [
     "ListSessions",
     "StartSession",
     "StreamStartSession",
@@ -587,6 +588,9 @@ const RESIDUAL_METHODS: [&str; 20] = [
     "SetProjectDefaultBranch",
     "SetProjectAccounts",
     "SetProjectOrchestratorDefaults",
+    "UpdateProject",
+    "DeleteProject",
+    "RestoreProject",
     "StartDemoVm",
     "StopDemoVm",
     "GetDemoVmStatus",
@@ -717,12 +721,15 @@ const SESSION_METHODS: [&str; 8] = [
     "GetWorktreeSnapshot",
 ];
 
-const PROJECT_METHODS: [&str; 5] = [
+const PROJECT_METHODS: [&str; 8] = [
     "ListProjects",
     "CreateProject",
     "AddProjectToHost",
     "ListProjectBranches",
     "SetProjectDefaultBranch",
+    "UpdateProject",
+    "DeleteProject",
+    "RestoreProject",
 ];
 
 const DEMO_VM_METHODS: [&str; 3] = ["StartDemoVm", "StopDemoVm", "GetDemoVmStatus"];

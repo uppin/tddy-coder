@@ -1,8 +1,8 @@
 # `project.ProjectService` (tddy-projects)
 
-Six RPCs for logical projects: list and create, add an existing project on another host, list
-branches on the project's main checkout, set the default integration base ref, and set the accounts
-the project uses. The proto is
+Ten RPCs for logical projects: list and create, add an existing project on another host, list
+branches on the project's main checkout, set the default integration base ref, the accounts the
+project uses and its orchestrator defaults, and rename, soft-delete and restore it. The proto is
 `packages/tddy-service/proto/project.proto`; implementation modules are `project_storage.rs` and
 `project_provision.rs` (extracted from `tddy-daemon` in `#unbundle` node 9).
 
@@ -14,12 +14,36 @@ the project uses. The proto is
 | `CreateProject` | Register a new project and its checkout |
 | `AddProjectToHost` | Reuse a `project_id` on another daemon instance |
 | `ListProjectBranches` | Branches visible on the project's main checkout |
-| `SetProjectDefaultBranch` | Set the integration base ref (forwarded for logical-project scope) |
-| `SetProjectAccounts` | Replace the project's account assignments (forwarded for logical-project scope) |
+| `SetProjectDefaultBranch` | Set the integration base ref, on the one host the request names |
+| `SetProjectAccounts` | Replace the project's account assignments, on the one host the request names |
+| `SetProjectOrchestratorDefaults` | Save the orchestrator composer's defaults, on the one host the request names |
+| `UpdateProject` | Rename the project on every host owning it |
+| `DeleteProject` | Soft-delete the project on every host owning it |
+| `RestoreProject` | Clear the project's tombstone on every host owning it |
 
 The handlers that serve these RPCs live in
 [`tddy-daemon-rpc`](../../tddy-daemon-rpc/docs/architecture.md) (`src/project/`); this crate owns the
 trait they implement, the storage and the provisioning.
+
+## Soft delete
+
+`ProjectData.lifecycle` (`ProjectLifecycle`) is flattened onto the row as `deleted_at`, `deleted_by`
+and `restored_at`, each skipped when absent. `project_storage` owns every write to it and to the name:
+
+| Function | Does |
+|---|---|
+| `rename_project` | Sets `name` only |
+| `mark_project_deleted` | Tombstones the row; an already deleted row keeps its first tombstone |
+| `mark_project_restored` | Clears the tombstone and records `restored_at`; a live row is left as it is |
+| `ProjectLifecycle::newest` | The winning lifecycle among one project's rows on several hosts: the newest delete or restore event; any event beats none; a tie is deleted |
+| `adopt_project_lifecycle` | Writes another host's lifecycle into this row when it is newer |
+| `find_deleted_project_matching` | A deleted row with the same `git_url` (trimmed) or checkout |
+| `refuse_if_deleted` / `refuse_if_project_deleted` | `failed_precondition` naming a deleted project, for every path that starts new work |
+| `validate_project_name` | The name rule `CreateProject` and `UpdateProject` share |
+
+Each returns `None` (writing nothing) for a project this host does not register. `project_provision`
+refuses a locally deleted row rather than provisioning it. The fan-out across hosts and the listing
+reconciliation live in [`tddy-daemon-rpc`](../../tddy-daemon-rpc/docs/architecture.md).
 
 ## Account assignments
 

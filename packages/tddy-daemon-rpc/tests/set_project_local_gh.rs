@@ -117,6 +117,7 @@ fn a_daemon_with_a_project_row(
             local_gh,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .expect("seed project");

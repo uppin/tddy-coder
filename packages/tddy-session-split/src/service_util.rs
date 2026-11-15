@@ -38,7 +38,8 @@ pub async fn index_session_worktree(
     Ok(())
 }
 
-/// A project registered for `os_user`, and the projects directory it was found in.
+/// A project registered for `os_user`, and the projects directory it was found in. A soft-deleted
+/// project is refused (`failed_precondition`): everything resolved through here is new work.
 pub fn find_registered_project(
     tddy_data_dir: &Path,
     os_user: &str,
@@ -56,6 +57,7 @@ pub fn find_registered_project(
     let project = tddy_projects::project_storage::find_project(&projects_dir, project_id)
         .map_err(|e| Status::internal(e.to_string()))?
         .ok_or_else(|| Status::not_found("project not found"))?;
+    tddy_projects::project_storage::refuse_if_deleted(&project)?;
     Ok((projects_dir, project))
 }
 

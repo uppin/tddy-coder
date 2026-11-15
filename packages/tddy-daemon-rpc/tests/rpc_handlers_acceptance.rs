@@ -145,6 +145,7 @@ impl ARunningDaemon {
                 local_gh: false,
                 home_session_id: None,
                 orchestrator_defaults: None,
+                lifecycle: Default::default(),
             },
         )
         .expect("register the project");
@@ -195,6 +196,7 @@ async fn a_project_handler_lists_the_projects_registered_for_the_caller() {
         .list_projects(Request::direct(ListProjectsRequest {
             session_token: A_KNOWN_TOKEN.to_string(),
             local_only: true,
+            ..ListProjectsRequest::default()
         }))
         .await
         .expect("the caller's projects were not listed")
@@ -216,6 +218,7 @@ async fn a_project_handler_refuses_a_caller_whose_session_token_is_unknown() {
         .list_projects(Request::direct(ListProjectsRequest {
             session_token: AN_UNKNOWN_TOKEN.to_string(),
             local_only: true,
+            ..ListProjectsRequest::default()
         }))
         .await
         .expect_err("an unknown caller was shown projects");

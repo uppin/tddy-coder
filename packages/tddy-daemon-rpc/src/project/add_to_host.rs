@@ -62,6 +62,11 @@ impl ProjectRpcHandler {
         if let Some(existing) = project_storage::find_project(&projects_dir, project_id)
             .map_err(|e| Status::internal(e.to_string()))?
         {
+            if existing.is_deleted() {
+                return self
+                    .restore_added_project(&req.session_token, project_id)
+                    .await;
+            }
             log::info!(
                 "AddProjectToHost: project_id={} already present on this host, returning existing row",
                 project_id
@@ -115,6 +120,7 @@ impl ProjectRpcHandler {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         };
         let (stored, _created) = project_storage::add_or_get_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;

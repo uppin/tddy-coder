@@ -1,7 +1,8 @@
 /**
  * Page object for a project's settings pane mounted on its own (`#orchestrators` 11/11): main's
- * section, the orchestrator defaults section and its controls, and the
- * `SetProjectOrchestratorDefaults` calls the daemon double recorded.
+ * section, the orchestrator defaults section and its controls, the project's name and its Delete,
+ * and the `SetProjectOrchestratorDefaults`, `UpdateProject` and `DeleteProject` calls the daemon
+ * double recorded.
  *
  * All raw selectors and wire inspection live here; test bodies call named methods.
  *
@@ -22,6 +23,15 @@ import {
   sessionsProjectSettingsDefaultsSave,
   sessionsProjectSettingsMain,
   sessionsProjectSettingsReplaceMain,
+  sessionsProjectSettingsName,
+  sessionsProjectSettingsNameSave,
+  sessionsProjectSettingsNameSaved,
+  sessionsProjectSettingsNameError,
+  sessionsProjectSettingsDelete,
+  sessionsProjectSettingsDeleteConfirm,
+  sessionsProjectSettingsDeleteConfirmYes,
+  sessionsProjectSettingsDeleteCancel,
+  sessionsProjectSettingsDeleteError,
 } from "../testIds";
 
 /** How long a lookup waits for something the pane renders after an RPC answers. */
@@ -103,4 +113,53 @@ export const projectSettingsPanePage = {
         ).to.have.length(1);
       })
       .then((b) => b.callsTo(ProjectService.method.setProjectOrchestratorDefaults)[0]),
+
+  // ---------------------------------------------------------------------------
+  // The project: its name and Delete
+  // ---------------------------------------------------------------------------
+
+  nameField: (projectId: string) => byTestId(sessionsProjectSettingsName(projectId), RENDER_WAIT),
+
+  rename(projectId: string, name: string) {
+    projectSettingsPanePage.nameField(projectId).clear().type(name);
+    byTestId(sessionsProjectSettingsNameSave(projectId), RENDER_WAIT).should("not.be.disabled").click();
+  },
+
+  renamed: (projectId: string) => byTestId(sessionsProjectSettingsNameSaved(projectId), RENDER_WAIT),
+
+  renameError: (projectId: string) => byTestId(sessionsProjectSettingsNameError(projectId), RENDER_WAIT),
+
+  /** The one `UpdateProject` request the pane sent. */
+  theRenameRequest: (backend: RecordingBackend) =>
+    cy
+      .wrap(backend)
+      .should((b) => {
+        expect(b.callsTo(ProjectService.method.updateProject), "one UpdateProject request").to.have.length(1);
+      })
+      .then((b) => b.callsTo(ProjectService.method.updateProject)[0]),
+
+  askToDelete(projectId: string) {
+    byTestId(sessionsProjectSettingsDelete(projectId), RENDER_WAIT).click();
+  },
+
+  deleteConfirmation: (projectId: string) => byTestId(sessionsProjectSettingsDeleteConfirm(projectId), RENDER_WAIT),
+
+  confirmDelete(projectId: string) {
+    byTestId(sessionsProjectSettingsDeleteConfirmYes(projectId), RENDER_WAIT).should("not.be.disabled").click();
+  },
+
+  cancelDelete(projectId: string) {
+    byTestId(sessionsProjectSettingsDeleteCancel(projectId), RENDER_WAIT).click();
+  },
+
+  /** Asserts no confirmation is showing. */
+  assertNoDeleteConfirmation(projectId: string) {
+    projectSettingsPanePage.pane(projectId).should("exist");
+    byTestId(sessionsProjectSettingsDeleteConfirm(projectId)).should("not.exist");
+  },
+
+  deleteError: (projectId: string) => byTestId(sessionsProjectSettingsDeleteError(projectId), RENDER_WAIT),
+
+  /** The `DeleteProject` requests the pane sent. */
+  deleteRequests: (backend: RecordingBackend) => cy.wrap(backend).then((b) => b.callsTo(ProjectService.method.deleteProject)),
 };

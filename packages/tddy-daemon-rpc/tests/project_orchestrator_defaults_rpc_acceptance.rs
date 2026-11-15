@@ -114,6 +114,7 @@ impl ADaemonHoldingTheProject {
             .list_projects(Request::direct(ListProjectsRequest {
                 session_token: VALID_TOKEN.to_string(),
                 local_only: true,
+                ..ListProjectsRequest::default()
             }))
             .await
             .expect("list_projects succeeds")
@@ -158,6 +159,7 @@ fn a_daemon_holding_the_project() -> ADaemonHoldingTheProject {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         }],
     )
     .expect("seed the registry");

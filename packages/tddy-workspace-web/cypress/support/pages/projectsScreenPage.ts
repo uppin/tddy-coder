@@ -21,6 +21,9 @@ import {
   projectLocalGhToggle,
   projectHostGh,
   projectCardError,
+  projectDeletedCard,
+  projectRestore,
+  projectRestoreError,
   TEST_IDS,
 } from "../testIds";
 
@@ -243,4 +246,25 @@ export const projectsScreenPage = {
     }
     byTestId(TEST_IDS.projectsCreateProjectSubmit).click();
   },
+
+  // ---------------------------------------------------------------------------
+  // Deleted projects
+  // ---------------------------------------------------------------------------
+
+  /** Ticks (or unticks) "Show deleted projects". */
+  setShowDeleted(on: boolean) {
+    const box = byTestId(TEST_IDS.projectsShowDeleted, { timeout: 5000 });
+    if (on) box.check();
+    else box.uncheck();
+  },
+
+  /** A soft-deleted project's card. */
+  deletedCard: (projectId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(projectDeletedCard(projectId), { timeout: 5000, ...options }),
+
+  restore(projectId: string) {
+    byTestId(projectRestore(projectId), { timeout: 5000 }).should("not.be.disabled").click();
+  },
+
+  restoreError: (projectId: string) => byTestId(projectRestoreError(projectId), { timeout: 5000 }),
 };

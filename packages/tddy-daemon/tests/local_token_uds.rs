@@ -361,6 +361,7 @@ fn a_project_under(data_dir: &Path) -> AProject {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .expect("register the project");

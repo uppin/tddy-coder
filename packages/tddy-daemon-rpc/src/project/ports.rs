@@ -65,4 +65,25 @@ impl ProjectHandler for ProjectRpcHandler {
         self.set_project_orchestrator_defaults_at_project_coordinate(request)
             .await
     }
+
+    async fn update_project(
+        &self,
+        request: Request<tddy_service::proto::project::UpdateProjectRequest>,
+    ) -> Result<Response<tddy_service::proto::project::UpdateProjectResponse>, Status> {
+        self.update_project_at_project_coordinate(request).await
+    }
+
+    async fn delete_project(
+        &self,
+        request: Request<tddy_service::proto::project::DeleteProjectRequest>,
+    ) -> Result<Response<tddy_service::proto::project::DeleteProjectResponse>, Status> {
+        self.delete_project_at_project_coordinate(request).await
+    }
+
+    async fn restore_project(
+        &self,
+        request: Request<tddy_service::proto::project::RestoreProjectRequest>,
+    ) -> Result<Response<tddy_service::proto::project::RestoreProjectResponse>, Status> {
+        self.restore_project_at_project_coordinate(request).await
+    }
 }

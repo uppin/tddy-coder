@@ -49,6 +49,7 @@ impl EligibleDaemonSource for PeerProjectsSource {
             local_gh: false,
             home_session_id: String::new(),
             orchestrator_defaults: None,
+            ..ProtoProjectEntry::default()
         }]
     }
 }
@@ -116,6 +117,7 @@ async fn list_projects_with_local_only_skips_peer_fan_out() {
         .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: true,
+            ..ListProjectsRequest::default()
         }))
         .await
         .expect("list_projects succeeds");
@@ -139,6 +141,7 @@ async fn list_projects_without_local_only_merges_peer_rows() {
         .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: false,
+            ..ListProjectsRequest::default()
         }))
         .await
         .expect("list_projects succeeds");

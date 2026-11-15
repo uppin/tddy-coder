@@ -91,6 +91,7 @@ fn given_a_registered_project(data_dir: &std::path::Path, os_user: &str) {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .expect("seed project");
@@ -124,6 +125,7 @@ async fn set_project_default_branch_persists_the_ref_and_list_projects_reports_i
         .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: true,
+            ..ListProjectsRequest::default()
         }))
         .await
         .expect("list_projects succeeds")

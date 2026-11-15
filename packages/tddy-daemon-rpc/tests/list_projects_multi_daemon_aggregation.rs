@@ -107,6 +107,7 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
                 local_gh: false,
                 home_session_id: String::new(),
                 orchestrator_defaults: None,
+                ..ProtoProjectEntry::default()
             },
             ProtoProjectEntry {
                 project_id: marker.to_string(),
@@ -120,6 +121,7 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
                 local_gh: false,
                 home_session_id: String::new(),
                 orchestrator_defaults: None,
+                ..ProtoProjectEntry::default()
             },
         ]
     }
@@ -141,6 +143,7 @@ async fn list_projects_merges_entries_tagged_with_daemon_instance_id() {
         .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: false,
+            ..ListProjectsRequest::default()
         }))
         .await
         .expect("list_projects succeeds");

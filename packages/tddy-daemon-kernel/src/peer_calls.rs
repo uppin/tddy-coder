@@ -11,6 +11,10 @@ use tddy_service::proto::project::{
     SetProjectAccountsResponse, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
     SetProjectOrchestratorDefaultsRequest, SetProjectOrchestratorDefaultsResponse,
 };
+use tddy_service::proto::project::{
+    DeleteProjectRequest, DeleteProjectResponse, RestoreProjectRequest, RestoreProjectResponse,
+    UpdateProjectRequest, UpdateProjectResponse,
+};
 use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
 use tddy_service::proto::session::{
     DeleteSessionRequest, DeleteSessionResponse, StartSessionEvent, StartSessionRequest,
@@ -266,6 +270,63 @@ pub async fn forward_set_project_orchestrator_defaults(
         peer_instance_id,
         "project.ProjectService",
         "SetProjectOrchestratorDefaults",
+        request,
+    )
+    .await
+}
+
+/// Forward **UpdateProject** to another daemon in the common room — one leg of the logical-project
+/// fan-out, so the request is `local_only`.
+///
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer`].
+pub async fn forward_update_project(
+    room: &CommonRoom,
+    peer_instance_id: &str,
+    request: &UpdateProjectRequest,
+) -> Result<UpdateProjectResponse, Status> {
+    forward_unary(
+        room,
+        peer_instance_id,
+        "project.ProjectService",
+        "UpdateProject",
+        request,
+    )
+    .await
+}
+
+/// Forward **DeleteProject** to another daemon in the common room — one leg of the logical-project
+/// fan-out, so the request is `local_only`.
+///
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer`].
+pub async fn forward_delete_project(
+    room: &CommonRoom,
+    peer_instance_id: &str,
+    request: &DeleteProjectRequest,
+) -> Result<DeleteProjectResponse, Status> {
+    forward_unary(
+        room,
+        peer_instance_id,
+        "project.ProjectService",
+        "DeleteProject",
+        request,
+    )
+    .await
+}
+
+/// Forward **RestoreProject** to another daemon in the common room — one leg of the logical-project
+/// fan-out, so the request is `local_only`.
+///
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer`].
+pub async fn forward_restore_project(
+    room: &CommonRoom,
+    peer_instance_id: &str,
+    request: &RestoreProjectRequest,
+) -> Result<RestoreProjectResponse, Status> {
+    forward_unary(
+        room,
+        peer_instance_id,
+        "project.ProjectService",
+        "RestoreProject",
         request,
     )
     .await

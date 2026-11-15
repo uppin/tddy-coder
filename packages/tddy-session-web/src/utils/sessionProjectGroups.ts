@@ -1,3 +1,4 @@
+import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 
 /** One project's slice of the drawer: its header label and the sessions under it. */
@@ -61,4 +62,35 @@ export function groupSessionsByProject(
     groups.push({ projectId: null, label: "Other", sessions: other });
   }
   return groups;
+}
+
+/**
+ * A `ListProjects` answer (asked with `includeDeleted`) split into live rows and deleted project ids.
+ *
+ * The daemon gives every row of one project the same lifecycle, so a row's own `deletedAt`
+ * decides which side it lands on.
+ */
+export function splitDeletedProjects(projects: ReadonlyArray<ProjectEntry>): {
+  live: ProjectEntry[];
+  deletedProjectIds: ReadonlySet<string>;
+} {
+  const live: ProjectEntry[] = [];
+  const deletedProjectIds = new Set<string>();
+  for (const project of projects) {
+    if (project.deletedAt) {
+      deletedProjectIds.add(project.projectId);
+    } else {
+      live.push(project);
+    }
+  }
+  return { live, deletedProjectIds };
+}
+
+/** `sessions` without those of a soft-deleted project. */
+export function withoutDeletedProjectsSessions(
+  sessions: SessionEntry[],
+  deletedProjectIds: ReadonlySet<string>,
+): SessionEntry[] {
+  if (deletedProjectIds.size === 0) return sessions;
+  return sessions.filter((session) => !deletedProjectIds.has(session.projectId));
 }

@@ -5,8 +5,14 @@ mod clone_destination;
 mod coordinate_handlers;
 mod coordinate_route;
 mod entries;
+mod fan_out;
+mod lifecycle_listing;
 mod orchestrator_defaults;
 mod ports;
+mod project_sessions;
+mod recreate;
+mod soft_delete;
+mod update;
 
 use std::path::PathBuf;
 use std::sync::Arc;

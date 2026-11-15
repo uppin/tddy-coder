@@ -7,9 +7,13 @@ use uuid::Uuid;
 use super::clone_destination::project_path_under_home_from_user_relative;
 use super::coordinate_route::CoordinateRoute;
 use super::entries::{self, merge_listed_projects_with_peers};
+use super::lifecycle_listing;
+use super::recreate::{checkout_of, deleted_project_at};
 use super::ProjectRpcHandler;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
-use tddy_daemon_kernel::user_paths::{projects_path_for_user, repos_base_for_user};
+use tddy_daemon_kernel::user_paths::{
+    projects_path_for_user, repos_base_for_user, sessions_base_for_user,
+};
 use tddy_projects::project_storage::{self, ProjectData};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::project::ProjectEntry as ConnProjectEntry;
@@ -107,14 +111,23 @@ impl ProjectRpcHandler {
         // `local_only` returns just this daemon's rows and skips peer fan-out, breaking the
         // recursion when a peer aggregation call fans out back into `ListProjects`.
         let conn_projects = if req.local_only {
-            entries
+            lifecycle_listing::local_listing(entries, req.include_deleted)
         } else {
-            merge_listed_projects_with_peers(
+            let merged = merge_listed_projects_with_peers(
                 &*self.eligible_daemon_source,
                 &req.session_token,
                 entries,
             )
-            .await
+            .await;
+            let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            lifecycle_listing::reconciled_listing(
+                merged,
+                req.include_deleted,
+                &local_daemon_id,
+                &projects_dir,
+                &sessions_base,
+            )
         };
         let projects = conn_projects
             .iter()
@@ -150,6 +163,14 @@ impl ProjectRpcHandler {
         let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
 
+        // Creating a deleted project's repository again restores that project rather than adding a
+        // second row over the checkout it kept: matched by its git URL first, which needs no clone
+        // destination, then by the destination it would be cloned to.
+        if let Some(deleted) = deleted_project_at(&projects_dir, git_url, "")? {
+            return self
+                .restore_instead_of_creating(&req.session_token, git_url, deleted)
+                .await;
+        }
         let user_rel = req.user_relative_path.trim();
         let destination = if !user_rel.is_empty() {
             project_path_under_home_from_user_relative(os_user, user_rel)
@@ -159,6 +180,13 @@ impl ProjectRpcHandler {
                 .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
             base.join(name)
         };
+        if let Some(deleted) =
+            deleted_project_at(&projects_dir, git_url, &checkout_of(&destination))?
+        {
+            return self
+                .restore_instead_of_creating(&req.session_token, git_url, deleted)
+                .await;
+        }
         self.clone_without_deadline("create_project", os_user, git_url, &destination)
             .await?;
 
@@ -180,6 +208,7 @@ impl ProjectRpcHandler {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         };
         let repo_root = PathBuf::from(&project.main_repo_path);
         let default_remote = entries::resolve_default_remote_or_empty(

@@ -54,6 +54,7 @@ import { SessionsDrawerDetailPane, SessionTypeOptionsRegistrar } from "./Session
 import { useSessionsDrawerScreenActions } from "./useSessionsDrawerScreenActions";
 import { useResumedSessionLiveness } from "./useResumedSessionLiveness";
 import { sessionPaneClients } from "./sessionPaneClients";
+import { withoutDeletedProjectsSessions } from "./utils/sessionProjectGroups";
 import {
   SessionsDrawerLoadNotices,
   SessionsDrawerPaneError,
@@ -122,7 +123,12 @@ export function SessionsDrawerScreen({
   const { attachClaimRef, settleAttach, listGenerationRef, awaitingCreatedSessionIdRef, unknownSession, setUnknownSession } =
     claims;
 
-  const { projects, error: projectsError, reload: reloadProjects } = useSessionsDrawerProjects(projectClient, sessionToken);
+  const {
+    projects,
+    deletedProjectIds,
+    error: projectsError,
+    reload: reloadProjects,
+  } = useSessionsDrawerProjects(projectClient, sessionToken);
   // Main is per host: the pinned entries and the setup pane read the selected host's rows, the host
   // the ensure below targets.
   const { homes: projectHomes } = useSessionsDrawerProjectHomes(projects, selectedInstanceId);
@@ -186,6 +192,17 @@ export function SessionsDrawerScreen({
     selectedSessionId,
     listGenerationRef,
   });
+
+  // A soft-deleted project's sessions stay on disk but leave the list — not moved to **Other** —
+  // and so cannot be picked for a bulk delete either. The main pane keeps the raw list.
+  const listedSessions = useMemo(
+    () => withoutDeletedProjectsSessions(drawerSessions, deletedProjectIds),
+    [drawerSessions, deletedProjectIds],
+  );
+  const selectableSessions = useMemo(
+    () => withoutDeletedProjectsSessions(sortedSessions, deletedProjectIds),
+    [sortedSessions, deletedProjectIds],
+  );
 
   const { onSessionDisconnect, selectedTraffic } = useSessionsDrawerRuntimeAttachment({
     attachment,
@@ -281,7 +298,7 @@ export function SessionsDrawerScreen({
     handleBulkDelete,
     bulkDeleteFailures,
   } = useSessionsDrawerDeleteSelection({
-    sortedSessions,
+    sortedSessions: selectableSessions,
     selectedInstanceId,
     clientForHost,
     sessionToken,
@@ -351,7 +368,7 @@ export function SessionsDrawerScreen({
             <SessionsDrawerOpenListButton onOpen={() => setSessionListOpen(true)} />
           )}
           <SessionDrawer
-            sessions={drawerSessions}
+            sessions={listedSessions}
             selectedSessionId={selectedSessionId}
             onSelectSession={handleSelectSession}
             onCreateSession={handleCreateSession}
@@ -411,7 +428,7 @@ export function SessionsDrawerScreen({
             selectedInstanceId={selectedInstanceId ?? ""}
             onSessionCreated={handleSessionCreated}
             onStartMainFor={(projectId, host, spec) => startProjectHome(projectId, host, spec)}
-            onDefaultsSaved={() => reloadProjects()}
+            onProjectChanged={() => reloadProjects()}
             onCloseSettings={closeSettings}
             unknownSession={unknownSession}
             onUnknownHome={handleUnknownHome}

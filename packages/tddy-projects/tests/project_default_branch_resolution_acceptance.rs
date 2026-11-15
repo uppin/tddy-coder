@@ -95,6 +95,7 @@ fn legacy_project_resolves_its_default_live_from_the_repository_not_a_hardcoded_
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .expect("register legacy project");
@@ -133,6 +134,7 @@ fn a_stored_default_branch_wins_over_the_legacy_probe() {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     )
     .expect("register project with stored default");
@@ -165,6 +167,7 @@ fn any_remote_branch_including_a_slashed_name_is_a_valid_stored_default() {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     );
 
@@ -192,6 +195,7 @@ fn a_default_branch_with_shell_metacharacters_is_still_rejected() {
             local_gh: false,
             home_session_id: None,
             orchestrator_defaults: None,
+            lifecycle: Default::default(),
         },
     );
 

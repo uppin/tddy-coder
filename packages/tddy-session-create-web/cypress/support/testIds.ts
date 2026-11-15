@@ -255,3 +255,37 @@ export const sessionsProjectSettingsDefaultsSave = (projectId: string) =>
 /** `[data-testid="sessions-project-settings-defaults-error-<projectId>"]` — the daemon's reason a save was refused. */
 export const sessionsProjectSettingsDefaultsError = (projectId: string) =>
   `sessions-project-settings-defaults-error-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-name-<projectId>"]` — the project's name field in the pane. */
+export const sessionsProjectSettingsName = (projectId: string) => `sessions-project-settings-name-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-name-save-<projectId>"]` — renames the project (`UpdateProject`). */
+export const sessionsProjectSettingsNameSave = (projectId: string) =>
+  `sessions-project-settings-name-save-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-name-saved-<projectId>"]` — the rename was applied. */
+export const sessionsProjectSettingsNameSaved = (projectId: string) =>
+  `sessions-project-settings-name-saved-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-name-error-<projectId>"]` — the daemon's reason a rename was refused. */
+export const sessionsProjectSettingsNameError = (projectId: string) =>
+  `sessions-project-settings-name-error-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-delete-<projectId>"]` — **Delete project**, which asks first. */
+export const sessionsProjectSettingsDelete = (projectId: string) => `sessions-project-settings-delete-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-delete-confirm-<projectId>"]` — the delete confirmation. */
+export const sessionsProjectSettingsDeleteConfirm = (projectId: string) =>
+  `sessions-project-settings-delete-confirm-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-delete-confirm-yes-<projectId>"]` — confirms the delete. */
+export const sessionsProjectSettingsDeleteConfirmYes = (projectId: string) =>
+  `sessions-project-settings-delete-confirm-yes-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-delete-cancel-<projectId>"]` — keeps the project. */
+export const sessionsProjectSettingsDeleteCancel = (projectId: string) =>
+  `sessions-project-settings-delete-cancel-${projectId}`;
+
+/** `[data-testid="sessions-project-settings-delete-error-<projectId>"]` — the daemon's reason a delete was refused. */
+export const sessionsProjectSettingsDeleteError = (projectId: string) =>
+  `sessions-project-settings-delete-error-${projectId}`;

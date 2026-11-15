@@ -117,6 +117,8 @@ export const TEST_IDS = {
   // Projects screen (/projects)
   projectsScreen: "projects-screen",
   projectsList: "projects-list",
+  /** The "Show deleted projects" checkbox: lists soft-deleted projects too, each with Restore. */
+  projectsShowDeleted: "projects-show-deleted",
   projectsCreateProjectToggle: "projects-create-project-toggle",
   projectsCreateProjectForm: "projects-create-project-form",
   projectsNewProjectName: "projects-new-project-name",
@@ -320,6 +322,15 @@ export const projectCard = (projectId: string) => `project-card-${projectId}`;
 
 /** `[data-testid="project-card-error-<projectId>"]` — why the card's last action or load failed */
 export const projectCardError = (projectId: string) => `project-card-error-${projectId}`;
+
+/** `[data-testid="project-deleted-<projectId>"]` — a soft-deleted project's card (shown with "Show deleted projects"). */
+export const projectDeletedCard = (projectId: string) => `project-deleted-${projectId}`;
+
+/** `[data-testid="project-restore-<projectId>"]` — **Restore** on a deleted project's card. */
+export const projectRestore = (projectId: string) => `project-restore-${projectId}`;
+
+/** `[data-testid="project-restore-error-<projectId>"]` — the daemon's reason a restore was refused. */
+export const projectRestoreError = (projectId: string) => `project-restore-error-${projectId}`;
 
 /** `[data-testid="project-card-id-<projectId>"]` — the logical project id shown on its card */
 export const projectCardId = (projectId: string) => `project-card-id-${projectId}`;
