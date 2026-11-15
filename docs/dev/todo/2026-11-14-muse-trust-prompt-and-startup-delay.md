@@ -31,9 +31,9 @@ screen-read cadence; its tool-call timestamps would settle it.
 
 - Decide whether a daemon-cut worktree should start with `--trust-workspace` (this run only, not
   saved). It removes the prompt and its round trip, but loads the worktree's project skills and rules
-  without asking. Project `.muse/hooks.json` may need trust too, which ties into
-  [2026-11-14-muse-hooks-not-wired.md](2026-11-14-muse-hooks-not-wired.md). A spec decision for the
-  developer.
+  without asking. Project `.muse/hooks.json` needs trust too — proven by the probe in
+  [2026-11-15-muse-hooks-wired](../changesets/2026-11-15-muse-hooks-wired.md). A spec decision for
+  the developer.
 - The ~13.6s runtime init is Muse's to fix, not tddy's.
 
 **Why deferred:** low priority; the trust choice is a security decision, not a bug fix.

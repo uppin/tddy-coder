@@ -1,0 +1,3 @@
+# 2026-11-15 — tddy-agent-backend: the Muse `-c hooks=` value
+
+`muse_hooks::build_muse_hooks_config_value` (`MUSE_INSTALLED_EVENTS`): Claude's eight hook events as Muse Code's `-c hooks=` setting value — the hooks map without the file's top-level key — with `PreToolUse` matched to `request_user_input` and every hook report-only. Both builders share `claude_hooks::hook_entry_for_event`, so the `session-hook` commands stay byte-identical by construction. PR [#911](https://github.com/uppin/tddy-coder/pull/911). See [2026-11-15-muse-hooks-wired](../../../../docs/dev/changesets/2026-11-15-muse-hooks-wired.md).

@@ -33,7 +33,7 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_core::session_pointer::SessionPointer;
 
 use crate::claude_cli_spawn_steps::{
-    claude_cli_hooks, claude_cli_hooks_with_token, record_hook_answer_wait, ClaudeCliHooks,
+    claude_cli_hooks, record_hook_answer_wait, resumed_argv_hooks, ClaudeCliHooks,
 };
 use crate::cli_session_pointer::session_pointer_of;
 use crate::launch_ports::LaunchSessions;
@@ -412,36 +412,6 @@ impl SessionWiring {
             .filter(|_| spec.has(Capability::Hooks))?;
         Some(hooks.params(session_id, os_user))
     }
-}
-
-/// The hooks a resume renders again: only an argv adapter's (Muse's `-c hooks=…`), rebuilt around
-/// the start's recorded token. A file adapter's file is kept as its start wrote it, and a session
-/// that recorded no token (started before its agent declared hooks) resumes hookless, as before.
-fn resumed_argv_hooks(
-    spec: &CodingAgentSpec,
-    config: &DaemonConfig,
-    agent_tool_socket: &Path,
-    tddy_tools_path: &str,
-    meta: &SessionMetadata,
-) -> Result<Option<ClaudeCliHooks>, Status> {
-    if !spec.has(Capability::Hooks) {
-        return Ok(None);
-    }
-    let adapter = slots::hooks::adapter(&spec.agent.hooks.adapter)
-        .map_err(|e| Status::internal(e.to_string()))?;
-    if adapter.delivery() != slots::hooks::HooksDelivery::Argv {
-        return Ok(None);
-    }
-    let Some(hook_token) = meta.hook_token.clone() else {
-        return Ok(None);
-    };
-    Ok(Some(claude_cli_hooks_with_token(
-        config,
-        agent_tool_socket,
-        spec,
-        tddy_tools_path,
-        hook_token,
-    )))
 }
 
 impl ResumedWiring {

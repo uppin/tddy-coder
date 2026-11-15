@@ -4,7 +4,7 @@
 //! into the `muse -c hooks=<json>` argv entries: project `.muse/hooks.json` is not loaded before
 //! workspace trust, while `-c` installs the same hooks without a file the agent could commit —
 //! and merges with the user's `managed_hooks_path` hooks instead of replacing them
-//! (`docs/dev/todo/2026-11-14-muse-hooks-not-wired.md`, probe 2026-11-15).
+//! (`docs/dev/changesets/2026-11-15-muse-hooks-wired.md`, probe 2026-11-15).
 //!
 //! The events and commands are Claude's
 //! ([`crate::claude_hooks::build_claude_hooks_settings`]), built by the shared

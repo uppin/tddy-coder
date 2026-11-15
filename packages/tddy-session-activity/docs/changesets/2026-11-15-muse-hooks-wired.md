@@ -1,0 +1,3 @@
+# 2026-11-15 — tddy-session-activity: Muse questions recorded, product in texts
+
+`pending_question_for_hook` treats `request_user_input` as a question tool — its input parses as Claude's (`id` ignored, missing `multiSelect` reads single-choice) — and its notification reads "asks:". `notification_for_activity_status` names the session agent's product from its spec instead of the hardcoded "Claude Code"; the hook report resolves it in the same lookup as its `hooks` gate. PR [#911](https://github.com/uppin/tddy-coder/pull/911). See [2026-11-15-muse-hooks-wired](../../../../docs/dev/changesets/2026-11-15-muse-hooks-wired.md).

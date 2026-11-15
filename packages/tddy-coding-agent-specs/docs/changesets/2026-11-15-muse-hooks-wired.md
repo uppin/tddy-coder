@@ -1,0 +1,3 @@
+# 2026-11-15 — tddy-coding-agent-specs: argv-delivered hooks and the Muse adapter
+
+`HooksAdapter::try_render` returns `RenderedHooks::File | Argv`, `delivery()` classifies the two, and `slots::render` splices argv renders into `argv_extra` (via the extracted `render_hooks_slot`) instead of writing a file. `MuseConfigArg` (`muse-config-arg`) renders `-c hooks=<compact json>`, refusing socket-less params as `NoDaemonSocket`. `muse.yaml` declares the adapter with `capabilities: [hooks]`, without `ask_user_question`. PR [#911](https://github.com/uppin/tddy-coder/pull/911). See [2026-11-15-muse-hooks-wired](../../../../docs/dev/changesets/2026-11-15-muse-hooks-wired.md).

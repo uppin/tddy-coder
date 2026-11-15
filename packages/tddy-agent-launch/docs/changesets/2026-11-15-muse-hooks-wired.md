@@ -1,0 +1,3 @@
+# 2026-11-15 — tddy-agent-launch: resumes render argv hooks again
+
+`claude_cli_hooks_with_token` / `resumed_argv_hooks` rebuild a resume's hooks around its recorded token — for an argv adapter only, minting none; `ResumedWiring::hook_params` carries them and `resume.rs` passes them to slots, while file adapters keep the start's file untouched. `write_jail_hooks` installs nothing for an argv adapter, so a jailed Muse session runs hookless like a jailed Claude one. PR [#911](https://github.com/uppin/tddy-coder/pull/911). See [2026-11-15-muse-hooks-wired](../../../../docs/dev/changesets/2026-11-15-muse-hooks-wired.md).
