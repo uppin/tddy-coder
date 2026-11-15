@@ -6,6 +6,7 @@ codebase placement, attachment staging (`attachments/`) and start progress. `tdd
 imports nothing from `tddy-web` or `livekit-client` (`src/packageBoundary.test.ts`).
 
 - **Orchestrator composer**: `OrchestratorComposer` — the centred prompt box a project header's "+" opens, with model, effort, provider account, host (`CreateSessionHostField`) and attachments; `buildOrchestratorComposerRequest` sends `session_role: orchestrator` with no placement fields. Product: [Session drawer § Orchestrator composer](../../../docs/ft/web/session-drawer.md#orchestrator-composer)
+- **Name field**: `CreateSessionNameField` (`create-session-name-input`), the session's optional name; `buildStartSessionRequest` and the orchestrator request send it trimmed as `display_name`, never for a `tddy_coder` session type, whose field is hidden (as on the main variant)
 - **Provider field (vendor or provider account for a CLI session)**: [create-session-provider.md](create-session-provider.md)
 - **Start progress, cancelling a start, keep-alive events**: [start-progress.md](start-progress.md)
 - **Passphrase prompt while a start clones (a slot the host application fills)**: [start-passphrase-prompt.md](start-passphrase-prompt.md)

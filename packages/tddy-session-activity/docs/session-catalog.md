@@ -11,6 +11,10 @@ the delete paths of the daemon's other services. None of them holds session-host
 | `session_list_enrichment` | the display fields a `ListSessions` row carries beyond `.session.yaml` — goal, workflow state, elapsed time, agent, model, the stack plan and a pending elicitation — read from the session's `changeset.yaml` (parity with the TUI's status bar), and `apply_session_list_status_to_proto`. Both take the host's `CodingAgentRegistry`: a session whose type a coding agent declares (`for_session_type`) runs no workflow, so it has no goal or workflow state |
 | `session_deletion` | filesystem-safe deletion: validating the session id, resolving the directory under the sessions tree, stopping a recorded live PID (SIGTERM, a wait, then SIGKILL; `signal_pid`), closing the session room, tearing down a workspace sandbox, and deciding which session types remove a daemon-managed worktree |
 
+`session_reader` carries the name the session was given (`SessionEntry.display_name`, from
+`.session.yaml`'s `display_name`; empty for an unnamed session) onto the `ListSessions` row as
+`display_name` — the label every surface puts first.
+
 `session_reader` also answers, per session, whether its agent **reads this host's filesystem**
 (`SessionEntry.reads_host_paths`, carried onto the `ListSessions` row as `reads_host_paths`):
 `tddy_changeset::reads_host_paths` over the session's `.session.yaml`, false for a jailed agent

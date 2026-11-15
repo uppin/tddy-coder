@@ -33,7 +33,7 @@ budget.
 | `session_lifecycle` | the unified session directory and its id rules |
 | `session_github_source` | the session's recorded GitHub source: `SessionGithubSource { Vault, LocalGh }`, `write_session_github_source`, `read_session_github_source` (`Ok(None)` when none was recorded) |
 | `session_provider_account` | the provider account a session runs on: `SessionProviderAccount { account_id, model }`, `write_session_provider_account`, `read_session_provider_account` (`Ok(None)` when the session runs on its vendor) |
-| `session_metadata`, `session_agent`, `session_activity`, `session_label`, `session_participant_metadata`, `session_context` | the per-session files beside the changeset |
+| `session_metadata`, `session_agent`, `session_activity`, `session_label`, `session_display_name`, `session_participant_metadata`, `session_context` | the per-session files beside the changeset |
 | `agent_activity` | the agent tool-call activity log |
 | `pending_question` | the question a session is waiting on: `PendingQuestion`, `write_pending_question`, `clear_pending_question`, `read_pending_question` |
 | `elapsed_format`, `source_path` | small formatting and path helpers |
@@ -56,6 +56,22 @@ never a key — a resume re-reads the key from the owner's vault, so a key rotat
 start is what the resume sees. A missing file is `Ok(None)`; an unreadable or malformed one is
 `WorkflowError::ChangesetInvalid`. See
 [Claude Code CLI session § Persistence and resume](../../../docs/ft/daemon/claude-cli-session.md#persistence-and-resume).
+
+## Session name (`session_display_name`)
+
+`SessionMetadata.display_name` is the name an operator, an orchestrator or the session's own agent
+gave the session; absent (never written) for an unnamed session, so an unnamed record reads exactly
+as one from before names existed. Every writer goes through `normalize_display_name`: surrounding
+whitespace is trimmed, an empty name is `None` (the name is cleared), and a name over
+`DISPLAY_NAME_MAX_CHARS` (80 characters, not bytes) or holding a control character is refused
+(`DisplayNameError::TooLong { chars, max }`, `ControlCharacter`) rather than cut or cleaned.
+`rename_session(session_dir, raw)` records the normalised name, or clears it, and changes no other
+field — `updated_at` included, since naming a session is not activity in it — and answers the name as
+recorded; a directory with no readable record is `RenameSessionError::Unreadable`.
+
+`session_label::session_display_label(display_name, repo_path, workflow_goal, session_id)` puts the
+name first (trimmed; blank counts as none), ahead of the basename of `repo_path`, `workflow_goal` and
+the short id. Pinned by `tests/session_display_name.rs` and `tests/session_display_label_acceptance.rs`.
 
 ## Harness resume token (`session_metadata`)
 
