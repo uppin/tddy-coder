@@ -387,4 +387,52 @@ describe("create session request builder", () => {
     // Then it is sent empty — a tool session's agent is launched by tddy-coder, which takes none
     expect(request.effort).to.equal("");
   });
+  it("sends the name the operator gave a CLI session, trimmed", () => {
+    // Given a claude-cli form whose Name field holds a padded name
+    const form = aFormWith({ displayName: "  Fix the login flow  " });
+
+    // When the request is built
+    const request = buildStartSessionRequest(form, null, []);
+
+    // Then it goes out as `display_name`, without the padding
+    expect(request.displayName).to.equal("Fix the login flow");
+  });
+
+  it("sends no name for a CLI session whose Name field is blank", () => {
+    // Given a claude-cli form whose Name field holds only whitespace
+    const form = aFormWith({ displayName: "   " });
+
+    // When the request is built
+    const request = buildStartSessionRequest(form, null, []);
+
+    // Then the session starts unnamed — labelled by its worktree, as before
+    expect(request.displayName ?? "").to.equal("");
+  });
+
+  it("sends the name the operator gave an orchestrator", () => {
+    // Given the Session orchestrator switch is on and a name is given
+    const form = aFormWith({ orchestrator: true, displayName: "Night shift" });
+
+    // When the request is built
+    const request = buildStartSessionRequest(form, null, []);
+
+    // Then the orchestrator starts under that name
+    expect(request.displayName).to.equal("Night shift");
+  });
+
+  it("sends no name for a tool session, whatever the form holds", () => {
+    // Given a tool session with a name left over from a CLI session's form
+    const form = aFormWith({
+      sessionType: "tool",
+      sessionLaunch: "tddy_coder",
+      displayName: "Fix the login flow",
+    });
+
+    // When the request is built
+    const request = buildStartSessionRequest(form, null, []);
+
+    // Then it is sent empty — the daemon refuses a name on a tddy_coder launch, whose tddy-coder
+    // writes the session's record itself
+    expect(request.displayName ?? "").to.equal("");
+  });
 });

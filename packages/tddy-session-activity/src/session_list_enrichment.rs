@@ -516,6 +516,7 @@ state:
         .unwrap();
 
         let mut proto = ProtoSessionEntry {
+            display_name: String::new(),
             session_id: "apply-proto-1".to_string(),
             created_at: String::new(),
             status: String::new(),
@@ -696,6 +697,7 @@ orchestrator_session_id: home-session-1
 
         // Write .session.yaml with session_type and model — new fields, compile error until added.
         let metadata = SessionMetadata {
+            display_name: None,
             effort: None,
             session_id: "sess-claude-cli-enrich-1".to_string(),
             project_id: "proj-x".to_string(),
@@ -771,6 +773,7 @@ orchestrator_session_id: home-session-1
         fs::create_dir_all(&session_dir).unwrap();
 
         let metadata = SessionMetadata {
+            display_name: None,
             effort: None,
             session_id: "sess-act-enrich-1".to_string(),
             project_id: "proj-x".to_string(),
@@ -831,6 +834,7 @@ orchestrator_session_id: home-session-1
         fs::create_dir_all(&session_dir).unwrap();
 
         let metadata = SessionMetadata {
+            display_name: None,
             effort: None,
             session_id: "sess-act-absent-1".to_string(),
             project_id: "proj-x".to_string(),
@@ -891,6 +895,7 @@ orchestrator_session_id: home-session-1
         // Write a standard tool session + changeset
         use tddy_core::SessionMetadata;
         let metadata = SessionMetadata {
+            display_name: None,
             effort: None,
             session_id: "sess-tool-act-1".to_string(),
             project_id: "proj-t".to_string(),
@@ -971,6 +976,7 @@ sessions:
         fs::create_dir_all(&session_dir).unwrap();
 
         let metadata = SessionMetadata {
+            display_name: None,
             effort: None,
             session_id: "sess-proto-act-1".to_string(),
             project_id: "proj-z".to_string(),
@@ -1009,6 +1015,7 @@ sessions:
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
         let mut proto = ProtoSessionEntry {
+            display_name: String::new(),
             session_id: "sess-proto-act-1".to_string(),
             created_at: String::new(),
             status: String::new(),
@@ -1069,6 +1076,7 @@ sessions:
         let session_dir = dir.path().join("sess-pe-unit-1");
         fs::create_dir_all(&session_dir).unwrap();
         let metadata = SessionMetadata {
+            display_name: None,
             effort: None,
             session_id: "sess-pe-unit-1".to_string(),
             project_id: "proj-1".to_string(),

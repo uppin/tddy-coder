@@ -62,6 +62,7 @@ fn write_claude_cli_session(session_dir: &std::path::Path, hook_token: &str) {
         .unwrap()
         .to_string();
     let metadata = SessionMetadata {
+        display_name: None,
         effort: None,
         session_id,
         project_id: "proj-activity-unit".to_string(),

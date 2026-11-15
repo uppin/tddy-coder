@@ -392,6 +392,7 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
 
     // Write a .session.yaml with session_type and model.
     let meta = SessionMetadata {
+        display_name: None,
         effort: None,
         session_id: session_id.to_string(),
         project_id: TEST_PROJECT_ID.to_string(),
@@ -502,6 +503,7 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
 
     // Simulate an inactive claude-cli session (process previously exited).
     let meta = SessionMetadata {
+        display_name: None,
         effort: None,
         session_id: session_id.to_string(),
         project_id: TEST_PROJECT_ID.to_string(),

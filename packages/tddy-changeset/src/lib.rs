@@ -15,6 +15,7 @@ pub mod project_stack_store;
 pub mod session_activity;
 pub mod session_agent;
 pub mod session_context;
+pub mod session_display_name;
 pub mod session_github_source;
 pub mod session_label;
 pub mod session_lifecycle;

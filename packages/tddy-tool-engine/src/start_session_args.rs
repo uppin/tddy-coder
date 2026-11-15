@@ -63,6 +63,9 @@ pub struct StartSessionArgs {
     /// The standing role asked for: `orchestrator` (`#orchestrators` 1/11), or empty for an
     /// ordinary session. The daemon admits it by who is asking and places the session itself.
     pub session_role: String,
+    /// The session's name, as the web's rename sets it: trimmed, empty for none, at most 80
+    /// characters on one line.
+    pub display_name: String,
 }
 
 /// A document on a connected host to attach to the new session — the form's host-document

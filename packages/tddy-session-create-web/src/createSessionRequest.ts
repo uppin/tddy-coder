@@ -99,6 +99,12 @@ export interface CreateSessionFormValues {
   sshConfigHost: string;
   /** The **Session orchestrator** switch is on: the start asks for the orchestrator role. */
   orchestrator?: boolean;
+  /**
+   * The name the operator gave the session in the **Name** field, as typed; empty or absent for an
+   * unnamed session. Sent trimmed as `display_name`, never for a tool session — the daemon refuses a
+   * name on a `tddy_coder` launch, whose tddy-coder writes the session's record itself.
+   */
+  displayName?: string;
 }
 
 /**

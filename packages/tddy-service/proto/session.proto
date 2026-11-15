@@ -46,6 +46,13 @@ service SessionService {
   rpc EnsureProjectHomeSession(EnsureProjectHomeSessionRequest) returns (EnsureProjectHomeSessionResponse);
   rpc SignalSession(SignalSessionRequest) returns (SignalSessionResponse);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+  // Give a session a name, or clear it: the name is recorded as `display_name` in the session's
+  // `.session.yaml` and listed as `SessionEntry.display_name`, where it names the session before
+  // anything derived (the drawer row, a Telegram alert). Answered by the daemon holding the session —
+  // a client sends it to the session's owning host, as it does `DeleteSession`. NOT_FOUND for a
+  // session this daemon does not hold; INVALID_ARGUMENT for a name over the limit or with a control
+  // character.
+  rpc RenameSession(RenameSessionRequest) returns (RenameSessionResponse);
   // One measurement of a session's checkout, for the daemon hosting that session's room.
   //
   // A session room lives on the daemon running the session's agent; when the repo is remote that
@@ -152,6 +159,20 @@ message DeleteSessionRequest {
 
 message DeleteSessionResponse {
   bool ok = 1;
+}
+
+message RenameSessionRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // The session's new name. Surrounding whitespace is trimmed; empty (or only whitespace) clears the
+  // name, so the session is called by its derived label again. At most 80 characters, and no
+  // control character (a name is one line).
+  string display_name = 3;
+}
+
+message RenameSessionResponse {
+  // The name as recorded: trimmed, and empty when the request cleared it.
+  string display_name = 1;
 }
 
 // Asks the daemon holding a checkout to measure it. `session_id` names the session on the
@@ -377,6 +398,11 @@ message SessionEntry {
   // `daemon_instance_id` it is the stack's address (`pr_stack.StackAddress`), which is how the
   // PR-stack chat screen loads and edits its plan.
   string stack_id = 38;
+  // The name an operator or an orchestrator gave the session (`RenameSession`, or
+  // `StartSessionRequest.display_name`), from its `.session.yaml`; empty for a session never named.
+  // When set it is the session's label everywhere — the drawer row, a Telegram alert — ahead of the
+  // derived one (`tddy_changeset::session_label`, `sessionDrawerLabel`).
+  string display_name = 39;
 }
 
 // An orchestrator's mark on one of its sessions, as `.session.yaml` records it.
@@ -730,6 +756,11 @@ message StartSessionRequest {
   // an agent that declares none, is refused with INVALID_ARGUMENT naming the agent. Recorded in the
   // session's `.session.yaml` and re-applied on resume. (`#orchestrators` 3/11)
   string effort = 48;
+  // The session's name, recorded in its `.session.yaml` when it is created, under the rules
+  // `RenameSessionRequest.display_name` states (trimmed; empty = unnamed; at most 80 characters, no
+  // control character). Refused with INVALID_ARGUMENT for a `tddy_coder` session type, whose record
+  // is written by its own process.
+  string display_name = 49;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

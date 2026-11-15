@@ -884,6 +884,20 @@ export const sessionsInspectorDeleteConfirm = (sessionId: string) =>
 export const sessionsInspectorTerminateBtn = (sessionId: string) =>
   `sessions-inspector-terminate-${sessionId}`;
 
+/** `[data-testid="session-name-label-<sessionId>"]` — the session's name (or its derived label, muted,
+ *  when unnamed) at the top of the inspector's Details tab; double-click opens the editor. */
+export const sessionNameLabel = (sessionId: string) => `session-name-label-${sessionId}`;
+
+/** `[data-testid="session-name-rename-<sessionId>"]` — the "Rename" button beside the session's name. */
+export const sessionNameRenameBtn = (sessionId: string) => `session-name-rename-${sessionId}`;
+
+/** `[data-testid="session-name-input-<sessionId>"]` — the inline name editor: Enter saves, Escape or
+ *  blur cancels. */
+export const sessionNameInput = (sessionId: string) => `session-name-input-${sessionId}`;
+
+/** `[data-testid="session-name-error-<sessionId>"]` — why the host refused a rename. */
+export const sessionNameError = (sessionId: string) => `session-name-error-${sessionId}`;
+
 /** `[data-testid="sessions-runtime-terminal-<sessionId>"]` — per-session terminal container
  *  mounted in the runtime registry (one per attached session; the focused one is CSS-visible,
  *  the others are `display:none` but still mounted). */

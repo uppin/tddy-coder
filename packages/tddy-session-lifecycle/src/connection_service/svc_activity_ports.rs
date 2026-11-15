@@ -388,6 +388,15 @@ impl ActivityService for PeerRoutedActivity {
         self.local.report_operator_notification(request).await
     }
 
+    /// Not routed, for the same reason: `tddy-tools rename-session` runs inside the session it
+    /// names, on the host that holds it.
+    async fn rename_own_session(
+        &self,
+        request: Request<tddy_service::proto::activity::RenameOwnSessionRequest>,
+    ) -> Result<Response<tddy_service::proto::activity::RenameOwnSessionResponse>, Status> {
+        self.local.rename_own_session(request).await
+    }
+
     type StreamSessionActivityStream = MpscResultStream<AgentActivityRecord>;
 
     async fn stream_session_activity(

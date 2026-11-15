@@ -54,6 +54,7 @@ async fn list_sessions_unit_returns_new_metadata_fields() {
     fs::create_dir_all(&session_dir).unwrap();
 
     let metadata = SessionMetadata {
+        display_name: None,
         effort: None,
         session_id: session_id.to_string(),
         project_id: "".to_string(),
@@ -105,4 +106,35 @@ async fn list_sessions_unit_returns_new_metadata_fields() {
     assert_eq!(sessions[0].updated_at, "2026-06-21T12:00:00Z");
     assert_eq!(sessions[0].previous_session_id, "ancestor-session");
     assert_eq!(sessions[0].livekit_room, "room-xyz-ct");
+    assert_eq!(sessions[0].display_name, "");
+}
+
+#[tokio::test]
+async fn list_sessions_lists_the_name_a_session_was_given() {
+    // Given a named session
+    let temp = tempfile::tempdir().unwrap();
+    let session_id = "list-test-session-named";
+    let session_dir = temp.path().join(SESSIONS_SUBDIR).join(session_id);
+    fs::create_dir_all(&session_dir).unwrap();
+    let metadata: SessionMetadata = serde_yaml::from_str(&format!(
+        "session_id: {session_id}\nproject_id: p\ncreated_at: \"2026-11-15T10:00:00Z\"\n\
+         updated_at: \"2026-11-15T10:00:00Z\"\nstatus: exited\nsession_type: workspace\n\
+         display_name: Fix the login flow\n"
+    ))
+    .unwrap();
+    write_session_metadata(&session_dir, &metadata).unwrap();
+
+    // When
+    let sessions = make_unit_service(temp.path().to_path_buf())
+        .list_sessions(Request::direct(ListSessionsRequest {
+            session_token: "valid".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner()
+        .sessions;
+
+    // Then
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].display_name, "Fix the login flow");
 }

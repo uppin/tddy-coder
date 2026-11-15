@@ -152,6 +152,7 @@ fn write_session(sessions_base: &Path) {
     let session_dir = sessions_base.join("sessions").join(SESSION_ID);
     std::fs::create_dir_all(&session_dir).expect("the session dir");
     let meta = SessionMetadata {
+        display_name: None,
         effort: None,
         session_id: SESSION_ID.to_string(),
         project_id: "a-project".to_string(),

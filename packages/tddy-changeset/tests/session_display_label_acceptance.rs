@@ -3,8 +3,9 @@
 //! PRD: docs/ft/daemon/session-notifications.md (FR1, AC1, AC2).
 //!
 //! The rule is the one `tddy-web`'s session drawer already applies
-//! (`packages/tddy-session-web/src/utils/sessionDrawerLabel.ts`): the basename of `repo_path`, falling
-//! back to `workflow_goal`, falling back to the first eight characters of `session_id`. These
+//! (`packages/tddy-session-web/src/utils/sessionDrawerLabel.ts`): the name the session was given
+//! (`display_name`), falling back to the basename of `repo_path`, falling back to `workflow_goal`,
+//! falling back to the first eight characters of `session_id`. These
 //! tests are the Rust half of that parity — each case mirrors a case in
 //! `packages/tddy-session-web/src/utils/sessionDrawerLabel.test.ts`.
 
@@ -18,7 +19,7 @@ fn names_a_session_after_the_basename_of_its_repository_path() {
     let repo_path = "/home/dev/my-feature-branch";
 
     // When
-    let label = session_display_label(repo_path, "Build the session drawer", A_SESSION_ID);
+    let label = session_display_label("", repo_path, "Build the session drawer", A_SESSION_ID);
 
     // Then
     assert_eq!(label, "my-feature-branch");
@@ -30,7 +31,7 @@ fn ignores_a_trailing_slash_when_taking_the_repository_basename() {
     let repo_path = "/home/dev/my-feature-branch/";
 
     // When
-    let label = session_display_label(repo_path, "Build the session drawer", A_SESSION_ID);
+    let label = session_display_label("", repo_path, "Build the session drawer", A_SESSION_ID);
 
     // Then
     assert_eq!(label, "my-feature-branch");
@@ -42,7 +43,7 @@ fn ignores_surrounding_whitespace_around_the_repository_path() {
     let repo_path = "  /home/dev/my-feature-branch  ";
 
     // When
-    let label = session_display_label(repo_path, "Build the session drawer", A_SESSION_ID);
+    let label = session_display_label("", repo_path, "Build the session drawer", A_SESSION_ID);
 
     // Then
     assert_eq!(label, "my-feature-branch");
@@ -54,7 +55,7 @@ fn falls_back_to_the_workflow_goal_when_the_session_has_no_repository_path() {
     let repo_path = "";
 
     // When
-    let label = session_display_label(repo_path, "Build the session drawer", A_SESSION_ID);
+    let label = session_display_label("", repo_path, "Build the session drawer", A_SESSION_ID);
 
     // Then
     assert_eq!(label, "Build the session drawer");
@@ -66,7 +67,7 @@ fn falls_back_to_the_workflow_goal_when_the_repository_path_is_the_filesystem_ro
     let repo_path = "/";
 
     // When
-    let label = session_display_label(repo_path, "Build the session drawer", A_SESSION_ID);
+    let label = session_display_label("", repo_path, "Build the session drawer", A_SESSION_ID);
 
     // Then
     assert_eq!(label, "Build the session drawer");
@@ -78,7 +79,7 @@ fn falls_back_to_the_first_eight_characters_of_the_session_id_when_nothing_else_
     let session_id = "deadbeef-0000-0000-0000-000000000000";
 
     // When
-    let label = session_display_label("", "", session_id);
+    let label = session_display_label("", "", "", session_id);
 
     // Then
     assert_eq!(label, "deadbeef");
@@ -91,7 +92,7 @@ fn falls_back_to_the_whole_session_id_when_it_is_shorter_than_eight_characters()
     let session_id = "abc123";
 
     // When
-    let label = session_display_label("", "", session_id);
+    let label = session_display_label("", "", "", session_id);
 
     // Then
     assert_eq!(label, "abc123");
@@ -107,7 +108,7 @@ fn treats_the_display_placeholder_as_an_absent_workflow_goal() {
     let session_id = "deadbeef-0000-0000-0000-000000000000";
 
     // When
-    let label = session_display_label("", "\u{2014}", session_id);
+    let label = session_display_label("", "", "\u{2014}", session_id);
 
     // Then
     assert_eq!(label, "deadbeef");
@@ -119,8 +120,48 @@ fn still_prefers_the_repository_basename_over_the_display_placeholder() {
     let repo_path = "/home/dev/my-feature-branch";
 
     // When
-    let label = session_display_label(repo_path, "\u{2014}", A_SESSION_ID);
+    let label = session_display_label("", repo_path, "\u{2014}", A_SESSION_ID);
 
     // Then
+    assert_eq!(label, "my-feature-branch");
+}
+
+#[test]
+fn names_a_session_after_the_name_it_was_given_before_anything_derived() {
+    // Given a session given a name, with a repository path it would otherwise be called after
+    let repo_path = "/home/dev/my-feature-branch";
+
+    // When
+    let label = session_display_label(
+        "Fix the login flow",
+        repo_path,
+        "Build the session drawer",
+        A_SESSION_ID,
+    );
+
+    // Then
+    assert_eq!(label, "Fix the login flow");
+}
+
+#[test]
+fn trims_the_whitespace_around_a_given_name() {
+    // When
+    let label = session_display_label(
+        "  Fix the login flow  ",
+        "/home/dev/my-feature-branch",
+        "",
+        A_SESSION_ID,
+    );
+
+    // Then
+    assert_eq!(label, "Fix the login flow");
+}
+
+#[test]
+fn ignores_a_name_of_only_whitespace() {
+    // When
+    let label = session_display_label("   ", "/home/dev/my-feature-branch", "", A_SESSION_ID);
+
+    // Then the derived label stands
     assert_eq!(label, "my-feature-branch");
 }

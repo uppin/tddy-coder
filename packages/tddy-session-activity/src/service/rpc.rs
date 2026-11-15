@@ -15,11 +15,12 @@ use tddy_service::proto::activity::{
     AgentActivityRecord as ProtoAgentActivityRecord, AwaitQuestionAnswerRequest,
     AwaitQuestionAnswerResponse, DeltaScope as ProtoDeltaScope, GetAcpReplayPageRequest,
     GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
-    IsSessionTerminalServedRequest, IsSessionTerminalServedResponse, ReportAgentActivityRequest,
-    ReportAgentActivityResponse, ReportOperatorNotificationRequest,
-    ReportOperatorNotificationResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
-    SessionNotificationEvent, SessionUsageSnapshot, StreamAcpReplayRequest, StreamMode,
-    StreamSessionActivityRequest, StreamSessionNotificationsRequest, StreamSessionUsageRequest,
+    IsSessionTerminalServedRequest, IsSessionTerminalServedResponse, RenameOwnSessionRequest,
+    RenameOwnSessionResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
+    ReportOperatorNotificationRequest, ReportOperatorNotificationResponse,
+    ReportSessionStatusRequest, ReportSessionStatusResponse, SessionNotificationEvent,
+    SessionUsageSnapshot, StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
+    StreamSessionNotificationsRequest, StreamSessionUsageRequest,
 };
 use tddy_worktree_service::stream::MpscResultStream;
 
@@ -51,6 +52,14 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
     ) -> Result<Response<ReportOperatorNotificationResponse>, Status> {
         self.report_operator_notification_impl(request.into_inner())
             .await
+    }
+
+    /// An agent naming its own session (`tddy-tools rename-session`) — see `own_session_name`.
+    async fn rename_own_session(
+        &self,
+        request: Request<RenameOwnSessionRequest>,
+    ) -> Result<Response<RenameOwnSessionResponse>, Status> {
+        self.rename_own_session_impl(request.into_inner()).await
     }
 
     /// An orchestrated session's `PermissionRequest` hook waiting for its orchestrator's answer —

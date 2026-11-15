@@ -19,9 +19,10 @@ use tddy_rpc::{
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
-    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, ResumeSessionRequest,
-    ResumeSessionResponse, SessionService, SessionServiceServer, SignalSessionRequest,
-    SignalSessionResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse,
+    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, RenameSessionRequest,
+    RenameSessionResponse, ResumeSessionRequest, ResumeSessionResponse, SessionService,
+    SessionServiceServer, SignalSessionRequest, SignalSessionResponse, StartSessionEvent,
+    StartSessionRequest, StartSessionResponse,
 };
 
 /// The session id the fixture answers every start with, so the CLI's printed output can be checked.
@@ -99,6 +100,13 @@ impl SessionService for StartRecordingSessionService {
         &self,
         _request: Request<DeleteSessionRequest>,
     ) -> Result<Response<DeleteSessionResponse>, Status> {
+        Err(Status::unimplemented("not served by this fixture"))
+    }
+
+    async fn rename_session(
+        &self,
+        _request: Request<RenameSessionRequest>,
+    ) -> Result<Response<RenameSessionResponse>, Status> {
         Err(Status::unimplemented("not served by this fixture"))
     }
 

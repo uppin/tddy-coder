@@ -68,6 +68,7 @@ fn a_daemon_config() -> DaemonConfig {
 fn write_claude_cli_session(session_dir: &std::path::Path, initial_activity_status: &str) {
     std::fs::create_dir_all(session_dir).unwrap();
     let meta = SessionMetadata {
+        display_name: None,
         effort: None,
         session_id: SESSION_ID.to_string(),
         project_id: "test-project".to_string(),

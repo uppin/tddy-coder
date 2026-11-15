@@ -25,6 +25,8 @@
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
+mod rename_session;
+
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -39,6 +41,8 @@ use crate::project_home_tools::{
     resolve_target, target_host_property, tool_def, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
 };
 use crate::ToolOutcome;
+
+pub use rename_session::{rename_session_tool_def, RENAME_SESSION};
 
 pub const SET_SESSION_MARK: &str = "SetSessionMark";
 pub const DELETE_SESSION: &str = "DeleteSession";
@@ -182,6 +186,18 @@ pub trait ProjectHomeLifecyclePort: ProjectHomePort {
         mark: Option<&OrchestrationMark>,
     ) -> Result<(), String> {
         let _ = (target, mark);
+        Err(NO_LIFECYCLE.to_string())
+    }
+
+    /// Record `display_name` as `target`'s name in its `.session.yaml`, or clear its name when it
+    /// is `None` — as the web's rename does (`RenameSession`). The tool has already normalised the
+    /// name; a running session is renamed like a stopped one.
+    async fn rename_session(
+        &self,
+        target: &SessionTarget,
+        display_name: Option<&str>,
+    ) -> Result<(), String> {
+        let _ = (target, display_name);
         Err(NO_LIFECYCLE.to_string())
     }
 

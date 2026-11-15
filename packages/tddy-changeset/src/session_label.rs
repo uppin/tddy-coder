@@ -3,10 +3,11 @@
 //! Every surface that shows a session — the web drawer, a Telegram alert, an indicator tooltip —
 //! must call it the same thing, or an operator reading one cannot find it in the other. The rule
 //! is deliberately a mirror of the web's `sessionDrawerLabel`
-//! (`packages/tddy-session-web/src/utils/sessionDrawerLabel.ts`): **the basename of `repo_path`, else
+//! (`packages/tddy-session-web/src/utils/sessionDrawerLabel.ts`): **the name the session was given
+//! (`display_name`, [`crate::session_display_name`]), else the basename of `repo_path`, else
 //! `workflow_goal`, else the first eight characters of `session_id`**. Change one side and the
 //! other must change with it — the parity is pinned case for case by
-//! `packages/tddy-core/tests/session_display_label_acceptance.rs` against
+//! `packages/tddy-changeset/tests/session_display_label_acceptance.rs` against
 //! `packages/tddy-session-web/src/utils/sessionDrawerLabel.test.ts`.
 
 /// The display placeholder the daemon's session-list enrichment puts in a field it has no value
@@ -36,12 +37,20 @@ pub fn label_from_repo_path(repo_path: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The human-readable label for a session, from the three values `ListSessions` reports.
+/// The human-readable label for a session, from the four values `ListSessions` reports.
 ///
-/// See the module docs for the rule and why it is shared. Never returns a padded or truncated-mid-
-/// character id: the last resort takes the first eight *characters* of `session_id`, which for a
-/// shorter id is the whole of it.
-pub fn session_display_label(repo_path: &str, workflow_goal: &str, session_id: &str) -> String {
+/// See the module docs for the rule and why it is shared. A `display_name` that is empty or only
+/// whitespace counts as no name. Never returns a padded or truncated-mid-character id: the last
+/// resort takes the first eight *characters* of `session_id`, which for a shorter id is the whole of
+/// it.
+pub fn session_display_label(
+    display_name: &str,
+    repo_path: &str,
+    workflow_goal: &str,
+    session_id: &str,
+) -> String {
+    // TODO(session-display-name): green phase — the name comes first.
+    let _ = display_name;
     if let Some(basename) = label_from_repo_path(repo_path) {
         return basename;
     }

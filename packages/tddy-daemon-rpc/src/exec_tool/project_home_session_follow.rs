@@ -27,6 +27,7 @@ pub(super) async fn session_activity(
     let session_dir = session_dir(sessions_base, target);
     tokio::task::spawn_blocking(move || {
         Ok(SessionActivity {
+            display_name: None,
             records: tddy_core::agent_activity::read_all_agent_activity(&session_dir)?,
             pending_question: tddy_core::pending_question::read_pending_question(&session_dir)?,
         })

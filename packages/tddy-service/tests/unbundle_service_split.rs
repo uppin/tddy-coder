@@ -568,10 +568,11 @@ const PR_STACK_METHODS: [&str; 10] = [
 /// method on one of these four services joins the list deliberately, in the change that adds it —
 /// `SetProjectAccounts` (`#keyring` 5/9) is the first to do so, `EnsureProjectHomeSession`
 /// (`#project-home` 4/7) the second, `SetProjectOrchestratorDefaults` (`#orchestrators` 11/11) the
-/// third, and `UpdateProject`, `DeleteProject` and `RestoreProject` (project update and soft
-/// delete) the fourth to sixth. `SetProjectHomeAgent` (`#project-home` 1/7) joined and was
-/// removed again when main came to be set up with the New-session form.
-const RESIDUAL_METHODS: [&str; 23] = [
+/// third, `UpdateProject`, `DeleteProject` and `RestoreProject` (project update and soft delete)
+/// the fourth to sixth, and `RenameSession` (session display names) the seventh.
+/// `SetProjectHomeAgent` (`#project-home` 1/7) joined and was removed again when main came to be
+/// set up with the New-session form.
+const RESIDUAL_METHODS: [&str; 24] = [
     "ListSessions",
     "StartSession",
     "StreamStartSession",
@@ -580,6 +581,7 @@ const RESIDUAL_METHODS: [&str; 23] = [
     "EnsureProjectHomeSession",
     "SignalSession",
     "DeleteSession",
+    "RenameSession",
     "GetWorktreeSnapshot",
     "ListProjects",
     "CreateProject",
@@ -710,7 +712,7 @@ fn the_shared_types_file_holds_only_the_five_types_that_genuinely_cross() {
     }
 }
 
-const SESSION_METHODS: [&str; 8] = [
+const SESSION_METHODS: [&str; 9] = [
     "ListSessions",
     "StartSession",
     "StreamStartSession",
@@ -718,6 +720,7 @@ const SESSION_METHODS: [&str; 8] = [
     "ResumeSession",
     "SignalSession",
     "DeleteSession",
+    "RenameSession",
     "GetWorktreeSnapshot",
 ];
 

@@ -12,6 +12,7 @@ use tddy_service::proto::session::{
 use tddy_service::proto::tasks::CancelTaskRequest;
 use tddy_tool_engine::start_ledger::{
     begin_recorded_start_with, StartHandle, StartLedger, StartState, StartedSessionDetails,
+    StartedSessionListing,
 };
 
 use crate::launch_ports::LaunchSessions;
@@ -127,7 +128,7 @@ impl LaunchSessions {
     }
 }
 
-/// A started session's branch and worktree, read off the listing of the host that runs it.
+/// A started session's branch, worktree and name, read off the listing of the host that runs it.
 struct StartedSessionListings {
     launch: LaunchSessions,
     session_token: String,
@@ -135,11 +136,11 @@ struct StartedSessionListings {
 
 #[async_trait]
 impl StartedSessionDetails for StartedSessionListings {
-    async fn branch_and_worktree(
+    async fn listing(
         &self,
         daemon_instance_id: &str,
         session_id: &str,
-    ) -> Option<(String, String)> {
+    ) -> Option<StartedSessionListing> {
         let request = ListSessionsRequest {
             session_token: self.session_token.clone(),
         };
@@ -178,6 +179,10 @@ impl StartedSessionDetails for StartedSessionListings {
             .sessions
             .into_iter()
             .find(|s| s.session_id == session_id)
-            .map(|s| (s.branch, s.repo_path))
+            .map(|s| StartedSessionListing {
+                branch: s.branch,
+                worktree: s.repo_path,
+                display_name: s.display_name,
+            })
     }
 }

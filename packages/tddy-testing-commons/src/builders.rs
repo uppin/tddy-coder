@@ -238,6 +238,7 @@ impl SessionMetadataBuilder {
 
     pub fn build(self) -> SessionMetadata {
         SessionMetadata {
+            display_name: None,
             effort: None,
             session_id: self.session_id,
             project_id: self.project_id,

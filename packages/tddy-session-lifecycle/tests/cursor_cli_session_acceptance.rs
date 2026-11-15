@@ -314,6 +314,7 @@ async fn cursor_cli_session_enrichment_reads_from_metadata() {
     std::fs::create_dir_all(&session_dir).unwrap();
 
     let meta = SessionMetadata {
+        display_name: None,
         effort: None,
         session_id: session_id.to_string(),
         project_id: TEST_PROJECT_ID.to_string(),

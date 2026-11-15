@@ -12,6 +12,10 @@ pub struct ListedSession {
     /// this id reaches the session on that host (`#start-parity` 1/9).
     #[serde(default)]
     pub daemon_instance_id: String,
+    /// The name the session was given (`RenameSession`, or `StartSession`'s `display_name`), or
+    /// `null` for an unnamed session. Defaulted so a peer that lists no names still answers.
+    #[serde(default)]
+    pub display_name: Option<String>,
 }
 
 /// What `ListProjectSessions` answers: the project's sessions on every eligible host, and the hosts

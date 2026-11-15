@@ -10,7 +10,9 @@ use clap::Parser;
 use rmcp::ServiceExt;
 use tddy_room_client::RoomConnector;
 use tddy_tools::server::PermissionServer;
-use tddy_tools::{cli, index_client, notify_cli, pty_relay, remote_cli, session_hook};
+use tddy_tools::{
+    cli, index_client, notify_cli, pty_relay, remote_cli, rename_session_cli, session_hook,
+};
 
 #[derive(Parser)]
 #[command(name = "tddy-tools")]
@@ -99,6 +101,11 @@ enum Subcommand {
     /// stdin), a level and a sound flag. Reads the session from the environment a daemon-launched
     /// session is given; exits non-zero with the reason when the daemon refuses or is unreachable.
     Notify(notify_cli::NotifyArgs),
+
+    /// Name the session this agent runs in, as the operator sees it in the web UI and in Telegram
+    /// alerts; an empty name clears it. Reads the session from the environment a daemon-launched
+    /// session is given; exits non-zero with the reason when the daemon refuses or is unreachable.
+    RenameSession(rename_session_cli::RenameSessionArgs),
 
     /// Enumerate the models an agent supports (JSON on stdout). Queries the underlying agent
     /// command where possible (cursor `--list-models`, ACP `available_models`), else a curated list.
@@ -224,6 +231,7 @@ async fn run(args: Args) -> Result<()> {
         Some(Subcommand::Remote(s)) => remote_cli::run_remote(s).await?,
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         Some(Subcommand::Notify(s)) => notify_cli::run_notify(s).await?,
+        Some(Subcommand::RenameSession(s)) => rename_session_cli::run_rename_session(s).await?,
         Some(Subcommand::ListModels(s)) => {
             tddy_tools::list_models::run_list_models(&s, &agent_models_catalog(&s)?).await?
         }

@@ -8,9 +8,9 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
-    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, ResumeSessionRequest,
-    ResumeSessionResponse, SignalSessionRequest, SignalSessionResponse, StartSessionEvent,
-    StartSessionRequest, StartSessionResponse,
+    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, RenameSessionRequest,
+    RenameSessionResponse, ResumeSessionRequest, ResumeSessionResponse, SignalSessionRequest,
+    SignalSessionResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse,
 };
 
 /// Server-streaming output for [`SessionHandler::stream_start_session`].
@@ -60,6 +60,12 @@ pub trait SessionHandler: Send + Sync {
         &self,
         request: Request<DeleteSessionRequest>,
     ) -> Result<Response<DeleteSessionResponse>, Status>;
+
+    /// Record or clear the session's name in its `.session.yaml`.
+    async fn rename_session(
+        &self,
+        request: Request<RenameSessionRequest>,
+    ) -> Result<Response<RenameSessionResponse>, Status>;
 
     async fn get_worktree_snapshot(
         &self,

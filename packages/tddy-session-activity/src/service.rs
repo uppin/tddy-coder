@@ -26,6 +26,7 @@ mod conversation_replay;
 mod conversation_rotation;
 mod hook_reports;
 mod operator_notifications;
+mod own_session_name;
 pub(crate) mod ports;
 mod question_answers;
 mod rpc;
