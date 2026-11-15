@@ -236,15 +236,30 @@ pub fn session_list_status_from_session_dir(
         });
     };
 
+    Ok(workflow_row(
+        session_dir,
+        &changeset,
+        row,
+        workflow_state,
+        elapsed_display,
+    ))
+}
+
+fn workflow_row(
+    session_dir: &Path,
+    changeset: &Changeset,
+    row: &CsSessionEntry,
+    workflow_state: String,
+    elapsed_display: String,
+) -> SessionListStatusDisplay {
     let workflow_goal = row.tag.clone();
     let agent = row.agent.clone();
-    let model =
-        resolve_model_label_for_tag(&changeset, &row.tag).unwrap_or_else(|| "—".to_string());
+    let model = resolve_model_label_for_tag(changeset, &row.tag).unwrap_or_else(|| "—".to_string());
 
     log::debug!(
         target: "tddy_daemon::session_list_enrichment",
         "enriched session {}: goal={} state={} agent={} model={} elapsed={}",
-        meta.session_id,
+        row.id,
         workflow_goal,
         workflow_state,
         agent,
@@ -252,7 +267,7 @@ pub fn session_list_status_from_session_dir(
         elapsed_display
     );
 
-    Ok(SessionListStatusDisplay {
+    SessionListStatusDisplay {
         workflow_goal,
         workflow_state,
         elapsed_display,
@@ -264,10 +279,10 @@ pub fn session_list_status_from_session_dir(
             .clone()
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
-        stack_plan_json: stack_plan_json_for_changeset(session_dir, &changeset),
+        stack_plan_json: stack_plan_json_for_changeset(session_dir, changeset),
         stack_id: changeset.stack_id.clone().unwrap_or_default(),
         branch: changeset.branch.clone().unwrap_or_default(),
-    })
+    }
 }
 
 fn cli_harness_row(
