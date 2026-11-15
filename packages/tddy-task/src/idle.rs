@@ -77,10 +77,8 @@ mod tests {
     #[test]
     fn a_tracker_last_active_longer_ago_than_its_timeout_is_already_idle() {
         // Given a tracker last active two minutes ago, with a one-minute timeout
-        let tracker = IdleTimeoutTracker::last_active_at(
-            Duration::from_secs(60),
-            two_minutes_ago(),
-        );
+        let tracker =
+            IdleTimeoutTracker::last_active_at(Duration::from_secs(60), two_minutes_ago());
 
         // Then it is idle without anyone waiting for it
         assert!(tracker.should_shutdown());
@@ -91,10 +89,8 @@ mod tests {
         // Given a tracker that has gone idle. Its timeout is a minute, so the check below cannot
         // race it: a timeout of milliseconds turns any scheduling delay between the reset and the
         // check into a reported failure to reset.
-        let tracker = IdleTimeoutTracker::last_active_at(
-            Duration::from_secs(60),
-            two_minutes_ago(),
-        );
+        let tracker =
+            IdleTimeoutTracker::last_active_at(Duration::from_secs(60), two_minutes_ago());
         assert!(tracker.should_shutdown());
 
         // When activity is recorded

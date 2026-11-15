@@ -77,7 +77,10 @@ fn main() -> io::Result<()> {
         .collect();
 
     let mut manifest = serde_json::Map::new();
-    manifest.insert("goals".to_string(), serde_json::Value::Array(manifest_goals));
+    manifest.insert(
+        "goals".to_string(),
+        serde_json::Value::Array(manifest_goals),
+    );
     manifest.insert("version".to_string(), serde_json::Value::from(1));
     let manifest = serde_json::Value::Object(manifest);
 
