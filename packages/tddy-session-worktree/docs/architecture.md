@@ -39,9 +39,10 @@ documented where they live.
   **setup_worktree_for_session_with_integration_base**. Used by TUI and daemon after plan approval
   when no explicit ref is passed at this API layer.
 
-`tddy_core::ssh_exec` is likewise a facade over `tddy_git::ssh_exec`, and the remote-host variant
-`setup_worktree_for_session_over_ssh` lives in `tddy-git`: it takes a session id as a string and
-never reads a changeset.
+`tddy_core::ssh_exec` is likewise a facade over `tddy_git::ssh_exec`, and the target variant
+`setup_remote_worktree` lives in `tddy-git`: it takes a session id as a string and never reads a
+changeset. A target's checkout is `$HOME/.tddy/repos/<repository>/.worktrees/<session>` on the
+target, resolved through its shell.
 
 **Repo root resolution** (where `output_dir`/`repo_path` comes from):
 

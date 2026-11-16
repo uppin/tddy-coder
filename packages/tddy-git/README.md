@@ -22,14 +22,15 @@ coupling — `packages/tddy-github/tests/git_plumbing_shape.rs` asserts against 
 | `rev` | `git rev-parse` wrappers: resolved revisions and checked-out branch names |
 | `remote` | `GIT_SSH_COMMAND`, fetch, push, default-remote detection, integration-base resolution |
 | `worktree` | linked worktrees under `.worktrees/`: create, reuse, find, list, remove |
-| `ssh_worktree`, `ssh_exec` | session worktrees on a remote host, run through the `tddy-remote-shell` port, and the path helpers they use |
+| `remote_checkout`, `ssh_exec` | a session's checkout on a target, under the target user's home, run through the `tddy-remote-shell` port, and the quoting/path helpers it uses |
 
 The modules are private and re-exported at the root, so every item is `tddy_git::<item>`. Details
 per function: [docs/architecture.md](docs/architecture.md).
 
-`setup_worktree_for_session_over_ssh` lives here rather than in `tddy-core` despite its name: it is
-`git clone` plus `git worktree add` over SSH, parameterised by a session-id **string**. It never
-reads a changeset.
+`setup_remote_worktree` lives here rather than in `tddy-core`: it is `git clone` plus
+`git worktree add` through the remote-shell port, parameterised by a session-id **string**. It
+never reads a changeset. A target's checkout is `$HOME/.tddy/repos/<repository>/.worktrees/<session>`
+on the target, with `$HOME` resolved through its shell.
 
 ## What stayed in `tddy-core`
 
@@ -44,6 +45,7 @@ path still resolves, and no consumer was edited. Write new code against `tddy_gi
 
 ## Error convention
 
-Every fallible function returns `Result<_, String>`, carrying the `git` invocation's own stderr.
-That is the convention the code arrived with and it is deliberately unchanged — a typed error would
-be a behaviour change to 35 dependents.
+Every fallible function returns `Result<_, String>`, carrying the `git` invocation's own stderr,
+except `remote_checkout`, whose `RemoteCheckoutError` carries the target's own words per failure
+kind. The `String` convention is the one the code arrived with and is deliberately unchanged — a
+typed error would be a behaviour change to 35 dependents.
