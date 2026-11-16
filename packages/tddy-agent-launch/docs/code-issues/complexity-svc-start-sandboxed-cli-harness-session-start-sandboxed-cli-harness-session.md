@@ -42,6 +42,7 @@ This is the third copy of the sandboxed start sequence, beside `start_sandboxed_
 own: the jail env, the warm-up gate and the metadata write are written three times.
 | 2026-11-05 | 223 → 239 | **worse by 16** in #820: the jailed start mints or binds the conversation (`start_conversation`), binds the permission mode and the node launcher and records the minted chat; measured on `origin/feature/agent-tools/route-support` (`3c29698cd`) and HEAD at #820's wrap. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer (2026-11-04) |
 | 2026-11-06 | 239 → 278 | — | **worse by 39** in #823 (`#agent-tools` 17/19): the generic jail now serves claude and cursor — the managed workflow, the role, the hooks written into the worktree before the context copy (`write_jail_hooks`), the passthrough args; measured fn line to closing brace on `origin/feature/agent-tools/spec-backend` (`d325fba73`) and HEAD; no coverage run. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
+| 2026-11-16 | 291 → 292 | #921 (`#remote-shell` 7/7): the sandboxed start hands on the Coder credential source. Touched, not closed |
 
 ## What would close it
 

@@ -75,11 +75,13 @@ impl crate::launch_ports::LaunchSessions {
         // Resolved before anything is re-wired: a Coder target whose vault has been locked
         // since the start refuses the resume here, and the session is kept as it was.
         let target_shell = match &metadata.target {
-            Some(target) => Some(crate::opencode_cli_spawn::shell_for_session_target(
-                target,
-                &(self.user_resolver)(&req.session_token).unwrap_or_default(),
-                self.coder_credentials.as_ref(),
-            )?),
+            Some(target) => Some(
+                crate::opencode_cli_spawn::session_start::shell_for_session_target(
+                    target,
+                    &(self.user_resolver)(&req.session_token).unwrap_or_default(),
+                    self.coder_credentials.as_ref(),
+                )?,
+            ),
             None => None,
         };
         let session_agent = resolve_session_agent(&self.coding_agents, kind.clone())?;

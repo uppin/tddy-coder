@@ -23,6 +23,7 @@
 | 2026-11-10 | 117 → 118 | **worse by 1** across #835–#865 (`#agent-tools` 27–32), brace-matched on `b8d9b769c` against `153b3c05d`. Not extracted: the `#agent-tools` sweep (#876) scoped Tier C to functions grown by 5 or more lines or with no record (user, 6e, 2026-11-10) |
 | 2026-11-11 | 118 → 128 | **worse by 10** in #891 (`#usage-binding 2/5`): the host resume rewrites its usage context before relaunching; br |
 | 2026-11-15 | 131 → 136 | **worse by 5** in #911: argv hooks render again on resume (the toolset take, the `hook_params` call, the hooks slot field, a two-line comment), mirroring the start path; the 131 base is growth since #891. Brace-matched on `origin/master` (`66bb45213`) and HEAD at #911's wrap |
+| 2026-11-16 | 157 → 166 | #921 (`#remote-shell` 7/7): a resume resolves its target's shell as its caller, so a locked vault refuses it before anything runs. Touched, not closed |
 
 ## What would close it
 

@@ -202,8 +202,12 @@ successful empty list. And a workspace is a remote-shell transport: the daemon r
 on it through the `coder` CLI with the account's URL and token in that child's environment
 alone (see [tddy-remote-shell architecture](../../../packages/tddy-remote-shell/docs/architecture.md)).
 
-Showing workspaces as hosts that run sessions belongs to a later change; nothing here starts
-a workspace or a session on one.
+A person's Coder accounts' workspaces are hosts derived from the daemon, and choosing a
+running one starts a session whose agent runs in that workspace through the `coder` CLI (see
+[Hosts screen](../web/hosts-screen.md)). The account's credentials are read from the caller's
+vault at the start and again at every resume: a locked vault refuses both, the resume as
+`FAILED_PRECONDITION` with the remedy, and the session is kept. A stopped workspace is refused
+at launch by the CLI's own complaint. Nothing here starts or stops a workspace itself.
 
 ## Out of scope
 

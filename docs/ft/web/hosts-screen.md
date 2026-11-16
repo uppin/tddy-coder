@@ -69,10 +69,18 @@ daemon that was asked.
 ## Derived hosts
 
 Beneath each daemon's row the screen lists the hosts that daemon reaches through a remote shell —
-its SSH config aliases, marked `SSH`. A derived host is a view over a target, not a daemon: it has
-no telemetry, tooling or desktop cells, and it is listed live from its source rather than recorded.
+its SSH config aliases, marked `SSH`, and the workspaces of each Coder account the signed-in
+person has connected, marked `CODER` and labelled `<workspace> (<account label>)`. A derived
+host is a view over a target, not a daemon: it has no telemetry, tooling or desktop cells, and it
+is listed live from its source rather than recorded.
 A daemon whose listing fails shows the failure on its own row, beside whatever hosts did arrive;
 an offline daemon's derived hosts are not offered.
+
+A Coder workspace's row says `Available` or `Unavailable`. It is unavailable — with the reason
+on the row — when the workspace is not running, or when the daemon has no `coder` CLI. An
+account whose workspaces cannot be listed is one unavailable row standing for the account,
+carrying the reason and no target; the other accounts' workspaces are listed as usual. A locked
+vault fails the listing with its reason and still carries the SSH hosts.
 
 ## Scope
 
@@ -101,6 +109,8 @@ an offline daemon's derived hosts are not offered.
 9. ✅ A corrupt or missing stored list yields an empty list, not a daemon failure.
 10. ✅ Derived hosts render beneath their parent daemon, marked with their kind and without
     daemon-only cells; a listing failure is shown on the parent's row.
+11. ✅ A connected Coder account's workspaces render beneath their daemon with the account
+    label and `Available` / `Unavailable`; an unavailable workspace carries its reason.
 
 ## Related documentation
 

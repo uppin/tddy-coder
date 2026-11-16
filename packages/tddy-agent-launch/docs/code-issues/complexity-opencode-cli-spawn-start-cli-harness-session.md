@@ -23,6 +23,7 @@
 | 2026-11-11 | 303 → 310 | **worse by 7** in #891 (`#usage-binding 2/5`): the host start records its usage context with the OS user's home before launching; br |
 
 | 2026-11-16 | 319 → 333 | **worse by 14** in #917 (`#remote-shell` 3/7), brace-matched on `origin/feature/remote-shell/coder-account` (`87e84fb27`) and HEAD; no coverage run. The target wiring the changeset allows: the `target` field, the checkout-alias selection and the one `HarnessRemote` call. Not extracted: restructuring stays with the `#agent-tools` sweep; this file is also touched by successor stacks |
+| 2026-11-16 | 347 → 368 | **worse by 21** in #921 (`#remote-shell` 7/7), brace-matched on `origin/feature/remote-shell/remote-hooks` (`529e4c653`) and HEAD after its wrap split; no coverage run. The Coder target resolution before the checkout is cut, and the slot files and pointer through the resolved shell. At the same wrap `CliSessionStart` and `shell_for_session_target` moved to `opencode_cli_spawn::session_start` (file 529 → 422 production lines); this function stays with the `#agent-tools` sweep as deferred |
 
 ## What would close it
 

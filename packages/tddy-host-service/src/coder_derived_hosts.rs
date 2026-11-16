@@ -31,7 +31,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::coder_workspaces::{CoderCredentialError, CoderCredentialSource, CoderWorkspaceSource};
+use crate::coder_workspaces::{
+    CoderCredentialError, CoderCredentialSource, CoderWorkspace, CoderWorkspaceSource,
+};
 use crate::derived_hosts::{DerivedHost, DerivedHostKind, DerivedHostSource};
 use crate::host_tooling::CoderCliStatus;
 
@@ -151,6 +153,75 @@ impl CoderDerivedHosts {
             coder_cli,
         }
     }
+
+    /// The one unusable host that stands for `account` when its workspaces cannot be listed:
+    /// the account's label and the reason, and no target.
+    fn account_host(&self, account: &CoderAccountRef, reason: String) -> DerivedHost {
+        DerivedHost {
+            id: coder_account_host_id(&self.parent_instance_id, &account.account_id),
+            label: account.label.clone(),
+            kind: DerivedHostKind::Coder as i32,
+            parent_instance_id: self.parent_instance_id.clone(),
+            target: None,
+            usable: false,
+            unusable_reason: reason,
+        }
+    }
+
+    /// The derived host of one `workspace` of `account`: usable when the workspace is running
+    /// and this daemon has the `coder` CLI, with the reason it is not otherwise.
+    fn workspace_host(&self, account: &CoderAccountRef, workspace: &CoderWorkspace) -> DerivedHost {
+        use tddy_service::proto::session::{session_target, CoderTarget, SessionTarget};
+
+        let (usable, unusable_reason) = if !workspace.is_running() {
+            (false, workspace_not_running_reason(&workspace.status))
+        } else if !self.coder_cli.installed {
+            (false, CODER_CLI_NOT_INSTALLED.to_string())
+        } else {
+            (true, String::new())
+        };
+        DerivedHost {
+            id: coder_derived_host_id(
+                &self.parent_instance_id,
+                &account.account_id,
+                &workspace.owner,
+                &workspace.name,
+            ),
+            label: coder_host_label(&workspace.name, &account.label),
+            kind: DerivedHostKind::Coder as i32,
+            parent_instance_id: self.parent_instance_id.clone(),
+            target: Some(SessionTarget {
+                kind: Some(session_target::Kind::Coder(CoderTarget {
+                    account_id: account.account_id.clone(),
+                    owner: workspace.owner.clone(),
+                    workspace: workspace.name.clone(),
+                    agent: String::new(),
+                })),
+            }),
+            usable,
+            unusable_reason,
+        }
+    }
+
+    /// Every workspace of `account` as a derived host, or the one host that stands for the
+    /// account when its credentials or its deployment's listing fail.
+    async fn hosts_of(&self, account: &CoderAccountRef) -> Vec<DerivedHost> {
+        let credentials = match self
+            .credentials
+            .credentials_for(&self.subject, &account.account_id)
+        {
+            Ok(credentials) => credentials,
+            Err(error) => return vec![self.account_host(account, error.to_string())],
+        };
+        let workspaces = match self.workspaces.workspaces(&credentials).await {
+            Ok(workspaces) => workspaces,
+            Err(error) => return vec![self.account_host(account, error.to_string())],
+        };
+        workspaces
+            .iter()
+            .map(|workspace| self.workspace_host(account, workspace))
+            .collect()
+    }
 }
 
 #[async_trait]
@@ -163,8 +234,6 @@ impl DerivedHostSource for CoderDerivedHosts {
     /// listing's order, each account's workspaces in its deployment's order. `os_user` is not
     /// read — see the module's *Whose accounts*.
     async fn list(&self, _os_user: &str) -> Result<Vec<DerivedHost>, String> {
-        use tddy_service::proto::session::{session_target, CoderTarget, SessionTarget};
-
         let accounts = self
             .accounts
             .accounts_of(&self.subject)
@@ -177,70 +246,7 @@ impl DerivedHostSource for CoderDerivedHosts {
             })?;
         let mut hosts = Vec::new();
         for account in &accounts {
-            let credentials = match self
-                .credentials
-                .credentials_for(&self.subject, &account.account_id)
-            {
-                Ok(credentials) => credentials,
-                Err(error) => {
-                    hosts.push(DerivedHost {
-                        id: coder_account_host_id(&self.parent_instance_id, &account.account_id),
-                        label: account.label.clone(),
-                        kind: DerivedHostKind::Coder as i32,
-                        parent_instance_id: self.parent_instance_id.clone(),
-                        target: None,
-                        usable: false,
-                        unusable_reason: error.to_string(),
-                    });
-                    continue;
-                }
-            };
-            let workspaces = match self.workspaces.workspaces(&credentials).await {
-                Ok(workspaces) => workspaces,
-                Err(error) => {
-                    hosts.push(DerivedHost {
-                        id: coder_account_host_id(&self.parent_instance_id, &account.account_id),
-                        label: account.label.clone(),
-                        kind: DerivedHostKind::Coder as i32,
-                        parent_instance_id: self.parent_instance_id.clone(),
-                        target: None,
-                        usable: false,
-                        unusable_reason: error.to_string(),
-                    });
-                    continue;
-                }
-            };
-            for workspace in workspaces {
-                let running = workspace.is_running();
-                let (usable, unusable_reason) = if !running {
-                    (false, workspace_not_running_reason(&workspace.status))
-                } else if !self.coder_cli.installed {
-                    (false, CODER_CLI_NOT_INSTALLED.to_string())
-                } else {
-                    (true, String::new())
-                };
-                hosts.push(DerivedHost {
-                    id: coder_derived_host_id(
-                        &self.parent_instance_id,
-                        &account.account_id,
-                        &workspace.owner,
-                        &workspace.name,
-                    ),
-                    label: coder_host_label(&workspace.name, &account.label),
-                    kind: DerivedHostKind::Coder as i32,
-                    parent_instance_id: self.parent_instance_id.clone(),
-                    target: Some(SessionTarget {
-                        kind: Some(session_target::Kind::Coder(CoderTarget {
-                            account_id: account.account_id.clone(),
-                            owner: workspace.owner.clone(),
-                            workspace: workspace.name.clone(),
-                            agent: String::new(),
-                        })),
-                    }),
-                    usable,
-                    unusable_reason,
-                });
-            }
+            hosts.extend(self.hosts_of(account).await);
         }
         Ok(hosts)
     }
