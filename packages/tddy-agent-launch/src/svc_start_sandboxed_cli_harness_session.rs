@@ -269,19 +269,14 @@ impl LaunchSessions {
             progress,
         )
         .await?;
-        let mut env: BTreeMap<String, String> = BTreeMap::new();
-        if !specialized_defs.is_empty() {
-            env.extend(self.specialized_subagent_env(&specialized_defs)?);
-        }
-        env.extend(self.jail_daemon_identity_env());
-        env.extend(self.lsp_tools_env(&worktree_path));
-        env.extend(self.restructure_tools_env());
-        env.extend(semantic_env);
-        env.extend(jail_route_config_env(
-            &session_agent.agent.spec,
-            route.as_ref(),
-            &dirs.scratch_dir,
-        ));
+        let env = self.jailed_agent_env(
+            session_agent,
+            &route,
+            specialized_defs,
+            &worktree_path,
+            &dirs,
+            semantic_env,
+        )?;
 
         // A start is launched with the spec's model and first prompt, as on the host; a route that
         // names the model itself (OpenCode's configuration file) leaves it to the route's arguments.
@@ -383,6 +378,31 @@ impl LaunchSessions {
             livekit_server_identity: String::new(),
             branch_conflict: None,
         }))
+    }
+
+    fn jailed_agent_env(
+        &self,
+        session_agent: &CliSessionAgent,
+        route: &Option<HarnessRoute>,
+        specialized_defs: Vec<tddy_discovery::agent_def::SpecializedAgentDef>,
+        worktree_path: &std::path::Path,
+        dirs: &crate::svc_start_sandboxed_claude_cli_session::JailDirs,
+        semantic_env: Vec<(String, String)>,
+    ) -> Result<BTreeMap<String, String>, Status> {
+        let mut env: BTreeMap<String, String> = BTreeMap::new();
+        if !specialized_defs.is_empty() {
+            env.extend(self.specialized_subagent_env(&specialized_defs)?);
+        }
+        env.extend(self.jail_daemon_identity_env());
+        env.extend(self.lsp_tools_env(worktree_path));
+        env.extend(self.restructure_tools_env());
+        env.extend(semantic_env);
+        env.extend(jail_route_config_env(
+            &session_agent.agent.spec,
+            route.as_ref(),
+            &dirs.scratch_dir,
+        ));
+        Ok(env)
     }
 }
 

@@ -1,4 +1,5 @@
 mod orchestrator_link;
+mod started_session_name;
 
 use tddy_session_split::service_util;
 use tddy_spawn::spawner;
@@ -78,14 +79,7 @@ impl LaunchSessions {
         // this daemon's registry — the registry is a def source on equal footing with the YAML
         // (`resolvable_agent_defs`), so an assistant `ListAgents` offers must also be startable.
         let agent_trim = req.agent.trim();
-        let agent_def = match agent_trim.is_empty() {
-            true => None,
-            false => {
-                self.agent_roster
-                    .agent_def_for_spawn(agent_trim, &github_user)
-                    .await?
-            }
-        };
+        let agent_def = self.agent_def_for_start(github_user, agent_trim).await?;
         if !agent_trim.is_empty() && agent_def.is_none() {
             let allowed = self.config.allowed_agents();
             if !allowed.is_empty() && !allowed.iter().any(|a| a.id == agent_trim) {
@@ -142,38 +136,20 @@ impl LaunchSessions {
         Ok(started)
     }
 
-    /// Record `display_name` in the `.session.yaml` of the session `started` names, once the start
-    /// has created it here. One place for every session type this daemon writes the record of — a
-    /// forwarded start is named by the peer that creates it, and a start refused for an owned branch
-    /// created nothing. A record that cannot be written fails the start's answer rather than leaving
-    /// a session silently unnamed.
-    async fn record_the_started_sessions_name(
+    async fn agent_def_for_start(
         &self,
-        os_user: &str,
-        started: &Response<StartSessionResponse>,
-        display_name: Option<String>,
-    ) -> Result<(), Status> {
-        let session_id = started.get_ref().session_id.clone();
-        let Some(display_name) = display_name.filter(|_| !session_id.is_empty()) else {
-            return Ok(());
+        github_user: String,
+        agent_trim: &str,
+    ) -> Result<Option<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
+        let agent_def = match agent_trim.is_empty() {
+            true => None,
+            false => {
+                self.agent_roster
+                    .agent_def_for_spawn(agent_trim, &github_user)
+                    .await?
+            }
         };
-        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
-            os_user,
-            Some(&self.tddy_data_dir),
-        )
-        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &session_id);
-        tokio::task::spawn_blocking(move || {
-            tddy_core::session_display_name::rename_session(&session_dir, &display_name)
-        })
-        .await
-        .map_err(|e| Status::internal(format!("naming the started session failed: {e}")))?
-        .map_err(|e| {
-            Status::internal(format!(
-                "session {session_id} started, but its name could not be recorded: {e}"
-            ))
-        })?;
-        Ok(())
+        Ok(agent_def)
     }
 
     /// Start `req` on this daemon, the route and the placement already decided, under the daemon's
