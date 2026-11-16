@@ -1,7 +1,7 @@
 # Initial Discovery: the #remote-shell sweep — code issues and backlog the stack left
 
 **Changeset**: [2026-11-16-remote-shell-sweep.md](./2026-11-16-remote-shell-sweep.md)
-**Stack**: `#remote-shell 8/8` — `feature/remote-shell/sweep`
+**Stack**: `#remote-shell 8/11` — `feature/remote-shell/sweep`
 **Date**: 2026-11-16
 **Passes**: 1
 

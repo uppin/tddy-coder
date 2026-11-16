@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Refactor
 **Complexity**: 5 — six packages, an inherited restructure across files four earlier stacks declined to split, one hand split in TypeScript, engine refusals already on record for two of the seams
-**Branch**: `feature/remote-shell/sweep`, base `feature/remote-shell/coder-hosts` (#921) — `#remote-shell 8/8`
+**Branch**: `feature/remote-shell/sweep`, base `feature/remote-shell/coder-hosts` (#921) — `#remote-shell 8/11`
 
 ## Initial Discovery
 
@@ -90,10 +90,10 @@ The first push after the plan (commit 2) publishes the recorded baseline and the
 
 ## Scope
 
-- [ ] **Plan**: seam order fixed, anchors emitted by the tool, every plan passes `check --deep`
-- [ ] **Apply**: each plan applied and committed on its own, `verify --against` clean
-- [ ] **Baseline**: every touched package's suite back to the recorded failing set, by name
-- [ ] **Code Quality**: clippy `-D warnings` and fmt clean on every touched package; the TypeScript package's specs and typecheck as before
+- [x] **Plan**: seam order fixed, anchors emitted by the tool, every plan passes `check --deep`
+- [x] **Apply**: each plan applied and committed on its own, `verify --against` clean
+- [x] **Baseline**: every touched package's suite back to the recorded failing set, by name
+- [x] **Code Quality**: clippy `-D warnings` and fmt clean on every touched package; the TypeScript package's specs and typecheck as before
 - [ ] **Records**: each closed record deleted with its final measurement in the change-history entry; each restored record re-measured
 - [ ] **Documentation**: Final Checklist derived
 
@@ -212,6 +212,24 @@ State A re-measured after the applies (production lines by `restructure lines`; 
 - **Complexity 5 is a warning.** This is five packages' worth of moves in one PR. It is one concern, the stack's own debt, and each group is a separate plan and commit so a reviewer can take them one at a time. If the plan step shows a group cannot be proven, the group is cut and reported, not forced.
 - **Fixture duplication is not moved here.** The stand-in target, stub agents and daemon helpers are repeated across four of the stack's test files. Moving them is a hand edit across test files owned by four PRs; it is recorded for the developer's decision.
 
+## Deferred work — for the stack's TODO gate
+
+Both rows below were **not restored**: the code is left exactly as it is, and no
+`docs/dev/todo/` entry is created by this PR. The stack's TODO gate is to ask the
+developer about each.
+
+- **Row 9 — `start_cli_harness_session` (368 lines, target ≤ 318).** Not restored
+  because the restructure engine refused them: every range holding what the stack
+  added carries `Option<Arc<dyn RemoteShell>>`, and the engine refuses a signature
+  naming a type the file does not import. Two hand-written `use` lines in
+  `opencode_cli_spawn.rs` would unlock about 51 lines. That is a hand edit of
+  production code and needs the developer's consent, so it is not in a plan.
+  Record: `packages/tddy-agent-launch/docs/code-issues/complexity-opencode-cli-spawn-start-cli-harness-session.md`.
+- **Row 16 — `DaemonSessionHost::new` (100 lines, target ≤ 97).** Not restored
+  because the restructure engine refused them: rust-analyzer offers no
+  extract-into-function assist for the fields of the `Self { … }` literal.
+  Record: `packages/tddy-session-lifecycle/docs/code-issues/complexity-svc-host-builders-new.md`.
+
 ## Final Checklist
 
 Every statement in `packages/*/docs/` that names a moved item's file is listed in [plans.md](./2026-11-16-remote-shell-sweep/plans.md) § Doc statements that name what moves.
@@ -219,16 +237,85 @@ Every statement in `packages/*/docs/` that names a moved item's file is listed i
 ## Refactoring Needed
 
 ### From /validate-changes
+
+None. The diff contains only this PR's files; no stub, no parent-owned symbol, no
+unplanned deletion.
+
 ### From /validate-tests
+
+One race, fixed in the test where it lived (see Validation Results): the daemon
+clone-restore test asserted the divergence report the instant the restored file
+was visible, although the report reaches daemon A asynchronously afterwards.
+
 ### From /validate-prod-ready
+
+None. No mock or test-only code in production paths, no added fallback, no
+`println!`/`eprintln!` in TUI paths, no new TODO/FIXME (one stale `FIXME(flaky)`
+removed with its fix).
+
 ### From /analyze-clean-code
+
+None new. Every non-test source file this PR touched is under 500 production
+lines (step 3.5 loop over the whole PR range prints nothing). The functions
+restored to their before-the-stack lengths stay over the 60-line function budget
+as the pre-existing records they are; rows 9 and 16 are under Deferred work.
 
 ## Validation Results
 
 ### /validate-changes
+
+2026-11-16 (wrap run): stack gate first — base is `master` (PR #924), HEAD
+already contains `origin/master` (`7ea536790`), and `origin/master..HEAD` lists
+only this PR's fifteen commits: verify-and-return, no rewrite. Diff grouped by
+package matches the six packages in Affected Packages plus this PR's own docs.
+Boundary checks: every State B row measured in the Baseline table; nothing from
+Dependencies implemented (moves only); no dependent behaviour; no unplanned
+deletions. Build/clippy in the scoped gates below.
+
+Flaky gate that was red at G: two tests failed under the package run and passed
+alone. Method: each run about ten times under the package's normal parallelism,
+then repeated with `c431bc926` (group G) reverted in the working tree only
+(`git revert --no-commit`, then `git revert --abort`; never committed).
+
+- `tddy-daemon` `restores_a_clone_that_diverged_and_says_so`: reproduced —
+  2/10 and 1/10 failures, with and without group G, always at the same line:
+  "a reconcile must be reported, never silent". Root cause in the test: the
+  mirror restores the clone's file on the peer, and the divergence is reported
+  back to daemon A only afterwards (`session_agent_clone.rs`: `report(...)`
+  after the restore), so asserting the report the moment the file reads
+  restored races it. Fix in the test: wait for the divergence report itself,
+  under the same 30 s bound the restore wait already uses; no timeout widened,
+  no retry, no ignore. After the fix: 10/10, plus 10/10 under concurrent load.
+  Group G did not cause it.
+- `tddy-session-lifecycle`
+  `the_gh_a_local_gh_session_start_asks_never_sees_the_daemons_github_tokens`:
+  not reproduced — 42 runs (binary at default parallelism, at 10 threads, and
+  under concurrent daemon-suite load), zero failures. The test binary does not
+  include either module group G changed: with `c431bc926` reverted, cargo does
+  not even rebuild it. Group G did not cause it, and no race was found in it to
+  fix; no speculative change made.
+
 ### /validate-tests
+
+Changed test code reviewed against the fluent-tests standard: the two warm-up
+builders assert the warm-up's exit status with its stderr; the fixed daemon
+test keeps Given/When/Then, one behaviour, and waits on the condition it
+asserts instead of on a proxy for it. No always-passing test, no new
+`#[ignore]`, no focused test.
+
 ### /validate-prod-ready
+
+46 files in the PR range checked: no non-production code in production paths,
+no added fallback, no debug output, no TODO/FIXME added. The one `FIXME(flaky)`
+in the daemon suite is removed by the race fix above, its hypothesis replaced
+by the measured finding.
+
 ### /analyze-clean-code
+
+File-length loop (pr-wrap step 3.5, whole PR range, production lines to the
+first `#[cfg(test)]`): no file at or over 500. Function lengths are the sixteen
+recorded rows: seven closed, seven restored to at most their before-the-stack
+length, rows 9 and 16 not restored (Deferred work), row 8 generated and left.
 
 ## TODO
 
@@ -242,5 +329,5 @@ Every statement in `packages/*/docs/` that names a moved item's file is listed i
 - [x] Hand split of the TypeScript file; fixture warm-up in the shared stub writers
 - [x] Final gate: fmt, clippy, the baseline's failing set by name, the comment-line multiset, `verify` against the ref before the first plan
 - [x] Re-measure and close or restore every record
-- [ ] Validate changes (/validate-changes)
-- [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+- [x] Validate changes (/validate-changes)
+- [x] USER REVIEW — scope developed, every gap approved: ready to wrap (standing instruction for this stack's review gates; rows 9 and 16 deferred under Deferred work for the stack's TODO gate)
