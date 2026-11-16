@@ -308,7 +308,7 @@ impl BuildContext {
 
     fn with_the_daemons_coder_credentials(
         &self,
-        user_resolver: &Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
+        user_resolver: &tddy_daemon_kernel::SessionUserResolver,
         connection_impl: DaemonSessionHost,
     ) -> DaemonSessionHost {
         match self.identity.credential_vaults.clone() {

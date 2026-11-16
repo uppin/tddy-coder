@@ -20,7 +20,6 @@ mod orchestrator_presence;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use prost::Message as _;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::activity::{
     AcpReplayFrame, ActivityService, AgentActivityDeltaChunk, AgentActivityDeltaRequest,
