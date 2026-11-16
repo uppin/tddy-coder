@@ -34,6 +34,11 @@ export interface DaemonHost {
   parent?: string;
   /** What a start on this host carries as its target (`HostDescriptor.target`). Absent on a daemon. */
   target?: SessionTarget;
+  /** Whether a session can be started on this host now (`HostDescriptor.usable`). Absent on a
+   *  daemon; only `false` withholds the host. */
+  usable?: boolean;
+  /** Why not, when `usable` is `false` (`HostDescriptor.unusableReason`). */
+  unusableReason?: string;
 }
 
 /** The daemon selection every daemon-scoped hook resolves against. */

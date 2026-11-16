@@ -148,7 +148,7 @@ pub(crate) fn on_home_worktree(
 mod tests {
     use pretty_assertions::assert_eq;
     use tddy_rpc::Code;
-    use tddy_service::proto::session::{session_target, SessionTarget, SshTarget};
+    use tddy_service::proto::session::{session_target, CoderTarget, SessionTarget, SshTarget};
 
     use super::*;
 
@@ -169,6 +169,37 @@ mod tests {
             refuse_what_main_cannot_honour(&spec).map_err(|status| (status.code, status.message));
 
         // Then the refusal is an argument error naming the target field
+        assert_eq!(
+            refused,
+            Err((
+                Code::InvalidArgument,
+                "main runs on its project's home worktree on this host: its start spec may not \
+                 set target"
+                    .to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_main_whose_start_spec_names_a_coder_target_is_refused() {
+        // Given a project-home start spec that names a Coder workspace as its target
+        let spec = StartSessionRequest {
+            target: Some(SessionTarget {
+                kind: Some(session_target::Kind::Coder(CoderTarget {
+                    account_id: "coder-3f1c9a52@coder.example.com".to_string(),
+                    owner: "ada".to_string(),
+                    workspace: "devbox".to_string(),
+                    agent: String::new(),
+                })),
+            }),
+            ..Default::default()
+        };
+
+        // When it is refused what main cannot honour
+        let refused =
+            refuse_what_main_cannot_honour(&spec).map_err(|status| (status.code, status.message));
+
+        // Then the refusal is the same argument error an SSH target gets, naming the target field
         assert_eq!(
             refused,
             Err((

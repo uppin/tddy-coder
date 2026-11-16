@@ -62,6 +62,11 @@ pub fn shell_for_target(target: &SessionTarget) -> Result<Arc<dyn RemoteShell>, 
             }
             Ok(Arc::new(SshShell::new(config_host)))
         }
+        // A Coder target needs the caller's account, which this function is not given: the
+        // launch resolves it through `coder_target::shell_for_coder_target`.
+        SessionTarget::Coder { .. } => Err(TargetError::Unsupported(
+            "a Coder target is reached with its account's credentials".to_string(),
+        )),
     }
 }
 
@@ -71,7 +76,7 @@ pub(crate) fn target_config_host(target: Option<&SessionTarget>) -> Option<&str>
         Some(SessionTarget::Ssh { config_host }) => {
             Some(config_host.trim()).filter(|host| !host.is_empty())
         }
-        None => None,
+        Some(SessionTarget::Coder { .. }) | None => None,
     }
 }
 
@@ -90,6 +95,19 @@ pub fn session_target_of_proto(
             }
             Ok(Some(SessionTarget::ssh(ssh.config_host.trim())))
         }
+        Some(ProtoTargetKind::Coder(coder)) => {
+            let target = SessionTarget::coder(
+                coder.account_id.trim(),
+                coder.owner.trim(),
+                coder.workspace.trim(),
+            );
+            let agent = coder.agent.trim();
+            Ok(Some(if agent.is_empty() {
+                target
+            } else {
+                target.on_agent(agent)
+            }))
+        }
         None => Err(TargetError::Unsupported(
             "the target names no kind of machine".to_string(),
         )),
@@ -103,6 +121,21 @@ pub fn proto_of_session_target(target: &SessionTarget) -> ProtoSessionTarget {
             kind: Some(ProtoTargetKind::Ssh(SshTarget {
                 config_host: config_host.clone(),
             })),
+        },
+        SessionTarget::Coder {
+            account_id,
+            owner,
+            workspace,
+            agent,
+        } => ProtoSessionTarget {
+            kind: Some(ProtoTargetKind::Coder(
+                tddy_service::proto::session::CoderTarget {
+                    account_id: account_id.clone(),
+                    owner: owner.clone(),
+                    workspace: workspace.clone(),
+                    agent: agent.clone().unwrap_or_default(),
+                },
+            )),
         },
     }
 }

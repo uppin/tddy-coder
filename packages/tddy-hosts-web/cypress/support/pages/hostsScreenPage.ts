@@ -1,4 +1,9 @@
-import { derivedHostRowTestId, derivedHostsFailureTestId } from "../../../src/DerivedHostRows";
+import {
+  derivedHostRowTestId,
+  derivedHostStatusTestId,
+  derivedHostUnusableReasonTestId,
+  derivedHostsFailureTestId,
+} from "../../../src/DerivedHostRows";
 import { TEST_IDS, byTestId } from "../testIds";
 
 const ROW_TEST_ID_PREFIX = "hosts-row-";
@@ -352,6 +357,10 @@ export const derivedHostsPage = {
   row: (derivedHostId: string) => byTestId(derivedHostRowTestId(derivedHostId)),
   /** What the row says its host is reached through — `SSH` for an SSH config alias. */
   kind: (derivedHostId: string) => byTestId(`${derivedHostRowTestId(derivedHostId)}-kind`),
+  /** Whether the host can run a session now: `Available` or `Unavailable` (#remote-shell 7/7). */
+  status: (derivedHostId: string) => byTestId(derivedHostStatusTestId(derivedHostId)),
+  /** Why an unavailable host cannot be used, in its daemon's words. Absent on an available one. */
+  unusableReason: (derivedHostId: string) => byTestId(derivedHostUnusableReasonTestId(derivedHostId)),
   /** The row saying a daemon could not list the hosts it reaches, and why. */
   listingFailure: (parentInstanceId: string) =>
     byTestId(derivedHostsFailureTestId(parentInstanceId)),

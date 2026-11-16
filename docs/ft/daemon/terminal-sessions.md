@@ -85,7 +85,8 @@ session and manage them over RPC, so I can run a shell in the session's worktree
 7. A session whose agent runs on a target (`StartSessionRequest.target`) serves its main terminal
    the same way: the terminal's local process is the remote-shell transport's client and the
    agent runs on the target, so streaming, input, resize and capture are unchanged; stopping the
-   session ends the remote agent.
+   session ends the remote agent. A Coder workspace is such a target: the agent runs in the
+   workspace through the `coder` CLI, with hooks delivered as on an SSH target.
 
 ### I/O addressed by terminal id
 7. The terminal I/O RPCs (`StreamSessionTerminalIO`, `StreamTerminalOutput`, `SendTerminalInput`)

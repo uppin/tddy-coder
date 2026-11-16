@@ -91,6 +91,7 @@ impl HostServiceImpl {
             coder_credentials: Arc::new(crate::coder_workspaces::CoderNotWired),
             coder_workspaces: Arc::new(crate::coder_workspaces::CoderNotWired),
             derived_host_sources: Vec::new(),
+            coder_accounts: Arc::new(crate::coder_derived_hosts::NoCoderAccounts),
             host_cpu_interval: HOST_CPU_INTERVAL,
             host_disk_interval: HOST_DISK_INTERVAL,
             user_resolver,
@@ -196,6 +197,17 @@ impl HostServiceImpl {
         source: Arc<dyn crate::derived_hosts::DerivedHostSource>,
     ) -> Self {
         self.derived_host_sources.push(source);
+        self
+    }
+
+    /// List each signed-in person's Coder accounts from the daemon's vaults, so their workspaces
+    /// are offered as derived hosts.
+    #[must_use]
+    pub fn with_coder_accounts(
+        mut self,
+        accounts: Arc<dyn crate::coder_derived_hosts::CoderAccountSource>,
+    ) -> Self {
+        self.coder_accounts = accounts;
         self
     }
 

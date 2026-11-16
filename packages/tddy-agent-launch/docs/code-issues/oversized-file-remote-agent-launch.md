@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---:|---|
 | 2026-11-16 | 451 → 546 | #920 (`#remote-shell` 6/7): the pid-based startup window (`wait_for_agent_start`, `AgentStart`, `AgentNeverStarted`) and the hook-log creation in `launch_on_target`. **Not split**: successor PR #921 (`feature/remote-shell/coder-hosts`) also modifies this file, and a split here would turn its diff into a conflict (`/pr-wrap` step 3.5, stack-branch rule). Split after the `#remote-shell` stack lands |
+| 2026-11-16 | 546 → 579 | #921 (`#remote-shell` 7/7): the Coder case of `session_target_of_proto` / `proto_of_session_target` and the `Coder` arm's refusal in `shell_for_target`. Re-measured at #921's wrap and left for the sweep after the stack lands, as recorded at #920 |
 
 ## What the tool found
 

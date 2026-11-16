@@ -15,6 +15,7 @@ use tddy_service::proto::session::StartSessionResponse;
 use tddy_rpc::Response;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::svc_start_session_core::CliStart;
 
@@ -187,7 +188,7 @@ impl LaunchSessions {
             &agent_tool_socket,
         )?;
         crate::opencode_cli_spawn::start_cli_harness_session(
-            crate::opencode_cli_spawn::CliSessionStart {
+            crate::opencode_cli_spawn::session_start::CliSessionStart {
                 kind: session_agent.kind.clone(),
                 agent: &session_agent.agent,
                 config: &self.config,
@@ -232,6 +233,8 @@ impl LaunchSessions {
                 ssh_config_host: req.ssh_config_host.trim(),
                 target: crate::remote_agent_launch::session_target_of_proto(req.target.as_ref())
                     .map_err(|e| Status::invalid_argument(e.to_string()))?,
+                subject: (self.user_resolver)(&req.session_token).unwrap_or_default(),
+                coder_credentials: Arc::clone(&self.coder_credentials),
                 hook_delivery: self.hook_report_delivery.clone(),
                 hook_followers: self.remote_hook_followers.clone(),
                 managed_codebase: req.managed_codebase,
@@ -280,7 +283,7 @@ impl LaunchSessions {
         // A child runs on its vendor: the orchestrator's account is not inherited.
         let route_sources = tddy_core::provider_route::RouteSources::default();
         crate::opencode_cli_spawn::start_cli_harness_session(
-            crate::opencode_cli_spawn::CliSessionStart {
+            crate::opencode_cli_spawn::session_start::CliSessionStart {
                 kind: session_agent.kind.clone(),
                 agent: &session_agent.agent,
                 config: &self.config,
@@ -321,6 +324,8 @@ impl LaunchSessions {
                 effort: "",
                 ssh_config_host: "",
                 target: None,
+                subject: String::new(),
+                coder_credentials: Arc::clone(&self.coder_credentials),
                 hook_delivery: self.hook_report_delivery.clone(),
                 hook_followers: self.remote_hook_followers.clone(),
                 // A spawned child is never a managed-codebase session, and has no standing role.

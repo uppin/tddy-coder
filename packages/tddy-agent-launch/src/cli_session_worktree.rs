@@ -39,6 +39,9 @@ pub(crate) struct CliWorktreeStart<'a> {
     /// The ssh `Host` alias the checkout lives on (`StartSessionRequest.ssh_config_host`); empty cuts
     /// a worktree on this host. The remote checkout is cloned from the project's git url.
     pub ssh_alias: &'a str,
+    /// The shell that reaches the session's target, when it named one: the checkout is cut on
+    /// the target through it, whatever transport reaches it. Takes precedence over `ssh_alias`.
+    pub shell: Option<std::sync::Arc<dyn tddy_remote_shell::RemoteShell>>,
 }
 
 /// The worktree a CLI harness session runs in, and the project it belongs to.
@@ -137,7 +140,9 @@ async fn cut_worktree(
 ) -> Result<PathBuf, Status> {
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(start.selected_integration_base_ref, chain_base_ref);
-    let wt = if start.ssh_alias.is_empty() {
+    let wt = if let Some(shell) = &start.shell {
+        remote_worktree_through(start, git_url, shell.as_ref()).await?
+    } else if start.ssh_alias.is_empty() {
         tddy_session_split::service_util::create_session_worktree(
             start.timeout,
             start.cut_label,
@@ -163,15 +168,25 @@ async fn cut_worktree(
 /// The session's checkout on the ssh target `start.ssh_alias`, cloned from `git_url`.
 async fn remote_worktree(start: &CliWorktreeStart<'_>, git_url: &str) -> Result<PathBuf, Status> {
     let shell = tddy_remote_shell::SshShell::new(start.ssh_alias);
+    remote_worktree_through(start, git_url, &shell).await
+}
+
+/// The session's checkout on its target, cloned from `git_url` through `shell`.
+async fn remote_worktree_through(
+    start: &CliWorktreeStart<'_>,
+    git_url: &str,
+    shell: &dyn tddy_remote_shell::RemoteShell,
+) -> Result<PathBuf, Status> {
     let remote_path = tokio::time::timeout(
         start.timeout,
-        tddy_core::setup_worktree_for_session_over_ssh(&shell, git_url, start.session_id),
+        tddy_core::setup_worktree_for_session_over_ssh(shell, git_url, start.session_id),
     )
     .await
     .map_err(|_| {
         Status::deadline_exceeded(format!(
             "remote worktree setup on {} did not finish within {:?}",
-            start.ssh_alias, start.timeout
+            shell.address(),
+            start.timeout
         ))
     })?
     .map_err(|error| Status::internal(format!("remote worktree setup failed: {error}")))?;

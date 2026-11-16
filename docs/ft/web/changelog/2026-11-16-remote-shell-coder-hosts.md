@@ -1,0 +1,3 @@
+# 2026-11-16 — Coder workspaces are hosts that run sessions
+
+The workspaces of each connected Coder account appear on the Hosts screen as hosts derived from the daemon, labelled with their account and marked `Available` or `Unavailable` with the reason — a workspace that is not running, or one on a daemon without the `coder` CLI. Choosing a running one in the create-session Host field starts a session whose agent runs in that workspace through the `coder` CLI; an unavailable workspace cannot be chosen. See [hosts-screen.md](../hosts-screen.md) and [create-session-package.md](../create-session-package.md).

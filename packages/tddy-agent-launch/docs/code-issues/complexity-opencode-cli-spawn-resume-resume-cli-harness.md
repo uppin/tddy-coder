@@ -16,6 +16,7 @@
 |---|---|---|
 | 2026-11-06 | 65 → 88 | first detection — #823: a split session's wiring is re-derived first (`resume_split_wiring`), and its context directory and empty commit identity chosen, now that every claude-cli session resumes here. Not split: restructuring deferred to the sweep node (n20) |
 | 2026-11-07 | 87 → 87 | **unchanged, moved** in #829 (`#agent-tools` 21/28): engine `move_item` of the `LaunchSessions` impl into `opencode_cli_spawn/resume.rs`; fn line to closing brace on `origin/master` (`d3fe1abea`) and HEAD |
+| 2026-11-16 | 95 → 108 | #921 (`#remote-shell` 7/7): the resume path carries the session's subject and Coder credentials to the target resolution. Touched, not closed |
 
 ## What would close it
 

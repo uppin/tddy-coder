@@ -273,6 +273,15 @@ impl BuildContext {
             coding_agents,
         );
 
+        let connection_impl = match self.identity.credential_vaults.clone() {
+            Some(vaults) => connection_impl.with_coder_credentials(
+                crate::coder_credential_source::coder_credential_source(
+                    vaults,
+                    Arc::clone(&user_resolver),
+                ),
+            ),
+            None => connection_impl,
+        };
         Ok(crate::livekit_host_ports::with_livekit_room_ports(
             connection_impl,
             Arc::clone(shared_session_rooms),

@@ -15,6 +15,7 @@
 | 2026-11-05 | 0 → 80 | first detection — #820: the hooks, the managed workflow (`prepare_managed_workflow_inner`, eleven arguments), the operator-notify guidance and the role, each routing its `TDDY_*` pairs to the tool server. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer (2026-11-04) |
 | 2026-11-06 | 80 → 87 | **worse by 7** in #823 (`#agent-tools` 17/19): the operator-notify pairs go to the session pointer, not the agent process (`notify_env`, `session_pointer_of`); measured fn line to closing brace on `origin/feature/agent-tools/spec-backend` (`d325fba73`) and HEAD; no coverage run. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
 | 2026-11-07 | 87 → 84 | **better by 3** in #834 (`#agent-tools` 26/28): the hooks are given the session user's socket (`agent_tool_socket` input) instead of probing for one, so the `hook_socket` fallback is gone; measured fn line to closing brace on `origin/feature/agent-tools/split-remote-env` (`cd9026d9d`) and HEAD; no coverage run. Still over 60 |
+| 2026-11-16 | 84 → 84 | #921 (`#remote-shell` 7/7): re-measured, brace-matched on `origin/feature/remote-shell/remote-hooks` (`529e4c653`) and HEAD — unchanged; this PR's `cli_agent_steps` growth is the shell slot writer beside it |
 
 ## What would close it
 

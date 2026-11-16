@@ -7,6 +7,7 @@
 //! it here cuts the `host_tooling ⇄ ssh_agent` cycle as a side effect.
 
 pub mod askpass;
+pub mod coder_derived_hosts;
 pub mod coder_workspaces;
 pub mod derived_hosts;
 pub mod github_cli;

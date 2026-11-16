@@ -55,6 +55,20 @@ export interface HostDescriptor {
    * `daemonInstanceId` (`DerivedHost.target`). Absent on a daemon, whose sessions run on itself.
    */
   readonly target?: SessionTarget;
+
+  /**
+   * Whether a session can be started on this host now (`DerivedHost.usable`). Absent on a daemon,
+   * which is usable whenever it is listed; only an explicit `false` withholds a host — a Coder
+   * workspace that is not running, or one whose parent has no `coder` CLI.
+   *
+   * A host that is not usable is still listed, and must stay visible wherever hosts are chosen:
+   * hiding a stopped workspace would read as an account that has none.
+   */
+  readonly usable?: boolean;
+
+  /** Why the host cannot be used, in its parent's words (`DerivedHost.unusable_reason`), when
+   *  {@link usable} is `false`. Absent or empty otherwise. */
+  readonly unusableReason?: string;
 }
 
 /**

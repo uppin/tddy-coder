@@ -8,13 +8,12 @@ use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
 use tddy_coding_agent_specs::slots::RenderedSlots;
 use tddy_rpc::Status;
 
-use crate::remote_agent_launch::{launch_on_target, shell_for_target, RemoteLaunch};
+use crate::remote_agent_launch::{launch_on_target, RemoteLaunch};
 use crate::spec_launch::{
     in_a_pane_with_only_the_agent_env, launch_host_pty, plan_host_pty,
     without_the_panes_terminal_variables, HostAgent, HostPtySession,
 };
 use tddy_core::session_pointer::SessionPointer;
-use tddy_core::SessionTarget;
 
 /// How a harness is run: as the PTY child, or inside tmux — and whether the launch starts the
 /// session's agent or resumes it.
@@ -90,7 +89,9 @@ pub(super) struct HarnessSpecLaunch<'a> {
 
 /// A harness launch on a session's target (`remote_agent_launch::launch_on_target`).
 pub(super) struct HarnessRemote {
-    pub(super) target: SessionTarget,
+    /// The shell that reaches the target, resolved from its target before anything was cut:
+    /// an ssh target's transport, or a Coder workspace's with its account's credentials.
+    pub(super) shell: Arc<dyn tddy_remote_shell::RemoteShell>,
     /// The session pointer placed in the worktree on the target, whose owner the launch records.
     pub(super) pointer: Option<SessionPointer>,
     /// How long the agent must stay up for the launch to count as started.
@@ -134,8 +135,7 @@ pub(super) async fn launch(
         Status::internal(format!("failed to spawn {kind}: {e}"))
     };
     if let Some(remote) = remote {
-        let shell = shell_for_target(&remote.target)
-            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let shell = Arc::clone(&remote.shell);
         // A hooked agent on a target appends to its hook log there: create it before the agent
         // starts, and follow it once the agent is up.
         let hook_log = match (&remote.hook_token, &remote.hook_delivery) {

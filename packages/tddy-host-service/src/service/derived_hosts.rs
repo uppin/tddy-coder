@@ -43,10 +43,18 @@ impl HostServiceImpl {
             .to_string();
 
         let parent_instance_id = local_base_instance_id_for_config(&self.config);
-        let mut sources: Vec<Arc<dyn DerivedHostSource>> = vec![Arc::new(
-            SshConfigDerivedHosts::new(Arc::clone(&self.host_user_files), parent_instance_id),
-        )];
+        let mut sources: Vec<Arc<dyn DerivedHostSource>> =
+            vec![Arc::new(SshConfigDerivedHosts::new(
+                Arc::clone(&self.host_user_files),
+                parent_instance_id.clone(),
+            ))];
         sources.extend(self.derived_host_sources.iter().map(Arc::clone));
+        let coder_cli = self
+            .cached_tooling(&parent_instance_id, &os_user, "")
+            .await
+            .map_err(Status::internal)?
+            .coder_cli;
+        sources.push(Arc::new(self.coder_derived_hosts(&github_user, coder_cli)));
 
         let mut hosts = Vec::new();
         let mut failure_reason: Option<String> = None;

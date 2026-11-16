@@ -82,6 +82,11 @@ export function derivedHostDescriptorOf(host: DerivedHost): HostDescriptor {
     sourceId: DERIVED_SOURCE_ID,
     parent: host.parentInstanceId,
     ...(host.target !== undefined ? { target: host.target } : {}),
+    // Usability is read from the reason: a host whose daemon gives none — an older daemon, or
+    // a fixture without the fields — stays usable, so only a named reason withholds a host.
+    ...(host.unusableReason
+      ? { usable: false, unusableReason: host.unusableReason }
+      : {}),
   };
 }
 

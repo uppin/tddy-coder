@@ -17,28 +17,24 @@
 
 mod harness_launch;
 mod resume;
+pub(crate) mod session_start;
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::provider_route::RouteSources;
 use tddy_core::{write_session_metadata, SessionMetadata};
-use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::user_paths::home_dir_for_user;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::start_phase::Step as StartStep;
 use tddy_service::proto::session::StartSessionResponse;
-use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::BranchIntentRequest;
 
 use crate::cli_agent_steps::conversation::refuse_a_role_the_agent_cannot_hold;
 use crate::cli_agent_steps::conversation::start_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::{
-    render_host_launch_slots, wire_session_agent, write_slot_files_on_target, HostLaunchSlots,
-    ManagedWiring, SessionWiringInputs,
+    render_host_launch_slots, wire_session_agent, write_slot_files_on_target,
+    write_slot_files_through_shell, HostLaunchSlots, SessionWiringInputs,
 };
 use crate::cli_resume_token::resume_token_recorder;
 use crate::cli_route_launch::{routed_launch_model, start_cli_route};
@@ -50,82 +46,11 @@ use crate::cli_session_worktree::{
 };
 use crate::cursor_from_spec::node_launcher_of;
 use crate::effort_launch::effort_launch;
-use crate::harness_from_spec::{
-    harness_template_params, resume_token_adapter, CliSessionType, HarnessLaunch,
-};
-use crate::project_home_launch::StartRole;
-use crate::session_acting_identity::SessionAccountAccess;
-use crate::spec_launch::HostAgent;
-use crate::stack_parent::SpawnStackParent;
+use crate::harness_from_spec::{harness_template_params, resume_token_adapter, HarnessLaunch};
+use crate::opencode_cli_spawn::session_start::shell_for_session_target;
+use crate::opencode_cli_spawn::session_start::CliSessionStart;
 use crate::usage_context::{record_usage_context, UsageSubject};
 use harness_launch::{launch, HarnessRemote, HarnessRun, HarnessSession, HarnessSpecLaunch};
-use tddy_session_split::service_util::OrchestratorLink;
-
-/// Everything one CLI harness start reads.
-pub(crate) struct CliSessionStart<'a> {
-    /// The CLI session type the session runs, with the spec that launches it.
-    pub kind: CliSessionType,
-    /// The coding agent the session launches, resolved on this host before anything is cut.
-    pub agent: &'a HostAgent,
-    pub config: &'a DaemonConfig,
-    pub tddy_data_dir: &'a Path,
-    /// The session's OS user's agent-tool socket, resolved before anything is cut
-    /// ([`LaunchSessions::agent_tool_socket_of`]).
-    pub agent_tool_socket: &'a Path,
-    pub cli_manager: &'a Arc<CliSessionManager>,
-    pub os_user: &'a str,
-    pub session_id: &'a str,
-    /// Authorizes the `workspace` starts this session's seeded agents need on their own hosts.
-    pub session_token: &'a str,
-    pub sessions_base: PathBuf,
-    /// The model the operator chose; empty leaves the choice to the harness.
-    pub model: &'a str,
-    pub project_id: &'a str,
-    pub repo_path: &'a str,
-    pub branch_worktree_intent: &'a str,
-    pub new_branch_name: &'a str,
-    pub selected_integration_base_ref: &'a str,
-    pub selected_branch_to_work_on: &'a str,
-    pub stack_parent: SpawnStackParent<'a>,
-    /// The orchestrator that started the session, recorded in its first changeset. Absent, the
-    /// stack parent (if any) is the orchestrator recorded.
-    pub orchestrator: Option<OrchestratorLink>,
-    pub initial_prompt: &'a str,
-    /// The session's starting agent roster, already resolved by the caller.
-    pub agents: &'a mut [tddy_core::SessionAgentRecord],
-    pub semantic_index: bool,
-    pub create_remote_branch: bool,
-    pub task_registry: &'a tddy_task::TaskRegistry,
-    pub agent_clones: &'a dyn tddy_session_agents::seed_codebase::SeededAgentClones,
-    /// What the start reads its owner's vault with: the provider account and the commit identity.
-    pub account_access: &'a SessionAccountAccess,
-    pub route_sources: &'a RouteSources,
-    pub progress: &'a AttachmentProgressSink,
-    /// Run the harness inside a tmux session as the session's OS user
-    /// (`StartSessionRequest.run_in_tmux`, `#tmux-agent` 3/3).
-    pub run_in_tmux: bool,
-    /// `StartSessionRequest.permission_mode`; blank leaves the spec's own default.
-    pub permission_mode: &'a str,
-    pub dangerously_skip_permissions: bool,
-    /// `StartSessionRequest.effort`: the level the agent's spec carries into its launch; blank
-    /// leaves the agent's own default.
-    pub effort: &'a str,
-    /// The ssh `Host` alias the checkout lives on; empty for a checkout on this host.
-    pub ssh_config_host: &'a str,
-    /// The target the session's agent runs on (`StartSessionRequest.target`), when it named one:
-    /// the checkout is cut on it and the agent is launched there.
-    pub target: Option<tddy_core::SessionTarget>,
-    /// Where a target session's followed hooks are delivered, and the registry its follower is
-    /// kept in (`LaunchSessions`' fields, lent for the start).
-    pub hook_delivery: Option<Arc<dyn crate::remote_hook_follower::HookReportDelivery>>,
-    pub hook_followers: crate::remote_hook_follower::RemoteHookFollowers,
-    /// Whether the session was started over a managed codebase; recorded on the session.
-    pub managed_codebase: bool,
-    /// The managed workflow the session is driven by, for a spec declaring `managed_workflow`.
-    pub managed: Option<ManagedWiring>,
-    /// The session's standing role, recorded before its agent is spawned.
-    pub role: StartRole<'a>,
-}
 
 pub(crate) async fn start_cli_harness_session(
     start: CliSessionStart<'_>,
@@ -165,6 +90,8 @@ pub(crate) async fn start_cli_harness_session(
         effort,
         ssh_config_host,
         target,
+        subject,
+        coder_credentials,
         hook_delivery,
         hook_followers,
         managed_codebase,
@@ -179,6 +106,16 @@ pub(crate) async fn start_cli_harness_session(
     // the slot files are written and the pointer is placed.
     let checkout_alias =
         crate::remote_agent_launch::target_config_host(target.as_ref()).unwrap_or(ssh_alias);
+    // Resolved before anything is cut: a Coder target whose vault is locked, or whose account
+    // the vault does not hold, refuses the start here rather than after a worktree exists.
+    let target_shell = match &target {
+        Some(target) => Some(shell_for_session_target(
+            target,
+            &subject,
+            coder_credentials.as_ref(),
+        )?),
+        None => None,
+    };
     let spec = &agent.spec;
     let role_name = role.name;
     refuse_a_role_the_agent_cannot_hold(spec, role_name)?;
@@ -236,6 +173,7 @@ pub(crate) async fn start_cli_harness_session(
             intent,
             timeout: config.spawn_worker_request_timeout(),
             ssh_alias: checkout_alias,
+            shell: target_shell.clone(),
         },
         &stack_parent,
         progress,
@@ -350,8 +288,16 @@ pub(crate) async fn start_cli_harness_session(
     slots.argv_extra.extend(role_args);
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
-    write_slot_files_on_target(&mut slots, remote_host).await?;
-    let host = PointerHost::of(remote_host);
+    match &target_shell {
+        Some(shell) => write_slot_files_through_shell(&mut slots, shell.as_ref()).await?,
+        None => write_slot_files_on_target(&mut slots, remote_host).await?,
+    }
+    let host = match &target_shell {
+        Some(shell) => PointerHost::Remote {
+            shell: Arc::clone(shell),
+        },
+        None => PointerHost::of(remote_host),
+    };
     let pointer =
         place_session_pointer(wiring.session_pointer.as_ref(), &worktree_path, &host).await?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, run_in_tmux);
@@ -385,8 +331,8 @@ pub(crate) async fn start_cli_harness_session(
             model: launch_model,
             env,
             on_exit,
-            remote: target.clone().map(|target| HarnessRemote {
-                target,
+            remote: target_shell.clone().map(|shell| HarnessRemote {
+                shell,
                 pointer: wiring.session_pointer.clone(),
                 startup_window: config.spawn_startup_grace_period(),
                 hook_token: wiring.hooks.as_ref().map(|hooks| hooks.hook_token.clone()),

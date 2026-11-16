@@ -109,6 +109,9 @@ pub struct HostServiceImpl {
     /// Extra derived-host sources beyond the SSH-config one the handler builds from this
     /// service's own files, in the order they are asked. Empty until a later kind registers.
     derived_host_sources: Vec<Arc<dyn crate::derived_hosts::DerivedHostSource>>,
+    /// Lists a signed-in person's Coder accounts, behind the Coder hosts of `ListDerivedHosts`.
+    /// Injected because the vault is `tddy-accounts`'.
+    coder_accounts: Arc<dyn crate::coder_derived_hosts::CoderAccountSource>,
     host_cpu_interval: Duration,
     host_disk_interval: Duration,
 }
@@ -279,3 +282,5 @@ mod host_keys;
 mod coder_workspaces;
 
 mod derived_hosts;
+
+mod coder_derived_hosts;

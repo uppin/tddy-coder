@@ -180,6 +180,7 @@ impl LaunchSessions {
                 intent,
                 timeout: self.config.spawn_worker_request_timeout(),
                 ssh_alias: "",
+                shell: None,
             },
             &stack_parent,
             progress,

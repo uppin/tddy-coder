@@ -416,6 +416,9 @@ message SessionTarget {
   oneof kind {
     // An OpenSSH host of the serving daemon's user.
     SshTarget ssh = 1;
+    // A workspace of one of the caller's Coder accounts, reached through the `coder` CLI on the
+    // serving daemon.
+    CoderTarget coder = 2;
   }
 }
 
@@ -423,6 +426,22 @@ message SessionTarget {
 message SshTarget {
   // An explicit `Host` alias from the serving daemon's `~/.ssh/config`.
   string config_host = 1;
+}
+
+// A Coder workspace a session's agent runs on. It names the account, because a workspace alone is
+// ambiguous across deployments and the start has to know whose vault holds the token. The token
+// itself is never carried: it is read from the caller's vault at the start and at every resume, so
+// a locked vault refuses both.
+message CoderTarget {
+  // The caller's Coder account, as ListAccounts names it (`Account.id`).
+  string account_id = 1;
+  // The login name of the user the workspace belongs to on that account's deployment.
+  string owner = 2;
+  // The workspace's name, unique among its owner's.
+  string workspace = 3;
+  // The workspace's agent to reach, for a workspace with more than one. Empty leaves the choice to
+  // the CLI, which is right for a workspace with exactly one.
+  string agent = 4;
 }
 
 // An orchestrator's mark on one of its sessions, as `.session.yaml` records it.

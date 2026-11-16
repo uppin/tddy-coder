@@ -87,6 +87,14 @@ impl DaemonSessionHost {
         self.github_cli.clone()
     }
 
+    /// What a Coder target's account is read from, for a handler sharing this host's state.
+    #[must_use]
+    pub fn coder_credentials(
+        &self,
+    ) -> Arc<dyn tddy_host_service::coder_workspaces::CoderCredentialSource> {
+        Arc::clone(&self.coder_credentials)
+    }
+
     /// The idle tracker this host bumps on every RPC, shared rather than copied, so a handler's
     /// calls keep the same relay alive the host's own do.
     #[must_use]
@@ -239,6 +247,7 @@ impl DaemonSessionHost {
             hook_report_delivery: Some(Arc::new(super::svc_activity_ports::ActivityHookDelivery {
                 host: self.clone(),
             })),
+            coder_credentials: self.coder_credentials(),
         }
     }
 }

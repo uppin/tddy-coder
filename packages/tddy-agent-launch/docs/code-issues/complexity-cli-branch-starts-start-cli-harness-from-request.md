@@ -18,6 +18,7 @@
 | 2026-11-05 | 60 → 89 | **worse by 29** in #820: the request branch builds the managed wiring (`managed_recipe_for`, `managed_spawn_handlers`, `ManagedWiring`) and the start role, and passes the permission mode, ssh host and managed flags on to `start_cli_harness_session`; measured on `origin/feature/agent-tools/route-support` (`3c29698cd`) and HEAD at #820's wrap. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer (2026-11-04) |
 | 2026-11-06 | 89 → 90 | **worse by 1** in #823 (`#agent-tools` 17/19): moved up the file as the claude and cursor request starts above it were deleted; measured fn line to closing brace on `origin/feature/agent-tools/spec-backend` (`d325fba73`) and HEAD; no coverage run. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
 | 2026-11-07 | 89 → 92 | **worse by 3** in #834 (`#agent-tools` 26/28): the request branch resolves the session user's agent-tool socket before anything is cut (`agent_tool_socket_of`, refusing an unlisted user) and hands it to the role wiring and to `CliSessionStart`; measured fn line to closing brace on `origin/feature/agent-tools/split-remote-env` (`cd9026d9d`) and HEAD; no coverage run (89 at the base by this count; 90 above) |
+| 2026-11-16 | 98 → 100 | #921 (`#remote-shell` 7/7): the two branch starts hand the start its caller subject and Coder credentials. Touched, not closed |
 
 ## What would close it
 

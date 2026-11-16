@@ -176,6 +176,12 @@ pub struct DaemonSessionHost {
     /// The host's GitHub CLI, asked as a session's OS user for a **Local gh** project's identity
     /// and token. Production looks `gh` up on the spawned child's `PATH` at each call.
     github_cli: tddy_host_service::GithubCli,
+    /// Reads a Coder account's deployment URL and token from its owner's vault, for a session
+    /// whose target is a Coder workspace: asked at the start and again at every resume, as the
+    /// caller's subject (`tddy_agent_launch::coder_target::shell_for_coder_target`).
+    /// [`tddy_agent_launch::coder_target::NoCoderAccounts`] until
+    /// [`Self::with_coder_credentials`].
+    coder_credentials: Arc<dyn tddy_host_service::coder_workspaces::CoderCredentialSource>,
     /// This daemon's session-token signer and the verifier for every daemon's tokens — the same
     /// value `tddy_daemon_auth::build_auth_entries_with` built the RPC gate from. What mints an
     /// agent's own credential for a split or jailed-codebase session. `None` means this daemon

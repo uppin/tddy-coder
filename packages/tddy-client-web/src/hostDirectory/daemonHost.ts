@@ -30,6 +30,10 @@ export function hostDescriptorOf(host: DaemonHost, sourceId: string): HostDescri
     sourceId,
     ...(host.parent !== undefined ? { parent: host.parent } : {}),
     ...(host.target !== undefined ? { target: host.target } : {}),
+    ...(host.usable !== undefined ? { usable: host.usable } : {}),
+    ...(host.unusableReason !== undefined
+      ? { unusableReason: host.unusableReason }
+      : {}),
     ...(host.reposBasePath !== undefined ? { reposBasePath: host.reposBasePath } : {}),
     ...(host.maxAttachmentBytes !== undefined
       ? { maxAttachmentBytes: host.maxAttachmentBytes }
@@ -47,6 +51,10 @@ export function daemonHostOf(descriptor: HostDescriptor): DaemonHost {
     label: descriptor.label,
     ...(descriptor.parent !== undefined ? { parent: descriptor.parent } : {}),
     ...(descriptor.target !== undefined ? { target: descriptor.target } : {}),
+    ...(descriptor.usable !== undefined ? { usable: descriptor.usable } : {}),
+    ...(descriptor.unusableReason !== undefined
+      ? { unusableReason: descriptor.unusableReason }
+      : {}),
     ...(descriptor.reposBasePath !== undefined ? { reposBasePath: descriptor.reposBasePath } : {}),
     ...(descriptor.maxAttachmentBytes !== undefined
       ? { maxAttachmentBytes: descriptor.maxAttachmentBytes }

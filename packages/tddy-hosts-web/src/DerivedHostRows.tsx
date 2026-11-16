@@ -44,8 +44,27 @@ export function derivedHostsFailureTestId(parentInstanceId: string): string {
   return `hosts-row-${parentInstanceId}-derived-hosts-failure`;
 }
 
+/**
+ * The test id of the cell saying whether the derived host `derivedHostId` can run a session now:
+ * `Available`, or `Unavailable` for one its daemon listed as not usable (`DerivedHost.usable`) — a
+ * Coder workspace that is not running, or one whose daemon has no `coder` CLI.
+ */
+export function derivedHostStatusTestId(derivedHostId: string): string {
+  return `${derivedHostRowTestId(derivedHostId)}-status`;
+}
+
+/**
+ * The test id of the daemon's own reason an unusable derived host cannot be used
+ * (`DerivedHost.unusable_reason`). Rendered only on a host that is not usable.
+ */
+export function derivedHostUnusableReasonTestId(derivedHostId: string): string {
+  return `${derivedHostRowTestId(derivedHostId)}-unusable-reason`;
+}
+
 function kindLabel(kind: DerivedHostKind): string {
-  return kind === DerivedHostKind.SSH ? "SSH" : "";
+  if (kind === DerivedHostKind.SSH) return "SSH";
+  if (kind === DerivedHostKind.CODER) return "Coder";
+  return "";
 }
 
 export function DerivedHostRows({ parentInstanceId, parentOnline }: DerivedHostRowsProps) {
@@ -84,13 +103,26 @@ export function DerivedHostRows({ parentInstanceId, parentOnline }: DerivedHostR
     <>
       {hosts.map((host) => {
         const rowId = derivedHostRowTestId(host.id);
+        const unusable = host.unusableReason !== "";
         return (
           <tr key={host.id} data-testid={rowId}>
             <td className="py-2 pr-4">{host.label}</td>
             <td className="py-2 pr-4">
               <span data-testid={`${rowId}-kind`}>{kindLabel(host.kind)}</span>
             </td>
-            <td className="py-2 pr-4" />
+            <td className="py-2 pr-4">
+              <span data-testid={derivedHostStatusTestId(host.id)}>
+                {unusable ? "Unavailable" : "Available"}
+              </span>
+              {unusable ? (
+                <span
+                  data-testid={derivedHostUnusableReasonTestId(host.id)}
+                  className="block text-xs text-muted-foreground"
+                >
+                  {host.unusableReason}
+                </span>
+              ) : null}
+            </td>
             <td className="py-2 pr-4" />
             <td className="py-2 pr-4" />
             <td className="py-2 pr-4 font-mono text-xs">{host.id}</td>
