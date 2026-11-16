@@ -174,6 +174,9 @@ pub enum RemoteLaunchError {
         status: Option<i32>,
         last_output: String,
     },
+    /// The agent never recorded its pid on the target within the bound, though its terminal is
+    /// still running: it never started, so there is no startup window to judge it by.
+    AgentNeverStarted { after: Duration },
 }
 
 impl fmt::Display for RemoteLaunchError {
@@ -197,6 +200,10 @@ impl fmt::Display for RemoteLaunchError {
                 f,
                 "the agent was killed while starting: {}",
                 last_output.trim()
+            ),
+            Self::AgentNeverStarted { after } => write!(
+                f,
+                "the agent on the target did not record its pid within {after:?}: it never started, though its terminal is still running"
             ),
         }
     }
@@ -230,8 +237,14 @@ pub async fn launch_on_target(
     remote
         .shell
         .exec(tddy_remote_shell::ExecRequest::new(format!(
-            "mkdir -p {}",
-            shell_single_quote(&remote.worktree.join(".tddy").to_string_lossy())
+            "mkdir -p {} && rm -f {}",
+            shell_single_quote(&remote.worktree.join(".tddy").to_string_lossy()),
+            shell_single_quote(
+                &remote
+                    .worktree
+                    .join(crate::cli_session_pointer::REMOTE_AGENT_PID_FILE)
+                    .to_string_lossy()
+            )
         )))
         .await
         .map_err(RemoteLaunchError::Shell)?
@@ -323,12 +336,41 @@ pub async fn launch_on_target(
         .await
         .map_err(|error| RemoteLaunchError::Spawn(error.to_string()))?;
 
-    if exits_during_startup(&handle, remote.startup_window).await {
+    // The startup window runs from when the agent is known to have started, not from the PTY
+    // spawn: under load the remote shell may not have run the remote command yet when a
+    // spawn-counted window elapses, and an agent that exits at once would be judged started.
+    // The remote command writes `.tddy/agent.pid` immediately before it execs the agent.
+    let start_bound = remote
+        .startup_window
+        .saturating_mul(10)
+        .max(Duration::from_secs(5));
+    let agent_pid =
+        match wait_for_agent_start(remote.shell.as_ref(), remote.worktree, &handle, start_bound)
+            .await
+        {
+            AgentStart::Started(pid) => Some(pid),
+            AgentStart::Exited => None,
+            AgentStart::NeverStarted => {
+                session.manager.stop_session(session.session_id).await;
+                return Err(RemoteLaunchError::AgentNeverStarted { after: start_bound });
+            }
+        };
+
+    if exits_during_startup(
+        &handle,
+        remote.startup_window,
+        remote.shell.as_ref(),
+        agent_pid,
+    )
+    .await
+    {
+        // The output settles first: an agent judged exited by its pid may not have its exit
+        // status recorded yet, and settling the capture gives the terminal time to record it.
+        let last_output = settled_last_output(&handle).await;
         let status = match handle.task_status() {
             tddy_task::TaskStatus::Completed { exit_code } => exit_code,
             _ => None,
         };
-        let last_output = settled_last_output(&handle).await;
         // The process has ended; removing its registry entry now leaves no terminal behind.
         session.manager.stop_session(session.session_id).await;
         return Err(RemoteLaunchError::ExitedDuringStartup {
@@ -362,41 +404,94 @@ pub async fn launch_on_target(
     Ok(RemoteLaunched { handle, owner })
 }
 
-/// Whether `handle`'s process ends while it is starting, failing the launch. The window is how
-/// long the agent must stay up once it is running, so it runs from the agent's first output:
-/// loading its program (an `exec` on a busy target) is not staying up, and an agent that dies as
-/// soon as its program runs has not started, however long the load took. An agent that has shown
-/// nothing within four times the window is taken as started — it may simply be quiet — and judged
-/// on that. A process still running when its window closes has started.
-async fn exits_during_startup(handle: &PtyHandle, window: Duration) -> bool {
-    // Waiting for the first output: four times the window, so a slow load is not mistaken for a
-    // started agent, and a quiet one is not waited on for ever.
-    let mut deadline = tokio::time::Instant::now() + window.saturating_mul(4);
-    let mut running = false;
+/// How waiting for an agent to start on its target ended.
+enum AgentStart {
+    /// The agent recorded its pid: it is running (or ran) on the target, under this pid.
+    Started(u32),
+    /// The session's terminal ended before the pid was recorded.
+    Exited,
+    /// The bound elapsed with the terminal still running and no pid recorded.
+    NeverStarted,
+}
+
+/// Wait, bounded by `bound`, for the agent to record its pid in `worktree` on the target — the
+/// remote command writes `.tddy/agent.pid` immediately before it `exec`s the agent — or for
+/// `handle`'s terminal to end, whichever comes first.
+async fn wait_for_agent_start(
+    shell: &dyn RemoteShell,
+    worktree: &Path,
+    handle: &PtyHandle,
+    bound: Duration,
+) -> AgentStart {
+    let pid_file = worktree.join(crate::cli_session_pointer::REMOTE_AGENT_PID_FILE);
+    let probe = format!("cat {}", shell_single_quote(&pid_file.to_string_lossy()));
+    let deadline = tokio::time::Instant::now() + bound;
+    loop {
+        if *handle.pty_done.borrow() {
+            return AgentStart::Exited;
+        }
+        if let Ok(output) = shell
+            .exec(tddy_remote_shell::ExecRequest::new(probe.clone()).within(Duration::from_secs(5)))
+            .await
+        {
+            if output.status == 0 {
+                if let Ok(pid) = String::from_utf8_lossy(&output.stdout).trim().parse() {
+                    return AgentStart::Started(pid);
+                }
+            }
+        }
+        if *handle.pty_done.borrow() {
+            return AgentStart::Exited;
+        }
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return AgentStart::NeverStarted;
+        }
+        tokio::time::sleep((deadline - now).min(Duration::from_millis(50))).await;
+    }
+}
+
+/// Whether the agent ends within `window`, failing the launch. Called only once the agent is
+/// known to have started (its pid is recorded on the target), so the window runs from the
+/// agent's start: an agent still running when it closes has started.
+///
+/// The agent's own liveness on the target is judged beside the terminal's end, because under
+/// load the terminal's exit is reported long after the agent that caused it is gone: an agent
+/// whose pid is dead on the target has exited, whatever its terminal has yet to say.
+async fn exits_during_startup(
+    handle: &PtyHandle,
+    window: Duration,
+    shell: &dyn RemoteShell,
+    agent_pid: Option<u32>,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + window;
+    let mut probed_at = tokio::time::Instant::now() - Duration::from_secs(1);
     loop {
         if *handle.pty_done.borrow() {
             return true;
-        }
-        if !running && has_output(handle) {
-            // The agent's program is running: its window to stay up starts now.
-            running = true;
-            deadline = tokio::time::Instant::now() + window;
         }
         let now = tokio::time::Instant::now();
         if now >= deadline {
             return false;
         }
+        if let Some(pid) = agent_pid {
+            if probed_at.elapsed() >= Duration::from_millis(50) {
+                probed_at = now;
+                let alive = shell
+                    .exec(
+                        tddy_remote_shell::ExecRequest::new(format!("kill -0 {pid}"))
+                            .within(Duration::from_secs(5)),
+                    )
+                    .await
+                    .map(|output| output.status == 0)
+                    .unwrap_or(true);
+                if !alive {
+                    return true;
+                }
+            }
+        }
         tokio::time::sleep((deadline - now).min(Duration::from_millis(10))).await;
     }
-}
-
-/// Whether `handle`'s terminal has shown anything yet.
-fn has_output(handle: &PtyHandle) -> bool {
-    handle
-        .capture
-        .lock()
-        .map(|capture| !capture.buffered_bytes().is_empty())
-        .unwrap_or(false)
 }
 
 /// The tail of what `handle`'s terminal showed, once it has finished showing it. The task's
