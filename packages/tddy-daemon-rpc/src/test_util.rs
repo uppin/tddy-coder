@@ -49,12 +49,17 @@ use crate::RpcHandlers;
 /// none of its own: one built from the host's own config and resolver, as the handler
 /// itself was built before the service became the composition root's to attach. Suites
 /// that need fixture operator files or Coder accounts attach their own instead, through
-/// [`TestDaemon::from_host_with_host_service`].
-fn a_bare_host_service(host: &DaemonSessionHost) -> Arc<HostServiceImpl> {
+/// [`TestDaemon::from_host_with_host_service`]. Built from the host's parts, never the
+/// host itself — no handler here holds the session host (`rpc_handlers_shape` AC4/AC5).
+fn a_bare_host_service(
+    config: &tddy_daemon_kernel::config::DaemonConfig,
+    tddy_data_dir: &std::path::Path,
+    user_resolver: tddy_daemon_kernel::SessionUserResolver,
+) -> Arc<HostServiceImpl> {
     Arc::new(HostServiceImpl::new(
-        host.config().clone(),
-        host.tddy_data_dir(),
-        host.user_resolver(),
+        config.clone(),
+        tddy_data_dir,
+        user_resolver,
     ))
 }
 
@@ -72,7 +77,8 @@ impl TestDaemon {
     /// the handlers share its state from here on (see [`RpcHandlers::install`]).
     #[must_use]
     pub fn from_host(host: DaemonSessionHost) -> Self {
-        let host_service = a_bare_host_service(&host);
+        let host_service =
+            a_bare_host_service(host.config(), host.tddy_data_dir(), host.user_resolver());
         Self::from_host_with_host_service(host, host_service)
     }
 
@@ -99,7 +105,12 @@ impl TestDaemon {
     #[must_use]
     pub fn serving(daemon: tddy_session_lifecycle::test_util::TestDaemon) -> Self {
         let handlers = RpcHandlers::from_host(daemon.connection());
-        handlers.attach_host_service(a_bare_host_service(daemon.connection()));
+        let host = daemon.connection();
+        handlers.attach_host_service(a_bare_host_service(
+            host.config(),
+            host.tddy_data_dir(),
+            host.user_resolver(),
+        ));
         Self { daemon, handlers }
     }
 
