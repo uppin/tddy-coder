@@ -100,6 +100,7 @@ fn notification_for_agent(
         question: None,
         at_unix_ms,
         ended: None,
+        activity_status: None,
     }
 }
 

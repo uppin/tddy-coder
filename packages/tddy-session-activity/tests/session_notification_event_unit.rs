@@ -26,6 +26,7 @@ fn a_session_end(outcome: &str, exit_code: Option<i32>) -> SessionNotification {
             exit_code,
         }),
         at_unix_ms: 1_790_000_000_000,
+        activity_status: None,
     }
 }
 

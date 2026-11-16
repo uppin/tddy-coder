@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 5 — several crates (daemon-kernel, session-activity, tool-engine, daemon-rpc, daemon), concurrency semantics (exactly-once delivery across concurrent calls and several watches), a persisted per-project store that must survive restart, and a decoration of every tool answer
-**Stack**: `#activity-wake` 2/3 — branch `feature/activity-wake/session-watches`, base `feature/activity-wake/session-ended-notice` (#929)
+**Stack**: `#activity-wake` 2/3 — branch `feature/activity-wake/session-watches`, base `feature/activity-wake/session-ended-notice` (#929) — PR [#930](https://github.com/uppin/tddy-coder/pull/930)
 
 ## Initial Discovery
 
@@ -43,6 +43,7 @@ Not consulted here — nothing in this node decides busy or idle. The successor 
 - **tddy-daemon-kernel**: [daemon-kernel.md](../../../packages/tddy-daemon-kernel/docs/daemon-kernel.md) — `SessionNotification.activity_status`
 - **tddy-session-activity**: [session-notifications.md](../../../packages/tddy-session-activity/docs/session-notifications.md) — the status on activity-status notifications and in the log's JSON; the new `session_watches` module
 - **tddy-tool-engine** — `project_home_watch_tools`: four tool definitions, their port, refusal texts; the catalogue offers them to the project-home role
+- **tddy-session-lifecycle** — `DaemonSessionHost::with_session_watches` / `session_watches` (`svc_session_watches_wiring.rs`)
 - **tddy-daemon-rpc** — the port on `DaemonProjectHome`; the `watchEvents` attachment around `execute_tool`
 - **tddy-daemon** — opens the store and hands it to the exec-tool handler
 - every crate with a `SessionNotification` literal — `activity_status: None`
@@ -87,7 +88,7 @@ This PR owns **watches and their delivery on tool answers**:
   (86 400), `MAX_LIVE_WATCHES` (16), `MAX_EVENTS_PER_ANSWER` (50);
 - `tddy_tool_engine::project_home_watch_tools` — the tool names, definitions, `ProjectHomeWatchPort`,
   refusal texts;
-- `tddy-daemon-rpc`'s port implementation and `watchEvents` attachment;
+- `tddy-daemon-rpc`'s port implementation and `watchEvents` attachment (`ExecToolRpcHandler::with_watch_events`; the former `execute_tool` body is now `answer_execute_tool`, unchanged, so the length code issue now names that symbol);
 - the daemon's opening of the store.
 
 ## Boundaries
@@ -115,6 +116,10 @@ implementing one here collides with the PR that owns it.
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
 | `feature/activity-wake/session-ended-notice` (#929) | `SessionNotificationSource::SessionEnded`, `SessionNotification.ended`, the log's `"source": "session_ended"` records | the `ended` kind matches those records; a watch ends when its owner's, or every named session's, `session_ended` record is in the log | raise a session-ended notification, change its text or `ended` part, or touch the session manager's agent-end announcement |
+
+Adding `activity_status` to `SessionNotification` puts `activity_status: None` into every literal
+of it, #929's new tests and its forwarder's builder among them. That is the field's mechanical
+fallout, not a change to #929's behaviour.
 
 ## Draft PR contract
 
@@ -301,9 +306,18 @@ calling `ExecuteTool` as an orchestrator's tddy-tools does and reading the answe
 
 - `a_status_record_round_trips_its_activity_status`, `an_older_line_without_a_status_still_reads`
 
-**tddy-tool-engine** — `src/project_home_watch_tools.rs` `#[cfg(test)]`
+**tddy-tool-engine** — `tests/project_home_watch_tools.rs`
 
-- `the_watch_tools_are_offered_to_the_project_home_role_only`, `create_requires_ttl_seconds_in_its_schema`
+- `the_watch_tools_are_offered_to_the_project_home_role`, `create_requires_ttl_seconds_in_its_schema`,
+  `create_hands_the_port_what_was_asked_with_every_kind_by_default`,
+  `create_is_refused_before_the_port_for_bad_arguments`, `renew_and_cancel_name_the_watch_to_the_port`
+
+**tddy-session-activity** — `tests/session_watches_unit.rs` also holds
+`the_kinds_are_named_as_the_tools_name_them` and
+`a_status_notification_carries_the_status_it_was_raised_for`; and the acceptance file adds
+`a_session_that_is_not_an_orchestrator_is_refused_the_watch_tools` (the role guard's
+`PermissionDenied`), `an_orchestrator_whose_agent_takes_no_turn_is_refused_naming_the_agent` and
+`the_seventeenth_watch_is_refused`.
 
 ### Testing Principles Applied
 
@@ -356,10 +370,10 @@ exactly-once test races real tasks against one store, not a mock; one behaviour 
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

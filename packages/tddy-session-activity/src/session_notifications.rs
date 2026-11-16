@@ -278,6 +278,7 @@ pub fn notification_for_activity_status(
         at_unix_ms,
         question: None,
         ended: None,
+        activity_status: None,
     })
 }
 
@@ -313,6 +314,7 @@ pub fn notification_for_pending_question(
         at_unix_ms,
         question: Some(crate::pending_question_notice::question_notice_for(pending)),
         ended: None,
+        activity_status: None,
     }
 }
 
@@ -336,6 +338,7 @@ pub fn notification_for_agent_tool_call(
         at_unix_ms,
         question: None,
         ended: None,
+        activity_status: None,
     }
 }
 
@@ -397,6 +400,7 @@ pub fn notification_for_presenter_event(
         at_unix_ms,
         question: None,
         ended: None,
+        activity_status: None,
     })
 }
 

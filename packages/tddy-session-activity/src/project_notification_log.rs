@@ -85,6 +85,9 @@ pub struct ProjectNotificationRecord {
     pub question: Option<QuestionNotice>,
     /// How the session's agent ended, for a session-ended record (`#activity-wake` 1/3).
     pub ended: Option<SessionEndNotice>,
+    /// The status an activity-status record was raised for (`#activity-wake` 2/3); `None` for
+    /// every other source, and for a record written before records carried it.
+    pub activity_status: Option<String>,
     pub at_unix_ms: u64,
     /// The orchestrator that started the session — the `orchestrator_session_id` its changeset
     /// names when the record is appended — or `None` for a session no orchestrator started
@@ -288,6 +291,30 @@ impl ProjectNotificationLog {
         }
     }
 
+    /// Every record of `project_id` whose session `os_user` owns, after `seq`, oldest first — and
+    /// how many of the project's records after `seq` were evicted before this read.
+    ///
+    /// Not scoped to exclude any session: a session watch reads its own orchestrator's end through
+    /// it (`#activity-wake` 2/3), which [`ProjectNotificationScope`] always excludes.
+    pub fn records_after(
+        &self,
+        project_id: &str,
+        os_user: &str,
+        seq: u64,
+    ) -> (Vec<ProjectNotificationRecord>, u64) {
+        // TODO(session-watches): implement
+        let _ = (self.project(project_id), os_user, seq);
+        (Vec::new(), 0)
+    }
+
+    /// The newest `seq` recorded for `project_id`, `0` for a project with none: where a watch
+    /// created now starts, so it sees only what happens after it (`#activity-wake` 2/3).
+    pub fn head_seq(&self, project_id: &str) -> u64 {
+        // TODO(session-watches): implement
+        let _ = self.project(project_id);
+        0
+    }
+
     /// The project's log, created empty the first time it is named.
     fn project(&self, project_id: &str) -> Arc<Project> {
         let mut projects = self.projects.lock().unwrap_or_else(PoisonError::into_inner);
@@ -430,6 +457,8 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
                     agent: notification.agent.clone(),
                     question: notification.question.clone(),
                     ended: notification.ended.clone(),
+                    // TODO(session-watches): implement — keep `notification.activity_status`.
+                    activity_status: None,
                     at_unix_ms: notification.at_unix_ms,
                     orchestrator_session_id: orchestrator.clone(),
                 },

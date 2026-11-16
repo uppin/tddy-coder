@@ -119,6 +119,7 @@ impl BuildContext {
             model_registry,
             session_notification_bus,
             project_notification_log,
+            session_watches: open_session_watches(tddy_data_dir)?,
             host_prompts,
         })
     }
@@ -513,4 +514,14 @@ fn session_reach_of(
     livekit_reach: &Arc<tddy_daemon_livekit::LiveKitSessionReach>,
 ) -> Arc<dyn tddy_daemon_extensions::SessionReach + 'static> {
     Arc::clone(livekit_reach) as Arc<dyn tddy_daemon_extensions::SessionReach>
+}
+
+/// The orchestrators' session watches, kept per project beside the notification log they read
+/// (`#activity-wake` 2/3).
+fn open_session_watches(
+    tddy_data_dir: &std::path::Path,
+) -> anyhow::Result<Arc<tddy_session_activity::session_watches::SessionWatchStore>> {
+    Ok(Arc::new(
+        tddy_session_activity::session_watches::SessionWatchStore::open(tddy_data_dir)?,
+    ))
 }

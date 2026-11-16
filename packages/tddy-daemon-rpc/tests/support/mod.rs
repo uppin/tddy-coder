@@ -718,6 +718,39 @@ pub fn a_host_logging_notifications(
     (host, bus)
 }
 
+/// [`a_host_logging_notifications`], whose daemon also keeps session watches over that log
+/// (`#activity-wake` 2/3): an orchestrator's watch tools work, and its answers carry `watchEvents`.
+pub fn a_host_watching_sessions(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+) -> (Host, Arc<SessionNotificationBus>) {
+    let bus = Arc::new(std::sync::Mutex::new(None));
+    let published_on = Arc::clone(&bus);
+    let host = host_built_with(instance_id, peers, test_config(), move |host, sessions| {
+        let base = sessions.to_path_buf();
+        let data_dir = sessions.join("notification-log");
+        let log = Arc::new(
+            ProjectNotificationLog::open(
+                &data_dir,
+                Arc::new(move |_os_user: &str| Some(base.clone())),
+            )
+            .expect("the notification log opens"),
+        );
+        let watches = Arc::new(
+            tddy_session_activity::session_watches::SessionWatchStore::open(&data_dir)
+                .expect("the session watches open"),
+        );
+        let notifications =
+            Arc::new(SessionNotificationBus::new().with_subscriber(Arc::clone(&log)));
+        *published_on.lock().unwrap() = Some(Arc::clone(&notifications));
+        host.with_session_notification_bus(notifications)
+            .with_project_notification_log(log)
+            .with_session_watches(watches)
+    });
+    let bus = bus.lock().unwrap().take().expect("the bus was installed");
+    (host, bus)
+}
+
 /// [`a_host`], whose daemon's notification bus records everything published on it
 /// (`#home-inbox` 11/11): what an agent's `NotifyOperator` reached.
 pub fn a_host_recording_notifications(

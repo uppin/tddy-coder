@@ -35,70 +35,11 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
         &self,
         request: Request<ExecuteToolRequest>,
     ) -> Result<Response<ExecuteToolResponse>, Status> {
-        self.rpc_activity.record();
         let req = request.into_inner();
-        let req_conn = wire_same::<ExecuteToolRequest, ConnExecuteToolRequest>(&req)?;
-
-        // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
-        if let Some(answered) = self
-            .peer_routing
-            .rpc_served_by_peer(
-                EXEC_TOOL_SERVICE,
-                "ExecuteTool",
-                &req.daemon_instance_id,
-                &req,
-            )
-            .await?
-        {
-            return Ok(Response::new(answered));
-        }
-
-        // Auth before *any* worktree is chosen, because the hosted-clone branch below chooses one
-        // that is not this daemon's and proxies its mutations under the clone's own credential.
-        authorize_exec_tool_caller(&self.config, &self.user_resolver, &req_conn)?;
-
-        // A session this daemon holds an *agent clone* for lives on another daemon, so the ordinary
-        // "resolve the worktree from my own sessions base" would find nothing. Checked before that
-        // resolution rather than after it, so the read/write split is what answers rather than a
-        // not-found for a session that legitimately is not here.
-        if let Some(clone) = self.local_exec_tools.hosted_clone_for(&req.session_id) {
-            reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
-            let answered = self
-                .local_exec_tools
-                .run_hosted_clone_tool(&req_conn, &clone)
-                .await;
-            return Ok(Response::new(wire_same::<
-                ConnExecuteToolResponse,
-                ExecuteToolResponse,
-            >(&answered)?));
-        }
-
-        // A project-home tool called by a session another host holds — forwarded here by that
-        // host — has no session here to resolve; its caller is confirmed at its owner instead.
-        if let Some(answered) = self
-            .serve_project_home_for_caller_held_elsewhere(&req_conn)
-            .await?
-        {
-            return Ok(Response::new(wire_same::<
-                ConnExecuteToolResponse,
-                ExecuteToolResponse,
-            >(&answered)?));
-        }
-
-        let (sessions_base, worktree_root) = resolve_exec_tool_worktree(
-            &self.config,
-            &self.user_resolver,
-            &self.tddy_data_dir,
-            &req_conn,
-        )?;
-        reject_refused_local_exec_tool(&sessions_base, &req)?;
-        let response = self
-            .run_locally(&req_conn, &sessions_base, &worktree_root)
-            .await?;
-        Ok(Response::new(wire_same::<
-            ConnExecuteToolResponse,
-            ExecuteToolResponse,
-        >(&response)?))
+        let answered = self.answer_execute_tool(req.clone()).await?;
+        // Every answer to a watching orchestrator carries what its watches matched
+        // (`#activity-wake` 2/3).
+        Ok(Response::new(self.with_watch_events(&req, answered).await))
     }
 
     /// Server-streaming sibling of [`Self::execute_tool`], carrying the same result in bounded
@@ -481,5 +422,69 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                 "the permission was not granted".to_string()
             },
         }))
+    }
+}
+
+impl ExecToolRpcHandler {
+    /// `ExecuteTool`'s answer to `req`, before any watch events are attached: forwarded to the
+    /// peer it names, served for a hosted clone or a caller held elsewhere, or run here.
+    async fn answer_execute_tool(
+        &self,
+        req: ExecuteToolRequest,
+    ) -> Result<ExecuteToolResponse, Status> {
+        self.rpc_activity.record();
+        let req_conn = wire_same::<ExecuteToolRequest, ConnExecuteToolRequest>(&req)?;
+
+        // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
+        if let Some(answered) = self
+            .peer_routing
+            .rpc_served_by_peer(
+                EXEC_TOOL_SERVICE,
+                "ExecuteTool",
+                &req.daemon_instance_id,
+                &req,
+            )
+            .await?
+        {
+            return Ok(answered);
+        }
+
+        // Auth before *any* worktree is chosen, because the hosted-clone branch below chooses one
+        // that is not this daemon's and proxies its mutations under the clone's own credential.
+        authorize_exec_tool_caller(&self.config, &self.user_resolver, &req_conn)?;
+
+        // A session this daemon holds an *agent clone* for lives on another daemon, so the ordinary
+        // "resolve the worktree from my own sessions base" would find nothing. Checked before that
+        // resolution rather than after it, so the read/write split is what answers rather than a
+        // not-found for a session that legitimately is not here.
+        if let Some(clone) = self.local_exec_tools.hosted_clone_for(&req.session_id) {
+            reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
+            let answered = self
+                .local_exec_tools
+                .run_hosted_clone_tool(&req_conn, &clone)
+                .await;
+            return wire_same::<ConnExecuteToolResponse, ExecuteToolResponse>(&answered);
+        }
+
+        // A project-home tool called by a session another host holds — forwarded here by that
+        // host — has no session here to resolve; its caller is confirmed at its owner instead.
+        if let Some(answered) = self
+            .serve_project_home_for_caller_held_elsewhere(&req_conn)
+            .await?
+        {
+            return wire_same::<ConnExecuteToolResponse, ExecuteToolResponse>(&answered);
+        }
+
+        let (sessions_base, worktree_root) = resolve_exec_tool_worktree(
+            &self.config,
+            &self.user_resolver,
+            &self.tddy_data_dir,
+            &req_conn,
+        )?;
+        reject_refused_local_exec_tool(&sessions_base, &req)?;
+        let response = self
+            .run_locally(&req_conn, &sessions_base, &worktree_root)
+            .await?;
+        wire_same::<ConnExecuteToolResponse, ExecuteToolResponse>(&response)
     }
 }
