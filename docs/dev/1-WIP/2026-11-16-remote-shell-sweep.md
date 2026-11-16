@@ -106,21 +106,21 @@ The first push after the plan (commit 2) publishes the recorded baseline and the
 | 1 | `tddy-agent-launch/src/remote_agent_launch.rs` | new | 579 | 500 |
 | 2 | `tddy-session-lifecycle/src/connection_service/svc_activity_ports.rs` | 513 | 546 | 500 |
 | 3 | `tddy-session-lifecycle/src/connection_service/svc_host_builders.rs` | 531 | 544 | 500 |
-| 4 | `tddy-session-lifecycle/src/connection_service.rs` | over 500 | +6 | 500 |
+| 4 | `tddy-session-lifecycle/src/connection_service.rs` | 558 (433 by `restructure lines`) | 567 (442) | 500 |
 | 5 | `tddy-accounts/src/service.rs` | 772 | 790 | 500 |
 | 6 | `tddy-worktree-service/src/remote_git_service.rs` | 1,004 | 1,111 | 500 |
 | 7 | `tddy-session-create-web/src/useCreateSessionPaneState.tsx` | 495 | 503 | 500 |
-| 8 | `tddy-rust-typescript-tests/gen/host_pb.ts` (generated) | 1,402 | 1,734 | 500 |
-| 9 | `start_cli_harness_session` | 319 | 368 | 60 |
-| 10 | `resume_cli_harness_session` | 157 | 166 | 60 |
-| 11 | `resume_cli_harness` | 95 | 108 | 60 |
+| 8 | `tddy-rust-typescript-tests/gen/host_pb.ts` (generated) | 1,402 | 1,762 | 500 |
+| 9 | `start_cli_harness_session` | 318 | 368 | 60 |
+| 10 | `resume_cli_harness_session` | 136 | 166 | 60 |
+| 11 | `resume_cli_harness` | 88 | 108 | 60 |
 | 12 | `build_session_host` (`tddy-daemon`) | 73 | 82 | 60 |
-| 13 | `start_cli_harness_from_request` | 98 | 100 | 60 |
+| 13 | `start_cli_harness_from_request` | 94 | 100 | 60 |
 | 14 | `start_sandboxed_cli_harness_session` | 291 | 292 | 60 |
 | 15 | `start_session_on_request` | 79 | 80 | 60 |
 | 16 | `DaemonSessionHost::new` | 97 | 100 | 60 |
 
-Lines are production lines, counted to the first `#[cfg(test)]`; function lengths are brace-matched, as the records measure them.
+Lines are production lines, counted to the first `#[cfg(test)]`; function lengths are brace-matched, as the records measure them. "Before the stack" is the stack's merge-base with `master`, `3b15ffbc4`; the contract commit re-measured every row there and corrected rows 4, 8, 9, 10, 11 and 13, which the plan commit had read from #921's base.
 
 ### State B
 
@@ -143,56 +143,57 @@ A record whose file or function ends at or under its budget is **closed** and de
 ### Delta — seam groups in dependency order
 
 1. **A — `tddy-agent-launch` file** (row 1): `extract_module` of the startup items, then of the target items. Definitions before users.
-2. **B — `tddy-agent-launch` functions** (rows 9, 10, 11, 13, 14): `extract_method`, last range first within each function. After A, because A moves the callees.
-3. **C — `tddy-session-lifecycle`** (rows 2, 3, 4, 15, 16): `move_item` / `move_impl_members` per file, then `extract_method` for 15 and 16.
-4. **D — `tddy-accounts`** (row 5): two `move_item` groups.
-5. **E — `tddy-worktree-service`** (row 6): `extract_module --to_file`, seam A then seam B.
-6. **F — `tddy-daemon`** (row 12): `extract_method`.
+2. **B — `tddy-agent-launch` functions** (rows 10, 11, 13, 14, 15): eleven `extract_method` and one `move_impl_members`. Row 15's function lives in this crate, not in `tddy-session-lifecycle`. Row 9 has no operation: see Decisions. A and B apply in either order, because A's target move re-exports by name and rewrites none of B's anchored functions.
+3. **C — `tddy-session-lifecycle`** (rows 2, 3, 4): `move_item` / `move_impl_members` per file. Row 16 has no operation: see Decisions.
+4. **D — `tddy-accounts`** (row 5): five child modules of `service`, in two plans. `plan-D.jsonl` moves the helpers, `plan-D2.jsonl` then moves the link `impl` run that calls them; the checker refuses both in one plan.
+5. **E — `tddy-worktree-service`** (row 6): three `move_item`: seam A, then seam B in two parts, because seam B as the record designs it is 511 lines.
+6. **F — `tddy-daemon`** (row 12): two `extract_method`. The second leaves a `let x = …; x` that `clippy::let_and_return` rejects; the two-line fix after the apply is the one already approved for this engine gap.
 7. **G — test support**: the fixture warm-up in the two shared stub writers. Hand edit of test code, no production line.
 8. **H — TypeScript** (row 7): hand split.
 
-One plan file per group A–F, each committed on its own after its apply.
+One plan file per group A–F (two for D), each committed on its own after its apply. Groups G and H are specified in [plans.md](./2026-11-16-remote-shell-sweep/plans.md).
 
 ## Callers
 
 | | |
 |---|---|
-| External importers | to be listed by the plan step from `restructure check --deep`: `tddy-daemon`, `tddy-session-lifecycle` and the test crates name items in rows 1, 5 and 6 |
+| External importers | listed per plan in [plans.md](./2026-11-16-remote-shell-sweep/plans.md), from `restructure check --deep` |
 | Facade | `reexport: "outside"` on every module with a consumer outside its crate, so no other crate's source changes |
 | Consequence | no caller outside the moved crates is edited |
 
 ## Visibility
 
-Filled in from each apply's report. Zero widenings is the target for groups D and E, whose seams are module-level items.
+Every widening `check --deep` reported is listed per plan in [plans.md](./2026-11-16-remote-shell-sweep/plans.md); each apply's report confirms it. Zero widenings for groups D and E turned out not to be achievable: their child modules read private fields and helpers of the parent.
 
 ## Baseline
 
-Recorded in the contract commit, before any change. The known failures on this machine that are not regressions, by cause: the LiveKit testkit's port bind, BSD `cat` rejecting `--` in the sandboxed-codebase suites, an unbuilt `tddy-remote-git-repo` binary, and the `/tmp` path assertion in `claude_cli_from_spec_acceptance`. CI on #921's head (`01a11360e`) is the reference for Linux: all 54 checks pass.
+Recorded in the contract commit, before any change, in [baseline.md](./2026-11-16-remote-shell-sweep/baseline.md), which names every failing test. The known failures on this machine that are not regressions, by cause: the LiveKit testkit's port bind, BSD `cat` rejecting `--` in the sandboxed-codebase suites, an unbuilt `tddy-remote-git-repo` binary, and the `/tmp` path assertion in `claude_cli_from_spec_acceptance`. CI on #921's head (`01a11360e`) is the reference for Linux: all 54 checks pass.
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-agent-launch` | recorded at the contract commit | |
-| `./test -p tddy-session-lifecycle` | recorded at the contract commit | |
-| `./test -p tddy-accounts` | recorded at the contract commit | |
-| `./test -p tddy-worktree-service` | recorded at the contract commit | |
-| `./test -p tddy-daemon` | recorded at the contract commit | |
-| `tddy-session-create-web` specs and unit tests | recorded at the contract commit | |
+| `./test -p tddy-agent-launch` | 342 passed, 0 failed | |
+| `./test -p tddy-session-lifecycle` | 966 passed, 13 failed (12 BSD `cat`, 1 `/tmp` path) | |
+| `./test -p tddy-accounts` | 152 passed, 0 failed | |
+| `./test -p tddy-worktree-service` | 175 passed, 0 failed, 1 ignored | |
+| `./test -p tddy-daemon` | 332 passed, 2 failed (LiveKit testkit port bind) | |
+| `tddy-session-create-web` unit tests (`bun test src`) | 104 passed, 0 failed; Cypress not run locally | |
 
 ## Plan
 
-`docs/dev/1-WIP/2026-11-16-remote-shell-sweep/plan-<group>.jsonl`, one per group A–F, written with `restructure anchors` and proven with `check --deep` in the contract commit.
+`docs/dev/1-WIP/2026-11-16-remote-shell-sweep/plan-{A,B,C,D,D2,E,F}.jsonl`, written with `restructure anchors`. Each ends `no findings` under `restructure check --deep --budget 500`. [plans.md](./2026-11-16-remote-shell-sweep/plans.md) holds the operations, the projected lengths, the engine's refusals verbatim and the hand-edit specs for groups G and H. No plan has been compiled: the compile gate, clippy and rustfmt run at apply, so every projected length is arithmetic until then.
 
 ## Decisions & Trade-offs
 
 - **"Closed or restored" is the bar.** A record the stack added is closed. A record that existed before is brought back to at most its measurement before the stack; where the designed split is on record and nothing above this PR blocks it (rows 5 and 6), it is closed outright.
 - **Rows 13–16 grew by one to three lines.** The `#agent-tools` sweep scoped its function tier at five lines. They are attempted here because the bar is "not worse", but rows 12 and 16 carry recorded engine refusals for their remaining seams. A refusal there is recorded in the record with the engine's words, and the row is reported to the developer as not restored.
+- **Rows 9 and 16 cannot be restored by the engine.** Row 9 (`start_cli_harness_session`, 368 against 318): every range holding what the stack added carries `Option<Arc<dyn RemoteShell>>`, and the engine refuses a signature naming a type the file does not import. Two hand-written `use` lines in `opencode_cli_spawn.rs` would unlock about 51 lines; that is a hand edit of production code and needs the developer's consent, so it is not in a plan. Row 16 (`DaemonSessionHost::new`, 100 against 97): rust-analyzer offers no extract-into-function assist for the fields of the `Self { … }` literal. Both rows are reported to the developer as not restored.
 - **Row 8 has no seam.** `host_pb.ts` is generated from `host.proto`; the only way to shorten it is to split the proto's service, which is a wire change. Whether generated output should be measured against the file budget at all is the developer's call and is put to them when this PR is done. This PR leaves the record as it is.
 - **Complexity 5 is a warning.** This is five packages' worth of moves in one PR. It is one concern, the stack's own debt, and each group is a separate plan and commit so a reviewer can take them one at a time. If the plan step shows a group cannot be proven, the group is cut and reported, not forced.
 - **Fixture duplication is not moved here.** The stand-in target, stub agents and daemon helpers are repeated across four of the stack's test files. Moving them is a hand edit across test files owned by four PRs; it is recorded for the developer's decision.
 
 ## Final Checklist
 
-Derived at the plan step: every statement in `packages/*/docs/` that names a moved item's file.
+Every statement in `packages/*/docs/` that names a moved item's file is listed in [plans.md](./2026-11-16-remote-shell-sweep/plans.md) § Doc statements that name what moves.
 
 ## Refactoring Needed
 
@@ -213,9 +214,9 @@ Derived at the plan step: every statement in `packages/*/docs/` that names a mov
 - [x] Record initial discovery (`2026-11-16-remote-shell-sweep-initial-discovery.md`)
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create changeset (this document)
-- [ ] Record the green baseline, by failing-test name
-- [ ] Write the plans with `restructure anchors`; prove each with `check --deep`
-- [ ] USER REVIEW — the plan
+- [x] Record the green baseline, by failing-test name
+- [x] Write the plans with `restructure anchors`; prove each with `check --deep`
+- [x] USER REVIEW — the plan (approved in advance by the developer's standing instruction for this stack's review gates)
 - [ ] Apply each plan, commit it on its own, `verify --against`
 - [ ] Hand split of the TypeScript file; fixture warm-up in the shared stub writers
 - [ ] Final gate: fmt, clippy, the baseline's failing set by name, the comment-line multiset, `verify` against the ref before the first plan
