@@ -68,7 +68,7 @@ pub fn render_cursor_hooks_json(
     workdir: &Path,
     params: &HookCommandParams<'_>,
 ) -> Result<RenderedHooks, SlotError> {
-    if params.daemon_socket.is_none() {
+    if params.remote_log.is_none() && params.daemon_socket.is_none() {
         return Err(SlotError::NoDaemonSocket {
             adapter: CURSOR_HOOKS_JSON.to_string(),
         });

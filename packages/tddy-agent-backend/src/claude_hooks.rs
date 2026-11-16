@@ -112,6 +112,14 @@ pub(crate) fn hook_entry_for_event(
     matcher: &str,
     awaits_an_answer: bool,
 ) -> serde_json::Value {
+    if let Some(log) = p.remote_log {
+        let cmd = crate::remote_hook_command::remote_hook_command(event, p.hook_token, log);
+        let hook = serde_json::json!({"type": "command", "command": cmd});
+        return serde_json::json!([{
+            "matcher": matcher,
+            "hooks": [hook]
+        }]);
+    }
     let cmd = format!(
         "{} session-hook --session {} --daemon {}{} --os-user {} --hook-token {} --event {}",
         shell_quote(p.tddy_tools_path),
@@ -163,6 +171,9 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
         // for the orchestrator's answer; the daemon decides whether anyone is there.
         let awaits_an_answer = *event == "PermissionRequest"
             || (*event == "PreToolUse" && *matcher == "AskUserQuestion");
+        if p.remote_log.is_some() && awaits_an_answer {
+            continue;
+        }
         hooks_obj.insert(
             event.to_string(),
             hook_entry_for_event(p, event, matcher, awaits_an_answer),

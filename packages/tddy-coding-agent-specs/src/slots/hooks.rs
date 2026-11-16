@@ -130,7 +130,7 @@ impl HooksAdapter for MuseConfigArg {
         _workdir: &Path,
         params: &HookCommandParams<'_>,
     ) -> Result<RenderedHooks, SlotError> {
-        if params.daemon_socket.is_none() {
+        if params.remote_log.is_none() && params.daemon_socket.is_none() {
             return Err(SlotError::NoDaemonSocket {
                 adapter: MUSE_CONFIG_ARG.to_string(),
             });

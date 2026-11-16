@@ -22,10 +22,25 @@
 
 use std::fmt;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
-use tddy_remote_shell::{RemoteShell, RemoteShellError};
+use tddy_remote_shell::{ExecRequest, FileMode, RemoteShell, RemoteShellError};
+use tokio::io::AsyncReadExt as _;
+
+/// Quote `arg` as one single-quoted POSIX shell word (`'\''` for an embedded quote).
+fn shell_quote(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', r"'\''"))
+}
+
+/// Whether `event` is installed by any hooks adapter (Claude Code, Muse or Cursor).
+fn is_installed_event(event: &str) -> bool {
+    tddy_core::claude_hooks::CLAUDE_INSTALLED_EVENTS.contains(&event)
+        || tddy_core::muse_hooks::MUSE_INSTALLED_EVENTS.contains(&event)
+        || tddy_core::cursor_hooks::CURSOR_HOOK_EVENTS.contains(&event)
+}
 
 /// One hook an agent on a target reported: a line of its hook log, checked.
 #[derive(Debug, Clone, PartialEq)]
@@ -68,9 +83,24 @@ impl HookLine {
     /// Cursor's) and its payload is JSON. The payload is everything after the second tab, so a tab
     /// inside it is kept. The token is checked before anything else of the line is looked at.
     pub fn parse(line: &str, expected_token: &str) -> Result<HookLine, HookLineError> {
-        // TODO(remote-hooks): implement
-        let _ = (line, expected_token);
-        Err(HookLineError::Malformed)
+        let mut fields = line.splitn(3, '\t');
+        let (Some(event), Some(token), Some(payload)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            return Err(HookLineError::Malformed);
+        };
+        if token != expected_token {
+            return Err(HookLineError::WrongToken);
+        }
+        if !is_installed_event(event) {
+            return Err(HookLineError::UnknownEvent(event.to_string()));
+        }
+        let payload: serde_json::Value =
+            serde_json::from_str(payload).map_err(|_| HookLineError::BrokenPayload)?;
+        Ok(HookLine {
+            event: event.to_string(),
+            payload,
+        })
     }
 }
 
@@ -93,9 +123,7 @@ pub trait HookSink: Send + Sync {
 /// shell.
 #[must_use]
 pub fn follow_command(log_path: &str, offset: u64) -> String {
-    // TODO(remote-hooks): implement
-    let _ = (log_path, offset);
-    String::new()
+    format!("tail -c +{} -f {}", offset + 1, shell_quote(log_path))
 }
 
 /// Create the session's hook log in `worktree` on `shell`'s target — empty, readable and writable
@@ -106,11 +134,20 @@ pub async fn create_remote_hook_log(
     shell: &dyn RemoteShell,
     worktree: &Path,
 ) -> Result<String, RemoteShellError> {
-    // TODO(remote-hooks): implement
-    let _ = (shell, worktree);
-    Err(RemoteShellError::Spawn(
-        "creating a target session's hook log is not implemented".to_string(),
-    ))
+    let log_path = worktree.join(tddy_core::REMOTE_HOOK_LOG);
+    let log = log_path.to_string_lossy().into_owned();
+    let exclude_command = format!(
+        "if exclude=$(git -C {worktree} rev-parse --path-format=absolute --git-path info/exclude 2>/dev/null); then \
+         mkdir -p \"$(dirname \"$exclude\")\"; \
+         grep -qxF '/.tddy/hooks.log' \"$exclude\" 2>/dev/null || echo '/.tddy/hooks.log' >> \"$exclude\"; fi",
+        worktree = shell_quote(&worktree.to_string_lossy()),
+    );
+    shell
+        .exec(ExecRequest::new(exclude_command))
+        .await?
+        .success_or_exited()?;
+    shell.write_file(&log, b"", FileMode::OwnerOnly).await?;
+    Ok(log)
 }
 
 /// Remove the session's hook log from `worktree` on `shell`'s target. A log that is already gone
@@ -119,17 +156,21 @@ pub async fn remove_remote_hook_log(
     shell: &dyn RemoteShell,
     worktree: &Path,
 ) -> Result<(), RemoteShellError> {
-    // TODO(remote-hooks): implement
-    let _ = (shell, worktree);
-    Err(RemoteShellError::Spawn(
-        "removing a target session's hook log is not implemented".to_string(),
-    ))
+    let log = worktree
+        .join(tddy_core::REMOTE_HOOK_LOG)
+        .to_string_lossy()
+        .into_owned();
+    shell
+        .exec(ExecRequest::new(format!("rm -f {}", shell_quote(&log))))
+        .await?
+        .success_or_exited()?;
+    Ok(())
 }
 
 /// The reader of one target session's hook log, running until it is stopped.
 pub struct RemoteHookFollower {
-    // TODO(remote-hooks): implement — the reading task and the dropped-line count.
-    _private: (),
+    task: Option<tokio::task::JoinHandle<()>>,
+    dropped: Arc<AtomicU64>,
 }
 
 impl RemoteHookFollower {
@@ -144,22 +185,66 @@ impl RemoteHookFollower {
         hook_token: &str,
         sink: Arc<dyn HookSink>,
     ) -> Self {
-        // TODO(remote-hooks): implement
-        let _ = (shell, log_path, hook_token, sink);
-        Self { _private: () }
+        let dropped = Arc::new(AtomicU64::new(0));
+        let task_dropped = Arc::clone(&dropped);
+        let log_path = log_path.to_string();
+        let hook_token = hook_token.to_string();
+        let task = tokio::spawn(async move {
+            let mut offset: u64 = 0;
+            let mut pending: Vec<u8> = Vec::new();
+            loop {
+                if let Ok(mut streamed) = shell
+                    .exec_streamed(&follow_command(&log_path, offset))
+                    .await
+                {
+                    let mut chunk = [0u8; 4096];
+                    loop {
+                        match streamed.stdout.read(&mut chunk).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(read) => {
+                                offset += read as u64;
+                                pending.extend_from_slice(&chunk[..read]);
+                                while let Some(end) = pending.iter().position(|byte| *byte == b'\n')
+                                {
+                                    let mut line: Vec<u8> = pending.drain(..=end).collect();
+                                    line.pop();
+                                    if line.last() == Some(&b'\r') {
+                                        line.pop();
+                                    }
+                                    let text = String::from_utf8_lossy(&line);
+                                    match HookLine::parse(&text, &hook_token) {
+                                        Ok(hook) => sink.deliver(hook).await,
+                                        Err(_) => {
+                                            task_dropped.fetch_add(1, Ordering::SeqCst);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        });
+        Self {
+            task: Some(task),
+            dropped,
+        }
     }
 
     /// How many lines this follower has dropped: wrong token, unknown event, broken payload or
     /// torn line.
     pub fn dropped_lines(&self) -> u64 {
-        // TODO(remote-hooks): implement
-        0
+        self.dropped.load(Ordering::SeqCst)
     }
 
     /// Stop following: the remote command is ended and nothing more is delivered. Returns once the
     /// reader is gone.
-    pub async fn stop(self) {
-        // TODO(remote-hooks): implement
+    pub async fn stop(mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+            let _ = task.await;
+        }
     }
 }
 

@@ -29,9 +29,13 @@ pub const REMOTE_HOOK_LOG: &str = ".tddy/hooks.log";
 /// log's directory must exist; the command creates the file.
 #[must_use]
 pub fn remote_hook_command(event: &str, hook_token: &str, log_path: &str) -> String {
-    // TODO(remote-hooks): implement
-    let _ = (event, hook_token, log_path);
-    String::new()
+    use crate::claude_hooks::shell_quote;
+    format!(
+        "printf '%s\\t%s\\t%s\\n' {} {} \"$(cat | tr -d '\\n')\" >> {}",
+        shell_quote(event),
+        shell_quote(hook_token),
+        shell_quote(log_path),
+    )
 }
 
 #[cfg(all(test, unix))]
