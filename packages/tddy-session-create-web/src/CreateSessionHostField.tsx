@@ -48,11 +48,16 @@ export function CreateSessionHostField({ daemons, daemonInstanceId, setDaemonIns
               data-testid={`create-session-host-derived-group-${safeTestIdPart(parent.instanceId)}`}
               label={parent.label}
             >
-              {derived.map((d) => (
-                <option key={d.instanceId} value={d.instanceId}>
-                  {d.label}
-                </option>
-              ))}
+              {derived.map((d) => {
+                const unusable = d.usable === false;
+                return (
+                  <option key={d.instanceId} value={d.instanceId} disabled={unusable}>
+                    {unusable && d.unusableReason
+                      ? `${d.label} — ${d.unusableReason}`
+                      : d.label}
+                  </option>
+                );
+              })}
             </optgroup>
           );
         })}

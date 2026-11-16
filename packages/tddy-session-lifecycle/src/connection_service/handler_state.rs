@@ -247,6 +247,7 @@ impl DaemonSessionHost {
             hook_report_delivery: Some(Arc::new(super::svc_activity_ports::ActivityHookDelivery {
                 host: self.clone(),
             })),
+            coder_credentials: self.coder_credentials(),
         }
     }
 }

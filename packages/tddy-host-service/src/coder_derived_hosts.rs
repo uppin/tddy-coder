@@ -90,35 +90,27 @@ pub fn coder_derived_host_id(
     owner: &str,
     workspace: &str,
 ) -> String {
-    // TODO(coder-hosts): implement
-    let _ = (parent_instance_id, account_id, owner, workspace);
-    String::new()
+    format!("{parent_instance_id}/coder/{account_id}/{owner}/{workspace}")
 }
 
 /// The id of the host that stands for a whole account whose workspaces could not be listed:
 /// `<parent_instance_id>/coder/<account_id>`.
 #[must_use]
 pub fn coder_account_host_id(parent_instance_id: &str, account_id: &str) -> String {
-    // TODO(coder-hosts): implement
-    let _ = (parent_instance_id, account_id);
-    String::new()
+    format!("{parent_instance_id}/coder/{account_id}")
 }
 
 /// What an operator reads for a workspace: `<workspace> (<account label>)`.
 #[must_use]
 pub fn coder_host_label(workspace: &str, account_label: &str) -> String {
-    // TODO(coder-hosts): implement
-    let _ = (workspace, account_label);
-    String::new()
+    format!("{workspace} ({account_label})")
 }
 
 /// Why a workspace whose deployment reports `status` cannot be used: `the workspace is <status>`.
 /// The deployment's own word is kept, so `stopped`, `starting` and `failed` read differently.
 #[must_use]
 pub fn workspace_not_running_reason(status: &str) -> String {
-    // TODO(coder-hosts): implement
-    let _ = status;
-    String::new()
+    format!("the workspace is {status}")
 }
 
 /// The workspaces of one signed-in person's Coder accounts, as derived hosts of one daemon.
@@ -164,28 +156,93 @@ impl CoderDerivedHosts {
 #[async_trait]
 impl DerivedHostSource for CoderDerivedHosts {
     fn kind(&self) -> DerivedHostKind {
-        // TODO(coder-hosts): implement
-        DerivedHostKind::Unspecified
+        DerivedHostKind::Coder
     }
 
     /// The workspaces of every Coder account of this source's subject: accounts in the accounts
     /// listing's order, each account's workspaces in its deployment's order. `os_user` is not
     /// read — see the module's *Whose accounts*.
-    async fn list(&self, os_user: &str) -> Result<Vec<DerivedHost>, String> {
-        // TODO(coder-hosts): implement
-        let _ = (
-            &self.parent_instance_id,
-            &self.subject,
-            &self.accounts,
-            &self.credentials,
-            &self.workspaces,
-            &self.coder_cli,
-            os_user,
-        );
-        Err(
-            "listing Coder workspaces as derived hosts is not implemented on this daemon yet"
-                .to_string(),
-        )
+    async fn list(&self, _os_user: &str) -> Result<Vec<DerivedHost>, String> {
+        use tddy_service::proto::session::{session_target, CoderTarget, SessionTarget};
+
+        let accounts = self
+            .accounts
+            .accounts_of(&self.subject)
+            .map_err(|error| match error {
+                CoderCredentialError::VaultLocked => {
+                    "the vault holding this Coder account is locked: unlock it and list again"
+                        .to_string()
+                }
+                other => other.to_string(),
+            })?;
+        let mut hosts = Vec::new();
+        for account in &accounts {
+            let credentials = match self
+                .credentials
+                .credentials_for(&self.subject, &account.account_id)
+            {
+                Ok(credentials) => credentials,
+                Err(error) => {
+                    hosts.push(DerivedHost {
+                        id: coder_account_host_id(&self.parent_instance_id, &account.account_id),
+                        label: account.label.clone(),
+                        kind: DerivedHostKind::Coder as i32,
+                        parent_instance_id: self.parent_instance_id.clone(),
+                        target: None,
+                        usable: false,
+                        unusable_reason: error.to_string(),
+                    });
+                    continue;
+                }
+            };
+            let workspaces = match self.workspaces.workspaces(&credentials).await {
+                Ok(workspaces) => workspaces,
+                Err(error) => {
+                    hosts.push(DerivedHost {
+                        id: coder_account_host_id(&self.parent_instance_id, &account.account_id),
+                        label: account.label.clone(),
+                        kind: DerivedHostKind::Coder as i32,
+                        parent_instance_id: self.parent_instance_id.clone(),
+                        target: None,
+                        usable: false,
+                        unusable_reason: error.to_string(),
+                    });
+                    continue;
+                }
+            };
+            for workspace in workspaces {
+                let running = workspace.is_running();
+                let (usable, unusable_reason) = if !running {
+                    (false, workspace_not_running_reason(&workspace.status))
+                } else if !self.coder_cli.installed {
+                    (false, CODER_CLI_NOT_INSTALLED.to_string())
+                } else {
+                    (true, String::new())
+                };
+                hosts.push(DerivedHost {
+                    id: coder_derived_host_id(
+                        &self.parent_instance_id,
+                        &account.account_id,
+                        &workspace.owner,
+                        &workspace.name,
+                    ),
+                    label: coder_host_label(&workspace.name, &account.label),
+                    kind: DerivedHostKind::Coder as i32,
+                    parent_instance_id: self.parent_instance_id.clone(),
+                    target: Some(SessionTarget {
+                        kind: Some(session_target::Kind::Coder(CoderTarget {
+                            account_id: account.account_id.clone(),
+                            owner: workspace.owner.clone(),
+                            workspace: workspace.name.clone(),
+                            agent: String::new(),
+                        })),
+                    }),
+                    usable,
+                    unusable_reason,
+                });
+            }
+        }
+        Ok(hosts)
     }
 }
 

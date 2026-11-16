@@ -37,8 +37,8 @@ use crate::cli_agent_steps::conversation::refuse_a_role_the_agent_cannot_hold;
 use crate::cli_agent_steps::conversation::start_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::{
-    render_host_launch_slots, wire_session_agent, write_slot_files_on_target, HostLaunchSlots,
-    ManagedWiring, SessionWiringInputs,
+    render_host_launch_slots, wire_session_agent, write_slot_files_on_target,
+    write_slot_files_through_shell, HostLaunchSlots, ManagedWiring, SessionWiringInputs,
 };
 use crate::cli_resume_token::resume_token_recorder;
 use crate::cli_route_launch::{routed_launch_model, start_cli_route};
@@ -115,6 +115,11 @@ pub(crate) struct CliSessionStart<'a> {
     /// The target the session's agent runs on (`StartSessionRequest.target`), when it named one:
     /// the checkout is cut on it and the agent is launched there.
     pub target: Option<tddy_core::SessionTarget>,
+    /// Who the start's caller is, as their session token resolved: the owner of the vault a
+    /// Coder target's account is read from.
+    pub subject: String,
+    /// Reads a Coder target's account from the caller's vault.
+    pub coder_credentials: Arc<dyn tddy_host_service::coder_workspaces::CoderCredentialSource>,
     /// Where a target session's followed hooks are delivered, and the registry its follower is
     /// kept in (`LaunchSessions`' fields, lent for the start).
     pub hook_delivery: Option<Arc<dyn crate::remote_hook_follower::HookReportDelivery>>,
@@ -125,6 +130,33 @@ pub(crate) struct CliSessionStart<'a> {
     pub managed: Option<ManagedWiring>,
     /// The session's standing role, recorded before its agent is spawned.
     pub role: StartRole<'a>,
+}
+
+/// The shell that reaches `target`, resolved as `subject`: an ssh target's transport, or a
+/// Coder workspace's with the credentials `credentials` reads from the subject's vault. A
+/// locked vault is `FAILED_PRECONDITION` with its own remedy, as a resume must answer.
+pub(crate) fn shell_for_session_target(
+    target: &tddy_core::SessionTarget,
+    subject: &str,
+    credentials: &dyn tddy_host_service::coder_workspaces::CoderCredentialSource,
+) -> Result<Arc<dyn tddy_remote_shell::RemoteShell>, Status> {
+    use crate::coder_target::CoderTargetError;
+    match target {
+        tddy_core::SessionTarget::Ssh { .. } => {
+            crate::remote_agent_launch::shell_for_target(target)
+                .map_err(|e| Status::invalid_argument(e.to_string()))
+        }
+        tddy_core::SessionTarget::Coder { .. } => {
+            crate::coder_target::shell_for_coder_target(target, subject, credentials).map_err(|e| {
+                match e {
+                    CoderTargetError::VaultLocked | CoderTargetError::Unavailable(_) => {
+                        Status::failed_precondition(e.to_string())
+                    }
+                    other => Status::invalid_argument(other.to_string()),
+                }
+            })
+        }
+    }
 }
 
 pub(crate) async fn start_cli_harness_session(
@@ -165,6 +197,8 @@ pub(crate) async fn start_cli_harness_session(
         effort,
         ssh_config_host,
         target,
+        subject,
+        coder_credentials,
         hook_delivery,
         hook_followers,
         managed_codebase,
@@ -179,6 +213,16 @@ pub(crate) async fn start_cli_harness_session(
     // the slot files are written and the pointer is placed.
     let checkout_alias =
         crate::remote_agent_launch::target_config_host(target.as_ref()).unwrap_or(ssh_alias);
+    // Resolved before anything is cut: a Coder target whose vault is locked, or whose account
+    // the vault does not hold, refuses the start here rather than after a worktree exists.
+    let target_shell = match &target {
+        Some(target) => Some(shell_for_session_target(
+            target,
+            &subject,
+            coder_credentials.as_ref(),
+        )?),
+        None => None,
+    };
     let spec = &agent.spec;
     let role_name = role.name;
     refuse_a_role_the_agent_cannot_hold(spec, role_name)?;
@@ -236,6 +280,7 @@ pub(crate) async fn start_cli_harness_session(
             intent,
             timeout: config.spawn_worker_request_timeout(),
             ssh_alias: checkout_alias,
+            shell: target_shell.clone(),
         },
         &stack_parent,
         progress,
@@ -350,8 +395,16 @@ pub(crate) async fn start_cli_harness_session(
     slots.argv_extra.extend(role_args);
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
-    write_slot_files_on_target(&mut slots, remote_host).await?;
-    let host = PointerHost::of(remote_host);
+    match &target_shell {
+        Some(shell) => write_slot_files_through_shell(&mut slots, shell.as_ref()).await?,
+        None => write_slot_files_on_target(&mut slots, remote_host).await?,
+    }
+    let host = match &target_shell {
+        Some(shell) => PointerHost::Remote {
+            shell: Arc::clone(shell),
+        },
+        None => PointerHost::of(remote_host),
+    };
     let pointer =
         place_session_pointer(wiring.session_pointer.as_ref(), &worktree_path, &host).await?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, run_in_tmux);
@@ -385,8 +438,8 @@ pub(crate) async fn start_cli_harness_session(
             model: launch_model,
             env,
             on_exit,
-            remote: target.clone().map(|target| HarnessRemote {
-                target,
+            remote: target_shell.clone().map(|shell| HarnessRemote {
+                shell,
                 pointer: wiring.session_pointer.clone(),
                 startup_window: config.spawn_startup_grace_period(),
                 hook_token: wiring.hooks.as_ref().map(|hooks| hooks.hook_token.clone()),

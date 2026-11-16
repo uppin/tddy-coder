@@ -100,11 +100,35 @@ pub fn shell_for_coder_target_through(
     subject: &str,
     credentials: &dyn CoderCredentialSource,
 ) -> Result<Arc<dyn RemoteShell>, CoderTargetError> {
-    // TODO(coder-hosts): implement
-    let _ = (coder_binary.into(), target, subject, credentials);
-    Err(CoderTargetError::Unavailable(
-        "no remote shell is built for a Coder target yet".to_string(),
-    ))
+    let SessionTarget::Coder {
+        account_id,
+        owner,
+        workspace,
+        agent,
+    } = target
+    else {
+        return Err(CoderTargetError::NotACoderTarget);
+    };
+    let (account_id, owner, workspace) = (account_id.trim(), owner.trim(), workspace.trim());
+    if account_id.is_empty() || owner.is_empty() || workspace.is_empty() {
+        return Err(CoderTargetError::NoWorkspace);
+    }
+    let held = credentials
+        .credentials_for(subject, account_id)
+        .map_err(|error| match error {
+            CoderCredentialError::VaultLocked => CoderTargetError::VaultLocked,
+            CoderCredentialError::NoSuchAccount(id) => CoderTargetError::NoSuchAccount(id),
+            CoderCredentialError::Unavailable(reason) => CoderTargetError::Unavailable(reason),
+        })?;
+    let mut workspace_ref = tddy_remote_shell::CoderWorkspaceRef::new(owner, workspace);
+    if let Some(agent) = agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+        workspace_ref = workspace_ref.on_agent(agent);
+    }
+    Ok(Arc::new(tddy_remote_shell::CoderShell::through(
+        coder_binary,
+        held,
+        workspace_ref,
+    )))
 }
 
 #[cfg(test)]

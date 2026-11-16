@@ -109,9 +109,17 @@ pub(crate) async fn write_slot_files_on_target(
         return Ok(());
     };
     let shell = tddy_remote_shell::SshShell::new(host);
+    write_slot_files_through_shell(slots, &shell).await
+}
+
+/// [`write_slot_files_on_target`], through the shell that reaches the session's target.
+pub(crate) async fn write_slot_files_through_shell(
+    slots: &mut RenderedSlots,
+    shell: &dyn tddy_remote_shell::RemoteShell,
+) -> Result<(), Status> {
     let files = std::mem::take(&mut slots.files);
     let paths: Vec<PathBuf> = files.iter().map(|(path, _)| path.clone()).collect();
-    write_slot_files_through(&shell, &files).await?;
+    write_slot_files_through(shell, &files).await?;
     for path in &paths {
         slots.written.retain(|written| written != path);
     }

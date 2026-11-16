@@ -144,6 +144,9 @@ pub struct LaunchSessions {
     /// Where a target session's followed hooks are delivered: this daemon's activity handling.
     /// `None` on a host that serves none, whose target sessions then start no follower.
     pub hook_report_delivery: Option<Arc<dyn crate::remote_hook_follower::HookReportDelivery>>,
+    /// Reads a Coder account's credentials from its owner's vault, for a session whose target
+    /// is a Coder workspace (`coder_target::shell_for_coder_target`).
+    pub coder_credentials: Arc<dyn tddy_host_service::coder_workspaces::CoderCredentialSource>,
 }
 
 impl LaunchSessions {

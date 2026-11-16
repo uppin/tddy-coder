@@ -4,7 +4,8 @@
 use crate::cli_agent_steps::conversation::resumed_or_adopted_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::{
-    render_host_launch_slots, write_slot_files_on_target, HostLaunchSlots, ResumedWiring,
+    render_host_launch_slots, write_slot_files_on_target, write_slot_files_through_shell,
+    HostLaunchSlots, ResumedWiring,
 };
 use crate::cli_resume_token::{resume_token_recorder, settled_resume_token};
 use crate::cli_route_launch::resume_cli_route;
@@ -71,6 +72,16 @@ impl crate::launch_ports::LaunchSessions {
         // The previous run's recorder may still be writing the token it printed as it exited.
         metadata.harness_resume_token =
             settled_resume_token(&self.cli_manager, &req.session_id, session_dir).await?;
+        // Resolved before anything is re-wired: a Coder target whose vault has been locked
+        // since the start refuses the resume here, and the session is kept as it was.
+        let target_shell = match &metadata.target {
+            Some(target) => Some(crate::opencode_cli_spawn::shell_for_session_target(
+                target,
+                &(self.user_resolver)(&req.session_token).unwrap_or_default(),
+                self.coder_credentials.as_ref(),
+            )?),
+            None => None,
+        };
         let session_agent = resolve_session_agent(&self.coding_agents, kind.clone())?;
         let identity = self.host.session_identity(
             os_user,
@@ -124,6 +135,7 @@ impl crate::launch_ports::LaunchSessions {
                 startup_window: self.config.spawn_startup_grace_period(),
                 hook_delivery: self.hook_report_delivery.clone(),
                 hook_followers: self.remote_hook_followers.clone(),
+                target_shell,
             },
         )
         .await
@@ -155,6 +167,8 @@ struct ResumedSession<'a> {
     /// kept in.
     hook_delivery: Option<Arc<dyn crate::remote_hook_follower::HookReportDelivery>>,
     hook_followers: crate::remote_hook_follower::RemoteHookFollowers,
+    /// The shell that reaches the session's target, resolved from its recorded target.
+    target_shell: Option<Arc<dyn tddy_remote_shell::RemoteShell>>,
 }
 
 /// A session whose worktree is gone has nothing for its agent to continue.
@@ -194,6 +208,7 @@ async fn resume_cli_harness_session(
         startup_window,
         hook_delivery,
         hook_followers,
+        target_shell,
     } = session;
     let SplitLaunchParts {
         args: split_args,
@@ -253,8 +268,16 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(wiring.extra_args);
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
-    write_slot_files_on_target(&mut slots, remote_host).await?;
-    let host = PointerHost::of(remote_host);
+    match &target_shell {
+        Some(shell) => write_slot_files_through_shell(&mut slots, shell.as_ref()).await?,
+        None => write_slot_files_on_target(&mut slots, remote_host).await?,
+    }
+    let host = match &target_shell {
+        Some(shell) => PointerHost::Remote {
+            shell: Arc::clone(shell),
+        },
+        None => PointerHost::of(remote_host),
+    };
     let pointer = place_session_pointer(session_pointer.as_ref(), &worktree_path, &host).await?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, meta.tmux_session.is_some());
     let mut env = git_environment;
@@ -290,8 +313,8 @@ async fn resume_cli_harness_session(
             model: "",
             env,
             on_exit,
-            remote: meta.target.clone().map(|target| HarnessRemote {
-                target,
+            remote: target_shell.clone().map(|shell| HarnessRemote {
+                shell,
                 pointer: session_pointer.clone(),
                 startup_window,
                 hook_token: meta.hook_token.clone(),

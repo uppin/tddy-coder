@@ -62,7 +62,9 @@ export function derivedHostUnusableReasonTestId(derivedHostId: string): string {
 }
 
 function kindLabel(kind: DerivedHostKind): string {
-  return kind === DerivedHostKind.SSH ? "SSH" : "";
+  if (kind === DerivedHostKind.SSH) return "SSH";
+  if (kind === DerivedHostKind.CODER) return "Coder";
+  return "";
 }
 
 export function DerivedHostRows({ parentInstanceId, parentOnline }: DerivedHostRowsProps) {
@@ -101,13 +103,26 @@ export function DerivedHostRows({ parentInstanceId, parentOnline }: DerivedHostR
     <>
       {hosts.map((host) => {
         const rowId = derivedHostRowTestId(host.id);
+        const unusable = host.unusableReason !== "";
         return (
           <tr key={host.id} data-testid={rowId}>
             <td className="py-2 pr-4">{host.label}</td>
             <td className="py-2 pr-4">
               <span data-testid={`${rowId}-kind`}>{kindLabel(host.kind)}</span>
             </td>
-            <td className="py-2 pr-4" />
+            <td className="py-2 pr-4">
+              <span data-testid={derivedHostStatusTestId(host.id)}>
+                {unusable ? "Unavailable" : "Available"}
+              </span>
+              {unusable ? (
+                <span
+                  data-testid={derivedHostUnusableReasonTestId(host.id)}
+                  className="block text-xs text-muted-foreground"
+                >
+                  {host.unusableReason}
+                </span>
+              ) : null}
+            </td>
             <td className="py-2 pr-4" />
             <td className="py-2 pr-4" />
             <td className="py-2 pr-4 font-mono text-xs">{host.id}</td>

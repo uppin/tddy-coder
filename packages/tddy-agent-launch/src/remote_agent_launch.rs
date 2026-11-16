@@ -95,10 +95,19 @@ pub fn session_target_of_proto(
             }
             Ok(Some(SessionTarget::ssh(ssh.config_host.trim())))
         }
-        // TODO(coder-hosts): implement — a start's Coder target as a session target.
-        Some(ProtoTargetKind::Coder(_)) => Err(TargetError::Unsupported(
-            "a Coder target cannot be started on yet".to_string(),
-        )),
+        Some(ProtoTargetKind::Coder(coder)) => {
+            let target = SessionTarget::coder(
+                coder.account_id.trim(),
+                coder.owner.trim(),
+                coder.workspace.trim(),
+            );
+            let agent = coder.agent.trim();
+            Ok(Some(if agent.is_empty() {
+                target
+            } else {
+                target.on_agent(agent)
+            }))
+        }
         None => Err(TargetError::Unsupported(
             "the target names no kind of machine".to_string(),
         )),
@@ -113,8 +122,21 @@ pub fn proto_of_session_target(target: &SessionTarget) -> ProtoSessionTarget {
                 config_host: config_host.clone(),
             })),
         },
-        // TODO(coder-hosts): implement — a recorded Coder target as it is listed.
-        SessionTarget::Coder { .. } => ProtoSessionTarget { kind: None },
+        SessionTarget::Coder {
+            account_id,
+            owner,
+            workspace,
+            agent,
+        } => ProtoSessionTarget {
+            kind: Some(ProtoTargetKind::Coder(
+                tddy_service::proto::session::CoderTarget {
+                    account_id: account_id.clone(),
+                    owner: owner.clone(),
+                    workspace: workspace.clone(),
+                    agent: agent.clone().unwrap_or_default(),
+                },
+            )),
+        },
     }
 }
 
