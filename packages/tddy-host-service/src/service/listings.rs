@@ -72,17 +72,30 @@ impl HostServiceImpl {
             .host_registry
             .known_hosts(&live_roster, &local, now_unix_ms)
             .into_iter()
-            .map(|view| KnownHostEntry {
-                instance_id: view.host.instance_id,
-                label: view.host.label,
-                online: view.online,
-                first_seen_unix_ms: view.host.first_seen_unix_ms,
-                last_seen_unix_ms: view.host.last_seen_unix_ms,
-                repos_base_path: view.host.repos_base_path,
-                max_attachment_bytes: view.host.max_attachment_bytes,
-                is_local: view.is_local,
-                // Filled at green (`#remote-shell` 9/11): the routing id an online row answers on.
-                routing_instance_id: String::new(),
+            .map(|view| {
+                let routing_instance_id = if !view.online {
+                    String::new()
+                } else if view.is_local {
+                    local_instance_id_for_config(&self.config)
+                } else {
+                    self.eligible_daemon_source
+                        .routing_instance_id_of(&crate::multi_host::DaemonInstanceId(
+                            view.host.instance_id.clone(),
+                        ))
+                        .map(|id| id.0)
+                        .unwrap_or_default()
+                };
+                KnownHostEntry {
+                    instance_id: view.host.instance_id,
+                    label: view.host.label,
+                    online: view.online,
+                    first_seen_unix_ms: view.host.first_seen_unix_ms,
+                    last_seen_unix_ms: view.host.last_seen_unix_ms,
+                    repos_base_path: view.host.repos_base_path,
+                    max_attachment_bytes: view.host.max_attachment_bytes,
+                    is_local: view.is_local,
+                    routing_instance_id,
+                }
             })
             .collect();
 

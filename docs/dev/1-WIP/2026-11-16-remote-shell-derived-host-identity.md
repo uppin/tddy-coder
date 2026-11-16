@@ -144,13 +144,13 @@ graph LR
 
 ## Scope
 
-- [ ] `KnownHostEntry.routing_instance_id`, filled for online rows
-- [ ] `ListDerivedHosts` parent = routing id
-- [ ] per-parent derived listing in `tddy-client-web`, with deadline, kept answers, failures
-- [ ] `DerivedHostsRefresh` port; Accounts connect and vault unlock call it; a parent that becomes connected is asked
-- [ ] the failure beside the Host field
-- [ ] Hosts screen rows ask through the routing id
-- [ ] feature docs: hosts-screen.md, create-session-package.md
+- [x] `KnownHostEntry.routing_instance_id`, filled for online rows
+- [x] `ListDerivedHosts` parent = routing id
+- [x] per-parent derived listing in `tddy-client-web`, with deadline, kept answers, failures
+- [x] `DerivedHostsRefresh` port; Accounts connect and vault unlock call it; a parent that becomes connected is asked
+- [x] the failure beside the Host field
+- [x] Hosts screen rows ask through the routing id
+- [x] feature docs: hosts-screen.md, create-session-package.md
 
 ## Technical Changes
 
@@ -174,10 +174,10 @@ See *Affected Packages* and *Responsibility*.
 
 ## Implementation Milestones
 
-- [ ] proto field and daemon ids, green on the identity acceptance
-- [ ] per-parent listing and refresh port, green on the client-web tests
-- [ ] form failure, Hosts screen addressing, the two refresh callers, green on the Cypress specs
-- [ ] feature docs updated
+- [x] proto field and daemon ids, green on the identity acceptance
+- [x] per-parent listing and refresh port, green on the client-web tests
+- [x] form failure, Hosts screen addressing, the two refresh callers, green on the Cypress specs
+- [x] feature docs updated
 
 ## Testing Plan
 
@@ -252,7 +252,7 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved in advance by the developer's standing instruction for this stack's review gates)
 - [ ] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

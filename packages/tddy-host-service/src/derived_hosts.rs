@@ -43,9 +43,9 @@ pub fn kind_segment(kind: DerivedHostKind) -> Option<&'static str> {
 /// The id of the SSH host `alias` reached from the daemon `parent_instance_id`:
 /// `<parent_instance_id>/ssh/<alias>`.
 ///
-/// `parent_instance_id` is the parent as `KnownHostEntry.instance_id` names it — the value
-/// per-host RPCs are keyed on — so the id's first segment addresses the daemon that reaches the
-/// host.
+/// `parent_instance_id` is the parent as `KnownHostEntry.routing_instance_id` names it — the
+/// value per-host RPCs are keyed on — so the id's first segment addresses the daemon that
+/// reaches the host.
 #[must_use]
 pub fn ssh_derived_host_id(parent_instance_id: &str, alias: &str) -> String {
     format!("{parent_instance_id}/ssh/{alias}")

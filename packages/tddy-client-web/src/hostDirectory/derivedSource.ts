@@ -184,10 +184,54 @@ export async function askParentForDerivedHosts(
   sessionToken: string,
   deadlineMs: number = DERIVED_LISTING_DEADLINE_MS,
 ): Promise<ParentDerivedHosts> {
-  void parent;
-  void sessionToken;
-  void deadlineMs;
-  throw new Error("askParentForDerivedHosts is not implemented yet (#remote-shell 9/11)");
+  const parentHostId = parent.host.hostId;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<ParentDerivedHosts>((resolve) => {
+    timer = setTimeout(() => {
+      resolve({
+        parentHostId,
+        hosts: [],
+        failure: {
+          parentHostId,
+          reason: `${parentHostId} did not list its hosts within ${deadlineMs} ms`,
+        },
+      });
+    }, deadlineMs);
+  });
+  const answer = (async (): Promise<ParentDerivedHosts> => {
+    try {
+      const response = await parent.client.listDerivedHosts({
+        sessionToken,
+        daemonInstanceId: parentHostId,
+      });
+      const hosts = response.hosts.map(derivedHostDescriptorOf);
+      if (response.outcome === ProbeOutcome.FAILED) {
+        return {
+          parentHostId,
+          hosts,
+          failure: {
+            parentHostId,
+            reason: response.failureReason || "listing derived hosts failed",
+          },
+        };
+      }
+      return { parentHostId, hosts, failure: null };
+    } catch (error) {
+      return {
+        parentHostId,
+        hosts: [],
+        failure: {
+          parentHostId,
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  })();
+  try {
+    return await Promise.race([answer, deadline]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 /**
@@ -195,13 +239,57 @@ export async function askParentForDerivedHosts(
  * every other parent's are kept, and parents stay in the order they first answered. The source is
  * `connected` once any parent has answered, `error` only when every parent that answered failed.
  */
+/** Each parent's latest answer, by source object — including an answer that listed no hosts. */
+const answersBySource = new WeakMap<
+  DerivedHostDirectorySource,
+  ReadonlyMap<string, ParentDerivedHosts>
+>();
+
+function answersOf(source: DerivedHostDirectorySource): Map<string, ParentDerivedHosts> {
+  const known = answersBySource.get(source);
+  if (known) return new Map(known);
+  const byParent = new Map<string, ParentDerivedHosts>();
+  for (const host of source.hosts) {
+    if (!host.parent) continue;
+    const existing = byParent.get(host.parent);
+    byParent.set(host.parent, {
+      parentHostId: host.parent,
+      hosts: [...(existing?.hosts ?? []), host],
+      failure: existing?.failure ?? null,
+    });
+  }
+  for (const failure of source.failures) {
+    const existing = byParent.get(failure.parentHostId);
+    byParent.set(failure.parentHostId, {
+      parentHostId: failure.parentHostId,
+      hosts: existing?.hosts ?? [],
+      failure,
+    });
+  }
+  return byParent;
+}
+
 export function mergeParentAnswer(
   previous: DerivedHostDirectorySource,
   answer: ParentDerivedHosts,
 ): DerivedHostDirectorySource {
-  void previous;
-  void answer;
-  throw new Error("mergeParentAnswer is not implemented yet (#remote-shell 9/11)");
+  const byParent = answersOf(previous);
+  byParent.set(answer.parentHostId, answer);
+  const answers = [...byParent.values()];
+  const hosts = answers.flatMap((entry) => entry.hosts);
+  const failures = answers.flatMap((entry) => (entry.failure ? [entry.failure] : []));
+  const allFailed = answers.length > 0 && answers.every((entry) => entry.failure !== null);
+  const merged: DerivedHostDirectorySource = allFailed
+    ? {
+        id: DERIVED_SOURCE_ID,
+        status: "error",
+        error: failures[0]?.reason ?? "listing derived hosts failed",
+        hosts,
+        failures,
+      }
+    : { id: DERIVED_SOURCE_ID, status: "connected", error: null, hosts, failures };
+  answersBySource.set(merged, byParent);
+  return merged;
 }
 
 /**
@@ -213,8 +301,8 @@ export function parentsToAsk(
   asked: ReadonlySet<string>,
   refreshed: boolean,
 ): DerivedHostParent[] {
-  void parents;
-  void asked;
-  void refreshed;
-  throw new Error("parentsToAsk is not implemented yet (#remote-shell 9/11)");
+  return parents.filter(
+    (parent) =>
+      parent.status === "connected" && (refreshed || !asked.has(parent.host.hostId)),
+  );
 }

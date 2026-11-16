@@ -21,12 +21,14 @@ import { useHostTooling } from "./useHostTooling";
 export interface HostRowToolingCellProps {
   /** The host to ask. */
   instanceId: string;
+  /** The id that host answers on now; defaults to `instanceId`. */
+  addressInstanceId?: string;
   /** Whether the registry reports this host in the live roster; gates whether it is asked at all. */
   online: boolean;
 }
 
-export function HostRowToolingCell({ instanceId, online }: HostRowToolingCellProps): JSX.Element | null {
-  const reading = useHostTooling(instanceId, online);
+export function HostRowToolingCell({ instanceId, addressInstanceId, online }: HostRowToolingCellProps): JSX.Element | null {
+  const reading = useHostTooling(addressInstanceId || instanceId, online);
 
   if (!online) return null;
 
