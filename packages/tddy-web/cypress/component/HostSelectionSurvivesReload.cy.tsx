@@ -17,6 +17,7 @@ import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { DaemonSelectorConnected } from "../../src/components/shell/DaemonSelector";
 import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/app/rpc/selectedDaemon";
+import { AuthProvider } from "../../src/app/auth/authProvider";
 import { appLocationPage } from "../support/pages/appLocationPage";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 import { byTestId } from "../support/testIds";
@@ -61,9 +62,11 @@ function Dashboard({
       <button data-testid={ROOM_EMPTIES} onClick={() => setDaemons([])}>
         everyone leaves
       </button>
-      <SelectedDaemonProvider room={room} daemons={daemons} servingInstanceId={servingInstanceId}>
-        <DaemonSelectorConnected />
-      </SelectedDaemonProvider>
+      <AuthProvider>
+        <SelectedDaemonProvider room={room} daemons={daemons} servingInstanceId={servingInstanceId}>
+          <DaemonSelectorConnected />
+        </SelectedDaemonProvider>
+      </AuthProvider>
     </>
   );
 }
