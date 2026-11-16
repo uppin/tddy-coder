@@ -1,4 +1,4 @@
-use crate::linking::{record_for_link, LinkError, LinkedAccountStore, LinkedIdentity};
+use crate::linking::{record_for_link, LinkError, LinkedIdentity};
 use crate::service::Linking;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tddy_credentials::{CredentialRecord, ProviderId};

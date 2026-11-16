@@ -1,4 +1,4 @@
-use crate::linking::{LinkError, LinkProgress, LinkedAccountStore, LinkedIdentity};
+use crate::linking::{LinkError, LinkProgress, LinkedIdentity};
 use crate::service::account_answers::summary_of;
 use crate::service::link_answers::link_status_for;
 use crate::service::link_answers::pending;
