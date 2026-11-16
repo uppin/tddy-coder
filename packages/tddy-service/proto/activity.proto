@@ -269,6 +269,10 @@ message ReportAgentActivityRequest {
   string result_json   = 7;
   bool   is_error      = 8;
   string error_message = 9;
+  // The agent's id for this tool call (Cursor's `tool_use_id`), pairing the pre and post
+  // reports of one call. Empty for agents that send none (Claude Code hooks); the daemon
+  // then pairs by arrival order, as it always has.
+  string tool_use_id   = 10;
 }
 
 message ReportAgentActivityResponse {

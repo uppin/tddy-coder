@@ -55,6 +55,14 @@ fn make_unit_service(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
 }
 
 fn write_claude_cli_session(session_dir: &std::path::Path, hook_token: &str) {
+    write_hook_session(session_dir, hook_token, "claude-cli");
+}
+
+fn write_cursor_cli_session(session_dir: &std::path::Path, hook_token: &str) {
+    write_hook_session(session_dir, hook_token, "cursor-cli");
+}
+
+fn write_hook_session(session_dir: &std::path::Path, hook_token: &str, session_type: &str) {
     let session_id = session_dir
         .file_name()
         .unwrap()
@@ -75,7 +83,7 @@ fn write_claude_cli_session(session_dir: &std::path::Path, hook_token: &str) {
         livekit_room: None,
         pending_elicitation: false,
         previous_session_id: None,
-        session_type: Some("claude-cli".to_string()),
+        session_type: Some(session_type.to_string()),
         model: Some("claude-sonnet-4-6".to_string()),
         cursor_chat_id: None,
         harness_resume_token: None,
@@ -117,6 +125,20 @@ fn a_pre_tool_use(
         result_json: String::new(),
         is_error: false,
         error_message: String::new(),
+        tool_use_id: String::new(),
+    }
+}
+
+/// A `PreToolUse` naming the agent's id for the call (Cursor's `tool_use_id`).
+fn a_pre_tool_use_named(
+    session_id: &str,
+    tool_name: &str,
+    input_json: &str,
+    tool_use_id: &str,
+) -> ReportAgentActivityRequest {
+    ReportAgentActivityRequest {
+        tool_use_id: tool_use_id.to_string(),
+        ..a_pre_tool_use(session_id, tool_name, input_json)
     }
 }
 
@@ -135,6 +157,20 @@ fn a_post_tool_use(
         result_json: result_json.to_string(),
         is_error: false,
         error_message: String::new(),
+        tool_use_id: String::new(),
+    }
+}
+
+/// A `PostToolUse` naming the agent's id for the call (Cursor's `tool_use_id`).
+fn a_post_tool_use_named(
+    session_id: &str,
+    tool_name: &str,
+    result_json: &str,
+    tool_use_id: &str,
+) -> ReportAgentActivityRequest {
+    ReportAgentActivityRequest {
+        tool_use_id: tool_use_id.to_string(),
+        ..a_post_tool_use(session_id, tool_name, result_json)
     }
 }
 
@@ -229,6 +265,208 @@ async fn report_pre_tool_use_alone_appends_a_running_row() {
     assert_eq!(records[0].tool_name, "Read");
     assert_eq!(records[0].status, STATUS_RUNNING);
     assert_eq!(records[0].completed_unix_ms, 0);
+}
+
+/// Every row of the session's activity log, un-coalesced: pairing is a fact about rows
+/// sharing a `call_id`, which the coalesced read hides.
+fn raw_activity_rows(session_dir: &std::path::Path) -> Vec<AgentActivityRecord> {
+    use tddy_core::agent_activity::AGENT_ACTIVITY_FILENAME;
+    let text = std::fs::read_to_string(session_dir.join(AGENT_ACTIVITY_FILENAME))
+        .expect("the activity log was written");
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).expect("every activity row parses as a record"))
+        .collect()
+}
+
+/// A pre and a post naming the same `tool_use_id` share one `call_id`: the agent's id for
+/// the call pairs its two rows.
+#[tokio::test]
+async fn report_pre_then_post_with_the_same_tool_use_id_share_one_call_id() {
+    // Given a registered cursor-cli session.
+    let temp = tempfile::tempdir().unwrap();
+    let sessions_base = temp.path().to_path_buf();
+    let session_id = "activity-named-pair-1";
+    let session_dir = unified_session_dir_path(&sessions_base, session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    write_cursor_cli_session(&session_dir, TEST_HOOK_TOKEN);
+    let service = make_unit_service(sessions_base);
+
+    // When the hook reports pre then post for one named call.
+    service
+        .activity_service()
+        .report_agent_activity(Request::direct(a_pre_tool_use_named(
+            session_id,
+            "Shell",
+            r#"{"command":"ls"}"#,
+            "tool-1",
+        )))
+        .await
+        .unwrap();
+    service
+        .activity_service()
+        .report_agent_activity(Request::direct(a_post_tool_use_named(
+            session_id,
+            "Shell",
+            r#"{"output":"src","exitCode":0}"#,
+            "tool-1",
+        )))
+        .await
+        .unwrap();
+
+    // Then both rows share one call id, running then completed.
+    let rows = raw_activity_rows(&session_dir);
+    assert_eq!(rows.len(), 2, "one pre and one post write two rows");
+    assert_eq!(rows[0].call_id, rows[1].call_id);
+    assert_eq!(rows[0].status, STATUS_RUNNING);
+    assert_eq!(rows[1].status, STATUS_COMPLETED);
+}
+
+/// Two interleaved calls pair by `tool_use_id`, not by arrival order: the second call to
+/// start may be the first to finish.
+#[tokio::test]
+async fn interleaved_tool_calls_pair_by_tool_use_id_not_arrival_order() {
+    // Given a registered cursor-cli session.
+    let temp = tempfile::tempdir().unwrap();
+    let sessions_base = temp.path().to_path_buf();
+    let session_id = "activity-interleaved-1";
+    let session_dir = unified_session_dir_path(&sessions_base, session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    write_cursor_cli_session(&session_dir, TEST_HOOK_TOKEN);
+    let service = make_unit_service(sessions_base);
+
+    // When two calls overlap and the first to start is also the first to finish — an
+    // order arrival-order pairing answers wrong (the first post pops the second pre).
+    for request in [
+        a_pre_tool_use_named(session_id, "Shell", r#"{"command":"ls-a"}"#, "tool-a"),
+        a_pre_tool_use_named(session_id, "Read", r#"{"path":"b"}"#, "tool-b"),
+        a_post_tool_use_named(session_id, "Shell", r#"{"output":"a"}"#, "tool-a"),
+        a_post_tool_use_named(session_id, "Read", r#"{"content":"b"}"#, "tool-b"),
+    ] {
+        service
+            .activity_service()
+            .report_agent_activity(Request::direct(request))
+            .await
+            .unwrap();
+    }
+
+    // Then each call id's rows name one tool: no row is paired with the other's call.
+    let rows = raw_activity_rows(&session_dir);
+    assert_eq!(rows.len(), 4);
+    let mut by_call: std::collections::BTreeMap<&str, Vec<&str>> =
+        std::collections::BTreeMap::new();
+    for row in &rows {
+        by_call
+            .entry(row.call_id.as_str())
+            .or_default()
+            .push(row.tool_name.as_str());
+    }
+    let mut groups: Vec<Vec<&str>> = by_call.into_values().collect();
+    groups.sort_unstable();
+    assert_eq!(
+        groups,
+        vec![vec!["Read", "Read"], vec!["Shell", "Shell"]],
+        "each call id must hold one call's own rows"
+    );
+}
+
+/// A post naming a call the daemon never saw start still records its terminal row, under a
+/// fresh id — a hook restart between pre and post must not lose the completion.
+#[tokio::test]
+async fn a_post_with_an_unknown_tool_use_id_gets_a_fresh_call_id() {
+    // Given a registered cursor-cli session.
+    let temp = tempfile::tempdir().unwrap();
+    let sessions_base = temp.path().to_path_buf();
+    let session_id = "activity-unknown-id-1";
+    let session_dir = unified_session_dir_path(&sessions_base, session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    write_cursor_cli_session(&session_dir, TEST_HOOK_TOKEN);
+    let service = make_unit_service(sessions_base);
+
+    // When a post arrives for a call with no pre on record, then a whole named pair.
+    service
+        .activity_service()
+        .report_agent_activity(Request::direct(a_post_tool_use_named(
+            session_id,
+            "Shell",
+            r#"{"output":"ghost"}"#,
+            "tool-ghost",
+        )))
+        .await
+        .unwrap();
+    service
+        .activity_service()
+        .report_agent_activity(Request::direct(a_pre_tool_use_named(
+            session_id,
+            "Read",
+            r#"{"path":"c"}"#,
+            "tool-c",
+        )))
+        .await
+        .unwrap();
+    service
+        .activity_service()
+        .report_agent_activity(Request::direct(a_post_tool_use_named(
+            session_id,
+            "Read",
+            r#"{"content":"c"}"#,
+            "tool-c",
+        )))
+        .await
+        .unwrap();
+
+    // Then the orphan post kept its own terminal row, and the pair still shares one id.
+    let rows = raw_activity_rows(&session_dir);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].tool_name, "Shell");
+    assert_eq!(rows[0].status, STATUS_COMPLETED);
+    assert_eq!(rows[1].call_id, rows[2].call_id);
+    assert_ne!(rows[0].call_id, rows[1].call_id);
+}
+
+/// A cursor-cli session's tool calls carry its own provenance, not claude-cli's.
+#[tokio::test]
+async fn a_cursor_cli_sessions_tool_calls_are_sourced_cursor_cli() {
+    // Given a registered cursor-cli session.
+    let temp = tempfile::tempdir().unwrap();
+    let sessions_base = temp.path().to_path_buf();
+    let session_id = "activity-cursor-source-1";
+    let session_dir = unified_session_dir_path(&sessions_base, session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    write_cursor_cli_session(&session_dir, TEST_HOOK_TOKEN);
+    let service = make_unit_service(sessions_base);
+
+    // When the hook reports pre then post for one named call.
+    service
+        .activity_service()
+        .report_agent_activity(Request::direct(a_pre_tool_use_named(
+            session_id,
+            "Shell",
+            r#"{"command":"ls"}"#,
+            "tool-1",
+        )))
+        .await
+        .unwrap();
+    service
+        .activity_service()
+        .report_agent_activity(Request::direct(a_post_tool_use_named(
+            session_id,
+            "Shell",
+            r#"{"output":"src"}"#,
+            "tool-1",
+        )))
+        .await
+        .unwrap();
+
+    // Then both rows are sourced cursor-cli.
+    let rows = raw_activity_rows(&session_dir);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.source.as_str())
+            .collect::<Vec<_>>(),
+        vec!["cursor-cli", "cursor-cli"]
+    );
 }
 
 /// A wrong hook_token is rejected before any activity is written.

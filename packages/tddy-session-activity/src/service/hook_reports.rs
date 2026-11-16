@@ -270,12 +270,27 @@ impl ActivityServiceImpl {
             .map(|root| tddy_core::agent_activity::declared_paths(&req.tool_name, &input, root))
             .unwrap_or_default();
 
+        // The provenance the rows carry: a cursor-cli session's own tool calls are its
+        // agent's, not Claude's. Every other session keeps what it always wrote.
+        let source = match meta.session_type.as_deref() {
+            Some("cursor-cli") => "cursor-cli",
+            _ => "claude-cli",
+        };
+
         let record = match req.event.as_str() {
             "PreToolUse" => {
-                // A tool call started: mint a call_id, remember it so the paired PostToolUse can
-                // reuse it, and append the `running` row.
-                let call_id = uuid::Uuid::new_v4().to_string();
-                self.ports.activity.push_pending(&req.session_id, &call_id);
+                // A tool call started. A report naming the agent's id for the call (Cursor's
+                // `tool_use_id`) pairs by that id: it IS the call_id, so the pre and post
+                // match by construction — across interleaved calls and across a daemon
+                // restart alike. Without one (Claude Code sends none), mint a call_id and
+                // remember it so the paired PostToolUse can reuse it.
+                let call_id = if req.tool_use_id.is_empty() {
+                    let minted = uuid::Uuid::new_v4().to_string();
+                    self.ports.activity.push_pending(&req.session_id, &minted);
+                    minted
+                } else {
+                    req.tool_use_id.clone()
+                };
                 tddy_core::agent_activity::AgentActivityRecord {
                     call_id,
                     tool_name: req.tool_name,
@@ -285,7 +300,7 @@ impl ActivityServiceImpl {
                     error_message: String::new(),
                     started_unix_ms: tddy_daemon_kernel::now_unix_ms(),
                     completed_unix_ms: 0,
-                    source: "claude-cli".to_string(),
+                    source: source.to_string(),
                     head_commit,
                     // The tick that covers this call has not been measured yet; the poll loop
                     // attributes it when it runs. `NO_TICK` is the wire's "no tick has covered it
@@ -296,13 +311,17 @@ impl ActivityServiceImpl {
                 }
             }
             "PostToolUse" => {
-                // The tool call finished: pair with the most-recent pending call_id (fresh id when
-                // none is outstanding, e.g. a hook restart), and append the terminal row.
-                let call_id = self
-                    .ports
-                    .activity
-                    .pop_pending(&req.session_id)
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                // The tool call finished: a named call pairs by its own id, as its pre did;
+                // otherwise pair with the most-recent pending call_id (fresh id when none is
+                // outstanding, e.g. a hook restart), and append the terminal row.
+                let call_id = if req.tool_use_id.is_empty() {
+                    self.ports
+                        .activity
+                        .pop_pending(&req.session_id)
+                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+                } else {
+                    req.tool_use_id.clone()
+                };
                 let status = if req.is_error {
                     tddy_core::agent_activity::STATUS_ERROR
                 } else {
@@ -317,7 +336,7 @@ impl ActivityServiceImpl {
                     error_message: req.error_message,
                     started_unix_ms: 0,
                     completed_unix_ms: tddy_daemon_kernel::now_unix_ms(),
-                    source: "claude-cli".to_string(),
+                    source: source.to_string(),
                     head_commit,
                     // As on the `running` row: the covering tick is the poll loop's to attribute.
                     activity_seq: crate::NO_TICK,

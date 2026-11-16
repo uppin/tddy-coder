@@ -242,6 +242,33 @@ async fn cursor_cli_session_metadata_fields_persisted() {
         .is_some_and(|p| PathBuf::from(p).exists()));
 }
 
+/// A started session records `Started` without waiting for a hook: tddy always launches
+/// Cursor with `--resume <chat>`, and a resumed launch never fires `sessionStart` — so the
+/// first hook to arrive is `beforeSubmitPrompt` (`Running`), and until then the spawn's own
+/// record is what the session reads as.
+#[tokio::test]
+async fn a_started_cursor_cli_session_records_started_without_waiting_for_a_hook() {
+    // Given a repo, a project and a stub agent that idles without running any hook
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let (_cfg_dir, config, stub) = write_config_with_stub_cursor_agent();
+    let service = minimal_service(config, &stub, sessions_tmp.path().to_path_buf());
+
+    // When a cursor-cli session starts
+    let resp = service
+        .start_session(Request::direct(start_cursor_cli_request()))
+        .await
+        .expect("StartSession must succeed");
+
+    // Then its first `.session.yaml` already reads `Started`
+    let session_id = resp.into_inner().session_id;
+    let meta =
+        read_session_metadata(&sessions_tmp.path().join("sessions").join(&session_id)).unwrap();
+    assert_eq!(meta.activity_status.as_deref(), Some("Started"));
+}
+
 #[tokio::test]
 async fn cursor_cli_session_writes_hooks_json() {
     let repo_dir = tempfile::tempdir().unwrap();

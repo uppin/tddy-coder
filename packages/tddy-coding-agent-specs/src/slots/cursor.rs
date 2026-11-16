@@ -60,9 +60,9 @@ impl HooksAdapter for CursorHooksJson {
     }
 }
 
-/// `<workdir>/`[`CURSOR_HOOKS_FILE`] for `params`, pretty-printed: the five Cursor events
-/// (`sessionStart`, `beforeSubmitPrompt`, `postToolUse`, `stop`, `sessionEnd`), each one command
-/// that reports over `params.daemon_socket`. `params` without a socket is
+/// `<workdir>/`[`CURSOR_HOOKS_FILE`] for `params`, pretty-printed: every installed Cursor
+/// event (see `tddy_agent_backend::cursor_hooks::CURSOR_HOOK_EVENTS`), each one command that
+/// reports over `params.daemon_socket`. `params` without a socket is
 /// [`SlotError::NoDaemonSocket`].
 pub fn render_cursor_hooks_json(
     workdir: &Path,
@@ -75,9 +75,16 @@ pub fn render_cursor_hooks_json(
     }
     let settings = tddy_agent_backend::build_cursor_hooks_settings(params);
     // `{:#}` is `serde_json`'s pretty form, and unlike `to_string_pretty` cannot fail.
+    //
+    // Every `/` leaves here escaped as `\/`: Cursor Agent CLI reads this file through
+    // `parseJSONC`, which strips `//.*$` and `/\*…\*/` blind to string literals, so one
+    // `--daemon http://…` (or any `/` before a later `*/`) would cut a command's string and
+    // fail the whole file — and Cursor would run the session with no project hooks at all.
+    // `\/` is valid JSON parsing back to `/`, and no `/` in the serialized output stands
+    // outside a string, so the replace cannot touch the JSON syntax itself.
     Ok(RenderedHooks::File(
         workdir.join(CURSOR_HOOKS_FILE),
-        format!("{settings:#}").into_bytes(),
+        format!("{settings:#}").replace('/', "\\/").into_bytes(),
     ))
 }
 
@@ -253,27 +260,91 @@ mod tests {
         // When
         let rendered = render_cursor_hooks_json(workdir, &hook_params(Some(SOCKET)));
 
-        // Then
+        // Then — every installed event runs the session-hook command, and every `/` in the
+        // file is escaped as `\/`, so Cursor's string-blind comment strip cannot match.
         let command = serde_json::json!([{ "command": the_socket_hook_command() }]);
-        let expected = serde_json::json!({
-            "version": 1,
-            "hooks": {
-                "sessionStart": command,
-                "beforeSubmitPrompt": command,
-                "postToolUse": command,
-                "stop": command,
-                "sessionEnd": command,
-            }
-        });
+        let mut hooks = serde_json::Map::new();
+        for event in tddy_agent_backend::cursor_hooks::CURSOR_HOOK_EVENTS {
+            hooks.insert((*event).to_string(), command.clone());
+        }
+        let expected = serde_json::json!({ "version": 1, "hooks": hooks });
         assert_eq!(
             rendered,
             Ok(RenderedHooks::File(
                 workdir.join(CURSOR_HOOKS_FILE),
                 serde_json::to_string_pretty(&expected)
                     .unwrap()
+                    .replace('/', "\\/")
                     .into_bytes(),
             ))
         );
+    }
+
+    /// Cursor Agent CLI's `parseJSONC` (`~/.local/share/cursor-agent/versions/*/5504.index.js`):
+    /// it strips `//`-to-end-of-line and then `/*…*/` blocks, both blind to string literals, and
+    /// only then `JSON.parse`s. Any `//` (or `/*`) inside a hook command — a `--daemon http://…`
+    /// URL, a path — cuts the string there and the whole file fails to parse, so Cursor runs the
+    /// session with no project hooks at all.
+    fn cursor_parse_jsonc(text: &str) -> Result<serde_json::Value, serde_json::Error> {
+        // `e.replace(/\/\/.*$/gm, "")`: from the first `//` on, each line is gone.
+        let no_line_comments = text
+            .lines()
+            .map(|line| line.split("//").next().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // `.replace(/\/\*[\s\S]*?\*\//g, "")`: each `/*…*/` block is gone, non-greedy; an
+        // unterminated `/*` matches nothing and stays, as under the regex.
+        let mut stripped = String::with_capacity(no_line_comments.len());
+        let mut rest = no_line_comments.as_str();
+        while let Some(open) = rest.find("/*") {
+            stripped.push_str(&rest[..open]);
+            match rest[open + 2..].find("*/") {
+                Some(close) => rest = &rest[open + 2 + close + 2..],
+                None => {
+                    stripped.push_str(&rest[open..]);
+                    rest = "";
+                }
+            }
+        }
+        stripped.push_str(rest);
+        serde_json::from_str(&stripped)
+    }
+
+    #[test]
+    fn cursor_reads_the_rendered_hooks_file_through_its_comment_stripping_parser() {
+        // Given — the hooks file as rendered for a host launch, daemon URL and all
+        let workdir = Path::new("/worktrees/0190-c");
+        let rendered =
+            render_cursor_hooks_json(workdir, &hook_params(Some(SOCKET))).expect("renders");
+        let RenderedHooks::File(_, bytes) = rendered else {
+            panic!("the cursor adapter renders a file, never argv")
+        };
+        let text = String::from_utf8(bytes).expect("the rendered file is UTF-8");
+
+        // When — Cursor reads it through parseJSONC
+        let parsed = cursor_parse_jsonc(&text)
+            .expect("Cursor's parseJSONC must still read the rendered hooks file");
+
+        // Then — every installed event kept the session-hook command it was rendered with
+        let expected_command = the_socket_hook_command();
+        let hooks = parsed.get("hooks").and_then(|v| v.as_object());
+        let hooks = hooks.expect("the stripped file still holds a hooks object");
+        assert_eq!(
+            hooks.len(),
+            tddy_agent_backend::cursor_hooks::CURSOR_HOOK_EVENTS.len(),
+            "no event may be lost to the comment strip"
+        );
+        for event in tddy_agent_backend::cursor_hooks::CURSOR_HOOK_EVENTS {
+            assert_eq!(
+                hooks
+                    .get(*event)
+                    .and_then(|entries| entries.get(0))
+                    .and_then(|entry| entry.get("command"))
+                    .and_then(|command| command.as_str()),
+                Some(expected_command.as_str()),
+                "event {event} must survive Cursor's comment strip with its command intact"
+            );
+        }
     }
 
     #[test]

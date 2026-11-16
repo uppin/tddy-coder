@@ -88,7 +88,9 @@ pub fn a_stub_agent_script(probes: &[String]) -> String {
     format!(
         r#"#!/bin/sh
 if [ "$1" = "create-chat" ]; then echo "{STUB_CHAT_ID}"; exit 0; fi
-hook=$(/usr/bin/sed -n '/"beforeSubmitPrompt"/,/"command"/p' .cursor/hooks.json 2>/dev/null | /usr/bin/sed -n 's/.*"command": "\(.*\)"$/\1/p')
+# The command as Cursor runs it: the file escapes every `/` as `\/`, which JSON.parse
+# decodes before the shell sees it — the trailing sed is that decode.
+hook=$(/usr/bin/sed -n '/"beforeSubmitPrompt"/,/"command"/p' .cursor/hooks.json 2>/dev/null | /usr/bin/sed -n 's/.*"command": "\(.*\)"$/\1/p' | /usr/bin/sed 's|\\/|/|g')
 if [ -n "$hook" ]; then
   printf '{{"hook_event_name":"beforeSubmitPrompt","prompt":"go"}}' | /bin/sh -c "$hook" >/dev/null 2>&1
   printf 'STUB hook-exit=%s\n' "$?"

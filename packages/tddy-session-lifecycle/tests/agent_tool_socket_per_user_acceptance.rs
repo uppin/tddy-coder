@@ -53,6 +53,9 @@ fn the_session_users_agent_tool_socket(daemon: &ARegistryDaemon) -> PathBuf {
 fn daemon_sockets_named_in(hooks_file: &Path) -> Vec<String> {
     let text = std::fs::read_to_string(hooks_file)
         .unwrap_or_else(|e| panic!("{} was not written: {e}", hooks_file.display()));
+    // Cursor's file escapes every `/` as `\/` (valid JSON, for its string-blind `parseJSONC`);
+    // decode that one escape so the split below reads the commands the agent runs.
+    let text = text.replace("\\/", "/");
     let mut named: Vec<String> = text
         .split("--daemon-socket")
         .skip(1)
