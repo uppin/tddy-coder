@@ -53,6 +53,7 @@ import { daemonHostOf } from "tddy-client-web";
 import { useLiveKitHostDirectorySource } from "tddy-livekit-web";
 import { HostPresenceRoom } from "tddy-livekit-web";
 import { useServingHostDirectorySource } from "./hostDirectory/servingSource";
+import { DerivedHostDirectorySources } from "./hostDirectory/derivedSource";
 import { HostDirectorySources, useHostDirectory } from "tddy-client-web";
 import type { HostDirectorySource } from "tddy-client-web";
 import { useSelectedDaemonLabel } from "./useSelectedDaemonLabel";
@@ -320,7 +321,9 @@ function SelectedDaemonProviderBody({
       <HostPresenceRoom room={room}>
         <LiveKitConnections room={room} registry={registry} openHostServedSession={openHostServedSession}>
           <ConnectionProviders registry={registry}>
-            <SelectedDaemonScope servingInstanceId={servingInstanceId}>{children}</SelectedDaemonScope>
+            <DerivedHostDirectorySources>
+              <SelectedDaemonScope servingInstanceId={servingInstanceId}>{children}</SelectedDaemonScope>
+            </DerivedHostDirectorySources>
           </ConnectionProviders>
         </LiveKitConnections>
       </HostPresenceRoom>

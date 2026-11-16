@@ -18,7 +18,14 @@
  * PRD: docs/ft/web/1-WIP/PRD-2026-11-15-remote-shell-derived-hosts.md
  */
 
-import { safeTestIdPart } from "tddy-client-web";
+import { useEffect, useState } from "react";
+import { safeTestIdPart, useAuth, useHostClient } from "tddy-client-web";
+import {
+  DerivedHostKind,
+  HostService,
+  ProbeOutcome,
+  type DerivedHost,
+} from "tddy-client-web/gen/host_pb";
 
 export interface DerivedHostRowsProps {
   /** The daemon whose derived hosts these are — the row they are listed beneath. */
@@ -37,9 +44,67 @@ export function derivedHostsFailureTestId(parentInstanceId: string): string {
   return `hosts-row-${parentInstanceId}-derived-hosts-failure`;
 }
 
+function kindLabel(kind: DerivedHostKind): string {
+  return kind === DerivedHostKind.SSH ? "SSH" : "";
+}
+
 export function DerivedHostRows({ parentInstanceId, parentOnline }: DerivedHostRowsProps) {
-  // TODO(derived-hosts): implement
-  void parentInstanceId;
-  void parentOnline;
-  return null;
+  const client = useHostClient(HostService, parentInstanceId);
+  const { sessionToken } = useAuth();
+  const [hosts, setHosts] = useState<DerivedHost[]>([]);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!parentOnline || !client) return;
+    let current = true;
+    client
+      .listDerivedHosts({ sessionToken: sessionToken ?? "", daemonInstanceId: parentInstanceId })
+      .then((response) => {
+        if (!current) return;
+        setHosts([...response.hosts]);
+        setFailure(
+          response.outcome === ProbeOutcome.FAILED
+            ? response.failureReason || "Listing derived hosts failed"
+            : null,
+        );
+      })
+      .catch((error: unknown) => {
+        if (!current) return;
+        setHosts([]);
+        setFailure(error instanceof Error ? error.message : "Listing derived hosts failed");
+      });
+    return () => {
+      current = false;
+    };
+  }, [client, parentInstanceId, parentOnline, sessionToken]);
+
+  if (!parentOnline) return null;
+
+  return (
+    <>
+      {hosts.map((host) => {
+        const rowId = derivedHostRowTestId(host.id);
+        return (
+          <tr key={host.id} data-testid={rowId}>
+            <td className="py-2 pr-4">{host.label}</td>
+            <td className="py-2 pr-4">
+              <span data-testid={`${rowId}-kind`}>{kindLabel(host.kind)}</span>
+            </td>
+            <td className="py-2 pr-4" />
+            <td className="py-2 pr-4" />
+            <td className="py-2 pr-4" />
+            <td className="py-2 pr-4 font-mono text-xs">{host.id}</td>
+            <td className="py-2" />
+          </tr>
+        );
+      })}
+      {failure !== null ? (
+        <tr data-testid={derivedHostsFailureTestId(parentInstanceId)}>
+          <td className="py-2 pr-4 text-sm text-destructive" colSpan={7}>
+            Could not list the hosts this daemon reaches: {failure}
+          </td>
+        </tr>
+      ) : null}
+    </>
+  );
 }

@@ -25,7 +25,7 @@
 
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionStatus } from "../connections/types";
-import type { DerivedHost, HostService } from "../gen/host_pb";
+import { ProbeOutcome, type DerivedHost, type HostService } from "../gen/host_pb";
 import type { HostDescriptor, HostDirectorySource } from "./types";
 
 /** The id this source contributes under. Precedence is stated against it, so it is a constant. */
@@ -76,9 +76,13 @@ export const NO_DERIVED_HOSTS: DerivedHostDirectorySource = Object.freeze({
  * label as listed, `parent` its `parentInstanceId`, `target` its target.
  */
 export function derivedHostDescriptorOf(host: DerivedHost): HostDescriptor {
-  // TODO(derived-hosts): implement
-  void host;
-  return { hostId: "", label: "", sourceId: DERIVED_SOURCE_ID };
+  return {
+    hostId: host.id,
+    label: host.label,
+    sourceId: DERIVED_SOURCE_ID,
+    parent: host.parentInstanceId,
+    ...(host.target !== undefined ? { target: host.target } : {}),
+  };
 }
 
 /**
@@ -92,8 +96,56 @@ export async function listDerivedHosts(
   parents: readonly DerivedHostParent[],
   sessionToken: string,
 ): Promise<DerivedHostDirectorySource> {
-  // TODO(derived-hosts): implement
-  void parents;
-  void sessionToken;
-  return NO_DERIVED_HOSTS;
+  const asked = parents.filter((parent) => parent.status === "connected");
+  if (asked.length === 0) return NO_DERIVED_HOSTS;
+
+  const answers = await Promise.all(
+    asked.map(async (parent) => {
+      const parentHostId = parent.host.hostId;
+      try {
+        const response = await parent.client.listDerivedHosts({
+          sessionToken,
+          daemonInstanceId: parentHostId,
+        });
+        const hosts = response.hosts.map(derivedHostDescriptorOf);
+        if (response.outcome === ProbeOutcome.FAILED) {
+          return {
+            hosts,
+            failure: {
+              parentHostId,
+              reason: response.failureReason || "listing derived hosts failed",
+            },
+          };
+        }
+        return { hosts, failure: null };
+      } catch (error) {
+        return {
+          hosts: [],
+          failure: {
+            parentHostId,
+            reason: error instanceof Error ? error.message : String(error),
+          },
+        };
+      }
+    }),
+  );
+
+  const hosts = answers.flatMap((answer) => answer.hosts);
+  const failures = answers.flatMap((answer) => (answer.failure ? [answer.failure] : []));
+  if (failures.length === asked.length) {
+    return {
+      id: DERIVED_SOURCE_ID,
+      status: "error",
+      error: failures[0]?.reason ?? "listing derived hosts failed",
+      hosts,
+      failures,
+    };
+  }
+  return {
+    id: DERIVED_SOURCE_ID,
+    status: "connected",
+    error: null,
+    hosts,
+    failures,
+  };
 }

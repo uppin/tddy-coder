@@ -24,11 +24,12 @@ import type { HostDescriptor } from "./types";
  * {@link daemonHostOf}: the Start-Session form reads them off the `DaemonHost` it is given.
  */
 export function hostDescriptorOf(host: DaemonHost, sourceId: string): HostDescriptor {
-  // TODO(derived-hosts): carry `parent` and `target`
   return {
     hostId: host.instanceId,
     label: host.label,
     sourceId,
+    ...(host.parent !== undefined ? { parent: host.parent } : {}),
+    ...(host.target !== undefined ? { target: host.target } : {}),
     ...(host.reposBasePath !== undefined ? { reposBasePath: host.reposBasePath } : {}),
     ...(host.maxAttachmentBytes !== undefined
       ? { maxAttachmentBytes: host.maxAttachmentBytes }
@@ -41,10 +42,11 @@ export function hostDescriptorOf(host: DaemonHost, sourceId: string): HostDescri
 
 /** The same host in the vocabulary the daemon-mode screens read. */
 export function daemonHostOf(descriptor: HostDescriptor): DaemonHost {
-  // TODO(derived-hosts): carry `parent` and `target`
   return {
     instanceId: descriptor.hostId,
     label: descriptor.label,
+    ...(descriptor.parent !== undefined ? { parent: descriptor.parent } : {}),
+    ...(descriptor.target !== undefined ? { target: descriptor.target } : {}),
     ...(descriptor.reposBasePath !== undefined ? { reposBasePath: descriptor.reposBasePath } : {}),
     ...(descriptor.maxAttachmentBytes !== undefined
       ? { maxAttachmentBytes: descriptor.maxAttachmentBytes }

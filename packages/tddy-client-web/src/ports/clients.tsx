@@ -103,16 +103,26 @@ export function useHostConnector(): (hostId: string | null) => HostConnection | 
   // Compiler memoises on what a body reads, so it would drop `revision`, keep the resolver from before
   // the common room joined, and leave every `useHostConnection` returning `null` for the page's life.
   "use no memo";
-  const { connections: registry, isHostReady: isReady } = useClientsPort();
+  const { connections: registry, isHostReady: isReady, selectedDaemon } = useClientsPort();
   const subscribe = useCallback((listener: () => void) => registry.subscribe(listener), [registry]);
   const revision = useSyncExternalStore(subscribe, () => registry.revision());
+  // A derived host has no wire of its own: its connection is its parent's.
+  const parentKey = JSON.stringify(
+    selectedDaemon.daemons.map((d) => [d.instanceId, d.parent ?? null]),
+  );
   // `revision` is a dependency, not an input — the resolver reads the registry's providers at the
   // moment it is called. Re-deriving on it is what changes this function's identity when a wire
   // registers, and so what re-runs the effects and callbacks that hold it.
   return useMemo(
-    () => (hostId: string | null) =>
-      hostId && (isReady?.(hostId) ?? true) ? registry.connectHost(hostId) : null,
-    [registry, revision, isReady],
+    () => (hostId: string | null) => {
+      if (!hostId) return null;
+      const parents = new Map(
+        (JSON.parse(parentKey) as [string, string | null][]).map(([id, parent]) => [id, parent]),
+      );
+      const resolved = parents.get(hostId) ?? hostId;
+      return (isReady?.(resolved) ?? true) ? registry.connectHost(resolved) : null;
+    },
+    [registry, revision, isReady, parentKey],
   );
 }
 

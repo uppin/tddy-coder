@@ -33,9 +33,10 @@ use crate::host_private_key::HostUserFiles;
 /// `None` for [`DerivedHostKind::Unspecified`]: a host of no kind has no id.
 #[must_use]
 pub fn kind_segment(kind: DerivedHostKind) -> Option<&'static str> {
-    // TODO(derived-hosts): implement
-    let _ = kind;
-    None
+    match kind {
+        DerivedHostKind::Ssh => Some("ssh"),
+        DerivedHostKind::Unspecified => None,
+    }
 }
 
 /// The id of the SSH host `alias` reached from the daemon `parent_instance_id`:
@@ -46,9 +47,7 @@ pub fn kind_segment(kind: DerivedHostKind) -> Option<&'static str> {
 /// host.
 #[must_use]
 pub fn ssh_derived_host_id(parent_instance_id: &str, alias: &str) -> String {
-    // TODO(derived-hosts): implement
-    let _ = (parent_instance_id, alias);
-    String::new()
+    format!("{parent_instance_id}/ssh/{alias}")
 }
 
 /// One kind of host a daemon derives: where they are listed from, and what kind they are.
@@ -89,14 +88,37 @@ impl SshConfigDerivedHosts {
 #[async_trait]
 impl DerivedHostSource for SshConfigDerivedHosts {
     fn kind(&self) -> DerivedHostKind {
-        // TODO(derived-hosts): implement
-        DerivedHostKind::Unspecified
+        DerivedHostKind::Ssh
     }
 
     async fn list(&self, os_user: &str) -> Result<Vec<DerivedHost>, String> {
-        // TODO(derived-hosts): implement
-        let _ = (&self.files, &self.parent_instance_id, os_user);
-        Err("listing SSH hosts as derived hosts is not implemented on this daemon yet".to_string())
+        let files = Arc::clone(&self.files);
+        let user = os_user.to_string();
+        let listed = tokio::task::spawn_blocking(move || {
+            crate::ssh_config::list_ssh_config_hosts(files.as_ref(), &user)
+        })
+        .await
+        .map_err(|_| "listing SSH config hosts on this host did not complete".to_string())?;
+        let aliases = match listed {
+            Ok(hosts) => hosts.aliases,
+            Err(crate::ssh_config::SshConfigHostsError::Unreadable(reason)) => {
+                return Err(reason);
+            }
+        };
+        Ok(aliases
+            .into_iter()
+            .map(|alias| DerivedHost {
+                id: ssh_derived_host_id(&self.parent_instance_id, &alias),
+                label: alias.clone(),
+                kind: DerivedHostKind::Ssh as i32,
+                parent_instance_id: self.parent_instance_id.clone(),
+                target: Some(tddy_service::proto::session::SessionTarget {
+                    kind: Some(tddy_service::proto::session::session_target::Kind::Ssh(
+                        tddy_service::proto::session::SshTarget { config_host: alias },
+                    )),
+                }),
+            })
+            .collect())
     }
 }
 

@@ -106,6 +106,9 @@ pub struct HostServiceImpl {
     /// Asks a Coder deployment for an account's workspaces. Injected because the HTTP client is
     /// the daemon's.
     coder_workspaces: Arc<dyn CoderWorkspaceSource>,
+    /// Extra derived-host sources beyond the SSH-config one the handler builds from this
+    /// service's own files, in the order they are asked. Empty until a later kind registers.
+    derived_host_sources: Vec<Arc<dyn crate::derived_hosts::DerivedHostSource>>,
     host_cpu_interval: Duration,
     host_disk_interval: Duration,
 }

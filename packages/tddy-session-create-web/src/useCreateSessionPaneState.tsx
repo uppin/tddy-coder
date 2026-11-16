@@ -122,6 +122,10 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
   const [daemonInstanceId, setDaemonInstanceId] = useState(
     projectHome?.daemonInstanceId || initialValues?.daemonInstanceId || selectedInstanceId || "",
   );
+  // The Host field holds the chosen host's own id, which may be a derived host's. Its session is
+  // started on the parent daemon, so every daemon-addressed read below uses the parent.
+  const selectedHostEntry = daemons.find((d) => d.instanceId === daemonInstanceId) ?? null;
+  const sessionDaemonInstanceId = selectedHostEntry?.parent ?? daemonInstanceId;
 
   // The whole session list as the daemon reported it. Kept raw because two pickers draw different
   // views of it — the orchestrators that can parent this session, and the sessions that own a branch
@@ -165,7 +169,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     catalogClient,
     connectedInstanceId,
     daemons,
-    daemonInstanceId,
+    daemonInstanceId: sessionDaemonInstanceId,
     agent,
   });
 
@@ -174,7 +178,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
   // params — never a list of the bundle's own.
   const typeOptions = sessionTypeOptions(
     offeredSessionTypes,
-    daemonInstanceId,
+    sessionDaemonInstanceId,
     connectedInstanceId,
   );
   registerSessionTypeOptions(typeOptions);
@@ -186,7 +190,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
   const sessionLaunch = sessionLaunchOf(sessionType, typeOptions);
   const sessionAgent = agentForSessionType(
     offeredAgents,
-    daemonInstanceId,
+    sessionDaemonInstanceId,
     connectedInstanceId,
     sessionType,
   );
@@ -195,7 +199,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     isMainVariant: projectHome !== undefined,
     typeOptions,
     offeredAgents,
-    daemonInstanceId,
+    daemonInstanceId: sessionDaemonInstanceId,
     connectedInstanceId,
     sessionType,
     setSessionType,
@@ -226,6 +230,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     placementWithdrawsPermissionBypass,
     applyPlacement,
     sshListDaemonId,
+    sessionTarget,
   } = useCreateSessionPlacement({
     sessionType,
     agentCanSplit: hasCapability(sessionAgent, "split_host"),
@@ -251,7 +256,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     sessionType,
     sessionLaunch,
     selectedAgentId,
-    daemonInstanceId,
+    daemonInstanceId: sessionDaemonInstanceId,
     selectedAgentRouteProviders,
     cliRouteProviders: sessionAgent?.routeProviders,
     initialModel: initialValues?.model,
@@ -270,7 +275,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     sessionToken,
     projectId,
     branchIntent,
-    daemonInstanceId,
+    daemonInstanceId: sessionDaemonInstanceId,
     preFilledBranchToWorkOn,
     setSelectedBranchToWorkOn,
   });
@@ -287,7 +292,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
   } = useCreateSessionStack({
     sessions,
     projectId,
-    daemonInstanceId,
+    daemonInstanceId: sessionDaemonInstanceId,
     initialStackParent: initialValues?.stackParent,
     initialStackNodeId: initialValues?.stackNodeId,
   });
@@ -299,7 +304,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     client,
     sessionFilesClient,
     sessionToken,
-    sessionDaemonInstanceId: daemonInstanceId,
+    sessionDaemonInstanceId,
     initialAttachments: initialValues?.attachments,
   });
   // The five the pane itself reads; the rest are the attachments section's, which takes the whole
@@ -327,7 +332,8 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     createRemoteBranch,
     selectedBaseBranch,
     selectedBranchToWorkOn,
-    daemonInstanceId,
+    daemonInstanceId: sessionDaemonInstanceId,
+    target: sessionTarget,
     sessionType,
     sessionLaunch,
     cliFeatures: cliAgentFeaturesOf(sessionAgent, providerHarness !== null),
@@ -411,6 +417,8 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     createRemoteBranch,
     created,
     daemonInstanceId,
+    sessionDaemonInstanceId,
+    sessionTarget,
     daemons,
     dangerouslySkipPermissions,
     displayName,

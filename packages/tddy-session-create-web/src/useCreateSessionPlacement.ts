@@ -74,13 +74,19 @@ export function useCreateSessionPlacement({
    * placeable on any host, and the index is built wherever the worktree is, which on a split
    * session is the codebase host.
    */
+  // A derived host is chosen by its own id, but its session is started on its parent: the
+  // request carries the parent as `daemonInstanceId` and this host as its `target`.
+  const selectedHostEntry = daemons.find((d) => d.instanceId === daemonInstanceId) ?? null;
+  const sessionDaemonInstanceId = selectedHostEntry?.parent ?? daemonInstanceId;
+  const sessionTarget = selectedHostEntry?.parent ? selectedHostEntry.target : undefined;
+
   const isSplitCodebase =
     canChooseCodebaseHost &&
     codebaseDaemonInstanceId !== "" &&
     // Naming the session's own host is the explicit spelling of "co-located", and the daemon
     // classifies it exactly that way. Treating it as a split here would withdraw the recipe from a
     // session that is going to run with one.
-    codebaseDaemonInstanceId !== daemonInstanceId;
+    codebaseDaemonInstanceId !== sessionDaemonInstanceId;
 
   /** The directory's entry for the host running this session, or `null` when it names none. */
   const sessionHost = daemons.find((d) => d.instanceId === agentHostInstanceId) ?? null;
@@ -208,6 +214,8 @@ export function useCreateSessionPlacement({
     setSshConfigHost,
     canChooseCodebaseHost,
     isSplitCodebase,
+    sessionDaemonInstanceId,
+    sessionTarget,
     sandboxedCodebaseUnavailableReason,
     jailSharesTheFilesystemRoot,
     placementWithdrawsPermissionBypass,

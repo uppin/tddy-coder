@@ -1052,7 +1052,9 @@ export type ListDerivedHostsResponse = Message<"host.ListDerivedHostsResponse"> 
   failureReason: string;
 
   /**
-   * The source's own order: first-seen order of explicit aliases. Empty unless outcome is OK.
+   * Each source's hosts in its own order: first-seen order of explicit aliases. Still carries
+   * the hosts of the sources that listed when outcome is FAILED — a failure is shown beside
+   * whatever hosts arrived, never instead of them.
    *
    * @generated from field: repeated host.DerivedHost hosts = 3;
    */

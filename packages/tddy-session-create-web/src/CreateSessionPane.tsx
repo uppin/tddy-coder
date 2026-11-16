@@ -93,6 +93,7 @@ export function CreateSessionPane(props: CreateSessionPaneProps) {
     createRemoteBranch,
     created,
     daemonInstanceId,
+    sessionDaemonInstanceId,
     daemons,
     dangerouslySkipPermissions,
     displayName,
@@ -193,7 +194,7 @@ export function CreateSessionPane(props: CreateSessionPaneProps) {
                   sessionLaunchOf(type, typeOptions),
                   agentForSessionType(
                     offeredAgents,
-                    daemonInstanceId,
+                    sessionDaemonInstanceId,
                     connectedInstanceId,
                     type,
                   ),
