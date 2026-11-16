@@ -217,6 +217,64 @@ impl CoderShell {
     fn spawn_error(&self, error: std::io::Error) -> RemoteShellError {
         RemoteShellError::Spawn(format!("{}: {error}", self.coder.display()))
     }
+
+    /// The child's three pipes, or the spawn failure that says which one it has not got.
+    fn take_pipes(
+        child: &mut tokio::process::Child,
+    ) -> Result<
+        (
+            tokio::process::ChildStdin,
+            tokio::process::ChildStdout,
+            tokio::process::ChildStderr,
+        ),
+        RemoteShellError,
+    > {
+        Ok((
+            child
+                .stdin
+                .take()
+                .ok_or_else(|| RemoteShellError::Spawn("coder child has no stdin".to_string()))?,
+            child
+                .stdout
+                .take()
+                .ok_or_else(|| RemoteShellError::Spawn("coder child has no stdout".to_string()))?,
+            child
+                .stderr
+                .take()
+                .ok_or_else(|| RemoteShellError::Spawn("coder child has no stderr".to_string()))?,
+        ))
+    }
+
+    /// A finished one-shot command's output, or the workspace's unreachability. The start
+    /// marker on stderr is what tells them apart: present means the command ran and the status
+    /// is its own, so the marker is removed and the rest is the command's stderr; absent with a
+    /// non-zero status means nothing ran, and what the CLI said is the reason.
+    fn output_of(
+        &self,
+        code: i32,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    ) -> Result<ExecOutput, RemoteShellError> {
+        let marker_line = format!("{START_MARKER}\n");
+        if let Some(stripped) = stderr.strip_prefix(marker_line.as_bytes()) {
+            return Ok(ExecOutput {
+                status: code,
+                stdout,
+                stderr: stripped.to_vec(),
+            });
+        }
+        if code == 0 {
+            return Ok(ExecOutput {
+                status: code,
+                stdout,
+                stderr,
+            });
+        }
+        Err(RemoteShellError::Unreachable {
+            address: self.address(),
+            detail: String::from_utf8_lossy(&stderr).trim().to_string(),
+        })
+    }
 }
 
 #[async_trait]
@@ -240,18 +298,7 @@ impl RemoteShell for CoderShell {
             .command(&wrapped)
             .spawn()
             .map_err(|error| self.spawn_error(error))?;
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| RemoteShellError::Spawn("coder child has no stdin".to_string()))?;
-        let mut stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| RemoteShellError::Spawn("coder child has no stdout".to_string()))?;
-        let mut stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| RemoteShellError::Spawn("coder child has no stderr".to_string()))?;
+        let (mut stdin, mut stdout, mut stderr) = Self::take_pipes(&mut child)?;
         let stdin_bytes = request.stdin;
         let coder_path = self.coder.clone();
         let work = async move {
@@ -288,26 +335,7 @@ impl RemoteShell for CoderShell {
         let status = status.map_err(|error| {
             RemoteShellError::Spawn(format!("{}: {error}", coder_path.display()))
         })?;
-        let code = status.code().unwrap_or(-1);
-        let marker_line = format!("{START_MARKER}\n");
-        if let Some(stripped) = stderr.strip_prefix(marker_line.as_bytes()) {
-            return Ok(ExecOutput {
-                status: code,
-                stdout,
-                stderr: stripped.to_vec(),
-            });
-        }
-        if code == 0 {
-            return Ok(ExecOutput {
-                status: code,
-                stdout,
-                stderr,
-            });
-        }
-        Err(RemoteShellError::Unreachable {
-            address: self.address(),
-            detail: String::from_utf8_lossy(&stderr).trim().to_string(),
-        })
+        self.output_of(status.code().unwrap_or(-1), stdout, stderr)
     }
 
     async fn exec_streamed(&self, command: &str) -> Result<StreamedExec, RemoteShellError> {
@@ -315,18 +343,7 @@ impl RemoteShell for CoderShell {
             .command(command)
             .spawn()
             .map_err(|error| self.spawn_error(error))?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| RemoteShellError::Spawn("coder child has no stdin".to_string()))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| RemoteShellError::Spawn("coder child has no stdout".to_string()))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| RemoteShellError::Spawn("coder child has no stderr".to_string()))?;
+        let (stdin, stdout, stderr) = Self::take_pipes(&mut child)?;
         let coder_path = self.coder.clone();
         Ok(StreamedExec {
             stdin: Box::new(CoderStdin { inner: Some(stdin) }),

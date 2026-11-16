@@ -24,6 +24,28 @@ impl VaultCoderCredentialSource {
     }
 }
 
+/// Wire a host service for Coder: its accounts read from `vaults` as the user a session token
+/// resolves to, and its listings asked of each account's deployment over HTTP. Kept here, with
+/// the credential source it installs, rather than in the host mounting that calls it.
+pub fn wire_coder(
+    host_service: tddy_host_service::HostServiceImpl,
+    vaults: Arc<tddy_credentials::SessionVaults>,
+    user_resolver: tddy_daemon_kernel::SessionUserResolver,
+) -> tddy_host_service::HostServiceImpl {
+    let coder_accounts = Arc::new(CoderAccounts::new(
+        vaults,
+        user_resolver,
+        Arc::new(
+            crate::coder_deployment_probe::HttpCoderDeploymentProbe::new(reqwest::Client::new()),
+        ),
+    ));
+    host_service
+        .with_coder_credentials(Arc::new(VaultCoderCredentialSource::new(coder_accounts)))
+        .with_coder_workspaces(Arc::new(
+            crate::coder_workspace_source::HttpCoderWorkspaceSource::new(reqwest::Client::new()),
+        ))
+}
+
 impl CoderCredentialSource for VaultCoderCredentialSource {
     fn credentials_for(
         &self,

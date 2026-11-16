@@ -55,29 +55,38 @@ impl CoderWorkspaceSource for HttpCoderWorkspaceSource {
             .text()
             .await
             .unwrap_or_else(|error| format!("(its body could not be read: {error})"));
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(CoderWorkspaceListError::Rejected(rejection_message(&body)));
-        }
-        if !status.is_success() {
-            let body: String = body.trim().chars().take(REFUSAL_BODY_LIMIT).collect();
-            return Err(CoderWorkspaceListError::Unusable(if body.is_empty() {
-                status.to_string()
-            } else {
-                format!("{status}: {body}")
-            }));
-        }
-        let answer: WorkspaceList = serde_json::from_str(&body)
-            .map_err(|error| CoderWorkspaceListError::Unusable(format!("{status}: {error}")))?;
-        Ok(answer
-            .workspaces
-            .into_iter()
-            .map(|workspace| CoderWorkspace {
-                owner: workspace.owner_name,
-                name: workspace.name,
-                status: workspace.latest_build.status,
-            })
-            .collect())
+        listing_of(status, &body)
     }
+}
+
+/// A deployment's answer as the listing: a 401 is the token refused, any other failure is
+/// what was seen, and a success is its workspaces with each one's latest build status.
+fn listing_of(
+    status: reqwest::StatusCode,
+    body: &str,
+) -> Result<Vec<CoderWorkspace>, CoderWorkspaceListError> {
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(CoderWorkspaceListError::Rejected(rejection_message(body)));
+    }
+    if !status.is_success() {
+        let seen: String = body.trim().chars().take(REFUSAL_BODY_LIMIT).collect();
+        return Err(CoderWorkspaceListError::Unusable(if seen.is_empty() {
+            status.to_string()
+        } else {
+            format!("{status}: {seen}")
+        }));
+    }
+    let answer: WorkspaceList = serde_json::from_str(body)
+        .map_err(|error| CoderWorkspaceListError::Unusable(format!("{status}: {error}")))?;
+    Ok(answer
+        .workspaces
+        .into_iter()
+        .map(|workspace| CoderWorkspace {
+            owner: workspace.owner_name,
+            name: workspace.name,
+            status: workspace.latest_build.status,
+        })
+        .collect())
 }
 
 /// The deployment's reason for refusing a token: its JSON `message`, or the body itself.

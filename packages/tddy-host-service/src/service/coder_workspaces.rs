@@ -38,34 +38,35 @@ impl HostServiceImpl {
             .credentials_for(&subject, &req.account_id)
         {
             Ok(credentials) => credentials,
-            Err(reason) => {
-                return Ok(Response::new(ListCoderWorkspacesResponse {
-                    outcome: ProbeOutcome::Failed as i32,
-                    failure_reason: reason.to_string(),
-                    workspaces: Vec::new(),
-                }));
-            }
+            Err(reason) => return Ok(Response::new(failed_listing(reason.to_string()))),
         };
 
         match self.coder_workspaces.workspaces(&credentials).await {
             Ok(workspaces) => Ok(Response::new(ListCoderWorkspacesResponse {
                 outcome: ProbeOutcome::Ok as i32,
                 failure_reason: String::new(),
-                workspaces: workspaces
-                    .iter()
-                    .map(|workspace| ListedWorkspace {
-                        owner: workspace.owner.clone(),
-                        name: workspace.name.clone(),
-                        status: workspace.status.clone(),
-                        running: workspace.is_running(),
-                    })
-                    .collect(),
+                workspaces: workspaces.iter().map(listed_workspace).collect(),
             })),
-            Err(reason) => Ok(Response::new(ListCoderWorkspacesResponse {
-                outcome: ProbeOutcome::Failed as i32,
-                failure_reason: reason.to_string(),
-                workspaces: Vec::new(),
-            })),
+            Err(reason) => Ok(Response::new(failed_listing(reason.to_string()))),
         }
+    }
+}
+
+/// A listing that could not be made, with why, in the listing port's own words.
+fn failed_listing(failure_reason: String) -> ListCoderWorkspacesResponse {
+    ListCoderWorkspacesResponse {
+        outcome: ProbeOutcome::Failed as i32,
+        failure_reason,
+        workspaces: Vec::new(),
+    }
+}
+
+/// One workspace as the wire names it, with whether a command can be run on it.
+fn listed_workspace(workspace: &crate::coder_workspaces::CoderWorkspace) -> ListedWorkspace {
+    ListedWorkspace {
+        owner: workspace.owner.clone(),
+        name: workspace.name.clone(),
+        status: workspace.status.clone(),
+        running: workspace.is_running(),
     }
 }
