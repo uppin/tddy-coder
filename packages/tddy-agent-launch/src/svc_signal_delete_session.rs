@@ -146,7 +146,11 @@ impl LaunchSessions {
             Some(self.coding_agents.agents()),
         )?;
         if let Some((target, worktree)) = &target_worktree {
-            remove_target_worktree(target, worktree).await?;
+            // FIXME(#remote-shell 10/11): a Coder target's shell is resolved with the caller's
+            // account, as the start resolves it; `shell_for_target` refuses it.
+            let shell = crate::remote_agent_launch::shell_for_target(target)
+                .map_err(|e| Status::invalid_argument(e.to_string()))?;
+            remove_target_worktree(shell.as_ref(), worktree).await?;
         }
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
@@ -256,15 +260,24 @@ pub(crate) fn target_worktree_of(session_dir: &Path) -> Option<(tddy_core::Sessi
     Some((metadata.target?, metadata.repo_path?))
 }
 
-/// Remove a target session's worktree on its target, through the remote-shell port: the session
-/// is deleted, so nothing of it is left there — its worktree, and the pointer inside it, go with
-/// it.
+/// The clone a target worktree belongs to: `<root>/.worktrees/<session>` → `<root>`. `None` for a
+/// path that is not a tddy worktree path.
+pub(crate) fn target_checkout_root_of(worktree: &str) -> Option<String> {
+    let path = Path::new(worktree);
+    let worktrees = path.parent()?;
+    (worktrees.file_name()?.to_str()? == ".worktrees")
+        .then(|| worktrees.parent())
+        .flatten()
+        .map(|root| root.to_string_lossy().into_owned())
+}
+
+/// Remove a target session's worktree on its target, through `shell`: the session is deleted, so
+/// nothing of it is left there — the worktree, the pointer inside it, and the clone's registration
+/// of it (`git worktree remove`, then `prune`), so the clone does not keep a dangling entry.
 pub(crate) async fn remove_target_worktree(
-    target: &tddy_core::SessionTarget,
+    shell: &dyn tddy_remote_shell::RemoteShell,
     worktree: &str,
 ) -> Result<(), Status> {
-    let shell = crate::remote_agent_launch::shell_for_target(target)
-        .map_err(|e| Status::invalid_argument(e.to_string()))?;
     shell
         .exec(tddy_remote_shell::ExecRequest::new(format!(
             "rm -rf {}",
@@ -410,5 +423,51 @@ pub fn signal_session_dir(
         Err(Status::unimplemented(
             "signal delivery is only supported on Unix",
         ))
+    }
+}
+
+#[cfg(test)]
+mod target_worktree_removal_tests {
+    //! `#remote-shell` 10/11: a deleted target session leaves nothing on its target.
+
+    use pretty_assertions::assert_eq;
+    use tddy_remote_shell::{ExecOutput, InMemoryShell};
+
+    use super::{remove_target_worktree, target_checkout_root_of};
+
+    const ROOT: &str = "/home/coder/.tddy/repos/qape-hq";
+    const WORKTREE: &str = "/home/coder/.tddy/repos/qape-hq/.worktrees/01a1b2c3";
+
+    #[test]
+    fn a_worktrees_clone_is_two_directories_up() {
+        assert_eq!(
+            (
+                target_checkout_root_of(WORKTREE),
+                target_checkout_root_of("/home/coder/somewhere/else"),
+            ),
+            (Some(ROOT.to_string()), None)
+        );
+    }
+
+    #[tokio::test]
+    async fn removing_a_target_worktree_unregisters_it_from_the_clone() {
+        // Given a target that answers every command with success
+        let target = InMemoryShell::new("coder.remote-dev");
+        target.answers_when(|_| Some(ExecOutput::succeeded(Vec::new())));
+
+        // When
+        remove_target_worktree(&target, WORKTREE)
+            .await
+            .expect("the removal succeeds");
+
+        // Then git removes and prunes the worktree in its clone; nothing is merely `rm -rf`ed
+        let run = target.commands_run().join("\n");
+        assert!(
+            run.contains(&format!(
+                "git -C '{ROOT}' worktree remove --force '{WORKTREE}'"
+            )) && run.contains(&format!("git -C '{ROOT}' worktree prune"))
+                && !run.contains("rm -rf"),
+            "the clone is told the worktree is gone:\n{run}"
+        );
     }
 }

@@ -19,6 +19,8 @@ mod worktree;
 pub use worktree::*;
 mod ssh_worktree;
 pub use ssh_worktree::*;
+mod remote_checkout;
+pub use remote_checkout::*;
 
 #[cfg(test)]
 use std::path::Path;

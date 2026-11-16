@@ -83,6 +83,30 @@ The first push after the plan (commit 2) publishes, as the start of this same PR
 
 This PR goes on to implement all of it. It does not merge in that state.
 
+## Contract as published
+
+The contract commit (commit 2) publishes exactly this; `/code-restructuring` is not involved — `/green` implements against it.
+
+**Surface**
+
+- `tddy-git/src/remote_checkout.rs` (re-exported at the crate root and through `tddy_core`): `REMOTE_REPOS_DIR = ".tddy/repos"`, `RemoteBranch::{NewFrom { name, base_ref }, Existing { name }}`, `RemoteWorktreeRequest { git_url, session_id, branch }`, `RemoteCheckout { root, worktree, branch }`, `RemoteCheckoutError::{HomeUnresolved, Clone { url, stderr }, Fetch, Worktree, Shell}` (+ `Display`, `From<RemoteShellError>`), `repository_name_of(git_url)`, `remote_checkout_root(shell, git_url)`, `setup_remote_worktree(shell, &request)`. The bodies are `todo!()` until green. **The root is named by the repository the git URL names**, not by the project's registry name: the cut has the URL and not the project record, and the two differ only when an operator renamed a project.
+- `setup_worktree_for_session_over_ssh` and `default_remote_repo_root` stay through the contract commit and go at green, when `cli_session_worktree::remote_worktree_through`, `remote_git_pack_execution` and the four `tddy-session-lifecycle` acceptance suites that read `default_remote_repo_root("")` as the stub target's checkout (`remote_target_session_acceptance`, `coder_target_session_acceptance`, `derived_host_start_acceptance`, `remote_hooks_session_acceptance`) move to the resolved root.
+- `tddy-agent-launch`: `remove_target_worktree(shell: &dyn RemoteShell, worktree)` takes the shell; `target_checkout_root_of(worktree)` names the clone. The delete still resolves the shell with `shell_for_target` (a `FIXME` marks it): resolving a Coder target's shell with the caller's account is green's, and its test is in `tddy-session-lifecycle` beside `coder_target_session_acceptance`.
+
+**Red tests at the contract commit**
+
+- `tddy-git/tests/remote_checkout_acceptance.rs` — 7 tests over `InMemoryShell` (the six planned plus `the_repository_name_is_the_urls_last_segment_without_git`); all panic on `todo!()`.
+- `tddy-git/tests/no_fixture_root_in_production.rs` — `no_production_source_names_home_dev` fails on `ssh_exec.rs`.
+- `tddy-agent-launch` (in-crate): `cli_session_worktree::remote_cut_tests::a_target_checkout_is_cut_under_the_targets_home_from_the_requested_branch_and_base`, `svc_signal_delete_session::target_worktree_removal_tests::removing_a_target_worktree_unregisters_it_from_the_clone` fail; `a_worktrees_clone_is_two_directories_up` passes (the helper is implemented).
+- `tddy-session-activity`: `a_remote_pack_for_a_session_without_a_recorded_path_packs_locally_rather_than_guessing` fails. The existing `resolver_picks_an_ssh_backed_session_for_the_project` asserts the guessed `/home/dev/repo/.worktrees/sess-b`; green rewrites it to a recorded path.
+
+**Differences from the plan**
+
+- The agent-launch tests are in-crate unit tests over `remote_worktree_through` and `remove_target_worktree`, not a new `tests/target_checkout_acceptance.rs`: both seams take the shell, so the in-memory shell drives them without a daemon. The two Coder-target end-to-end tests (`a_coder_target_start_cuts_its_checkout_under_the_workspace_users_home`, `deleting_a_coder_target_session_removes_its_worktree_on_the_workspace`) are written at green in `tddy-session-lifecycle`, where the stub-target fixtures are.
+- `a_remote_pack_for_a_session_without_a_recorded_path` packs **locally** rather than refusing: the resolver's existing answer for "no SSH session" is a local pack, and a record without a path is treated as not SSH-backed. Refusing would need a new `PackExecution` variant for one corrupt-record case.
+
+**Complexity re-scored:** 4 → 4.
+
 ## Green wave
 
 **Wave:** 2 of 2
@@ -212,9 +236,9 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved in advance by the developer's standing instruction for this stack's review gates)
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress

@@ -243,3 +243,87 @@ pub(crate) async fn semantic_index_env(
     }
     Ok(session_env)
 }
+
+#[cfg(test)]
+mod remote_cut_tests {
+    //! `#remote-shell` 10/11: a target session's checkout is cut under the target user's home,
+    //! on the branch the start asked for.
+
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use tddy_remote_shell::{ExecOutput, InMemoryShell};
+
+    use super::{remote_worktree_through, CliWorktreeStart};
+
+    const QAPE_HQ: &str = "git@github.com:wix-private/qape-hq.git";
+    const SESSION: &str = "01a1b2c3-remote-dev";
+    const WORKSPACE_HOME: &str = "/home/coder";
+
+    /// A workspace whose user's home is /home/coder and whose git commands all succeed.
+    fn a_workspace() -> InMemoryShell {
+        let shell = InMemoryShell::new("coder.remote-dev");
+        shell.answers_when(|request| {
+            request
+                .command
+                .contains("$HOME")
+                .then(|| ExecOutput::succeeded(WORKSPACE_HOME.as_bytes().to_vec()))
+        });
+        shell.answers_when(|request| {
+            request
+                .command
+                .contains("git ")
+                .then(|| ExecOutput::succeeded(Vec::new()))
+        });
+        shell
+    }
+
+    #[tokio::test]
+    async fn a_target_checkout_is_cut_under_the_targets_home_from_the_requested_branch_and_base() {
+        // Given a start on a Coder target asking for feature/hooks off origin/main
+        let session_dir = tempfile::tempdir().expect("session dir");
+        let sessions_base = tempfile::tempdir().expect("sessions base");
+        let tddy_data = tempfile::tempdir().expect("tddy data");
+        let workspace = a_workspace();
+        let start = CliWorktreeStart {
+            session_type: "claude-cli",
+            cut_label: "cut the session worktree",
+            session_id: SESSION,
+            session_dir: session_dir.path(),
+            sessions_base: sessions_base.path(),
+            tddy_data_dir: tddy_data.path(),
+            os_user: "testdev",
+            project_id: "proj-1",
+            repo_path: "",
+            branch_worktree_intent: "new_branch_from_base",
+            new_branch_name: "feature/hooks",
+            selected_integration_base_ref: "origin/main",
+            selected_branch_to_work_on: "",
+            create_remote_branch: false,
+            intent: tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+            timeout: Duration::from_secs(5),
+            ssh_alias: "",
+            shell: Some(Arc::new(workspace.clone())),
+        };
+
+        // When the checkout is cut on the target
+        let worktree = remote_worktree_through(&start, QAPE_HQ, &workspace)
+            .await
+            .expect("the cut succeeds");
+
+        // Then it is under the workspace user's home, on the requested branch from its base
+        let root = format!("{WORKSPACE_HOME}/.tddy/repos/qape-hq");
+        assert_eq!(
+            worktree.to_string_lossy(),
+            format!("{root}/.worktrees/{SESSION}")
+        );
+        let run = workspace.commands_run().join("\n");
+        assert!(
+            run.contains("worktree add -b 'feature/hooks'")
+                && run.contains("'origin/main'")
+                && !run.contains("/home/dev")
+                && !run.contains("tddy-"),
+            "the requested branch, from its base, under the target's home:\n{run}"
+        );
+    }
+}

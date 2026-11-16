@@ -12,3 +12,9 @@ path = "src/lib.rs"
 async-trait = "0.1"
 log = "0.4"
 tddy-remote-shell = { path = "../tddy-remote-shell" }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# The remote checkout is driven through the in-memory shell the port ships for its consumers.
+tddy-remote-shell = { path = "../tddy-remote-shell", features = ["test-support"] }

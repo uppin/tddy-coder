@@ -270,4 +270,66 @@ mod tests {
             }
         );
     }
+
+    /// `#remote-shell` 10/11: a session record without a worktree path is a record this daemon
+    /// did not write; the pack runs locally rather than against a path nobody recorded.
+    #[test]
+    fn a_remote_pack_for_a_session_without_a_recorded_path_packs_locally_rather_than_guessing() {
+        // Given an SSH-backed session whose record names no worktree path
+        let home = tempfile::tempdir().expect("tempdir");
+        let sessions_base = home.path().join(".tddy");
+        let projects_dir = sessions_base.join("projects");
+        let local_repo = home.path().join("repos").join("app");
+        std::fs::create_dir_all(&local_repo).expect("repo");
+        write_projects(
+            &projects_dir,
+            &[ProjectData {
+                project_id: "proj-1".to_string(),
+                name: "my-app".to_string(),
+                git_url: "https://github.com/example/my-app.git".to_string(),
+                main_repo_path: local_repo.to_string_lossy().to_string(),
+                main_branch_ref: None,
+                remote_name: None,
+                host_repo_paths: HashMap::new(),
+                accounts: Vec::new(),
+                local_gh: false,
+                home_session_id: None,
+                orchestrator_defaults: None,
+                lifecycle: Default::default(),
+            }],
+        )
+        .expect("projects");
+        write_session(
+            &sessions_base,
+            "sess-a",
+            "proj-1",
+            "buildbox",
+            "",
+            "2026-01-02T00:00:00Z",
+        );
+
+        let sessions_base_owned = sessions_base.clone();
+        let projects_dir_owned = projects_dir.clone();
+        let sessions_base_resolver: SessionsBaseResolver =
+            Arc::new(move |_| Some(sessions_base_owned.clone()));
+        let projects_dir_resolver: ProjectsDirResolver =
+            Arc::new(move |_| Some(projects_dir_owned.clone()));
+        let resolver =
+            pack_execution_resolver_from_sessions(sessions_base_resolver, projects_dir_resolver);
+
+        // When
+        let execution = resolver(PackExecutionContext {
+            os_user: "dev".to_string(),
+            project_ref: "my-app".to_string(),
+            local_repo_path: local_repo.clone(),
+        });
+
+        // Then — no path is invented for the target
+        assert_eq!(
+            execution,
+            PackExecution::Local {
+                repo_path: local_repo
+            }
+        );
+    }
 }
