@@ -262,6 +262,7 @@ pub(crate) fn target_worktree_of(session_dir: &Path) -> Option<(tddy_core::Sessi
 
 /// The clone a target worktree belongs to: `<root>/.worktrees/<session>` → `<root>`. `None` for a
 /// path that is not a tddy worktree path.
+#[allow(dead_code)] // the delete names the clone at green (#remote-shell 10/11)
 pub(crate) fn target_checkout_root_of(worktree: &str) -> Option<String> {
     let path = Path::new(worktree);
     let worktrees = path.parent()?;
