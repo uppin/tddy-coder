@@ -80,7 +80,7 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 37] = [
+    const ENDPOINT: [&str; 40] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -153,6 +153,18 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         // deliberately carries no network stack, so only the crate that holds the HTTP client can
         // implement the port.
         "coder_deployment_probe.rs",
+        // The daemon's `CoderCredentialSource`: `tddy-host-service`'s port answered from the
+        // vault through `tddy-accounts`' `CoderAccounts`, converting between the two crates'
+        // credential forms. Wiring by the same criterion — no RPC method, no session state,
+        // built only by `runtime/mount_host.rs` (`wire_coder`) — and it lives here because only
+        // the crate that holds the accounts vault can read a Coder account's credentials from it.
+        "coder_credential_source.rs",
+        // The daemon's `CoderWorkspaceSource`: asks a Coder deployment for a token's workspaces
+        // over the daemon's `reqwest` client. Wiring by the same criterion as
+        // `coder_deployment_probe.rs` — no RPC method, no session state, built only by
+        // `wire_coder` — and it lives here for the same reason the probe does: the HTTP client
+        // is the daemon's, made over HTTP so a host without the `coder` CLI still lists.
+        "coder_workspace_source.rs",
         // `#provider-route` 2/9's `RouteSupport` adapter: `tddy-accounts`' port answered by the
         // harness route matrix in `tddy-agent-backend`. Wiring by the same criterion — no RPC
         // method, no session state, built only by `account_linking::accounts_service_over` — and
@@ -177,6 +189,7 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         "runtime/mount_entries.rs",
         "runtime/mount_host.rs",
         "runtime/mount_socket.rs",
+        "runtime/last_run_sweep.rs",
         "runtime/tasks.rs",
         "runtime/telegram_wiring.rs",
     ];
