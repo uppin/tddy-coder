@@ -7,9 +7,11 @@ stream carries one git pack operation: the client is `tddy-remote-git-repo`, whi
 `GIT_SSH_COMMAND`; this module is the far end. Product contract:
 [remote-git-repo.md](../../../docs/ft/daemon/remote-git-repo.md).
 
-The file is two layers with a one-way dependency. Admission — verb, project, argv, environment — is
-pure or pure-plus-filesystem and is unit-testable without a process. The relay underneath owns a
-live child and its pipes. `serve` is the seam: it admits, then spawns, and holds nothing else.
+The module is two layers with a one-way dependency. Admission — verb, project, argv, environment —
+is pure or pure-plus-filesystem and is unit-testable without a process; it lives in
+`remote_git_service/request.rs`. The relay underneath owns a live child and its pipes, in
+`remote_git_service/child_relay.rs` and `remote_git_service/pumps.rs`. `serve` is the seam: it
+admits, then spawns, and holds nothing else.
 
 ## Why this is not the terminal RPC
 

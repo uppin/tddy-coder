@@ -6,9 +6,10 @@ connect, signal and delete handlers; `tddy-session-lifecycle` wires it to the ho
 ([module-layout](../../tddy-session-lifecycle/docs/module-layout.md)) and re-exports it at the old
 `tddy_session_lifecycle::…` paths.
 
-About **9.5k production lines** in 55 modules, under the 10k receiver budget. One production file is over 500 (by the count to the first `#[cfg(test)]`:
-`remote_agent_launch.rs` 546 — recorded in [`code-issues/oversized-file-remote-agent-launch.md`](code-issues/oversized-file-remote-agent-launch.md), its split deferred until no stack PR still edits it; the next largest are
-`svc_start_session_core.rs` 499, `session_coordinate_handlers.rs` 492).
+About **9.5k production lines** in the crate's modules, under the 10k receiver budget. No production file is over 500 (by the count to the first `#[cfg(test)]`):
+`remote_agent_launch.rs` is a module whose startup wait, window and settled output live in
+`remote_agent_launch/startup.rs` and whose target resolution and proto conversions live in
+`remote_agent_launch/target.rs`.
 Standing findings are in [`code-issues/`](code-issues/). A production line is any line of a `src/` file
 outside an inline `#[cfg(test)] mod x { … }` block, excluding `*_tests.rs`.
 
@@ -44,7 +45,8 @@ classified, decides the route and the placement, refuses an orchestrated `tddy_c
 (`start_request_checks::refuse_an_orchestrated_tool_start` — such a session's changeset is written by
 its own `tddy-coder`) and a named one (`refuse_a_named_tool_start`, for the same reason: its
 `.session.yaml` is its own process's), then calls `start_here` (the per-launch start) and records the
-requested name in the started session's `.session.yaml` (`record_the_started_sessions_name`, once,
+requested name in the started session's `.session.yaml` (`record_the_started_sessions_name`, in
+`svc_start_session_core/started_session_name.rs`, once,
 for every session type this daemon writes the record of). The name itself is validated earlier, in
 `start_session_core_cancellable` (`start_request_checks::requested_display_name`), before routing. `start_here_body` reads the
 `SessionLaunch` again, so every local start — operator-keyed ones included — is checked, and refuses a

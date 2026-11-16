@@ -36,6 +36,7 @@
 | 2026-11-15 | `start_session_on_request` 73 → 79, `start_here_body` 274 → 274 | — | — | — | **regressed** by session display names (#910), fn line to closing brace on `9712eb8d9~1` and `9712eb8d9`: `refuse_a_named_tool_start` beside the orchestrated-tool refusal, and `start_here`'s result recorded before it is returned so the requested name can be written. The write itself is its own method, `record_the_started_sessions_name` (33 lines); `start_here` (32) and `start_here_body` unchanged. Nesting, branches and exits not re-derived; no coverage run. Kept open |
 
 | 2026-11-16 | `start_session_on_request` 79 → 80, `start_here_body` 274 → 274 | — | — | — | **worse by 1** in #917 (`#remote-shell` 3/7): the one `refuse_a_target_combination(&req)?` call the changeset allows; brace-matched on `origin/feature/remote-shell/coder-account` (`87e84fb27`) and HEAD; no coverage run. Kept open |
+| 2026-11-16 | 80 → 73 | 1 |  |  | #924 (`#remote-shell` 8/11) sweep: `start_session_on_request` restored to below its before-the-stack length (79). Still over 60, so this record stays open on the remainder |
 
 ## What the tool found
 
