@@ -343,12 +343,34 @@ fn daemon_over(
 /// [`daemon_over`], with `customise` given the host before its handlers are installed on it: the
 /// `with_*` a suite wants on it, which cannot be added afterwards.
 fn daemon_over_customised(
+    config: tddy_daemon_kernel::config::DaemonConfig,
+    instance_id: &str,
+    sessions_base: &Path,
+    peers: Arc<InProcessPeers>,
+    terminals: Arc<CliSessionManager>,
+    customise: impl FnOnce(DaemonSessionHost) -> DaemonSessionHost,
+) -> TestDaemon {
+    daemon_over_with_host_service(
+        config,
+        instance_id,
+        sessions_base,
+        peers,
+        terminals,
+        customise,
+        None,
+    )
+}
+
+/// [`daemon_over_customised`], with the project-home tools answering host questions from
+/// `host_service` instead of the bare service [`TestDaemon::from_host`] attaches.
+fn daemon_over_with_host_service(
     mut config: tddy_daemon_kernel::config::DaemonConfig,
     instance_id: &str,
     sessions_base: &Path,
     peers: Arc<InProcessPeers>,
     terminals: Arc<CliSessionManager>,
     customise: impl FnOnce(DaemonSessionHost) -> DaemonSessionHost,
+    host_service: Option<Arc<tddy_host_service::HostServiceImpl>>,
 ) -> TestDaemon {
     config.daemon_instance_id = Some(instance_id.to_string());
     let base = sessions_base.to_path_buf();
@@ -369,7 +391,12 @@ fn daemon_over_customised(
         terminals,
         tddy_session_lifecycle::test_util::builtin_coding_agents(),
     );
-    let daemon = TestDaemon::from_host(customise(host));
+    let daemon = match host_service {
+        Some(host_service) => {
+            TestDaemon::from_host_with_host_service(customise(host), host_service)
+        }
+        None => TestDaemon::from_host(customise(host)),
+    };
     daemon.as_arc().install_sandbox_rpc_bridge();
     daemon
 }
@@ -762,15 +789,15 @@ fn host_built_with_host_service(
     let mut service_config = config.clone();
     service_config.daemon_instance_id = Some(instance_id.to_string());
     let host_service = a_host_service_over(&service_config, sessions.path(), operator_home);
-    let daemon = Arc::new(daemon_over_customised(
+    let daemon = Arc::new(daemon_over_with_host_service(
         config,
         instance_id,
         sessions.path(),
         Arc::clone(peers),
         Arc::clone(&terminals),
         |host| customise(host, &sessions_path),
+        Some(host_service),
     ));
-    daemon.handlers().attach_host_service(host_service);
     peers.register(instance_id, Arc::clone(&daemon));
     Host {
         daemon,

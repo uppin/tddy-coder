@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tddy_host_service::HostServiceImpl;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::catalog::{
     CatalogService, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
@@ -44,6 +45,19 @@ use tddy_worktree_service::stream::MpscResultStream;
 
 use crate::RpcHandlers;
 
+/// The host service a test daemon's project-home tools answer from when a suite attaches
+/// none of its own: one built from the host's own config and resolver, as the handler
+/// itself was built before the service became the composition root's to attach. Suites
+/// that need fixture operator files or Coder accounts attach their own instead, through
+/// [`TestDaemon::from_host_with_host_service`].
+fn a_bare_host_service(host: &DaemonSessionHost) -> Arc<HostServiceImpl> {
+    Arc::new(HostServiceImpl::new(
+        host.config().clone(),
+        host.tddy_data_dir(),
+        host.user_resolver(),
+    ))
+}
+
 /// A lifecycle [`TestDaemon`](tddy_session_lifecycle::test_util::TestDaemon) with this crate's
 /// [`RpcHandlers`] installed as its `DaemonRpcFamilies` — what `runtime::build` assembles — and
 /// answering the families served here through those same handlers.
@@ -58,7 +72,20 @@ impl TestDaemon {
     /// the handlers share its state from here on (see [`RpcHandlers::install`]).
     #[must_use]
     pub fn from_host(host: DaemonSessionHost) -> Self {
+        let host_service = a_bare_host_service(&host);
+        Self::from_host_with_host_service(host, host_service)
+    }
+
+    /// [`TestDaemon::from_host`], with the project-home tools answering host questions
+    /// from `host_service` — a suite's fixture service over an operator home, attached
+    /// before the daemon serves anything.
+    #[must_use]
+    pub fn from_host_with_host_service(
+        host: DaemonSessionHost,
+        host_service: Arc<HostServiceImpl>,
+    ) -> Self {
         let (host, handlers) = RpcHandlers::install(host);
+        handlers.attach_host_service(host_service);
         Self {
             daemon: tddy_session_lifecycle::test_util::TestDaemon::from_arc(Arc::new(host)),
             handlers,
@@ -72,6 +99,7 @@ impl TestDaemon {
     #[must_use]
     pub fn serving(daemon: tddy_session_lifecycle::test_util::TestDaemon) -> Self {
         let handlers = RpcHandlers::from_host(daemon.connection());
+        handlers.attach_host_service(a_bare_host_service(daemon.connection()));
         Self { daemon, handlers }
     }
 

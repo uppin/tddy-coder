@@ -184,7 +184,7 @@ impl ExecToolRpcHandler {
             worktree_sizes: Arc::clone(&self.project_home_host.worktree_sizes),
             catalog: Arc::clone(&self.project_home_host.catalog),
             projects: Arc::clone(&self.project_home_host.projects),
-            host_service: self.host_service(),
+            host_service: self.host_service()?,
             provider_accounts: self
                 .project_home_host
                 .provider_accounts

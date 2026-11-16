@@ -23,6 +23,7 @@ use tddy_credentials::SessionVaults;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_host_service::{GithubCli, HostServiceImpl};
+use tddy_rpc::Status;
 use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::{DaemonSessionHost, LocalExecTools};
@@ -70,8 +71,8 @@ pub(crate) struct ProjectHomeHost {
     pub(crate) catalog: Arc<CatalogRpcHandler>,
     pub(crate) projects: Arc<ProjectRpcHandler>,
     /// The host service the project-home tools answer host questions from, late-bound by
-    /// [`ExecToolRpcHandler::attach_host_service`]; unset until attached or first read, when
-    /// the bare one is built (see [`ExecToolRpcHandler::host_service`]).
+    /// [`ExecToolRpcHandler::attach_host_service`]; unset until attached, and a project-home
+    /// tool that needs it then refuses (see [`ExecToolRpcHandler::host_service`]).
     pub(crate) host_service: Arc<OnceLock<Arc<HostServiceImpl>>>,
     /// The provider accounts this host's vaults hold, late-bound by
     /// [`RpcHandlers::attach_provider_accounts`](crate::RpcHandlers::attach_provider_accounts).
@@ -156,20 +157,22 @@ impl ExecToolRpcHandler {
         }
     }
 
-    /// The host service the project-home tools answer host questions from: the attached one,
-    /// or the bare one built from this host's own config — its SSH config read as each OS
-    /// user, no Coder accounts — when none was attached.
-    pub(crate) fn host_service(&self) -> Arc<HostServiceImpl> {
+    /// The host service the project-home tools answer host questions from: the one the
+    /// composition root attached. When none was attached the tool is refused, naming the
+    /// missing wiring — there is no bare service to fall back to, because one built here
+    /// would read this host's SSH config with no Coder accounts and answer a different
+    /// listing than the daemon itself serves.
+    pub(crate) fn host_service(&self) -> Result<Arc<HostServiceImpl>, Status> {
         self.project_home_host
             .host_service
-            .get_or_init(|| {
-                Arc::new(HostServiceImpl::new(
-                    self.config.clone(),
-                    &self.tddy_data_dir,
-                    self.user_resolver.clone(),
-                ))
+            .get()
+            .cloned()
+            .ok_or_else(|| {
+                Status::failed_precondition(
+                    "this daemon's host service was never attached to its exec-tool handler, \
+                 so the host's derived hosts cannot be listed or resolved",
+                )
             })
-            .clone()
     }
 
     /// The late-bound launch cell, shared with the families that attach it.
@@ -187,5 +190,40 @@ impl ExecToolRpcHandler {
     /// The late-bound provider-account cell, shared with the families that attach it.
     pub(crate) fn provider_accounts_cell(&self) -> Arc<OnceLock<Arc<dyn ProviderAccountsPort>>> {
         Arc::clone(&self.project_home_host.provider_accounts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unattached_handler_refuses_rather_than_answering_from_a_bare_host_service() {
+        // Given a handler no composition root attached a host service to
+        let sessions = tempfile::tempdir().expect("sessions storage");
+        let host = tddy_session_lifecycle::test_util::test_host(sessions.path().to_path_buf());
+        let handler = ExecToolRpcHandler::from_host(&host);
+
+        // When a project-home tool asks it for the host service
+        let refused = handler.host_service();
+
+        // Then it refuses, naming the missing wiring, instead of building a bare service
+        // whose listing (SSH config only, no Coder accounts) would silently differ
+        match refused {
+            Ok(_) => panic!("an unattached handler must refuse, not fall back"),
+            Err(status) => assert!(
+                status.message().contains("never attached"),
+                "the refusal names the missing wiring: {}",
+                status.message()
+            ),
+        }
+
+        // And once the wired service is attached, that service is the one answered from
+        handler.attach_host_service(Arc::new(HostServiceImpl::new(
+            host.config().clone(),
+            host.tddy_data_dir(),
+            host.user_resolver(),
+        )));
+        assert!(handler.host_service().is_ok());
     }
 }

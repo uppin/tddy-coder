@@ -174,14 +174,6 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
         string("The host that holds the session's worktree, when it is not the host the agent runs on. Requires `managed_codebase`. Empty keeps them together."),
     );
     offer(
-        "ssh_config_host",
-        string("An OpenSSH `Host` alias on the host that manages the code: the worktree lives on that SSH target and every exec tool runs there, while the agent stays on the host. Empty is the host's own filesystem. Only explicit `Host` entries count — a wildcard such as `Host coder.*` is not an alias; a Coder workspace is a derived host, named with `target`."),
-    );
-    offer(
-        "target",
-        string("A derived host the agent itself runs on: an `id` from `DescribeSessionStartOptions.derived_hosts` (an SSH alias or a Coder workspace the host reaches). The session starts on that host's parent daemon with the derived host as its target, and its worktree is created there. Empty runs the agent on the host itself. Exclusive with `ssh_config_host`."),
-    );
-    offer(
         "semantic_index",
         boolean("Index the worktree before the agent starts and offer it SemanticSearch."),
     );
@@ -222,6 +214,7 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
             "description": "`orchestrator`: start an orchestrator session — read-only on the project's home worktree with main's tools, as many as wanted beside main. The daemon places it (managed, no branch, no stack, on this host) and refuses a placement, a sandbox, or a session type whose agent cannot be held read-only. Only a person, main or another orchestrator may ask for it. Omit for an ordinary session."
         }),
     );
+    offer_remote_placement(&mut properties);
 
     let mut conditions: Vec<Value> = needing_a_model
         .iter()
@@ -244,6 +237,20 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
         "allOf": conditions,
         "additionalProperties": false
     })
+}
+
+/// The remote-placement arguments, exclusive with each other: `ssh_config_host` keeps the
+/// agent on the host and puts only the worktree on an SSH target, while `target` runs the
+/// agent itself on a derived host the host reaches.
+fn offer_remote_placement(properties: &mut Map<String, Value>) {
+    properties.insert(
+        "ssh_config_host".to_string(),
+        string("An OpenSSH `Host` alias on the host that manages the code: the worktree lives on that SSH target and every exec tool runs there, while the agent stays on the host. Empty is the host's own filesystem. Only explicit `Host` entries count — a wildcard such as `Host coder.*` is not an alias; a Coder workspace is a derived host, named with `target`."),
+    );
+    properties.insert(
+        "target".to_string(),
+        string("A derived host the agent itself runs on: an `id` from `DescribeSessionStartOptions.derived_hosts` (an SSH alias or a Coder workspace the host reaches). The session starts on that host's parent daemon with the derived host as its target, and its worktree is created there. Empty runs the agent on the host itself. Exclusive with `ssh_config_host`."),
+    );
 }
 
 /// `session_type`: with `choices`, an enum of the session types the daemon declares plus the
