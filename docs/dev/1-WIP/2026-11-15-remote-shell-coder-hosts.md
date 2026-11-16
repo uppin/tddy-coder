@@ -127,13 +127,13 @@ Red state at the contract commit: `coder_agent_launch_acceptance` 0 passed / 4 f
 ## Green wave
 
 **Wave:** 4 of 4
-**Greenable independently:** after `coder-shell` and `derived-hosts` are green: its tests list real workspaces through one and render through the other, and start through `ssh-agent-launch`
+**Greenable independently:** after `coder-shell` and `derived-hosts` are green: its tests list real workspaces through one and render through the other, and start through `ssh-agent-launch`. One launch test also watches a hook arrive, so `remote-hooks` must be green too
 **Concurrent with:** none
 **Blocks:** none
 
 Real dependency edges, as opposed to the branch line:
 
-    n1 → n3, n4, n6      n2 → n4      n3 → n5, n6, n7      n4 → n7      n5 → n7
+    n1 → n3, n4, n6      n2 → n4      n3 → n5, n6, n7      n4 → n7      n5 → n7      n6 → n7
 
 ```mermaid
 graph TD
@@ -146,7 +146,7 @@ graph TD
   n3 --> n7[n7 coder-hosts]
   n4 --> n7
   n5 --> n7
-  n6 -. must not .-> n7
+  n6 --> n7
   n2 -. must not .-> n3
 ```
 
