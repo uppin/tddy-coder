@@ -193,6 +193,18 @@ is open, through `CoderAccounts::credentials_for`, which is the read path sessio
 workspaces use. Implementation:
 [tddy-accounts Coder accounts](../../../packages/tddy-accounts/docs/coder-accounts.md).
 
+That read path has its uses. `HostService.ListCoderWorkspaces` lists the workspaces one
+account can reach — owner, name, the latest build's status, and whether a command can be run
+on it — by asking the deployment over HTTP (`GET /api/v2/workspaces?q=owner:me`), so it
+answers on a host with no `coder` CLI. A locked vault, a rejected token and an unreachable
+deployment are distinct failures, each in its own words; an account with no workspaces is a
+successful empty list. And a workspace is a remote-shell transport: the daemon runs commands
+on it through the `coder` CLI with the account's URL and token in that child's environment
+alone (see [tddy-remote-shell architecture](../../../packages/tddy-remote-shell/docs/architecture.md)).
+
+Showing workspaces as hosts that run sessions belongs to a later change; nothing here starts
+a workspace or a session on one.
+
 ## Out of scope
 
 - Editing a stored key in place — remove the account and connect it again.

@@ -43,6 +43,7 @@ crate boundary could have tolerated.
 | `AddHostKey` | Unary, and **blocks for as long as the add takes**: it raises a passphrase prompt on `StreamHostPrompts`, waits for the ciphertext on `AnswerHostPrompt`, decrypts it, unlocks the OpenSSH key named by `subject` — read as the mapped OS user, out of their own home — and hands the identity to that user's ssh-agent. `subject` must be an **absolute** path; nothing expands `~`. Answers with `{added, outcome (AddHostKeyOutcome), fingerprint, failure_reason}` and never with anything derived from the passphrase |
 | `ListHostKeyCandidates` | Unary; the private keys the caller's own OS user could load, out of their own `~/.ssh` — one `HostKeyCandidate` (`path`, `key_type`, `fingerprint`) per key **whose `.pub` sits beside it**, ordered by path. Every field comes from the public half, so no private key is opened to build the list, and every path offered is one `AddHostKey` accepts. Returns a list and never a failure: an absent, unreadable and empty `~/.ssh` are one answer |
 | `ListSshConfigHosts` | Unary; the explicit OpenSSH `Host` aliases in the mapped OS user's `~/.ssh/config`, after `Include` expansion — one `SshConfigHost` (`alias`) per name, first-seen order, wildcard patterns skipped. Routed by `daemon_instance_id` like `ListHostKeyCandidates`. **Honesty is the opposite of key listing:** an unreadable or unparseable config is `ProbeOutcome::Failed` with an empty `hosts` list, never mistaken for "no aliases"; a missing or empty config with no includes is `Ok` with zero hosts. Parser: [`ssh_config.rs`](../src/ssh_config.rs) |
+| `ListCoderWorkspaces` | Unary; the workspaces one Coder account can reach — one `CoderWorkspace` (`owner`, `name`, `status`, `running`) per workspace. Routed by `daemon_instance_id`, then the account's credentials are read through `CoderCredentialSource` before any network call, and the deployment is asked through `CoderWorkspaceSource` over HTTP, never the `coder` CLI. An account with no workspaces is `Ok` and empty; a locked vault, a rejected token and an unreachable deployment are `Failed` with distinct reasons. Ports: [`coder_workspaces.rs`](../src/coder_workspaces.rs) |
 | `StreamHostStats` | Server-streaming host telemetry — CPU, disk, memory and, where the platform provides one, load |
 
 ## How it is served
@@ -120,7 +121,9 @@ backing the tooling cells on each Hosts row
 ([docs/ft/web/hosts-screen-tooling.md](../../../docs/ft/web/hosts-screen-tooling.md)):
 
 - `GetHostTooling({session_token, daemon_instance_id})` →
-  `{daemon_instance_id, git, github_cli, ssh_agent}`.
+  `{daemon_instance_id, git, github_cli, ssh_agent, remote_desktop, coder_cli}`.
+  `HostCoderCli` carries `installed` and `version`: whether a `coder` executable is on the
+  path the daemon's children are given, and the release it reports.
   `HostGitIdentity` carries `outcome`, `configured`, `user_name`, `user_email`, `failure_reason`;
   `HostGithubCli` carries `outcome`, `installed`, `authenticated`, `login`, `failure_reason`;
   `HostSshAgent` carries `outcome`, `reachable`, `keys` (`repeated SshAgentKey`) and
