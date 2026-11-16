@@ -171,12 +171,33 @@ Recorded in the contract commit, before any change, in [baseline.md](./2026-11-1
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-agent-launch` | 342 passed, 0 failed | |
-| `./test -p tddy-session-lifecycle` | 966 passed, 13 failed (12 BSD `cat`, 1 `/tmp` path) | |
-| `./test -p tddy-accounts` | 152 passed, 0 failed | |
-| `./test -p tddy-worktree-service` | 175 passed, 0 failed, 1 ignored | |
-| `./test -p tddy-daemon` | 332 passed, 2 failed (LiveKit testkit port bind) | |
-| `tddy-session-create-web` unit tests (`bun test src`) | 104 passed, 0 failed; Cypress not run locally | |
+| `./test -p tddy-agent-launch` | 342 passed, 0 failed | 342 passed, 0 failed |
+| `./test -p tddy-session-lifecycle` | 966 passed, 13 failed (12 BSD `cat`, 1 `/tmp` path) | 965 passed, 14 failed (the same 13 by name, plus `the_gh_a_local_gh_session_start_asks_never_sees_the_daemons_github_tokens` under load; that target is 10/10 alone), 1 ignored |
+| `./test -p tddy-accounts` | 152 passed, 0 failed | 152 passed, 0 failed |
+| `./test -p tddy-worktree-service` | 175 passed, 0 failed, 1 ignored | 175 passed, 0 failed, 1 ignored (after building `tddy-remote-git-repo`, as the baseline did) |
+| `./test -p tddy-daemon` | 332 passed, 2 failed (LiveKit testkit port bind) | 333 passed, 1 failed (`restores_a_clone_that_diverged_and_says_so` under load; green alone in 12 s), 1 ignored |
+| `tddy-session-create-web` unit tests (`bun test src`) | 104 passed, 0 failed; Cypress not run locally | 104 passed, 0 failed; Cypress not run locally |
+
+State A re-measured after the applies (production lines by `restructure lines`; functions brace-matched; row 4 also whole-file):
+
+| # | After | Verdict |
+|---|---|---|
+| 1 | `remote_agent_launch.rs` 338 (`startup.rs` 145, `target.rs` 116) | closed |
+| 2 | `svc_activity_ports.rs` 412 | closed |
+| 3 | `svc_host_builders.rs` 470 | closed |
+| 4 | `connection_service.rs` 556 whole · 431 by `restructure lines` (before the stack: 558 · 433) | restored |
+| 5 | `service.rs` 421 | closed |
+| 6 | `remote_git_service.rs` 418 | closed |
+| 7 | `useCreateSessionPaneState.tsx` 498 | closed |
+| 8 | `gen/host_pb.ts` 1,762, unchanged | not restored (generated; no seam) |
+| 9 | `start_cli_harness_session` 368 (target ≤ 318) | not restored (engine refusals in plans.md; the two `use` lines need the developer's consent) |
+| 10 | `resume_cli_harness_session` 135 (target ≤ 136) | restored |
+| 11 | `resume_cli_harness` 83 (target ≤ 88) | restored |
+| 12 | `build_session_host` 73 (target ≤ 73) | restored |
+| 13 | `start_cli_harness_from_request` 84 (target ≤ 94) | restored |
+| 14 | `start_sandboxed_cli_harness_session` 287 (target ≤ 291) | restored |
+| 15 | `start_session_on_request` 73 (target ≤ 79) | restored |
+| 16 | `DaemonSessionHost::new` 100 (target ≤ 97) | not restored (engine refusals in plans.md) |
 
 ## Plan
 
@@ -217,9 +238,9 @@ Every statement in `packages/*/docs/` that names a moved item's file is listed i
 - [x] Record the green baseline, by failing-test name
 - [x] Write the plans with `restructure anchors`; prove each with `check --deep`
 - [x] USER REVIEW — the plan (approved in advance by the developer's standing instruction for this stack's review gates)
-- [ ] Apply each plan, commit it on its own, `verify --against`
-- [ ] Hand split of the TypeScript file; fixture warm-up in the shared stub writers
-- [ ] Final gate: fmt, clippy, the baseline's failing set by name, the comment-line multiset, `verify` against the ref before the first plan
-- [ ] Re-measure and close or restore every record
+- [x] Apply each plan, commit it on its own, `verify --against`
+- [x] Hand split of the TypeScript file; fixture warm-up in the shared stub writers
+- [x] Final gate: fmt, clippy, the baseline's failing set by name, the comment-line multiset, `verify` against the ref before the first plan
+- [x] Re-measure and close or restore every record
 - [ ] Validate changes (/validate-changes)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
