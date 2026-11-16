@@ -48,9 +48,28 @@ impl StandInCoder {
     fn running(body: &str) -> Self {
         let dir = tempfile::tempdir().expect("a temp dir for the stand-in coder");
         let path = dir.path().join("coder");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}")).expect("the stand-in coder is written");
+        // The warm-up guard is the script's first line and it is run once, guarded, here: a
+        // freshly written executable pays a first-execution scan on this OS (~2.4 s measured
+        // on macOS, against ~20 ms afterwards), and a stand-in timed from its first real exec
+        // would spend that scan inside whatever window its test measures. Guarded, the
+        // warm-up records no call and runs nothing.
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\nif [ -n \"$TDDY_FIXTURE_WARMUP\" ]; then exit 0; fi\n{body}"),
+        )
+        .expect("the stand-in coder is written");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
             .expect("the stand-in coder is made executable");
+        let warmed = std::process::Command::new(&path)
+            .env("TDDY_FIXTURE_WARMUP", "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the freshly written stand-in warms up");
+        assert!(
+            warmed.status.success(),
+            "the warm-up of the stand-in coder exited {}",
+            warmed.status
+        );
         Self { dir }
     }
 
