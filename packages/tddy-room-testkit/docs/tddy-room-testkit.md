@@ -35,6 +35,16 @@ LiveKit. Nothing here opens a socket, needs Docker, or knows a LiveKit URL.
   passes because the hub grew a LiveKit-shaped quirk, the quirk belongs in the compat
   package's contract suites, not in the hub.
 
+## The satellite boundary
+
+This crate names `tddy-daemon-livekit` in `[dependencies]` — the registry it feeds is the
+production one — which the LiveKit-satellite rule (`livekit_is_a_satellite` in
+`tddy-daemon-extensions`) normally forbids outside the plugins and binary wiring. The hub
+is admitted there as a named test double, on one condition the same test enforces: every
+crate that names this crate does so under `[dev-dependencies]`, so its LiveKit edge can
+never enter a production build. Adding a `[dependencies]` edge to this crate anywhere
+fails that test, by design.
+
 ## Why not a fake LiveKit server
 
 A fake would have to reimplement the server's join, metadata and RPC semantics, and a
