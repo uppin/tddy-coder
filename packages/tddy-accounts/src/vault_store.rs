@@ -71,7 +71,7 @@ impl SessionVaultAccountStore {
 }
 
 /// What a vault in `state` refuses with — `None` when it is open and can be read.
-fn refusal_for_closed(state: VaultState) -> Option<AccountsError> {
+pub(crate) fn refusal_for_closed(state: VaultState) -> Option<AccountsError> {
     match state {
         VaultState::Open => None,
         VaultState::Locked => Some(AccountsError::Locked),
@@ -132,7 +132,7 @@ const STORE_UNREADABLE: &str = "the credential store could not be read or writte
 /// gets [`STORE_UNREADABLE`] and the log gets the full error with the subject it belongs to. Every
 /// other variant's text is a fixed sentence written for the person — none of them names a path —
 /// so it is passed on verbatim: it tells them, or the operator, which remedy applies.
-fn refusal_of(subject: &str, error: VaultError) -> AccountsError {
+pub(crate) fn refusal_of(subject: &str, error: VaultError) -> AccountsError {
     match error {
         VaultError::Locked => AccountsError::Locked,
         VaultError::Io(_) => {

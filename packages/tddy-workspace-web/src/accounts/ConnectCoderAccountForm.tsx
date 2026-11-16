@@ -8,6 +8,9 @@
  * `accounts.proto` has no field to return it in.
  */
 
+import { useState } from "react";
+import { Button } from "tddy-ui-web";
+
 /** What the form submits; the container turns it into `ConnectCoderAccount`. */
 export interface ConnectCoderAccountInput {
   /** The deployment's root, e.g. `https://coder.example.com`. */
@@ -26,15 +29,69 @@ export interface ConnectCoderAccountFormProps {
   onCancel: () => void;
 }
 
-export function ConnectCoderAccountForm(_props: ConnectCoderAccountFormProps) {
-  // TODO(coder-account): implement — the URL, token and label fields (`accounts-coder-url`,
-  // `accounts-coder-token`, `accounts-coder-label`), the submit control (`accounts-coder-submit`)
-  // and the daemon's refusal (`accounts-coder-error`).
+const FIELD_CLASS = "h-8 rounded-md border border-border bg-background px-2 text-sm";
+
+export function ConnectCoderAccountForm({
+  pending,
+  error,
+  onSubmit,
+  onCancel,
+}: ConnectCoderAccountFormProps) {
+  const [deploymentUrl, setDeploymentUrl] = useState("");
+  const [token, setToken] = useState("");
+  const [label, setLabel] = useState("");
+
   return (
     <form
       data-testid="accounts-coder-form"
       className="mt-4 flex max-w-md flex-col gap-3 text-sm"
-      onSubmit={(event) => event.preventDefault()}
-    />
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit({ deploymentUrl, token, label });
+      }}
+    >
+      <label className="flex flex-col gap-1">
+        Deployment URL
+        <input
+          data-testid="accounts-coder-url"
+          className={FIELD_CLASS}
+          value={deploymentUrl}
+          onChange={(event) => setDeploymentUrl(event.target.value)}
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        Label
+        <input
+          data-testid="accounts-coder-label"
+          className={FIELD_CLASS}
+          value={label}
+          onChange={(event) => setLabel(event.target.value)}
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        Session token
+        <input
+          data-testid="accounts-coder-token"
+          type="password"
+          autoComplete="off"
+          className={FIELD_CLASS}
+          value={token}
+          onChange={(event) => setToken(event.target.value)}
+        />
+      </label>
+      {error ? (
+        <p data-testid="accounts-coder-error" className="text-destructive">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" disabled={pending} data-testid="accounts-coder-submit">
+          Connect
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
   );
 }

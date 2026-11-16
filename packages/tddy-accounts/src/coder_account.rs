@@ -17,16 +17,21 @@
 //!
 //! [`ProviderAccount::from_record`]: crate::ProviderAccount::from_record
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use tddy_credentials::{AccountId, CredentialRecord, SecretString, SessionVaults};
+use tddy_credentials::{
+    AccountId, CredentialRecord, ProviderId, SecretString, SessionVault, SessionVaults,
+    FIRST_VERSION,
+};
 use tddy_rpc::Status;
 use tddy_service::proto::accounts::ConnectCoderAccountRequest;
 
 use crate::service::AccountsServiceImpl;
 use crate::store::AccountsError;
-use crate::vault_store::SessionSubjectResolver;
+use crate::vault_store::{refusal_for_closed, refusal_of, SessionSubjectResolver};
 
 /// The `provider` every Coder account's vault record carries, and the group it lists under.
 pub const CODER_PROVIDER: &str = "coder";
@@ -42,8 +47,20 @@ pub struct CoderDeploymentUrl(String);
 impl CoderDeploymentUrl {
     /// `input` as a deployment root, or [`CoderAccountError::InvalidUrl`] naming it.
     pub fn parse(input: &str) -> Result<Self, CoderAccountError> {
-        // TODO(coder-account): implement — validate, and drop the trailing slash.
-        Ok(Self(input.to_string()))
+        let invalid = || CoderAccountError::InvalidUrl(input.to_string());
+        let rest = input
+            .strip_prefix("https://")
+            .or_else(|| input.strip_prefix("http://"))
+            .ok_or_else(invalid)?;
+        let authority = rest.split('/').next().unwrap_or_default();
+        let unusable = authority.is_empty()
+            || authority.contains('@')
+            || input.contains(['?', '#'])
+            || input.chars().any(char::is_whitespace);
+        if unusable {
+            return Err(invalid());
+        }
+        Ok(Self(input.trim_end_matches('/').to_string()))
     }
 
     /// The root as written to the vault and handed to the `coder` CLI, without a trailing slash.
@@ -55,8 +72,12 @@ impl CoderDeploymentUrl {
     /// The authority's host, with its port when the URL names one — what an account id ends in.
     #[must_use]
     pub fn host(&self) -> &str {
-        // TODO(coder-account): implement
-        ""
+        let rest = self
+            .0
+            .strip_prefix("https://")
+            .or_else(|| self.0.strip_prefix("http://"))
+            .unwrap_or(&self.0);
+        rest.split('/').next().unwrap_or_default()
     }
 }
 
@@ -111,23 +132,31 @@ impl CoderAccount {
     /// The account `user` has at `deployment_url`, labelled `label`.
     #[must_use]
     pub fn for_user(deployment_url: CoderDeploymentUrl, user: &CoderUser, label: &str) -> Self {
-        // TODO(coder-account): implement — the id is `coder-<user id>@<host>`.
-        let _ = (user, label);
         Self {
-            account_id: AccountId::new(""),
-            label: String::new(),
+            account_id: AccountId::new(format!("coder-{}@{}", user.id, deployment_url.host())),
+            label: label.to_string(),
             deployment_url,
-            username: String::new(),
-            user_id: String::new(),
+            username: user.username.clone(),
+            user_id: user.id.clone(),
         }
     }
 
     /// The Coder account `record` holds, or `None` when it holds some other kind of account.
     #[must_use]
     pub fn from_record(record: &CredentialRecord) -> Option<Self> {
-        // TODO(coder-account): implement
-        let _ = record;
-        None
+        if record.provider.as_str() != CODER_PROVIDER {
+            return None;
+        }
+        let deployment_url = CoderDeploymentUrl::parse(record.metadata.get("url")?).ok()?;
+        let username = record.metadata.get("subject")?.clone();
+        let user_id = record.metadata.get("subject_id")?.clone();
+        Some(Self {
+            account_id: record.account.clone(),
+            label: record.label.clone(),
+            deployment_url,
+            username,
+            user_id,
+        })
     }
 
     /// The vault record that holds this account with `token`, written at `now` (seconds since the
@@ -135,17 +164,20 @@ impl CoderAccount {
     /// ever written straight after its deployment named the user.
     #[must_use]
     pub fn into_record(self, token: SecretString, now: u64) -> CredentialRecord {
-        // TODO(coder-account): implement — provider, secret, and the `url`, `subject`,
-        // `subject_id` and `probed_at` metadata.
-        let _ = (token, now);
+        let metadata = BTreeMap::from([
+            ("url".to_string(), self.deployment_url.as_str().to_string()),
+            ("subject".to_string(), self.username.clone()),
+            ("subject_id".to_string(), self.user_id.clone()),
+            ("probed_at".to_string(), now.to_string()),
+        ]);
         CredentialRecord {
-            provider: tddy_credentials::ProviderId::new(""),
+            provider: ProviderId::new(CODER_PROVIDER),
             account: self.account_id,
-            label: String::new(),
-            secret: SecretString::new(""),
-            metadata: std::collections::BTreeMap::new(),
-            updated_at: 0,
-            version: tddy_credentials::FIRST_VERSION,
+            label: self.label,
+            secret: token,
+            metadata,
+            updated_at: now,
+            version: FIRST_VERSION,
         }
     }
 }
@@ -181,12 +213,8 @@ pub enum CoderAccountError {
 
 /// Coder accounts in the vaults a daemon holds: connecting one, and reading one's credentials.
 pub struct CoderAccounts {
-    // TODO(coder-account): implement — the three ports are read by `connect` and `credentials_for`.
-    #[allow(dead_code)]
     vaults: Arc<SessionVaults>,
-    #[allow(dead_code)]
     subject_of: SessionSubjectResolver,
-    #[allow(dead_code)]
     probe: Arc<dyn CoderDeploymentProbe>,
 }
 
@@ -219,11 +247,45 @@ impl CoderAccounts {
         token: SecretString,
         label: &str,
     ) -> Result<CredentialRecord, CoderAccountError> {
-        // TODO(coder-account): implement
-        let _ = (session_token, deployment_url, token, label);
-        Err(CoderAccountError::Vault(AccountsError::Unavailable(
-            "connecting a Coder account is not implemented on this daemon yet".to_string(),
-        )))
+        let deployment_url = CoderDeploymentUrl::parse(deployment_url)?;
+        if token.expose().is_empty() {
+            return Err(CoderAccountError::MissingToken);
+        }
+        let subject = (self.subject_of)(session_token)
+            .ok_or(CoderAccountError::Vault(AccountsError::NoSuchSession))?;
+        let vault = self.open_vault(&subject)?;
+        let user =
+            self.probe
+                .whoami(&deployment_url, &token)
+                .await
+                .map_err(|error| match error {
+                    CoderProbeError::Rejected(reason) => CoderAccountError::Rejected(reason),
+                    CoderProbeError::Unreachable(reason) | CoderProbeError::Unusable(reason) => {
+                        CoderAccountError::Unreachable(reason)
+                    }
+                })?;
+        let mut account = CoderAccount::for_user(deployment_url, &user, label);
+        let held = vault
+            .list(None)
+            .map_err(|error| CoderAccountError::Vault(refusal_of(&subject, error)))?;
+        if let Some(existing) = held
+            .iter()
+            .filter_map(CoderAccount::from_record)
+            .find(|held_account| held_account.account_id == account.account_id)
+        {
+            account.label = existing.label;
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .map_err(|error| {
+                CoderAccountError::Vault(AccountsError::Unavailable(error.to_string()))
+            })?;
+        let record = account.into_record(token, now);
+        vault
+            .put(record.clone())
+            .map_err(|error| CoderAccountError::Vault(refusal_of(&subject, error)))?;
+        Ok(record)
     }
 
     /// The deployment URL and token of `subject`'s Coder account `account_id`.
@@ -236,12 +298,39 @@ impl CoderAccounts {
         subject: &str,
         account_id: &AccountId,
     ) -> Result<CoderCredentials, CoderAccountError> {
-        // TODO(coder-account): implement
-        let _ = (subject, account_id);
-        Err(CoderAccountError::Vault(AccountsError::Unavailable(
-            "reading a Coder account's credentials is not implemented on this daemon yet"
-                .to_string(),
-        )))
+        let vault = self.open_vault(subject)?;
+        let held = vault
+            .list(None)
+            .map_err(|error| CoderAccountError::Vault(refusal_of(subject, error)))?;
+        let record = held
+            .into_iter()
+            .find(|record| &record.account == account_id)
+            .filter(|record| CoderAccount::from_record(record).is_some())
+            .ok_or_else(|| CoderAccountError::NotFound(account_id.clone()))?;
+        let account = CoderAccount::from_record(&record)
+            .ok_or_else(|| CoderAccountError::NotFound(account_id.clone()))?;
+        Ok(CoderCredentials {
+            url: account.deployment_url,
+            token: record.secret.clone(),
+        })
+    }
+
+    fn open_vault(&self, subject: &str) -> Result<Arc<SessionVault>, CoderAccountError> {
+        if let Some(refusal) = refusal_for_closed(self.vaults.state(subject)) {
+            return Err(CoderAccountError::Vault(refusal));
+        }
+        match self.vaults.use_open(subject) {
+            Some(vault) => Ok(vault),
+            None => Err(CoderAccountError::Vault(
+                refusal_for_closed(self.vaults.state(subject)).unwrap_or_else(|| {
+                    AccountsError::Unavailable(
+                        "the credential vault closed and reopened while it was being read; \
+                         try again"
+                            .to_string(),
+                    )
+                }),
+            )),
+        }
     }
 }
 
@@ -265,11 +354,50 @@ pub(crate) async fn connect_coder_account(
     coder: Option<&CoderAccounts>,
     request: ConnectCoderAccountRequest,
 ) -> Result<CredentialRecord, Status> {
-    // TODO(coder-account): implement
-    let _ = (coder, request);
-    Err(Status::unimplemented(
-        "connecting a Coder account is not implemented on this daemon yet",
-    ))
+    let coder = coder.ok_or_else(|| {
+        Status::failed_precondition(
+            "this daemon cannot connect Coder accounts: no Coder accounts are wired",
+        )
+    })?;
+    coder
+        .connect(
+            &request.session_token,
+            &request.deployment_url,
+            SecretString::new(request.token),
+            &request.label,
+        )
+        .await
+        .map_err(|error| match error {
+            CoderAccountError::InvalidUrl(url) => Status::invalid_argument(format!(
+                "{url:?} is not an http(s) URL with a host and without credentials, query or fragment"
+            )),
+            CoderAccountError::MissingToken => {
+                Status::invalid_argument("a Coder session token is required")
+            }
+            CoderAccountError::Rejected(reason) => Status::unauthenticated(reason),
+            CoderAccountError::Unreachable(reason) => Status::unavailable(reason),
+            CoderAccountError::NotFound(account) => {
+                Status::not_found(format!("no Coder account {account} is connected"))
+            }
+            CoderAccountError::Vault(AccountsError::Locked) => Status::failed_precondition(
+                "your credential vault is locked on this daemon; unlock it with your passphrase",
+            ),
+            CoderAccountError::Vault(AccountsError::Uninitialized) => {
+                Status::failed_precondition(
+                    "no credential vault exists for you on this daemon yet; \
+                     choosing a passphrase creates one",
+                )
+            }
+            CoderAccountError::Vault(AccountsError::NoSuchSession) => {
+                Status::unauthenticated("the session token names no signed-in session")
+            }
+            CoderAccountError::Vault(AccountsError::Unavailable(reason)) => {
+                Status::internal(reason)
+            }
+            CoderAccountError::Vault(AccountsError::NotFound { provider, account }) => {
+                Status::not_found(format!("no {provider} account {account} is connected"))
+            }
+        })
 }
 
 #[cfg(test)]

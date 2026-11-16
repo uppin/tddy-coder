@@ -141,18 +141,9 @@ export function AccountsScreen({
       {onConnectProviderAccount && outcome.kind === "listed" ? (
         <ConnectApiKey onConnect={onConnectProviderAccount} error={connectError} />
       ) : null}
-      {outcome.kind === "listed" ? (
+      {onConnectCoderAccount && outcome.kind === "listed" ? (
         <section data-testid="accounts-coder-connect" className="mb-4">
-          {/* TODO(coder-account): implement — the control that opens the form
-              (`accounts-connect-coder`), pending state, and closing once the account was added. */}
-          <ConnectCoderAccountForm
-            pending={false}
-            error={coderConnectError}
-            onCancel={() => {}}
-            onSubmit={(input) => {
-              void onConnectCoderAccount?.(input);
-            }}
-          />
+          <ConnectCoder onConnect={onConnectCoderAccount} error={coderConnectError} />
         </section>
       ) : null}
       {renderOutcome(outcome, onRename, onRemove, onAddAccount, onListModels, onSetDefaults, harnessOptions)}
@@ -419,6 +410,45 @@ function AccountRowView({
         </Button>
       )}
     </li>
+  );
+}
+
+/** "Connect Coder" and, once pressed, its form; closes when the daemon added the account. */
+function ConnectCoder({
+  onConnect,
+  error,
+}: {
+  onConnect: NonNullable<AccountsScreenProps["onConnectCoderAccount"]>;
+  error: string | null;
+}) {
+  const [connecting, setConnecting] = useState(false);
+  const [pending, setPending] = useState(false);
+  return (
+    <div>
+      <Button
+        size="sm"
+        variant="outline"
+        data-testid="accounts-connect-coder"
+        onClick={() => setConnecting(true)}
+      >
+        Connect Coder
+      </Button>
+      {connecting ? (
+        <ConnectCoderAccountForm
+          pending={pending}
+          error={error}
+          onCancel={() => setConnecting(false)}
+          onSubmit={(input) => {
+            setPending(true);
+            onConnect(input)
+              .then((added) => {
+                if (added) setConnecting(false);
+              })
+              .finally(() => setPending(false));
+          }}
+        />
+      ) : null}
+    </div>
   );
 }
 

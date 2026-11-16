@@ -196,11 +196,11 @@ See *Affected Packages* and *Responsibility*.
 
 ## Implementation Milestones
 
-- [ ] Codec round-trips a record
-- [ ] HTTP probe against a stand-in deployment
-- [ ] RPC with every refusal and the reconnect path
-- [ ] Web form and group
-- [ ] `./test -p tddy-accounts`, the one Cypress spec
+- [x] Codec round-trips a record
+- [x] HTTP probe against a stand-in deployment
+- [x] RPC with every refusal and the reconnect path
+- [x] Web form and group
+- [x] `./test -p tddy-accounts`, the one Cypress spec
 
 ## Testing Plan
 
@@ -270,7 +270,7 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved in advance on 2026-11-15: "proceed with your recommended option"; the titles are listed in the PR body)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
