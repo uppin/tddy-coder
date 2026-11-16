@@ -20,11 +20,16 @@ shown while a start clones over SSH.
   [tool-session-model-selection.md](tool-session-model-selection.md),
   [web-workspace-setup.md](web-workspace-setup.md)).
 - A start that asks for a key passphrase shows the Hosts screen's dialog over the form, as before.
+- The Host field groups the hosts a daemon reaches through a remote shell (its SSH config aliases)
+  under that daemon. Choosing one starts the session on the parent daemon with the derived host as
+  its target, and the form says that permission prompts are answered in the terminal.
 
 ## Acceptance criteria
 
 - [x] Create-session lives in `tddy-session-create-web` and imports nothing from `tddy-web` or LiveKit (rule test).
 - [x] Its specs pass from the package's own Cypress config and PR check.
 - [x] `tddy-web` renders it unchanged (its drawer and PR-stack start-session specs pass).
+- [x] A derived host is offered under its parent daemon, and starting on it sends the parent as
+      `daemon_instance_id` with the derived host's target (`CreateSessionDerivedHostAcceptance`).
 
 Technical reference: [packages/tddy-session-create-web/docs/README.md](../../../packages/tddy-session-create-web/docs/README.md).

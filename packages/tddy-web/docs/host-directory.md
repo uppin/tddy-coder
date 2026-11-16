@@ -17,7 +17,7 @@ The directory separates *which hosts exist* from *how you reach one*. Reaching o
 
 | Type | What it is |
 |---|---|
-| `HostDescriptor` | a host some source described: `hostId`, `label`, `sourceId`, and the optional `reposBasePath` / `maxAttachmentBytes` a daemon advertises |
+| `HostDescriptor` | a host some source described: `hostId`, `label`, `sourceId`, and the optional `reposBasePath` / `maxAttachmentBytes` a daemon advertises. A derived host also carries `parent` (the daemon that reaches it) and `target` (the `SessionTarget` a start on it is addressed with) |
 | `HostDirectorySource` | one contributor: `id`, `status`, `error`, `hosts` |
 | `HostDirectory` | the merge every host-selection surface reads: `hosts`, `sources`, `status`, `error` |
 
@@ -75,6 +75,7 @@ this. Reading the merged status there would make the message unreachable on ever
 |---|---|---|
 | `useLiveKitHostDirectorySource` | `livekit` | common-room participants whose metadata parses as a daemon advertisement, with `reposBasePath` / `maxAttachmentBytes` carried through |
 | `useServingHostDirectorySource` | `serving` | the daemon that served this page, from `servingInstanceId` |
+| `DerivedHostDirectorySources` (`app/rpc/hostDirectory/derivedSource.tsx`) | `derived` | the hosts each connected daemon reaches through a remote shell (`ListDerivedHosts`), each carrying its `parent` daemon and the `target` a start on it is addressed with. Asked over the parent's own `HostConnection`, so it mounts inside `ConnectionProviders`; the merged directory it publishes shadows the base sources for the subtree below it |
 
 With no `livekitUrl` / `commonRoom`, `useCommonRoom` short-circuits before constructing a `Room` or
 calling `TokenService` — **nothing is built and no token is minted** — and the source reports `idle`.
@@ -108,7 +109,8 @@ exactly one implementation would be a fiction. What changed is that reaching it 
 `SelectedDaemonProvider` composes the sources and renders:
 
 ```
-HostDirectorySources → HostPresenceRoom → LiveKitConnections → SelectedDaemonScope
+HostDirectorySources → HostPresenceRoom → LiveKitConnections → ConnectionProviders
+  → DerivedHostDirectorySources → SelectedDaemonScope
 ```
 
 `SelectedDaemonScope` reads the merged directory through `useHostDirectory()` — the same way every

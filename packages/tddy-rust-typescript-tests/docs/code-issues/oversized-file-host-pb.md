@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-rust-typescript-tests/gen/host_pb.ts`
 **Category:** oversized-file
 **Detected:** 2026-11-16 by `/pr-wrap` step 3.5 file-length gate (structural audit)
-**Metrics:** 1,571 production lines (whole file; TypeScript has no `#[cfg(test)]` cut) — 1,402 at the base of #918, grown 169 by that PR's `ListCoderWorkspaces` regeneration
-**Thresholds breached:** 1,571 > 500 production-line budget
+**Metrics:** 1,734 production lines (whole file; TypeScript has no `#[cfg(test)]` cut) — 1,402 at the base of #918, grown by that PR's and #919's regenerations
+**Thresholds breached:** 1,734 > 500 production-line budget
 **Restructure:** none — generated output
 **Status:** Open — alert only; do not split
 
@@ -13,6 +13,7 @@
 | Run | Lines | Note |
 |---|---|---|
 | 2026-11-16 | 1,402 → 1,571 | #918 (`#remote-shell` 4/7): `host.proto` gained `ListCoderWorkspaces` and `HostCoderCli`; both `gen/host_pb.ts` copies regenerated |
+| 2026-11-16 | 1,571 → 1,734 | #919 (`#remote-shell` 5/7): `host.proto` gained `ListDerivedHosts`, `DerivedHost` and `DerivedHostKind`; both `gen/host_pb.ts` copies regenerated. Alert only — generated, and successors #920/#921 also modify this file |
 
 ## What the tool found
 
@@ -36,3 +37,5 @@ layout changes. Leave it; re-measure at each wrap that regenerates it.
 2026-11-16 (#918 wrap): read the `@generated` header, confirmed the growth is the
 `ListCoderWorkspaces` regeneration, and confirmed #919 and #921 modify the same file in
 their own diffs (`git diff origin/feature/remote-shell/coder-shell...origin/<successor>`).
+2026-11-16 (#919 wrap): re-measured with the step 3.5 gate loop — 1,571 → 1,734, the
+`ListDerivedHosts` regeneration. Same conclusion: alert only, do not split.
