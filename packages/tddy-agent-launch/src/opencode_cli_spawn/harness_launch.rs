@@ -8,10 +8,13 @@ use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
 use tddy_coding_agent_specs::slots::RenderedSlots;
 use tddy_rpc::Status;
 
+use crate::remote_agent_launch::{launch_on_target, shell_for_target, RemoteLaunch};
 use crate::spec_launch::{
     in_a_pane_with_only_the_agent_env, launch_host_pty, plan_host_pty,
     without_the_panes_terminal_variables, HostAgent, HostPtySession,
 };
+use tddy_core::session_pointer::SessionPointer;
+use tddy_core::SessionTarget;
 
 /// How a harness is run: as the PTY child, or inside tmux — and whether the launch starts the
 /// session's agent or resumes it.
@@ -80,6 +83,18 @@ pub(super) struct HarnessSpecLaunch<'a> {
     pub(super) model: &'a str,
     pub(super) env: Vec<(String, String)>,
     pub(super) on_exit: Option<ExitHook>,
+    /// The target the agent runs on, when the session named one: the agent is launched there
+    /// through the remote-shell port instead of in a PTY (or tmux) on this host.
+    pub(super) remote: Option<HarnessRemote>,
+}
+
+/// A harness launch on a session's target (`remote_agent_launch::launch_on_target`).
+pub(super) struct HarnessRemote {
+    pub(super) target: SessionTarget,
+    /// The session pointer placed in the worktree on the target, whose owner the launch records.
+    pub(super) pointer: Option<SessionPointer>,
+    /// How long the agent must stay up for the launch to count as started.
+    pub(super) startup_window: std::time::Duration,
 }
 
 /// Spawn the harness from its spec as the session's OS user — whose `HOME` and configured `PATH`
@@ -106,10 +121,35 @@ pub(super) async fn launch(
         model,
         env,
         on_exit,
+        remote,
     } = launch;
     let failed = |e: crate::spec_launch::SpecLaunchError| {
         Status::internal(format!("failed to spawn {kind}: {e}"))
     };
+    if let Some(remote) = remote {
+        let shell = shell_for_target(&remote.target)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let launched = launch_on_target(
+            agent,
+            params,
+            slots,
+            RemoteLaunch {
+                shell,
+                worktree: worktree_path,
+                session_dir,
+                pointer: remote.pointer.as_ref(),
+                startup_window: remote.startup_window,
+            },
+            host_pty_session(cli_manager, session_id, os_user, kind, model, env),
+            on_exit,
+        )
+        .await
+        .map_err(|e| Status::internal(format!("failed to spawn {kind}: {e}")))?;
+        return Ok(LaunchedHarness {
+            pid: launched.handle.pid,
+            tmux_session: None,
+        });
+    }
     if run.in_tmux {
         let plan = plan_host_pty(agent, params, slots).map_err(failed)?;
         let env: Vec<(String, String)> = plan.env.into_iter().chain(env).collect();

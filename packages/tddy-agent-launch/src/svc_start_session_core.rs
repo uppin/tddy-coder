@@ -19,7 +19,7 @@ use tddy_session_split::split_start::resolve_split_agent_placement;
 use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
 use crate::start_request_checks::{
-    refuse_a_cli_start_without_a_model, refuse_a_named_tool_start,
+    refuse_a_cli_start_without_a_model, refuse_a_named_tool_start, refuse_a_target_combination,
     refuse_a_tool_path_the_daemon_does_not_allow, refuse_an_effort_the_agent_cannot_take,
     refuse_an_orchestrated_tool_start, requested_display_name,
 };
@@ -128,6 +128,7 @@ impl LaunchSessions {
         // A session type nothing on this host declares is a request error, refused before the
         // placement is classified or anything is created.
         requested_session_launch(&self.coding_agents, &req.session_type)?;
+        refuse_a_target_combination(&req)?;
         let placement =
             classify_start_placement(&req, Some(&*self.coding_agents), local_id, eligible_ids)?;
         refuse_an_orchestrated_tool_start(&req, &self.coding_agents)?;

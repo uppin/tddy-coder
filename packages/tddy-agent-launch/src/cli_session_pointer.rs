@@ -67,12 +67,16 @@ pub(crate) fn session_pointer_of(
 }
 
 /// The host a session's worktree, and so its pointer, is on (`#agent-tools 21/28`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub(crate) enum PointerHost {
     /// This host.
     Local,
     /// A target reached through the remote-shell port's ssh transport.
     Ssh { shell: SshShell },
+    /// A target reached through the remote-shell port, by whichever transport reaches it.
+    Remote {
+        shell: std::sync::Arc<dyn RemoteShell>,
+    },
 }
 
 impl PointerHost {
@@ -108,7 +112,7 @@ fn remote_status(error: &RemoteShellError) -> Status {
 }
 
 /// A pointer a launch placed, and the host it is on: what its agent's exit removes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub(crate) struct PlacedSessionPointer {
     pub(crate) path: PathBuf,
     pub(crate) host: PointerHost,
@@ -133,6 +137,13 @@ pub(crate) async fn place_session_pointer(
     match host {
         PointerHost::Ssh { shell } => {
             let path = place_session_pointer_through(shell, pointer, worktree).await?;
+            Ok(Some(PlacedSessionPointer {
+                path,
+                host: host.clone(),
+            }))
+        }
+        PointerHost::Remote { shell } => {
+            let path = place_session_pointer_through(shell.as_ref(), pointer, worktree).await?;
             Ok(Some(PlacedSessionPointer {
                 path,
                 host: host.clone(),
@@ -178,30 +189,27 @@ pub(crate) fn place_session_pointer_locally(
 /// Where an ssh launch's agent records its pid on the target, relative to its worktree, for
 /// [`record_remote_owner`] to read (and remove). The launch writes it as `$$` before it `exec`s the
 /// agent, so it is the agent's own pid.
-// `record_remote_owner` has no caller until an ssh agent launch exists:
-// docs/dev/todo/2026-11-07-ssh-agent-launch-remote-pointer-owner.md
-#[allow(dead_code)]
 pub(crate) const REMOTE_AGENT_PID_FILE: &str = ".tddy/agent.pid";
 
-/// Once the agent has started on the ssh target `placed` is on: one bounded ssh command reads the
-/// target's own name for itself (`hostname`) and the agent's pid ([`REMOTE_AGENT_PID_FILE`], which
-/// it removes), and rewrites the placed `pointer` owner-only with that owner, which it returns. A
-/// pointer on this host is refused: the daemon that placed it is its owner.
-// No caller until an ssh agent launch exists: today an ssh session's agent is not started on the
-// target, so there is no pid file to read
-// (docs/dev/todo/2026-11-07-ssh-agent-launch-remote-pointer-owner.md).
-#[allow(dead_code)]
+/// Once the agent has started on the target `placed` is on: one bounded command through the port
+/// reads the target's own name for itself (`hostname`) and the agent's pid
+/// ([`REMOTE_AGENT_PID_FILE`], which it removes), and rewrites the placed `pointer` owner-only
+/// with that owner, which it returns. A pointer on this host is refused: the daemon that placed
+/// it is its owner.
 pub(crate) async fn record_remote_owner(
     placed: &PlacedSessionPointer,
     pointer: &SessionPointer,
 ) -> Result<SessionPointerOwner, Status> {
-    let PointerHost::Ssh { shell } = &placed.host else {
-        return Err(Status::failed_precondition(format!(
-            "the session pointer {} is on this host: the daemon that placed it owns it",
-            placed.path.display()
-        )));
+    let (shell, alias): (&dyn RemoteShell, String) = match &placed.host {
+        PointerHost::Ssh { shell } => (shell, shell.alias().to_string()),
+        PointerHost::Remote { shell } => (shell.as_ref(), shell.address().to_string()),
+        PointerHost::Local => {
+            return Err(Status::failed_precondition(format!(
+                "the session pointer {} is on this host: the daemon that placed it owns it",
+                placed.path.display()
+            )));
+        }
     };
-    let alias = shell.alias().to_string();
     // The pointer, without an owner, as compact JSON: the target appends the owner it read.
     let mut unowned = pointer.clone();
     unowned.owner = None;
@@ -276,34 +284,36 @@ pub(crate) async fn remove_session_pointer(worktree: &Path, host: &PointerHost) 
 
 /// Remove `placed`, on the host it is on.
 pub(crate) async fn remove_placed_pointer(placed: &PlacedSessionPointer) {
-    match &placed.host {
-        PointerHost::Local => remove_pointer_file(&placed.path),
-        PointerHost::Ssh { shell } => {
-            let alias = shell.alias().to_string();
-            let removed = shell
-                .exec(ExecRequest::new(format!(
-                    "rm -f {}",
-                    shell_single_quote(&placed.path.to_string_lossy())
-                )))
-                .await;
-            match removed {
-                Err(e) => {
-                    log::warn!(
-                        "could not remove the session pointer {} on {alias}: {e}",
-                        placed.path.display()
-                    );
-                }
-                Ok(output) if output.status != 0 => {
-                    log::warn!(
-                        "could not remove the session pointer {} on {alias}: the command exited with status {}: {}",
-                        placed.path.display(),
-                        output.status,
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    );
-                }
-                Ok(_) => {}
-            }
+    let (shell, alias): (&dyn RemoteShell, String) = match &placed.host {
+        PointerHost::Local => {
+            remove_pointer_file(&placed.path);
+            return;
         }
+        PointerHost::Ssh { shell } => (shell, shell.alias().to_string()),
+        PointerHost::Remote { shell } => (shell.as_ref(), shell.address().to_string()),
+    };
+    let removed = shell
+        .exec(ExecRequest::new(format!(
+            "rm -f {}",
+            shell_single_quote(&placed.path.to_string_lossy())
+        )))
+        .await;
+    match removed {
+        Err(e) => {
+            log::warn!(
+                "could not remove the session pointer {} on {alias}: {e}",
+                placed.path.display()
+            );
+        }
+        Ok(output) if output.status != 0 => {
+            log::warn!(
+                "could not remove the session pointer {} on {alias}: the command exited with status {}: {}",
+                placed.path.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(_) => {}
     }
 }
 

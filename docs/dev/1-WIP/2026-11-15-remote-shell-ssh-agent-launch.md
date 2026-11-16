@@ -204,13 +204,13 @@ See *Affected Packages* and *Responsibility*.
 
 ## Implementation Milestones
 
-- [ ] Proto and metadata round-trip a target
-- [ ] Refusals
-- [ ] Remote command composition, unit-tested for quoting
-- [ ] Launch through the port with the startup watch
-- [ ] Pointer owner recorded
-- [ ] Stop, exit, delete, resume
-- [ ] `./test -p` per touched package
+- [x] Proto and metadata round-trip a target
+- [x] Refusals
+- [x] Remote command composition, unit-tested for quoting
+- [x] Launch through the port with the startup watch
+- [x] Pointer owner recorded
+- [x] Stop, exit, delete, resume
+- [x] `./test -p` per touched package
 
 ## Testing Plan
 
@@ -287,10 +287,10 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved in advance on 2026-11-15: "proceed with your recommended option"; the titles are listed in the PR body)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -301,5 +301,5 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap

@@ -130,12 +130,19 @@ impl LaunchSessions {
         // this is the session-wide sweep that catches admissions whose clones were already gone.)
         self.forget_session_state(session_id).await;
         session_deletion::close_session_room(&*self.session_rooms, session_id);
+        // A target session's worktree is on its target, where the local deletion below cannot
+        // reach: what to remove there is captured now, while its record is still on disk.
+        let target_worktree =
+            target_worktree_of(&unified_session_dir_path(&sessions_base, session_id));
         session_deletion::delete_session_directory(
             &sessions_base,
             session_id,
             projects_dir_opt.as_deref(),
             Some(self.coding_agents.agents()),
         )?;
+        if let Some((target, worktree)) = &target_worktree {
+            remove_target_worktree(target, worktree).await?;
+        }
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
     }
@@ -210,20 +217,59 @@ async fn remove_session_pointer(session_id: &str, sessions_base: &std::path::Pat
     remove_recorded_session_pointer(&session_dir).await;
 }
 
+/// The pointer host a session's record names: its target when it has one (the agent ran there),
+/// else its ssh exec host, else this host.
+fn pointer_host_of(
+    metadata: &tddy_core::SessionMetadata,
+) -> crate::cli_session_pointer::PointerHost {
+    match crate::remote_agent_launch::target_config_host(metadata.target.as_ref()) {
+        Some(alias) => crate::cli_session_pointer::PointerHost::of(Some(alias)),
+        None => crate::cli_session_pointer::PointerHost::of(metadata.ssh_config_host.as_deref()),
+    }
+}
+
 /// Remove the session pointer ([`crate::cli_session_pointer`]) from the worktree the session in
-/// `session_dir` records, if it records one — on the ssh target it records
-/// (`ssh_config_host`, reached through the ssh client `ssh`) when it records one.
+/// `session_dir` records, if it records one — on the target it records (its session `target`, or
+/// its `ssh_config_host`, reached through the ssh client `ssh`) when it records one.
 pub(crate) async fn remove_recorded_session_pointer(session_dir: &Path) {
     let Ok(metadata) = read_session_metadata(session_dir) else {
         return;
     };
-    if let Some(worktree) = metadata.repo_path {
+    if let Some(worktree) = &metadata.repo_path {
         crate::cli_session_pointer::remove_session_pointer(
-            Path::new(&worktree),
-            &crate::cli_session_pointer::PointerHost::of(metadata.ssh_config_host.as_deref()),
+            Path::new(worktree),
+            &pointer_host_of(&metadata),
         )
         .await;
     }
+}
+
+/// What a delete removes on a session's target, captured from its record before the record
+/// goes: the target and the worktree there. `None` for a session whose agent ran here.
+pub(crate) fn target_worktree_of(session_dir: &Path) -> Option<(tddy_core::SessionTarget, String)> {
+    let metadata = read_session_metadata(session_dir).ok()?;
+    Some((metadata.target?, metadata.repo_path?))
+}
+
+/// Remove a target session's worktree on its target, through the remote-shell port: the session
+/// is deleted, so nothing of it is left there — its worktree, and the pointer inside it, go with
+/// it.
+pub(crate) async fn remove_target_worktree(
+    target: &tddy_core::SessionTarget,
+    worktree: &str,
+) -> Result<(), Status> {
+    let shell = crate::remote_agent_launch::shell_for_target(target)
+        .map_err(|e| Status::invalid_argument(e.to_string()))?;
+    shell
+        .exec(tddy_remote_shell::ExecRequest::new(format!(
+            "rm -rf {}",
+            tddy_core::ssh_exec::shell_single_quote(worktree)
+        )))
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .success_or_exited()
+        .map_err(|e| Status::internal(e.to_string()))?;
+    Ok(())
 }
 
 /// [`remove_recorded_session_pointer`], reaching an ssh target through the ssh client `ssh`.

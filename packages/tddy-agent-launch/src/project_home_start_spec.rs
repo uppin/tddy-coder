@@ -61,6 +61,8 @@ fn refuse_a_placement_off_the_home_worktree(
         ),
         // An SSH exec target runs the agent on a host that does not hold the home worktree.
         (!spec.ssh_config_host.trim().is_empty(), "ssh_config_host"),
+        // A session target runs the agent on a machine that does not hold the home worktree.
+        (spec.target.is_some(), "target"),
         (spec.agent_clone.is_some(), "agent_clone"),
         (spec.split_agent.is_some(), "split_agent"),
     ];
@@ -139,5 +141,42 @@ pub(crate) fn on_home_worktree(
         stack_node_id: String::new(),
         pr_stack_base_session_id: String::new(),
         ..spec
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use tddy_rpc::Code;
+    use tddy_service::proto::session::{session_target, SessionTarget, SshTarget};
+
+    use super::*;
+
+    #[test]
+    fn a_main_whose_start_spec_names_a_target_is_refused() {
+        // Given a project-home start spec that names a session target
+        let spec = StartSessionRequest {
+            target: Some(SessionTarget {
+                kind: Some(session_target::Kind::Ssh(SshTarget {
+                    config_host: "buildbox".to_string(),
+                })),
+            }),
+            ..Default::default()
+        };
+
+        // When it is refused what main cannot honour
+        let refused =
+            refuse_what_main_cannot_honour(&spec).map_err(|status| (status.code, status.message));
+
+        // Then the refusal is an argument error naming the target field
+        assert_eq!(
+            refused,
+            Err((
+                Code::InvalidArgument,
+                "main runs on its project's home worktree on this host: its start spec may not \
+                 set target"
+                    .to_string()
+            ))
+        );
     }
 }

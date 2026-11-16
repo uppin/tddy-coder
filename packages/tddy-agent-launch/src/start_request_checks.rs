@@ -57,6 +57,61 @@ pub(crate) fn record_requested_github_source(
         .map_err(|e| Status::internal(format!("failed to record the session's GitHub source: {e}")))
 }
 
+/// A start naming a target together with a placement that puts the agent or its code somewhere
+/// else is refused before anything is created, `INVALID_ARGUMENT` naming both: a managed codebase
+/// (the agent would reach the code only through daemon tools, with nothing installed on the
+/// target), a sandbox or sandboxed codebase (a jail on this host), a split placement
+/// (`codebase_daemon_instance_id` or `split_agent`: the worktree on another daemon), or an ssh
+/// exec host (`ssh_config_host`: the agent on this host, its tools there — the other ssh mode).
+/// A target naming no machine, or an ssh target naming no alias, is refused the same way.
+pub(crate) fn refuse_a_target_combination(req: &StartSessionRequest) -> Result<(), Status> {
+    let target = crate::remote_agent_launch::session_target_of_proto(req.target.as_ref())
+        .map_err(|e| Status::invalid_argument(e.to_string()))?;
+    if target.is_none() {
+        return Ok(());
+    }
+    let refused = |field: &str, reason: &str| {
+        Status::invalid_argument(format!("target cannot be combined with {field}: {reason}"))
+    };
+    if req.managed_codebase {
+        return Err(refused(
+            "managed_codebase",
+            "a target session's agent runs on the target with its own tools, not through a managed codebase",
+        ));
+    }
+    if req.sandbox {
+        return Err(refused(
+            "sandbox",
+            "a target session's agent runs on the target, not in a jail on this host",
+        ));
+    }
+    if req.sandboxed_codebase {
+        return Err(refused(
+            "sandboxed_codebase",
+            "a target session's agent runs on the target, not beside a jailed checkout on this host",
+        ));
+    }
+    if !req.codebase_daemon_instance_id.trim().is_empty() {
+        return Err(refused(
+            "codebase_daemon_instance_id",
+            "a target session's worktree is on its target, not on another daemon",
+        ));
+    }
+    if req.split_agent.is_some() {
+        return Err(refused(
+            "split_agent",
+            "a target session's agent runs on its target, not beside a worktree on another daemon",
+        ));
+    }
+    if !req.ssh_config_host.trim().is_empty() {
+        return Err(refused(
+            "ssh_config_host",
+            "ssh_config_host keeps the agent on this host and runs its tools on the ssh host; a target runs the agent itself there",
+        ));
+    }
+    Ok(())
+}
+
 /// A start of a CLI coding agent that cannot be served is refused before anything is created: a
 /// managed codebase is refused, `INVALID_ARGUMENT` naming the agent, for a spec that does not declare
 /// `managed_workflow` (`#agent-tools 14/19`). A sandboxed start's placement is the spec's own refusal
