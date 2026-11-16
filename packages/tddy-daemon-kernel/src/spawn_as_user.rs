@@ -32,6 +32,10 @@ pub const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
     "GITHUB_ENTERPRISE_TOKEN",
 ];
 
+/// The variables the `coder` CLI reads its deployment and session token from. A daemon holding
+/// one account's token must never hand it to a probe run as another user.
+pub const CODER_TOKEN_VARIABLES: [&str; 2] = ["CODER_URL", "CODER_SESSION_TOKEN"];
+
 /// Resolve `tool_path` (from `dev.daemon.yaml`'s `allowed_tools`, e.g. `"target/debug/tddy-coder"`)
 /// to an absolute path anchored to the **daemon's own toolchain root** — never to the target
 /// session's `repo_path`.
@@ -183,6 +187,9 @@ fn as_user_command(
     // The environment is never a credential: a daemon that has one of these exported must not hand
     // it to a child run as a user, or `gh` would act as whoever exported it.
     for token_variable in GITHUB_TOKEN_VARIABLES {
+        cmd.env_remove(token_variable);
+    }
+    for token_variable in CODER_TOKEN_VARIABLES {
         cmd.env_remove(token_variable);
     }
 

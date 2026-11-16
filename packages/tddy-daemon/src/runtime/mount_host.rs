@@ -155,6 +155,28 @@ impl BuildContext {
             if let Some(ref tracker) = idle_tracker {
                 host_service = host_service.with_idle_tracker(tracker.clone());
             }
+            if let Some(vaults) = self.identity.credential_vaults.clone() {
+                let coder_accounts = Arc::new(tddy_accounts::CoderAccounts::new(
+                    vaults,
+                    Arc::clone(user_resolver),
+                    Arc::new(
+                        crate::coder_deployment_probe::HttpCoderDeploymentProbe::new(
+                            reqwest::Client::new(),
+                        ),
+                    ),
+                ));
+                host_service = host_service
+                    .with_coder_credentials(Arc::new(
+                        crate::coder_credential_source::VaultCoderCredentialSource::new(
+                            coder_accounts,
+                        ),
+                    ))
+                    .with_coder_workspaces(Arc::new(
+                        crate::coder_workspace_source::HttpCoderWorkspaceSource::new(
+                            reqwest::Client::new(),
+                        ),
+                    ));
+            }
             Arc::new(host_service)
         };
 

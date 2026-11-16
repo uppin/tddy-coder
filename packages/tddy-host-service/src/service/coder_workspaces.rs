@@ -1,7 +1,10 @@
 use super::HostServiceImpl;
 
 use tddy_rpc::{Request, Response, Status};
-use tddy_service::proto::host::{ListCoderWorkspacesRequest, ListCoderWorkspacesResponse};
+use tddy_service::proto::host::{
+    CoderWorkspace as ListedWorkspace, ListCoderWorkspacesRequest, ListCoderWorkspacesResponse,
+    ProbeOutcome,
+};
 
 impl HostServiceImpl {
     /// Body of [`HostService::list_coder_workspaces`]; the trait method delegates here.
@@ -18,14 +21,51 @@ impl HostServiceImpl {
         request: Request<ListCoderWorkspacesRequest>,
     ) -> Result<Response<ListCoderWorkspacesResponse>, Status> {
         self.record_rpc_activity();
-        // TODO(coder-shell): implement
-        let _ = (
-            request.into_inner(),
-            &self.coder_credentials,
-            &self.coder_workspaces,
-        );
-        Err(Status::unimplemented(
-            "listing Coder workspaces is not implemented on this daemon yet",
-        ))
+        let req = request.into_inner();
+
+        if let Some(answered) = self
+            .rpc_served_by_peer("ListCoderWorkspaces", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+
+        let subject = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+
+        let credentials = match self
+            .coder_credentials
+            .credentials_for(&subject, &req.account_id)
+        {
+            Ok(credentials) => credentials,
+            Err(reason) => {
+                return Ok(Response::new(ListCoderWorkspacesResponse {
+                    outcome: ProbeOutcome::Failed as i32,
+                    failure_reason: reason.to_string(),
+                    workspaces: Vec::new(),
+                }));
+            }
+        };
+
+        match self.coder_workspaces.workspaces(&credentials).await {
+            Ok(workspaces) => Ok(Response::new(ListCoderWorkspacesResponse {
+                outcome: ProbeOutcome::Ok as i32,
+                failure_reason: String::new(),
+                workspaces: workspaces
+                    .iter()
+                    .map(|workspace| ListedWorkspace {
+                        owner: workspace.owner.clone(),
+                        name: workspace.name.clone(),
+                        status: workspace.status.clone(),
+                        running: workspace.is_running(),
+                    })
+                    .collect(),
+            })),
+            Err(reason) => Ok(Response::new(ListCoderWorkspacesResponse {
+                outcome: ProbeOutcome::Failed as i32,
+                failure_reason: reason.to_string(),
+                workspaces: Vec::new(),
+            })),
+        }
     }
 }

@@ -157,9 +157,9 @@ graph LR
 
 ## Scope
 
-- [ ] **Transport**: `CoderShell` passing the contract suite
-- [ ] **Listing**: `ListCoderWorkspaces` with its distinct outcomes
-- [ ] **Tooling**: the `coder` CLI probe
+- [x] **Transport**: `CoderShell` passing the contract suite
+- [x] **Listing**: `ListCoderWorkspaces` with its distinct outcomes
+- [x] **Tooling**: the `coder` CLI probe
 - [ ] **Docs**: `packages/tddy-remote-shell/docs/`, provider-accounts, hosts-screen-tooling
 
 ## Technical Changes
@@ -185,12 +185,12 @@ See *Affected Packages* and *Responsibility*.
 
 ## Implementation Milestones
 
-- [ ] `CoderShell` exec and streamed exec through the stand-in `coder`
-- [ ] Interactive command
-- [ ] Contract suite green
-- [ ] Listing against a stand-in deployment, each outcome
-- [ ] Tooling probe
-- [ ] `./test -p tddy-remote-shell -p tddy-host-service`
+- [x] `CoderShell` exec and streamed exec through the stand-in `coder`
+- [x] Interactive command
+- [x] Contract suite green
+- [x] Listing against a stand-in deployment, each outcome
+- [x] Tooling probe
+- [x] `./test -p tddy-remote-shell -p tddy-host-service`
 
 ## Testing Plan
 
@@ -259,10 +259,10 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved in advance on 2026-11-15: "proceed with your recommended option"; the titles are listed in the PR body)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete

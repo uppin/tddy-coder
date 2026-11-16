@@ -81,8 +81,7 @@ impl CoderWorkspace {
     /// other status — stopped, starting, stopping, failed, one this code has never seen — is not.
     #[must_use]
     pub fn is_running(&self) -> bool {
-        // TODO(coder-shell): implement
-        false
+        self.status == Self::RUNNING
     }
 }
 

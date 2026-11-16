@@ -1,8 +1,10 @@
+use crate::host_tooling::classify_coder_version;
 use crate::host_tooling::classify_gh_auth_status;
 use crate::host_tooling::parse_git_identity;
 #[cfg(unix)]
 use crate::host_tooling::subprocess::ProbeOutput;
 use crate::host_tooling::summarise;
+use crate::host_tooling::CoderCliStatus;
 use crate::host_tooling::GitIdentity;
 use crate::host_tooling::GithubCliStatus;
 use crate::host_tooling::ProbeOutcome;
@@ -127,6 +129,33 @@ pub(super) fn git_config_value(
             "git config --global --get {key} was killed by a signal"
         )),
     }
+}
+
+/// The state `coder version` reported, or why it could not be asked.
+///
+/// This block carries no failure outcome of its own on the wire. A probe that started — so
+/// `coder` was found on the path — and then failed to answer still reports it installed, with
+/// no version: absence is decided by the PATH lookup in `probe`, as it is for `gh`.
+#[cfg(unix)]
+pub(super) fn coder_cli_of(probed: Result<ProbeOutput, String>) -> CoderCliStatus {
+    let output = match probed {
+        Ok(output) => output,
+        Err(_) => {
+            return CoderCliStatus {
+                installed: true,
+                version: None,
+            }
+        }
+    };
+    let Some(code) = output.status.code() else {
+        return CoderCliStatus {
+            installed: true,
+            version: None,
+        };
+    };
+    let mut written = String::from_utf8_lossy(&output.stdout).into_owned();
+    written.push_str(&String::from_utf8_lossy(&output.stderr));
+    classify_coder_version(Some(code), &written)
 }
 
 /// The state `gh auth status` reported, or why it could not be asked.

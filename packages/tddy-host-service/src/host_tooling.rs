@@ -33,6 +33,8 @@ use crate::host_tooling::desktop_probes::warn_if_a_desktop_probe_failed;
 #[cfg(unix)]
 use crate::host_tooling::readings::agent_status_of;
 #[cfg(unix)]
+use crate::host_tooling::readings::coder_cli_of;
+#[cfg(unix)]
 use crate::host_tooling::readings::git_config_value;
 #[cfg(unix)]
 use crate::host_tooling::readings::git_identity_of;
@@ -109,9 +111,20 @@ impl CoderCliStatus {
 /// the word after `Coder` on its first line (`Coder v2.16.0+683a720 Thu Oct  3 …` is `v2.16.0`,
 /// without the build suffix), and `None` when that line is not there.
 pub fn classify_coder_version(exit_code: Option<i32>, output: &str) -> CoderCliStatus {
-    // TODO(coder-shell): implement
-    let _ = (exit_code, output);
-    CoderCliStatus::not_installed()
+    if exit_code.is_none() {
+        return CoderCliStatus::not_installed();
+    }
+    let version = output.lines().next().and_then(|first_line| {
+        let mut words = first_line.split_whitespace();
+        match (words.next(), words.next()) {
+            (Some("Coder"), Some(word)) => Some(word.split('+').next().unwrap_or(word).to_string()),
+            _ => None,
+        }
+    });
+    CoderCliStatus {
+        installed: true,
+        version,
+    }
 }
 
 /// Everything the tooling probe reports for one host.
@@ -334,6 +347,8 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
         let git_program =
             tddy_daemon_kernel::spawn_as_user::find_program_on_spawn_child_path("git");
         let gh_program = tddy_daemon_kernel::spawn_as_user::find_program_on_spawn_child_path("gh");
+        let coder_program =
+            tddy_daemon_kernel::spawn_as_user::find_program_on_spawn_child_path("coder");
 
         // One deadline for the whole probe, with every command started before any is collected.
         // They are independent reads of the same account, so running them in series would make the
@@ -360,6 +375,9 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
             let gh_args: Vec<&str> = gh_args.iter().map(String::as_str).collect();
             start_probe(os_user, gh, &gh_args)
         });
+        let coder_cli = coder_program
+            .as_deref()
+            .map(|coder| start_probe(os_user, coder, &["version"]));
 
         // Collected before the two commands for the reason it was started before them: a struct
         // literal evaluates its fields in order, and a probe still in flight when it is collected is
@@ -395,9 +413,11 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
             },
             ssh_agent,
             remote_desktop,
-            // TODO(coder-shell): implement — find `coder` on the spawn child path and run
-            // `coder version` beside the other probes, with no Coder variable in its environment.
-            coder_cli: CoderCliStatus::not_installed(),
+            coder_cli: match coder_cli {
+                Some(started) => coder_cli_of(started.collect(deadline)),
+                // `coder` absent from the PATH is the finding "not installed", as for `gh`.
+                None => classify_coder_version(None, ""),
+            },
         };
 
         warn_if_failed("git identity", os_user, &tooling.git.outcome);
@@ -432,7 +452,7 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
             },
             ssh_agent: crate::ssh_agent::AgentStatus::unsupported(),
             remote_desktop: self.with_x11_channels(desktop_readings_of(remote_desktop, deadline)),
-            // TODO(coder-shell): implement — the path lookup is Unix-only, as the `gh` one is.
+            // The path lookup is Unix-only, as the `gh` one is: nothing was probed here.
             coder_cli: CoderCliStatus::not_installed(),
         };
 

@@ -228,11 +228,9 @@ pub(crate) fn github_cli_message(gh: &crate::host_tooling::GithubCliStatus) -> H
 pub(crate) fn coder_cli_message(
     coder: &crate::host_tooling::CoderCliStatus,
 ) -> tddy_service::proto::host::HostCoderCli {
-    // TODO(coder-shell): implement
-    let _ = coder;
     tddy_service::proto::host::HostCoderCli {
-        installed: false,
-        version: String::new(),
+        installed: coder.installed,
+        version: coder.version.clone().unwrap_or_default(),
     }
 }
 
