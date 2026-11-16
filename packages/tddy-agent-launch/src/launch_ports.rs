@@ -139,6 +139,11 @@ pub struct LaunchSessions {
     pub session_reach: Arc<dyn SessionReach>,
     /// The host as an extension reaches back into it when it is told of a reach.
     pub reachable_sessions: Arc<dyn ReachableSessions>,
+    /// The hook-log followers of this daemon's target sessions, by session id.
+    pub remote_hook_followers: crate::remote_hook_follower::RemoteHookFollowers,
+    /// Where a target session's followed hooks are delivered: this daemon's activity handling.
+    /// `None` on a host that serves none, whose target sessions then start no follower.
+    pub hook_report_delivery: Option<Arc<dyn crate::remote_hook_follower::HookReportDelivery>>,
 }
 
 impl LaunchSessions {

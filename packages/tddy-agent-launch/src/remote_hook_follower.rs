@@ -112,6 +112,150 @@ pub trait HookSink: Send + Sync {
     async fn deliver(&self, line: HookLine);
 }
 
+/// The daemon end of a delivered hook: the two hook reports a local `tddy-tools session-hook`
+/// makes, served in-process. Implemented on the session host, which owns the activity service;
+/// a report the handling refuses is the delivery's error, never retried by the follower.
+#[async_trait]
+pub trait HookReportDelivery: Send + Sync {
+    /// Serve one `ReportSessionStatus` request, as the activity service's RPC does.
+    async fn report_session_status(
+        &self,
+        request: tddy_service::proto::activity::ReportSessionStatusRequest,
+    ) -> Result<(), String>;
+    /// Serve one `ReportAgentActivity` request, as the activity service's RPC does.
+    async fn report_agent_activity(
+        &self,
+        request: tddy_service::proto::activity::ReportAgentActivityRequest,
+    ) -> Result<(), String>;
+}
+
+/// The production [`HookSink`]: each followed hook is mapped to the daemon's hook reports by
+/// the one payload-to-request mapping (`tddy_session_activity::hook_request`, which the local
+/// `tddy-tools session-hook` also reports with) and served through `delivery`. A refused report
+/// is logged and the next hook still arrives: a hook must never block on the daemon's answer.
+pub struct ActivityHookSink {
+    delivery: Arc<dyn HookReportDelivery>,
+    session_id: String,
+    hook_token: String,
+    os_user: String,
+}
+
+impl ActivityHookSink {
+    /// The sink of `session_id`'s hooks, authenticated with its `hook_token` as `os_user`.
+    pub fn new(
+        delivery: Arc<dyn HookReportDelivery>,
+        session_id: &str,
+        hook_token: &str,
+        os_user: &str,
+    ) -> Self {
+        Self {
+            delivery,
+            session_id: session_id.to_string(),
+            hook_token: hook_token.to_string(),
+            os_user: os_user.to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl HookSink for ActivityHookSink {
+    async fn deliver(&self, line: HookLine) {
+        let payload = line.payload.to_string();
+        if let Some(request) = tddy_session_activity::hook_request::session_status_request(
+            &self.session_id,
+            &self.hook_token,
+            &self.os_user,
+            &line.event,
+            &payload,
+        ) {
+            if let Err(error) = self.delivery.report_session_status(request).await {
+                log::warn!(
+                    "remote hook {} for session {} refused: {error}",
+                    line.event,
+                    self.session_id
+                );
+            }
+        }
+        if let Some(request) = tddy_session_activity::hook_request::agent_activity_request(
+            &line.event,
+            &payload,
+            &self.session_id,
+            &self.hook_token,
+            &self.os_user,
+        ) {
+            if let Err(error) = self.delivery.report_agent_activity(request).await {
+                log::warn!(
+                    "remote agent activity {} for session {} refused: {error}",
+                    line.event,
+                    self.session_id
+                );
+            }
+        }
+    }
+}
+
+/// The followers of this daemon's target sessions, by session id, with the shell and worktree
+/// each one's log lives on — so a session's exit, stop or delete can stop its follower and
+/// remove its log without re-deriving where either is.
+#[derive(Clone, Default)]
+pub struct RemoteHookFollowers {
+    entries: Arc<std::sync::Mutex<std::collections::HashMap<String, RemoteHookEntry>>>,
+}
+
+struct RemoteHookEntry {
+    follower: Option<RemoteHookFollower>,
+    shell: Arc<dyn RemoteShell>,
+    worktree: std::path::PathBuf,
+}
+
+impl RemoteHookFollowers {
+    /// An empty registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register `session_id`'s follower, replacing any registered before it (a resume).
+    pub fn insert(
+        &self,
+        session_id: &str,
+        follower: RemoteHookFollower,
+        shell: Arc<dyn RemoteShell>,
+        worktree: std::path::PathBuf,
+    ) {
+        self.entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                session_id.to_string(),
+                RemoteHookEntry {
+                    follower: Some(follower),
+                    shell,
+                    worktree,
+                },
+            );
+    }
+
+    /// Stop `session_id`'s follower and remove its hook log on its target. A session with no
+    /// follower registered has nothing to stop.
+    pub async fn stop_and_remove_log(&self, session_id: &str) {
+        let entry = self
+            .entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(session_id);
+        if let Some(mut entry) = entry {
+            if let Some(follower) = entry.follower.take() {
+                follower.stop().await;
+            }
+            if let Err(error) = remove_remote_hook_log(entry.shell.as_ref(), &entry.worktree).await
+            {
+                log::warn!("removing session {session_id}'s hook log on its target: {error}");
+            }
+        }
+    }
+}
+
 /// The command a follower runs on the target to read `log_path` from the byte `offset` on, and
 /// everything appended after it:
 ///

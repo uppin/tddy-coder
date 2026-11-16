@@ -95,6 +95,13 @@ pub(super) struct HarnessRemote {
     pub(super) pointer: Option<SessionPointer>,
     /// How long the agent must stay up for the launch to count as started.
     pub(super) startup_window: std::time::Duration,
+    /// The session's hook token, when its agent declares hooks: its hooks append to the hook log
+    /// on the target, which this launch creates and then follows. `None` starts no follower.
+    pub(super) hook_token: Option<String>,
+    /// Where followed hooks are delivered, and the registry the follower is kept in for the
+    /// session's exit, stop and delete. `None` delivery starts no follower.
+    pub(super) hook_delivery: Option<Arc<dyn crate::remote_hook_follower::HookReportDelivery>>,
+    pub(super) hook_followers: crate::remote_hook_follower::RemoteHookFollowers,
 }
 
 /// Spawn the harness from its spec as the session's OS user — whose `HOME` and configured `PATH`
@@ -129,12 +136,40 @@ pub(super) async fn launch(
     if let Some(remote) = remote {
         let shell = shell_for_target(&remote.target)
             .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        // A hooked agent on a target appends to its hook log there: create it before the agent
+        // starts, and follow it once the agent is up.
+        let hook_log = match (&remote.hook_token, &remote.hook_delivery) {
+            (Some(_), Some(_)) => Some(
+                crate::remote_hook_follower::create_remote_hook_log(shell.as_ref(), worktree_path)
+                    .await
+                    .map_err(|e| Status::internal(format!("failed to spawn {kind}: {e}")))?,
+            ),
+            _ => None,
+        };
+        // The session's exit stops its follower and removes its log, after the launch's own
+        // exit work: the registry entry is registered below, once the agent is up.
+        let on_exit = match hook_log.as_ref() {
+            Some(_) => {
+                let followers = remote.hook_followers.clone();
+                let exited_session = session_id.to_string();
+                Some(Box::new(move |capture| {
+                    Box::pin(async move {
+                        if let Some(original) = on_exit {
+                            original(capture).await;
+                        }
+                        followers.stop_and_remove_log(&exited_session).await;
+                    })
+                        as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+                }) as ExitHook)
+            }
+            None => on_exit,
+        };
         let launched = launch_on_target(
             agent,
             params,
             slots,
             RemoteLaunch {
-                shell,
+                shell: Arc::clone(&shell),
                 worktree: worktree_path,
                 session_dir,
                 pointer: remote.pointer.as_ref(),
@@ -145,6 +180,27 @@ pub(super) async fn launch(
         )
         .await
         .map_err(|e| Status::internal(format!("failed to spawn {kind}: {e}")))?;
+        if let (Some(log), Some(token), Some(delivery)) = (
+            hook_log,
+            remote.hook_token.as_ref(),
+            remote.hook_delivery.as_ref(),
+        ) {
+            let sink = Arc::new(crate::remote_hook_follower::ActivityHookSink::new(
+                Arc::clone(delivery),
+                session_id,
+                token,
+                os_user,
+            ));
+            let follower = crate::remote_hook_follower::RemoteHookFollower::start(
+                Arc::clone(&shell),
+                &log,
+                token,
+                sink,
+            );
+            remote
+                .hook_followers
+                .insert(session_id, follower, shell, worktree_path.to_path_buf());
+        }
         return Ok(LaunchedHarness {
             pid: launched.handle.pid,
             tmux_session: None,

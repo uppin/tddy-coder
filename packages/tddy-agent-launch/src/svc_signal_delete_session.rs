@@ -130,6 +130,11 @@ impl LaunchSessions {
         // this is the session-wide sweep that catches admissions whose clones were already gone.)
         self.forget_session_state(session_id).await;
         session_deletion::close_session_room(&*self.session_rooms, session_id);
+        // A target session's hook log is followed from here: stop its follower and remove the
+        // log on its target before its record and worktree go.
+        self.remote_hook_followers
+            .stop_and_remove_log(session_id)
+            .await;
         // A target session's worktree is on its target, where the local deletion below cannot
         // reach: what to remove there is captured now, while its record is still on disk.
         let target_worktree =

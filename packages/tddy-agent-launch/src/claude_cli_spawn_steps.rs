@@ -21,6 +21,10 @@ pub(super) struct ClaudeCliHooks {
     daemon_socket: Option<String>,
     pub(super) hook_token: String,
     pub(super) answer_wait_secs: u64,
+    /// The hook log of a session whose agent runs on a target: every hook appends there instead
+    /// of running `tddy-tools session-hook`. Set by the harness launch when the session has a
+    /// target; `None` is a session on this host.
+    pub(super) remote_log: Option<String>,
 }
 
 impl ClaudeCliHooks {
@@ -38,7 +42,7 @@ impl ClaudeCliHooks {
             hook_token: &self.hook_token,
             daemon_socket: self.daemon_socket.as_deref(),
             answer_wait_secs: self.answer_wait_secs,
-            remote_log: None,
+            remote_log: self.remote_log.as_deref(),
         }
     }
 }
@@ -114,6 +118,7 @@ pub(super) fn claude_cli_hooks_with_token(
         daemon_socket: Some(agent_tool_socket.to_string_lossy().into_owned()),
         hook_token,
         answer_wait_secs: spec.answer_wait_secs(),
+        remote_log: None,
     }
 }
 

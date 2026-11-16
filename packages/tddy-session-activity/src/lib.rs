@@ -19,6 +19,7 @@
 
 pub mod answer_wait;
 pub mod answers;
+pub mod hook_request;
 pub mod orchestrator_presence;
 pub mod pending_answers;
 pub mod pending_elicitation;

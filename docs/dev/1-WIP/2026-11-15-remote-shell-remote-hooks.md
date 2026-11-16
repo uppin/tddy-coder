@@ -166,6 +166,7 @@ graph LR
 - [x] **Follower**: streamed read, parse, token check, delivery
 - [x] **Robustness**: resume from offset, bad lines, cleanup on stop and delete
 - [ ] **Docs**: agent-session-status, the three CLI session docs, `packages/tddy-agent-backend/docs/`
+- [x] **Wiring**: launch renders `remote_log`, creates the log and follows it; the follower delivers through the daemon's activity handling (mapping in `tddy-session-activity::hook_request`); exit, stop and delete stop it and remove the log
 
 ## Technical Changes
 
@@ -197,12 +198,12 @@ See *Affected Packages* and *Responsibility*.
 
 ## Implementation Milestones
 
-- [ ] `remote_hook_command` and its quoting
-- [ ] Each adapter renders it; awaiting hooks omitted
-- [ ] `HookLine::parse` and the token check
-- [ ] Follower delivers in order
-- [ ] Resume from offset with no loss or duplicate
-- [ ] Cleanup; `./test -p` per touched package
+- [x] `remote_hook_command` and its quoting
+- [x] Each adapter renders it; awaiting hooks omitted
+- [x] `HookLine::parse` and the token check
+- [x] Follower delivers in order
+- [x] Resume from offset with no loss or duplicate
+- [x] Cleanup; `./test -p` per touched package
 
 ## Testing Plan
 

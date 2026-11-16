@@ -232,6 +232,8 @@ impl LaunchSessions {
                 ssh_config_host: req.ssh_config_host.trim(),
                 target: crate::remote_agent_launch::session_target_of_proto(req.target.as_ref())
                     .map_err(|e| Status::invalid_argument(e.to_string()))?,
+                hook_delivery: self.hook_report_delivery.clone(),
+                hook_followers: self.remote_hook_followers.clone(),
                 managed_codebase: req.managed_codebase,
                 managed,
                 role,
@@ -319,6 +321,8 @@ impl LaunchSessions {
                 effort: "",
                 ssh_config_host: "",
                 target: None,
+                hook_delivery: self.hook_report_delivery.clone(),
+                hook_followers: self.remote_hook_followers.clone(),
                 // A spawned child is never a managed-codebase session, and has no standing role.
                 managed_codebase: false,
                 managed: None,

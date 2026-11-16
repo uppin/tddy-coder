@@ -122,6 +122,8 @@ impl crate::launch_ports::LaunchSessions {
                 wiring,
                 tddy_data_dir: &self.tddy_data_dir,
                 startup_window: self.config.spawn_startup_grace_period(),
+                hook_delivery: self.hook_report_delivery.clone(),
+                hook_followers: self.remote_hook_followers.clone(),
             },
         )
         .await
@@ -149,6 +151,10 @@ struct ResumedSession<'a> {
     tddy_data_dir: &'a Path,
     /// How long a target session's resumed agent must stay up to count as started.
     startup_window: std::time::Duration,
+    /// Where a target session's followed hooks are delivered, and the registry its follower is
+    /// kept in.
+    hook_delivery: Option<Arc<dyn crate::remote_hook_follower::HookReportDelivery>>,
+    hook_followers: crate::remote_hook_follower::RemoteHookFollowers,
 }
 
 /// A session whose worktree is gone has nothing for its agent to continue.
@@ -186,6 +192,8 @@ async fn resume_cli_harness_session(
         mut wiring,
         tddy_data_dir,
         startup_window,
+        hook_delivery,
+        hook_followers,
     } = session;
     let SplitLaunchParts {
         args: split_args,
@@ -218,7 +226,15 @@ async fn resume_cli_harness_session(
                 .filter(|alias| !alias.is_empty())
         });
     // Argv hooks (Muse's `-c hooks=…`) render again from the recorded token; a file
-    // adapter's file is kept as the start wrote it.
+    // adapter's file is kept as the start wrote it. On a target both append to the hook log
+    // there, which this launch recreates and follows again.
+    if meta.target.is_some() {
+        if let Some(hooks) = &mut wiring.hooks {
+            // Relative to the worktree the agent runs in: the hook appends there, on the
+            // target, wherever that worktree is.
+            hooks.remote_log = Some(tddy_core::REMOTE_HOOK_LOG.to_string());
+        }
+    }
     let toolset = std::mem::take(&mut wiring.toolset);
     let hook_params = wiring.hook_params(spec, session_id, os_user);
     let mut slots = render_host_launch_slots(
@@ -278,6 +294,9 @@ async fn resume_cli_harness_session(
                 target,
                 pointer: session_pointer.clone(),
                 startup_window,
+                hook_token: meta.hook_token.clone(),
+                hook_delivery: hook_delivery.clone(),
+                hook_followers: hook_followers.clone(),
             }),
         },
         HarnessRun::resume(meta.tmux_session.is_some()),

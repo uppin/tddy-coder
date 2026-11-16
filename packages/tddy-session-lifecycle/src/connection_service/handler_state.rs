@@ -235,6 +235,10 @@ impl DaemonSessionHost {
             host: Arc::new(self.clone()),
             session_reach: Arc::clone(&self.session_reach),
             reachable_sessions: Arc::new(self.clone()),
+            remote_hook_followers: self.remote_hook_followers.clone(),
+            hook_report_delivery: Some(Arc::new(super::svc_activity_ports::ActivityHookDelivery {
+                host: self.clone(),
+            })),
         }
     }
 }

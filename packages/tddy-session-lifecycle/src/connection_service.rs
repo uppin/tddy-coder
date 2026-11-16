@@ -166,6 +166,9 @@ pub struct DaemonSessionHost {
     /// subscribes to, and shared across clones so the seed a listing paid for is not re-read by the
     /// next one.
     session_agent_inference: Arc<crate::session_agent_inference::SessionAgentInferenceStore>,
+    /// The hook-log followers of this daemon's target sessions, shared with every
+    /// [`LaunchSessions`] built from it, so a start registers one and a delete stops it.
+    remote_hook_followers: tddy_agent_launch::remote_hook_follower::RemoteHookFollowers,
     /// Each operator's open credential vault, where the GitHub access token their login granted is
     /// sealed — the credential the PR-status reads act with. `None` (no `auth_storage` configured)
     /// means a real login's PR status reads as *unavailable*, never as "no PR".

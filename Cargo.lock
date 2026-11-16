@@ -14575,6 +14575,7 @@ dependencies = [
  "tddy-sandbox",
  "tddy-sandbox-runner",
  "tddy-service",
+ "tddy-session-activity",
  "tddy-session-tool-client",
  "tddy-stdio",
  "tddy-terminal-rpc",
