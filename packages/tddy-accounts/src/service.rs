@@ -2,6 +2,7 @@
 
 mod account_answers;
 mod link_answers;
+mod link_progress;
 mod provider_routes;
 mod wiring;
 
@@ -22,9 +23,7 @@ use tddy_service::proto::accounts::{
 };
 
 use crate::attempts::{Attempts, PollAdmission};
-use crate::linking::{
-    removal_allowed, AccountLinker, LinkError, LinkProgress, LinkedAccountStore, LinkedIdentity,
-};
+use crate::linking::{removal_allowed, AccountLinker, LinkError, LinkedAccountStore};
 use crate::provider_account::{
     refuse_undrivable, ProviderAccount, ProviderAccountDefaults, ProviderAccountStore,
     ProviderModelProbe, RouteSupport,
@@ -38,7 +37,6 @@ use crate::service::link_answers::link_status_for;
 use crate::service::link_answers::pending;
 use crate::service::link_answers::saturating_i64;
 use crate::service::link_answers::state_only;
-use crate::service::link_answers::store_link;
 use crate::service::provider_routes::route_option;
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
@@ -405,88 +403,6 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
             .map_err(link_status_for)?;
         let response = self.answer_for(linking, &request, &provider, progress)?;
         Ok(Response::new(response))
-    }
-}
-
-impl<S> AccountsServiceImpl<S> {
-    /// The account the session was established with. `None` when no linking is wired, because
-    /// nothing then knows which account that is.
-    fn session_account_of(
-        &self,
-        session_token: &str,
-    ) -> Result<Option<(ProviderId, AccountId)>, Status> {
-        self.linking.as_ref().map_or(Ok(None), |linking| {
-            linking
-                .store
-                .session_account(session_token)
-                .map_err(link_status_for)
-        })
-    }
-
-    /// What the person is told about `progress`, finishing the attempt when it is terminal.
-    fn answer_for(
-        &self,
-        linking: &Linking,
-        request: &PollLinkAccountRequest,
-        provider: &ProviderId,
-        progress: LinkProgress,
-    ) -> Result<PollLinkAccountResponse, Status> {
-        let finish = || {
-            linking
-                .attempts
-                .finish(&request.link_id)
-                .map_err(link_status_for)
-        };
-        match progress {
-            LinkProgress::Pending { interval_seconds } => {
-                linking
-                    .attempts
-                    .reschedule(&request.link_id, interval_seconds, (self.clock)())
-                    .map_err(link_status_for)?;
-                Ok(pending(interval_seconds))
-            }
-            LinkProgress::Denied => {
-                finish()?;
-                Ok(state_only(LinkState::LinkDenied))
-            }
-            LinkProgress::Expired => {
-                finish()?;
-                Ok(state_only(LinkState::LinkExpired))
-            }
-            LinkProgress::Approved {
-                identity,
-                access_token,
-            } => {
-                finish()?;
-                self.linked(
-                    linking,
-                    &request.session_token,
-                    provider,
-                    &identity,
-                    &access_token,
-                )
-            }
-        }
-    }
-
-    /// Store an approved link and report it. A closed vault is an answer, not an error.
-    fn linked(
-        &self,
-        linking: &Linking,
-        session_token: &str,
-        provider: &ProviderId,
-        identity: &LinkedIdentity,
-        access_token: &str,
-    ) -> Result<PollLinkAccountResponse, Status> {
-        match store_link(linking, session_token, provider, identity, access_token) {
-            Ok(record) => Ok(PollLinkAccountResponse {
-                state: LinkState::LinkLinked as i32,
-                account: Some(summary_of(&record, self.sync_status.as_deref())),
-                ..PollLinkAccountResponse::default()
-            }),
-            Err(LinkError::Locked) => Ok(state_only(LinkState::LinkVaultLocked)),
-            Err(refusal) => Err(link_status_for(refusal)),
-        }
     }
 }
 
