@@ -10,6 +10,7 @@ use std::path::Path;
 
 use pretty_assertions::assert_eq;
 use project_notification_log_support::{a_log_over, write_session};
+use tddy_daemon_kernel::session_notification::SessionEndNotice;
 use tddy_session_activity::project_notification_log::{
     ProjectNotificationScope, PROJECT_NOTIFICATION_CAPACITY,
 };
@@ -33,6 +34,7 @@ fn an_attention_notification(text: &str) -> SessionNotification {
         agent: None,
         question: None,
         at_unix_ms: 1_790_000_000_000,
+        ended: None,
     }
 }
 
@@ -189,4 +191,83 @@ async fn a_line_torn_by_a_crash_does_not_swallow_the_next_record() {
             ]
         );
     }
+}
+
+/// The notification the daemon publishes when the child's agent exits with `code`.
+fn the_childs_agent_exited_with(code: i32) -> SessionNotification {
+    SessionNotification {
+        source: SessionNotificationSource::SessionEnded,
+        ended: Some(SessionEndNotice {
+            outcome: format!("exit code {code}"),
+            exit_code: Some(code),
+        }),
+        ..an_attention_notification(&format!(
+            "⏹ Session my-feature-branch ended: exit code {code}"
+        ))
+    }
+}
+
+/// The JSON lines of the project's notification file.
+fn json_lines_in(data_dir: &Path) -> Vec<serde_json::Value> {
+    let file = data_dir
+        .join("projects")
+        .join(PROJECT)
+        .join("notifications.jsonl");
+    std::fs::read_to_string(file)
+        .expect("the project's notification file")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON line"))
+        .collect()
+}
+
+#[tokio::test]
+async fn an_ended_record_round_trips_through_the_log_file() {
+    // Given a daemon whose child's agent exited with code 3
+    let data_dir = tempfile::tempdir().expect("a temporary data dir");
+    write_session(data_dir.path(), ADA, CHILD, PROJECT);
+    let (_log, bus) = a_log_over(data_dir.path());
+    bus.publish(the_childs_agent_exited_with(3)).await;
+
+    // When the daemon restarts over the same data directory
+    let (restarted, _bus) = a_log_over(data_dir.path());
+
+    // Then the record read back is a session end, with how it ended
+    let read = restarted
+        .read(&the_home_agents_scope(), "", None)
+        .expect("the log is read");
+    assert_eq!(
+        read.page
+            .items
+            .iter()
+            .map(|r| (r.source, r.ended.clone()))
+            .collect::<Vec<_>>(),
+        vec![(
+            SessionNotificationSource::SessionEnded,
+            Some(SessionEndNotice {
+                outcome: "exit code 3".to_string(),
+                exit_code: Some(3),
+            }),
+        )]
+    );
+}
+
+#[tokio::test]
+async fn a_record_without_an_ended_part_writes_no_ended_key() {
+    // Given a daemon whose child asked for attention, which is not an end
+    let data_dir = tempfile::tempdir().expect("a temporary data dir");
+    write_session(data_dir.path(), ADA, CHILD, PROJECT);
+    let (_log, bus) = a_log_over(data_dir.path());
+
+    // When the notification is logged
+    bus.publish(an_attention_notification("needs your input"))
+        .await;
+
+    // Then its line carries no `ended` key at all
+    assert_eq!(
+        json_lines_in(data_dir.path())
+            .iter()
+            .map(|line| line.get("ended").is_some())
+            .collect::<Vec<_>>(),
+        vec![false]
+    );
 }

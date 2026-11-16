@@ -436,6 +436,16 @@ message SessionNotificationEvent {
   string                    link          = 11;
   // Set only for source PENDING_QUESTION: what a claude-cli session is asking (`#home-inbox` 3/8).
   QuestionNotice            question      = 12;
+  // Set only for source SESSION_ENDED: how the session's agent ended (`#activity-wake` 1/3).
+  SessionEndNotice          ended         = 13;
+}
+
+// How a session's agent ended.
+message SessionEndNotice {
+  // `exit code 3`, `exit code unknown`, `stopped by the daemon`, or a failure's message.
+  string         outcome   = 1;
+  // The agent's exit code, when one was seen.
+  optional int32 exit_code = 2;
 }
 
 // What a session is asking: a permission for a tool, or the questions of an AskUserQuestion call.
@@ -487,6 +497,9 @@ enum SessionNotificationSource {
   // ReportSessionStatus with a structured question — a claude-cli permission prompt or
   // AskUserQuestion call (`#home-inbox` 3/8).
   SESSION_NOTIFICATION_SOURCE_PENDING_QUESTION = 5;
+  // The session manager: the agent of the session's main terminal ended. Carries `ended`
+  // (`#activity-wake` 1/3).
+  SESSION_NOTIFICATION_SOURCE_SESSION_ENDED = 6;
 }
 
 // How an agent grades what it is telling its operator.

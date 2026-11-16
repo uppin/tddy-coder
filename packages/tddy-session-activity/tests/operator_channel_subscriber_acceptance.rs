@@ -39,6 +39,7 @@ fn an_attention_notification() -> SessionNotification {
         agent: None,
         at_unix_ms: AT,
         question: None,
+        ended: None,
     }
 }
 

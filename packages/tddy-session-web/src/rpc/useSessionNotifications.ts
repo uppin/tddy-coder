@@ -18,9 +18,10 @@
  */
 
 import { useEffect, useState } from "react";
-import { ActivityService, SessionNotificationKind } from "tddy-client-web/gen/activity_pb";
+import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import { useAuth, rpcFailureText, useDaemonClient } from "tddy-client-web";
 import { sessionNotificationRegistry } from "../lib/sessionNotificationRegistry";
+import { dotForNotification } from "../lib/sessionNotificationDot";
 
 export interface SessionNotificationsFeed {
   /** Why the feed stopped, ready to render; `null` while it is live (or not yet open). */
@@ -48,14 +49,15 @@ export function useSessionNotifications(): SessionNotificationsFeed {
           // The daemon stamps the moment the notification happened; the registry keeps the newest
           // per session, so a replayed or out-of-order frame cannot walk a dot backwards.
           const atMs = Number(event.atUnixMs);
-          if (event.kind === SessionNotificationKind.ATTENTION_REQUIRED) {
+          const dot = dotForNotification(event);
+          if (dot === "attention") {
             sessionNotificationRegistry.recordAttention(event.sessionId, atMs);
-          } else if (event.kind === SessionNotificationKind.ACTIVITY) {
+          } else if (dot === "activity") {
             sessionNotificationRegistry.recordActivity(event.sessionId, atMs);
           }
-          // Any other kind is a newer daemon telling us about something this build has no dot for.
-          // Dropping it leaves the row reading exactly as it did before — the honest rendering of a
-          // notification we cannot interpret.
+          // No dot is a newer daemon telling us about something this build has no dot for, or an
+          // event that lights none (a session's end). Dropping it leaves the row reading exactly as
+          // it did before.
         }
       } catch (err) {
         // A stream aborted on unmount surfaces as an AbortError; ignore it. Any other error while

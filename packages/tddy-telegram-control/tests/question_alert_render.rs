@@ -22,6 +22,7 @@ fn a_notification_for(label: &str, question: QuestionNotice) -> SessionNotificat
         agent: None,
         question: Some(question),
         at_unix_ms: 1_761_000_000_000,
+        ended: None,
     }
 }
 

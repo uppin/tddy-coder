@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — more than one crate (cli-sessions, daemon-kernel, session-activity, session-lifecycle, service, daemon, session-web), a proto contract change, a spawned-process seam (real PTY child, tmux detach watcher)
-**Stack**: `#activity-wake` 1/3 — branch `feature/activity-wake/session-ended-notice`, base `master`
+**Stack**: `#activity-wake` 1/3 — branch `feature/activity-wake/session-ended-notice`, base `master` — PR [#929](https://github.com/uppin/tddy-coder/pull/929)
 
 ## Initial Discovery
 
@@ -40,11 +40,12 @@ the entry.
 - **tddy-daemon-kernel**: [daemon-kernel.md](../../../packages/tddy-daemon-kernel/docs/daemon-kernel.md) — `SessionNotificationSource::SessionEnded`, `SessionEndNotice`, `SessionNotification.ended`
 - **tddy-session-activity**: [session-notifications.md](../../../packages/tddy-session-activity/docs/session-notifications.md) — the log's JSON: `source: "session_ended"`, `ended`
 - **tddy-session-lifecycle**: [README.md](../../../packages/tddy-session-lifecycle/README.md) — the agent-end forwarder
-- **tddy-service** — `activity.proto`: one source value, `SessionEndNotice`; `convert.rs`
+- **tddy-service** — `activity.proto`: one source value, `SessionEndNotice`
 - **tddy-daemon** — starts the forwarder
 - **tddy-telegram-control**: exhaustive `match` on the source only — declines it
 - **tddy-session-web**: [README.md](../../../packages/tddy-session-web/README.md) — the drawer's dot ignores the new source
 - **tddy-client-web**, **tddy-rust-typescript-tests**: regenerated `activity_pb.ts`
+- **tddy-desktop** (tests only) — a `SessionNotification` literal in `src-tauri/tests/support`
 
 ## Related Feature Documentation
 
@@ -111,7 +112,8 @@ The first push of this PR's code (pass 2, commit 2) publishes:
   `CliSessionManager::agent_ends() -> tokio::sync::broadcast::Receiver<AgentEnd>`, announcing nothing
   yet (`// TODO(session-ended-notice): implement`);
 - the kernel types and the `ended: None` on every existing `SessionNotification` literal;
-- the proto value and message, generated code, and `convert.rs` arms;
+- the proto value and message, generated code, and the wire conversion's source arm (`ended` not yet
+  carried);
 - `notification_for_agent_end` and `forward_agent_ends` with `todo!`-free bodies that publish
   nothing yet;
 - the storage DTO's `session_ended` value and `ended` object;
@@ -189,12 +191,12 @@ Real dependency edges, as opposed to the branch line:
 
 - `activity.proto`: `SESSION_NOTIFICATION_SOURCE_SESSION_ENDED = 6;`
   `message SessionEndNotice { string outcome = 1; optional int32 exit_code = 2; }`;
-  `SessionEndNotice ended = 13;` on `SessionNotificationEvent`. `convert.rs` both ways.
+  `SessionEndNotice ended = 13;` on `SessionNotificationEvent`.
 
 #### tddy-session-activity
 
 - `storage.rs`: the source value, the `ended` object (omitted when `None`), read back on replay.
-- `streams.rs`: the new arm.
+- `streams.rs`: the new source arm and `ended` on the wire.
 
 #### tddy-session-lifecycle
 
@@ -260,8 +262,8 @@ through the real bus and the real `ProjectNotificationLog`; the inbox answer thr
 - `an_ended_agent_lands_in_its_projects_notification_log` — a real manager runs a stub main for a
   session recorded with a `project_id`; the forwarder runs on a bus with the real log → one record,
   source `SessionEnded`, text `⏹ Session {label} ended: exit code 0`, `ended.exit_code == Some(0)`.
-- `an_end_whose_session_cannot_be_resolved_is_not_published` — an OS user with no sessions base →
-  nothing on the bus.
+- `an_end_whose_owner_has_no_sessions_base_is_not_published` — the daemon user resolves to no
+  sessions base → nothing on the bus.
 
 **tddy-daemon-rpc** — `packages/tddy-daemon-rpc/tests/project_home_session_ended_acceptance.rs`
 
@@ -276,10 +278,12 @@ through the real bus and the real `ProjectNotificationLog`; the inbox answer thr
 - `tddy-session-lifecycle` `session_notifications.rs`: `an_agent_end_becomes_an_attention_notification_naming_its_outcome`.
 - `tddy-session-activity` `tests/project_notification_log_storage.rs`:
   `an_ended_record_round_trips_through_the_log_file`, `a_record_without_an_ended_part_writes_no_ended_key`.
-- `tddy-service` `convert.rs`: `a_session_ended_notification_converts_with_its_end`.
+- `tddy-session-activity` `tests/session_notification_event_unit.rs` (the wire conversion is
+  `streams::session_notification_event`, not `tddy-service`): `a_session_ended_notification_converts_with_its_end`,
+  `an_end_with_no_exit_code_has_none_on_the_wire`.
 - `tddy-telegram-control` `tests/telegram_notification_subscriber_unit.rs`: `telegram_declines_a_session_end`.
 - `tddy-session-web` `src/lib/sessionNotificationDot.test.ts`: `a session end lights no dot`,
-  `attention and activity light as before`.
+  `attention and activity light as before`, `a kind this build does not know lights nothing`.
 
 ### Testing Principles Applied
 
@@ -328,10 +332,10 @@ _(populated during development)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

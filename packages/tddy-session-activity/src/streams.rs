@@ -62,6 +62,7 @@ pub fn session_notification_event(notification: SessionNotification) -> SessionN
             SessionNotificationSource::PendingQuestion => {
                 ProtoSessionNotificationSource::PendingQuestion
             }
+            SessionNotificationSource::SessionEnded => ProtoSessionNotificationSource::SessionEnded,
         } as i32,
         text: notification.text,
         at_unix_ms: notification.at_unix_ms,
@@ -73,6 +74,8 @@ pub fn session_notification_event(notification: SessionNotification) -> SessionN
         sound: agent.is_some_and(|a| a.sound),
         link: agent.map(|a| a.link.clone()).unwrap_or_default(),
         question,
+        // TODO(session-ended-notice): implement — carry `notification.ended` on the wire.
+        ended: None,
     }
 }
 

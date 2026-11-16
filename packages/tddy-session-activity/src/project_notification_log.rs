@@ -40,7 +40,8 @@ use tokio::time::Instant;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_core::WorkflowError;
 use tddy_daemon_kernel::session_notification::{
-    AgentNotification, QuestionNotice, SessionNotificationKind, SessionNotificationSource,
+    AgentNotification, QuestionNotice, SessionEndNotice, SessionNotificationKind,
+    SessionNotificationSource,
 };
 use tddy_tool_engine::project_home_inbox_tools::MAX_WAIT_MS;
 use tddy_tool_engine::session_follow::{page_size, parse_cursor, FollowPage};
@@ -82,6 +83,8 @@ pub struct ProjectNotificationRecord {
     pub agent: Option<AgentNotification>,
     /// What the session asks, with the `request_id` it is answered by (`#home-inbox` 3/8).
     pub question: Option<QuestionNotice>,
+    /// How the session's agent ended, for a session-ended record (`#activity-wake` 1/3).
+    pub ended: Option<SessionEndNotice>,
     pub at_unix_ms: u64,
     /// The orchestrator that started the session — the `orchestrator_session_id` its changeset
     /// names when the record is appended — or `None` for a session no orchestrator started
@@ -426,6 +429,8 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
                     text: notification.text.clone(),
                     agent: notification.agent.clone(),
                     question: notification.question.clone(),
+                    // TODO(session-ended-notice): implement — keep `notification.ended`.
+                    ended: None,
                     at_unix_ms: notification.at_unix_ms,
                     orchestrator_session_id: orchestrator.clone(),
                 },

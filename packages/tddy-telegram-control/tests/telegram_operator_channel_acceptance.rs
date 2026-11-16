@@ -43,6 +43,7 @@ fn an_attention_notification() -> SessionNotification {
         agent: None,
         at_unix_ms: 1_756_000_000_000,
         question: None,
+        ended: None,
     }
 }
 

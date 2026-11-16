@@ -52,6 +52,10 @@ pub(crate) struct DetachWatch {
     exposed_terminals: ExposedTerminalRegistry,
     watchers: DetachedWatchers,
     interval: Duration,
+    /// Where an agent the watcher sees end is announced.
+    // TODO(session-ended-notice): implement — read by both announcing sites; drop the allow.
+    #[allow(dead_code)]
+    agent_ends: super::agent_end::AgentEndSender,
 }
 
 impl DetachWatch {
@@ -94,6 +98,8 @@ impl DetachWatch {
                             "the agent of detached session {session_id} ended (tmux session {session:?} is gone): cleaning up"
                         );
                         self.drop_agent_state(&session_id).await;
+                        // TODO(session-ended-notice): implement — announce the end on
+                        // `self.agent_ends`, outcome `exit code unknown`, no exit code.
                         return;
                     }
                     // A probe that did not finish tears nothing down: it is tried again.
@@ -117,7 +123,11 @@ impl DetachWatch {
     /// agent ends, so a watcher does, and runs the same cleanup then.
     pub(crate) async fn main_ended(self, session_id: String, exit: MainExit, tmux_run: TmuxRun) {
         match (exit, tmux_run.session, tmux_run.os_user) {
-            (MainExit::AgentEnded, ..) => self.drop_agent_state(&session_id).await,
+            (MainExit::AgentEnded, ..) => {
+                self.drop_agent_state(&session_id).await;
+                // TODO(session-ended-notice): implement — announce the end on `self.agent_ends`
+                // with the main's outcome and exit code.
+            }
             (MainExit::ClientOnly, Some(session), Some(os_user)) => {
                 self.start(session_id, session, os_user).await;
             }
@@ -214,6 +224,7 @@ impl CliSessionManager {
             exposed_terminals: Arc::clone(&self.exposed_terminals),
             watchers: Arc::clone(&self.detached_watchers),
             interval: self.detach_watch_interval,
+            agent_ends: self.agent_end_tx.clone(),
         }
     }
 
