@@ -328,7 +328,7 @@ pub async fn launch_on_target(
             tddy_task::TaskStatus::Completed { exit_code } => exit_code,
             _ => None,
         };
-        let last_output = last_output_of(&handle);
+        let last_output = settled_last_output(&handle).await;
         // The process has ended; removing its registry entry now leaves no terminal behind.
         session.manager.stop_session(session.session_id).await;
         return Err(RemoteLaunchError::ExitedDuringStartup {
@@ -399,14 +399,45 @@ fn has_output(handle: &PtyHandle) -> bool {
         .unwrap_or(false)
 }
 
-/// The tail of what `handle`'s terminal showed, as a startup failure quotes it.
-fn last_output_of(handle: &PtyHandle) -> String {
-    let capture = handle
+/// The tail of what `handle`'s terminal showed, once it has finished showing it. The task's
+/// end is signalled from its exit status, which the PTY's reader can lag under load: the last
+/// bytes are still in flight when the process is already known to have ended. Reading the
+/// capture at that moment races the reader and can quote nothing — so wait until the captured
+/// bytes stop changing (the reader has drained the PTY), bounded so a wedged reader cannot
+/// hang the failed start.
+async fn settled_last_output(handle: &PtyHandle) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let mut previous = captured_bytes(handle);
+    let mut unchanged_since = tokio::time::Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let current = captured_bytes(handle);
+        if current != previous {
+            previous = current;
+            unchanged_since = tokio::time::Instant::now();
+            continue;
+        }
+        if unchanged_since.elapsed() >= Duration::from_millis(50)
+            || tokio::time::Instant::now() >= deadline
+        {
+            break;
+        }
+    }
+    last_output_of(&previous)
+}
+
+/// What `handle`'s terminal has captured so far.
+fn captured_bytes(handle: &PtyHandle) -> Vec<u8> {
+    handle
         .capture
         .lock()
         .map(|capture| capture.buffered_bytes().to_vec())
-        .unwrap_or_default();
-    let text = String::from_utf8_lossy(&capture);
+        .unwrap_or_default()
+}
+
+/// The tail of `capture`, as a startup failure quotes it.
+fn last_output_of(capture: &[u8]) -> String {
+    let text = String::from_utf8_lossy(capture);
     let mut lines: Vec<&str> = text
         .lines()
         .map(|line| line.trim_end())
