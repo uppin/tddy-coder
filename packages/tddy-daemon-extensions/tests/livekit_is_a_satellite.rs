@@ -55,6 +55,15 @@ const WIRING: &[&str] = &[
     "tddy-e2e",
 ];
 
+/// Test doubles for the plugin surface: in-memory implementations of the extension ports,
+/// built against the plugins' own types (the peer registry a converted suite asserts on is
+/// the production one). They may name a LiveKit crate for the same reason a plugin may —
+/// but only because nothing can ship them: every crate that names one does so under
+/// `[dev-dependencies]`, which `a_test_double_is_only_ever_a_dev_dependency` proves. A
+/// double named from `[dependencies]` would launder its LiveKit edge into a production
+/// build, which is exactly what this file exists to prevent.
+const TEST_DOUBLES: &[&str] = &["tddy-room-testkit"];
+
 /// Libraries a wiring crate builds a client binary from. They join rooms through
 /// `tddy-room-client` and name LiveKit nowhere — not in their manifest, not in any source file.
 const CLIENT_LIBRARIES: &[&str] = &["tddy-remote-git-repo", "tddy-session-sync", "tddy-tools"];
@@ -117,16 +126,43 @@ fn the_extension_ports_reach_no_livekit_crate() {
 fn only_plugins_and_wiring_name_a_livekit_crate() {
     // Given the workspace as Cargo resolves it
     let graph = WorkspaceGraph::load();
-    let allowed: BTreeSet<String> = set_of(PLUGINS).into_iter().chain(set_of(WIRING)).collect();
+    let allowed: BTreeSet<String> = set_of(PLUGINS)
+        .into_iter()
+        .chain(set_of(WIRING))
+        .chain(set_of(TEST_DOUBLES))
+        .collect();
 
     // When every crate naming a LiveKit crate is collected
     let naming = crates_naming_livekit(&graph);
 
-    // Then each one is LiveKit itself, or a binary's wiring
+    // Then each one is LiveKit itself, a binary's wiring, or a test double for the plugin
     assert_eq!(
         naming.difference(&allowed).collect::<Vec<_>>(),
         Vec::<&String>::new(),
         "these crates name a LiveKit crate: reach it through tddy-daemon-extensions instead"
+    );
+}
+
+#[test]
+fn a_test_double_is_only_ever_a_dev_dependency() {
+    // Given the workspace as Cargo resolves it
+    let graph = WorkspaceGraph::load();
+    let doubles = set_of(TEST_DOUBLES);
+
+    // When every crate naming a test double outside `[dev-dependencies]` is collected
+    // (`names_directly` never counts a dev edge)
+    let naming: Vec<String> = graph
+        .workspace_crates()
+        .into_iter()
+        .filter(|krate| !graph.names_directly(krate).is_disjoint(&doubles))
+        .collect();
+
+    // Then there are none: a double's LiveKit edge can never enter a production build
+    assert_eq!(
+        naming,
+        Vec::<String>::new(),
+        "these crates name a test double outside [dev-dependencies]: \
+         its LiveKit edge would enter a production build"
     );
 }
 

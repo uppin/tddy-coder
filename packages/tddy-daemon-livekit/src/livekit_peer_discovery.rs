@@ -433,6 +433,29 @@ impl CommonRoomPeerRegistry {
         self.apply_snapshot(next);
     }
 
+    /// Replace remote entries from `(identity, metadata)` participant fields, with no LiveKit
+    /// type in sight.
+    ///
+    /// [`Self::sync_from_room`] is this over a room's remote participants; an in-memory room
+    /// (the `tddy-room-testkit` hub) drives the same registry from its own participant list, so
+    /// the classification, the local-daemon exclusion and the snapshot recording below this line
+    /// are shared, not copied — a peer the classifier refuses in one room it refuses in the other.
+    pub fn sync_from_participant_fields(
+        &self,
+        participants: impl IntoIterator<Item = (String, String)>,
+        local_instance_id: &str,
+    ) {
+        let mut next: HashMap<String, PeerDaemon> = HashMap::new();
+        for (identity, metadata) in participants {
+            if let Some(peer) =
+                peer_daemon_from_participant_fields(&identity, &metadata, local_instance_id)
+            {
+                next.insert(peer.advertisement.instance_id.clone(), peer);
+            }
+        }
+        self.apply_snapshot(next);
+    }
+
     /// Adopt `next` as the room's membership and record the transition.
     ///
     /// Split from [`Self::sync_from_room`] so the recording behaviour can be exercised without a

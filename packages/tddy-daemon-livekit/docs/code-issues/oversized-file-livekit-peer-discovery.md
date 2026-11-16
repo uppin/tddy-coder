@@ -20,6 +20,7 @@
 | 2026-10-17 | 1,697 → 1,700 (+3) | `#satellite` 2/13 (#624): the two forwarding call sites build `CommonRoom::new(LiveKitPeerForwarder::new(slot), &config)` instead of `CommonRoom::from_config(slot, &config)`. Grown; split deferred with the developer's consent — `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md` — and because later `#satellite` nodes also edit this file |
 | 2026-10-20 | 1,700 → 1,407 (−293) | `#satellite` 10/13 (#632): the thirteen `forward_*_via_livekit` helpers moved to `tddy_daemon_kernel::peer_calls` (seam A, by hand-written move rather than `extract_module`); the file keeps a `pub use` of each under its old name until node 11 moves the last callers. Narrowed, not closed |
 | 2026-10-21 | 1,407 → 1,390 (−17) | `#satellite` 13/13 (#635): the `StartSessionPeerRoute` alias and `classify_start_session_peer_route` wrapper are deleted; callers use the kernel's `classify_peer_route` / `PeerRoute`. Smaller, still over |
+| 2026-11-15 | 1,410 → 1,433 (+23) | #923 (`livekit-compat-tests`): `sync_from_participant_fields` on the registry — the transport-neutral snapshot the in-memory hub drives. Grown; the designed seams B/C remain the way out, and splitting in this PR would collide with the hub work that consumes the new entry, so it is deferred with the same reasoning as the 2026-10-17 rows. Still over |
 
 ## What would close it — designed seams
 

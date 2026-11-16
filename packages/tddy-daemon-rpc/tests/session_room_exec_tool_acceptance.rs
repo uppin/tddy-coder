@@ -9,24 +9,22 @@
 //! where the handlers `runtime::build` installs are available. The fixture is that suite's, trimmed
 //! to what this test reaches.
 //!
-//! Needs the LiveKit testkit container (Docker or `LIVEKIT_TESTKIT_WS_URL`), and is `#[serial]` so
-//! it owns it alone.
+//! The room is the in-memory hub (`tddy-room-testkit`); the suite is `#[serial]` because it
+//! shares a sessions root on disk. That the LiveKit reach opens real rooms is
+//! `tddy-livekit-compat-tests`' job.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use livekit::prelude::RoomOptions;
-use livekit::Room;
 use prost::Message;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon_extensions::IntegrationStatusBoard;
-use tddy_daemon_livekit::session_room::{session_room_name, SessionRoomRegistry};
-use tddy_daemon_livekit::{LiveKitSessionReach, LIVEKIT_INTEGRATION_ID};
-use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
-use tddy_livekit_testkit::LiveKitTestkit;
-use tddy_rpc::{Request, RequestMetadata, RequestTransport, RpcMessage, RpcResult};
+use tddy_daemon_kernel::peer_forwarding::session_room_name;
+use tddy_room_testkit::{HubSessionReach, HubSessionRooms, RoomHub};
+use tddy_rpc::{
+    Request, RequestMetadata, RequestTransport, RpcClientTransport, RpcMessage, RpcResult,
+};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{
     SessionService as SessionServiceTrait, StartSessionRequest, StartSessionResponse,
@@ -39,15 +37,7 @@ use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-/// The lobby, so the daemon under test is configured exactly as in production: the session room is
-/// an addition to it, not a replacement.
-fn common_room() -> &'static str {
-    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    ROOM.get_or_init(|| LiveKitTestkit::unique_room("session-room-lobby"))
-}
 const INSTANCE_ID: &str = "session-room-facilitating-host";
-const LK_API_KEY: &str = "devkey";
-const LK_API_SECRET: &str = "secret";
 const TEST_PROJECT_ID: &str = "session-room-proj";
 
 /// Short enough that a change is picked up inside a test's patience, long enough that a loaded
@@ -144,20 +134,11 @@ fn register_project(projects_dir: &Path, repo_path: &Path) {
     std::fs::write(projects_dir.join("projects.yaml"), yaml).unwrap();
 }
 
-/// The `livekit:` block a daemon needs to host session rooms.
-fn livekit_yaml_block(ws_url: &str) -> String {
-    let room = common_room();
-    format!(
-        "livekit:\n  enabled: true\n  url: {ws_url}\n  api_key: {LK_API_KEY}\n  \
-         api_secret: {LK_API_SECRET}\n  common_room: {room}\n"
-    )
-}
-
-fn write_daemon_yaml(ws_url: &str, os_user: &str) -> (tempfile::TempDir, PathBuf) {
+fn write_daemon_yaml(os_user: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
     let true_path = true_bin();
-    let livekit = livekit_yaml_block(ws_url);
+    // The creds a tool session's start reads to name its room; over the hub nothing dials them.
     let yaml = format!(
         r#"
 daemon_instance_id: {INSTANCE_ID}
@@ -166,7 +147,12 @@ allowed_tools:
     label: t
 session_room:
   poll_interval_ms: {POLL_INTERVAL_MS}
-{livekit}"#
+livekit:
+  enabled: true
+  url: ws://127.0.0.1:7880
+  api_key: devkey
+  api_secret: secret
+  common_room: session-room-lobby"#
     );
     std::fs::write(&path, yaml).unwrap();
     std::fs::write(
@@ -191,11 +177,10 @@ fn an_agent_session_request() -> StartSessionRequest {
 /// The daemon running the agent: it hosts the session room and answers tool calls in it.
 struct FacilitatingDaemon {
     service: DaemonSessionHost,
-    /// The LiveKit plugin's `SessionRoomService`, which is what opens a session's room.
+    /// The hub reach's `SessionRoomService`, which is what opens a session's room.
     room_service: tddy_rpc::ServiceEntry,
     sessions_base: PathBuf,
-    ws_url: String,
-    livekit: LiveKitTestkit,
+    hub: RoomHub,
     _sessions: tempfile::TempDir,
     _staging: tempfile::TempDir,
     _config: tempfile::TempDir,
@@ -206,11 +191,8 @@ struct FacilitatingDaemon {
 impl FacilitatingDaemon {
     /// A daemon with the families `runtime::build` installs, so the room's roster is the
     /// production one — the exec tools among them.
-    async fn with_livekit() -> Self {
-        let livekit = LiveKitTestkit::start()
-            .await
-            .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
-        let ws_url = livekit.get_ws_url();
+    async fn with_hub() -> Self {
+        let hub = RoomHub::new();
 
         let os_user = std::env::var("USER").expect("USER required");
         let repo_dir = tempfile::tempdir().unwrap();
@@ -224,7 +206,7 @@ impl FacilitatingDaemon {
             .then_reading_stdin()
             .build();
 
-        let (config_dir, config_path) = write_daemon_yaml(&ws_url, &os_user);
+        let (config_dir, config_path) = write_daemon_yaml(&os_user);
         std::fs::write(
             std::path::Path::new(&(config_path))
                 .parent()
@@ -247,13 +229,8 @@ impl FacilitatingDaemon {
         // Wired as the daemon wires it: one room registry shared by the host and the LiveKit
         // plugin, the plugin installed as the host's reach before the RPC families, and its own
         // service built over the finished host.
-        let rooms = Arc::new(SessionRoomRegistry::new());
-        let integrations = IntegrationStatusBoard::new();
-        let reach = LiveKitSessionReach::new(
-            config.clone(),
-            Arc::clone(&rooms),
-            integrations.reporter(LIVEKIT_INTEGRATION_ID, "LiveKit"),
-        );
+        let rooms = HubSessionRooms::new(hub.clone());
+        let reach = HubSessionReach::new(hub.clone(), config.clone(), Arc::clone(&rooms));
         let service = DaemonSessionHost::new(
             config.clone(),
             resolver,
@@ -279,8 +256,7 @@ impl FacilitatingDaemon {
             service,
             room_service,
             sessions_base: sessions.path().to_path_buf(),
-            ws_url,
-            livekit,
+            hub,
             _sessions: sessions,
             _staging: staging,
             _config: config_dir,
@@ -333,30 +309,31 @@ impl FacilitatingDaemon {
 /// A participant that joins the session room the way another agent would: no service of its own,
 /// just an RPC client aimed at the facilitating daemon.
 struct AgentProbe {
-    room: Arc<Room>,
+    hub: RoomHub,
+    room_name: String,
+    identity: String,
+    _participant: tddy_room_testkit::HubParticipant,
 }
 
 impl AgentProbe {
     async fn join(daemon: &FacilitatingDaemon, room_name: &str, identity: &str) -> Self {
-        let token = daemon
-            .livekit
-            .generate_token(room_name, identity)
-            .expect("LiveKit token for an agent probe");
-        let (room, _events) = Room::connect(&daemon.ws_url, &token, RoomOptions::default())
-            .await
-            .unwrap_or_else(|e| panic!("probe {identity} must join {room_name}: {e}"));
+        let participant = daemon.hub.join(room_name, identity, "");
         Self {
-            room: Arc::new(room),
+            hub: daemon.hub.clone(),
+            room_name: room_name.to_string(),
+            identity: identity.to_string(),
+            _participant: participant,
         }
     }
 
-    fn rpc_to_daemon(&self) -> RpcClient {
-        LiveKitRpcClientFactory::for_room(self.room.clone()).client(rpc_identity(INSTANCE_ID))
+    fn rpc_to_daemon(&self) -> impl RpcClientTransport {
+        self.hub
+            .client(&self.room_name, &self.identity, &rpc_identity(INSTANCE_ID))
     }
 }
 
 async fn execute_tool_in_room(
-    client: &RpcClient,
+    client: &dyn RpcClientTransport,
     session_id: &str,
     tool_name: &str,
     args: serde_json::Value,
@@ -399,7 +376,7 @@ fn commit_a_file(worktree: &Path, path: &str, contents: &str) -> String {
 #[serial]
 async fn a_participant_reads_a_worktree_file_through_execute_tool_in_the_session_room() {
     // Given a worktree holding a committed file, and an agent that joined only the session room
-    let daemon = FacilitatingDaemon::with_livekit().await;
+    let daemon = FacilitatingDaemon::with_hub().await;
     let started = daemon.a_session_with_an_open_room().await;
     let worktree = daemon.worktree_of(&started.session_id);
     commit_a_file(&worktree, "greeting.txt", "hello from the worktree");

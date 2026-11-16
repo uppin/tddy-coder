@@ -1,0 +1,131 @@
+//! Regression: common-room discovery must keep the shared LiveKit `room_slot` filled after
+//! `set_metadata` succeeds. Calling `set_metadata` before the join handshake finishes used to hit
+//! the LiveKit Rust SDK’s 5s signaling timeout and clear the slot in a tight reconnect loop.
+//!
+//! This test joins another participant first (closer to real `tddy-lobby` load), waits for
+//! `room_slot` to populate, then asserts it stays populated across a window where the old bug would
+//! have cycled several times.
+//!
+//! Run (requires Docker LiveKit or `LIVEKIT_TESTKIT_WS_URL`):
+//! `cargo test -p tddy-livekit-compat-tests --test common_room_set_metadata_handshake_repro -- --nocapture`
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use livekit::prelude::{Room, RoomOptions};
+use serial_test::serial;
+use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_livekit_testkit::LiveKitTestkit;
+
+fn common_room() -> &'static str {
+    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ROOM.get_or_init(|| LiveKitTestkit::unique_room("repro-metadata-handshake-room"))
+}
+const DAEMON_IDENTITY: &str = "repro-metadata-handshake-daemon";
+const PREJOIN_IDENTITY: &str = "repro-prejoin-participant";
+const LIVEKIT_API_KEY: &str = "devkey";
+const LIVEKIT_API_SECRET: &str = "secret";
+
+fn write_livekit_config(ws_url: &str) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("daemon.yaml");
+    let room = common_room();
+    let yaml = format!(
+        r#"
+allowed_tools:
+  - path: /bin/true
+    label: t
+daemon_instance_id: {DAEMON_IDENTITY}
+livekit:
+  enabled: true
+  url: {ws_url}
+  api_key: {LIVEKIT_API_KEY}
+  api_secret: {LIVEKIT_API_SECRET}
+  common_room: {room}
+"#
+    );
+    std::fs::write(&path, yaml).unwrap();
+    std::fs::write(
+        dir.path().join("users.yaml"),
+        "- github_user: \"testuser\"\n  os_user: \"testdev\"\n",
+    )
+    .unwrap();
+    (dir, path)
+}
+
+fn spawn_common_room_discovery(
+    config: DaemonConfig,
+) -> Arc<tokio::sync::RwLock<Option<Arc<Room>>>> {
+    let config_arc = Arc::new(config);
+    let registry =
+        Arc::new(tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new());
+    let room_slot = Arc::new(tokio::sync::RwLock::new(None));
+    // The discovery loop alone. It used to be reached through `spawn_common_room_discovery_task`,
+    // which also started the OAuth loopback tunnel supervisor — a co-tenant of the room slot with
+    // nothing to do with peer discovery, and one that now lives in `tddy-daemon-auth`, which this
+    // crate deliberately cannot reach. The supervisor acts only on participants publishing pending
+    // `codex_oauth` metadata, and nothing here publishes any, so what this suite observes is
+    // unchanged.
+    tddy_daemon_livekit::livekit_peer_discovery::spawn_common_room_discovery_loop(
+        config_arc,
+        registry,
+        room_slot.clone(),
+        Default::default(),
+        tddy_daemon_extensions::IntegrationStatusBoard::new().reporter(
+            tddy_daemon_livekit::session_reach::LIVEKIT_INTEGRATION_ID,
+            "LiveKit",
+        ),
+    );
+    room_slot
+}
+
+async fn wait_until_room_slot_populated(
+    slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    timeout: Duration,
+) {
+    tokio::time::timeout(timeout, async {
+        loop {
+            let filled = { slot.read().await.is_some() };
+            if filled {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(400)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "timeout waiting for common-room room_slot (identity={DAEMON_IDENTITY}) — discovery never published metadata / stored Room handle"
+        );
+    });
+}
+
+#[tokio::test]
+#[serial(livekit_docker)]
+async fn common_room_room_slot_stays_populated_after_metadata_publish_with_peer_in_room() {
+    // Given
+    let livekit = LiveKitTestkit::start()
+        .await
+        .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
+    let url = livekit.get_ws_url();
+    let pre_token = livekit
+        .generate_token(common_room(), PREJOIN_IDENTITY)
+        .expect("token for pre-join participant");
+    let (_pre_room, _pre_ev) = Room::connect(&url, &pre_token, RoomOptions::default())
+        .await
+        .expect("pre-join participant enters common room");
+    let (_cfg_dir, cfg_path) = write_livekit_config(&url);
+    let config = DaemonConfig::load(&cfg_path).expect("daemon yaml");
+    let room_slot = spawn_common_room_discovery(config);
+
+    // When
+    wait_until_room_slot_populated(&room_slot, Duration::from_secs(60)).await;
+    tokio::time::sleep(Duration::from_secs(12)).await;
+
+    // Then
+    assert!(
+        room_slot.read().await.is_some(),
+        "room_slot cleared within 12s after initial fill — expect stable discovery (regression: set_metadata signaling timeout reconnect loop)"
+    );
+}

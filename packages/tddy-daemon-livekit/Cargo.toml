@@ -73,7 +73,6 @@ serde_yaml = "0.9"
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }
 serial_test = "3"
-tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }

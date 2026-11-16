@@ -38,7 +38,6 @@ serial_test = "3"
 tempfile = "3"
 pretty_assertions = { workspace = true }
 tddy-core = { path = "../tddy-core" }
-tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 tddy-task = { path = "../tddy-task" }
 tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }

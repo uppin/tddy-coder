@@ -15,6 +15,7 @@ tests that failed.
 | `Rust build` | `cargo build --workspace --bins --examples` | ~10 min |
 | `Rust tests` | `cargo nextest run --profile ci`, minus the e2e set, over the workspace as 3 shards (`Rust tests shard i/3`), each a sliding window of package batches (`scripts/nextest-windowed.ts --shard i/3`); one `Rust tests` check stands for them | |
 | `Rust e2e tests` | `cargo nextest run --archive-file … --profile ci`, restricted to the e2e set, run as 6 shards from an archive of just the e2e test targets — tests that need real infrastructure | |
+| `Rust LiveKit e2e tests` | `cargo nextest run --profile ci -p tddy-livekit-compat-tests -p tddy-livekit-testkit`, restricted to `.config/rust-livekit-e2e.filterset` against one shared LiveKit server — the LiveKit adapter contract suites only, no product logic | |
 | `Generated code` | `bun install --frozen-lockfile`, the CI script tests, then `scripts/generated-code.sh check` | ~3 min |
 | `Web build` | every web workspace package's `build:ci` (`web.yml`); see [Web checks](#web-checks) | |
 | `Web lint` | every web package's `typecheck`, minus `scripts/web-lint-exclusions.json`, and the web rule tests | |
@@ -57,12 +58,13 @@ failure that only reproduces on a runner.
 
 ## Rust tests and Rust e2e tests
 
-The Rust suite is two checks, split by **what a test needs to run**, not by how long it takes:
+The Rust suite is three checks, split by **what a test needs to run**, not by how long it takes:
 
 | Check | Runs | Needs |
 |-------|------|-------|
-| `Rust tests` | every test not in the e2e set | nothing outside the process, the files and the sockets it makes itself |
-| `Rust e2e tests` | the e2e set | real infrastructure: a **LiveKit server in Docker**, a **live rust-analyzer**, or a **real `tddy-supervisor`, index-daemon, daemon or `tddy-coder` process** |
+| `Rust tests` | every test in neither e2e set | nothing outside the process, the files and the sockets it makes itself |
+| `Rust e2e tests` | the e2e set | real infrastructure: a **live rust-analyzer**, or a **real `tddy-supervisor`, index-daemon, daemon or `tddy-coder` process** |
+| `Rust LiveKit e2e tests` | the LiveKit set: `tddy-livekit-compat-tests` plus the testkit's own suites | a **LiveKit server in Docker** (one shared server for the leg) |
 
 **`Rust tests` compiles its own test targets, sharded by package and windowed within a shard.** The
 packages with test binaries are cut into 3 contiguous groups balanced by test binaries
@@ -149,21 +151,29 @@ failed, after uploading its JUnit as `junit-rust-e2e-shard-i`. The `Rust tests` 
 `scripts/ci-status.sh` as a failed `Rust e2e shard i/6` check with no annotations of its own; the failing
 tests are listed under `Rust e2e tests`.
 
-**The set is written once, in [`.config/rust-e2e.filterset`](../../../.config/rust-e2e.filterset).** The
-`e2e` leg runs that nextest filterset and the other leg runs its complement, both with `-E`, which
-nextest combines with the profile's `default-filter` — so the exclusions below apply to both. A
-test belongs in the file when it **starts a real LiveKit server** (it uses `tddy-livekit-testkit`),
-**drives a live rust-analyzer** (in `tddy-code-restructuring`: it uses the `tests/harness` module, which
-spawns the server over a real cargo workspace) or **execs one of those processes**; a test that builds the same thing in process does not. The
-`tddy-e2e` package is named for its purpose, but most of it — the gRPC and PTY workflow tests — runs
-the presenter in memory, and stays in `Rust tests`; only its LiveKit tests and
-`stdio_remote_control_acceptance` (a real `tddy-coder`) are in the set.
+**Each set is written once: [`.config/rust-e2e.filterset`](../../../.config/rust-e2e.filterset) and
+[`.config/rust-livekit-e2e.filterset`](../../../.config/rust-livekit-e2e.filterset).** The `e2e`
+leg runs the first, the LiveKit leg runs the second, and the unit leg runs the complement of both,
+all with `-E`, which nextest combines with the profile's `default-filter` — so the exclusions below
+apply to every leg and no suite runs twice. A test belongs in the e2e file when it **drives a live
+rust-analyzer** (in `tddy-code-restructuring`: it uses the `tests/harness` module, which spawns the
+server over a real cargo workspace) or **execs a real supervisor, index-daemon, daemon or coder
+process**; a test that builds the same thing in process does not. A test belongs in the LiveKit file
+only through its package: it is a suite in `tddy-livekit-compat-tests` (or the testkit's own suite
+in `tddy-livekit-testkit`) whose job is to prove a LiveKit adapter connects and honours the RPC
+contract. Logic suites never go there — they run in the crate that owns the logic, over a cheap
+transport, in `Rust tests`. The logic suites still converting onto those transports are named in
+`tddy-livekit-compat-tests`' placement test; until they land they stay in the e2e set, which is why
+that leg still starts a shared LiveKit server. The `tddy-e2e` package is named for its purpose, but
+most of it — the gRPC and PTY workflow tests — runs the presenter in memory and stays in
+`Rust tests`; only `stdio_remote_control_acceptance` (a real `tddy-coder`) is in the e2e set.
 
-When you add a test that uses the LiveKit testkit, the restructuring harness or spawns one of those
-binaries, add its binary to the filterset, and — for a LiveKit one — to the LiveKit override of the
-`ci` profile in `.config/nextest.toml`, which bounds a stuck test with `slow-timeout` (see
-[The shared LiveKit server](#the-shared-livekit-server)). The two lists carry the same LiveKit names on purpose; the
-override also covers `tddy-livekit`'s own suites. LiveKit tests run in parallel; none belongs in a
+When you add a test that uses the restructuring harness or spawns one of those binaries, add its
+binary to the e2e filterset. When you add a LiveKit contract suite, add it to
+`tddy-livekit-compat-tests` — the package term in the LiveKit filterset selects it, and the LiveKit
+override of the `ci` profile in `.config/nextest.toml` (which bounds a stuck test with
+`slow-timeout`, see [The shared LiveKit server](#the-shared-livekit-server)) covers the whole
+package. LiveKit tests run in parallel; none belongs in a
 serial test-group (any group with `max-threads = 1`). The script test
 `scripts/nextest-serial-groups.test.ts` checks it, in the `Generated code` job: it fails if a binary that starts the
 LiveKit testkit is put in a serial group, or if a serial group's filter names a binary or package

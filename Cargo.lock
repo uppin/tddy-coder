@@ -12610,7 +12610,6 @@ dependencies = [
  "tddy-coder",
  "tddy-core",
  "tddy-livekit",
- "tddy-livekit-testkit",
  "tddy-rpc",
  "tddy-service",
  "tddy-task",
@@ -12794,6 +12793,7 @@ dependencies = [
  "tddy-model-registry",
  "tddy-pr-stack",
  "tddy-projects",
+ "tddy-room-testkit",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-sandbox-runner",
@@ -12924,7 +12924,6 @@ dependencies = [
  "tddy-daemon-sandbox",
  "tddy-host-service",
  "tddy-livekit",
- "tddy-livekit-testkit",
  "tddy-rpc",
  "tddy-service",
  "tddy-session-activity",
@@ -12972,11 +12971,11 @@ dependencies = [
  "tddy-host-service",
  "tddy-index-daemon",
  "tddy-livekit",
- "tddy-livekit-testkit",
  "tddy-lsp",
  "tddy-model-registry",
  "tddy-pr-stack",
  "tddy-projects",
+ "tddy-room-testkit",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-service",
@@ -13371,7 +13370,6 @@ dependencies = [
  "serial_test",
  "tddy-changeset",
  "tddy-core",
- "tddy-livekit-testkit",
  "tddy-room-client",
  "tddy-rpc",
  "tddy-service",
@@ -13380,6 +13378,49 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+]
+
+[[package]]
+name = "tddy-livekit-compat-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "env_logger",
+ "futures-util",
+ "livekit",
+ "livekit-api",
+ "log",
+ "pretty_assertions",
+ "prost 0.13.5",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
+ "strip-ansi-escapes",
+ "tddy-coder",
+ "tddy-coder-cli",
+ "tddy-core",
+ "tddy-daemon-extensions",
+ "tddy-daemon-kernel",
+ "tddy-daemon-livekit",
+ "tddy-e2e",
+ "tddy-host-service",
+ "tddy-livekit",
+ "tddy-livekit-testkit",
+ "tddy-room-client",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-task",
+ "tddy-terminal-rpc",
+ "tddy-testing-commons",
+ "tddy-tool-engine",
+ "tddy-tui-testkit",
+ "tddy-workflow-recipes",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "uuid",
 ]
 
 [[package]]
@@ -13651,6 +13692,23 @@ dependencies = [
  "async-trait",
  "pretty_assertions",
  "tddy-rpc",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-room-testkit"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "log",
+ "pretty_assertions",
+ "tddy-daemon-extensions",
+ "tddy-daemon-kernel",
+ "tddy-daemon-livekit",
+ "tddy-host-service",
+ "tddy-rpc",
+ "tddy-service",
+ "tempfile",
  "tokio",
 ]
 

@@ -91,7 +91,7 @@ serde_yaml = "0.9"
 # The session-room suite wires the LiveKit plugin as the daemon does (status board for its reporter).
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tddy-livekit = { path = "../tddy-livekit" }
-tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
+tddy-room-testkit = { path = "../tddy-room-testkit" }
 # The session-room exec-tool suite joins a room with the SDK directly; `src/` never names it.
 livekit = "0.7"
 tddy-session-files = { path = "../tddy-session-files" }

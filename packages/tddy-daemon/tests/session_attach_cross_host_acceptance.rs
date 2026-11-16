@@ -1,5 +1,5 @@
 //! Acceptance: cross-host attachments — forwarding to a peer that serves under its **production**
-//! LiveKit identity.
+//! RPC identity.
 //!
 //! PRD: `docs/ft/web/1-WIP/PRD-2026-08-01-session-attach-ui.md`
 //! Changeset: `docs/dev/1-WIP/2026-08-01-session-attach-ui.md`
@@ -12,12 +12,10 @@
 //! on. This suite does, which is why it is separate from
 //! `tests/staging_forwarding_acceptance.rs`.
 //!
-//! These need the LiveKit testkit container (Docker or `LIVEKIT_TESTKIT_WS_URL`); they are
-//! `#[serial]` so they own the container alone.
+//! The room is the in-memory hub (`tddy-room-testkit`), fresh per test; the suites are
+//! `#[serial]` because they share staging roots on disk.
 //!
 //! Single-host behavior lives in `tests/session_attach_staging_scope_acceptance.rs`.
-
-mod daemon_rpc_participant;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -27,11 +25,11 @@ use futures_util::{Stream, StreamExt};
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_daemon_livekit::livekit_peer_discovery::{
-    CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
-};
-use tddy_livekit_testkit::LiveKitTestkit;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
+use tddy_daemon_kernel::peer_forwarding::CommonRoom;
+use tddy_daemon_livekit::livekit_peer_discovery::{AdvertisedSigningKey, CommonRoomPeerRegistry};
+use tddy_host_service::peer_routing::PeerRouting;
+use tddy_room_testkit::{HubEligibleDaemonSource, HubParticipant, HubPeerForwarder, RoomHub};
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::session::{
     session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent,
@@ -49,16 +47,12 @@ use tddy_session_lifecycle::test_util::{wait_until_peer_discovered, TEST_TOKEN};
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-fn room() -> &'static str {
-    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    ROOM.get_or_init(|| LiveKitTestkit::unique_room("attach-cross-host-room"))
-}
+/// The hub is fresh per test, so the room name needs no uniqueness.
+const ATTACH_ROOM: &str = "attach-cross-host-room";
 /// Local daemon A — the host the browser is connected to and stages its bytes on.
 const LOCAL_INSTANCE_ID: &str = "attach-cross-host-local";
 /// Peer daemon B — the host a session may be started on instead.
 const PEER_INSTANCE_ID: &str = "attach-cross-host-peer";
-const LK_API_KEY: &str = "devkey";
-const LK_API_SECRET: &str = "secret";
 /// The forward deadline the silent-peer test configures, in seconds.
 const FORWARD_DEADLINE_SECS: u64 = 2;
 
@@ -79,27 +73,16 @@ fn true_bin() -> &'static str {
     }
 }
 
-fn write_livekit_daemon_yaml(
-    ws_url: &str,
-    daemon_instance_id: &str,
-    os_user: &str,
-) -> (tempfile::TempDir, PathBuf) {
+fn write_daemon_yaml(daemon_instance_id: &str, os_user: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
     let true_path = true_bin();
-    let room = room();
     let yaml = format!(
         r#"
 daemon_instance_id: {daemon_instance_id}
 allowed_tools:
   - path: {true_path}
     label: t
-livekit:
-  enabled: true
-  url: {ws_url}
-  api_key: {LK_API_KEY}
-  api_secret: {LK_API_SECRET}
-  common_room: {room}
 "#
     );
     std::fs::write(&path, yaml).unwrap();
@@ -150,20 +133,24 @@ struct Daemon {
     sessions_base: PathBuf,
     /// Staging base — where bytes staged *to this host* land.
     staging_base: PathBuf,
+    /// The discovery participant: while it lives, this daemon is advertised in the room.
+    _advertisement: HubParticipant,
+    /// Keeps this daemon's registry synced with the room.
+    _attach: tokio::task::JoinHandle<()>,
     _sessions: tempfile::TempDir,
     _staging: tempfile::TempDir,
     _config: tempfile::TempDir,
 }
 
 async fn a_daemon(
-    ws_url: &str,
+    hub: &RoomHub,
     instance_id: &str,
     os_user: &str,
     repo: &Path,
     user_resolver: UserResolver,
     peer_forward_timeout_secs: u64,
 ) -> Daemon {
-    let (config_dir, config_path) = write_livekit_daemon_yaml(ws_url, instance_id, os_user);
+    let (config_dir, config_path) = write_daemon_yaml(instance_id, os_user);
     let mut config = DaemonConfig::load(&config_path).unwrap();
     config.peer_forward_timeout_secs = peer_forward_timeout_secs;
 
@@ -173,18 +160,25 @@ async fn a_daemon(
     let base = sessions.path().to_path_buf();
     let resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
 
-    let config_arc = Arc::new(config.clone());
+    // The discovery participant: bare instance id, publishes the advertisement, serves no RPC.
+    let advertisement =
+        hub.advertise_daemon(ATTACH_ROOM, &config, &AdvertisedSigningKey::default());
     let registry = Arc::new(CommonRoomPeerRegistry::new());
-    let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-    spawn_common_room_discovery_task(
-        config_arc.clone(),
+    let attach = hub.attach_registry(
+        ATTACH_ROOM,
+        &local_instance_id_for_config(&config),
         registry.clone(),
-        room_slot.clone(),
-        Default::default(),
     );
-    let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
-        LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
+    let common_room = CommonRoom::new(
+        HubPeerForwarder::new(
+            hub.clone(),
+            ATTACH_ROOM,
+            rpc_identity(&local_instance_id_for_config(&config)),
+        ),
+        &config,
     );
+    let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> =
+        HubEligibleDaemonSource::new(Arc::new(config.clone()), registry, common_room.clone());
 
     let service = DaemonSessionHost::new(
         config.clone(),
@@ -193,13 +187,7 @@ async fn a_daemon(
         user_resolver,
         None,
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-        tddy_daemon_livekit::peer_routing::peer_routing_over(
-            &config,
-            Some(LiveKitDiscoveryHandles {
-                eligible_daemon_source: eligible,
-                common_room_livekit_room: room_slot,
-            }),
-        ),
+        PeerRouting::new(config.clone(), eligible, Some(common_room)),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
         tddy_session_lifecycle::test_util::builtin_coding_agents(),
@@ -210,6 +198,8 @@ async fn a_daemon(
         service: Arc::new(tddy_daemon_rpc::RpcHandlers::install(service).0),
         sessions_base: sessions.path().to_path_buf(),
         staging_base: staging.path().to_path_buf(),
+        _advertisement: advertisement,
+        _attach: attach,
         _sessions: sessions,
         _staging: staging,
         _config: config_dir,
@@ -219,27 +209,27 @@ async fn a_daemon(
 /// Joins the common room as `daemon-{instance_id}` — the identity a caller must address, and the
 /// only one that answers.
 ///
-/// Which coordinates it serves is [`daemon_rpc_participant::serve_daemon_rpc_participant`]'s answer rather than
-/// this suite's: `StartSession` is still `the pre-unbundle monolithic RPC coordinate`'s, while the staging and
+/// Which coordinates it serves is `daemon_rpc_roster`'s answer rather than this suite's:
+/// `StartSession` is still `the pre-unbundle monolithic RPC coordinate`'s, while the staging and
 /// host-document RPCs a forward addresses became `session_files.SessionFilesService`'s with
 /// `#unbundle` node 6, and a suite-local list is how one of them stops being served.
-async fn serve_rpc_participant(
-    livekit: &LiveKitTestkit,
-    ws_url: &str,
+fn serve_rpc_participant(
+    hub: &RoomHub,
     instance_id: &str,
     service: Arc<DaemonSessionHost>,
-) -> tokio::task::JoinHandle<()> {
-    let token = livekit
-        .generate_token(room(), &rpc_identity(instance_id))
-        .expect("LiveKit token for a daemon's RPC participant");
-    daemon_rpc_participant::serve_daemon_rpc_participant(ws_url, &token, &service).await
+) -> HubParticipant {
+    let participant = hub.join(ATTACH_ROOM, &rpc_identity(instance_id), "");
+    participant.serve(Arc::new(
+        tddy_session_lifecycle::test_util::daemon_rpc_roster(&service),
+    ));
+    participant
 }
 
 /// Blocks until `service` lists `peer_instance_id` as eligible, so a route to it classifies as a
 /// forward rather than an unknown host.
 ///
-/// 45s: two daemons publish their advertisement on the common room's own metadata cadence, and a
-/// cold LiveKit container has to accept both participants first.
+/// 45s: the same budget the room used to get — two daemons publishing and syncing; the hub is
+/// in-memory so this is generous.
 ///
 /// Asked through `host.HostService`, which is where `ListEligibleDaemons` lives since `#unbundle`
 /// node 1, and against this service's own roster — see [`wait_until_peer_discovered`].
@@ -266,9 +256,9 @@ struct TwoDaemons {
     peer_staging_base: PathBuf,
     /// B's sessions/data root — where a session started *on the peer* puts its attachments.
     peer_sessions_base: PathBuf,
-    peer_rpc_run: tokio::task::JoinHandle<()>,
-    _local_rpc_run: tokio::task::JoinHandle<()>,
-    _livekit: LiveKitTestkit,
+    /// B's RPC participant: silencing it is the peer that stopped answering.
+    peer_rpc: HubParticipant,
+    _local_rpc: HubParticipant,
     _repo: tempfile::TempDir,
     _local: Daemon,
     _peer: Daemon,
@@ -283,10 +273,7 @@ async fn two_daemons() -> TwoDaemons {
 
 /// Two daemons whose forwards to each other give up after `peer_forward_timeout_secs`.
 async fn two_daemons_forwarding_within(peer_forward_timeout_secs: u64) -> TwoDaemons {
-    let livekit = LiveKitTestkit::start()
-        .await
-        .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
-    let ws_url = livekit.get_ws_url();
+    let hub = RoomHub::new();
     let os_user = std::env::var("USER").expect("USER required");
 
     let repo_dir = tempfile::tempdir().unwrap();
@@ -296,7 +283,7 @@ async fn two_daemons_forwarding_within(peer_forward_timeout_secs: u64) -> TwoDae
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
 
     let peer = a_daemon(
-        &ws_url,
+        &hub,
         PEER_INSTANCE_ID,
         &os_user,
         repo_dir.path(),
@@ -305,7 +292,7 @@ async fn two_daemons_forwarding_within(peer_forward_timeout_secs: u64) -> TwoDae
     )
     .await;
     let local = a_daemon(
-        &ws_url,
+        &hub,
         LOCAL_INSTANCE_ID,
         &os_user,
         repo_dir.path(),
@@ -314,10 +301,8 @@ async fn two_daemons_forwarding_within(peer_forward_timeout_secs: u64) -> TwoDae
     )
     .await;
 
-    let peer_rpc_run =
-        serve_rpc_participant(&livekit, &ws_url, PEER_INSTANCE_ID, peer.service.clone()).await;
-    let local_rpc_run =
-        serve_rpc_participant(&livekit, &ws_url, LOCAL_INSTANCE_ID, local.service.clone()).await;
+    let peer_rpc = serve_rpc_participant(&hub, PEER_INSTANCE_ID, peer.service.clone());
+    let local_rpc = serve_rpc_participant(&hub, LOCAL_INSTANCE_ID, local.service.clone());
 
     wait_until_discovered(&local.service, PEER_INSTANCE_ID).await;
     wait_until_discovered(&peer.service, LOCAL_INSTANCE_ID).await;
@@ -328,9 +313,8 @@ async fn two_daemons_forwarding_within(peer_forward_timeout_secs: u64) -> TwoDae
         local_staging_base: local.staging_base.clone(),
         peer_staging_base: peer.staging_base.clone(),
         peer_sessions_base: peer.sessions_base.clone(),
-        peer_rpc_run,
-        _local_rpc_run: local_rpc_run,
-        _livekit: livekit,
+        peer_rpc,
+        _local_rpc: local_rpc,
         _repo: repo_dir,
         _local: local,
         _peer: peer,
@@ -470,7 +454,7 @@ async fn a_forwarded_rpc_to_a_peer_that_stopped_answering_fails_within_its_deadl
     // Given — two daemons configured to give up on a peer after 2s, then the peer's RPC
     // participant is taken down
     let env = two_daemons_forwarding_within(FORWARD_DEADLINE_SECS).await;
-    env.peer_rpc_run.abort();
+    env.peer_rpc.set_silenced(true);
 
     // When — A forwards a staging upload to the now-silent peer
     // 20s: ten times the 2s forward deadline. The outer wait exists only to fail the test instead

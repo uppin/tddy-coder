@@ -8,11 +8,13 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use livekit::prelude::RoomOptions;
 use serial_test::serial;
 use tddy_daemon::config::DaemonConfig;
-use tddy_livekit::LiveKitParticipant;
-use tddy_livekit_testkit::LiveKitTestkit;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
+use tddy_daemon_kernel::peer_forwarding::CommonRoom;
+use tddy_daemon_livekit::livekit_peer_discovery::{AdvertisedSigningKey, CommonRoomPeerRegistry};
+use tddy_host_service::peer_routing::PeerRouting;
+use tddy_room_testkit::{HubEligibleDaemonSource, HubPeerForwarder, RoomHub};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::session::{
     DeleteSessionRequest, ListSessionsRequest, SessionService as SessionServiceTrait,
@@ -22,13 +24,9 @@ use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 use tddy_testing_commons::a_session_metadata;
 
-fn remote_acceptance_room() -> &'static str {
-    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    ROOM.get_or_init(|| LiveKitTestkit::unique_room("acceptance-common-room"))
-}
+/// The hub is fresh per test, so the room name needs no uniqueness.
+const ACCEPTANCE_ROOM: &str = "acceptance-common-room";
 const REMOTE_PEER_INSTANCE_ID: &str = "acceptance-daemon-b";
-const REMOTE_LK_API_KEY: &str = "devkey";
-const REMOTE_LK_API_SECRET: &str = "secret";
 const REMOTE_ROUTING_PROJECT_ID: &str = "remote-routing-proj";
 
 /// The identity a daemon serves `the pre-unbundle monolithic RPC coordinate` on — a fixed `daemon-` prefix over
@@ -63,8 +61,7 @@ fn a_fake_tddy_coder_that_outlives_the_startup_grace_period() -> (tempfile::Temp
     (dir, path)
 }
 
-fn write_livekit_daemon_yaml(
-    ws_url: &str,
+fn write_daemon_yaml(
     daemon_instance_id: Option<&str>,
     os_user: &str,
     tddy_coder: &Path,
@@ -75,7 +72,6 @@ fn write_livekit_daemon_yaml(
         .map(|id| format!("daemon_instance_id: {id}\n"))
         .unwrap_or_default();
     let true_path = true_bin();
-    let room = remote_acceptance_room();
     let tddy_coder = tddy_coder.display();
     let yaml = format!(
         r#"
@@ -86,10 +82,10 @@ fn write_livekit_daemon_yaml(
     label: fake tddy-coder
 livekit:
   enabled: true
-  url: {ws_url}
-  api_key: {REMOTE_LK_API_KEY}
-  api_secret: {REMOTE_LK_API_SECRET}
-  common_room: {room}
+  url: ws://127.0.0.1:7880
+  api_key: devkey
+  api_secret: secret
+  common_room: {ACCEPTANCE_ROOM}
 "#
     );
     std::fs::write(&path, yaml).unwrap();
@@ -253,15 +249,12 @@ async fn start_session_unknown_daemon_instance_id_returns_clear_error() {
 }
 
 /// StartSession targeting a discovered peer’s `daemon_instance_id` must return gRPC OK and run on that peer
-/// (LiveKit RPC to the peer daemon’s **ConnectionService**).
+/// (a forwarded RPC to the peer daemon’s **ConnectionService**).
 #[tokio::test]
 #[serial]
 async fn start_session_remote_daemon_instance_id_routes_to_peer() {
-    // Given — two daemons in a common LiveKit room; daemon B (peer) advertises itself
-    let livekit = LiveKitTestkit::start()
-        .await
-        .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
-    let ws_url = livekit.get_ws_url();
+    // Given — two daemons in a common room (the in-memory hub); daemon B (peer) advertises itself
+    let hub = RoomHub::new();
 
     let repo_tmp = tempfile::tempdir().unwrap();
     let repo_path = repo_tmp.path();
@@ -297,10 +290,8 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
 
     // Both hosts allow the stand-in tddy-coder: a tool session's `tool_path` must be one of the
     // daemon's `allowed_tools`.
-    let (_tmp_a, path_a) =
-        write_livekit_daemon_yaml(&ws_url, None, &os_user, &fake_tddy_coder_path);
-    let (_tmp_b, path_b) = write_livekit_daemon_yaml(
-        &ws_url,
+    let (_tmp_a, path_a) = write_daemon_yaml(None, &os_user, &fake_tddy_coder_path);
+    let (_tmp_b, path_b) = write_daemon_yaml(
         Some(REMOTE_PEER_INSTANCE_ID),
         &os_user,
         &fake_tddy_coder_path,
@@ -336,55 +327,35 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     );
 
     // Daemon B's discovery participant: bare instance id, publishes the advertisement A discovers.
-    tddy_daemon::runtime::spawn_common_room_discovery_task(
-        Arc::new(config_b),
-        Arc::new(tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new()),
-        Arc::new(tokio::sync::RwLock::new(None)),
-        Default::default(),
-    );
+    let _b_advertisement =
+        hub.advertise_daemon(ACCEPTANCE_ROOM, &config_b, &AdvertisedSigningKey::default());
 
     // Daemon B's RPC participant: `daemon-{instance_id}`, the identity A's forward addresses.
-    let token_b = livekit
-        .generate_token(
-            remote_acceptance_room(),
-            &rpc_identity(REMOTE_PEER_INSTANCE_ID),
-        )
-        .expect("LiveKit token for peer daemon");
     let service_b = Arc::new(service_b);
     let connection_server =
         tddy_service::SessionServiceServer::new(service_b.session_lifecycle_service());
-    let participant = LiveKitParticipant::connect(
-        &ws_url,
-        &token_b,
-        connection_server,
-        RoomOptions::default(),
-        None,
-        None,
-    )
-    .await
-    .expect("peer daemon joins common room with ConnectionService RPC");
-    let peer_run = tokio::spawn(async move { participant.run().await });
+    let _b_rpc = hub.join(ACCEPTANCE_ROOM, &rpc_identity(REMOTE_PEER_INSTANCE_ID), "");
+    _b_rpc.serve(Arc::new(connection_server));
 
     let sessions_a = tempfile::tempdir().unwrap();
     let base_a = sessions_a.path().to_path_buf();
     let resolver_a: SessionsBaseResolver = Arc::new(move |_| Some(base_a.clone()));
-    let config_arc = Arc::new(config_a.clone());
-    let registry =
-        Arc::new(tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new());
-    let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-    tddy_daemon::runtime::spawn_common_room_discovery_task(
-        config_arc.clone(),
+    let registry = Arc::new(CommonRoomPeerRegistry::new());
+    let _attach_a = hub.attach_registry(
+        ACCEPTANCE_ROOM,
+        &local_instance_id_for_config(&config_a),
         registry.clone(),
-        room_slot.clone(),
-        Default::default(),
     );
-    let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
-        tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
-            config_arc,
-            registry,
-            room_slot.clone(),
+    let common_room_a = CommonRoom::new(
+        HubPeerForwarder::new(
+            hub.clone(),
+            ACCEPTANCE_ROOM,
+            rpc_identity(&local_instance_id_for_config(&config_a)),
         ),
+        &config_a,
     );
+    let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> =
+        HubEligibleDaemonSource::new(Arc::new(config_a.clone()), registry, common_room_a.clone());
     // The readiness probe below asks *which peers are visible*, which is `host.HostService`'s
     // question since `#unbundle` node 1. Built over the same eligible source the connection service
     // routes on, so "the peer is discoverable" and "StartSession can reach it" are one fact.
@@ -401,15 +372,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         user_resolver,
         None,
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-        tddy_daemon_livekit::peer_routing::peer_routing_over(
-            &config_a,
-            Some(
-                tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles {
-                    eligible_daemon_source: eligible,
-                    common_room_livekit_room: room_slot,
-                },
-            ),
-        ),
+        PeerRouting::new(config_a.clone(), eligible, Some(common_room_a)),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
         tddy_session_lifecycle::test_util::builtin_coding_agents(),
@@ -475,8 +438,6 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         &inner.session_id,
     );
     assert_eq!(inner.livekit_server_identity, expected_identity);
-
-    peer_run.abort();
 }
 
 /// SessionEntry.daemon_instance_id must be populated for listed sessions.
