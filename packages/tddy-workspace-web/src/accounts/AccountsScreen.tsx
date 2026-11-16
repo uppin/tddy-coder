@@ -15,12 +15,9 @@ import { useState } from "react";
 import { Button } from "tddy-ui-web";
 import { ProviderAccountDefaultsControl } from "./ProviderAccountDefaultsControl";
 import { ProviderModels } from "./ProviderModels";
-import {
-  ConnectProviderAccountForm,
-  PROVIDER_PRESET_OPTIONS,
-  type ConnectProviderAccountInput,
-} from "./ConnectProviderAccountForm";
-import { ConnectCoderAccountForm, type ConnectCoderAccountInput } from "./ConnectCoderAccountForm";
+import { type ConnectProviderAccountInput } from "./ConnectProviderAccountForm";
+import { type ConnectCoderAccountInput } from "./ConnectCoderAccountForm";
+import { ConnectApiKey, ConnectCoder } from "./ConnectAccountControls";
 
 /**
  * `#keyring` 6/9's aggregate sync standing for one account, worst peer first. `null` means
@@ -410,85 +407,6 @@ function AccountRowView({
         </Button>
       )}
     </li>
-  );
-}
-
-/** "Connect Coder" and, once pressed, its form; closes when the daemon added the account. */
-function ConnectCoder({
-  onConnect,
-  error,
-}: {
-  onConnect: NonNullable<AccountsScreenProps["onConnectCoderAccount"]>;
-  error: string | null;
-}) {
-  const [connecting, setConnecting] = useState(false);
-  const [pending, setPending] = useState(false);
-  return (
-    <div>
-      <Button
-        size="sm"
-        variant="outline"
-        data-testid="accounts-connect-coder"
-        onClick={() => setConnecting(true)}
-      >
-        Connect Coder
-      </Button>
-      {connecting ? (
-        <ConnectCoderAccountForm
-          pending={pending}
-          error={error}
-          onCancel={() => setConnecting(false)}
-          onSubmit={(input) => {
-            setPending(true);
-            onConnect(input)
-              .then((added) => {
-                if (added) setConnecting(false);
-              })
-              .finally(() => setPending(false));
-          }}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-/** "Connect API key" and, once pressed, its form; closes when the daemon added the account. */
-function ConnectApiKey({
-  onConnect,
-  error,
-}: {
-  onConnect: NonNullable<AccountsScreenProps["onConnectProviderAccount"]>;
-  error: string | null;
-}) {
-  const [connecting, setConnecting] = useState(false);
-  const [pending, setPending] = useState(false);
-  return (
-    <div className="mb-4">
-      <Button
-        size="sm"
-        variant="outline"
-        data-testid="accounts-connect-api-key"
-        onClick={() => setConnecting(true)}
-      >
-        Connect API key
-      </Button>
-      {connecting ? (
-        <ConnectProviderAccountForm
-          presets={PROVIDER_PRESET_OPTIONS}
-          pending={pending}
-          error={error}
-          onCancel={() => setConnecting(false)}
-          onSubmit={(input) => {
-            setPending(true);
-            onConnect(input)
-              .then((added) => {
-                if (added) setConnecting(false);
-              })
-              .finally(() => setPending(false));
-          }}
-        />
-      ) : null}
-    </div>
   );
 }
 

@@ -58,12 +58,12 @@ Tests are written first and run per touched package; the whole-workspace result 
 
 ## Acceptance Criteria
 
-- [ ] A valid URL and token store a `coder` account whose subject is the deployment's username
-- [ ] The account lists under the Coder group with its label and subject, and no secret
-- [ ] Each refusal names its cause and stores nothing
-- [ ] Reconnecting the same deployment and user replaces the token and keeps the account id and label
-- [ ] A locked or missing vault is reported as such, not as an empty list
-- [ ] The Accounts screen connects a Coder account and shows a refusal beside the form
+- [x] A valid URL and token store a `coder` account whose subject is the deployment's username
+- [x] The account lists under the Coder group with its label and subject, and no secret
+- [x] Each refusal names its cause and stores nothing
+- [x] Reconnecting the same deployment and user replaces the token and keeps the account id and label
+- [x] A locked or missing vault is reported as such, not as an empty list
+- [x] The Accounts screen connects a Coder account and shows a refusal beside the form
 
 ## References
 

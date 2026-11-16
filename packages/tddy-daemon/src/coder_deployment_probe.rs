@@ -50,16 +50,7 @@ impl CoderDeploymentProbe for HttpCoderDeploymentProbe {
             .await
             .unwrap_or_else(|error| format!("(its body could not be read: {error})"));
         if status == reqwest::StatusCode::UNAUTHORIZED {
-            let message = serde_json::from_str::<serde_json::Value>(&body)
-                .ok()
-                .and_then(|value| {
-                    value
-                        .get("message")
-                        .and_then(|message| message.as_str())
-                        .map(str::to_string)
-                })
-                .unwrap_or_else(|| body.trim().to_string());
-            return Err(CoderProbeError::Rejected(message));
+            return Err(CoderProbeError::Rejected(rejection_message(&body)));
         }
         if !status.is_success() {
             let body: String = body.trim().chars().take(REFUSAL_BODY_LIMIT).collect();
@@ -76,6 +67,19 @@ impl CoderDeploymentProbe for HttpCoderDeploymentProbe {
             username: user.username,
         })
     }
+}
+
+/// The deployment's reason for refusing a token: its JSON `message`, or the body itself.
+fn rejection_message(body: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("message")
+                .and_then(|message| message.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| body.trim().to_string())
 }
 
 #[derive(Deserialize)]

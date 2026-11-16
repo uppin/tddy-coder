@@ -254,16 +254,11 @@ impl CoderAccounts {
         let subject = (self.subject_of)(session_token)
             .ok_or(CoderAccountError::Vault(AccountsError::NoSuchSession))?;
         let vault = self.open_vault(&subject)?;
-        let user =
-            self.probe
-                .whoami(&deployment_url, &token)
-                .await
-                .map_err(|error| match error {
-                    CoderProbeError::Rejected(reason) => CoderAccountError::Rejected(reason),
-                    CoderProbeError::Unreachable(reason) | CoderProbeError::Unusable(reason) => {
-                        CoderAccountError::Unreachable(reason)
-                    }
-                })?;
+        let user = self
+            .probe
+            .whoami(&deployment_url, &token)
+            .await
+            .map_err(account_error_of_probe)?;
         let mut account = CoderAccount::for_user(deployment_url, &user, label);
         let held = vault
             .list(None)
@@ -275,13 +270,7 @@ impl CoderAccounts {
         {
             account.label = existing.label;
         }
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_secs())
-            .map_err(|error| {
-                CoderAccountError::Vault(AccountsError::Unavailable(error.to_string()))
-            })?;
-        let record = account.into_record(token, now);
+        let record = account.into_record(token, now_unix_seconds()?);
         vault
             .put(record.clone())
             .map_err(|error| CoderAccountError::Vault(refusal_of(&subject, error)))?;
@@ -332,6 +321,25 @@ impl CoderAccounts {
             )),
         }
     }
+}
+
+/// A probe refusal as the connect's own error: a rejected token stays a rejection, and a
+/// deployment that cannot be reached — or that answered as something else — is unavailable.
+fn account_error_of_probe(error: CoderProbeError) -> CoderAccountError {
+    match error {
+        CoderProbeError::Rejected(reason) => CoderAccountError::Rejected(reason),
+        CoderProbeError::Unreachable(reason) | CoderProbeError::Unusable(reason) => {
+            CoderAccountError::Unreachable(reason)
+        }
+    }
+}
+
+/// Seconds since the Unix epoch, for the stored record's `updated_at`.
+fn now_unix_seconds() -> Result<u64, CoderAccountError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .map_err(|error| CoderAccountError::Vault(AccountsError::Unavailable(error.to_string())))
 }
 
 impl<S> AccountsServiceImpl<S> {
