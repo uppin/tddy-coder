@@ -451,7 +451,7 @@ async fn an_ssh_slot_write_that_never_returns_refuses_the_start_after_its_deadli
             refusal.code,
             refusal
                 .message
-                .contains("on ssh target buildbox: no answer within 60s"),
+                .contains("ssh target buildbox: no answer within 60s"),
             daemon.spawn_marker.exists(),
         ),
         (Code::DeadlineExceeded, true, false)

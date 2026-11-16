@@ -8,7 +8,8 @@ knows what a session, changeset or workflow is — the session-aware layer built
 [`tddy_session_worktree::worktree`](../../tddy-session-worktree/docs/architecture.md) (also
 `tddy_core::worktree`), which re-exports this crate with `pub use tddy_git::*;`.
 
-The crate depends on no workspace crate, only `log`. All modules are private and glob re-exported
+The crate depends on no workspace crate but the `tddy-remote-shell` port (below), plus `log`
+and `async-trait`. All modules are private and glob re-exported
 at the root, so every item is `tddy_git::<item>` regardless of which module holds it.
 
 ## Modules
