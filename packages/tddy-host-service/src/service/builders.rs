@@ -90,6 +90,7 @@ impl HostServiceImpl {
             // A daemon that hands in neither answers every Coder listing FAILED, saying so.
             coder_credentials: Arc::new(crate::coder_workspaces::CoderNotWired),
             coder_workspaces: Arc::new(crate::coder_workspaces::CoderNotWired),
+            derived_host_sources: Vec::new(),
             host_cpu_interval: HOST_CPU_INTERVAL,
             host_disk_interval: HOST_DISK_INTERVAL,
             user_resolver,
@@ -185,6 +186,16 @@ impl HostServiceImpl {
         workspaces: Arc<dyn crate::coder_workspaces::CoderWorkspaceSource>,
     ) -> Self {
         self.coder_workspaces = workspaces;
+        self
+    }
+
+    /// Register an extra kind of derived host, asked after the SSH-config source.
+    #[must_use]
+    pub fn with_derived_host_source(
+        mut self,
+        source: Arc<dyn crate::derived_hosts::DerivedHostSource>,
+    ) -> Self {
+        self.derived_host_sources.push(source);
         self
     }
 

@@ -17,6 +17,7 @@ import { aDisconnectedRoom } from "tddy-livekit-web/testkit";
 import { DaemonSelector } from "../../src/components/shell/DaemonSelector";
 import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/app/rpc/selectedDaemon";
+import { AuthProvider } from "../../src/app/auth/authProvider";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 import { byTestId } from "../support/testIds";
 import { useSelectedDaemon } from "tddy-client-web";
@@ -31,15 +32,17 @@ const DEV: DaemonHost = { instanceId: "dev", label: "dev (this daemon)" };
 function RoomDisconnectHarness() {
   const [daemons, setDaemons] = useState<DaemonHost[]>([DEV]);
   return (
-    <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={daemons} servingInstanceId="dev">
-      <button data-testid="simulate-disconnect" onClick={() => setDaemons([])}>
-        disconnect
-      </button>
-      <button data-testid="simulate-reconnect" onClick={() => setDaemons([DEV])}>
-        reconnect
-      </button>
-      <SelectedDaemonReadout />
-    </SelectedDaemonProvider>
+    <AuthProvider>
+      <SelectedDaemonProvider room={aDisconnectedRoom()} daemons={daemons} servingInstanceId="dev">
+        <button data-testid="simulate-disconnect" onClick={() => setDaemons([])}>
+          disconnect
+        </button>
+        <button data-testid="simulate-reconnect" onClick={() => setDaemons([DEV])}>
+          reconnect
+        </button>
+        <SelectedDaemonReadout />
+      </SelectedDaemonProvider>
+    </AuthProvider>
   );
 }
 

@@ -14,6 +14,7 @@
  */
 
 import type { ConnectionStatus } from "../connections/types";
+import type { SessionTarget } from "../gen/session_pb";
 
 /**
  * A host this page could select, as some source described it.
@@ -39,6 +40,21 @@ export interface HostDescriptor {
   /** What this host's workspace jail confines (`sandboxed_codebase`). Absent = the host does not
    *  serve the sandboxed-codebase placement at all. */
   readonly sandboxedCodebase?: { readonly confinesFilesystem: boolean };
+
+  /**
+   * The daemon this host is *derived* from — the `hostId` of the daemon that reaches it through a
+   * remote shell (`DerivedHost.parent_instance_id`). Absent on a daemon.
+   *
+   * A derived host has no connection of its own: every call about it, and every session on it, goes
+   * to its parent, so a `HostConnection` for it is resolved by this id rather than by `hostId`.
+   */
+  readonly parent?: string;
+
+  /**
+   * What a start addressed at this host carries as `StartSessionRequest.target`, with the parent as
+   * `daemonInstanceId` (`DerivedHost.target`). Absent on a daemon, whose sessions run on itself.
+   */
+  readonly target?: SessionTarget;
 }
 
 /**
@@ -50,7 +66,7 @@ export interface HostDescriptor {
  * feature nobody asked for.
  */
 export interface HostDirectorySource {
-  /** Stable identifier (`"livekit"`, `"serving"`, later `"local-ipc"`). */
+  /** Stable identifier (`"livekit"`, `"serving"`, `"derived"`, later `"local-ipc"`). */
   readonly id: string;
 
   readonly status: ConnectionStatus;

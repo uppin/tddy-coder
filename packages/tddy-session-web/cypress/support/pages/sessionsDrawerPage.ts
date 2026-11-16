@@ -13,6 +13,7 @@ import {
   sessionsDrawerItemTooltip,
   sessionsDrawerItemHost,
   sessionsDrawerItemCodebaseHost,
+  sessionsDrawerItemDerivedHost,
   sessionsDrawerItemBranch,
   sessionsDetailResumeBtn,
   sessionsDetailDeleteBtn,
@@ -181,6 +182,18 @@ export const sessionsDrawerPage = {
   /** The row carries no owning-host badge — its agent runs on the selected host. */
   expectNoOwningHostBadge(sessionId: string) {
     byTestId(sessionsDrawerItemHost(sessionId)).should("not.exist");
+  },
+
+  /**
+   * The derived-host badge — present only on a session whose agent runs on a machine its daemon
+   * reaches through a remote shell (`SessionEntry.target`), naming that machine.
+   */
+  derivedHostBadge: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsDrawerItemDerivedHost(sessionId), { timeout: 5000, ...options }),
+
+  /** The row's agent runs on its daemon's own host, so it names no derived host. */
+  expectNoDerivedHostBadge(sessionId: string) {
+    byTestId(sessionsDrawerItemDerivedHost(sessionId)).should("not.exist");
   },
 
   /**

@@ -24,6 +24,7 @@ export * from "./connections/useHasCapability";
 export * from "./capability/capabilityAvailability";
 export * from "./capability/useCapabilityAvailability";
 export * from "./hostDirectory/daemonHost";
+export * from "./hostDirectory/derivedSource";
 export * from "./hostDirectory/types";
 export * from "./hostDirectory/useHostDirectory";
 export * from "./rpcFailure";

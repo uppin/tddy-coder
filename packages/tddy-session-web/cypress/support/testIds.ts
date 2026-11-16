@@ -848,6 +848,14 @@ export const sessionsDrawerItemHost = (sessionId: string) =>
   `sessions-drawer-item-host-${sessionId}`;
 
 /**
+ * `[data-testid="sessions-drawer-item-derived-host-<sessionId>"]` — the badge naming the derived
+ * host a session's agent runs on (`SessionEntry.target`): a machine its daemon reaches through a
+ * remote shell. Absent on a session whose agent runs on the daemon's own host.
+ */
+export const sessionsDrawerItemDerivedHost = (sessionId: string) =>
+  `sessions-drawer-item-derived-host-${sessionId}`;
+
+/**
  * `[data-testid="sessions-drawer-item-codebase-host-<sessionId>"]` — codebase-host badge on a split
  * session, whose worktree lives on a different daemon than the one running its agent. Absent for
  * co-located sessions. See docs/ft/daemon/remote-managed-worktree.md.

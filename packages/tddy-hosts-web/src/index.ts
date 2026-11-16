@@ -10,6 +10,7 @@ export { HostRowTooling } from "./HostRowTooling";
 export { HostRowToolingCell } from "./HostRowToolingCell";
 export { HostRowSshAgent } from "./HostRowSshAgent";
 export { HostRowSshConfig } from "./HostRowSshConfig";
+export { DerivedHostRows, type DerivedHostRowsProps } from "./DerivedHostRows";
 export { HostRowRemoteDesktop } from "./HostRowRemoteDesktop";
 export { HostStatsFooter, type HostStatsFooterProps } from "./HostStatsFooter";
 export { CpuCoresIndicator } from "./CpuCoresIndicator";

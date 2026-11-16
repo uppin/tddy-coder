@@ -53,6 +53,9 @@ Each `SessionDrawerItem` shows:
 - A **mark** badge (`sessions-drawer-item-mark-<id>`) on a session an orchestrator marked
   `paused`, `blocked` or `done` with `SetSessionMark`, its note as the hover text. An unmarked
   session shows none
+- The derived host a session runs on, when its entry carries a target (`SessionEntry.target`):
+  the machine reached through the session's daemon, named on the item
+  (`sessions-drawer-item-derived-host-<id>`)
 
 The New-session form offers a **Session orchestrator** switch (`create-session-orchestrator-toggle`)
 for an agent whose spec declares `project_home_main`. On, the start asks for `session_role:

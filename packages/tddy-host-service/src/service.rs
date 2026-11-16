@@ -18,10 +18,11 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::host::{
     AddHostKeyRequest, AddHostKeyResponse, AnswerHostPromptRequest, AnswerHostPromptResponse,
     GetHostToolingRequest, GetHostToolingResponse, HostService, ListCoderWorkspacesRequest,
-    ListCoderWorkspacesResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
-    ListHostKeyCandidatesRequest, ListHostKeyCandidatesResponse, ListKnownHostsRequest,
-    ListKnownHostsResponse, ListSshConfigHostsRequest, ListSshConfigHostsResponse,
-    StreamHostPromptsRequest, StreamHostStatsRequest,
+    ListCoderWorkspacesResponse, ListDerivedHostsRequest, ListDerivedHostsResponse,
+    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListHostKeyCandidatesRequest,
+    ListHostKeyCandidatesResponse, ListKnownHostsRequest, ListKnownHostsResponse,
+    ListSshConfigHostsRequest, ListSshConfigHostsResponse, StreamHostPromptsRequest,
+    StreamHostStatsRequest,
 };
 use tddy_task::IdleTimeoutTracker;
 
@@ -105,6 +106,9 @@ pub struct HostServiceImpl {
     /// Asks a Coder deployment for an account's workspaces. Injected because the HTTP client is
     /// the daemon's.
     coder_workspaces: Arc<dyn CoderWorkspaceSource>,
+    /// Extra derived-host sources beyond the SSH-config one the handler builds from this
+    /// service's own files, in the order they are asked. Empty until a later kind registers.
+    derived_host_sources: Vec<Arc<dyn crate::derived_hosts::DerivedHostSource>>,
     host_cpu_interval: Duration,
     host_disk_interval: Duration,
 }
@@ -241,6 +245,17 @@ impl HostService for HostServiceImpl {
         self.list_coder_workspaces_impl(request).await
     }
 
+    /// The hosts this daemon reaches through a remote shell: its OS user's SSH config aliases.
+    ///
+    /// Routed like [`Self::list_ssh_config_hosts`], and honest the same way: a daemon that reaches
+    /// none is OK and empty; an SSH config that cannot be read is FAILED with its reason.
+    async fn list_derived_hosts(
+        &self,
+        request: Request<ListDerivedHostsRequest>,
+    ) -> Result<Response<ListDerivedHostsResponse>, Status> {
+        self.list_derived_hosts_impl(request).await
+    }
+
     /// Stream host telemetry for the selected daemon. Authenticates `session_token`, then spawns a
     /// sampling task that emits one `HostStatsEvent` immediately (both CPU and disk), then refreshes
     /// CPU and disk on two independent cadences, pushing an event carrying the latest CPU and disk
@@ -262,3 +277,5 @@ mod prompts;
 mod host_keys;
 
 mod coder_workspaces;
+
+mod derived_hosts;

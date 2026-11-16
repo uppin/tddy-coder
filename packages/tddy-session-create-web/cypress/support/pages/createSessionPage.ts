@@ -29,6 +29,37 @@ export const createSessionPage = {
   },
 
   // ---------------------------------------------------------------------------
+  // Derived hosts — machines a daemon reaches through a remote shell (#remote-shell 5/7)
+  // ---------------------------------------------------------------------------
+
+  /** The daemons the Host select offers directly — its top-level options, in option order. */
+  daemonHostOptionValues: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .hostSelect()
+      .children("option")
+      .then(($opts) => [...$opts].map((el) => (el as HTMLOptionElement).value)),
+
+  /** The group of the Host select holding the hosts derived from `parentInstanceId`. */
+  derivedHostGroup: (parentInstanceId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(ids.createSessionHostDerivedGroup(parentInstanceId), { timeout: 5000, ...options }),
+
+  /** The derived hosts offered under `parentInstanceId`, as `[value, caption]`, in option order. */
+  derivedHostOptions: (parentInstanceId: string): Cypress.Chainable<[string, string][]> =>
+    createSessionPage
+      .derivedHostGroup(parentInstanceId)
+      .find("option")
+      .then(($opts) =>
+        [...$opts].map((el): [string, string] => [
+          (el as HTMLOptionElement).value,
+          (el.textContent ?? "").trim(),
+        ]),
+      ),
+
+  /** The note shown while a derived host is chosen — where its prompts are answered. */
+  derivedHostNote: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(ids.CREATE_SESSION_DERIVED_HOST_NOTE, { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
   // Agent selector — the agent a tool session is started as, fanned out across hosts
   // ---------------------------------------------------------------------------
 

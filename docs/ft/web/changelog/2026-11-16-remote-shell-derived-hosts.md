@@ -1,0 +1,5 @@
+# 2026-11-16 — SSH hosts as hosts derived from a daemon
+
+The machines a daemon can reach through a remote shell appear as hosts of their own. In the Host field when starting a session, the SSH config aliases of a daemon are grouped under that daemon; choosing one starts the session on the parent daemon with the derived host as its target, and the form says permission prompts are answered in the terminal. On the Hosts screen, derived hosts are listed beneath their parent's row, marked `SSH`, without the telemetry or tooling cells only a daemon can fill; a daemon that cannot list shows the failure on its own row. A session running on a derived host names it in the session drawer. Derived hosts are listed live and offered only while their parent is online.
+
+PR [#919](https://github.com/uppin/tddy-coder/pull/919) (`#remote-shell` 5/7). See [hosts-screen.md](../hosts-screen.md), [create-session-package.md](../create-session-package.md) and [client-ports-package.md](../client-ports-package.md).

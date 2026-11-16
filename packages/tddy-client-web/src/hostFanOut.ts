@@ -141,6 +141,8 @@ export function useHostFanOut<C, T>(
   // per actual change. `\n` cannot occur in a daemon instance id (they are LiveKit participant
   // identity segments).
   const peerIdsKey = daemons
+    // A derived host is read through its parent, which is already in this list.
+    .filter((d) => !d.parent)
     .map((d) => d.instanceId)
     .filter((id) => id !== "" && id !== homeInstanceId)
     .join("\n");

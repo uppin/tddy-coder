@@ -25,6 +25,11 @@ The consumer hooks keep their pre-split names (`useDaemonClient`, `useHostClient
   wiring.
 - A hook used outside its provider fails loudly, naming the provider; there is no silent default.
 - The package imports neither `livekit-client` nor `tddy-web` (enforced by a boundary test).
+- The host directory has a `derived` source: every connected daemon is asked (`ListDerivedHosts`)
+  for the hosts it reaches through a remote shell, and each answer becomes a `HostDescriptor`
+  carrying `parent` and `target`. A derived host resolves its client through its parent's
+  connection; an offline parent's hosts are not offered, and one parent's failed listing does not
+  hide another's hosts.
 
 ## Acceptance criteria
 
@@ -33,5 +38,8 @@ The consumer hooks keep their pre-split names (`useDaemonClient`, `useHostClient
       HTTP services with no `tddy-web` provider in the tree.
 - [x] `tddy-client-web` imports neither `livekit-client` nor `tddy-web`.
 - [x] `tddy-web` behaves as before.
+- [x] The `derived` source emits each connected daemon's derived hosts with their parent and
+      target, offers nothing for an offline parent, and keeps one parent's failure from hiding
+      another's hosts (`derivedSource.test.ts`).
 
 Technical reference: [packages/tddy-client-web/docs/README.md](../../../packages/tddy-client-web/docs/README.md).

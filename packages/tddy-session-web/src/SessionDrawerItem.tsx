@@ -31,6 +31,8 @@ interface SessionDrawerItemProps {
 
 export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLabel, codebaseHostLabel, sessionMetadata, selected, onToggleSelect }: SessionDrawerItemProps) {
   const label = sessionDrawerLabel(session);
+  const derivedHostLabel =
+    session.target?.kind.case === "ssh" ? session.target.kind.value.configHost : undefined;
 
   return (
     <Tooltip>
@@ -79,6 +81,16 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
               className="min-w-0 max-w-20 truncate text-[10px] leading-none px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
             >
               {hostLabel}
+            </span>
+          )}
+          {/* Derived-host badge — the machine the agent runs on, reached through its daemon. */}
+          {derivedHostLabel && (
+            <span
+              data-testid={`sessions-drawer-item-derived-host-${session.sessionId}`}
+              title={derivedHostLabel}
+              className="min-w-0 max-w-20 truncate text-[10px] leading-none px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+            >
+              {derivedHostLabel}
             </span>
           )}
           {/* Codebase-host badge — outlined rather than filled so "the agent runs here" and "the

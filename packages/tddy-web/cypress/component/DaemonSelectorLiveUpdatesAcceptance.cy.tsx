@@ -20,6 +20,7 @@ import React from "react";
 import { DaemonSelector } from "../../src/components/shell/DaemonSelector";
 import type { DaemonHost } from "tddy-client-web";
 import { SelectedDaemonProvider } from "../../src/app/rpc/selectedDaemon";
+import { AuthProvider } from "../../src/app/auth/authProvider";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 import { byTestId } from "../support/testIds";
 import { aFakeCommonRoom } from "tddy-livekit-web/testkit";
@@ -61,9 +62,11 @@ it("lists a daemon whose presence is re-synced when the common room reconnects",
   // precondition unreachable and the subject unobservable.
   const commonRoom = aFakeCommonRoom();
   cy.mount(
-    <SelectedDaemonProvider room={commonRoom.room}>
-      <DaemonSelectorReadout />
-    </SelectedDaemonProvider>,
+    <AuthProvider>
+      <SelectedDaemonProvider room={commonRoom.room}>
+        <DaemonSelectorReadout />
+      </SelectedDaemonProvider>
+    </AuthProvider>,
   );
   daemonSelectorPage.expectEmpty();
 
@@ -82,10 +85,12 @@ it("re-lists a daemon that dropped and rejoined across a common-room reconnect",
   // re-sync is observable.
   const commonRoom = aFakeCommonRoom().withDaemons([UDOO]);
   cy.mount(
-    <SelectedDaemonProvider room={commonRoom.room}>
-      <DaemonSelectorReadout />
-      <DerivedDaemonIdsReadout />
-    </SelectedDaemonProvider>,
+    <AuthProvider>
+      <SelectedDaemonProvider room={commonRoom.room}>
+        <DaemonSelectorReadout />
+        <DerivedDaemonIdsReadout />
+      </SelectedDaemonProvider>
+    </AuthProvider>,
   );
   byTestId("derived-daemon-ids").should("have.text", "udoo");
 

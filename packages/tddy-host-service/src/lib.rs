@@ -8,6 +8,7 @@
 
 pub mod askpass;
 pub mod coder_workspaces;
+pub mod derived_hosts;
 pub mod github_cli;
 pub mod host_desktop_targets;
 pub mod host_keypair;
@@ -40,6 +41,8 @@ pub use stream::{MpscHostPromptStream, MpscHostStatsStream};
 
 // The handler tests that came out of `connection_service` with the code they exercise. They drive
 // `HostServiceImpl` through the `host.HostService` trait, which is what the service now answers on.
+#[cfg(test)]
+mod derived_hosts_handler_tests;
 #[cfg(all(test, unix))]
 mod github_cli_unit_tests;
 #[cfg(test)]

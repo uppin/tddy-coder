@@ -17,6 +17,7 @@ import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import type { ConnectionProviderRegistry } from "../connections/registry";
 import type { ConnectionStatus, HostConnection } from "../connections/types";
+import type { SessionTarget } from "../gen/session_pb";
 import { hostLabelOf } from "../hostLabel";
 
 /** A daemon a client can be built for, as the host directory lists it. */
@@ -29,6 +30,10 @@ export interface DaemonHost {
   maxAttachmentBytes?: number;
   /** What this host's workspace jail confines. Absent = the sandboxed-codebase placement is not served. */
   sandboxedCodebase?: { confinesFilesystem: boolean };
+  /** The daemon this host is derived from (`HostDescriptor.parent`). Absent on a daemon. */
+  parent?: string;
+  /** What a start on this host carries as its target (`HostDescriptor.target`). Absent on a daemon. */
+  target?: SessionTarget;
 }
 
 /** The daemon selection every daemon-scoped hook resolves against. */
@@ -98,16 +103,26 @@ export function useHostConnector(): (hostId: string | null) => HostConnection | 
   // Compiler memoises on what a body reads, so it would drop `revision`, keep the resolver from before
   // the common room joined, and leave every `useHostConnection` returning `null` for the page's life.
   "use no memo";
-  const { connections: registry, isHostReady: isReady } = useClientsPort();
+  const { connections: registry, isHostReady: isReady, selectedDaemon } = useClientsPort();
   const subscribe = useCallback((listener: () => void) => registry.subscribe(listener), [registry]);
   const revision = useSyncExternalStore(subscribe, () => registry.revision());
+  // A derived host has no wire of its own: its connection is its parent's.
+  const parentKey = JSON.stringify(
+    selectedDaemon.daemons.map((d) => [d.instanceId, d.parent ?? null]),
+  );
   // `revision` is a dependency, not an input — the resolver reads the registry's providers at the
   // moment it is called. Re-deriving on it is what changes this function's identity when a wire
   // registers, and so what re-runs the effects and callbacks that hold it.
   return useMemo(
-    () => (hostId: string | null) =>
-      hostId && (isReady?.(hostId) ?? true) ? registry.connectHost(hostId) : null,
-    [registry, revision, isReady],
+    () => (hostId: string | null) => {
+      if (!hostId) return null;
+      const parents = new Map(
+        (JSON.parse(parentKey) as [string, string | null][]).map(([id, parent]) => [id, parent]),
+      );
+      const resolved = parents.get(hostId) ?? hostId;
+      return (isReady?.(resolved) ?? true) ? registry.connectHost(resolved) : null;
+    },
+    [registry, revision, isReady, parentKey],
   );
 }
 

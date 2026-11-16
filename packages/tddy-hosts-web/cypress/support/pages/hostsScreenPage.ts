@@ -1,3 +1,4 @@
+import { derivedHostRowTestId, derivedHostsFailureTestId } from "../../../src/DerivedHostRows";
 import { TEST_IDS, byTestId } from "../testIds";
 
 const ROW_TEST_ID_PREFIX = "hosts-row-";
@@ -338,4 +339,36 @@ export const hostToolingCellPage = {
       .should("match", /could not (be )?read/i);
     hostToolingPage.section(instanceId).should("not.exist");
   },
+};
+
+/**
+ * Derived-host rows — the hosts a daemon reaches through a remote shell, listed beneath its own
+ * row. Added by `#remote-shell 5/7`.
+ *
+ * A derived host's id is `<parent>/ssh/<alias>`; its row's test id is built by the component's own
+ * `derivedHostRowTestId`, so the selector and the element cannot drift apart.
+ */
+export const derivedHostsPage = {
+  row: (derivedHostId: string) => byTestId(derivedHostRowTestId(derivedHostId)),
+  /** What the row says its host is reached through — `SSH` for an SSH config alias. */
+  kind: (derivedHostId: string) => byTestId(`${derivedHostRowTestId(derivedHostId)}-kind`),
+  /** The row saying a daemon could not list the hosts it reaches, and why. */
+  listingFailure: (parentInstanceId: string) =>
+    byTestId(derivedHostsFailureTestId(parentInstanceId)),
+  /**
+   * The test ids of every row of the Hosts table, daemons and derived hosts alike, in render order.
+   *
+   * Built from queries only, so an assertion chained onto it is retried until the screen settles.
+   */
+  tableRowTestIds: () =>
+    hostsScreenPage
+      .rows()
+      .invoke("toArray")
+      .invoke("map", (el: HTMLElement) => el.getAttribute("data-testid") ?? ""),
+  /** The daemon-only cells inside a derived host's row: telemetry and tooling. */
+  daemonOnlyCells: (derivedHostId: string) =>
+    derivedHostsPage.row(derivedHostId).find("[data-testid$='-telemetry'], [data-testid$='-tooling']"),
+  /** Every "no hosts" / empty-state rendering under a parent's row. */
+  emptyState: (parentInstanceId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${parentInstanceId}-derived-hosts-empty`),
 };

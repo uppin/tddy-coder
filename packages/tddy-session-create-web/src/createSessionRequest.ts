@@ -1,3 +1,4 @@
+import type { SessionTarget } from "tddy-client-web/gen/session_pb";
 import type { BranchFieldOverrides, BranchWorktreeIntent } from "./lib/branchConflict";
 import { TDDY_CODER_LAUNCH, type SessionLaunch } from "./cliHarnessOptions";
 import { ORCHESTRATOR_SESSION_ROLE } from "./CreateSessionOrchestratorField";
@@ -58,6 +59,8 @@ export interface CreateSessionFormValues {
   selectedBaseBranch: string;
   selectedBranchToWorkOn: string;
   daemonInstanceId: string;
+  /** The target the session's agent runs on, when a derived host was chosen. Absent = the daemon's own host. */
+  target?: SessionTarget;
   sessionType: SessionType;
   /** How a session of `sessionType` is launched, as its daemon declared it. */
   sessionLaunch: SessionLaunch | undefined;
@@ -158,6 +161,7 @@ export function buildStartSessionRequest(
     selectedIntegrationBaseRef: selectedBaseBranch,
     selectedBranchToWorkOn,
     daemonInstanceId,
+    ...(form.target !== undefined ? { target: form.target } : {}),
     // Ask to be refused rather than silently given `<branch>-1` when another session owns the
     // branch: this form has an operator to prompt. See docs/ft/daemon/session-branch-conflict.md.
     onBranchConflict: "reject",
