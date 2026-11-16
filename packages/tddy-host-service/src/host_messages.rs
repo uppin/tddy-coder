@@ -224,6 +224,16 @@ pub(crate) fn github_cli_message(gh: &crate::host_tooling::GithubCliStatus) -> H
     }
 }
 
+/// Put a probed `coder` CLI state on the wire. No version is an empty string.
+pub(crate) fn coder_cli_message(
+    coder: &crate::host_tooling::CoderCliStatus,
+) -> tddy_service::proto::host::HostCoderCli {
+    tddy_service::proto::host::HostCoderCli {
+        installed: coder.installed,
+        version: coder.version.clone().unwrap_or_default(),
+    }
+}
+
 /// Put one probed remote-desktop reading on the wire.
 ///
 /// `can_bridge` and `desktop_reachable` are carried as two fields because they are two facts: "this

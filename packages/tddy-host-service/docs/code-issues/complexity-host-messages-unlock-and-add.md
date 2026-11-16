@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 80 | 4 | 5 | 3 | first detection |
+| 2026-11-16 | 80 | 4 | 5 | 3 | #918 (`#remote-shell` 4/7): re-measured — unchanged. That PR added `coder_cli_message` elsewhere in the same file and did not touch `unlock_and_add`; the finding stays open exactly as it stood |
 
 ## What the tool found
 

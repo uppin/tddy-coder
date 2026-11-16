@@ -74,7 +74,7 @@ fn walk_for_rec(dir: &Path, needle: &str, hits: &mut Vec<String>) {
     }
 }
 
-const HOST_METHODS: [&str; 9] = [
+const HOST_METHODS: [&str; 10] = [
     "ListEligibleDaemons",
     "ListKnownHosts",
     "GetHostTooling",
@@ -83,6 +83,7 @@ const HOST_METHODS: [&str; 9] = [
     "AddHostKey",
     "ListHostKeyCandidates",
     "ListSshConfigHosts",
+    "ListCoderWorkspaces",
     "StreamHostStats",
 ];
 

@@ -16,6 +16,7 @@ Deferred by the user, 2026-11-10 (#876 sweep): the restructure engine refused th
 |---|---|---|---|
 | 2026-11-10 | 90 → 74 | 1 | #876 Tier C: `build_connection_impl`, `adopt_and_build_connection` and `daemon_launcher_deps` extracted. The remaining seams are refused: the tail builder chain offers only "extract into variable", sub-expression extractions name `SplitRoomHosting`, `TerminalExposure` or `RoomTokenMinter` (spelled fully-qualified in other files' field declarations, not imported here), and the launcher expression's `approval_routes` is generated as `&_`. |
 | 2026-11-12 | 74 → 73 | 1 | #879 (`#orchestrators` 2/11): the headless-files sweep and the new PR-stack startup sweep share one `sweep_what_the_last_run_left` call. The file is 499 production lines (489 at the base) |
+| 2026-11-16 | 73 → 73 | 1 | #918 (`#remote-shell` 4/7): re-measured — `build_session_host` unchanged. The file grew 499 → 521 with the Coder wiring, then the sweep pair moved to `runtime/last_run_sweep.rs` and the Coder wiring to `coder_credential_source::wire_coder` in the same PR, leaving it at 473 production lines. This finding is untouched and stays open |
 
 ## What would close it
 

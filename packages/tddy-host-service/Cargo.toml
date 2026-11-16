@@ -23,6 +23,9 @@ tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "proc
 tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-rpc = { path = "../tddy-rpc" }
+# `CoderCredentials`: what `ListCoderWorkspaces` reads from the vault is what a `CoderShell` is
+# built from, so it is that crate's type rather than a second one here.
+tddy-remote-shell = { path = "../tddy-remote-shell" }
 tddy-task = { path = "../tddy-task" }
 tokio-stream = "0.1"
 tddy-service = { path = "../tddy-service" }
@@ -48,6 +51,8 @@ uuid = { version = "1", features = ["v4", "v7"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `SecretString`: the token of the stand-in Coder account the listing's tests read.
+tddy-credentials = { path = "../tddy-credentials" }
 # `NoPeerForwarding`: a common room that is configured but carries nothing.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 futures-util = "0.3"

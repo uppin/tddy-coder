@@ -33,6 +33,8 @@ use crate::host_tooling::desktop_probes::warn_if_a_desktop_probe_failed;
 #[cfg(unix)]
 use crate::host_tooling::readings::agent_status_of;
 #[cfg(unix)]
+use crate::host_tooling::readings::coder_cli_of;
+#[cfg(unix)]
 use crate::host_tooling::readings::git_config_value;
 #[cfg(unix)]
 use crate::host_tooling::readings::git_identity_of;
@@ -82,6 +84,49 @@ pub struct GithubCliStatus {
     pub login: Option<String>,
 }
 
+/// The state of the Coder CLI on a host: what a session on a Coder workspace is run through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoderCliStatus {
+    pub installed: bool,
+    /// The version the CLI reports, e.g. `v2.16.0`. `None` when it is not installed, or when what
+    /// it printed named none.
+    pub version: Option<String>,
+}
+
+impl CoderCliStatus {
+    /// No `coder` executable on the host's path.
+    #[must_use]
+    pub fn not_installed() -> Self {
+        Self {
+            installed: false,
+            version: None,
+        }
+    }
+}
+
+/// Classify what `coder version` printed.
+///
+/// `exit_code` is `None` for the one case where there was no `coder` to run at all — the caller
+/// found none on the path. A `coder` that ran is installed whatever it printed; the version is
+/// the word after `Coder` on its first line (`Coder v2.16.0+683a720 Thu Oct  3 …` is `v2.16.0`,
+/// without the build suffix), and `None` when that line is not there.
+pub fn classify_coder_version(exit_code: Option<i32>, output: &str) -> CoderCliStatus {
+    if exit_code.is_none() {
+        return CoderCliStatus::not_installed();
+    }
+    let version = output.lines().next().and_then(|first_line| {
+        let mut words = first_line.split_whitespace();
+        match (words.next(), words.next()) {
+            (Some("Coder"), Some(word)) => Some(word.split('+').next().unwrap_or(word).to_string()),
+            _ => None,
+        }
+    });
+    CoderCliStatus {
+        installed: true,
+        version,
+    }
+}
+
 /// Everything the tooling probe reports for one host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostTooling {
@@ -93,6 +138,8 @@ pub struct HostTooling {
     /// Added by `#hosts-screen 7/8`. One reading per probed protocol, filled from
     /// [`crate::remote_desktop_probe`].
     pub remote_desktop: Vec<crate::remote_desktop_probe::DesktopReachability>,
+    /// Added by `#remote-shell 4/7`: whether the `coder` CLI is on this host's path.
+    pub coder_cli: CoderCliStatus,
 }
 
 /// Probes a host for what it has installed and configured.
@@ -300,6 +347,8 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
         let git_program =
             tddy_daemon_kernel::spawn_as_user::find_program_on_spawn_child_path("git");
         let gh_program = tddy_daemon_kernel::spawn_as_user::find_program_on_spawn_child_path("gh");
+        let coder_program =
+            tddy_daemon_kernel::spawn_as_user::find_program_on_spawn_child_path("coder");
 
         // One deadline for the whole probe, with every command started before any is collected.
         // They are independent reads of the same account, so running them in series would make the
@@ -326,6 +375,9 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
             let gh_args: Vec<&str> = gh_args.iter().map(String::as_str).collect();
             start_probe(os_user, gh, &gh_args)
         });
+        let coder_cli = coder_program
+            .as_deref()
+            .map(|coder| start_probe(os_user, coder, &["version"]));
 
         // Collected before the two commands for the reason it was started before them: a struct
         // literal evaluates its fields in order, and a probe still in flight when it is collected is
@@ -361,6 +413,11 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
             },
             ssh_agent,
             remote_desktop,
+            coder_cli: match coder_cli {
+                Some(started) => coder_cli_of(started.collect(deadline)),
+                // `coder` absent from the PATH is the finding "not installed", as for `gh`.
+                None => classify_coder_version(None, ""),
+            },
         };
 
         warn_if_failed("git identity", os_user, &tooling.git.outcome);
@@ -395,6 +452,8 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
             },
             ssh_agent: crate::ssh_agent::AgentStatus::unsupported(),
             remote_desktop: self.with_x11_channels(desktop_readings_of(remote_desktop, deadline)),
+            // The path lookup is Unix-only, as the `gh` one is: nothing was probed here.
+            coder_cli: CoderCliStatus::not_installed(),
         };
 
         warn_if_a_desktop_probe_failed(&tooling.remote_desktop);
@@ -854,6 +913,48 @@ mod tests {
         assert!(
             !a_process_still_exists(child_pid),
             "the overrunning child must be ended and reaped, not abandoned to run on"
+        );
+    }
+
+    /// `coder` absent from PATH: there was nothing to run.
+    #[test]
+    fn reports_that_the_coder_cli_is_not_installed() {
+        let status = classify_coder_version(None, "");
+
+        assert_eq!(status, CoderCliStatus::not_installed());
+    }
+
+    /// The version is the release, without the build suffix or the build date beside it.
+    #[test]
+    fn reports_the_version_the_coder_cli_prints() {
+        let status = classify_coder_version(
+            Some(0),
+            "Coder v2.16.0+683a720 Thu Oct  3 16:06:17 UTC 2024\n\
+             https://github.com/coder/coder/commit/683a720\n\n\
+             Full build of Coder, supports the server subcommand.\n",
+        );
+
+        assert_eq!(
+            status,
+            CoderCliStatus {
+                installed: true,
+                version: Some("v2.16.0".to_string()),
+            }
+        );
+    }
+
+    /// A `coder` that ran is installed, whatever it printed and however it exited: an operator
+    /// told it is missing would install a second one.
+    #[test]
+    fn reports_a_coder_cli_whose_output_names_no_version_as_installed_without_one() {
+        let status = classify_coder_version(Some(1), "some future format nobody here has seen\n");
+
+        assert_eq!(
+            status,
+            CoderCliStatus {
+                installed: true,
+                version: None,
+            }
         );
     }
 

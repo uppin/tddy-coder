@@ -35,12 +35,24 @@ unloaded key is a hard failure, never a prompt, and a connection cannot hang. Op
 255 is `Unreachable`; a command past its deadline is stopped and reported `TimedOut`.
 `interactive` is `ssh -tt <options> -- <alias> <command>`.
 
+## The Coder transport
+
+`CoderShell::new(credentials, workspace)` / `through(coder_binary, …)` runs the host's
+`coder` CLI: `coder ssh --disable-autostart <owner>/<name>[.<agent>] -- sh -c '<command>'`,
+with `CODER_URL` and `CODER_SESSION_TOKEN` set on that child alone and scrubbed from every
+probe the daemon runs as another user. The workspace is never started; one that is not
+running is `Unreachable` with what the CLI said, told from a failed command by a start
+marker the one-shot wrapper prints to stderr before the command runs. `interactive` is
+`coder ssh --disable-autostart -t <workspace> -- <command>` for a local PTY. Credentials are
+held in memory for the shell's life; `Debug` shows the URL and never the token.
+
 ## Test support
 
 Behind the `test-support` feature: `InMemoryShell`, a scriptable in-memory double, and
 `contract::assert_behaves_like_a_remote_shell`, the behaviour suite every transport is held
-to. The suite runs against both `InMemoryShell` and `SshShell` driving a stand-in `ssh`
-executable; no real SSH server and no network are involved.
+to. The suite runs against `InMemoryShell`, `SshShell` driving a stand-in `ssh`
+executable, and `CoderShell` driving a stand-in `coder` executable; no real SSH server, no
+Coder deployment and no network are involved.
 
 ## Consumers
 

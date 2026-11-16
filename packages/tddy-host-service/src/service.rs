@@ -17,13 +17,15 @@ use tddy_daemon_kernel::SessionUserResolver;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::host::{
     AddHostKeyRequest, AddHostKeyResponse, AnswerHostPromptRequest, AnswerHostPromptResponse,
-    GetHostToolingRequest, GetHostToolingResponse, HostService, ListEligibleDaemonsRequest,
-    ListEligibleDaemonsResponse, ListHostKeyCandidatesRequest, ListHostKeyCandidatesResponse,
-    ListKnownHostsRequest, ListKnownHostsResponse, ListSshConfigHostsRequest,
-    ListSshConfigHostsResponse, StreamHostPromptsRequest, StreamHostStatsRequest,
+    GetHostToolingRequest, GetHostToolingResponse, HostService, ListCoderWorkspacesRequest,
+    ListCoderWorkspacesResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    ListHostKeyCandidatesRequest, ListHostKeyCandidatesResponse, ListKnownHostsRequest,
+    ListKnownHostsResponse, ListSshConfigHostsRequest, ListSshConfigHostsResponse,
+    StreamHostPromptsRequest, StreamHostStatsRequest,
 };
 use tddy_task::IdleTimeoutTracker;
 
+use crate::coder_workspaces::{CoderCredentialSource, CoderWorkspaceSource};
 use crate::host_keypair::HostKeypair;
 use crate::host_prompts::HostPromptRegistry;
 use crate::host_registry::HostRegistry;
@@ -97,6 +99,12 @@ pub struct HostServiceImpl {
     prompt_pumps: Arc<AtomicUsize>,
     /// Host machine stats (per-core CPU, memory, load, project-dir disk) for the Host Stats Footer.
     host_stats: Arc<dyn HostStats>,
+    /// Reads a Coder account's deployment URL and token from its owner's vault, behind
+    /// `ListCoderWorkspaces`. Injected because the vault is `tddy-accounts`'.
+    coder_credentials: Arc<dyn CoderCredentialSource>,
+    /// Asks a Coder deployment for an account's workspaces. Injected because the HTTP client is
+    /// the daemon's.
+    coder_workspaces: Arc<dyn CoderWorkspaceSource>,
     host_cpu_interval: Duration,
     host_disk_interval: Duration,
 }
@@ -221,6 +229,18 @@ impl HostService for HostServiceImpl {
         self.list_ssh_config_hosts_impl(request).await
     }
 
+    /// The workspaces one Coder account can reach, with their status.
+    ///
+    /// Routed like [`Self::list_ssh_config_hosts`], and honest the same way: an account with no
+    /// workspaces is OK and empty; a locked vault, a rejected token and an unreachable deployment
+    /// are each FAILED with a reason of their own.
+    async fn list_coder_workspaces(
+        &self,
+        request: Request<ListCoderWorkspacesRequest>,
+    ) -> Result<Response<ListCoderWorkspacesResponse>, Status> {
+        self.list_coder_workspaces_impl(request).await
+    }
+
     /// Stream host telemetry for the selected daemon. Authenticates `session_token`, then spawns a
     /// sampling task that emits one `HostStatsEvent` immediately (both CPU and disk), then refreshes
     /// CPU and disk on two independent cadences, pushing an event carrying the latest CPU and disk
@@ -240,3 +260,5 @@ mod listings;
 mod prompts;
 
 mod host_keys;
+
+mod coder_workspaces;

@@ -7,6 +7,7 @@ use tokio::sync::broadcast;
 use super::build_context::BuildContext;
 use super::mount::{Hosted, Mount, Served, Shared};
 use super::*;
+use crate::runtime::last_run_sweep::sweep_what_the_last_run_left;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::session_notifications::{
     SessionNotification, SessionNotificationSubscriber,
@@ -154,6 +155,13 @@ impl BuildContext {
             }
             if let Some(ref tracker) = idle_tracker {
                 host_service = host_service.with_idle_tracker(tracker.clone());
+            }
+            if let Some(vaults) = self.identity.credential_vaults.clone() {
+                host_service = crate::coder_credential_source::wire_coder(
+                    host_service,
+                    vaults,
+                    Arc::clone(user_resolver),
+                );
             }
             Arc::new(host_service)
         };
@@ -462,38 +470,4 @@ impl BuildContext {
             ),
         );
     }
-}
-
-/// Remove the headless conversation files this daemon's previous run left behind. A failure is
-/// logged, not fatal: the files are a previous run's, and nothing this run serves depends on them.
-fn sweep_headless_files(
-    config: &tddy_daemon_kernel::config::DaemonConfig,
-    tddy_data_dir: &std::path::Path,
-) {
-    match tddy_session_lifecycle::coding_agent_launcher::sweep_headless_files_left_by_this_daemon(
-        config,
-        tddy_data_dir,
-    ) {
-        Ok(swept) if swept.is_empty() => {}
-        Ok(swept) => log::info!(
-            "removed the headless files of {} conversation(s) a previous run left: {}",
-            swept.len(),
-            swept.join(", ")
-        ),
-        Err(e) => log::warn!(
-            "could not sweep the headless conversation files under {}: {e}",
-            tddy_data_dir.display()
-        ),
-    }
-}
-
-/// What earlier runs left that this one must not serve: headless conversation files (their MCP
-/// configs carry agent credentials), and PR stacks still in a `changeset.yaml`, moved into their
-/// projects' store — idempotent, self-logging; a session it cannot move lists no stack plan.
-fn sweep_what_the_last_run_left(config: &DaemonConfig, tddy_data_dir: &std::path::Path) {
-    sweep_headless_files(config, tddy_data_dir);
-    tddy_pr_stack::stack_migration::migrate_session_stacks(
-        tddy_data_dir,
-        &tddy_data_dir.join("projects"),
-    );
 }

@@ -130,6 +130,7 @@ impl HostServiceImpl {
                 .iter()
                 .map(crate::host_messages::host_remote_desktop_message)
                 .collect(),
+            coder_cli: Some(crate::host_messages::coder_cli_message(&tooling.coder_cli)),
         }))
     }
 }

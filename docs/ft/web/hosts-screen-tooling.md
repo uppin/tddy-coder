@@ -258,6 +258,15 @@ The remote-desktop section is mounted by `HostRowTooling` behind an optional pro
 ssh-agent section is, so it appears with the section and needs no wiring of its own. It fetches
 nothing itself.
 
+## The Coder CLI the report carries
+
+`GetHostTooling` also reports the host's `coder` CLI: whether a `coder` executable is on the
+path the daemon's children are given, and the version it prints. That is the CLI a session on
+a Coder workspace is run through, so the report says whether a listed workspace can be used
+before anyone tries. The probe that decides it runs as the host's OS user with any Coder
+token variables scrubbed. No cell renders it yet; showing Coder workspaces on this screen is
+what will.
+
 ## Technical reference
 
 - Daemon: [`packages/tddy-host-service/docs/host-tooling-probe.md`](../../../packages/tddy-host-service/docs/host-tooling-probe.md),

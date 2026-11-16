@@ -17,6 +17,7 @@ mod build_context;
 mod env;
 mod identity;
 mod integrations;
+mod last_run_sweep;
 mod mount;
 mod mount_accounts;
 mod mount_entries;

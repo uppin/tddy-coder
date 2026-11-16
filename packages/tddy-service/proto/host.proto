@@ -76,6 +76,19 @@ service HostService {
   // FAILED), never an empty alias list. Empty hosts with outcome OK means this user has no
   // explicit Host aliases. Collapsing the two would silently force LocalShell.
   rpc ListSshConfigHosts(ListSshConfigHostsRequest) returns (ListSshConfigHostsResponse);
+  // The workspaces one Coder account can reach on its deployment, with their status.
+  //
+  // Addressed by `daemon_instance_id` and honoured the way ListSshConfigHosts honours it: the
+  // account is in a vault on one daemon, and that daemon's host is where a workspace would be
+  // reached from.
+  //
+  // Asked of the deployment over HTTP, not through the `coder` CLI, so a host without the CLI
+  // still lists — GetHostTooling's `coder_cli` is what says whether a listed workspace can be used.
+  //
+  // Honest the way ListSshConfigHosts is: OK with no workspaces is an account that has none.
+  // FAILED is a listing that could not be made, and `failure_reason` says which of a locked vault,
+  // a token the deployment rejected and a deployment that could not be reached it was.
+  rpc ListCoderWorkspaces(ListCoderWorkspacesRequest) returns (ListCoderWorkspacesResponse);
   // Host Stats Footer (see docs/ft/web/host-stats-footer.md) — host-level telemetry for the
   // selected daemon. Addressed to the daemon directly over the common-room LiveKit connection (no
   // daemon_instance_id payload needed) and validates `session_token`. The server owns the cadence:
@@ -159,6 +172,20 @@ message AnswerHostPromptResponse {
   string rejection_reason = 2;
 }
 
+// One workspace of a Coder deployment, as its owner's account sees it.
+message CoderWorkspace {
+  // The login name of the user the workspace belongs to.
+  string owner = 1;
+  // The workspace's name, unique among its owner's.
+  string name = 2;
+  // The deployment's own word for the state of the workspace's latest build, e.g. "running",
+  // "stopped", "starting", "failed". For an operator; `running` is the one to branch on.
+  string status = 3;
+  // True when the workspace is running, which is the only state a command can be run on it in.
+  // Nothing here starts a workspace.
+  bool running = 4;
+}
+
 message EligibleDaemonEntry {
   string instance_id = 1;
   string label = 2;
@@ -182,6 +209,18 @@ message GetHostToolingResponse {
   // One entry per desktop channel: the endpoint probes (VNC :5900, RDP :3389) plus one per X11
   // display the daemon's OS user can open that is not already served on its VNC port.
   repeated HostRemoteDesktop remote_desktop = 5;
+  // Whether the `coder` CLI — what a session on a Coder workspace is run through — is on this
+  // host's path.
+  HostCoderCli coder_cli = 6;
+}
+
+// The state of the Coder CLI on this host.
+message HostCoderCli {
+  // True when a `coder` executable is on the path the daemon's children are given.
+  bool installed = 1;
+  // The version that executable reports, e.g. "v2.16.0". Empty when it is not installed, or when
+  // what it printed named none.
+  string version = 2;
 }
 
 message HostCpuStats {
@@ -369,6 +408,26 @@ message KnownHostEntry {
   uint64 max_attachment_bytes = 7;
   // True when this entry is the daemon serving the call.
   bool is_local = 8;
+}
+
+message ListCoderWorkspacesRequest {
+  string session_token = 1;
+  // The daemon whose vault holds the account. Empty means the daemon serving the call.
+  string daemon_instance_id = 2;
+  // The Coder account whose workspaces are listed, as AccountsService lists it.
+  string account_id = 3;
+}
+
+message ListCoderWorkspacesResponse {
+  // OK with an empty `workspaces` is "this account has no workspaces". FAILED is a listing that
+  // could not be made. The two must not be collapsed.
+  ProbeOutcome outcome = 1;
+  // Why the listing failed, when outcome is FAILED: the vault is locked, the deployment rejected
+  // the account's token, or the deployment could not be reached. For an operator, not for parsing.
+  // Never carries the token.
+  string failure_reason = 2;
+  // The account's own workspaces, in the deployment's order. Empty unless outcome is OK.
+  repeated CoderWorkspace workspaces = 3;
 }
 
 message ListEligibleDaemonsRequest {

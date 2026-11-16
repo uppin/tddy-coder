@@ -14,6 +14,9 @@ test-support = []
 
 [dependencies]
 async-trait = "0.1"
+# `SecretString`: the Coder session token a `CoderShell` holds is redacted in `Debug` and wiped on
+# drop by the workspace's one secret type, not by a second copy of it.
+tddy-credentials = { path = "../tddy-credentials" }
 tokio = { version = "1", features = ["rt", "macros", "sync", "time", "process", "io-util"] }
 
 [dev-dependencies]
