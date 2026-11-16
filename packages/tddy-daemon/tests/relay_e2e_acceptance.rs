@@ -1,13 +1,14 @@
-//! Phase 6 E2E acceptance tests: relay forwarding via LiveKit + idle-timeout integration.
+//! Phase 6 E2E acceptance tests: relay forwarding over the common room + idle-timeout
+//! integration.
 //!
-//! AC: relay daemon forwards `ListExecTools` (and `ExecuteTool`) to a remote peer via LiveKit —
-//! the relay classifies `daemon_instance_id`, calls `forward_to_peer`, and the response matches
-//! what the peer would return directly.
+//! AC: relay daemon forwards `ListExecTools` (and `ExecuteTool`) to a remote peer over the
+//! common room — the relay classifies `daemon_instance_id`, calls `forward_to_peer`, and the
+//! response matches what the peer would return directly. The room here is the in-memory hub
+//! (`tddy-room-testkit`), which models the LiveKit adapter's contract; that the LiveKit adapter
+//! itself behaves this way against a real server is `tddy-livekit-compat-tests`' job.
 //!
 //! AC: relay idle monitor spawns a task that checks `IdleTimeoutTracker::should_shutdown()`
 //! and fires the external shutdown channel, causing `run_server` to exit cleanly.
-
-mod daemon_rpc_participant;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,26 +16,22 @@ use std::time::Duration;
 
 use serial_test::serial;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_daemon_livekit::livekit_peer_discovery::{
-    CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
-};
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
+use tddy_daemon_kernel::peer_forwarding::CommonRoom;
+use tddy_daemon_livekit::livekit_peer_discovery::{AdvertisedSigningKey, CommonRoomPeerRegistry};
 use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_host_service::multi_host::EligibleDaemonSource;
-use tddy_livekit_testkit::LiveKitTestkit;
+use tddy_host_service::peer_routing::PeerRouting;
+use tddy_room_testkit::{HubEligibleDaemonSource, HubPeerForwarder, RoomHub};
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecToolService, ListExecToolsRequest};
 use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
 
-fn relay_room() -> &'static str {
-    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    ROOM.get_or_init(|| LiveKitTestkit::unique_room("relay-e2e-common-room"))
-}
+/// The hub is fresh per test, so the room name needs no uniqueness.
+const RELAY_ROOM: &str = "relay-e2e-common-room";
 const RELAY_PEER_ID: &str = "relay-e2e-remote-peer";
-const LK_API_KEY: &str = "devkey";
-const LK_API_SECRET: &str = "secret";
 
 /// The identity a daemon serves RPC on — a fixed `daemon-` prefix over its instance id, the way
 /// `main.rs` joins the common room. The bare instance id is the discovery participant's, which
@@ -61,23 +58,13 @@ fn sessions_resolver(base: PathBuf) -> SessionsBaseResolver {
     Arc::new(move |_| Some(base.clone()))
 }
 
-fn write_daemon_yaml(ws_url: &str, instance_id: Option<&str>) -> (tempfile::TempDir, PathBuf) {
+fn write_daemon_yaml(instance_id: Option<&str>) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
     let id_block = instance_id
         .map(|id| format!("daemon_instance_id: {id}\n"))
         .unwrap_or_default();
-    let room = relay_room();
-    let yaml = format!(
-        r#"
-{id_block}livekit:
-  enabled: true
-  url: {ws_url}
-  api_key: {LK_API_KEY}
-  api_secret: {LK_API_SECRET}
-  common_room: {room}
-"#
-    );
+    let yaml = format!("{id_block}livekit:\n  enabled: false\n");
     std::fs::write(&path, yaml).unwrap();
     std::fs::write(
         dir.path().join("users.yaml"),
@@ -195,24 +182,21 @@ async fn relay_idle_tracker_expires_after_a_full_idle_period() {
     );
 }
 
-// ── LiveKit end-to-end relay forwarding ─────────────────────────────────────────────────────────
+// ── Common-room relay forwarding ─────────────────────────────────────────────────────────
 
-/// Phase 6 AC: relay daemon forwards `ListExecTools` to a remote peer via LiveKit.
+/// Phase 6 AC: relay daemon forwards `ListExecTools` to a remote peer over the common room.
 ///
-/// Service A (relay) has LiveKit discovery seeing service B. When A receives
+/// Service A (relay) has discovery seeing service B. When A receives
 /// `list_exec_tools(daemon_instance_id=B)`, it classifies Forward, calls `forward_to_peer`,
 /// and returns B's tool catalog to the caller.
 #[tokio::test]
 #[serial]
 async fn relay_forwards_list_exec_tools_to_remote_peer() {
     // Given
-    let livekit = LiveKitTestkit::start()
-        .await
-        .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
-    let ws_url = livekit.get_ws_url();
+    let hub = RoomHub::new();
 
-    // ── Service B: the remote peer. Joins the LiveKit room and serves RPCs.
-    let (_tmp_b, path_b) = write_daemon_yaml(&ws_url, Some(RELAY_PEER_ID));
+    // ── Service B: the remote peer. Advertises in the room and serves RPCs.
+    let (_tmp_b, path_b) = write_daemon_yaml(Some(RELAY_PEER_ID));
     let config_b = DaemonConfig::load(&path_b).unwrap();
     let sessions_b = tempfile::tempdir().unwrap();
     let service_b = Arc::new(
@@ -223,7 +207,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
             valid_user_resolver(),
             None,
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b), // B has no discovery of its own — it only serves its local tools
+            PeerRouting::local_only(&config_b), // B has no discovery of its own — it only serves its local tools
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(CliSessionManager::new()),
             tddy_session_lifecycle::test_util::builtin_coding_agents(),
@@ -232,37 +216,33 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     );
 
     // B's discovery participant: bare instance id, publishes the advertisement A discovers.
-    spawn_common_room_discovery_task(
-        Arc::new(config_b),
-        Arc::new(CommonRoomPeerRegistry::new()),
-        Arc::new(tokio::sync::RwLock::new(None)),
-        Default::default(),
-    );
-
+    let _b_advertisement =
+        hub.advertise_daemon(RELAY_ROOM, &config_b, &AdvertisedSigningKey::default());
     // B's RPC participant: `daemon-{instance_id}`, the identity A's forward addresses.
-    let token_b = livekit
-        .generate_token(relay_room(), &rpc_identity(RELAY_PEER_ID))
-        .expect("LiveKit token for remote peer B");
-    let peer_run =
-        daemon_rpc_participant::serve_daemon_rpc_participant(&ws_url, &token_b, &service_b).await;
-
-    // ── Service A: the relay. Has LiveKit discovery that will see B.
-    let (_tmp_a, path_a) = write_daemon_yaml(&ws_url, None);
-    let config_a = DaemonConfig::load(&path_a).unwrap();
-    let config_arc = Arc::new(config_a.clone());
-    let registry = Arc::new(CommonRoomPeerRegistry::new());
-    let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-    spawn_common_room_discovery_task(
-        config_arc.clone(),
-        registry.clone(),
-        room_slot.clone(),
-        Default::default(),
-    );
-    let eligible: Arc<dyn EligibleDaemonSource> = Arc::new(LiveKitEligibleDaemonSource::new(
-        config_arc,
-        registry,
-        room_slot.clone(),
+    let b_rpc = hub.join(RELAY_ROOM, &rpc_identity(RELAY_PEER_ID), "");
+    b_rpc.serve(Arc::new(
+        tddy_session_lifecycle::test_util::daemon_rpc_roster(&service_b),
     ));
+
+    // ── Service A: the relay. Its registry is attached to the room and will see B.
+    let (_tmp_a, path_a) = write_daemon_yaml(None);
+    let config_a = DaemonConfig::load(&path_a).unwrap();
+    let registry = Arc::new(CommonRoomPeerRegistry::new());
+    let _attach = hub.attach_registry(
+        RELAY_ROOM,
+        &local_instance_id_for_config(&config_a),
+        registry.clone(),
+    );
+    let common_room = CommonRoom::new(
+        HubPeerForwarder::new(
+            hub.clone(),
+            RELAY_ROOM,
+            rpc_identity(&local_instance_id_for_config(&config_a)),
+        ),
+        &config_a,
+    );
+    let eligible: Arc<dyn EligibleDaemonSource> =
+        HubEligibleDaemonSource::new(Arc::new(config_a.clone()), registry, common_room.clone());
     let sessions_a = tempfile::tempdir().unwrap();
     // "Who can I see?" is `host.HostService`'s question since `#unbundle` node 1. Built over the
     // same eligible source A routes on, so discovery readiness and routability are one fact.
@@ -279,13 +259,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         valid_user_resolver(),
         None,
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-        tddy_daemon_livekit::peer_routing::peer_routing_over(
-            &config_a,
-            Some(LiveKitDiscoveryHandles {
-                eligible_daemon_source: eligible,
-                common_room_livekit_room: room_slot,
-            }),
-        ),
+        PeerRouting::new(config_a.clone(), Arc::clone(&eligible), Some(common_room)),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
         tddy_session_lifecycle::test_util::builtin_coding_agents(),
@@ -334,7 +308,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let tools = resp.into_inner().tools;
     assert!(
         !tools.is_empty(),
-        "relay must return B's tool catalog (forwarded via LiveKit); got empty list"
+        "relay must return B's tool catalog (forwarded over the common room); got empty list"
     );
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     assert!(
@@ -352,6 +326,4 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         "B's catalog must include 'Shell'; got: {:?}",
         names
     );
-
-    peer_run.abort();
 }

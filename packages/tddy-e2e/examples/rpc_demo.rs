@@ -346,12 +346,7 @@ fn connect_livekit(
         let _ = key_tx.blocking_send(bytes);
     });
 
-    let recv = Box::new(
-        move || match output_rx.recv_timeout(Duration::from_millis(50)) {
-            Ok(bytes) => Some(bytes),
-            Err(_) => None,
-        },
-    );
+    let recv = Box::new(move || output_rx.recv_timeout(Duration::from_millis(50)).ok());
 
     // Keep the runtime alive (it owns the spawned tasks)
     std::mem::forget(rt);

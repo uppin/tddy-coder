@@ -268,7 +268,7 @@ pub fn spawn_presenter_with_view_connection_factory(
     initial_prompt: Option<String>,
 ) -> (
     thread::JoinHandle<()>,
-    Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>,
+    ViewConnectionFactory,
     Arc<AtomicBool>,
 ) {
     let (event_tx, _) = broadcast::channel(256);
@@ -281,7 +281,9 @@ pub fn spawn_presenter_with_view_connection_factory(
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&session_dir).unwrap();
-    let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe))
+    let tddy_data_dir =
+        std::env::temp_dir().join(format!("tddy-e2e-livekit-home-{}", uuid::Uuid::new_v4()));
+    let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
         .with_broadcast(event_tx.clone())
         .with_intent_sender(intent_tx.clone())
         .with_worktree_dir(output_dir.clone());

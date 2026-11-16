@@ -97,17 +97,22 @@ jobs:
       - name: cargo clippy
         run: ./dev cargo clippy --workspace --all-targets --locked -- -D warnings
 
-  # The Rust suite runs as two checks. They split it by what a test needs to run, not by how long
+  # The Rust suite runs as three checks. They split it by what a test needs to run, not by how long
   # it takes (docs/dev/guides/ci.md):
   #
-  #   Rust tests      everything that runs in this process or against files and sockets it makes
-  #                   itself. Builds its own test targets, from the rust-cache.
-  #   Rust e2e tests  everything that needs real infrastructure: a LiveKit server in Docker, or a
-  #                   real tddy-supervisor / index-daemon / daemon / coder process. The set is
-  #                   .config/rust-e2e.filterset — the one place it is written; each leg takes it or
-  #                   its complement. It runs as shards (`rust-e2e-shard`) from an archive of just its
-  #                   test targets (`rust-test-build`), and `rust-e2e` is the one check that stands
-  #                   for all of them.
+  #   Rust tests            everything that runs in this process or against files and sockets it
+  #                         makes itself. Builds its own test targets, from the rust-cache.
+  #   Rust e2e tests        everything that needs real infrastructure: a real tddy-supervisor /
+  #                         index-daemon / daemon / coder process, or a live rust-analyzer. The set
+  #                         is .config/rust-e2e.filterset — the one place it is written; each leg
+  #                         takes it or its complement. It runs as shards (`rust-e2e-shard`) from an
+  #                         archive of just its test targets (`rust-test-build`), and `rust-e2e` is
+  #                         the one check that stands for all of them.
+  #   Rust LiveKit e2e tests  the LiveKit adapter contract suites only
+  #                         (`tddy-livekit-compat-tests` plus the testkit's own), selected by
+  #                         .config/rust-livekit-e2e.filterset against one shared LiveKit server.
+  #                         Both other legs exclude that set, so no suite runs twice and no logic
+  #                         suite pays for a container.
   #
   # An archive of every test target is tens of GB and does not fit a runner (ENOSPC while archiving
   # 983 binaries), so only the e2e targets — about a tenth — are archived.
@@ -288,8 +293,9 @@ jobs:
         # .config/nextest.toml apply to every leg.
         run: |
           e2e="$(cat .config/rust-e2e.filterset)"
+          livekit="$(cat .config/rust-livekit-e2e.filterset)"
           ./dev bun scripts/nextest-windowed.ts --batches 2 \
-            --shard "${{ matrix.shard }}/${{ strategy.job-total }}" -- --profile ci --locked -E "not ($e2e)"
+            --shard "${{ matrix.shard }}/${{ strategy.job-total }}" -- --profile ci --locked -E "not (($e2e) or ($livekit))"
 
       - name: Disk after the tests
         if: always()
@@ -534,6 +540,96 @@ jobs:
               exit 1
             fi
           done
+
+  # The LiveKit compatibility leg: its own check, on purpose. It runs only the suites whose job is
+  # to prove a LiveKit adapter connects and honours the RPC contract — `tddy-livekit-compat-tests`,
+  # plus the testkit's own suites — selected by `.config/rust-livekit-e2e.filterset`, against one
+  # shared LiveKit server. No product logic is tested here: the crates that own the logic run their
+  # suites over cheap transports in `Rust tests`, so a LiveKit failure in this check is attributable
+  # to the adapter, and a logic change does not pay for a container. It builds its own test targets
+  # (no archive): the set is one package, not a tenth of the workspace.
+  rust-livekit-e2e:
+    name: Rust LiveKit e2e tests
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false # rust-build is the sole writer; see the comment there
+
+      # LiveKit's prebuilt libwebrtc from the Actions cache (webrtc-sys reads LK_CUSTOM_WEBRTC).
+      - uses: ./.github/actions/webrtc-prebuilt
+
+      # Read-only restore of the shared dependency graph, as the e2e archive job does.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test-shard-1
+          save-if: false
+
+      # One suite (`terminal_service_livekit`) spawns the real `tddy-coder` binary by path from
+      # target/debug; nextest builds only test targets, so the binary is built explicitly here.
+      - name: Build the tddy-coder fixture binary
+        run: ./dev cargo build -p tddy-coder-cli --locked
+
+      # One shared pinned server for the whole leg (see docs/dev/guides/ci.md); the script exports
+      # LIVEKIT_TESTKIT_WS_URL through $GITHUB_ENV.
+      - name: Start shared LiveKit server
+        timeout-minutes: 5
+        run: scripts/livekit-ci-server.sh start
+
+      - name: cargo nextest
+        id: nextest
+        # Keep going on failure so the JUnit still publishes; the last step of this job fails it.
+        continue-on-error: true
+        run: |
+          ./dev cargo nextest run --profile ci --locked \
+            -p tddy-livekit-compat-tests -p tddy-livekit-testkit \
+            -E "$(cat .config/rust-livekit-e2e.filterset)"
+
+      - name: Stop shared LiveKit server
+        if: ${{ always() }}
+        timeout-minutes: 2
+        run: scripts/livekit-ci-server.sh stop
+
+      - name: Publish test report
+        if: ${{ !cancelled() }}
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: target/nextest/ci/junit.xml
+          check_name: Rust LiveKit e2e tests
+          detailed_summary: true
+          fail_on_failure: true
+          require_tests: true
+
+      - name: Upload JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-rust-livekit-e2e
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Fail the leg if nextest failed
+        if: ${{ steps.nextest.outcome == 'failure' }}
+        run: exit 1
 
   # Manual only. Compiles every test target cold with `--timings` (20+ minutes) to answer one
   # question: how much of a leg's compile would a per-target split skip? See

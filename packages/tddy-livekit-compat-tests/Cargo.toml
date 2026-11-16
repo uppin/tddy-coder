@@ -1,0 +1,50 @@
+[package]
+name = "tddy-livekit-compat-tests"
+version = "0.1.0"
+edition = "2021"
+description = "LiveKit connectivity and contract suites: the LiveKit adapter of each port, proved against a real server. No product logic lives here."
+
+[lib]
+name = "tddy_livekit_compat_tests"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+anyhow = "1"
+livekit = { version = "0.7", features = ["rustls-tls-native-roots"] }
+prost = "0.13"
+serial_test = "3"
+tddy-core = { path = "../tddy-core" }
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-service = { path = "../tddy-service" }
+tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net", "fs", "time"] }
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+env_logger = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tempfile = "3"
+pretty_assertions = { workspace = true }
+tddy-room-client = { path = "../tddy-room-client" }
+livekit-api = "0.5"
+futures-util = "0.3"
+async-trait = "0.1"
+log = { version = "0.4", features = ["std"] }
+tokio-stream = "0.1"
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+uuid = { version = "1", features = ["v4"] }
+tddy-host-service = { path = "../tddy-host-service" }
+strip-ansi-escapes = "0.2"
+tddy-e2e = { path = "../tddy-e2e", features = ["livekit"] }
+tddy-tui-testkit = { path = "../tddy-tui-testkit" }
+tddy-coder = { path = "../tddy-coder" }
+tddy-coder-cli = { path = "../tddy-coder-cli" }
+tddy-task = { path = "../tddy-task" }
+tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
+tddy-tool-engine = { path = "../tddy-tool-engine" }

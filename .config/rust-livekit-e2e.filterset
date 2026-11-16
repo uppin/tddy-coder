@@ -1,0 +1,2 @@
+(package(tddy-livekit-compat-tests) and kind(test))
+ or (package(tddy-livekit-testkit) and kind(test))

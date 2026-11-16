@@ -1,0 +1,31 @@
+[package]
+name = "tddy-room-testkit"
+version = "0.1.0"
+edition = "2021"
+description = "An in-memory room hub for logic suites: named rooms, participant metadata and watching, RPC serving and forwarding, and broadcasts — no Docker, no network. Test support only."
+
+[lib]
+name = "tddy_room_testkit"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1"
+log = "0.4"
+tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+tddy-host-service = { path = "../tddy-host-service" }
+tddy-service = { path = "../tddy-service" }
+tddy-rpc = { path = "../tddy-rpc" }
+
+[dev-dependencies]
+async-trait = "0.1"
+pretty_assertions = { workspace = true }
+tempfile = "3"
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+tddy-host-service = { path = "../tddy-host-service" }
+tddy-service = { path = "../tddy-service" }
+tddy-rpc = { path = "../tddy-rpc" }
