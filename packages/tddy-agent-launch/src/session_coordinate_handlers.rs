@@ -425,6 +425,10 @@ fn session_entry_from_listing(
         codebase_daemon_instance_id: s.codebase_daemon_instance_id,
         codebase_session_id: s.codebase_session_id,
         ssh_config_host: s.ssh_config_host,
+        target: s
+            .target
+            .as_ref()
+            .map(crate::remote_agent_launch::proto_of_session_target),
         managed_codebase: s.managed_codebase,
         session_role: s.session_role,
         reads_host_paths: s.reads_host_paths,

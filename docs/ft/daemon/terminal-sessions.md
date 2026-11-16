@@ -82,6 +82,10 @@ session and manage them over RPC, so I can run a shell in the session's worktree
 6. `StopTerminalSession` with `terminal_id = "main"` is rejected with `INVALID_ARGUMENT` — the main
    `claude` tool is managed through session lifecycle (`SignalSession` / `DeleteSession`), not this
    API.
+7. A session whose agent runs on a target (`StartSessionRequest.target`) serves its main terminal
+   the same way: the terminal's local process is the remote-shell transport's client and the
+   agent runs on the target, so streaming, input, resize and capture are unchanged; stopping the
+   session ends the remote agent.
 
 ### I/O addressed by terminal id
 7. The terminal I/O RPCs (`StreamSessionTerminalIO`, `StreamTerminalOutput`, `SendTerminalInput`)

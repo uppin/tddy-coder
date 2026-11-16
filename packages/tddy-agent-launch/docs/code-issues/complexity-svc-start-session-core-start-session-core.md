@@ -35,6 +35,8 @@
 | 2026-11-11 | `start_session_on_request` 83, `start_here_body` 273 | — | — | — | declared-session-types: +3 / +8 against HEAD~1 (80 → 83, 265 → 273, fn line to closing brace) from the `requested_session_launch` refusal and the `SessionLaunch` match replacing the spelling checks; `start_here` unchanged (32). Nesting, branches and exits not re-derived. **Regressed, kept open** |
 | 2026-11-15 | `start_session_on_request` 73 → 79, `start_here_body` 274 → 274 | — | — | — | **regressed** by session display names (#910), fn line to closing brace on `9712eb8d9~1` and `9712eb8d9`: `refuse_a_named_tool_start` beside the orchestrated-tool refusal, and `start_here`'s result recorded before it is returned so the requested name can be written. The write itself is its own method, `record_the_started_sessions_name` (33 lines); `start_here` (32) and `start_here_body` unchanged. Nesting, branches and exits not re-derived; no coverage run. Kept open |
 
+| 2026-11-16 | `start_session_on_request` 79 → 80, `start_here_body` 274 → 274 | — | — | — | **worse by 1** in #917 (`#remote-shell` 3/7): the one `refuse_a_target_combination(&req)?` call the changeset allows; brace-matched on `origin/feature/remote-shell/coder-account` (`87e84fb27`) and HEAD; no coverage run. Kept open |
+
 ## What the tool found
 
 The body is **842 lines**, 14.0x the 60-line ceiling at which `/analyze-clean-code` says a function must be refactored. It is the **only function in its file**, so the file's 896 production lines are this function and nothing else — there is nothing else to move out.

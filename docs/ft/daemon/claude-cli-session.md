@@ -555,6 +555,16 @@ environment the `claude-cli` launch produces:
 - **ssh checkout.** On an ssh checkout the slot files are written on the target over ssh (bounded by
   the 60 s slot-write deadline; a target that never answers refuses the start `DEADLINE_EXCEEDED`
   naming the host), never at that path on this host.
+- **Agent on a target.** A start naming `StartSessionRequest.target` (its first kind is an SSH
+  `Host` alias) runs the agent itself on that machine, which needs no tddy software: the worktree
+  is created there, the agent starts there in an interactive remote shell under the environment
+  its spec declares, and the session's terminal is a local PTY whose child is the transport's
+  client. The session record and `.session.yaml` carry the target; stopping the session ends the
+  remote agent, the agent's exit ends the terminal with its status, and a resume starts the agent
+  on the target again. An agent that exits within the startup window fails the start with its
+  last output; an unreachable target fails it with the shell's reason and leaves no session. A
+  target combined with a managed codebase, a sandbox, a split placement or the project-home main
+  is refused with the reason, as is a target named together with `ssh_config_host`.
 - **An allow-listed environment.** The agent process starts from an environment the daemon
   computes, not from the daemon's own: the base set (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
   `TERM`, `LANG`, `LC_*`, `TMPDIR`, `TZ`, `SSH_AUTH_SOCK`, proxy variables, `XDG_*`) read from the
@@ -580,8 +590,11 @@ environment the `claude-cli` launch produces:
   pointer to the target checkout's `info/exclude` and writes it owner-only, and the removals are a
   bounded ssh command each. A `tddy-tools` on the daemon's host refuses a pointer whose owner has
   exited or whose socket is gone, naming the pointer; one on the ssh target does not check an owner on
-  another host. The remote agent is not yet recorded as an ssh pointer's owner
-  ([todo](../../dev/todo/2026-11-07-ssh-agent-launch-remote-pointer-owner.md)). A jailed session
+  another host. For a session whose agent runs on a target (next bullet), the launch writes the
+  shell's own pid to `.tddy/agent.pid` on the target before it `exec`s the agent, and once the
+  agent has outlived its startup window one bounded command through the remote-shell port reads
+  and removes that file and rewrites the pointer with the remote agent — its pid and the
+  target's own name for itself — as its owner. A jailed session
   writes none: its shell relay carries the session, and a pointer copied into the jail would name a
   host socket the jail cannot reach.
 - **Jail.** The generic jailed start and resume bind the same conversation, permission mode and

@@ -118,6 +118,15 @@ pub struct SessionMetadata {
     /// docs/ft/web/1-WIP/PRD-2026-09-14-ssh-exec.md.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_config_host: Option<String>,
+    /// Where the session's agent runs when that is not this daemon's host
+    /// (`StartSessionRequest.target`): the daemon reaches it through a remote shell, `repo_path` is
+    /// the worktree there, and the agent uses its own file and shell tools there. Unlike
+    /// `ssh_config_host`, which keeps the agent on this host. Absent for every session whose agent
+    /// runs here, and for legacy files; never written when absent, so such a record reads exactly
+    /// as before. An older daemon cannot read a record carrying it: this struct refuses unknown
+    /// fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<crate::session_target::SessionTarget>,
     /// The session was started in managed-codebase mode: its agent reaches the code only through
     /// daemon tools. Absent reads as `false`, and `false` is never written, so a file from before
     /// this field reads exactly as it did. See `#project-home` 3/7.
@@ -227,8 +236,9 @@ pub fn paired_agent(meta: &SessionMetadata) -> Option<(&str, &str)> {
 /// (`sandbox`, whose Seatbelt profile reads strictly) or one that reaches the code only through
 /// daemon tools (`managed_codebase`); an agent paired with a checkout elsewhere, which is every
 /// split placement including the sandboxed-codebase one (`codebase_daemon_instance_id`); one whose
-/// tools run on an SSH target (`ssh_config_host`); and a `workspace` session, which is a checkout
-/// with no agent of its own. Those sessions still receive dropped files — uploaded into the session
+/// tools run on an SSH target (`ssh_config_host`); one that itself runs on a target (`target`),
+/// which opens that machine's files, not this host's; and a `workspace` session, which is a
+/// checkout with no agent of its own. Those sessions still receive dropped files — uploaded into the session
 /// directory, which each of them can see — but never a raw host path.
 #[must_use]
 pub fn reads_host_paths(meta: &SessionMetadata) -> bool {
@@ -239,6 +249,7 @@ pub fn reads_host_paths(meta: &SessionMetadata) -> bool {
         && !meta.managed_codebase
         && !names_something(&meta.codebase_daemon_instance_id)
         && !names_something(&meta.ssh_config_host)
+        && meta.target.is_none()
         && !meta
             .session_type
             .as_deref()
@@ -326,6 +337,7 @@ pub fn write_initial_tool_session_metadata(
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        target: None,
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
@@ -440,6 +452,49 @@ mod tests {
 
         // Then
         assert_eq!(roles, [false; 5]);
+    }
+
+    #[test]
+    fn a_session_yaml_without_a_target_reads_none_and_writes_none() {
+        // Given a file written before `target` was recorded
+        let yaml = "session_id: s1\nproject_id: p1\ncreated_at: \"2026-10-22T00:00:00Z\"\nupdated_at: \"2026-10-22T00:00:00Z\"\nstatus: active\n";
+
+        // When it is read and written back
+        let metadata: SessionMetadata = serde_yaml::from_str(yaml).expect("legacy metadata parses");
+        let written = serde_yaml::to_string(&metadata).expect("metadata serializes");
+
+        // Then the agent runs on this host, and the record gains no key
+        assert_eq!(metadata.target, None);
+        assert!(
+            !written.contains("target"),
+            "a session without a target writes none: {written}"
+        );
+    }
+
+    #[test]
+    fn a_session_on_an_ssh_target_keeps_it_through_a_write_and_a_read() {
+        // Given a session whose agent runs on the ssh host `buildbox`
+        let dir = tempfile::tempdir().expect("a session directory");
+        let metadata = SessionMetadata {
+            target: Some(crate::session_target::SessionTarget::ssh("buildbox")),
+            ..a_claude_cli_session()
+        };
+
+        // When its record is written and read back
+        write_session_metadata(dir.path(), &metadata).expect("the record is written");
+        let file = fs::read_to_string(dir.path().join(SESSION_METADATA_FILENAME))
+            .expect("the record is on disk");
+        let read = read_session_metadata(dir.path()).expect("the record reads back");
+
+        // Then the file names the target's kind and host, and the target survives
+        assert!(
+            file.contains("target:\n  kind: ssh\n  config_host: buildbox\n"),
+            "the record spells the target as a map: {file}"
+        );
+        assert_eq!(
+            read.target,
+            Some(crate::session_target::SessionTarget::ssh("buildbox"))
+        );
     }
 
     #[test]
@@ -992,6 +1047,10 @@ session_type: workspace
     })]
     #[case::an_agent_whose_tools_run_over_ssh(SessionMetadata {
         ssh_config_host: Some("buildbox".to_string()),
+        ..a_claude_cli_session()
+    })]
+    #[case::an_agent_that_runs_on_a_target(SessionMetadata {
+        target: Some(crate::session_target::SessionTarget::ssh("buildbox")),
         ..a_claude_cli_session()
     })]
     #[case::a_workspace_checkout(a_workspace_session())]

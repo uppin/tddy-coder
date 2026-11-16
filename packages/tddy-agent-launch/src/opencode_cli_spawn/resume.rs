@@ -18,7 +18,7 @@ use crate::harness_from_spec::{
     CliSessionType, HarnessLaunch,
 };
 use crate::opencode_cli_spawn::harness_launch::{
-    launch, HarnessRun, HarnessSession, HarnessSpecLaunch,
+    launch, HarnessRemote, HarnessRun, HarnessSession, HarnessSpecLaunch,
 };
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::usage_context::{record_usage_context, UsageSubject};
@@ -85,7 +85,11 @@ impl crate::launch_ports::LaunchSessions {
             .or_else(|| metadata.repo_path.as_ref().map(PathBuf::from))
             .unwrap_or_else(|| session_dir.to_path_buf());
         // A worktree that is gone leaves nothing to resume: refused before anything is re-wired.
-        refuse_a_resume_without_its_worktree(kind.name, &worktree)?;
+        // A target session's worktree is on its target, not on this host: the launch through the
+        // port is what finds it gone there.
+        if metadata.target.is_none() {
+            refuse_a_resume_without_its_worktree(kind.name, &worktree)?;
+        }
         let wiring = self
             .resumed_session_wiring(
                 &session_agent.agent,
@@ -117,6 +121,7 @@ impl crate::launch_ports::LaunchSessions {
                 os_user,
                 wiring,
                 tddy_data_dir: &self.tddy_data_dir,
+                startup_window: self.config.spawn_startup_grace_period(),
             },
         )
         .await
@@ -142,6 +147,8 @@ struct ResumedSession<'a> {
     wiring: ResumedWiring,
     /// Where the main terminal's recording is kept.
     tddy_data_dir: &'a Path,
+    /// How long a target session's resumed agent must stay up to count as started.
+    startup_window: std::time::Duration,
 }
 
 /// A session whose worktree is gone has nothing for its agent to continue.
@@ -178,6 +185,7 @@ async fn resume_cli_harness_session(
         os_user,
         mut wiring,
         tddy_data_dir,
+        startup_window,
     } = session;
     let SplitLaunchParts {
         args: split_args,
@@ -203,10 +211,12 @@ async fn resume_cli_harness_session(
         &meta,
     )
     .await?;
-    let remote_host = meta
-        .ssh_config_host
-        .as_deref()
-        .filter(|alias| !alias.is_empty());
+    let remote_host =
+        crate::remote_agent_launch::target_config_host(meta.target.as_ref()).or_else(|| {
+            meta.ssh_config_host
+                .as_deref()
+                .filter(|alias| !alias.is_empty())
+        });
     // Argv hooks (Muse's `-c hooks=…`) render again from the recorded token; a file
     // adapter's file is kept as the start wrote it.
     let toolset = std::mem::take(&mut wiring.toolset);
@@ -264,6 +274,11 @@ async fn resume_cli_harness_session(
             model: "",
             env,
             on_exit,
+            remote: meta.target.clone().map(|target| HarnessRemote {
+                target,
+                pointer: session_pointer.clone(),
+                startup_window,
+            }),
         },
         HarnessRun::resume(meta.tmux_session.is_some()),
     )

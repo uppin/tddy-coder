@@ -29,6 +29,9 @@ pub struct SessionEntry {
     pub codebase_session_id: String,
     /// OpenSSH `Host` alias this session's exec catalog runs on. Empty = local tools.
     pub ssh_config_host: String,
+    /// Where this session's agent runs when that is not this daemon's host (`.session.yaml`'s
+    /// `target`); `None` for a session whose agent runs here.
+    pub target: Option<tddy_core::SessionTarget>,
     /// Whether the session was started in managed-codebase mode (`.session.yaml`).
     pub managed_codebase: bool,
     /// The session's standing role (`.session.yaml`); empty for an ordinary session.
@@ -102,6 +105,7 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             codebase_daemon_instance_id: metadata.codebase_daemon_instance_id.unwrap_or_default(),
             codebase_session_id: metadata.codebase_session_id.unwrap_or_default(),
             ssh_config_host: metadata.ssh_config_host.unwrap_or_default(),
+            target: metadata.target,
             managed_codebase: metadata.managed_codebase,
             session_role: metadata.session_role.unwrap_or_default(),
             reads_host_paths,
@@ -182,6 +186,7 @@ mod tests {
             agent_daemon_instance_id: None,
             agent_session_id: None,
             ssh_config_host: None,
+            target: None,
             managed_codebase: false,
             session_role: None,
             tmux_session: None,

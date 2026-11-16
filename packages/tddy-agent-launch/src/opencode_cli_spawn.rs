@@ -58,7 +58,7 @@ use crate::session_acting_identity::SessionAccountAccess;
 use crate::spec_launch::HostAgent;
 use crate::stack_parent::SpawnStackParent;
 use crate::usage_context::{record_usage_context, UsageSubject};
-use harness_launch::{launch, HarnessRun, HarnessSession, HarnessSpecLaunch};
+use harness_launch::{launch, HarnessRemote, HarnessRun, HarnessSession, HarnessSpecLaunch};
 use tddy_session_split::service_util::OrchestratorLink;
 
 /// Everything one CLI harness start reads.
@@ -112,6 +112,9 @@ pub(crate) struct CliSessionStart<'a> {
     pub effort: &'a str,
     /// The ssh `Host` alias the checkout lives on; empty for a checkout on this host.
     pub ssh_config_host: &'a str,
+    /// The target the session's agent runs on (`StartSessionRequest.target`), when it named one:
+    /// the checkout is cut on it and the agent is launched there.
+    pub target: Option<tddy_core::SessionTarget>,
     /// Whether the session was started over a managed codebase; recorded on the session.
     pub managed_codebase: bool,
     /// The managed workflow the session is driven by, for a spec declaring `managed_workflow`.
@@ -157,6 +160,7 @@ pub(crate) async fn start_cli_harness_session(
         dangerously_skip_permissions,
         effort,
         ssh_config_host,
+        target,
         managed_codebase,
         managed,
         role,
@@ -164,6 +168,11 @@ pub(crate) async fn start_cli_harness_session(
     let project_id = project_id.trim();
     let repo_path = repo_path.trim();
     let ssh_alias = ssh_config_host.trim();
+    // The checkout's host: the target the agent runs on, or the ssh exec host. The two are
+    // mutually exclusive (refused at the start), so one alias names where the worktree is cut,
+    // the slot files are written and the pointer is placed.
+    let checkout_alias =
+        crate::remote_agent_launch::target_config_host(target.as_ref()).unwrap_or(ssh_alias);
     let spec = &agent.spec;
     let role_name = role.name;
     refuse_a_role_the_agent_cannot_hold(spec, role_name)?;
@@ -220,7 +229,7 @@ pub(crate) async fn start_cli_harness_session(
             create_remote_branch,
             intent,
             timeout: config.spawn_worker_request_timeout(),
-            ssh_alias,
+            ssh_alias: checkout_alias,
         },
         &stack_parent,
         progress,
@@ -305,7 +314,7 @@ pub(crate) async fn start_cli_harness_session(
     .await?;
     progress.begin_phase(StartStep::Agent);
     let route = route.unwrap_or_default();
-    let remote_host = Some(ssh_alias).filter(|alias| !alias.is_empty());
+    let remote_host = Some(checkout_alias).filter(|alias| !alias.is_empty());
     let toolset = std::mem::take(&mut wiring.toolset);
     let role_args = std::mem::take(&mut wiring.extra_args);
     let hook_params = wiring.hook_params(spec, session_id, os_user);
@@ -361,6 +370,11 @@ pub(crate) async fn start_cli_harness_session(
             model: launch_model,
             env,
             on_exit,
+            remote: target.clone().map(|target| HarnessRemote {
+                target,
+                pointer: wiring.session_pointer.clone(),
+                startup_window: config.spawn_startup_grace_period(),
+            }),
         },
         HarnessRun::start(run_in_tmux),
     )
@@ -383,7 +397,10 @@ pub(crate) async fn start_cli_harness_session(
         agents: agents.to_vec(),
         hook_token: wiring.hooks.map(|hooks| hooks.hook_token),
         recipe: recipe_name.clone(),
-        ssh_config_host: remote_host.map(str::to_string),
+        ssh_config_host: Some(ssh_alias)
+            .filter(|alias| !alias.is_empty())
+            .map(str::to_string),
+        target: target.clone(),
         managed_codebase,
         session_role: Some(role_name.to_string()).filter(|role| !role.is_empty()),
         effort: Some(effort.trim().to_string()).filter(|effort| !effort.is_empty()),

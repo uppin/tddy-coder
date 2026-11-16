@@ -93,6 +93,16 @@ filesystem reads or writes.
 The create-session form offers aliases from `ListSshConfigHosts` on the session host plus an empty
 (local) choice (`create-session-ssh-config-select`).
 
+### Agent on the target (`StartSessionRequest.target`)
+
+The second SSH mode names a **target** instead of an exec host: the agent itself runs on the
+machine the daemon reaches through the remote-shell port, with no tddy software on it. The
+worktree is created on the target, the agent starts there in an interactive remote shell, and
+its terminal, stop, exit status and resume behave as a local session's do. `ssh_config_host`
+keeps the meaning above — agent local, tools remote — and the two fields are mutually exclusive
+on a start. Session targets are specified in
+[claude-cli-session.md](claude-cli-session.md#the-generic-cli-spec-launch-serves-claudes-needs).
+
 ### Split: SSH Host alias (`ssh_config_host`)
 
 When `codebase_daemon_instance_id` names a different host than `daemon_instance_id`, the **codebase

@@ -22,6 +22,8 @@
 | 2026-11-10 | 302 → 303 | **worse by 1** across #835–#865 (`#agent-tools` 27–32), brace-matched on `b8d9b769c` against the stack's merge-base `153b3c05d`. Not extracted: the `#agent-tools` sweep (#876) scoped Tier C to functions grown by 5 or more lines or with no record (user, 6e, 2026-11-10) |
 | 2026-11-11 | 303 → 310 | **worse by 7** in #891 (`#usage-binding 2/5`): the host start records its usage context with the OS user's home before launching; br |
 
+| 2026-11-16 | 319 → 333 | **worse by 14** in #917 (`#remote-shell` 3/7), brace-matched on `origin/feature/remote-shell/coder-account` (`87e84fb27`) and HEAD; no coverage run. The target wiring the changeset allows: the `target` field, the checkout-alias selection and the one `HarnessRemote` call. Not extracted: restructuring stays with the `#agent-tools` sweep; this file is also touched by successor stacks |
+
 ## What would close it
 
 Extract the worktree/route provisioning and the spec render into helpers through `/code-restructuring` (`extract_method`), with parameter structs so none passes seven parameters. Deleting the legacy `CliHarness` path first shrinks the function.

@@ -23,8 +23,8 @@ use crate::launch_ports::LaunchSessions;
 use crate::placement::managed_recipe_for;
 use crate::session_provider_route::{session_route_sources_with_default, start_route, RouteAgent};
 use crate::start_request_checks::{
-    refuse_a_cli_start_without_a_model, refuse_an_effort_the_agent_cannot_take,
-    refuse_an_unsupported_cli_session_start,
+    refuse_a_cli_start_without_a_model, refuse_a_target_combination,
+    refuse_an_effort_the_agent_cannot_take, refuse_an_unsupported_cli_session_start,
 };
 use tddy_service::proto::session::StartSessionRequest;
 use tddy_session_split::split_start::resolve_caller_chosen_session_id;
@@ -117,6 +117,7 @@ impl LaunchSessions {
     ) -> Result<Response<StartSessionResponse>, Status> {
         // Resolved first, with no side effect: the managed-codebase refusal reads the agent's spec.
         let session_agent = resolve_session_agent(&self.coding_agents, kind.clone())?;
+        refuse_a_target_combination(req)?;
         refuse_an_unsupported_cli_session_start(&session_agent.agent.spec, kind.name, req)?;
         if req.sandbox {
             self.require_sandbox_placement(kind.name)?;
@@ -229,6 +230,8 @@ impl LaunchSessions {
                 dangerously_skip_permissions: req.dangerously_skip_permissions,
                 effort: req.effort.trim(),
                 ssh_config_host: req.ssh_config_host.trim(),
+                target: crate::remote_agent_launch::session_target_of_proto(req.target.as_ref())
+                    .map_err(|e| Status::invalid_argument(e.to_string()))?,
                 managed_codebase: req.managed_codebase,
                 managed,
                 role,
@@ -315,6 +318,7 @@ impl LaunchSessions {
                 dangerously_skip_permissions: false,
                 effort: "",
                 ssh_config_host: "",
+                target: None,
                 // A spawned child is never a managed-codebase session, and has no standing role.
                 managed_codebase: false,
                 managed: None,
