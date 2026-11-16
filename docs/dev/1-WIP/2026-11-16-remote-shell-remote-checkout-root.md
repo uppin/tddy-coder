@@ -138,12 +138,12 @@ graph LR
 
 ## Scope
 
-- [ ] `remote_checkout_root` through the shell; `$HOME/.tddy/repos/<project>`
-- [ ] `RemoteWorktreeRequest` with the branch intent; `RemoteCheckout`; typed errors with the target's words
-- [ ] `default_remote_repo_root` removed from production
-- [ ] the remote cut in `cli_session_worktree.rs` passes the intent
-- [ ] delete: shell resolved for every target kind, `worktree remove` + `prune`
-- [ ] `remote_repo_path_for_session` without a fallback
+- [x] `remote_checkout_root` through the shell; `$HOME/.tddy/repos/<project>`
+- [x] `RemoteWorktreeRequest` with the branch intent; `RemoteCheckout`; typed errors with the target's words
+- [x] `default_remote_repo_root` removed from production
+- [x] the remote cut in `cli_session_worktree.rs` passes the intent
+- [x] delete: shell resolved for every target kind, `worktree remove` + `prune`
+- [x] `remote_repo_path_for_session` without a fallback
 - [ ] feature docs updated
 
 ## Technical Changes
@@ -168,9 +168,9 @@ See *Affected Packages* and *Responsibility*.
 
 ## Implementation Milestones
 
-- [ ] `tddy-git` plan, root and errors green over `InMemoryShell`
-- [ ] the start passes the intent; the delete handles every target kind; green on `tddy-agent-launch`
-- [ ] the pack path without a fallback; docs; `/home/dev` gone
+- [x] `tddy-git` plan, root and errors green over `InMemoryShell`
+- [x] the start passes the intent; the delete handles every target kind; green on `tddy-agent-launch`
+- [x] the pack path without a fallback; docs; `/home/dev` gone
 
 ## Testing Plan
 
@@ -240,8 +240,8 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved in advance by the developer's standing instruction for this stack's review gates)
 - [ ] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)

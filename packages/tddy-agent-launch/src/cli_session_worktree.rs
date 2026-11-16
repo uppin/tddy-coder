@@ -141,7 +141,7 @@ async fn cut_worktree(
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(start.selected_integration_base_ref, chain_base_ref);
     let wt = if let Some(shell) = &start.shell {
-        remote_worktree_through(start, git_url, shell.as_ref()).await?
+        remote_worktree_through(start, git_url, shell.as_ref(), worktree_base_ref).await?
     } else if start.ssh_alias.is_empty() {
         tddy_session_split::service_util::create_session_worktree(
             start.timeout,
@@ -152,7 +152,7 @@ async fn cut_worktree(
         )
         .await?
     } else {
-        remote_worktree(start, git_url).await?
+        remote_worktree(start, git_url, worktree_base_ref).await?
     };
     tddy_session_split::service_util::push_new_branch_to_origin_if_requested(
         start.create_remote_branch,
@@ -166,20 +166,47 @@ async fn cut_worktree(
 }
 
 /// The session's checkout on the ssh target `start.ssh_alias`, cloned from `git_url`.
-async fn remote_worktree(start: &CliWorktreeStart<'_>, git_url: &str) -> Result<PathBuf, Status> {
+async fn remote_worktree(
+    start: &CliWorktreeStart<'_>,
+    git_url: &str,
+    worktree_base_ref: Option<String>,
+) -> Result<PathBuf, Status> {
     let shell = tddy_remote_shell::SshShell::new(start.ssh_alias);
-    remote_worktree_through(start, git_url, &shell).await
+    remote_worktree_through(start, git_url, &shell, worktree_base_ref).await
 }
 
-/// The session's checkout on its target, cloned from `git_url` through `shell`.
+/// The session's checkout on its target, cloned from `git_url` through `shell`: under the target
+/// user's home, on the branch the start asked for — a new branch from its base, or the existing
+/// branch it named — as the local cut honours both.
 async fn remote_worktree_through(
     start: &CliWorktreeStart<'_>,
     git_url: &str,
     shell: &dyn tddy_remote_shell::RemoteShell,
+    worktree_base_ref: Option<String>,
 ) -> Result<PathBuf, Status> {
-    let remote_path = tokio::time::timeout(
+    let branch = match start.intent {
+        tddy_core::BranchWorktreeIntent::WorkOnSelectedBranch => {
+            tddy_core::worktree::RemoteBranch::Existing {
+                name: start.selected_branch_to_work_on.trim().to_string(),
+            }
+        }
+        tddy_core::BranchWorktreeIntent::NewBranchFromBase => {
+            tddy_core::worktree::RemoteBranch::NewFrom {
+                name: start.new_branch_name.trim().to_string(),
+                base_ref: worktree_base_ref
+                    .filter(|base| !base.trim().is_empty())
+                    .unwrap_or_else(|| "HEAD".to_string()),
+            }
+        }
+    };
+    let request = tddy_core::worktree::RemoteWorktreeRequest {
+        git_url: git_url.to_string(),
+        session_id: start.session_id.to_string(),
+        branch,
+    };
+    let checkout = tokio::time::timeout(
         start.timeout,
-        tddy_core::setup_worktree_for_session_over_ssh(shell, git_url, start.session_id),
+        tddy_core::setup_remote_worktree(shell, &request),
     )
     .await
     .map_err(|_| {
@@ -190,7 +217,7 @@ async fn remote_worktree_through(
         ))
     })?
     .map_err(|error| Status::internal(format!("remote worktree setup failed: {error}")))?;
-    Ok(PathBuf::from(remote_path))
+    Ok(PathBuf::from(checkout.worktree))
 }
 
 fn spawned_branch(
@@ -307,9 +334,10 @@ mod remote_cut_tests {
         };
 
         // When the checkout is cut on the target
-        let worktree = remote_worktree_through(&start, QAPE_HQ, &workspace)
-            .await
-            .expect("the cut succeeds");
+        let worktree =
+            remote_worktree_through(&start, QAPE_HQ, &workspace, Some("origin/main".to_string()))
+                .await
+                .expect("the cut succeeds");
 
         // Then it is under the workspace user's home, on the requested branch from its base
         let root = format!("{WORKSPACE_HOME}/.tddy/repos/qape-hq");

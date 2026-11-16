@@ -9,8 +9,8 @@
 //! as the local cut does. A failure carries the target's own words: a clone fails for reasons only
 //! the target knows.
 //!
-//! The functions are declared here with their contract; the bodies land with the implementation in
-//! this same PR.
+//! Every command runs as its own shell call, so the target's answer to each — a home it cannot
+//! print, a clone it refuses, a fetch or a cut that fails — is reported with its own words.
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-16-remote-shell-remote-checkout-root.md
 
@@ -95,11 +95,33 @@ impl From<RemoteShellError> for RemoteCheckoutError {
 }
 
 /// The repository name a git URL names: the last path segment without `.git`
-/// (`qape-hq` for `git@github.com:wix-private/qape-hq.git` and for `https://…/qape-hq.git`).
+/// (`qape-hq` for `git@github.com:wix-private/qape-hq.git` and for `https://…/qape-hq.git`). A URL
+/// naming no segment — the empty URL of a project with no remote yet — names `repo`, as the
+/// checkout it is cloned into still needs a directory.
 #[must_use]
 pub fn repository_name_of(git_url: &str) -> String {
-    let _ = git_url;
-    todo!("#remote-shell 10/11: the repository name a git URL names")
+    let trimmed = git_url.trim().trim_end_matches('/');
+    let segment = trimmed
+        .rsplit(['/', ':'])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches(".git");
+    if segment.is_empty() {
+        "repo".to_string()
+    } else {
+        segment.to_string()
+    }
+}
+
+/// What a failed command on the target printed, as one trimmed line of text.
+fn target_words(output: &tddy_remote_shell::ExecOutput) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let words = if stderr.trim().is_empty() {
+        String::from_utf8_lossy(&output.stdout)
+    } else {
+        stderr
+    };
+    words.trim().to_string()
 }
 
 /// Where the project `git_url` names is cloned on the target `shell` reaches: the target user's
@@ -108,8 +130,23 @@ pub async fn remote_checkout_root(
     shell: &dyn RemoteShell,
     git_url: &str,
 ) -> Result<String, RemoteCheckoutError> {
-    let _ = (shell, git_url);
-    todo!("#remote-shell 10/11: the checkout root is resolved on the target")
+    let output = shell
+        .exec(tddy_remote_shell::ExecRequest::new("printf '%s' \"$HOME\""))
+        .await?;
+    if output.status != 0 {
+        return Err(RemoteCheckoutError::HomeUnresolved(target_words(&output)));
+    }
+    let home = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    if home.is_empty() {
+        return Err(RemoteCheckoutError::HomeUnresolved(target_words(&output)));
+    }
+    Ok(format!(
+        "{home}/{REMOTE_REPOS_DIR}/{}",
+        repository_name_of(git_url)
+    ))
 }
 
 /// Cut `request`'s worktree on the target `shell` reaches: clone the project under
@@ -119,6 +156,123 @@ pub async fn setup_remote_worktree(
     shell: &dyn RemoteShell,
     request: &RemoteWorktreeRequest,
 ) -> Result<RemoteCheckout, RemoteCheckoutError> {
-    let _ = (shell, request);
-    todo!("#remote-shell 10/11: the worktree is cut on the target from the requested branch")
+    use crate::ssh_exec::shell_single_quote;
+
+    let root = remote_checkout_root(shell, &request.git_url).await?;
+    let worktree = format!("{root}/.worktrees/{}", request.session_id);
+    ensure_the_clone(shell, &root, &request.git_url).await?;
+
+    let branch = match &request.branch {
+        RemoteBranch::NewFrom { name, .. } | RemoteBranch::Existing { name } => name.clone(),
+    };
+    let checkout = RemoteCheckout {
+        root: root.clone(),
+        worktree: worktree.clone(),
+        branch,
+    };
+
+    // A worktree already cut at this path is the cut, asked for again.
+    let already_cut = shell
+        .exec(tddy_remote_shell::ExecRequest::new(format!(
+            "test -d {}",
+            shell_single_quote(&worktree)
+        )))
+        .await?;
+    if already_cut.status == 0 {
+        return Ok(checkout);
+    }
+
+    let fetched = shell
+        .exec(tddy_remote_shell::ExecRequest::new(format!(
+            "git -C {} fetch --all",
+            shell_single_quote(&root)
+        )))
+        .await?;
+    if fetched.status != 0 {
+        return Err(RemoteCheckoutError::Fetch(target_words(&fetched)));
+    }
+
+    let add = match &request.branch {
+        RemoteBranch::NewFrom { name, base_ref } => format!(
+            "git -C {} worktree add -b {} {} {}",
+            shell_single_quote(&root),
+            shell_single_quote(name),
+            shell_single_quote(&worktree),
+            shell_single_quote(base_ref),
+        ),
+        RemoteBranch::Existing { name } => format!(
+            "git -C {} worktree add {} {}",
+            shell_single_quote(&root),
+            shell_single_quote(&worktree),
+            shell_single_quote(name),
+        ),
+    };
+    let added = shell.exec(tddy_remote_shell::ExecRequest::new(add)).await?;
+    if added.status != 0 {
+        return Err(RemoteCheckoutError::Worktree(target_words(&added)));
+    }
+    Ok(checkout)
+}
+
+/// The clone of `git_url` at `root` on the target, made when it is not there yet: cloned from the
+/// URL, or — for a project with no URL yet — initialised in place with one empty commit, as the
+/// local cut's repository begins.
+async fn ensure_the_clone(
+    shell: &dyn RemoteShell,
+    root: &str,
+    git_url: &str,
+) -> Result<(), RemoteCheckoutError> {
+    use crate::ssh_exec::shell_single_quote;
+
+    let there = shell
+        .exec(tddy_remote_shell::ExecRequest::new(format!(
+            "test -d {}",
+            shell_single_quote(&format!("{root}/.git"))
+        )))
+        .await?;
+    if there.status == 0 {
+        return Ok(());
+    }
+
+    let url = git_url.trim();
+    if url.is_empty() {
+        for command in [
+            format!("git init {}", shell_single_quote(root)),
+            format!(
+                "git -C {} config user.email t@t.com",
+                shell_single_quote(root)
+            ),
+            format!("git -C {} config user.name T", shell_single_quote(root)),
+            format!(
+                "git -C {} commit --allow-empty -m init",
+                shell_single_quote(root)
+            ),
+        ] {
+            let ran = shell
+                .exec(tddy_remote_shell::ExecRequest::new(command))
+                .await?;
+            if ran.status != 0 {
+                return Err(RemoteCheckoutError::Clone {
+                    url: git_url.to_string(),
+                    stderr: target_words(&ran),
+                });
+            }
+        }
+        return Ok(());
+    }
+
+    let cloned = shell
+        .exec(tddy_remote_shell::ExecRequest::new(format!(
+            "git clone {} {}",
+            shell_single_quote(url),
+            shell_single_quote(root)
+        )))
+        .await?;
+    if cloned.status != 0 {
+        return Err(RemoteCheckoutError::Clone {
+            url: git_url.to_string(),
+            stderr: target_words(&cloned),
+        });
+    }
+    Ok(())
 }

@@ -146,10 +146,14 @@ impl LaunchSessions {
             Some(self.coding_agents.agents()),
         )?;
         if let Some((target, worktree)) = &target_worktree {
-            // FIXME(#remote-shell 10/11): a Coder target's shell is resolved with the caller's
-            // account, as the start resolves it; `shell_for_target` refuses it.
-            let shell = crate::remote_agent_launch::shell_for_target(target)
-                .map_err(|e| Status::invalid_argument(e.to_string()))?;
+            // The shell is resolved with the caller's account, as the start resolves it, so a
+            // Coder target's worktree is removed on its workspace too.
+            let subject = (self.user_resolver)(session_token).unwrap_or_default();
+            let shell = crate::opencode_cli_spawn::session_start::shell_for_session_target(
+                target,
+                &subject,
+                self.coder_credentials.as_ref(),
+            )?;
             remove_target_worktree(shell.as_ref(), worktree).await?;
         }
         log::info!("DeleteSession: successfully removed session {}", session_id);
@@ -262,7 +266,6 @@ pub(crate) fn target_worktree_of(session_dir: &Path) -> Option<(tddy_core::Sessi
 
 /// The clone a target worktree belongs to: `<root>/.worktrees/<session>` → `<root>`. `None` for a
 /// path that is not a tddy worktree path.
-#[allow(dead_code)] // the delete names the clone at green (#remote-shell 10/11)
 pub(crate) fn target_checkout_root_of(worktree: &str) -> Option<String> {
     let path = Path::new(worktree);
     let worktrees = path.parent()?;
@@ -279,15 +282,29 @@ pub(crate) async fn remove_target_worktree(
     shell: &dyn tddy_remote_shell::RemoteShell,
     worktree: &str,
 ) -> Result<(), Status> {
-    shell
-        .exec(tddy_remote_shell::ExecRequest::new(format!(
-            "rm -rf {}",
-            tddy_core::ssh_exec::shell_single_quote(worktree)
-        )))
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?
-        .success_or_exited()
-        .map_err(|e| Status::internal(e.to_string()))?;
+    let root = target_checkout_root_of(worktree).ok_or_else(|| {
+        Status::invalid_argument(format!(
+            "the target worktree {worktree} is not under a clone's .worktrees directory"
+        ))
+    })?;
+    for command in [
+        format!(
+            "git -C {} worktree remove --force {}",
+            tddy_core::ssh_exec::shell_single_quote(&root),
+            tddy_core::ssh_exec::shell_single_quote(worktree),
+        ),
+        format!(
+            "git -C {} worktree prune",
+            tddy_core::ssh_exec::shell_single_quote(&root),
+        ),
+    ] {
+        shell
+            .exec(tddy_remote_shell::ExecRequest::new(command))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .success_or_exited()
+            .map_err(|e| Status::internal(e.to_string()))?;
+    }
     Ok(())
 }
 

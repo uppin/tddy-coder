@@ -4,8 +4,9 @@
 //! changesets or workflows. Worktrees are stored in `.worktrees/` relative to the repo root.
 //!
 //! The crate is split by concern — `refs` (branch and ref names), `rev` (`rev-parse` wrappers),
-//! `remote` (fetch, push and remote resolution), `worktree` (linked worktrees) and `ssh_worktree`
-//! (worktrees on a remote host) — and every item is re-exported at the crate root.
+//! `remote` (fetch, push and remote resolution), `worktree` (linked worktrees) and
+//! `remote_checkout` (a checkout on a target, through the remote-shell port) — and every item is
+//! re-exported at the crate root.
 
 pub mod ssh_exec;
 
@@ -17,8 +18,6 @@ mod remote;
 pub use remote::*;
 mod worktree;
 pub use worktree::*;
-mod ssh_worktree;
-pub use ssh_worktree::*;
 mod remote_checkout;
 pub use remote_checkout::*;
 

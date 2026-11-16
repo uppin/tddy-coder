@@ -3,7 +3,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tddy_core::default_remote_repo_root;
 use tddy_projects::project_storage;
 use tddy_worktree_service::remote_git_service::{
     pack_execution_for_session, PackExecution, PackExecutionResolver, ProjectsDirResolver,
@@ -49,7 +48,11 @@ fn resolve_pack_execution(
     let Some(session) = best_ssh_session_for_project(&sessions, &project.project_id) else {
         return pack_execution_for_session(local_repo_path, "", "");
     };
-    let remote_repo_path = remote_repo_path_for_session(session, &project.git_url);
+    // A record without a path is a record this daemon did not write: it names no checkout on
+    // the target, so the pack runs locally rather than against a guessed path.
+    let Some(remote_repo_path) = remote_repo_path_for_session(session) else {
+        return pack_execution_for_session(local_repo_path, "", "");
+    };
     pack_execution_for_session(local_repo_path, &session.ssh_config_host, &remote_repo_path)
 }
 
@@ -72,16 +75,11 @@ fn best_ssh_session_for_project<'a>(
     ssh_sessions.first().copied()
 }
 
-fn remote_repo_path_for_session(session: &SessionEntry, git_url: &str) -> String {
+/// The worktree path `session` recorded, when it recorded one. A session whose record names
+/// no path is treated as not SSH-backed: no path is guessed for it.
+fn remote_repo_path_for_session(session: &SessionEntry) -> Option<String> {
     let trimmed = session.repo_path.trim();
-    if !trimmed.is_empty() {
-        return trimmed.to_string();
-    }
-    format!(
-        "{}/.worktrees/{}",
-        default_remote_repo_root(git_url).trim_end_matches('/'),
-        session.session_id
-    )
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 #[cfg(test)]
@@ -233,7 +231,7 @@ mod tests {
             "sess-a",
             "proj-1",
             "buildbox",
-            "/home/dev/repo/.worktrees/sess-a",
+            "/home/coder/.tddy/repos/my-app/.worktrees/sess-a",
             "2026-01-02T00:00:00Z",
         );
         write_session(
@@ -241,7 +239,7 @@ mod tests {
             "sess-b",
             "proj-1",
             "buildbox",
-            "/home/dev/repo/.worktrees/sess-b",
+            "/home/coder/.tddy/repos/my-app/.worktrees/sess-b",
             "2026-01-03T00:00:00Z",
         );
 
@@ -261,12 +259,13 @@ mod tests {
             local_repo_path: local_repo.clone(),
         });
 
-        // Then — newest `updated_at` wins when no session has a live pid
+        // Then — newest `updated_at` wins when no session has a live pid, at the path its
+        // record names
         assert_eq!(
             execution,
             PackExecution::Remote {
                 ssh_config_host: "buildbox".to_string(),
-                remote_repo_path: "/home/dev/repo/.worktrees/sess-b".to_string(),
+                remote_repo_path: "/home/coder/.tddy/repos/my-app/.worktrees/sess-b".to_string(),
             }
         );
     }
