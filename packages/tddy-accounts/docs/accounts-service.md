@@ -157,6 +157,13 @@ provider account the caller's default for each named harness, clearing it from t
 and answers with every changed account; it needs both `with_provider_account_defaults` and
 `with_route_support`. Detail: [provider-accounts.md](./provider-accounts.md).
 
+## Coder accounts
+
+`ConnectCoderAccount(session_token, deployment_url, token, label)` stores a Coder deployment
+account after the deployment names the person the token belongs to. It is served only when
+`AccountsServiceImpl::with_coder_accounts` was called; otherwise it answers
+`FAILED_PRECONDITION`. Detail: [coder-accounts.md](./coder-accounts.md).
+
 ## Registration
 
 `build_accounts_entry(service)` returns the `ServiceEntry` named `accounts.AccountsService`. The

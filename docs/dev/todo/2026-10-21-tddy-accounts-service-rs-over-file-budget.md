@@ -27,3 +27,9 @@ later nodes (#666+) modify the file too.
 `route_matrix()` helper shared with `list_provider_routes`. Still deferred for the same stack-shared
 reason: #668 (`opencode-acp`) modifies the file too. The split named above should also take
 `set_provider_account_defaults` with the provider-account half.
+
+**#916 (`#remote-shell` 2/7):** grew `service.rs` **772 → 790 production lines** (one delegating
+`connect_coder_account` arm, the `coder` field, two imports; every Coder helper lives in
+`coder_account.rs`). Still deferred: this PR's boundaries forbid splitting the file, and it is
+inherited by every later `#remote-shell` node. The split named above should also take the
+Coder arm with its own module.

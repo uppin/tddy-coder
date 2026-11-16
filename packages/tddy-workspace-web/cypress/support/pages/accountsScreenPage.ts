@@ -98,6 +98,24 @@ export const accountsScreenPage = {
     accountsScreenPage.connectSubmit().click();
   },
 
+  /** Open the form that adds a Coder deployment from its URL and a session token. */
+  connectCoderButton: () => byTestId("accounts-connect-coder"),
+  coderUrl: () => byTestId("accounts-coder-url"),
+  coderToken: () => byTestId("accounts-coder-token"),
+  coderLabel: () => byTestId("accounts-coder-label"),
+  coderSubmit: () => byTestId("accounts-coder-submit"),
+  /** The daemon's reason a Coder connect was refused, verbatim, beside the form. */
+  coderConnectError: () => byTestId("accounts-coder-error"),
+
+  /** Connect a Coder deployment the way a person does: open the form, fill it, submit. */
+  connectCoderAccount: (deploymentUrl: string, token: string, label: string) => {
+    accountsScreenPage.connectCoderButton().click();
+    accountsScreenPage.coderUrl().clear().type(deploymentUrl);
+    accountsScreenPage.coderToken().clear().type(token, { log: false });
+    accountsScreenPage.coderLabel().clear().type(label);
+    accountsScreenPage.coderSubmit().click();
+  },
+
   /** The harnesses a provider account is the person's default for, as a multi-select. */
   defaultForSelect: (provider: string, accountId: string) =>
     byTestId(`${ROW_TEST_ID_PREFIX}${provider}-${accountId}-default-for`),

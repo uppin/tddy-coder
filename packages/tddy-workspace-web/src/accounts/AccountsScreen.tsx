@@ -15,11 +15,9 @@ import { useState } from "react";
 import { Button } from "tddy-ui-web";
 import { ProviderAccountDefaultsControl } from "./ProviderAccountDefaultsControl";
 import { ProviderModels } from "./ProviderModels";
-import {
-  ConnectProviderAccountForm,
-  PROVIDER_PRESET_OPTIONS,
-  type ConnectProviderAccountInput,
-} from "./ConnectProviderAccountForm";
+import { type ConnectProviderAccountInput } from "./ConnectProviderAccountForm";
+import { type ConnectCoderAccountInput } from "./ConnectCoderAccountForm";
+import { ConnectApiKey, ConnectCoder } from "./ConnectAccountControls";
 
 /**
  * `#keyring` 6/9's aggregate sync standing for one account, worst peer first. `null` means
@@ -107,6 +105,12 @@ export interface AccountsScreenProps {
   onConnectProviderAccount?: (input: ConnectProviderAccountInput) => Promise<boolean>;
   /** The daemon's reason the last connect was refused, verbatim. */
   connectError?: string | null;
+  /**
+   * Connect a Coder deployment from its URL and a session token; resolves true once it was added.
+   */
+  onConnectCoderAccount?: (input: ConnectCoderAccountInput) => Promise<boolean>;
+  /** The daemon's reason the last Coder connect was refused, verbatim. */
+  coderConnectError?: string | null;
   /** The models a provider account's endpoint serves, asked for when its row is expanded. */
   onListModels?: (accountId: string) => Promise<string[]>;
   /** Make a provider account the default for these harnesses. When absent the row has no control. */
@@ -123,6 +127,8 @@ export function AccountsScreen({
   onAddAccount,
   onConnectProviderAccount,
   connectError = null,
+  onConnectCoderAccount,
+  coderConnectError = null,
   onListModels,
   onSetDefaults,
   harnessOptions = [],
@@ -131,6 +137,11 @@ export function AccountsScreen({
     <div data-testid="accounts-screen">
       {onConnectProviderAccount && outcome.kind === "listed" ? (
         <ConnectApiKey onConnect={onConnectProviderAccount} error={connectError} />
+      ) : null}
+      {onConnectCoderAccount && outcome.kind === "listed" ? (
+        <section data-testid="accounts-coder-connect" className="mb-4">
+          <ConnectCoder onConnect={onConnectCoderAccount} error={coderConnectError} />
+        </section>
       ) : null}
       {renderOutcome(outcome, onRename, onRemove, onAddAccount, onListModels, onSetDefaults, harnessOptions)}
       {linkAttempt ? <LinkAttemptView attempt={linkAttempt} /> : null}
@@ -396,46 +407,6 @@ function AccountRowView({
         </Button>
       )}
     </li>
-  );
-}
-
-/** "Connect API key" and, once pressed, its form; closes when the daemon added the account. */
-function ConnectApiKey({
-  onConnect,
-  error,
-}: {
-  onConnect: NonNullable<AccountsScreenProps["onConnectProviderAccount"]>;
-  error: string | null;
-}) {
-  const [connecting, setConnecting] = useState(false);
-  const [pending, setPending] = useState(false);
-  return (
-    <div className="mb-4">
-      <Button
-        size="sm"
-        variant="outline"
-        data-testid="accounts-connect-api-key"
-        onClick={() => setConnecting(true)}
-      >
-        Connect API key
-      </Button>
-      {connecting ? (
-        <ConnectProviderAccountForm
-          presets={PROVIDER_PRESET_OPTIONS}
-          pending={pending}
-          error={error}
-          onCancel={() => setConnecting(false)}
-          onSubmit={(input) => {
-            setPending(true);
-            onConnect(input)
-              .then((added) => {
-                if (added) setConnecting(false);
-              })
-              .finally(() => setPending(false));
-          }}
-        />
-      ) : null}
-    </div>
   );
 }
 

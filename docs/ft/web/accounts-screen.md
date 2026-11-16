@@ -79,6 +79,16 @@ and the New-session form starts with it selected. Saving a harness another accou
 both rows update; a harness the account cannot drive is refused with the daemon's reason. See
 [Provider accounts § A person's default per harness](../daemon/provider-accounts.md#a-persons-default-per-harness).
 
+### Connect Coder
+
+**Connect Coder** adds a [Coder](https://github.com/coder/coder) deployment from its URL and a
+session token. The form asks for the deployment URL, the token and a label; the token field is
+a password field. The daemon asks the deployment who the token belongs to before storing
+anything: a token it rejects is refused with the deployment's reason beside the form, with what
+was typed kept, and a working one joins the **Coder** group under the deployment's username.
+The token is never shown again. See
+[Provider accounts § Coder accounts](../daemon/provider-accounts.md#coder-accounts).
+
 ## Scope and access
 
 - The list is the signed-in person's own vault on the **selected daemon**; it is refused, not shown

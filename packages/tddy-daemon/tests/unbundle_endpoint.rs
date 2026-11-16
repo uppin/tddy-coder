@@ -80,7 +80,7 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 36] = [
+    const ENDPOINT: [&str; 37] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -146,6 +146,13 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         // deliberately carries no network stack, so only the crate that holds the HTTP client can
         // implement the port.
         "provider_model_probe.rs",
+        // The Coder deployment probe: `tddy-accounts`' `CoderDeploymentProbe` port implemented
+        // over the daemon's `reqwest` client. Wiring by the same criterion as
+        // `provider_model_probe.rs` — no RPC method, no session state, built only by
+        // `account_linking::accounts_service_over` — and it lives here because `tddy-accounts`
+        // deliberately carries no network stack, so only the crate that holds the HTTP client can
+        // implement the port.
+        "coder_deployment_probe.rs",
         // `#provider-route` 2/9's `RouteSupport` adapter: `tddy-accounts`' port answered by the
         // harness route matrix in `tddy-agent-backend`. Wiring by the same criterion — no RPC
         // method, no session state, built only by `account_linking::accounts_service_over` — and

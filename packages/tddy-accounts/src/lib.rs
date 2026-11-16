@@ -16,6 +16,7 @@
 //! [`linking`]: crate::linking
 
 mod attempts;
+mod coder_account;
 mod deadline;
 mod identity;
 mod linking;
@@ -27,6 +28,10 @@ mod store;
 mod sync_status;
 mod vault_store;
 
+pub use coder_account::{
+    CoderAccount, CoderAccountError, CoderAccounts, CoderCredentials, CoderDeploymentProbe,
+    CoderDeploymentUrl, CoderProbeError, CoderUser, CODER_PROVIDER,
+};
 pub use deadline::{deadline_after, forget_expired, is_past};
 pub use identity::{acting_identity, ActingIdentity, GitIdentity, IdentityError, PROVIDER_GITHUB};
 pub use linking::{

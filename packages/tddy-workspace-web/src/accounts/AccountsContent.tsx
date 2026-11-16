@@ -21,6 +21,7 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { reasonOf } from "./rpcReason";
 import { useLinkFlow } from "./useLinkFlow";
 import { type ConnectProviderAccountInput } from "./ConnectProviderAccountForm";
+import { type ConnectCoderAccountInput } from "./ConnectCoderAccountForm";
 import {
   AccountsScreen,
   type AccountRow,
@@ -166,6 +167,7 @@ export function AccountsContent() {
   }, [client, sessionToken]);
 
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [coderConnectError, setCoderConnectError] = useState<string | null>(null);
 
   const reread = () => {
     if (!client) return;
@@ -198,6 +200,24 @@ export function AccountsContent() {
       return false;
     }
     setConnectError(null);
+    reread();
+    return true;
+  };
+
+  const connectCoderAccount = async (input: ConnectCoderAccountInput) => {
+    if (!client) return false;
+    try {
+      await client.connectCoderAccount({
+        sessionToken: sessionToken ?? "",
+        deploymentUrl: input.deploymentUrl,
+        token: input.token,
+        label: input.label,
+      });
+    } catch (e: unknown) {
+      setCoderConnectError(reasonOf(e));
+      return false;
+    }
+    setCoderConnectError(null);
     reread();
     return true;
   };
@@ -282,6 +302,8 @@ export function AccountsContent() {
           onAddAccount={addAccount}
           onConnectProviderAccount={connectProviderAccount}
           connectError={connectError}
+          onConnectCoderAccount={connectCoderAccount}
+          coderConnectError={coderConnectError}
           onListModels={listModels}
           onSetDefaults={setDefaults}
           harnessOptions={harnessOptions}

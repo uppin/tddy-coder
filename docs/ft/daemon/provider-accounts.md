@@ -172,6 +172,27 @@ whose default is an account is refused like one that names the account, since a 
 an account yet. Tool sessions decide from the session-level choice only
 ([backlog](../../dev/todo/2026-10-22-tool-session-starts-ignore-the-provider-default.md)).
 
+## Coder accounts
+
+A signed-in person connects a [Coder](https://github.com/coder/coder) deployment by entering
+its URL and a session token. Coder is not a model-provider preset: it serves no model endpoint,
+so it has its own intake, `ConnectCoderAccount`, and never appears in the preset table, the
+route matrix or a Provider field.
+
+The daemon asks the deployment who the token belongs to (`GET /api/v2/users/me`) before storing
+anything, and checks the vault is open before that, so a closed vault refuses without the token
+leaving the daemon. The connect is refused, with the reason, when the URL is not an `http(s)`
+URL with a host, carries userinfo, a query or a fragment, the token is empty, the deployment
+rejects the token, or the deployment cannot be reached. A working pair is stored as
+`provider = "coder"`, `secret = token`, with the deployment URL, the username and the user id
+in the record's metadata. Connecting the same deployment and user again replaces that
+account's token and keeps its account id and label.
+
+No RPC returns the token. The stored URL and token are readable only while the person's vault
+is open, through `CoderAccounts::credentials_for`, which is the read path sessions on Coder
+workspaces use. Implementation:
+[tddy-accounts Coder accounts](../../../packages/tddy-accounts/docs/coder-accounts.md).
+
 ## Out of scope
 
 - Editing a stored key in place — remove the account and connect it again.

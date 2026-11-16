@@ -42,6 +42,11 @@ service AccountsService {
   // default per person: naming it here clears it from whichever account held it. A harness the
   // account cannot drive is refused. An empty list clears every default this account holds.
   rpc SetProviderAccountDefaults(SetProviderAccountDefaultsRequest) returns (SetProviderAccountDefaultsResponse);
+  // Add a Coder deployment as an account, from its URL and a pasted session token. The pair is
+  // checked by asking the deployment who the token belongs to before anything is stored; connecting
+  // the same deployment and user again replaces that account's token. Mints no session; the token
+  // goes in, never out.
+  rpc ConnectCoderAccount(ConnectCoderAccountRequest) returns (ConnectCoderAccountResponse);
 }
 
 // One linked account, as a person sees it.
@@ -300,4 +305,23 @@ message SetProviderAccountDefaultsRequest {
 message SetProviderAccountDefaultsResponse {
   // Every account whose defaults changed — the one named, and any that lost a harness to it.
   repeated AccountSummary changed = 1;
+}
+
+// A Coder deployment, connected by URL and session token.
+//
+// `token` is **inbound only**: no response carries it back, by the same message-shape rule as
+// `AccountSummary`. Not a model-provider preset — a Coder account serves no model endpoint, so it
+// never appears in `ListProviderRoutes`.
+message ConnectCoderAccountRequest {
+  string session_token = 1;
+  // The deployment's root, e.g. "https://coder.example.com": an http(s) URL with a host and without
+  // userinfo, query or fragment.
+  string deployment_url = 2;
+  // A Coder session token for that deployment (what `coder login` stores).
+  string token = 3;
+  string label = 4;
+}
+
+message ConnectCoderAccountResponse {
+  AccountSummary account = 1;
 }
