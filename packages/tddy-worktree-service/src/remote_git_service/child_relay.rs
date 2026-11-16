@@ -13,7 +13,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use tddy_rpc::Status;
 use tddy_service::proto::remote_git::GitServerFrame;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 /// The stream of frames one relay produces.
