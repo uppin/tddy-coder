@@ -13186,7 +13186,9 @@ dependencies = [
 name = "tddy-git"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "log",
+ "tddy-remote-shell",
 ]
 
 [[package]]
@@ -14264,9 +14266,11 @@ dependencies = [
  "log",
  "tddy-changeset",
  "tddy-git",
+ "tddy-remote-shell",
  "tddy-session-store",
  "tddy-workflow",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

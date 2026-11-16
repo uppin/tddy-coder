@@ -133,11 +133,14 @@ impl ExecOutput {
     /// This output when the command exited zero; otherwise [`RemoteShellError::Exited`] carrying
     /// the status and what the command wrote to stderr.
     pub fn success_or_exited(self) -> Result<Self, RemoteShellError> {
-        // TODO(shell-port): implement
-        let _ = self;
-        Err(RemoteShellError::Spawn(
-            "ExecOutput::success_or_exited is not implemented".to_string(),
-        ))
+        if self.status == 0 {
+            Ok(self)
+        } else {
+            Err(RemoteShellError::Exited {
+                status: self.status,
+                stderr: String::from_utf8_lossy(&self.stderr).into_owned(),
+            })
+        }
     }
 }
 
@@ -177,11 +180,12 @@ pub trait RemoteShell: Send + Sync {
     /// The bytes of the file at `path` on the target. A file that cannot be read is
     /// [`RemoteShellError::Exited`] with what the target said.
     async fn read_file(&self, path: &str) -> Result<Vec<u8>, RemoteShellError> {
-        // TODO(shell-port): implement — `cat <path>` through `exec`.
-        let _ = path;
-        Err(RemoteShellError::Spawn(
-            "RemoteShell::read_file is not implemented".to_string(),
-        ))
+        let command = format!("cat {}", shell_single_quote(path));
+        Ok(self
+            .exec(ExecRequest::new(command))
+            .await?
+            .success_or_exited()?
+            .stdout)
     }
 
     /// Write `bytes` to `path` on the target, creating its directory, with the permissions `mode`
@@ -192,12 +196,31 @@ pub trait RemoteShell: Send + Sync {
         bytes: &[u8],
         mode: FileMode,
     ) -> Result<(), RemoteShellError> {
-        // TODO(shell-port): implement — `umask …; mkdir -p <dir> && cat > <path>` through `exec`.
-        let _ = (path, bytes, mode);
-        Err(RemoteShellError::Spawn(
-            "RemoteShell::write_file is not implemented".to_string(),
-        ))
+        let dir = match path.rfind('/') {
+            Some(0) => "/",
+            Some(index) => &path[..index],
+            None => ".",
+        };
+        let quoted_dir = shell_single_quote(dir);
+        let quoted_path = shell_single_quote(path);
+        let command = match mode {
+            FileMode::OwnerOnly => {
+                format!("umask 077; mkdir -p {quoted_dir} && cat > {quoted_path}")
+            }
+            FileMode::TargetDefault => {
+                format!("mkdir -p {quoted_dir} && cat > {quoted_path}")
+            }
+        };
+        self.exec(ExecRequest::new(command).with_stdin(bytes.to_vec()))
+            .await?
+            .success_or_exited()?;
+        Ok(())
     }
+}
+
+/// Escape a string for a single-quoted POSIX shell argument.
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 #[cfg(test)]

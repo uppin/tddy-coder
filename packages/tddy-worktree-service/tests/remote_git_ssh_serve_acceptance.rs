@@ -77,8 +77,9 @@ async fn serve_without_ssh_config_host_still_packs_the_local_repo() {
     ];
 
     // When
-    let (relay, frames) =
-        GitChildRelay::spawn_pack_verb(&execution, argv, host_path_env()).expect("local spawn");
+    let (relay, frames) = GitChildRelay::spawn_pack_verb(&execution, argv, host_path_env())
+        .await
+        .expect("local spawn");
     let stdout = stdout_of(frames).await;
     drop(relay);
 
@@ -104,8 +105,9 @@ async fn serve_upload_pack_with_ssh_config_host_packs_the_remote_repo() {
     ];
 
     // When
-    let (relay, frames) =
-        GitChildRelay::spawn_pack_verb(&execution, argv, host_path_env()).expect("remote spawn");
+    let (relay, frames) = GitChildRelay::spawn_pack_verb(&execution, argv, host_path_env())
+        .await
+        .expect("remote spawn");
     let stdout = stdout_of(frames).await;
     drop(relay);
 

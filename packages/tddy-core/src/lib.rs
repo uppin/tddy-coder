@@ -22,9 +22,7 @@ pub mod ssh_exec;
 
 pub use atomic_file::{write_atomic, write_atomic_labelled};
 pub use error::{BackendError, ParseError, WorkflowError};
-pub use ssh_exec::{
-    contain_remote_path, default_remote_repo_root, run_ssh_batch, shell_single_quote,
-};
+pub use ssh_exec::{contain_remote_path, default_remote_repo_root, shell_single_quote};
 pub use tddy_workflow::{
     canonical_artifact_write_path, canonical_attachment_write_path, read_session_artifact_utf8,
     read_session_artifact_utf8_or_placeholder, resolve_existing_session_artifact,

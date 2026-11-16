@@ -102,14 +102,15 @@ fn a_notify_only_session_points_at_no_socket_and_a_session_with_neither_has_no_p
     );
 }
 
-#[test]
-fn a_placed_pointer_is_found_from_the_worktree_owner_only_and_kept_out_of_git() {
+#[tokio::test]
+async fn a_placed_pointer_is_found_from_the_worktree_owner_only_and_kept_out_of_git() {
     // Given
     let checkout = a_checkout();
     let pointer = the_pointer_in(checkout.path());
 
     // When
     let placed = place_session_pointer(Some(&pointer), checkout.path(), &PointerHost::Local)
+        .await
         .expect("the pointer is written")
         .expect("a local pointer is the launch's to remove")
         .path;
@@ -132,14 +133,15 @@ fn a_placed_pointer_is_found_from_the_worktree_owner_only_and_kept_out_of_git() 
     );
 }
 
-#[test]
-fn a_worktree_that_is_no_git_checkout_gets_its_pointer_with_nothing_to_exclude_it_from() {
+#[tokio::test]
+async fn a_worktree_that_is_no_git_checkout_gets_its_pointer_with_nothing_to_exclude_it_from() {
     // Given — a plain directory: no repository holds it, so none can commit the pointer
     let not_a_checkout = tempfile::tempdir().unwrap();
     let pointer = the_pointer_in(not_a_checkout.path());
 
     // When
     let placed = place_session_pointer(Some(&pointer), not_a_checkout.path(), &PointerHost::Local)
+        .await
         .expect("the pointer is written")
         .map(|placed| placed.path);
 
@@ -159,6 +161,7 @@ async fn the_agents_exit_removes_the_pointer_then_runs_the_launchs_own_hook() {
         checkout.path(),
         &PointerHost::Local,
     )
+    .await
     .unwrap();
     let ran = Arc::new(Mutex::new(false));
     let ran_by_hook = Arc::clone(&ran);
@@ -224,8 +227,7 @@ fn a_stub_ssh() -> AStubSsh {
 impl AStubSsh {
     fn host(&self) -> PointerHost {
         PointerHost::Ssh {
-            ssh: self.dir.path().join("ssh"),
-            alias: SSH_TARGET.to_string(),
+            shell: tddy_remote_shell::SshShell::through(self.dir.path().join("ssh"), SSH_TARGET),
         }
     }
 
@@ -294,8 +296,8 @@ fn the_targets_hostname() -> String {
 /// The pid the remote launch records for its agent on the target.
 const REMOTE_AGENT_PID: u32 = 4242;
 
-#[test]
-fn an_ssh_pointer_is_excluded_owner_only_and_bounded() {
+#[tokio::test]
+async fn an_ssh_pointer_is_excluded_owner_only_and_bounded() {
     // Given — an ssh session whose worktree is a checkout on the target
     let target_checkout = a_checkout();
     let ssh = a_stub_ssh();
@@ -303,6 +305,7 @@ fn an_ssh_pointer_is_excluded_owner_only_and_bounded() {
 
     // When — the pointer is placed, the agent starts and records its pid, and its owner is recorded
     let placed = place_session_pointer(Some(&pointer), target_checkout.path(), &ssh.host())
+        .await
         .expect("the pointer is written on the target")
         .expect("an ssh pointer is the launch's to remove");
     std::fs::write(
@@ -310,7 +313,9 @@ fn an_ssh_pointer_is_excluded_owner_only_and_bounded() {
         REMOTE_AGENT_PID.to_string(),
     )
     .unwrap();
-    let owner = record_remote_owner(&placed, &pointer).expect("the remote agent owns the pointer");
+    let owner = record_remote_owner(&placed, &pointer)
+        .await
+        .expect("the remote agent owns the pointer");
 
     // Then — owned by the remote agent on the target, owner-only, kept out of git, and each step
     // one bounded ssh command
@@ -342,23 +347,26 @@ fn an_ssh_pointer_is_excluded_owner_only_and_bounded() {
             }),
             0o600,
             String::new(),
-            2,
+            3,
             true
         )
     );
 }
 
-#[test]
-fn the_owner_of_a_pointer_on_this_host_is_not_looked_up_over_ssh() {
+#[tokio::test]
+async fn the_owner_of_a_pointer_on_this_host_is_not_looked_up_over_ssh() {
     // Given — a pointer placed on this host
     let checkout = a_checkout();
     let pointer = the_pointer_in(checkout.path());
     let placed = place_session_pointer(Some(&pointer), checkout.path(), &PointerHost::Local)
+        .await
         .unwrap()
         .expect("a local pointer");
 
     // When
-    let refused = record_remote_owner(&placed, &pointer).map_err(|status| status.code());
+    let refused = record_remote_owner(&placed, &pointer)
+        .await
+        .map_err(|status| status.code());
 
     // Then
     assert_eq!(refused, Err(tddy_rpc::Code::FailedPrecondition));
@@ -372,6 +380,7 @@ async fn an_ssh_pointer_is_removed_when_the_agent_exits_and_when_the_session_is_
     let on_the_target = target_checkout.path().join(".tddy/session.json");
     let pointer = the_pointer_in(target_checkout.path());
     let placed = place_session_pointer(Some(&pointer), target_checkout.path(), &ssh.host())
+        .await
         .expect("the pointer is written on the target");
 
     // When — its agent exits
@@ -382,12 +391,14 @@ async fn an_ssh_pointer_is_removed_when_the_agent_exits_and_when_the_session_is_
 
     // ...and, placed again by a resume, its session is deleted
     place_session_pointer(Some(&pointer), target_checkout.path(), &ssh.host())
+        .await
         .expect("the pointer is written again");
     let sessions = a_session_recording_an_ssh_worktree(target_checkout.path());
-    crate::svc_signal_delete_session::remove_recorded_session_pointer(
+    crate::svc_signal_delete_session::remove_recorded_session_pointer_through(
         &sessions.path().join("s1"),
         &ssh.dir.path().join("ssh"),
-    );
+    )
+    .await;
     let after_the_delete = on_the_target.exists();
 
     // Then — gone both times, through bounded ssh commands

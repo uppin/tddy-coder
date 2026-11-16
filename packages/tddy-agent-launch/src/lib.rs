@@ -54,7 +54,6 @@ pub mod session_coordinate_handlers;
 pub mod session_git;
 pub mod session_provider_route;
 pub mod session_worktree_observer;
-mod slot_file_over_ssh;
 pub mod slot_files_over_shell;
 pub mod spec_launch;
 pub mod split_session_pointers;

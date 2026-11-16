@@ -5,17 +5,15 @@
 /// if needed), then `git worktree add` under `.worktrees/`. Returns the absolute path on the target.
 ///
 /// A BatchMode failure is the result — never a local worktree.
-pub fn setup_worktree_for_session_over_ssh(
-    ssh_config_host: &str,
+pub async fn setup_worktree_for_session_over_ssh(
+    shell: &dyn tddy_remote_shell::RemoteShell,
     git_url: &str,
     session_id: &str,
 ) -> Result<String, String> {
-    use crate::ssh_exec::{default_remote_repo_root, run_ssh_batch, shell_single_quote};
+    use tddy_remote_shell::ExecRequest;
 
-    let host = ssh_config_host.trim();
-    if host.is_empty() {
-        return Err("ssh_config_host is required for remote worktree setup".to_string());
-    }
+    use crate::ssh_exec::{default_remote_repo_root, shell_single_quote};
+
     let remote_repo = default_remote_repo_root(git_url);
     let worktree_path = format!("{}/.worktrees/{}", remote_repo, session_id);
     let quoted_repo = shell_single_quote(&remote_repo);
@@ -65,6 +63,11 @@ pub fn setup_worktree_for_session_over_ssh(
         session_id = session_id,
     );
 
-    run_ssh_batch(host, &remote_cmd)?;
+    shell
+        .exec(ExecRequest::new(remote_cmd))
+        .await
+        .map_err(|error| error.to_string())?
+        .success_or_exited()
+        .map_err(|error| error.to_string())?;
     Ok(worktree_path)
 }

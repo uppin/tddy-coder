@@ -6,7 +6,7 @@
 //!   `hooks`, the MCP and tool-list slots from the role's [`AgentToolset`], the appended system
 //!   prompt (a managed workflow's recipe prompt, a main's prompt) and `{home}`.
 //! - [`write_slot_files_on_target`]: an ssh session's slot files written on its target
-//!   (`slot_file_over_ssh`, bounded by `SLOT_FILE_OVER_SSH_DEADLINE`), never at that path here.
+//!   (through the remote-shell port, bounded by its deadline), never at that path here.
 //! - [`start_conversation`] / [`resumed_conversation`]: `coding_agent.conversation` — the daemon's
 //!   session id, a minted id (bounded by the slot's mint deadline), the worktree, or a resume token.
 //! - [`refuse_a_role_the_agent_cannot_hold`]: a project-home main only for a spec declaring
@@ -39,8 +39,8 @@ use crate::cli_session_pointer::session_pointer_of;
 use crate::launch_ports::LaunchSessions;
 use crate::managed_launch;
 use crate::project_home_launch::{spec_role_launch, RoleWiring, StartRole};
-use crate::slot_file_over_ssh::write_slot_file_over_ssh;
-use crate::spec_launch::{AgentToolset, HostAgent, McpRegistration, SpecLaunchError};
+use crate::slot_files_over_shell::write_slot_files_through;
+use crate::spec_launch::{AgentToolset, HostAgent, McpRegistration};
 
 /// What a generic host launch fills beyond its spec's own argv.
 #[derive(Default)]
@@ -101,21 +101,19 @@ pub(crate) fn render_host_launch_slots(
 /// local write (`spec_launch::plan_host_pty`) writes nothing at those paths on this host. A local
 /// checkout (`None`) leaves `slots` alone. Refused `DEADLINE_EXCEEDED` naming the host when the
 /// target never answers.
-pub(crate) fn write_slot_files_on_target(
+pub(crate) async fn write_slot_files_on_target(
     slots: &mut RenderedSlots,
     remote_host: Option<&str>,
 ) -> Result<(), Status> {
     let Some(host) = remote_host else {
         return Ok(());
     };
-    for (path, bytes) in std::mem::take(&mut slots.files) {
-        write_slot_file_over_ssh(host, &path, &bytes).map_err(|error| match error {
-            SpecLaunchError::SlotFileOverSshTimedOut { .. } => {
-                Status::deadline_exceeded(error.to_string())
-            }
-            other => Status::internal(format!("failed to write a slot file on {host}: {other}")),
-        })?;
-        slots.written.retain(|written| *written != path);
+    let shell = tddy_remote_shell::SshShell::new(host);
+    let files = std::mem::take(&mut slots.files);
+    let paths: Vec<PathBuf> = files.iter().map(|(path, _)| path.clone()).collect();
+    write_slot_files_through(&shell, &files).await?;
+    for path in &paths {
+        slots.written.retain(|written| written != path);
     }
     Ok(())
 }

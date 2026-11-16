@@ -31,5 +31,6 @@ async fn tddy_remote_git_repo_clones_an_ssh_backed_project() {
 
     // When — the same spawn Serve will use for tddy-remote-git-repo
     let (_relay, _frames) = GitChildRelay::spawn_pack_verb(&execution, argv, Vec::new())
+        .await
         .expect("upload-pack on the SSH target must spawn so a clone can proceed");
 }

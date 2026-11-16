@@ -6,8 +6,9 @@
 
 use std::path::{Path, PathBuf};
 
-use tddy_core::session_pointer::SessionPointer;
-use tddy_remote_shell::RemoteShell;
+use tddy_core::session_pointer::{SessionPointer, SESSION_POINTER_FILE};
+use tddy_core::ssh_exec::shell_single_quote;
+use tddy_remote_shell::{ExecRequest, FileMode, RemoteShell, RemoteShellError};
 use tddy_rpc::Status;
 
 /// Write each of `files` (a rendered launch's slot files: path on the target, bytes) through
@@ -17,11 +18,16 @@ pub async fn write_slot_files_through(
     shell: &dyn RemoteShell,
     files: &[(PathBuf, Vec<u8>)],
 ) -> Result<(), Status> {
-    // TODO(shell-port): implement
-    let _ = (shell, files);
-    Err(Status::unimplemented(
-        "slot files are not written through the remote-shell port yet",
-    ))
+    for (path, bytes) in files {
+        shell
+            .write_file(&path.to_string_lossy(), bytes, FileMode::TargetDefault)
+            .await
+            .map_err(|error| match error {
+                RemoteShellError::TimedOut { .. } => Status::deadline_exceeded(error.to_string()),
+                other => Status::internal(other.to_string()),
+            })?;
+    }
+    Ok(())
 }
 
 /// Place `pointer` as `worktree`'s session pointer on `shell`'s target: the pointer is added to
@@ -33,9 +39,33 @@ pub async fn place_session_pointer_through(
     pointer: &SessionPointer,
     worktree: &Path,
 ) -> Result<PathBuf, Status> {
-    // TODO(shell-port): implement
-    let _ = (shell, pointer, worktree);
-    Err(Status::unimplemented(
-        "the session pointer is not placed through the remote-shell port yet",
-    ))
+    let exclude_command = format!(
+        "if exclude=$(git -C {worktree} rev-parse --path-format=absolute --git-path info/exclude 2>/dev/null); then \
+         mkdir -p \"$(dirname \"$exclude\")\"; \
+         grep -qxF '/.tddy/session.json' \"$exclude\" 2>/dev/null || echo '/.tddy/session.json' >> \"$exclude\"; fi",
+        worktree = shell_single_quote(&worktree.to_string_lossy()),
+    );
+    shell
+        .exec(ExecRequest::new(exclude_command))
+        .await
+        .map_err(|error| match error {
+            RemoteShellError::TimedOut { .. } => Status::deadline_exceeded(error.to_string()),
+            other => Status::internal(other.to_string()),
+        })?
+        .success_or_exited()
+        .map_err(|error| match error {
+            RemoteShellError::TimedOut { .. } => Status::deadline_exceeded(error.to_string()),
+            other => Status::internal(other.to_string()),
+        })?;
+    let pointer_path = worktree.join(SESSION_POINTER_FILE);
+    let bytes =
+        serde_json::to_vec_pretty(pointer).map_err(|error| Status::internal(error.to_string()))?;
+    shell
+        .write_file(&pointer_path.to_string_lossy(), &bytes, FileMode::OwnerOnly)
+        .await
+        .map_err(|error| match error {
+            RemoteShellError::TimedOut { .. } => Status::deadline_exceeded(error.to_string()),
+            other => Status::internal(other.to_string()),
+        })?;
+    Ok(pointer_path)
 }

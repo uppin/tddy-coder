@@ -162,20 +162,19 @@ async fn cut_worktree(
 
 /// The session's checkout on the ssh target `start.ssh_alias`, cloned from `git_url`.
 async fn remote_worktree(start: &CliWorktreeStart<'_>, git_url: &str) -> Result<PathBuf, Status> {
-    let (alias, git_url, session_id) = (
-        start.ssh_alias.to_string(),
-        git_url.to_string(),
-        start.session_id.to_string(),
-    );
-    let remote_path = tddy_session_split::service_util::spawn_blocking_with_timeout(
+    let shell = tddy_remote_shell::SshShell::new(start.ssh_alias);
+    let remote_path = tokio::time::timeout(
         start.timeout,
-        "start_cli_harness_session: create remote worktree",
-        move || {
-            tddy_core::setup_worktree_for_session_over_ssh(&alias, &git_url, &session_id)
-                .map_err(|e| anyhow::anyhow!("remote worktree setup failed: {}", e))
-        },
+        tddy_core::setup_worktree_for_session_over_ssh(&shell, git_url, start.session_id),
     )
-    .await?;
+    .await
+    .map_err(|_| {
+        Status::deadline_exceeded(format!(
+            "remote worktree setup on {} did not finish within {:?}",
+            start.ssh_alias, start.timeout
+        ))
+    })?
+    .map_err(|error| Status::internal(format!("remote worktree setup failed: {error}")))?;
     Ok(PathBuf::from(remote_path))
 }
 

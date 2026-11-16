@@ -207,19 +207,28 @@ impl LaunchSessions {
 
 async fn remove_session_pointer(session_id: &str, sessions_base: &std::path::Path) {
     let session_dir = unified_session_dir_path(sessions_base, session_id);
-    if let Err(e) = tokio::task::spawn_blocking(move || {
-        remove_recorded_session_pointer(&session_dir, Path::new("ssh"))
-    })
-    .await
-    {
-        log::warn!("the session pointer's removal did not finish: {e}");
-    }
+    remove_recorded_session_pointer(&session_dir).await;
 }
 
 /// Remove the session pointer ([`crate::cli_session_pointer`]) from the worktree the session in
 /// `session_dir` records, if it records one — on the ssh target it records
 /// (`ssh_config_host`, reached through the ssh client `ssh`) when it records one.
-pub(crate) fn remove_recorded_session_pointer(session_dir: &Path, ssh: &Path) {
+pub(crate) async fn remove_recorded_session_pointer(session_dir: &Path) {
+    let Ok(metadata) = read_session_metadata(session_dir) else {
+        return;
+    };
+    if let Some(worktree) = metadata.repo_path {
+        crate::cli_session_pointer::remove_session_pointer(
+            Path::new(&worktree),
+            &crate::cli_session_pointer::PointerHost::of(metadata.ssh_config_host.as_deref()),
+        )
+        .await;
+    }
+}
+
+/// [`remove_recorded_session_pointer`], reaching an ssh target through the ssh client `ssh`.
+#[allow(dead_code)]
+pub(crate) async fn remove_recorded_session_pointer_through(session_dir: &Path, ssh: &Path) {
     let Ok(metadata) = read_session_metadata(session_dir) else {
         return;
     };
@@ -230,7 +239,8 @@ pub(crate) fn remove_recorded_session_pointer(session_dir: &Path, ssh: &Path) {
                 ssh,
                 metadata.ssh_config_host.as_deref(),
             ),
-        );
+        )
+        .await;
     }
 }
 
