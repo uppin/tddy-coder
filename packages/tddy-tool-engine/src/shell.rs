@@ -6,9 +6,11 @@
 //! fallback to the host filesystem.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use tddy_core::{contain_remote_path, run_ssh_batch, shell_single_quote};
+use tddy_core::{contain_remote_path, shell_single_quote};
+use tddy_remote_shell::ExecRequest;
 
 use crate::contained_shell::run_contained;
 use crate::{contain_path, execute_tool_with_env, ToolOutcome};
@@ -98,27 +100,31 @@ impl Shell for LocalShell {
 pub struct RemoteShell {
     host_alias: String,
     remote_root: String,
+    /// The port every command of this shell runs through.
+    port: Arc<dyn tddy_remote_shell::RemoteShell>,
 }
 
 impl RemoteShell {
     pub fn new(host_alias: impl Into<String>, remote_root: impl Into<String>) -> Self {
+        let host_alias = host_alias.into();
         Self {
-            host_alias: host_alias.into(),
+            port: Arc::new(tddy_remote_shell::SshShell::new(host_alias.clone())),
+            host_alias,
             remote_root: remote_root.into(),
         }
     }
 
-    /// `ssh -o BatchMode=yes -- <alias> …` — the argv green will spawn. Encrypted keys must already
-    /// be loaded (Hosts add-key); this never prompts.
-    pub fn ssh_argv(&self, remote_command: &str) -> Vec<String> {
-        vec![
-            "ssh".to_string(),
-            "-o".to_string(),
-            "BatchMode=yes".to_string(),
-            "--".to_string(),
-            self.host_alias.clone(),
-            remote_command.to_string(),
-        ]
+    /// The exec catalog on the target `port` reaches, contained against `remote_root` there. Every
+    /// read, write and command runs through the port; a failure of the port is the tool's result.
+    pub fn over(
+        port: Arc<dyn tddy_remote_shell::RemoteShell>,
+        remote_root: impl Into<String>,
+    ) -> Self {
+        Self {
+            host_alias: port.address().name,
+            remote_root: remote_root.into(),
+            port,
+        }
     }
 
     pub fn host_alias(&self) -> &str {
@@ -133,12 +139,36 @@ impl RemoteShell {
         &self,
         remote_shell_command: &str,
     ) -> Result<std::process::Output, ShellError> {
-        let host = self.host_alias.clone();
-        let cmd = remote_shell_command.to_string();
-        tokio::task::spawn_blocking(move || run_ssh_batch(&host, &cmd))
+        let output = self
+            .port
+            .exec(ExecRequest::new(remote_shell_command))
             .await
-            .map_err(|e| ShellError::Io(format!("ssh task join: {e}")))?
-            .map_err(ShellError::Io)
+            .map_err(|error| ShellError::Io(error.to_string()))?;
+        Ok(exec_output_to_process_output(output))
+    }
+}
+
+/// Convert a port output to a `std::process::Output` for the `Shell` trait's existing callers.
+fn exec_output_to_process_output(output: tddy_remote_shell::ExecOutput) -> std::process::Output {
+    #[cfg(unix)]
+    let status = {
+        use std::os::unix::process::ExitStatusExt as _;
+        // This reconstructs an exited status from the port's exit code.
+        std::process::ExitStatus::from_raw((output.status.max(0)) << 8)
+    };
+    #[cfg(not(unix))]
+    let status = {
+        let _ = output.status;
+        // Non-Unix targets have no public exited-status constructor; callers only read
+        // stdout/stderr there, so a success status stands in for the port's code.
+        std::process::Command::new("true")
+            .status()
+            .expect("a success status")
+    };
+    std::process::Output {
+        status,
+        stdout: output.stdout,
+        stderr: output.stderr,
     }
 }
 

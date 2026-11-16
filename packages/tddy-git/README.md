@@ -9,8 +9,9 @@ where 35 dependent crates compiled 1,606 lines of git plumbing whether they touc
 two session-aware functions were enough to bind all of it to the god-crate. Splitting the two apart
 leaves a dependency-free library anything in the workspace can use.
 
-**`tddy-git` depends on no other workspace crate**, and must not gain one. Its only dependency is
-`log`. A `tddy-git` that reached back into `tddy-core` would have moved the lines without moving the
+**`tddy-git` depends on no workspace crate but the `tddy-remote-shell` port**, and must not gain
+another. Besides that port its dependencies are `log` and `async-trait`. A `tddy-git` that reached
+back into `tddy-core` would have moved the lines without moving the
 coupling — `packages/tddy-github/tests/git_plumbing_shape.rs` asserts against exactly that.
 
 ## Module layout
@@ -21,7 +22,7 @@ coupling — `packages/tddy-github/tests/git_plumbing_shape.rs` asserts against 
 | `rev` | `git rev-parse` wrappers: resolved revisions and checked-out branch names |
 | `remote` | `GIT_SSH_COMMAND`, fetch, push, default-remote detection, integration-base resolution |
 | `worktree` | linked worktrees under `.worktrees/`: create, reuse, find, list, remove |
-| `ssh_worktree`, `ssh_exec` | session worktrees on a remote host, and the OpenSSH helpers they run through |
+| `ssh_worktree`, `ssh_exec` | session worktrees on a remote host, run through the `tddy-remote-shell` port, and the path helpers they use |
 
 The modules are private and re-exported at the root, so every item is `tddy_git::<item>`. Details
 per function: [docs/architecture.md](docs/architecture.md).

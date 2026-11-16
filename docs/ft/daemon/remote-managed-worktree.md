@@ -84,7 +84,7 @@ SSH client; `tddy-tools` inside the jail does not open SSH.
 | `ssh_config_host` | Worktree | Exec catalog |
 |---|---|---|
 | empty | Created on the daemon's local disk (today) | `LocalShell` — `execute_tool` on the local root |
-| set | Materialized on the SSH target via `setup_worktree_for_session_over_ssh` | `RemoteShell` — `ssh -o BatchMode=yes <alias> …` against the remote worktree path |
+| set | Materialized on the SSH target via `setup_worktree_for_session_over_ssh` | `RemoteShell` — the tool-engine shell over the `tddy-remote-shell` port (`SshShell` on the alias, one option set: `BatchMode=yes`, `ConnectTimeout=15`, `ServerAliveInterval=5`, `ServerAliveCountMax=3`) against the remote worktree path |
 
 The alias is persisted on `.session.yaml` and listed on `SessionEntry`. Failed SSH (unknown host,
 BatchMode, missing agent key) surfaces as start or tool failure; there is no fallback to local

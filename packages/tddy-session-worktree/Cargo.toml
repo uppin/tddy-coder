@@ -16,4 +16,6 @@ tddy-git = { path = "../tddy-git" }
 # `stack_fixtures`: the sessions layout a PR stack lives in.
 tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 tempfile = "3"
+tddy-remote-shell = { path = "../tddy-remote-shell", features = ["test-support"] }
+tokio = { version = "1", features = ["macros", "rt"] }
 tddy-workflow = { path = "../tddy-workflow" }

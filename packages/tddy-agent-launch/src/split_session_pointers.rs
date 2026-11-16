@@ -7,15 +7,15 @@
 use std::path::Path;
 
 use crate::cli_session_pointer::{
-    place_session_pointer, remove_placed_pointer, removing_session_pointer_on_exit,
-    PlacedSessionPointer, PointerHost,
+    place_session_pointer_locally, remove_pointer_file, removing_session_pointer_on_exit,
+    session_pointer_path, PlacedSessionPointer, PointerHost,
 };
 use tddy_cli_sessions::cli_session_manager::ExitHook;
 use tddy_core::session_pointer::SessionPointer;
 use tddy_rpc::Status;
 use tddy_session_split::split_ports::SplitSessionPointers;
 
-/// [`SplitSessionPointers`] on this host: [`crate::cli_session_pointer::place_session_pointer`]
+/// [`SplitSessionPointers`] on this host: [`crate::cli_session_pointer::place_session_pointer_locally`]
 /// and [`crate::cli_session_pointer::removing_session_pointer_on_exit`].
 pub struct HostSplitSessionPointers;
 
@@ -26,15 +26,20 @@ impl SplitSessionPointers for HostSplitSessionPointers {
         context_dir: &Path,
         on_exit: Option<ExitHook>,
     ) -> Result<Option<ExitHook>, Status> {
-        let placed = place_session_pointer(Some(pointer), context_dir, &PointerHost::Local)?;
-        Ok(removing_session_pointer_on_exit(on_exit, placed, false))
+        let path = place_session_pointer_locally(pointer, context_dir)?;
+        let placed = PlacedSessionPointer {
+            path,
+            host: PointerHost::Local,
+        };
+        Ok(removing_session_pointer_on_exit(
+            on_exit,
+            Some(placed),
+            false,
+        ))
     }
 
     fn remove(&self, context_dir: &Path) {
-        remove_placed_pointer(&PlacedSessionPointer {
-            path: crate::cli_session_pointer::session_pointer_path(context_dir),
-            host: PointerHost::Local,
-        });
+        remove_pointer_file(&session_pointer_path(context_dir));
     }
 }
 

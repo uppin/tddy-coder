@@ -441,8 +441,8 @@ fn a_host_launch_of_an_agent_declaring_hooks_renders_its_hooks_file_and_appended
     );
 }
 
-#[test]
-fn a_local_checkouts_slot_files_are_left_for_the_local_write() {
+#[tokio::test]
+async fn a_local_checkouts_slot_files_are_left_for_the_local_write() {
     // Given
     let mut slots = RenderedSlots {
         files: vec![(
@@ -454,7 +454,9 @@ fn a_local_checkouts_slot_files_are_left_for_the_local_write() {
     let before = slots.clone();
 
     // When
-    let written = write_slot_files_on_target(&mut slots, None).map_err(|s| s.message);
+    let written = write_slot_files_on_target(&mut slots, None)
+        .await
+        .map_err(|s| s.message);
 
     // Then
     assert_eq!((written, slots), (Ok(()), before));

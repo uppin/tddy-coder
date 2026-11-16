@@ -12262,6 +12262,7 @@ dependencies = [
  "tddy-host-service",
  "tddy-pr-stack",
  "tddy-projects",
+ "tddy-remote-shell",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-sandbox-recipes",
@@ -13185,7 +13186,9 @@ dependencies = [
 name = "tddy-git"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "log",
+ "tddy-remote-shell",
 ]
 
 [[package]]
@@ -13624,6 +13627,17 @@ dependencies = [
  "env_logger",
  "tddy-livekit",
  "tddy-remote-git-repo",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-remote-shell"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "pretty_assertions",
+ "tddy-remote-shell",
+ "tempfile",
  "tokio",
 ]
 
@@ -14252,9 +14266,11 @@ dependencies = [
  "log",
  "tddy-changeset",
  "tddy-git",
+ "tddy-remote-shell",
  "tddy-session-store",
  "tddy-workflow",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -14496,6 +14512,7 @@ dependencies = [
  "tddy-core",
  "tddy-daemon-kernel",
  "tddy-discovery",
+ "tddy-remote-shell",
  "tddy-rpc",
  "tddy-service",
  "tddy-session-lifecycle",
@@ -14837,6 +14854,7 @@ dependencies = [
  "tddy-livekit",
  "tddy-livekit-testkit",
  "tddy-projects",
+ "tddy-remote-shell",
  "tddy-rpc",
  "tddy-service",
  "tddy-session-lifecycle",

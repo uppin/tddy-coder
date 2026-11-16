@@ -209,13 +209,6 @@ pub enum SpecLaunchError {
         path: PathBuf,
         message: String,
     },
-    /// A slot file on an SSH target was not written in time: the target never answered, and the
-    /// ssh was killed.
-    SlotFileOverSshTimedOut {
-        host: String,
-        path: PathBuf,
-        after: std::time::Duration,
-    },
     /// The PTY spawn failed.
     Spawn(String),
 }
@@ -234,11 +227,6 @@ impl fmt::Display for SpecLaunchError {
             Self::SlotFile { path, message } => {
                 write!(f, "slot file {}: {message}", path.display())
             }
-            Self::SlotFileOverSshTimedOut { host, path, after } => write!(
-                f,
-                "slot file {} on ssh target {host}: no answer within {after:?}; the ssh was killed",
-                path.display()
-            ),
             Self::Spawn(message) => write!(f, "failed to spawn the agent: {message}"),
         }
     }

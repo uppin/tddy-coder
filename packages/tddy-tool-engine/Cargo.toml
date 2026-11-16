@@ -24,6 +24,8 @@ tddy-workflow = { path = "../tddy-workflow" }
 # The terminal key-name table, shared with the agent specs' `turn_input.submit_key` check.
 tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 base64 = "0.22"
+# The transport the exec catalog's `RemoteShell` runs its commands through.
+tddy-remote-shell = { path = "../tddy-remote-shell" }
 tddy-task = { path = "../tddy-task" }
 # `PermissionAnswer`, the answer `AnswerSessionPermission` delivers (`#home-inbox` 6/8). Already in
 # this crate's tree.
@@ -48,6 +50,8 @@ pretty_assertions = { workspace = true }
 # `stack_fixtures`: the sessions layout a PR stack lives in (`stack_tools::caller_records`).
 tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 tempfile = "3"
+# `InMemoryShell`: the remote-shell port an exec-catalog tool is run through in tests.
+tddy-remote-shell = { path = "../tddy-remote-shell", features = ["test-support"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "process"] }
 tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }

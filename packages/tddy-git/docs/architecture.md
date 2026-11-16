@@ -8,7 +8,8 @@ knows what a session, changeset or workflow is — the session-aware layer built
 [`tddy_session_worktree::worktree`](../../tddy-session-worktree/docs/architecture.md) (also
 `tddy_core::worktree`), which re-exports this crate with `pub use tddy_git::*;`.
 
-The crate depends on no workspace crate, only `log`. All modules are private and glob re-exported
+The crate depends on no workspace crate but the `tddy-remote-shell` port (below), plus `log`
+and `async-trait`. All modules are private and glob re-exported
 at the root, so every item is `tddy_git::<item>` regardless of which module holds it.
 
 ## Modules
@@ -103,10 +104,12 @@ Worktrees live in `.worktrees/` relative to the repository root (**worktree_dir*
 
 ### SSH (`ssh_worktree.rs`, `ssh_exec.rs`)
 
-- **setup_worktree_for_session_over_ssh(ssh_config_host, git_url, session_id)**: Clones (or
+- **setup_worktree_for_session_over_ssh(shell, git_url, session_id)**: Clones (or
   initialises) the repository under the remote's default root if it is absent, then adds
   `.worktrees/<session_id>` on branch `tddy-<session_id>`, creating the branch from `HEAD` when it
-  does not exist — all as one `ssh -o BatchMode=yes` batch. Idempotent: a worktree already listed at
-  that path is left alone. The session id is only a string; nothing here reads a changeset.
-- **ssh_exec**: `run_ssh_batch`, `shell_single_quote`, `default_remote_repo_root`,
-  `contain_remote_path`. There is no fallback to the local filesystem when the remote command fails.
+  does not exist — as one command run through the `tddy_remote_shell::RemoteShell` port the
+  caller supplies. Idempotent: a worktree already listed at that path is left alone. The session
+  id is only a string; nothing here reads a changeset.
+- **ssh_exec**: `shell_single_quote`, `default_remote_repo_root`, `contain_remote_path`. This
+  crate spawns no `ssh` of its own; there is no fallback to the local filesystem when the remote
+  command fails.

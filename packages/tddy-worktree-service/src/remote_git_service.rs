@@ -166,9 +166,10 @@ pub fn resolve_project_repo(projects_dir: &Path, project_ref: &str) -> Result<Pa
     Ok(repo_path)
 }
 
-/// Where a Serve spawn runs pack verbs. Local is today's `main_repo_path`. Remote is n2's
-/// RemoteShell (`ssh -o BatchMode=yes <alias>`) — this crate cannot take `tddy_tool_engine::Shell`
-/// because that crate already depends on this one.
+/// Where a Serve spawn runs pack verbs. Local is today's `main_repo_path`. Remote streams the
+/// verb through the remote-shell port (`tddy_remote_shell::RemoteShell`, its ssh transport) —
+/// this crate cannot take `tddy_tool_engine::Shell` because that crate already depends on this
+/// one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackExecution {
     Local {
@@ -276,19 +277,6 @@ fn git_child_env(target: &ResolvedPtyUser) -> Vec<(String, String)> {
     let home = PathBuf::from(&target.home_dir);
     let path_extra = tddy_daemon_kernel::user_paths::spawn_path_extra_for_home(&home);
     tddy_daemon_kernel::privilege_drop::pty_user_env_overrides(&home, path_extra.as_deref())
-}
-
-/// OpenSSH argv for one remote shell command — same shape as
-/// [`tddy_tool_engine::RemoteShell::ssh_argv`], without taking a dependency on tool-engine.
-fn ssh_batch_mode_argv(host_alias: &str, remote_shell_command: &str) -> Vec<String> {
-    vec![
-        "ssh".to_string(),
-        "-o".to_string(),
-        "BatchMode=yes".to_string(),
-        "--".to_string(),
-        host_alias.to_string(),
-        remote_shell_command.to_string(),
-    ]
 }
 
 /// Shell command run on the SSH target for a pack verb. The repo path in `git_argv` is replaced
@@ -540,6 +528,7 @@ impl tddy_service::proto::remote_git::RemoteGitService for RemoteGitServiceImpl 
             local_repo_path: request.repo_path.clone(),
         });
         let (relay, frames) = GitChildRelay::spawn_pack_verb(&execution, command.argv, command.env)
+            .await
             .inspect_err(|status| log_refused_open(&open.project_ref, &open.verb, status))?;
         let spawn_target = match &execution {
             PackExecution::Local { repo_path } => repo_path.display().to_string(),
@@ -617,7 +606,7 @@ pub struct GitChildRelay {
     pid: u32,
     /// The child's stdin, until the client closes it. Held behind a lock because a `Serve` stream
     /// writes from the task that reads client frames while the pumps run on their own tasks.
-    stdin: Mutex<Option<tokio::process::ChildStdin>>,
+    stdin: Mutex<Option<tddy_remote_shell::ShellStdin>>,
     /// Dropped with the relay — that closed channel is what tells the supervisor task the
     /// connection is over and the child must go.
     _connection_alive: oneshot::Sender<()>,
@@ -655,9 +644,9 @@ impl GitChildRelay {
         Self::spawn_child(argv, cwd, Some(env))
     }
 
-    /// Spawn a pack verb through [`PackExecution`]. Local is [`spawn_with_env`]. Remote is
-    /// OpenSSH to the session's Host alias with piped stdio (same argv shape as RemoteShell).
-    pub fn spawn_pack_verb(
+    /// Spawn a pack verb through [`PackExecution`]. Local is [`spawn_with_env`]. Remote streams
+    /// it through the remote-shell port's ssh transport to the session's Host alias.
+    pub async fn spawn_pack_verb(
         execution: &PackExecution,
         argv: Vec<String>,
         env: Vec<(String, String)>,
@@ -670,14 +659,79 @@ impl GitChildRelay {
                 ssh_config_host,
                 remote_repo_path,
             } => {
-                let remote_cmd = remote_pack_shell_command(&argv, remote_repo_path)
-                    .map_err(|e| Status::internal(format!("remote pack command: {e}")))?;
-                let ssh_argv = ssh_batch_mode_argv(ssh_config_host, &remote_cmd);
-                // OpenSSH runs as the daemon and must keep agent, config, and PATH — not the
-                // constructed env passed for a local `setpriv` git child.
-                Self::spawn_child(ssh_argv, PathBuf::from("/"), None)
+                // The port's ssh transport runs as the daemon and keeps agent, config, and PATH —
+                // not the constructed env passed for a local `setpriv` git child.
+                Self::spawn_remote_pack_verb(
+                    &tddy_remote_shell::SshShell::new(ssh_config_host),
+                    argv,
+                    remote_repo_path,
+                )
+                .await
             }
         }
+    }
+
+    /// Start the pack verb `argv` names on the target `shell` reaches, packing `remote_repo_path`
+    /// there, and relay it as [`Self::spawn_pack_verb`] relays a local child: stdin written
+    /// through, stdout and stderr in frames of their own, one final `done` frame with the exit
+    /// status. The repo path in `argv` is replaced with `remote_repo_path`, so the target never
+    /// packs a path the session did not authorize.
+    pub async fn spawn_remote_pack_verb(
+        shell: &dyn tddy_remote_shell::RemoteShell,
+        argv: Vec<String>,
+        remote_repo_path: &str,
+    ) -> Result<(GitChildRelay, GitServerFrames), Status> {
+        let command = remote_pack_shell_command(&argv, remote_repo_path)
+            .map_err(|e| Status::internal(format!("remote pack command: {e}")))?;
+        let streamed = shell
+            .exec_streamed(&command)
+            .await
+            .map_err(|error| Status::internal(error.to_string()))?;
+        Ok(Self::spawn_streamed(streamed))
+    }
+
+    /// Relay a streamed remote command as a local child is relayed: its pipes become frames, and
+    /// its exit becomes the one final `done` frame. It has no local pid (`0`).
+    fn spawn_streamed(
+        streamed: tddy_remote_shell::StreamedExec,
+    ) -> (GitChildRelay, GitServerFrames) {
+        let tddy_remote_shell::StreamedExec {
+            stdin,
+            stdout,
+            stderr,
+            exit,
+        } = streamed;
+        let (frames, rx) = mpsc::channel(GIT_FRAME_CHANNEL_CAPACITY);
+        let progress = Arc::new(PumpProgress::default());
+        let pumps = vec![
+            tokio::spawn(pump_output(
+                stdout,
+                frames.clone(),
+                OutputStream::Stdout,
+                progress.clone(),
+            )),
+            tokio::spawn(pump_output(
+                stderr,
+                frames.clone(),
+                OutputStream::Stderr,
+                progress.clone(),
+            )),
+        ];
+        let (connection_alive, connection_ended) = oneshot::channel();
+        tokio::spawn(supervise_streamed(
+            exit,
+            connection_ended,
+            Pumps { pumps, progress },
+            frames,
+        ));
+        (
+            GitChildRelay {
+                pid: 0,
+                stdin: Mutex::new(Some(stdin)),
+                _connection_alive: connection_alive,
+            },
+            rx,
+        )
     }
 
     /// Spawn the child with all three stdio streams piped, and start pumping:
@@ -751,7 +805,9 @@ impl GitChildRelay {
         Ok((
             GitChildRelay {
                 pid,
-                stdin: Mutex::new(stdin),
+                stdin: Mutex::new(
+                    stdin.map(|stdin| Box::new(stdin) as tddy_remote_shell::ShellStdin),
+                ),
                 _connection_alive: connection_alive,
             },
             rx,
@@ -926,6 +982,54 @@ async fn supervise_child(
     }
 }
 
+/// Wait for a streamed remote command, or stop waiting when the connection ends, then close the
+/// stream with its exit status.
+///
+/// On connection end the exit future is dropped, which stops the remote command (the ssh transport
+/// kills its client), and the stream closes with a `done` frame carrying `-1`: no exit status was
+/// ever reported for it.
+async fn supervise_streamed(
+    exit: tddy_remote_shell::StreamedExit,
+    connection_ended: oneshot::Receiver<()>,
+    pumps: Pumps,
+    frames: FrameSender,
+) {
+    let outcome = tokio::select! {
+        status = exit.wait() => Some(status),
+        _ = connection_ended => None,
+    };
+    drain_pumps(pumps, 0).await;
+    match outcome {
+        Some(Ok(exit_code)) => {
+            log::info!(target: LOG_TARGET, "remote git command exited with code {exit_code}");
+            let _ = frames
+                .send(Ok(GitServerFrame {
+                    exit_code,
+                    done: true,
+                    ..Default::default()
+                }))
+                .await;
+        }
+        Some(Err(error)) => {
+            log::warn!(target: LOG_TARGET, "remote git command could not be reaped: {error}");
+            let _ = frames
+                .send(Err(Status::internal(format!(
+                    "wait for remote git command: {error}"
+                ))))
+                .await;
+        }
+        None => {
+            let _ = frames
+                .send(Ok(GitServerFrame {
+                    exit_code: -1,
+                    done: true,
+                    ..Default::default()
+                }))
+                .await;
+        }
+    }
+}
+
 /// Wait for both output pumps to finish, so nothing the child wrote just before exiting is lost to
 /// the teardown — but never wait forever.
 ///
@@ -956,7 +1060,10 @@ async fn drain_pumps(pumps: Pumps, pid: u32) {
         "git child {pid} is gone but its output pipe is still held — a process it forked inherited \
          it; killing the process group so the stream can be closed"
     );
-    signal_process_group(pid, libc::SIGKILL);
+    // A streamed remote command has no local process group to signal (pid 0).
+    if pid != 0 {
+        signal_process_group(pid, libc::SIGKILL);
+    }
     if tokio::time::timeout(CHILD_TERMINATION_GRACE, &mut joined)
         .await
         .is_err()
