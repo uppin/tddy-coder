@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-rust-typescript-tests/gen/host_pb.ts`
 **Category:** oversized-file
 **Detected:** 2026-11-16 by `/pr-wrap` step 3.5 file-length gate (structural audit)
-**Metrics:** 1,734 production lines (whole file; TypeScript has no `#[cfg(test)]` cut) — 1,402 at the base of #918, grown by that PR's and #919's regenerations
-**Thresholds breached:** 1,734 > 500 production-line budget
+**Metrics:** 1,771 production lines (whole file; TypeScript has no `#[cfg(test)]` cut) — 1,402 at the base of #918, grown by that PR's and #919's regenerations
+**Thresholds breached:** 1,771 > 500 production-line budget
 **Restructure:** none — generated output
 **Status:** Open — alert only; do not split
 
@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-11-16 | 1,402 → 1,571 | #918 (`#remote-shell` 4/7): `host.proto` gained `ListCoderWorkspaces` and `HostCoderCli`; both `gen/host_pb.ts` copies regenerated |
 | 2026-11-16 | 1,571 → 1,734 | #919 (`#remote-shell` 5/7): `host.proto` gained `ListDerivedHosts`, `DerivedHost` and `DerivedHostKind`; both `gen/host_pb.ts` copies regenerated. Alert only — generated, and successors #920/#921 also modify this file |
+| 2026-11-16 | 1,762 → 1,771 | #925 (`#remote-shell` 9/11): `host.proto` gained `KnownHostEntry.routing_instance_id = 9`; both `gen/host_pb.ts` copies regenerated, drift gate clean. Alert only — generated; not split |
 
 ## What the tool found
 
