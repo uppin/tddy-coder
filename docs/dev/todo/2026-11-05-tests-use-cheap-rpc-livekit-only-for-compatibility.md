@@ -51,14 +51,14 @@ first as the first slice of this one.
 
 ## Progress
 
-**Done 2026-11-15** (`livekit-compat-tests` changeset, `docs/dev/1-WIP/2026-11-15-livekit-compat-tests.md`):
+**Done 2026-11-15** (`livekit-compat-tests` changeset, `docs/dev/changesets/2026-11-15-livekit-compat-tests.md`):
 clause 3's package and clause 4's CI half. `tddy-livekit-compat-tests` now holds the 24 LiveKit
 contract suites from `tddy-livekit`, `tddy-daemon-livekit`, `tddy-e2e` and `tddy-coder-cli`, moved
 with `move_test_binary_to_crate`; `.config/rust-livekit-e2e.filterset` selects that package plus the
 testkit's own suites, and `Rust LiveKit e2e tests` is its own PR check. `livekit_test_placement.rs`
 in that package pins the split and names the logic suites below as the remaining set.
 
-**Done 2026-11-15, second node** (`docs/dev/1-WIP/2026-11-15-in-memory-common-room.md`): the
+**Done 2026-11-15, second node** (`docs/dev/changesets/2026-11-15-in-memory-common-room.md`): the
 discovery surface of clause 1. `CommonRoomPeerRegistry::sync_from_participant_fields` is the
 transport-neutral snapshot entry (the LiveKit loop's classifier, shared), and `tddy-room-testkit`
 is the in-memory hub — rooms, advertisements, registry attach, participant RPC serving, a
@@ -68,6 +68,13 @@ is the in-memory hub — rooms, advertisements, registry attach, participant RPC
 placement test's remaining set, now 11. `remote_git_livekit_acceptance` stays: the shipped
 `tddy-remote-git-repo` shim itself speaks LiveKit, so that suite tests a LiveKit product feature,
 not logic over a transport — it needs a seam in the shim binary, a separate decision.
+
+**Done 2026-11-15, third node** (`docs/dev/changesets/2026-11-15-hub-session-rooms.md`): the
+session-room hosting surface of clause 1, first slice. `tddy-room-testkit` gained
+`HubSessionReach`/`HubSessionRooms` over per-session hub rooms (holding each hosted session's
+participant for the hosted lifetime — dropping it empties the room), and
+`tddy-daemon-rpc/session_room_exec_tool_acceptance` converted onto them; that crate's
+`tddy-livekit-testkit` dev-dependency is gone. Remaining set: 10.
 
 ## What would close it
 
@@ -86,12 +93,11 @@ not logic over a transport — it needs a seam in the shim binary, a separate de
      hub must also offer a test-side raw participant, and `runtime::build` needs the port carried
      on `RuntimeOptions` beside `spawn_backend`. That runtime seam is the keystone: it changes how
      the binary and the desktop embedder wire discovery, so it is a changeset of its own, first.
-   - **Session-room hosting port** (7 of the 15 suites use it). `SessionRoomRegistry::open` creates the room
-     (`RoomMetadataClient`), mints tokens and joins a `LiveKitParticipant` itself. The broadcast
-     half already has a port (`RoomBroadcast` in `tddy-daemon-extensions`, used through
-     `agent_room_ports`); room creation, token minting and participant serving do not. Extract
-     those three behind a hosting port; an in-memory implementation hosts rooms over
-     `tddy-rpc`'s engines.
+   - **Session-room hosting port** (7 of the 15 suites use it). First slice done 2026-11-15
+     (third node, above): the existing `SessionReach`/`SessionRooms` ports gained hub
+     implementations. Still open for the daemon suites wiring the full
+     `with_the_livekit_room_ports` set: room creation, token minting and participant serving
+     behind the hosting port those suites consume, with the hub growing those surfaces.
    - **Participant serving/client pair** (6 of the 15 suites hand-wire one; the surfaces overlap, so the three extractions together unlock all 15). Suites hand-wire two services through
      `LiveKitParticipant::connect` + `RpcClient`. `tddy-rpc`'s `ServerEngine`/`ClientEngine` over
      an in-memory duplex is the cheap pair; `tddy-room-client`'s `in_memory` module and
@@ -101,9 +107,10 @@ not logic over a transport — it needs a seam in the shim binary, a separate de
      `PeerForwarder`, the participant pair, and a stdio/IPC adapter for cross-process cases.
    - Media: a media port (capture source, publisher and viewer), with an in-memory adapter that carries
      frames as values.
-2. **Move behaviour suites onto the cheap adapters.** Four `tddy-daemon` suites are done (above).
-   The remaining 11 `livekit_test_placement.rs` names — 7 in `tddy-daemon`, the 2
-   `tddy-session-lifecycle` room suites, `tddy-daemon-rpc`'s `session_room_exec_tool_acceptance` and
+2. **Move behaviour suites onto the cheap adapters.** Four `tddy-daemon` suites and
+   `tddy-daemon-rpc`'s exec-tool suite are done (above).
+   The remaining 10 `livekit_test_placement.rs` names — 7 in `tddy-daemon`, the 2
+   `tddy-session-lifecycle` room suites and
    `tddy-worktree-service`'s `remote_git_livekit_acceptance` — run their scenarios over the in-memory
    transport. `test_placement.rs` keeps its rule
    (a suite that mounts the daemon's composition stays in `tddy-daemon`). Only the transport
