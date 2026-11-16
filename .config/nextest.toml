@@ -175,7 +175,7 @@ filter = """
     package(tddy-livekit-compat-tests)
     or package(tddy-livekit-testkit)
     or (package(tddy-daemon) and (
-        or binary(remote_git_livekit_acceptance)
+        binary(remote_git_livekit_acceptance)
         or binary(remote_managed_worktree_cross_host_acceptance)
         or binary(session_agent_remote_acceptance)
         or binary(session_room_acceptance)
