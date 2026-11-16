@@ -62,6 +62,11 @@ pub fn shell_for_target(target: &SessionTarget) -> Result<Arc<dyn RemoteShell>, 
             }
             Ok(Arc::new(SshShell::new(config_host)))
         }
+        // A Coder target needs the caller's account, which this function is not given: the
+        // launch resolves it through `coder_target::shell_for_coder_target`.
+        SessionTarget::Coder { .. } => Err(TargetError::Unsupported(
+            "a Coder target is reached with its account's credentials".to_string(),
+        )),
     }
 }
 
@@ -71,7 +76,7 @@ pub(crate) fn target_config_host(target: Option<&SessionTarget>) -> Option<&str>
         Some(SessionTarget::Ssh { config_host }) => {
             Some(config_host.trim()).filter(|host| !host.is_empty())
         }
-        None => None,
+        Some(SessionTarget::Coder { .. }) | None => None,
     }
 }
 
@@ -90,6 +95,10 @@ pub fn session_target_of_proto(
             }
             Ok(Some(SessionTarget::ssh(ssh.config_host.trim())))
         }
+        // TODO(coder-hosts): implement — a start's Coder target as a session target.
+        Some(ProtoTargetKind::Coder(_)) => Err(TargetError::Unsupported(
+            "a Coder target cannot be started on yet".to_string(),
+        )),
         None => Err(TargetError::Unsupported(
             "the target names no kind of machine".to_string(),
         )),
@@ -104,6 +113,8 @@ pub fn proto_of_session_target(target: &SessionTarget) -> ProtoSessionTarget {
                 config_host: config_host.clone(),
             })),
         },
+        // TODO(coder-hosts): implement — a recorded Coder target as it is listed.
+        SessionTarget::Coder { .. } => ProtoSessionTarget { kind: None },
     }
 }
 

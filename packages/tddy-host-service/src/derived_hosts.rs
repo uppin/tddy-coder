@@ -36,6 +36,8 @@ pub fn kind_segment(kind: DerivedHostKind) -> Option<&'static str> {
     match kind {
         DerivedHostKind::Ssh => Some("ssh"),
         DerivedHostKind::Unspecified => None,
+        // TODO(coder-hosts): implement — the Coder kind's segment.
+        DerivedHostKind::Coder => None,
     }
 }
 
@@ -117,6 +119,8 @@ impl DerivedHostSource for SshConfigDerivedHosts {
                         tddy_service::proto::session::SshTarget { config_host: alias },
                     )),
                 }),
+                usable: true,
+                unusable_reason: String::new(),
             })
             .collect())
     }
