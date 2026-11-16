@@ -356,7 +356,7 @@ and served the four start tools and the two answer tools, for its own project, a
 | Tool | Arguments | Answers |
 |---|---|---|
 | `ListProjectSessions` | — | `{"sessions": [{session_id, branch, worktree, is_active, agent_status, pending_elicitation, daemon_instance_id, display_name}], "unreachable_hosts": [{daemon_instance_id, reason}]}`: every other session of the project **on every eligible host**, each with the host it runs on, the status the web's session list shows, and the name it was given (`null` when it has none; see [Session names](../web/session-drawer.md#session-names)). A host from before session names lists every session with `null`. A split session's agent half carries the branch its codebase half works on, recorded in its changeset at start, with no worktree of its own. A CLI agent session carries the orchestrator and recipe its changeset records. A host that does not answer is named in `unreachable_hosts`, never silently left out |
-| `StartSession` | the `StartSessionRequest` fields the New-session form can send, under their proto names: `session_type` (required), `daemon_instance_id`, `tool_path`, `agent`, `recipe`, `model`, `provider_account_id`, `provider_built_in`, `branch_worktree_intent`, `new_branch_name`, `selected_integration_base_ref`, `selected_branch_to_work_on`, `create_remote_branch`, `initial_prompt`, `permission_mode`, `dangerously_skip_permissions`, `stack_parent`, `stack_parent_daemon_instance_id`, `stack_node_id`, `pr_stack_base_session_id`, `sandbox`, `managed_codebase`, `sandboxed_codebase`, `codebase_daemon_instance_id`, `ssh_config_host`, `semantic_index`, `specialized_agents`, `attachments` (host documents), `display_name` (the session's name: one line, at most 80 characters; refused for a tool session type) | `{"start_id", "task_id", "daemon_instance_id"}` at once (see [Asynchronous session start](#asynchronous-session-start)); the start's outcome is a session started in the project as the caller's user, on this host or the eligible host `daemon_instance_id` names; the daemon that creates it records the home session in its changeset as `orchestrator_session_id`, with the home session's host as `orchestrator_daemon_instance_id`. See [StartSession](#startsession) |
+| `StartSession` | the `StartSessionRequest` fields the New-session form can send, under their proto names: `session_type` (required), `daemon_instance_id`, `tool_path`, `agent`, `recipe`, `model`, `provider_account_id`, `provider_built_in`, `branch_worktree_intent`, `new_branch_name`, `selected_integration_base_ref`, `selected_branch_to_work_on`, `create_remote_branch`, `initial_prompt`, `permission_mode`, `dangerously_skip_permissions`, `stack_parent`, `stack_parent_daemon_instance_id`, `stack_node_id`, `pr_stack_base_session_id`, `sandbox`, `managed_codebase`, `sandboxed_codebase`, `codebase_daemon_instance_id`, `ssh_config_host`, `target` (a derived-host id from `DescribeSessionStartOptions.derived_hosts`), `semantic_index`, `specialized_agents`, `attachments` (host documents), `display_name` (the session's name: one line, at most 80 characters; refused for a tool session type) | `{"start_id", "task_id", "daemon_instance_id"}` at once (see [Asynchronous session start](#asynchronous-session-start)); the start's outcome is a session started in the project as the caller's user, on this host or the eligible host `daemon_instance_id` names; the daemon that creates it records the home session in its changeset as `orchestrator_session_id`, with the home session's host as `orchestrator_daemon_instance_id`. See [StartSession](#startsession) |
 | `DescribeSessionStartOptions` | `daemon_instance_id?`, `session_type?`, `agent?`, `provider_account_id?` | the choices a `StartSession` on that host can make, from the RPCs the New-session form fills its pickers from. See [Start options](#start-options) |
 | `ReadSessionWorktree` | `session_id`, `path` (relative; empty for the root), `daemon_instance_id?` | a file's text (`content`, `truncated`, `byte_size`) or a directory's `entries`, through the same worktree reader as the Code pane |
 | `DiffSessionWorktree` | `session_id`, `daemon_instance_id?` | `{session_id, base_ref, diff}`: the worktree's diff against its integration base (the session's recorded base, else the project's main branch ref), including uncommitted and untracked files. Taken over a temporary index; the worktree's own index is never written |
@@ -435,6 +435,17 @@ can start any session a person can.
 - **`effort`** is a free string, as `model` is: levels are per agent, so the schema cannot enumerate
   them, and `effort_levels` in [Start options](#start-options) lists them. A level the agent does not
   declare is refused ([Claude CLI session § Effort](claude-cli-session.md#effort)).
+- **`target` names a derived host by id.** Its value is an `id` from
+  `DescribeSessionStartOptions.derived_hosts` — an SSH alias or a Coder workspace the host
+  reaches — never a target the agent composes. The daemon resolves it for the caller (the
+  calling session's token names whose Coder account is read) into the host's parent daemon
+  and its `SessionTarget`: the session starts on the parent, its agent runs on the derived
+  host, and its worktree is created there. An unknown id is refused naming the listed ids;
+  an unusable host is refused with its reason. Empty runs the agent on the host itself, and
+  `target` excludes `ssh_config_host` (which keeps the agent on the host and puts only the
+  worktree on an SSH target). Only explicit `Host` entries count as SSH aliases — a wildcard
+  such as `Host coder.*` is not an alias; the Coder workspaces it would reach are listed
+  under `derived_hosts` with their state.
 - **A branch another session owns is refused**, naming the branch and its owner; it is never
   suffixed (`on_branch_conflict` is always `reject`).
 - **Across hosts.** A start naming another host takes the daemon's own start path, which forwards it
@@ -530,14 +541,16 @@ answers them on demand, each from the RPC the form calls, on the host `daemon_in
 | `provider_routes` `[{account_id, label, preset, supported, reason}]` | `AccountsService.ListProviderRoutes` for the harness: a coding agent's `session_type`, or the `agent` of any other session type (a `workspace` session runs none); `warp-cli` has none |
 | `effort_levels` `[{session_type, default, levels}]` | each declared session type whose coding agent's spec has an `effort` slot (`CatalogService.ListAgents` serves the same as `AgentInfo.effort_levels` / `default_effort`); a type missing from it takes no effort |
 | `ssh_config_hosts` | `HostService.ListSshConfigHosts` |
+| `derived_hosts` `[{id, label, kind, parent_daemon_instance_id, usable, unusable_reason}]` | `HostService.ListDerivedHosts` on the described host: its SSH config aliases and the caller's Coder workspaces, each startable by naming its `id` as `StartSession`'s `target` |
 | `subagents` | `CatalogService.ListSubagents`, each qualified `name@daemon_instance_id` as `specialized_agents` takes them |
 | `branches` | `ProjectService.ListProjectBranches` for the project's checkout on that host |
 | `stack_parents` | the host's `ListSessions`, filtered as the form's `prStackOrchestrators`: a PR-stack recipe, not itself a stack child |
 | `pr_stack_base_candidates` | the same sessions, filtered as the form's `stackBaseSessionCandidates`: owning a branch, in this project, on this host, not already stacked |
 
-- **An unanswerable list says why.** `models`, `provider_routes` and `ssh_config_hosts` that could not
-  be answered are empty, with `models_unavailable`, `provider_routes_unavailable` or
-  `ssh_config_hosts_unavailable` naming the reason: the query names no agent or harness, the caller's
+- **An unanswerable list says why.** `models`, `provider_routes`, `ssh_config_hosts` and
+  `derived_hosts` that could not be answered are empty, with `models_unavailable`,
+  `provider_routes_unavailable`, `ssh_config_hosts_unavailable` or `derived_hosts_unavailable`
+  naming the reason: the query names no agent or harness, the caller's
   vault refused, the host could not list its SSH config, or **the host keeps no credential vaults**
   and so has no provider accounts to offer. A failure of any other source (the catalogue, the branch
   listing, the session store) fails the whole answer.

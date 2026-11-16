@@ -1,0 +1,3 @@
+# 2026-11-16 — An orchestrator starts a session on a derived host
+
+An orchestrator agent can start a session on an SSH host or a Coder workspace: `DescribeSessionStartOptions` lists the derived hosts the daemon reaches, and `StartSession`'s `target` names one by its id from that list. The daemon resolves the id for the caller into the host's parent daemon and target; an unknown id is refused naming the listed ones, an unusable host with its reason. A wildcard `Host` entry is not an alias — the Coder workspaces it would reach are listed as derived hosts. See [project-concept.md](../project-concept.md) § StartSession and § Start options.
