@@ -49,6 +49,13 @@ pub struct HookCommandParams<'a> {
     /// is this plus [`AWAIT_CLIENT_MARGIN_SECS`], and Claude's `timeout` for it this plus
     /// [`CLAUDE_HOOK_TIMEOUT_MARGIN_SECS`] (`#home-inbox` 6/8, 8/9).
     pub answer_wait_secs: u64,
+    /// The hook carrier. `None` is the `tddy-tools session-hook` command every field above
+    /// describes. `Some(log)` is a session whose agent runs on a **target**, a machine with no
+    /// tddy software on it: every hook is
+    /// [`remote_hook_command`](crate::remote_hook_command::remote_hook_command), which appends one
+    /// line to the file `log` there, no hook that waits for an answer is installed, and no daemon
+    /// socket is needed (`#remote-shell` 6/7).
+    pub remote_log: Option<&'a str>,
 }
 
 /// How far the hook's own client bound sits past the daemon's deadline: the daemon answers
@@ -105,6 +112,14 @@ pub(crate) fn hook_entry_for_event(
     matcher: &str,
     awaits_an_answer: bool,
 ) -> serde_json::Value {
+    if let Some(log) = p.remote_log {
+        let cmd = crate::remote_hook_command::remote_hook_command(event, p.hook_token, log);
+        let hook = serde_json::json!({"type": "command", "command": cmd});
+        return serde_json::json!([{
+            "matcher": matcher,
+            "hooks": [hook]
+        }]);
+    }
     let cmd = format!(
         "{} session-hook --session {} --daemon {}{} --os-user {} --hook-token {} --event {}",
         shell_quote(p.tddy_tools_path),
@@ -156,6 +171,9 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
         // for the orchestrator's answer; the daemon decides whether anyone is there.
         let awaits_an_answer = *event == "PermissionRequest"
             || (*event == "PreToolUse" && *matcher == "AskUserQuestion");
+        if p.remote_log.is_some() && awaits_an_answer {
+            continue;
+        }
         hooks_obj.insert(
             event.to_string(),
             hook_entry_for_event(p, event, matcher, awaits_an_answer),
@@ -182,6 +200,7 @@ mod tests {
             hook_token: "tok-xyz",
             daemon_socket: None,
             answer_wait_secs: 120,
+            remote_log: None,
         }
     }
 

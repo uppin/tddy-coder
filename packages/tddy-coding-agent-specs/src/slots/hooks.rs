@@ -130,7 +130,7 @@ impl HooksAdapter for MuseConfigArg {
         _workdir: &Path,
         params: &HookCommandParams<'_>,
     ) -> Result<RenderedHooks, SlotError> {
-        if params.daemon_socket.is_none() {
+        if params.remote_log.is_none() && params.daemon_socket.is_none() {
             return Err(SlotError::NoDaemonSocket {
                 adapter: MUSE_CONFIG_ARG.to_string(),
             });
@@ -229,6 +229,7 @@ mod tests {
             hook_token: "a-hook-token",
             daemon_socket: Some("/var/folders/xy/T/tddy-agent-tools-1a2b.sock"),
             answer_wait_secs: 120,
+            remote_log: None,
         };
 
         // When
@@ -293,6 +294,7 @@ mod tests {
             hook_token: "a-hook-token",
             daemon_socket: None,
             answer_wait_secs: 120,
+            remote_log: None,
         };
 
         // When
@@ -363,6 +365,7 @@ mod tests {
             hook_token: "a-hook-token",
             daemon_socket: None,
             answer_wait_secs: 120,
+            remote_log: None,
         };
 
         // When

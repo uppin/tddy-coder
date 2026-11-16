@@ -23,15 +23,18 @@ pub const CURSOR_HOOK_EVENTS: &[&str] = &[
 pub fn build_cursor_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Value {
     let mut hooks_obj = serde_json::Map::new();
     for event in CURSOR_HOOK_EVENTS {
-        let cmd = format!(
-            "{} session-hook --session {} --daemon {}{} --os-user {} --hook-token {}",
-            shell_quote(p.tddy_tools_path),
-            p.session_id,
-            p.daemon_url,
-            daemon_socket_arg(p),
-            p.os_user,
-            p.hook_token,
-        );
+        let cmd = match p.remote_log {
+            Some(log) => crate::remote_hook_command::remote_hook_command(event, p.hook_token, log),
+            None => format!(
+                "{} session-hook --session {} --daemon {}{} --os-user {} --hook-token {}",
+                shell_quote(p.tddy_tools_path),
+                p.session_id,
+                p.daemon_url,
+                daemon_socket_arg(p),
+                p.os_user,
+                p.hook_token,
+            ),
+        };
         hooks_obj.insert(
             (*event).to_string(),
             serde_json::json!([{ "command": cmd }]),
@@ -58,6 +61,7 @@ mod tests {
             hook_token: "tok-xyz",
             daemon_socket: None,
             answer_wait_secs: 120,
+            remote_log: None,
         }
     }
 

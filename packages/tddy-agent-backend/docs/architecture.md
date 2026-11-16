@@ -22,6 +22,16 @@ not the other way round, so the edge runs one way, engine → backend.
 `backend::write_codex_thread_id_file` is `pub` because the workflow engine calls it across the
 crate boundary. It is not API.
 
+**Remote hook command** (`remote_hook_command.rs`): the hook command of a session whose agent
+runs on a target. `REMOTE_HOOK_LOG` (`.tddy/hooks.log`) and
+`remote_hook_command(event, hook_token, log_path)`, selected by
+`HookCommandParams.remote_log`: a `printf` one-liner using only `printf`, `cat` and `tr` that
+appends `<event>\t<hook token>\t<payload, newlines removed>` to the log in one write, so two
+hooks firing together each leave a whole line. Under the remote carrier the builders omit the
+hooks that wait for an answer (Claude's `PermissionRequest` and its question matcher; Muse's
+hooks of those names only report, so Muse keeps all eight; Cursor installs none that wait),
+and the Muse and Cursor adapters accept the carrier in place of a daemon socket.
+
 ## Backend (`backend`)
 
 - **CodingBackend**: Async trait for invoking LLM-based coders. Implementations: `SpecHeadlessBackend` (every headless CLI agent), `ClaudeAcpBackend`, `CodexAcpBackend`, `OpenCodeAcpBackend` (production), `MockBackend`, `StubBackend` (testing/demo). `SpecBackend` (headless or ACP, built from an agent spec) for CLI dispatch; its headless arm holds a `SpecHeadlessBackend` built from that agent's spec. `SharedBackend` wraps `Arc<dyn CodingBackend>`; backend created once per run. **`action_invoke_cache_eligible`**: production backends default **true** so **`BackendInvokeTask`** may reuse a prior successful **`tddy-tools submit`** result; **`MockBackend`** returns **false** so harness-driven invokes stay aligned with explicit submits; **`StubBackend`** supports invocation counting for tests.

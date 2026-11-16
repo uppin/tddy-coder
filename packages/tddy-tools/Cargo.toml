@@ -57,6 +57,9 @@ tddy-service = { path = "../tddy-service" }
 # Reaching this session's daemon: transport detection and tool dispatch over the sandbox socket,
 # daemon HTTP or the installed room transport.
 tddy-session-tool-client = { path = "../tddy-session-tool-client" }
+# The hook payload-to-request mapping, beside the daemon handling it serves: `session-hook`
+# reports with it, a target session's hook-log follower delivers with it.
+tddy-session-activity = { path = "../tddy-session-activity" }
 prost = { version = "0.13" }
 # The client room transport port every library below joins rooms through; `tddy-tools-cli` wires
 # the LiveKit implementation into it.

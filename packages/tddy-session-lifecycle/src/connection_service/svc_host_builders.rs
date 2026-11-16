@@ -92,6 +92,8 @@ impl DaemonSessionHost {
             session_agent_inference: Arc::new(
                 crate::session_agent_inference::SessionAgentInferenceStore::new(),
             ),
+            remote_hook_followers:
+                tddy_agent_launch::remote_hook_follower::RemoteHookFollowers::new(),
             credential_vaults: None,
             github_cli: tddy_host_service::GithubCli::on_spawn_child_path(),
             session_tokens: None,

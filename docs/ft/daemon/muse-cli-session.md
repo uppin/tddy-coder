@@ -125,6 +125,11 @@ without one, and merges with the user's `managed_hooks_path` hooks instead of re
 resume renders them again from the recorded hook token, minting none. A jailed session installs
 none.
 
+On a target session the same eight hooks travel on the command line with the remote carrier:
+each command appends to `.tddy/hooks.log` in the worktree instead of running `tddy-tools`
+(see [Claude CLI session § Hook wiring](claude-cli-session.md#hook-wiring)). Muse's hooks of the
+awaiting names only report and never wait, so a target keeps all eight.
+
 Every hook is report-only. Muse's `PreToolUse` never fires for `request_user_input`, so no hook
 can carry an orchestrator's answer back. A session waiting in the question UI reports
 `WaitingForInput` through the `Notification` hook (`notification_type: question_prompt`) and raises

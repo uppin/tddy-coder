@@ -89,6 +89,7 @@ impl SplitSessions {
             hook_token,
             daemon_socket: Some(&agent_tool_socket),
             answer_wait_secs,
+            remote_log: None,
         };
         self.render_and_write_split_hooks(session_id, context_dir, hook_params)?;
         Ok(())

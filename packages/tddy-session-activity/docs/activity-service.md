@@ -36,6 +36,13 @@ worktree of any agent session (a session type a coding agent declares) and of `w
 through `is_no_agent_session_type`), except one whose agent declares
 `keep_worktree_on_delete` (`worktree_removal_applies_to`).
 
+**Hook payload mapping** (`hook_request.rs`): `session_status_request` and
+`agent_activity_request` map a hook's stdin JSON to the two hook reports. Every hook path uses
+the one mapping: the local `tddy-tools session-hook` and a target session's hook-log follower
+in `tddy-agent-launch`, which delivers in-process through `HookReportDelivery`. A target
+session's hooks are followed from its `.tddy/hooks.log` on the target; a line with the wrong
+token, an unknown event or an unparseable payload is dropped and counted, never delivered.
+
 Proto: [`packages/tddy-service/proto/activity.proto`](../../tddy-service/proto/activity.proto). It
 imports `types.proto` for `AgentActivityRecord` and `StreamMode`.
 

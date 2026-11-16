@@ -15,6 +15,7 @@ Deferred by the user, 2026-11-10 (#876 sweep): the restructure engine refused th
 | Run | Lines | Nesting | Note |
 |---|---|---|---|
 | 2026-11-10 | 112 → 97 | 1 | #876 Tier C: `build_host_stores` and `default_agent_tool_sockets` extracted. The body is now a ~78-line `Self { … }` builder literal; every field-expression range offers only "extract into variable", in both `extract_method` variants. |
+| 2026-11-16 | 97 → 99 | 1 | #920 (`#remote-shell` 6/7): the host gains its remote-hook followers registry. Touched, not closed — the file is also modified by successor PR #921, so no extract is attempted here (`/pr-wrap` step 3.5, stack-branch rule) |
 
 ## What would close it
 

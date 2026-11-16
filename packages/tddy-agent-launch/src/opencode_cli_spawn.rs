@@ -115,6 +115,10 @@ pub(crate) struct CliSessionStart<'a> {
     /// The target the session's agent runs on (`StartSessionRequest.target`), when it named one:
     /// the checkout is cut on it and the agent is launched there.
     pub target: Option<tddy_core::SessionTarget>,
+    /// Where a target session's followed hooks are delivered, and the registry its follower is
+    /// kept in (`LaunchSessions`' fields, lent for the start).
+    pub hook_delivery: Option<Arc<dyn crate::remote_hook_follower::HookReportDelivery>>,
+    pub hook_followers: crate::remote_hook_follower::RemoteHookFollowers,
     /// Whether the session was started over a managed codebase; recorded on the session.
     pub managed_codebase: bool,
     /// The managed workflow the session is driven by, for a spec declaring `managed_workflow`.
@@ -161,6 +165,8 @@ pub(crate) async fn start_cli_harness_session(
         effort,
         ssh_config_host,
         target,
+        hook_delivery,
+        hook_followers,
         managed_codebase,
         managed,
         role,
@@ -285,6 +291,15 @@ pub(crate) async fn start_cli_harness_session(
         github_credential_handler: identity.github_credential,
     })?;
 
+    // On a target the agent's hooks append to its hook log there, not to a daemon it cannot
+    // reach: the launch creates that log and follows it.
+    if target.is_some() {
+        if let Some(hooks) = &mut wiring.hooks {
+            // Relative to the worktree the agent runs in: the hook appends there, on the
+            // target, wherever that worktree is.
+            hooks.remote_log = Some(tddy_core::REMOTE_HOOK_LOG.to_string());
+        }
+    }
     let launch_model = routed_launch_model(
         &agent.spec,
         route.as_ref().map(|route| route.args.as_slice()),
@@ -374,6 +389,9 @@ pub(crate) async fn start_cli_harness_session(
                 target,
                 pointer: wiring.session_pointer.clone(),
                 startup_window: config.spawn_startup_grace_period(),
+                hook_token: wiring.hooks.as_ref().map(|hooks| hooks.hook_token.clone()),
+                hook_delivery: hook_delivery.clone(),
+                hook_followers: hook_followers.clone(),
             }),
         },
         HarnessRun::start(run_in_tmux),
