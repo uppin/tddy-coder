@@ -29,10 +29,29 @@ struct World {
     b: Host,
     home: String,
     on_a: String,
+    _operator_home: Option<tempfile::TempDir>,
 }
 
 async fn a_world() -> World {
     a_world_with(a_host).await
+}
+
+/// A world whose host A reaches no derived host: its operator home has no SSH config and
+/// the caller has no Coder account (`#remote-shell` 11/11).
+async fn a_world_reaching_no_derived_host() -> World {
+    let peers = Arc::new(InProcessPeers::default());
+    let (a, operator_home) = support::a_host_with_operator_home(HOST_A, &peers);
+    let b = a_host(HOST_B, &peers);
+    let home = a_workspace_in(&a.daemon, THIS_PROJECT).await;
+    a.make_project_home(&home);
+    let on_a = a_workspace_in(&a.daemon, THIS_PROJECT).await;
+    World {
+        a,
+        b,
+        home,
+        on_a,
+        _operator_home: Some(operator_home),
+    }
 }
 
 /// The same world, with host A's daemon mapping the test user to the OS user this process runs as,
@@ -48,7 +67,13 @@ async fn a_world_with(host_a: fn(&str, &Arc<InProcessPeers>) -> Host) -> World {
     let home = a_workspace_in(&a.daemon, THIS_PROJECT).await;
     a.make_project_home(&home);
     let on_a = a_workspace_in(&a.daemon, THIS_PROJECT).await;
-    World { a, b, home, on_a }
+    World {
+        a,
+        b,
+        home,
+        on_a,
+        _operator_home: None,
+    }
 }
 
 impl World {
@@ -306,7 +331,7 @@ async fn describe_session_start_options_lists_each_agents_levels() {
 #[tokio::test]
 async fn the_derived_hosts_are_offered_and_the_list_is_answered() {
     // Given a host whose operator reaches no derived host (no SSH config, no Coder account)
-    let world = a_world().await;
+    let world = a_world_reaching_no_derived_host().await;
 
     // When
     let options = world.options(serde_json::json!({})).await;

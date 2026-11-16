@@ -15,7 +15,7 @@ mod support;
 
 use std::sync::Arc;
 
-use support::{a_host, a_workspace_in, InProcessPeers, HOST_A, THIS_PROJECT};
+use support::{a_workspace_in, InProcessPeers, HOST_A, THIS_PROJECT};
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ExecuteToolResponse};
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
@@ -27,14 +27,19 @@ const NOBODYS_HOST: &str = "host-a/ssh/remote-dev";
 struct World {
     a: support::Host,
     home: String,
+    _operator_home: tempfile::TempDir,
 }
 
 async fn a_world() -> World {
     let peers = Arc::new(InProcessPeers::default());
-    let a = a_host(HOST_A, &peers);
+    let (a, operator_home) = support::a_host_with_operator_home(HOST_A, &peers);
     let home = a_workspace_in(&a.daemon, THIS_PROJECT).await;
     a.make_project_home(&home);
-    World { a, home }
+    World {
+        a,
+        home,
+        _operator_home: operator_home,
+    }
 }
 
 impl World {

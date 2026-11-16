@@ -7,13 +7,14 @@
 //! ever start on a host the caller could have chosen in the New-session form, and never composes
 //! a target of its own.
 //!
-//! The method is declared here with its contract; the body lands with the implementation in this
-//! same PR.
+//! Resolution lists this daemon's derived hosts for the caller and picks the one the id names.
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-16-remote-shell-orchestrator-target-start.md
 
 use std::fmt;
 
+use tddy_rpc::{Code, Request};
+use tddy_service::proto::host::{HostService, ListDerivedHostsRequest, ProbeOutcome};
 use tddy_service::proto::session::SessionTarget;
 
 use super::HostServiceImpl;
@@ -78,7 +79,52 @@ impl HostServiceImpl {
         session_token: &str,
         id: &str,
     ) -> Result<ResolvedDerivedHost, DerivedHostResolutionError> {
-        let _ = (session_token, id);
-        todo!("#remote-shell 11/11: a derived host is resolved for the caller from this daemon's listing")
+        let answer = HostService::list_derived_hosts(
+            self,
+            Request::direct(ListDerivedHostsRequest {
+                session_token: session_token.to_string(),
+                daemon_instance_id: String::new(),
+            }),
+        )
+        .await
+        .map_err(|status| {
+            if status.code == Code::Unauthenticated {
+                DerivedHostResolutionError::Unauthenticated
+            } else {
+                DerivedHostResolutionError::Listing(status.message().to_string())
+            }
+        })?
+        .into_inner();
+        if answer.outcome == ProbeOutcome::Failed as i32 {
+            let reason = if answer.failure_reason.is_empty() {
+                "the derived hosts could not be listed".to_string()
+            } else {
+                answer.failure_reason
+            };
+            return Err(DerivedHostResolutionError::Listing(reason));
+        }
+        let listed: Vec<String> = answer.hosts.iter().map(|host| host.id.clone()).collect();
+        let Some(host) = answer.hosts.into_iter().find(|host| host.id == id) else {
+            return Err(DerivedHostResolutionError::Unknown {
+                id: id.to_string(),
+                listed,
+            });
+        };
+        if !host.usable {
+            return Err(DerivedHostResolutionError::Unusable {
+                id: host.id,
+                reason: host.unusable_reason,
+            });
+        }
+        match host.target {
+            Some(target) => Ok(ResolvedDerivedHost {
+                parent_instance_id: host.parent_instance_id,
+                target,
+            }),
+            None => Err(DerivedHostResolutionError::Unusable {
+                id: host.id,
+                reason: "the host lists no target a session can start on".to_string(),
+            }),
+        }
     }
 }

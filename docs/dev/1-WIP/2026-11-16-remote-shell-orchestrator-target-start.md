@@ -136,10 +136,10 @@ graph LR
 
 ## Scope
 
-- [ ] `DerivedHostChoice` list in the start options
-- [ ] `target` on `start_session`, resolved for the caller
-- [ ] unknown and unusable refusals
-- [ ] parity: `target` offered; schema text on wildcards
+- [x] `DerivedHostChoice` list in the start options
+- [x] `target` on `start_session`, resolved for the caller
+- [x] unknown and unusable refusals
+- [x] parity: `target` offered; schema text on wildcards
 - [ ] docs: project-concept.md; TODO deleted at wrap
 
 ## Technical Changes
@@ -162,9 +162,10 @@ See *Affected Packages* and *Responsibility*.
 
 ## Implementation Milestones
 
-- [ ] tool-engine fields, schema and parity green
-- [ ] host-service resolution green
-- [ ] daemon-rpc options and start acceptance green; docs; TODO deleted
+- [x] tool-engine fields, schema and parity green
+- [x] host-service resolution green
+- [x] daemon-rpc options and start acceptance green
+- [ ] docs; TODO deleted (wrap)
 
 ## Testing Plan
 
@@ -231,7 +232,7 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved in advance by the developer's standing instruction for this stack's review gates)
 - [ ] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

@@ -16,14 +16,16 @@ use tddy_service::proto::accounts::ProviderRouteOption;
 use tddy_service::proto::catalog::{
     ListAgentModelsRequest, ListAgentsRequest, ListSubagentsRequest,
 };
-use tddy_service::proto::host::{HostService, ListSshConfigHostsRequest, ProbeOutcome};
+use tddy_service::proto::host::{
+    HostService, ListDerivedHostsRequest, ListSshConfigHostsRequest, ProbeOutcome,
+};
 use tddy_service::proto::project::ListProjectBranchesRequest;
 use tddy_service::proto::session::ListSessionsRequest;
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_tool_engine::start_options::{
     models_agent, pr_stack_orchestrators, provider_harness, stack_base_session_candidates,
-    CandidateSession, LabelledChoice, ModelChoices, ProviderRouteChoice, StartOptions,
-    StartOptionsQuery,
+    CandidateSession, DerivedHostChoice, LabelledChoice, ModelChoices, ProviderRouteChoice,
+    StartOptions, StartOptionsQuery,
 };
 
 use super::project_home::status_error;
@@ -104,6 +106,8 @@ pub(super) async fn describe_start_options(
         provider_route_choices(&sources, &query, &harness_choices).await;
     let (ssh_config_hosts, ssh_config_hosts_unavailable) =
         ssh_config_hosts(sources.host_service, sources.session_token).await?;
+    let (derived_hosts, derived_hosts_unavailable) =
+        derived_hosts(sources.host_service, sources.session_token).await?;
     let branches = branch_names(sources.projects, sources.session_token, project_id).await?;
     let sessions = session_candidates(&sources).await?;
     Ok(StartOptions {
@@ -117,9 +121,8 @@ pub(super) async fn describe_start_options(
         provider_routes_unavailable,
         ssh_config_hosts,
         ssh_config_hosts_unavailable,
-        // FIXME(#remote-shell 11/11): listed from `HostService::list_derived_hosts` at green.
-        derived_hosts: Vec::new(),
-        derived_hosts_unavailable: "this host does not list its derived hosts yet".to_string(),
+        derived_hosts,
+        derived_hosts_unavailable,
         subagents,
         branches,
         stack_parents: pr_stack_orchestrators(&sessions),
@@ -282,6 +285,48 @@ async fn ssh_config_hosts(
         answer.failure_reason
     };
     Ok((Vec::new(), reason))
+}
+
+/// The derived hosts this host reaches, or the reason it could not list them.
+async fn derived_hosts(
+    host_service: &HostServiceImpl,
+    session_token: &str,
+) -> anyhow::Result<(Vec<DerivedHostChoice>, String)> {
+    let answer = HostService::list_derived_hosts(
+        host_service,
+        Request::direct(ListDerivedHostsRequest {
+            session_token: session_token.to_string(),
+            daemon_instance_id: String::new(),
+        }),
+    )
+    .await
+    .map_err(status_error)?
+    .into_inner();
+    if answer.outcome == ProbeOutcome::Failed as i32 {
+        let reason = if answer.failure_reason.is_empty() {
+            "this host could not list its derived hosts".to_string()
+        } else {
+            answer.failure_reason
+        };
+        return Ok((Vec::new(), reason));
+    }
+    let choices = answer
+        .hosts
+        .into_iter()
+        .map(|host| DerivedHostChoice {
+            id: host.id,
+            label: host.label,
+            kind: tddy_service::proto::host::DerivedHostKind::try_from(host.kind)
+                .ok()
+                .and_then(tddy_host_service::derived_hosts::kind_segment)
+                .unwrap_or_default()
+                .to_string(),
+            parent_daemon_instance_id: host.parent_instance_id,
+            usable: host.usable,
+            unusable_reason: host.unusable_reason,
+        })
+        .collect();
+    Ok((choices, String::new()))
 }
 
 /// The branches of `project_id`'s checkout on this host.

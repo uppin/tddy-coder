@@ -69,7 +69,10 @@ pub(crate) struct ProjectHomeHost {
     /// called in-process on this host (`#start-parity` 5/9).
     pub(crate) catalog: Arc<CatalogRpcHandler>,
     pub(crate) projects: Arc<ProjectRpcHandler>,
-    pub(crate) host_service: Arc<HostServiceImpl>,
+    /// The host service the project-home tools answer host questions from, late-bound by
+    /// [`ExecToolRpcHandler::attach_host_service`]; unset until attached or first read, when
+    /// the bare one is built (see [`ExecToolRpcHandler::host_service`]).
+    pub(crate) host_service: Arc<OnceLock<Arc<HostServiceImpl>>>,
     /// The provider accounts this host's vaults hold, late-bound by
     /// [`RpcHandlers::attach_provider_accounts`](crate::RpcHandlers::attach_provider_accounts).
     pub(crate) provider_accounts: Arc<OnceLock<Arc<dyn ProviderAccountsPort>>>,
@@ -118,14 +121,7 @@ impl ExecToolRpcHandler {
                 worktree_sizes: host.worktree_size_calculator(),
                 catalog: Arc::new(CatalogRpcHandler::from_host(host)),
                 projects: Arc::new(ProjectRpcHandler::from_host(host)),
-                // Only its `ListSshConfigHosts` is answered from this instance, which reads the host's
-                // SSH config and no peer's, so the registry and prompt state it is built without are
-                // never reached from here.
-                host_service: Arc::new(HostServiceImpl::new(
-                    host.config().clone(),
-                    host.tddy_data_dir(),
-                    host.user_resolver(),
-                )),
+                host_service: Arc::new(OnceLock::new()),
                 provider_accounts: Arc::new(OnceLock::new()),
                 terminals: host.terminal_sessions(),
                 terminal_control: host.terminal_control(),
@@ -143,6 +139,37 @@ impl ExecToolRpcHandler {
     pub fn with_approval_routes(mut self, routes: Arc<ApprovalRoutes>) -> Self {
         self.approval_routes = Some(routes);
         self
+    }
+
+    /// Attach the host service the project-home tools answer host questions from — the
+    /// composition root's wired service, with its operator files and Coder vaults, so a start
+    /// names and resolves the derived hosts the daemon itself lists for the caller. Called
+    /// once, before the handler answers; a second attach keeps the first.
+    pub fn attach_host_service(&self, host_service: Arc<HostServiceImpl>) {
+        if self
+            .project_home_host
+            .host_service
+            .set(host_service)
+            .is_err()
+        {
+            log::error!("the host service was attached twice; keeping the first attachment");
+        }
+    }
+
+    /// The host service the project-home tools answer host questions from: the attached one,
+    /// or the bare one built from this host's own config — its SSH config read as each OS
+    /// user, no Coder accounts — when none was attached.
+    pub(crate) fn host_service(&self) -> Arc<HostServiceImpl> {
+        self.project_home_host
+            .host_service
+            .get_or_init(|| {
+                Arc::new(HostServiceImpl::new(
+                    self.config.clone(),
+                    &self.tddy_data_dir,
+                    self.user_resolver.clone(),
+                ))
+            })
+            .clone()
     }
 
     /// The late-bound launch cell, shared with the families that attach it.

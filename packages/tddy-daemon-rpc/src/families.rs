@@ -104,7 +104,12 @@ impl RpcHandlers {
     /// Build every family's handler from `host`'s state.
     #[must_use]
     pub fn from_host(host: &DaemonSessionHost) -> Self {
-        let exec_tool = Arc::new(ExecToolRpcHandler::from_host(host));
+        Self::build(host, Arc::new(ExecToolRpcHandler::from_host(host)))
+    }
+
+    /// The bundle over one exec-tool handler: every other family from `host`, and the
+    /// handler's late-bound cells shared with the bundle.
+    fn build(host: &DaemonSessionHost, exec_tool: Arc<ExecToolRpcHandler>) -> Self {
         let session_launch = exec_tool.session_launch_cell();
         let provider_accounts = exec_tool.provider_accounts_cell();
         Self {
@@ -146,6 +151,13 @@ impl RpcHandlers {
         let handlers = Self::from_host(&host);
         let host = host.with_rpc_families(Arc::new(handlers.clone()));
         (host, handlers)
+    }
+
+    /// Attach the host service the project-home tools answer host questions from — the
+    /// composition root's wired service, with its operator files and Coder vaults. A second
+    /// attach keeps the first.
+    pub fn attach_host_service(&self, host_service: Arc<tddy_host_service::HostServiceImpl>) {
+        self.exec_tool.attach_host_service(host_service);
     }
 
     /// `project.ProjectService`, answered by the shared [`ProjectRpcHandler`].

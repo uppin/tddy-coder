@@ -374,6 +374,25 @@ fn daemon_over_customised(
     daemon
 }
 
+/// The host service over `operator_home` a daemon built by [`daemon_over_customised`]
+/// answers host questions from: the daemon's own config and resolver, the fixture's files.
+fn a_host_service_over(
+    config: &tddy_daemon_kernel::config::DaemonConfig,
+    sessions_base: &Path,
+    operator_home: PathBuf,
+) -> Arc<tddy_host_service::HostServiceImpl> {
+    Arc::new(
+        tddy_host_service::HostServiceImpl::new(
+            config.clone(),
+            sessions_base,
+            Arc::new(|token: &str| (token == TEST_TOKEN).then(|| TEST_USER.to_string())),
+        )
+        .with_host_user_files(Arc::new(AnOperatorHome {
+            home: operator_home,
+        })),
+    )
+}
+
 // ── the projects and sessions ────────────────────────────────────────────────────────────────
 
 pub fn git(cwd: &Path, args: &[&str]) {
@@ -537,6 +556,44 @@ pub fn a_host_as_current_user(instance_id: &str, peers: &Arc<InProcessPeers>) ->
     )
 }
 
+/// The operator's files, read from a home on a temp path — whichever OS user is asked for.
+struct AnOperatorHome {
+    home: PathBuf,
+}
+
+impl tddy_host_service::host_private_key::HostUserFiles for AnOperatorHome {
+    fn home_dir(&self, _os_user: &str) -> Result<PathBuf, String> {
+        Ok(self.home.clone())
+    }
+
+    fn read_as_user(&self, _os_user: &str, path: &Path) -> Result<Vec<u8>, String> {
+        std::fs::read(path).map_err(|e| e.to_string())
+    }
+
+    fn list_files_as_user(&self, _os_user: &str, dir: &Path) -> Result<Vec<PathBuf>, String> {
+        Err(format!("{} is not listed by this stand-in", dir.display()))
+    }
+}
+
+/// [`a_host`], whose project-home tools answer host questions from a host service reading an
+/// operator home with no SSH config and no Coder account — a host that reaches no derived
+/// host, on any machine (`#remote-shell` 11/11). The home is returned with the host: it must
+/// outlive it.
+pub fn a_host_with_operator_home(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+) -> (Host, tempfile::TempDir) {
+    let operator_home = tempfile::tempdir().unwrap();
+    let host = host_built_with_host_service(
+        instance_id,
+        peers,
+        test_config(),
+        operator_home.path().to_path_buf(),
+        |host, _sessions| host,
+    );
+    (host, operator_home)
+}
+
 fn host_built_by(
     instance_id: &str,
     peers: &Arc<InProcessPeers>,
@@ -671,6 +728,49 @@ fn host_built_with(
         Arc::clone(&terminals),
         |host| customise(host, &sessions_path),
     ));
+    peers.register(instance_id, Arc::clone(&daemon));
+    Host {
+        daemon,
+        terminals,
+        sessions,
+        _repos: (this_repo, other_repo),
+    }
+}
+
+/// [`host_built_with`], with the daemon's project-home tools answering host questions from
+/// a host service over `operator_home`, attached before the daemon serves anything.
+fn host_built_with_host_service(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+    config: tddy_daemon_kernel::config::DaemonConfig,
+    operator_home: PathBuf,
+    customise: impl FnOnce(DaemonSessionHost, &Path) -> DaemonSessionHost,
+) -> Host {
+    let sessions = tempfile::tempdir().unwrap();
+    let this_repo = a_repo_with_origin();
+    let other_repo = a_repo_with_origin();
+    write_projects(
+        &sessions.path().join("projects"),
+        &[
+            a_project(THIS_PROJECT, this_repo.path()),
+            a_project(OTHER_PROJECT, other_repo.path()),
+        ],
+    )
+    .unwrap();
+    let terminals = Arc::new(CliSessionManager::new());
+    let sessions_path = sessions.path().to_path_buf();
+    let mut service_config = config.clone();
+    service_config.daemon_instance_id = Some(instance_id.to_string());
+    let host_service = a_host_service_over(&service_config, sessions.path(), operator_home);
+    let daemon = Arc::new(daemon_over_customised(
+        config,
+        instance_id,
+        sessions.path(),
+        Arc::clone(peers),
+        Arc::clone(&terminals),
+        |host| customise(host, &sessions_path),
+    ));
+    daemon.handlers().attach_host_service(host_service);
     peers.register(instance_id, Arc::clone(&daemon));
     Host {
         daemon,
