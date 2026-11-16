@@ -1,7 +1,7 @@
 # Changeset: A remote agent's hooks reach the daemon with nothing installed
 
 **Date**: 2026-11-15
-**Status**: 🚧 In Progress
+**Status**: ✅ Complete
 **Type**: Feature
 **Complexity**: 4 — three crates (agent-backend, coding-agent-specs, agent-launch), a long-lived streamed reader with reconnect and ordering, an untrusted input stream
 **Branch**: `feature/remote-shell/remote-hooks`, base `feature/remote-shell/derived-hosts` — `#remote-shell 6/7` — PR #920 (https://github.com/uppin/tddy-coder/pull/920)
@@ -165,7 +165,7 @@ graph LR
 - [x] **Command**: the carrier, the one-liner, awaiting hooks omitted, all three adapters
 - [x] **Follower**: streamed read, parse, token check, delivery
 - [x] **Robustness**: resume from offset, bad lines, cleanup on stop and delete
-- [ ] **Docs**: agent-session-status, the three CLI session docs, `packages/tddy-agent-backend/docs/`
+- [x] **Docs**: agent-session-status, the three CLI session docs, `packages/tddy-agent-backend/docs/`
 - [x] **Wiring**: launch renders `remote_log`, creates the log and follows it; the follower delivers through the daemon's activity handling (mapping in `tddy-session-activity::hook_request`); exit, stop and delete stop it and remove the log
 
 ## Technical Changes
@@ -258,19 +258,109 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - **A token per line.** The log is writable by anything running as that user on the target; the token is what the local path already uses to tell a session's hooks from noise. It authenticates nothing stronger than that, and the payload is treated as untrusted input.
 - **`tr -d '\n'` rather than encoding.** It keeps the command to tools every POSIX system has. A payload that is not JSON would lose its newlines; every adapter's payload is JSON.
 
+## Planned by decision beyond the original plan
+
+Three things this PR carries beyond the plan above, all taken by decision during the stack's
+implementation and recorded here so the wrap describes them, not discovers them:
+
+- **Production wiring of the hook log** (commit `69bdf7bbf` before the rebase): the launch creates
+  the log on the target, renders `remote_log` for a target session, starts
+  `RemoteHookFollower` with `ActivityHookSink`, and the exit, stop and delete paths stop it and
+  remove the log (`RemoteHookFollowers` in `tddy-agent-launch`, `ActivityHookDelivery` in
+  `tddy-session-lifecycle`). The payload-to-request mapping moved to
+  `tddy-session-activity::hook_request`, shared with `tddy-tools session-hook`; no second copy.
+- **A pid-based startup window in `remote_agent_launch.rs`** (code first shipped by PR #917,
+  fixed here, commit `4c4fe4596` before the rebase): the startup window runs from the agent's
+  recorded pid (`.tddy/agent.pid`, written by the remote command immediately before it `exec`s
+  the agent), not from the PTY spawn. An agent that never records a pid within
+  `max(10 × startup_window, 5 s)` is refused as `AgentNeverStarted`; liveness during the window
+  is judged by the pid on the target beside the terminal's end.
+- **A fixture warm-up (`TDDY_FIXTURE_WARMUP`) in test files owned by lower PRs**
+  (commit `94c79ccef` before the rebase): a freshly written script's first exec takes ~2.4 s on
+  macOS (measured, against ~20 ms afterwards), so each `write_executable` in the timed suites
+  runs its script once, guarded, before any launch is timed. Test code only: the guard exits
+  before the script body, records no call and writes no pid file, and no production path reads
+  the variable. The shared stub writers in `agent_registry_support` / `harness_clis_support`
+  (`packages/tddy-session-lifecycle/tests/`) are **not** warmed: no test of this PR times an
+  executable they write (this PR's lifecycle suite uses only `builtin_yaml_as` from
+  `agent_registry_support` and times its own warmed stub), so that is recorded as a backlog
+  entry at the wrap (see Validation Results), not fixed here.
+
+## Restructuring
+
+File-length gate (`/pr-wrap` step 3.5, whole PR range, production lines to the first
+`#[cfg(test)]`):
+
+| File | Before → after | Disposition |
+|---|---:|---|
+| `packages/tddy-agent-launch/src/remote_agent_launch.rs` | 451 → 546 | 🔴 This PR pushed it past 500 — **not split**: successor PR #921 (`feature/remote-shell/coder-hosts`) also modifies this file, so the split is deferred to a follow-up branch after the `#remote-shell` stack lands (stack-branch rule). Recorded in `packages/tddy-agent-launch/docs/code-issues/oversized-file-remote-agent-launch.md` |
+| `packages/tddy-session-lifecycle/src/connection_service/svc_activity_ports.rs` | 513 → 546 | 🔴 Already over, grew here — **not split**: successor PR #921 also modifies this file. Same deferral. Recorded in `packages/tddy-session-lifecycle/docs/code-issues/oversized-file-svc-activity-ports.md` |
+| `packages/tddy-session-lifecycle/src/connection_service/svc_host_builders.rs` | 531 → 533 | 🔴 Already over, grew by 2 — **not split**: successor PR #921 also modifies this file. Same deferral. Re-measured in the existing `packages/tddy-session-lifecycle/docs/code-issues/oversized-file-svc-host-builders.md` |
+
+One mechanical extract in this PR's own new file (not a file split, so not a
+`/code-restructuring` plan): `RemoteHookFollower::start` (52 lines) now spawns
+`follow_log`, which reads one stream via `read_stream` / `deliver_whole_lines`; no function in
+the new follower is over 40 lines afterwards. Verified by the follower acceptance and unit
+tests, green before and after.
+
 ## Refactoring Needed
 
 ### From /validate-changes
+- None against the plan. The three oversized files above are stack-shared with PR #921 and are
+  recorded, not split (see Restructuring).
+
 ### From /validate-tests
+- None. The new suites use Given/When/Then, descriptive names and exact assertions; no
+  `#[ignore]`, no focused tests, no always-passing tests were found.
+
 ### From /validate-prod-ready
+- None. No mock or test-only code in production paths, no added `TODO`/`FIXME`, no added
+  stdout/stderr in TUI paths (the `println!`/`eprintln!` in `tddy-tools/src/session_hook.rs`
+  are pre-existing CLI output, untouched by this PR), no fallback added.
+
 ### From /analyze-clean-code
+- `RemoteHookFollower::start` at 52 lines (needs attention, 41–60) — extracted, see
+  Restructuring. The remaining over-60 functions in touched files are pre-existing and
+  unchanged in substance: `launch_on_target` and `DaemonSessionHost::new` (both already
+  recorded in their packages' code-issues), and `session_status_request` (70 lines), which is
+  the mapping moved verbatim from `tddy-tools` into `tddy-session-activity::hook_request`.
 
 ## Validation Results
 
 ### /validate-changes
+- 2026-11-16 (after the single-mode `/pr-stack-rebase` onto `a76247e46`): stack gate ✅ —
+  `origin/feature/remote-shell/derived-hosts..HEAD` is this PR's six commits only. Boundary ✅:
+  every Scope item implemented except Docs (wrapped at `/pr-wrap`); `## Responsibility`
+  delivered, no stub bodies remain; nothing from `## Dependencies` implemented here; no
+  dependent behaviour (PR #921's Coder hosts are not touched); diff contains only this PR's
+  files; no parent-owned file deleted. The three planned-by-decision additions above are
+  recorded, with the warm-up checked to have no production effect.
+- Build/test (scoped, `CARGO_INCREMENTAL=0`): `tddy-agent-backend`, `tddy-coding-agent-specs`,
+  `tddy-session-activity`, `tddy-agent-launch`, `tddy-tools`, `tddy-remote-shell` and
+  `tddy-session-split` green; `tddy-session-lifecycle`'s own suites for this PR green
+  (`remote_hooks_session_acceptance` 1/1, `remote_target_session_acceptance` 2/2,
+  `derived_host_start_acceptance` 9/9). The one failure in the package run is
+  `claude_cli_from_spec_acceptance::an_unsandboxed_claude_cli_start_runs_the_spec_binary_with_the_argv_its_template_renders`
+  — the pre-existing macOS `/tmp` vs `/private/tmp` canonicalisation assertion, in a file this
+  PR does not touch; PR #919's wrap records the same failure on the parent branch.
+- Shared stub writers: no test of this PR times an executable written by
+  `agent_registry_support` / `harness_clis_support`, so they are not warmed here; a
+  `docs/dev/todo/` entry with the measured ~2.4 s cause is written at the wrap.
+
 ### /validate-tests
+- 2026-11-16: tests analyzed — the four new suites plus the unit tests in
+  `remote_hook_command.rs` / `remote_hook_follower.rs`. No anti-patterns found; the 30 s
+  `OBSERVE` bounds are documented safety nets, not timing predictions.
+
 ### /validate-prod-ready
+- 2026-11-16: files checked — all production files in the diff. Blockers 0, warnings 0.
+
 ### /analyze-clean-code
+- 2026-11-16: file length — three files at or over 500, all stack-shared with PR #921 (see
+  Restructuring). Function length — one needs-attention in new code, extracted; the rest
+  pre-existing. No magic values, duplication or naming findings in the new code (the follower's
+  local `shell_quote` mirrors the one in `remote_hook_command.rs`'s crate because the two live
+  in different crates).
 
 ## TODO
 
@@ -283,18 +373,18 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] USER REVIEW — acceptance tests (approved in advance on 2026-11-15: "proceed with your recommended option"; the titles are listed in the PR body)
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
-- [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
-- [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
+- [x] USER REVIEW — development complete
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] USER REVIEW — scope developed, every gap approved: ready to wrap

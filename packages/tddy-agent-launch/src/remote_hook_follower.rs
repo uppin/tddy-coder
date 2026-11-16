@@ -330,46 +330,13 @@ impl RemoteHookFollower {
         sink: Arc<dyn HookSink>,
     ) -> Self {
         let dropped = Arc::new(AtomicU64::new(0));
-        let task_dropped = Arc::clone(&dropped);
-        let log_path = log_path.to_string();
-        let hook_token = hook_token.to_string();
-        let task = tokio::spawn(async move {
-            let mut offset: u64 = 0;
-            let mut pending: Vec<u8> = Vec::new();
-            loop {
-                if let Ok(mut streamed) = shell
-                    .exec_streamed(&follow_command(&log_path, offset))
-                    .await
-                {
-                    let mut chunk = [0u8; 4096];
-                    loop {
-                        match streamed.stdout.read(&mut chunk).await {
-                            Ok(0) | Err(_) => break,
-                            Ok(read) => {
-                                offset += read as u64;
-                                pending.extend_from_slice(&chunk[..read]);
-                                while let Some(end) = pending.iter().position(|byte| *byte == b'\n')
-                                {
-                                    let mut line: Vec<u8> = pending.drain(..=end).collect();
-                                    line.pop();
-                                    if line.last() == Some(&b'\r') {
-                                        line.pop();
-                                    }
-                                    let text = String::from_utf8_lossy(&line);
-                                    match HookLine::parse(&text, &hook_token) {
-                                        Ok(hook) => sink.deliver(hook).await,
-                                        Err(_) => {
-                                            task_dropped.fetch_add(1, Ordering::SeqCst);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-        });
+        let task = tokio::spawn(follow_log(
+            shell,
+            log_path.to_string(),
+            hook_token.to_string(),
+            sink,
+            Arc::clone(&dropped),
+        ));
         Self {
             task: Some(task),
             dropped,
@@ -388,6 +355,81 @@ impl RemoteHookFollower {
         if let Some(task) = self.task.take() {
             task.abort();
             let _ = task.await;
+        }
+    }
+}
+
+/// Follow `log_path` until aborted: open its stream, deliver its lines, and when the stream
+/// ends open another from the byte reached, after a back-off.
+async fn follow_log(
+    shell: Arc<dyn RemoteShell>,
+    log_path: String,
+    hook_token: String,
+    sink: Arc<dyn HookSink>,
+    dropped: Arc<AtomicU64>,
+) {
+    let mut offset: u64 = 0;
+    let mut pending: Vec<u8> = Vec::new();
+    loop {
+        if let Ok(mut streamed) = shell
+            .exec_streamed(&follow_command(&log_path, offset))
+            .await
+        {
+            read_stream(
+                &mut streamed,
+                &mut offset,
+                &mut pending,
+                &hook_token,
+                &sink,
+                &dropped,
+            )
+            .await;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// Read one opened stream to its end, delivering every whole line it carries.
+async fn read_stream(
+    streamed: &mut tddy_remote_shell::StreamedExec,
+    offset: &mut u64,
+    pending: &mut Vec<u8>,
+    hook_token: &str,
+    sink: &Arc<dyn HookSink>,
+    dropped: &AtomicU64,
+) {
+    let mut chunk = [0u8; 4096];
+    loop {
+        match streamed.stdout.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(read) => {
+                *offset += read as u64;
+                pending.extend_from_slice(&chunk[..read]);
+                deliver_whole_lines(pending, hook_token, sink, dropped).await;
+            }
+        }
+    }
+}
+
+/// Deliver every newline-terminated line in `pending`, keeping a trailing partial line there.
+async fn deliver_whole_lines(
+    pending: &mut Vec<u8>,
+    hook_token: &str,
+    sink: &Arc<dyn HookSink>,
+    dropped: &AtomicU64,
+) {
+    while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+        let mut line: Vec<u8> = pending.drain(..=end).collect();
+        line.pop();
+        if line.last() == Some(&b'\r') {
+            line.pop();
+        }
+        let text = String::from_utf8_lossy(&line);
+        match HookLine::parse(&text, hook_token) {
+            Ok(hook) => sink.deliver(hook).await,
+            Err(_) => {
+                dropped.fetch_add(1, Ordering::SeqCst);
+            }
         }
     }
 }
