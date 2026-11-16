@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — a proto contract change, four packages across daemon and web, a credential resolved at launch and at resume
-**Branch**: `feature/remote-shell/coder-hosts`, base `feature/remote-shell/remote-hooks` — `#remote-shell 7/7`
+**Branch**: `feature/remote-shell/coder-hosts`, base `feature/remote-shell/remote-hooks` — `#remote-shell 7/7` — PR #921 (https://github.com/uppin/tddy-coder/pull/921)
 
 ## Initial Discovery
 
@@ -93,6 +93,36 @@ The first push after the plan (commit 2) publishes, as the start of this same PR
 - The failing tests below.
 
 This PR goes on to implement all of it. It does not merge in that state.
+
+## Contract as published
+
+Published in the contract commit.
+
+- **Proto**: `CoderTarget { account_id, owner, workspace, agent }` as `SessionTarget.coder = 2`; `DERIVED_HOST_KIND_CODER = 2`; `DerivedHost.usable = 6`, `DerivedHost.unusable_reason = 7`. Both `session_pb.ts` and `host_pb.ts` regenerated.
+- **`tddy_changeset::SessionTarget::Coder { account_id, owner, workspace, agent: Option }`** with `SessionTarget::coder(..)` and `.on_agent(..)`. Real code; its tests pass.
+- **`tddy_agent_launch::coder_target`** (`TODO(coder-hosts)`): `CoderTargetError::{NotACoderTarget, NoWorkspace, VaultLocked, NoSuchAccount, Unavailable}`, `NoCoderAccounts`, `shell_for_coder_target(target, subject, credentials)`, `shell_for_coder_target_through(coder_binary, …)`. `ssh-agent-launch`'s `shell_for_target` and `TargetError` are untouched.
+- **`tddy_host_service::coder_derived_hosts`** (`TODO(coder-hosts)`): `CODER_CLI_NOT_INSTALLED`, `CoderAccountRef { account_id, label }`, `trait CoderAccountSource { fn accounts_of(&self, subject) }`, `coder_derived_host_id`, `coder_account_host_id`, `coder_host_label`, `workspace_not_running_reason`, `CoderDerivedHosts::new(parent_instance_id, subject, accounts, credentials, workspaces, coder_cli)`. `HostServiceImpl::{with_coder_accounts, coder_derived_hosts}`.
+- **`DaemonSessionHost::with_coder_credentials`** and its accessor; the start and resume paths do not read it yet.
+- **Web**: `usable` / `unusableReason` on `HostDescriptor` and `DaemonHost`; `derivedHostStatusTestId`, `derivedHostUnusableReasonTestId`.
+
+Where the contract differs from the plan above:
+
+- **A new port, `CoderAccountSource`.** Nothing in `coder-account` or `coder-shell` lists a subject's Coder accounts with their labels. The daemon adapter that fills it is implementation and needs its own test.
+- **The source is built per call for one subject** and ignores the `os_user` passed to `list`; `derived-hosts`' trait is unchanged.
+- **Refusals of a Coder target use `CoderTargetError`**, this PR's own type, so the parent's `TargetError` gains no variant.
+- **`derived-hosts`' test helper `an_ssh_host` gained `usable: true`**: the new fields force the edit, and it pins that an SSH host is usable. `tddy_host_service::test_util` gained Coder stand-ins shared by three test files.
+
+Decisions for the implementation:
+
+- **Usability is read from the reason.** The web treats a derived host as unusable exactly when `unusable_reason` is non-empty, so a host from a daemon that does not know the fields, or from a fixture without them, stays usable. The daemon sets `usable` and the reason consistently.
+- **No separate status field.** The status word travels in the reason (`the workspace is stopped`); the row shows `Available` / `Unavailable` and the reason.
+- **An account that cannot be listed is one unusable row** (`<parent>/coder/<account_id>`, the account's label, the reason, no target), because a source returns either hosts or an error.
+- **A locked vault answers `FAILED` with the reason and still carries the hosts of sources that listed.** That rule belongs to `derived-hosts`' handler and is recorded in that PR's changeset.
+- **A stopped workspace is refused by the CLI's own complaint at launch**, not by asking the deployment before each start. With `coder-shell`'s start marker it arrives as `Unreachable` carrying that complaint.
+- **A locked vault on resume** is `FailedPrecondition`, `the vault holding this session's Coder account is locked: unlock it and try again`, and the session is kept.
+- The lifecycle tests assume a workspace's worktree sits under `default_remote_repo_root` as on an SSH target, created through the port.
+
+Red state at the contract commit: `coder_agent_launch_acceptance` 0 passed / 4 failed, at this PR's `shell_for_coder_target_through`; `coder_target_session_acceptance` 0 / 3, because the start ignores `target` (`ssh-agent-launch`'s behaviour); `coder_derived_hosts_acceptance` 0 / 6, at `derived-hosts`' handler stub, with the same scenarios pinned at this PR's own stub by 12 unit tests; `coder_target.rs` unit tests 2 / 8; Cypress `CoderHostsAcceptance` 0 / 2 and `CreateSessionCoderHostAcceptance` 0 / 2, at `derived-hosts`' unimplemented rows and grouping. This PR goes green only after every PR below it. Clippy and fmt clean on the five touched Rust packages; `unbundle_service_split` passes (28). Fixtures are duplicated from the lower PRs' test files in four places; lifting them into shared support is the sweep's.
 
 ## Green wave
 
@@ -253,10 +283,10 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved in advance on 2026-11-15: "proceed with your recommended option"; the titles are listed in the PR body)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

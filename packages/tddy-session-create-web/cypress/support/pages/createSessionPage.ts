@@ -55,6 +55,21 @@ export const createSessionPage = {
         ]),
       ),
 
+  /**
+   * The derived hosts under `parentInstanceId` that cannot be chosen — disabled options — as
+   * `[value, caption]`, in option order (#remote-shell 7/7). The caption carries the reason.
+   */
+  unusableDerivedHostOptions: (parentInstanceId: string): Cypress.Chainable<[string, string][]> =>
+    createSessionPage
+      .derivedHostGroup(parentInstanceId)
+      .find("option:disabled")
+      .then(($opts) =>
+        [...$opts].map((el): [string, string] => [
+          (el as HTMLOptionElement).value,
+          (el.textContent ?? "").trim(),
+        ]),
+      ),
+
   /** The note shown while a derived host is chosen — where its prompts are answered. */
   derivedHostNote: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(ids.CREATE_SESSION_DERIVED_HOST_NOTE, { timeout: 5000, ...options }),

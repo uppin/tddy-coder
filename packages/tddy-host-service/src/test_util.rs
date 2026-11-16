@@ -128,3 +128,186 @@ impl AnX11SocketDir {
         self.dir.path()
     }
 }
+
+/// One signed-in person's vault, as the Coder ports see it: the accounts it holds, each with its
+/// deployment URL and token, and whether it is open.
+///
+/// It answers for its owner alone. Anybody else is a person with no Coder account, which is what
+/// lets a test tell a listing made as the caller's subject from one made as their OS user. It can
+/// be locked and unlocked while a test holds it, as a person's vault is between a start and a
+/// resume.
+pub struct ACoderVault {
+    subject: String,
+    locked: std::sync::atomic::AtomicBool,
+    accounts: Vec<(
+        crate::coder_derived_hosts::CoderAccountRef,
+        crate::coder_workspaces::CoderCredentials,
+    )>,
+}
+
+/// `subject`'s vault: open, and holding no Coder account yet.
+pub fn a_coder_vault_of(subject: &str) -> ACoderVault {
+    ACoderVault {
+        subject: subject.to_string(),
+        locked: std::sync::atomic::AtomicBool::new(false),
+        accounts: Vec::new(),
+    }
+}
+
+impl ACoderVault {
+    /// This vault, also holding `account` with its `credentials`.
+    #[must_use]
+    pub fn holding(
+        mut self,
+        account: crate::coder_derived_hosts::CoderAccountRef,
+        credentials: crate::coder_workspaces::CoderCredentials,
+    ) -> Self {
+        self.accounts.push((account, credentials));
+        self
+    }
+
+    /// This vault, locked.
+    #[must_use]
+    pub fn locked(self) -> Self {
+        self.lock();
+        self
+    }
+
+    /// Lock the vault: nothing in it can be read until it is unlocked.
+    pub fn lock(&self) {
+        self.locked.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Unlock the vault again.
+    pub fn unlock(&self) {
+        self.locked
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn is_locked(&self) -> bool {
+        self.locked.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl crate::coder_derived_hosts::CoderAccountSource for ACoderVault {
+    fn accounts_of(
+        &self,
+        subject: &str,
+    ) -> Result<
+        Vec<crate::coder_derived_hosts::CoderAccountRef>,
+        crate::coder_workspaces::CoderCredentialError,
+    > {
+        if subject != self.subject {
+            return Ok(Vec::new());
+        }
+        if self.is_locked() {
+            return Err(crate::coder_workspaces::CoderCredentialError::VaultLocked);
+        }
+        Ok(self
+            .accounts
+            .iter()
+            .map(|(account, _)| account.clone())
+            .collect())
+    }
+}
+
+impl crate::coder_workspaces::CoderCredentialSource for ACoderVault {
+    fn credentials_for(
+        &self,
+        subject: &str,
+        account_id: &str,
+    ) -> Result<
+        crate::coder_workspaces::CoderCredentials,
+        crate::coder_workspaces::CoderCredentialError,
+    > {
+        use crate::coder_workspaces::CoderCredentialError;
+
+        if subject == self.subject && self.is_locked() {
+            return Err(CoderCredentialError::VaultLocked);
+        }
+        self.accounts
+            .iter()
+            .find(|(account, _)| subject == self.subject && account.account_id == account_id)
+            .map(|(_, credentials)| credentials.clone())
+            .ok_or_else(|| CoderCredentialError::NoSuchAccount(account_id.to_string()))
+    }
+}
+
+/// The Coder deployments a test's accounts are on, by their URL: each answers a listing with one
+/// fixed outcome. A URL no answer was given for is a deployment nothing answers at.
+#[derive(Default)]
+pub struct CoderDeployments {
+    answers: Vec<(
+        String,
+        Result<
+            Vec<crate::coder_workspaces::CoderWorkspace>,
+            crate::coder_workspaces::CoderWorkspaceListError,
+        >,
+    )>,
+}
+
+/// No deployments yet.
+pub fn coder_deployments() -> CoderDeployments {
+    CoderDeployments::default()
+}
+
+impl CoderDeployments {
+    /// These deployments, with the one at `url` listing `workspaces`.
+    #[must_use]
+    pub fn listing(
+        mut self,
+        url: &str,
+        workspaces: Vec<crate::coder_workspaces::CoderWorkspace>,
+    ) -> Self {
+        self.answers.push((url.to_string(), Ok(workspaces)));
+        self
+    }
+
+    /// These deployments, with the one at `url` failing every listing with `error`.
+    #[must_use]
+    pub fn failing(
+        mut self,
+        url: &str,
+        error: crate::coder_workspaces::CoderWorkspaceListError,
+    ) -> Self {
+        self.answers.push((url.to_string(), Err(error)));
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::coder_workspaces::CoderWorkspaceSource for CoderDeployments {
+    async fn workspaces(
+        &self,
+        credentials: &crate::coder_workspaces::CoderCredentials,
+    ) -> Result<
+        Vec<crate::coder_workspaces::CoderWorkspace>,
+        crate::coder_workspaces::CoderWorkspaceListError,
+    > {
+        self.answers
+            .iter()
+            .find(|(url, _)| *url == credentials.url)
+            .map(|(_, answer)| answer.clone())
+            .unwrap_or_else(|| {
+                Err(
+                    crate::coder_workspaces::CoderWorkspaceListError::Unreachable(format!(
+                        "no stand-in deployment at {}",
+                        credentials.url
+                    )),
+                )
+            })
+    }
+}
+
+/// `owner`'s workspace `name`, whose deployment reports `status`.
+pub fn a_coder_workspace(
+    owner: &str,
+    name: &str,
+    status: &str,
+) -> crate::coder_workspaces::CoderWorkspace {
+    crate::coder_workspaces::CoderWorkspace {
+        owner: owner.to_string(),
+        name: name.to_string(),
+        status: status.to_string(),
+    }
+}

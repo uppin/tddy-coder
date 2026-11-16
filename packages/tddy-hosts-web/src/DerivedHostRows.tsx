@@ -44,6 +44,23 @@ export function derivedHostsFailureTestId(parentInstanceId: string): string {
   return `hosts-row-${parentInstanceId}-derived-hosts-failure`;
 }
 
+/**
+ * The test id of the cell saying whether the derived host `derivedHostId` can run a session now:
+ * `Available`, or `Unavailable` for one its daemon listed as not usable (`DerivedHost.usable`) — a
+ * Coder workspace that is not running, or one whose daemon has no `coder` CLI.
+ */
+export function derivedHostStatusTestId(derivedHostId: string): string {
+  return `${derivedHostRowTestId(derivedHostId)}-status`;
+}
+
+/**
+ * The test id of the daemon's own reason an unusable derived host cannot be used
+ * (`DerivedHost.unusable_reason`). Rendered only on a host that is not usable.
+ */
+export function derivedHostUnusableReasonTestId(derivedHostId: string): string {
+  return `${derivedHostRowTestId(derivedHostId)}-unusable-reason`;
+}
+
 function kindLabel(kind: DerivedHostKind): string {
   return kind === DerivedHostKind.SSH ? "SSH" : "";
 }

@@ -159,6 +159,8 @@ mod tests {
                     config_host: alias.to_string(),
                 })),
             }),
+            usable: true,
+            unusable_reason: String::new(),
         }
     }
 

@@ -17,6 +17,7 @@ mod clone_backend;
 mod clone_planner;
 pub mod clone_ssh_env;
 mod clone_stopper;
+pub mod coder_target;
 pub mod conversation_spawn;
 pub mod conversation_spawn_handler;
 pub mod conversation_start;

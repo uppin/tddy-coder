@@ -453,6 +453,9 @@ enum DerivedHostKind {
   DERIVED_HOST_KIND_UNSPECIFIED = 0;
   // An explicit `Host` alias of the parent daemon's OS user's `~/.ssh/config`.
   DERIVED_HOST_KIND_SSH = 1;
+  // A workspace of one of the caller's Coder accounts, reached through the `coder` CLI on the
+  // parent daemon.
+  DERIVED_HOST_KIND_CODER = 2;
 }
 
 // A machine a daemon reaches through a remote shell, offered wherever a host is chosen. It has no
@@ -461,8 +464,11 @@ enum DerivedHostKind {
 message DerivedHost {
   // `<parent_instance_id>/ssh/<alias>` for an SSH host: unique across daemons, and stable for as
   // long as the alias is in the parent's config.
+  // `<parent_instance_id>/coder/<account_id>/<owner>/<workspace>` for a Coder workspace, so two
+  // accounts' workspaces of the same name are two hosts.
   string id = 1;
-  // What an operator reads: the alias, for an SSH host.
+  // What an operator reads: the alias, for an SSH host; `<workspace> (<account label>)` for a
+  // Coder workspace.
   string label = 2;
   DerivedHostKind kind = 3;
   // The daemon that reaches this host, as KnownHostEntry.instance_id names it. A session on this
@@ -471,6 +477,13 @@ message DerivedHost {
   // What StartSessionRequest.target carries to run a session's agent on this host, with
   // `daemon_instance_id` set to `parent_instance_id`.
   session.SessionTarget target = 5;
+  // Whether a session can be started on this host now. An SSH host always is. A Coder workspace is
+  // only while it is running and the parent daemon has the `coder` CLI. A host that is not usable
+  // is still listed: hiding a stopped workspace would read as an account that has none.
+  bool usable = 6;
+  // Why the host cannot be used, when `usable` is false — a workspace's status, or the missing
+  // CLI. Empty for a usable host. For an operator, not for parsing.
+  string unusable_reason = 7;
 }
 
 message ListDerivedHostsRequest {

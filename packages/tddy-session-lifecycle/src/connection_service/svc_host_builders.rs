@@ -96,6 +96,7 @@ impl DaemonSessionHost {
                 tddy_agent_launch::remote_hook_follower::RemoteHookFollowers::new(),
             credential_vaults: None,
             github_cli: tddy_host_service::GithubCli::on_spawn_child_path(),
+            coder_credentials: Arc::new(tddy_agent_launch::coder_target::NoCoderAccounts),
             session_tokens: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
             session_rooms: Arc::new(NoSessionRooms),
@@ -291,6 +292,16 @@ impl DaemonSessionHost {
     /// the spawned child's `PATH`.
     pub fn with_github_cli(mut self, github_cli: tddy_host_service::GithubCli) -> Self {
         self.github_cli = github_cli;
+        self
+    }
+
+    /// Read the Coder account of a session whose target is a Coder workspace from `credentials`
+    /// (builder) — the daemon's vaults — at its start and at every resume.
+    pub fn with_coder_credentials(
+        mut self,
+        credentials: Arc<dyn tddy_host_service::coder_workspaces::CoderCredentialSource>,
+    ) -> Self {
+        self.coder_credentials = credentials;
         self
     }
 
