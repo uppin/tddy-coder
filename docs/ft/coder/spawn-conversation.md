@@ -35,7 +35,9 @@ the spawn `FAILED_PRECONDITION`.
 Because a spawned conversation is a real child session, the web needs no new RPC to discover it: the
 existing `ListSessions` poll already returns `SessionEntry.orchestrator_session_id`. The parent
 session's runtime derives its child tabs by filtering the session list on
-`orchestratorSessionId === parentSessionId`.
+`orchestratorSessionId === parentSessionId` — except a project-home or orchestrator parent
+(`session_role` `project-home` / `orchestrator`), which shows no child tabs: the sessions it
+started through `StartSession` are started sessions, not spawned conversations.
 
 ### Target Consumers
 
@@ -88,7 +90,8 @@ session's runtime derives its child tabs by filtering the session list on
   `start_spawned_cli_child` directly.
 - **Child-as-tab rendering** (`tddy-web`): the parent `SessionRuntime` derives
   `childSessions = sessions.filter(s => s.orchestratorSessionId === parentSessionId)`, renders a tab
-  per child, and attaches the child session's runtime when its tab is active.
+  per child, and attaches the child session's runtime when its tab is active. A project-home or
+  orchestrator parent derives no children and shows only the Agent tab.
 
 ### Developer Experience (DX) Requirements
 
