@@ -16,12 +16,25 @@
  */
 
 import React from "react";
+import { create } from "@bufbuild/protobuf";
+import { createClient, type Client } from "@connectrpc/connect";
+import type { DescService } from "@bufbuild/protobuf";
+import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import {
+  DerivedHostKind,
+  DerivedHostSchema,
+  HostService,
+  ListDerivedHostsResponseSchema,
+  ProbeOutcome,
+} from "tddy-client-web/gen/host_pb";
 import { useHostDirectory } from "tddy-client-web";
 import { useHostPresence } from "tddy-client-web";
 import type { HostDirectorySource } from "tddy-client-web";
 import { HostDirectorySources } from "tddy-client-web";
 import { DaemonSelectorConnected } from "../../src/components/shell/DaemonSelector";
 import { SelectedDaemonProvider } from "../../src/app/rpc/selectedDaemon";
+import { AuthProvider } from "../../src/app/auth/authProvider";
+import { mountWithRpc } from "../support/rpc/inMemory";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 import { ConnectionProviders } from "../../src/app/rpc/connections/registry";
 import type { ConnectionCapability, HostConnection } from "tddy-client-web/connections/types";
@@ -264,9 +277,11 @@ describe("the daemon selector on a page that was served by a daemon", () => {
     // Given the desktop app's default: a page that knows the daemon that served it and nothing else
     // — no `livekitUrl`, no `commonRoom`, no injected room and no injected host list
     cy.mount(
-      <SelectedDaemonProvider servingInstanceId={THIS_HOST}>
-        <DaemonSelectorConnected />
-      </SelectedDaemonProvider>,
+      <AuthProvider>
+        <SelectedDaemonProvider servingInstanceId={THIS_HOST}>
+          <DaemonSelectorConnected />
+        </SelectedDaemonProvider>
+      </AuthProvider>,
     );
 
     // Then the serving daemon is offered and already selected, keeping its self-label because it is
@@ -274,13 +289,77 @@ describe("the daemon selector on a page that was served by a daemon", () => {
     daemonSelectorPage.expectShowsSelected(`${THIS_HOST} (this daemon)`);
   });
 
+  it("includes the serving daemon's derived hosts in the directory the app offers", () => {
+    // Given a daemon that reaches buildbox over SSH, answered over its own connection
+    const backend = anInMemoryRpcBackend().implement(HostService, {
+      listDerivedHosts: async () =>
+        create(ListDerivedHostsResponseSchema, {
+          outcome: ProbeOutcome.OK,
+          hosts: [
+            create(DerivedHostSchema, {
+              id: `${THIS_HOST}/ssh/buildbox`,
+              label: "buildbox",
+              kind: DerivedHostKind.SSH,
+              parentInstanceId: THIS_HOST,
+              target: { kind: { case: "ssh", value: { configHost: "buildbox" } } },
+            }),
+          ],
+        }),
+    });
+    const registry = new ConnectionProviderRegistry();
+    registry.register({
+      id: "in-memory",
+      connectHost: (hostId: string) => {
+        if (hostId !== THIS_HOST) return null;
+        const transport = backend.transport();
+        const clients = new Map<DescService, Client<DescService>>();
+        return {
+          hostId,
+          providerId: "in-memory",
+          status: "connected",
+          error: null,
+          capabilities: new Set(["rpc"]),
+          clientFor: <S extends DescService>(service: S): Client<S> => {
+            const cached = clients.get(service);
+            if (cached) return cached as Client<S>;
+            const built = createClient(service, transport);
+            clients.set(service, built as Client<DescService>);
+            return built;
+          },
+          transport: () => transport,
+        } as HostConnection;
+      },
+    });
+
+    // When the real provider assembles the app's directory
+    mountWithRpc(
+      <AuthProvider>
+        <ConnectionProviders registry={registry}>
+          <SelectedDaemonProvider
+            room={null}
+            daemons={[{ instanceId: THIS_HOST, label: "this daemon" }]}
+            servingInstanceId={THIS_HOST}
+          >
+            <DirectoryProbe />
+          </SelectedDaemonProvider>
+        </ConnectionProviders>
+      </AuthProvider>,
+      backend as InMemoryRpcBackend,
+    );
+
+    // Then the derived host is offered alongside its parent
+    hostDirectoryProbe.expectOffersHosts(THIS_HOST, `${THIS_HOST}/ssh/buildbox`);
+  });
+
   it("offers nothing when neither a common room nor a serving daemon names a host", () => {
     // Given a bundle served by something that is not a daemon — a static file server or Storybook —
     // and still no common room
     cy.mount(
-      <SelectedDaemonProvider>
-        <DaemonSelectorConnected />
-      </SelectedDaemonProvider>,
+      <AuthProvider>
+        <SelectedDaemonProvider>
+          <DaemonSelectorConnected />
+        </SelectedDaemonProvider>
+      </AuthProvider>,
     );
 
     // Then there is genuinely nothing to offer, and the selector says so rather than naming a host
