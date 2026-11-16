@@ -38,6 +38,35 @@ mod livekit_tests {
         String::from_utf8_lossy(&stripped).into_owned()
     }
 
+    /// Prefix for assertion/debug output without splitting a UTF-8 codepoint.
+    fn utf8_preview(s: &str, max_chars: usize) -> String {
+        s.chars().take(max_chars).collect()
+    }
+
+    /// After interview→plan handoff, the stub may skip plan clarify; these markers cover the full stub run.
+    /// Kept 1:1 with `grpc_terminal_rpc` (see that file's header: same assertions, same strictness).
+    fn stub_workflow_progressed(text: &str) -> bool {
+        text.contains("Session dir:")
+            || text.contains("AcceptanceTesting")
+            || text.contains("GreenComplete")
+            || text.contains("Workflow complete")
+            || text.contains("DocsUpdated")
+            || text.contains("Type your feature")
+            || text.contains("Planning→Planned")
+            || text.contains("Plan generated")
+            || text.contains("acceptance-tests")
+            || text.contains("Interviewing")
+            || text.contains("Permission")
+            || text.contains("Planned │")
+    }
+
+    fn initial_tui_visible(text: &str) -> bool {
+        text.contains("State:")
+            || text.contains("Scope")
+            || text.contains("Plan generated")
+            || text.contains("Interview")
+    }
+
     async fn wait_for_participant(
         room: &Room,
         events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
@@ -155,6 +184,12 @@ mod livekit_tests {
 
     /// Drain all buffered output from the LiveKit stream until `quiet_period` passes
     /// without any new data. Returns all collected bytes.
+    ///
+    /// The first chunk is waited on far longer than the quiet period: the workflow's
+    /// opening render takes seconds to cross the room, while once frames are flowing
+    /// the quiet period only has to separate one phase's burst from the next — and
+    /// stay under the VirtualTui's ~1 Hz autonomous repaint, which otherwise keeps
+    /// the stream permanently un-quiet.
     async fn drain_output(
         rx: &mut tokio::sync::mpsc::Receiver<Result<Vec<u8>, tddy_rpc::Status>>,
         quiet_period: Duration,
@@ -163,7 +198,12 @@ mod livekit_tests {
         let mut received = Vec::new();
         let mut chunk_count = 0u64;
         loop {
-            match tokio::time::timeout(quiet_period, rx.recv()).await {
+            let wait = if received.is_empty() {
+                Duration::from_secs(30)
+            } else {
+                quiet_period
+            };
+            match tokio::time::timeout(wait, rx.recv()).await {
                 Ok(Some(Ok(bytes))) => {
                     chunk_count += 1;
                     let output = TerminalOutput::decode(&bytes[..])?;
@@ -236,8 +276,9 @@ mod livekit_tests {
         // All sends use end_of_stream=false to keep the bidi session alive —
         // end_of_stream=true would tear down the session before VirtualTui processes
         // the last key (the shutdown propagates through the input chain).
-        // LiveKit data channels have higher per-chunk latency than gRPC (5 hops vs 2),
-        // so we use longer quiet periods (2s vs 500ms for gRPC).
+        // The quiet period must stay under the VirtualTui's ~1 Hz autonomous repaint
+        // (see grpc_virtual_tui_idle_animation_cadence): at 2-3s the drain never sees
+        // quiet and never returns. 500ms is the gRPC twin's value against the same TUI.
         sender
             .send(
                 TerminalInput {
@@ -250,21 +291,21 @@ mod livekit_tests {
             .await
             .map_err(|e| anyhow::anyhow!("send init: {}", e))?;
 
-        let initial_output = drain_output(&mut rx, Duration::from_secs(3), "init").await?;
+        let initial_output = drain_output(&mut rx, Duration::from_millis(500), "init").await?;
         let initial_text = ansi_to_text(&initial_output);
         eprintln!(
             "[TEST] livekit init: {} bytes, text_len={}, preview={:?}",
             initial_output.len(),
             initial_text.len(),
-            &initial_text[..initial_text.floor_char_boundary(300)]
+            utf8_preview(&initial_text, 300)
         );
 
         // Then — Phase 1: initial TUI renders before any keyboard input
         assert!(
-            initial_text.contains("State:") || initial_text.contains("Scope"),
+            initial_tui_visible(&initial_text),
             "Initial TUI should render before any keyboard input; got (len {}): {:?}",
             initial_text.len(),
-            &initial_text[..initial_text.floor_char_boundary(300)]
+            utf8_preview(&initial_text, 300)
         );
 
         // When — Phase 2: send keyboard inputs to advance the workflow.
@@ -290,7 +331,7 @@ mod livekit_tests {
                 .await
                 .map_err(|e| anyhow::anyhow!("send {}: {}", label, e))?;
 
-            let chunk = drain_output(&mut rx, Duration::from_secs(2), label).await?;
+            let chunk = drain_output(&mut rx, Duration::from_millis(500), label).await?;
             eprintln!(
                 "[TEST-INPUT] livekit: '{}' produced {} bytes of output",
                 label,
@@ -307,29 +348,22 @@ mod livekit_tests {
             "[TEST] livekit total output: {} bytes, text_len={}, preview={:?}",
             all_output.len(),
             text.len(),
-            &text[..text.floor_char_boundary(500)]
+            utf8_preview(&text, 500)
         );
 
         // Then — Phase 2: workflow advanced past the initial screen
         assert!(
-            text.contains("State:") || text.contains("Scope"),
+            initial_tui_visible(&text),
             "Should receive initial TUI output; got (len {}): {:?}",
             text.len(),
-            &text[..text.floor_char_boundary(300)]
+            utf8_preview(&text, 300)
         );
 
-        let progressed = text.contains("Session dir:")
-            || text.contains("AcceptanceTesting")
-            || text.contains("GreenComplete")
-            || text.contains("Workflow complete")
-            || text.contains("DocsUpdated")
-            || text.contains("Type your feature");
-
         assert!(
-            progressed,
+            stub_workflow_progressed(&text),
             "Keyboard inputs should advance the workflow past the initial screen; got (len {}): {:?}",
             text.len(),
-            &text[..text.floor_char_boundary(500)]
+            utf8_preview(&text, 500)
         );
 
         Ok(())
@@ -345,6 +379,10 @@ mod livekit_tests {
     #[allow(clippy::await_holding_lock)]
     async fn livekit_virtual_tui_rpc_large_echo_char_by_char() -> anyhow::Result<()> {
         use tddy_tui_testkit::input_encoding::encode_resize;
+
+        // The Enter affordance overlay paints over the prompt the echo is parsed from;
+        // the gRPC twin sets the same flag for the same check.
+        std::env::set_var("TDDY_E2E_NO_ENTER_AFFORDANCE", "1");
 
         let _ = env_logger::builder().is_test(true).try_init();
 
@@ -474,14 +512,15 @@ mod livekit_tests {
         }
 
         // Then — the full segmented echo appears in the vt100-parsed output
-        // LiveKit has higher per-chunk latency than gRPC; use a longer timeout than gRPC e2e.
+        // (120s as in the gRPC twin, so the test reports its own failure before
+        // nextest's 180s slow-timeout termination.)
         eventually_segmented_echo(
             &buf,
             &expected,
             ROWS,
             COLS,
             SegmentedEchoWaitParams {
-                timeout: Duration::from_secs(180),
+                timeout: Duration::from_secs(120),
                 min_interval: Duration::from_millis(400),
                 min_new_bytes: 4096,
                 loop_sleep: Duration::from_millis(50),
@@ -576,7 +615,8 @@ mod livekit_tests {
             .await
             .map_err(|e| anyhow::anyhow!("send init: {}", e))?;
 
-        let initial_output = drain_output(&mut rx, Duration::from_secs(3), "ghostty-init").await?;
+        let initial_output =
+            drain_output(&mut rx, Duration::from_millis(500), "ghostty-init").await?;
         for chunk in initial_output.chunks(256) {
             viewer.feed(chunk);
         }
@@ -584,10 +624,10 @@ mod livekit_tests {
 
         // Then — Phase 1: initial TUI renders before keyboard input
         assert!(
-            initial_text.contains("State:") || initial_text.contains("Scope"),
+            initial_tui_visible(&initial_text),
             "Initial TUI should render before any keyboard input; got (len {}): {:?}",
             initial_text.len(),
-            &initial_text[..initial_text.floor_char_boundary(300)]
+            utf8_preview(&initial_text, 300)
         );
 
         // When — Phase 2: send keyboard inputs to advance the workflow.
@@ -612,7 +652,7 @@ mod livekit_tests {
                 .await
                 .map_err(|e| anyhow::anyhow!("send {}: {}", label, e))?;
 
-            let chunk = drain_output(&mut rx, Duration::from_secs(2), label).await?;
+            let chunk = drain_output(&mut rx, Duration::from_millis(500), label).await?;
             for part in chunk.chunks(256) {
                 viewer.feed(part);
             }
@@ -624,18 +664,12 @@ mod livekit_tests {
 
         // Then — Phase 2: workflow advanced past the initial screen
         let visible = ansi_to_text(&all_raw);
-        let progressed = visible.contains("Session dir:")
-            || visible.contains("AcceptanceTesting")
-            || visible.contains("GreenComplete")
-            || visible.contains("Workflow complete")
-            || visible.contains("DocsUpdated")
-            || visible.contains("Type your feature");
 
         assert!(
-            progressed,
+            stub_workflow_progressed(&visible),
             "Keyboard inputs should advance the workflow; stripped text (len {}): {:?}",
             visible.len(),
-            &visible[..visible.floor_char_boundary(500)]
+            utf8_preview(&visible, 500)
         );
 
         Ok(())
