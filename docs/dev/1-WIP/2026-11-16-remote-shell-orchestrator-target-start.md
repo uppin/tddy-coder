@@ -79,6 +79,32 @@ The first push after the plan (commit 2) publishes, as the start of this same PR
 
 This PR goes on to implement all of it. It does not merge in that state.
 
+## Contract as published
+
+The contract commit (commit 2) publishes exactly this; `/green` implements against it.
+
+**Surface**
+
+- `tddy-tool-engine`: `start_options::DerivedHostChoice { id, label, kind, parent_daemon_instance_id, usable, unusable_reason }`, `StartOptions.derived_hosts`, `StartOptions.derived_hosts_unavailable`; `StartSessionArgs.target: String`; `target` moved out of `INTERNAL_START_FIELDS` and offered by the schema with its description; `ssh_config_host`'s description says a wildcard `Host` is not an alias and points at `target`. `into_request` does not yet carry `target` — the daemon resolves the id before the request is built, so the field never reaches the request as a string.
+- `tddy-host-service`: `HostServiceImpl::resolve_derived_host(&self, session_token, id) -> Result<ResolvedDerivedHost, DerivedHostResolutionError>` (`service/derived_host_resolution.rs`, re-exported at the crate root), `ResolvedDerivedHost { parent_instance_id, target }`, `DerivedHostResolutionError::{Unauthenticated, Listing, Unknown { id, listed }, Unusable { id, reason }}` with `Display`. The body is `todo!()` until green.
+- `tddy-daemon-rpc`: `describe_start_options` fills the two new fields with an empty list and a placeholder reason (`FIXME`); the start handler does not read `target` yet.
+- `tddy-session-create-web/cypress/support/fixtures/start-session-tool-fields.json`: `target` added to `offered` (34 fields), as the parity test requires; the web's `createSessionRequestParity.cy.ts` runs over it at green.
+
+**Red tests at the contract commit**
+
+- `tddy-host-service/tests/derived_host_resolution_acceptance.rs` — 3 tests (a listed SSH alias and a running Coder workspace resolve; an unknown id is refused naming the listed ids; a stopped workspace is refused with its reason); all panic on `todo!()`.
+- `tddy-daemon-rpc/tests/start_options_acceptance.rs` — `the_derived_hosts_are_offered_and_the_list_is_answered` fails on the placeholder reason.
+- `tddy-daemon-rpc/tests/project_home_start_target_acceptance.rs` — `a_start_naming_an_unknown_derived_host_is_refused_naming_the_listed_ones` fails: the handler starts a local session instead of refusing.
+- Guards that already pass: `tddy-tool-engine/tests/start_session_schema.rs` `target_is_offered_as_a_derived_host_id`, `ssh_config_host_says_a_wildcard_is_not_an_alias`; `tests/start_options.rs` `a_derived_host_choice_carries_what_a_start_needs_and_what_an_agent_reads`; the four parity tests.
+
+**Differences from the plan**
+
+- The daemon-rpc acceptance proves the refusal, not a start that lands: the test hosts' operator has no SSH config and no Coder account, and the stub-target fixtures live in `tddy-session-lifecycle`. The landing test (`a_start_naming_a_derived_host_runs_on_its_parent_with_the_hosts_target`) and `a_coder_derived_host_is_resolved_with_the_callers_own_account` are written at green beside `derived_host_start_acceptance`, with a project-home session issuing the start.
+- The options' parity with `ListDerivedHosts` over a host that does reach hosts is green's too: `TestDaemon` does not expose `HostService`.
+- Resolution is a method on `HostServiceImpl` rather than a free function over sources: the sources (operator files, tooling cache, Coder ports) are the service's own.
+
+**Complexity re-scored:** 4 → 4.
+
 ## Green wave
 
 **Wave:** 2 of 2
@@ -201,9 +227,9 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved in advance by the developer's standing instruction for this stack's review gates)
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress

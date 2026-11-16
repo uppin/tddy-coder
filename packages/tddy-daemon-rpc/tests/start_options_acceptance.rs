@@ -298,3 +298,27 @@ async fn describe_session_start_options_lists_each_agents_levels() {
     );
     assert_eq!(entry_for("opencode-cli"), None);
 }
+
+// ---------------------------------------------------------------------------
+// `#remote-shell` 11/11 — the derived hosts a host reaches are offered
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn the_derived_hosts_are_offered_and_the_list_is_answered() {
+    // Given a host whose operator reaches no derived host (no SSH config, no Coder account)
+    let world = a_world().await;
+
+    // When
+    let options = world.options(serde_json::json!({})).await;
+
+    // Then the list is there and was answered — empty because the host reaches none, with no
+    // excuse standing in for an answer (parity with `ListDerivedHosts` is green's, over a host
+    // whose operator has an SSH config)
+    assert_eq!(
+        (
+            options["derived_hosts"].as_array().map(Vec::len),
+            options["derived_hosts_unavailable"].as_str(),
+        ),
+        (Some(0), Some(""))
+    );
+}

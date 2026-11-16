@@ -55,6 +55,10 @@ pub struct StartSessionArgs {
     pub sandboxed_codebase: bool,
     pub codebase_daemon_instance_id: String,
     pub ssh_config_host: String,
+    /// The derived host the session's agent runs on — an `id` from
+    /// `DescribeSessionStartOptions.derived_hosts`, resolved on the daemon for the caller into the
+    /// host's parent and target (`#remote-shell` 11/11). Empty runs the agent on the host itself.
+    pub target: String,
     pub semantic_index: bool,
     pub run_in_tmux: bool,
     pub specialized_agents: Vec<String>,
@@ -170,10 +174,6 @@ pub const INTERNAL_START_FIELDS: &[(&str, &str)] = &[
     (
         "github_source",
         "filled by a daemon forwarding a start to a peer, from its own project row",
-    ),
-    (
-        "target",
-        "the session's own record names its target and the daemon places it there; not a form option",
     ),
 ];
 

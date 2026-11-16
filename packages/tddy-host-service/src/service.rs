@@ -284,3 +284,5 @@ mod coder_workspaces;
 mod derived_hosts;
 
 mod coder_derived_hosts;
+mod derived_host_resolution;
+pub use derived_host_resolution::{DerivedHostResolutionError, ResolvedDerivedHost};

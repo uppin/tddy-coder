@@ -117,6 +117,9 @@ pub(super) async fn describe_start_options(
         provider_routes_unavailable,
         ssh_config_hosts,
         ssh_config_hosts_unavailable,
+        // FIXME(#remote-shell 11/11): listed from `HostService::list_derived_hosts` at green.
+        derived_hosts: Vec::new(),
+        derived_hosts_unavailable: "this host does not list its derived hosts yet".to_string(),
         subagents,
         branches,
         stack_parents: pr_stack_orchestrators(&sessions),

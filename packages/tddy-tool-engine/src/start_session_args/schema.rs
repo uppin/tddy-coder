@@ -175,7 +175,11 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
     );
     offer(
         "ssh_config_host",
-        string("An OpenSSH `Host` alias on the host that manages the code: the worktree lives on that SSH target and every exec tool runs there. Empty is the host's own filesystem."),
+        string("An OpenSSH `Host` alias on the host that manages the code: the worktree lives on that SSH target and every exec tool runs there, while the agent stays on the host. Empty is the host's own filesystem. Only explicit `Host` entries count — a wildcard such as `Host coder.*` is not an alias; a Coder workspace is a derived host, named with `target`."),
+    );
+    offer(
+        "target",
+        string("A derived host the agent itself runs on: an `id` from `DescribeSessionStartOptions.derived_hosts` (an SSH alias or a Coder workspace the host reaches). The session starts on that host's parent daemon with the derived host as its target, and its worktree is created there. Empty runs the agent on the host itself. Exclusive with `ssh_config_host`."),
     );
     offer(
         "semantic_index",
