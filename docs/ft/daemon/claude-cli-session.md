@@ -781,10 +781,19 @@ before Claude kills it. Waiters are held in memory, one per `request_id`: a daem
 them and each hook falls back to Claude's prompt. A person can still answer in Claude's terminal once
 the wait ends.
 
+On a target session the settings carry the remote carrier instead: with
+`HookCommandParams.remote_log` set, every reporting event's command is
+`tddy_core::remote_hook_command` — a `printf` one-liner appending the event, the hook token and
+the payload to `.tddy/hooks.log` in the worktree — and the hooks that wait for an answer
+(`PermissionRequest`, the `PreToolUse` question matcher) are not installed, so Claude asks in
+its terminal. The daemon follows the log through the session's remote shell
+(`tddy_agent_launch::remote_hook_follower`) into the same `ReportSessionStatus` /
+`ReportAgentActivity` handling, and removes the log when the session goes.
+
 ### Hook wiring
 
 `start_claude_cli_session` generates a per-session UUID `hook_token` and calls
-`tddy_core::build_claude_hooks_settings(&HookCommandParams { tddy_tools_path, daemon_url, daemon_socket, session_id, os_user, hook_token, answer_wait_secs })`.
+`tddy_core::build_claude_hooks_settings(&HookCommandParams { tddy_tools_path, daemon_url, daemon_socket, session_id, os_user, hook_token, answer_wait_secs, remote_log })`.
 The resulting JSON is written to `<worktree>/.claude/settings.local.json`. The `hook_token` is also
 stored in `.session.yaml` for validation on inbound `ReportSessionStatus` calls.
 

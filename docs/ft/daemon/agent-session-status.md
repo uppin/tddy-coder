@@ -163,6 +163,18 @@ length, and `ListSessions` is a response an operator's dashboard polls.
 10. A summary longer than 120 characters is cut at 120, and a multi-line one is collapsed to one
     line, before it reaches the wire.
 
+## Hooks on a target
+
+A session whose agent runs on a target — a machine reached through a remote shell, with no
+tddy software on it — reports the same hook word. Its hook command is a POSIX `sh` one-liner
+(`printf`, `cat`, `tr`, nothing of tddy's) that appends one line — event, hook token, payload —
+to `.tddy/hooks.log` in the worktree. The daemon follows that file through the session's remote
+shell and feeds each line into the same hook handling a local hook reaches, so a target session
+shows working, waiting and idle like a local one. Hooks that wait for an answer are not
+installed on a target: the agent asks in its terminal. A line with the wrong token, an unknown
+event or an unparseable payload is dropped and counted, never acted on; a dropped follower
+stream resumes from the byte it had reached, so every hook is delivered once, in order.
+
 ## Non-Goals
 
 - **No new RPC and no new stream.** The fields ride `ListSessions`, which every consumer of a peer

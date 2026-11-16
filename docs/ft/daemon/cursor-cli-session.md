@@ -86,7 +86,7 @@ Where the reports go:
 | Host | the agent-tool socket of the session's OS user: Tddy Desktop's one socket, or on a server daemon `<data dir>/run/<user>/daemon.sock` (owner-only; under `tddy-supervisor` the one it handed over, `/run/tddy-users/<user>/daemon.sock`) | the socket itself |
 | Jail | the in-jail tool-IPC socket | `tddy-sandbox-runner` relays the two reports (`IN_JAIL_RELAYABLE_HOOK_REPORTS`) to the facilitating daemon as host RPCs. The bridge serves them for the jail's own session only, and refuses any other session id |
 
-A hooks file is never rendered without a socket: the adapter refuses (`SlotError::NoDaemonSocket`) rather than falling back to `daemon_url`.
+A hooks file is never rendered without a socket: the adapter refuses (`SlotError::NoDaemonSocket`) rather than falling back to `daemon_url`. On a target session the carrier stands in for the socket: with `HookCommandParams.remote_log` set, each event's command appends to `.tddy/hooks.log` in the worktree (see [Claude CLI session § Hook wiring](claude-cli-session.md#hook-wiring)), and no socket is required.
 
 **Server daemons** serve one daemon socket per OS user, so a host session's reports reach the daemon whichever user it runs as, and no other user can connect to it. Under `tddy-supervisor` a session user must be mapped in `users.yaml`; an unmapped one has the start refused, naming `users.yaml`, rather than started with hooks that report nowhere — see [tddy-supervisor § One socket per user](../supervisor/tddy-supervisor.md#one-socket-per-user-handed-to-the-daemon).
 

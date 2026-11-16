@@ -15,6 +15,7 @@ Deferred by the user, 2026-11-10 (#876 wrap): left for a later refactoring node
 | Run | Production lines | Note |
 |---|---:|---|
 | 2026-11-10 | 493 → 531 | #876: the Tier C extracts out of `DaemonSessionHost::new` (112 → 97) added `default_agent_tool_sockets`, `HostStores` and `build_host_stores` beside it |
+| 2026-11-16 | 531 → 533 | #920 (`#remote-shell` 6/7): the host gains the remote-hook followers registry (2 lines). Touched, not closed. **Not split**: successor PR #921 (`feature/remote-shell/coder-hosts`) also modifies this file (`/pr-wrap` step 3.5, stack-branch rule). Split after the `#remote-shell` stack lands |
 
 ## What would close it
 
