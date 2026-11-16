@@ -171,6 +171,10 @@ pub const INTERNAL_START_FIELDS: &[(&str, &str)] = &[
         "github_source",
         "filled by a daemon forwarding a start to a peer, from its own project row",
     ),
+    (
+        "target",
+        "the session's own record names its target and the daemon places it there; not a form option",
+    ),
 ];
 
 /// One host a session can start on, as the eligible-daemon roster names it.
