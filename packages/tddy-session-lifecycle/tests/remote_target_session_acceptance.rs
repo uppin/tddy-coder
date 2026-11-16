@@ -327,7 +327,7 @@ impl ADaemonWithATarget {
             .signal_session(Request::direct(SignalSessionRequest {
                 session_token: VALID_TOKEN.to_string(),
                 session_id: session_id.to_string(),
-                signal: libc::SIGTERM,
+                signal: tddy_service::proto::session::Signal::Sigterm as i32,
                 control_token: String::new(),
             }))
             .await
