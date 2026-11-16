@@ -3,8 +3,8 @@
 //! Empty `ssh_config_host` is today's host filesystem. A set alias is OpenSSH (`BatchMode=yes`)
 //! on that Host — a failure is the result, never a local read.
 //!
-//! Green will speak `ssh` against a fixture target. Wave 2 publishes the surface; RemoteShell
-//! bodies are still `TODO(exec)`.
+//! A set alias runs through the `RemoteShell` port (`SshShell`); the port's in-memory
+//! double drives the acceptance tests below.
 
 use tddy_task::TaskRegistry;
 use tddy_tool_engine::{

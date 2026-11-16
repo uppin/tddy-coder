@@ -1,8 +1,8 @@
 //! A specialized-agent clone through `tddy-remote-git-repo` must pack from the SSH target when
 //! the code-managing session has `ssh_config_host` set. The client binary is unchanged.
 //!
-//! Green drives the real `tddy-remote-git-repo` against a fixture sshd. Wave 2 publishes the
-//! spawn seam; Remote pack spawn is still `TODO(remote-git)`.
+//! The real `tddy-remote-git-repo` is driven against a fixture sshd; remote pack verbs
+//! stream through the `RemoteShell` port.
 
 use std::path::PathBuf;
 
