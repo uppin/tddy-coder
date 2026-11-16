@@ -456,6 +456,26 @@ impl SessionWatchStore {
         delivery
     }
 
+    /// Hand `owner`'s waiting delivery to `deliver`, and advance past it only if `deliver`
+    /// succeeds (`#activity-wake` 3/3): a wake whose paste failed delivers nothing, and what was
+    /// waiting waits on. `Ok(true)` when something was delivered, `Ok(false)` when nothing was
+    /// waiting (and `deliver` was not called); `Err` with `deliver`'s refusal, nothing moved.
+    pub async fn deliver_with<F, Fut>(
+        &self,
+        owner: &WatchOwner,
+        log: &ProjectNotificationLog,
+        now_unix_ms: u64,
+        deliver: F,
+    ) -> Result<bool, String>
+    where
+        F: FnOnce(WatchDelivery) -> Fut + Send,
+        Fut: std::future::Future<Output = Result<(), String>> + Send,
+    {
+        // TODO(idle-wake): implement
+        let _ = (owner, log, now_unix_ms, deliver);
+        Ok(false)
+    }
+
     /// Whether `owner` holds a watch that has not ended at `now_unix_ms`.
     pub async fn has_live_watches(
         &self,

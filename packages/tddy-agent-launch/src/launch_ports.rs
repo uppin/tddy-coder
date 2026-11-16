@@ -132,6 +132,13 @@ pub struct LaunchSessions {
     /// (`#agent-tools 19/19`): a host that installed none is given an empty registry, whose every
     /// agent session is refused for naming no spec — nothing is launched by hand.
     pub coding_agents: Arc<crate::spec_launch::HostCodingAgents>,
+    /// The orchestrators' session watches and the log they read, which the idle reaper asks
+    /// whether a project-home session holds a live watch (`#activity-wake` 3/3). `None` on a host
+    /// with none: nothing is held up.
+    pub session_watches: Option<(
+        Arc<tddy_session_activity::session_watches::SessionWatchStore>,
+        Arc<tddy_session_activity::project_notification_log::ProjectNotificationLog>,
+    )>,
     /// The host's capabilities that are not fields.
     pub host: Arc<dyn LaunchHost>,
     /// What extends a session's reach beyond this host when it is connected to.

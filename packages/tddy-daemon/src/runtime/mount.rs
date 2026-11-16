@@ -37,6 +37,10 @@ pub(super) struct Shared {
         Arc<tddy_session_activity::project_notification_log::ProjectNotificationLog>,
     /// The orchestrators' session watches over that log (`#activity-wake` 2/3).
     pub(super) session_watches: Arc<tddy_session_activity::session_watches::SessionWatchStore>,
+    /// What the bus's wake trigger sends, taken by the waker once the handlers exist
+    /// (`#activity-wake` 3/3).
+    pub(super) wake_cues:
+        std::sync::Mutex<Option<tddy_daemon_rpc::exec_tool::watch_wake::WakeCues>>,
     pub(super) host_prompts: Arc<dyn tddy_session_lifecycle::host_prompts::HostPromptRegistry>,
 }
 
@@ -97,6 +101,7 @@ impl BuildContext {
         hosted
             .rpc_handlers
             .attach_host_service(Arc::clone(&served.host_service_impl));
+        start_watch_waker(&shared, &hosted);
         self.register_code_intelligence(&hosted.task_registry);
         let livekit_service = livekit_service(&mount);
         let mounted = Mounted {
@@ -327,4 +332,20 @@ fn operator_workspace_roots(
         );
     }
     Ok(roots)
+}
+
+/// Wake this host's idle watching orchestrators (`#activity-wake` 3/3), from the cues of the trigger
+/// `open_shared` registered on the bus.
+fn start_watch_waker(shared: &Shared, hosted: &Hosted) {
+    let cues = shared
+        .wake_cues
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    if let Some(cues) = cues {
+        hosted.rpc_handlers.start_watch_waker(
+            cues,
+            tddy_daemon_rpc::exec_tool::watch_wake::WakeTimings::default(),
+        );
+    }
 }

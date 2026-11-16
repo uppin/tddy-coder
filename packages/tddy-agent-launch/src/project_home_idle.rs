@@ -38,6 +38,9 @@ pub struct IdleObservation {
     pub busy: bool,
     /// When the session last reported a status change (turn end or input).
     pub idle_since: SystemTime,
+    /// The session holds a live session watch, so it is kept up to be woken by it
+    /// (`#activity-wake` 3/3).
+    pub holds_live_watch: bool,
 }
 
 impl IdleObservation {
@@ -48,13 +51,15 @@ impl IdleObservation {
         Some(Self {
             busy: activity_status == Some(RUNNING),
             idle_since: SystemTime::from(idle_since),
+            holds_live_watch: false,
         })
     }
 }
 
 /// Whether a session observed as `obs` should be stopped at `now`. Never for a busy session, never
-/// when `idle_stop` is zero.
+/// when `idle_stop` is zero — and, once implemented, never for one holding a live watch.
 pub fn should_stop(obs: &IdleObservation, now: SystemTime, idle_stop: Duration) -> bool {
+    // TODO(idle-wake): implement — a session holding a live watch is not stopped.
     if obs.busy || idle_stop.is_zero() {
         return false;
     }
@@ -195,6 +200,7 @@ mod tests {
                 IdleObservation {
                     busy: false,
                     idle_since: at(10_000 - 601),
+                    holds_live_watch: false,
                 },
                 true,
             ),
@@ -203,6 +209,7 @@ mod tests {
                 IdleObservation {
                     busy: false,
                     idle_since: at(10_000 - 600),
+                    holds_live_watch: false,
                 },
                 true,
             ),
@@ -211,6 +218,7 @@ mod tests {
                 IdleObservation {
                     busy: false,
                     idle_since: at(10_000 - 30),
+                    holds_live_watch: false,
                 },
                 false,
             ),
@@ -219,6 +227,7 @@ mod tests {
                 IdleObservation {
                     busy: true,
                     idle_since: at(0),
+                    holds_live_watch: false,
                 },
                 false,
             ),
@@ -231,10 +240,24 @@ mod tests {
     }
 
     #[test]
+    fn a_live_watch_holds_off_the_stop() {
+        // Given a session idle for far past the limit, holding a live session watch
+        let obs = IdleObservation {
+            busy: false,
+            idle_since: at(0),
+            holds_live_watch: true,
+        };
+
+        // Then it is not stopped (`#activity-wake` 3/3)
+        assert!(!should_stop(&obs, at(1_000_000), TEN_MINUTES));
+    }
+
+    #[test]
     fn a_zero_limit_never_stops() {
         let obs = IdleObservation {
             busy: false,
             idle_since: at(0),
+            holds_live_watch: false,
         };
         assert!(!should_stop(&obs, at(1_000_000), Duration::ZERO));
     }
@@ -250,14 +273,16 @@ mod tests {
             running,
             Some(IdleObservation {
                 busy: true,
-                idle_since: since
+                idle_since: since,
+                holds_live_watch: false,
             })
         );
         assert_eq!(
             waiting,
             Some(IdleObservation {
                 busy: false,
-                idle_since: since
+                idle_since: since,
+                holds_live_watch: false,
             })
         );
         assert_eq!(IdleObservation::from_metadata(None, "not a time"), None);

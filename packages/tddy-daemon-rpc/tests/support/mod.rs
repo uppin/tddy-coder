@@ -751,6 +751,54 @@ pub fn a_host_watching_sessions(
     (host, bus)
 }
 
+/// [`a_host_watching_sessions`], whose daemon also wakes its idle watching orchestrators with
+/// `timings` (`#activity-wake` 3/3): the wake trigger rides the bus after the log, and the waker
+/// runs on the host's exec-tool handler.
+pub fn a_host_waking_orchestrators(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+    timings: tddy_daemon_rpc::exec_tool::watch_wake::WakeTimings,
+) -> (Host, Arc<SessionNotificationBus>) {
+    let bus = Arc::new(std::sync::Mutex::new(None));
+    let published_on = Arc::clone(&bus);
+    let cues = Arc::new(std::sync::Mutex::new(None));
+    let cues_out = Arc::clone(&cues);
+    let host = host_built_with(instance_id, peers, test_config(), move |host, sessions| {
+        let base = sessions.to_path_buf();
+        let data_dir = sessions.join("notification-log");
+        let log = Arc::new(
+            ProjectNotificationLog::open(
+                &data_dir,
+                Arc::new(move |_os_user: &str| Some(base.clone())),
+            )
+            .expect("the notification log opens"),
+        );
+        let watches = Arc::new(
+            tddy_session_activity::session_watches::SessionWatchStore::open(&data_dir)
+                .expect("the session watches open"),
+        );
+        let (trigger, wake_cues) = tddy_daemon_rpc::exec_tool::watch_wake::WakeTrigger::channel();
+        *cues_out.lock().unwrap() = Some(wake_cues);
+        let notifications = Arc::new(
+            SessionNotificationBus::new()
+                .with_subscriber(Arc::clone(&log))
+                .with_subscriber(Arc::new(trigger)),
+        );
+        *published_on.lock().unwrap() = Some(Arc::clone(&notifications));
+        host.with_session_notification_bus(notifications)
+            .with_project_notification_log(log)
+            .with_session_watches(watches)
+    });
+    let wake_cues = cues
+        .lock()
+        .unwrap()
+        .take()
+        .expect("the trigger was registered");
+    host.daemon.handlers().start_watch_waker(wake_cues, timings);
+    let bus = bus.lock().unwrap().take().expect("the bus was installed");
+    (host, bus)
+}
+
 /// [`a_host`], whose daemon's notification bus records everything published on it
 /// (`#home-inbox` 11/11): what an agent's `NotifyOperator` reached.
 pub fn a_host_recording_notifications(

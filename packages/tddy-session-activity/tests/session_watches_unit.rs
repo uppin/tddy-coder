@@ -451,3 +451,71 @@ fn a_status_notification_carries_the_status_it_was_raised_for() {
         ]
     );
 }
+
+// ── committed delivery (`#activity-wake` 3/3) ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_failed_delivery_moves_no_position() {
+    // Given a watch with a finished turn waiting
+    let host = AHost::of_one_project();
+    host.watch(&[CHILD], &WatchKind::ALL).await;
+    host.publishes(a_finished_turn(CHILD, "turn 1")).await;
+
+    // When a delivery is handed to a paste that fails
+    let outcome = host
+        .watches
+        .deliver_with(&the_orchestrator(), &host.log, NOW, |delivery| async move {
+            assert_eq!(texts(&delivery.events), vec!["turn 1"]);
+            Err("the terminal is gone".to_string())
+        })
+        .await;
+
+    // Then the failure is reported and the event is still waiting
+    assert_eq!(outcome, Err("the terminal is gone".to_string()));
+    assert_eq!(texts(&host.delivery_at(NOW).await.events), vec!["turn 1"]);
+}
+
+#[tokio::test]
+async fn a_successful_delivery_moves_positions_as_take_delivery_does() {
+    // Given a watch with a finished turn waiting
+    let host = AHost::of_one_project();
+    host.watch(&[CHILD], &WatchKind::ALL).await;
+    host.publishes(a_finished_turn(CHILD, "turn 1")).await;
+
+    // When a delivery is handed to a paste that succeeds
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let outcome = {
+        let seen = Arc::clone(&seen);
+        host.watches
+            .deliver_with(&the_orchestrator(), &host.log, NOW, |delivery| async move {
+                seen.lock().unwrap().extend(texts(&delivery.events));
+                Ok(())
+            })
+            .await
+    };
+
+    // Then it was delivered once, and nothing waits any more
+    assert_eq!(
+        (outcome, seen.lock().unwrap().clone()),
+        (Ok(true), vec!["turn 1".to_string()])
+    );
+    assert!(host.delivery_at(NOW).await.is_empty());
+}
+
+#[tokio::test]
+async fn nothing_waiting_never_calls_the_delivery() {
+    // Given a watch with nothing waiting
+    let host = AHost::of_one_project();
+    host.watch(&[CHILD], &WatchKind::ALL).await;
+
+    // When a delivery is attempted
+    let outcome = host
+        .watches
+        .deliver_with(&the_orchestrator(), &host.log, NOW, |_| async {
+            panic!("an empty delivery was handed over")
+        })
+        .await;
+
+    // Then nothing was delivered
+    assert_eq!(outcome, Ok(false));
+}
