@@ -154,3 +154,67 @@ export async function listDerivedHosts(
     failures,
   };
 }
+
+// ---------------------------------------------------------------------------
+// One parent at a time (`#remote-shell` 9/11)
+// ---------------------------------------------------------------------------
+
+/**
+ * How long one parent is given to list its hosts before the call counts as that parent's failure.
+ * A unary call to a listed peer over the room may never answer; without a bound, one such daemon
+ * would hold every daemon's hosts back for the life of the page.
+ */
+export const DERIVED_LISTING_DEADLINE_MS = 20_000;
+
+/** One parent's answer: what it listed, and its failure when it could not list or did not answer. */
+export interface ParentDerivedHosts {
+  readonly parentHostId: string;
+  readonly hosts: readonly HostDescriptor[];
+  readonly failure: DerivedHostListingFailure | null;
+}
+
+/**
+ * Ask one connected parent for the hosts it reaches, within `deadlineMs`.
+ *
+ * Never rejects: a refused call, a `FAILED` outcome and a call past its deadline are each that
+ * parent's `failure`, with its hosts (a `FAILED` listing still carries the hosts that arrived).
+ */
+export async function askParentForDerivedHosts(
+  parent: DerivedHostParent,
+  sessionToken: string,
+  deadlineMs: number = DERIVED_LISTING_DEADLINE_MS,
+): Promise<ParentDerivedHosts> {
+  void parent;
+  void sessionToken;
+  void deadlineMs;
+  throw new Error("askParentForDerivedHosts is not implemented yet (#remote-shell 9/11)");
+}
+
+/**
+ * Fold one parent's answer into the source: that parent's earlier hosts and failure are replaced,
+ * every other parent's are kept, and parents stay in the order they first answered. The source is
+ * `connected` once any parent has answered, `error` only when every parent that answered failed.
+ */
+export function mergeParentAnswer(
+  previous: DerivedHostDirectorySource,
+  answer: ParentDerivedHosts,
+): DerivedHostDirectorySource {
+  void previous;
+  void answer;
+  throw new Error("mergeParentAnswer is not implemented yet (#remote-shell 9/11)");
+}
+
+/**
+ * Which parents to ask now: every connected parent not yet asked, and — after a refresh — every
+ * connected parent again. A parent that is not `connected` is never asked, whatever `asked` says.
+ */
+export function parentsToAsk(
+  parents: readonly DerivedHostParent[],
+  asked: ReadonlySet<string>,
+  refreshed: boolean,
+): DerivedHostParent[] {
+  void parents;
+  void asked;
+  void refreshed;
+  throw new Error("parentsToAsk is not implemented yet (#remote-shell 9/11)");
+}

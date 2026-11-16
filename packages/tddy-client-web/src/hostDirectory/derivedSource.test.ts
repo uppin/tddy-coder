@@ -220,3 +220,139 @@ describe("a derived host in the screens' vocabulary", () => {
     expect(described).toEqual(descriptor);
   });
 });
+
+// ---------------------------------------------------------------------------
+// One parent at a time (`#remote-shell` 9/11)
+// ---------------------------------------------------------------------------
+
+import { NO_DERIVED_HOSTS, askParentForDerivedHosts, mergeParentAnswer, parentsToAsk } from "./derivedSource";
+
+/** A daemon whose `ListDerivedHosts` never answers — a listed peer nobody is home at. */
+function aDaemonThatNeverAnswers(): InMemoryRpcBackend {
+  return anInMemoryRpcBackend().implement(HostService, {
+    listDerivedHosts: () => new Promise<never>(() => {}),
+  });
+}
+
+const A_SHORT_DEADLINE_MS = 50;
+
+describe("derived hosts, one parent at a time", () => {
+  it("a parent that never answers withholds only its own hosts", async () => {
+    // Given a daemon that lists buildbox and one that never answers
+    const laptop = aDaemonReaching(LAPTOP, ["buildbox"]);
+    const workstation = aDaemonThatNeverAnswers();
+
+    // When each is asked on its own and the answers are folded in as they arrive
+    const afterLaptop = mergeParentAnswer(
+      NO_DERIVED_HOSTS,
+      await askParentForDerivedHosts(aParent(LAPTOP, laptop), A_SESSION_TOKEN),
+    );
+    const afterBoth = mergeParentAnswer(
+      afterLaptop,
+      await askParentForDerivedHosts(aParent(WORKSTATION, workstation), A_SESSION_TOKEN, A_SHORT_DEADLINE_MS),
+    );
+
+    // Then buildbox is offered as soon as its daemon answered, and stays offered when the other times out
+    expect({ early: afterLaptop.hosts, late: afterBoth.hosts, status: afterBoth.status }).toEqual({
+      early: [aDerivedDescriptor(LAPTOP, "buildbox")],
+      late: [aDerivedDescriptor(LAPTOP, "buildbox")],
+      status: "connected",
+    });
+  });
+
+  it("a call past its deadline is that parent's failure", async () => {
+    // Given
+    const workstation = aDaemonThatNeverAnswers();
+
+    // When
+    const answer = await askParentForDerivedHosts(
+      aParent(WORKSTATION, workstation),
+      A_SESSION_TOKEN,
+      A_SHORT_DEADLINE_MS,
+    );
+
+    // Then the failure names the parent and the deadline, and no host is invented
+    expect(answer).toEqual({
+      parentHostId: WORKSTATION,
+      hosts: [],
+      failure: {
+        parentHostId: WORKSTATION,
+        reason: `${WORKSTATION} did not list its hosts within ${A_SHORT_DEADLINE_MS} ms`,
+      },
+    });
+  });
+
+  it("a parent's earlier answer is kept until a newer one arrives", async () => {
+    // Given two daemons that have both answered once
+    const laptopBefore = aDaemonReaching(LAPTOP, ["buildbox"]);
+    const workstation = aDaemonReaching(WORKSTATION, ["gpu-rig"]);
+    let source = mergeParentAnswer(
+      NO_DERIVED_HOSTS,
+      await askParentForDerivedHosts(aParent(LAPTOP, laptopBefore), A_SESSION_TOKEN),
+    );
+    source = mergeParentAnswer(
+      source,
+      await askParentForDerivedHosts(aParent(WORKSTATION, workstation), A_SESSION_TOKEN),
+    );
+
+    // When the laptop answers again with a host more
+    const laptopAfter = aDaemonReaching(LAPTOP, ["buildbox", "staging"]);
+    const updated = mergeParentAnswer(
+      source,
+      await askParentForDerivedHosts(aParent(LAPTOP, laptopAfter), A_SESSION_TOKEN),
+    );
+
+    // Then only the laptop's hosts changed, in their place; the workstation's stayed as they were
+    expect(updated.hosts).toEqual([
+      aDerivedDescriptor(LAPTOP, "buildbox"),
+      aDerivedDescriptor(LAPTOP, "staging"),
+      aDerivedDescriptor(WORKSTATION, "gpu-rig"),
+    ]);
+  });
+
+  it("a failed listing replaces that parent's hosts with its failure and keeps the rest", async () => {
+    // Given a daemon that answered, then can no longer read its config
+    const laptop = aDaemonReaching(LAPTOP, ["buildbox"]);
+    const workstation = aDaemonReaching(WORKSTATION, ["gpu-rig"]);
+    let source = mergeParentAnswer(
+      NO_DERIVED_HOSTS,
+      await askParentForDerivedHosts(aParent(LAPTOP, laptop), A_SESSION_TOKEN),
+    );
+    source = mergeParentAnswer(
+      source,
+      await askParentForDerivedHosts(aParent(WORKSTATION, workstation), A_SESSION_TOKEN),
+    );
+
+    // When
+    const failed = mergeParentAnswer(
+      source,
+      await askParentForDerivedHosts(aParent(LAPTOP, aDaemonThatCannotList("permission denied")), A_SESSION_TOKEN),
+    );
+
+    // Then
+    expect({ hosts: failed.hosts, failures: failed.failures, status: failed.status }).toEqual({
+      hosts: [aDerivedDescriptor(WORKSTATION, "gpu-rig")],
+      failures: [{ parentHostId: LAPTOP, reason: "permission denied" }],
+      status: "connected",
+    });
+  });
+
+  it("a parent that becomes connected is asked, and a refresh asks every connected parent again", () => {
+    // Given the laptop was asked while the workstation was still connecting
+    const laptop = aParent(LAPTOP, aDaemonReaching(LAPTOP, []));
+    const workstation = aParent(WORKSTATION, aDaemonReaching(WORKSTATION, []), "connecting");
+    const asked = new Set([LAPTOP]);
+
+    // When the workstation is still connecting, nothing is to ask; when it connects, it is; on a refresh, both are
+    const whileConnecting = parentsToAsk([laptop, workstation], asked, false);
+    const onceConnected = parentsToAsk([laptop, { ...workstation, status: "connected" }], asked, false);
+    const onRefresh = parentsToAsk([laptop, { ...workstation, status: "connected" }], asked, true);
+
+    // Then
+    expect({
+      whileConnecting: whileConnecting.map((p) => p.host.hostId),
+      onceConnected: onceConnected.map((p) => p.host.hostId),
+      onRefresh: onRefresh.map((p) => p.host.hostId),
+    }).toEqual({ whileConnecting: [], onceConnected: [WORKSTATION], onRefresh: [LAPTOP, WORKSTATION] });
+  });
+});

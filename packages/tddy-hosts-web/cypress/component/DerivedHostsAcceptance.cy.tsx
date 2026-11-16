@@ -133,3 +133,37 @@ describe("Hosts screen derived hosts", () => {
     derivedHostsPage.emptyState(PARENT).should("not.exist");
   });
 });
+
+// ---------------------------------------------------------------------------
+// `#remote-shell` 9/11 — a row whose daemon answers on another id than it is filed under
+// ---------------------------------------------------------------------------
+
+/** The id the daemon answers RPCs on while this run lasts: its durable id plus its startup stamp. */
+const PARENT_ROUTING = `${PARENT}-1794836073070`;
+
+/** The parent as a daemon that appends its startup timestamp lists itself: filed under `PARENT`, answering on `PARENT_ROUTING`. */
+function theParentDaemonAnsweringOn(routingInstanceId: string): KnownHostEntry {
+  return { ...theParentDaemon(), routingInstanceId } as KnownHostEntry;
+}
+
+describe("Hosts screen derived hosts of a daemon with a routing id", () => {
+  it("asks an online row's derived hosts through its routing id", () => {
+    // Given a daemon filed under its durable id that answers on its routing id, reaching buildbox
+    const backend = anInMemoryRpcBackend().implement(HostService, {
+      listKnownHosts: () => ({ hosts: [theParentDaemonAnsweringOn(PARENT_ROUTING)] }),
+      listDerivedHosts: async () => aListingOfSshHosts(["buildbox"]),
+    });
+    // And the directory lists that daemon by the id it answers on — the only id a connection exists under
+    cy.mountWithClients(<HostsContent />, backend, {
+      daemons: [{ instanceId: PARENT_ROUTING, label: PARENT_ROUTING }],
+    });
+
+    // Then the row is asked, and buildbox is listed beneath it
+    derivedHostsPage.row(BUILDBOX).should("exist");
+    cy.wrap(null).should(() => {
+      expect(
+        backend.callsTo(HostService.method.listDerivedHosts).map((call) => call.daemonInstanceId),
+      ).to.deep.equal([PARENT_ROUTING]);
+    });
+  });
+});

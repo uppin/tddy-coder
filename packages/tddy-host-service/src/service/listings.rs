@@ -81,6 +81,8 @@ impl HostServiceImpl {
                 repos_base_path: view.host.repos_base_path,
                 max_attachment_bytes: view.host.max_attachment_bytes,
                 is_local: view.is_local,
+                // Filled at green (`#remote-shell` 9/11): the routing id an online row answers on.
+                routing_instance_id: String::new(),
             })
             .collect();
 

@@ -29,6 +29,7 @@ import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { DaemonHost } from "tddy-client-web";
 import { createSessionPage } from "../support/pages/createSessionPage";
+import { DERIVED_SOURCE_ID, HostDirectorySources, type DerivedHostDirectorySource } from "tddy-client-web";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -166,4 +167,52 @@ it("says that prompts are answered in the terminal when a derived host is chosen
     .derivedHostNote()
     .should("be.visible")
     .and("contain.text", "answered in the terminal");
+});
+
+// ---------------------------------------------------------------------------
+// `#remote-shell` 9/11 — a daemon that could not list its hosts says so beside the field
+// ---------------------------------------------------------------------------
+
+/** The directory's derived source after the parent's listing failed for `reason`: no host, one failure. */
+function aDerivedSourceWhoseParentFailed(reason: string): DerivedHostDirectorySource {
+  return {
+    id: DERIVED_SOURCE_ID,
+    status: "connected",
+    error: null,
+    hosts: [],
+    failures: [{ parentHostId: PARENT_DAEMON, reason }],
+  };
+}
+
+it("shows a parent's listing failure beside the Host field and still offers the daemon", () => {
+  // Given a daemon whose derived-host listing failed because its vault is locked
+  const backend = aCreateSessionBackend();
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
+  const catalogClient = createClient(CatalogService, backend.transport());
+  const sessionFilesClient = createClient(SessionFilesService, backend.transport());
+  const worktreeClient = createClient(WorktreeService, backend.transport());
+  cy.mountWithClients(
+    <HostDirectorySources sources={[aDerivedSourceWhoseParentFailed("the vault is locked")]}>
+      <CreateSessionPane
+        client={client}
+        projectClient={projectClient}
+        catalogClient={catalogClient}
+        sessionFilesClient={sessionFilesClient}
+        worktreeClient={worktreeClient}
+        sessionToken="fake-token"
+        onCancel={cy.stub()}
+        onCreated={cy.stub()}
+      />
+    </HostDirectorySources>,
+    backend,
+    { clients: aClientsPortDouble(backend, { daemons: [HOSTS[0]] }) },
+  );
+
+  // Then the daemon is still offered, and the failure is shown beside the field in the daemon's words
+  createSessionPage.daemonHostOptionValues().should("deep.equal", [PARENT_DAEMON]);
+  createSessionPage
+    .derivedHostsFailure(PARENT_DAEMON)
+    .should("contain.text", "the vault is locked")
+    .and("contain.text", PARENT_DAEMON);
 });

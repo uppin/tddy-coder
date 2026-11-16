@@ -22,6 +22,7 @@ import {
 } from "tddy-client-web/gen/accounts_pb";
 import { recordedFields } from "../support/rpc/recordedRequests";
 import { accountsScreenPage } from "../support/pages/accountsScreenPage";
+import { DerivedHostsRefreshProvider } from "tddy-client-web";
 
 const THE_DEPLOYMENT = "https://coder.example.com";
 const A_CODER_TOKEN = "coder-token-that-must-never-be-echoed";
@@ -118,5 +119,49 @@ describe("Connecting a Coder deployment", () => {
       const held = [...$inputs].map((input) => (input as HTMLInputElement).value);
       expect(held).not.to.include(A_CODER_TOKEN);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `#remote-shell` 9/11 — a connected account's workspaces are hosts; the directory is told
+// ---------------------------------------------------------------------------
+
+describe("Connecting a Coder deployment refreshes the derived hosts", () => {
+  it("asks the directory to list derived hosts again once the account is connected", () => {
+    // Given the Accounts screen under a directory that can be asked to refresh
+    const daemon = aDaemon("accepts");
+    const refresh = cy.stub().as("refresh");
+    cy.mountWithClients(
+      <DerivedHostsRefreshProvider refresh={refresh}>
+        <AccountsContent />
+      </DerivedHostsRefreshProvider>,
+      daemon.backend,
+    );
+
+    // When a Coder deployment is connected
+    accountsScreenPage.connectCoderAccount(THE_DEPLOYMENT, A_CODER_TOKEN, "Work Coder");
+    accountsScreenPage.label("coder", ADAS_ACCOUNT_ID).should("contain.text", "Work Coder");
+
+    // Then the directory was asked to refresh, once, after the daemon accepted
+    cy.get("@refresh").should("have.been.calledOnce");
+  });
+
+  it("does not refresh when the daemon refuses the token", () => {
+    // Given
+    const daemon = aDaemon({ refusesWith: "the token was rejected" });
+    const refresh = cy.stub().as("refresh");
+    cy.mountWithClients(
+      <DerivedHostsRefreshProvider refresh={refresh}>
+        <AccountsContent />
+      </DerivedHostsRefreshProvider>,
+      daemon.backend,
+    );
+
+    // When
+    accountsScreenPage.connectCoderAccount(THE_DEPLOYMENT, A_CODER_TOKEN, "Work Coder");
+    cy.wrap(daemon.connects).should("have.length", 1);
+
+    // Then nothing changed for the directory to learn
+    cy.get("@refresh").should("not.have.been.called");
   });
 });

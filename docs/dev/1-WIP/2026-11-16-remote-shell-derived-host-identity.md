@@ -85,6 +85,34 @@ The first push after the plan (commit 2) publishes, as the start of this same PR
 
 This PR goes on to implement all of it. It does not merge in that state.
 
+## Contract as published
+
+The contract commit (commit 2) publishes exactly this; `/green` implements against it.
+
+**Surface**
+
+- `host.proto`: `KnownHostEntry.routing_instance_id = 9` — the id an online host answers RPCs on, empty offline. Rust and TypeScript regenerated.
+- `tddy-host-service::multi_host::EligibleDaemonSource::routing_instance_id_of(&self, durable_host_id) -> Option<DaemonInstanceId>` — default pairs `live_known_hosts()` with `list_eligible_daemons()` by position; `ListKnownHosts` fills the field from it for online rows and from `local_instance_id_for_config` for this daemon.
+- `tddy-client-web/src/hostDirectory/derivedSource.ts`: `DERIVED_LISTING_DEADLINE_MS = 20_000`, `ParentDerivedHosts { parentHostId, hosts, failure }`, `askParentForDerivedHosts(parent, sessionToken, deadlineMs?)` (never rejects), `mergeParentAnswer(previous, answer)`, `parentsToAsk(parents, asked, refreshed)`. The three functions throw "not implemented" until green; `listDerivedHosts` stays until the app's source moves off it, then goes.
+- `tddy-client-web/src/ports/derivedHostsRefresh.tsx`: `DerivedHostsRefreshProvider({ refresh })`, `useRefreshDerivedHosts()` (no-op without a provider), `useDerivedHostListingFailures()` over the directory's derived source. Exported from the package index.
+- Test ids: `create-session-derived-hosts-failure-<safe parent id>` on the New-session form.
+
+**Red tests at the contract commit**
+
+- `tddy-host-service/tests/derived_hosts_identity_acceptance.rs` — 3 tests: the parent id and the online row's routing id fail; the offline row's empty id passes already (the field is unfilled) and stays as the guard that green fills it for online rows only. The room is a stand-in `EligibleDaemonSource` whose `live_known_hosts` strips the stamp, as the LiveKit source does; the departed peer is pre-recorded in a `FileHostRegistry`, as the discovery tick records it.
+- `tddy-client-web/src/hostDirectory/derivedSource.test.ts` — 5 tests under "derived hosts, one parent at a time".
+- `tddy-hosts-web/cypress/component/DerivedHostsAcceptance.cy.tsx` — `asks an online row's derived hosts through its routing id`; `HostsScreenToolingMountAcceptance.cy.tsx` — `asks an online row's tooling through its routing id`.
+- `tddy-session-create-web/cypress/component/CreateSessionDerivedHostAcceptance.cy.tsx` — `shows a parent's listing failure beside the Host field and still offers the daemon`.
+- `tddy-workspace-web/cypress/component/ConnectCoderAccountAcceptance.cy.tsx` — the refresh is called once after an accepted connect, not after a refused one.
+
+**Differences from the plan**
+
+- The vault prompt's refresh (`unlocking_the_vault_refreshes_the_derived_hosts`) has no red test here: `CredentialVaultPrompt` is driven by `useAuth().unlockVault`, and no spec mounts it yet. It is written at green with an auth-port double, as the first step of that milestone, before the call is wired.
+- The Hosts screen tests mount the screen with the directory listing the daemon by its routing id (the only id a connection exists under); the `tddy-web` wiring that keys the screen's `useHostClient` on `routing_instance_id || instance_id` is green's.
+- The "a parent that becomes connected is asked" and "a refresh asks every connected parent again" behaviours are pinned on the pure `parentsToAsk` rather than on the React effect; the effect in `tddy-web` is a thin loop over it.
+
+**Complexity re-scored:** 3 → 3. Six packages, but every piece is small and in-memory; nothing in the contract contradicted the plan.
+
 ## Green wave
 
 **Wave:** 1 of 2
@@ -220,9 +248,9 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved in advance by the developer's standing instruction for this stack's review gates)
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress

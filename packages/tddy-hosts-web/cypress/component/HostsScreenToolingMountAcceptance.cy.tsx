@@ -204,3 +204,25 @@ describe("Hosts screen tooling mount", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// `#remote-shell` 9/11 — a row whose daemon answers on another id than it is filed under
+// ---------------------------------------------------------------------------
+
+describe("Hosts screen tooling of a daemon with a routing id", () => {
+  it("asks an online row's tooling through its routing id", () => {
+    // Given an online host filed under its durable id that answers on its routing id
+    const routing = `${ONLINE_HOST}-1794836073070`;
+    const host = { ...anOnlineHost(ONLINE_HOST), routingInstanceId: routing } as KnownHostEntry;
+    const backend = aDaemonWhoseHostsReportAReachableVnc([host]);
+
+    // When the screen is opened over a wire that reaches the routing id only
+    openTheHostsScreen(backend, [routing]);
+
+    // Then the row's tooling is asked through that id and shown — not "could not be read"
+    hostToolingPage.gitIdentity(ONLINE_HOST).should("contain.text", "Ada Lovelace");
+    cy.wrap(null).should(() => {
+      expect(toolingCallsTo(backend).map((call) => call.daemonInstanceId)).to.deep.equal([routing]);
+    });
+  });
+});
