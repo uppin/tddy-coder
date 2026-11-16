@@ -44,11 +44,11 @@ export const createSessionPage = {
   derivedHostGroup: (parentInstanceId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(ids.createSessionHostDerivedGroup(parentInstanceId), { timeout: 5000, ...options }),
 
-  /** The derived hosts offered under `parentInstanceId`, as `[value, caption]`, in option order. */
   /** Why `parentInstanceId` could not list the hosts it reaches, shown beside the Host field (`#remote-shell` 9/11). */
   derivedHostsFailure: (parentInstanceId: string) =>
     cy.get(`[data-testid="create-session-derived-hosts-failure-${safeTestIdPart(parentInstanceId)}"]`),
 
+  /** The derived hosts offered under `parentInstanceId`, as `[value, caption]`, in option order. */
   derivedHostOptions: (parentInstanceId: string): Cypress.Chainable<[string, string][]> =>
     createSessionPage
       .derivedHostGroup(parentInstanceId)

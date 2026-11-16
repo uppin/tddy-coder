@@ -1,7 +1,7 @@
 # Changeset: Derived hosts are offered under the daemon the web addresses
 
 **Date**: 2026-11-16
-**Status**: 🚧 In Progress
+**Status**: ✅ Complete
 **Type**: Bug Fix
 **Complexity**: 3 — one proto field, one id change in the daemon, a per-parent rewrite of one web source plus a refresh port, across six packages; every behaviour is drivable with in-memory connections
 **Branch**: `feature/remote-shell/derived-host-identity`, base `feature/remote-shell/sweep` — `#remote-shell 9/11`
@@ -218,7 +218,8 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 
 ## Technical Debt & Production Readiness
 
-(Populated during development.)
+None added. The superseded all-at-once `listDerivedHosts` was removed at wrap (see
+Refactoring Needed); no TODO/FIXME, fallback, mock or debug output was added in production code.
 
 ## Decisions & Trade-offs
 
@@ -231,16 +232,53 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 ## Refactoring Needed
 
 ### From /validate-changes
+- `listDerivedHosts` (all-at-once) was dead production code once `tddy-web` moved to the
+  per-parent source — the Contract as published said it goes then. Removed; its five tests now
+  drive `parentsToAsk` + `askParentForDerivedHosts` + `mergeParentAnswer` through a test helper,
+  so the coverage (order, addressing, offline, failure isolation, all-failed error) is kept.
 ### From /validate-tests
+- `CredentialVaultPromptRefreshAcceptance` used raw `cy.get("[data-testid=…]")`: moved behind a
+  new `credentialVaultPromptPage` page object. `createSessionPage.derivedHostsFailure`'s doc
+  comment sat over the wrong member; reordered.
 ### From /validate-prod-ready
+- Nothing found after the `listDerivedHosts` removal: no mock/fake, fallback, TODO/FIXME,
+  unused code or debug output in the production diff.
 ### From /analyze-clean-code
+- All touched production files are under the 500-line budget. The doc comment for
+  `mergeParentAnswer` sat over the `answersBySource` map it does not describe; moved onto the
+  function.
 
 ## Validation Results
 
 ### /validate-changes
+2026-11-16 (wrap run): stack gate — base `feature/remote-shell/sweep` resolved from PR #925's
+`baseRefName`; already current (`origin/feature/remote-shell/sweep` c6fbf1f4 is an ancestor of
+HEAD) and leak-free (`origin/…/sweep..HEAD` is this PR's three commits only). Diff = this PR's
+31 files, all claimed by Scope; no parent-owned symbol implemented, no successor behaviour
+(orchestrator start stays #926/#927's), no unplanned deletions. One gap found — dead
+`listDerivedHosts` — fixed and re-validated in the same run (the single /green re-entry).
+Rust: `CARGO_INCREMENTAL=0 ./dev cargo test -p tddy-host-service` green, clippy clean,
+`cargo fmt --check` clean. Web: `bun test` in tddy-client-web 156/156; Cypress component specs
+run singly — DerivedHostsAcceptance 4/4, HostsScreenToolingMountAcceptance 5/5,
+CreateSessionDerivedHostAcceptance 4/4, ConnectCoderAccountAcceptance 5/5,
+CredentialVaultPromptRefreshAcceptance 2/2, HostDirectoryAcceptance 9/9.
+`scripts/generated-code.sh check packages/tddy-client-web packages/tddy-rust-typescript-tests` clean.
+Eval (changeset as one unit, this PR alone against its base): complexity 3 as scored — one proto
+field, one id change, one per-parent rewrite; justified by the intent (derived hosts offered
+under the daemon the web addresses). Pure increment on the sweep: no predecessor lines rewritten.
+Backlog delta: no `docs/dev/todo/` entry added, edited or resolved by this PR.
 ### /validate-tests
+12/12 in `derivedSource.test.ts` after the adaptation, 156/156 package-wide. Tests use
+Given/When/Then, one behaviour each, in-memory backends; no skip/only/intercept in changed specs.
+Typecheck: tddy-client-web and tddy-hosts-web clean; tddy-workspace-web (47 errors) and
+tddy-session-create-web (252) report identical counts with and without this wrap's edits —
+pre-existing protobuf-fixture errors in files this PR does not touch.
 ### /validate-prod-ready
+Clean after the removal above. `tddy-rust-typescript-tests/gen/host_pb.ts` 1762 → 1771 is
+generated output (drift-gated), already over budget before this PR; alert only, never split.
 ### /analyze-clean-code
+No must-refactor items in changed production files; longest touched file is
+`derivedSource.ts` at 243 lines after the removal.
 
 ## TODO
 
@@ -251,20 +289,20 @@ Every acceptance criterion of the PRD has at least one named test below; each re
 - [x] Create failing acceptance tests
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved in advance by the developer's standing instruction for this stack's review gates)
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
-- [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
-- [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
+- [x] USER REVIEW — development complete
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] USER REVIEW — scope developed, every gap approved: ready to wrap

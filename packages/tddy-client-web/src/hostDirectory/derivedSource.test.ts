@@ -22,7 +22,15 @@ import {
 } from "../gen/host_pb";
 import { SessionTargetSchema, type SessionTarget } from "../gen/session_pb";
 import { daemonHostOf, hostDescriptorOf } from "./daemonHost";
-import { DERIVED_SOURCE_ID, listDerivedHosts, type DerivedHostParent } from "./derivedSource";
+import {
+  DERIVED_SOURCE_ID,
+  NO_DERIVED_HOSTS,
+  askParentForDerivedHosts,
+  mergeParentAnswer,
+  parentsToAsk,
+  type DerivedHostDirectorySource,
+  type DerivedHostParent,
+} from "./derivedSource";
 import type { HostDescriptor } from "./types";
 
 const A_SESSION_TOKEN = "a-session-token";
@@ -91,6 +99,17 @@ function aParent(
   };
 }
 
+/** The source the app builds: ask each connected parent on its own, folding answers in as they arrive. */
+async function aDerivedSourceFrom(
+  parents: readonly DerivedHostParent[],
+): Promise<DerivedHostDirectorySource> {
+  let source: DerivedHostDirectorySource = NO_DERIVED_HOSTS;
+  for (const parent of parentsToAsk(parents, new Set(), false)) {
+    source = mergeParentAnswer(source, await askParentForDerivedHosts(parent, A_SESSION_TOKEN));
+  }
+  return source;
+}
+
 describe("derived host directory source", () => {
   it("emits each connected daemon's derived hosts with their parent", async () => {
     // Given two connected daemons, each reaching hosts of its own
@@ -98,10 +117,7 @@ describe("derived host directory source", () => {
     const workstation = aDaemonReaching(WORKSTATION, ["gpu-rig", "staging"]);
 
     // When
-    const source = await listDerivedHosts(
-      [aParent(LAPTOP, laptop), aParent(WORKSTATION, workstation)],
-      A_SESSION_TOKEN,
-    );
+    const source = await aDerivedSourceFrom([aParent(LAPTOP, laptop), aParent(WORKSTATION, workstation)]);
 
     // Then every host is offered under the daemon that reaches it, in the daemons' order
     expect(source).toEqual({
@@ -122,7 +138,7 @@ describe("derived host directory source", () => {
     const laptop = aDaemonReaching(LAPTOP, ["buildbox"]);
 
     // When
-    await listDerivedHosts([aParent(LAPTOP, laptop)], A_SESSION_TOKEN);
+    await aDerivedSourceFrom([aParent(LAPTOP, laptop)]);
 
     // Then the listing is addressed to that daemon, with the session's token
     expect(
@@ -138,10 +154,10 @@ describe("derived host directory source", () => {
     const workstation = aDaemonReaching(WORKSTATION, ["gpu-rig"]);
 
     // When
-    const source = await listDerivedHosts(
-      [aParent(LAPTOP, laptop), aParent(WORKSTATION, workstation, "error")],
-      A_SESSION_TOKEN,
-    );
+    const source = await aDerivedSourceFrom([
+      aParent(LAPTOP, laptop),
+      aParent(WORKSTATION, workstation, "error"),
+    ]);
 
     // Then only the connected daemon's host is offered, and the offline one was never asked
     expect({
@@ -159,10 +175,7 @@ describe("derived host directory source", () => {
     const workstation = aDaemonReaching(WORKSTATION, ["gpu-rig"]);
 
     // When
-    const source = await listDerivedHosts(
-      [aParent(LAPTOP, laptop), aParent(WORKSTATION, workstation)],
-      A_SESSION_TOKEN,
-    );
+    const source = await aDerivedSourceFrom([aParent(LAPTOP, laptop), aParent(WORKSTATION, workstation)]);
 
     // Then the other daemon's host is offered, and the failure is recorded against its own daemon
     expect(source).toEqual({
@@ -179,7 +192,7 @@ describe("derived host directory source", () => {
     const laptop = aDaemonThatCannotList("permission denied");
 
     // When
-    const source = await listDerivedHosts([aParent(LAPTOP, laptop)], A_SESSION_TOKEN);
+    const source = await aDerivedSourceFrom([aParent(LAPTOP, laptop)]);
 
     // Then the source says so rather than reporting a daemon that reaches no hosts
     expect(source).toEqual({
@@ -224,8 +237,6 @@ describe("a derived host in the screens' vocabulary", () => {
 // ---------------------------------------------------------------------------
 // One parent at a time (`#remote-shell` 9/11)
 // ---------------------------------------------------------------------------
-
-import { NO_DERIVED_HOSTS, askParentForDerivedHosts, mergeParentAnswer, parentsToAsk } from "./derivedSource";
 
 /** A daemon whose `ListDerivedHosts` never answers — a listed peer nobody is home at. */
 function aDaemonThatNeverAnswers(): InMemoryRpcBackend {

@@ -11,6 +11,7 @@ import { DerivedHostsRefreshProvider } from "tddy-client-web";
 import { VaultState } from "tddy-client-web/gen/auth_pb";
 import { anAuthDouble } from "tddy-client-web/testkit";
 import { CredentialVaultPrompt } from "../../src/signin/CredentialVaultPrompt";
+import { credentialVaultPromptPage } from "../support/pages/credentialVaultPromptPage";
 
 const A_PASSPHRASE = "a-vault-passphrase";
 
@@ -29,8 +30,7 @@ describe("Unlocking the credential vault refreshes the derived hosts", () => {
     );
 
     // When the vault is unlocked with its passphrase
-    cy.get('[data-testid="credential-vault-passphrase"]').type(A_PASSPHRASE);
-    cy.get('[data-testid="credential-vault-submit"]').click();
+    credentialVaultPromptPage.unlockWith(A_PASSPHRASE);
 
     // Then the unlock went to the auth port, and the directory was asked to refresh, once
     cy.wrap(null).should(() => {
@@ -59,12 +59,8 @@ describe("Unlocking the credential vault refreshes the derived hosts", () => {
     );
 
     // When
-    cy.get('[data-testid="credential-vault-passphrase"]').type(A_PASSPHRASE);
-    cy.get('[data-testid="credential-vault-submit"]').click();
-    cy.get('[data-testid="credential-vault-error"]').should(
-      "contain.text",
-      "the passphrase did not open the vault",
-    );
+    credentialVaultPromptPage.unlockWith(A_PASSPHRASE);
+    credentialVaultPromptPage.error().should("contain.text", "the passphrase did not open the vault");
 
     // Then the vault never opened, so nothing changed for the directory to learn
     cy.get("@refresh").should("not.have.been.called");

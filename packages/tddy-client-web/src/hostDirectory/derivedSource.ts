@@ -90,71 +90,6 @@ export function derivedHostDescriptorOf(host: DerivedHost): HostDescriptor {
   };
 }
 
-/**
- * Ask every connected parent for the hosts it reaches, and merge the answers into one source.
- *
- * Hosts keep the parents' order, and each parent's own listing order within it. The source is
- * `connected` once any parent has listed, `idle` when no parent is connected, and `error` only
- * when every parent that was asked failed.
- */
-export async function listDerivedHosts(
-  parents: readonly DerivedHostParent[],
-  sessionToken: string,
-): Promise<DerivedHostDirectorySource> {
-  const asked = parents.filter((parent) => parent.status === "connected");
-  if (asked.length === 0) return NO_DERIVED_HOSTS;
-
-  const answers = await Promise.all(
-    asked.map(async (parent) => {
-      const parentHostId = parent.host.hostId;
-      try {
-        const response = await parent.client.listDerivedHosts({
-          sessionToken,
-          daemonInstanceId: parentHostId,
-        });
-        const hosts = response.hosts.map(derivedHostDescriptorOf);
-        if (response.outcome === ProbeOutcome.FAILED) {
-          return {
-            hosts,
-            failure: {
-              parentHostId,
-              reason: response.failureReason || "listing derived hosts failed",
-            },
-          };
-        }
-        return { hosts, failure: null };
-      } catch (error) {
-        return {
-          hosts: [],
-          failure: {
-            parentHostId,
-            reason: error instanceof Error ? error.message : String(error),
-          },
-        };
-      }
-    }),
-  );
-
-  const hosts = answers.flatMap((answer) => answer.hosts);
-  const failures = answers.flatMap((answer) => (answer.failure ? [answer.failure] : []));
-  if (failures.length === asked.length) {
-    return {
-      id: DERIVED_SOURCE_ID,
-      status: "error",
-      error: failures[0]?.reason ?? "listing derived hosts failed",
-      hosts,
-      failures,
-    };
-  }
-  return {
-    id: DERIVED_SOURCE_ID,
-    status: "connected",
-    error: null,
-    hosts,
-    failures,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // One parent at a time (`#remote-shell` 9/11)
 // ---------------------------------------------------------------------------
@@ -234,11 +169,6 @@ export async function askParentForDerivedHosts(
   }
 }
 
-/**
- * Fold one parent's answer into the source: that parent's earlier hosts and failure are replaced,
- * every other parent's are kept, and parents stay in the order they first answered. The source is
- * `connected` once any parent has answered, `error` only when every parent that answered failed.
- */
 /** Each parent's latest answer, by source object — including an answer that listed no hosts. */
 const answersBySource = new WeakMap<
   DerivedHostDirectorySource,
@@ -269,6 +199,11 @@ function answersOf(source: DerivedHostDirectorySource): Map<string, ParentDerive
   return byParent;
 }
 
+/**
+ * Fold one parent's answer into the source: that parent's earlier hosts and failure are replaced,
+ * every other parent's are kept, and parents stay in the order they first answered. The source is
+ * `connected` once any parent has answered, `error` only when every parent that answered failed.
+ */
 export function mergeParentAnswer(
   previous: DerivedHostDirectorySource,
   answer: ParentDerivedHosts,
