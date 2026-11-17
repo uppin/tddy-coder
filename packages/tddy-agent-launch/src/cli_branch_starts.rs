@@ -171,6 +171,10 @@ impl LaunchSessions {
             &req.session_token,
             &agent_tool_socket,
         )?;
+        // The session's own shell gets the session tool transport: minted under the caller, so its
+        // `tddy-tools monitor` / `send` resolve this daemon and authenticate as the session
+        // (`#activity-wake` 4/5, 5/5).
+        let session_tool_token = self.session_tool_token_for(&start.session_id, &req.session_token);
         crate::opencode_cli_spawn::start_cli_harness_session(
             crate::opencode_cli_spawn::session_start::CliSessionStart {
                 kind: session_agent.kind.clone(),
@@ -224,6 +228,7 @@ impl LaunchSessions {
                 managed_codebase: req.managed_codebase,
                 managed,
                 role,
+                session_tool_token,
             },
         )
         .await
@@ -342,6 +347,10 @@ impl LaunchSessions {
                 managed_codebase: false,
                 managed: None,
                 role: crate::project_home_launch::StartRole::ordinary(),
+                // The child's start carries no caller token — there is nothing to mint an agent
+                // credential under — so its shell runs without the session tool transport, as
+                // before.
+                session_tool_token: None,
             },
         )
         .await

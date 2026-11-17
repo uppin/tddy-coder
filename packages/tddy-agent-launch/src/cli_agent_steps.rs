@@ -145,6 +145,10 @@ pub(crate) struct SessionWiringInputs<'a> {
     pub managed: Option<ManagedWiring>,
     /// The session's standing role: a project-home main is given its tool restriction.
     pub role: StartRole<'a>,
+    /// The agent credential the session tool transport is minted around — `None` exports nothing:
+    /// a start with no caller token (the daemon's own children), a session whose agent runs on
+    /// another host, a daemon that signs no tokens.
+    pub session_tool_token: Option<String>,
     /// Answers the agent's tools' `github-token` over the managed session's toolcall socket.
     pub github_credential_handler: Option<Arc<dyn tddy_core::toolcall::GithubCredentialHandler>>,
 }
@@ -166,7 +170,9 @@ pub(crate) struct SessionWiring {
     /// Passed with the spec's `append_system_prompt` flag: a managed recipe's prompt, composed with
     /// the operator-notify guidance.
     pub system_prompt_file: Option<PathBuf>,
-    /// The environment the agent process is given beyond the spec's: never a `TDDY_*` variable.
+    /// The environment the agent process is given beyond the spec's: the non-`TDDY_` pairs the
+    /// session's wiring produced, plus the session tool transport (`TDDY_REMOTE_*`), whose export
+    /// to the agent process is what a `tddy-tools` run from its own shell routes by.
     pub env: Vec<(String, String)>,
     /// Flags already rendered (a main's role prompt), placed after the slot flags.
     pub extra_args: Vec<String>,
@@ -183,7 +189,10 @@ pub(crate) struct SessionWiring {
 /// tool restriction. A `TDDY_*` variable these steps produce belongs to the agent's tool server
 /// (`tddy-tools --mcp`'s registration) and is carried by its `env` block, and the session a
 /// shell-run `tddy-tools` reaches (the workflow socket, the operator-notify session) is the session
-/// pointer's; neither reaches the agent process, whatever the spec declares.
+/// pointer's; neither reaches the agent process, whatever the spec declares. The one exception is
+/// the session tool transport a `session_tool_token` asks for (`TDDY_REMOTE_*`): it is exported to
+/// the agent process precisely so the shell — and any `tddy-tools --mcp` child, which inherits it —
+/// routes `tddy-tools monitor` and `tddy-tools send` to this daemon.
 pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<SessionWiring, Status> {
     let SessionWiringInputs {
         spec,
@@ -197,6 +206,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         worktree,
         managed,
         role,
+        session_tool_token,
         github_credential_handler,
     } = inputs;
     let hooks = (spec.has(Capability::Hooks) || spec.has(Capability::OperatorNotify))
@@ -205,6 +215,17 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         record_hook_answer_wait(session_dir, hooks)?;
     }
     let mut process_env: Vec<(String, String)> = Vec::new();
+    if let Some(agent_session_token) = session_tool_token {
+        process_env.extend(
+            tddy_session_split::split_session::colocated_jail_tool_env(
+                &tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(config),
+                session_id,
+                &agent_session_token,
+                Some(agent_tool_socket.to_string_lossy().into_owned()),
+            )
+            .env_pairs(),
+        );
+    }
     let mut tool_server_env: Vec<(String, String)> = Vec::new();
     let mut notify_env: Vec<(String, String)> = Vec::new();
     let mut system_prompt_file: Option<PathBuf> = None;
@@ -298,6 +319,33 @@ impl LaunchSessions {
             .map_err(|e| Status::failed_precondition(format!("{e:#}")))
     }
 
+    /// The agent credential a session's own shell authenticates its tool calls with, minted under
+    /// the caller that started (or resumed) the session — `None` when there is nothing to mint
+    /// from: the daemon's own callerless children, or a daemon that signs no tokens. A daemon that
+    /// cannot mint is a session whose shell runs without the transport, not a failed start — it
+    /// says so on stderr and carries on, as it did before the transport existed.
+    pub(crate) fn session_tool_token_for(
+        &self,
+        session_id: &str,
+        session_token: &str,
+    ) -> Option<String> {
+        if session_token.is_empty() {
+            return None;
+        }
+        match self
+            .split_sessions
+            .agent_session_token_for(session_token, session_id)
+        {
+            Ok(token) => Some(token),
+            Err(e) => {
+                log::warn!(
+                    "session {session_id}: no session tool transport for its agent (token mint failed: {e:#})"
+                );
+                None
+            }
+        }
+    }
+
     /// The wiring a resume of `meta` gives `spec`'s agent again — none of it is in a persisted argv.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn resumed_session_wiring(
@@ -313,7 +361,33 @@ impl LaunchSessions {
         let spec = &agent.spec;
         let tddy_tools_path = crate::cli_harness_jail::agent_tddy_tools(agent)?;
         let session_id = meta.session_id.as_str();
+        let tool_socket = self.agent_tool_socket_of(os_user).await?;
         let mut process_env = Vec::new();
+        // A resumed agent's shell gets the session tool transport again, under a credential minted
+        // now — nothing persists the previous process's token. A session whose agent runs on
+        // another host is exported none: the socket and the URL name this host, which its shell
+        // cannot reach, and detection would prefer the dead route.
+        let runs_on_this_host = meta.target.is_none()
+            && meta
+                .ssh_config_host
+                .as_deref()
+                .map_or(true, |host| host.trim().is_empty());
+        let session_tool_token = if runs_on_this_host {
+            self.session_tool_token_for(session_id, session_token)
+        } else {
+            None
+        };
+        if let Some(agent_session_token) = session_tool_token {
+            process_env.extend(
+                tddy_session_split::split_session::colocated_jail_tool_env(
+                    &tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(&self.config),
+                    session_id,
+                    &agent_session_token,
+                    Some(tool_socket.to_string_lossy().into_owned()),
+                )
+                .env_pairs(),
+            );
+        }
         let mut tool_server_env = Vec::new();
         let mut notify_env = Vec::new();
         let mut system_prompt_file = None;
@@ -347,7 +421,6 @@ impl LaunchSessions {
                 workflow = Some(launch.workflow);
             }
         }
-        let tool_socket = self.agent_tool_socket_of(os_user).await?;
         if spec.has(Capability::OperatorNotify) {
             let notify = crate::notify_env::resumed_agent_notify_launch(
                 &self.config,
