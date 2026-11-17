@@ -142,12 +142,9 @@ fn the_family_implementation_files_have_left_the_lifecycle_crate() {
 
 #[test]
 fn no_handler_holds_the_session_host() {
-    // Given the new crate's sources, bar the test composition root: `test_util.rs` installs the
-    // handlers on a host it is handed, as `runtime::build` does, and holds none of it as handler
-    // state — every handler file is scanned.
+    // Given the new crate's sources
     let holders: Vec<String> = rust_files_under(&package("tddy-daemon-rpc").join("src"))
         .into_iter()
-        .filter(|path| path.file_name().is_some_and(|name| name != "test_util.rs"))
         .filter(|path| {
             let source = source_of(path);
             source.contains("Arc<DaemonSessionHost>") || source.contains(": DaemonSessionHost,")

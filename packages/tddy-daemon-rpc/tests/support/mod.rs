@@ -19,6 +19,7 @@ use prost::Message;
 use tddy_daemon_extensions::PeerForwarder;
 use tddy_daemon_kernel::peer_forwarding::CommonRoom;
 use tddy_daemon_rpc::test_util::TestDaemon;
+use tddy_daemon_rpc::RpcHandlers;
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_projects::project_storage::{write_projects, ProjectData};
 use tddy_rpc::{Request, RequestMetadata, RequestTransport, Status};
@@ -393,7 +394,12 @@ fn daemon_over_with_host_service(
     );
     let daemon = match host_service {
         Some(host_service) => {
-            TestDaemon::from_host_with_host_service(customise(host), host_service)
+            let (host, handlers) = RpcHandlers::install(customise(host));
+            handlers.attach_host_service(host_service);
+            TestDaemon::from_handlers(
+                tddy_session_lifecycle::test_util::TestDaemon::from_arc(Arc::new(host)),
+                handlers,
+            )
         }
         None => TestDaemon::from_host(customise(host)),
     };

@@ -47,10 +47,11 @@ use crate::RpcHandlers;
 
 /// The host service a test daemon's project-home tools answer from when a suite attaches
 /// none of its own: one built from the host's own config and resolver, as the handler
-/// itself was built before the service became the composition root's to attach. Suites
-/// that need fixture operator files or Coder accounts attach their own instead, through
-/// [`TestDaemon::from_host_with_host_service`]. Built from the host's parts, never the
-/// host itself — no handler here holds the session host (`rpc_handlers_shape` AC4/AC5).
+/// itself was built before the service became the composition root's to attach. A suite
+/// that needs fixture operator files or Coder accounts attaches its own to the handlers
+/// it installs instead, and wraps them with [`TestDaemon::from_handlers`]. Built from the
+/// host's parts, never the host itself — no handler here holds the session host
+/// (`rpc_handlers_shape` AC4/AC5).
 fn a_bare_host_service(
     config: &tddy_daemon_kernel::config::DaemonConfig,
     tddy_data_dir: &std::path::Path,
@@ -74,28 +75,29 @@ pub struct TestDaemon {
 
 impl TestDaemon {
     /// Install the handlers on `host`, which must already carry every `with_*` the suite wants:
-    /// the handlers share its state from here on (see [`RpcHandlers::install`]).
+    /// the handlers share its state from here on (see [`RpcHandlers::install`]), and the bare
+    /// host service is attached for them.
     #[must_use]
     pub fn from_host(host: DaemonSessionHost) -> Self {
         let host_service =
             a_bare_host_service(host.config(), host.tddy_data_dir(), host.user_resolver());
-        Self::from_host_with_host_service(host, host_service)
-    }
-
-    /// [`TestDaemon::from_host`], with the project-home tools answering host questions
-    /// from `host_service` — a suite's fixture service over an operator home, attached
-    /// before the daemon serves anything.
-    #[must_use]
-    pub fn from_host_with_host_service(
-        host: DaemonSessionHost,
-        host_service: Arc<HostServiceImpl>,
-    ) -> Self {
         let (host, handlers) = RpcHandlers::install(host);
         handlers.attach_host_service(host_service);
-        Self {
-            daemon: tddy_session_lifecycle::test_util::TestDaemon::from_arc(Arc::new(host)),
+        Self::from_handlers(
+            tddy_session_lifecycle::test_util::TestDaemon::from_arc(Arc::new(host)),
             handlers,
-        }
+        )
+    }
+
+    /// Wrap handlers a suite installed on its own host and wired itself — above all the host
+    /// service it attached through [`RpcHandlers::attach_host_service`], its fixture service
+    /// over an operator home. No bare service is attached here: the handlers arrive complete.
+    #[must_use]
+    pub fn from_handlers(
+        daemon: tddy_session_lifecycle::test_util::TestDaemon,
+        handlers: RpcHandlers,
+    ) -> Self {
+        Self { daemon, handlers }
     }
 
     /// Serve the families here for a lifecycle `daemon` whose host is already behind its `Arc` —
