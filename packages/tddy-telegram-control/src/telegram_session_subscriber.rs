@@ -240,6 +240,8 @@ impl OperatorChannel for TelegramDaemonHooks {
                 SessionNotificationSource::PendingQuestion => true,
                 SessionNotificationSource::ActivityStatus => notification.question.is_none(),
                 SessionNotificationSource::Agent => true,
+                // The end of a session is for its orchestrator's inbox, not a chat.
+                SessionNotificationSource::SessionEnded => false,
                 SessionNotificationSource::AgentToolCall | SessionNotificationSource::Presenter => {
                     false
                 }

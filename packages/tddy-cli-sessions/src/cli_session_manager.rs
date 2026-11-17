@@ -125,6 +125,8 @@ pub struct CliSessionManager {
     /// The exit-hook watchers of tmux-run agents. Kept apart from `detached_watchers`, which a
     /// re-attach aborts; a shutdown closes both.
     exit_hook_watched: tmux_exit_hook::ExitHookWatched,
+    /// Where agent ends are announced — [`Self::agent_ends`].
+    agent_end_tx: agent_end::AgentEndSender,
 }
 
 impl Default for CliSessionManager {
@@ -156,6 +158,7 @@ impl CliSessionManager {
             detach_watch_interval: tmux_reattach::DETACH_WATCH_INTERVAL,
             detached_watchers: tmux_reattach::DetachedWatchers::default(),
             exit_hook_watched: tmux_exit_hook::ExitHookWatched::default(),
+            agent_end_tx: agent_end::agent_end_channel(),
         }
     }
 
@@ -166,6 +169,9 @@ impl CliSessionManager {
 
     // --- terminal control lease (single-screen mutex) ---
 }
+
+mod agent_end;
+pub use agent_end::{AgentEnd, AGENT_END_CAPACITY};
 
 mod exposed_terminals;
 

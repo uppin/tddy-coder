@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tddy_daemon_kernel::session_notification::{
     AgentNotification, NotificationLevel, QuestionNotice, QuestionNoticeItem, QuestionNoticeOption,
-    SessionNotificationKind, SessionNotificationSource,
+    SessionEndNotice, SessionNotificationKind, SessionNotificationSource,
 };
 
 use super::{Held, ProjectNotificationRecord};
@@ -231,6 +231,10 @@ struct RecordDto {
     text: String,
     agent: Option<AgentDto>,
     question: Option<QuestionDto>,
+    /// Absent from every record but a session-ended one, and from a line written before records
+    /// carried how a session ended (`#activity-wake` 1/3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ended: Option<EndedDto>,
     at_unix_ms: u64,
     /// Absent from a line written before records named their orchestrator (`#orchestrators`
     /// 4/11), and from a record of a session no orchestrator started.
@@ -253,6 +257,7 @@ enum SourceDto {
     Presenter,
     Agent,
     PendingQuestion,
+    SessionEnded,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -271,6 +276,14 @@ struct AgentDto {
     level: LevelDto,
     sound: bool,
     link: String,
+}
+
+/// How a session's agent ended. `exit_code` is absent when no code was seen.
+#[derive(Serialize, Deserialize)]
+struct EndedDto {
+    outcome: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -307,6 +320,7 @@ impl From<&ProjectNotificationRecord> for RecordDto {
             text: record.text.clone(),
             agent: record.agent.as_ref().map(AgentDto::from),
             question: record.question.as_ref().map(QuestionDto::from),
+            ended: record.ended.as_ref().map(EndedDto::from),
             at_unix_ms: record.at_unix_ms,
             orchestrator_session_id: record.orchestrator_session_id.clone(),
         }
@@ -324,6 +338,7 @@ impl From<RecordDto> for ProjectNotificationRecord {
             text: dto.text,
             agent: dto.agent.map(AgentNotification::from),
             question: dto.question.map(QuestionNotice::from),
+            ended: dto.ended.map(SessionEndNotice::from),
             at_unix_ms: dto.at_unix_ms,
             orchestrator_session_id: dto.orchestrator_session_id,
         }
@@ -356,6 +371,7 @@ impl From<SessionNotificationSource> for SourceDto {
             SessionNotificationSource::Presenter => Self::Presenter,
             SessionNotificationSource::Agent => Self::Agent,
             SessionNotificationSource::PendingQuestion => Self::PendingQuestion,
+            SessionNotificationSource::SessionEnded => Self::SessionEnded,
         }
     }
 }
@@ -368,6 +384,7 @@ impl From<SourceDto> for SessionNotificationSource {
             SourceDto::Presenter => Self::Presenter,
             SourceDto::Agent => Self::Agent,
             SourceDto::PendingQuestion => Self::PendingQuestion,
+            SourceDto::SessionEnded => Self::SessionEnded,
         }
     }
 }
@@ -390,6 +407,24 @@ impl From<LevelDto> for NotificationLevel {
             LevelDto::Success => Self::Success,
             LevelDto::Warning => Self::Warning,
             LevelDto::Error => Self::Error,
+        }
+    }
+}
+
+impl From<&SessionEndNotice> for EndedDto {
+    fn from(ended: &SessionEndNotice) -> Self {
+        Self {
+            outcome: ended.outcome.clone(),
+            exit_code: ended.exit_code,
+        }
+    }
+}
+
+impl From<EndedDto> for SessionEndNotice {
+    fn from(ended: EndedDto) -> Self {
+        Self {
+            outcome: ended.outcome,
+            exit_code: ended.exit_code,
         }
     }
 }

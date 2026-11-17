@@ -2,7 +2,7 @@ use super::CliSessionManager;
 
 use super::MAIN_TERMINAL_ID;
 
-use tddy_task::TaskId;
+use tddy_task::{TaskId, TaskStatus};
 use tokio::sync::{oneshot, watch};
 
 use crate::cli_session_manager::pty_handle;
@@ -12,7 +12,7 @@ use tddy_task::TaskHandle;
 
 use super::{ExitSettlements, TerminalEntry};
 
-use super::tmux_reattach::{classify_ended_main, TmuxRun};
+use super::tmux_reattach::{classify_ended_main, MainExit, TmuxRun};
 
 use tddy_terminal_rpc::pty_runtime::PtyRuntime;
 
@@ -32,6 +32,38 @@ pub type ExitHook = Box<
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
         + Send,
 >;
+
+/// Wait until `status_rx` reports a terminal status, or its sender goes away.
+async fn await_terminal_status(status_rx: &mut watch::Receiver<TaskStatus>) {
+    loop {
+        if status_rx.borrow().is_terminal() {
+            break;
+        }
+        if status_rx.changed().await.is_err() {
+            break;
+        }
+    }
+}
+
+/// Remove `terminal_id` from `session_id`'s index entry — only the entry `task_id` registered,
+/// so a relaunched terminal is not removed by its predecessor's cleanup — and drop the entry
+/// when its last terminal goes.
+async fn deregister_terminal(
+    terminals: &super::TerminalIndex,
+    session_id: &str,
+    terminal_id: &str,
+    task_id: TaskId,
+) {
+    let mut reg = terminals.write().await;
+    if let Some(tools) = reg.get_mut(session_id) {
+        if tools.get(terminal_id).is_some_and(|e| e.task_id == task_id) {
+            tools.remove(terminal_id);
+        }
+        if tools.is_empty() {
+            reg.remove(session_id);
+        }
+    }
+}
 
 impl CliSessionManager {
     /// Spawn `argv` in a PTY as an identified tool and register it under `(session_id, terminal_id)`.
@@ -259,16 +291,10 @@ impl CliSessionManager {
                 None => return,
             };
             let mut status_rx = task.status_watch();
-            loop {
-                if status_rx.borrow().is_terminal() {
-                    break;
-                }
-                if status_rx.changed().await.is_err() {
-                    break;
-                }
-            }
+            await_terminal_status(&mut status_rx).await;
+            let status = task.status();
             if terminal_id == MAIN_TERMINAL_ID {
-                super::main_exit::log_main_exit(&session_id, &main_exit, &task.status());
+                super::main_exit::log_main_exit(&session_id, &main_exit, &status);
             }
             // The process has exited and its output is complete. The hook finishes before the
             // terminal leaves the index, and before a waiting resume goes on.
@@ -282,20 +308,21 @@ impl CliSessionManager {
             } else {
                 None
             };
-            let mut reg = terminals.write().await;
-            if let Some(tools) = reg.get_mut(&session_id) {
-                if tools
-                    .get(&terminal_id)
-                    .is_some_and(|e| e.task_id == task_id)
-                {
-                    tools.remove(&terminal_id);
-                }
-                if tools.is_empty() {
-                    reg.remove(&session_id);
-                }
-            }
+            deregister_terminal(&terminals, &session_id, &terminal_id, task_id).await;
             if let Some(exit) = main_exit {
-                detach_watch.main_ended(session_id, exit, tmux_run).await;
+                // An agent that ended with its main is announced with how it ended; a client
+                // that ended while its agent lives announces nothing.
+                let end = match exit {
+                    MainExit::AgentEnded => Some(super::AgentEnd::for_ended_main(
+                        session_id.clone(),
+                        &tmux_run,
+                        &status,
+                    )),
+                    MainExit::ClientOnly => None,
+                };
+                detach_watch
+                    .main_ended(session_id, exit, tmux_run, end)
+                    .await;
             }
         });
     }

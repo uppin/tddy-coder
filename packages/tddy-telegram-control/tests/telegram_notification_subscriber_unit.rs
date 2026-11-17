@@ -55,6 +55,7 @@ fn an_attention_notification() -> SessionNotification {
         agent: None,
         at_unix_ms: AT,
         question: None,
+        ended: None,
     }
 }
 
@@ -240,6 +241,24 @@ fn declines_an_attention_notification_raised_by_the_presenter() {
 
     // When / Then
     assert!(!channel.wants_notification(&a_presenter_attention_notification()));
+}
+
+/// A session's end is for its orchestrator's inbox; a chat is not told (`#activity-wake` 1/3).
+#[test]
+fn telegram_declines_a_session_end() {
+    // Given
+    let (channel, _) = a_telegram_channel(
+        a_config_broadcasting_to_one_chat(),
+        no_chat_tracks_the_session(),
+    );
+    let session_end = SessionNotification {
+        source: SessionNotificationSource::SessionEnded,
+        text: "⏹ Session fix-login ended: exit code 0".to_string(),
+        ..an_attention_notification()
+    };
+
+    // When / Then
+    assert!(!channel.wants_notification(&session_end));
 }
 
 #[test]

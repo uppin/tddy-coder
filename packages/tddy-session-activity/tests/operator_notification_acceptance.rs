@@ -231,6 +231,7 @@ fn the_agents_notification_at(at_unix_ms: u64) -> SessionNotification {
         }),
         at_unix_ms,
         question: None,
+        ended: None,
     }
 }
 

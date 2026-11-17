@@ -17,8 +17,8 @@ use tddy_service::proto::activity::{
     AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord,
     NotificationLevel as ProtoNotificationLevel, QuestionNotice as ProtoQuestionNotice,
     QuestionNoticeItem as ProtoQuestionNoticeItem,
-    QuestionNoticeOption as ProtoQuestionNoticeOption, SessionNotificationEvent,
-    SessionNotificationKind as ProtoSessionNotificationKind,
+    QuestionNoticeOption as ProtoQuestionNoticeOption, SessionEndNotice as ProtoSessionEndNotice,
+    SessionNotificationEvent, SessionNotificationKind as ProtoSessionNotificationKind,
     SessionNotificationSource as ProtoSessionNotificationSource,
 };
 use tokio::sync::broadcast::error::RecvError;
@@ -62,6 +62,7 @@ pub fn session_notification_event(notification: SessionNotification) -> SessionN
             SessionNotificationSource::PendingQuestion => {
                 ProtoSessionNotificationSource::PendingQuestion
             }
+            SessionNotificationSource::SessionEnded => ProtoSessionNotificationSource::SessionEnded,
         } as i32,
         text: notification.text,
         at_unix_ms: notification.at_unix_ms,
@@ -73,6 +74,10 @@ pub fn session_notification_event(notification: SessionNotification) -> SessionN
         sound: agent.is_some_and(|a| a.sound),
         link: agent.map(|a| a.link.clone()).unwrap_or_default(),
         question,
+        ended: notification.ended.map(|ended| ProtoSessionEndNotice {
+            outcome: ended.outcome,
+            exit_code: ended.exit_code,
+        }),
     }
 }
 

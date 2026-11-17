@@ -19,6 +19,7 @@ Deferred by the user, 2026-11-10 (#876 sweep): the restructure engine refused th
 | 2026-11-16 | 73 → 73 | 1 | #918 (`#remote-shell` 4/7): re-measured — `build_session_host` unchanged. The file grew 499 → 521 with the Coder wiring, then the sweep pair moved to `runtime/last_run_sweep.rs` and the Coder wiring to `coder_credential_source::wire_coder` in the same PR, leaving it at 473 production lines. This finding is untouched and stays open |
 | 2026-11-16 | 73 → 82 | #921 (`#remote-shell` 7/7): `build_session_host` wires the daemon's Coder credential source into the connection host when vaults are present. Touched, not closed — left as deferred at #876 |
 | 2026-11-16 | 82 → 73 | 1 | #924 (`#remote-shell` 8/11) sweep: the Coder credential wiring this stack added was extracted; restored to its before-the-stack length. Still over 60, so this record stays open on the remainder |
+| 2026-11-17 | 73 → 73 | 1 | #929 (`#activity-wake` 1/3): re-measured — `build_session_host` untouched; the agent-end forwarder starts from its own `BuildContext::forward_agent_ends`. The file grew by 21 production lines; its split is stack-shared with #930/#931 and deferred to a follow-up after the stack lands. Unchanged, stays open |
 
 ## What would close it
 

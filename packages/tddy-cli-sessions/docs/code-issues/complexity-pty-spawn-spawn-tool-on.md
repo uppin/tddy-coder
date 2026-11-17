@@ -15,6 +15,7 @@ Deferred by the user, 2026-11-10 (#876 sweep): the restructure engine refused th
 | Run | Lines | Nesting | Note |
 |---|---|---|---|
 | 2026-11-10 | 104 → 75 | 3 | #876 B4i/Tier C: terminal registration, ready await, spawn-spec build, cleanup-and-finish extracted. Every remaining seam (recording hook, task spawn, pending-exit match, handle build) names the exit hook's `Output`, which this file does not import. |
+| 2026-11-17 | 75 → 75 | 3 | #929 (`#activity-wake` 1/3): re-measured — `spawn_tool_on` untouched; the agent-end announcement landed in `spawn_terminal_cleanup` and `agent_end.rs`. Unchanged, stays open |
 
 ## What would close it
 

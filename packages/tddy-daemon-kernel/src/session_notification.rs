@@ -32,6 +32,9 @@ pub enum SessionNotificationSource {
     /// `ReportSessionStatus` carrying a structured question — a claude-cli permission prompt or
     /// `AskUserQuestion` call. Carries a [`QuestionNotice`] (`#home-inbox` 3/8).
     PendingQuestion,
+    /// The session manager — the agent of the session's main terminal ended. Carries a
+    /// [`SessionEndNotice`] (`#activity-wake` 1/3).
+    SessionEnded,
 }
 
 /// How an agent grades what it is telling its operator. Chosen by the agent (`tddy-tools notify
@@ -105,6 +108,18 @@ pub struct QuestionNoticeOption {
     pub description: String,
 }
 
+/// How a session's agent ended: the structured content of a
+/// [`SessionNotificationSource::SessionEnded`] notification, so a reader branches on the exit code
+/// rather than parsing [`SessionNotification::text`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SessionEndNotice {
+    /// `exit code 3`, `exit code unknown`, `stopped by the daemon`, or a failure's message — the
+    /// words the daemon's `main exited` log line uses.
+    pub outcome: String,
+    /// The agent's exit code, when one was seen.
+    pub exit_code: Option<i32>,
+}
+
 /// One thing that happened in one session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionNotification {
@@ -133,6 +148,9 @@ pub struct SessionNotification {
     /// notification — and for the `ActivityStatus` one that follows the same prompt, so a surface
     /// that already told the operator can tell it is the same prompt. `None` otherwise.
     pub question: Option<QuestionNotice>,
+    /// How the agent ended, for a [`SessionNotificationSource::SessionEnded`] notification;
+    /// `None` for every other source.
+    pub ended: Option<SessionEndNotice>,
     /// Epoch milliseconds. The web ages activity out of its blink window against this, so it is
     /// the moment the event happened, never the moment a client read it.
     pub at_unix_ms: u64,

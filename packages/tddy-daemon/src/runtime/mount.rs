@@ -80,6 +80,7 @@ impl BuildContext {
         let mut mount = self.open_mount(config_arc, user_resolver, session_tokens);
         mount.livekit_discovery = livekit_discovery;
         let shared = self.open_shared(&mount.sessions_base_resolver).await?;
+        self.forward_agent_ends(&mount, &shared);
         let served = self.open_served(&mount, &shared);
         self.manage_index_daemon(&mount.config_arc);
         let askpass_endpoint = self.bind_askpass(&shared, &served).await?;

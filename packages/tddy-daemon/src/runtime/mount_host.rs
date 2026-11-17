@@ -123,6 +123,27 @@ impl BuildContext {
         })
     }
 
+    /// Publish every session's agent end on the bus (`#activity-wake` 1/3): the session manager
+    /// announces them, and the forwarder names, owns and publishes each — so it reaches the
+    /// project notification log and an orchestrator's inbox. Started once the bus exists; the
+    /// manager was built before it, which is why the end is a channel and not a callback.
+    pub(super) fn forward_agent_ends(&self, mount: &Mount, shared: &Shared) {
+        let Some(daemon_os_user) = super::this_process_os_user() else {
+            log::warn!(
+                target: "tddy_daemon::session_notifications",
+                "this process's OS user does not resolve: a session's agent end is not published"
+            );
+            return;
+        };
+        tddy_session_lifecycle::session_notifications::forward_agent_ends(
+            self.registries.shared_cli_manager.agent_ends(),
+            Arc::clone(&shared.session_notification_bus),
+            Some(self.coding_agents.agents_shared()),
+            Arc::clone(&mount.sessions_base_resolver),
+            daemon_os_user,
+        );
+    }
+
     pub(super) fn open_served(&self, mount: &Mount, shared: &Shared) -> Served {
         let config = &self.config;
         let tddy_data_dir = &self.identity.keys.tddy_data_dir;
