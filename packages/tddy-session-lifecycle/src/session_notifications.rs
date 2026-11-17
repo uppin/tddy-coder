@@ -80,30 +80,13 @@ mod agent_end_notifications {
             loop {
                 match ends.recv().await {
                     Ok(end) => {
-                        let os_user = end
-                            .os_user
-                            .clone()
-                            .unwrap_or_else(|| daemon_os_user.clone());
-                        let Some(sessions_base) = sessions_base_for(&os_user) else {
-                            log::warn!(
-                                target: "tddy_daemon::session_notifications",
-                                "the agent of session {} ended for OS user {os_user}, who has no \
-                                 sessions base: its end is not published",
-                                end.session_id
-                            );
-                            continue;
-                        };
-                        let label = resolve_session_label(
-                            agents.as_deref(),
-                            &sessions_base,
-                            &end.session_id,
-                        );
-                        bus.publish(notification_for_agent_end(
+                        publish_agent_end(
                             &end,
-                            &os_user,
-                            &label,
-                            tddy_daemon_kernel::now_unix_ms(),
-                        ))
+                            &bus,
+                            agents.as_deref(),
+                            &sessions_base_for,
+                            &daemon_os_user,
+                        )
                         .await;
                     }
                     Err(broadcast::error::RecvError::Lagged(missed)) => {
@@ -117,6 +100,38 @@ mod agent_end_notifications {
             }
         })
     }
+    /// Publish one announced `end` on `bus`, under its owner's label. An end whose owner has
+    /// no sessions base is logged and dropped: a notification naming no owner reaches nobody.
+    async fn publish_agent_end(
+        end: &AgentEnd,
+        bus: &SessionNotificationBus,
+        agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
+        sessions_base_for: &SessionsBaseResolver,
+        daemon_os_user: &str,
+    ) {
+        let os_user = end
+            .os_user
+            .clone()
+            .unwrap_or_else(|| daemon_os_user.to_string());
+        let Some(sessions_base) = sessions_base_for(&os_user) else {
+            log::warn!(
+                target: "tddy_daemon::session_notifications",
+                "the agent of session {} ended for OS user {os_user}, who has no \
+                 sessions base: its end is not published",
+                end.session_id
+            );
+            return;
+        };
+        let label = resolve_session_label(agents, &sessions_base, &end.session_id);
+        bus.publish(notification_for_agent_end(
+            end,
+            &os_user,
+            &label,
+            tddy_daemon_kernel::now_unix_ms(),
+        ))
+        .await;
+    }
+
     #[cfg(test)]
     mod tests {
         use tddy_daemon_kernel::session_notification::SessionEndNotice;

@@ -9,8 +9,10 @@
 //! The daemon turns each [`AgentEnd`] into a session notification; this crate knows nothing of
 //! notifications.
 
+use tddy_task::TaskStatus;
 use tokio::sync::broadcast;
 
+use super::tmux_reattach::TmuxRun;
 use super::CliSessionManager;
 
 /// How many unread ends a subscriber may fall behind by before it misses some. Agent ends are rare
@@ -30,6 +32,34 @@ pub struct AgentEnd {
     /// The agent's exit code, when one was seen. `None` for a failure, a stop, or an agent whose
     /// end only the detach watcher saw.
     pub exit_code: Option<i32>,
+}
+
+impl AgentEnd {
+    /// The end of a main classified `AgentEnded`, from its task `status`. A PTY-run main's
+    /// status is its agent's own, so it words the end and carries the exit code; a tmux-run
+    /// main's status is its client's — nothing saw the agent exit — so its end reads
+    /// `exit code unknown` with no code, as the detach watcher's does.
+    pub(crate) fn for_ended_main(
+        session_id: String,
+        tmux_run: &TmuxRun,
+        status: &TaskStatus,
+    ) -> Self {
+        let is_tmux_run = tmux_run.is_tmux_run();
+        Self {
+            session_id,
+            os_user: tmux_run.os_user().map(str::to_string),
+            outcome: if is_tmux_run {
+                "exit code unknown".to_string()
+            } else {
+                super::main_exit::outcome_of(status)
+            },
+            exit_code: if is_tmux_run {
+                None
+            } else {
+                super::main_exit::exit_code_of(status)
+            },
+        }
+    }
 }
 
 /// The sending half every announcing site holds a clone of.
