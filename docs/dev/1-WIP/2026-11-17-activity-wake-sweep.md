@@ -35,11 +35,12 @@ change-history entries, and changes no behaviour.
 ## Final measurements
 
 - `packages/tddy-session-activity/src/session_watches.rs`: **857 → 205 production lines** (budget 500) — split into `session_watches/{matcher 145, delivery 211, store 349, stream 428}` (`stream.rs` pre-existing from the #935 wrap). This closes `packages/tddy-session-activity/docs/code-issues/oversized-file-session-watches.md`, deleted in the commit that closed it. The function-ceiling side-note inside the record (`take_stream_batch` 255, `monitor_cli` `stream` 62) is NOT closed by this node.
+- `packages/tddy-session-activity/src/project_notification_log/storage.rs`: **578 → 220 production lines** (budget 500) — the DTOs and their `From` conversions moved into `storage/dto.rs` (363). This closes `packages/tddy-session-activity/docs/code-issues/oversized-file-storage.md`, deleted in the commit that closes it.
 
 ## Scope
 
 - [x] `session_watches.rs` 857 → submodules under `session_watches/`, each file under budget; the records' close conditions are file-length-only; the function-ceiling side-notes (`take_stream_batch` 255, `monitor_cli` `stream` 62) are left open in the report — `extract_method` there would rewrite bodies, outside a move-only sweep
-- [ ] `project_notification_log/storage.rs` 578 → submodules under `project_notification_log/storage/`
+- [x] `project_notification_log/storage.rs` 578 → submodules under `project_notification_log/storage/`
 - [ ] `mount_host.rs` 527 → submodules under `runtime/mount_host/`
 - [ ] The three `oversized-file-*` records deleted by the commits that close them, final measurement recorded first
 - [ ] No TODO added; the stack's one open TODO (`2026-11-16-session-watches-are-not-shown-on-the-web.md`) is NOT this node's — it goes to the TODO gate
