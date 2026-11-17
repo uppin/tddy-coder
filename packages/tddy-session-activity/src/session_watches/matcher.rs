@@ -1,4 +1,5 @@
 use crate::project_notification_log::ProjectNotificationRecord;
+use crate::session_watches::SessionWatch;
 use serde::{Deserialize, Serialize};
 use tddy_daemon_kernel::session_notification::SessionNotificationSource;
 
@@ -81,4 +82,64 @@ impl WatchKind {
             SessionNotificationSource::Message => Some(Self::Message),
         }
     }
+}
+
+/// Which records a watch matches: those of `session_ids`, or — with `started_by_me` — of the
+/// sessions its owner started; and of `kinds` only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WatchFilter {
+    pub session_ids: Vec<String>,
+    pub started_by_me: bool,
+    pub kinds: Vec<WatchKind>,
+}
+
+/// Whether `watch` matches `record`, `owner_inbox_position` being the `seq` up to which the
+/// watch's owner has read the messages addressed to it. Its session is named, or it started the
+/// session, and the record is of a kind it asks for, and it is never the owner's own session. The
+/// record's project and OS user are the log read's, which is the owner's.
+///
+/// A **message** record matches by who it is addressed to and who sent it: an inbox watch
+/// ([`WatchFilter::is_inbox_of`] its owner) matches the messages addressed to its owner, whoever
+/// sent them; any other watch matches by sender, through the session selection. And a message
+/// addressed to the owner that the owner's inbox position has passed matches no watch — it was
+/// read already, and it is delivered once (`crate::session_messages`).
+pub(super) fn watch_matches(
+    watch: &SessionWatch,
+    record: &ProjectNotificationRecord,
+    owner_inbox_position: u64,
+) -> bool {
+    if record.session_id == watch.owner.session_id {
+        return false;
+    }
+    if record.source == SessionNotificationSource::Message {
+        let Some(message) = &record.message else {
+            return false;
+        };
+        let addressed_to_the_owner = message.to_session_id == watch.owner.session_id;
+        if addressed_to_the_owner && record.seq <= owner_inbox_position {
+            return false;
+        }
+        if watch.filter.is_inbox_of(&watch.owner.session_id) {
+            return addressed_to_the_owner;
+        }
+        if !watch.filter.kinds.contains(&WatchKind::Message) {
+            return false;
+        }
+        return watch
+            .filter
+            .session_ids
+            .iter()
+            .any(|id| id == &record.session_id)
+            || (watch.filter.started_by_me
+                && record.orchestrator_session_id.as_deref()
+                    == Some(watch.owner.session_id.as_str()));
+    }
+    let selected = watch
+        .filter
+        .session_ids
+        .iter()
+        .any(|id| id == &record.session_id)
+        || (watch.filter.started_by_me
+            && record.orchestrator_session_id.as_deref() == Some(watch.owner.session_id.as_str()));
+    selected && WatchKind::of(record).is_some_and(|kind| watch.filter.kinds.contains(&kind))
 }

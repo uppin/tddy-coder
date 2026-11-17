@@ -12,15 +12,14 @@
 //!
 //! Feature: docs/ft/daemon/project-concept.md#watching-sessions
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tddy_daemon_kernel::session_notification::SessionNotificationSource;
 
-use crate::project_notification_log::{ProjectNotificationLog, ProjectNotificationRecord};
+use crate::project_notification_log::ProjectNotificationRecord;
 
 mod delivery;
 pub(crate) mod matcher;
@@ -49,14 +48,7 @@ pub struct WatchOwner {
     pub os_user: String,
 }
 
-/// Which records a watch matches: those of `session_ids`, or — with `started_by_me` — of the
-/// sessions its owner started; and of `kinds` only.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WatchFilter {
-    pub session_ids: Vec<String>,
-    pub started_by_me: bool,
-    pub kinds: Vec<WatchKind>,
-}
+pub use crate::session_watches::matcher::WatchFilter;
 
 /// One watch, as the store keeps it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +74,7 @@ pub struct ListedWatch {
 }
 
 pub use crate::session_watches::delivery::{WatchDelivery, WatchEnd, WatchEndReason};
+use crate::session_watches::matcher::watch_matches;
 
 /// A watch that ended and has not been reported yet, and whose it was.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,57 +179,6 @@ fn refuse_a_bad_ttl(ttl: Duration) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether `watch` matches `record`, `owner_inbox_position` being the `seq` up to which the
-/// watch's owner has read the messages addressed to it. Its session is named, or it started the
-/// session, and the record is of a kind it asks for, and it is never the owner's own session. The
-/// record's project and OS user are the log read's, which is the owner's.
-///
-/// A **message** record matches by who it is addressed to and who sent it: an inbox watch
-/// ([`WatchFilter::is_inbox_of`] its owner) matches the messages addressed to its owner, whoever
-/// sent them; any other watch matches by sender, through the session selection. And a message
-/// addressed to the owner that the owner's inbox position has passed matches no watch — it was
-/// read already, and it is delivered once (`crate::session_messages`).
-fn watch_matches(
-    watch: &SessionWatch,
-    record: &ProjectNotificationRecord,
-    owner_inbox_position: u64,
-) -> bool {
-    if record.session_id == watch.owner.session_id {
-        return false;
-    }
-    if record.source == SessionNotificationSource::Message {
-        let Some(message) = &record.message else {
-            return false;
-        };
-        let addressed_to_the_owner = message.to_session_id == watch.owner.session_id;
-        if addressed_to_the_owner && record.seq <= owner_inbox_position {
-            return false;
-        }
-        if watch.filter.is_inbox_of(&watch.owner.session_id) {
-            return addressed_to_the_owner;
-        }
-        if !watch.filter.kinds.contains(&WatchKind::Message) {
-            return false;
-        }
-        return watch
-            .filter
-            .session_ids
-            .iter()
-            .any(|id| id == &record.session_id)
-            || (watch.filter.started_by_me
-                && record.orchestrator_session_id.as_deref()
-                    == Some(watch.owner.session_id.as_str()));
-    }
-    let selected = watch
-        .filter
-        .session_ids
-        .iter()
-        .any(|id| id == &record.session_id)
-        || (watch.filter.started_by_me
-            && record.orchestrator_session_id.as_deref() == Some(watch.owner.session_id.as_str()));
-    selected && WatchKind::of(record).is_some_and(|kind| watch.filter.kinds.contains(&kind))
-}
-
 /// The `seq` up to which `owner` has read the messages addressed to it, from `state`.
 pub(crate) fn inbox_position_of(state: &ProjectWatches, owner: &WatchOwner) -> u64 {
     state
@@ -260,161 +202,4 @@ pub(crate) fn a_watch_has_delivered(
             && watch.position >= record.seq
             && watch_matches(watch, record, owner_inbox_position)
     })
-}
-
-/// Why `watch` has ended at `now_unix_ms`, or `None` while it lives.
-fn end_reason(
-    watch: &SessionWatch,
-    log: &ProjectNotificationLog,
-    now_unix_ms: u64,
-) -> Option<WatchEndReason> {
-    if now_unix_ms >= watch.expires_at_unix_ms {
-        return Some(WatchEndReason::Expired);
-    }
-    let (records, _) = log.records_after(
-        &watch.owner.project_id,
-        &watch.owner.os_user,
-        watch.created_seq,
-    );
-    let ended: HashSet<&str> = records
-        .iter()
-        .filter(|r| r.source == SessionNotificationSource::SessionEnded)
-        .map(|r| r.session_id.as_str())
-        .collect();
-    if ended.contains(watch.owner.session_id.as_str()) {
-        return Some(WatchEndReason::OrchestratorEnded);
-    }
-    if !watch.filter.started_by_me
-        && !watch.filter.session_ids.is_empty()
-        && watch
-            .filter
-            .session_ids
-            .iter()
-            .all(|id| ended.contains(id.as_str()))
-    {
-        return Some(WatchEndReason::SessionsEnded);
-    }
-    None
-}
-
-/// Compute `owner`'s delivery from `state` and advance it past what the delivery hands over:
-/// positions move past the delivered records (and past what the log evicted), and the watches
-/// that ended are taken to be reported. Shared by `take_delivery`, which commits at once, and
-/// `deliver_with`, which rolls `state` back when its delivery is refused.
-fn apply_delivery(
-    state: &mut ProjectWatches,
-    owner: &WatchOwner,
-    log: &ProjectNotificationLog,
-    now_unix_ms: u64,
-    streamed: &HashSet<String>,
-) -> WatchDelivery {
-    end_finished(state, owner, log, now_unix_ms);
-    // A watch a stream's lease holds is skipped entirely: its events are the stream's alone,
-    // and its position is the stream's to advance.
-    let inbox = inbox_position_of(state, owner);
-    let mut matched: BTreeMap<u64, ProjectNotificationRecord> = BTreeMap::new();
-    let mut lost = 0_u64;
-    let mut scans: Vec<(String, u64, u64)> = Vec::new();
-    for watch in state
-        .watches
-        .iter()
-        .filter(|watch| &watch.owner == owner && !streamed.contains(&watch.watch_id))
-    {
-        let (records, watch_lost) =
-            log.records_after(&owner.project_id, &owner.os_user, watch.position);
-        lost = lost.max(watch_lost);
-        for record in records.iter().filter(|r| watch_matches(watch, r, inbox)) {
-            matched.entry(record.seq).or_insert_with(|| record.clone());
-        }
-        scans.push((watch.watch_id.clone(), watch.position, watch_lost));
-    }
-    let events: Vec<ProjectNotificationRecord> = matched
-        .values()
-        .take(MAX_EVENTS_PER_ANSWER)
-        .cloned()
-        .collect();
-    let delivered: HashSet<u64> = events.iter().map(|r| r.seq).collect();
-    for watch in state
-        .watches
-        .iter_mut()
-        .filter(|watch| &watch.owner == owner && !streamed.contains(&watch.watch_id))
-    {
-        let mut position = watch.position;
-        if let Some((_, _, watch_lost)) = scans.iter().find(|(id, _, _)| id == &watch.watch_id) {
-            position = position.max(watch.position.saturating_add(*watch_lost));
-        }
-        for record in events
-            .iter()
-            .filter(|r| delivered.contains(&r.seq) && watch_matches(watch, r, inbox))
-        {
-            position = position.max(record.seq);
-        }
-        watch.position = position;
-    }
-    let mut ended = Vec::new();
-    state.ended.retain(|pending| {
-        if &pending.owner == owner && !streamed.contains(&pending.end.watch_id) {
-            ended.push(pending.end.clone());
-            false
-        } else {
-            true
-        }
-    });
-    WatchDelivery {
-        events,
-        lost,
-        ended,
-    }
-}
-
-/// Move `owner`'s watches that have ended out of the live set, to be reported once by its next
-/// delivery. Whether any moved.
-fn end_finished(
-    state: &mut ProjectWatches,
-    owner: &WatchOwner,
-    log: &ProjectNotificationLog,
-    now_unix_ms: u64,
-) -> bool {
-    let mut kept = Vec::with_capacity(state.watches.len());
-    let mut moved = false;
-    for watch in state.watches.drain(..) {
-        if &watch.owner == owner {
-            if let Some(reason) = end_reason(&watch, log, now_unix_ms) {
-                state.ended.push(PendingEnd {
-                    owner: watch.owner.clone(),
-                    end: WatchEnd {
-                        watch_id: watch.watch_id.clone(),
-                        reason,
-                    },
-                });
-                moved = true;
-                continue;
-            }
-        }
-        kept.push(watch);
-    }
-    state.watches = kept;
-    moved
-}
-
-/// [`end_finished`] for expiry alone, for the operations handed no log.
-fn end_expired(state: &mut ProjectWatches, owner: &WatchOwner, now_unix_ms: u64) -> bool {
-    let mut kept = Vec::with_capacity(state.watches.len());
-    let mut moved = false;
-    for watch in state.watches.drain(..) {
-        if &watch.owner == owner && now_unix_ms >= watch.expires_at_unix_ms {
-            state.ended.push(PendingEnd {
-                owner: watch.owner.clone(),
-                end: WatchEnd {
-                    watch_id: watch.watch_id.clone(),
-                    reason: WatchEndReason::Expired,
-                },
-            });
-            moved = true;
-            continue;
-        }
-        kept.push(watch);
-    }
-    state.watches = kept;
-    moved
 }

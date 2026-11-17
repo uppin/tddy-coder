@@ -32,9 +32,13 @@ file into submodules by `move_item`/`extract_module` — mechanical moves the re
 applies, no code written by hand — deletes the three records with the final measurements in the
 change-history entries, and changes no behaviour.
 
+## Final measurements
+
+- `packages/tddy-session-activity/src/session_watches.rs`: **857 → 205 production lines** (budget 500) — split into `session_watches/{matcher 145, delivery 211, store 349, stream 428}` (`stream.rs` pre-existing from the #935 wrap). This closes `packages/tddy-session-activity/docs/code-issues/oversized-file-session-watches.md`, deleted in the commit that closed it. The function-ceiling side-note inside the record (`take_stream_batch` 255, `monitor_cli` `stream` 62) is NOT closed by this node.
+
 ## Scope
 
-- [ ] `session_watches.rs` 857 → submodules under `session_watches/`, each file under budget; the records' close conditions are file-length-only; the function-ceiling side-notes (`take_stream_batch` 255, `monitor_cli` `stream` 62) are left open in the report — `extract_method` there would rewrite bodies, outside a move-only sweep
+- [x] `session_watches.rs` 857 → submodules under `session_watches/`, each file under budget; the records' close conditions are file-length-only; the function-ceiling side-notes (`take_stream_batch` 255, `monitor_cli` `stream` 62) are left open in the report — `extract_method` there would rewrite bodies, outside a move-only sweep
 - [ ] `project_notification_log/storage.rs` 578 → submodules under `project_notification_log/storage/`
 - [ ] `mount_host.rs` 527 → submodules under `runtime/mount_host/`
 - [ ] The three `oversized-file-*` records deleted by the commits that close them, final measurement recorded first
