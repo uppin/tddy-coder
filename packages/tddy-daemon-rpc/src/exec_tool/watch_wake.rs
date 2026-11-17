@@ -8,7 +8,7 @@
 //! pastes [`wake_text`] into its main terminal — the paste `SendSessionMessage` makes — through a
 //! delivery committed only when the paste succeeds.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-16-idle-wake.md
+//! Feature: docs/ft/daemon/project-concept.md#watching-sessions
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -308,7 +308,10 @@ impl ExecToolRpcHandler {
     ) -> Option<String> {
         let launch = self.session_launch.get()?;
         let session_type = metadata.session_type.as_deref().unwrap_or_default();
-        let agent = launch.coding_agents.agents().for_session_type(session_type)?;
+        let agent = launch
+            .coding_agents
+            .agents()
+            .for_session_type(session_type)?;
         let slot = agent.turn_input().cloned()?;
         terminal_submit_key(session_id, slot).ok()
     }

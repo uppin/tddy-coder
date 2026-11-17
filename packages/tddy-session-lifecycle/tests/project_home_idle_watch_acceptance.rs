@@ -5,7 +5,7 @@
 //! The reaper is the daemon's, over a real host; the watch is created in the host's store as the
 //! `CreateSessionWatch` tool creates it.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-16-idle-wake.md
+//! Feature: docs/ft/daemon/project-concept.md#watching-sessions
 
 mod project_home_support;
 

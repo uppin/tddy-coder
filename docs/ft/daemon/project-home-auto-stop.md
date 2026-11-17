@@ -32,6 +32,9 @@ Absent section = the default.
   the `project-home` role, in every mapped user's sessions directory. Only main is stopped: an
   [orchestrator session](project-concept.md#orchestrator-sessions) is left running however long it
   idles.
+- A project-home session that holds a live [session watch](project-concept.md#watching-sessions)
+  is not stopped, however long it idles: it is kept up to be woken by what it watches. Once its
+  last watch ends, the ordinary idle clock applies again.
 - The stop is the one an explicit termination makes: the tracked terminal is cancelled (SIGTERM, then
   SIGKILL to its child) and forgotten. `.session.yaml` is not written, so resume has what it needs.
 - The reaper waits up to 5 s for the process to exit before counting the session as stopped.

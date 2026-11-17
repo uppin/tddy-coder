@@ -9,7 +9,7 @@
 //! published on the bus as the daemon's publish sites publish them. Wake timings are shortened
 //! through the waker's own constructor.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-16-idle-wake.md
+//! Feature: docs/ft/daemon/project-concept.md#watching-sessions
 
 mod support;
 

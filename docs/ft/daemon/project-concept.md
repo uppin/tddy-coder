@@ -794,6 +794,17 @@ wait open.
   kept per project at `<data dir>/projects/<project_id>/session-watches.json`, whole-file atomically
   rewritten on every change, so a watch and its position survive a daemon restart and the
   orchestrator's `/clear`.
+- **Waking an idle orchestrator.** An orchestrator that is idle is sent one turn carrying what its
+  watches matched, instead of waiting for its next tool call. Idle means its main terminal is live,
+  it waits on no question of its own, and its reported status is `Done`, `WaitingForInput`,
+  `Started` or `Ended` (no status counts as `Started`); `Running` and `ExecutingTool` are mid-turn
+  and are not woken. The turn is one pasted `[tddy watch]` message listing each event with its
+  session, kind and `request_id`, plus anything lost and the watches that ended. A burst is
+  coalesced by a 2-second settle, and two wakes of one orchestrator are at least 30 seconds apart.
+  The events in a wake count as delivered, so they do not ride on a later tool answer; a paste
+  that fails delivers nothing, and what was waiting waits for the next chance. A busy orchestrator
+  is woken once its turn ends with events still waiting. A stopped orchestrator is never started
+  by a wake.
 
 ### Following a session
 
