@@ -111,6 +111,7 @@ fn a_turn_end_of(session_id: &str) -> SessionNotification {
         at_unix_ms: 1_793_000_000_000,
         ended: None,
         activity_status: None,
+        message: None,
     }
 }
 

@@ -57,6 +57,7 @@ fn an_attention_notification() -> SessionNotification {
         question: None,
         ended: None,
         activity_status: None,
+        message: None,
     }
 }
 
@@ -514,4 +515,29 @@ async fn reports_how_many_chats_a_failed_delivery_missed() {
         outcome.map_err(|e| e.to_string()),
         Err("telegram send failed for 2 of 2 chat(s)".to_string())
     );
+}
+
+/// A message one session sends another is for its recipient's inbox: no chat is told, even one
+/// tracking the sender (`#activity-wake` 5/5).
+#[test]
+fn a_message_is_never_sent_to_telegram() {
+    // Given a chat tracking the session, and a message the session sent its orchestrator
+    let (channel, _) = a_telegram_channel(
+        a_config_broadcasting_to_one_chat(),
+        a_chat_tracking_the_session(),
+    );
+    let message = SessionNotification {
+        source: SessionNotificationSource::Message,
+        text: "Tests pass; pushed 3f2a1c.".to_string(),
+        message: Some(tddy_daemon_kernel::session_notification::SessionMessage {
+            to_session_id: OTHER_SESSION_ID.to_string(),
+            message_id: "m-1".to_string(),
+            reply_to: None,
+            text: "Tests pass; pushed 3f2a1c.".to_string(),
+        }),
+        ..an_attention_notification()
+    };
+
+    // When / Then
+    assert!(!channel.wants_notification(&message));
 }

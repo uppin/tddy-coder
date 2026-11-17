@@ -120,6 +120,7 @@ fn a_notification_of(session_id: &str, text: &str) -> SessionNotification {
         ended: None,
         activity_status: None,
         at_unix_ms: NOW,
+        message: None,
     }
 }
 
@@ -176,6 +177,7 @@ fn a_record_of(notification: SessionNotification) -> ProjectNotificationRecord {
         activity_status: notification.activity_status,
         at_unix_ms: notification.at_unix_ms,
         orchestrator_session_id: None,
+        message: None,
     }
 }
 

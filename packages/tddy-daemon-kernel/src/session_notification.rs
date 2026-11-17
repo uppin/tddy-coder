@@ -35,6 +35,11 @@ pub enum SessionNotificationSource {
     /// The session manager — the agent of the session's main terminal ended. Carries a
     /// [`SessionEndNotice`] (`#activity-wake` 1/3).
     SessionEnded,
+    /// `PostSessionMessage` — one session's message to another; the notification's `session_id`
+    /// is the sender. Carries a [`SessionMessage`] (`#activity-wake` 5/5). Not for the operator:
+    /// the project log keeps it for its recipient's inbox and for whoever watches its sender, and
+    /// the drawer, Telegram and the desktop skip it.
+    Message,
 }
 
 /// How an agent grades what it is telling its operator. Chosen by the agent (`tddy-tools notify
@@ -120,6 +125,21 @@ pub struct SessionEndNotice {
     pub exit_code: Option<i32>,
 }
 
+/// What one session sent another: the structured content of a
+/// [`SessionNotificationSource::Message`] notification, whose `session_id` is the sender
+/// (`#activity-wake` 5/5).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SessionMessage {
+    /// The recipient: a session of the sender's project, on this host, of the same OS user.
+    pub to_session_id: String,
+    /// `m-` and a UUID: what a reply names as its `reply_to`.
+    pub message_id: String,
+    /// The message this one replies to, which the sender received.
+    pub reply_to: Option<String>,
+    /// The message itself: non-empty, at most 8 KiB.
+    pub text: String,
+}
+
 /// One thing that happened in one session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionNotification {
@@ -155,6 +175,9 @@ pub struct SessionNotification {
     /// raised for (`Done`, `WaitingForInput`, …), so a session watch can tell a finished turn from
     /// a wait for input (`#activity-wake` 2/3); `None` for every other source. Server-side only.
     pub activity_status: Option<String>,
+    /// What one session sent another, for a [`SessionNotificationSource::Message`] notification;
+    /// `None` for every other source (`#activity-wake` 5/5).
+    pub message: Option<SessionMessage>,
     /// Epoch milliseconds. The web ages activity out of its blink window against this, so it is
     /// the moment the event happened, never the moment a client read it.
     pub at_unix_ms: u64,

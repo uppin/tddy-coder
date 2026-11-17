@@ -81,6 +81,7 @@ impl World {
             at_unix_ms: 1_790_000_000_000,
             ended: None,
             activity_status: None,
+            message: None,
         }
     }
 

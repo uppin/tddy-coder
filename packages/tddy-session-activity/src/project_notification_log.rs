@@ -40,7 +40,7 @@ use tokio::time::Instant;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_core::WorkflowError;
 use tddy_daemon_kernel::session_notification::{
-    AgentNotification, QuestionNotice, SessionEndNotice, SessionNotificationKind,
+    AgentNotification, QuestionNotice, SessionEndNotice, SessionMessage, SessionNotificationKind,
     SessionNotificationSource,
 };
 use tddy_tool_engine::project_home_inbox_tools::MAX_WAIT_MS;
@@ -88,6 +88,9 @@ pub struct ProjectNotificationRecord {
     /// The status an activity-status record was raised for (`#activity-wake` 2/3); `None` for
     /// every other source, and for a record written before records carried it.
     pub activity_status: Option<String>,
+    /// What one session sent another, for a `message` record (`#activity-wake` 5/5); `None` for
+    /// every other source.
+    pub message: Option<SessionMessage>,
     pub at_unix_ms: u64,
     /// The orchestrator that started the session — the `orchestrator_session_id` its changeset
     /// names when the record is appended — or `None` for a session no orchestrator started
@@ -147,7 +150,10 @@ struct Held {
 
 impl Held {
     fn visible_to(&self, scope: &ProjectNotificationScope) -> bool {
+        // A message between sessions is its recipient's, read through the inbox and the message
+        // watches — never an operator notification (`#activity-wake` 5/5).
         self.os_user == scope.os_user
+            && self.record.source != SessionNotificationSource::Message
             && self.record.session_id != scope.exclude_session_id
             && scope.started_by.as_ref().is_none_or(|orchestrator| {
                 self.record.orchestrator_session_id.as_ref() == Some(orchestrator)
@@ -462,6 +468,7 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
                     question: notification.question.clone(),
                     ended: notification.ended.clone(),
                     activity_status: notification.activity_status.clone(),
+                    message: notification.message.clone(),
                     at_unix_ms: notification.at_unix_ms,
                     orchestrator_session_id: orchestrator.clone(),
                 },

@@ -172,6 +172,8 @@ pub fn desktop_notice_for(
 ) -> Option<DesktopNotice> {
     if notification.kind != SessionNotificationKind::AttentionRequired
         || notification.os_user != context.os_user
+        // A message between sessions is for its recipient's inbox (`#activity-wake` 5/5).
+        || notification.source == SessionNotificationSource::Message
     {
         return None;
     }

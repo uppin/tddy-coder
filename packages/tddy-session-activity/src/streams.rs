@@ -63,6 +63,8 @@ pub fn session_notification_event(notification: SessionNotification) -> SessionN
                 ProtoSessionNotificationSource::PendingQuestion
             }
             SessionNotificationSource::SessionEnded => ProtoSessionNotificationSource::SessionEnded,
+            // A message has no wire form: the relay never sends one (`#activity-wake` 5/5).
+            SessionNotificationSource::Message => ProtoSessionNotificationSource::Unspecified,
         } as i32,
         text: notification.text,
         at_unix_ms: notification.at_unix_ms,
@@ -138,6 +140,11 @@ pub async fn relay_session_notifications(
                 // no owner is not a notification for everybody — it is one whose owner could not
                 // be established, and the safe answer to that is to deliver it to no one.
                 if notification.os_user.is_empty() || notification.os_user != os_user {
+                    continue;
+                }
+                // A message between sessions is for its recipient's inbox, not the drawer
+                // (`#activity-wake` 5/5).
+                if notification.source == SessionNotificationSource::Message {
                     continue;
                 }
                 if tx.send(session_notification_event(notification)).is_err() {

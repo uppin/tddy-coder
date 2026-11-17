@@ -12,7 +12,7 @@ use tddy_room_client::RoomConnector;
 use tddy_tools::server::PermissionServer;
 use tddy_tools::{
     cli, index_client, monitor_cli, notify_cli, pty_relay, remote_cli, rename_session_cli,
-    session_hook,
+    send_cli, session_hook,
 };
 
 #[derive(Parser)]
@@ -112,6 +112,11 @@ enum Subcommand {
     /// creates a watch (or attaches to one with `--watch`), prints each matched event as it happens,
     /// exits 0 once every streamed watch has ended and non-zero after an `error` line.
     Monitor(monitor_cli::MonitorArgs),
+
+    /// Send another session of your project a message it reads when it next looks — nothing is
+    /// typed into its terminal (`--to <session-id>`, `--reply-to <message-id>`, text or `-` for
+    /// stdin). Prints the message's id as JSON; exits non-zero with the reason when refused.
+    Send(send_cli::SendArgs),
 
     /// Enumerate the models an agent supports (JSON on stdout). Queries the underlying agent
     /// command where possible (cursor `--list-models`, ACP `available_models`), else a curated list.
@@ -239,6 +244,7 @@ async fn run(args: Args) -> Result<()> {
         Some(Subcommand::Notify(s)) => notify_cli::run_notify(s).await?,
         Some(Subcommand::RenameSession(s)) => rename_session_cli::run_rename_session(s).await?,
         Some(Subcommand::Monitor(s)) => std::process::exit(monitor_cli::run_monitor(s).await),
+        Some(Subcommand::Send(s)) => std::process::exit(send_cli::run_send(s).await),
         Some(Subcommand::ListModels(s)) => {
             tddy_tools::list_models::run_list_models(&s, &agent_models_catalog(&s)?).await?
         }

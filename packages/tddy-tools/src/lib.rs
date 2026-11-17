@@ -29,6 +29,7 @@ pub mod remote_cli;
 pub mod rename_session_cli;
 mod reset_worktree_choice;
 pub mod restructure_tools;
+pub mod send_cli;
 pub mod server;
 pub mod session_actions_cli;
 pub mod session_hook;

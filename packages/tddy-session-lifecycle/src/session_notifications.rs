@@ -59,6 +59,7 @@ mod agent_end_notifications {
             }),
             at_unix_ms,
             activity_status: None,
+            message: None,
         }
     }
 
@@ -171,6 +172,7 @@ mod agent_end_notifications {
                     }),
                     at_unix_ms: 1_790_000_000_000,
                     activity_status: None,
+                    message: None,
                 }
             );
         }

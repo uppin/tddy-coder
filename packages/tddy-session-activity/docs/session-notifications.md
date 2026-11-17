@@ -153,8 +153,8 @@ opens it over the data dir before the bus is assembled and installs the same `Ar
 ## Session watches (`session_watches`)
 
 An orchestrator's watches over the sessions it can see (`#activity-wake` 2/3): a filter — sessions
-by id and/or `started_by_me`, six kinds (`WatchKind`: `question`, `permission`, `turn_finished`,
-`waiting_for_input`, `agent_notification`, `ended`) — with its own position in the project
+by id and/or `started_by_me`, seven kinds (`WatchKind`: `question`, `permission`, `turn_finished`,
+`waiting_for_input`, `agent_notification`, `ended`, `message`) — with its own position in the project
 notification log and a required TTL of at most 24 hours (`MAX_WATCH_TTL_SECS` = 86 400, at most
 `MAX_LIVE_WATCHES` = 16 live per orchestrator).
 
@@ -206,6 +206,37 @@ notification log and a required TTL of at most 24 hours (`MAX_WATCH_TTL_SECS` = 
   lease map and the acknowledgement live in `session_watches/stream.rs`.
 - `has_live_watches(owner, log, now)` is the live check the wake and the auto-stop hold call;
   this crate only answers it.
+
+## Messages between sessions (`session_messages`)
+
+A `PostSessionMessage` record is activity like any other (`#activity-wake` 5/5): source `Message`
+in `tddy_daemon_kernel::session_notification`, carrying a `SessionMessage { to_session_id,
+message_id, reply_to, text }`, published `AttentionRequired` so the log, the waker and the long
+polls take it unchanged — the operator surfaces (the drawer, Telegram, the desktop,
+`ReadProjectNotifications`) skip the source. The log is its only store; this module is how its
+recipient reads it, and nothing here keeps a copy.
+
+- **The inbox watch.** `WatchFilter::inbox_of(session_id)` — the kind `message` alone, selecting
+  its owner — matches the records addressed to its owner, whoever sent them
+  (`watch_matches`'s `message` branch: an inbox watch by recipient, any other `message` watch by
+  sender, through the session selection). It is the one watch a session that is not an orchestrator
+  may hold; the daemon-rpc layer serves it (`run_inbox_watch_tool`) ahead of the project-home role
+  gate. An orchestrator hears what its sessions send through an ordinary watch that includes the
+  kind `message`.
+- **The inbox position.** Per session, the `seq` up to which it has read the messages addressed to
+  it — `ProjectWatches.inbox_positions`, persisted beside the watches in
+  `session-watches.json`, keyed by session id, so it survives a restart and a `/clear`.
+- **Reading.** `SessionWatchStore::read_messages(recipient, after_message_id, limit, log, now)`
+  (`ReadSessionMessages`' body) answers the messages addressed to `recipient` after its inbox
+  position — or after `after_message_id`, which must name one it received (`received_message`) —
+  oldest first, at most `limit` (default and cap `MAX_MESSAGES_PER_READ` = 50), advancing the
+  position past what it answered under the project lock. `refuse_a_bad_message_text` holds the
+  text to non-empty and `MAX_MESSAGE_BYTES` (8 KiB).
+- **Delivered once.** `watch_matches` takes the owner's inbox position: a message addressed to the
+  owner that the position has passed matches no watch; and a read
+  (`read_inbox`, with `skip_watch_delivered`) skips a message a live watch of the reader whose
+  position has passed it already delivered — advancing the position past it. Across a reader's own
+  watches, the union by `seq` already hands a record once.
 
 ## Publish sites
 
@@ -263,6 +294,8 @@ Telegram surface is unaffected, and web-started and resumed sessions publish nor
 | `project_home_watch_tools` | `tddy-tool-engine` | the tools offered to the project-home role; `ttl_seconds` required in the schema; the port handed what was asked, with every kind by default; bad arguments refused before the port; renew and cancel naming the watch |
 | `project_home_session_watch_acceptance` | `tddy-daemon-rpc` | the tools and `watchEvents` through the harness: a permission prompt riding on the next answer, delivered once; kinds and sessions told apart; list, renew and cancel; sessions-ended reported once; every refusal; an error answer consuming nothing |
 | `session_watch_stream_unit` | `tddy-session-activity` | a stream batch not advancing until acknowledged; `ack_seq` past what was handed refused; `take_delivery` and `deliver_with` skipping a streamed watch; the lease lapsing after its grace; a new stream taking over from the old one |
+| `session_messages_unit` | `tddy-session-activity` | a message record round-tripping through the log; the inbox position advancing past what is read; an inbox watch matching only what is addressed to its owner; delivered once across reads and watches; the kind matching only message records; the 8 KiB limit |
+| `session_messages_acceptance` | `tddy-daemon-rpc` | the tools through the exec-tool harness with real session records: a child messaging its orchestrator and being read; `reply_to` carried and a reply to a message never received refused; every out-of-rule address refused naming the reaches; the message absent from `ReadProjectNotifications`; each message read once; an orchestrator's `message` watch and the wake; a session's own inbox watch and no other; a Cursor session reading its messages |
 
 ⚠ The bus's classification, fan-out and stream are asserted from `tddy-session-lifecycle` and
 `tddy-telegram-control`, not from this crate. Recorded in

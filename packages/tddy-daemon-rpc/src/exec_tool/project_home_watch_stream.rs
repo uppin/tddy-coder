@@ -13,7 +13,9 @@ use serde_json::{json, Map, Value};
 use tddy_session_activity::project_notification_log::{
     record_json, ProjectNotificationLog, ProjectNotificationScope,
 };
-use tddy_session_activity::session_watches::{StreamBatch, WatchKind, WatchOwner};
+use tddy_session_activity::session_watches::{
+    SessionWatchStore, StreamBatch, WatchKind, WatchOwner,
+};
 use tddy_tool_engine::project_home_inbox_tools::NO_NOTIFICATION_LOG;
 use tddy_tool_engine::project_home_watch_stream_tools::{
     ProjectHomeWatchStreamPort, WatchStreamRequest,
@@ -28,6 +30,50 @@ use super::watch_wake::wake_event_text;
 /// How often a held call re-takes its batch: it renews the stream's lease while it waits, well
 /// inside the shortest lease a host is built with.
 const RENEW_TICK: Duration = Duration::from_millis(100);
+
+/// One `WaitSessionWatchEvents` call over this host's watches and log, held for `owner` — whose
+/// answer excludes its own session's records while it waits. Shared by the port the project-home
+/// role serves and by a session's own inbox watch (`#activity-wake` 5/5).
+pub(super) async fn hold_and_take(
+    watches: &SessionWatchStore,
+    log: &ProjectNotificationLog,
+    owner: WatchOwner,
+    exclude_session_id: String,
+    request: WatchStreamRequest,
+) -> Result<Value, String> {
+    let deadline = Instant::now() + Duration::from_millis(request.timeout_ms);
+    let mut stream_id = request.stream_id.clone();
+    loop {
+        let batch = watches
+            .take_stream_batch(
+                &owner,
+                stream_id.as_deref(),
+                &request.watch_ids,
+                request.ack_seq,
+                log,
+                tddy_daemon_kernel::now_unix_ms(),
+            )
+            .await
+            .map_err(|refusal| refusal.to_string())?;
+        stream_id = Some(batch.stream_id.clone());
+        let has_batch = !batch.events.is_empty() || batch.lost > 0 || !batch.ended.is_empty();
+        let now = Instant::now();
+        if has_batch || request.timeout_ms == 0 || now >= deadline {
+            return batch_json(batch);
+        }
+        // Hold until the log records something for the caller's project, or the renewal
+        // tick: re-taking the batch then renews the lease while the call is held.
+        let remaining = deadline.saturating_duration_since(now);
+        let scope = ProjectNotificationScope {
+            project_id: owner.project_id.clone(),
+            os_user: owner.os_user.clone(),
+            exclude_session_id: exclude_session_id.clone(),
+            started_by: None,
+        };
+        let cursor = log.head_seq(&owner.project_id).to_string();
+        let _ = log.wait(&scope, &cursor, remaining.min(RENEW_TICK)).await;
+    }
+}
 
 #[async_trait]
 impl ProjectHomeWatchStreamPort for DaemonProjectHome {
@@ -49,50 +95,8 @@ impl ProjectHomeWatchStreamPort for DaemonProjectHome {
             session_id: home.session_id.clone(),
             os_user: self.os_user.clone(),
         };
-        let deadline = Instant::now() + Duration::from_millis(request.timeout_ms);
-        let mut stream_id = request.stream_id.clone();
-        loop {
-            let batch = watches
-                .take_stream_batch(
-                    &owner,
-                    stream_id.as_deref(),
-                    &request.watch_ids,
-                    request.ack_seq,
-                    log,
-                    tddy_daemon_kernel::now_unix_ms(),
-                )
-                .await
-                .map_err(|refusal| refusal.to_string())?;
-            stream_id = Some(batch.stream_id.clone());
-            let has_batch = !batch.events.is_empty() || batch.lost > 0 || !batch.ended.is_empty();
-            let now = Instant::now();
-            if has_batch || request.timeout_ms == 0 || now >= deadline {
-                return batch_json(batch);
-            }
-            // Hold until the log records something for the caller's project, or the renewal
-            // tick: re-taking the batch then renews the lease while the call is held.
-            let remaining = deadline.saturating_duration_since(now);
-            hold_until_next_record(log, &owner, home, remaining).await;
-        }
+        hold_and_take(watches, log, owner, home.session_id.clone(), request).await
     }
-}
-
-/// Hold until the log records something for `owner`'s project, or `remaining` capped at the
-/// renewal tick passes.
-async fn hold_until_next_record(
-    log: &ProjectNotificationLog,
-    owner: &WatchOwner,
-    home: &HomeCaller,
-    remaining: Duration,
-) {
-    let scope = ProjectNotificationScope {
-        project_id: owner.project_id.clone(),
-        os_user: owner.os_user.clone(),
-        exclude_session_id: home.session_id.clone(),
-        started_by: None,
-    };
-    let cursor = log.head_seq(&owner.project_id).to_string();
-    let _ = log.wait(&scope, &cursor, remaining.min(RENEW_TICK)).await;
 }
 
 /// A batch as the tool answers it: each event carries the monitor line's fields plus its record.

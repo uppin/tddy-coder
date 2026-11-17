@@ -121,8 +121,10 @@ async fn answer(
     port.wait_watch_events(home, request_from(&args)?).await
 }
 
-/// What a call asks for: its watches, its acknowledgement and stream, and how long to hold it.
-fn request_from(args: &Value) -> Result<WatchStreamRequest, String> {
+/// What a call asks for, read from its parsed arguments — the same read
+/// [`execute_project_home_watch_stream_tool`] makes, for a daemon serving a call it has already
+/// routed itself (the inbox watch of a session that is not an orchestrator, `#activity-wake` 5/5).
+pub fn request_from(args: &Value) -> Result<WatchStreamRequest, String> {
     Ok(WatchStreamRequest {
         watch_ids: watch_ids_argument(args)?,
         ack_seq: ack_seq_argument(args)?,

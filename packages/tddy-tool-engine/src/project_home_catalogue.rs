@@ -37,6 +37,7 @@ use crate::read_only::is_project_home_allowed_tool;
 use crate::session_follow::{
     session_follow_tool_defs, READ_SESSION_ACTIVITY, READ_SESSION_TRANSCRIPT,
 };
+use crate::session_message_tools::session_message_tool_defs;
 use crate::stack_git_tools::stack_git_tool_defs;
 use crate::stack_tools::stack_tool_defs;
 use crate::start_ledger::{CANCEL_SESSION_START, GET_SESSION_START};
@@ -112,7 +113,11 @@ pub fn session_offered_catalog(is_project_home: bool, choices: &StartChoices) ->
     if is_project_home {
         project_home_catalog_with(start_session_schema(choices))
     } else {
+        // Every role messages the sessions it may address (`#activity-wake` 5/5).
         tool_catalog()
+            .into_iter()
+            .chain(session_message_tool_defs())
+            .collect()
     }
 }
 
@@ -171,6 +176,7 @@ pub fn session_offered_catalog_for(role: SessionToolRole, choices: &StartChoices
                             || is_conversation_spawner_scoped_tool(&tool.name)
                     }),
             )
+            .chain(session_message_tool_defs())
             .collect(),
     }
 }
@@ -183,6 +189,7 @@ pub(crate) fn project_home_catalog_with(start_schema: Value) -> Vec<ToolDef> {
         .chain(project_home_git_tool_defs())
         .chain(stack_tool_defs())
         .chain(stack_git_tool_defs())
+        .chain(session_message_tool_defs())
         .collect()
 }
 

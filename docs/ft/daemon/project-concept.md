@@ -351,7 +351,9 @@ The exec tools below give the read-only main its reach over **its own project's*
 session whose record carries the `project-home` role may run them; any other caller is refused with
 `PERMISSION_DENIED` naming the role — except that a session that can spawn conversations is offered
 and served the four start tools and the two answer tools, for its own project, and
-`ReadSessionActivity` for the sessions it started (see [Conversation spawners](#conversation-spawners)).
+`ReadSessionActivity` for the sessions it started (see [Conversation spawners](#conversation-spawners)),
+and that `PostSessionMessage`, `ReadSessionMessages` and each session's own inbox watch are every
+role's (see [Messages between sessions](#messages-between-sessions)).
 
 | Tool | Arguments | Answers |
 |---|---|---|
@@ -373,9 +375,11 @@ and served the four start tools and the two answer tools, for its own project, a
 | `AnswerSessionQuestion` | `session_id`, `request_id`, `answers: [{question_index, selected, other?}]`, `daemon_instance_id?` | `{session_id, request_id, answered_by, answers, at_unix_ms}`: answers the `AskUserQuestion` a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. Each answer names a question by index, the option labels chosen and, optionally, free text. Only the target's orchestrator may answer, the answers are checked against the question as asked, and the first answer wins. See [Answering a question](#answering-a-question) |
 | `SendSessionMessage` | `session_id`, `text`, `daemon_instance_id?` | `{session_id, delivered_via}`: gives a running session's agent one new turn, delivered the way its agent spec's `turn_input` declares (`terminal_paste`: pasted into the **main** terminal, then the submit key). Takes **no** control lease. Refused, with nothing typed, for an agent that declares no `turn_input` (naming it), a stopped session (naming `ResumeSession`), and one waiting on a permission prompt or question (naming the answer tool). See [Sending a session a turn](#sending-a-session-a-turn) |
 | `ResumeSession` | `session_id`, `message?`, `daemon_instance_id?` | `{session_id, outcome}`: `resumed` — what the web UI's **Resume** does, then `message`, if any, as the resumed agent's first turn once its terminal has drawn — or `running` for a session already running, which is left alone. See [Sending a session a turn](#sending-a-session-a-turn) |
+| `PostSessionMessage` | `to_session_id`, `text`, `reply_to?` | `{message_id, to_session_id, sent_at_unix_ms}`: sends another session of the project a message it reads when it next looks — nothing is typed into its terminal. Offered to **every** session role. Who may be addressed is the rule of [Messages between sessions](#messages-between-sessions); the text is non-empty and at most 8 KiB |
+| `ReadSessionMessages` | `after_message_id?`, `limit?` (50 by default and at most) | `{messages, lost, has_more}`: the messages addressed to the caller that it has not read yet, oldest first, each once; answering them advances its inbox position. See [Messages between sessions](#messages-between-sessions) |
 | `WaitProjectNotifications` | `cursor?`, `timeout_ms?` (at most 20000, the default), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, timed_out, lost?}`: returns at once when the project's notification log holds records after `cursor`, otherwise holds until one arrives or `timeout_ms` passes. Without a cursor it waits for the next new record. See [Waiting for notifications](#waiting-for-notifications) |
 | `ReadProjectNotifications` | `cursor?`, `limit?` (50 by default, at most 200), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, clamped_to?, lost?}`: up to `limit` records after `cursor`, oldest first, without waiting; without a cursor, the newest page. See [Waiting for notifications](#waiting-for-notifications) |
-| `CreateSessionWatch` | `session_ids?`, `started_by_me?`, `kinds?`, `ttl_seconds` (required, 1 to 86400) | `{watch_id, session_ids, started_by_me, kinds, created_at_unix_ms, expires_at_unix_ms}`: a watch over the sessions it names, or every session the caller started, for the kinds named (all six when none: `question`, `permission`, `turn_finished`, `waiting_for_input`, `agent_notification`, `ended`). See [Watching sessions](#watching-sessions) |
+| `CreateSessionWatch` | `session_ids?`, `started_by_me?`, `kinds?`, `ttl_seconds` (required, 1 to 86400) | `{watch_id, session_ids, started_by_me, kinds, created_at_unix_ms, expires_at_unix_ms}`: a watch over the sessions it names, or every session the caller started, for the kinds named (all seven when none: `question`, `permission`, `turn_finished`, `waiting_for_input`, `agent_notification`, `ended`, `message`). The kind `message` alone with no session selected is the caller's inbox watch — the one watch a session that is not an orchestrator may hold. See [Watching sessions](#watching-sessions) |
 | `ListSessionWatches` | — | `{watches}`: the caller's live watches, each with its filter, expiry and how many matched events wait (`waiting`) |
 | `RenewSessionWatch` | `watch_id`, `ttl_seconds` (required, 1 to 86400) | the watch, expiring `ttl_seconds` from now |
 | `CancelSessionWatch` | `watch_id` | `{watch_id, cancelled: true}`: the watch ends; nothing more is delivered for it |
@@ -668,6 +672,47 @@ a subagent: give it a follow-up turn, resume it when it has stopped, and learn w
   caller's own sessions only. Read the result with `ReadSessionActivity`, `ReadSessionTranscript` or
   `ReadSessionTerminal`.
 
+### Messages between sessions
+
+`PostSessionMessage` lets a session answer its orchestrator, and an orchestrator leave a session
+something for later, without typing into anyone's terminal — the counterpart
+[SendSessionMessage](#sending-a-session-a-turn) lacks for agents that declare no `turn_input`
+(Cursor, for one), and the only way a started session's agent can answer the orchestrator that
+started it. The message is recorded once, as a **`message` record of the project notification log**
+([Session notifications § The project notification log](session-notifications.md#the-project-notification-log)),
+and read from there — nothing of the message is kept anywhere else.
+
+- **Who may address whom** is the daemon's rule, read from the sessions' own records: one project,
+  one operating-system user, on this host, never the caller itself, and one of the caller's
+  reaches — an **orchestrator** may address any session of its project it can see; a session, its
+  orchestrator (the one its changeset names) and the project's main session; a **reply**
+  (`reply_to`) may go to the sender of a message the caller received. Anything else is refused
+  saying who the caller may address.
+- **The text** is non-empty and at most 8 KiB. The answer is `{message_id, to_session_id,
+  sent_at_unix_ms}`; `tddy-tools send --to <session-id> [--reply-to <message-id>] [<text> | -]`
+  calls the tool and prints it, exiting non-zero with the reason when refused.
+- **Not for a person.** A message is an activity record, not an attention notification: the drawer,
+  Telegram and Tddy Desktop's native notifications skip the source, and
+  `ReadProjectNotifications` / `WaitProjectNotifications` never return one. It shares the log's
+  1 000-record window with attention records, and an evicted, undelivered message is counted in
+  `lost`.
+- **Reading.** `ReadSessionMessages { after_message_id?, limit? }` answers the messages addressed
+  to the caller that it has not read yet, oldest first, at most 50, through its **inbox position** —
+  a `seq` into the log kept beside its watches in `session-watches.json`, advanced past what is
+  answered. It holds no message: it is a reference into the log.
+- **The inbox watch.** `CreateSessionWatch` with the kind `message` alone and no session selected
+  creates the caller's **inbox watch**: the messages addressed to it, whoever sent them. It is the
+  one watch a session that is not an orchestrator may hold (see
+  [Watching sessions](#watching-sessions)), and it is delivered like any watch — on the holder's
+  next tool answer, pasted by the idle wake when it holds one, or streamed by
+  `tddy-tools monitor --kinds message`, which prints each message as a `message` line carrying its
+  text whole (JSON escapes the newlines, so it stays one stdout line).
+- **Delivered once.** A message addressed to a session is handed to it once across its watches and
+  its reads, under the project's lock: a watch skips a message the inbox position has passed, and a
+  read skips one a watch of the reader has already delivered.
+- **No cross-host.** A message never crosses to another daemon, and the tools take no
+  `daemon_instance_id`.
+
 ### Answering a permission prompt
 
 A claude-cli session started by an orchestrator (its changeset's `orchestrator_session_id`) holds
@@ -766,20 +811,26 @@ orchestrator learns what its sessions did on whatever tool call it makes next in
 wait open.
 
 - **Creation.** `CreateSessionWatch` names sessions by `session_ids`, or every session the caller
-  started with `started_by_me`, or both — at least one of the two. `kinds` names which of the six
-  kinds match (all six when none is named): a `question` or `permission` prompt, a `turn_finished`
+  started with `started_by_me`, or both — at least one of the two, except the **inbox watch**,
+  which selects no session and is the caller's own (below). `kinds` names which of the seven kinds
+  match (all seven when none is named): a `question` or `permission` prompt, a `turn_finished`
   (`Done`), a `waiting_for_input` (`WaitingForInput` with no question — an activity-status record
   carrying a question matches nothing, since its `pending_question` record already announced that
-  prompt), an `agent_notification`, or an `ended` (`session_ended`). `ttl_seconds` is required, from
-  1 to 86400 (24 hours); `RenewSessionWatch` restarts it for one of the caller's watches. One
-  orchestrator holds at most 16 live watches.
+  prompt), an `agent_notification`, an `ended` (`session_ended`), or a `message`. `ttl_seconds` is
+  required, from 1 to 86400 (24 hours); `RenewSessionWatch` restarts it for one of the caller's
+  watches. One orchestrator holds at most 16 live watches.
 - **Visibility.** A watch sees exactly what the inbox tools see: the caller's project and operating-system
   user, on this host, never the caller's own session. A `session_ids` entry with no session record
   here, or one of another project, is refused naming the session; naming the caller's own session is
-  refused saying why. A caller that is not an orchestrator is refused by the role guard, and an
+  refused saying why. A caller that is not an orchestrator is refused by the role guard — except its
+  **inbox watch**, the one watch any session may hold: `CreateSessionWatch` with the kind `message`
+  alone and no session selected, matching the messages addressed to it
+  ([Messages between sessions](#messages-between-sessions)); every other watch tool call from such a
+  session is still denied. An
   orchestrator whose agent declares no `turn_input` — or one whose `turn_input` is `acp_prompt` — is
   refused naming the agent, in the words `SendSessionMessage` uses: a watch promises a wake that such
-  an agent cannot take.
+  an agent cannot take. (The inbox watch is exempt: it need not paste — its holder reads what it
+  holds.)
 - **Delivery.** Every tool answer the orchestrator receives on this host whose result is a JSON
   object gains a `watchEvents` key when something is waiting:
   `{events, lost, ended}` — the records its watches matched since the last answer, oldest first, at
@@ -798,8 +849,12 @@ wait open.
 - **Streaming to a monitor.** `tddy-tools monitor` streams a watch to a process — one JSON object
   per stdout line, for Claude Code's `Monitor` tool to turn into notifications. Without `--watch`
   it creates a watch through `CreateSessionWatch` and prints a `watch` line; with `--watch <id>`
-  (repeatable) it attaches to existing watches. It then loops `WaitSessionWatchEvents`: each event
-  is printed as an `event` line (compact, or with the full log record under `--full`), `lost` and
+  (repeatable) it attaches to existing watches; with `--kinds message` and no `--session` or
+  `--started-by-me` it creates the caller's inbox watch, which any session may stream. It then
+  loops `WaitSessionWatchEvents`: each event is printed as an `event` line — a matched message as
+  a `message` line carrying its text whole
+  ([Messages between sessions](#messages-between-sessions)) — (compact, or with the full log record under `--full`),
+  `lost` and
   `ended` are printed as they come, and the next call acknowledges the batch with the last printed
   `seq`. It exits 0 once every streamed watch has ended, and non-zero after an `error` line on any
   refusal, transport error or per-call deadline lapse (`timeout_ms` + 10 s). While a stream keeps

@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-session-activity/src/session_watches.rs`
 **Category:** oversized-file
 **Detected:** 2026-11-17 — `/pr-wrap` step 3.5 file-length gate on #930 (`#activity-wake` 2/3), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **0 → 650 production lines** (2026-11-17) · budget 500
-**Thresholds breached:** length 650 > 500
+**Metrics:** **723 → 857 production lines** (2026-11-17, #935) · budget 500
+**Thresholds breached:** length 857 > 500
 **Restructure:** `move_item` / `extract_module` into submodules — `/code-restructuring` territory
 **Status:** Open — deferred to a follow-up branch after the `#activity-wake` stack lands; unclaimed
 
@@ -19,6 +19,7 @@ deferred under `/pr-wrap` step 3.5's stack-branch rule.
 | 2026-11-17 | 0 → 650 | #930: the watch store, matcher and endings in one new module |
 | 2026-11-17 | 650 → 701 | #931: `deliver_with` (committed-on-success delivery) added on the same store. Still stack-shared — successors #934/#935 also modify this file — so the split stays deferred to a follow-up after the stack lands |
 | 2026-11-17 | 701 → 723 | #934: the stream lease fields and the streamed-watch skip in `apply_delivery`. Still stack-shared — #935 (`session-messages`) also modifies this file — so the split stays deferred to a follow-up after the stack lands |
+| 2026-11-17 | 723 → 857 | #935: the `message` kind, the inbox watch's match and the once-only rule (`watch_matches`'s message branch, `a_watch_has_delivered`), the inbox positions (`inbox_positions`, `inbox_position_of`), and `read_inbox`. Still stack-shared — #930/#931/#934 are open in the same stack — the split stays deferred to a follow-up after the stack lands |
 
 ## What would close it
 

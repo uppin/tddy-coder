@@ -22,4 +22,13 @@ impl DaemonSessionHost {
     pub fn project_notification_log(&self) -> Option<Arc<ProjectNotificationLog>> {
         self.project_notification_log.clone()
     }
+
+    /// The notification bus installed with [`Self::with_session_notification_bus`], or `None` on a
+    /// host with none: what a session's `PostSessionMessage` is published on (`#activity-wake`
+    /// 5/5), so the log, the waker and the long polls see it as they see every notification.
+    pub fn session_notification_bus(
+        &self,
+    ) -> Option<Arc<crate::session_notifications::SessionNotificationBus>> {
+        self.session_notification_bus.clone()
+    }
 }

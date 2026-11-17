@@ -112,6 +112,7 @@ impl World {
             ended: None,
             activity_status: None,
             at_unix_ms: 1_790_000_000_000,
+            message: None,
         }
     }
 

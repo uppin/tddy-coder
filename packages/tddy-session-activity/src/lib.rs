@@ -33,6 +33,7 @@ pub mod remote_git_pack_execution;
 pub mod service;
 pub mod session_deletion;
 pub mod session_list_enrichment;
+pub mod session_messages;
 pub mod session_notification_publishing;
 pub mod session_notification_subscribers;
 pub mod session_notifications;

@@ -121,6 +121,7 @@ impl AgentNotificationBuilder {
             at_unix_ms: A_MOMENT,
             ended: None,
             activity_status: None,
+            message: None,
         }
     }
 }

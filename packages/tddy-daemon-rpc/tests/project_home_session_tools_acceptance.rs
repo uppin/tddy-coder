@@ -499,7 +499,7 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
     let offered = offered_tool_names(&world, &world.home).await;
 
     // Then exactly the read-only tools, the project-home tools, the seven git tools, the eleven
-    // stack tools and the six stack git tools
+    // stack tools, the six stack git tools and the two message tools
     assert_eq!(
         offered,
         sorted_names(&[
@@ -566,6 +566,8 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
             "pr_set_parents",
             "pr_resolve_conflicts",
             "pr_spawn_child",
+            "PostSessionMessage",
+            "ReadSessionMessages",
         ])
     );
 }
@@ -582,8 +584,14 @@ async fn an_ordinary_session_is_offered_the_catalog_without_the_project_home_too
     // When
     let offered = offered_tool_names(&world, &world.sibling).await;
 
-    // Then the whole catalog, and none of the project-home tools
+    // Then the whole catalog plus the message tools every role is offered, and none of the
+    // project-home tools
     let mut expected = catalog;
+    expected.extend(
+        tddy_tool_engine::session_message_tools::session_message_tool_defs()
+            .into_iter()
+            .map(|tool| tool.name),
+    );
     expected.sort();
     assert_eq!(offered, expected);
     assert!(!offered.iter().any(|name| name == "ListProjectSessions"));

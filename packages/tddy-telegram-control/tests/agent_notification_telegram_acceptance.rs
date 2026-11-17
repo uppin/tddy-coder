@@ -76,6 +76,7 @@ impl AgentNotificationBuilder {
             question: None,
             ended: None,
             activity_status: None,
+            message: None,
         }
     }
 }

@@ -89,8 +89,9 @@ impl DaemonProjectHome {
     }
 }
 
-/// A watch as the tools answer it, with how many matched events wait when listed.
-fn watch_json(watch: &SessionWatch, waiting: Option<usize>) -> Value {
+/// A watch as the tools answer it, with how many matched events wait when listed. Shared with the
+/// inbox watch a session that is not an orchestrator holds (`#activity-wake` 5/5).
+pub(super) fn watch_json(watch: &SessionWatch, waiting: Option<usize>) -> Value {
     let mut answered = json!({
         "watch_id": watch.watch_id,
         "session_ids": watch.filter.session_ids,

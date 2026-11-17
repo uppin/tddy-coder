@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use tddy_daemon_kernel::session_notification::SessionNotificationSource;
 
 use crate::project_notification_log::{ProjectNotificationLog, ProjectNotificationRecord};
+use crate::session_messages::{a_message_to, InboxMessage, InboxRead};
 
 mod stream;
 
@@ -52,17 +53,21 @@ pub enum WatchKind {
     AgentNotification,
     /// A session's agent ended (`#activity-wake` 1/3).
     Ended,
+    /// A session sent a message — to the orchestrator itself or to another session
+    /// (`#activity-wake` 5/5). Selected by sender.
+    Message,
 }
 
 impl WatchKind {
     /// Every kind, in the order the tools list them.
-    pub const ALL: [WatchKind; 6] = [
+    pub const ALL: [WatchKind; 7] = [
         WatchKind::Question,
         WatchKind::Permission,
         WatchKind::TurnFinished,
         WatchKind::WaitingForInput,
         WatchKind::AgentNotification,
         WatchKind::Ended,
+        WatchKind::Message,
     ];
 
     /// The kind's name, as the tools take it.
@@ -74,6 +79,7 @@ impl WatchKind {
             WatchKind::WaitingForInput => "waiting_for_input",
             WatchKind::AgentNotification => "agent_notification",
             WatchKind::Ended => "ended",
+            WatchKind::Message => "message",
         }
     }
 
@@ -107,6 +113,7 @@ impl WatchKind {
                 }
             }
             SessionNotificationSource::AgentToolCall => None,
+            SessionNotificationSource::Message => Some(Self::Message),
         }
     }
 }
@@ -196,13 +203,21 @@ struct PendingEnd {
     end: WatchEnd,
 }
 
-/// The watches of one project, as kept in memory and on disk.
+/// The watches of one project, as kept in memory and on disk. Its fields are the watch module's
+/// alone; the rest of the crate reaches a project's state through
+/// [`SessionWatchStore::project_of`].
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct ProjectWatches {
+pub(crate) struct ProjectWatches {
     #[serde(default)]
     watches: Vec<SessionWatch>,
     #[serde(default)]
     ended: Vec<PendingEnd>,
+    /// Per session, the `seq` up to which it has read the messages addressed to it — the inbox
+    /// position of `ReadSessionMessages`, kept beside the watches
+    /// (`#activity-wake` 5/5). A session named here but holding no watches still keeps its
+    /// position.
+    #[serde(default)]
+    inbox_positions: BTreeMap<String, u64>,
 }
 
 /// Every project's watches on this host.
@@ -280,7 +295,7 @@ impl SessionWatchStore {
             );
         }
         if filter.kinds.is_empty() {
-            return Err("name at least one kind, or name none for all six".to_string());
+            return Err("name at least one kind, or name none for all seven".to_string());
         }
         let project = self.project_of(&owner.project_id);
         let mut state = project.lock().await;
@@ -336,9 +351,10 @@ impl SessionWatchStore {
             .map(|watch| {
                 let (records, _) =
                     log.records_after(&owner.project_id, &owner.os_user, watch.position);
+                let inbox = inbox_position_of(&state, owner);
                 let waiting = records
                     .iter()
-                    .filter(|record| watch_matches(watch, record))
+                    .filter(|record| watch_matches(watch, record, inbox))
                     .count();
                 ListedWatch {
                     watch: watch.clone(),
@@ -475,8 +491,66 @@ impl SessionWatchStore {
         state.watches.iter().any(|watch| &watch.owner == owner)
     }
 
+    /// The messages addressed to `recipient` after `start_seq`, oldest first, at most `limit` —
+    /// the body of `ReadSessionMessages`, which `crate::session_messages` words. With
+    /// `skip_watch_delivered`, a message a live watch of `recipient` already handed is not handed
+    /// again. The inbox position ends at the newest message handed — a watch-delivered one
+    /// skipped included — never behind where it stood, under the project's lock, persisted with
+    /// the watches. `lost` is the log's eviction count after `start_seq`.
+    pub(crate) async fn read_inbox(
+        &self,
+        recipient: &WatchOwner,
+        start_seq: u64,
+        limit: usize,
+        skip_watch_delivered: bool,
+        log: &ProjectNotificationLog,
+        now_unix_ms: u64,
+    ) -> InboxRead {
+        let project = self.project_of(&recipient.project_id);
+        let mut state = project.lock().await;
+        let ended_some = end_finished(&mut state, recipient, log, now_unix_ms);
+        let position = inbox_position_of(&state, recipient);
+        let (records, lost) =
+            log.records_after(&recipient.project_id, &recipient.os_user, start_seq);
+        let mut handed: Vec<InboxMessage> = Vec::new();
+        let mut newest = position;
+        let mut has_more = false;
+        for record in records
+            .iter()
+            .filter(|record| a_message_to(record, &recipient.session_id).is_some())
+        {
+            if skip_watch_delivered && a_watch_has_delivered(&state, recipient, record, position) {
+                // Delivered by a watch already; the position passes it, so no later read of
+                // the log hands it either.
+                newest = newest.max(record.seq);
+                continue;
+            }
+            if handed.len() >= limit {
+                has_more = true;
+                break;
+            }
+            if let Some(message) = InboxMessage::of(record) {
+                newest = newest.max(record.seq);
+                handed.push(message);
+            }
+        }
+        if newest > position {
+            state
+                .inbox_positions
+                .insert(recipient.session_id.clone(), newest);
+        }
+        if newest != position || ended_some {
+            self.persist_best_effort(&recipient.project_id, &state);
+        }
+        InboxRead {
+            messages: handed,
+            lost,
+            has_more,
+        }
+    }
+
     /// The project's watches, loaded the first time it is named.
-    fn project_of(&self, project_id: &str) -> Arc<tokio::sync::Mutex<ProjectWatches>> {
+    pub(crate) fn project_of(&self, project_id: &str) -> Arc<tokio::sync::Mutex<ProjectWatches>> {
         let mut projects = self
             .projects
             .lock()
@@ -549,12 +623,46 @@ fn refuse_a_bad_ttl(ttl: Duration) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether `watch` matches `record`: its session is named, or it started the session, the record
-/// is of a kind it asks for, and it is never the owner's own session. The record's project and OS
-/// user are the log read's, which is the owner's.
-fn watch_matches(watch: &SessionWatch, record: &ProjectNotificationRecord) -> bool {
+/// Whether `watch` matches `record`, `owner_inbox_position` being the `seq` up to which the
+/// watch's owner has read the messages addressed to it. Its session is named, or it started the
+/// session, and the record is of a kind it asks for, and it is never the owner's own session. The
+/// record's project and OS user are the log read's, which is the owner's.
+///
+/// A **message** record matches by who it is addressed to and who sent it: an inbox watch
+/// ([`WatchFilter::is_inbox_of`] its owner) matches the messages addressed to its owner, whoever
+/// sent them; any other watch matches by sender, through the session selection. And a message
+/// addressed to the owner that the owner's inbox position has passed matches no watch — it was
+/// read already, and it is delivered once (`crate::session_messages`).
+fn watch_matches(
+    watch: &SessionWatch,
+    record: &ProjectNotificationRecord,
+    owner_inbox_position: u64,
+) -> bool {
     if record.session_id == watch.owner.session_id {
         return false;
+    }
+    if record.source == SessionNotificationSource::Message {
+        let Some(message) = &record.message else {
+            return false;
+        };
+        let addressed_to_the_owner = message.to_session_id == watch.owner.session_id;
+        if addressed_to_the_owner && record.seq <= owner_inbox_position {
+            return false;
+        }
+        if watch.filter.is_inbox_of(&watch.owner.session_id) {
+            return addressed_to_the_owner;
+        }
+        if !watch.filter.kinds.contains(&WatchKind::Message) {
+            return false;
+        }
+        return watch
+            .filter
+            .session_ids
+            .iter()
+            .any(|id| id == &record.session_id)
+            || (watch.filter.started_by_me
+                && record.orchestrator_session_id.as_deref()
+                    == Some(watch.owner.session_id.as_str()));
     }
     let selected = watch
         .filter
@@ -564,6 +672,31 @@ fn watch_matches(watch: &SessionWatch, record: &ProjectNotificationRecord) -> bo
         || (watch.filter.started_by_me
             && record.orchestrator_session_id.as_deref() == Some(watch.owner.session_id.as_str()));
     selected && WatchKind::of(record).is_some_and(|kind| watch.filter.kinds.contains(&kind))
+}
+
+/// The `seq` up to which `owner` has read the messages addressed to it, from `state`.
+pub(crate) fn inbox_position_of(state: &ProjectWatches, owner: &WatchOwner) -> u64 {
+    state
+        .inbox_positions
+        .get(&owner.session_id)
+        .copied()
+        .unwrap_or(0)
+}
+
+/// Whether a live watch of `owner` in `state` matches `record` and has already been handed it —
+/// its position at or past the record. What a read skips, so a message is delivered once across
+/// the reader's watches and its reads (`crate::session_messages`).
+pub(crate) fn a_watch_has_delivered(
+    state: &ProjectWatches,
+    owner: &WatchOwner,
+    record: &ProjectNotificationRecord,
+    owner_inbox_position: u64,
+) -> bool {
+    state.watches.iter().any(|watch| {
+        &watch.owner == owner
+            && watch.position >= record.seq
+            && watch_matches(watch, record, owner_inbox_position)
+    })
 }
 
 /// Why `watch` has ended at `now_unix_ms`, or `None` while it lives.
@@ -615,6 +748,7 @@ fn apply_delivery(
     end_finished(state, owner, log, now_unix_ms);
     // A watch a stream's lease holds is skipped entirely: its events are the stream's alone,
     // and its position is the stream's to advance.
+    let inbox = inbox_position_of(state, owner);
     let mut matched: BTreeMap<u64, ProjectNotificationRecord> = BTreeMap::new();
     let mut lost = 0_u64;
     let mut scans: Vec<(String, u64, u64)> = Vec::new();
@@ -626,7 +760,7 @@ fn apply_delivery(
         let (records, watch_lost) =
             log.records_after(&owner.project_id, &owner.os_user, watch.position);
         lost = lost.max(watch_lost);
-        for record in records.iter().filter(|r| watch_matches(watch, r)) {
+        for record in records.iter().filter(|r| watch_matches(watch, r, inbox)) {
             matched.entry(record.seq).or_insert_with(|| record.clone());
         }
         scans.push((watch.watch_id.clone(), watch.position, watch_lost));
@@ -648,7 +782,7 @@ fn apply_delivery(
         }
         for record in events
             .iter()
-            .filter(|r| delivered.contains(&r.seq) && watch_matches(watch, r))
+            .filter(|r| delivered.contains(&r.seq) && watch_matches(watch, r, inbox))
         {
             position = position.max(record.seq);
         }
