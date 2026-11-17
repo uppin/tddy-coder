@@ -58,6 +58,7 @@ pub struct HomeDaemon {
     /// Shared, with its sandbox RPC bridge installed as the daemon runtime installs it, so a
     /// sandboxed main's jail can reach it (`#agent-tools 5/12`).
     pub service: Arc<DaemonSessionHost>,
+    #[allow(dead_code)]
     pub manager: Arc<CliSessionManager>,
     pub data: tempfile::TempDir,
     _stub: tempfile::TempDir,
@@ -67,9 +68,58 @@ pub struct HomeDaemon {
 /// A daemon over one project on `repo` (`origin/main` as its main branch ref) whose registry row
 /// carries `extra_row_yaml` (e.g. a `home_session_id:` line), with `extra_config_yaml` appended to
 /// its daemon config (e.g. a `project_home:` block).
+// Used by the other project-home suites sharing this module; not every suite calls it.
+#[allow(dead_code)]
 pub fn a_home_daemon(repo: &Path, extra_row_yaml: &str, extra_config_yaml: &str) -> HomeDaemon {
     // A host with no coding agents refuses every agent session, so a home daemon always has them.
-    build_home_daemon(repo, extra_row_yaml, extra_config_yaml, true)
+    build_home_daemon(repo, extra_row_yaml, extra_config_yaml, true, |host, _| {
+        host
+    })
+}
+
+/// [`a_home_daemon`] that also keeps a project notification log and session watches over its data
+/// directory (`#activity-wake` 3/3), returned so a suite can create a watch as the watch tools do.
+// Used by the suite on the reaper's live-watch hold; the others include this module too.
+#[allow(dead_code)]
+pub fn a_home_daemon_keeping_session_watches(
+    repo: &Path,
+    extra_row_yaml: &str,
+    extra_config_yaml: &str,
+) -> (
+    HomeDaemon,
+    Arc<tddy_session_activity::session_watches::SessionWatchStore>,
+    Arc<tddy_session_activity::project_notification_log::ProjectNotificationLog>,
+) {
+    let kept = std::sync::Mutex::new(None);
+    let home = build_home_daemon(
+        repo,
+        extra_row_yaml,
+        extra_config_yaml,
+        true,
+        |host, data| {
+            let base = data.to_path_buf();
+            let log = Arc::new(
+                tddy_session_activity::project_notification_log::ProjectNotificationLog::open(
+                    data,
+                    Arc::new(move |_os_user: &str| Some(base.clone())),
+                )
+                .expect("the notification log opens"),
+            );
+            let watches = Arc::new(
+                tddy_session_activity::session_watches::SessionWatchStore::open(data)
+                    .expect("the session watches open"),
+            );
+            *kept.lock().unwrap() = Some((Arc::clone(&watches), Arc::clone(&log)));
+            host.with_project_notification_log(log)
+                .with_session_watches(watches)
+        },
+    );
+    let (watches, log) = kept
+        .lock()
+        .unwrap()
+        .take()
+        .expect("the watches were installed");
+    (home, watches, log)
 }
 
 /// [`a_home_daemon`] with the daemon's coding agents installed, as the daemon runtime installs
@@ -82,7 +132,9 @@ pub fn a_home_daemon_with_coding_agents(
     extra_row_yaml: &str,
     extra_config_yaml: &str,
 ) -> HomeDaemon {
-    build_home_daemon(repo, extra_row_yaml, extra_config_yaml, true)
+    build_home_daemon(repo, extra_row_yaml, extra_config_yaml, true, |host, _| {
+        host
+    })
 }
 
 fn build_home_daemon(
@@ -90,6 +142,7 @@ fn build_home_daemon(
     extra_row_yaml: &str,
     extra_config_yaml: &str,
     coding_agents: bool,
+    customise: impl FnOnce(DaemonSessionHost, &Path) -> DaemonSessionHost,
 ) -> HomeDaemon {
     let data = tempfile::tempdir().unwrap();
     write_project_registry(data.path(), repo, extra_row_yaml);
@@ -113,7 +166,7 @@ fn build_home_daemon(
             ),
         ));
     }
-    let service = Arc::new(host);
+    let service = Arc::new(customise(host, data.path()));
     service.install_sandbox_rpc_bridge();
     HomeDaemon {
         service,

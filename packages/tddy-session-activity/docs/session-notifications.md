@@ -184,8 +184,12 @@ notification log and a required TTL of at most 24 hours (`MAX_WATCH_TTL_SECS` = 
   whole file atomically rewritten (write, sync, rename, sync the directory) on every change and
   read once at open; an unreadable file is an error. Keyed by the orchestrator's session id, which
   `/clear` keeps.
-- `has_live_watches(owner, log, now)` is the live check the successor's wake and auto-stop hold
-  call; this crate only answers it.
+- `deliver_with(owner, log, now, deliver)` computes the same delivery as `take_delivery` but
+  advances positions and removes ended watches only when `deliver` succeeds; on failure nothing
+  moves and nothing is persisted, so a wake whose paste failed delivers nothing and what was
+  waiting waits on. Nothing waiting never calls `deliver`.
+- `has_live_watches(owner, log, now)` is the live check the wake and the auto-stop hold call;
+  this crate only answers it.
 
 ## Publish sites
 

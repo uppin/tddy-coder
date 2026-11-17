@@ -143,6 +143,16 @@ impl RpcHandlers {
         }
     }
 
+    /// Start waking this host's idle watching orchestrators from `cues` (`#activity-wake` 3/3):
+    /// the trigger they come from must already be registered on the host's bus.
+    pub fn start_watch_waker(
+        &self,
+        cues: crate::exec_tool::watch_wake::WakeCues,
+        timings: crate::exec_tool::watch_wake::WakeTimings,
+    ) -> tokio::task::JoinHandle<()> {
+        self.exec_tool.start_watch_waker(cues, timings)
+    }
+
     /// Build the handlers from `host` and install them on it as its [`DaemonRpcFamilies`] — the
     /// composition root's last step before the host goes behind its `Arc`. Returns both, so the
     /// root serves the same handlers on its own transports.

@@ -14,6 +14,7 @@ mod role_guard;
 mod stack_git_tools;
 pub mod stack_tools;
 mod watch_events;
+pub mod watch_wake;
 
 pub use result_frames::EXEC_TOOL_FRAME_BYTES;
 

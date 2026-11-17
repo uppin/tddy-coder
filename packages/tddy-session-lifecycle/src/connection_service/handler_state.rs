@@ -248,6 +248,7 @@ impl DaemonSessionHost {
                 host: self.clone(),
             })),
             coder_credentials: self.coder_credentials(),
+            session_watches: self.session_watches().zip(self.project_notification_log()),
         }
     }
 }

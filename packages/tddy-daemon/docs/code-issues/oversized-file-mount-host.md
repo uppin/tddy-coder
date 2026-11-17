@@ -18,6 +18,7 @@ the notification log (`open_session_watches`, and the `Shared` field it fills).
 | Run | Production lines | Note |
 |---|---:|---|
 | 2026-11-17 | 516 → 527 | #930: the session-watch store is opened in `open_shared` |
+| 2026-11-17 | 527 → 532 | #931: the wake trigger is registered on the bus in `open_shared`. Still stack-shared — successors #934/#935 also modify this file — so the split stays deferred to a follow-up after the stack lands |
 
 ## What would close it
 

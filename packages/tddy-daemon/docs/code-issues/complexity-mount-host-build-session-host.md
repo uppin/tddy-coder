@@ -21,6 +21,7 @@ Deferred by the user, 2026-11-10 (#876 sweep): the restructure engine refused th
 | 2026-11-16 | 82 → 73 | 1 | #924 (`#remote-shell` 8/11) sweep: the Coder credential wiring this stack added was extracted; restored to its before-the-stack length. Still over 60, so this record stays open on the remainder |
 | 2026-11-17 | 73 → 73 | 1 | #929 (`#activity-wake` 1/3): re-measured — `build_session_host` untouched; the agent-end forwarder starts from its own `BuildContext::forward_agent_ends`. The file grew by 21 production lines; its split is stack-shared with #930/#931 and deferred to a follow-up after the stack lands. Unchanged, stays open |
 | 2026-11-17 | 73 → 73 | 1 | #930 (`#activity-wake` 2/3): re-measured at its wrap — `build_session_host` unchanged; the file grew elsewhere (`open_session_watches` in `open_shared`). Touched, not closed |
+| 2026-11-17 | 73 → 73 | 1 | #931 (`#activity-wake` 3/5): re-measured at its wrap — `build_session_host` unchanged; the wake trigger registration is in `open_shared`, and the waker starts from its own `start_watch_waker` in `runtime/mount.rs`. Touched, not closed |
 
 ## What would close it
 

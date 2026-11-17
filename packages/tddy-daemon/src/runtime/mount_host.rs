@@ -88,6 +88,8 @@ impl BuildContext {
         // `StreamSessionNotifications` relays every event to the browsers driving the drawer's
         // indicators. Assembled here because `DaemonSessionHost::new` installs no bus of its own,
         // and because the stream subscriber must be the very one the RPC handler subscribes to.
+        let (wake_trigger, wake_cues) =
+            tddy_daemon_rpc::exec_tool::watch_wake::WakeTrigger::channel();
         let session_notification_bus = {
             let bus = tddy_session_lifecycle::session_notifications::SessionNotificationBus::new()
                 .with_subscriber(Arc::new(
@@ -99,6 +101,8 @@ impl BuildContext {
                 tddy_session_lifecycle::session_notification_subscribers::SessionNotificationStreamSubscriber::new(),
             ));
             let bus = bus.with_subscriber(Arc::clone(&project_notification_log));
+            // After the log, so a wake reads a record the log already holds.
+            let bus = bus.with_subscriber(Arc::new(wake_trigger));
             // The subscribers an embedding host registered, after both built-ins in registration order.
             let bus = self
                 .options
@@ -120,6 +124,7 @@ impl BuildContext {
             session_notification_bus,
             project_notification_log,
             session_watches: open_session_watches(tddy_data_dir)?,
+            wake_cues: std::sync::Mutex::new(Some(wake_cues)),
             host_prompts,
         })
     }
