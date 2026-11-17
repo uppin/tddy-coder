@@ -141,7 +141,7 @@ async fn cut_worktree(
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(start.selected_integration_base_ref, chain_base_ref);
     let wt = if let Some(shell) = &start.shell {
-        remote_worktree_through(start, git_url, shell.as_ref()).await?
+        remote_worktree_through(start, git_url, shell.as_ref(), worktree_base_ref).await?
     } else if start.ssh_alias.is_empty() {
         tddy_session_split::service_util::create_session_worktree(
             start.timeout,
@@ -152,7 +152,7 @@ async fn cut_worktree(
         )
         .await?
     } else {
-        remote_worktree(start, git_url).await?
+        remote_worktree(start, git_url, worktree_base_ref).await?
     };
     tddy_session_split::service_util::push_new_branch_to_origin_if_requested(
         start.create_remote_branch,
@@ -166,20 +166,75 @@ async fn cut_worktree(
 }
 
 /// The session's checkout on the ssh target `start.ssh_alias`, cloned from `git_url`.
-async fn remote_worktree(start: &CliWorktreeStart<'_>, git_url: &str) -> Result<PathBuf, Status> {
+async fn remote_worktree(
+    start: &CliWorktreeStart<'_>,
+    git_url: &str,
+    worktree_base_ref: Option<String>,
+) -> Result<PathBuf, Status> {
     let shell = tddy_remote_shell::SshShell::new(start.ssh_alias);
-    remote_worktree_through(start, git_url, &shell).await
+    remote_worktree_through(start, git_url, &shell, worktree_base_ref).await
 }
 
-/// The session's checkout on its target, cloned from `git_url` through `shell`.
+/// The session's checkout on its target, cloned from `git_url` through `shell`: under the target
+/// user's home, on the branch the start asked for — a new branch from its base, or the existing
+/// branch it named — as the local cut honours both.
 async fn remote_worktree_through(
     start: &CliWorktreeStart<'_>,
     git_url: &str,
     shell: &dyn tddy_remote_shell::RemoteShell,
+    worktree_base_ref: Option<String>,
 ) -> Result<PathBuf, Status> {
-    let remote_path = tokio::time::timeout(
+    // The branch the start resolved, read from its changeset as the local cut reads it: an
+    // omitted intent generated a name there, while the request fields this start carries may
+    // name none. The requested field answers only when the changeset names none.
+    let workflow = tddy_core::read_changeset(start.session_dir)
+        .ok()
+        .and_then(|cs| cs.workflow);
+    let resolved_name = |from_changeset: Option<String>, requested: &str| {
+        from_changeset
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| requested.trim().to_string())
+    };
+    let branch = match start.intent {
+        tddy_core::BranchWorktreeIntent::WorkOnSelectedBranch => {
+            let name = resolved_name(
+                workflow.and_then(|wf| wf.selected_branch_to_work_on),
+                start.selected_branch_to_work_on,
+            );
+            if name.is_empty() {
+                return Err(Status::invalid_argument(
+                    "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
+                ));
+            }
+            tddy_core::worktree::RemoteBranch::Existing { name }
+        }
+        tddy_core::BranchWorktreeIntent::NewBranchFromBase => {
+            let name = resolved_name(
+                workflow.and_then(|wf| wf.new_branch_name),
+                start.new_branch_name,
+            );
+            if name.is_empty() {
+                return Err(Status::invalid_argument(
+                    "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
+                ));
+            }
+            tddy_core::worktree::RemoteBranch::NewFrom {
+                name,
+                base_ref: worktree_base_ref
+                    .filter(|base| !base.trim().is_empty())
+                    .unwrap_or_else(|| "HEAD".to_string()),
+            }
+        }
+    };
+    let request = tddy_core::worktree::RemoteWorktreeRequest {
+        git_url: git_url.to_string(),
+        session_id: start.session_id.to_string(),
+        branch,
+    };
+    let checkout = tokio::time::timeout(
         start.timeout,
-        tddy_core::setup_worktree_for_session_over_ssh(shell, git_url, start.session_id),
+        tddy_core::setup_remote_worktree(shell, &request),
     )
     .await
     .map_err(|_| {
@@ -190,7 +245,7 @@ async fn remote_worktree_through(
         ))
     })?
     .map_err(|error| Status::internal(format!("remote worktree setup failed: {error}")))?;
-    Ok(PathBuf::from(remote_path))
+    Ok(PathBuf::from(checkout.worktree))
 }
 
 fn spawned_branch(
@@ -242,4 +297,144 @@ pub(crate) async fn semantic_index_env(
         ));
     }
     Ok(session_env)
+}
+
+#[cfg(test)]
+mod remote_cut_tests {
+    //! `#remote-shell` 10/11: a target session's checkout is cut under the target user's home,
+    //! on the branch the start asked for.
+
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use tddy_remote_shell::{ExecOutput, InMemoryShell};
+
+    use super::{remote_worktree_through, CliWorktreeStart};
+
+    const QAPE_HQ: &str = "git@github.com:wix-private/qape-hq.git";
+    const SESSION: &str = "01a1b2c3-remote-dev";
+    const WORKSPACE_HOME: &str = "/home/coder";
+
+    /// A workspace whose user's home is /home/coder and whose git commands all succeed.
+    fn a_workspace() -> InMemoryShell {
+        let shell = InMemoryShell::new("coder.remote-dev");
+        shell.answers_when(|request| {
+            request
+                .command
+                .contains("$HOME")
+                .then(|| ExecOutput::succeeded(WORKSPACE_HOME.as_bytes().to_vec()))
+        });
+        shell.answers_when(|request| {
+            request
+                .command
+                .contains("git ")
+                .then(|| ExecOutput::succeeded(Vec::new()))
+        });
+        shell
+    }
+
+    #[tokio::test]
+    async fn a_target_checkout_is_cut_under_the_targets_home_from_the_requested_branch_and_base() {
+        // Given a start on a Coder target asking for feature/hooks off origin/main
+        let session_dir = tempfile::tempdir().expect("session dir");
+        let sessions_base = tempfile::tempdir().expect("sessions base");
+        let tddy_data = tempfile::tempdir().expect("tddy data");
+        let workspace = a_workspace();
+        let start = CliWorktreeStart {
+            session_type: "claude-cli",
+            cut_label: "cut the session worktree",
+            session_id: SESSION,
+            session_dir: session_dir.path(),
+            sessions_base: sessions_base.path(),
+            tddy_data_dir: tddy_data.path(),
+            os_user: "testdev",
+            project_id: "proj-1",
+            repo_path: "",
+            branch_worktree_intent: "new_branch_from_base",
+            new_branch_name: "feature/hooks",
+            selected_integration_base_ref: "origin/main",
+            selected_branch_to_work_on: "",
+            create_remote_branch: false,
+            intent: tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+            timeout: Duration::from_secs(5),
+            ssh_alias: "",
+            shell: Some(Arc::new(workspace.clone())),
+        };
+
+        // When the checkout is cut on the target
+        let worktree =
+            remote_worktree_through(&start, QAPE_HQ, &workspace, Some("origin/main".to_string()))
+                .await
+                .expect("the cut succeeds");
+
+        // Then it is under the workspace user's home, on the requested branch from its base
+        let root = format!("{WORKSPACE_HOME}/.tddy/repos/qape-hq");
+        assert_eq!(
+            worktree.to_string_lossy(),
+            format!("{root}/.worktrees/{SESSION}")
+        );
+        let run = workspace.commands_run().join("\n");
+        assert!(
+            run.contains("worktree add -b 'feature/hooks'")
+                && run.contains("'origin/main'")
+                && !run.contains("/home/dev")
+                && !run.contains("tddy-"),
+            "the requested branch, from its base, under the target's home:\n{run}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_start_that_named_no_branch_is_cut_on_the_branch_its_changeset_generated() {
+        // Given a start that named no branch, whose changeset generated one for its session
+        let session_dir = tempfile::tempdir().expect("session dir");
+        let sessions_base = tempfile::tempdir().expect("sessions base");
+        let tddy_data = tempfile::tempdir().expect("tddy data");
+        tddy_core::write_changeset(
+            session_dir.path(),
+            &tddy_core::Changeset {
+                workflow: Some(tddy_core::ChangesetWorkflow {
+                    branch_worktree_intent: Some(
+                        tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+                    ),
+                    new_branch_name: Some("claude-cli/01a1b2c3".to_string()),
+                    ..tddy_core::ChangesetWorkflow::default()
+                }),
+                ..tddy_core::Changeset::default()
+            },
+        )
+        .expect("the changeset the start resolved is written");
+        let workspace = a_workspace();
+        let start = CliWorktreeStart {
+            session_type: "claude-cli",
+            cut_label: "cut the session worktree",
+            session_id: SESSION,
+            session_dir: session_dir.path(),
+            sessions_base: sessions_base.path(),
+            tddy_data_dir: tddy_data.path(),
+            os_user: "testdev",
+            project_id: "proj-1",
+            repo_path: "",
+            branch_worktree_intent: "",
+            new_branch_name: "",
+            selected_integration_base_ref: "",
+            selected_branch_to_work_on: "",
+            create_remote_branch: false,
+            intent: tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+            timeout: Duration::from_secs(5),
+            ssh_alias: "",
+            shell: Some(Arc::new(workspace.clone())),
+        };
+
+        // When the checkout is cut on the target
+        remote_worktree_through(&start, QAPE_HQ, &workspace, None)
+            .await
+            .expect("the cut succeeds");
+
+        // Then the branch cut is the generated one the changeset names, never an empty name
+        let run = workspace.commands_run().join("\n");
+        assert!(
+            run.contains("worktree add -b 'claude-cli/01a1b2c3'"),
+            "the generated branch from the changeset is cut:\n{run}"
+        );
+    }
 }

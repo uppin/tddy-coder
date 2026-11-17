@@ -29,7 +29,7 @@ import {
   type AccountsOutcome,
   type ProviderGroup,
 } from "./AccountsScreen";
-import { useAuth, useDaemonClient } from "tddy-client-web";
+import { useAuth, useDaemonClient, useRefreshDerivedHosts } from "tddy-client-web";
 
 /** `SYNC_STATUS_UNSPECIFIED` maps to `null` — nothing has synced the account yet. */
 function syncStatusFromRpc(status: SyncStatus): AccountSyncStatus | null {
@@ -114,6 +114,7 @@ function withChanged(providers: ProviderGroup[], changed: AccountSummary[]) {
 
 export function AccountsContent() {
   const { sessionToken } = useAuth();
+  const refreshDerivedHosts = useRefreshDerivedHosts();
   const client = useDaemonClient(AccountsService);
   const catalogClient = useDaemonClient(CatalogService);
 
@@ -218,6 +219,7 @@ export function AccountsContent() {
       return false;
     }
     setCoderConnectError(null);
+    refreshDerivedHosts();
     reread();
     return true;
   };

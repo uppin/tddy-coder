@@ -23,6 +23,7 @@ use tddy_credentials::SessionVaults;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_host_service::{GithubCli, HostServiceImpl};
+use tddy_rpc::Status;
 use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::{DaemonSessionHost, LocalExecTools};
@@ -69,7 +70,10 @@ pub(crate) struct ProjectHomeHost {
     /// called in-process on this host (`#start-parity` 5/9).
     pub(crate) catalog: Arc<CatalogRpcHandler>,
     pub(crate) projects: Arc<ProjectRpcHandler>,
-    pub(crate) host_service: Arc<HostServiceImpl>,
+    /// The host service the project-home tools answer host questions from, late-bound by
+    /// [`ExecToolRpcHandler::attach_host_service`]; unset until attached, and a project-home
+    /// tool that needs it then refuses (see [`ExecToolRpcHandler::host_service`]).
+    pub(crate) host_service: Arc<OnceLock<Arc<HostServiceImpl>>>,
     /// The provider accounts this host's vaults hold, late-bound by
     /// [`RpcHandlers::attach_provider_accounts`](crate::RpcHandlers::attach_provider_accounts).
     pub(crate) provider_accounts: Arc<OnceLock<Arc<dyn ProviderAccountsPort>>>,
@@ -118,14 +122,7 @@ impl ExecToolRpcHandler {
                 worktree_sizes: host.worktree_size_calculator(),
                 catalog: Arc::new(CatalogRpcHandler::from_host(host)),
                 projects: Arc::new(ProjectRpcHandler::from_host(host)),
-                // Only its `ListSshConfigHosts` is answered from this instance, which reads the host's
-                // SSH config and no peer's, so the registry and prompt state it is built without are
-                // never reached from here.
-                host_service: Arc::new(HostServiceImpl::new(
-                    host.config().clone(),
-                    host.tddy_data_dir(),
-                    host.user_resolver(),
-                )),
+                host_service: Arc::new(OnceLock::new()),
                 provider_accounts: Arc::new(OnceLock::new()),
                 terminals: host.terminal_sessions(),
                 terminal_control: host.terminal_control(),
@@ -145,6 +142,39 @@ impl ExecToolRpcHandler {
         self
     }
 
+    /// Attach the host service the project-home tools answer host questions from — the
+    /// composition root's wired service, with its operator files and Coder vaults, so a start
+    /// names and resolves the derived hosts the daemon itself lists for the caller. Called
+    /// once, before the handler answers; a second attach keeps the first.
+    pub fn attach_host_service(&self, host_service: Arc<HostServiceImpl>) {
+        if self
+            .project_home_host
+            .host_service
+            .set(host_service)
+            .is_err()
+        {
+            log::error!("the host service was attached twice; keeping the first attachment");
+        }
+    }
+
+    /// The host service the project-home tools answer host questions from: the one the
+    /// composition root attached. When none was attached the tool is refused, naming the
+    /// missing wiring — there is no bare service to fall back to, because one built here
+    /// would read this host's SSH config with no Coder accounts and answer a different
+    /// listing than the daemon itself serves.
+    pub(crate) fn host_service(&self) -> Result<Arc<HostServiceImpl>, Status> {
+        self.project_home_host
+            .host_service
+            .get()
+            .cloned()
+            .ok_or_else(|| {
+                Status::failed_precondition(
+                    "this daemon's host service was never attached to its exec-tool handler, \
+                 so the host's derived hosts cannot be listed or resolved",
+                )
+            })
+    }
+
     /// The late-bound launch cell, shared with the families that attach it.
     pub(crate) fn session_launch_cell(&self) -> Arc<OnceLock<LaunchSessions>> {
         Arc::clone(&self.session_launch)
@@ -160,5 +190,40 @@ impl ExecToolRpcHandler {
     /// The late-bound provider-account cell, shared with the families that attach it.
     pub(crate) fn provider_accounts_cell(&self) -> Arc<OnceLock<Arc<dyn ProviderAccountsPort>>> {
         Arc::clone(&self.project_home_host.provider_accounts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unattached_handler_refuses_rather_than_answering_from_a_bare_host_service() {
+        // Given a handler no composition root attached a host service to
+        let sessions = tempfile::tempdir().expect("sessions storage");
+        let host = tddy_session_lifecycle::test_util::test_host(sessions.path().to_path_buf());
+        let handler = ExecToolRpcHandler::from_host(&host);
+
+        // When a project-home tool asks it for the host service
+        let refused = handler.host_service();
+
+        // Then it refuses, naming the missing wiring, instead of building a bare service
+        // whose listing (SSH config only, no Coder accounts) would silently differ
+        match refused {
+            Ok(_) => panic!("an unattached handler must refuse, not fall back"),
+            Err(status) => assert!(
+                status.message().contains("never attached"),
+                "the refusal names the missing wiring: {}",
+                status.message()
+            ),
+        }
+
+        // And once the wired service is attached, that service is the one answered from
+        handler.attach_host_service(Arc::new(HostServiceImpl::new(
+            host.config().clone(),
+            host.tddy_data_dir(),
+            host.user_resolver(),
+        )));
+        assert!(handler.host_service().is_ok());
     }
 }

@@ -6,7 +6,7 @@
 **Metrics:** **525 production lines** by the changeset's counter (2026-10-09; 582 on `origin/master` before #536; the 508 / 503 below are an earlier counter) · budget 500 (the inline-test-block rule; the naive count to the first `#[cfg(test)]` reads 18)
 **Thresholds breached:** length 525 > 500
 **Restructure:** group the facade blocks by receiver (see "What would close it"); #536 has landed the moves, so the re-measure the earlier note waited for is done: 525
-**Status:** Open — regressed 2026-10-24 (+7 from #721, `#coagents` 2/8: the `coding_agent_launcher` field and a re-export; split deferred because `#coagents` 4/8 touches this file); narrowed 2026-10-21 (−29 from #635, `#satellite` 13/13); regressed 2026-10-20 (+5 from #634, `#satellite` 12/13: the `split_rooms` field; split deferred because #633 and #635 touch this file); regressed 2026-10-19 (+4 from #628, `#satellite` 6/13: the host's `terminal_exposure` field and its doc comment; ≈529 by the changeset's counter, counted from the diff, `loc.py` not re-run; split deferred with the developer's consent); narrowed 2026-10-09 by #536 (582 → 525, still over 500) — **unclaimed**; the 2026-10-07 deferral (the stack's other nodes editing this file) is over with #536
+**Status:** Open — partially fixed by #924 (`#remote-shell` 8/11): restored to below its before-the-stack measurement (431 by `restructure lines`); still over 500 by the whole-file count — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -30,6 +30,7 @@
 | 2026-11-06 | +3 | by `git diff --numstat` (counter not re-run): #824 (`#agent-tools` 18/19) declares `pub mod operator_session_starter` with its doc line and a blank. Grown; not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
 | 2026-11-07 | ±0 | by `wc -l` (554 → 554 total lines; counter not re-run): #830 (`#agent-tools` 22/28) makes `coding_agents` non-optional; the field's doc comment is reworded at the same length. Touched, unchanged |
 | 2026-11-16 | +6 | #921 (`#remote-shell` 7/7), by `git diff --numstat` (6 added, 0 removed; the record's counter not re-run): the host's Coder credential field and its re-exports. Still over 500 by the record's counter; not split here |
+| 2026-11-16 | 433 → 431 by `restructure lines` (558 → 556 whole file) | #924 (`#remote-shell` 8/11) sweep: the re-export block this stack lengthened moved with its neighbours into a module the facade re-exports. Restored to below its before-the-stack measurement; still over 500 by the whole-file count, so this record stays open on the remainder |
 
 ## What grew it
 

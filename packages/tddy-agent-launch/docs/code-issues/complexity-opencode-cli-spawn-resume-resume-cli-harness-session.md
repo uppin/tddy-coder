@@ -7,7 +7,7 @@
 **Metrics:** **136 lines**
 **Thresholds breached:** length 74 > 60 (`/analyze-clean-code`)
 **Restructure:** not designed — deferred to the #agent-tools sweep node (developer, 2026-11-02)
-**Status:** Open — regressed 2026-11-15 by #911 (131 → 136): the toolset take, the `hook_params` call, the hooks slot field and its comment, mirroring the start path — unclaimed
+**Status:** Open — partially fixed by #924 (`#remote-shell` 8/11): restored to below its before-the-stack length (135); still over 60 — unclaimed
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured
 
 ## Measurement history
@@ -24,6 +24,7 @@
 | 2026-11-11 | 118 → 128 | **worse by 10** in #891 (`#usage-binding 2/5`): the host resume rewrites its usage context before relaunching; br |
 | 2026-11-15 | 131 → 136 | **worse by 5** in #911: argv hooks render again on resume (the toolset take, the `hook_params` call, the hooks slot field, a two-line comment), mirroring the start path; the 131 base is growth since #891. Brace-matched on `origin/master` (`66bb45213`) and HEAD at #911's wrap |
 | 2026-11-16 | 157 → 166 | #921 (`#remote-shell` 7/7): a resume resolves its target's shell as its caller, so a locked vault refuses it before anything runs. Touched, not closed |
+| 2026-11-16 | 166 → 135 | #924 (`#remote-shell` 8/11) sweep: restored to below its before-the-stack length (136). Still over 60, so this record stays open on the remainder |
 
 ## What would close it
 

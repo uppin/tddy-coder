@@ -7,7 +7,7 @@
 **Metrics:** **88 lines**
 **Thresholds breached:** length 88 > 60 (`/analyze-clean-code`)
 **Restructure:** not designed — deferred to the `#agent-tools` sweep node (n20) by the developer (2026-11-04)
-**Status:** Open — unclaimed
+**Status:** Open — partially fixed by #924 (`#remote-shell` 8/11): restored to below its before-the-stack length (83); still over 60 — unclaimed
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured
 
 ## Measurement history
@@ -17,6 +17,7 @@
 | 2026-11-06 | 65 → 88 | first detection — #823: a split session's wiring is re-derived first (`resume_split_wiring`), and its context directory and empty commit identity chosen, now that every claude-cli session resumes here. Not split: restructuring deferred to the sweep node (n20) |
 | 2026-11-07 | 87 → 87 | **unchanged, moved** in #829 (`#agent-tools` 21/28): engine `move_item` of the `LaunchSessions` impl into `opencode_cli_spawn/resume.rs`; fn line to closing brace on `origin/master` (`d3fe1abea`) and HEAD |
 | 2026-11-16 | 95 → 108 | #921 (`#remote-shell` 7/7): the resume path carries the session's subject and Coder credentials to the target resolution. Touched, not closed |
+| 2026-11-16 | 108 → 83 | #924 (`#remote-shell` 8/11) sweep: restored to below its before-the-stack length (88). Still over 60, so this record stays open on the remainder |
 
 ## What would close it
 

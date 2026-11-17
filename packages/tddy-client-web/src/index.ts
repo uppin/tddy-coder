@@ -14,6 +14,7 @@ export type * from "./connections/types";
 export type * from "./connections/session";
 export type * from "./connections/terminal";
 export * from "./ports/media";
+export * from "./ports/derivedHostsRefresh";
 export * from "./lib/participantRole";
 export * from "./lib/debugMask";
 export * from "./lib/testId";

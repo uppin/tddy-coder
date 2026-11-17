@@ -96,6 +96,7 @@ impl ATarget {
                 r#"#!/bin/sh
 for command; do :; done
 command=$(printf '%s' "$command" | /usr/bin/sed 's#/home/dev#{root}/home/dev#g')
+export HOME='{root}'
 exec 3<&0
 /bin/sh -c "$command" <&3 3<&- &
 remote=$!
@@ -120,12 +121,12 @@ exit $?
         }
     }
 
-    /// Where the target keeps the worktree of `session_id`.
+    /// Where the target keeps the worktree of `session_id`: under the checkout resolved from
+    /// the target user's home — the stub's `$HOME` is this directory, and the project's empty
+    /// git URL names `repo` under `.tddy/repos`.
     fn worktree_of(&self, session_id: &str) -> PathBuf {
-        let checkout = tddy_core::ssh_exec::default_remote_repo_root("");
         self.root
-            .join(checkout.trim_start_matches('/'))
-            .join(".worktrees")
+            .join(".tddy/repos/repo/.worktrees")
             .join(session_id)
     }
 

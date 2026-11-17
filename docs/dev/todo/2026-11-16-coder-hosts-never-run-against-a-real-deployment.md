@@ -14,6 +14,12 @@ and workspace sources, and in-memory web backends:
 | CLI probe output | the host tooling probe | what `coder version` prints on a daemon with the CLI installed |
 | Workspace status values | `CoderWorkspace::is_running` and the derived-host reason | the deployment reports `running` for a usable workspace; every other word (`stopped`, `starting`, …) is carried verbatim into `the workspace is <status>` |
 
+**Narrowed at the wrap of #927 (`#remote-shell` 11/11):** nodes 9–11 of the stack were
+planned from a real-deployment run's findings, and their listings, checkout root and
+orchestrator start are pinned by the same stand-ins above. What still has no
+real-deployment evidence is the hook follower on a Coder workspace; the four facts remain
+unverified against a real deployment.
+
 **Why deferred:** no real deployment was available to the stack; the stand-ins pin the
 contract the code was built against, not the deployment's actual answers.
 

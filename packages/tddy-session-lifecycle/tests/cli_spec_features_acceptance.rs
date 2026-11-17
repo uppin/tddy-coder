@@ -175,8 +175,9 @@ async fn a_copy_of_claude_yaml_under_another_id_as_a_project_home_main_records_i
 }
 
 /// A stub `ssh` first on this process's `PATH` for as long as it lives: every call appends its
-/// remote command and its stdin to `<log>/calls`, and runs nothing. With `slot_writes_hang`, a call
-/// that writes a file (`cat > …`) never returns.
+/// remote command and its stdin to `<log>/calls`, and runs nothing — except the target's home
+/// query, which it answers as a real target would. With `slot_writes_hang`, a call that writes a
+/// file (`cat > …`) never returns.
 struct AnSshTarget {
     log: tempfile::TempDir,
     _bin: tempfile::TempDir,
@@ -199,6 +200,7 @@ shift
 alias="$1"; shift
 remote="$*"
 {hang}
+case "$remote" in *'$HOME'*) printf '%s' '/home/dev'; exit 0 ;; esac
 printf 'CALL %s %s\n' "$alias" "$remote" >> "{log}/calls"
 /bin/cat >> "{log}/calls"
 printf '\nEND\n' >> "{log}/calls"

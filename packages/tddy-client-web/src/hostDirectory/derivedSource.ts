@@ -90,67 +90,154 @@ export function derivedHostDescriptorOf(host: DerivedHost): HostDescriptor {
   };
 }
 
-/**
- * Ask every connected parent for the hosts it reaches, and merge the answers into one source.
- *
- * Hosts keep the parents' order, and each parent's own listing order within it. The source is
- * `connected` once any parent has listed, `idle` when no parent is connected, and `error` only
- * when every parent that was asked failed.
- */
-export async function listDerivedHosts(
-  parents: readonly DerivedHostParent[],
-  sessionToken: string,
-): Promise<DerivedHostDirectorySource> {
-  const asked = parents.filter((parent) => parent.status === "connected");
-  if (asked.length === 0) return NO_DERIVED_HOSTS;
+// ---------------------------------------------------------------------------
+// One parent at a time (`#remote-shell` 9/11)
+// ---------------------------------------------------------------------------
 
-  const answers = await Promise.all(
-    asked.map(async (parent) => {
-      const parentHostId = parent.host.hostId;
-      try {
-        const response = await parent.client.listDerivedHosts({
-          sessionToken,
-          daemonInstanceId: parentHostId,
-        });
-        const hosts = response.hosts.map(derivedHostDescriptorOf);
-        if (response.outcome === ProbeOutcome.FAILED) {
-          return {
-            hosts,
-            failure: {
-              parentHostId,
-              reason: response.failureReason || "listing derived hosts failed",
-            },
-          };
-        }
-        return { hosts, failure: null };
-      } catch (error) {
+/**
+ * How long one parent is given to list its hosts before the call counts as that parent's failure.
+ * A unary call to a listed peer over the room may never answer; without a bound, one such daemon
+ * would hold every daemon's hosts back for the life of the page.
+ */
+export const DERIVED_LISTING_DEADLINE_MS = 20_000;
+
+/** One parent's answer: what it listed, and its failure when it could not list or did not answer. */
+export interface ParentDerivedHosts {
+  readonly parentHostId: string;
+  readonly hosts: readonly HostDescriptor[];
+  readonly failure: DerivedHostListingFailure | null;
+}
+
+/**
+ * Ask one connected parent for the hosts it reaches, within `deadlineMs`.
+ *
+ * Never rejects: a refused call, a `FAILED` outcome and a call past its deadline are each that
+ * parent's `failure`, with its hosts (a `FAILED` listing still carries the hosts that arrived).
+ */
+export async function askParentForDerivedHosts(
+  parent: DerivedHostParent,
+  sessionToken: string,
+  deadlineMs: number = DERIVED_LISTING_DEADLINE_MS,
+): Promise<ParentDerivedHosts> {
+  const parentHostId = parent.host.hostId;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<ParentDerivedHosts>((resolve) => {
+    timer = setTimeout(() => {
+      resolve({
+        parentHostId,
+        hosts: [],
+        failure: {
+          parentHostId,
+          reason: `${parentHostId} did not list its hosts within ${deadlineMs} ms`,
+        },
+      });
+    }, deadlineMs);
+  });
+  const answer = (async (): Promise<ParentDerivedHosts> => {
+    try {
+      const response = await parent.client.listDerivedHosts({
+        sessionToken,
+        daemonInstanceId: parentHostId,
+      });
+      const hosts = response.hosts.map(derivedHostDescriptorOf);
+      if (response.outcome === ProbeOutcome.FAILED) {
         return {
-          hosts: [],
+          parentHostId,
+          hosts,
           failure: {
             parentHostId,
-            reason: error instanceof Error ? error.message : String(error),
+            reason: response.failureReason || "listing derived hosts failed",
           },
         };
       }
-    }),
-  );
-
-  const hosts = answers.flatMap((answer) => answer.hosts);
-  const failures = answers.flatMap((answer) => (answer.failure ? [answer.failure] : []));
-  if (failures.length === asked.length) {
-    return {
-      id: DERIVED_SOURCE_ID,
-      status: "error",
-      error: failures[0]?.reason ?? "listing derived hosts failed",
-      hosts,
-      failures,
-    };
+      return { parentHostId, hosts, failure: null };
+    } catch (error) {
+      return {
+        parentHostId,
+        hosts: [],
+        failure: {
+          parentHostId,
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  })();
+  try {
+    return await Promise.race([answer, deadline]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
-  return {
-    id: DERIVED_SOURCE_ID,
-    status: "connected",
-    error: null,
-    hosts,
-    failures,
-  };
+}
+
+/** Each parent's latest answer, by source object — including an answer that listed no hosts. */
+const answersBySource = new WeakMap<
+  DerivedHostDirectorySource,
+  ReadonlyMap<string, ParentDerivedHosts>
+>();
+
+function answersOf(source: DerivedHostDirectorySource): Map<string, ParentDerivedHosts> {
+  const known = answersBySource.get(source);
+  if (known) return new Map(known);
+  const byParent = new Map<string, ParentDerivedHosts>();
+  for (const host of source.hosts) {
+    if (!host.parent) continue;
+    const existing = byParent.get(host.parent);
+    byParent.set(host.parent, {
+      parentHostId: host.parent,
+      hosts: [...(existing?.hosts ?? []), host],
+      failure: existing?.failure ?? null,
+    });
+  }
+  for (const failure of source.failures) {
+    const existing = byParent.get(failure.parentHostId);
+    byParent.set(failure.parentHostId, {
+      parentHostId: failure.parentHostId,
+      hosts: existing?.hosts ?? [],
+      failure,
+    });
+  }
+  return byParent;
+}
+
+/**
+ * Fold one parent's answer into the source: that parent's earlier hosts and failure are replaced,
+ * every other parent's are kept, and parents stay in the order they first answered. The source is
+ * `connected` once any parent has answered, `error` only when every parent that answered failed.
+ */
+export function mergeParentAnswer(
+  previous: DerivedHostDirectorySource,
+  answer: ParentDerivedHosts,
+): DerivedHostDirectorySource {
+  const byParent = answersOf(previous);
+  byParent.set(answer.parentHostId, answer);
+  const answers = [...byParent.values()];
+  const hosts = answers.flatMap((entry) => entry.hosts);
+  const failures = answers.flatMap((entry) => (entry.failure ? [entry.failure] : []));
+  const allFailed = answers.length > 0 && answers.every((entry) => entry.failure !== null);
+  const merged: DerivedHostDirectorySource = allFailed
+    ? {
+        id: DERIVED_SOURCE_ID,
+        status: "error",
+        error: failures[0]?.reason ?? "listing derived hosts failed",
+        hosts,
+        failures,
+      }
+    : { id: DERIVED_SOURCE_ID, status: "connected", error: null, hosts, failures };
+  answersBySource.set(merged, byParent);
+  return merged;
+}
+
+/**
+ * Which parents to ask now: every connected parent not yet asked, and — after a refresh — every
+ * connected parent again. A parent that is not `connected` is never asked, whatever `asked` says.
+ */
+export function parentsToAsk(
+  parents: readonly DerivedHostParent[],
+  asked: ReadonlySet<string>,
+  refreshed: boolean,
+): DerivedHostParent[] {
+  return parents.filter(
+    (parent) =>
+      parent.status === "connected" && (refreshed || !asked.has(parent.host.hostId)),
+  );
 }

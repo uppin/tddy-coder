@@ -22,6 +22,9 @@ use tddy_daemon_kernel::operator_channel::SharedOperatorChannel;
 use std::path::PathBuf;
 
 use crate::config::DaemonConfig;
+use crate::connection_service::svc_host_builders::stores::build_host_stores;
+use crate::connection_service::svc_host_builders::stores::default_agent_tool_sockets;
+use crate::connection_service::svc_host_builders::stores::HostStores;
 
 impl DaemonSessionHost {
     /// A session host over `coding_agents`: the daemon's one coding-agent registry, loaded once at
@@ -279,32 +282,6 @@ impl DaemonSessionHost {
         self.staging_base_dir = staging_base_dir;
     }
 
-    /// Act on the operator's own GitHub credential for PR-status reads (builder). The vaults are
-    /// the ones the auth service opens at login and reopens at refresh; without them, PR status
-    /// reports itself unavailable.
-    pub fn with_credential_vaults(mut self, vaults: Arc<tddy_daemon_auth::SessionVaults>) -> Self {
-        self.debug_assert_rpc_families_not_installed("with_credential_vaults");
-        self.credential_vaults = Some(vaults);
-        self
-    }
-
-    /// Ask this `gh` for a Local gh project's identity and token (builder), instead of the one on
-    /// the spawned child's `PATH`.
-    pub fn with_github_cli(mut self, github_cli: tddy_host_service::GithubCli) -> Self {
-        self.github_cli = github_cli;
-        self
-    }
-
-    /// Read the Coder account of a session whose target is a Coder workspace from `credentials`
-    /// (builder) — the daemon's vaults — at its start and at every resume.
-    pub fn with_coder_credentials(
-        mut self,
-        credentials: Arc<dyn tddy_host_service::coder_workspaces::CoderCredentialSource>,
-    ) -> Self {
-        self.coder_credentials = credentials;
-        self
-    }
-
     /// How often the process of a registered tool session is looked at to see whether it has stopped
     /// (builder); a stopped session is no longer answered on its host-session socket. Replaces the
     /// daemon's sockets, so call it before any session starts.
@@ -487,58 +464,7 @@ impl DaemonSessionHost {
     }
 }
 
-fn default_agent_tool_sockets() -> Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets> {
-    Arc::new(
-        tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets::new(
-            tddy_daemon_kernel::agent_tool_sockets::AgentToolSocketPlacement::PerOsUser,
-        ),
-    )
-}
-
-struct HostStores {
-    workspace_sandbox_provisioner:
-        tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,
-    task_registry: TaskRegistry,
-    demo_vm_state: Arc<
-        tokio::sync::Mutex<
-            std::collections::HashMap<String, tddy_demo_vm_service::activity_hub::DemoVmHandle>,
-        >,
-    >,
-    host_session_sockets: Arc<tddy_agent_launch::host_session_socket::HostSessionSockets>,
-    session_agent_clones: Arc<tddy_session_agents::session_agent_clone::SessionAgentCloneStore>,
-    worktree_size_calculator: Arc<tddy_worktree_service::worktrees::WorktreeSizeCalculator>,
-}
-
-fn build_host_stores(
-    tddy_data_dir: &std::path::Path,
-    cli_manager: &Arc<CliSessionManager>,
-) -> HostStores {
-    let workspace_sandbox_provisioner =
-        tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner::for_tddy_home(
-            tddy_data_dir,
-        );
-    let task_registry = cli_manager.task_registry();
-    let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
-    let host_session_sockets = Arc::new(super::host_session_socket::HostSessionSockets::default());
-    // Built here rather than inline below because the roster store reads it: an entry's
-    // `clone_state` is the state of the checkout serving it, and two stores would let a roster
-    // report READY for a clone nobody built.
-    let session_agent_clones = Arc::new(crate::session_agent_clone::SessionAgentCloneStore::new());
-    let worktree_size_calculator = Arc::new(
-        tddy_worktree_service::worktrees::WorktreeSizeCalculator::new(
-            tddy_worktree_service::worktrees::projects_stats_cache_root(tddy_data_dir),
-            tddy_worktree_service::worktrees::DAEMON_SIZE_WALK_PERMITS,
-        ),
-    );
-    HostStores {
-        workspace_sandbox_provisioner,
-        task_registry,
-        demo_vm_state,
-        host_session_sockets,
-        session_agent_clones,
-        worktree_size_calculator,
-    }
-}
-
 mod rpc_activity;
+mod stores;
+mod svc_credential_builders;
 mod svc_room_builders;

@@ -336,3 +336,37 @@ fn an_argument_the_tool_does_not_offer_is_refused_by_name() {
     // Then
     assert!(refused.to_string().contains("repo_path"), "{refused}");
 }
+
+// ---------------------------------------------------------------------------
+// `#remote-shell` 11/11 — a derived host is named with `target`
+// ---------------------------------------------------------------------------
+
+#[test]
+fn target_is_offered_as_a_derived_host_id() {
+    // When
+    let target = &schema()["properties"]["target"];
+
+    // Then it is a free string that points the agent at the derived hosts the options list
+    let description = target["description"].as_str().unwrap_or_default();
+    assert_eq!(target["type"], Value::from("string"));
+    assert!(
+        description.contains("DescribeSessionStartOptions.derived_hosts")
+            && description.contains("Exclusive with `ssh_config_host`"),
+        "the description names where the ids come from and what the field excludes: {description}"
+    );
+}
+
+#[test]
+fn ssh_config_host_says_a_wildcard_is_not_an_alias() {
+    // When
+    let description = schema()["properties"]["ssh_config_host"]["description"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+
+    // Then an agent that read `Host coder.*` in a config is told it is not a host to name here
+    assert!(
+        description.contains("wildcard") && description.contains("`target`"),
+        "{description}"
+    );
+}

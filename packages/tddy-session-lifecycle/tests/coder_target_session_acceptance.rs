@@ -23,7 +23,7 @@ use tddy_host_service::coder_workspaces::{CoderCredentialSource, CoderCredential
 use tddy_host_service::test_util::{a_coder_vault_of, ACoderVault};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::session::{
-    session_target, CoderTarget, ListSessionsRequest, ResumeSessionRequest,
+    session_target, CoderTarget, DeleteSessionRequest, ListSessionsRequest, ResumeSessionRequest,
     SessionService as SessionServiceTrait, SessionTarget, Signal, SignalSessionRequest,
     StartSessionRequest,
 };
@@ -107,6 +107,7 @@ impl AWorkspace {
                 r#"while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done
 shift
 command=$(printf '%s' "$*" | /usr/bin/sed 's#/home/dev#{root}/home/dev#g')
+export HOME='{root}'
 exec 3<&0
 /bin/sh -c "$command" <&3 3<&- &
 remote=$!
@@ -148,13 +149,12 @@ exit $?
         }
     }
 
-    /// Where the workspace keeps the worktree of `session_id`: under the checkout the daemon
-    /// clones a project into on a target (`tddy_core::ssh_exec::default_remote_repo_root`).
+    /// Where the workspace keeps the worktree of `session_id`: under the checkout resolved
+    /// from the workspace user's home — the stub's `$HOME` is this directory, and the
+    /// project's empty git URL names `repo` under `.tddy/repos`.
     fn worktree_of(&self, session_id: &str) -> PathBuf {
-        let checkout = tddy_core::ssh_exec::default_remote_repo_root("");
         self.root
-            .join(checkout.trim_start_matches('/'))
-            .join(".worktrees")
+            .join(".tddy/repos/repo/.worktrees")
             .join(session_id)
     }
 }
@@ -406,6 +406,16 @@ impl ADaemonWithAWorkspace {
         self.manager.exit_hook_settled(session_id).await;
     }
 
+    async fn delete(&self, session_id: &str) -> Result<(), tddy_rpc::Status> {
+        self.service
+            .delete_session(Request::direct(DeleteSessionRequest {
+                session_token: VALID_TOKEN.to_string(),
+                session_id: session_id.to_string(),
+            }))
+            .await
+            .map(|_| ())
+    }
+
     async fn resume(&self, session_id: &str) -> Result<(), (Code, String)> {
         self.service
             .resume_session(Request::direct(ResumeSessionRequest {
@@ -491,6 +501,64 @@ async fn a_resume_with_an_open_vault_restarts_the_agent_in_the_workspace() {
             daemon.manager.get(&session_id).await.is_some()
         ),
         (true, true)
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_coder_target_start_cuts_its_checkout_under_the_workspace_users_home() {
+    // Given a daemon whose caller has a running workspace
+    let daemon = a_daemon_reaching_a_running_workspace();
+
+    // When a session is started in the workspace
+    let session_id = daemon.a_session_in_the_workspace().await;
+    let runs = daemon.runs_in_the_workspace(&session_id, 1).await;
+
+    // Then its checkout is under the workspace user's home — the stub's `$HOME`, in
+    // `.tddy/repos/<repository>` — and that is the path the session records
+    let worktree = daemon.workspace.worktree_of(&session_id);
+    let recorded = read_session_metadata(&daemon.session_dir(&session_id))
+        .expect(".session.yaml is written")
+        .repo_path;
+    assert_eq!(
+        (runs[0].cwd.clone(), recorded),
+        (
+            worktree.clone(),
+            Some(worktree.to_string_lossy().into_owned())
+        )
+    );
+    assert!(
+        worktree.starts_with(daemon.workspace.root.join(".tddy/repos")),
+        "the checkout is under the workspace user's home: {}",
+        worktree.display()
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn deleting_a_coder_target_session_removes_its_worktree_on_the_workspace() {
+    // Given a stopped session whose worktree is on the workspace
+    let daemon = a_daemon_reaching_a_running_workspace();
+    let session_id = daemon.a_session_in_the_workspace().await;
+    daemon.runs_in_the_workspace(&session_id, 1).await;
+    let worktree = daemon.workspace.worktree_of(&session_id);
+    assert!(
+        worktree.is_dir(),
+        "the workspace holds the session's worktree while it runs: {}",
+        worktree.display()
+    );
+    daemon.stop(&session_id).await;
+
+    // When the session is deleted
+    daemon
+        .delete(&session_id)
+        .await
+        .expect("a stopped session on a Coder target is deleted");
+
+    // Then its worktree is gone from the workspace, and its record is gone here
+    assert_eq!(
+        (worktree.exists(), daemon.session_dir(&session_id).exists()),
+        (false, false)
     );
 }
 

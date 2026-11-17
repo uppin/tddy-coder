@@ -3,7 +3,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tddy_core::default_remote_repo_root;
 use tddy_projects::project_storage;
 use tddy_worktree_service::remote_git_service::{
     pack_execution_for_session, PackExecution, PackExecutionResolver, ProjectsDirResolver,
@@ -49,7 +48,11 @@ fn resolve_pack_execution(
     let Some(session) = best_ssh_session_for_project(&sessions, &project.project_id) else {
         return pack_execution_for_session(local_repo_path, "", "");
     };
-    let remote_repo_path = remote_repo_path_for_session(session, &project.git_url);
+    // A record without a path is a record this daemon did not write: it names no checkout on
+    // the target, so the pack runs locally rather than against a guessed path.
+    let Some(remote_repo_path) = remote_repo_path_for_session(session) else {
+        return pack_execution_for_session(local_repo_path, "", "");
+    };
     pack_execution_for_session(local_repo_path, &session.ssh_config_host, &remote_repo_path)
 }
 
@@ -72,16 +75,11 @@ fn best_ssh_session_for_project<'a>(
     ssh_sessions.first().copied()
 }
 
-fn remote_repo_path_for_session(session: &SessionEntry, git_url: &str) -> String {
+/// The worktree path `session` recorded, when it recorded one. A session whose record names
+/// no path is treated as not SSH-backed: no path is guessed for it.
+fn remote_repo_path_for_session(session: &SessionEntry) -> Option<String> {
     let trimmed = session.repo_path.trim();
-    if !trimmed.is_empty() {
-        return trimmed.to_string();
-    }
-    format!(
-        "{}/.worktrees/{}",
-        default_remote_repo_root(git_url).trim_end_matches('/'),
-        session.session_id
-    )
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 #[cfg(test)]
@@ -233,7 +231,7 @@ mod tests {
             "sess-a",
             "proj-1",
             "buildbox",
-            "/home/dev/repo/.worktrees/sess-a",
+            "/home/coder/.tddy/repos/my-app/.worktrees/sess-a",
             "2026-01-02T00:00:00Z",
         );
         write_session(
@@ -241,7 +239,7 @@ mod tests {
             "sess-b",
             "proj-1",
             "buildbox",
-            "/home/dev/repo/.worktrees/sess-b",
+            "/home/coder/.tddy/repos/my-app/.worktrees/sess-b",
             "2026-01-03T00:00:00Z",
         );
 
@@ -261,12 +259,75 @@ mod tests {
             local_repo_path: local_repo.clone(),
         });
 
-        // Then — newest `updated_at` wins when no session has a live pid
+        // Then — newest `updated_at` wins when no session has a live pid, at the path its
+        // record names
         assert_eq!(
             execution,
             PackExecution::Remote {
                 ssh_config_host: "buildbox".to_string(),
-                remote_repo_path: "/home/dev/repo/.worktrees/sess-b".to_string(),
+                remote_repo_path: "/home/coder/.tddy/repos/my-app/.worktrees/sess-b".to_string(),
+            }
+        );
+    }
+
+    /// `#remote-shell` 10/11: a session record without a worktree path is a record this daemon
+    /// did not write; the pack runs locally rather than against a path nobody recorded.
+    #[test]
+    fn a_remote_pack_for_a_session_without_a_recorded_path_packs_locally_rather_than_guessing() {
+        // Given an SSH-backed session whose record names no worktree path
+        let home = tempfile::tempdir().expect("tempdir");
+        let sessions_base = home.path().join(".tddy");
+        let projects_dir = sessions_base.join("projects");
+        let local_repo = home.path().join("repos").join("app");
+        std::fs::create_dir_all(&local_repo).expect("repo");
+        write_projects(
+            &projects_dir,
+            &[ProjectData {
+                project_id: "proj-1".to_string(),
+                name: "my-app".to_string(),
+                git_url: "https://github.com/example/my-app.git".to_string(),
+                main_repo_path: local_repo.to_string_lossy().to_string(),
+                main_branch_ref: None,
+                remote_name: None,
+                host_repo_paths: HashMap::new(),
+                accounts: Vec::new(),
+                local_gh: false,
+                home_session_id: None,
+                orchestrator_defaults: None,
+                lifecycle: Default::default(),
+            }],
+        )
+        .expect("projects");
+        write_session(
+            &sessions_base,
+            "sess-a",
+            "proj-1",
+            "buildbox",
+            "",
+            "2026-01-02T00:00:00Z",
+        );
+
+        let sessions_base_owned = sessions_base.clone();
+        let projects_dir_owned = projects_dir.clone();
+        let sessions_base_resolver: SessionsBaseResolver =
+            Arc::new(move |_| Some(sessions_base_owned.clone()));
+        let projects_dir_resolver: ProjectsDirResolver =
+            Arc::new(move |_| Some(projects_dir_owned.clone()));
+        let resolver =
+            pack_execution_resolver_from_sessions(sessions_base_resolver, projects_dir_resolver);
+
+        // When
+        let execution = resolver(PackExecutionContext {
+            os_user: "dev".to_string(),
+            project_ref: "my-app".to_string(),
+            local_repo_path: local_repo.clone(),
+        });
+
+        // Then — no path is invented for the target
+        assert_eq!(
+            execution,
+            PackExecution::Local {
+                repo_path: local_repo
             }
         );
     }

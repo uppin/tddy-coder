@@ -7,11 +7,14 @@
  * base sources for the subtree below it, which is where every host-selection surface reads.
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  DerivedHostsRefreshProvider,
   HostDirectorySources,
   NO_DERIVED_HOSTS,
-  listDerivedHosts,
+  askParentForDerivedHosts,
+  mergeParentAnswer,
+  parentsToAsk,
   useAuth,
   useHostConnector,
   useHostDirectory,
@@ -30,39 +33,54 @@ export function DerivedHostDirectorySources({ children }: { children: ReactNode 
   const connect = useHostConnector();
   const { sessionToken } = useAuth();
   const [derived, setDerived] = useState<DerivedHostDirectorySource>(NO_DERIVED_HOSTS);
+  const askedRef = useRef<ReadonlySet<string>>(new Set());
 
   // The parents are the directory's daemons — never a derived host, which is asked through its
-  // parent. Keyed on their ids so a rebuilt list with the same daemons asks nothing again.
-  const parentIdsKey = directory.hosts
+  // parent.
+  const parents: DerivedHostParent[] = directory.hosts
     .filter((host) => !host.parent)
-    .map((host) => host.hostId)
-    .join("\n");
+    .map((host) => {
+      const connection = connect(host.hostId);
+      return {
+        host,
+        status: connection?.status ?? "error",
+        // Only a connected parent is asked, so a missing connection is never called.
+        client: connection?.clientFor(HostService) as DerivedHostParent["client"],
+      };
+    })
+    .filter((parent) => parent.client !== undefined && parent.client !== null);
+
+  const parentsRef = useRef(parents);
+  parentsRef.current = parents;
+  const tokenRef = useRef(sessionToken ?? "");
+  tokenRef.current = sessionToken ?? "";
+
+  const ask = useCallback((toAsk: readonly DerivedHostParent[]) => {
+    for (const parent of toAsk) {
+      askedRef.current = new Set(askedRef.current).add(parent.host.hostId);
+      void askParentForDerivedHosts(parent, tokenRef.current).then((answer) => {
+        setDerived((previous) => mergeParentAnswer(previous, answer));
+      });
+    }
+  }, []);
+
+  const refresh = useCallback(() => {
+    ask(parentsToAsk(parentsRef.current, askedRef.current, true));
+  }, [ask]);
+
+  // Keyed on ids and statuses so a rebuilt list with the same daemons asks nothing again, and a
+  // parent that becomes connected is asked.
+  const parentsKey = parents.map((parent) => `${parent.host.hostId}:${parent.status}`).join("\n");
 
   useEffect(() => {
-    const parents: DerivedHostParent[] = directory.hosts
-      .filter((host) => !host.parent)
-      .map((host) => {
-        const connection = connect(host.hostId);
-        return {
-          host,
-          status: connection?.status ?? "error",
-          // Only a connected parent is asked, so a missing connection is never called.
-          client: connection?.clientFor(HostService) as DerivedHostParent["client"],
-        };
-      })
-      .filter((parent) => parent.client !== undefined && parent.client !== null);
-    let current = true;
-    void listDerivedHosts(parents, sessionToken ?? "").then((source) => {
-      if (current) setDerived(source);
-    });
-    return () => {
-      current = false;
-    };
-    // `directory.hosts` is rebuilt on every source change; the ids are the stable input.
+    ask(parentsToAsk(parentsRef.current, askedRef.current, false));
+    // `parentsRef` carries the current parents; the key is the stable input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parentIdsKey, connect, sessionToken]);
+  }, [parentsKey, ask, sessionToken]);
 
   return (
-    <HostDirectorySources sources={[...directory.sources, derived]}>{children}</HostDirectorySources>
+    <DerivedHostsRefreshProvider refresh={refresh}>
+      <HostDirectorySources sources={[...directory.sources, derived]}>{children}</HostDirectorySources>
+    </DerivedHostsRefreshProvider>
   );
 }
