@@ -286,12 +286,12 @@ Real dependency edges, as opposed to the branch line:
 
 ## Implementation Milestones
 
-- [ ] Source, storage, skips; storage tests green
-- [ ] Post with addressing; acceptance green
-- [ ] The inbox position and `ReadSessionMessages`; acceptance green
-- [ ] The inbox watch (match, role exception) and the `message` line; acceptance and CLI green (after #934)
-- [ ] Watch kind, once-only across watches and reads
-- [ ] `send`; docs
+- [x] Source, storage, skips; storage tests green
+- [x] Post with addressing; acceptance green
+- [x] The inbox position and `ReadSessionMessages`; acceptance green
+- [x] The inbox watch (match, role exception) and the `message` line; acceptance and CLI green (after #934)
+- [x] Watch kind, once-only across watches and reads
+- [x] `send` (the feature docs — `project-concept.md`, `session-notifications.md`, package docs — belong to the wrap)
 
 ## Testing Plan
 
@@ -424,7 +424,7 @@ Real session records and log, a real CLI binary, one behaviour per test, and the
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (6e 2026-11-17: redesign — messages as activity, one filtered wait — then the redesigned tests approved)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p tddy-daemon-kernel -p tddy-session-activity -p tddy-tool-engine -p tddy-daemon-rpc -p tddy-telegram-control -p tddy-tools -p tddy-tools-cli -p tddy-session-lifecycle`) — verify 100% pass

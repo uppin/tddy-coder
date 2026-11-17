@@ -190,6 +190,10 @@ pub fn session_message_tool_defs() -> Vec<ToolDef> {
     ]
 }
 
+/// The most messages one read asks for, as the tool's schema caps it —
+/// `tddy_session_activity::session_messages::MAX_MESSAGES_PER_READ`, which sits above this crate.
+pub const MAX_MESSAGES_PER_READ: usize = 50;
+
 /// Run one of the two message tools for `caller`. Bad arguments and the port's refusals come back
 /// as an `is_error` outcome saying what to do.
 pub async fn execute_session_message_tool(
@@ -198,10 +202,82 @@ pub async fn execute_session_message_tool(
     tool_name: &str,
     args_json: &str,
 ) -> ToolOutcome {
-    // TODO(session-messages): implement — read each tool's arguments (refusing a limit above 50),
-    // and hand them to the port.
-    let _ = (port, caller, args_json);
-    ToolOutcome::err(format!(
-        "{tool_name}: TODO(session-messages): session messages are not implemented yet"
-    ))
+    let args: Value = match serde_json::from_str(args_json) {
+        Ok(args) => args,
+        Err(e) => return ToolOutcome::err(format!("{tool_name}: invalid args_json: {e}")),
+    };
+    let answered = match tool_name {
+        POST_SESSION_MESSAGE => match post_request(&args) {
+            Ok(request) => port.post_message(caller, request).await,
+            Err(message) => Err(message),
+        },
+        READ_SESSION_MESSAGES => match read_request(&args) {
+            Ok(request) => port.read_messages(caller, request).await,
+            Err(message) => Err(message),
+        },
+        other => Err(format!("unknown session message tool: {other}")),
+    };
+    match answered {
+        Ok(value) => ToolOutcome::ok(value.to_string()),
+        Err(message) => ToolOutcome::err(format!("{tool_name}: {message}")),
+    }
+}
+
+/// What `PostSessionMessage` asks for: a recipient and a text, and the message it replies to when
+/// named.
+fn post_request(args: &Value) -> Result<PostMessageRequest, String> {
+    let to_session_id = match args.get("to_session_id").and_then(Value::as_str) {
+        Some(to) if !to.is_empty() => to.to_string(),
+        _ => {
+            return Err(
+                "to_session_id is required: the session to message (ListProjectSessions)"
+                    .to_string(),
+            )
+        }
+    };
+    let text = match args.get("text").and_then(Value::as_str) {
+        Some(text) => text.to_string(),
+        None => return Err("text is required: the message to send".to_string()),
+    };
+    let reply_to = match args.get("reply_to") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(reply_to)) if !reply_to.is_empty() => Some(reply_to.clone()),
+        Some(other) => return Err(format!("reply_to must name a message, not {other}")),
+    };
+    Ok(PostMessageRequest {
+        to_session_id,
+        text,
+        reply_to,
+    })
+}
+
+/// What `ReadSessionMessages` asks for: where to read from, and how much — a `limit` above
+/// [`MAX_MESSAGES_PER_READ`] is refused before the port is asked.
+fn read_request(args: &Value) -> Result<ReadMessagesRequest, String> {
+    let after_message_id = match args.get("after_message_id") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(after)) if !after.is_empty() => Some(after.clone()),
+        Some(other) => return Err(format!("after_message_id must name a message, not {other}")),
+    };
+    let limit = match args.get("limit") {
+        None | Some(Value::Null) => None,
+        Some(limit) => {
+            let Some(limit) = limit.as_u64() else {
+                return Err(format!(
+                    "limit must be a whole number of messages, not {limit}"
+                ));
+            };
+            if limit > MAX_MESSAGES_PER_READ as u64 {
+                return Err(format!(
+                    "limit must be at most {MAX_MESSAGES_PER_READ}: read at most \
+                     {MAX_MESSAGES_PER_READ} messages in one call"
+                ));
+            }
+            Some(limit as usize)
+        }
+    };
+    Ok(ReadMessagesRequest {
+        after_message_id,
+        limit,
+    })
 }

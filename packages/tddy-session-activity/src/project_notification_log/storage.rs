@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tddy_daemon_kernel::session_notification::{
     AgentNotification, NotificationLevel, QuestionNotice, QuestionNoticeItem, QuestionNoticeOption,
-    SessionEndNotice, SessionNotificationKind, SessionNotificationSource,
+    SessionEndNotice, SessionMessage, SessionNotificationKind, SessionNotificationSource,
 };
 
 use super::{Held, ProjectNotificationRecord};
@@ -244,6 +244,43 @@ struct RecordDto {
     /// 4/11), and from a record of a session no orchestrator started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     orchestrator_session_id: Option<String>,
+    /// Absent from every record but a `message` one, and from a line written before records
+    /// carried what one session sent another (`#activity-wake` 5/5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    message: Option<MessageDto>,
+}
+
+/// A [`SessionMessage`] as JSON.
+#[derive(Serialize, Deserialize)]
+struct MessageDto {
+    to_session_id: String,
+    message_id: String,
+    /// Absent from a message that replies to nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reply_to: Option<String>,
+    text: String,
+}
+
+impl From<&SessionMessage> for MessageDto {
+    fn from(message: &SessionMessage) -> Self {
+        Self {
+            to_session_id: message.to_session_id.clone(),
+            message_id: message.message_id.clone(),
+            reply_to: message.reply_to.clone(),
+            text: message.text.clone(),
+        }
+    }
+}
+
+impl From<MessageDto> for SessionMessage {
+    fn from(dto: MessageDto) -> Self {
+        Self {
+            to_session_id: dto.to_session_id,
+            message_id: dto.message_id,
+            reply_to: dto.reply_to,
+            text: dto.text,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -327,6 +364,7 @@ impl From<&ProjectNotificationRecord> for RecordDto {
             question: record.question.as_ref().map(QuestionDto::from),
             ended: record.ended.as_ref().map(EndedDto::from),
             activity_status: record.activity_status.clone(),
+            message: record.message.as_ref().map(MessageDto::from),
             at_unix_ms: record.at_unix_ms,
             orchestrator_session_id: record.orchestrator_session_id.clone(),
         }
@@ -346,8 +384,7 @@ impl From<RecordDto> for ProjectNotificationRecord {
             question: dto.question.map(QuestionNotice::from),
             ended: dto.ended.map(SessionEndNotice::from),
             activity_status: dto.activity_status,
-            // TODO(session-messages): implement — persist and replay the message part.
-            message: None,
+            message: dto.message.map(SessionMessage::from),
             at_unix_ms: dto.at_unix_ms,
             orchestrator_session_id: dto.orchestrator_session_id,
         }

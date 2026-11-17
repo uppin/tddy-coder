@@ -2,8 +2,9 @@
 //! project notification log (`#activity-wake` 5/5).
 //!
 //! A message is stored once, as a `message` record in the project log
-//! (`SessionNotificationSource::Message`, carrying a `SessionMessage`), its `session_id` the
-//! sender. Nothing else keeps it. A session receives it two ways, both reading that record:
+//! ([`crate::session_notifications::SessionNotificationSource::Message`], carrying a
+//! `SessionMessage`), its `session_id` the sender. Nothing else keeps it. A session receives it
+//! two ways, both reading that record:
 //!
 //! - **Watching.** A session's **inbox watch** ([`WatchFilter::inbox_of`]: kind `message`, naming
 //!   the session itself) matches the messages addressed to it, and is delivered like any watch — on
@@ -24,6 +25,7 @@
 
 use crate::project_notification_log::{ProjectNotificationLog, ProjectNotificationRecord};
 use crate::session_watches::{SessionWatchStore, WatchFilter, WatchKind, WatchOwner};
+use tddy_daemon_kernel::session_notification::SessionMessage;
 
 /// The longest a message's text may be, in bytes: 8 KiB.
 pub const MAX_MESSAGE_BYTES: usize = 8 * 1024;
@@ -34,9 +36,32 @@ pub const MAX_MESSAGES_PER_READ: usize = 50;
 /// Refuse a message `text` that is empty or longer than [`MAX_MESSAGE_BYTES`], saying what to send
 /// instead.
 pub fn refuse_a_bad_message_text(text: &str) -> Result<(), String> {
-    // TODO(session-messages): implement — refuse an empty text and one over MAX_MESSAGE_BYTES.
-    let _ = text;
-    Err("TODO(session-messages): a message's text is not checked yet".to_string())
+    if text.is_empty() {
+        return Err(
+            "a message needs a text: give PostSessionMessage the message to send".to_string(),
+        );
+    }
+    if text.len() > MAX_MESSAGE_BYTES {
+        return Err(format!(
+            "a message is at most 8 KiB ({MAX_MESSAGE_BYTES} bytes), not {} — send less, or split it",
+            text.len()
+        ));
+    }
+    Ok(())
+}
+
+/// The `message` part of `record`, when it is one addressed to `session_id`.
+pub(crate) fn a_message_to<'a>(
+    record: &'a ProjectNotificationRecord,
+    session_id: &str,
+) -> Option<&'a SessionMessage> {
+    if record.source != crate::session_notifications::SessionNotificationSource::Message {
+        return None;
+    }
+    record
+        .message
+        .as_ref()
+        .filter(|message| message.to_session_id == session_id)
 }
 
 impl WatchFilter {
@@ -75,9 +100,16 @@ pub struct InboxMessage {
 impl InboxMessage {
     /// The message `record` carries, or `None` for a record that is not a message.
     pub fn of(record: &ProjectNotificationRecord) -> Option<Self> {
-        // TODO(session-messages): implement — read the record's message part.
-        let _ = record;
-        None
+        let message = record.message.as_ref()?;
+        Some(Self {
+            seq: record.seq,
+            message_id: message.message_id.clone(),
+            from_session_id: record.session_id.clone(),
+            from: record.label.clone(),
+            reply_to: message.reply_to.clone(),
+            text: message.text.clone(),
+            sent_at_unix_ms: record.at_unix_ms,
+        })
     }
 }
 
@@ -109,21 +141,42 @@ impl SessionWatchStore {
         log: &ProjectNotificationLog,
         now_unix_ms: u64,
     ) -> Result<InboxRead, String> {
-        // TODO(session-messages): implement — under the project lock: answer the messages after
-        // the inbox position, skip what a watch delivered, advance, persist.
-        let _ = (recipient, after_message_id, limit, log, now_unix_ms);
-        Err(
-            "TODO(session-messages): reading a session's messages is not implemented yet"
-                .to_string(),
-        )
+        let limit = limit
+            .unwrap_or(MAX_MESSAGES_PER_READ)
+            .min(MAX_MESSAGES_PER_READ);
+        let (start, skip_watch_delivered) = match after_message_id {
+            Some(message_id) => {
+                let named = self
+                    .received_message(recipient, message_id, log)
+                    .ok_or_else(|| {
+                        format!(
+                            "you received no message {message_id}: after_message_id must name a \
+                             message addressed to you (ReadSessionMessages answers message_id, or \
+                             your message watch carries one)"
+                        )
+                    })?;
+                (named.seq, false)
+            }
+            None => (self.inbox_position(recipient).await, true),
+        };
+        Ok(self
+            .read_inbox(
+                recipient,
+                start,
+                limit,
+                skip_watch_delivered,
+                log,
+                now_unix_ms,
+            )
+            .await)
     }
 
     /// The `seq` up to which `recipient` has read the messages addressed to it; `0` for a session
     /// that never read.
     pub async fn inbox_position(&self, recipient: &WatchOwner) -> u64 {
-        // TODO(session-messages): implement — read the persisted position.
-        let _ = recipient;
-        0
+        let project = self.project_of(&recipient.project_id);
+        let state = project.lock().await;
+        crate::session_watches::inbox_position_of(&state, recipient)
     }
 
     /// The message `message_id` if `recipient` received it — one addressed to it that the log still
@@ -134,8 +187,13 @@ impl SessionWatchStore {
         message_id: &str,
         log: &ProjectNotificationLog,
     ) -> Option<InboxMessage> {
-        // TODO(session-messages): implement — find the message addressed to `recipient`.
-        let _ = (recipient, message_id, log);
-        None
+        let (records, _) = log.records_after(&recipient.project_id, &recipient.os_user, 0);
+        records
+            .iter()
+            .filter(|record| {
+                a_message_to(record, &recipient.session_id)
+                    .is_some_and(|message| message.message_id == message_id)
+            })
+            .find_map(InboxMessage::of)
     }
 }

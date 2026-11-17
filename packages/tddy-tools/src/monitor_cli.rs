@@ -186,9 +186,10 @@ async fn stream(args: &MonitorArgs) -> Result<i32, String> {
                 .to_string(),
         );
         for event in batch["events"].as_array().map(Vec::as_slice).unwrap_or(&[]) {
-            // TODO(session-messages): implement — print an event of kind `message` as a
-            // `MonitorLine::Message`, read from its record's message part (`message_line_of`).
-            print_line(&event_line(event, args.full)?);
+            match message_line_of(event) {
+                Some(line) => print_line(&line),
+                None => print_line(&event_line(event, args.full)?),
+            }
         }
         if let Some(lost) = batch["lost"].as_u64().filter(|lost| *lost > 0) {
             print_line(&MonitorLine::Lost { count: lost });
@@ -307,12 +308,31 @@ async fn call_tool(
 }
 
 /// The `message` line for a streamed event of kind `message`, or `None` for any other event
-/// (`#activity-wake` 5/5).
+/// (`#activity-wake` 5/5). The message's fields are read from the event's log record, so its text
+/// is whole.
 pub fn message_line_of(event: &Value) -> Option<MonitorLine> {
-    // TODO(session-messages): implement — read seq, watch_ids, session_id, session and the
-    // record's `message` part.
-    let _ = event;
-    None
+    if event["kind"].as_str()? != "message" {
+        return None;
+    }
+    let message = &event["record"]["message"];
+    Some(MonitorLine::Message {
+        seq: event["seq"].as_u64().unwrap_or(0),
+        watch_ids: event["watch_ids"]
+            .as_array()?
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect(),
+        message_id: message.get("message_id")?.as_str()?.to_string(),
+        from_session_id: event["session_id"].as_str().unwrap_or_default().to_string(),
+        from: event["session"].as_str().unwrap_or_default().to_string(),
+        to_session_id: message.get("to_session_id")?.as_str()?.to_string(),
+        reply_to: message
+            .get("reply_to")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        text: message.get("text")?.as_str()?.to_string(),
+    })
 }
 
 /// Write `line` to stdout and flush it, so a `Monitor` sees it at once.

@@ -150,7 +150,10 @@ struct Held {
 
 impl Held {
     fn visible_to(&self, scope: &ProjectNotificationScope) -> bool {
+        // A message between sessions is its recipient's, read through the inbox and the message
+        // watches — never an operator notification (`#activity-wake` 5/5).
         self.os_user == scope.os_user
+            && self.record.source != SessionNotificationSource::Message
             && self.record.session_id != scope.exclude_session_id
             && scope.started_by.as_ref().is_none_or(|orchestrator| {
                 self.record.orchestrator_session_id.as_ref() == Some(orchestrator)

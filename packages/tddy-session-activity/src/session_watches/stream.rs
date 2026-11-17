@@ -310,7 +310,11 @@ impl SessionWatchStore {
             let (records, watch_lost) =
                 log.records_after(&owner.project_id, &owner.os_user, watch.position);
             lost = lost.max(watch_lost);
-            for record in records.iter().filter(|record| watch_matches(watch, record)) {
+            let inbox = super::inbox_position_of(&state, owner);
+            for record in records
+                .iter()
+                .filter(|record| watch_matches(watch, record, inbox))
+            {
                 let event = matched.entry(record.seq).or_insert_with(|| StreamedEvent {
                     record: record.clone(),
                     watch_ids: Vec::new(),
