@@ -8,7 +8,7 @@ import { dotForNotification } from "./sessionNotificationDot";
 /**
  * Which drawer dot a session notification lights.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-11-16-session-ended-notice.md — a session's end is attention
+ * docs/ft/daemon/session-notifications.md — a session's end is attention
  * for an orchestrator's inbox, and lights nothing in the drawer.
  */
 

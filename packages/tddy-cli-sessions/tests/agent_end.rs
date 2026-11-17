@@ -3,7 +3,7 @@
 //!
 //! The PTY is real: a stub agent that exits with a chosen code, or sleeps until it is stopped.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-16-session-ended-notice.md
+//! Feature: docs/ft/daemon/session-notifications.md (*What is notified*)
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

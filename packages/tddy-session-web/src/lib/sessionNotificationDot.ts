@@ -6,7 +6,7 @@
  * nothing here: an ended session already reads as stopped. A kind this build does not know lights
  * nothing either, so a newer daemon's event leaves the row as it was.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-11-16-session-ended-notice.md.
+ * See docs/ft/daemon/session-notifications.md (*What is notified*).
  */
 
 import {

@@ -5,7 +5,7 @@
 //! main attached to it as its client. Both tests set the process-wide `TMUX_TMPDIR`, so they hold
 //! one lock for their whole run.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-16-session-ended-notice.md
+//! Feature: docs/ft/daemon/session-notifications.md
 
 use std::path::Path;
 use std::process::{Command, Output};

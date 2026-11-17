@@ -5,7 +5,7 @@
 //! forwarder publishes it; the read is the real `ReadProjectNotifications` exec-tool call a
 //! project-home agent makes, and the assertion is on the JSON it is answered with.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-16-session-ended-notice.md
+//! Feature: docs/ft/daemon/session-notifications.md
 
 mod support;
 

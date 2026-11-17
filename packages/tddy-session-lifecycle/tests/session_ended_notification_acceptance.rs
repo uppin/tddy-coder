@@ -5,7 +5,7 @@
 //! forwarder the daemon starts, a bus with the project notification log registered on it, and a
 //! data directory holding the session's `.session.yaml`.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-16-session-ended-notice.md
+//! Feature: docs/ft/daemon/session-notifications.md
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
