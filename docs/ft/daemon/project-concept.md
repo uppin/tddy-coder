@@ -379,6 +379,7 @@ and served the four start tools and the two answer tools, for its own project, a
 | `ListSessionWatches` | — | `{watches}`: the caller's live watches, each with its filter, expiry and how many matched events wait (`waiting`) |
 | `RenewSessionWatch` | `watch_id`, `ttl_seconds` (required, 1 to 86400) | the watch, expiring `ttl_seconds` from now |
 | `CancelSessionWatch` | `watch_id` | `{watch_id, cancelled: true}`: the watch ends; nothing more is delivered for it |
+| `WaitSessionWatchEvents` | `watch_ids`, `ack_seq?`, `stream_id?`, `timeout_ms?` (at most 20000) | `{stream_id, events, lost, ended, next_ack_seq}`: the next batch of the caller's streamed watches, held until one matches or `timeout_ms` passes. Each event is `{seq, watch_ids, kind, session_id, session, summary, request_id?, record}`, its `summary` worded as a wake words it. A watch's position advances only past the `ack_seq` a later call presents. See [Watching sessions](#watching-sessions) |
 | `NotifyOperator` | `title`, `body_markdown`, `level?` (`info` (default), `success`, `warning`, `error`), `sound?` | `{published: true}`: notifies the operator in the agent's own words, as `tddy-tools notify` does for a session with a shell — one `AGENT` attention notification on every surface (Telegram, the desktop). The title is 1 to 200 characters after trimming and the body at most 2,000; either over its limit, or an unknown `level`, is refused saying why, never truncated. No session argument: the daemon publishes for the calling session alone, with the `hook_token` its `.session.yaml` records, through `ActivityService.ReportOperatorNotification` in process; the token never appears in the answer. A main that is not `claude-cli` / `cursor-cli`, or records no hook token, is refused naming the tool and why. See [Session notifications § A session with no shell](session-notifications.md#a-session-with-no-shell-notifyoperator) |
 | `SetSessionMark` | `session_id`, `mark` (`paused`, `blocked`, `done` or `none`), `note?`, `daemon_instance_id?` | `{session_id, mark, note, set_by, at_unix_ms}`: records the mark in the session's `.session.yaml` (`orchestration_mark`), listed as `SessionEntry.orchestration_mark` and shown as a badge on the session's drawer row, the note on hover. `paused` also stops the session, as `TerminateSession` does; any resume clears a `paused` mark. `blocked` and `done` only mark. `none` removes the mark |
 | `RenameSession` | `session_id`, `display_name`, `daemon_instance_id?` | `{session_id, display_name}`: what the web UI's rename does — records the name in the session's `.session.yaml` (`display_name`), from then on its label on its drawer row and its Telegram alerts, and what `ListProjectSessions` and `ReadSessionActivity` report. Trimmed; an empty `display_name` clears it (answered as `null`); over 80 characters or with a control character is refused saying why, before anything is written. A running session keeps running. See [Session names](../web/session-drawer.md#session-names) |
@@ -794,6 +795,19 @@ wait open.
   kept per project at `<data dir>/projects/<project_id>/session-watches.json`, whole-file atomically
   rewritten on every change, so a watch and its position survive a daemon restart and the
   orchestrator's `/clear`.
+- **Streaming to a monitor.** `tddy-tools monitor` streams a watch to a process — one JSON object
+  per stdout line, for Claude Code's `Monitor` tool to turn into notifications. Without `--watch`
+  it creates a watch through `CreateSessionWatch` and prints a `watch` line; with `--watch <id>`
+  (repeatable) it attaches to existing watches. It then loops `WaitSessionWatchEvents`: each event
+  is printed as an `event` line (compact, or with the full log record under `--full`), `lost` and
+  `ended` are printed as they come, and the next call acknowledges the batch with the last printed
+  `seq`. It exits 0 once every streamed watch has ended, and non-zero after an `error` line on any
+  refusal, transport error or per-call deadline lapse (`timeout_ms` + 10 s). While a stream keeps
+  calling, it holds its watches under a lease (15 s past its last call): their events ride on no
+  tool answer and wake nobody. When the lease lapses, what was never acknowledged returns to both.
+  A new monitor on the owner's own watch takes the stream over at once, resuming from the last
+  acknowledged position; the superseded stream is refused from its next call. A watch nobody
+  resumes ends at its TTL.
 - **Waking an idle orchestrator.** An orchestrator that is idle is sent one turn carrying what its
   watches matched, instead of waiting for its next tool call. Idle means its main terminal is live,
   it waits on no question of its own, and its reported status is `Done`, `WaitingForInput`,

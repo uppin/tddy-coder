@@ -16,9 +16,13 @@
 //!
 //! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-17-session-watch-monitor.md
 
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
-use super::{SessionWatchStore, WatchEnd, WatchOwner};
+use super::{
+    end_finished, end_reason, watch_matches, SessionWatchStore, WatchEnd, WatchOwner,
+    MAX_EVENTS_PER_ANSWER,
+};
 use crate::project_notification_log::{ProjectNotificationLog, ProjectNotificationRecord};
 
 /// How long a watch stays streamed after a stream's last call returned: the monitor's turnaround
@@ -125,32 +129,295 @@ impl SessionWatchStore {
         log: &ProjectNotificationLog,
         now_unix_ms: u64,
     ) -> Result<StreamBatch, StreamRefusal> {
-        // TODO(watch-monitor): implement — acknowledge, take or renew the lease, hand the batch.
-        let _ = (
-            stream_id,
-            ack_seq,
-            log,
-            now_unix_ms,
-            owner,
-            &self.leases,
-            self.stream_lease_grace,
-        );
-        Err(StreamRefusal::NotYourLiveWatch {
-            watch_id: watch_ids.first().cloned().unwrap_or_default(),
+        if watch_ids.is_empty() {
+            return Err(StreamRefusal::NoWatchNamed);
+        }
+        let project = self.project_of(&owner.project_id);
+        let mut state = project.lock().await;
+
+        // Classify the named watches without moving anything: a refusal moves nothing.
+        let mut live_ids: Vec<String> = Vec::new();
+        let mut ended_ids: Vec<String> = Vec::new();
+        for watch_id in watch_ids {
+            let owned = state
+                .watches
+                .iter()
+                .find(|watch| &watch.owner == owner && &watch.watch_id == watch_id);
+            match owned {
+                Some(watch) if end_reason(watch, log, now_unix_ms).is_none() => {
+                    if !live_ids.contains(watch_id) {
+                        live_ids.push(watch_id.clone());
+                    }
+                }
+                Some(_) => {
+                    if !ended_ids.contains(watch_id) {
+                        ended_ids.push(watch_id.clone());
+                    }
+                }
+                None if state.ended.iter().any(|pending| {
+                    &pending.owner == owner && &pending.end.watch_id == watch_id
+                }) =>
+                {
+                    if !ended_ids.contains(watch_id) {
+                        ended_ids.push(watch_id.clone());
+                    }
+                }
+                None => {
+                    return Err(StreamRefusal::NotYourLiveWatch {
+                        watch_id: watch_id.clone(),
+                    });
+                }
+            }
+        }
+
+        // The lease snapshot this call is judged against.
+        let leases_snapshot: HashMap<String, Lease> = {
+            let leases = self
+                .leases
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            leases.by_watch.clone()
+        };
+        let holds = |watch_id: &str, presented: &str, leases: &HashMap<String, Lease>| {
+            leases.get(watch_id).is_some_and(|lease| {
+                &lease.owner == owner
+                    && lease.stream_id == presented
+                    && now_unix_ms < lease.lease_until_unix_ms
+            })
+        };
+
+        // An ended watch is reported only to the stream that was holding it.
+        for watch_id in &ended_ids {
+            let continued =
+                stream_id.is_some_and(|presented| holds(watch_id, presented, &leases_snapshot));
+            if !continued {
+                return Err(StreamRefusal::NotYourLiveWatch {
+                    watch_id: watch_id.clone(),
+                });
+            }
+        }
+
+        // Resolve the stream: a presented id must hold at least one named watch and no named
+        // watch may be held by another live stream; no id starts (and takes over) a new stream.
+        let effective_stream_id: String = match stream_id {
+            Some(presented) => {
+                for watch_id in live_ids.iter().chain(ended_ids.iter()) {
+                    if let Some(lease) = leases_snapshot.get(watch_id) {
+                        if &lease.owner == owner
+                            && lease.stream_id != presented
+                            && now_unix_ms < lease.lease_until_unix_ms
+                        {
+                            return Err(StreamRefusal::Superseded {
+                                watch_id: watch_id.clone(),
+                            });
+                        }
+                    }
+                }
+                let holds_any = live_ids
+                    .iter()
+                    .chain(ended_ids.iter())
+                    .any(|watch_id| holds(watch_id, presented, &leases_snapshot));
+                if !holds_any {
+                    return Err(StreamRefusal::UnknownStream {
+                        stream_id: presented.to_string(),
+                    });
+                }
+                presented.to_string()
+            }
+            None => uuid::Uuid::new_v4().to_string(),
+        };
+        let starting = stream_id.is_none();
+
+        // What each live watch had been handed before this call; acknowledgement may not pass it.
+        let mut handed_before: HashMap<String, u64> = HashMap::new();
+        for watch_id in &live_ids {
+            let watch = state
+                .watches
+                .iter()
+                .find(|watch| &watch.owner == owner && &watch.watch_id == watch_id)
+                .expect("a live watch was classified above");
+            let handed = if starting {
+                watch.position
+            } else {
+                leases_snapshot
+                    .get(watch_id)
+                    .filter(|lease| &lease.owner == owner && lease.stream_id == effective_stream_id)
+                    .map_or(watch.position, |lease| lease.handed)
+            };
+            if let Some(ack_seq) = ack_seq {
+                if ack_seq > handed {
+                    return Err(StreamRefusal::AckPastHanded { ack_seq, handed });
+                }
+            }
+            handed_before.insert(watch_id.clone(), handed);
+        }
+
+        // Move the watches that have ended, and report the ended ones this stream held.
+        let ended_moved = end_finished(&mut state, owner, log, now_unix_ms);
+        let mut ended: Vec<WatchEnd> = Vec::new();
+        if !ended_ids.is_empty() {
+            let ended_set: HashSet<&str> = ended_ids.iter().map(String::as_str).collect();
+            state.ended.retain(|pending| {
+                if &pending.owner == owner && ended_set.contains(pending.end.watch_id.as_str()) {
+                    ended.push(pending.end.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            ended.sort_by(|a, b| a.watch_id.cmp(&b.watch_id));
+            // Report in the order the call named the watches.
+            ended.sort_by_key(|end| {
+                watch_ids
+                    .iter()
+                    .position(|id| id == &end.watch_id)
+                    .unwrap_or(usize::MAX)
+            });
+        }
+
+        // Advance only on acknowledgement, and persist what moved.
+        let mut changed = ended_moved;
+        if let Some(ack_seq) = ack_seq {
+            for watch in state
+                .watches
+                .iter_mut()
+                .filter(|watch| &watch.owner == owner && live_ids.contains(&watch.watch_id))
+            {
+                if ack_seq > watch.position {
+                    watch.position = ack_seq;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.persist_best_effort(&owner.project_id, &state);
+        }
+
+        // The batch: matched records after each watch's acknowledged position, unioned by seq.
+        let mut matched: BTreeMap<u64, StreamedEvent> = BTreeMap::new();
+        let mut lost = 0_u64;
+        for watch_id in watch_ids {
+            if !live_ids.contains(watch_id) {
+                continue;
+            }
+            let Some(watch) = state
+                .watches
+                .iter()
+                .find(|watch| &watch.owner == owner && &watch.watch_id == watch_id)
+            else {
+                continue;
+            };
+            let (records, watch_lost) =
+                log.records_after(&owner.project_id, &owner.os_user, watch.position);
+            lost = lost.max(watch_lost);
+            for record in records.iter().filter(|record| watch_matches(watch, record)) {
+                let event = matched.entry(record.seq).or_insert_with(|| StreamedEvent {
+                    record: record.clone(),
+                    watch_ids: Vec::new(),
+                });
+                if !event.watch_ids.contains(watch_id) {
+                    event.watch_ids.push(watch_id.clone());
+                }
+            }
+        }
+        let events: Vec<StreamedEvent> =
+            matched.into_values().take(MAX_EVENTS_PER_ANSWER).collect();
+        let max_position = live_ids
+            .iter()
+            .filter_map(|watch_id| {
+                state
+                    .watches
+                    .iter()
+                    .find(|watch| &watch.owner == owner && &watch.watch_id == watch_id)
+                    .map(|watch| watch.position)
+            })
+            .max()
+            .unwrap_or(0);
+        let next_ack_seq = events
+            .iter()
+            .map(|event| event.record.seq)
+            .max()
+            .unwrap_or_else(|| ack_seq.unwrap_or(max_position).max(max_position));
+
+        // Take or renew the lease on the live watches; an ended watch's lease is dropped.
+        let grace_ms = u64::try_from(self.stream_lease_grace.as_millis()).unwrap_or(u64::MAX);
+        {
+            let mut leases = self
+                .leases
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for watch_id in &ended_ids {
+                leases.by_watch.remove(watch_id);
+            }
+            for watch_id in &live_ids {
+                let handed = handed_before
+                    .get(watch_id)
+                    .copied()
+                    .unwrap_or(0)
+                    .max(next_ack_seq);
+                leases.by_watch.insert(
+                    watch_id.clone(),
+                    Lease {
+                        owner: owner.clone(),
+                        stream_id: effective_stream_id.clone(),
+                        lease_until_unix_ms: now_unix_ms.saturating_add(grace_ms),
+                        handed,
+                    },
+                );
+            }
+        }
+
+        Ok(StreamBatch {
+            stream_id: effective_stream_id,
+            events,
+            lost,
+            ended,
+            next_ack_seq,
         })
     }
 
     /// Whether `owner`'s watch `watch_id` is held by a stream's lease at `now_unix_ms`.
     pub async fn is_streamed(&self, owner: &WatchOwner, watch_id: &str, now_unix_ms: u64) -> bool {
-        // TODO(watch-monitor): implement — read the lease map.
-        let _ = (owner, watch_id, now_unix_ms);
-        false
+        let leases = self
+            .leases
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        leases
+            .by_watch
+            .get(watch_id)
+            .is_some_and(|lease| &lease.owner == owner && now_unix_ms < lease.lease_until_unix_ms)
     }
+
+    /// The ids of `owner`'s watches a stream's lease holds at `now_unix_ms`.
+    pub(super) fn streamed_watch_ids(
+        &self,
+        owner: &WatchOwner,
+        now_unix_ms: u64,
+    ) -> HashSet<String> {
+        let leases = self
+            .leases
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        leases
+            .by_watch
+            .iter()
+            .filter(|(_, lease)| &lease.owner == owner && now_unix_ms < lease.lease_until_unix_ms)
+            .map(|(watch_id, _)| watch_id.clone())
+            .collect()
+    }
+}
+
+/// One watch's lease: the stream holding it, when the lease lapses, and what it was handed.
+#[derive(Debug, Clone)]
+pub(super) struct Lease {
+    pub(super) owner: WatchOwner,
+    pub(super) stream_id: String,
+    pub(super) lease_until_unix_ms: u64,
+    pub(super) handed: u64,
 }
 
 /// The in-memory leases of every stream on this host.
 #[derive(Debug, Default)]
 pub(super) struct StreamLeases {
-    // TODO(watch-monitor): implement — per watch: the holding stream, its lease's end and what it
-    // was handed.
+    pub(super) by_watch: HashMap<String, Lease>,
 }

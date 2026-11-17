@@ -104,10 +104,94 @@ pub async fn execute_project_home_watch_stream_tool(
     tool_name: &str,
     args_json: &str,
 ) -> ToolOutcome {
-    // TODO(watch-monitor): implement — read watch_ids, ack_seq, stream_id and timeout_ms (refusing
-    // one above MAX_WAIT_MS), and hand them to the port.
-    let _ = (port, home, args_json);
-    ToolOutcome::err(format!(
-        "{tool_name}: TODO(watch-monitor): streaming a session watch is not implemented yet"
-    ))
+    match answer(port, home, args_json).await {
+        Ok(value) => ToolOutcome::ok(value.to_string()),
+        Err(message) => ToolOutcome::err(format!("{tool_name}: {message}")),
+    }
+}
+
+/// The batch `args_json` asks the port for.
+async fn answer(
+    port: &dyn ProjectHomeWatchStreamPort,
+    home: &HomeCaller,
+    args_json: &str,
+) -> Result<Value, String> {
+    let args: Value =
+        serde_json::from_str(args_json).map_err(|e| format!("invalid args_json: {e}"))?;
+    port.wait_watch_events(home, request_from(&args)?).await
+}
+
+/// What a call asks for: its watches, its acknowledgement and stream, and how long to hold it.
+fn request_from(args: &Value) -> Result<WatchStreamRequest, String> {
+    Ok(WatchStreamRequest {
+        watch_ids: watch_ids_argument(args)?,
+        ack_seq: ack_seq_argument(args)?,
+        stream_id: stream_id_argument(args)?,
+        timeout_ms: timeout_argument(args)?,
+    })
+}
+
+/// `watch_ids`: the watches to stream, as `CreateSessionWatch` returned them; at least one.
+fn watch_ids_argument(args: &Value) -> Result<Vec<String>, String> {
+    match args.get("watch_ids") {
+        Some(Value::Array(ids)) if !ids.is_empty() => ids
+            .iter()
+            .map(|id| {
+                id.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("watch_ids must name watches, not {id}"))
+            })
+            .collect(),
+        Some(Value::Array(_)) => Err(
+            "name at least one watch_id: the watch_id CreateSessionWatch or ListSessionWatches returned"
+                .to_string(),
+        ),
+        None | Some(Value::Null) => Err(
+            "watch_ids is required: the watch_id CreateSessionWatch or ListSessionWatches returned"
+                .to_string(),
+        ),
+        Some(other) => Err(format!("watch_ids must name watches, not {other}")),
+    }
+}
+
+/// `ack_seq`: the `next_ack_seq` of the batch the caller printed; absent on a first call.
+fn ack_seq_argument(args: &Value) -> Result<Option<u64>, String> {
+    match args.get("ack_seq") {
+        None | Some(Value::Null) => Ok(None),
+        Some(ack) => ack
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| format!("ack_seq must be a whole log position, not {ack}")),
+    }
+}
+
+/// `stream_id`: the stream the call continues; absent starts one.
+fn stream_id_argument(args: &Value) -> Result<Option<String>, String> {
+    match args.get("stream_id") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(stream_id)) if !stream_id.is_empty() => Ok(Some(stream_id.clone())),
+        Some(other) => Err(format!(
+            "stream_id must be the stream_id a stream's first call returned, not {other}"
+        )),
+    }
+}
+
+/// `timeout_ms`: how long to hold the call, at most [`MAX_WAIT_MS`]; absent, the cap.
+fn timeout_argument(args: &Value) -> Result<u64, String> {
+    match args.get("timeout_ms") {
+        None | Some(Value::Null) => Ok(MAX_WAIT_MS),
+        Some(timeout) => {
+            let Some(timeout_ms) = timeout.as_u64() else {
+                return Err(format!(
+                    "timeout_ms must be a whole number of milliseconds, not {timeout}"
+                ));
+            };
+            if timeout_ms > MAX_WAIT_MS {
+                return Err(format!(
+                    "timeout_ms must be at most {MAX_WAIT_MS}, not {timeout_ms}"
+                ));
+            }
+            Ok(timeout_ms)
+        }
+    }
 }

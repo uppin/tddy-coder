@@ -412,7 +412,8 @@ impl SessionWatchStore {
     ) -> WatchDelivery {
         let project = self.project_of(&owner.project_id);
         let mut state = project.lock().await;
-        let delivery = apply_delivery(&mut state, owner, log, now_unix_ms);
+        let streamed = self.streamed_watch_ids(owner, now_unix_ms);
+        let delivery = apply_delivery(&mut state, owner, log, now_unix_ms, &streamed);
         if !delivery.is_empty() {
             self.persist_best_effort(&owner.project_id, &state);
         }
@@ -437,7 +438,8 @@ impl SessionWatchStore {
         let project = self.project_of(&owner.project_id);
         let mut state = project.lock().await;
         let before = state.clone();
-        let delivery = apply_delivery(&mut state, owner, log, now_unix_ms);
+        let streamed = self.streamed_watch_ids(owner, now_unix_ms);
+        let delivery = apply_delivery(&mut state, owner, log, now_unix_ms, &streamed);
         if delivery.is_empty() {
             return Ok(false);
         }
@@ -608,14 +610,19 @@ fn apply_delivery(
     owner: &WatchOwner,
     log: &ProjectNotificationLog,
     now_unix_ms: u64,
+    streamed: &HashSet<String>,
 ) -> WatchDelivery {
     end_finished(state, owner, log, now_unix_ms);
-    // TODO(watch-monitor): implement — skip every watch a stream's lease holds at `now_unix_ms`:
-    // its events are the stream's alone, and its position is the stream's to advance.
+    // A watch a stream's lease holds is skipped entirely: its events are the stream's alone,
+    // and its position is the stream's to advance.
     let mut matched: BTreeMap<u64, ProjectNotificationRecord> = BTreeMap::new();
     let mut lost = 0_u64;
     let mut scans: Vec<(String, u64, u64)> = Vec::new();
-    for watch in state.watches.iter().filter(|watch| &watch.owner == owner) {
+    for watch in state
+        .watches
+        .iter()
+        .filter(|watch| &watch.owner == owner && !streamed.contains(&watch.watch_id))
+    {
         let (records, watch_lost) =
             log.records_after(&owner.project_id, &owner.os_user, watch.position);
         lost = lost.max(watch_lost);
@@ -633,7 +640,7 @@ fn apply_delivery(
     for watch in state
         .watches
         .iter_mut()
-        .filter(|watch| &watch.owner == owner)
+        .filter(|watch| &watch.owner == owner && !streamed.contains(&watch.watch_id))
     {
         let mut position = watch.position;
         if let Some((_, _, watch_lost)) = scans.iter().find(|(id, _, _)| id == &watch.watch_id) {
@@ -649,7 +656,7 @@ fn apply_delivery(
     }
     let mut ended = Vec::new();
     state.ended.retain(|pending| {
-        if &pending.owner == owner {
+        if &pending.owner == owner && !streamed.contains(&pending.end.watch_id) {
             ended.push(pending.end.clone());
             false
         } else {

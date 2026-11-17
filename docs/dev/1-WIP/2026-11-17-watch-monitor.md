@@ -65,11 +65,11 @@ did not print.
 
 ## Scope
 
-- [ ] Acknowledged stream positions and the lease in the watch store; the existing deliveries skip a streamed watch
-- [ ] `WaitSessionWatchEvents`: the tool, its refusals, the bus-woken long poll
-- [ ] The remote clamp for its `timeout_ms`
-- [ ] `tddy-tools monitor`: create or attach, the loop, the line protocol, exit codes, the per-call deadline
-- [ ] Docs: `project-concept.md` (the monitor), package docs
+- [x] Acknowledged stream positions and the lease in the watch store; the existing deliveries skip a streamed watch
+- [x] `WaitSessionWatchEvents`: the tool, its refusals, the bus-woken long poll
+- [x] The remote clamp for its `timeout_ms`
+- [x] `tddy-tools monitor`: create or attach, the loop, the line protocol, exit codes, the per-call deadline
+- [x] Docs: `project-concept.md` (the monitor), package docs
 - [ ] Manual: under Claude Code's `Monitor`, an idle orchestrator is told of a watched permission prompt (PRD open question 1)
 
 ## Responsibility
@@ -226,10 +226,10 @@ Real dependency edges, as opposed to the branch line:
 
 ## Implementation Milestones
 
-- [ ] Store: acknowledgement, lease, skip; unit tests green
-- [ ] Tool and port, bus-woken; acceptance green
-- [ ] Clamp
-- [ ] CLI against the harness daemon; CLI acceptance green
+- [x] Store: acknowledgement, lease, skip; unit tests green
+- [x] Tool and port, bus-woken; acceptance green
+- [x] Clamp
+- [x] CLI against the harness daemon; CLI acceptance green
 - [ ] Docs; the manual `Monitor` check
 
 ## Testing Plan
@@ -353,10 +353,10 @@ exactly-once property raced with real tasks; stdout read line by line, never as 
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved 2026-11-17; re-arm changed to resume-by-takeover at the review)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p tddy-session-activity -p tddy-tool-engine -p tddy-daemon-rpc -p tddy-session-tool-client -p tddy-tools-cli`) — verify 100% pass
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the touched packages' tests (`./test -p tddy-session-activity -p tddy-tool-engine -p tddy-daemon-rpc -p tddy-session-tool-client -p tddy-tools-cli`) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -367,5 +367,5 @@ exactly-once property raced with real tasks; stdout read line by line, never as 
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings` per touched package, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings` per touched package, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap

@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_session_activity::project_notification_log::ProjectNotificationRecord;
 use tddy_session_activity::session_notifications::{
     SessionNotification, SessionNotificationKind, SessionNotificationSource,
     SessionNotificationSubscriber,
@@ -116,6 +117,13 @@ pub fn orchestrator_is_idle(
         )
 }
 
+/// One watched event as a wake words it: the session, the kind, and what it said. A monitor
+/// line's `summary` is this same wording (`#activity-wake` 4/5).
+pub fn wake_event_text(event: &ProjectNotificationRecord) -> String {
+    let kind = WatchKind::of(event).map_or("event", WatchKind::as_str);
+    format!("Session {} — {kind}: {}", event.label, event.text)
+}
+
 /// The turn a wake sends: one line per event, oldest first, naming the session, the kind, what it
 /// said and the `request_id` a question is answered by; then what was lost and which watches ended.
 pub fn wake_text(delivery: &WatchDelivery) -> String {
@@ -125,11 +133,7 @@ pub fn wake_text(delivery: &WatchDelivery) -> String {
         if count == 1 { "" } else { "s" }
     );
     for event in &delivery.events {
-        let kind = WatchKind::of(event).map_or("event", WatchKind::as_str);
-        text.push_str(&format!(
-            "\n- Session {} — {kind}: {}",
-            event.label, event.text
-        ));
+        text.push_str(&format!("\n- {}", wake_event_text(event)));
         if let Some(question) = &event.question {
             text.push_str(&format!(" (request_id {})", question.request_id));
         }
