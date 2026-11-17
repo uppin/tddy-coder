@@ -80,7 +80,7 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 40] = [
+    const ENDPOINT: [&str; 41] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -188,6 +188,10 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         "runtime/mount_accounts.rs",
         "runtime/mount_entries.rs",
         "runtime/mount_host.rs",
+        // `mount_host`'s shared-open and watch-store helper, split out of `mount_host.rs` to keep
+        // that file under its size record. Wiring by the same criterion as the `mount*` files —
+        // no RPC method, no session state, called only by `runtime::mount_host`.
+        "runtime/mount_host/open_shared.rs",
         "runtime/mount_socket.rs",
         "runtime/last_run_sweep.rs",
         "runtime/tasks.rs",
