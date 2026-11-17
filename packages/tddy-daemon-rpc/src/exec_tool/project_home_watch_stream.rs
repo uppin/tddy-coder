@@ -99,24 +99,6 @@ impl ProjectHomeWatchStreamPort for DaemonProjectHome {
     }
 }
 
-/// Hold until the log records something for `owner`'s project, or `remaining` capped at the
-/// renewal tick passes.
-async fn hold_until_next_record(
-    log: &ProjectNotificationLog,
-    owner: &WatchOwner,
-    home: &HomeCaller,
-    remaining: Duration,
-) {
-    let scope = ProjectNotificationScope {
-        project_id: owner.project_id.clone(),
-        os_user: owner.os_user.clone(),
-        exclude_session_id: home.session_id.clone(),
-        started_by: None,
-    };
-    let cursor = log.head_seq(&owner.project_id).to_string();
-    let _ = log.wait(&scope, &cursor, remaining.min(RENEW_TICK)).await;
-}
-
 /// A batch as the tool answers it: each event carries the monitor line's fields plus its record.
 fn batch_json(batch: StreamBatch) -> Result<Value, String> {
     let mut events = Vec::with_capacity(batch.events.len());

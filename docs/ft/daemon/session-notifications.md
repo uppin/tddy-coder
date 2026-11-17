@@ -54,6 +54,14 @@ declines it, so the operator is told once.
 **Telegram traffic did not grow.** `ACTIVITY` exists for indicators; sending it to a chat would turn
 every tool call into a message.
 
+**Messages between sessions are not operator notifications.** A `PostSessionMessage` record (source
+`message`, `#activity-wake` 5/5) is published `ATTENTION_REQUIRED` so the project log, the waker and
+the long polls take it unchanged, but every human-facing surface skips the source: Telegram's
+channel declines it, the drawer's stream never carries it, Tddy Desktop's native notifications drop
+it, and the project log keeps it out of `ReadProjectNotifications` / `WaitProjectNotifications`.
+It is its recipient's, read through the inbox watch and `ReadSessionMessages`
+([Project concept § Messages between sessions](project-concept.md#messages-between-sessions)).
+
 ## Agent-written notifications
 
 Every other notification is a fixed sentence the daemon writes. An agent in a daemon-launched
@@ -171,6 +179,9 @@ The stream is live-only; the **project notification log** is what a project-home
   with its own position in the log, and the records it matches ride on the orchestrator's next tool
   answer. Nothing new is published for a watch.
 - Records are numbered per project from 1 and never reused. The newest 1000 are kept per project.
+- A `message` record — one session's message to another — is stored here too, beside the attention
+  records, and read by its recipient's inbox watch and `ReadSessionMessages`, never by the operator
+  surfaces above. It shares the window: an evicted, undelivered message is counted in `lost`.
 - The log is persisted as JSON lines at `<data dir>/projects/<project_id>/notifications.jsonl` and
   replayed when the daemon starts, so numbering continues across a restart. Once the file holds twice
   the window it is rewritten to the window: written to a temporary file, flushed, and renamed over it.
