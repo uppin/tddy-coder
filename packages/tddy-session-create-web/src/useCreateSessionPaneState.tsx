@@ -46,6 +46,7 @@ import { useCreateSessionAgentSelection } from "./useCreateSessionAgentSelection
 import { BranchConflictDialog } from "./BranchConflictDialog";
 import { StartPassphrasePrompt } from "./StartPassphrasePrompt";
 import { useCreateSessionOrchestrator } from "./useCreateSessionOrchestrator";
+import { useDerivedHostSelection } from "./useDerivedHostSelection";
 import { useStartingHost } from "./useStartingHost";
 import { CreateSessionLaunchFields } from "./CreateSessionLaunchFields";
 import { useOpenOnMainSessionType } from "./useOpenOnMainSessionType";
@@ -115,17 +116,11 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
   // `initialValues` itself is a fresh object on every render of the caller.
   const preFilledBranchToWorkOn = initialValues?.selectedBranch ?? "";
   const [selectedBranchToWorkOn, setSelectedBranchToWorkOn] = useState(preFilledBranchToWorkOn);
-  // Which daemon/host runs the session. Defaults to the pre-filled host, else the selected daemon,
-  // else empty (which the daemon treats as "run locally on the connected daemon"). An empty
-  // pre-filled host falls through to the selected daemon so the Host <select>'s displayed option
-  // matches the value it will submit.
-  const [daemonInstanceId, setDaemonInstanceId] = useState(
-    projectHome?.daemonInstanceId || initialValues?.daemonInstanceId || selectedInstanceId || "",
-  );
-  // The Host field holds the chosen host's own id, which may be a derived host's. Its session is
-  // started on the parent daemon, so every daemon-addressed read below uses the parent.
-  const selectedHostEntry = daemons.find((d) => d.instanceId === daemonInstanceId) ?? null;
-  const sessionDaemonInstanceId = selectedHostEntry?.parent ?? daemonInstanceId;
+  const { daemonInstanceId, setDaemonInstanceId, sessionDaemonInstanceId } =
+    useDerivedHostSelection(
+      daemons,
+      projectHome?.daemonInstanceId || initialValues?.daemonInstanceId || selectedInstanceId || "",
+    );
 
   // The whole session list as the daemon reported it. Kept raw because two pickers draw different
   // views of it — the orchestrators that can parent this session, and the sessions that own a branch

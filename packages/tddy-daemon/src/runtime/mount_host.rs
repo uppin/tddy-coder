@@ -273,24 +273,15 @@ impl BuildContext {
             coding_agents,
         );
 
-        let connection_impl = match self.identity.credential_vaults.clone() {
-            Some(vaults) => connection_impl.with_coder_credentials(
-                crate::coder_credential_source::coder_credential_source(
-                    vaults,
-                    Arc::clone(&user_resolver),
-                ),
-            ),
-            None => connection_impl,
-        };
+        let connection_impl =
+            self.with_the_daemons_coder_credentials(&user_resolver, connection_impl);
         Ok(crate::livekit_host_ports::with_livekit_room_ports(
             connection_impl,
             Arc::clone(shared_session_rooms),
             Arc::clone(shared_session_admissions),
             Arc::clone(room_tokens),
         )
-        .with_session_reach(
-            Arc::clone(livekit_reach) as Arc<dyn tddy_daemon_extensions::SessionReach>
-        )
+        .with_session_reach(session_reach_of(livekit_reach))
         .with_terminal_exposure(Arc::clone(terminal_exposure))
         // The worktree service's own calculator, so the project-home worktree tools list the same
         // calculation state the Worktrees screen streams.
@@ -313,6 +304,22 @@ impl BuildContext {
         // 31/32): an embedded host keeps binding its own host sockets, as its runtime serves
         // its one socket itself.
         .with_host_sessions_merged(options.host != RuntimeHost::Embedded))
+    }
+
+    fn with_the_daemons_coder_credentials(
+        &self,
+        user_resolver: &tddy_daemon_kernel::SessionUserResolver,
+        connection_impl: DaemonSessionHost,
+    ) -> DaemonSessionHost {
+        match self.identity.credential_vaults.clone() {
+            Some(vaults) => connection_impl.with_coder_credentials(
+                crate::coder_credential_source::coder_credential_source(
+                    vaults,
+                    Arc::clone(user_resolver),
+                ),
+            ),
+            None => connection_impl,
+        }
     }
 
     fn daemon_launcher_deps(
@@ -479,4 +486,10 @@ impl BuildContext {
             ),
         );
     }
+}
+
+fn session_reach_of(
+    livekit_reach: &Arc<tddy_daemon_livekit::LiveKitSessionReach>,
+) -> Arc<dyn tddy_daemon_extensions::SessionReach + 'static> {
+    Arc::clone(livekit_reach) as Arc<dyn tddy_daemon_extensions::SessionReach>
 }

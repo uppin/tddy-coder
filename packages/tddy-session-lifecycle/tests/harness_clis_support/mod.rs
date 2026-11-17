@@ -130,6 +130,7 @@ pub fn a_stub_harness_script(harness: AHarness, marker: &Path, probes: &[String]
     };
     format!(
         r#"#!/bin/sh
+if [ -n "$TDDY_FIXTURE_WARMUP" ]; then exit 0; fi
 /usr/bin/touch "{marker}" 2>/dev/null
 printf 'STUB argv=%s' "$0"; for a in "$@"; do printf '|%s' "$a"; done; printf '\n'
 printf 'STUB cwd=%s\n' "$(/bin/pwd -P)"
@@ -326,6 +327,20 @@ pub fn a_harness_daemon(spec: ADaemonSpec) -> AHarnessDaemon {
     )
     .unwrap();
     std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Pay the first-execution scan here, guarded, so no launch is timed against it: the
+    // warm-up touches no spawn marker and writes no pid file.
+    let warmed = std::process::Command::new(&stub)
+        .env("TDDY_FIXTURE_WARMUP", "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the freshly written stub warms up");
+    assert!(
+        warmed.status.success(),
+        "the warm-up of {} exited {}: {}",
+        stub.display(),
+        warmed.status,
+        String::from_utf8_lossy(&warmed.stderr)
+    );
     std::os::unix::fs::symlink(tddy_tools_binary(), stub_bin.join("tddy-tools")).unwrap();
 
     let (config_dir, config) = a_daemon_config();

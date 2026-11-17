@@ -9,6 +9,9 @@
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-15-remote-shell-ssh-agent-launch.md.
 
+mod startup;
+mod target;
+
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
@@ -20,125 +23,23 @@ use tddy_cli_sessions::cli_session_manager::ExitHook;
 use tddy_coding_agent_specs::slots::RenderedSlots;
 use tddy_core::session_pointer::{SessionPointer, SessionPointerOwner};
 use tddy_core::ssh_exec::shell_single_quote;
+#[cfg(test)]
 use tddy_core::SessionTarget;
-use tddy_remote_shell::{FileMode, RemoteShell, RemoteShellError, SshShell};
-use tddy_service::proto::session::{
-    session_target::Kind as ProtoTargetKind, SessionTarget as ProtoSessionTarget, SshTarget,
-};
+use tddy_remote_shell::{FileMode, RemoteShell, RemoteShellError};
 
 use crate::cli_session_pointer::{
     record_remote_owner, session_pointer_path, PlacedSessionPointer, PointerHost,
 };
+use crate::remote_agent_launch::startup::exits_during_startup;
+use crate::remote_agent_launch::startup::settled_last_output;
+use crate::remote_agent_launch::startup::wait_for_agent_start;
+use crate::remote_agent_launch::startup::AgentStart;
 use crate::spec_launch::{plan_host_pty, HostAgent, HostPtySession, SpecLaunchError};
 
-/// Why a session's target cannot be reached through a remote shell.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TargetError {
-    /// An ssh target that names no `Host` alias.
-    NoSshHost,
-    /// A target this daemon has no transport for, with the reason.
-    Unsupported(String),
-}
-
-impl fmt::Display for TargetError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NoSshHost => write!(f, "the ssh target names no host alias"),
-            Self::Unsupported(reason) => write!(f, "the target cannot be reached: {reason}"),
-        }
-    }
-}
-
-impl std::error::Error for TargetError {}
-
-/// The remote shell that reaches `target`: for an ssh target, the OpenSSH transport on its alias,
-/// through the `ssh` on the daemon's `PATH`.
-pub fn shell_for_target(target: &SessionTarget) -> Result<Arc<dyn RemoteShell>, TargetError> {
-    match target {
-        SessionTarget::Ssh { config_host } => {
-            let config_host = config_host.trim();
-            if config_host.is_empty() {
-                return Err(TargetError::NoSshHost);
-            }
-            Ok(Arc::new(SshShell::new(config_host)))
-        }
-        // A Coder target needs the caller's account, which this function is not given: the
-        // launch resolves it through `coder_target::shell_for_coder_target`.
-        SessionTarget::Coder { .. } => Err(TargetError::Unsupported(
-            "a Coder target is reached with its account's credentials".to_string(),
-        )),
-    }
-}
-
-/// The `Host` alias an ssh `target` names; `None` for no target.
-pub(crate) fn target_config_host(target: Option<&SessionTarget>) -> Option<&str> {
-    match target {
-        Some(SessionTarget::Ssh { config_host }) => {
-            Some(config_host.trim()).filter(|host| !host.is_empty())
-        }
-        Some(SessionTarget::Coder { .. }) | None => None,
-    }
-}
-
-/// The session target a start's proto `target` names; `None` when it names none. A proto target
-/// naming no kind, or an ssh kind naming no alias, is refused as [`TargetError`].
-pub fn session_target_of_proto(
-    target: Option<&ProtoSessionTarget>,
-) -> Result<Option<SessionTarget>, TargetError> {
-    let Some(target) = target else {
-        return Ok(None);
-    };
-    match &target.kind {
-        Some(ProtoTargetKind::Ssh(ssh)) => {
-            if ssh.config_host.trim().is_empty() {
-                return Err(TargetError::NoSshHost);
-            }
-            Ok(Some(SessionTarget::ssh(ssh.config_host.trim())))
-        }
-        Some(ProtoTargetKind::Coder(coder)) => {
-            let target = SessionTarget::coder(
-                coder.account_id.trim(),
-                coder.owner.trim(),
-                coder.workspace.trim(),
-            );
-            let agent = coder.agent.trim();
-            Ok(Some(if agent.is_empty() {
-                target
-            } else {
-                target.on_agent(agent)
-            }))
-        }
-        None => Err(TargetError::Unsupported(
-            "the target names no kind of machine".to_string(),
-        )),
-    }
-}
-
-/// The proto target a `.session.yaml` [`SessionTarget`] lists as.
-pub fn proto_of_session_target(target: &SessionTarget) -> ProtoSessionTarget {
-    match target {
-        SessionTarget::Ssh { config_host } => ProtoSessionTarget {
-            kind: Some(ProtoTargetKind::Ssh(SshTarget {
-                config_host: config_host.clone(),
-            })),
-        },
-        SessionTarget::Coder {
-            account_id,
-            owner,
-            workspace,
-            agent,
-        } => ProtoSessionTarget {
-            kind: Some(ProtoTargetKind::Coder(
-                tddy_service::proto::session::CoderTarget {
-                    account_id: account_id.clone(),
-                    owner: owner.clone(),
-                    workspace: workspace.clone(),
-                    agent: agent.clone().unwrap_or_default(),
-                },
-            )),
-        },
-    }
-}
+pub(crate) use crate::remote_agent_launch::target::target_config_host;
+pub use crate::remote_agent_launch::target::{
+    proto_of_session_target, session_target_of_proto, shell_for_target, TargetError,
+};
 
 /// The one shell command that starts an agent on a target: enter `worktree`, write the shell's own
 /// pid to `.tddy/agent.pid` there, then `exec` `argv` under `env -i` with exactly `env` — so the
@@ -435,146 +336,6 @@ pub async fn launch_on_target(
     };
 
     Ok(RemoteLaunched { handle, owner })
-}
-
-/// How waiting for an agent to start on its target ended.
-enum AgentStart {
-    /// The agent recorded its pid: it is running (or ran) on the target, under this pid.
-    Started(u32),
-    /// The session's terminal ended before the pid was recorded.
-    Exited,
-    /// The bound elapsed with the terminal still running and no pid recorded.
-    NeverStarted,
-}
-
-/// Wait, bounded by `bound`, for the agent to record its pid in `worktree` on the target — the
-/// remote command writes `.tddy/agent.pid` immediately before it `exec`s the agent — or for
-/// `handle`'s terminal to end, whichever comes first.
-async fn wait_for_agent_start(
-    shell: &dyn RemoteShell,
-    worktree: &Path,
-    handle: &PtyHandle,
-    bound: Duration,
-) -> AgentStart {
-    let pid_file = worktree.join(crate::cli_session_pointer::REMOTE_AGENT_PID_FILE);
-    let probe = format!("cat {}", shell_single_quote(&pid_file.to_string_lossy()));
-    let deadline = tokio::time::Instant::now() + bound;
-    loop {
-        if *handle.pty_done.borrow() {
-            return AgentStart::Exited;
-        }
-        if let Ok(output) = shell
-            .exec(tddy_remote_shell::ExecRequest::new(probe.clone()).within(Duration::from_secs(5)))
-            .await
-        {
-            if output.status == 0 {
-                if let Ok(pid) = String::from_utf8_lossy(&output.stdout).trim().parse() {
-                    return AgentStart::Started(pid);
-                }
-            }
-        }
-        if *handle.pty_done.borrow() {
-            return AgentStart::Exited;
-        }
-        let now = tokio::time::Instant::now();
-        if now >= deadline {
-            return AgentStart::NeverStarted;
-        }
-        tokio::time::sleep((deadline - now).min(Duration::from_millis(50))).await;
-    }
-}
-
-/// Whether the agent ends within `window`, failing the launch. Called only once the agent is
-/// known to have started (its pid is recorded on the target), so the window runs from the
-/// agent's start: an agent still running when it closes has started.
-///
-/// The agent's own liveness on the target is judged beside the terminal's end, because under
-/// load the terminal's exit is reported long after the agent that caused it is gone: an agent
-/// whose pid is dead on the target has exited, whatever its terminal has yet to say.
-async fn exits_during_startup(
-    handle: &PtyHandle,
-    window: Duration,
-    shell: &dyn RemoteShell,
-    agent_pid: Option<u32>,
-) -> bool {
-    let deadline = tokio::time::Instant::now() + window;
-    let mut probed_at = tokio::time::Instant::now() - Duration::from_secs(1);
-    loop {
-        if *handle.pty_done.borrow() {
-            return true;
-        }
-        let now = tokio::time::Instant::now();
-        if now >= deadline {
-            return false;
-        }
-        if let Some(pid) = agent_pid {
-            if probed_at.elapsed() >= Duration::from_millis(50) {
-                probed_at = now;
-                let alive = shell
-                    .exec(
-                        tddy_remote_shell::ExecRequest::new(format!("kill -0 {pid}"))
-                            .within(Duration::from_secs(5)),
-                    )
-                    .await
-                    .map(|output| output.status == 0)
-                    .unwrap_or(true);
-                if !alive {
-                    return true;
-                }
-            }
-        }
-        tokio::time::sleep((deadline - now).min(Duration::from_millis(10))).await;
-    }
-}
-
-/// The tail of what `handle`'s terminal showed, once it has finished showing it. The task's
-/// end is signalled from its exit status, which the PTY's reader can lag under load: the last
-/// bytes are still in flight when the process is already known to have ended. Reading the
-/// capture at that moment races the reader and can quote nothing — so wait until the captured
-/// bytes stop changing (the reader has drained the PTY), bounded so a wedged reader cannot
-/// hang the failed start.
-async fn settled_last_output(handle: &PtyHandle) -> String {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    let mut previous = captured_bytes(handle);
-    let mut unchanged_since = tokio::time::Instant::now();
-    loop {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        let current = captured_bytes(handle);
-        if current != previous {
-            previous = current;
-            unchanged_since = tokio::time::Instant::now();
-            continue;
-        }
-        if unchanged_since.elapsed() >= Duration::from_millis(50)
-            || tokio::time::Instant::now() >= deadline
-        {
-            break;
-        }
-    }
-    last_output_of(&previous)
-}
-
-/// What `handle`'s terminal has captured so far.
-fn captured_bytes(handle: &PtyHandle) -> Vec<u8> {
-    handle
-        .capture
-        .lock()
-        .map(|capture| capture.buffered_bytes().to_vec())
-        .unwrap_or_default()
-}
-
-/// The tail of `capture`, as a startup failure quotes it.
-fn last_output_of(capture: &[u8]) -> String {
-    let text = String::from_utf8_lossy(capture);
-    let mut lines: Vec<&str> = text
-        .lines()
-        .map(|line| line.trim_end())
-        .filter(|line| !line.trim().is_empty())
-        .collect();
-    if lines.len() > 20 {
-        lines.drain(..lines.len() - 20);
-    }
-    lines.join("\n")
 }
 
 #[cfg(test)]

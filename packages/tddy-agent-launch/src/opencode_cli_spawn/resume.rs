@@ -43,32 +43,11 @@ impl crate::launch_ports::LaunchSessions {
         session_dir: &Path,
         mut metadata: SessionMetadata,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
-        // Nothing of a split session's tool transport survives a stop, and its roster lives beside
-        // its codebase: both are re-derived from the persisted pairing (with a fresh join token),
-        // and a codebase host that cannot be read refuses the resume. `None` for a co-located one.
         let split = self
-            .split_sessions
-            .resume_split_wiring(
-                &metadata,
-                os_user,
-                sessions_base,
-                session_dir,
-                &req.session_id,
-                &req.session_token,
-            )
+            .resumed_split_wiring(os_user, req, sessions_base, session_dir, &metadata)
             .await?;
-        if metadata.tmux_session.is_some() {
-            // A tmux-run agent that exited unwatched left its token on its kept pane.
-            crate::cli_harness_tmux::settle_unwatched_agent_exit(
-                &self.cli_manager,
-                Some(&*self.coding_agents),
-                os_user,
-                &req.session_id,
-                kind.name,
-                session_dir,
-            )
+        self.settle_a_tmux_agents_unwatched_exit(&kind, os_user, req, session_dir, &metadata)
             .await?;
-        }
         // The previous run's recorder may still be writing the token it printed as it exited.
         metadata.harness_resume_token =
             settled_resume_token(&self.cli_manager, &req.session_id, session_dir).await?;
@@ -92,11 +71,7 @@ impl crate::launch_ports::LaunchSessions {
             &req.session_token,
         );
         // A split agent runs in its context directory, standing in for the checkout it does not have.
-        let worktree = split
-            .as_ref()
-            .map(|split| split.context_dir.clone())
-            .or_else(|| metadata.repo_path.as_ref().map(PathBuf::from))
-            .unwrap_or_else(|| session_dir.to_path_buf());
+        let worktree = resumed_worktree(session_dir, &metadata, &split);
         // A worktree that is gone leaves nothing to resume: refused before anything is re-wired.
         // A target session's worktree is on its target, not on this host: the launch through the
         // port is what finds it gone there.
@@ -142,6 +117,66 @@ impl crate::launch_ports::LaunchSessions {
         )
         .await
     }
+
+    async fn resumed_split_wiring(
+        &self,
+        os_user: &str,
+        req: &ResumeSessionRequest,
+        sessions_base: &Path,
+        session_dir: &Path,
+        metadata: &SessionMetadata,
+    ) -> Result<Option<tddy_session_split::split_session::SplitAgentWiring>, Status> {
+        // Nothing of a split session's tool transport survives a stop, and its roster lives beside
+        // its codebase: both are re-derived from the persisted pairing (with a fresh join token),
+        // and a codebase host that cannot be read refuses the resume. `None` for a co-located one.
+        let split = self
+            .split_sessions
+            .resume_split_wiring(
+                metadata,
+                os_user,
+                sessions_base,
+                session_dir,
+                &req.session_id,
+                &req.session_token,
+            )
+            .await?;
+        Ok(split)
+    }
+
+    async fn settle_a_tmux_agents_unwatched_exit(
+        &self,
+        kind: &CliSessionType,
+        os_user: &str,
+        req: &ResumeSessionRequest,
+        session_dir: &Path,
+        metadata: &SessionMetadata,
+    ) -> Result<(), Status> {
+        if metadata.tmux_session.is_some() {
+            // A tmux-run agent that exited unwatched left its token on its kept pane.
+            crate::cli_harness_tmux::settle_unwatched_agent_exit(
+                &self.cli_manager,
+                Some(&*self.coding_agents),
+                os_user,
+                &req.session_id,
+                kind.name,
+                session_dir,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+}
+
+fn resumed_worktree(
+    session_dir: &Path,
+    metadata: &SessionMetadata,
+    split: &Option<tddy_session_split::split_session::SplitAgentWiring>,
+) -> PathBuf {
+    split
+        .as_ref()
+        .map(|split| split.context_dir.clone())
+        .or_else(|| metadata.repo_path.as_ref().map(PathBuf::from))
+        .unwrap_or_else(|| session_dir.to_path_buf())
 }
 
 /// The stopped session a resume relaunches.
@@ -236,22 +271,8 @@ async fn resume_cli_harness_session(
         &meta,
     )
     .await?;
-    let remote_host =
-        crate::remote_agent_launch::target_config_host(meta.target.as_ref()).or_else(|| {
-            meta.ssh_config_host
-                .as_deref()
-                .filter(|alias| !alias.is_empty())
-        });
-    // Argv hooks (Muse's `-c hooks=…`) render again from the recorded token; a file
-    // adapter's file is kept as the start wrote it. On a target both append to the hook log
-    // there, which this launch recreates and follows again.
-    if meta.target.is_some() {
-        if let Some(hooks) = &mut wiring.hooks {
-            // Relative to the worktree the agent runs in: the hook appends there, on the
-            // target, wherever that worktree is.
-            hooks.remote_log = Some(tddy_core::REMOTE_HOOK_LOG.to_string());
-        }
-    }
+    let remote_host = remote_host_of(&meta);
+    hooks_append_to_the_target_log(&meta, &mut wiring);
     let toolset = std::mem::take(&mut wiring.toolset);
     let hook_params = wiring.hook_params(spec, session_id, os_user);
     let mut slots = render_host_launch_slots(
@@ -294,15 +315,13 @@ async fn resume_cli_harness_session(
         node_launcher: launcher.as_ref(),
         ..HarnessLaunch::default()
     }));
-    record_usage_context(
+    record_the_resumed_usage_context(
         session_dir,
-        &spec.id,
-        home_dir_for_user(os_user),
-        &UsageSubject::new(
-            conversation.usage_id(),
-            meta.model.as_deref().unwrap_or_default(),
-        ),
+        &meta,
         &worktree_path,
+        os_user,
+        spec,
+        &conversation,
     )?;
     let launched = launch(
         cli_manager,
@@ -334,6 +353,61 @@ async fn resume_cli_harness_session(
     }
     crate::claude_cli_spawn::record_main_terminal(cli_manager, tddy_data_dir, session_id).await;
 
+    record_the_resumed_session(session_dir, meta, conversation, launched)?;
+    // Armed only once the metadata is on disk, for the same reason as the start.
+    token_arm.arm();
+
+    resumed_session_response(session_id)
+}
+
+fn remote_host_of(meta: &SessionMetadata) -> Option<&str> {
+    crate::remote_agent_launch::target_config_host(meta.target.as_ref()).or_else(|| {
+        meta.ssh_config_host
+            .as_deref()
+            .filter(|alias| !alias.is_empty())
+    })
+}
+
+fn hooks_append_to_the_target_log(meta: &SessionMetadata, wiring: &mut ResumedWiring) {
+    // Argv hooks (Muse's `-c hooks=…`) render again from the recorded token; a file
+    // adapter's file is kept as the start wrote it. On a target both append to the hook log
+    // there, which this launch recreates and follows again.
+    if meta.target.is_some() {
+        if let Some(hooks) = &mut wiring.hooks {
+            // Relative to the worktree the agent runs in: the hook appends there, on the
+            // target, wherever that worktree is.
+            hooks.remote_log = Some(tddy_core::REMOTE_HOOK_LOG.to_string());
+        }
+    }
+}
+
+fn record_the_resumed_usage_context(
+    session_dir: &Path,
+    meta: &SessionMetadata,
+    worktree_path: &Path,
+    os_user: &str,
+    spec: &tddy_coding_agent_specs::CodingAgentSpec,
+    conversation: &crate::cli_agent_steps::conversation::LaunchConversation,
+) -> Result<(), Status> {
+    record_usage_context(
+        session_dir,
+        &spec.id,
+        home_dir_for_user(os_user),
+        &UsageSubject::new(
+            conversation.usage_id(),
+            meta.model.as_deref().unwrap_or_default(),
+        ),
+        worktree_path,
+    )?;
+    Ok(())
+}
+
+fn record_the_resumed_session(
+    session_dir: &Path,
+    meta: SessionMetadata,
+    conversation: crate::cli_agent_steps::conversation::LaunchConversation,
+    launched: super::harness_launch::LaunchedHarness,
+) -> Result<(), Status> {
     let mut updated = meta;
     updated.cursor_chat_id = conversation
         .recorded_chat_id()
@@ -345,9 +419,10 @@ async fn resume_cli_harness_session(
     updated.updated_at = chrono::Utc::now().to_rfc3339();
     write_session_metadata(session_dir, &updated)
         .map_err(|e| Status::internal(format!("failed to update session metadata: {e}")))?;
-    // Armed only once the metadata is on disk, for the same reason as the start.
-    token_arm.arm();
+    Ok(())
+}
 
+fn resumed_session_response(session_id: &str) -> Result<Response<ResumeSessionResponse>, Status> {
     Ok(Response::new(ResumeSessionResponse {
         session_id: session_id.to_string(),
         livekit_room: String::new(),

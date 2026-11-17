@@ -311,6 +311,7 @@ pub fn a_stub_agent_script_minting(
     };
     format!(
         r#"#!/bin/sh
+if [ -n "$TDDY_FIXTURE_WARMUP" ]; then exit 0; fi
 if [ "$1" = "create-chat" ]; then {create_chat}; fi
 /usr/bin/touch "{marker}" 2>/dev/null
 printf 'STUB argv=%s' "$0"; for a in "$@"; do printf '|%s' "$a"; done; printf '\n'
@@ -560,6 +561,20 @@ fn a_daemon_built_from(spec: ARegistryDaemonBuilder) -> ARegistryDaemon {
     )
     .unwrap();
     std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Pay the first-execution scan here, guarded, so no launch is timed against it: the
+    // warm-up records no call and writes no pid file.
+    let warmed = std::process::Command::new(&stub)
+        .env("TDDY_FIXTURE_WARMUP", "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the freshly written stub warms up");
+    assert!(
+        warmed.status.success(),
+        "the warm-up of {} exited {}: {}",
+        stub.display(),
+        warmed.status,
+        String::from_utf8_lossy(&warmed.stderr)
+    );
     std::os::unix::fs::symlink(tddy_tools_binary(), stub_bin.join("tddy-tools")).unwrap();
 
     let (config_dir, config) = a_daemon_config_without_agent_sections();

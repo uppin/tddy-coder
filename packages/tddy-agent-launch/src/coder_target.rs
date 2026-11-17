@@ -1,7 +1,7 @@
 //! Reaching a session's **Coder** target: a workspace of one of the session owner's Coder
 //! accounts, through the `coder` CLI on this daemon.
 //!
-//! [`crate::remote_agent_launch::shell_for_target`] resolves a target that needs nothing but its
+//! [`crate::remote_agent_launch::target::shell_for_target`] resolves a target that needs nothing but its
 //! own fields. A Coder target needs more: the caller's subject, and the vault that holds the
 //! account's deployment URL and token ([`CoderCredentialSource`]). This is the entry for it. Once
 //! the shell is resolved, everything else — [`crate::remote_agent_launch::launch_on_target`], the
@@ -26,7 +26,7 @@ use tddy_remote_shell::RemoteShell;
 /// Why a Coder target cannot be reached through a remote shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoderTargetError {
-    /// The target is of another kind: it is [`crate::remote_agent_launch::shell_for_target`]'s.
+    /// The target is of another kind: it is [`crate::remote_agent_launch::target::shell_for_target`]'s.
     NotACoderTarget,
     /// The target names no account, no owner or no workspace.
     NoWorkspace,

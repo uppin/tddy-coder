@@ -163,23 +163,7 @@ impl LaunchSessions {
         let account_access = self.host.session_account_access(&req.session_token);
         let route_sources =
             session_route_sources_with_default(req, session_agent.kind.name, &account_access)?;
-        // A managed codebase driven by a recipe: admitted only for a spec declaring
-        // `managed_workflow` (`refuse_an_unsupported_cli_session_start`). An unknown recipe is a
-        // request error, never silently ignored.
-        let managed_recipe = managed_recipe_for(req)?;
-        let (child_spawn_handler, conversation_spawn_handler) = self.managed_spawn_handlers(
-            &managed_recipe,
-            os_user,
-            &start.session_id,
-            req.project_id.trim(),
-            &start.sessions_base,
-            &req.session_token,
-        );
-        let managed = managed_recipe.map(|recipe| crate::cli_agent_steps::ManagedWiring {
-            recipe,
-            child_spawn_handler,
-            conversation_spawn_handler,
-        });
+        let managed = self.managed_wiring_of(req, os_user, &start)?;
         let role = self.start_role(
             req.session_role.trim(),
             &start.session_id,
@@ -243,6 +227,32 @@ impl LaunchSessions {
             },
         )
         .await
+    }
+
+    fn managed_wiring_of(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        start: &CliStart,
+    ) -> Result<Option<crate::cli_agent_steps::ManagedWiring>, Status> {
+        // A managed codebase driven by a recipe: admitted only for a spec declaring
+        // `managed_workflow` (`refuse_an_unsupported_cli_session_start`). An unknown recipe is a
+        // request error, never silently ignored.
+        let managed_recipe = managed_recipe_for(req)?;
+        let (child_spawn_handler, conversation_spawn_handler) = self.managed_spawn_handlers(
+            &managed_recipe,
+            os_user,
+            &start.session_id,
+            req.project_id.trim(),
+            &start.sessions_base,
+            &req.session_token,
+        );
+        let managed = managed_recipe.map(|recipe| crate::cli_agent_steps::ManagedWiring {
+            recipe,
+            child_spawn_handler,
+            conversation_spawn_handler,
+        });
+        Ok(managed)
     }
 }
 

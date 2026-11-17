@@ -6,7 +6,7 @@
 **Metrics:** **92 lines**
 **Thresholds breached:** length 61 > 60 (`/analyze-clean-code`)
 **Restructure:** not designed — deferred to the #agent-tools sweep node (developer, 2026-11-02)
-**Status:** Open — regressed 2026-11-07 by #834 (89 → 92) — unclaimed
+**Status:** Open — partially fixed by #924 (`#remote-shell` 8/11): restored to below its before-the-stack length (84); still over 60 — unclaimed
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured
 
 ## Measurement history
@@ -19,6 +19,7 @@
 | 2026-11-06 | 89 → 90 | **worse by 1** in #823 (`#agent-tools` 17/19): moved up the file as the claude and cursor request starts above it were deleted; measured fn line to closing brace on `origin/feature/agent-tools/spec-backend` (`d325fba73`) and HEAD; no coverage run. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
 | 2026-11-07 | 89 → 92 | **worse by 3** in #834 (`#agent-tools` 26/28): the request branch resolves the session user's agent-tool socket before anything is cut (`agent_tool_socket_of`, refusing an unlisted user) and hands it to the role wiring and to `CliSessionStart`; measured fn line to closing brace on `origin/feature/agent-tools/split-remote-env` (`cd9026d9d`) and HEAD; no coverage run (89 at the base by this count; 90 above) |
 | 2026-11-16 | 98 → 100 | #921 (`#remote-shell` 7/7): the two branch starts hand the start its caller subject and Coder credentials. Touched, not closed |
+| 2026-11-16 | 100 → 84 | #924 (`#remote-shell` 8/11) sweep: restored to below its before-the-stack length (94). Still over 60, so this record stays open on the remainder |
 
 ## What would close it
 

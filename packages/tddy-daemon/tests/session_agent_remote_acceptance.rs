@@ -1727,10 +1727,9 @@ async fn moves_the_clone_to_the_commit_the_session_made() {
 /// A clone corrupted by hand is restored, and the divergence is reported rather than absorbed
 /// silently — a mirror that repairs itself without saying so hides a real fault.
 ///
-/// FIXME(flaky): observed failing when this suite runs alongside other LiveKit-backed suites on one
-/// machine, and passing every time the suite runs on its own. The waits here are wall-clock, so a
-/// contended host is the likeliest cause rather than anything about what is being asserted — but
-/// that is a hypothesis, not a finding. Left marked so CI can say which it is.
+/// The restored file lands on the peer when the mirror applies it; the divergence report
+/// reaches daemon A afterwards, over the room. So each assertion below waits for its own
+/// condition: reading the file says nothing about whether the report has arrived yet.
 #[tokio::test]
 #[serial]
 async fn restores_a_clone_that_diverged_and_says_so() {
@@ -1770,11 +1769,22 @@ async fn restores_a_clone_that_diverged_and_says_so() {
     .expect("the corrupted clone was never restored");
     assert!(restored.contains("fixture v2"));
 
-    let divergences = fleet
-        .a
-        .agent_clone_divergences(&fleet.session_id, &explorer)
-        .await
-        .expect("the daemon must record what diverged");
+    // 30s: the restore above, plus the report's trip back to daemon A.
+    let divergences = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let divergences = fleet
+                .a
+                .agent_clone_divergences(&fleet.session_id, &explorer)
+                .await
+                .expect("the daemon must record what diverged");
+            if !divergences.is_empty() {
+                return divergences;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    })
+    .await
+    .expect("a reconcile must be reported, never silent");
     assert!(
         !divergences.is_empty(),
         "a reconcile must be reported, never silent"
