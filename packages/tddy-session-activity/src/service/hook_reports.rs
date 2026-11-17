@@ -25,6 +25,10 @@ use tddy_service::proto::activity::{
     ReportSessionStatusResponse,
 };
 
+/// The provenance label a hook row carries for a session that recorded no type of its
+/// own: the label hook rows have always carried.
+const UNTYPED_HOOK_SOURCE: &str = "claude-cli";
+
 /// What a status report did to the question its session waits on, and so what it publishes.
 enum PendingChange {
     /// A permission or a question was recorded under a new id: one notification carries it.
@@ -270,12 +274,14 @@ impl ActivityServiceImpl {
             .map(|root| tddy_core::agent_activity::declared_paths(&req.tool_name, &input, root))
             .unwrap_or_default();
 
-        // The provenance the rows carry: a cursor-cli session's own tool calls are its
-        // agent's, not Claude's. Every other session keeps what it always wrote.
-        let source = match meta.session_type.as_deref() {
-            Some("cursor-cli") => "cursor-cli",
-            _ => "claude-cli",
-        };
+        // The provenance the rows carry: the session's own type names the agent that
+        // reported them — its tool calls are its agent's, not another's. Derived from
+        // the recorded value, never matched against an agent's name. A session that
+        // recorded no type keeps the label hook rows have always carried.
+        let source = meta
+            .session_type
+            .clone()
+            .unwrap_or_else(|| UNTYPED_HOOK_SOURCE.to_string());
 
         let record = match req.event.as_str() {
             "PreToolUse" => {
@@ -300,7 +306,7 @@ impl ActivityServiceImpl {
                     error_message: String::new(),
                     started_unix_ms: tddy_daemon_kernel::now_unix_ms(),
                     completed_unix_ms: 0,
-                    source: source.to_string(),
+                    source,
                     head_commit,
                     // The tick that covers this call has not been measured yet; the poll loop
                     // attributes it when it runs. `NO_TICK` is the wire's "no tick has covered it
@@ -336,7 +342,7 @@ impl ActivityServiceImpl {
                     error_message: req.error_message,
                     started_unix_ms: 0,
                     completed_unix_ms: tddy_daemon_kernel::now_unix_ms(),
-                    source: source.to_string(),
+                    source,
                     head_commit,
                     // As on the `running` row: the covering tick is the poll loop's to attribute.
                     activity_seq: crate::NO_TICK,

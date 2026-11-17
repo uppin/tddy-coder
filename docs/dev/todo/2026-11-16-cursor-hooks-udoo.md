@@ -4,7 +4,7 @@
 **Source:** investigation on host `mantas-udoo-ros` (10.4.66.10) of a `cursor-cli` session whose
 lifecycle hooks never reached the daemon.
 **Status:** ranked fixes 1–3 have landed (branch `fix/cursor-hooks-activity`, changeset
-`docs/dev/1-WIP/2026-11-16-cursor-hooks-reach-the-daemon.md`). What follows is what is still
+`docs/dev/changesets/2026-11-16-cursor-hooks-reach-the-daemon.md`). What follows is what is still
 open: ranked fixes 4–5 and the `turn_input` side finding. The full original write-up, with the
 evidence for the landed fixes, stays on branch `investigate/cursor-hooks-udoo`.
 

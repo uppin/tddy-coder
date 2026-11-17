@@ -469,6 +469,37 @@ async fn a_cursor_cli_sessions_tool_calls_are_sourced_cursor_cli() {
     );
 }
 
+/// Provenance derives from the session's own recorded type, never from a comparison
+/// against an agent's name: a session of a third CLI type is sourced by its own type,
+/// where it previously inherited claude-cli's label.
+#[tokio::test]
+async fn a_sessions_tool_calls_are_sourced_by_its_own_session_type() {
+    // Given a registered muse-cli session.
+    let temp = tempfile::tempdir().unwrap();
+    let sessions_base = temp.path().to_path_buf();
+    let session_id = "activity-own-type-1";
+    let session_dir = unified_session_dir_path(&sessions_base, session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    write_hook_session(&session_dir, TEST_HOOK_TOKEN, "muse-cli");
+    let service = make_unit_service(sessions_base);
+
+    // When the hook reports a tool call starting.
+    service
+        .activity_service()
+        .report_agent_activity(Request::direct(a_pre_tool_use(
+            session_id,
+            "Shell",
+            r#"{"command":"ls"}"#,
+        )))
+        .await
+        .unwrap();
+
+    // Then the row is sourced muse-cli.
+    let rows = raw_activity_rows(&session_dir);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].source, "muse-cli");
+}
+
 /// A wrong hook_token is rejected before any activity is written.
 #[tokio::test]
 async fn report_agent_activity_rejects_bad_hook_token() {
