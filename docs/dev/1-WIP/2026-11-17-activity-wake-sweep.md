@@ -34,7 +34,7 @@ change-history entries, and changes no behaviour.
 
 ## Scope
 
-- [ ] `session_watches.rs` 857 → submodules under `session_watches/`, each file under budget; `take_stream_batch` (255) and `stream` (62) land under the function ceiling by the same move
+- [ ] `session_watches.rs` 857 → submodules under `session_watches/`, each file under budget; the records' close conditions are file-length-only; the function-ceiling side-notes (`take_stream_batch` 255, `monitor_cli` `stream` 62) are left open in the report — `extract_method` there would rewrite bodies, outside a move-only sweep
 - [ ] `project_notification_log/storage.rs` 578 → submodules under `project_notification_log/storage/`
 - [ ] `mount_host.rs` 527 → submodules under `runtime/mount_host/`
 - [ ] The three `oversized-file-*` records deleted by the commits that close them, final measurement recorded first
@@ -44,7 +44,8 @@ change-history entries, and changes no behaviour.
 
 This PR owns **three mechanical splits and nothing else**: the module moves above, the `mod`/`use`
 wiring they need, and the record deletions. Any behaviour change, signature change or
-public-surface change is a stop.
+public-surface change is a stop. The function-ceiling side-notes recorded inside the oversized-file
+records are NOT closed by this node.
 
 ## Boundaries
 

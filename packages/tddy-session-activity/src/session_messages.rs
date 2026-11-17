@@ -24,7 +24,8 @@
 //! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-17-session-messages.md
 
 use crate::project_notification_log::{ProjectNotificationLog, ProjectNotificationRecord};
-use crate::session_watches::{SessionWatchStore, WatchFilter, WatchKind, WatchOwner};
+use crate::session_watches::matcher::WatchKind;
+use crate::session_watches::{SessionWatchStore, WatchFilter, WatchOwner};
 use tddy_daemon_kernel::session_notification::SessionMessage;
 
 /// The longest a message's text may be, in bytes: 8 KiB.

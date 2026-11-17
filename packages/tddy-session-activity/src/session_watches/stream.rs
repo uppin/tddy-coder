@@ -20,10 +20,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
 use super::{
-    end_finished, end_reason, watch_matches, SessionWatchStore, WatchEnd, WatchOwner,
-    MAX_EVENTS_PER_ANSWER,
+    end_finished, end_reason, watch_matches, SessionWatchStore, WatchOwner, MAX_EVENTS_PER_ANSWER,
 };
 use crate::project_notification_log::{ProjectNotificationLog, ProjectNotificationRecord};
+use crate::session_watches::delivery::WatchEnd;
 
 /// How long a watch stays streamed after a stream's last call returned: the monitor's turnaround
 /// between two calls, with margin. A stream that stops calling hands its watches back to tool
