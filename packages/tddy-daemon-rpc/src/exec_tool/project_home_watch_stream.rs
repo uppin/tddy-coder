@@ -10,7 +10,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
-use tddy_session_activity::project_notification_log::{record_json, ProjectNotificationScope};
+use tddy_session_activity::project_notification_log::{
+    record_json, ProjectNotificationLog, ProjectNotificationScope,
+};
 use tddy_session_activity::session_watches::{StreamBatch, WatchKind, WatchOwner};
 use tddy_tool_engine::project_home_inbox_tools::NO_NOTIFICATION_LOG;
 use tddy_tool_engine::project_home_watch_stream_tools::{
@@ -70,16 +72,27 @@ impl ProjectHomeWatchStreamPort for DaemonProjectHome {
             // Hold until the log records something for the caller's project, or the renewal
             // tick: re-taking the batch then renews the lease while the call is held.
             let remaining = deadline.saturating_duration_since(now);
-            let scope = ProjectNotificationScope {
-                project_id: owner.project_id.clone(),
-                os_user: owner.os_user.clone(),
-                exclude_session_id: home.session_id.clone(),
-                started_by: None,
-            };
-            let cursor = log.head_seq(&owner.project_id).to_string();
-            let _ = log.wait(&scope, &cursor, remaining.min(RENEW_TICK)).await;
+            hold_until_next_record(log, &owner, home, remaining).await;
         }
     }
+}
+
+/// Hold until the log records something for `owner`'s project, or `remaining` capped at the
+/// renewal tick passes.
+async fn hold_until_next_record(
+    log: &ProjectNotificationLog,
+    owner: &WatchOwner,
+    home: &HomeCaller,
+    remaining: Duration,
+) {
+    let scope = ProjectNotificationScope {
+        project_id: owner.project_id.clone(),
+        os_user: owner.os_user.clone(),
+        exclude_session_id: home.session_id.clone(),
+        started_by: None,
+    };
+    let cursor = log.head_seq(&owner.project_id).to_string();
+    let _ = log.wait(&scope, &cursor, remaining.min(RENEW_TICK)).await;
 }
 
 /// A batch as the tool answers it: each event carries the monitor line's fields plus its record.

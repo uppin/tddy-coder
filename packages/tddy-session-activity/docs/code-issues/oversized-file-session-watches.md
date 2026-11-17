@@ -18,6 +18,7 @@ deferred under `/pr-wrap` step 3.5's stack-branch rule.
 |---|---:|---|
 | 2026-11-17 | 0 → 650 | #930: the watch store, matcher and endings in one new module |
 | 2026-11-17 | 650 → 701 | #931: `deliver_with` (committed-on-success delivery) added on the same store. Still stack-shared — successors #934/#935 also modify this file — so the split stays deferred to a follow-up after the stack lands |
+| 2026-11-17 | 701 → 723 | #934: the stream lease fields and the streamed-watch skip in `apply_delivery`. Still stack-shared — #935 (`session-messages`) also modifies this file — so the split stays deferred to a follow-up after the stack lands |
 
 ## What would close it
 
