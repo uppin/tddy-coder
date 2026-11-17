@@ -11,6 +11,7 @@
 
 import {
   SessionNotificationKind,
+  SessionNotificationSource,
   type SessionNotificationEvent,
 } from "tddy-client-web/gen/activity_pb";
 
@@ -19,7 +20,9 @@ export type NotificationDot = "attention" | "activity" | null;
 export function dotForNotification(
   event: Pick<SessionNotificationEvent, "kind" | "source">,
 ): NotificationDot {
-  // TODO(session-ended-notice): implement — a SESSION_ENDED event lights no dot.
+  if (event.source === SessionNotificationSource.SESSION_ENDED) {
+    return null;
+  }
   switch (event.kind) {
     case SessionNotificationKind.ATTENTION_REQUIRED:
       return "attention";

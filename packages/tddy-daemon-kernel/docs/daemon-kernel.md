@@ -111,9 +111,12 @@ the Telegram channel reports on stays in extensions.
 ### `session_notification` — the types the port names
 
 `SessionNotification`, `SessionNotificationKind` (`Activity`, `AttentionRequired`),
-`SessionNotificationSource` (`ActivityStatus`, `AgentToolCall`, `Presenter`, `Agent`) and an agent
+`SessionNotificationSource` (`ActivityStatus`, `AgentToolCall`, `Presenter`, `Agent`,
+`PendingQuestion`, `SessionEnded`) and an agent
 notification's content (`AgentNotification`, `NotificationLevel`) are defined here so the port can
-name them. The bus, its subscriber trait and its subscribers live in `tddy-session-activity`,
+name them. A `SessionEnded` notification carries `SessionNotification.ended: Option<SessionEndNotice>`
+(`{ outcome, exit_code }`), so a reader branches on how the session's agent ended without parsing
+the text (`#activity-wake` 1/3). The bus, its subscriber trait and its subscribers live in `tddy-session-activity`,
 whose `session_notifications` module re-exports these three under its own path —
 [session-notifications.md](../../tddy-session-activity/docs/session-notifications.md).
 

@@ -52,9 +52,8 @@ pub(crate) struct DetachWatch {
     exposed_terminals: ExposedTerminalRegistry,
     watchers: DetachedWatchers,
     interval: Duration,
-    /// Where an agent the watcher sees end is announced.
-    // TODO(session-ended-notice): implement — read by both announcing sites; drop the allow.
-    #[allow(dead_code)]
+    /// Where an agent end is announced — read by both announcing sites: a main ending with its
+    /// agent (`main_ended`) and a detached agent whose tmux session is gone (`start`).
     agent_ends: super::agent_end::AgentEndSender,
 }
 
@@ -98,8 +97,13 @@ impl DetachWatch {
                             "the agent of detached session {session_id} ended (tmux session {session:?} is gone): cleaning up"
                         );
                         self.drop_agent_state(&session_id).await;
-                        // TODO(session-ended-notice): implement — announce the end on
-                        // `self.agent_ends`, outcome `exit code unknown`, no exit code.
+                        // Nothing saw the agent's process exit, so its end has no code.
+                        let _ = self.agent_ends.send(super::AgentEnd {
+                            session_id: session_id.clone(),
+                            os_user: Some(os_user.clone()),
+                            outcome: "exit code unknown".to_string(),
+                            exit_code: None,
+                        });
                         return;
                     }
                     // A probe that did not finish tears nothing down: it is tried again.
@@ -120,13 +124,21 @@ impl DetachWatch {
     /// no terminal left to bridge, and an entry nobody removes would keep a dead session's block
     /// waiting for a consumer that could only find an empty PTY. A tmux client that ended while its
     /// agent lives keeps both, since its agent still serves them; nothing else will notice when that
-    /// agent ends, so a watcher does, and runs the same cleanup then.
-    pub(crate) async fn main_ended(self, session_id: String, exit: MainExit, tmux_run: TmuxRun) {
+    /// agent ends, so a watcher does, and runs the same cleanup then. An agent that ended is
+    /// announced (`end`, built by the caller from the main's status) once the cleanup has run.
+    pub(crate) async fn main_ended(
+        self,
+        session_id: String,
+        exit: MainExit,
+        tmux_run: TmuxRun,
+        end: Option<super::AgentEnd>,
+    ) {
         match (exit, tmux_run.session, tmux_run.os_user) {
             (MainExit::AgentEnded, ..) => {
                 self.drop_agent_state(&session_id).await;
-                // TODO(session-ended-notice): implement — announce the end on `self.agent_ends`
-                // with the main's outcome and exit code.
+                if let Some(end) = end {
+                    let _ = self.agent_ends.send(end);
+                }
             }
             (MainExit::ClientOnly, Some(session), Some(os_user)) => {
                 self.start(session_id, session, os_user).await;
@@ -156,6 +168,17 @@ impl TmuxRun {
             session: session.map(str::to_string),
             os_user: os_user.map(str::to_string),
         }
+    }
+
+    /// The OS user the terminal ran as; `None` when it ran as the daemon's own user.
+    pub(crate) fn os_user(&self) -> Option<&str> {
+        self.os_user.as_deref()
+    }
+
+    /// Whether the terminal is a client of a tmux session (a tmux-run main), rather than the
+    /// agent's own process (a PTY-run main).
+    pub(crate) fn is_tmux_run(&self) -> bool {
+        self.session.is_some()
     }
 }
 

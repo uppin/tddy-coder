@@ -24,13 +24,14 @@ pub use agent_end_notifications::{forward_agent_ends, notification_for_agent_end
 mod agent_end_notifications {
     use std::sync::Arc;
 
+    use tddy_daemon_kernel::session_notification::SessionEndNotice;
     use tddy_daemon_kernel::SessionsBaseResolver;
     use tokio::sync::broadcast;
     use tokio::task::JoinHandle;
 
     use super::{
-        SessionNotification, SessionNotificationBus, SessionNotificationKind,
-        SessionNotificationSource,
+        resolve_session_label, SessionNotification, SessionNotificationBus,
+        SessionNotificationKind, SessionNotificationSource,
     };
     use crate::cli_session_manager::AgentEnd;
 
@@ -43,17 +44,19 @@ mod agent_end_notifications {
         label: &str,
         at_unix_ms: u64,
     ) -> SessionNotification {
-        // TODO(session-ended-notice): implement — the text and the `ended` part.
         SessionNotification {
             session_id: end.session_id.clone(),
             os_user: os_user.to_string(),
             label: label.to_string(),
             kind: SessionNotificationKind::AttentionRequired,
             source: SessionNotificationSource::SessionEnded,
-            text: String::new(),
+            text: format!("⏹ Session {label} ended: {}", end.outcome),
             agent: None,
             question: None,
-            ended: None,
+            ended: Some(SessionEndNotice {
+                outcome: end.outcome.clone(),
+                exit_code: end.exit_code,
+            }),
             at_unix_ms,
         }
     }
@@ -72,13 +75,43 @@ mod agent_end_notifications {
         sessions_base_for: SessionsBaseResolver,
         daemon_os_user: String,
     ) -> JoinHandle<()> {
-        // TODO(session-ended-notice): implement — resolve, label and publish each end.
-        let _ = (bus, agents, sessions_base_for, daemon_os_user);
-        let mut ends = ends;
         tokio::spawn(async move {
+            let mut ends = ends;
             loop {
                 match ends.recv().await {
-                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Ok(end) => {
+                        let os_user = end
+                            .os_user
+                            .clone()
+                            .unwrap_or_else(|| daemon_os_user.clone());
+                        let Some(sessions_base) = sessions_base_for(&os_user) else {
+                            log::warn!(
+                                target: "tddy_daemon::session_notifications",
+                                "the agent of session {} ended for OS user {os_user}, who has no \
+                                 sessions base: its end is not published",
+                                end.session_id
+                            );
+                            continue;
+                        };
+                        let label = resolve_session_label(
+                            agents.as_deref(),
+                            &sessions_base,
+                            &end.session_id,
+                        );
+                        bus.publish(notification_for_agent_end(
+                            &end,
+                            &os_user,
+                            &label,
+                            tddy_daemon_kernel::now_unix_ms(),
+                        ))
+                        .await;
+                    }
+                    Err(broadcast::error::RecvError::Lagged(missed)) => {
+                        log::warn!(
+                            target: "tddy_daemon::session_notifications",
+                            "the agent-end forwarder missed {missed} session ends while lagging"
+                        );
+                    }
                     Err(broadcast::error::RecvError::Closed) => return,
                 }
             }

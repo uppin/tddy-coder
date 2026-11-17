@@ -12,7 +12,7 @@ use tddy_task::TaskHandle;
 
 use super::{ExitSettlements, TerminalEntry};
 
-use super::tmux_reattach::{classify_ended_main, TmuxRun};
+use super::tmux_reattach::{classify_ended_main, MainExit, TmuxRun};
 
 use tddy_terminal_rpc::pty_runtime::PtyRuntime;
 
@@ -267,8 +267,9 @@ impl CliSessionManager {
                     break;
                 }
             }
+            let status = task.status();
             if terminal_id == MAIN_TERMINAL_ID {
-                super::main_exit::log_main_exit(&session_id, &main_exit, &task.status());
+                super::main_exit::log_main_exit(&session_id, &main_exit, &status);
             }
             // The process has exited and its output is complete. The hook finishes before the
             // terminal leaves the index, and before a waiting resume goes on.
@@ -295,7 +296,30 @@ impl CliSessionManager {
                 }
             }
             if let Some(exit) = main_exit {
-                detach_watch.main_ended(session_id, exit, tmux_run).await;
+                // An agent that ended with its main is announced with how it ended; a client
+                // that ended while its agent lives announces nothing. A tmux-run main's status
+                // is its client's, not its agent's — nothing saw the agent exit — so its end is
+                // worded the way the detach watcher's is.
+                let end = match exit {
+                    MainExit::AgentEnded => Some(super::AgentEnd {
+                        session_id: session_id.clone(),
+                        os_user: tmux_run.os_user().map(str::to_string),
+                        outcome: if tmux_run.is_tmux_run() {
+                            "exit code unknown".to_string()
+                        } else {
+                            super::main_exit::outcome_of(&status)
+                        },
+                        exit_code: if tmux_run.is_tmux_run() {
+                            None
+                        } else {
+                            super::main_exit::exit_code_of(&status)
+                        },
+                    }),
+                    MainExit::ClientOnly => None,
+                };
+                detach_watch
+                    .main_ended(session_id, exit, tmux_run, end)
+                    .await;
             }
         });
     }

@@ -43,6 +43,7 @@ Unifying those is a tracked follow-up.
 | `ATTENTION_REQUIRED` | a presenter elicitation | ✓ *(via its own keyboard surface)* | yellow |
 | `ATTENTION_REQUIRED` | the agent itself, with `tddy-tools notify` or the `NotifyOperator` exec tool (source `AGENT`) | ✓ *(rendered markdown, see below)* | yellow |
 | `ACTIVITY` | `Started` / `Running` / `ExecutingTool`, an agent tool call, a workflow state change | — | blinking green |
+| `ATTENTION_REQUIRED` | the session's agent ending (source `SESSION_ENDED`, carrying `ended { outcome, exit_code }`; text `⏹ Session {label} ended: {outcome}`) | — | — *(an ended session already reads as stopped)* |
 
 **One notification per question.** A report that records a question publishes one
 `PENDING_QUESTION` notification and no separate status one; its drawer text is

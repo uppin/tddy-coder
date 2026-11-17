@@ -56,6 +56,15 @@ pub(crate) fn log_main_exit(session_id: &str, watch: &MainExitWatch, status: &Ta
     }
 }
 
+/// The exit code an ended terminal's status carries, when one was seen: a completed task's
+/// code. A failure, a stop and a still-running task have none.
+pub(crate) fn exit_code_of(status: &TaskStatus) -> Option<i32> {
+    match status {
+        TaskStatus::Completed { exit_code } => *exit_code,
+        _ => None,
+    }
+}
+
 /// How an ended terminal's status reads (`exit code 3`, the failure itself).
 pub(crate) fn outcome_of(status: &TaskStatus) -> String {
     match status {

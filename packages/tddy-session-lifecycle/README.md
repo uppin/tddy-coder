@@ -27,6 +27,16 @@ worktree's current files into the conversation's branch before a turn and answer
 recorded merge that changed no file), or `{"conflicts": [≤ SYNC_NOTICE_PATHS paths], "moreConflicts": n}`
 with nothing moved; a merge and a conflict are logged at `info`.
 
+## Agent ends become notifications
+
+`session_notifications::{notification_for_agent_end, forward_agent_ends}` (`#activity-wake` 1/3):
+the session manager announces each agent end on its broadcast channel; the forwarder the daemon
+starts once the bus exists resolves the owner's sessions base (an end with no OS user belongs to
+the daemon's own user; one whose base does not resolve is logged at `warn` and dropped), resolves
+the label with the drawer's rule, and publishes one `ATTENTION_REQUIRED` notification with source
+`SessionEnded`, text `⏹ Session {label} ended: {outcome}` and the structured `ended` part. A
+lagging forwarder logs how many ends it missed and continues.
+
 **The host bridge is bound to its jail's session.** Each jail gets its own `DaemonRpcHandler`,
 built by `sandbox_rpc_handler(session_id, session_dir)` at every jail launch
 (`svc_start_sandboxed_cursor_cli_session.rs`, `jail_launch_steps.rs`, `relaunch_jail_steps.rs`) and

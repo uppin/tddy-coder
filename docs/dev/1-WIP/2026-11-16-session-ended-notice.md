@@ -68,12 +68,12 @@ and every inbox reader gains from it now.
 
 ## Scope
 
-- [ ] The session manager announces every agent end, from both sites, exactly once each
-- [ ] The new source and `SessionEndNotice` through the bus model, the proto, the conversions and the log's JSON
-- [ ] The forwarder: an announced end → a labelled, owned bus notification
-- [ ] The daemon starts the forwarder after the bus is assembled
-- [ ] Telegram declines it; the drawer's dot ignores it
-- [ ] Feature and package docs updated
+- [x] The session manager announces every agent end, from both sites, exactly once each
+- [x] The new source and `SessionEndNotice` through the bus model, the proto, the conversions and the log's JSON
+- [x] The forwarder: an announced end → a labelled, owned bus notification
+- [x] The daemon starts the forwarder after the bus is assembled
+- [x] Telegram declines it; the drawer's dot ignores it
+- [x] Feature and package docs updated
 
 ## Responsibility
 
@@ -221,12 +221,12 @@ Real dependency edges, as opposed to the branch line:
 
 ## Implementation Milestones
 
-- [ ] `AgentEnd` announced from both sites; cli-sessions tests green
-- [ ] Kernel, proto, conversions, storage carry the new source and `ended`
-- [ ] Forwarder publishes a labelled, owned notification; lifecycle acceptance green
-- [ ] Daemon starts the forwarder
-- [ ] Telegram declines; drawer ignores
-- [ ] Docs: `docs/ft/daemon/session-notifications.md` *What is notified* row; package docs
+- [x] `AgentEnd` announced from both sites; cli-sessions tests green
+- [x] Kernel, proto, conversions, storage carry the new source and `ended`
+- [x] Forwarder publishes a labelled, owned notification; lifecycle acceptance green
+- [x] Daemon starts the forwarder
+- [x] Telegram declines; drawer ignores
+- [x] Docs: `docs/ft/daemon/session-notifications.md` *What is notified* row; package docs
 
 ## Testing Plan
 
@@ -306,6 +306,12 @@ _(populated during development)_
   something an orchestrator must act on. The drawer opts out by source instead.
 - **The watcher's end has no exit code.** Nothing saw the agent's process exit; `exit code unknown`
   says so rather than inventing a 0.
+- **A tmux-run main's immediate end is also `exit code unknown`** (green, 2026-11-17): its task
+  status is the tmux *client's*, not the agent's, so `outcome_of(status)` would claim the client's
+  `exit code 0` for an agent nobody saw exit. Only a PTY-run main — whose status is the agent's own
+  process — announces `outcome_of(status)` with its exit code. This also makes the detached case
+  deterministic: whether the watcher's poll or the client's cleanup sees the tmux session go first,
+  the one announcement reads the same.
 
 ## Refactoring Needed
 
@@ -336,10 +342,10 @@ _(populated during development)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p tddy-cli-sessions -p tddy-daemon-kernel -p tddy-session-activity -p tddy-session-lifecycle -p tddy-service -p tddy-daemon -p tddy-daemon-rpc -p tddy-telegram-control`, and the session-web unit test) — verify 100% pass
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [ ] Run the touched packages' tests (`./test -p tddy-cli-sessions -p tddy-daemon-kernel -p tddy-session-activity -p tddy-session-lifecycle -p tddy-service -p tddy-daemon -p tddy-daemon-rpc -p tddy-telegram-control`, and the session-web unit test) — every test this changeset added passes scoped, and batch 1 (`cli-sessions`, `daemon-kernel`, `session-activity`, `telegram-control`) is fully green; the full `daemon` / `daemon-rpc` / `session-lifecycle` suites keep this host's pre-existing environmental reds (jail fixtures' BSD `cat`, LiveKit Docker ports, `tddy-remote-git-repo` not built, `/tmp` canonicalisation — the families `tddy-session-lifecycle`'s README already documents), each confirmed independent of this diff; whole-workspace health is CI's to judge
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -350,5 +356,5 @@ _(populated during development)_
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings` per touched package, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings` per touched package, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap

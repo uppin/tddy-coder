@@ -11,6 +11,10 @@ and create-session packages.
 It imports nothing from `tddy-web` and nothing from LiveKit; it reaches the outside world through
 `tddy-client-web` (generated clients and ports), and renders with `tddy-ui-web`.
 
+The drawer's dot for a notification is `lib/sessionNotificationDot.ts`'s `dotForNotification`:
+attention lights yellow and activity blinks green, except a session's end (source `SESSION_ENDED`,
+`#activity-wake` 1/3), which lights nothing — an ended session already reads as stopped.
+
 Tests: `bun test src` and `bun run cypress:component` (specs mount with `cy.mountWithClients` and port doubles).
 
 Documentation: [docs/README.md](docs/README.md).

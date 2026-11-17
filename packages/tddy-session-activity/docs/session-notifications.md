@@ -28,9 +28,10 @@ pub struct SessionNotification {
     pub session_id: String,
     pub label: String,       // the drawer label; see "Naming" below
     pub kind: SessionNotificationKind,     // Activity | AttentionRequired
-    pub source: SessionNotificationSource, // ActivityStatus | AgentToolCall | Presenter | Agent
+    pub source: SessionNotificationSource, // ActivityStatus | AgentToolCall | Presenter | Agent | PendingQuestion | SessionEnded
     pub text: String,        // operator-facing line, rendered once at publish
     pub agent: Option<AgentNotification>, // what the agent wrote; Some only for source Agent
+    pub ended: Option<SessionEndNotice>,  // how the agent ended; Some only for source SessionEnded
     pub at_unix_ms: u64,
     pub os_user: String,     // owner; server-side only, never on the wire
 }
@@ -42,6 +43,12 @@ pub struct SessionNotification {
 alone, because each surface renders the body differently and none can recover structure from a
 flattened line. `streams::session_notification_event` maps it onto `SessionNotificationEvent`'s
 `title`, `body_markdown`, `level`, `sound` and `link` (empty for every other source).
+
+`ended` carries how a session's agent ended (`SessionEndNotice { outcome, exit_code }`) for a
+`SessionEnded` notification, raised by `tddy-session-lifecycle`'s agent-end forwarder when the
+session manager announces the end (`#activity-wake` 1/3). The project notification log stores it as
+`source: "session_ended"` with an `ended` object (omitted when `None`), so the project-home inbox
+tools return it; Telegram declines the source and the drawer's dot ignores it.
 
 `text` is rendered at publish rather than by each subscriber, so a chat message and the drawer's
 tooltip read the same sentence. `os_user` is what scopes the stream — see **Authorization**.

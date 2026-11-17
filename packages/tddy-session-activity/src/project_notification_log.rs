@@ -429,8 +429,7 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
                     text: notification.text.clone(),
                     agent: notification.agent.clone(),
                     question: notification.question.clone(),
-                    // TODO(session-ended-notice): implement — keep `notification.ended`.
-                    ended: None,
+                    ended: notification.ended.clone(),
                     at_unix_ms: notification.at_unix_ms,
                     orchestrator_session_id: orchestrator.clone(),
                 },
