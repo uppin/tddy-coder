@@ -371,7 +371,7 @@ impl LaunchSessions {
             && meta
                 .ssh_config_host
                 .as_deref()
-                .map_or(true, |host| host.trim().is_empty());
+                .is_none_or(|host| host.trim().is_empty());
         let session_tool_token = if runs_on_this_host {
             self.session_tool_token_for(session_id, session_token)
         } else {
