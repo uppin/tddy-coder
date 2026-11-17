@@ -102,14 +102,19 @@ Worktrees live in `.worktrees/` relative to the repository root (**worktree_dir*
 - **remove_worktree**: `git worktree remove --force`.
 - **list_worktrees**: The main worktree and every linked one, as **WorktreeInfo**.
 
-### SSH (`ssh_worktree.rs`, `ssh_exec.rs`)
+### Remote checkout (`remote_checkout.rs`, `ssh_exec.rs`)
 
-- **setup_worktree_for_session_over_ssh(shell, git_url, session_id)**: Clones (or
-  initialises) the repository under the remote's default root if it is absent, then adds
-  `.worktrees/<session_id>` on branch `tddy-<session_id>`, creating the branch from `HEAD` when it
-  does not exist — as one command run through the `tddy_remote_shell::RemoteShell` port the
-  caller supplies. Idempotent: a worktree already listed at that path is left alone. The session
-  id is only a string; nothing here reads a changeset.
-- **ssh_exec**: `shell_single_quote`, `default_remote_repo_root`, `contain_remote_path`. This
-  crate spawns no `ssh` of its own; there is no fallback to the local filesystem when the remote
-  command fails.
+- **remote_checkout_root(shell, git_url)**: Reads the target user's home through the
+  `tddy_remote_shell::RemoteShell` port the caller supplies (`printf '%s' "$HOME"`) and returns
+  `<home>/.tddy/repos/<repository>`, where `<repository>` is the name the git URL's last segment
+  names without `.git` (**repository_name_of**; `repo` for a URL naming no segment).
+- **setup_remote_worktree(shell, &RemoteWorktreeRequest)**: Clones (or, for a project with no
+  URL, initialises) the repository at that root when it is absent, fetches, then adds
+  `.worktrees/<session_id>` on the requested branch — `RemoteBranch::NewFrom { name, base_ref }`
+  cuts `name` from `base_ref`, `RemoteBranch::Existing { name }` checks `name` out — and returns
+  `RemoteCheckout { root, worktree, branch }`. Idempotent: a worktree already at that path is
+  left alone. Failures are `RemoteCheckoutError` (`HomeUnresolved`, `Clone { url, stderr }`,
+  `Fetch`, `Worktree`, `Shell`), carrying the target's own words. The session id is only a
+  string; nothing here reads a changeset.
+- **ssh_exec**: `shell_single_quote`, `contain_remote_path`. This crate spawns no `ssh` of its
+  own; there is no fallback to the local filesystem when the remote command fails.

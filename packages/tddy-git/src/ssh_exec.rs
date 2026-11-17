@@ -35,26 +35,3 @@ pub fn contain_remote_path(remote_root: &str, arg_path: &str) -> Result<String, 
     }
     Ok(normalized)
 }
-
-/// Default checkout directory on an SSH target for the fixture alias `buildbox` and example URLs.
-pub fn default_remote_repo_root(git_url: &str) -> String {
-    let trimmed = git_url.trim();
-    if trimmed.is_empty() || trimmed.contains("example.com") {
-        "/home/dev/repo".to_string()
-    } else if trimmed.starts_with("git@") {
-        let path = trimmed.split(':').nth(1).unwrap_or("repo");
-        let name = path
-            .rsplit('/')
-            .next()
-            .unwrap_or("repo")
-            .trim_end_matches(".git");
-        format!("/home/dev/{name}")
-    } else {
-        let name = trimmed
-            .rsplit('/')
-            .next()
-            .unwrap_or("repo")
-            .trim_end_matches(".git");
-        format!("/home/dev/{name}")
-    }
-}

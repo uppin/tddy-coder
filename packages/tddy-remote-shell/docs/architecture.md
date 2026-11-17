@@ -58,6 +58,6 @@ Coder deployment and no network are involved.
 
 - `tddy-tool-engine`: the exec catalog's `RemoteShell` wraps an `Arc<dyn RemoteShell>`;
   `session_shell` builds an `SshShell` for a set `ssh_config_host`.
-- `tddy-git`: `setup_worktree_for_session_over_ssh` takes `&dyn RemoteShell`.
+- `tddy-git`: `setup_remote_worktree` and `remote_checkout_root` take `&dyn RemoteShell`; a target's checkout is `$HOME/.tddy/repos/<repository>/.worktrees/<session>` on the target, resolved through its shell.
 - `tddy-agent-launch`: slot files and the session pointer are written through the port.
 - `tddy-worktree-service`: remote git pack verbs stream through `exec_streamed`.
