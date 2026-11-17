@@ -246,6 +246,11 @@ pub async fn execute_project_home_tool(
         | crate::project_home_watch_tools::CANCEL_SESSION_WATCH => ToolOutcome::err(format!(
             "{tool_name} is answered by execute_project_home_watch_tool, not by execute_project_home_tool"
         )),
+        // Streams the daemon's session watches, so the daemon answers it through
+        // `execute_project_home_watch_stream_tool` (`#activity-wake` 4/5).
+        crate::project_home_watch_stream_tools::WAIT_SESSION_WATCH_EVENTS => ToolOutcome::err(format!(
+            "{tool_name} is answered by execute_project_home_watch_stream_tool, not by execute_project_home_tool"
+        )),
         other => ToolOutcome::err(format!("unknown project-home tool: {other}")),
     }
 }

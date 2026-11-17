@@ -72,6 +72,9 @@ use tddy_tool_engine::project_home_tools::{
 use tddy_tool_engine::project_home_turn_tools::{
     execute_project_home_turn_tool, is_project_home_turn_tool,
 };
+use tddy_tool_engine::project_home_watch_stream_tools::{
+    execute_project_home_watch_stream_tool, is_project_home_watch_stream_tool,
+};
 use tddy_tool_engine::project_home_watch_tools::{
     execute_project_home_watch_tool, is_project_home_watch_tool,
 };
@@ -348,6 +351,8 @@ impl DaemonProjectHome {
             execute_project_home_answer_tool(self, home, &req.tool_name, &req.args_json).await
         } else if is_project_home_inbox_tool(&req.tool_name) {
             execute_project_home_inbox_tool(self, home, &req.tool_name, &req.args_json).await
+        } else if is_project_home_watch_stream_tool(&req.tool_name) {
+            execute_project_home_watch_stream_tool(self, home, &req.tool_name, &req.args_json).await
         } else if is_project_home_watch_tool(&req.tool_name) {
             execute_project_home_watch_tool(self, home, &req.tool_name, &req.args_json).await
         } else if is_project_home_turn_tool(&req.tool_name) {

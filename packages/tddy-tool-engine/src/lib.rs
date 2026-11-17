@@ -20,6 +20,7 @@ pub mod project_home_terminal_tools;
 pub mod project_home_terminate;
 pub mod project_home_tools;
 pub mod project_home_turn_tools;
+pub mod project_home_watch_stream_tools;
 pub mod project_home_watch_tools;
 pub mod project_home_worktree_tools;
 pub mod read_only;

@@ -15,6 +15,7 @@ use tddy_tool_engine::project_home_tools::project_home_offered_catalog;
 use tddy_tool_engine::project_home_tools::{
     ListProjectSessionsResult, ListedSession, ProjectHomePort,
 };
+use tddy_tool_engine::project_home_watch_stream_tools::project_home_watch_stream_tool_defs;
 use tddy_tool_engine::project_home_watch_tools::{
     execute_project_home_watch_tool, project_home_watch_tool_defs, ProjectHomeWatchPort,
     WatchRequest, CANCEL_SESSION_WATCH, CREATE_SESSION_WATCH, RENEW_SESSION_WATCH, WATCH_KINDS,
@@ -160,6 +161,7 @@ fn the_watch_tools_are_offered_to_the_project_home_role() {
         offered,
         project_home_watch_tool_defs()
             .into_iter()
+            .chain(project_home_watch_stream_tool_defs())
             .map(|def| def.name)
             .collect::<Vec<_>>()
     );

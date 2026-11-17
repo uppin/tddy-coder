@@ -22,6 +22,10 @@ use tddy_daemon_kernel::session_notification::SessionNotificationSource;
 
 use crate::project_notification_log::{ProjectNotificationLog, ProjectNotificationRecord};
 
+mod stream;
+
+pub use stream::{StreamBatch, StreamRefusal, StreamedEvent, STREAM_LEASE_GRACE};
+
 /// The longest a watch lives without being renewed: 24 hours.
 pub const MAX_WATCH_TTL_SECS: u64 = 86_400;
 /// How many live watches one orchestrator may hold.
@@ -207,6 +211,11 @@ pub struct SessionWatchStore {
     /// One lock per project: every operation on a project's watches holds it, which is what makes a
     /// record delivered once across concurrent calls.
     projects: Mutex<HashMap<String, Arc<tokio::sync::Mutex<ProjectWatches>>>>,
+    /// Which stream holds which watch, in memory only (`#activity-wake` 4/5): a daemon restart
+    /// ends every stream's hold.
+    leases: Mutex<stream::StreamLeases>,
+    /// How long a watch stays streamed after its stream's last call.
+    stream_lease_grace: Duration,
 }
 
 impl SessionWatchStore {
@@ -221,6 +230,8 @@ impl SessionWatchStore {
                 return Ok(Self {
                     data_dir: data_dir.to_path_buf(),
                     projects: Mutex::new(projects),
+                    leases: Mutex::default(),
+                    stream_lease_grace: STREAM_LEASE_GRACE,
                 });
             }
             Err(e) => return Err(anyhow::anyhow!("read {}: {e}", dir.display())),
@@ -243,6 +254,8 @@ impl SessionWatchStore {
         Ok(Self {
             data_dir: data_dir.to_path_buf(),
             projects: Mutex::new(projects),
+            leases: Mutex::default(),
+            stream_lease_grace: STREAM_LEASE_GRACE,
         })
     }
 
@@ -597,6 +610,8 @@ fn apply_delivery(
     now_unix_ms: u64,
 ) -> WatchDelivery {
     end_finished(state, owner, log, now_unix_ms);
+    // TODO(watch-monitor): implement — skip every watch a stream's lease holds at `now_unix_ms`:
+    // its events are the stream's alone, and its position is the stream's to advance.
     let mut matched: BTreeMap<u64, ProjectNotificationRecord> = BTreeMap::new();
     let mut lost = 0_u64;
     let mut scans: Vec<(String, u64, u64)> = Vec::new();

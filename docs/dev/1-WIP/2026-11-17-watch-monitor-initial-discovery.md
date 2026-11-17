@@ -123,3 +123,42 @@ Exploration 1 is the whole stack-extension's discovery (nodes 4/5 and 5/5), copi
 | [`2026-11-13-acp-turn-input-is-not-delivered.md`](../todo/2026-11-13-acp-turn-input-is-not-delivered.md) | 5 | ℹ ANSWERED — a message needs no `turn_input`; the entry stays open |
 | [`2026-11-16-session-watches-are-not-shown-on-the-web.md`](../todo/2026-11-16-session-watches-are-not-shown-on-the-web.md) | 4 | ℹ unrelated here — the monitor adds no web surface |
 | Telegram notifier code issues (`complexity-telegram-notifier-on-server-message.md` et al.) | 5 | ⚠ DURING — the `message` skip goes in `telegram_session_subscriber.rs`'s source match, one arm, nothing in the notifier |
+
+## Exploration 2 — pass 2 red (contract and failing tests), 2026-11-17
+
+**Sequence**
+
+1. `session_watches.rs` on this branch: `take_delivery` and `deliver_with` share one private
+   `apply_delivery(state, owner, log, now)`, so the stream's skip is one place (marked
+   `TODO(watch-monitor)` there). The store's two `Self { .. }` literals in `open` gained the lease map
+   and the grace.
+2. `exec_tool/project_home_watches.rs` and `watch_events.rs` read the clock as
+   `tddy_daemon_kernel::now_unix_ms()`, not an injected one: an acceptance test cannot move time, so
+   a lease lapse at that level needs the grace itself to be shorter — hence
+   `SessionWatchStore::with_stream_lease_grace`, set by the new support helper
+   `a_host_streaming_watches` (beside `a_host_waking_orchestrators`, which now shares its builder).
+3. `watch_wake.rs`'s `owners_concerned` asks `has_live_watches`, which a streamed watch still
+   answers yes; `try_wake` then gets `Ok(false)` from `deliver_with` once it skips the watch — so the
+   waker needs no edit, as the Boundaries say.
+4. `project_home.rs` `run_locally` routes only names `is_project_home_tool` lists, so the new tool is
+   listed there (and offered in the catalogue) for a call to reach `DaemonProjectHome::execute`.
+5. Catalogue fallout: three name lists pin the project-home catalogue exactly —
+   `read_only.rs`'s unit test, `project_home_session_tools_acceptance.rs`, and #930's two
+   `contains("SessionWatch")` filters (`tests/project_home_watch_tools.rs`,
+   `project_home_session_watch_acceptance.rs`), which `WaitSessionWatchEvents` also matches. All four
+   now include it.
+6. `tddy-tools-cli` has no dependency on `tddy-daemon-rpc`, and the daemon harness is a test
+   module there; the CLI suite instead serves a scripted `ExecToolService` on the session's
+   `TDDY_SANDBOX_TOOL_IPC` socket, as `notify_cli_acceptance.rs` and `support/exec_catalog.rs` do.
+
+**Open point — resolved**
+
+- **Re-arming inside the lease.** `Monitor` expires after 30 minutes and the agent re-arms with
+  `--watch`; the new process presents no `stream_id`, so as first drafted it was refused as a second
+  stream until the old lease lapsed (up to 15 s). **Resolved by the user (2026-11-17): resume by
+  takeover** — a new stream of the same owner takes the watch over at once, resuming from the last
+  acknowledged position, and the superseded stream is refused from its next call
+  (`StreamRefusal::Superseded`, replacing the draft's `StreamedElsewhere`). An unresumed watch ends
+  at its TTL. Tests: `a_new_stream_on_a_streamed_watch_takes_it_over_and_the_old_stream_is_refused`,
+  `a_new_stream_takes_over_from_the_old_one`,
+  `monitor_with_watch_resumes_a_watch_another_monitor_was_streaming`.

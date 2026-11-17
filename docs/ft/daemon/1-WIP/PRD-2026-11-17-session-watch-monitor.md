@@ -138,12 +138,19 @@ wherever the watch tools already work, with no new listener, credential or outbo
   - When the lease lapses, everything after the last acknowledged `seq` goes back to answers and the
     wake, as if no monitor had run. That happens when `Monitor` expires and is not re-armed, the
     command is stopped, or the daemon restarts (the lease is in memory).
-- **One stream per watch.** A second monitor on a watch that is already streamed is refused, naming
-  the watch. `--watch` on a watch that is not the caller's, or has ended, is refused as
-  `RenewSessionWatch` refuses it.
-- **Re-arming.** `Monitor` expires after at most 30 minutes. The agent re-runs `tddy-tools monitor
-  --watch <id>` with the `watch_id` from the first line. Events that arrive between expiry and
-  re-arm wait in the log at the watch's position, or are woken/answered once the lease has lapsed.
+- **One stream per watch, and the newest wins.** A new monitor that the watch's own orchestrator
+  starts on its own live watch **takes the stream over at once**: it gets the lease and a new stream
+  id, and resumes from the last acknowledged position, so a batch the old monitor never acknowledged
+  is handed again. The old monitor's next call is refused, naming the watch and saying another
+  monitor took it over; it prints an `error` line and exits non-zero. `--watch` on a watch that is
+  not the caller's, or has ended, is refused as `RenewSessionWatch` refuses it. (Decided by the user,
+  2026-11-17: "agent should be able to resume the monitor. If monitor is not resumed, its TTL would
+  auto-unarm it.")
+- **Resuming.** `Monitor` expires after at most 30 minutes. The agent re-runs `tddy-tools monitor
+  --watch <id>` with the `watch_id` from the first line, at once — it does not wait for the old
+  lease. Events that arrive between expiry and resume wait in the log at the watch's position, or are
+  woken/answered once the lease has lapsed. A watch nobody resumes ends at its TTL, as any watch
+  does.
 - **Telling the agent.** `WaitSessionWatchEvents`'s description and
   [Project concept](../project-concept.md) say that a Claude Code orchestrator may stream a watch with
   `Monitor` and `tddy-tools monitor` rather than wait to be woken. They give the command,
@@ -214,8 +221,8 @@ wherever the watch tools already work, with no new listener, credential or outbo
 - [ ] `--watch <id>` re-attaches to an existing watch and continues from its acknowledged position
 - [ ] The monitor exits 0 after printing `ended` lines once every streamed watch has ended, and exits
       non-zero after printing an `error` line on a refusal or a lost transport
-- [ ] A second monitor on a streamed watch is refused; a non-orchestrator is refused; `--watch` on
-      another orchestrator's watch is refused
+- [ ] A second monitor on a streamed watch takes it over and the first is refused from its next
+      call; a non-orchestrator is refused; `--watch` on another orchestrator's watch is refused
 - [ ] It works over each transport `tddy-tools` detects: daemon socket (host) and tool IPC (jail)
 - [ ] Manual: under Claude Code's `Monitor`, an idle orchestrator receives a watched permission
       prompt as a notification and answers it (see open question 1)
@@ -223,12 +230,14 @@ wherever the watch tools already work, with no new listener, credential or outbo
 
 ## Open questions
 
-1. **⚠ Does a `Monitor` notification start a turn for an *idle* Claude Code agent?** `Monitor`'s
-   description says events "arrive in the chat" while the agent keeps working, and a background
-   `Bash` task re-invokes an idle agent when it exits. This design **assumes yes**, which is what
-   makes it safe for the lease to suppress the wake. Verify on a real Claude Code session before
-   green. **If no**, the lease suppresses `watchEvents` on answers only and the wake stays on, and
-   the wake must then take only events the monitor has not printed, or both would deliver them.
+1. **✅ Answered (2026-11-17): yes — a `Monitor` notification starts a turn for an *idle* Claude
+   Code agent.** Observed on the orchestrator's own Claude Code session that planned this stack:
+   on 2026-11-17 its `Monitor` events re-invoked the idle session repeatedly, each one starting a
+   turn. So the lease may suppress the wake as designed: a streamed watch's events reach an idle
+   orchestrator through the monitor alone. The design is no longer conditional; the manual
+   acceptance criterion above stays as a confirmation on a real session (an idle orchestrator told
+   of a watched *permission prompt* through `tddy-tools monitor` specifically), not as a gate on
+   the design.
 2. **Tool-call activity.** "Session activities" could also mean a watched session's tool calls (the
    rows `ReadSessionActivity` reads from `agent-activity.jsonl`). Those are not in the project log
    that watches read, so they would need a seventh kind with its own per-session cursor. **Proposed:

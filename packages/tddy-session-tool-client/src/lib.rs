@@ -159,6 +159,8 @@ fn remote_block_arg_keys(tool_name: &str) -> &'static [&'static str] {
         // A wait holds the call for up to its `timeout_ms` (#home-inbox 7/8), so it needs the same
         // ceiling as `Await`: a minute-long wait sits past every transport's deadline.
         "WaitProjectNotifications" => &["timeout_ms"],
+        // A monitor's stream call holds the same way (#activity-wake 4/5).
+        "WaitSessionWatchEvents" => &["timeout_ms"],
         _ => &[],
     }
 }

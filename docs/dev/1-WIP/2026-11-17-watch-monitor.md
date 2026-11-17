@@ -3,7 +3,7 @@
 **Date**: 2026-11-17
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Complexity**: 5 — five crates (session-activity, tool-engine, daemon-rpc, session-tool-client, tddy-tools), ordering semantics (acknowledged positions beside #930's exactly-once delivery and #931's commit-on-paste, an in-memory lease racing the waker), a long-poll tool over every session transport, and one design question still open (does a `Monitor` notification start a turn for an idle agent)
+**Complexity**: 5 — five crates (session-activity, tool-engine, daemon-rpc, session-tool-client, tddy-tools), ordering semantics (acknowledged positions beside #930's exactly-once delivery and #931's commit-on-paste, an in-memory lease racing the waker), a long-poll tool over every session transport; the one open design question (does a `Monitor` notification start a turn for an idle agent) is answered yes
 **Stack**: `#activity-wake` 4/5 — branch `feature/activity-wake/watch-monitor`, base `feature/activity-wake/idle-wake` (#931)
 
 ## Initial Discovery
@@ -117,13 +117,23 @@ watch nobody streams, are untouched.
 
 The first push of this PR's code (commit 2) publishes:
 
-- `StreamBatch`, `StreamRefusal`, `STREAM_LEASE_GRACE`, `SessionWatchStore::take_stream_batch` and
-  `is_streamed`, returning `// TODO(watch-monitor): implement` refusals / `false`;
-- `WAIT_SESSION_WATCH_EVENTS`, its definition in the project-home catalogue, and
-  `ProjectHomeWatchStreamPort`, the daemon's implementation refusing with a TODO text;
+- `StreamBatch`, `StreamedEvent`, `StreamRefusal` (NoWatchNamed, NotYourLiveWatch, Superseded,
+  AckPastHanded, UnknownStream), `STREAM_LEASE_GRACE`,
+  `SessionWatchStore::take_stream_batch(owner, stream_id, watch_ids, ack_seq, log, now)`,
+  `is_streamed(owner, watch_id, now)` and `with_stream_lease_grace(grace)`, returning
+  `// TODO(watch-monitor): implement` refusals / `false`; the skip inside `apply_delivery` is a TODO;
+- `WAIT_SESSION_WATCH_EVENTS`, `WatchStreamRequest { watch_ids, ack_seq, stream_id, timeout_ms }`,
+  `project_home_watch_stream_tool_defs` (listed in the project-home catalogue and in
+  `is_project_home_tool`), `ProjectHomeWatchStreamPort::wait_watch_events` and
+  `execute_project_home_watch_stream_tool` (argument reading a TODO); the daemon's implementation
+  (`exec_tool/project_home_watch_stream.rs`, routed in `DaemonProjectHome::execute`) refusing with a
+  TODO text;
 - the clamp entry;
-- `tddy-tools monitor` parsing its arguments and printing an `error` line with the TODO text;
-- every test below, **failing** on the missing behaviour, not on compilation.
+- `tddy-tools monitor` (`MonitorArgs`, `MonitorLine`, `run_monitor`) parsing its arguments and
+  printing an `error` line with the TODO text, exiting 1;
+- every test below, **failing** on the missing behaviour, not on compilation — except the two that
+  pin the published surface itself (`the_stream_tool_is_offered_to_the_project_home_role_only`,
+  `the_stream_wait_is_clamped_for_a_remote_call`), which pass in red by contract.
 
 ## Green wave
 
@@ -158,8 +168,9 @@ Real dependency edges, as opposed to the branch line:
 
 ### State B (Target)
 
-- **Store.** `take_stream_batch(owner, watch_ids, ack_seq, log, now) -> Result<StreamBatch,
-  StreamRefusal>`:
+- **Store.** `take_stream_batch(owner, stream_id, watch_ids, ack_seq, log, now) ->
+  Result<StreamBatch, StreamRefusal>` (`stream_id` `None` starts a stream; the batch carries the
+  `stream_id` every later call presents):
   - under the project lock, first advances each named watch's position to `ack_seq` (refused when
     `ack_seq` is past what was handed, or names a watch not held by this stream);
   - renews the lease;
@@ -168,11 +179,16 @@ Real dependency edges, as opposed to the branch line:
 
   A watch is streamed while a lease is held (`now < lease_until`); the lease is in memory only and
   renewed by each call. `take_delivery` and `deliver_with` skip a streamed watch entirely.
-- **Tool.** `WaitSessionWatchEvents { watch_ids, ack_seq?, timeout_ms ≤ 20 000 }` →
-  `{ events, lost, ended, next_ack_seq }`. It answers at once when `take_stream_batch` has something,
+- **Tool.** `WaitSessionWatchEvents { watch_ids, ack_seq?, stream_id?, timeout_ms ≤ 20 000 }` →
+  `{ stream_id, events, lost, ended, next_ack_seq }`, each event
+  `{ seq, watch_ids, kind, session_id, session, summary, request_id?, record }` — the monitor line's
+  fields plus the log record `--full` prints. It answers at once when `take_stream_batch` has something,
   and otherwise waits on the bus for a record of the owner's project, or the timeout.
-  - Refusals: not an orchestrator; a watch that is not the caller's or has ended; a watch streamed by
-    another call (lease held, different stream); `timeout_ms` above the cap.
+  - Refusals: not an orchestrator; a watch that is not the caller's or has ended; a stream whose
+    watch a newer stream of the same owner took over (`StreamRefusal::Superseded`, naming the watch
+    and that another monitor took it over); `timeout_ms` above the cap.
+  - A call without `stream_id` on the caller's own live watch **takes it over**, held or not: it gets
+    the lease and a new stream id and resumes from the last acknowledged position.
   - The lease's holder is the stream id the first call returns and each later call presents.
 - **CLI.** `tddy-tools monitor`:
   - With `--watch`, it attaches; otherwise it creates a watch via `CreateSessionWatch` and prints the
@@ -236,7 +252,7 @@ line as `Monitor` would.
 - `a_streamed_watch_does_not_wake_its_idle_orchestrator`
 - `events_after_the_last_acknowledgement_return_to_answers_and_the_wake_once_the_lease_lapses`
 - `an_unacknowledged_batch_is_handed_again`
-- `a_second_stream_on_a_streamed_watch_is_refused_naming_the_watch`
+- `a_new_stream_on_a_streamed_watch_takes_it_over_and_the_old_stream_is_refused`
 - `streaming_a_watch_that_is_not_the_callers_or_has_ended_is_refused`
 - `a_session_that_is_not_an_orchestrator_is_refused_the_stream_tool`
 - `the_wait_answers_empty_at_its_timeout`
@@ -248,6 +264,7 @@ line as `Monitor` would.
 - `monitor_exits_zero_after_an_ended_line_for_each_watch`
 - `monitor_prints_an_error_line_and_exits_non_zero_on_a_refusal`
 - `monitor_with_watch_continues_from_the_acknowledged_position`
+- `monitor_with_watch_resumes_a_watch_another_monitor_was_streaming`
 
 ### Unit Tests
 
@@ -258,7 +275,7 @@ line as `Monitor` would.
 - `take_delivery_skips_a_streamed_watch`
 - `deliver_with_skips_a_streamed_watch`
 - `the_lease_lapses_after_its_grace_with_no_call`
-- `one_stream_holds_a_watch_at_a_time`
+- `a_new_stream_takes_over_from_the_old_one`
 
 **tddy-tool-engine** — `packages/tddy-tool-engine/tests/project_home_watch_stream_tools.rs`
 
@@ -279,9 +296,11 @@ exactly-once property raced with real tasks; stdout read line by line, never as 
 
 - The lease is in memory: a daemon restart ends every stream's hold. That is the intended fallback,
   not debt.
-- PRD open question 1 (does a `Monitor` notification start a turn for an idle agent) must be checked
-  on a real Claude Code session before green. If the answer is no, the lease must not suppress the
-  wake, and this changeset's State B changes.
+- PRD open question 1 (does a `Monitor` notification start a turn for an idle agent) is
+  **answered yes** (2026-11-17): the orchestrator's own Claude Code session saw its `Monitor` events
+  re-invoke it repeatedly while idle. The design — the lease suppressing the wake — is no longer
+  conditional. A manual confirmation remains (Scope's manual line): on a real session, an idle
+  orchestrator running `tddy-tools monitor` is told of a watched permission prompt and answers it.
 
 ## Decisions & Trade-offs
 
@@ -290,6 +309,18 @@ exactly-once property raced with real tasks; stdout read line by line, never as 
   mid-batch loses nothing; the cost is a possible re-print of one batch, recognisable by `seq`.
 - **A lease, not a flag.** The stream holds a watch only while it keeps calling, so a dead monitor
   hands its watch back to answers and the wake on its own, with no cleanup call.
+- **The lease's grace is a store parameter.** `SessionWatchStore::with_stream_lease_grace(grace)`
+  sets it; the daemon opens its store with the production default, `STREAM_LEASE_GRACE` (15 s). It
+  is a real constructor parameter, like `WakeTimings` for the wake — the acceptance suite uses it to
+  lapse a lease in half a second instead of waiting 15 — not a test-only code path.
+- **A stream id names the lease's holder.** The first call returns one and every later call
+  presents it, which is what tells a stream's next call from a second monitor on the same watch.
+- **Resume by takeover** (user, 2026-11-17: "agent should be able to resume the monitor. If monitor
+  is not resumed, its TTL would auto-unarm it."). A new stream of the watch's own orchestrator takes
+  the watch over at once rather than being refused until the old lease lapses, so re-arming after
+  `Monitor`'s 30-minute expiry costs nothing; the superseded stream is refused from its next call
+  (`StreamRefusal::Superseded`). A watch nobody resumes ends at its TTL (#930's, unchanged); the
+  lease lapse still returns its unacknowledged events to answers and the wake.
 - **Complexity 5** is a boundary warning. The store change, the tool and the CLI stay in one node
   because none of them delivers anything alone: a stream tool with no CLI reaches no agent, and a CLI
   with no tool has nothing to read.
@@ -318,10 +349,10 @@ exactly-once property raced with real tasks; stdout read line by line, never as 
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved 2026-11-17; re-arm changed to resume-by-takeover at the review)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
