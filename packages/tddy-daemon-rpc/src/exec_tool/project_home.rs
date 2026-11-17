@@ -78,6 +78,7 @@ use tddy_tool_engine::project_home_watch_stream_tools::{
 use tddy_tool_engine::project_home_watch_tools::{
     execute_project_home_watch_tool, is_project_home_watch_tool,
 };
+use tddy_tool_engine::session_message_tools::is_session_message_tool;
 use tddy_tool_engine::stack_git_tools::is_stack_git_tool;
 use tddy_tool_engine::stack_tools::caller_records::stack_and_git_tools_offered_to;
 use tddy_tool_engine::stack_tools::is_stack_tool;
@@ -131,6 +132,12 @@ impl ExecToolRpcHandler {
         }
         if is_stack_tool(&req.tool_name) {
             return self.run_stack_tool(req, sessions_base).await;
+        }
+        if is_session_message_tool(&req.tool_name) {
+            return self.run_session_message_tool(req, sessions_base).await;
+        }
+        if self.is_inbox_watch_call(req, sessions_base) {
+            return self.run_inbox_watch_tool(req, sessions_base).await;
         }
         if !is_project_home_tool(&req.tool_name) && !is_project_home_git_tool(&req.tool_name) {
             return Ok(self

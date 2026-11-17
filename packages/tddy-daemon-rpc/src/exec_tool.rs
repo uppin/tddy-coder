@@ -12,6 +12,7 @@ mod project_home_watch_stream;
 mod project_home_watches;
 mod result_frames;
 mod role_guard;
+mod session_messages;
 mod stack_git_tools;
 pub mod stack_tools;
 mod watch_events;
@@ -97,6 +98,10 @@ pub(crate) struct ProjectHomeHost {
     /// `WaitProjectNotifications` and `ReadProjectNotifications` read (`#home-inbox` 7/8). `None`
     /// on a host with none installed.
     pub(crate) notification_log: Option<Arc<ProjectNotificationLog>>,
+    /// The bus a session's `PostSessionMessage` is published on (`#activity-wake` 5/5). `None` on a
+    /// host with none.
+    pub(crate) notification_bus:
+        Option<Arc<tddy_session_activity::session_notifications::SessionNotificationBus>>,
     /// The session watches the watch tools keep and every orchestrator's answer carries the events
     /// of (`#activity-wake` 2/3). `None` on a host with none.
     pub(crate) session_watches:
@@ -137,6 +142,7 @@ impl ExecToolRpcHandler {
                 leases: Arc::new(home_terminal_leases::HomeTerminalLeases::default()),
                 pending_answers: host.pending_answers(),
                 notification_log: host.project_notification_log(),
+                notification_bus: host.session_notification_bus(),
                 session_watches: host.session_watches(),
                 activity: Arc::new(host.activity_service()),
                 stack_github: Arc::new(OnceLock::new()),

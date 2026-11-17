@@ -100,6 +100,7 @@ fn an_attention_notification(os_user: &str, session_id: &str, text: &str) -> Ses
         at_unix_ms: 1_790_000_000_000,
         ended: None,
         activity_status: None,
+        message: None,
     }
 }
 

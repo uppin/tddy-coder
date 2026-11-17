@@ -4,6 +4,7 @@
 //! ```text
 //! tddy-tools monitor --started-by-me --kinds permission,question --ttl 3600
 //! tddy-tools monitor --watch <watch_id>
+//! tddy-tools monitor --kinds message --ttl 86400   # the messages addressed to you
 //! ```
 //!
 //! Made for Claude Code's `Monitor` tool, which turns each stdout line of a command into a
@@ -16,6 +17,11 @@
 //! written; logs go to stderr. It exits 0 once every streamed watch has ended, after an `ended`
 //! line for each, and non-zero after an `error` line on any refusal, transport error or per-call
 //! deadline lapse — so a `Monitor` never mistakes silence for success.
+//!
+//! A matched message between sessions is printed as a `message` line rather than an `event` line
+//! (`#activity-wake` 5/5). `--kinds message` with no `--session` or `--started-by-me` creates the
+//! caller's **inbox watch** — the messages addressed to it — which any session may stream, not only
+//! an orchestrator.
 //!
 //! The session and the transport are the ones every session tool call uses
 //! ([`crate::session_tool_client::dispatch_session_tool`]).
@@ -49,7 +55,7 @@ pub struct MonitorArgs {
     pub started_by_me: bool,
 
     /// Which events, comma-separated: question, permission, turn_finished, waiting_for_input,
-    /// agent_notification, ended. Default all six.
+    /// agent_notification, ended, message. Default all seven.
     #[arg(long, value_delimiter = ',', conflicts_with = "watch_ids")]
     pub kinds: Vec<String>,
 
@@ -88,6 +94,21 @@ pub enum MonitorLine {
         /// The log record, with `--full`.
         #[serde(skip_serializing_if = "Option::is_none")]
         record: Option<Value>,
+    },
+    /// A message between sessions a streamed watch matched (`#activity-wake` 5/5): one addressed
+    /// to the caller (its inbox watch), or one a watched session sent. Its `text` is whole; JSON
+    /// escapes its newlines, so it stays one line.
+    Message {
+        seq: u64,
+        watch_ids: Vec<String>,
+        message_id: String,
+        from_session_id: String,
+        /// The sender's display label.
+        from: String,
+        to_session_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reply_to: Option<String>,
+        text: String,
     },
     /// Matched records the log evicted before they could be streamed.
     Lost { count: u64 },
@@ -165,6 +186,8 @@ async fn stream(args: &MonitorArgs) -> Result<i32, String> {
                 .to_string(),
         );
         for event in batch["events"].as_array().map(Vec::as_slice).unwrap_or(&[]) {
+            // TODO(session-messages): implement — print an event of kind `message` as a
+            // `MonitorLine::Message`, read from its record's message part (`message_line_of`).
             print_line(&event_line(event, args.full)?);
         }
         if let Some(lost) = batch["lost"].as_u64().filter(|lost| *lost > 0) {
@@ -281,6 +304,15 @@ async fn call_tool(
             .to_string());
     }
     Ok(value)
+}
+
+/// The `message` line for a streamed event of kind `message`, or `None` for any other event
+/// (`#activity-wake` 5/5).
+pub fn message_line_of(event: &Value) -> Option<MonitorLine> {
+    // TODO(session-messages): implement — read seq, watch_ids, session_id, session and the
+    // record's `message` part.
+    let _ = event;
+    None
 }
 
 /// Write `line` to stdout and flush it, so a `Monitor` sees it at once.

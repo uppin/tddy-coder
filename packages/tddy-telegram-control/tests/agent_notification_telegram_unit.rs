@@ -28,6 +28,7 @@ fn an_agent_notification(title: &str, body: &str, sound: bool, label: &str) -> S
         question: None,
         ended: None,
         activity_status: None,
+        message: None,
     }
 }
 

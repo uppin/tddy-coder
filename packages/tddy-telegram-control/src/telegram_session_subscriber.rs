@@ -242,6 +242,8 @@ impl OperatorChannel for TelegramDaemonHooks {
                 SessionNotificationSource::Agent => true,
                 // The end of a session is for its orchestrator's inbox, not a chat.
                 SessionNotificationSource::SessionEnded => false,
+                // A message between sessions is for its recipient's inbox (`#activity-wake` 5/5).
+                SessionNotificationSource::Message => false,
                 SessionNotificationSource::AgentToolCall | SessionNotificationSource::Presenter => {
                     false
                 }

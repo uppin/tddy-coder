@@ -41,6 +41,7 @@ fn an_attention_notification() -> SessionNotification {
         question: None,
         ended: None,
         activity_status: None,
+        message: None,
     }
 }
 

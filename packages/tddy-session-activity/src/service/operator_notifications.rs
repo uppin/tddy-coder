@@ -101,6 +101,7 @@ fn notification_for_agent(
         at_unix_ms,
         ended: None,
         activity_status: None,
+        message: None,
     }
 }
 

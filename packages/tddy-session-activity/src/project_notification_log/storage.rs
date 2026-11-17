@@ -262,6 +262,7 @@ enum SourceDto {
     Agent,
     PendingQuestion,
     SessionEnded,
+    Message,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -345,6 +346,8 @@ impl From<RecordDto> for ProjectNotificationRecord {
             question: dto.question.map(QuestionNotice::from),
             ended: dto.ended.map(SessionEndNotice::from),
             activity_status: dto.activity_status,
+            // TODO(session-messages): implement — persist and replay the message part.
+            message: None,
             at_unix_ms: dto.at_unix_ms,
             orchestrator_session_id: dto.orchestrator_session_id,
         }
@@ -378,6 +381,7 @@ impl From<SessionNotificationSource> for SourceDto {
             SessionNotificationSource::Agent => Self::Agent,
             SessionNotificationSource::PendingQuestion => Self::PendingQuestion,
             SessionNotificationSource::SessionEnded => Self::SessionEnded,
+            SessionNotificationSource::Message => Self::Message,
         }
     }
 }
@@ -391,6 +395,7 @@ impl From<SourceDto> for SessionNotificationSource {
             SourceDto::Agent => Self::Agent,
             SourceDto::PendingQuestion => Self::PendingQuestion,
             SourceDto::SessionEnded => Self::SessionEnded,
+            SourceDto::Message => Self::Message,
         }
     }
 }

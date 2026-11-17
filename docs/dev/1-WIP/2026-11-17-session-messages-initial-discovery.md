@@ -123,3 +123,80 @@ Exploration 1 is the whole stack-extension's discovery (nodes 4/5 and 5/5), copi
 | [`2026-11-13-acp-turn-input-is-not-delivered.md`](../todo/2026-11-13-acp-turn-input-is-not-delivered.md) | 5 | ℹ ANSWERED — a message needs no `turn_input`; the entry stays open |
 | [`2026-11-16-session-watches-are-not-shown-on-the-web.md`](../todo/2026-11-16-session-watches-are-not-shown-on-the-web.md) | 4 | ℹ unrelated here — the monitor adds no web surface |
 | Telegram notifier code issues (`complexity-telegram-notifier-on-server-message.md` et al.) | 5 | ⚠ DURING — the `message` skip goes in `telegram_session_subscriber.rs`'s source match, one arm, nothing in the notifier |
+
+## Exploration 2 — pass 2 (surface and failing tests, 2026-11-17)
+
+**Sequence**
+
+1. Read #934's contract (`session_watches/stream.rs`, `project_home_watch_stream_tools.rs`,
+   `exec_tool/project_home_watch_stream.rs`, `monitor_cli.rs`) and its suites
+   (`project_home_watch_stream_acceptance.rs`, `monitor_cli_acceptance.rs`,
+   `session_watch_stream_unit.rs`).
+2. `run_locally` (`exec_tool/project_home.rs`) routes the stack tools ahead of the local runner by
+   name; the message tools are routed the same way, so `answer_execute_tool` is untouched.
+   `reject_refused_local_exec_tool` runs first, so the tools are also allowed for the project-home
+   role in `read_only::is_project_home_allowed_tool`.
+3. `DaemonSessionHost` keeps its bus private (`connection_service.rs:222`); the exec-tool handler had
+   no way to publish. Added `session_notification_bus()` beside `project_notification_log()`.
+4. The log (`ProjectNotificationLog::wants`) and the waker (`WakeTrigger::wants`) both take
+   `AttentionRequired`: a message notification is published with that kind, so both see it with no
+   change, and each surface skips it by source (web relay, Telegram, desktop).
+5. `tddy-session-activity` depends on `tddy-tool-engine` (the log imports `MAX_WAIT_MS`), so the size
+   check (`refuse_a_bad_message_text`, `MAX_MESSAGE_BYTES`) lives in `session_messages` and the daemon
+   port applies it; the tool engine only reads arguments.
+6. `WatchKind::ALL` and `WATCH_KINDS` are held equal by a test; both gain `message`, which also
+   makes it part of the default kinds.
+
+**Conclusions**
+
+- **The inbox lives in the watch store** (`SessionWatchStore::inbox()`), under the same per-project
+  lock, persisted to its own `session-inbox.json`. Delivered-once in both directions needs the inbox
+  to see the watches' positions and the watches to see the inbox's; two stores would each need the
+  other.
+- **`monitor --inbox` needs a long poll of its own.** `WaitSessionWatchEvents` is #934's and takes
+  watch ids; the inbox has none. `WaitSessionMessages` mirrors it (ack, stream id, takeover, cap,
+  clamp). `--inbox --watch` runs both loops in one process.
+- **The message part is nested in the record's JSON** (`"message": {to_session_id, message_id,
+  reply_to, text}`), as `agent`, `question` and `ended` are, rather than flattened as the PRD's
+  example shows.
+
+## Exploration 3 — 6e redesign: messages as activity, one filtered wait (2026-11-17)
+
+User at the acceptance-test review: "messages should be as activities; waiting for activities could
+use a filter to only wait for messages; the inbox could reference activity". Exploration 2's
+`SessionInbox` (its own file, stream, acknowledgement and `WaitSessionMessages`) is replaced.
+
+**Sequence**
+
+1. `CreateSessionWatch`'s arguments (`project_home_watch_tools.rs`, `create_request`): `session_ids`,
+   `started_by_me`, `kinds`, `ttl_seconds`. A call selecting no session reaches the port with an empty
+   selection; the store refuses it today ("a watch must select at least one session"). So the kind
+   `message` alone, with no selection, is free to mean "my inbox" — no new argument.
+2. `watch_matches` (`session_watches.rs`) never matches a record of the owner's own session, and
+   selects by `record.session_id` (the sender). The inbox watch is therefore a filter naming its owner
+   (`WatchFilter::inbox_of`) whose match is by recipient — a case the matcher gains, distinct from
+   every #930 filter, which never names its owner (`refuse_an_unseen_session` refuses that).
+3. The role gate: `run_locally` sends every project-home tool (watch tools included) to
+   `project_home_caller`, which refuses any role but project-home for them. Rather than widen that
+   gate (#project-home's), a watch-tool call from another role is routed first to
+   `run_inbox_watch_tool` (`exec_tool/session_messages.rs`).
+4. The catalogue: `the_stream_tool_is_offered_to_the_project_home_role_only` (#934's test) pins that
+   only the project-home role is *offered* the watch tools. `tddy-tools monitor` calls them through
+   the session-tool dispatch, not the advertised catalogue, so the catalogue stays as it is; a
+   non-orchestrator learns of its inbox watch from `ReadSessionMessages`' description and the CLI.
+5. `with_watch_events` (`watch_events.rs`) attaches deliveries for any session with watches — not
+   only orchestrators — so an inbox watch rides a session's answers with no change there.
+6. `DaemonProjectHome::create_watch` refuses an agent that takes no turn (the wake pastes). An inbox
+   watch need not paste, so that refusal does not apply to it.
+
+**Conclusions**
+
+- **One record, references to it.** The message is the log record. The inbox position (a `seq` per
+  session, kept in `session-watches.json` with the watches) and the inbox watch (a watch position) are
+  the two references; both live in the watch store under its per-project lock, which is what makes
+  the once-only rule across them a single critical section.
+- **One wait.** `tddy-tools monitor --kinds message` creates the inbox watch and streams it with
+  #934's loop; `WaitSessionMessages`, `monitor --inbox` and the remote clamp entry are gone.
+- **Open:** an idle session holding an unstreamed inbox watch would be woken by a paste like any
+  watcher (#931's waker sees every owner with live watches). Whether the inbox watch should wake is
+  left to the user (see the report).

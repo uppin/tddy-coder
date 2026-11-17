@@ -52,17 +52,21 @@ pub enum WatchKind {
     AgentNotification,
     /// A session's agent ended (`#activity-wake` 1/3).
     Ended,
+    /// A session sent a message — to the orchestrator itself or to another session
+    /// (`#activity-wake` 5/5). Selected by sender.
+    Message,
 }
 
 impl WatchKind {
     /// Every kind, in the order the tools list them.
-    pub const ALL: [WatchKind; 6] = [
+    pub const ALL: [WatchKind; 7] = [
         WatchKind::Question,
         WatchKind::Permission,
         WatchKind::TurnFinished,
         WatchKind::WaitingForInput,
         WatchKind::AgentNotification,
         WatchKind::Ended,
+        WatchKind::Message,
     ];
 
     /// The kind's name, as the tools take it.
@@ -74,6 +78,7 @@ impl WatchKind {
             WatchKind::WaitingForInput => "waiting_for_input",
             WatchKind::AgentNotification => "agent_notification",
             WatchKind::Ended => "ended",
+            WatchKind::Message => "message",
         }
     }
 
@@ -107,6 +112,8 @@ impl WatchKind {
                 }
             }
             SessionNotificationSource::AgentToolCall => None,
+            // TODO(session-messages): implement — a message record is of the kind `message`.
+            SessionNotificationSource::Message => None,
         }
     }
 }
@@ -280,7 +287,7 @@ impl SessionWatchStore {
             );
         }
         if filter.kinds.is_empty() {
-            return Err("name at least one kind, or name none for all six".to_string());
+            return Err("name at least one kind, or name none for all seven".to_string());
         }
         let project = self.project_of(&owner.project_id);
         let mut state = project.lock().await;
@@ -553,6 +560,9 @@ fn refuse_a_bad_ttl(ttl: Duration) -> Result<(), String> {
 /// is of a kind it asks for, and it is never the owner's own session. The record's project and OS
 /// user are the log read's, which is the owner's.
 fn watch_matches(watch: &SessionWatch, record: &ProjectNotificationRecord) -> bool {
+    // TODO(session-messages): implement — an inbox watch (`WatchFilter::is_inbox_of` its owner)
+    // matches the messages addressed to its owner, and every watch skips a message to its owner
+    // that the owner's inbox position has passed (`crate::session_messages`).
     if record.session_id == watch.owner.session_id {
         return false;
     }

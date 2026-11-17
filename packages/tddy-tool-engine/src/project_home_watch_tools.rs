@@ -26,13 +26,15 @@ pub const CANCEL_SESSION_WATCH: &str = "CancelSessionWatch";
 
 /// The kinds a watch can ask for, as the tools take them — `tddy_session_activity`'s `WatchKind`
 /// names, which a test there holds to this list.
-pub const WATCH_KINDS: [&str; 6] = [
+pub const WATCH_KINDS: [&str; 7] = [
     "question",
     "permission",
     "turn_finished",
     "waiting_for_input",
     "agent_notification",
     "ended",
+    // A message a watched session sent (`#activity-wake` 5/5).
+    "message",
 ];
 
 /// The longest `ttl_seconds` a watch is created or renewed with: 24 hours.
@@ -127,7 +129,7 @@ pub fn project_home_watch_tool_defs() -> Vec<ToolDef> {
                     "kinds": {
                         "type": "array",
                         "items": { "type": "string", "enum": WATCH_KINDS },
-                        "description": "Which events; default all six."
+                        "description": "Which events; default all seven."
                     },
                     "ttl_seconds": ttl.clone()
                 },
@@ -201,7 +203,7 @@ async fn answer(
 }
 
 /// What `CreateSessionWatch` asks for: `ttl_seconds` required and in bounds, a session selected,
-/// every kind known (all six when none is named).
+/// every kind known (all seven when none is named).
 fn create_request(args: &Value) -> Result<WatchRequest, String> {
     let ttl_seconds = ttl_argument(args)?;
     let session_ids = match args.get("session_ids") {

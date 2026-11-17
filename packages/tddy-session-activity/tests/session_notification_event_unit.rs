@@ -27,6 +27,7 @@ fn a_session_end(outcome: &str, exit_code: Option<i32>) -> SessionNotification {
         }),
         at_unix_ms: 1_790_000_000_000,
         activity_status: None,
+        message: None,
     }
 }
 
@@ -60,5 +61,53 @@ fn an_end_with_no_exit_code_has_none_on_the_wire() {
             outcome: "exit code unknown".to_string(),
             exit_code: None,
         })
+    );
+}
+
+// ── messages between sessions never reach the web (`#activity-wake` 5/5) ──────────────────────
+
+/// The child's message to its orchestrator, as `PostSessionMessage` publishes it.
+fn a_message_between_sessions() -> SessionNotification {
+    SessionNotification {
+        source: SessionNotificationSource::Message,
+        text: "Tests pass; pushed 3f2a1c.".to_string(),
+        ended: None,
+        message: Some(tddy_daemon_kernel::session_notification::SessionMessage {
+            to_session_id: "s-main".to_string(),
+            message_id: "m-1".to_string(),
+            reply_to: None,
+            text: "Tests pass; pushed 3f2a1c.".to_string(),
+        }),
+        ..a_session_end("unused", None)
+    }
+}
+
+#[tokio::test]
+async fn the_web_stream_never_carries_a_message() {
+    // Given a browser of the session's operator subscribed to the notification stream
+    let (published, subscribed) = tokio::sync::broadcast::channel(8);
+    let (to_the_browser, mut the_browser) = tokio::sync::mpsc::unbounded_channel();
+    let relay = tokio::spawn(tddy_session_activity::streams::relay_session_notifications(
+        subscribed,
+        to_the_browser,
+        "ada".to_string(),
+    ));
+
+    // When a message between sessions is published, and then a session ends
+    published.send(a_message_between_sessions()).unwrap();
+    published
+        .send(a_session_end("exit code 0", Some(0)))
+        .unwrap();
+    drop(published);
+    relay.await.expect("the relay ends with the bus");
+
+    // Then the browser is sent the end alone
+    let mut sources = Vec::new();
+    while let Ok(event) = the_browser.try_recv() {
+        sources.push(event.source);
+    }
+    assert_eq!(
+        sources,
+        vec![ProtoSessionNotificationSource::SessionEnded as i32]
     );
 }

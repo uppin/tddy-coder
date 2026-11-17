@@ -403,6 +403,7 @@ mod tests {
             activity_status: None,
             at_unix_ms: 1_790_000_000_000,
             orchestrator_session_id: None,
+            message: None,
         }
     }
 
@@ -490,6 +491,7 @@ mod tests {
             ended: None,
             activity_status: Some("Done".to_string()),
             at_unix_ms: 1_790_000_000_000,
+            message: None,
         };
         for _ in 0..WAKE_CUE_CAPACITY {
             trigger.deliver(&notification).await.unwrap();

@@ -21,6 +21,7 @@ use std::sync::LazyLock;
 use tddy_session_tool_client::SessionExecToolAnswer;
 use tddy_tool_engine::project_home_git_tools::project_home_git_tool_defs;
 use tddy_tool_engine::project_home_tools::project_home_tool_defs;
+use tddy_tool_engine::session_message_tools::session_message_tool_defs;
 use tddy_tool_engine::stack_git_tools::stack_git_tool_defs;
 use tddy_tool_engine::stack_tools::stack_tool_defs;
 
@@ -56,14 +57,16 @@ pub async fn admitted_exec_tool_names() -> Result<Vec<String>, String> {
 }
 
 /// The project-home tools, the project-home git tools (`#project-home` 7/7) and the stack tools
-/// (`#orchestrators` 7/11), as MCP tool definitions. Registered at construction so a call to one of
-/// them dispatches; advertised only to a session the daemon admits them for.
+/// (`#orchestrators` 7/11), and the session message tools every role is offered (`#activity-wake`
+/// 5/5), as MCP tool definitions. Registered at construction so a call to one of them dispatches;
+/// advertised only to a session the daemon admits them for.
 pub fn project_home_remote_tool_defs() -> Vec<RemoteToolDef> {
     project_home_tool_defs()
         .into_iter()
         .chain(project_home_git_tool_defs())
         .chain(stack_tool_defs())
         .chain(stack_git_tool_defs())
+        .chain(session_message_tool_defs())
         .map(|tool| RemoteToolDef {
             name: tool.name,
             description: tool.description,
@@ -205,6 +208,8 @@ mod tests {
                 "pr_set_parents",
                 "pr_resolve_conflicts",
                 "pr_spawn_child",
+                "PostSessionMessage",
+                "ReadSessionMessages",
             ])
         );
     }

@@ -40,7 +40,7 @@ use tokio::time::Instant;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_core::WorkflowError;
 use tddy_daemon_kernel::session_notification::{
-    AgentNotification, QuestionNotice, SessionEndNotice, SessionNotificationKind,
+    AgentNotification, QuestionNotice, SessionEndNotice, SessionMessage, SessionNotificationKind,
     SessionNotificationSource,
 };
 use tddy_tool_engine::project_home_inbox_tools::MAX_WAIT_MS;
@@ -88,6 +88,9 @@ pub struct ProjectNotificationRecord {
     /// The status an activity-status record was raised for (`#activity-wake` 2/3); `None` for
     /// every other source, and for a record written before records carried it.
     pub activity_status: Option<String>,
+    /// What one session sent another, for a `message` record (`#activity-wake` 5/5); `None` for
+    /// every other source.
+    pub message: Option<SessionMessage>,
     pub at_unix_ms: u64,
     /// The orchestrator that started the session — the `orchestrator_session_id` its changeset
     /// names when the record is appended — or `None` for a session no orchestrator started
@@ -462,6 +465,7 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
                     question: notification.question.clone(),
                     ended: notification.ended.clone(),
                     activity_status: notification.activity_status.clone(),
+                    message: notification.message.clone(),
                     at_unix_ms: notification.at_unix_ms,
                     orchestrator_session_id: orchestrator.clone(),
                 },

@@ -97,6 +97,7 @@ impl AHost {
                 ended: None,
                 activity_status: None,
                 at_unix_ms: NOW,
+                message: None,
             })
             .await;
     }

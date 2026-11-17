@@ -27,6 +27,7 @@ pub fn is_project_home_allowed_tool(name: &str) -> bool {
         || crate::project_home_git_tools::is_project_home_git_tool(name)
         || crate::stack_tools::is_stack_tool(name)
         || crate::stack_git_tools::is_stack_git_tool(name)
+        || crate::session_message_tools::is_session_message_tool(name)
 }
 
 /// The prefix `claude` gives a tool served by the `tddy-tools` MCP server.
@@ -159,6 +160,9 @@ mod tests {
                 "mcp__tddy-tools__pr_set_parents",
                 "mcp__tddy-tools__pr_resolve_conflicts",
                 "mcp__tddy-tools__pr_spawn_child",
+                // Offered to every role (`#activity-wake` 5/5).
+                "mcp__tddy-tools__PostSessionMessage",
+                "mcp__tddy-tools__ReadSessionMessages",
             ]
         );
     }

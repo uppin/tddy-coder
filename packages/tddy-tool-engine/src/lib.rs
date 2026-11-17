@@ -28,6 +28,7 @@ pub(crate) mod read_window;
 pub(crate) mod restructure_tools;
 pub(crate) mod search_window;
 pub mod session_follow;
+pub mod session_message_tools;
 pub mod shell;
 pub mod stack_git_tools;
 pub mod stack_tools;
