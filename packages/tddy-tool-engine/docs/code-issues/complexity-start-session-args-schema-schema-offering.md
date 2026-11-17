@@ -1,6 +1,6 @@
 # complexity: schema_offering
 
-**Location:** `packages/tddy-tool-engine/src/start_session_args/schema.rs:45` — `schema_offering`
+**Location:** `packages/tddy-tool-engine/src/start_session_args/schema.rs:49` — `schema_offering`
 **Category:** complexity
 **Detected:** 2026-10-25 — `/pr-wrap` on #751 (`#start-parity` 2/9), function length by brace matching (fn line to closing brace)
 **Metrics:** **178 lines** · budget 60 · **~3× over**; nesting 3, one closure, no loops beyond iterator chains
@@ -16,6 +16,7 @@
 | 2026-10-25 | 178 | first detection. Replaces `start_project_session_schema` (~55 lines, five arguments) in `project_home_tools.rs`; the argument set grew from 5 to 28. Moved into `start_session_args/schema.rs` by the same PR's file split (engine `move_item`) |
 | 2026-11-11 | 179 | declared-session-types: 191 → 179 (fn line to closing brace) — the hard-coded session-type enum became the declared list. Still ~3× the 60-line budget; open |
 | 2026-11-15 | 191 → 195 | **regressed** by session display names (#910), fn line to closing brace on `9712eb8d9~1` and `9712eb8d9`: one more `offer("display_name", …)` call. Straight-line data, as before; still ~3× the 60-line budget; open |
+| 2026-11-16 | 195 → 192 | orchestrator target start (#927): the `target` offer and the longer `ssh_config_host` text took the function to 199; the two remote-placement offers were extracted to `offer_remote_placement`, leaving it under the recorded 195. Straight-line data, as before; still ~3× the 60-line budget; open |
 
 ## What would close it
 

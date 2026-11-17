@@ -107,12 +107,27 @@ impl ProjectHomePort for DaemonProjectHome {
         home_session_id: &str,
         args: StartSessionArgs,
     ) -> anyhow::Result<StartHandle> {
-        let request = args.into_request(StartContext {
+        let target_id = args.target.clone();
+        let resolved = if target_id.is_empty() {
+            None
+        } else {
+            Some(
+                self.host_service
+                    .resolve_derived_host(&self.session_token, &target_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?,
+            )
+        };
+        let mut request = args.into_request(StartContext {
             session_token: self.session_token.clone(),
             project_id: project_id.to_string(),
             orchestrator_session_id: home_session_id.to_string(),
             orchestrator_daemon_instance_id: self.daemon_instance_id.clone(),
         });
+        if let Some(resolved) = resolved {
+            request.daemon_instance_id = resolved.parent_instance_id;
+            request.target = Some(resolved.target);
+        }
         let ledger = self.start_ledger_of(home_session_id)?;
         self.launch
             .begin_recorded_start(request, &self.os_user, ledger)

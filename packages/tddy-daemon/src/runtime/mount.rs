@@ -86,6 +86,13 @@ impl BuildContext {
         let connection_impl =
             self.build_session_host(&mut mount, &shared, &served, askpass_endpoint)?;
         let hosted = self.install_session_host(connection_impl);
+        // The project-home tools answer host questions from the daemon's wired host
+        // service — the one `HostService` is served from, with its Coder vaults — so an
+        // orchestrator's start lists and resolves the derived hosts this daemon reaches
+        // for the caller (`#remote-shell` 11/11).
+        hosted
+            .rpc_handlers
+            .attach_host_service(Arc::clone(&served.host_service_impl));
         self.register_code_intelligence(&hosted.task_registry);
         let livekit_service = livekit_service(&mount);
         let mounted = Mounted {

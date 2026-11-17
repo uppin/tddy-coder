@@ -61,6 +61,23 @@ pub struct ProviderRouteChoice {
     pub reason: String,
 }
 
+/// One host a daemon reaches through a remote shell, as `StartSession` can be addressed at it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DerivedHostChoice {
+    /// What `StartSession`'s `target` names: `<parent>/ssh/<alias>` or
+    /// `<parent>/coder/<account>/<owner>/<workspace>`.
+    pub id: String,
+    pub label: String,
+    /// `ssh` or `coder`.
+    pub kind: String,
+    /// The daemon the session actually starts on; the agent runs on the derived host.
+    pub parent_daemon_instance_id: String,
+    /// Whether a session can start on it now.
+    pub usable: bool,
+    /// Why not, in the daemon's words, when `usable` is false.
+    pub unusable_reason: String,
+}
+
 /// The models one agent (or provider account) runs, and the one the form preselects.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelChoices {
@@ -112,6 +129,13 @@ pub struct StartOptions {
     pub ssh_config_hosts: Vec<String>,
     /// Why `ssh_config_hosts` is empty, when the host could not list its SSH config.
     pub ssh_config_hosts_unavailable: String,
+    /// The hosts this host reaches through a remote shell — its SSH config aliases and the
+    /// caller's Coder workspaces — each startable by naming its `id` as `StartSession`'s `target`
+    /// (`#remote-shell` 11/11). A wildcard `Host` entry (`coder config-ssh`'s `Host coder.*`) is
+    /// not an alias and is not here; the workspaces it would reach are.
+    pub derived_hosts: Vec<DerivedHostChoice>,
+    /// Why `derived_hosts` is empty, when the host could not list them. Empty when it could.
+    pub derived_hosts_unavailable: String,
     /// Qualified `name@daemon_instance_id`, as `specialized_agents` takes them.
     pub subagents: Vec<String>,
     pub branches: Vec<String>,

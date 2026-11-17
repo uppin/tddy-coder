@@ -39,6 +39,7 @@
     "stack_node_id",
     "stack_parent",
     "stack_parent_daemon_instance_id",
+    "target",
     "tool_path"
   ]
 }

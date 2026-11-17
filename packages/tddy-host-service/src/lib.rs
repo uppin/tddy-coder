@@ -38,6 +38,7 @@ pub mod test_util;
 
 pub use github_cli::{GhUser, GithubCli, GithubCliRefusal};
 pub use service::HostServiceImpl;
+pub use service::{DerivedHostResolutionError, ResolvedDerivedHost};
 pub use stream::{MpscHostPromptStream, MpscHostStatsStream};
 
 // The handler tests that came out of `connection_service` with the code they exercise. They drive
