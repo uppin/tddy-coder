@@ -275,6 +275,44 @@ impl ExecToolRpcHandler {
         concerned
     }
 
+    /// Whether `owner` is idle now: it waits on no question of its own, its main terminal is
+    /// live, and its reported status is an idle one.
+    async fn is_idle_now(
+        &self,
+        owner: &WatchOwner,
+        session_dir: &std::path::Path,
+        metadata: &tddy_core::SessionMetadata,
+    ) -> bool {
+        let waits_on_its_own_question =
+            tddy_core::pending_question::read_pending_question(session_dir)
+                .is_ok_and(|pending| pending.is_some());
+        let main_terminal_live = self
+            .project_home_host
+            .terminals
+            .get_terminal(&owner.session_id, MAIN_TERMINAL_ID)
+            .await
+            .is_some();
+        orchestrator_is_idle(
+            metadata.activity_status.as_deref(),
+            waits_on_its_own_question,
+            main_terminal_live,
+        )
+    }
+
+    /// The submit key a wake ends with for a session of `metadata`'s type, or `None` when its
+    /// agent takes no terminal turn this host can send.
+    fn wake_submit_key(
+        &self,
+        metadata: &tddy_core::SessionMetadata,
+        session_id: &str,
+    ) -> Option<String> {
+        let launch = self.session_launch.get()?;
+        let session_type = metadata.session_type.as_deref().unwrap_or_default();
+        let agent = launch.coding_agents.agents().for_session_type(session_type)?;
+        let slot = agent.turn_input().cloned()?;
+        terminal_submit_key(session_id, slot).ok()
+    }
+
     /// Paste `owner`'s waiting delivery into its main terminal when it is idle. `true` only when
     /// a turn was pasted, which starts the owner's gap.
     async fn try_wake(&self, owner: &WatchOwner) -> bool {
@@ -292,33 +330,10 @@ impl ExecToolRpcHandler {
         let Ok(metadata) = tddy_core::read_session_metadata(&session_dir) else {
             return false;
         };
-        let waits_on_its_own_question =
-            tddy_core::pending_question::read_pending_question(&session_dir)
-                .is_ok_and(|pending| pending.is_some());
-        let main_terminal_live = self
-            .project_home_host
-            .terminals
-            .get_terminal(&owner.session_id, MAIN_TERMINAL_ID)
-            .await
-            .is_some();
-        if !orchestrator_is_idle(
-            metadata.activity_status.as_deref(),
-            waits_on_its_own_question,
-            main_terminal_live,
-        ) {
+        if !self.is_idle_now(owner, &session_dir, &metadata).await {
             return false;
         }
-        let Some(launch) = self.session_launch.get() else {
-            return false;
-        };
-        let session_type = metadata.session_type.as_deref().unwrap_or_default();
-        let Some(agent) = launch.coding_agents.agents().for_session_type(session_type) else {
-            return false;
-        };
-        let Some(slot) = agent.turn_input().cloned() else {
-            return false;
-        };
-        let Ok(submit_key) = terminal_submit_key(&owner.session_id, slot) else {
+        let Some(submit_key) = self.wake_submit_key(&metadata, &owner.session_id) else {
             return false;
         };
         let pasted = Arc::new(AtomicBool::new(false));

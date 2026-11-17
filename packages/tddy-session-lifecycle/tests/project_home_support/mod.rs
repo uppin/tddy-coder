@@ -58,6 +58,7 @@ pub struct HomeDaemon {
     /// Shared, with its sandbox RPC bridge installed as the daemon runtime installs it, so a
     /// sandboxed main's jail can reach it (`#agent-tools 5/12`).
     pub service: Arc<DaemonSessionHost>,
+    #[allow(dead_code)]
     pub manager: Arc<CliSessionManager>,
     pub data: tempfile::TempDir,
     _stub: tempfile::TempDir,
@@ -67,6 +68,8 @@ pub struct HomeDaemon {
 /// A daemon over one project on `repo` (`origin/main` as its main branch ref) whose registry row
 /// carries `extra_row_yaml` (e.g. a `home_session_id:` line), with `extra_config_yaml` appended to
 /// its daemon config (e.g. a `project_home:` block).
+// Used by the other project-home suites sharing this module; not every suite calls it.
+#[allow(dead_code)]
 pub fn a_home_daemon(repo: &Path, extra_row_yaml: &str, extra_config_yaml: &str) -> HomeDaemon {
     // A host with no coding agents refuses every agent session, so a home daemon always has them.
     build_home_daemon(repo, extra_row_yaml, extra_config_yaml, true, |host, _| {
