@@ -759,6 +759,33 @@ pub fn a_host_waking_orchestrators(
     peers: &Arc<InProcessPeers>,
     timings: tddy_daemon_rpc::exec_tool::watch_wake::WakeTimings,
 ) -> (Host, Arc<SessionNotificationBus>) {
+    a_host_waking_orchestrators_with(instance_id, peers, timings, |watches| watches)
+}
+
+/// [`a_host_waking_orchestrators`], whose session watches are leased to a stream for `lease` after
+/// its last call (`#activity-wake` 4/5): `WaitSessionWatchEvents` works, and a lapse needs no
+/// 15-second wait.
+pub fn a_host_streaming_watches(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+    timings: tddy_daemon_rpc::exec_tool::watch_wake::WakeTimings,
+    lease: std::time::Duration,
+) -> (Host, Arc<SessionNotificationBus>) {
+    a_host_waking_orchestrators_with(instance_id, peers, timings, move |watches| {
+        watches.with_stream_lease_grace(lease)
+    })
+}
+
+/// [`a_host_waking_orchestrators`], its session watch store shaped by `watches_of`.
+fn a_host_waking_orchestrators_with(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+    timings: tddy_daemon_rpc::exec_tool::watch_wake::WakeTimings,
+    watches_of: impl FnOnce(
+            tddy_session_activity::session_watches::SessionWatchStore,
+        ) -> tddy_session_activity::session_watches::SessionWatchStore
+        + 'static,
+) -> (Host, Arc<SessionNotificationBus>) {
     let bus = Arc::new(std::sync::Mutex::new(None));
     let published_on = Arc::clone(&bus);
     let cues = Arc::new(std::sync::Mutex::new(None));
@@ -773,10 +800,10 @@ pub fn a_host_waking_orchestrators(
             )
             .expect("the notification log opens"),
         );
-        let watches = Arc::new(
+        let watches = Arc::new(watches_of(
             tddy_session_activity::session_watches::SessionWatchStore::open(&data_dir)
                 .expect("the session watches open"),
-        );
+        ));
         let (trigger, wake_cues) = tddy_daemon_rpc::exec_tool::watch_wake::WakeTrigger::channel();
         *cues_out.lock().unwrap() = Some(wake_cues);
         let notifications = Arc::new(

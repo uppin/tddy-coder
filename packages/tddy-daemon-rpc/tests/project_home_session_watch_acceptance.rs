@@ -623,6 +623,8 @@ async fn an_ordinary_session_is_not_offered_the_watch_tools() {
             LIST_SESSION_WATCHES.to_string(),
             RENEW_SESSION_WATCH.to_string(),
             CANCEL_SESSION_WATCH.to_string(),
+            // The stream over them (`#activity-wake` 4/5).
+            "WaitSessionWatchEvents".to_string(),
         ]
     );
 }

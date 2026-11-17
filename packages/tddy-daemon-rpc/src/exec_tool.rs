@@ -8,6 +8,7 @@ mod project_home_inbox;
 mod project_home_remote;
 mod project_home_session_follow;
 mod project_home_start_options;
+mod project_home_watch_stream;
 mod project_home_watches;
 mod result_frames;
 mod role_guard;

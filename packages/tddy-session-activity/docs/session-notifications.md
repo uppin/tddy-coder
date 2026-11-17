@@ -188,6 +188,22 @@ notification log and a required TTL of at most 24 hours (`MAX_WATCH_TTL_SECS` = 
   advances positions and removes ended watches only when `deliver` succeeds; on failure nothing
   moves and nothing is persisted, so a wake whose paste failed delivers nothing and what was
   waiting waits on. Nothing waiting never calls `deliver`.
+- **Streaming to a monitor.** `SessionWatchStore::take_stream_batch(owner, stream_id, watch_ids,
+  ack_seq, log, now)` (`#activity-wake` 4/5) hands an orchestrator's watch events to a process —
+  `tddy-tools monitor` — instead of to tool answers or a wake. A `stream_id` of `None` starts a
+  stream; the batch carries the id every later call presents. Under the project lock it first
+  advances each named watch's position to `ack_seq` (refused, `StreamRefusal`, when `ack_seq` is
+  past what was handed or names a watch the stream does not hold), renews the stream's lease, and
+  answers the matched records after the new position (union by `seq`, oldest first, at most 50),
+  the `lost` count and the ended watches — without advancing past them, so a batch the caller
+  received but did not acknowledge is handed again. A new stream of the watch's own orchestrator
+  takes the watch over at once and resumes from the last acknowledged position; the superseded
+  stream is refused (`Superseded`) from its next call. A watch counts as streamed while a lease is
+  held: the lease is in memory only, renewed by each call and lapsed `STREAM_LEASE_GRACE` (15 s;
+  `with_stream_lease_grace` sets it) after the last one. Both `take_delivery` and `deliver_with`
+  skip a streamed watch entirely, so while it streams — and for the grace after each call — its
+  events reach the monitor alone and return to answers and the wake when the lease lapses. The
+  lease map and the acknowledgement live in `session_watches/stream.rs`.
 - `has_live_watches(owner, log, now)` is the live check the wake and the auto-stop hold call;
   this crate only answers it.
 
@@ -246,6 +262,7 @@ Telegram surface is unaffected, and web-started and resumed sessions publish nor
 | `project_notification_log_storage` (status cases) | `tddy-session-activity` | a status record round-tripping its `activity_status`; an older line without one still reading |
 | `project_home_watch_tools` | `tddy-tool-engine` | the tools offered to the project-home role; `ttl_seconds` required in the schema; the port handed what was asked, with every kind by default; bad arguments refused before the port; renew and cancel naming the watch |
 | `project_home_session_watch_acceptance` | `tddy-daemon-rpc` | the tools and `watchEvents` through the harness: a permission prompt riding on the next answer, delivered once; kinds and sessions told apart; list, renew and cancel; sessions-ended reported once; every refusal; an error answer consuming nothing |
+| `session_watch_stream_unit` | `tddy-session-activity` | a stream batch not advancing until acknowledged; `ack_seq` past what was handed refused; `take_delivery` and `deliver_with` skipping a streamed watch; the lease lapsing after its grace; a new stream taking over from the old one |
 
 ⚠ The bus's classification, fan-out and stream are asserted from `tddy-session-lifecycle` and
 `tddy-telegram-control`, not from this crate. Recorded in

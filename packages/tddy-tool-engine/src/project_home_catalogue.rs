@@ -25,6 +25,9 @@ use crate::project_home_tools::READ_SESSION_WORKTREE;
 use crate::project_home_turn_tools::{
     project_home_turn_tool_defs, RESUME_SESSION, SEND_SESSION_MESSAGE,
 };
+use crate::project_home_watch_stream_tools::{
+    project_home_watch_stream_tool_defs, WAIT_SESSION_WATCH_EVENTS,
+};
 use crate::project_home_watch_tools::{
     project_home_watch_tool_defs, CANCEL_SESSION_WATCH, CREATE_SESSION_WATCH, LIST_SESSION_WATCHES,
     RENEW_SESSION_WATCH,
@@ -83,6 +86,7 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | LIST_SESSION_WATCHES
             | RENEW_SESSION_WATCH
             | CANCEL_SESSION_WATCH
+            | WAIT_SESSION_WATCH_EVENTS
     )
 }
 
@@ -252,6 +256,7 @@ pub(crate) fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
     defs.extend(project_home_answer_tool_defs());
     defs.extend(project_home_inbox_tool_defs());
     defs.extend(project_home_watch_tool_defs());
+    defs.extend(project_home_watch_stream_tool_defs());
     defs.extend(project_home_turn_tool_defs());
     defs.extend(project_home_lifecycle_tool_defs());
     defs.extend(terminate_session_tool_def());

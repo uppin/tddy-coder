@@ -123,6 +123,7 @@ mod tests {
                 "mcp__tddy-tools__ListSessionWatches",
                 "mcp__tddy-tools__RenewSessionWatch",
                 "mcp__tddy-tools__CancelSessionWatch",
+                "mcp__tddy-tools__WaitSessionWatchEvents",
                 "mcp__tddy-tools__SendSessionMessage",
                 "mcp__tddy-tools__ResumeSession",
                 "mcp__tddy-tools__SetSessionMark",

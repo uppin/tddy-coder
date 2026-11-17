@@ -169,6 +169,7 @@ mod tests {
                 "ListSessionWatches",
                 "RenewSessionWatch",
                 "CancelSessionWatch",
+                "WaitSessionWatchEvents",
                 "SendSessionMessage",
                 "ResumeSession",
                 "SetSessionMark",
