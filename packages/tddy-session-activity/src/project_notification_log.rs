@@ -302,17 +302,21 @@ impl ProjectNotificationLog {
         os_user: &str,
         seq: u64,
     ) -> (Vec<ProjectNotificationRecord>, u64) {
-        // TODO(session-watches): implement
-        let _ = (self.project(project_id), os_user, seq);
-        (Vec::new(), 0)
+        let project = self.project(project_id);
+        let state = project.lock();
+        let records = state
+            .window
+            .iter()
+            .filter(|held| held.os_user == os_user && held.record.seq > seq)
+            .map(|held| held.record.clone())
+            .collect();
+        (records, lost_after(&state, seq))
     }
 
     /// The newest `seq` recorded for `project_id`, `0` for a project with none: where a watch
     /// created now starts, so it sees only what happens after it (`#activity-wake` 2/3).
     pub fn head_seq(&self, project_id: &str) -> u64 {
-        // TODO(session-watches): implement
-        let _ = self.project(project_id);
-        0
+        self.project(project_id).lock().newest_seq
     }
 
     /// The project's log, created empty the first time it is named.
@@ -457,8 +461,7 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
                     agent: notification.agent.clone(),
                     question: notification.question.clone(),
                     ended: notification.ended.clone(),
-                    // TODO(session-watches): implement — keep `notification.activity_status`.
-                    activity_status: None,
+                    activity_status: notification.activity_status.clone(),
                     at_unix_ms: notification.at_unix_ms,
                     orchestrator_session_id: orchestrator.clone(),
                 },

@@ -278,7 +278,7 @@ pub fn notification_for_activity_status(
         at_unix_ms,
         question: None,
         ended: None,
-        activity_status: None,
+        activity_status: Some(status.to_string()),
     })
 }
 

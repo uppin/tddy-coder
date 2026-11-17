@@ -82,7 +82,10 @@ impl ProjectHomeTurnPort for DaemonProjectHome {
 }
 
 /// The submit key of a `terminal_paste` slot, or the refusal of an `acp_prompt` one.
-fn terminal_submit_key(session_id: &str, slot: TurnInputSlot) -> Result<String, String> {
+pub(in crate::exec_tool) fn terminal_submit_key(
+    session_id: &str,
+    slot: TurnInputSlot,
+) -> Result<String, String> {
     match slot {
         TurnInputSlot::TerminalPaste { submit_key } => Ok(submit_key),
         // TODO(acp-turn-input): no ACP agent declares `acp_prompt` yet, so the daemon holds no
@@ -97,7 +100,10 @@ fn terminal_submit_key(session_id: &str, slot: TurnInputSlot) -> Result<String, 
 
 impl DaemonProjectHome {
     /// The `turn_input` the target's agent declares, or a refusal naming the agent.
-    fn turn_input_of(&self, target: &SessionTarget) -> Result<TurnInputSlot, String> {
+    pub(in crate::exec_tool) fn turn_input_of(
+        &self,
+        target: &SessionTarget,
+    ) -> Result<TurnInputSlot, String> {
         let session_dir = unified_session_dir_path(&self.sessions_base, &target.session_id);
         let metadata = tddy_core::read_session_metadata(&session_dir)
             .map_err(|e| format!("cannot read session {}'s record: {e}", target.session_id))?;

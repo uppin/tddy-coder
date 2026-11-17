@@ -70,12 +70,12 @@ for the matched records to reach the orchestrator without it asking.
 
 ## Scope
 
-- [ ] `activity_status` on activity-status notifications and in the log
-- [ ] The watch store: create, list, renew, cancel, take-delivery, live check; persisted
-- [ ] The matcher: six kinds, session selection, no double delivery for one prompt
-- [ ] Endings: expiry, cancel, orchestrator ended, every named session ended
-- [ ] The four tools, offered to the project-home role only, with every refusal
-- [ ] `watchEvents` on every answer to a watching orchestrator, consumed once
+- [x] `activity_status` on activity-status notifications and in the log
+- [x] The watch store: create, list, renew, cancel, take-delivery, live check; persisted
+- [x] The matcher: six kinds, session selection, no double delivery for one prompt
+- [x] Endings: expiry, cancel, orchestrator ended, every named session ended
+- [x] The four tools, offered to the project-home role only, with every refusal
+- [x] `watchEvents` on every answer to a watching orchestrator, consumed once
 - [ ] Docs: `project-concept.md` (the tools), package docs; a Future-enhancement TODO for showing watches on the web
 
 ## Responsibility
@@ -374,8 +374,8 @@ exactly-once test races real tasks against one store, not a mock; one behaviour 
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p tddy-daemon-kernel -p tddy-session-activity -p tddy-tool-engine -p tddy-daemon-rpc -p tddy-daemon`) — verify 100% pass
 - [ ] Validate changes (/validate-changes)

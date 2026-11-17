@@ -28,7 +28,7 @@ mod listing;
 mod notify;
 mod port;
 mod terminal;
-mod turn;
+pub(in crate::exec_tool) mod turn;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -200,6 +200,7 @@ impl ExecToolRpcHandler {
             leases: Arc::clone(&self.project_home_host.leases),
             pending_answers: Arc::clone(&self.project_home_host.pending_answers),
             notification_log: self.project_home_host.notification_log.clone(),
+            session_watches: self.project_home_host.session_watches.clone(),
             activity: Arc::clone(&self.project_home_host.activity),
         })
     }
@@ -288,7 +289,7 @@ pub(super) struct DaemonProjectHome {
     /// The OS user the caller's sessions belong to; the notification log is read for it
     /// (`#home-inbox` 7/8).
     pub(super) os_user: String,
-    sessions_base: PathBuf,
+    pub(super) sessions_base: PathBuf,
     tddy_data_dir: PathBuf,
     /// Reads the signed-in person's vault for a target's GitHub identity, as a session start does.
     identity: SessionAccountAccess,
@@ -326,6 +327,10 @@ pub(super) struct DaemonProjectHome {
     /// This host's project notification log, which the two inbox tools read (`#home-inbox` 7/8);
     /// `None` on a host with none installed.
     pub(super) notification_log: Option<Arc<ProjectNotificationLog>>,
+    /// This host's session watches, which the four watch tools keep (`#activity-wake` 2/3);
+    /// `None` on a host with none installed.
+    pub(super) session_watches:
+        Option<Arc<tddy_session_activity::session_watches::SessionWatchStore>>,
     /// This host's activity surface, which `NotifyOperator` reports through (`#home-inbox` 11/11).
     activity: Arc<PeerRoutedActivity>,
 }

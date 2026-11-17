@@ -171,9 +171,112 @@ pub async fn execute_project_home_watch_tool(
     tool_name: &str,
     args_json: &str,
 ) -> ToolOutcome {
-    // TODO(session-watches): implement — read the arguments, call the port, answer its JSON.
-    let _ = (port, home, args_json);
-    ToolOutcome::err(format!(
-        "{tool_name}: session watches are not implemented yet"
-    ))
+    match answer(port, home, tool_name, args_json).await {
+        Ok(value) => ToolOutcome::ok(value.to_string()),
+        Err(message) => ToolOutcome::err(format!("{tool_name}: {message}")),
+    }
+}
+
+/// The JSON `tool_name` answers for `args_json`, from the port.
+async fn answer(
+    port: &dyn ProjectHomeWatchPort,
+    home: &HomeCaller,
+    tool_name: &str,
+    args_json: &str,
+) -> Result<Value, String> {
+    if !is_project_home_watch_tool(tool_name) {
+        return Err(format!("unknown session watch tool: {tool_name}"));
+    }
+    let args: Value =
+        serde_json::from_str(args_json).map_err(|e| format!("invalid args_json: {e}"))?;
+    match tool_name {
+        CREATE_SESSION_WATCH => port.create_watch(home, create_request(&args)?).await,
+        LIST_SESSION_WATCHES => port.list_watches(home).await,
+        RENEW_SESSION_WATCH => {
+            port.renew_watch(home, &watch_id_argument(&args)?, ttl_argument(&args)?)
+                .await
+        }
+        _ => port.cancel_watch(home, &watch_id_argument(&args)?).await,
+    }
+}
+
+/// What `CreateSessionWatch` asks for: `ttl_seconds` required and in bounds, a session selected,
+/// every kind known (all six when none is named).
+fn create_request(args: &Value) -> Result<WatchRequest, String> {
+    let ttl_seconds = ttl_argument(args)?;
+    let session_ids = match args.get("session_ids") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(ids)) => ids
+            .iter()
+            .map(|id| {
+                id.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("session_ids must name sessions, not {id}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        Some(other) => return Err(format!("session_ids must name sessions, not {other}")),
+    };
+    let started_by_me = match args.get("started_by_me") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(flag)) => *flag,
+        Some(other) => return Err(format!("started_by_me must be true or false, not {other}")),
+    };
+    if session_ids.is_empty() && !started_by_me {
+        return Err(
+            "name session_ids or started_by_me: a watch must select at least one session"
+                .to_string(),
+        );
+    }
+    let kinds = match args.get("kinds") {
+        None | Some(Value::Null) => WATCH_KINDS.iter().map(|k| k.to_string()).collect(),
+        Some(Value::Array(kinds)) => {
+            let mut named = Vec::new();
+            for kind in kinds {
+                let Some(name) = kind.as_str().filter(|n| WATCH_KINDS.contains(n)) else {
+                    return Err(format!(
+                        "unknown kind {kind}: kinds are {}",
+                        WATCH_KINDS.join(", ")
+                    ));
+                };
+                named.push(name.to_string());
+            }
+            named
+        }
+        Some(other) => return Err(format!("kinds must name kinds, not {other}")),
+    };
+    Ok(WatchRequest {
+        session_ids,
+        started_by_me,
+        kinds,
+        ttl_seconds,
+    })
+}
+
+/// `ttl_seconds`: required, a whole number of seconds between 1 and [`MAX_WATCH_TTL_SECONDS`].
+fn ttl_argument(args: &Value) -> Result<u64, String> {
+    let Some(ttl) = args.get("ttl_seconds").and_then(Value::as_u64) else {
+        return Err("ttl_seconds is required: how long the watch lives, in seconds".to_string());
+    };
+    if ttl == 0 {
+        return Err(
+            "ttl_seconds must be at least 1: how long the watch lives, in seconds".to_string(),
+        );
+    }
+    if ttl > MAX_WATCH_TTL_SECONDS {
+        return Err(format!(
+            "ttl_seconds must be at most {MAX_WATCH_TTL_SECONDS} (24 hours), not {ttl}"
+        ));
+    }
+    Ok(ttl)
+}
+
+/// `watch_id`: the watch the call names, as `CreateSessionWatch` returned it.
+fn watch_id_argument(args: &Value) -> Result<String, String> {
+    match args.get("watch_id").and_then(Value::as_str) {
+        Some(watch_id) if !watch_id.is_empty() => Ok(watch_id.to_string()),
+        _ => Err(
+            "watch_id is required: the watch_id CreateSessionWatch or ListSessionWatches returned"
+                .to_string(),
+        ),
+    }
 }
