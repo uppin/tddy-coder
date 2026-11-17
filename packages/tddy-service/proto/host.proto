@@ -426,6 +426,10 @@ message KnownHostEntry {
   uint64 max_attachment_bytes = 7;
   // True when this entry is the daemon serving the call.
   bool is_local = 8;
+  // The id this host answers RPCs on right now — its routing id, which differs from `instance_id`
+  // when the daemon appends its startup timestamp (`#remote-shell` 9/11). Filled for an online
+  // host; empty for an offline one, which answers nothing.
+  string routing_instance_id = 9;
 }
 
 message ListCoderWorkspacesRequest {

@@ -18,6 +18,8 @@ import { HostRowToolingCell } from "./HostRowToolingCell";
 export interface HostRow {
   /** The daemon instance id — stable, and what every host-addressed RPC is keyed on. */
   instanceId: string;
+  /** The id this host answers RPCs on now, when online; empty or absent offline. */
+  routingInstanceId?: string;
   label: string;
   /** In the live roster at the moment the list was read. */
   online: boolean;
@@ -113,13 +115,21 @@ export function HostsScreen({ rows, nowUnixMs }: HostsScreenProps) {
                   <HostRowTelemetry instanceId={row.instanceId} online={row.online} />
                 </td>
                 <td className="py-2 pr-4">
-                  <HostRowToolingCell instanceId={row.instanceId} online={row.online} />
+                  <HostRowToolingCell
+                    instanceId={row.instanceId}
+                    addressInstanceId={row.routingInstanceId || row.instanceId}
+                    online={row.online}
+                  />
                 </td>
                 <td className="py-2 pr-4 font-mono text-xs">{row.instanceId}</td>
                 <td className="py-2 font-mono text-xs">{row.reposBasePath}</td>
               </tr>
               {/* The hosts this daemon reaches through a remote shell, beneath its own row. */}
-              <DerivedHostRows parentInstanceId={row.instanceId} parentOnline={row.online} />
+              <DerivedHostRows
+                parentInstanceId={row.instanceId}
+                parentAddressId={row.routingInstanceId || row.instanceId}
+                parentOnline={row.online}
+              />
               </Fragment>
             ))}
           </tbody>

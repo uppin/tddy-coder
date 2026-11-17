@@ -1,4 +1,4 @@
-import { useAuth } from "tddy-client-web";
+import { useAuth, useRefreshDerivedHosts } from "tddy-client-web";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "tddy-ui-web";
 import { VaultState } from "tddy-client-web/gen/auth_pb";
@@ -21,6 +21,7 @@ type Mode = "unlock" | "create" | "reset";
  */
 export function CredentialVaultPrompt() {
   const { isAuthenticated, vaultState, unlockVault, resetVault } = useAuth();
+  const refreshDerivedHosts = useRefreshDerivedHosts();
   const [resetting, setResetting] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [passphrase, setPassphrase] = useState("");
@@ -55,6 +56,7 @@ export function CredentialVaultPrompt() {
         await resetVault(passphrase);
       } else {
         await unlockVault(passphrase, mode === "create");
+        if (mode === "unlock") refreshDerivedHosts();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "The credential vault could not be opened");

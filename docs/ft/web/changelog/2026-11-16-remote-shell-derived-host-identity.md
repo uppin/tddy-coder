@@ -1,0 +1,5 @@
+# 2026-11-16 — Derived hosts are offered under the daemon the web addresses
+
+A derived host now names its parent by the id the web addresses that daemon with, so Coder workspaces and SSH hosts appear in the New-session form on a deployment whose daemon appends its startup timestamp, as the installed desktop does. Each daemon's hosts are listed on their own: a daemon that never answers withholds only its own hosts, an earlier answer stays offered until a newer one arrives, and a daemon is asked again when it connects, when a Coder account is connected and when the credential vault is unlocked. A daemon that cannot list its hosts says so beside the Host field, with its reason, while the daemon itself stays offered. On the Hosts screen, an online row's derived hosts and tooling are asked through the routing id the row carries.
+
+PR [#925](https://github.com/uppin/tddy-coder/pull/925) (`#remote-shell` 9/11). See [hosts-screen.md](../hosts-screen.md) and [create-session-package.md](../create-session-package.md).

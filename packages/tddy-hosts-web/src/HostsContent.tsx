@@ -16,6 +16,7 @@ import { HostsScreen, type HostRow } from "./HostsScreen";
 function rowFromRpc(host: KnownHostEntry): HostRow {
   return {
     instanceId: host.instanceId,
+    routingInstanceId: host.routingInstanceId,
     label: host.label,
     online: host.online,
     lastSeenUnixMs: host.lastSeenUnixMs,

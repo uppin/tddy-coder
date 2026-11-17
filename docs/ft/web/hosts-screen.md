@@ -76,6 +76,11 @@ is listed live from its source rather than recorded.
 A daemon whose listing fails shows the failure on its own row, beside whatever hosts did arrive;
 an offline daemon's derived hosts are not offered.
 
+A row is filed under the host's durable id, but an online row is asked through the routing id it
+carries (`KnownHostEntry.routing_instance_id`) — the id that daemon answers RPCs on, which differs
+from the durable one when the daemon appends its startup timestamp. Derived hosts name that same
+routing id as their parent.
+
 A Coder workspace's row says `Available` or `Unavailable`. It is unavailable — with the reason
 on the row — when the workspace is not running, or when the daemon has no `coder` CLI. An
 account whose workspaces cannot be listed is one unavailable row standing for the account,

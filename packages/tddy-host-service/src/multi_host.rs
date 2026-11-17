@@ -34,6 +34,24 @@ pub trait EligibleDaemonSource: Send + Sync {
         self.list_eligible_daemons()
     }
 
+    /// The id the live host filed under `durable_host_id` answers RPCs on right now — the routing
+    /// id `list_eligible_daemons` names it by — or `None` when no live host is filed under it.
+    ///
+    /// `KnownHostEntry.routing_instance_id` is filled from this (`#remote-shell` 9/11): the Hosts
+    /// screen addresses an online row through it. The default pairs the two listings by position,
+    /// which is exact for every source whose `live_known_hosts` maps `list_eligible_daemons` one to
+    /// one in order — the identity default above, and the LiveKit source that strips a suffix.
+    fn routing_instance_id_of(
+        &self,
+        durable_host_id: &DaemonInstanceId,
+    ) -> Option<DaemonInstanceId> {
+        let routing = self.list_eligible_daemons();
+        self.live_known_hosts()
+            .iter()
+            .position(|host| &host.instance_id == durable_host_id)
+            .and_then(|at| routing.get(at).map(|info| info.instance_id.clone()))
+    }
+
     /// Extra `ListProjects` rows from peer daemons (each row must set `daemon_instance_id`).
     /// Default: none. Live discovery / gRPC fan-out implementations override this.
     ///

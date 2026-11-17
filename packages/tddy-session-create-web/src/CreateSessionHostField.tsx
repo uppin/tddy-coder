@@ -1,5 +1,5 @@
 import type { DaemonHost } from "tddy-client-web";
-import { safeTestIdPart } from "tddy-client-web";
+import { safeTestIdPart, useDerivedHostListingFailures } from "tddy-client-web";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 
 export interface CreateSessionHostFieldProps {
@@ -19,6 +19,7 @@ export interface CreateSessionHostFieldProps {
  * into the parent as `daemonInstanceId` plus the host's `target` on the request.
  */
 export function CreateSessionHostField({ daemons, daemonInstanceId, setDaemonInstanceId }: CreateSessionHostFieldProps) {
+  const failures = useDerivedHostListingFailures();
   if (daemons.length === 0) return null;
   const parents = daemons.filter((d) => !d.parent);
   const selected = daemons.find((d) => d.instanceId === daemonInstanceId);
@@ -62,6 +63,15 @@ export function CreateSessionHostField({ daemons, daemonInstanceId, setDaemonIns
           );
         })}
       </select>
+      {failures.map((failure) => (
+        <p
+          key={failure.parentHostId}
+          data-testid={`create-session-derived-hosts-failure-${safeTestIdPart(failure.parentHostId)}`}
+          className="mt-1 text-xs text-destructive"
+        >
+          Could not list the hosts {failure.parentHostId} reaches: {failure.reason}
+        </p>
+      ))}
       {selected?.parent ? (
         <p data-testid="create-session-derived-host-note" className="mt-1 text-xs text-muted-foreground">
           This host is reached through {selected.parent}. Its agent runs there with no tddy

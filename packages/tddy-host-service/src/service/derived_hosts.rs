@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::HostServiceImpl;
 
-use tddy_daemon_kernel::daemon_identity::local_base_instance_id_for_config;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::host::{ListDerivedHostsRequest, ListDerivedHostsResponse, ProbeOutcome};
 
@@ -14,7 +14,7 @@ impl HostServiceImpl {
     /// Routed first, like every listing addressed by `daemon_instance_id`. Then the session is
     /// resolved to its OS user, and each [`DerivedHostSource`] of this daemon is asked for that
     /// user's hosts — [`SshConfigDerivedHosts`] over this service's host user files, with the
-    /// parent id this daemon is listed under in `ListKnownHosts`, then any source registered
+    /// routing id this daemon answers on as the parent id, then any source registered
     /// with `with_derived_host_source`. A source that fails does not hide the sources that
     /// listed: the answer is `FAILED` with the first failure's reason and still carries the
     /// hosts that arrived.
@@ -42,7 +42,7 @@ impl HostServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
             .to_string();
 
-        let parent_instance_id = local_base_instance_id_for_config(&self.config);
+        let parent_instance_id = local_instance_id_for_config(&self.config);
         let mut sources: Vec<Arc<dyn DerivedHostSource>> =
             vec![Arc::new(SshConfigDerivedHosts::new(
                 Arc::clone(&self.host_user_files),

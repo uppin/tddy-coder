@@ -26,6 +26,11 @@ shown while a start clones over SSH.
 - A derived host that cannot be used — a Coder workspace that is not running, or one on a daemon
   without the `coder` CLI — is shown with its reason and cannot be chosen. The web reads this from
   a non-empty unusable reason, so a host carrying no reason stays choosable.
+- Each daemon's derived hosts are listed on their own: one daemon that never answers withholds
+  only its own hosts, an earlier answer is kept until a newer one arrives, and a daemon is asked
+  again when it connects, when a Coder account is connected and when the vault is unlocked. A
+  daemon whose listing failed says so beside the Host field — "Could not list the hosts <parent>
+  reaches: <reason>" — while its own daemon entry stays offered.
 
 ## Acceptance criteria
 
@@ -36,5 +41,7 @@ shown while a start clones over SSH.
       `daemon_instance_id` with the derived host's target (`CreateSessionDerivedHostAcceptance`).
 - [x] A Coder workspace is offered the same way with its Coder target, and a stopped workspace
       cannot be chosen (`CreateSessionCoderHostAcceptance`).
+- [x] A parent's listing failure is shown beside the Host field and the daemon stays offered
+      (`CreateSessionDerivedHostAcceptance`).
 
 Technical reference: [packages/tddy-session-create-web/docs/README.md](../../../packages/tddy-session-create-web/docs/README.md).

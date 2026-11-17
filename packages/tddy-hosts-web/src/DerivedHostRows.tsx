@@ -30,6 +30,8 @@ import {
 export interface DerivedHostRowsProps {
   /** The daemon whose derived hosts these are — the row they are listed beneath. */
   parentInstanceId: string;
+  /** The id that daemon answers on now; defaults to `parentInstanceId`. */
+  parentAddressId?: string;
   /** Whether that daemon is in the live roster. An offline parent is not asked. */
   parentOnline: boolean;
 }
@@ -67,8 +69,9 @@ function kindLabel(kind: DerivedHostKind): string {
   return "";
 }
 
-export function DerivedHostRows({ parentInstanceId, parentOnline }: DerivedHostRowsProps) {
-  const client = useHostClient(HostService, parentInstanceId);
+export function DerivedHostRows({ parentInstanceId, parentAddressId, parentOnline }: DerivedHostRowsProps) {
+  const addressId = parentAddressId || parentInstanceId;
+  const client = useHostClient(HostService, addressId);
   const { sessionToken } = useAuth();
   const [hosts, setHosts] = useState<DerivedHost[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
@@ -77,7 +80,7 @@ export function DerivedHostRows({ parentInstanceId, parentOnline }: DerivedHostR
     if (!parentOnline || !client) return;
     let current = true;
     client
-      .listDerivedHosts({ sessionToken: sessionToken ?? "", daemonInstanceId: parentInstanceId })
+      .listDerivedHosts({ sessionToken: sessionToken ?? "", daemonInstanceId: addressId })
       .then((response) => {
         if (!current) return;
         setHosts([...response.hosts]);
@@ -95,7 +98,7 @@ export function DerivedHostRows({ parentInstanceId, parentOnline }: DerivedHostR
     return () => {
       current = false;
     };
-  }, [client, parentInstanceId, parentOnline, sessionToken]);
+  }, [client, addressId, parentOnline, sessionToken]);
 
   if (!parentOnline) return null;
 
