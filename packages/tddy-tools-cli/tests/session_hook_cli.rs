@@ -396,6 +396,55 @@ async fn posts_both_hook_reports_to_the_activity_service_the_daemon_serves() {
     assert_eq!(activity.tool_name, "Bash");
 }
 
+/// A Cursor `postToolUse` hook raises **both** reports too: the `ExecutingTool` status
+/// and the tool call's row — carrying Cursor's `tool_use_id` so the daemon pairs it with
+/// its `preToolUse`, and the parsed `tool_output` string as the result.
+#[tokio::test]
+async fn a_cursor_post_tool_use_hook_posts_its_tool_call_with_the_tools_id() {
+    // Given a daemon-shaped /rpc surface serving activity.ActivityService and nothing else
+    let endpoint = AnActivityEndpoint::start().await;
+
+    // When a Cursor postToolUse hook fires against it
+    run_session_hook_against(
+        &endpoint.base_url,
+        "cursor-coordinate-1",
+        r#"{"hook_event_name":"postToolUse","tool_name":"Shell","tool_input":{"command":"ls"},"tool_output":"{\"output\":\"src\",\"exitCode\":0}","tool_use_id":"tool-1","cwd":"/repo"}"#,
+    )
+    .await;
+
+    // Then the status report landed, moving the session
+    let status_body = endpoint.body_of("ReportSessionStatus").unwrap_or_else(|| {
+        panic!(
+            "ReportSessionStatus never reached activity.ActivityService; the endpoint was asked \
+             for {:?}",
+            endpoint.methods()
+        )
+    });
+    let status = ReportSessionStatusRequest::decode(&status_body[..])
+        .expect("decode the ReportSessionStatusRequest the hook posted");
+    assert_eq!(status.session_id, "cursor-coordinate-1");
+    assert_eq!(status.status, "ExecutingTool");
+
+    // …and so did the agent-activity report, naming the agent's id for the call
+    let activity_body = endpoint.body_of("ReportAgentActivity").unwrap_or_else(|| {
+        panic!(
+            "ReportAgentActivity never reached activity.ActivityService; the endpoint was asked \
+             for {:?}",
+            endpoint.methods()
+        )
+    });
+    let activity = ReportAgentActivityRequest::decode(&activity_body[..])
+        .expect("decode the ReportAgentActivityRequest the hook posted");
+    assert_eq!(activity.session_id, "cursor-coordinate-1");
+    assert_eq!(activity.event, "PostToolUse");
+    assert_eq!(activity.tool_name, "Shell");
+    assert_eq!(activity.tool_use_id, "tool-1");
+    assert_eq!(
+        activity.result_json, r#"{"exitCode":0,"output":"src"}"#,
+        "the string tool_output must arrive parsed"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Reaching a daemon embedded in an application
 //

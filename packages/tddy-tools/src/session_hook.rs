@@ -5,9 +5,10 @@
 //! 1. **`ReportSessionStatus`** — maps the event to a [`SessionActivityStatus`] via
 //!    [`activity_status_from_hook_with_tool`]; skipped when the mapping is `None` (no-op event).
 //!    A permission or a question also carries its tool and that tool's input (`#home-inbox` 3/8).
-//! 2. **`ReportAgentActivity`** — for `PreToolUse` / `PostToolUse` events, carries the tool
-//!    payload (name, input, response) so claude-cli sessions populate `agent-activity.jsonl`;
-//!    skipped for every other event.
+//! 2. **`ReportAgentActivity`** — for `PreToolUse` / `PostToolUse` events (Cursor's
+//!    `preToolUse` / `postToolUse` / `postToolUseFailure` normalize to the same pair), carries
+//!    the tool payload (name, input, response, the agent's id for the call) so hook-driven
+//!    sessions populate `agent-activity.jsonl`; skipped for every other event.
 //!
 //! Both go to `--daemon` over HTTP, or — when the hook was given `--daemon-socket` — over the
 //! agent-tool socket of a daemon embedded in an application, which serves no HTTP RPC at all.

@@ -90,14 +90,26 @@ A hooks file is never rendered without a socket: the adapter refuses (`SlotError
 
 **Server daemons** serve one daemon socket per OS user, so a host session's reports reach the daemon whichever user it runs as, and no other user can connect to it. Under `tddy-supervisor` a session user must be mapped in `users.yaml`; an unmapped one has the start refused, naming `users.yaml`, rather than started with hooks that report nowhere — see [tddy-supervisor § One socket per user](../supervisor/tddy-supervisor.md#one-socket-per-user-handed-to-the-daemon).
 
-| Cursor hook event | `activity_status` |
-|---|---|
-| `sessionStart` | `Started` |
-| `beforeSubmitPrompt` | `Running` |
-| `postToolUse` | `ExecutingTool` |
-| `stop` | `Done` |
-| `sessionEnd` | `Ended` |
-| `preToolUse` / `beforeShellExecution` / `afterShellExecution` / others | no-op (exit 0, no RPC) |
+| Cursor hook event | `activity_status` | agent activity |
+|---|---|---|
+| `sessionStart` | `Started` (fresh-chat launches only — see below) | — |
+| `beforeSubmitPrompt` | `Running` | — |
+| `preToolUse` | no-op (exit 0, no status RPC) | opens the call's `running` row |
+| `postToolUse` | `ExecutingTool` | closes the row (`completed`, or `error` when the output flags one) |
+| `postToolUseFailure` | no-op (exit 0, no status RPC) | closes the row as `error` (fires *instead of* `postToolUse`) |
+| `stop` | `Done` | — |
+| `sessionEnd` | `Ended` | — |
+| `beforeShellExecution` / `afterShellExecution` / `beforeMCPExecution` / `afterMCPExecution` / `afterFileEdit` / `afterAgentResponse` / others | not installed | not installed |
+
+The pre/post pair names the agent's id for the call (Cursor's `tool_use_id`), which pairs
+the two rows; a call whose ids interleave still pairs. The uninstalled hooks fire alongside
+the pair for the same tool call — or carry no tool payload at all — so wiring one would
+duplicate a row the pair already reports.
+
+**No `sessionStart` on a resumed launch.** Every tddy Cursor launch resumes its chat
+(`agent --resume <chat>`, minted before the first start), and a resumed launch never fires
+`sessionStart` — the first hook to arrive is `beforeSubmitPrompt` (`Running`). The daemon
+therefore records `Started` in `.session.yaml` at spawn instead of waiting for the hook.
 
 **`WaitingForInput`** is not produced — Cursor hooks have no permission-prompt equivalent in v1.
 
@@ -141,7 +153,7 @@ A conversation or pr-stack child of a cursor-cli orchestrator is itself a cursor
 
 ### Hook wiring
 
-- `tddy_coding_agent_specs::slots::cursor::render_cursor_hooks_json` (`cursor-hooks-json`) — emits `.cursor/hooks.json` v1 (five lifecycle events), each naming the daemon socket.
+- `tddy_coding_agent_specs::slots::cursor::render_cursor_hooks_json` (`cursor-hooks-json`) — emits `.cursor/hooks.json` v1 (seven hook events), each naming the daemon socket. Every `/` in the file is escaped as `\/` (valid JSON): Cursor reads the file through a `parseJSONC` that strips `//` and `/*…*/` blind to string literals, so an unescaped `--daemon http://…` would fail the whole file and leave the session with no hooks at all.
 - `tddy-tools session-hook` — primary mapping from stdin `hook_event_name`; `--event` fallback for tests.
 - `tddy_core::session_activity` — unified PascalCase + camelCase hook name → status mapping shared with Claude hooks.
 

@@ -34,10 +34,12 @@ const REPORTING_EVENTS: [&str; 6] = [
     "SessionEnd",
 ];
 /// The events Cursor reports with.
-const CURSOR_EVENTS: [&str; 5] = [
+const CURSOR_EVENTS: [&str; 7] = [
     "sessionStart",
     "beforeSubmitPrompt",
+    "preToolUse",
     "postToolUse",
+    "postToolUseFailure",
     "stop",
     "sessionEnd",
 ];

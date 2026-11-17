@@ -352,6 +352,28 @@ mod tests {
         );
     }
 
+    /// Cursor's `preToolUse` is a no-op for status, as Claude's `PreToolUse` is: the
+    /// tool call it opens is reported as agent activity, not as a status.
+    #[test]
+    fn cursor_pre_tool_use_is_noop_for_status() {
+        // When
+        let status = activity_status_from_hook("preToolUse", None);
+
+        // Then
+        assert_eq!(status, None);
+    }
+
+    /// Cursor's `postToolUseFailure` is a no-op for status: the failed call is reported
+    /// as agent activity, and the turn's end still comes from `stop`.
+    #[test]
+    fn cursor_post_tool_use_failure_is_noop_for_status() {
+        // When
+        let status = activity_status_from_hook("postToolUseFailure", None);
+
+        // Then
+        assert_eq!(status, None);
+    }
+
     /// Unknown events (e.g. `PreToolUse`) return `None` — no-op, no daemon call.
     #[test]
     fn unknown_event_is_noop() {

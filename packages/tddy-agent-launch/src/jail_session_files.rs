@@ -113,6 +113,14 @@ pub(super) fn write_jail_session_metadata(
         ..
     } = *jail;
     let meta = tddy_core::SessionMetadata {
+        // As on a host start: the agent runs, so the session reads `Started` from its own
+        // first record rather than waiting for a hook that may never fire (Cursor sends
+        // no `sessionStart` on its resumed launches).
+        activity_status: Some(
+            tddy_core::SessionActivityStatus::Started
+                .as_wire()
+                .to_string(),
+        ),
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
         pid: Some(record.pid),
         model: Some(record.model.to_string()),
@@ -137,4 +145,49 @@ pub(super) fn write_jail_session_metadata(
     tddy_core::write_session_metadata(session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    /// A jailed session's first `.session.yaml` records `Started`: its agent runs, and no
+    /// hook has refined that yet (a Cursor launch never fires `sessionStart` at all).
+    #[test]
+    fn a_jailed_sessions_first_metadata_records_started() {
+        // Given a jail session dir and its record
+        let tmp = tempfile::tempdir().unwrap();
+        let session_dir = tmp.path().join("sessions").join("jailed-1");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let worktree = tmp.path().join("worktrees").join("jailed-1");
+        std::fs::create_dir_all(&worktree).unwrap();
+        let jail = JailSession {
+            session_id: "jailed-1",
+            project_id: "proj-1",
+            session_token: "tok",
+            session_dir: &session_dir,
+            worktree_path: &worktree,
+        };
+        let record = JailRecord {
+            session_type: "cursor-cli",
+            model: "composer-2.5",
+            effort: "",
+            managed_recipe: None,
+            started_agents: Vec::new(),
+            pid: 4242,
+            managed_codebase: false,
+            session_role: "",
+            chat_id: Some("chat-1"),
+            hook_token: Some("tok-hook".to_string()),
+        };
+
+        // When the start writes the session's first metadata
+        write_jail_session_metadata(&jail, record).expect("the metadata writes");
+
+        // Then it already reads `Started`
+        let meta = tddy_core::read_session_metadata(&session_dir).expect("it reads back");
+        assert_eq!(meta.activity_status.as_deref(), Some("Started"));
+    }
 }

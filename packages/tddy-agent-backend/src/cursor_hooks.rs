@@ -1,17 +1,28 @@
 //! Pure builder for the per-worktree `.cursor/hooks.json` configuration.
 //!
 //! The daemon calls [`build_cursor_hooks_settings`] during `start_cursor_cli_session` to produce
-//! the JSON that Cursor Agent CLI reads from the worktree. Each of the five relevant hook events
-//! is wired to `tddy-tools session-hook` with session id, daemon URL, os_user, and hook_token
-//! baked in. Event names are read from stdin JSON (`hook_event_name`) by the hook binary.
+//! the JSON that Cursor Agent CLI reads from the worktree. Each installed hook event is wired to
+//! `tddy-tools session-hook` with session id, daemon URL, os_user, and hook_token baked in.
+//! Event names are read from stdin JSON (`hook_event_name`) by the hook binary.
 
 use crate::claude_hooks::{daemon_socket_arg, shell_quote, HookCommandParams};
 
-/// Cursor lifecycle hooks wired for activity status reporting.
+/// Cursor hooks wired for activity status and agent-activity reporting: the session lifecycle,
+/// the prompt submit, the tool-call pair (`preToolUse` opens each call's row, `postToolUse`
+/// closes it), the failure that fires *instead of* `postToolUse` (`postToolUseFailure`), and
+/// the turn/session ends.
+///
+/// The shell, MCP, file-edit and response hooks (`beforeShellExecution`,
+/// `afterShellExecution`, `beforeMCPExecution`, `afterMCPExecution`, `afterFileEdit`,
+/// `afterAgentResponse`, …) stay uninstalled on purpose: each fires alongside the tool-use
+/// pair for the same call — or carries no tool payload at all — so wiring one would
+/// duplicate a row the pair already reports.
 pub const CURSOR_HOOK_EVENTS: &[&str] = &[
     "sessionStart",
     "beforeSubmitPrompt",
+    "preToolUse",
     "postToolUse",
+    "postToolUseFailure",
     "stop",
     "sessionEnd",
 ];
@@ -66,14 +77,33 @@ mod tests {
     }
 
     #[test]
-    fn build_cursor_hooks_settings_emits_version_and_five_events() {
+    fn build_cursor_hooks_settings_emits_version_and_the_seven_installed_events() {
+        // Given the lifecycle, prompt, tool-call and turn-end hooks tddy reports from —
+        // `preToolUse` opens each tool call's row, `postToolUseFailure` closes a failed
+        // one (it fires instead of `postToolUse`, never beside it), and the shell, MCP,
+        // file-edit and response hooks stay uninstalled: each would duplicate a row the
+        // tool-use pair already reports.
+        let installed = [
+            "sessionStart",
+            "beforeSubmitPrompt",
+            "preToolUse",
+            "postToolUse",
+            "postToolUseFailure",
+            "stop",
+            "sessionEnd",
+        ];
+
+        // When
         let value = build_cursor_hooks_settings(&test_params());
+
+        // Then
         assert_eq!(value.get("version").and_then(|v| v.as_i64()), Some(1));
         let hooks = value["hooks"].as_object().expect("hooks object");
-        for event in CURSOR_HOOK_EVENTS {
-            assert!(hooks.contains_key(*event), "missing event {event}");
+        assert_eq!(CURSOR_HOOK_EVENTS, &installed);
+        for event in installed {
+            assert!(hooks.contains_key(event), "missing event {event}");
         }
-        assert_eq!(hooks.len(), 5);
+        assert_eq!(hooks.len(), installed.len());
     }
 
     #[test]

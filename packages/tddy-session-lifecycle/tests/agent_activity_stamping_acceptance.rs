@@ -139,6 +139,7 @@ async fn a_recorded_call(
             result_json: String::new(),
             is_error: false,
             error_message: String::new(),
+            tool_use_id: String::new(),
         }))
         .await
         .expect("ReportAgentActivity must accept a hook event");

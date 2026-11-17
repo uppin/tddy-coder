@@ -353,6 +353,16 @@ pub(crate) async fn start_cli_harness_session(
 
     let pid = launched.pid;
     let meta = SessionMetadata {
+        // The agent runs: the session reads `Started` from its own first record, without
+        // waiting for a hook. A Claude start's `SessionStart` hook re-records the same a
+        // moment later; a Cursor start's never fires (every Cursor launch resumes its chat,
+        // and a resumed launch sends no `sessionStart`), so without this the session would
+        // read no status at all until its first prompt's `beforeSubmitPrompt` (`Running`).
+        activity_status: Some(
+            tddy_core::SessionActivityStatus::Started
+                .as_wire()
+                .to_string(),
+        ),
         tmux_session: launched.tmux_session,
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
         pid: Some(pid),
