@@ -347,6 +347,8 @@ impl LaunchSessions {
     }
 
     /// The wiring a resume of `meta` gives `spec`'s agent again — none of it is in a persisted argv.
+    /// `local_session` says the session is neither split nor aimed at another host: only such a
+    /// session's agent is given the session tool transport.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn resumed_session_wiring(
         &self,
@@ -357,6 +359,7 @@ impl LaunchSessions {
         os_user: &str,
         session_token: &str,
         github_credential_handler: Option<Arc<dyn tddy_core::toolcall::GithubCredentialHandler>>,
+        local_session: bool,
     ) -> Result<ResumedWiring, Status> {
         let spec = &agent.spec;
         let tddy_tools_path = crate::cli_harness_jail::agent_tddy_tools(agent)?;
@@ -366,8 +369,10 @@ impl LaunchSessions {
         // A resumed agent's shell gets the session tool transport again, under a credential minted
         // now — nothing persists the previous process's token. A session whose agent runs on
         // another host is exported none: the socket and the URL name this host, which its shell
-        // cannot reach, and detection would prefer the dead route.
-        let runs_on_this_host = meta.target.is_none()
+        // cannot reach, and detection would prefer the dead route. A split agent's process runs
+        // model-authored code joined to its room over its own split transport — none of this.
+        let runs_on_this_host = local_session
+            && meta.target.is_none()
             && meta
                 .ssh_config_host
                 .as_deref()

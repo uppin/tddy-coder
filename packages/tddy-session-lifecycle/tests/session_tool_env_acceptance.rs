@@ -16,12 +16,14 @@ mod ensure_project_home_world;
 mod project_home_support;
 
 use ensure_project_home_world::{a_claude_cli_spec, a_daemon_with_a_project, World};
-use project_home_support::{a_caller_token, current_os_user, this_daemons_session_tokens, PROJECT_ID};
+use project_home_support::{
+    a_caller_token, current_os_user, this_daemons_session_tokens, PROJECT_ID,
+};
 use std::path::{Path, PathBuf};
 use tddy_daemon_kernel::daemon_hook_urls;
 use tddy_rpc::Request;
-use tddy_service::proto::session::{ResumeSessionRequest, SessionService as SessionServiceTrait};
 use tddy_service::proto::session::StartSessionRequest;
+use tddy_service::proto::session::{ResumeSessionRequest, SessionService as SessionServiceTrait};
 use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
 impl World {
@@ -98,11 +100,8 @@ fn this_daemons_local_url() -> String {
 
 /// This daemon's socket for the session's OS user — what `tddy-tools` dials over the UDS transport.
 fn this_users_socket(data_dir: &Path) -> PathBuf {
-    tddy_daemon_kernel::agent_tool_sockets::user_socket_path_for_user(
-        data_dir,
-        &current_os_user(),
-    )
-    .expect("the user has a socket path")
+    tddy_daemon_kernel::agent_tool_sockets::user_socket_path_for_user(data_dir, &current_os_user())
+        .expect("the user has a socket path")
 }
 
 #[tokio::test]
@@ -120,7 +119,10 @@ async fn an_ordinary_sessions_agent_carries_the_session_tool_transport_in_its_ow
         launch.env("TDDY_REMOTE_DAEMON_SOCKET"),
         this_users_socket(world.home.data.path()).to_string_lossy()
     );
-    assert_eq!(launch.env("TDDY_REMOTE_DAEMON_URL"), this_daemons_local_url());
+    assert_eq!(
+        launch.env("TDDY_REMOTE_DAEMON_URL"),
+        this_daemons_local_url()
+    );
 
     // And it holds a credential of its own — not the caller's short-lived one — that this daemon
     // verifies as the caller, which is how its tool calls are authorized
