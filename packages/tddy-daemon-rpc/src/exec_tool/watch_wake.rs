@@ -10,17 +10,28 @@
 //!
 //! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-16-idle-wake.md
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_session_activity::session_notifications::{
-    SessionNotification, SessionNotificationSubscriber,
+    SessionNotification, SessionNotificationKind, SessionNotificationSource,
+    SessionNotificationSubscriber,
 };
-use tddy_session_activity::session_watches::WatchDelivery;
+use tddy_session_activity::session_watches::{
+    WatchDelivery, WatchEndReason, WatchKind, WatchOwner,
+};
+use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
+use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
+use tddy_terminal_rpc::session::TerminalSessionStore;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 
+use super::project_home::turn::{paste_and_submit_to, terminal_submit_key};
 use super::ExecToolRpcHandler;
 
 /// How many cues may wait for the waker before a new one is dropped. A dropped cue loses nothing:
@@ -75,9 +86,8 @@ impl SessionNotificationSubscriber for WakeTrigger {
     }
 
     fn wants(&self, notification: &SessionNotification) -> bool {
-        // TODO(idle-wake): implement — attention notifications and every status report.
-        let _ = notification;
-        false
+        notification.kind == SessionNotificationKind::AttentionRequired
+            || notification.source == SessionNotificationSource::ActivityStatus
     }
 
     async fn deliver(&self, notification: &SessionNotification) -> anyhow::Result<()> {
@@ -98,21 +108,61 @@ pub fn orchestrator_is_idle(
     waits_on_its_own_question: bool,
     main_terminal_live: bool,
 ) -> bool {
-    // TODO(idle-wake): implement
-    let _ = (
-        activity_status,
-        waits_on_its_own_question,
-        main_terminal_live,
-    );
-    false
+    main_terminal_live
+        && !waits_on_its_own_question
+        && matches!(
+            activity_status,
+            None | Some("Done" | "WaitingForInput" | "Started" | "Ended")
+        )
 }
 
 /// The turn a wake sends: one line per event, oldest first, naming the session, the kind, what it
 /// said and the `request_id` a question is answered by; then what was lost and which watches ended.
 pub fn wake_text(delivery: &WatchDelivery) -> String {
-    // TODO(idle-wake): implement
-    let _ = delivery;
-    String::new()
+    let count = delivery.events.len();
+    let mut text = format!(
+        "[tddy watch] {count} watched event{} (oldest first):",
+        if count == 1 { "" } else { "s" }
+    );
+    for event in &delivery.events {
+        let kind = WatchKind::of(event).map_or("event", WatchKind::as_str);
+        text.push_str(&format!(
+            "\n- Session {} — {kind}: {}",
+            event.label, event.text
+        ));
+        if let Some(question) = &event.question {
+            text.push_str(&format!(" (request_id {})", question.request_id));
+        }
+    }
+    if delivery.lost > 0 {
+        text.push_str(&format!(
+            "\n{} lost to eviction before they could be delivered.",
+            delivery.lost
+        ));
+    }
+    for end in &delivery.ended {
+        let reason = match end.reason {
+            WatchEndReason::Expired => "expired",
+            WatchEndReason::OrchestratorEnded => "orchestrator_ended",
+            WatchEndReason::SessionsEnded => "sessions_ended",
+        };
+        text.push_str(&format!("\nwatch {} ended ({reason})", end.watch_id));
+    }
+    if count > 0 {
+        text.push_str(
+            "\nAnswer with AnswerSessionPermission / AnswerSessionQuestion, or read ReadProjectNotifications for detail.",
+        );
+    }
+    text
+}
+
+/// One orchestrator's wake schedule in the waker task.
+#[derive(Default)]
+struct OwnerWake {
+    /// When the armed settle (or the gap's end) fires; `None` when nothing is armed.
+    fire_at: Option<Instant>,
+    /// When this orchestrator was last woken, for the gap.
+    last_wake: Option<Instant>,
 }
 
 impl ExecToolRpcHandler {
@@ -122,10 +172,182 @@ impl ExecToolRpcHandler {
         cues: WakeCues,
         timings: WakeTimings,
     ) -> JoinHandle<()> {
-        // TODO(idle-wake): implement — settle, gap, idle check, committed paste.
-        let _ = timings;
+        let handler = Arc::clone(self);
+        tokio::spawn(async move { handler.run_watch_waker(cues, timings).await })
+    }
+
+    /// The waker task: a cue arms a settle for every orchestrator with live watches in the cue's
+    /// project; on fire, the gap is honoured first, then an idle orchestrator is pasted its
+    /// waiting delivery — committed only when the paste succeeds, so a failed or refused wake
+    /// leaves everything waiting for the next cue.
+    async fn run_watch_waker(&self, cues: WakeCues, timings: WakeTimings) {
         let WakeCues(mut cues) = cues;
-        tokio::spawn(async move { while cues.recv().await.is_some() {} })
+        let mut owners: HashMap<WatchOwner, OwnerWake> = HashMap::new();
+        loop {
+            let deadline = owners.values().filter_map(|owner| owner.fire_at).min();
+            let cue = match deadline {
+                Some(at) => tokio::select! {
+                    received = cues.recv() => match received {
+                        Some(cue) => Some(cue),
+                        None => break,
+                    },
+                    () = tokio::time::sleep_until(at) => None,
+                },
+                None => match cues.recv().await {
+                    Some(cue) => Some(cue),
+                    None => break,
+                },
+            };
+            if let Some(cue) = cue {
+                for owner in self.owners_concerned(&cue).await {
+                    let wake = owners.entry(owner).or_default();
+                    if wake.fire_at.is_none() {
+                        wake.fire_at = Some(Instant::now() + timings.settle);
+                    }
+                }
+            }
+            let now = Instant::now();
+            let due: Vec<WatchOwner> = owners
+                .iter()
+                .filter(|(_, wake)| wake.fire_at.is_some_and(|at| at <= now))
+                .map(|(owner, _)| owner.clone())
+                .collect();
+            for owner in due {
+                let Some(wake) = owners.get_mut(&owner) else {
+                    continue;
+                };
+                wake.fire_at = None;
+                if let Some(last) = wake.last_wake {
+                    if now.duration_since(last) < timings.min_gap {
+                        wake.fire_at = Some(last + timings.min_gap);
+                        continue;
+                    }
+                }
+                if self.try_wake(&owner).await {
+                    if let Some(wake) = owners.get_mut(&owner) {
+                        wake.last_wake = Some(Instant::now());
+                    }
+                }
+            }
+        }
+    }
+
+    /// The owners a cue concerns: every session of the cue session's project on this host that
+    /// holds a live watch — the cue's own session included, for when its own status changed.
+    async fn owners_concerned(&self, cue: &WakeCue) -> Vec<WatchOwner> {
+        let (Some(watches), Some(log)) = (
+            self.project_home_host.session_watches.as_deref(),
+            self.project_home_host.notification_log.as_deref(),
+        ) else {
+            return Vec::new();
+        };
+        let Some(sessions_base) = sessions_base_for_user(&cue.os_user, Some(&self.tddy_data_dir))
+        else {
+            return Vec::new();
+        };
+        let cue_dir = unified_session_dir_path(&sessions_base, &cue.session_id);
+        let Ok(cue_metadata) = tddy_core::read_session_metadata(&cue_dir) else {
+            return Vec::new();
+        };
+        if cue_metadata.project_id.is_empty() {
+            return Vec::new();
+        }
+        let Ok(sessions) =
+            tddy_session_activity::session_reader::list_sessions_in_dir(&sessions_base)
+        else {
+            return Vec::new();
+        };
+        let now = tddy_daemon_kernel::now_unix_ms();
+        let mut concerned = Vec::new();
+        for session in sessions {
+            if session.project_id != cue_metadata.project_id {
+                continue;
+            }
+            let owner = WatchOwner {
+                project_id: session.project_id,
+                session_id: session.session_id,
+                os_user: cue.os_user.clone(),
+            };
+            if watches.has_live_watches(&owner, log, now).await {
+                concerned.push(owner);
+            }
+        }
+        concerned
+    }
+
+    /// Paste `owner`'s waiting delivery into its main terminal when it is idle. `true` only when
+    /// a turn was pasted, which starts the owner's gap.
+    async fn try_wake(&self, owner: &WatchOwner) -> bool {
+        let (Some(watches), Some(log)) = (
+            self.project_home_host.session_watches.as_deref(),
+            self.project_home_host.notification_log.as_deref(),
+        ) else {
+            return false;
+        };
+        let Some(sessions_base) = sessions_base_for_user(&owner.os_user, Some(&self.tddy_data_dir))
+        else {
+            return false;
+        };
+        let session_dir = unified_session_dir_path(&sessions_base, &owner.session_id);
+        let Ok(metadata) = tddy_core::read_session_metadata(&session_dir) else {
+            return false;
+        };
+        let waits_on_its_own_question =
+            tddy_core::pending_question::read_pending_question(&session_dir)
+                .is_ok_and(|pending| pending.is_some());
+        let main_terminal_live = self
+            .project_home_host
+            .terminals
+            .get_terminal(&owner.session_id, MAIN_TERMINAL_ID)
+            .await
+            .is_some();
+        if !orchestrator_is_idle(
+            metadata.activity_status.as_deref(),
+            waits_on_its_own_question,
+            main_terminal_live,
+        ) {
+            return false;
+        }
+        let Some(launch) = self.session_launch.get() else {
+            return false;
+        };
+        let session_type = metadata.session_type.as_deref().unwrap_or_default();
+        let Some(agent) = launch.coding_agents.agents().for_session_type(session_type) else {
+            return false;
+        };
+        let Some(slot) = agent.turn_input().cloned() else {
+            return false;
+        };
+        let Ok(submit_key) = terminal_submit_key(&owner.session_id, slot) else {
+            return false;
+        };
+        let pasted = Arc::new(AtomicBool::new(false));
+        let outcome = watches
+            .deliver_with(owner, log, tddy_daemon_kernel::now_unix_ms(), |delivery| {
+                let terminals = self.project_home_host.terminals.clone();
+                let session_id = owner.session_id.clone();
+                let pasted = Arc::clone(&pasted);
+                async move {
+                    if delivery.events.is_empty() && delivery.lost == 0 {
+                        return Ok(());
+                    }
+                    pasted.store(true, Ordering::SeqCst);
+                    paste_and_submit_to(&terminals, &session_id, &wake_text(&delivery), &submit_key)
+                        .await
+                }
+            })
+            .await;
+        match outcome {
+            Ok(_) => pasted.load(Ordering::SeqCst),
+            Err(e) => {
+                log::debug!(
+                    target: "tddy_daemon_rpc::watch_wake",
+                    "waking {} failed, its events stay waiting: {e}",
+                    owner.session_id
+                );
+                false
+            }
+        }
     }
 }
 

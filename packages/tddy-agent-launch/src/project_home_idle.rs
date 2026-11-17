@@ -11,7 +11,6 @@
 //!
 //! Feature: docs/ft/daemon/project-concept.md § Project-home auto-stop.
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -59,8 +58,7 @@ impl IdleObservation {
 /// Whether a session observed as `obs` should be stopped at `now`. Never for a busy session, never
 /// when `idle_stop` is zero — and, once implemented, never for one holding a live watch.
 pub fn should_stop(obs: &IdleObservation, now: SystemTime, idle_stop: Duration) -> bool {
-    // TODO(idle-wake): implement — a session holding a live watch is not stopped.
-    if obs.busy || idle_stop.is_zero() {
+    if obs.busy || obs.holds_live_watch || idle_stop.is_zero() {
         return false;
     }
     now.duration_since(obs.idle_since)
@@ -79,7 +77,7 @@ impl LaunchSessions {
             return Vec::new();
         }
         let mut stopped = Vec::new();
-        for sessions_base in self.session_bases() {
+        for (os_user, sessions_base) in self.session_bases() {
             let sessions = match session_reader::list_sessions_in_dir(&sessions_base) {
                 Ok(sessions) => sessions,
                 Err(e) => {
@@ -95,7 +93,13 @@ impl LaunchSessions {
                     continue;
                 }
                 if self
-                    .stop_if_idle(&sessions_base, &session.session_id, now, idle_stop)
+                    .stop_if_idle(
+                        &sessions_base,
+                        &os_user,
+                        &session.session_id,
+                        now,
+                        idle_stop,
+                    )
                     .await
                 {
                     stopped.push(session.session_id);
@@ -105,14 +109,20 @@ impl LaunchSessions {
         stopped
     }
 
-    /// The sessions directory of every mapped OS user. With a data dir configured every user's is
-    /// that one directory, so it is listed once.
-    fn session_bases(&self) -> BTreeSet<PathBuf> {
-        self.config
-            .users
-            .snapshot()
-            .iter()
-            .filter_map(|row| sessions_base_for_user(&row.os_user, Some(&self.tddy_data_dir)))
+    /// The sessions directory of every mapped OS user, with that user (whose watches the reaper
+    /// asks about). With a data dir configured every user's is that one directory, so it is
+    /// listed once, under the first user mapped to it.
+    fn session_bases(&self) -> Vec<(String, PathBuf)> {
+        let mut by_base: std::collections::BTreeMap<PathBuf, String> =
+            std::collections::BTreeMap::new();
+        for row in self.config.users.snapshot() {
+            if let Some(base) = sessions_base_for_user(&row.os_user, Some(&self.tddy_data_dir)) {
+                by_base.entry(base).or_insert_with(|| row.os_user.clone());
+            }
+        }
+        by_base
+            .into_iter()
+            .map(|(base, user)| (user, base))
             .collect()
     }
 
@@ -121,6 +131,7 @@ impl LaunchSessions {
     async fn stop_if_idle(
         &self,
         sessions_base: &Path,
+        os_user: &str,
         session_id: &str,
         now: SystemTime,
         idle_stop: Duration,
@@ -129,12 +140,28 @@ impl LaunchSessions {
         let Ok(metadata) = read_session_metadata(&session_dir) else {
             return false;
         };
-        let Some(obs) = IdleObservation::from_metadata(
+        let Some(mut obs) = IdleObservation::from_metadata(
             metadata.activity_status.as_deref(),
             &metadata.updated_at,
         ) else {
             return false;
         };
+        if let Some((watches, log)) = &self.session_watches {
+            let now_unix_ms = now
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+            obs.holds_live_watch = watches
+                .has_live_watches(
+                    &tddy_session_activity::session_watches::WatchOwner {
+                        project_id: metadata.project_id.clone(),
+                        session_id: session_id.to_string(),
+                        os_user: os_user.to_string(),
+                    },
+                    log,
+                    now_unix_ms,
+                )
+                .await;
+        }
         if !should_stop(&obs, now, idle_stop) {
             return false;
         }

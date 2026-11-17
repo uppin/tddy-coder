@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use tddy_coding_agent_specs::TurnInputSlot;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_service::proto::session::ResumeSessionRequest;
+use tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore;
 use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
 use tddy_terminal_rpc::session::TerminalSessionStore;
 use tddy_tool_engine::project_home_turn_tools::{ProjectHomeTurnPort, ResumeOutcome, TurnDelivery};
@@ -157,27 +158,13 @@ impl DaemonProjectHome {
     /// Type `text` into the session's main terminal — as a bracketed paste when the terminal turned
     /// it on — then `submit_key`, in one write. The control lease is neither read nor changed:
     /// the daemon is the writer, and the terminal's holder keeps it.
-    async fn paste_and_submit(
+    pub(crate) async fn paste_and_submit(
         &self,
         session_id: &str,
         text: &str,
         submit_key: &str,
     ) -> Result<(), String> {
-        let terminal = self
-            .terminals
-            .get_terminal(session_id, MAIN_TERMINAL_ID)
-            .await
-            .ok_or_else(|| format!("session {session_id} has no live terminal"))?;
-        let bracketed_paste = terminal
-            .capture()
-            .lock()
-            .map_err(|_| format!("session {session_id}'s terminal capture is poisoned"))?
-            .text_grid()
-            .ok_or_else(|| format!("session {session_id}'s terminal size is not known yet"))?
-            .bracketed_paste;
-        let bytes = encode_keys(Some(text), &[submit_key.to_string()], bracketed_paste)?;
-        terminal.send_input(bytes.into(), 0);
-        Ok(())
+        paste_and_submit_to(&self.terminals, session_id, text, submit_key).await
     }
 
     /// Wait for a resumed session's main terminal to exist and show something: the agent has drawn.
@@ -208,4 +195,28 @@ impl DaemonProjectHome {
             tokio::time::sleep(RESUMED_TERMINAL_POLL).await;
         }
     }
+}
+
+/// [`DaemonProjectHome::paste_and_submit`] over a terminal store alone, for the watch waker
+/// (`#activity-wake` 3/3), which holds the store and no project-home caller.
+pub(crate) async fn paste_and_submit_to(
+    terminals: &DaemonTerminalSessionStore,
+    session_id: &str,
+    text: &str,
+    submit_key: &str,
+) -> Result<(), String> {
+    let terminal = terminals
+        .get_terminal(session_id, MAIN_TERMINAL_ID)
+        .await
+        .ok_or_else(|| format!("session {session_id} has no live terminal"))?;
+    let bracketed_paste = terminal
+        .capture()
+        .lock()
+        .map_err(|_| format!("session {session_id}'s terminal capture is poisoned"))?
+        .text_grid()
+        .ok_or_else(|| format!("session {session_id}'s terminal size is not known yet"))?
+        .bracketed_paste;
+    let bytes = encode_keys(Some(text), &[submit_key.to_string()], bracketed_paste)?;
+    terminal.send_input(bytes.into(), 0);
+    Ok(())
 }

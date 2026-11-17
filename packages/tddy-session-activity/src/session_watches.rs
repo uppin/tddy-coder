@@ -193,7 +193,7 @@ struct PendingEnd {
 }
 
 /// The watches of one project, as kept in memory and on disk.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct ProjectWatches {
     #[serde(default)]
     watches: Vec<SessionWatch>,
@@ -399,57 +399,7 @@ impl SessionWatchStore {
     ) -> WatchDelivery {
         let project = self.project_of(&owner.project_id);
         let mut state = project.lock().await;
-        end_finished(&mut state, owner, log, now_unix_ms);
-        let mut matched: BTreeMap<u64, ProjectNotificationRecord> = BTreeMap::new();
-        let mut lost = 0_u64;
-        let mut scans: Vec<(String, u64, u64)> = Vec::new();
-        for watch in state.watches.iter().filter(|watch| &watch.owner == owner) {
-            let (records, watch_lost) =
-                log.records_after(&owner.project_id, &owner.os_user, watch.position);
-            lost = lost.max(watch_lost);
-            for record in records.iter().filter(|r| watch_matches(watch, r)) {
-                matched.entry(record.seq).or_insert_with(|| record.clone());
-            }
-            scans.push((watch.watch_id.clone(), watch.position, watch_lost));
-        }
-        let events: Vec<ProjectNotificationRecord> = matched
-            .values()
-            .take(MAX_EVENTS_PER_ANSWER)
-            .cloned()
-            .collect();
-        let delivered: HashSet<u64> = events.iter().map(|r| r.seq).collect();
-        for watch in state
-            .watches
-            .iter_mut()
-            .filter(|watch| &watch.owner == owner)
-        {
-            let mut position = watch.position;
-            if let Some((_, _, watch_lost)) = scans.iter().find(|(id, _, _)| id == &watch.watch_id)
-            {
-                position = position.max(watch.position.saturating_add(*watch_lost));
-            }
-            for record in events
-                .iter()
-                .filter(|r| delivered.contains(&r.seq) && watch_matches(watch, r))
-            {
-                position = position.max(record.seq);
-            }
-            watch.position = position;
-        }
-        let mut ended = Vec::new();
-        state.ended.retain(|pending| {
-            if &pending.owner == owner {
-                ended.push(pending.end.clone());
-                false
-            } else {
-                true
-            }
-        });
-        let delivery = WatchDelivery {
-            events,
-            lost,
-            ended,
-        };
+        let delivery = apply_delivery(&mut state, owner, log, now_unix_ms);
         if !delivery.is_empty() {
             self.persist_best_effort(&owner.project_id, &state);
         }
@@ -471,9 +421,28 @@ impl SessionWatchStore {
         F: FnOnce(WatchDelivery) -> Fut + Send,
         Fut: std::future::Future<Output = Result<(), String>> + Send,
     {
-        // TODO(idle-wake): implement
-        let _ = (owner, log, now_unix_ms, deliver);
-        Ok(false)
+        let project = self.project_of(&owner.project_id);
+        let mut state = project.lock().await;
+        let before = state.clone();
+        let delivery = apply_delivery(&mut state, owner, log, now_unix_ms);
+        if delivery.is_empty() {
+            return Ok(false);
+        }
+        match deliver(delivery).await {
+            Ok(()) => {
+                self.persist_best_effort(&owner.project_id, &state);
+                Ok(true)
+            }
+            Err(e) => {
+                *state = before;
+                log::warn!(
+                    target: "tddy_session_activity::session_watches",
+                    "a delivery to {} was refused, so nothing was delivered: {e}",
+                    owner.session_id
+                );
+                Err(e)
+            }
+        }
     }
 
     /// Whether `owner` holds a watch that has not ended at `now_unix_ms`.
@@ -615,6 +584,68 @@ fn end_reason(
         return Some(WatchEndReason::SessionsEnded);
     }
     None
+}
+
+/// Compute `owner`'s delivery from `state` and advance it past what the delivery hands over:
+/// positions move past the delivered records (and past what the log evicted), and the watches
+/// that ended are taken to be reported. Shared by `take_delivery`, which commits at once, and
+/// `deliver_with`, which rolls `state` back when its delivery is refused.
+fn apply_delivery(
+    state: &mut ProjectWatches,
+    owner: &WatchOwner,
+    log: &ProjectNotificationLog,
+    now_unix_ms: u64,
+) -> WatchDelivery {
+    end_finished(state, owner, log, now_unix_ms);
+    let mut matched: BTreeMap<u64, ProjectNotificationRecord> = BTreeMap::new();
+    let mut lost = 0_u64;
+    let mut scans: Vec<(String, u64, u64)> = Vec::new();
+    for watch in state.watches.iter().filter(|watch| &watch.owner == owner) {
+        let (records, watch_lost) =
+            log.records_after(&owner.project_id, &owner.os_user, watch.position);
+        lost = lost.max(watch_lost);
+        for record in records.iter().filter(|r| watch_matches(watch, r)) {
+            matched.entry(record.seq).or_insert_with(|| record.clone());
+        }
+        scans.push((watch.watch_id.clone(), watch.position, watch_lost));
+    }
+    let events: Vec<ProjectNotificationRecord> = matched
+        .values()
+        .take(MAX_EVENTS_PER_ANSWER)
+        .cloned()
+        .collect();
+    let delivered: HashSet<u64> = events.iter().map(|r| r.seq).collect();
+    for watch in state
+        .watches
+        .iter_mut()
+        .filter(|watch| &watch.owner == owner)
+    {
+        let mut position = watch.position;
+        if let Some((_, _, watch_lost)) = scans.iter().find(|(id, _, _)| id == &watch.watch_id) {
+            position = position.max(watch.position.saturating_add(*watch_lost));
+        }
+        for record in events
+            .iter()
+            .filter(|r| delivered.contains(&r.seq) && watch_matches(watch, r))
+        {
+            position = position.max(record.seq);
+        }
+        watch.position = position;
+    }
+    let mut ended = Vec::new();
+    state.ended.retain(|pending| {
+        if &pending.owner == owner {
+            ended.push(pending.end.clone());
+            false
+        } else {
+            true
+        }
+    });
+    WatchDelivery {
+        events,
+        lost,
+        ended,
+    }
 }
 
 /// Move `owner`'s watches that have ended out of the live set, to be reported once by its next
