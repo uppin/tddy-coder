@@ -375,6 +375,10 @@ and served the four start tools and the two answer tools, for its own project, a
 | `ResumeSession` | `session_id`, `message?`, `daemon_instance_id?` | `{session_id, outcome}`: `resumed` — what the web UI's **Resume** does, then `message`, if any, as the resumed agent's first turn once its terminal has drawn — or `running` for a session already running, which is left alone. See [Sending a session a turn](#sending-a-session-a-turn) |
 | `WaitProjectNotifications` | `cursor?`, `timeout_ms?` (at most 20000, the default), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, timed_out, lost?}`: returns at once when the project's notification log holds records after `cursor`, otherwise holds until one arrives or `timeout_ms` passes. Without a cursor it waits for the next new record. See [Waiting for notifications](#waiting-for-notifications) |
 | `ReadProjectNotifications` | `cursor?`, `limit?` (50 by default, at most 200), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, clamped_to?, lost?}`: up to `limit` records after `cursor`, oldest first, without waiting; without a cursor, the newest page. See [Waiting for notifications](#waiting-for-notifications) |
+| `CreateSessionWatch` | `session_ids?`, `started_by_me?`, `kinds?`, `ttl_seconds` (required, 1 to 86400) | `{watch_id, session_ids, started_by_me, kinds, created_at_unix_ms, expires_at_unix_ms}`: a watch over the sessions it names, or every session the caller started, for the kinds named (all six when none: `question`, `permission`, `turn_finished`, `waiting_for_input`, `agent_notification`, `ended`). See [Watching sessions](#watching-sessions) |
+| `ListSessionWatches` | — | `{watches}`: the caller's live watches, each with its filter, expiry and how many matched events wait (`waiting`) |
+| `RenewSessionWatch` | `watch_id`, `ttl_seconds` (required, 1 to 86400) | the watch, expiring `ttl_seconds` from now |
+| `CancelSessionWatch` | `watch_id` | `{watch_id, cancelled: true}`: the watch ends; nothing more is delivered for it |
 | `NotifyOperator` | `title`, `body_markdown`, `level?` (`info` (default), `success`, `warning`, `error`), `sound?` | `{published: true}`: notifies the operator in the agent's own words, as `tddy-tools notify` does for a session with a shell — one `AGENT` attention notification on every surface (Telegram, the desktop). The title is 1 to 200 characters after trimming and the body at most 2,000; either over its limit, or an unknown `level`, is refused saying why, never truncated. No session argument: the daemon publishes for the calling session alone, with the `hook_token` its `.session.yaml` records, through `ActivityService.ReportOperatorNotification` in process; the token never appears in the answer. A main that is not `claude-cli` / `cursor-cli`, or records no hook token, is refused naming the tool and why. See [Session notifications § A session with no shell](session-notifications.md#a-session-with-no-shell-notifyoperator) |
 | `SetSessionMark` | `session_id`, `mark` (`paused`, `blocked`, `done` or `none`), `note?`, `daemon_instance_id?` | `{session_id, mark, note, set_by, at_unix_ms}`: records the mark in the session's `.session.yaml` (`orchestration_mark`), listed as `SessionEntry.orchestration_mark` and shown as a badge on the session's drawer row, the note on hover. `paused` also stops the session, as `TerminateSession` does; any resume clears a `paused` mark. `blocked` and `done` only mark. `none` removes the mark |
 | `RenameSession` | `session_id`, `display_name`, `daemon_instance_id?` | `{session_id, display_name}`: what the web UI's rename does — records the name in the session's `.session.yaml` (`display_name`), from then on its label on its drawer row and its Telegram alerts, and what `ListProjectSessions` and `ReadSessionActivity` report. Trimmed; an empty `display_name` clears it (answered as `null`); over 80 characters or with a control character is refused saying why, before anything is written. A running session keeps running. See [Session names](../web/session-drawer.md#session-names) |
@@ -753,6 +757,43 @@ an agent wrote it a notification.
   across hosts.
 - **Tool guidance.** The descriptions tell the agent to wait with the last cursor, that a timeout means
   nothing happened, and never to wait in a loop with nothing to decide.
+
+### Watching sessions
+
+A watch is a filter over the project notification log with its own position in it, so an
+orchestrator learns what its sessions did on whatever tool call it makes next instead of holding a
+wait open.
+
+- **Creation.** `CreateSessionWatch` names sessions by `session_ids`, or every session the caller
+  started with `started_by_me`, or both — at least one of the two. `kinds` names which of the six
+  kinds match (all six when none is named): a `question` or `permission` prompt, a `turn_finished`
+  (`Done`), a `waiting_for_input` (`WaitingForInput` with no question — an activity-status record
+  carrying a question matches nothing, since its `pending_question` record already announced that
+  prompt), an `agent_notification`, or an `ended` (`session_ended`). `ttl_seconds` is required, from
+  1 to 86400 (24 hours); `RenewSessionWatch` restarts it for one of the caller's watches. One
+  orchestrator holds at most 16 live watches.
+- **Visibility.** A watch sees exactly what the inbox tools see: the caller's project and operating-system
+  user, on this host, never the caller's own session. A `session_ids` entry with no session record
+  here, or one of another project, is refused naming the session; naming the caller's own session is
+  refused saying why. A caller that is not an orchestrator is refused by the role guard, and an
+  orchestrator whose agent declares no `turn_input` — or one whose `turn_input` is `acp_prompt` — is
+  refused naming the agent, in the words `SendSessionMessage` uses: a watch promises a wake that such
+  an agent cannot take.
+- **Delivery.** Every tool answer the orchestrator receives on this host whose result is a JSON
+  object gains a `watchEvents` key when something is waiting:
+  `{events, lost, ended}` — the records its watches matched since the last answer, oldest first, at
+  most 50 (the rest ride on the next answer), each delivered once across all its watches and across
+  concurrent calls; `lost` counts matched records the log evicted before delivery; `ended` names the
+  watches that ended since the last answer, with why (`expired`, `orchestrator_ended`,
+  `sessions_ended`). An error answer carries nothing and consumes nothing, a non-object result
+  carries nothing, and the streamed `ExecuteTool` path carries nothing. A watch has its own position:
+  reading the inbox does not consume watch events, nor the reverse.
+- **Lifetime.** A watch ends at its expiry, when cancelled, when its orchestrator's own agent ends,
+  or when every session in `session_ids` has ended and `started_by_me` is off; an ended watch is
+  reported once in the next delivery's `ended` and is gone from `ListSessionWatches`. Watches are
+  kept per project at `<data dir>/projects/<project_id>/session-watches.json`, whole-file atomically
+  rewritten on every change, so a watch and its position survive a daemon restart and the
+  orchestrator's `/clear`.
 
 ### Following a session
 

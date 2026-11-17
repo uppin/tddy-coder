@@ -32,6 +32,7 @@ pub struct SessionNotification {
     pub text: String,        // operator-facing line, rendered once at publish
     pub agent: Option<AgentNotification>, // what the agent wrote; Some only for source Agent
     pub ended: Option<SessionEndNotice>,  // how the agent ended; Some only for source SessionEnded
+    pub activity_status: Option<String>,   // the status raised for; Some only for source ActivityStatus
     pub at_unix_ms: u64,
     pub os_user: String,     // owner; server-side only, never on the wire
 }
@@ -144,6 +145,47 @@ opens it over the data dir before the bus is assembled and installs the same `Ar
   record is an `Err` the bus logs. A failed compaction is logged and retried on the next append.
 - **Dependencies.** The paging (`FollowPage`, `page_size`, `parse_cursor`) and `MAX_WAIT_MS` are
   `tddy-tool-engine`'s; the edge is acyclic, since tool-engine's tree holds no session-activity.
+- **Activity status.** `notification_for_activity_status` sets `activity_status` to the wire status
+  it was raised for; the log's DTO keeps it (`"activity_status"`, omitted when `None`, and a line
+  written before records carried it reads back with none), so a finished turn and a wait for input
+  stay told apart in a record.
+
+## Session watches (`session_watches`)
+
+An orchestrator's watches over the sessions it can see (`#activity-wake` 2/3): a filter — sessions
+by id and/or `started_by_me`, six kinds (`WatchKind`: `question`, `permission`, `turn_finished`,
+`waiting_for_input`, `agent_notification`, `ended`) — with its own position in the project
+notification log and a required TTL of at most 24 hours (`MAX_WATCH_TTL_SECS` = 86 400, at most
+`MAX_LIVE_WATCHES` = 16 live per orchestrator).
+
+- **Matching.** `WatchKind::of(record)`: a `pending_question` with a permission question is
+  `permission`, any other `pending_question` and a `presenter` record are `question`, an
+  `activity_status` of `Done` is `turn_finished` and of `WaitingForInput` with no question is
+  `waiting_for_input` (an activity-status record carrying a question matches nothing — its
+  `pending_question` record already announced that prompt), an `agent` record is
+  `agent_notification` and a `session_ended` record is `ended`. A record is selected when its
+  session is named, or `started_by_me` and its `orchestrator_session_id` is the owner — always
+  within the owner's project and OS user (the log's `records_after(project, os_user, seq)`, which
+  excludes no session, so a watch can read its own orchestrator's end), and never the owner's own
+  session.
+- **Delivery.** `SessionWatchStore::take_delivery(owner, log, now)` ends what has ended, then reads
+  each live watch's records after its position, unions the matches by `seq`, takes the oldest 50
+  (`MAX_EVENTS_PER_ANSWER`), advances each watch's position past what it delivered, adds evictions
+  to `lost`, and persists — one async lock per project serialises every operation, which is what
+  makes delivery exactly-once across concurrent calls. Nothing waiting is an empty delivery and no
+  write. The daemon attaches a non-empty delivery to the orchestrator's tool answers as
+  `watchEvents` (`tddy-daemon-rpc`); the store only hands it over.
+- **Endings**, checked at every operation on the owner's watches: `now ≥ expires_at` is `expired`;
+  the owner's own `session_ended` record after the watch's creation is `orchestrator_ended` (read
+  through `records_after`, unscoped by session); every `session_ids` entry having a `session_ended`
+  record after creation, with `started_by_me` off, is `sessions_ended`. An ended watch is removed
+  and reported once in the next delivery's `ended`.
+- **Persistence.** Per project at `<data dir>/projects/<project_id>/session-watches.json`, the
+  whole file atomically rewritten (write, sync, rename, sync the directory) on every change and
+  read once at open; an unreadable file is an error. Keyed by the orchestrator's session id, which
+  `/clear` keeps.
+- `has_live_watches(owner, log, now)` is the live check the successor's wake and auto-stop hold
+  call; this crate only answers it.
 
 ## Publish sites
 
@@ -196,6 +238,10 @@ Telegram surface is unaffected, and web-started and resumed sessions publish nor
 | `project_notification_log_unit` | `tddy-session-activity` | `wants`, cursor parsing, the empty-page cursor, paging and clamping, `lost`, skipping a session of no project, an unknown session's delivery error |
 | `project_notification_log_storage` | `tddy-session-activity` | compaction past twice the window keeping `seq` and `lost` across a restart; a damaged line skipped; a torn last line not swallowing the next record |
 | `project_home_wait_acceptance` | `tddy-daemon-rpc` | the tool through the exec-tool handler: a home agent receiving a child's notification, a non-home caller refused |
+| `session_watches_unit` | `tddy-session-activity` | each kind matching only its records; one record delivered once for two watches and across concurrent calls; the 50 cap; `lost`; expiry and orchestrator-ended endings; reopening the store; a new watch seeing only what follows it |
+| `project_notification_log_storage` (status cases) | `tddy-session-activity` | a status record round-tripping its `activity_status`; an older line without one still reading |
+| `project_home_watch_tools` | `tddy-tool-engine` | the tools offered to the project-home role; `ttl_seconds` required in the schema; the port handed what was asked, with every kind by default; bad arguments refused before the port; renew and cancel naming the watch |
+| `project_home_session_watch_acceptance` | `tddy-daemon-rpc` | the tools and `watchEvents` through the harness: a permission prompt riding on the next answer, delivered once; kinds and sessions told apart; list, renew and cancel; sessions-ended reported once; every refusal; an error answer consuming nothing |
 
 ⚠ The bus's classification, fan-out and stream are asserted from `tddy-session-lifecycle` and
 `tddy-telegram-control`, not from this crate. Recorded in

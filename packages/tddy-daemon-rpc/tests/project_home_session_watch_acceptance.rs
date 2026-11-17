@@ -5,7 +5,7 @@
 //! published on the host's bus as the daemon's publish sites publish them; the orchestrator's calls
 //! are the real exec-tool calls its tddy-tools makes, and the assertions read the answers' JSON.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-16-session-watches.md
+//! Feature: docs/ft/daemon/project-concept.md#watching-sessions
 
 mod support;
 

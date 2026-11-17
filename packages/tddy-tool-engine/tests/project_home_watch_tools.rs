@@ -3,7 +3,7 @@
 //!
 //! The watches are the daemon's: here the port is a fake that records what it was asked.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-16-session-watches.md
+//! Feature: docs/ft/daemon/project-concept.md#watching-sessions
 
 use std::sync::Mutex;
 

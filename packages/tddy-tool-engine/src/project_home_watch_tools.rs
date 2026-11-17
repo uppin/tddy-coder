@@ -9,7 +9,7 @@
 //! The watches themselves are `tddy_session_activity::session_watches`'. That crate sits above
 //! this one, so the port speaks in JSON values and plain arguments.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-16-session-watches.md
+//! Feature: docs/ft/daemon/project-concept.md#watching-sessions
 
 use async_trait::async_trait;
 use serde_json::{json, Value};

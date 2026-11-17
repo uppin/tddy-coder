@@ -5,7 +5,7 @@
 //! opened over the same directory, and "a restart" is a second store opened there. Time is passed
 //! in, so an expiry needs no sleep.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-16-session-watches.md
+//! Feature: docs/ft/daemon/project-concept.md#watching-sessions
 
 mod project_notification_log_support;
 
