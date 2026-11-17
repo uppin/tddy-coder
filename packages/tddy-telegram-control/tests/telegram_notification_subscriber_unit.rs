@@ -56,6 +56,7 @@ fn an_attention_notification() -> SessionNotification {
         at_unix_ms: AT,
         question: None,
         ended: None,
+        activity_status: None,
     }
 }
 

@@ -163,6 +163,13 @@ The stream is live-only; the **project notification log** is what a project-home
   one whose owner or record cannot be resolved is a delivery failure the bus logs.
 - Each record names the orchestrator that started its session (`orchestrator_session_id`, from the
   session's changeset when the record is appended), so a reader can ask for its own sessions only.
+- A record raised for an activity status carries that status (`activity_status`: `Done` or
+  `WaitingForInput`), so a reader can tell a finished turn from a wait for input without parsing the
+  text. Lines written before records carried it have none, and match neither of those two kinds.
+- The log is also what an orchestrator's **session watches** read
+  ([Project concept § Watching sessions](project-concept.md#watching-sessions)): a watch is a filter
+  with its own position in the log, and the records it matches ride on the orchestrator's next tool
+  answer. Nothing new is published for a watch.
 - Records are numbered per project from 1 and never reused. The newest 1000 are kept per project.
 - The log is persisted as JSON lines at `<data dir>/projects/<project_id>/notifications.jsonl` and
   replayed when the daemon starts, so numbering continues across a restart. Once the file holds twice

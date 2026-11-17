@@ -151,6 +151,10 @@ pub struct SessionNotification {
     /// How the agent ended, for a [`SessionNotificationSource::SessionEnded`] notification;
     /// `None` for every other source.
     pub ended: Option<SessionEndNotice>,
+    /// The hook-reported status an [`SessionNotificationSource::ActivityStatus`] notification was
+    /// raised for (`Done`, `WaitingForInput`, …), so a session watch can tell a finished turn from
+    /// a wait for input (`#activity-wake` 2/3); `None` for every other source. Server-side only.
+    pub activity_status: Option<String>,
     /// Epoch milliseconds. The web ages activity out of its blink window against this, so it is
     /// the moment the event happened, never the moment a client read it.
     pub at_unix_ms: u64,

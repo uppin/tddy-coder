@@ -58,6 +58,7 @@ mod agent_end_notifications {
                 exit_code: end.exit_code,
             }),
             at_unix_ms,
+            activity_status: None,
         }
     }
 
@@ -169,6 +170,7 @@ mod agent_end_notifications {
                         exit_code: Some(3),
                     }),
                     at_unix_ms: 1_790_000_000_000,
+                    activity_status: None,
                 }
             );
         }

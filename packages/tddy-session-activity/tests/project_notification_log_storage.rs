@@ -35,6 +35,7 @@ fn an_attention_notification(text: &str) -> SessionNotification {
         question: None,
         at_unix_ms: 1_790_000_000_000,
         ended: None,
+        activity_status: None,
     }
 }
 
@@ -269,5 +270,65 @@ async fn a_record_without_an_ended_part_writes_no_ended_key() {
             .map(|line| line.get("ended").is_some())
             .collect::<Vec<_>>(),
         vec![false]
+    );
+}
+
+#[tokio::test]
+async fn a_status_record_round_trips_its_activity_status() {
+    // Given a daemon whose child finished a turn
+    let data_dir = tempfile::tempdir().expect("a temporary data dir");
+    write_session(data_dir.path(), ADA, CHILD, PROJECT);
+    let (_log, bus) = a_log_over(data_dir.path());
+    bus.publish(SessionNotification {
+        activity_status: Some("Done".to_string()),
+        ..an_attention_notification("finished this turn")
+    })
+    .await;
+
+    // When the daemon restarts over the same data directory
+    let (restarted, _bus) = a_log_over(data_dir.path());
+
+    // Then the record read back still says which status it was raised for
+    let read = restarted
+        .read(&the_home_agents_scope(), "", None)
+        .expect("the log is read");
+    assert_eq!(
+        read.page
+            .items
+            .iter()
+            .map(|r| r.activity_status.clone())
+            .collect::<Vec<_>>(),
+        vec![Some("Done".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn an_older_line_without_a_status_still_reads() {
+    // Given a log file holding a line written before records carried their status
+    let data_dir = tempfile::tempdir().expect("a temporary data dir");
+    write_session(data_dir.path(), ADA, CHILD, PROJECT);
+    let project_dir = data_dir.path().join("projects").join(PROJECT);
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let line = serde_json::json!({
+        "os_user": ADA, "seq": 1, "session_id": CHILD, "label": "my-feature-branch",
+        "kind": "attention_required", "source": "activity_status", "text": "an old line",
+        "agent": null, "question": null, "at_unix_ms": 1_790_000_000_000_u64
+    });
+    std::fs::write(project_dir.join("notifications.jsonl"), format!("{line}\n")).unwrap();
+
+    // When the daemon opens the log
+    let (log, _bus) = a_log_over(data_dir.path());
+
+    // Then the line reads, with no status
+    let read = log
+        .read(&the_home_agents_scope(), "", None)
+        .expect("the log is read");
+    assert_eq!(
+        read.page
+            .items
+            .iter()
+            .map(|r| (r.text.clone(), r.activity_status.clone()))
+            .collect::<Vec<_>>(),
+        vec![("an old line".to_string(), None)]
     );
 }

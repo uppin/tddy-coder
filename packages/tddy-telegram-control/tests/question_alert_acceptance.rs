@@ -59,6 +59,7 @@ fn a_permission_request() -> QuestionNotificationBuilder {
             }),
             at_unix_ms: 1_761_000_000_000,
             ended: None,
+            activity_status: None,
         },
     }
 }

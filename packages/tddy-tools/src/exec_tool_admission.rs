@@ -136,8 +136,9 @@ mod tests {
         // When the advertised exec tools are read
         let advertised = advertised_exec_names(&admitted);
 
-        // Then exactly the read-only tools, the project-home tools, the seven git tools, the
-        // eleven stack plan tools and the six stack git tools, and no write or shell tool
+        // Then exactly the read-only tools, the project-home tools (the four session watch
+        // tools among them), the seven git tools, the eleven stack plan tools and the six
+        // stack git tools, and no write or shell tool
         assert_eq!(
             advertised,
             sorted(&[
@@ -164,6 +165,10 @@ mod tests {
                 "AnswerSessionQuestion",
                 "WaitProjectNotifications",
                 "ReadProjectNotifications",
+                "CreateSessionWatch",
+                "ListSessionWatches",
+                "RenewSessionWatch",
+                "CancelSessionWatch",
                 "SendSessionMessage",
                 "ResumeSession",
                 "SetSessionMark",

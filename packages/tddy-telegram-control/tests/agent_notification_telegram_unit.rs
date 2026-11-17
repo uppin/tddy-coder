@@ -27,6 +27,7 @@ fn an_agent_notification(title: &str, body: &str, sound: bool, label: &str) -> S
         at_unix_ms: 1,
         question: None,
         ended: None,
+        activity_status: None,
     }
 }
 

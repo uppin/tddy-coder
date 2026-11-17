@@ -73,6 +73,7 @@ impl World {
                 exit_code: Some(code),
             }),
             at_unix_ms: 1_790_000_000_000,
+            activity_status: None,
         }
     }
 

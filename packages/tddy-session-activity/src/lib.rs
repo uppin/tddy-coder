@@ -37,6 +37,7 @@ pub mod session_notification_publishing;
 pub mod session_notification_subscribers;
 pub mod session_notifications;
 pub mod session_reader;
+pub mod session_watches;
 pub mod streams;
 pub mod user_sessions_path;
 

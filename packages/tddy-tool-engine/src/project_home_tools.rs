@@ -238,6 +238,14 @@ pub async fn execute_project_home_tool(
         WAIT_PROJECT_NOTIFICATIONS | READ_PROJECT_NOTIFICATIONS => ToolOutcome::err(format!(
             "{tool_name} is answered by execute_project_home_inbox_tool, not by execute_project_home_tool"
         )),
+        // Read the daemon's session watches, so the daemon answers them through
+        // `execute_project_home_watch_tool`.
+        crate::project_home_watch_tools::CREATE_SESSION_WATCH
+        | crate::project_home_watch_tools::LIST_SESSION_WATCHES
+        | crate::project_home_watch_tools::RENEW_SESSION_WATCH
+        | crate::project_home_watch_tools::CANCEL_SESSION_WATCH => ToolOutcome::err(format!(
+            "{tool_name} is answered by execute_project_home_watch_tool, not by execute_project_home_tool"
+        )),
         other => ToolOutcome::err(format!("unknown project-home tool: {other}")),
     }
 }

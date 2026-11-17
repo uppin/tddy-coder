@@ -8,10 +8,12 @@ mod project_home_inbox;
 mod project_home_remote;
 mod project_home_session_follow;
 mod project_home_start_options;
+mod project_home_watches;
 mod result_frames;
 mod role_guard;
 mod stack_git_tools;
 pub mod stack_tools;
+mod watch_events;
 
 pub use result_frames::EXEC_TOOL_FRAME_BYTES;
 
@@ -93,6 +95,10 @@ pub(crate) struct ProjectHomeHost {
     /// `WaitProjectNotifications` and `ReadProjectNotifications` read (`#home-inbox` 7/8). `None`
     /// on a host with none installed.
     pub(crate) notification_log: Option<Arc<ProjectNotificationLog>>,
+    /// The session watches the watch tools keep and every orchestrator's answer carries the events
+    /// of (`#activity-wake` 2/3). `None` on a host with none.
+    pub(crate) session_watches:
+        Option<Arc<tddy_session_activity::session_watches::SessionWatchStore>>,
     /// This host's activity surface, which `NotifyOperator` publishes through in process
     /// (`#home-inbox` 11/11).
     pub(crate) activity: Arc<tddy_session_lifecycle::connection_service::PeerRoutedActivity>,
@@ -129,6 +135,7 @@ impl ExecToolRpcHandler {
                 leases: Arc::new(home_terminal_leases::HomeTerminalLeases::default()),
                 pending_answers: host.pending_answers(),
                 notification_log: host.project_notification_log(),
+                session_watches: host.session_watches(),
                 activity: Arc::new(host.activity_service()),
                 stack_github: Arc::new(OnceLock::new()),
             },
