@@ -106,11 +106,11 @@ green baseline stands in for them (the suites covering the moved code, green bef
 
 ## Implementation Milestones
 
-- [ ] plan.jsonl authored from the engine's anchors
-- [ ] session-activity's two splits applied and green
-- [ ] tddy-daemon's split applied and green
-- [ ] Records deleted with final measurements
-- [ ] Baseline suites green after; clippy/fmt clean
+- [x] plan.jsonl authored from the engine's anchors
+- [x] session-activity's two splits applied and green
+- [x] tddy-daemon's split applied and green
+- [x] Records deleted with final measurements
+- [x] Baseline suites green after; clippy/fmt clean
 
 ## Testing Plan
 
