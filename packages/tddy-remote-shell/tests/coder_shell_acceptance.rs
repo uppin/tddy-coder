@@ -162,14 +162,13 @@ fn the_interactive_command_opens_a_terminal_on_the_workspace() {
     // When the interactive command for an agent is asked for
     let interactive = shell.interactive("cd '/home/dev/repo' && exec claude --resume");
 
-    // Then it is coder's ssh with a terminal asked for, the workspace never started, and the
-    // command as one argument after `--` — an argv a local PTY can run, given the deployment and
-    // the token
+    // Then it is coder's ssh, the workspace never started, and the command as one argument after
+    // `--` — an argv a local PTY can run, given the deployment and the token. No `-t`: coder
+    // v2.33.5 has no such flag, and gives the command a terminal of its own when its stdin is one
     let argv: Vec<OsString> = [
         "coder",
         "ssh",
         "--disable-autostart",
-        "-t",
         "ada/devbox.main",
         "--",
         "cd '/home/dev/repo' && exec claude --resume",

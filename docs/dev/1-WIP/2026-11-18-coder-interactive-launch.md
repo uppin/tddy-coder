@@ -34,12 +34,38 @@ directory`, exit 127. It needs a design decision and stays open.
 
 ## Scope
 
-- [ ] Fix 1: the transport client is found on the daemon's `PATH`
-- [ ] Fix 2: no `-t` in `CoderShell::interactive`
-- [ ] Fix 3: start probes bounded by the start's own bounds
-- [ ] Each fix pinned by a test that fails before it
-- [ ] Live retry of a Claude start on `mantasi/remote-dev`, recording where it stops
-- [ ] Scoped gates for `tddy-remote-shell` and `tddy-agent-launch`
+- [x] Fix 1: the transport client is found on the daemon's `PATH`. `launch_on_target` adds the
+      daemon's `PATH` beside `SSH_AUTH_SOCK`.
+- [x] Fix 2: no `-t` in `CoderShell::interactive`.
+- [x] Fix 3: start probes are bounded by the time left in the start bound and in the startup window.
+- [x] Each fix is pinned by a test that fails before it:
+  - `a_coder_found_only_on_the_daemons_path_carries_the_agents_terminal` fails with
+    `Unable to resolve the PATH`;
+  - `the_interactive_command_opens_a_terminal_on_the_workspace` fails on the argv, and the
+    stand-in that refuses `-t` fails `the_agent_runs_in_the_coder_workspace_named_by_the_target`
+    and `a_hook_fired_in_a_coder_workspace_reaches_the_daemon`;
+  - `an_agent_on_a_deployment_slower_than_five_seconds_a_call_is_launched` stays red after fix 2,
+    and `an_agent_that_exits_on_a_slow_deployment_fails_its_launch_with_its_last_words` passes
+    throughout as its guard.
+- [x] Live retry on `mantasi/remote-dev` (2026-11-18), through the daemon's bare `coder` and the
+      real `CoderShell`, with no workaround:
+  - As the daemon resolves the agent, the launch stops at the Mac agent path (`env:
+    '/Users/…/claude/versions/2.1.311': No such file or directory`, exit 127). That is backlog
+    `2026-11-18-a-target-launch-runs-the-daemon-hosts-agent-path`, not this node.
+  - With the VM's binary, `HOME` and `PATH` put in by the test, the launch is judged started and
+    Claude completes its turn (`hostname: coder-mantasi-remote-dev`). The worktree was already
+    trusted, with its MCP servers rejected, from an earlier run.
+- [x] Scoped gates:
+  - `./test -p tddy-remote-shell -p tddy-agent-launch` exits 0. The new suites:
+    `coder_agent_launch_acceptance` 6, `coder_agent_launch_on_path_acceptance` 1,
+    `coder_shell_acceptance` 14.
+  - `cargo clippy -p tddy-remote-shell --all-targets -D warnings` is clean.
+  - `cargo clippy -p tddy-agent-launch` was **not** run locally, because 2.9 GiB of disk was left
+    and it would build a second set of artifacts for that crate's whole dependency graph. It is
+    left to CI (`#forcebuild`).
+
+**At the wrap:** `packages/tddy-remote-shell/docs/architecture.md` still names `coder ssh
+--disable-autostart -t <workspace>` for `interactive`, and loses the `-t` then.
 
 ## Responsibility
 

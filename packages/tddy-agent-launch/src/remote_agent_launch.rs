@@ -238,7 +238,9 @@ pub async fn launch_on_target(
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
     // The local PTY's child is the transport's client: it carries this daemon's ssh environment
-    // (its agent socket), never the agent's, which already travelled inside the command.
+    // (its agent socket) and the `PATH` a bare client (`coder`, `ssh`) is found on — the PTY's
+    // environment is otherwise cleared — never the agent's, which already travelled inside the
+    // command.
     let mut local_env: Vec<(String, String)> = interactive
         .env
         .iter()
@@ -249,9 +251,11 @@ pub async fn launch_on_target(
             )
         })
         .collect();
-    if let Ok(auth_sock) = std::env::var("SSH_AUTH_SOCK") {
-        if !auth_sock.is_empty() && !local_env.iter().any(|(name, _)| name == "SSH_AUTH_SOCK") {
-            local_env.push(("SSH_AUTH_SOCK".to_string(), auth_sock));
+    for name in ["SSH_AUTH_SOCK", "PATH"] {
+        if let Ok(value) = std::env::var(name) {
+            if !value.is_empty() && !local_env.iter().any(|(set, _)| set == name) {
+                local_env.push((name.to_string(), value));
+            }
         }
     }
 
