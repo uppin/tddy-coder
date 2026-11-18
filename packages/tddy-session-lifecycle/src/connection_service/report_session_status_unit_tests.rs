@@ -311,10 +311,11 @@ fn reporting(session_id: &str, status: &str, message: &str) -> Request<ReportSes
     })
 }
 
-/// A claude-cli session reported waiting is recorded as waiting on the agent's own message, so a
-/// reader that is not watching the session live can see the question (`#start-parity` 6/9).
+/// A claude-cli session reported waiting with no tool and no structured question pending — the
+/// `idle_prompt` `Notification` — waits for input with nothing to answer: no pending question is
+/// recorded, since one is never written without a request id (`#coder-start` 6/10).
 #[tokio::test]
-async fn waiting_for_input_records_the_agents_message_as_the_pending_question() {
+async fn waiting_for_input_with_nothing_asked_records_no_pending_question() {
     // Given
     let temp = tempfile::tempdir().unwrap();
     let session_id = "hook-pending-question-1";
@@ -329,19 +330,17 @@ async fn waiting_for_input_records_the_agents_message_as_the_pending_question() 
         .report_session_status(reporting(
             session_id,
             "WaitingForInput",
-            "Claude needs your permission to use Bash",
+            "Claude is waiting for your input",
         ))
         .await
         .unwrap();
 
     // Then
-    let question = tddy_core::pending_question::read_pending_question(&session_dir)
-        .unwrap()
-        .expect("the session waits on a question");
-    assert_eq!(question.kind, "permission");
+    let meta = tddy_core::read_session_metadata(&session_dir).unwrap();
+    assert_eq!(meta.activity_status.as_deref(), Some("WaitingForInput"));
     assert_eq!(
-        question.question,
-        "Claude needs your permission to use Bash"
+        tddy_core::pending_question::read_pending_question(&session_dir).unwrap(),
+        None
     );
 }
 
@@ -357,9 +356,20 @@ async fn the_next_status_clears_the_pending_question() {
     let service = make_unit_service(temp.path().to_path_buf());
     service
         .activity_service()
-        .report_session_status(reporting(session_id, "WaitingForInput", "Pick one"))
+        .report_session_status(Request::direct(ReportSessionStatusRequest {
+            hook_event_name: "PermissionRequest".to_string(),
+            tool_name: "Bash".to_string(),
+            tool_input_json: r#"{"command":"cargo publish"}"#.to_string(),
+            ..reporting(session_id, "WaitingForInput", "").into_inner()
+        }))
         .await
         .unwrap();
+    assert!(
+        tddy_core::pending_question::read_pending_question(&session_dir)
+            .unwrap()
+            .is_some(),
+        "the permission request is recorded as the pending question"
+    );
 
     // When it is reported running again
     service
