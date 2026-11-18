@@ -128,7 +128,7 @@ impl DaemonProjectHome {
         })
     }
 
-    /// Refuse while the session's agent waits on a permission prompt or a question it can be
+    /// Refuse while the session's agent waits on a permission prompt or a question that can be
     /// answered, naming the tool that answers it. A record with no request id (one written before
     /// an idle wait stopped being recorded) has nothing to answer and does not refuse.
     fn refuse_while_waiting_on_an_answer(&self, target: &SessionTarget) -> Result<(), String> {
