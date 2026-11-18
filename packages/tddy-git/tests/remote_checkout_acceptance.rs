@@ -20,14 +20,22 @@ const QAPE_HQ: &str = "git@github.com:wix-private/qape-hq.git";
 const WORKSPACE_HOME: &str = "/home/coder";
 const SESSION: &str = "01a1b2c3-remote-dev";
 
-/// A target whose user's home is `home`.
+/// A target whose user's home is `home`, answering the home probe as a pty-merging
+/// transport delivers it: the shell's start marker and the probe's own sentinels around
+/// the home, with the carriage returns a pty adds. The sentinels spell exactly what
+/// `remote_checkout_root` prints around `$HOME`.
 fn a_target_whose_home_is(home: &'static str) -> InMemoryShell {
     let shell = InMemoryShell::new("coder.remote-dev");
     shell.answers_when(move |request| {
-        request
-            .command
-            .contains("$HOME")
-            .then(|| ExecOutput::succeeded(home.as_bytes().to_vec()))
+        request.command.contains("$HOME").then(|| {
+            ExecOutput::succeeded(
+                format!(
+                    "tddy-coder-shell: the command is running\r\n\
+                     TDDY_REMOTE_HOME_BEGIN:{home}:TDDY_REMOTE_HOME_END\r\n"
+                )
+                .into_bytes(),
+            )
+        })
     });
     shell
 }
@@ -196,6 +204,77 @@ async fn a_cut_names_no_tddy_session_branch() {
     assert!(
         !run.contains("tddy-") && !run.contains("/home/dev"),
         "no `tddy-<session>` branch and no fixture path:\n{run}"
+    );
+}
+
+#[tokio::test]
+async fn a_home_answer_without_the_probes_sentinels_is_refused_with_its_words() {
+    // Given a target that answers the home probe with words the probe did not frame
+    let target = InMemoryShell::new("coder.remote-dev");
+    target.answers_when(|request| {
+        request
+            .command
+            .contains("$HOME")
+            .then(|| ExecOutput::succeeded(b"some banner the shell printed".to_vec()))
+    });
+
+    // When
+    let root = remote_checkout_root(&target, QAPE_HQ).await;
+
+    // Then the answer is not taken for a home, and the refusal carries the target's words
+    assert_eq!(
+        root,
+        Err(RemoteCheckoutError::HomeUnresolved(
+            "some banner the shell printed".to_string()
+        ))
+    );
+}
+
+#[tokio::test]
+async fn a_fetch_that_fails_is_a_fetch_failure_not_an_unreachable_target() {
+    // Given a workspace with a clone already there, whose `git fetch` the target refuses
+    let workspace = a_target_whose_home_is(WORKSPACE_HOME);
+    workspace.answers_when(|request| {
+        request
+            .command
+            .contains("fetch")
+            .then(|| ExecOutput::exited(128, b"fatal: unable to connect to github.com".to_vec()))
+    });
+    workspace.answers_when(|request| {
+        // `test -d <root>/.git`: the clone is already there.
+        request
+            .command
+            .contains(".git")
+            .then(|| ExecOutput::succeeded(Vec::new()))
+    });
+
+    // When
+    let checkout = setup_remote_worktree(
+        &workspace,
+        &a_new_branch_from("feature/hooks", "origin/main"),
+    )
+    .await;
+
+    // Then the failure names the fetch step and carries the target's words, and no
+    // command the cut ran carried the polluted home the pty delivered
+    assert_eq!(
+        checkout,
+        Err(RemoteCheckoutError::Fetch(
+            "fatal: unable to connect to github.com".to_string()
+        ))
+    );
+    let shown = RemoteCheckoutError::Fetch("fatal: unable to connect to github.com".to_string())
+        .to_string();
+    assert!(
+        shown.contains("fetching on the target failed") && !shown.contains("unreachable"),
+        "the fetch step is named, never unreachable: {shown}"
+    );
+    let run = everything_run_on(&workspace);
+    assert!(
+        run.contains(&format!("test -d '{}/.git'", the_root()))
+            && !run.contains("tddy-coder-shell")
+            && !run.contains('\r'),
+        "every later command names the clean home:\n{run}"
     );
 }
 

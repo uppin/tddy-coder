@@ -18,8 +18,8 @@ use tddy_remote_shell::{
 };
 
 use coder_support::{
-    a_coder_that_refuses_to_connect, a_coder_whose_workspaces_run_commands_here, the_credentials,
-    DEPLOYMENT_URL, SESSION_TOKEN,
+    a_coder_that_refuses_to_connect, a_coder_whose_workspaces_merge_stderr_into_stdout,
+    a_coder_whose_workspaces_run_commands_here, the_credentials, DEPLOYMENT_URL, SESSION_TOKEN,
 };
 
 /// What a one-shot call's arguments start with: never start the workspace, the workspace and its
@@ -178,6 +178,66 @@ fn the_interactive_command_opens_a_terminal_on_the_workspace() {
                 ),
             ],
         }
+    );
+}
+
+#[tokio::test]
+async fn a_command_through_a_merging_pty_keeps_its_status_and_merged_words() {
+    // Given a coder whose pty merges the workspace's stderr into its stdout
+    let coder = a_coder_whose_workspaces_merge_stderr_into_stdout();
+    let shell = coder.shell_on(adas_devbox());
+
+    // When a command that prints on both streams and exits non-zero is run
+    let output = shell
+        .exec(ExecRequest::new("printf out; printf err >&2; exit 3"))
+        .await;
+
+    // Then the command ran: its status is its own, its words arrive merged, and the start
+    // marker that proves it ran is not part of the output
+    assert_eq!(
+        output,
+        Ok(ExecOutput {
+            status: 3,
+            stdout: b"outerr".to_vec(),
+            stderr: Vec::new(),
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_value_through_a_merging_pty_is_the_value_alone() {
+    // Given a coder whose pty merges the workspace's stderr into its stdout
+    let coder = a_coder_whose_workspaces_merge_stderr_into_stdout();
+    let shell = coder.shell_on(adas_devbox());
+
+    // When a value-returning command is run, as the target's home is read
+    let output = shell
+        .exec(ExecRequest::new("printf '%s' /home/coder"))
+        .await;
+
+    // Then the value is clean: no start marker and no line ending the pty added
+    assert_eq!(output, Ok(ExecOutput::succeeded("/home/coder")));
+}
+
+#[tokio::test]
+async fn a_failed_command_through_a_merging_pty_is_not_unreachable() {
+    // Given a coder whose pty merges the workspace's stderr into its stdout
+    let coder = a_coder_whose_workspaces_merge_stderr_into_stdout();
+    let shell = coder.shell_on(adas_devbox());
+
+    // When a command runs and exits 1, as `test -d` does for a path that is not there
+    let output = shell
+        .exec(ExecRequest::new("printf 'no such directory' >&2; exit 1"))
+        .await;
+
+    // Then it is a failed command with its words, not an unreachable workspace
+    assert_eq!(
+        output,
+        Ok(ExecOutput {
+            status: 1,
+            stdout: b"no such directory".to_vec(),
+            stderr: Vec::new(),
+        })
     );
 }
 

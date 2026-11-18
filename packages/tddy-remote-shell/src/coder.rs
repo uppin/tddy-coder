@@ -84,6 +84,21 @@ impl fmt::Display for CoderWorkspaceRef {
 /// ran and its status is its own; absent with a non-zero exit means nothing ran.
 const START_MARKER: &str = "tddy-coder-shell: the command is running";
 
+/// `bytes` without its leading start-marker line, or `None` when the marker is not there.
+/// The line ends `\n`, or `\r\n` when a pty wrote it.
+fn strip_start_marker(bytes: &[u8]) -> Option<&[u8]> {
+    let rest = bytes.strip_prefix(START_MARKER.as_bytes())?;
+    if let Some(stripped) = rest.strip_prefix(b"\r\n") {
+        Some(stripped)
+    } else if let Some(stripped) = rest.strip_prefix(b"\n") {
+        Some(stripped)
+    } else if rest.is_empty() {
+        Some(rest)
+    } else {
+        None
+    }
+}
+
 /// A streamed coder command's stdin: shutting it down drops the pipe, which is the command's EOF.
 struct CoderStdin {
     inner: Option<tokio::process::ChildStdin>,
@@ -246,21 +261,33 @@ impl CoderShell {
     }
 
     /// A finished one-shot command's output, or the workspace's unreachability. The start
-    /// marker on stderr is what tells them apart: present means the command ran and the status
-    /// is its own, so the marker is removed and the rest is the command's stderr; absent with a
-    /// non-zero status means nothing ran, and what the CLI said is the reason.
+    /// marker is what tells them apart: present means the command ran and the status is its
+    /// own, so the marker is removed from the stream it arrived on and the rest is the
+    /// command's output; absent with a non-zero status means nothing ran, and what the CLI
+    /// said is the reason.
+    ///
+    /// The marker is printed to stderr, but `coder ssh` runs the command in a pty, which
+    /// merges the command's stderr into its stdout — so it is recognised on either stream,
+    /// with the `\r\n` a pty writes. Without it, a stopped workspace and a command that
+    /// exits 1 are indistinguishable: `coder ssh` exits 1 for both.
     fn output_of(
         &self,
         code: i32,
         stdout: Vec<u8>,
         stderr: Vec<u8>,
     ) -> Result<ExecOutput, RemoteShellError> {
-        let marker_line = format!("{START_MARKER}\n");
-        if let Some(stripped) = stderr.strip_prefix(marker_line.as_bytes()) {
+        if let Some(stripped) = strip_start_marker(&stderr) {
             return Ok(ExecOutput {
                 status: code,
                 stdout,
                 stderr: stripped.to_vec(),
+            });
+        }
+        if let Some(stripped) = strip_start_marker(&stdout) {
+            return Ok(ExecOutput {
+                status: code,
+                stdout: stripped.to_vec(),
+                stderr,
             });
         }
         if code == 0 {
@@ -270,9 +297,14 @@ impl CoderShell {
                 stderr,
             });
         }
+        let detail = String::from_utf8_lossy(&stderr).trim().to_string();
         Err(RemoteShellError::Unreachable {
             address: self.address(),
-            detail: String::from_utf8_lossy(&stderr).trim().to_string(),
+            detail: if detail.is_empty() {
+                String::from_utf8_lossy(&stdout).trim().to_string()
+            } else {
+                detail
+            },
         })
     }
 }
@@ -429,6 +461,49 @@ mod tests {
         // Then
         assert_eq!(address, ShellAddress::new("coder", "ada/devbox.main"));
         assert_eq!(shell.coder_binary(), Path::new("/opt/bin/coder"));
+    }
+
+    #[test]
+    fn a_marker_merged_into_stdout_with_a_ptys_line_ending_is_stripped_from_stdout() {
+        // Given a shell whose command ran in a pty: the marker and the command's value
+        // arrive on stdout together, the marker line ending in a carriage return
+        let shell = CoderShell::through(
+            "/opt/bin/coder",
+            adas_credentials(),
+            CoderWorkspaceRef::new("ada", "devbox"),
+        );
+
+        // When the finished command's output is read
+        let output = shell.output_of(
+            0,
+            format!("{START_MARKER}\r\n/home/coder").into_bytes(),
+            Vec::new(),
+        );
+
+        // Then the status is the command's and the value alone is its stdout
+        assert_eq!(output, Ok(ExecOutput::succeeded("/home/coder")));
+    }
+
+    #[test]
+    fn an_unreachable_workspace_says_what_the_cli_printed_on_either_stream() {
+        // Given a shell the CLI refused to connect, printing why on stdout alone
+        let shell = CoderShell::through(
+            "/opt/bin/coder",
+            adas_credentials(),
+            CoderWorkspaceRef::new("ada", "devbox"),
+        );
+
+        // When the finished command's output is read
+        let output = shell.output_of(1, b"workspace must be started\n".to_vec(), Vec::new());
+
+        // Then the workspace is unreachable, with what the CLI said
+        assert_eq!(
+            output,
+            Err(RemoteShellError::Unreachable {
+                address: ShellAddress::new("coder", "ada/devbox"),
+                detail: "workspace must be started".to_string(),
+            })
+        );
     }
 
     #[test]

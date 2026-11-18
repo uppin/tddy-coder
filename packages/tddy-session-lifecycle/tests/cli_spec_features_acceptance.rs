@@ -200,7 +200,7 @@ shift
 alias="$1"; shift
 remote="$*"
 {hang}
-case "$remote" in *'$HOME'*) printf '%s' '/home/dev'; exit 0 ;; esac
+case "$remote" in *'$HOME'*) printf 'TDDY_REMOTE_HOME_BEGIN:%s:TDDY_REMOTE_HOME_END\n' '/home/dev'; exit 0 ;; esac
 printf 'CALL %s %s\n' "$alias" "$remote" >> "{log}/calls"
 /bin/cat >> "{log}/calls"
 printf '\nEND\n' >> "{log}/calls"

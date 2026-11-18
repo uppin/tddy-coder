@@ -316,13 +316,21 @@ mod remote_cut_tests {
     const WORKSPACE_HOME: &str = "/home/coder";
 
     /// A workspace whose user's home is /home/coder and whose git commands all succeed.
+    /// The home probe is answered as a pty-merging transport delivers it: the shell's
+    /// start marker, then the probe's sentinels around the home (they spell exactly what
+    /// `remote_checkout_root` prints around `$HOME`).
     fn a_workspace() -> InMemoryShell {
         let shell = InMemoryShell::new("coder.remote-dev");
         shell.answers_when(|request| {
-            request
-                .command
-                .contains("$HOME")
-                .then(|| ExecOutput::succeeded(WORKSPACE_HOME.as_bytes().to_vec()))
+            request.command.contains("$HOME").then(|| {
+                ExecOutput::succeeded(
+                    format!(
+                        "tddy-coder-shell: the command is running\r\n\
+                         TDDY_REMOTE_HOME_BEGIN:{WORKSPACE_HOME}:TDDY_REMOTE_HOME_END\r\n"
+                    )
+                    .into_bytes(),
+                )
+            })
         });
         shell.answers_when(|request| {
             request

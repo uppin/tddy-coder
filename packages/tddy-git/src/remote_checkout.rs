@@ -124,25 +124,42 @@ fn target_words(output: &tddy_remote_shell::ExecOutput) -> String {
     words.trim().to_string()
 }
 
+/// The sentinels the home probe prints around the target's home. A transport may merge
+/// the command's streams or add words of its own around the answer — a pty does both — so
+/// the value is parsed out from between them rather than read as the whole output.
+const HOME_BEGIN: &str = "TDDY_REMOTE_HOME_BEGIN:";
+const HOME_END: &str = ":TDDY_REMOTE_HOME_END";
+
+/// The home framed by the probe's sentinels in `stdout`, or `None` when the answer does
+/// not carry them. Nothing outside the sentinels is taken for part of the path.
+fn home_between_sentinels(stdout: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(stdout);
+    let value = text
+        .split_once(HOME_BEGIN)?
+        .1
+        .split_once(HOME_END)?
+        .0
+        .trim()
+        .trim_end_matches('/');
+    (!value.is_empty()).then(|| value.to_string())
+}
+
 /// Where the project `git_url` names is cloned on the target `shell` reaches: the target user's
 /// home, read through the shell, then [`REMOTE_REPOS_DIR`] and the repository name.
 pub async fn remote_checkout_root(
     shell: &dyn RemoteShell,
     git_url: &str,
 ) -> Result<String, RemoteCheckoutError> {
+    let probe = format!("printf '%s%s%s\\n' '{HOME_BEGIN}' \"$HOME\" '{HOME_END}'");
     let output = shell
-        .exec(tddy_remote_shell::ExecRequest::new("printf '%s' \"$HOME\""))
+        .exec(tddy_remote_shell::ExecRequest::new(probe))
         .await?;
     if output.status != 0 {
         return Err(RemoteCheckoutError::HomeUnresolved(target_words(&output)));
     }
-    let home = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .trim_end_matches('/')
-        .to_string();
-    if home.is_empty() {
+    let Some(home) = home_between_sentinels(&output.stdout) else {
         return Err(RemoteCheckoutError::HomeUnresolved(target_words(&output)));
-    }
+    };
     Ok(format!(
         "{home}/{REMOTE_REPOS_DIR}/{}",
         repository_name_of(git_url)
