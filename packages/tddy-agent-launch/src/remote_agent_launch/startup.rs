@@ -30,8 +30,11 @@ pub(super) async fn wait_for_agent_start(
         if *handle.pty_done.borrow() {
             return AgentStart::Exited;
         }
+        // A probe may take as long as the bound has left: one round trip to a remote deployment
+        // can outlast any fixed few seconds, and a probe cut short never sees the pid.
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
         if let Ok(output) = shell
-            .exec(tddy_remote_shell::ExecRequest::new(probe.clone()).within(Duration::from_secs(5)))
+            .exec(tddy_remote_shell::ExecRequest::new(probe.clone()).within(left))
             .await
         {
             if output.status == 0 {
@@ -77,10 +80,12 @@ pub(super) async fn exits_during_startup(
         if let Some(pid) = agent_pid {
             if probed_at.elapsed() >= Duration::from_millis(50) {
                 probed_at = now;
+                // Bounded by what the window has left, as the pid probe is by its bound; a probe
+                // that does not answer in time leaves the agent judged alive.
                 let alive = shell
                     .exec(
                         tddy_remote_shell::ExecRequest::new(format!("kill -0 {pid}"))
-                            .within(Duration::from_secs(5)),
+                            .within(deadline.saturating_duration_since(now)),
                     )
                     .await
                     .map(|output| output.status == 0)

@@ -67,7 +67,7 @@ rewrites every `\n` the command prints as `\r\n` (`onlcr`):
   pointer, and with it the hook token.
 
 `exec_streamed` relays its pipes through the same pty untranslated.
-`interactive` is `coder ssh --disable-autostart -t <workspace> -- <command>` for a local PTY. Credentials are
+`interactive` is `coder ssh --disable-autostart <workspace> -- <command>` for a local PTY. Credentials are
 held in memory for the shell's life; `Debug` shows the URL and never the token.
 
 ## Test support

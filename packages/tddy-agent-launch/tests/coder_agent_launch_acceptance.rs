@@ -56,6 +56,12 @@ const HOOK_TOKEN: &str = "tok-7f3a9c";
 
 /// How long the agent must stay up for a launch to count as started.
 const STARTUP_WINDOW: Duration = Duration::from_millis(400);
+/// How long one one-shot takes on a deployment as slow as `coder.ireland-devex.wixprod.net`
+/// measured (6–8 s): past the five seconds a probe was once given.
+const SLOW_DEPLOYMENT_ROUND_TRIP: &str = "5.5";
+/// The startup window of a launch on that deployment: its start bound (ten windows) holds a few
+/// of its round trips.
+const SLOW_STARTUP_WINDOW: Duration = Duration::from_secs(2);
 /// A safety net for a stub to report, not a prediction of how long it takes.
 const OBSERVE: Duration = Duration::from_secs(15);
 
@@ -170,20 +176,43 @@ struct ACoderCall {
 
 /// A running workspace: the stand-in records its working directory, the deployment and token it
 /// was given and its arguments, then hands what follows `--` to a shell as one command line —
-/// which is what a workspace's login shell is given — and becomes it.
+/// which is what a workspace's login shell is given — and becomes it. Like coder v2.33.5, it
+/// refuses `-t`, a flag that CLI does not have.
 fn a_running_workspace() -> AWorkspace {
+    a_workspace_answering_one_shots_after("")
+}
+
+/// A running workspace on a deployment as slow as a real one: every one-shot (`sh -c …`) answers
+/// after [`SLOW_DEPLOYMENT_ROUND_TRIP`], longer than any fixed five-second probe; the terminal's
+/// command starts at once.
+fn a_workspace_on_a_slow_deployment() -> AWorkspace {
+    a_workspace_answering_one_shots_after(&format!(
+        "if [ \"$1\" = sh ]; then /bin/sleep {SLOW_DEPLOYMENT_ROUND_TRIP}; fi\n"
+    ))
+}
+
+fn a_workspace_answering_one_shots_after(delay: &str) -> AWorkspace {
     let dir = tempfile::tempdir().expect("a directory standing for the workspace");
     let root = std::fs::canonicalize(dir.path()).expect("the workspace's directory resolves");
     std::fs::create_dir_all(root.join("bin")).expect("a directory for the stand-in coder");
     write_executable(
         &root.join("bin/coder"),
-        r#"#!/bin/sh
-printf '%s\t%s\t%s\t%s\n' "$(/bin/pwd -P)" "${CODER_URL-}" "${CODER_SESSION_TOKEN-}" \
+        &format!(
+            r#"#!/bin/sh
+printf '%s\t%s\t%s\t%s\n' "$(/bin/pwd -P)" "${{CODER_URL-}}" "${{CODER_SESSION_TOKEN-}}" \
   "$(printf '%s' "$*" | /usr/bin/tr '\n\t' '  ')" >> "$(dirname "$0")/calls"
+for argument in "$@"; do
+  [ "$argument" = "--" ] && break
+  if [ "$argument" = "-t" ]; then
+    echo "unknown shorthand flag: 't' in -t" >&2
+    exit 1
+  fi
+done
 while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done
 shift
-exec /bin/sh -c "$*"
-"#,
+{delay}exec /bin/sh -c "$*"
+"#
+        ),
     );
     let workspace = AWorkspace { root, _dir: dir };
     std::fs::create_dir_all(workspace.worktree()).expect("the session's worktree in the workspace");
@@ -436,6 +465,19 @@ impl ADaemon {
         workspace: &AWorkspace,
         slots: &RenderedSlots,
     ) -> Result<RemoteLaunched, RemoteLaunchError> {
+        self.launches_within(shell, agent, workspace, slots, STARTUP_WINDOW)
+            .await
+    }
+
+    /// [`Self::launches_through`], counted as started once the agent outlives `startup_window`.
+    async fn launches_within(
+        &self,
+        shell: Arc<dyn RemoteShell>,
+        agent: &AStubAgent,
+        workspace: &AWorkspace,
+        slots: &RenderedSlots,
+        startup_window: Duration,
+    ) -> Result<RemoteLaunched, RemoteLaunchError> {
         launch_on_target(
             &the_acme_agent(&agent.program()),
             &TemplateParams::new().with("model", MODEL),
@@ -445,7 +487,7 @@ impl ADaemon {
                 worktree: &workspace.worktree(),
                 session_dir: &self.session_dir,
                 pointer: None,
-                startup_window: STARTUP_WINDOW,
+                startup_window,
             },
             HostPtySession {
                 manager: &self.manager,
@@ -678,5 +720,67 @@ async fn a_target_naming_an_unknown_account_is_refused() {
             daemon.has_a_terminal().await
         ),
         (Vec::new(), false, false)
+    );
+}
+
+#[tokio::test]
+async fn an_agent_on_a_deployment_slower_than_five_seconds_a_call_is_launched() {
+    // Given a workspace whose every one-shot takes longer than five seconds, as a real
+    // deployment's does, and an agent there that stays up
+    let workspace = a_workspace_on_a_slow_deployment();
+    let agent = an_agent_that_stays_up();
+    let vault = an_open_vault_holding_adas_account();
+    let daemon = a_daemon();
+    let shell = daemon
+        .the_shell_for(&adas_devbox(), &workspace, &vault)
+        .expect("a Coder target whose vault is open resolves to a shell");
+
+    // When the agent is launched
+    let launched = daemon
+        .launches_within(
+            shell,
+            &agent,
+            &workspace,
+            &RenderedSlots::default(),
+            SLOW_STARTUP_WINDOW,
+        )
+        .await
+        .map(|_launched| ());
+
+    // Then it is launched — the probes that judge its start wait for the deployment's answers —
+    // and it runs in the session's worktree
+    assert_eq!(launched, Ok(()));
+    assert_eq!(agent.working_directory().await, workspace.worktree());
+}
+
+#[tokio::test]
+async fn an_agent_that_exits_on_a_slow_deployment_fails_its_launch_with_its_last_words() {
+    // Given a workspace whose every one-shot takes longer than five seconds, and an agent there
+    // that exits as it starts
+    let workspace = a_workspace_on_a_slow_deployment();
+    let agent = AStubAgent::running("printf 'acme: no licence for this host\\n'\nexit 3\n");
+    let vault = an_open_vault_holding_adas_account();
+    let daemon = a_daemon();
+    let shell = daemon
+        .the_shell_for(&adas_devbox(), &workspace, &vault)
+        .expect("a Coder target whose vault is open resolves to a shell");
+
+    // When the agent is launched
+    let launched = daemon
+        .launches_within(
+            shell,
+            &agent,
+            &workspace,
+            &RenderedSlots::default(),
+            SLOW_STARTUP_WINDOW,
+        )
+        .await
+        .map(|_launched| ());
+
+    // Then the launch fails with what the agent said as it exited
+    assert!(
+        matches!(&launched, Err(RemoteLaunchError::ExitedDuringStartup { last_output, .. })
+            if last_output.contains("acme: no licence for this host")),
+        "expected the launch to fail with the agent's last words, got {launched:?}"
     );
 }
