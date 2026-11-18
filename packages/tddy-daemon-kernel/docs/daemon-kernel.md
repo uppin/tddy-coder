@@ -486,9 +486,14 @@ user, or adopted from `tddy-supervisor`. It lives in this crate because its cons
 
 `AgentToolSockets::new(AgentToolSocketPlacement)`:
 
-- **`Embedded`** (Tddy Desktop) — one socket for the daemon, at `agent_tool_socket_path(data_dir)`
-  (`agent_tool_socket.rs`), bound and served by the runtime. `ensure_bound` returns it after a live
-  `connect`; a session started before the runtime serves it is refused rather than pointed at nothing.
+- **`Embedded`** (Tddy Desktop) — one socket per application **instance**,
+  `$TMPDIR/tddy-agent-tools-<pid>-<n>.sock` (`next_embedded_socket_path`, `agent_tool_socket.rs`), so
+  two instances on one data dir each serve their own. Bound lazily on the first session like a
+  per-user socket, `0600`, and bound afresh at a new path when its file is gone or replaced (macOS
+  clears `$TMPDIR`). Before binding, `clear_dead_instances_sockets` removes the sockets of instances
+  whose process is gone (`kill(pid, 0)` → `ESRCH`) through `clear_stale_socket` — never a live
+  process's, another account's, or one something listens on. Under `$TMPDIR` because the ~104-byte
+  `AF_UNIX` limit leaves no room under a checkout path.
 - **`PerOsUser`** (the `tddy-daemon` binary, unsupervised) — `<data dir>/run/<user>/daemon.sock`
   (`user_socket_path_for_user`), bound lazily on the user's first session through
   `bind_owner_only(…, USER_DAEMON)`. The user name must be one plain path segment and the path at most
@@ -498,6 +503,10 @@ user, or adopted from `tddy-supervisor`. It lives in this crate because its cons
   the sockets `tddy-supervisor` handed over. The daemon derives and binds no path of its own; a user it
   was handed none for is refused, naming `users.yaml`, and one whose handed socket is gone is refused
   saying to map the user and restart the supervisor.
+
+`stop_serving` closes every socket the daemon bound and removes its file (a supervisor-made socket
+stays where it is); dropping `AgentToolSockets` does the same, so no file outlives the sockets that
+served it.
 
 The handed-over sockets are read by `adopt_user_sockets_from_environment` → `user_socket_fds`
 (prefix `USER_SOCKET_FD_NAME_PREFIX` = `user.`) → `adopt_user_descriptors`, before the daemon's own

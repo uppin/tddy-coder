@@ -52,14 +52,11 @@ struct AnEmbeddedHost {
     config: DaemonConfig,
     socket_path: PathBuf,
     _listener: std::os::unix::net::UnixListener,
-    /// Owns the data dir the socket's path is digested from.
-    _data_dir: tempfile::TempDir,
 }
 
 impl AnEmbeddedHost {
     fn with_its_agent_tool_socket_bound() -> Self {
-        let data_dir = tempfile::tempdir().expect("a temporary data dir");
-        let socket_path = tddy_daemon_kernel::agent_tool_socket_path(data_dir.path());
+        let socket_path = tddy_daemon_kernel::next_embedded_socket_path();
         let listener = std::os::unix::net::UnixListener::bind(&socket_path)
             .expect("the agent-tool socket binds");
         let mut config = DaemonConfig::default();
@@ -68,7 +65,6 @@ impl AnEmbeddedHost {
             config,
             socket_path,
             _listener: listener,
-            _data_dir: data_dir,
         }
     }
 

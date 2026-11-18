@@ -533,44 +533,24 @@ impl ACursorDaemon {
     }
 }
 
-/// An embedded daemon's agent-tool socket — bound where `tddy-daemon` binds it for this data dir
-/// (`tddy_daemon_kernel::agent_tool_socket_path`), serving the host's own
-/// `activity.ActivityService` entry one endpoint per connection, as `tddy-daemon`'s
-/// `serve_agent_tool_socket` does. Dropping it stops serving and removes the socket.
+/// An embedded daemon's agent-tool socket serving the host's own `activity.ActivityService` entry,
+/// as the daemon's roster does — bound by the host's own agent-tool sockets when its first session
+/// asks for it. Dropping it stops serving and removes the socket.
 pub struct AnAgentToolSocket {
-    pub path: PathBuf,
-    serving: tokio::task::JoinHandle<()>,
+    sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
 }
 
 impl AnAgentToolSocket {
     pub fn serving_the_activity_of(daemon: &ACursorDaemon) -> Self {
-        let path = tddy_daemon_kernel::agent_tool_socket_path(&daemon.tddy_home);
-        let _ = std::fs::remove_file(&path);
-        let listener = tokio::net::UnixListener::bind(&path).expect("bind the agent-tool socket");
-        let service = Arc::clone(&daemon.service);
-        let serving = tokio::spawn(async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                let entry = service.activity_entry();
-                tokio::spawn(async move {
-                    let (read_half, write_half) = tokio::io::split(stream);
-                    let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
-                        read_half,
-                        write_half,
-                        tddy_rpc::MultiRpcService::new(vec![entry]),
-                        tddy_rpc::RequestTransport::UnixSocket,
-                    );
-                    endpoint.run().await;
-                });
-            }
-        });
-        Self { path, serving }
+        let sockets = daemon.service.agent_tool_sockets();
+        sockets.install_roster(vec![daemon.service.activity_entry()]);
+        Self { sockets }
     }
 }
 
 impl Drop for AnAgentToolSocket {
     fn drop(&mut self) {
-        self.serving.abort();
-        let _ = std::fs::remove_file(&self.path);
+        self.sockets.stop_serving();
     }
 }
 

@@ -5,7 +5,7 @@
 //! **Where.** `<data dir>/run/<os user>/host.sock`. The data dir is the daemon's configured one
 //! (the base `sessions_base_for_user` resolves), not a temp dir. Nested under a *session's* own
 //! directory it would overflow `AF_UNIX`'s ~104-byte path limit on a real checkout path — the same
-//! overflow `agent_tool_socket_path` was digested to avoid — so the per-user directory is the
+//! overflow the embedded agent-tool socket avoids by living under `$TMPDIR` — so the per-user directory is the
 //! deepest this can safely go, and a path that still does not fit is refused with that reason.
 //!
 //! **Who can reach it.** (Bound by `tddy_daemon_kernel::owner_socket::bind_owner_only`, which the

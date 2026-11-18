@@ -49,10 +49,6 @@ pub struct RuntimeTasks {
     pub(super) common_room: Option<CommonRoomSupervisorTask>,
     pub(super) oauth_loopback_tunnel: Option<OauthLoopbackTunnel>,
     pub(super) local_socket: Option<LocalSocketTransport>,
-    /// The agent-facing tool socket an **embedded** daemon serves, so a co-located agent spawned
-    /// beside a jailed checkout can reach `ExecuteTool` and the roster at all. `None` on the
-    /// binary host, which already serves both HTTP and the tonic local socket.
-    pub(super) agent_tool_socket: Option<(PathBuf, Vec<tddy_rpc::ServiceEntry>)>,
     pub(super) lsp_idle_reaper: Option<tddy_lsp::LspRegistry>,
     pub(super) index_daemon: Option<crate::index_daemon::IndexDaemonRegistry>,
     /// The session host, whose project-home sessions a periodic task stops once idle
@@ -320,26 +316,6 @@ impl RuntimeTasks {
                             stopped.len()
                         );
                     }
-                }
-            }));
-        }
-
-        if let Some((socket_path, entries)) = self.agent_tool_socket {
-            handles.push(tokio::spawn(async move {
-                // Runs for the life of the process: an embedded daemon is stopped by its
-                // application exiting, and the socket file is removed on the way out.
-                let shutdown = std::future::pending::<()>();
-                if let Err(e) = crate::agent_tool_socket::serve_agent_tool_socket(
-                    &socket_path,
-                    entries,
-                    shutdown,
-                )
-                .await
-                {
-                    log::error!(
-                        target: "tddy_daemon::agent_tool_socket",
-                        "agent tool socket exited with error: {e:#}"
-                    );
                 }
             }));
         }

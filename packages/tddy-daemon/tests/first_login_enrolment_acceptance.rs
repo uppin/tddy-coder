@@ -275,6 +275,8 @@ struct Deployment {
     rpc: RpcBridge<MultiRpcService>,
     tasks: Option<runtime::RuntimeTasks>,
     running: Option<RuntimeTaskHandles>,
+    /// The agent-tool sockets this deployment's sessions are told about.
+    agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
     config_path: PathBuf,
     data_dir: PathBuf,
     _dir: TempDir,
@@ -290,11 +292,17 @@ async fn a_deployment_mapping_nobody(options: RuntimeOptions) -> Deployment {
     let runtime = runtime::build(config, options.with_config_path(Some(config_path.clone())))
         .await
         .expect("the daemon runtime builds");
+    let agent_tool_sockets = runtime
+        .session_host
+        .as_ref()
+        .expect("a deployment signing in through GitHub hosts sessions")
+        .agent_tool_sockets();
     Deployment {
         rpc: RpcBridge::new(MultiRpcService::new(cloned(&runtime.entries))),
         roster: runtime.entries,
         tasks: Some(runtime.tasks),
         running: None,
+        agent_tool_sockets,
         config_path,
         data_dir: the_data_dir_in(&dir),
         _dir: dir,
@@ -420,7 +428,7 @@ impl Drop for Deployment {
     fn drop(&mut self) {
         if let Some(running) = self.running.take() {
             running.abort_all();
-            let _ = std::fs::remove_file(the_agent_tool_socket_of(self));
+            self.agent_tool_sockets.stop_serving();
         }
     }
 }
@@ -503,15 +511,19 @@ async fn sees_participant(
     .unwrap_or_else(|_| panic!("{identity} never joined the room"));
 }
 
-/// Start the deployment's own tasks — its agent tool socket among them — and connect to that
-/// socket as a co-located process would.
+/// Start the deployment's own tasks, and connect to the agent tool socket its sessions are told
+/// about as a co-located process would.
 async fn an_agent_on_the_tool_socket_of(deployment: &mut Deployment) -> Via {
     let tasks = deployment
         .tasks
         .take()
         .expect("the deployment's tasks are started once");
     deployment.running = Some(tasks.spawn());
-    let socket = the_agent_tool_socket_of(deployment);
+    let socket = deployment
+        .agent_tool_sockets
+        .ensure_bound(&the_os_user_this_process_runs_as(), &deployment.data_dir)
+        .await
+        .expect("the agent tool socket is bound");
     let client = eventually_awaiting("the agent tool socket accepts", SERVING_TIMEOUT, || {
         let socket = socket.clone();
         async move {
@@ -532,10 +544,6 @@ async fn an_agent_on_the_tool_socket_of(deployment: &mut Deployment) -> Via {
     })
     .await;
     Via::Transport(client)
-}
-
-fn the_agent_tool_socket_of(deployment: &Deployment) -> PathBuf {
-    tddy_daemon::agent_tool_socket::agent_tool_socket_path(&deployment.data_dir)
 }
 
 /// Aborts the task it holds when dropped, so a test's servers end with the test.

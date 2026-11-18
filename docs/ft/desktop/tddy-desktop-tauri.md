@@ -287,6 +287,15 @@ lookup that resolves `tddy-sandbox-runner` and `tddy-index-daemon`. That same lo
 binaries are installed twice on macOS — inside the bundle for the daemon to find, and in `$BIN_DIR`
 for `allowed_tools` and a hand-run `tddy-tools` to resolve.
 
+Running the binary is never free — it opens a window and hosts a whole daemon over the data dir — so
+it takes **no arguments**: `--help` (`-h`) and `--version` (`-V`) print and exit, and anything else
+is refused before anything starts (macOS's `-psn_*` aside). Several instances may still run on one
+data dir; each serves its sessions an agent-tool socket of its own instance
+(`$TMPDIR/tddy-agent-tools-<pid>-<n>.sock`), so one exiting never takes another's sessions with it.
+They do share the LiveKit identity the configuration names, and the common room keeps one of them.
+On exit the application stops what the `tddy-daemon` binary stops on `SIGTERM` — its CLI sessions,
+workspace jails and index daemon — and removes its agent-tool socket.
+
 `./release --desktop` builds everything the install ships, in the one order that works: the CLI
 binaries, then the `tddy-web` bundle, then `tauri build`. The application *embeds* the bundle, so
 building the app first produces a stale dashboard and no error. `--build` runs that same script, and

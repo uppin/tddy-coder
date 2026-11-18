@@ -7,9 +7,8 @@ lifecycle, projects, tools, hosts, or any other subsystem RPC.
 
 ## What stays in this crate
 
-Thirteen source modules under `src/`: `main`, `lib`, `server`, `startup`, `runtime`, `config`,
-`daemon_settings`, `daemon_config_service`, `local_socket_server`, `agent_tool_socket`,
-`common_room_key_directory`, `index_daemon` (with `index_daemon_body`). `src/lib.rs` declares those and nothing else — it carries no re-export facade,
+Twelve source modules under `src/`: `main`, `lib`, `server`, `startup`, `runtime`, `config`,
+`daemon_settings`, `daemon_config_service`, `local_socket_server`, `common_room_key_directory`, `index_daemon` (with `index_daemon_body`). `src/lib.rs` declares those and nothing else — it carries no re-export facade,
 and `config` is the single forwarding module, to `tddy-daemon-kernel`, which owns the configuration
 this crate loads.
 
@@ -290,7 +289,8 @@ the tool server and the host-session services (`github_token`, `spawn_conversati
 one ([daemon kernel § Per-OS-user sockets](../../tddy-daemon-kernel/docs/daemon-kernel.md#per-os-user-sockets-owner_socket-agent_tool_sockets),
 [session identity](../../tddy-session-lifecycle/docs/session-identity.md)).
 
-- **Placement** (`runtime/build_context.rs`): an embedded host gets `AgentToolSocketPlacement::Embedded`;
+- **Placement** (`runtime/build_context.rs`): an embedded host gets `AgentToolSocketPlacement::Embedded`
+  — a socket of its own instance, bound by `AgentToolSockets` on the first session like any other;
   the binary gets `Supervised` when `TDDY_USERS_FILE` is set — `tddy-supervisor` started it — and
   `PerOsUser` otherwise, binding `<data dir>/run/<user>/daemon.sock` itself.
 - **Adoption** (`runtime/mount_host.rs`): `runtime::build` reads the `user.<os user>` listeners the
@@ -301,7 +301,7 @@ one ([daemon kernel § Per-OS-user sockets](../../tddy-daemon-kernel/docs/daemon
 - **Host sessions on the same socket**: the host is built with
   `with_host_sessions_merged(options.host != RuntimeHost::Embedded)`. For a binary host that serves the
   host-session service on the per-user daemon sockets (`HostSessionSockets::serve_on`); an embedded
-  host serves its one agent-tool socket itself, so it keeps binding its own host-session sockets
+  host serves the roster alone on its instance's agent-tool socket, so it keeps binding its own host-session sockets
   (`<data dir>/run/<user>/host.sock`).
 
 See [host sockets](../../tddy-supervisor/docs/host-sockets.md) for the supervisor's half.
