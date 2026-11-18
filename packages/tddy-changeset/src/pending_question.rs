@@ -37,8 +37,10 @@ pub struct PendingQuestion {
     /// Whether a free-text answer is accepted besides the options.
     #[serde(default)]
     pub allow_other: bool,
-    /// The id this question is answered by, minted when the hook reported it. Empty for a record
-    /// that carries no structure (a `tool` session's, or a bare `Notification` message).
+    /// The id this question is answered by, minted when the hook reported it. Never empty by
+    /// design: a wait with nothing to answer (a bare `Notification`, an idle prompt) writes no
+    /// record. An empty id survives only in a record written before that, and readers treat it as
+    /// nothing to answer.
     #[serde(default)]
     pub request_id: String,
     /// The tool the agent asks to use — `Bash` for a permission, `AskUserQuestion` for a question.

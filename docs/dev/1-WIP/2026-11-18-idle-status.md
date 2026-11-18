@@ -22,9 +22,9 @@
 
 ## Scope
 
-- [ ] No pending-question record without a request id
-- [ ] `SendSessionMessage` refuses only on an answerable question
-- [ ] Idle wakes see a waiting-for-input session with nothing to answer as idle
+- [x] No pending-question record without a request id
+- [x] `SendSessionMessage` refuses only on an answerable question
+- [x] Idle wakes see a waiting-for-input session with nothing to answer as idle
 - [x] Reproduced first by a failing test that feeds an `idle_prompt` Notification
 - [ ] Scoped gates
 
@@ -99,6 +99,6 @@ The request in test 1 is what `tddy-tools session-hook` sends for an `idle_promp
 - [x] Create changeset
 - [x] Draft PR contract — failing tests (commit 2)
 - [x] USER REVIEW — acceptance tests (6e)
-- [ ] TDD Green
+- [x] TDD Green
 - [ ] Validate changes
 - [ ] Wrap

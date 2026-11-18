@@ -128,8 +128,9 @@ impl DaemonProjectHome {
         })
     }
 
-    /// Refuse while the session's agent waits on a permission prompt or a question, naming the tool
-    /// that answers it.
+    /// Refuse while the session's agent waits on a permission prompt or a question it can be
+    /// answered, naming the tool that answers it. A record with no request id (one written before
+    /// an idle wait stopped being recorded) has nothing to answer and does not refuse.
     fn refuse_while_waiting_on_an_answer(&self, target: &SessionTarget) -> Result<(), String> {
         let session_dir = unified_session_dir_path(&self.sessions_base, &target.session_id);
         let pending =
@@ -139,7 +140,7 @@ impl DaemonProjectHome {
                     target.session_id
                 )
             })?;
-        match pending {
+        match pending.filter(|pending| !pending.request_id.is_empty()) {
             None => Ok(()),
             Some(pending) => {
                 let answer_tool = if pending.kind == "permission" {

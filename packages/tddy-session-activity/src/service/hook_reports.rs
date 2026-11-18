@@ -112,9 +112,9 @@ fn question_asked_by(
 ///   question before it.
 /// - A `WaitingForInput` with no tool — the `Notification` that follows a prompt — keeps the
 ///   structured question still pending, and fills its text from the message only if it had none.
-///   With no such question pending it records the message alone, as `#start-parity` 6/9 did.
-/// - Any other status clears the question. A wait the hook gave no message for leaves nothing
-///   pending.
+///   With no such question pending it records nothing: a session waiting for input has nothing to
+///   answer, and a pending question is never written without a request id.
+/// - Any other status clears the question, and so does a wait with no question to keep.
 fn record_pending_question(
     session_dir: &Path,
     req: &ReportSessionStatusRequest,
@@ -136,16 +136,6 @@ fn record_pending_question(
             }
             set_pending_elicitation(session_dir, true)?;
             return Ok(PendingChange::Kept(kept));
-        }
-        if !req.message.is_empty() {
-            let message_only = PendingQuestion {
-                kind: "permission".to_string(),
-                question: req.message.clone(),
-                ..Default::default()
-            };
-            write_pending_question(session_dir, &message_only).map_err(pending_question_failure)?;
-            set_pending_elicitation(session_dir, true)?;
-            return Ok(PendingChange::Plain);
         }
     }
 
