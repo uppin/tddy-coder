@@ -87,6 +87,13 @@ session and manage them over RPC, so I can run a shell in the session's worktree
    agent runs on the target, so streaming, input, resize and capture are unchanged; stopping the
    session ends the remote agent. A Coder workspace is such a target: the agent runs in the
    workspace through the `coder` CLI, with hooks delivered as on an SSH target.
+   The agent on a target is the **target's own**: its bare command (`claude`, `agent`) is found on
+   the target's login `PATH`, and its `HOME`, `PATH` and `TMPDIR` are the target's; only the
+   spec's explicit environment travels from the daemon. A Cursor chat is minted on the target, in
+   its worktree. Neither agent stops at a first-run dialog nobody on that pty would answer: a
+   Claude start records the clone root (`~/.tddy/repos/<repo>`) as trusted in the target's
+   `~/.claude.json`, with every project MCP server of its `.mcp.json` rejected, and a Cursor start
+   on a target passes `--trust`. A local start still leaves both dialogs to the operator.
 
 ### I/O addressed by terminal id
 7. The terminal I/O RPCs (`StreamSessionTerminalIO`, `StreamTerminalOutput`, `SendTerminalInput`)
