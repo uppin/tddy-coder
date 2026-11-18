@@ -220,7 +220,12 @@ pub async fn launch_on_target(
     judge_the_start(remote, session, handle).await
 }
 
-fn client_argv_and_env(agent: &HostAgent, remote: &RemoteLaunch<'_>, session: &HostPtySession<'_>, plan: crate::spec_launch::HostPtyPlan) -> (Vec<String>, Vec<(String, String)>) {
+fn client_argv_and_env(
+    agent: &HostAgent,
+    remote: &RemoteLaunch<'_>,
+    session: &HostPtySession<'_>,
+    plan: crate::spec_launch::HostPtyPlan,
+) -> (Vec<String>, Vec<(String, String)>) {
     let command = remote_command(agent, remote, session, plan);
 
     let (argv, local_env) = client_command(remote, command);
@@ -384,6 +389,14 @@ async fn judge_the_start(
         });
     }
 
+    let owner = recorded_owner(remote).await?;
+
+    Ok(RemoteLaunched { handle, owner })
+}
+
+async fn recorded_owner(
+    remote: RemoteLaunch<'_>,
+) -> Result<Option<SessionPointerOwner>, RemoteLaunchError> {
     let owner = match remote.pointer {
         Some(pointer) => {
             let placed = PlacedSessionPointer {
@@ -405,8 +418,7 @@ async fn judge_the_start(
         }
         None => None,
     };
-
-    Ok(RemoteLaunched { handle, owner })
+    Ok(owner)
 }
 
 #[cfg(test)]
