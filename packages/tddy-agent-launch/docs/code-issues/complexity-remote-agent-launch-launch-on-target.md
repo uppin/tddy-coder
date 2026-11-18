@@ -3,15 +3,16 @@
 **Location:** `packages/tddy-agent-launch/src/remote_agent_launch.rs:163` — `launch_on_target`
 **Category:** complexity
 **Detected:** 2026-11-18 — `/yolo-pr-stack` sweep-collect (`#coder-start`), function length by brace matching (fn line to closing brace)
-**Metrics:** **184 lines** · 6 parameters · budget 60 lines, 5 parameters · **~3× over**. CRAP: below the report's top-50 cut-off (CRAP < 42), join rate 65.3% for the package (1340 of 2052), so the function's own coverage figure was not read
-**Thresholds breached:** length 184 > 60, parameters 6 > 5
-**Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — length predates the `#coder-start` stack (180 on merge base `2ed59a3c7`); the stack added 4 — **unclaimed**
+**Metrics:** **59 lines** (was 184) · **6 parameters** · budget 60 lines, 5 parameters — length closed, parameter count still 6 > 5. CRAP: below the report's top-50 cut-off (CRAP < 42), join rate 65.3% for the package (1340 of 2052), so the function's own coverage figure was not read
+**Thresholds breached:** parameters 6 > 5 (length closed by the #coder-start sweep)
+**Restructure:** a parameter bundle (`HostAgent` + `TemplateParams` + `RenderedSlots` into one input) — changes the public signature, so a feature change, not a Refactor node
+**Status:** Open — partially fixed (length closed in the sweep; parameter count remains) — **unclaimed**
 
 ## Measurement history
 
 | Run | Lines | Note |
 |---|---|---|
+| 2026-11-18 (sweep) | 184 → 59 | eight engine `extract_method`s: `judge_the_start`, `recorded_owner`, `client_command`, `remote_command`, `client_argv_and_env`, `plan_the_launch`, `write_slot_files`, `write_rendered_session_files`; every extracted function ≤ 33 lines. Parameters unchanged at 6 |
 | 2026-11-18 | 180 → 184 | first detection as a record. 180 on `2ed59a3c7`, 184 on `6e88f90e6`: the ssh-only `SSH_AUTH_SOCK` copy became a `for name in ["SSH_AUTH_SOCK", "PATH"]` loop so a bare `coder`/`ssh` client is found on `PATH` (#942 area). One loop and its comment |
 
 ## What the tool found
@@ -24,7 +25,7 @@ Every launch-path change on a remote target lands in this function; the stack's 
 
 ## What would close it
 
-Cut along the existing steps: the local PTY environment (`local_env` assembly, ~25 lines) into a function of the interactive command's env; the post-start owner recording and registration into a tail function. `RemoteLaunch`/`HostPtySession` already bundle most parameters.
+Bundle the six parameters (`agent`, `params`, `slots` describe one launch recipe; `remote`, `session` already bundle theirs) into one input type. That changes `launch_on_target`'s public signature and its callers, so it is not a restructure.
 
 ## Verified by hand
 

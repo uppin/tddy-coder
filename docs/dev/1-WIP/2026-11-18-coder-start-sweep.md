@@ -64,11 +64,11 @@ the function they came from. No `pub` item moves, so no caller outside the three
 
 ## Scope
 
-- [ ] **Plan**: `plan.jsonl` per seam, anchors emitted by `restructure anchors`, `check --deep` clean
-- [ ] **Apply**: dry run clean, each plan applied with its compile gate, `verify --against` clean, one commit per plan
-- [ ] **Baseline**: the four packages' suites back to the recorded numbers, failing set equal by name (empty)
-- [ ] **Code Quality**: `./dev cargo clippy -p tddy-remote-shell -p tddy-agent-launch -p tddy-session-driver --all-targets -- -D warnings` and `cargo fmt --check` clean
-- [ ] **Records**: the three records deleted by the commits that close them, final measurement recorded first
+- [x] **Plan**: `plan.jsonl` per seam, anchors emitted by `restructure anchors`, `check --deep` clean
+- [x] **Apply**: dry run clean, each plan applied with its compile gate, `verify --against` clean, one commit per plan
+- [x] **Baseline**: the four packages' suites back to the recorded numbers, failing set equal by name (empty)
+- [x] **Code Quality**: `./dev cargo clippy -p tddy-remote-shell -p tddy-agent-launch -p tddy-session-driver --all-targets -- -D warnings` and `cargo fmt --check` clean
+- [x] **Records**: two records deleted by the commits that closed them, the third (`launch_on_target`) narrowed to its parameter count 6 > 5 — see Decisions
 - [ ] **Documentation**: Final Checklist executed
 
 ## Responsibility
@@ -159,9 +159,23 @@ The names are proposals; the engine's assist names the function and the plan's `
 
 ## Visibility
 
-Expected: the eight one-shot items widen from private to `pub(super)` (read by `CoderShell` in
-`coder.rs`). The extracted functions are private. Recorded after the apply from the engine's
-report.
+Recorded from the engine's report on the apply: five of the eight one-shot items widened private
+to `pub(super)` (`START_MARKER`, `strip_start_marker`, `stdin_lines`, `one_shot_command`,
+`read_noting_the_marker`); the rest stayed private. Every extracted function is private.
+
+### Measured after (head of `feature/coder-start/sweep`)
+
+| Item | Before | After | Budget |
+|---|---|---|---|
+| `coder.rs` production lines | 507 | **405** (`coder/one_shot.rs` 107) | 500 |
+| `launch_on_target` | 184 | **59** | 60 |
+| `judge_the_start` / `recorded_owner` / `client_command` / `remote_command` | new | 48 / 26 / 33 / 17 | 60 |
+| `client_argv_and_env` / `plan_the_launch` / `write_slot_files` / `write_rendered_session_files` | new | 11 / 18 / 13 / 27 | 60 |
+| `DriverSession::launch` / `wait_out_the_startup_window` | 61 / new | **58** / 6 | 60 |
+
+Baseline after: `./test -p tddy-remote-shell -p tddy-agent-launch -p tddy-session-driver -p tddy-tool-engine`
+exit 0, 692 passed, 0 failed (scoped); clippy `-D warnings` on the three packages and `cargo fmt --check` clean; the
+comment-line multiset of the touched sources is identical before and after (242).
 
 ## Plan
 
@@ -182,6 +196,8 @@ Apply order: 1 → 2a → 2b → 3, one commit each.
 - **The two file-writing loops are two extractions.** As one range, rust-analyzer dropped the three-line comment between them and the engine could not pair it back; split, the comment stays above the second call.
 - **A range cannot start on a comment.** The tail range starts at `let start_bound`; the five-line comment explaining the startup window stays above the call in `launch_on_target`.
 - **`launch_on_target`'s 6 parameters stay.** The record names parameter count 6 > 5 too; `RemoteLaunch`/`HostPtySession` already bundle the rest and a further bundle would change the public signature, which is outside a Refactor node. If the record's parameter threshold still reads as breached at wrap, the record is narrowed, not deleted, and that is put to the developer. ⚠
+- **The pid-directory cut was swapped out (applied).** Plan 2a's fifth extraction (the `exec` of `mkdir -p … && rm -f …`) compiled in the dry run and `check --deep` but the apply's compile gate failed: rust-analyzer's extract rewrote `ExecRequest::new(format!(..))` as `ExecRequest::new(*format!(..))` (`E0277: str: Into<String>`). An engine/rust-analyzer defect, documented here, not a TODO; the apply was rolled back and the cut dropped. The spawn range was refused by `check --deep` (signature names `Output`, via `ExitHook`); the replacements that held are `remote_command` (env + command, in plan 2a), and, to reach the 60-line budget, `plan_the_launch` and `client_argv_and_env` (plan `plan-2c-client-argv.jsonl`; the `plan_the_launch` plan was consumed by its apply). The pid-directory `exec` therefore stays inline in `launch_on_target`.
+- **Tooling tidy after the apply.** The engine's `remote_command` ended in `let command = …; command`, which clippy flags (`let_and_return`); fixed with `cargo clippy --fix` and `cargo fmt`, not by hand.
 - **The session-driver CRAP scores are not findings** (coverage blind spot for binary-spawned tests).
 
 ## Final Checklist
@@ -202,7 +218,7 @@ None — the stack's tail.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [ ] Create failing acceptance tests — N/A (`Type: Refactor`; green baseline recorded instead)
 - [ ] USER REVIEW — the refactor plan (this changeset + plan files)
-- [ ] TDD Green — apply the plans via the restructure engine
-- [ ] Run the touched packages' tests — failing set equal to the baseline's (empty)
+- [x] TDD Green — apply the plans via the restructure engine
+- [x] Run the touched packages' tests — failing set equal to the baseline's (empty)
 - [ ] Validate changes (/validate-changes)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
