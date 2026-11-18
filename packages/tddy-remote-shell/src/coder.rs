@@ -237,10 +237,11 @@ impl CoderShell {
     }
 
     /// `ssh <options> -o ProxyCommand=<proxy> -o StrictHostKeyChecking=no
-    /// -o UserKnownHostsFile=/dev/null -- <host token> <command>`, with the two credential
-    /// variables on this child's environment alone: the proxy inherits them, and neither is on any
-    /// command line. The workspace is authenticated by the CLI's session token, not by a host key,
-    /// so no host key is kept and none is asked about.
+    /// -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -- <host token> <command>`, with the two
+    /// credential variables on this child's environment alone: the proxy inherits them, and neither
+    /// is on any command line. The workspace is authenticated by the CLI's session token, not by a
+    /// host key, so no host key is kept and none is asked about. `LogLevel=ERROR` keeps `ssh`'s own
+    /// "Permanently added ... to the list of known hosts" warning out of the command's stderr.
     fn ssh_command(&self, remote_command: &str) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(&self.ssh);
         command
@@ -252,6 +253,8 @@ impl CoderShell {
                 "StrictHostKeyChecking=no",
                 "-o",
                 "UserKnownHostsFile=/dev/null",
+                "-o",
+                "LogLevel=ERROR",
                 "--",
                 Self::SSH_HOST_TOKEN,
             ])
