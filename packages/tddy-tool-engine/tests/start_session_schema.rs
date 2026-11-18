@@ -370,3 +370,26 @@ fn ssh_config_host_says_a_wildcard_is_not_an_alias() {
         "{description}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// An empty `new_branch_name` is not generated for every agent
+// ---------------------------------------------------------------------------
+
+#[test]
+fn new_branch_name_says_an_agent_requiring_one_refuses_it_empty() {
+    // When
+    let description = schema()["properties"]["new_branch_name"]["description"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+
+    // Then an agent about to send `new_branch_from_base` with no name is told that a harness
+    // declaring `branch_name_required` refuses it, and that an empty intent is the way to have
+    // one generated
+    assert!(
+        description.contains("`branch_name_required`")
+            && description.contains("refuse")
+            && description.contains("empty `branch_worktree_intent`"),
+        "{description}"
+    );
+}

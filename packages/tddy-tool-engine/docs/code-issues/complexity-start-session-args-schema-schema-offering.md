@@ -17,6 +17,7 @@
 | 2026-11-11 | 179 | declared-session-types: 191 → 179 (fn line to closing brace) — the hard-coded session-type enum became the declared list. Still ~3× the 60-line budget; open |
 | 2026-11-15 | 191 → 195 | **regressed** by session display names (#910), fn line to closing brace on `9712eb8d9~1` and `9712eb8d9`: one more `offer("display_name", …)` call. Straight-line data, as before; still ~3× the 60-line budget; open |
 | 2026-11-16 | 195 → 192 | orchestrator target start (#927): the `target` offer and the longer `ssh_config_host` text took the function to 199; the two remote-placement offers were extracted to `offer_remote_placement`, leaving it under the recorded 195. Straight-line data, as before; still ~3× the 60-line budget; open |
+| 2026-11-18 | 192 | unchanged, fn line to closing brace (49–240) on `origin/master` and on the fix branch: Coder one-shots cross the pty intact rewrote the `new_branch_name` description string only. Still ~3× the 60-line budget; open |
 
 ## What would close it
 

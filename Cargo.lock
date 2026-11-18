@@ -13680,6 +13680,7 @@ name = "tddy-remote-shell"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "pretty_assertions",
  "tddy-credentials",
  "tddy-remote-shell",

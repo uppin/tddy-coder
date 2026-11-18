@@ -48,6 +48,53 @@ pub fn a_coder_whose_workspaces_merge_stderr_into_stdout() -> StandInCoder {
     ))
 }
 
+/// A coder whose workspaces run commands in a pty that never ends their input, as the real
+/// `coder ssh` does: what is written to the CLI's stdin reaches the command, but closing it does
+/// not — the pty turns no end of input into an EOF — and the workspace's stderr is merged into its
+/// stdout. The command's stdin is a FIFO the command itself holds open for writing, so a read past
+/// the bytes it was sent blocks for good, as `cat` does on the workspace. (The CLI's stdin is
+/// kept as fd 4 for the forwarder: an asynchronous list's own stdin is `/dev/null`.)
+pub fn a_coder_whose_workspaces_never_see_the_end_of_their_input() -> StandInCoder {
+    StandInCoder::running(&format!(
+        "{RECORD_THE_CALL}\
+         while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
+         shift\n\
+         input=\"$here/input.$$\"\n\
+         mkfifo \"$input\"\n\
+         exec 3<>\"$input\" 4<&0\n\
+         cat <&4 >&3 &\n\
+         forwarder=$!\n\
+         sh -c \"$*\" <&3 2>&1\n\
+         status=$?\n\
+         kill \"$forwarder\" 2>/dev/null\n\
+         rm -f \"$input\"\n\
+         exit \"$status\"\n"
+    ))
+}
+
+/// A coder whose workspaces run commands in a pty that ends every line the command writes with a
+/// carriage return (`onlcr`), as the real `coder ssh` does, until the command turns the pty's
+/// output processing off with `stty -opost`. The workspace's `stty` is a stand-in that only notes
+/// that; text alone is translated — a line is read by the shell, so a NUL would not survive it —
+/// and the CLI exits with the translation's status, not the command's.
+pub fn a_coder_whose_workspaces_end_their_lines_with_carriage_returns() -> StandInCoder {
+    StandInCoder::running(&format!(
+        "{RECORD_THE_CALL}\
+         while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
+         shift\n\
+         mkdir -p \"$here/workspace-bin\"\n\
+         printf '#!/bin/sh\\ncase \" $* \" in *\" -opost \"*) : > \"%s/opost-off\";; esac\\n' \"$here\" \
+         > \"$here/workspace-bin/stty\"\n\
+         chmod +x \"$here/workspace-bin/stty\"\n\
+         rm -f \"$here/opost-off\"\n\
+         PATH=\"$here/workspace-bin:$PATH\" sh -c \"$*\" 2>&1 | \
+         while IFS= read -r line || {{ printf '%s' \"$line\"; false; }}; do\n\
+           if [ -f \"$here/opost-off\" ]; then ending='\\n'; else ending='\\r\\n'; fi\n\
+           printf \"%s$ending\" \"$line\"\n\
+         done\n"
+    ))
+}
+
 /// A coder that refuses before anything runs on a workspace, as the CLI does for a workspace it
 /// will not connect to: `complaint` on stderr and exit status 1.
 pub fn a_coder_that_refuses_to_connect(complaint: &str) -> StandInCoder {
