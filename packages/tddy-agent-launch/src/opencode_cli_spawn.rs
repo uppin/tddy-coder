@@ -97,6 +97,7 @@ pub(crate) async fn start_cli_harness_session(
         managed_codebase,
         managed,
         role,
+        session_tool_token,
     } = start;
     let project_id = project_id.trim();
     let repo_path = repo_path.trim();
@@ -227,6 +228,10 @@ pub(crate) async fn start_cli_harness_session(
         managed,
         role,
         github_credential_handler: identity.github_credential,
+        // A session whose agent runs on another host is exported none: the URL and the socket
+        // name this daemon's host, which that shell cannot reach — detection would prefer the
+        // dead route over the remote one.
+        session_tool_token: session_tool_token.filter(|_| checkout_alias.is_empty()),
     })?;
 
     // On a target the agent's hooks append to its hook log there, not to a daemon it cannot

@@ -331,9 +331,10 @@ fn minimal_service_with_manager(
 /// reaper (which only considers live processes) is not racing a process exit. `cat` ends when the
 /// session is stopped (SIGTERM) or its terminal closes.
 ///
-/// The variables are read from the `tddy-tools` server's `env` block in the MCP config the agent was
-/// launched with (`--mcp-config`): the agent's own environment carries no `TDDY_*`, its tool server's
-/// does.
+/// The `ENVDUMP` variables are read from the `tddy-tools` server's `env` block in the MCP config the
+/// agent was launched with (`--mcp-config`): the agent's own environment carries no `TDDY_*`, its
+/// tool server's does. The `ENVDUMPENV` variables are read from the agent process's own environment,
+/// which is what its shell and its MCP children inherit.
 fn write_argv_and_env_script(dir: &Path) -> PathBuf {
     let script_path = dir.join("stub_claude_argv_env.sh");
     let dump = |key: &str| {
@@ -341,6 +342,7 @@ fn write_argv_and_env_script(dir: &Path) -> PathBuf {
             "echo \"ENVDUMP {key}=[$(sed -n 's/.*\"{key}\": *\"\\([^\"]*\\)\".*/\\1/p' \"$cfg\" 2>/dev/null)]\"\n"
         )
     };
+    let dump_env = |key: &str| format!("echo \"ENVDUMPENV {key}=[${key}]\"\n");
     std::fs::write(
         &script_path,
         [
@@ -353,6 +355,10 @@ fn write_argv_and_env_script(dir: &Path) -> PathBuf {
             dump("TDDY_REMOTE_SESSION_TOKEN"),
             dump("TDDY_REMOTE_DAEMON_URL"),
             dump("TDDY_REMOTE_DAEMON_SOCKET"),
+            dump_env("TDDY_REMOTE_SESSION_ID"),
+            dump_env("TDDY_REMOTE_SESSION_TOKEN"),
+            dump_env("TDDY_REMOTE_DAEMON_URL"),
+            dump_env("TDDY_REMOTE_DAEMON_SOCKET"),
             "exec cat >/dev/null\n".to_string(),
         ]
         .concat(),

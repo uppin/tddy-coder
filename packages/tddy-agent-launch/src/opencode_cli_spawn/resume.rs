@@ -87,6 +87,9 @@ impl crate::launch_ports::LaunchSessions {
                 os_user,
                 &req.session_token,
                 identity.github_credential,
+                // A split agent's process runs model-authored code joined to its room over its
+                // own split transport: the session tool transport is none of its process's.
+                split.is_none(),
             )
             .await?;
         resume_cli_harness_session(

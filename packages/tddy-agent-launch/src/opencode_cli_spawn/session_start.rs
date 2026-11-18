@@ -82,6 +82,10 @@ pub(crate) struct CliSessionStart<'a> {
     pub managed: Option<ManagedWiring>,
     /// The session's standing role, recorded before its agent is spawned.
     pub role: StartRole<'a>,
+    /// The agent credential the session tool transport is minted around — `None` exports nothing:
+    /// the daemon's own callerless children, a session whose agent runs on another host, a daemon
+    /// that signs no tokens.
+    pub session_tool_token: Option<String>,
 }
 
 /// The shell that reaches `target`, resolved as `subject`: an ssh target's transport, or a

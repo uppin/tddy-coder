@@ -575,9 +575,18 @@ environment the `claude-cli` launch produces:
   (supervisor-spawned) agent all start from it. An operator adds a variable in `pass_env` of
   `tools/<agent>.yaml`, or replaces the base set with `tools/agent-env/base.yaml`
   ([Harness profiles § The agent's environment](harness-profiles.md#the-agents-environment)).
-- **No `TDDY_*` variable.** The agent process sees no `TDDY_*` variable. A managed workflow's or a
-  main's `TDDY_*` pair is carried by the agent's tool-server registration (`mcp` env), never the
-  process.
+- **No `TDDY_*` variable — except the session tool transport.** A managed workflow's or a main's
+  `TDDY_*` pair is carried by the agent's tool-server registration (`mcp` env), never the process.
+  The one exception, for a locally-launched session, is the **session tool transport** the agent
+  process itself is given: `TDDY_REMOTE_SESSION_ID` (its own session id),
+  `TDDY_REMOTE_DAEMON_URL` / `TDDY_REMOTE_DAEMON_SOCKET` (this daemon's endpoints) and
+  `TDDY_REMOTE_SESSION_TOKEN` — an agent credential of its own, minted under the caller's token at
+  every start and resume (24 h TTL), never the caller's. A `tddy-tools` the agent runs from its own
+  shell — `tddy-tools monitor`, `tddy-tools send` (`#activity-wake` 4/5, 5/5) — resolves its route
+  and authenticates from these (and so does a `tddy-tools --mcp` child, which inherits the process).
+  A session whose agent runs on another host (a target or ssh checkout) is given none: the endpoints
+  name this host, which its shell cannot reach. A daemon that signs no tokens exports none, and
+  says so on its log.
 - **Session pointer.** So a `tddy-tools submit`, `transition`, `ask` or `notify` the agent runs from
   its own shell still reaches the session, the launch writes `<worktree>/.tddy/session.json` at every
   start and resume ([tddy-tools session resolution](../../../packages/tddy-tools/docs/session-resolution.md)):
