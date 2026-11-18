@@ -58,6 +58,21 @@ The shared target-session test fixtures, and the one test that runs the Coder pa
 Commit 2 is the recorded green baseline of the four suites (names and counts), plus the live test as
 a failing production test. The live test is red until nodes 5 and 7 are green beneath it.
 
+## Recorded baseline and contract (pass 2, 2026-11-18)
+
+Scoped run `./test -p tddy-testing-commons -p tddy-agent-launch -p tddy-session-lifecycle -p tddy-session-driver` on `61f07b821`: **1372 passed, 28 failed, 3 ignored**. `tddy-testing-commons` and `tddy-session-driver` (unit 3, acceptance 7) are fully green. The 28 failures are not this node's:
+
+- **Parent contracts still red (nodes 6/7):** `target_trust_acceptance` (3), `remote_agent_launch_acceptance` (2) and lib unit tests (`remote_agent_launch::tests::*` 2, `cli_agent_steps_tests::a_minted_conversation_on_a_target_is_minted_through_its_shell`) in `tddy-agent-launch`; `claude_cli_from_spec_acceptance::an_unsandboxed_claude_cli_start_runs_the_spec_binary_with_the_argv_its_template_renders` and lib `report_session_status_unit_tests::waiting_for_input_records_the_agents_message_as_the_pending_question` in `tddy-session-lifecycle`.
+- **Environment:** `sandboxed_codebase_lifecycle_acceptance` (5), `sandboxed_codebase_placement_acceptance` (7) -- macOS sandbox harness; `session_sync_livekit_acceptance` (6, "Once instance has previously been poisoned") -- LiveKit testkit.
+
+Live test `tests/coder_live_production.rs` (3 tests, `#[ignore]`, run with `--ignored` against `me/remote-dev`):
+
+- `the_deployment_reads_as_the_stand_ins_assume` -- **passes**: `coder version` first line is `Coder v2.33.5+81139b5 ...`; `remote-dev` reports `running`.
+- `a_claude_session_on_the_workspace_reaches_its_prompt_and_its_hook_log_is_followed` and `a_cursor_session_on_the_workspace_mints_its_chat_and_reaches_its_prompt` -- **red**: `start_session` fails with the agent exiting 127 on the workspace: `env: '/Users/mantasi/.local/share/claude/versions/2.1.311': No such file or directory` (Cursor: `.../cursor-agent/versions/2026.11.17-.../cursor-agent`). The driver sends the daemon host's absolute agent path to the workspace. This is the `target-agent-start` (node 7) defect; the live test stays red until it is green.
+- Without `CODER_URL` the test fails naming it.
+
+Unverified because the start never gets there: that Claude shows `for shortcuts` and Cursor `Cursor Agent` as the prompt marker, that `<worktree>/.tddy/hooks.log` exists while running and is removed on stop. Also noted: the workspace reports "outdated" on each `coder ssh` (stderr noise in the start's output).
+
 ## Green wave
 
 **Wave:** 3 of 3
