@@ -6,7 +6,7 @@
 **Metrics:** **302 lines**
 **Thresholds breached:** length 191 > 60 (`/analyze-clean-code`)
 **Restructure:** not designed — deferred to the #agent-tools sweep node (developer, 2026-11-02)
-**Status:** Open — regressed 2026-11-16 by #933 (368 → 378) — unclaimed
+**Status:** Open — regressed 2026-11-18 by #948 (391 → 397) — unclaimed
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured
 
 ## Measurement history
@@ -26,6 +26,7 @@
 | 2026-11-16 | 347 → 368 | **worse by 21** in #921 (`#remote-shell` 7/7), brace-matched on `origin/feature/remote-shell/remote-hooks` (`529e4c653`) and HEAD after its wrap split; no coverage run. The Coder target resolution before the checkout is cut, and the slot files and pointer through the resolved shell. At the same wrap `CliSessionStart` and `shell_for_session_target` moved to `opencode_cli_spawn::session_start` (file 529 → 422 production lines); this function stays with the `#agent-tools` sweep as deferred |
 | 2026-11-16 | 368 → 368 | #924 (`#remote-shell` 8/11) sweep: **not restored** (target ≤ 318). Every range holding what the stack added carries `Option<Arc<dyn RemoteShell>>`, and the engine refuses a signature naming a type the file does not import; two hand-written `use` lines would unlock about 51 lines and need the developer's consent. Recorded in the changeset's Deferred work for the stack's TODO gate; the code is left as it is |
 | 2026-11-16 | 368 → 378 | **worse by 10** in #933: the spawn records `activity_status: Started` in the first `.session.yaml` (a Cursor launch never fires `sessionStart`); brace-matched fn line to closing brace on `origin/master` (`769c16e86`) and HEAD; no coverage run. Not extracted: restructuring stays with the `#agent-tools` sweep as deferred |
+| 2026-11-18 | 391 → 397 | **worse by 6** in #948 (`#coder-start` 8/10): the target shell is wrapped in `recorded_by` after the cut, so the start's later target calls are logged; brace-matched fn line to closing brace on `origin/feature/coder-start/target-agent-start` (`a91b974ec`) and HEAD; no coverage run. The base already measures 391, so the growth from 378 is not this PR's. Not extracted: restructuring stays with the `#agent-tools` sweep as deferred |
 
 ## What would close it
 
