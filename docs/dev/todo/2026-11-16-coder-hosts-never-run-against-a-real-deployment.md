@@ -36,3 +36,9 @@ contract the code was built against, not the deployment's actual answers.
 real `coder` CLI on the daemon — connect an account, list its workspaces, start a session on
 a running workspace, and try a stopped one — correct whichever of the four facts differs,
 and update the stand-ins and the feature docs to match.
+
+**Narrowed 2026-11-18 (`#coder-start` 9/10, #949):** `tddy-session-driver/tests/coder_live_production.rs`
+runs against `mantasi/remote-dev` and passes: `coder version` prints `Coder v2.33.5+81139b5 …`, a
+usable workspace reports `running`, and Claude and Cursor start there and reach their prompts. Still
+unverified: the hook follower on a workspace (needs a daemon-level start — the driver never creates
+`hooks.log`), and the status words of a non-running workspace (none was tried).

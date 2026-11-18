@@ -27,6 +27,7 @@ tddy-session-driver --target coder:<owner>/<workspace>[.<agent>] --worktree <pat
 |---|---|
 | `--target` | `local`, `ssh:<Host alias>`, or `coder:<owner>/<workspace>[.<agent>]` (`target.rs`) |
 | `--worktree` | The agent's working directory, on the target. It must exist; the driver cuts none |
+| `--session-id` | The session's id (default: a fresh UUID). A Claude start pre-trusts the clone only when the worktree is `<clone>/.worktrees/<session id>`, so a caller that lays out that layout names the id here. Claude requires a UUID |
 | `--agent` | The coding agent's id, resolved as the daemon resolves it: built-in specs plus `<tddy home>/tools` (`host_coding_agents`) |
 | `--model`, `--prompt`, `--permission-mode` | Passed into the harness template as a session start passes them |
 | `--binary <path>` | The agent's binary on the target, replacing the path this host resolved |
@@ -90,4 +91,14 @@ caller answers them with `wait_for_text` then `send_keys`.
 failing on any stdout line that is not a frame. Local and Coder conversations (through a stand-in `coder`
 the suite writes, which runs the workspace's command on this machine), the missing-token refusal, a start failure's last words,
 `--start`, and a Coder stop that must kill the agent by its recorded pid. Unit tests in `target.rs`
-cover parsing and the refusal.
+cover parsing and the refusal; unit tests in `main.rs` cover the `--session-id` default.
+The stand-in `coder` script, the ssh stand-in and `write_executable` come from
+`tddy_testing_commons::remote_target`.
+
+`tests/coder_live_production.rs` is a production test (`#[ignore]`, run with
+`./test -p tddy-session-driver -- --ignored coder_live`) against a real Coder deployment. It needs
+`TDDY_CODER_LIVE_WORKSPACE`, `CODER_URL` and `CODER_SESSION_TOKEN` and fails, never skips, when one is
+missing; the token is inherited by the `coder` children and never put on an argument list. It checks
+that `coder version` and the workspace status read as the stand-ins assume, that Cursor mints its chat
+and reaches `Cursor Agent`, and that Claude on a cloned worktree (`--session-id`) reaches `❯ Try` with no
+trust dialog. It does not check the hook log: the daemon's start path creates it, not the driver.

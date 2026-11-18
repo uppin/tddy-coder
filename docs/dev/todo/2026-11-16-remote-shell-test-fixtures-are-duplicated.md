@@ -28,3 +28,11 @@ stand-in `coder` **script**. The shared stand-in could not be used: the suite dr
 binary as a subprocess, so it needs a `coder` executable on disk, and `tddy_remote_shell`'s test
 support offers only the in-process `InMemoryShell`. A shared support module should therefore also
 offer the stand-in `coder` as a script writer.
+
+**Narrowed 2026-11-18 (`#coder-start` 9/10, #949):** `tddy_testing_commons::remote_target` now holds
+`write_executable` with the warm-up (all 11 copies replaced) and `StandInSshTarget` (the identical
+`AReachableMachine`/`ATarget` in the four lifecycle files). What remains: the stand-in coder
+`AWorkspace` (lifecycle `coder_target_session`, agent-launch `coder_agent_launch` — bodies diverged),
+agent-launch's `ATarget` with its call log, the stub agent families, the `acme` spec, the daemon
+helpers, and the copies in `tddy-remote-shell/tests/support` and `tddy-agent-launch/src/remote_agent_launch.rs`
+(a `tddy-testing-commons` dev-dependency there risks a cycle).

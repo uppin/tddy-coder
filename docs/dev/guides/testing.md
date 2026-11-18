@@ -341,6 +341,12 @@ Do not use production tests for:
 
 Production tests use `#[ignore]` and can be run with `cargo test -- --ignored` when needed.
 
+### Listed production tests
+
+| Test | Needs | Run |
+|---|---|---|
+| `tddy-session-driver/tests/coder_live_production.rs` — the Coder path against a real deployment: `coder version`, workspace status, Claude and Cursor reaching their prompts | `TDDY_CODER_LIVE_WORKSPACE`, `CODER_URL`, `CODER_SESSION_TOKEN` (a missing one fails the test) | `./test -p tddy-session-driver -- --ignored coder_live` |
+
 ## Test Execution Workflow
 
 ```bash
