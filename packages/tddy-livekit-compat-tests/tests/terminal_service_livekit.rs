@@ -44,6 +44,48 @@ mod livekit_tests {
         Ok(())
     }
 
+    /// Upper bound for a cold daemon start on a loaded CI runner. The wait ends as
+    /// soon as the daemon joins or exits; this only bounds a daemon that hangs alive.
+    const DAEMON_JOIN_TIMEOUT: Duration = Duration::from_secs(90);
+
+    /// Waits until the daemon joins the room as `server`, polling the daemon process
+    /// so an early exit fails immediately (with its stderr) instead of timing out.
+    async fn wait_for_daemon_participant(
+        room: &Room,
+        events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
+        daemon: &mut std::process::Child,
+        stderr_path: &std::path::Path,
+    ) -> Result<()> {
+        let target: ParticipantIdentity = SERVER_IDENTITY.to_string().into();
+        let deadline = tokio::time::Instant::now() + DAEMON_JOIN_TIMEOUT;
+        let stderr = || std::fs::read_to_string(stderr_path).unwrap_or_default();
+        loop {
+            if room.remote_participants().contains_key(&target) {
+                return Ok(());
+            }
+            if let Some(status) = daemon.try_wait()? {
+                anyhow::bail!(
+                    "daemon exited ({status}) before joining as '{SERVER_IDENTITY}'; stderr:\n{}",
+                    stderr()
+                );
+            }
+            if tokio::time::Instant::now() >= deadline {
+                anyhow::bail!(
+                    "daemon still running but not joined as '{SERVER_IDENTITY}' after {:?}; stderr:\n{}",
+                    DAEMON_JOIN_TIMEOUT,
+                    stderr()
+                );
+            }
+            match tokio::time::timeout(Duration::from_millis(250), events.recv()).await {
+                Ok(Some(RoomEvent::ParticipantConnected(p))) if p.identity() == target => {
+                    return Ok(())
+                }
+                Ok(None) => anyhow::bail!("client room event stream closed"),
+                _ => {}
+            }
+        }
+    }
+
     /// Two LiveKit clients with independent VirtualTui streams.
     /// Each client gets its own stream; client 1 disconnect does not affect client 2.
     #[tokio::test]
@@ -179,6 +221,7 @@ mod livekit_tests {
         let sessions_base = std::env::temp_dir().join("tddy-daemon-livekit-test");
         let _ = std::fs::remove_dir_all(&sessions_base);
         std::fs::create_dir_all(&sessions_base).expect("create sessions base");
+        let daemon_stderr_path = sessions_base.join("daemon.stderr.log");
 
         let tddy_coder = std::env::var("CARGO_BIN_EXE_tddy-coder").unwrap_or_else(|_| {
             let exe = std::env::current_exe().expect("current exe");
@@ -190,7 +233,7 @@ mod livekit_tests {
             .env_clear()
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::fs::File::create(&daemon_stderr_path)?)
             .args([
                 "--agent",
                 "stub",
@@ -216,18 +259,24 @@ mod livekit_tests {
                 let _ = self.0.wait();
             }
         }
-        let _guard = KillOnDrop(daemon);
+        let mut guard = KillOnDrop(daemon);
 
-        // When — client connects and calls StreamTerminalIO on the daemon
-        tokio::time::sleep(Duration::from_secs(3)).await;
-
+        // When — client connects and calls StreamTerminalIO on the daemon.
+        // The daemon's own join is the readiness signal: no fixed sleep, and a
+        // daemon that dies fails the wait at once with its stderr.
         let (client_room, mut client_events) =
             Room::connect(&url, &client_token, RoomOptions::default())
                 .await
                 .map_err(|e| anyhow::anyhow!("client connect: {}", e))?;
 
         let rpc_events = client_room.subscribe();
-        wait_for_participant(&client_room, &mut client_events, SERVER_IDENTITY).await?;
+        wait_for_daemon_participant(
+            &client_room,
+            &mut client_events,
+            &mut guard.0,
+            &daemon_stderr_path,
+        )
+        .await?;
 
         let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
 
