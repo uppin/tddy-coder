@@ -182,6 +182,12 @@ pub(crate) async fn start_cli_harness_session(
     )
     .await?;
 
+    // The start's later calls on its target (the conversation, the slot files, the pointer, the
+    // trust write, the launch) are listed on its record as the worktree step's are.
+    let target_shell = target_shell.map(|shell| -> Arc<dyn tddy_remote_shell::RemoteShell> {
+        Arc::new(crate::cli_session_worktree::recorded_by(shell, progress))
+    });
+
     // The clones this session's seeded agents read, claimed now: the worktree they mirror exists.
     let seeded_clones = agent_clones
         .claim_for_seed(

@@ -190,19 +190,34 @@ async fn remote_worktree(
 
 /// `shell`, reporting each command it runs to the start's progress, which is how the start's record
 /// comes to list them.
-fn recorded_by(
+///
+/// The reports hold the progress stream only weakly: a recorded shell a session keeps past its
+/// start (its pointer's removal on exit, its hook follower) neither keeps the start's stream open
+/// nor reports anything once the start is over.
+pub(crate) fn recorded_by(
     shell: std::sync::Arc<dyn tddy_remote_shell::RemoteShell>,
     progress: &AttachmentProgressSink,
 ) -> tddy_remote_shell::RecordedShell {
     tddy_remote_shell::RecordedShell::new(
         shell,
-        std::sync::Arc::new(ProgressCalls(progress.clone())),
+        std::sync::Arc::new(ProgressCalls(
+            progress
+                .tx
+                .as_ref()
+                .map(tokio::sync::mpsc::UnboundedSender::downgrade),
+        )),
     )
 }
 
 /// A [`tddy_remote_shell::RemoteCallSink`] that turns a call's report into the start's
-/// `remote_call` event.
-struct ProgressCalls(AttachmentProgressSink);
+/// `remote_call` event, while the start's progress stream is still open.
+struct ProgressCalls(
+    Option<
+        tokio::sync::mpsc::WeakUnboundedSender<
+            Result<tddy_service::proto::session::StartSessionEvent, Status>,
+        >,
+    >,
+);
 
 impl tddy_remote_shell::RemoteCallSink for ProgressCalls {
     fn report(&self, call: tddy_remote_shell::RemoteCallReport) {
@@ -213,15 +228,19 @@ impl tddy_remote_shell::RemoteCallSink for ProgressCalls {
             Ended::TimedOut => (Outcome::TimedOut, 0),
             Ended::Unreachable => (Outcome::Unreachable, 0),
         };
-        self.0
-            .remote_call(tddy_service::proto::session::StartRemoteCall {
+        let Some(tx) = self.0.as_ref().and_then(|weak| weak.upgrade()) else {
+            return;
+        };
+        AttachmentProgressSink::streaming(tx).remote_call(
+            tddy_service::proto::session::StartRemoteCall {
                 host: call.address.to_string(),
                 command: call.command,
                 duration_ms: u64::try_from(call.duration.as_millis()).unwrap_or(u64::MAX),
                 outcome: outcome as i32,
                 exit_code,
                 stderr_tail: call.stderr_tail,
-            });
+            },
+        );
     }
 }
 
@@ -513,5 +532,62 @@ mod remote_cut_tests {
             run.contains("worktree add -b 'claude-cli/01a1b2c3'"),
             "the generated branch from the changeset is cut:\n{run}"
         );
+    }
+}
+
+#[cfg(test)]
+mod recorded_start_shell_tests {
+    //! `#coder-start` 8/10: a start's recorded shell lists its calls while the start runs, and a
+    //! session that keeps it afterwards neither holds the start's stream open nor reports past it.
+
+    use std::sync::Arc;
+
+    use tddy_remote_shell::{ExecOutput, ExecRequest, InMemoryShell, RemoteShell};
+    use tddy_service::proto::session::start_session_event::Event;
+    use tddy_session_files::attachment_progress::AttachmentProgressSink;
+
+    use super::recorded_by;
+
+    fn a_target() -> Arc<dyn RemoteShell> {
+        let shell = InMemoryShell::new("coder.remote-dev");
+        shell.answers_when(|_| Some(ExecOutput::succeeded(Vec::new())));
+        Arc::new(shell)
+    }
+
+    #[tokio::test]
+    async fn a_call_made_during_the_start_is_reported_on_its_stream() {
+        // Given a start's progress stream and its target's shell, recorded
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let progress = AttachmentProgressSink::streaming(tx);
+        let shell = recorded_by(a_target(), &progress);
+
+        // When the start runs a command there
+        shell
+            .exec(ExecRequest::new("mkdir -p .tddy"))
+            .await
+            .unwrap();
+
+        // Then the stream carries the call
+        let event = rx.try_recv().expect("the call is reported").unwrap();
+        assert!(
+            matches!(&event.event, Some(Event::RemoteCall(call)) if call.command == "mkdir -p .tddy"),
+            "{event:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_shell_kept_past_its_start_neither_holds_the_stream_open_nor_reports() {
+        // Given a recorded shell whose start's own sender has been dropped
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let shell = recorded_by(a_target(), &AttachmentProgressSink::streaming(tx));
+
+        // When the session still runs a command through it
+        shell
+            .exec(ExecRequest::new("rm -f hooks.log"))
+            .await
+            .unwrap();
+
+        // Then the start's stream is closed, with nothing reported after the start
+        assert!(rx.recv().await.is_none(), "the stream ended with the start");
     }
 }

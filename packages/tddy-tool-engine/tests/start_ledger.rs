@@ -441,6 +441,30 @@ async fn a_failed_start_keeps_the_branch_and_worktree_it_cut() {
 }
 
 #[tokio::test]
+async fn a_succeeded_start_whose_session_is_not_listed_keeps_the_branch_and_worktree_it_cut() {
+    // Given a begun start that cut its worktree, on a ledger with no session listing to ask
+    let (_dir, ledger, start, start_id) = a_begun_start().await;
+    start.send(the_worktree_was_cut(
+        "feat/x",
+        "/home/dev/.tddy/repos/repo/.worktrees/s-1",
+    ));
+    eventually(&ledger, &start_id, |r| r.branch.is_some()).await;
+
+    // When the start succeeds
+    start.send(result("s-1"));
+
+    // Then the record still names the branch and worktree the start reported
+    let done = eventually(&ledger, &start_id, |r| r.state == StartState::Succeeded).await;
+    assert_eq!(
+        (done.branch.as_deref(), done.worktree.as_deref()),
+        (
+            Some("feat/x"),
+            Some("/home/dev/.tddy/repos/repo/.worktrees/s-1")
+        )
+    );
+}
+
+#[tokio::test]
 async fn every_remote_call_advances_updated_at() {
     // Given a begun start
     let (_dir, ledger, start, start_id) = a_begun_start().await;

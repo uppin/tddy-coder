@@ -417,8 +417,10 @@ fn apply_ending(record: &mut StartLedgerRecord, ending: Ending) {
         } => {
             record.state = StartState::Succeeded;
             record.session_id = Some(session_id);
-            record.branch = branch;
-            record.worktree = worktree;
+            // The session's listing names them when there is one; otherwise the record keeps what
+            // the start reported when it cut its worktree.
+            record.branch = branch.or(record.branch.take());
+            record.worktree = worktree.or(record.worktree.take());
             record.display_name = display_name;
         }
         Ending::Failed(message) => {
