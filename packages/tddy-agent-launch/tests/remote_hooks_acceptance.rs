@@ -97,6 +97,8 @@ fn a_reachable_target() -> ATarget {
         &root.join("bin/ssh"),
         r#"#!/bin/sh
 for command; do :; done
+SHELL="$(dirname "$0")/login-shell"
+export SHELL
 exec 3<&0
 /bin/sh -c "$command" <&3 3<&- &
 remote=$!
@@ -106,7 +108,18 @@ exit $?
 "#,
     );
     let target = ATarget { root, _dir: dir };
-    std::fs::create_dir_all(target.worktree()).expect("the session's worktree on the target");
+    for path in [target.worktree(), target.agents_dir()] {
+        std::fs::create_dir_all(path).expect("a directory of the target");
+    }
+    // The target's login shell finds its agents on a `PATH` of its own.
+    write_executable(
+        &target.root.join("bin/login-shell"),
+        &format!(
+            "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\nPATH='{}:/usr/bin:/bin'\nexport PATH\n\
+             exec /bin/sh -c \"$2\"\n",
+            target.agents_dir().display()
+        ),
+    );
     target
 }
 
@@ -114,6 +127,11 @@ impl ATarget {
     /// The remote shell on the target, through the stand-in.
     fn shell(&self) -> Arc<SshShell> {
         Arc::new(SshShell::through(self.root.join("bin/ssh"), TARGET_ALIAS))
+    }
+
+    /// Where the target's login finds its agents: the first directory of its `PATH`.
+    fn agents_dir(&self) -> PathBuf {
+        self.root.join("opt/agents")
     }
 
     /// The session's worktree on the target.
@@ -156,14 +174,12 @@ impl ATarget {
 /// A stub agent installed where the target finds it.
 struct AStubAgent {
     dir: PathBuf,
-    _dir: tempfile::TempDir,
 }
 
 /// An agent that fires its `SessionStart` hook as it starts — `hook_command` under `sh -c`, with
 /// [`SESSION_START_PAYLOAD`] on its stdin, as Claude Code runs a hook — then waits on its terminal.
-fn an_agent_that_fires_as_it_starts(hook_command: &str) -> AStubAgent {
-    let dir = tempfile::tempdir().expect("a directory for the stub agent");
-    let path = std::fs::canonicalize(dir.path()).expect("the stub's directory resolves");
+fn an_agent_that_fires_as_it_starts(target: &ATarget, hook_command: &str) -> AStubAgent {
+    let path = target.agents_dir();
     std::fs::write(path.join("session-start-hook"), hook_command)
         .expect("the hook command is kept for the stub");
     write_executable(
@@ -180,10 +196,7 @@ exec /bin/cat
             here = path.display()
         ),
     );
-    AStubAgent {
-        dir: path,
-        _dir: dir,
-    }
+    AStubAgent { dir: path }
 }
 
 impl AStubAgent {
@@ -395,7 +408,7 @@ async fn a_hook_fired_by_an_agent_on_a_target_updates_the_sessions_activity() {
     let target = a_reachable_target();
     let daemon = a_daemon();
     let hooks = daemon.installs_the_sessions_hooks_on(&target).await;
-    let agent = an_agent_that_fires_as_it_starts(&target.installed_hook("SessionStart"));
+    let agent = an_agent_that_fires_as_it_starts(&target, &target.installed_hook("SessionStart"));
 
     // When
     let session = daemon.launches(&agent, &target, &hooks).await;

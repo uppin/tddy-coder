@@ -1,7 +1,7 @@
 # Changeset: Claude and Cursor start on a target with the target's own binary, environment, chat and trust
 
 **Date**: 2026-11-18
-**Status**: 🚧 In Progress
+**Status**: 🟢 Green (live Claude/Cursor check on `mantasi/remote-dev` left to [W])
 **Type**: Fix
 **Complexity**: 4. It spans several crates: `tddy-agent-launch`, `tddy-agent-backend` and possibly
 `tddy-coding-agent-specs`. It changes the remote-command contract, adds a JSON merge on the target,
@@ -148,3 +148,13 @@ See the discovery doc, Exploration 2:
 - [ ] TDD Green
 - [ ] Validate changes
 - [ ] Wrap
+
+### From @green
+
+- **Clone root is derived, not plumbed** (orchestrator, under the user's finish-without-stopping instruction): `clone_root_of_worktree(worktree, session_id)` reads `<root>/.worktrees/<session id>`, the layout `RemoteCheckout` documents; any other layout gives `None` and trusts nothing. Used by `harness_launch` and `tddy-session-driver`.
+- **Spec's own binary on a target**: `plan_the_launch` renders the argv with `tool.binary = tool.command`; the node launcher is `None` on a target.
+- **Environment on a target**: only the spec's `pass_env` values and the launch's own variables travel; the base set (`HOME`, `PATH`, `TMPDIR`) is expanded by the target's login shell. A chat mint on a target uses the same form and takes the last stdout line as the id (login banners).
+- **Trust failure** is `RemoteLaunchError::Trust`; it fails the start before any terminal is registered.
+- **Local mint into a missing directory** now names the directory.
+- **Flaky deadline test**: the cause was the first-execution scan of a fresh stub eating the 3 s turn deadline; the stub is now warmed up before the turn.
+- MCP key location still to confirm live (see above).

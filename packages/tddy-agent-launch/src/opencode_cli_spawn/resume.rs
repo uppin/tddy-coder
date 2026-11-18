@@ -316,7 +316,11 @@ async fn resume_cli_harness_session(
     env.extend(wiring.env);
     env.extend(carried_effort.env);
     env.extend(route.env);
-    let launcher = node_launcher_of(&agent.tool.binary);
+    // The node launcher is a path of this host: a target runs its own agent, found by its name.
+    let launcher = match &target_shell {
+        Some(_) => None,
+        None => node_launcher_of(&agent.tool.binary),
+    };
     let params = harness_template_params(&conversation.bound(HarnessLaunch {
         model: meta.model.as_deref().unwrap_or_default(),
         resume: true,

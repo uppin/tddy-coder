@@ -216,7 +216,9 @@ done
 [ "$2" = "--stdio" ] && exit 0
 while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done
 shift
-{delay}exec /bin/sh -c "$*"
+{delay}SHELL="$(dirname "$0")/login-shell"
+export SHELL
+exec /bin/sh -c "$*"
 "#
         ),
     );
@@ -229,11 +231,29 @@ for argument; do
   last="$argument"
 done
 [ -n "$proxy" ] && /bin/sh -c "$proxy" </dev/null >/dev/null 2>&1
+SHELL="$(dirname "$0")/login-shell"
+export SHELL
 exec /bin/sh -c "$last"
 "#,
     );
     let workspace = AWorkspace { root, _dir: dir };
-    std::fs::create_dir_all(workspace.worktree()).expect("the session's worktree in the workspace");
+    for dir in [
+        workspace.worktree(),
+        workspace.home(),
+        workspace.agents_dir(),
+    ] {
+        std::fs::create_dir_all(dir).expect("a directory of the workspace");
+    }
+    // The workspace's login shell: a `HOME` and a `PATH` of its own, which holds its agents.
+    write_executable(
+        &workspace.root.join("bin/login-shell"),
+        &format!(
+            "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\nHOME='{}'\nPATH='{}:/usr/bin:/bin'\nexport HOME PATH\n\
+             exec /bin/sh -c \"$2\"\n",
+            workspace.home().display(),
+            workspace.agents_dir().display()
+        ),
+    );
     workspace
 }
 
@@ -246,6 +266,16 @@ impl AWorkspace {
     /// The stand-in OpenSSH client a streamed command reaches this workspace through.
     fn ssh(&self) -> PathBuf {
         self.root.join("bin/ssh")
+    }
+
+    /// The `HOME` of the workspace's login.
+    fn home(&self) -> PathBuf {
+        self.root.join("home/coder")
+    }
+
+    /// Where the workspace's login finds its agents: the first directory of its `PATH`.
+    fn agents_dir(&self) -> PathBuf {
+        self.root.join("opt/agents")
     }
 
     /// The session's worktree in the workspace.
@@ -297,21 +327,28 @@ impl AWorkspace {
 /// A stub agent installed where the workspace finds it.
 struct AStubAgent {
     dir: PathBuf,
-    _dir: tempfile::TempDir,
+    _dir: Option<tempfile::TempDir>,
 }
 
 impl AStubAgent {
+    /// An agent in a directory of this host's: a start that must never run it shows it never did.
     fn running(body: &str) -> Self {
         let dir = tempfile::tempdir().expect("a directory for the stub agent");
         let path = std::fs::canonicalize(dir.path()).expect("the stub's directory resolves");
+        Self::written_to(path, Some(dir), body)
+    }
+
+    /// An agent installed where `workspace`'s login finds it, by its bare name.
+    fn installed_in(workspace: &AWorkspace, body: &str) -> Self {
+        Self::written_to(workspace.agents_dir(), None, body)
+    }
+
+    fn written_to(dir: PathBuf, held: Option<tempfile::TempDir>, body: &str) -> Self {
         write_executable(
-            &path.join("acme"),
-            &format!("#!/bin/sh\nhere='{}'\n{body}", path.display()),
+            &dir.join("acme"),
+            &format!("#!/bin/sh\nhere='{}'\n{body}", dir.display()),
         );
-        Self {
-            dir: path,
-            _dir: dir,
-        }
+        Self { dir, _dir: held }
     }
 
     fn program(&self) -> PathBuf {
@@ -336,26 +373,36 @@ impl AStubAgent {
 
 /// An agent that records its working directory, then waits on its terminal.
 fn an_agent_that_stays_up() -> AStubAgent {
-    AStubAgent::running(
-        r#"/bin/pwd -P > "$here/cwd"
+    AStubAgent::running(the_body_of_an_agent_that_stays_up())
+}
+
+/// [`an_agent_that_stays_up`] as installed in `workspace`.
+fn an_agent_that_stays_up_in(workspace: &AWorkspace) -> AStubAgent {
+    AStubAgent::installed_in(workspace, the_body_of_an_agent_that_stays_up())
+}
+
+fn the_body_of_an_agent_that_stays_up() -> &'static str {
+    r#"/bin/pwd -P > "$here/cwd"
 printf 'ACME READY in the workspace\n'
 exec /bin/cat
-"#,
-    )
+"#
 }
 
 /// An agent that fires its `SessionStart` hook as it starts — `hook_command` under `sh -c`, with
 /// [`SESSION_START_PAYLOAD`] on its stdin, as Claude Code runs a hook — then waits on its terminal.
-fn an_agent_that_fires_as_it_starts(hook_command: &str) -> AStubAgent {
-    let agent = AStubAgent::running(&format!(
-        r#"PATH=/usr/bin:/bin
+fn an_agent_that_fires_as_it_starts_in(workspace: &AWorkspace, hook_command: &str) -> AStubAgent {
+    let agent = AStubAgent::installed_in(
+        workspace,
+        &format!(
+            r#"PATH=/usr/bin:/bin
 export PATH
 /bin/pwd -P > "$here/cwd"
 printf '%s' '{SESSION_START_PAYLOAD}' | /bin/sh -c "$(/bin/cat "$here/session-start-hook")"
 printf 'ACME READY in the workspace\n'
 exec /bin/cat
 "#
-    ));
+        ),
+    );
     std::fs::write(agent.dir.join("session-start-hook"), hook_command)
         .expect("the hook command is kept for the stub");
     agent
@@ -606,7 +653,7 @@ async fn the_agent_runs_in_the_coder_workspace_named_by_the_target() {
     // Given a running workspace holding the session's worktree, the agent installed there, and
     // the caller's open vault holding the account the target names
     let workspace = a_running_workspace();
-    let agent = an_agent_that_stays_up();
+    let agent = an_agent_that_stays_up_in(&workspace);
     let vault = an_open_vault_holding_adas_account();
     let daemon = a_daemon();
 
@@ -623,7 +670,7 @@ async fn the_agent_runs_in_the_coder_workspace_named_by_the_target() {
 
     // And the CLI that carries it ran once, in the session's directory, for that workspace's
     // agent, as the account the caller's vault holds
-    let launches = workspace.calls_carrying(&agent.program().to_string_lossy());
+    let launches = workspace.calls_carrying("> .tddy/agent.pid");
     assert_eq!(
         launches
             .iter()
@@ -660,7 +707,8 @@ async fn a_hook_fired_in_a_coder_workspace_reaches_the_daemon() {
     let hooks = daemon
         .installs_the_sessions_hooks_through(shell.as_ref(), &workspace)
         .await;
-    let agent = an_agent_that_fires_as_it_starts(&workspace.installed_hook("SessionStart"));
+    let agent =
+        an_agent_that_fires_as_it_starts_in(&workspace, &workspace.installed_hook("SessionStart"));
 
     // When the agent is launched and the session's hook log is followed
     let _launched = daemon
@@ -752,7 +800,7 @@ async fn an_agent_on_a_deployment_slower_than_five_seconds_a_call_is_launched() 
     // Given a workspace whose every one-shot takes longer than five seconds, as a real
     // deployment's does, and an agent there that stays up
     let workspace = a_workspace_on_a_slow_deployment();
-    let agent = an_agent_that_stays_up();
+    let agent = an_agent_that_stays_up_in(&workspace);
     let vault = an_open_vault_holding_adas_account();
     let daemon = a_daemon();
     let shell = daemon
@@ -782,7 +830,10 @@ async fn an_agent_that_exits_on_a_slow_deployment_fails_its_launch_with_its_last
     // Given a workspace whose every one-shot takes longer than five seconds, and an agent there
     // that exits as it starts
     let workspace = a_workspace_on_a_slow_deployment();
-    let agent = AStubAgent::running("printf 'acme: no licence for this host\\n'\nexit 3\n");
+    let agent = AStubAgent::installed_in(
+        &workspace,
+        "printf 'acme: no licence for this host\\n'\nexit 3\n",
+    );
     let vault = an_open_vault_holding_adas_account();
     let daemon = a_daemon();
     let shell = daemon

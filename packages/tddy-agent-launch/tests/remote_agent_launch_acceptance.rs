@@ -130,15 +130,11 @@ struct AnSshCall {
     args: String,
 }
 
-/// A target that runs what it is asked to: the stand-in records its working directory and its
-/// arguments, then runs its last argument — the remote command — with `sh -c` as a child whose
-/// terminal is its own, under a login environment holding [`LOGIN_ONLY`]. It hangs the command up
-/// when it is itself hung up or terminated, and exits with the command's status.
-fn a_reachable_target() -> ATarget {
-    ATarget::reached_through(&a_target_that_runs_what_it_is_asked_to(""))
-}
-
-/// The stand-in `ssh` of [`a_reachable_target`], `before` its first line.
+/// The stand-in `ssh` of a target that runs what it is asked to: it records its working directory
+/// and its arguments, then runs its last argument — the remote command — with `sh -c` as a child
+/// whose terminal is its own, under a login environment holding [`LOGIN_ONLY`]. It hangs the
+/// command up when it is itself hung up or terminated, and exits with the command's status.
+/// `before` is run first.
 fn a_target_that_runs_what_it_is_asked_to(before: &str) -> String {
     format!(
         r#"{before}for command; do :; done
@@ -155,7 +151,7 @@ exit $?
     )
 }
 
-/// A reachable target whose login shell is its own: `$SHELL` there runs `-lc <command>` under a
+/// A reachable target whose login shell is its own, as every target is that runs an agent: `$SHELL` there runs `-lc <command>` under a
 /// `HOME`, a `PATH` and a `TMPDIR` inside the target's filesystem, none of them this host's, and
 /// finds the agent in the target's own `opt/agents`, which this host's `PATH` does not hold.
 fn a_target_with_a_login_of_its_own() -> ATarget {
@@ -328,10 +324,11 @@ exec /bin/cat
 
 /// An agent that cannot start: it prints [`AGENT_COMPLAINT`] and exits
 /// [`AGENT_FAILURE_STATUS`] at once.
-fn an_agent_that_exits_at_once() -> AStubAgent {
-    AStubAgent::running(&format!(
-        "printf '{AGENT_COMPLAINT}\\n'\nexit {AGENT_FAILURE_STATUS}\n"
-    ))
+fn an_agent_that_exits_at_once_on(target: &ATarget) -> AStubAgent {
+    AStubAgent::installed_on(
+        target,
+        &format!("printf '{AGENT_COMPLAINT}\\n'\nexit {AGENT_FAILURE_STATUS}\n"),
+    )
 }
 
 impl AStubAgent {
@@ -505,8 +502,8 @@ impl ADaemon {
 #[tokio::test]
 async fn the_agent_runs_on_the_target_in_the_sessions_worktree() {
     // Given a reachable target holding the session's worktree, and the agent installed there
-    let target = a_reachable_target();
-    let agent = an_agent_that_stays_up();
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_stays_up_on(&target);
     let daemon = a_daemon();
 
     // When
@@ -526,7 +523,7 @@ async fn the_agent_runs_on_the_target_in_the_sessions_worktree() {
     );
 
     // And the client that carries it ran once, for the target's alias, in the session's directory
-    let launches = target.calls_carrying(&agent.program().to_string_lossy());
+    let launches = target.calls_carrying("> .tddy/agent.pid");
     assert_eq!(
         launches
             .iter()
@@ -539,8 +536,8 @@ async fn the_agent_runs_on_the_target_in_the_sessions_worktree() {
 #[tokio::test]
 async fn the_agents_output_reaches_the_session_terminal() {
     // Given
-    let target = a_reachable_target();
-    let agent = an_agent_that_stays_up();
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_stays_up_on(&target);
     let daemon = a_daemon();
 
     // When
@@ -569,8 +566,8 @@ async fn the_agents_output_reaches_the_session_terminal() {
 async fn the_agent_sees_only_its_specs_environment() {
     // Given a daemon holding a declared key, an undeclared key and a variable of its own, and a
     // target whose login sets a variable for every command
-    let target = a_reachable_target();
-    let agent = an_agent_that_stays_up();
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_stays_up_on(&target);
     let daemon = a_daemon();
 
     // When
@@ -602,8 +599,8 @@ async fn the_agent_sees_only_its_specs_environment() {
 #[tokio::test]
 async fn the_pointer_on_the_target_names_the_remote_agent_as_its_owner() {
     // Given a pointer the start placed on the target, owned by this daemon
-    let target = a_reachable_target();
-    let agent = an_agent_that_stays_up();
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_stays_up_on(&target);
     let daemon = a_daemon();
     let placed = target.a_placed_pointer();
 
@@ -640,8 +637,8 @@ async fn the_pointer_on_the_target_names_the_remote_agent_as_its_owner() {
 #[tokio::test]
 async fn an_agent_that_exits_in_the_startup_window_fails_the_start_with_its_last_output() {
     // Given an agent on the target that exits as soon as it is started
-    let target = a_reachable_target();
-    let agent = an_agent_that_exits_at_once();
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_exits_at_once_on(&target);
     let daemon = a_daemon();
 
     // When

@@ -174,8 +174,10 @@ pub(super) async fn launch(
                 session_dir,
                 pointer: remote.pointer.as_ref(),
                 startup_window: remote.startup_window,
-                // TODO(target-agent-start): the clone root of the checkout this start cut.
-                clone_root: None,
+                clone_root: crate::remote_agent_launch::clone_root_of_worktree(
+                    worktree_path,
+                    session_id,
+                ),
             },
             host_pty_session(cli_manager, session_id, os_user, kind, model, env),
             on_exit,

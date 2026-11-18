@@ -118,8 +118,10 @@ impl DriverSession {
                         session_dir: &spec.session_dir,
                         pointer: None,
                         startup_window: spec.startup_window,
-                        // TODO(target-agent-start): the clone root of `--worktree`, when known.
-                        clone_root: None,
+                        clone_root: tddy_agent_launch::remote_agent_launch::clone_root_of_worktree(
+                            &spec.worktree,
+                            &spec.session_id,
+                        ),
                     },
                     session,
                     None,

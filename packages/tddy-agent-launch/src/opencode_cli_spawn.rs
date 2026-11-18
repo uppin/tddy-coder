@@ -314,7 +314,11 @@ pub(crate) async fn start_cli_harness_session(
     env.extend(std::mem::take(&mut wiring.env));
     env.extend(carried_effort.env);
     env.extend(route.env);
-    let launcher = node_launcher_of(&agent.tool.binary);
+    // The node launcher is a path of this host: a target runs its own agent, found by its name.
+    let launcher = match &target_shell {
+        Some(_) => None,
+        None => node_launcher_of(&agent.tool.binary),
+    };
     let params = harness_template_params(&conversation.bound(HarnessLaunch {
         model: launch_model,
         prompt: Some(initial_prompt),

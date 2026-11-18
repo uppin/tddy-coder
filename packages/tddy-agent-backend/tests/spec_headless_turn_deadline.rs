@@ -81,12 +81,27 @@ impl AStubAgent {
         let dir = tempfile::tempdir().expect("agent dir");
         std::fs::create_dir(dir.path().join("work")).expect("workdir");
         let program = dir.path().join("agent");
+        // A freshly written executable pays a first-execution scan on macOS (~2.4 s, against ~20 ms
+        // afterwards). Left to the turn, that scan eats the turn's deadline: the agent is killed
+        // before it has run a line, and never records its pid. So the script carries a warm-up
+        // guard as its first line and is run once here, guarded, before any turn is timed.
         std::fs::write(
             &program,
-            format!("#!/bin/sh\nPIDS='{}'\n{body}", dir.path().display()),
+            format!(
+                "#!/bin/sh\nif [ -n \"$TDDY_FIXTURE_WARMUP\" ]; then exit 0; fi\nPIDS='{}'\n{body}",
+                dir.path().display()
+            ),
         )
         .expect("write agent");
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let warmed = std::process::Command::new(&program)
+            .env("TDDY_FIXTURE_WARMUP", "1")
+            .output()
+            .expect("the freshly written agent warms up");
+        assert!(
+            warmed.status.success(),
+            "the warm-up of the stub agent failed"
+        );
         Self { dir }
     }
 

@@ -117,11 +117,34 @@ impl ConversationIdAdapter for CursorCreateChat {
 
     async fn mint_on_target(
         &self,
-        _agent: &dyn AgentOnTarget,
-        _deadline: Duration,
+        agent: &dyn AgentOnTarget,
+        deadline: Duration,
     ) -> Result<String, ConversationMintError> {
-        // TODO(target-agent-start): implement
-        unimplemented!("TODO(target-agent-start): mint through the target's shell")
+        let command = "the target's `create-chat`";
+        let run = agent
+            .run(&["create-chat"], deadline)
+            .await
+            .map_err(|reason| {
+                ConversationMintError::Failed(format!("{command} could not be run: {reason}"))
+            })?;
+        if run.status != Some(0) {
+            let status = run
+                .status
+                .map_or("a signal".to_string(), |code| format!("status {code}"));
+            return Err(ConversationMintError::Failed(format!(
+                "{command} exited with {status}: {}",
+                run.stderr.trim()
+            )));
+        }
+        // A login shell may print its own banner before the agent runs: the id is the last line.
+        let last_line = run
+            .stdout
+            .lines()
+            .map(str::trim)
+            .rfind(|line| !line.is_empty())
+            .unwrap_or("");
+        parse_created_chat_id(last_line)
+            .map_err(|e| ConversationMintError::Failed(format!("{command} {e}")))
     }
 
     async fn mint(&self, mint: ConversationMint<'_>) -> Result<String, ConversationMintError> {
@@ -142,7 +165,8 @@ impl ConversationIdAdapter for CursorCreateChat {
             }
             Ok(Err(e)) => {
                 return Err(ConversationMintError::Failed(format!(
-                    "{command} could not be run: {e}"
+                    "{command} could not be run in {}: {e}",
+                    mint.workdir.display()
                 )))
             }
             Ok(Ok(output)) => output,

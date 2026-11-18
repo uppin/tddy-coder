@@ -116,6 +116,15 @@ impl AMachine {
             .expect("the acme tool file");
         std::fs::create_dir_all(root.join("worktree")).expect("the worktree");
         write_executable(&root.join("acme"), agent_script);
+        // The workspace's login shell finds the agent on a `PATH` of its own, by its bare name.
+        write_executable(
+            &root.join("login-shell"),
+            &format!(
+                "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\nPATH='{}:/usr/bin:/bin'\nexport PATH\n\
+                 exec /bin/sh -c \"$2\"\n",
+                root.display()
+            ),
+        );
         write_executable(
             &root.join("coder"),
             &format!(
@@ -124,8 +133,10 @@ impl AMachine {
                  \"${{CODER_SESSION_TOKEN-}}\" >> '{calls}'\n\
                  while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
                  shift\n\
+                 SHELL='{login}'\nexport SHELL\n\
                  {run}/bin/sh -c \"$*\"\n",
-                calls = root.join("coder-calls").display()
+                calls = root.join("coder-calls").display(),
+                login = root.join("login-shell").display()
             ),
         );
         Self { root, _dir: dir }
