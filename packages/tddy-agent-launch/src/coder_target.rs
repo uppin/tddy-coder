@@ -80,7 +80,8 @@ impl CoderCredentialSource for NoCoderAccounts {
 
 /// The remote shell that reaches the Coder workspace `target` names, as `subject`'s account: a
 /// [`tddy_remote_shell::CoderShell`] on `<owner>/<workspace>[.<agent>]`, through the `coder` on the
-/// daemon's `PATH`, holding the account's deployment URL and token as `credentials` reads them.
+/// daemon's `PATH` (and the OpenSSH `ssh` on it for a streamed command), holding the account's
+/// deployment URL and token as `credentials` reads them.
 ///
 /// `subject` is who the calling session's token resolved to — the owner of the vault asked. The
 /// target is checked before the vault is read: one that is not a Coder target, or names no
@@ -90,12 +91,14 @@ pub fn shell_for_coder_target(
     subject: &str,
     credentials: &dyn CoderCredentialSource,
 ) -> Result<Arc<dyn RemoteShell>, CoderTargetError> {
-    shell_for_coder_target_through("coder", target, subject, credentials)
+    shell_for_coder_target_through("coder", "ssh", target, subject, credentials)
 }
 
-/// [`shell_for_coder_target`], reaching the workspace through the CLI `coder_binary`.
+/// [`shell_for_coder_target`], reaching the workspace through the CLI `coder_binary`, and
+/// streaming a command through the OpenSSH client `ssh_binary` with that CLI as its proxy.
 pub fn shell_for_coder_target_through(
     coder_binary: impl Into<PathBuf>,
+    ssh_binary: impl Into<PathBuf>,
     target: &SessionTarget,
     subject: &str,
     credentials: &dyn CoderCredentialSource,
@@ -124,11 +127,10 @@ pub fn shell_for_coder_target_through(
     if let Some(agent) = agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
         workspace_ref = workspace_ref.on_agent(agent);
     }
-    Ok(Arc::new(tddy_remote_shell::CoderShell::through(
-        coder_binary,
-        held,
-        workspace_ref,
-    )))
+    Ok(Arc::new(
+        tddy_remote_shell::CoderShell::through(coder_binary, held, workspace_ref)
+            .with_ssh_binary(ssh_binary),
+    ))
 }
 
 #[cfg(test)]
