@@ -227,9 +227,7 @@ fn client_argv_and_env(
     plan: crate::spec_launch::HostPtyPlan,
 ) -> (Vec<String>, Vec<(String, String)>) {
     let command = remote_command(agent, remote, session, plan);
-
-    let (argv, local_env) = client_command(remote, command);
-    (argv, local_env)
+    client_command(remote, command)
 }
 
 async fn plan_the_launch(

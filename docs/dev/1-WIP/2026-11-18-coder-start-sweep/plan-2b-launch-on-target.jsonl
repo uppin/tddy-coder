@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-agent-launch/src/remote_agent_launch.rs":{"sha256":"sha256:5e114b58f344befb7c6a8278359105bfd325b840e06b0f1a21330cd576365d40"}}}
-{"id":"op-1","op":"extract_method","anchor":{"kind":"item","item":"tddy_agent_launch::remote_agent_launch::judge_the_start","file":"packages/tddy-agent-launch/src/remote_agent_launch.rs","start":{"line":45,"col":5},"end":{"line":65,"col":7},"fingerprint":"sha256:42ce494b4428823d089ef50e646de3d8e15526be0aa192d4a376f88c884f5ca8","hint":{"line":387,"col":5}},"name":"recorded_owner"}
