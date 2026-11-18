@@ -46,8 +46,8 @@ export function ProjectEditSection(props: {
     setSaved(ok);
   };
 
-  const moveCheckout = (daemonInstanceId: string, mainRepoPath: string) =>
-    failure.run(() =>
+  const moveCheckout = async (daemonInstanceId: string, mainRepoPath: string) => {
+    await failure.run(() =>
       onMoveProjectCheckout({
         projectId: group.projectId,
         name: group.name,
@@ -55,6 +55,7 @@ export function ProjectEditSection(props: {
         daemonInstanceId,
       }),
     );
+  };
 
   return (
     <div className="mb-3 rounded-md border border-border p-3" data-testid={`project-edit-form-${group.projectId}`}>
