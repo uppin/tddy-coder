@@ -12,10 +12,10 @@
 //!
 //! PRD: docs/ft/web/1-WIP/PRD-2026-11-15-remote-shell-coder-hosts.md.
 
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tddy_testing_commons::remote_target::write_executable;
 
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
@@ -71,35 +71,6 @@ const OBSERVE: Duration = Duration::from_secs(15);
 /// What the agent hands its `SessionStart` hook.
 const SESSION_START_PAYLOAD: &str =
     r#"{"hook_event_name":"SessionStart","session_id":"c-41","source":"startup"}"#;
-
-fn write_executable(path: &Path, script: &str) {
-    // A freshly written executable pays a first-execution scan on this OS (~2.4 s measured on
-    // macOS, against ~20 ms afterwards): a stand-in or stub written here and then timed from
-    // its first real exec would spend that scan inside whatever window the test measures. So
-    // the script carries a warm-up guard as its first line, and is run once here, guarded —
-    // no runs are recorded, no pid files written — to pay the scan before any launch is timed.
-    let script = match script.strip_prefix("#!/bin/sh\n") {
-        Some(body) => {
-            format!("#!/bin/sh\nif [ -n \"$TDDY_FIXTURE_WARMUP\" ]; then exit 0; fi\n{body}")
-        }
-        None => script.to_string(),
-    };
-    std::fs::write(path, script).expect("the script is written");
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-        .expect("the script is made executable");
-    let warmed = std::process::Command::new(path)
-        .env("TDDY_FIXTURE_WARMUP", "1")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .expect("the freshly written script warms up");
-    assert!(
-        warmed.status.success(),
-        "the warm-up of {} exited {}: {}",
-        path.display(),
-        warmed.status,
-        String::from_utf8_lossy(&warmed.stderr)
-    );
-}
 
 /// The target a start names: Ada's workspace `devbox` of her account, on its agent `main`.
 fn adas_devbox() -> SessionTarget {

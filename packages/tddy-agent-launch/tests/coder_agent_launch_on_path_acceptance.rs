@@ -8,10 +8,10 @@
 //!
 //! PRD: docs/dev/1-WIP/PRD-2026-11-18-coder-interactive-launch.md.
 
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tddy_testing_commons::remote_target::write_executable;
 
 use pretty_assertions::assert_eq;
 use tddy_actions::tool::{ResolvedTool, TemplateParams, ToolDef};
@@ -48,29 +48,6 @@ impl CoderCredentialSource for AdasVault {
             SecretString::new("adas-coder-session-token"),
         ))
     }
-}
-
-/// `script` as an executable at `path`, run once guarded so this OS's first-execution scan is paid
-/// before anything is timed.
-fn write_executable(path: &Path, script: &str) {
-    let body = script.strip_prefix("#!/bin/sh\n").expect("a shell script");
-    std::fs::write(
-        path,
-        format!("#!/bin/sh\nif [ -n \"$TDDY_FIXTURE_WARMUP\" ]; then exit 0; fi\n{body}"),
-    )
-    .expect("the script is written");
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-        .expect("the script is made executable");
-    let warmed = std::process::Command::new(path)
-        .env("TDDY_FIXTURE_WARMUP", "1")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .expect("the freshly written script warms up");
-    assert!(
-        warmed.status.success(),
-        "the warm-up of {} failed",
-        path.display()
-    );
 }
 
 /// The `acme` agent, resolved to `program`.

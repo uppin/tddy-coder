@@ -16,6 +16,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use tddy_testing_commons::remote_target::write_executable;
 
 use pretty_assertions::assert_eq;
 use serde_json::{json, Value};
@@ -32,32 +33,6 @@ const SESSION_ID: &str = "019d2c7e-51aa-7c40-8f0e-2b1d6a9c3e11";
 const SESSION_TYPE: &str = "acme-cli";
 const MODEL: &str = "acme-1";
 const STARTUP_WINDOW: Duration = Duration::from_millis(400);
-
-fn write_executable(path: &Path, script: &str) {
-    // A freshly written executable pays a first-execution scan on this OS (~2.4 s measured on
-    // macOS, against ~20 ms afterwards): the script carries a warm-up guard as its first line, and
-    // is run once here, guarded, to pay the scan before any launch is timed.
-    let script = match script.strip_prefix("#!/bin/sh\n") {
-        Some(body) => {
-            format!("#!/bin/sh\nif [ -n \"$TDDY_FIXTURE_WARMUP\" ]; then exit 0; fi\n{body}")
-        }
-        None => script.to_string(),
-    };
-    std::fs::write(path, script).expect("the script is written");
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-        .expect("the script is made executable");
-    let warmed = std::process::Command::new(path)
-        .env("TDDY_FIXTURE_WARMUP", "1")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .expect("the freshly written script warms up");
-    assert!(
-        warmed.status.success(),
-        "the warm-up of {} exited {}",
-        path.display(),
-        warmed.status
-    );
-}
 
 /// A machine reached over ssh, with a login of its own: a directory standing for its filesystem,
 /// holding a clone of a repository with the session's worktree cut from it, an agent on its

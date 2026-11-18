@@ -11,10 +11,10 @@
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-15-remote-shell-remote-hooks.md.
 
-use std::os::unix::fs::PermissionsExt as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tddy_testing_commons::remote_target::{write_executable, StandInSshTarget};
 
 use pretty_assertions::assert_eq;
 use tddy_core::session_metadata::read_session_metadata;
@@ -46,117 +46,6 @@ const STARTED: &str = "Started";
 /// A safety net for a hook to reach the daemon, not a prediction of how long it takes.
 const OBSERVE: Duration = Duration::from_secs(30);
 
-/// The login shell of the target: `$SHELL -lc <command>` runs the command under the `PATH` the
-/// stand-in set, whose first directory is the target's own `opt/agents` — where its agent is
-/// installed, as a target start runs the agent's bare command, never this host's path to it.
-const A_TARGET_LOGIN_SHELL: &str =
-    "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\nexec /bin/sh -c \"$2\"\n";
-
-fn write_executable(path: &Path, script: &str) {
-    // A freshly written executable pays a first-execution scan on this OS (~2.4 s measured on
-    // macOS, against ~20 ms afterwards): a stand-in or stub written here and then timed from
-    // its first real exec would spend that scan inside whatever window the test measures. So
-    // the script carries a warm-up guard as its first line, and is run once here, guarded —
-    // no runs are recorded, no pid files written — to pay the scan before any launch is timed.
-    let script = match script.strip_prefix("#!/bin/sh\n") {
-        Some(body) => {
-            format!("#!/bin/sh\nif [ -n \"$TDDY_FIXTURE_WARMUP\" ]; then exit 0; fi\n{body}")
-        }
-        None => script.to_string(),
-    };
-    std::fs::write(path, script).expect("the script is written");
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-        .expect("the script is made executable");
-    let warmed = std::process::Command::new(path)
-        .env("TDDY_FIXTURE_WARMUP", "1")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .expect("the freshly written script warms up");
-    assert!(
-        warmed.status.success(),
-        "the warm-up of {} exited {}: {}",
-        path.display(),
-        warmed.status,
-        String::from_utf8_lossy(&warmed.stderr)
-    );
-}
-
-/// The target a session's agent runs on: a stand-in `ssh` first on this process's `PATH`, and
-/// the directory standing for the target's filesystem.
-struct ATarget {
-    root: PathBuf,
-    previous_path: Option<std::ffi::OsString>,
-    _dir: tempfile::TempDir,
-}
-
-impl ATarget {
-    /// A target that runs what it is asked to, as `remote_target_session_acceptance.rs`'s does.
-    fn reachable() -> Self {
-        let dir = tempfile::tempdir().expect("a directory standing for the target");
-        let root = std::fs::canonicalize(dir.path()).expect("the target's directory resolves");
-        let bin = root.join("bin");
-        std::fs::create_dir_all(&bin).expect("a directory for the stand-in ssh");
-        write_executable(&bin.join("login-shell"), A_TARGET_LOGIN_SHELL);
-        std::fs::create_dir_all(root.join("opt/agents")).expect("the target's agents directory");
-        write_executable(
-            &bin.join("ssh"),
-            &format!(
-                r#"#!/bin/sh
-for command; do :; done
-command=$(printf '%s' "$command" | /usr/bin/sed 's#/home/dev#{root}/home/dev#g')
-export HOME='{root}'
-SHELL='{root}/bin/login-shell'
-PATH='{root}/opt/agents':"$PATH"
-export SHELL PATH
-exec 3<&0
-/bin/sh -c "$command" <&3 3<&- &
-remote=$!
-trap 'kill -HUP "$remote" 2>/dev/null' HUP TERM
-wait "$remote"
-exit $?
-"#,
-                root = root.display()
-            ),
-        );
-        let previous_path = std::env::var_os("PATH");
-        let mut path = std::ffi::OsString::from(&bin);
-        if let Some(previous) = &previous_path {
-            path.push(":");
-            path.push(previous);
-        }
-        std::env::set_var("PATH", path);
-        Self {
-            root,
-            previous_path,
-            _dir: dir,
-        }
-    }
-
-    /// Where the target keeps the worktree of `session_id`: under the checkout resolved from
-    /// the target user's home — the stub's `$HOME` is this directory, and the project's empty
-    /// git URL names `repo` under `.tddy/repos`.
-    fn worktree_of(&self, session_id: &str) -> PathBuf {
-        self.root
-            .join(".tddy/repos/repo/.worktrees")
-            .join(session_id)
-    }
-
-    /// Where the hook log of `session_id` lives on the target.
-    fn hook_log_of(&self, session_id: &str) -> PathBuf {
-        self.worktree_of(session_id)
-            .join(tddy_core::REMOTE_HOOK_LOG)
-    }
-}
-
-impl Drop for ATarget {
-    fn drop(&mut self) {
-        match &self.previous_path {
-            Some(path) => std::env::set_var("PATH", path),
-            None => std::env::remove_var("PATH"),
-        }
-    }
-}
-
 /// A stub agent that, as Claude Code does on a `SessionStart`, hands the event's payload to the
 /// hook command installed in its worktree — read from its `.claude/settings.local.json` — then
 /// stays up. It fires once it has had time to be recorded as started, so the daemon's own
@@ -180,14 +69,14 @@ struct ADaemonWithATarget {
     service: Arc<DaemonSessionHost>,
     manager: Arc<CliSessionManager>,
     sessions_base: PathBuf,
-    target: ATarget,
+    target: StandInSshTarget,
     _repo_dir: tempfile::TempDir,
     _sessions_dir: tempfile::TempDir,
     _stub_dir: tempfile::TempDir,
 }
 
 fn a_daemon_with_a_reachable_target() -> ADaemonWithATarget {
-    let target = ATarget::reachable();
+    let target = StandInSshTarget::behind_ssh();
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
     let sessions_dir = tempfile::tempdir().unwrap();
@@ -207,7 +96,7 @@ fn a_daemon_with_a_reachable_target() -> ADaemonWithATarget {
     write_executable(&stub, &an_agent_that_fires_its_start_hook());
     // A target start runs the agent's bare command, found on the target's own `PATH`.
     write_executable(
-        &target.root.join("opt/agents").join(AGENT_ID),
+        &target.agents_dir().join(AGENT_ID),
         &an_agent_that_fires_its_start_hook(),
     );
 

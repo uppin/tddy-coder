@@ -14,10 +14,10 @@
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-16-remote-shell-orchestrator-target-start.md
 
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tddy_testing_commons::remote_target::{write_executable, StandInSshTarget};
 
 use pretty_assertions::assert_eq;
 use tddy_core::session_metadata::read_session_metadata;
@@ -64,114 +64,6 @@ const DERIVED_HOST_ALIAS: &str = "buildbox";
 
 /// A safety net for an agent to be observed on the host, not a prediction of how long it takes.
 const OBSERVE: Duration = Duration::from_secs(20);
-
-/// The login shell of the target: `$SHELL -lc <command>` runs the command under the `PATH` the
-/// stand-in set, whose first directory is the target's own `opt/agents` — where its agent is
-/// installed, as a target start runs the agent's bare command, never this host's path to it.
-const A_TARGET_LOGIN_SHELL: &str =
-    "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\nexec /bin/sh -c \"$2\"\n";
-
-fn write_executable(path: &Path, script: &str) {
-    // A freshly written executable pays a first-execution scan on this OS (~2.4 s measured on
-    // macOS, against ~20 ms afterwards): a stand-in or stub written here and then timed from
-    // its first real exec would spend that scan inside whatever window the test measures. So
-    // the script carries a warm-up guard as its first line, and is run once here, guarded —
-    // no runs are recorded, no pid files written — to pay the scan before any launch is timed.
-    let script = match script.strip_prefix("#!/bin/sh\n") {
-        Some(body) => {
-            format!("#!/bin/sh\nif [ -n \"$TDDY_FIXTURE_WARMUP\" ]; then exit 0; fi\n{body}")
-        }
-        None => script.to_string(),
-    };
-    std::fs::write(path, script).expect("the script is written");
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-        .expect("the script is made executable");
-    let warmed = std::process::Command::new(path)
-        .env("TDDY_FIXTURE_WARMUP", "1")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .expect("the freshly written script warms up");
-    assert!(
-        warmed.status.success(),
-        "the warm-up of {} exited {}: {}",
-        path.display(),
-        warmed.status,
-        String::from_utf8_lossy(&warmed.stderr)
-    );
-}
-
-/// The machine behind the derived host, for as long as it lives: a stand-in `ssh` first on this
-/// process's `PATH`, and the directory standing for the machine's filesystem.
-struct AReachableMachine {
-    root: PathBuf,
-    previous_path: Option<std::ffi::OsString>,
-    _dir: tempfile::TempDir,
-}
-
-impl AReachableMachine {
-    /// A machine that runs what it is asked to. The stand-in runs its last argument — the remote
-    /// command — with `sh -c` as a child whose terminal is its own, every `/home/dev` path in it
-    /// mapped under the machine's directory. It hangs the command up when it is itself hung up or
-    /// terminated, and exits with the command's status.
-    fn behind_ssh() -> Self {
-        let dir = tempfile::tempdir().expect("a directory standing for the machine");
-        let root = std::fs::canonicalize(dir.path()).expect("the machine's directory resolves");
-        let bin = root.join("bin");
-        std::fs::create_dir_all(&bin).expect("a directory for the stand-in ssh");
-        write_executable(&bin.join("login-shell"), A_TARGET_LOGIN_SHELL);
-        std::fs::create_dir_all(root.join("opt/agents")).expect("the target's agents directory");
-        write_executable(
-            &bin.join("ssh"),
-            &format!(
-                r#"#!/bin/sh
-for command; do :; done
-command=$(printf '%s' "$command" | /usr/bin/sed 's#/home/dev#{root}/home/dev#g')
-export HOME='{root}'
-SHELL='{root}/bin/login-shell'
-PATH='{root}/opt/agents':"$PATH"
-export SHELL PATH
-exec 3<&0
-/bin/sh -c "$command" <&3 3<&- &
-remote=$!
-trap 'kill -HUP "$remote" 2>/dev/null' HUP TERM
-wait "$remote"
-exit $?
-"#,
-                root = root.display()
-            ),
-        );
-        let previous_path = std::env::var_os("PATH");
-        let mut path = std::ffi::OsString::from(&bin);
-        if let Some(previous) = &previous_path {
-            path.push(":");
-            path.push(previous);
-        }
-        std::env::set_var("PATH", path);
-        Self {
-            root,
-            previous_path,
-            _dir: dir,
-        }
-    }
-
-    /// Where the machine keeps the worktree of `session_id`: under the checkout resolved from
-    /// the target user's home — the stub's `$HOME` is this directory, and the project's empty
-    /// git URL names `repo` under `.tddy/repos`.
-    fn worktree_of(&self, session_id: &str) -> PathBuf {
-        self.root
-            .join(".tddy/repos/repo/.worktrees")
-            .join(session_id)
-    }
-}
-
-impl Drop for AReachableMachine {
-    fn drop(&mut self) {
-        match &self.previous_path {
-            Some(path) => std::env::set_var("PATH", path),
-            None => std::env::remove_var("PATH"),
-        }
-    }
-}
 
 /// The operator's files, read from a home on a temp path — whichever OS user is asked for.
 struct AnOperatorHome {
@@ -232,7 +124,7 @@ struct ADaemonReachingAnSshHost {
     manager: Arc<CliSessionManager>,
     sessions_base: PathBuf,
     runs: PathBuf,
-    machine: AReachableMachine,
+    machine: StandInSshTarget,
     _repo_dir: tempfile::TempDir,
     _sessions_dir: tempfile::TempDir,
     _stub_dir: tempfile::TempDir,
@@ -240,7 +132,7 @@ struct ADaemonReachingAnSshHost {
 }
 
 fn a_daemon_reaching_an_ssh_host() -> ADaemonReachingAnSshHost {
-    let machine = AReachableMachine::behind_ssh();
+    let machine = StandInSshTarget::behind_ssh();
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
     let sessions_dir = tempfile::tempdir().unwrap();
@@ -260,10 +152,7 @@ fn a_daemon_reaching_an_ssh_host() -> ADaemonReachingAnSshHost {
     let stub = stub_bin.join(AGENT_ID);
     write_executable(&stub, &a_stub_agent(&runs));
     // A target start runs the agent's bare command, found on the target's own `PATH`.
-    write_executable(
-        &machine.root.join("opt/agents").join(AGENT_ID),
-        &a_stub_agent(&runs),
-    );
+    write_executable(&machine.agents_dir().join(AGENT_ID), &a_stub_agent(&runs));
 
     let operator_home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(operator_home.path().join(".ssh")).unwrap();
