@@ -59,6 +59,12 @@ const STOPPED_COMPLAINT: &str = "workspace ada/devbox is stopped";
 /// takes.
 const OBSERVE: Duration = Duration::from_secs(20);
 
+/// The login shell of the target: `$SHELL -lc <command>` runs the command under the `PATH` the
+/// stand-in set, whose first directory is the target's own `opt/agents` — where its agent is
+/// installed, as a target start runs the agent's bare command, never this host's path to it.
+const A_TARGET_LOGIN_SHELL: &str =
+    "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\nexec /bin/sh -c \"$2\"\n";
+
 fn write_executable(path: &Path, script: &str) {
     // A freshly written executable pays a first-execution scan on this OS (~2.4 s measured on
     // macOS, against ~20 ms afterwards): a stand-in or stub written here and then timed from
@@ -108,6 +114,9 @@ impl AWorkspace {
 shift
 command=$(printf '%s' "$*" | /usr/bin/sed 's#/home/dev#{root}/home/dev#g')
 export HOME='{root}'
+SHELL='{root}/bin/login-shell'
+PATH='{root}/opt/agents':"$PATH"
+export SHELL PATH
 exec 3<&0
 /bin/sh -c "$command" <&3 3<&- &
 remote=$!
@@ -131,6 +140,8 @@ exit $?
         let root = std::fs::canonicalize(dir.path()).expect("the workspace's directory resolves");
         let bin = root.join("bin");
         std::fs::create_dir_all(&bin).expect("a directory for the stand-in coder");
+        write_executable(&bin.join("login-shell"), A_TARGET_LOGIN_SHELL);
+        std::fs::create_dir_all(root.join("opt/agents")).expect("the target's agents directory");
         write_executable(
             &bin.join("coder"),
             &format!("#!/bin/sh\n{}", coder_body(&root)),
@@ -241,6 +252,11 @@ fn a_daemon_reaching(workspace: AWorkspace) -> ADaemonWithAWorkspace {
     let runs = stub_bin.join("runs");
     let stub = stub_bin.join(AGENT_ID);
     write_executable(&stub, &a_stub_agent(&runs));
+    // A target start runs the agent's bare command, found on the target's own `PATH`.
+    write_executable(
+        &workspace.root.join("opt/agents").join(AGENT_ID),
+        &a_stub_agent(&runs),
+    );
 
     // The vault of the person VALID_TOKEN signs in — the subject a Coder target is resolved as.
     let vault = Arc::new(a_coder_vault_of(&current_os_user()).holding(
