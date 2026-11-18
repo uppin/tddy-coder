@@ -6,9 +6,13 @@
 
 #[path = "support/coder.rs"]
 mod coder_support;
+#[path = "support/mod.rs"]
+mod ssh_support;
 
 use std::ffi::OsString;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use pretty_assertions::assert_eq;
 use tddy_remote_shell::contract::assert_behaves_like_a_remote_shell;
@@ -17,12 +21,16 @@ use tddy_remote_shell::{
     RemoteShell, RemoteShellError, ShellAddress,
 };
 
+use ssh_support::an_ssh_that_connects_through_its_proxy_and_runs_commands_here;
+
 use coder_support::{
-    a_coder_that_refuses_to_connect,
+    a_coder_that_is_a_pty_unless_asked_for_stdio, a_coder_that_refuses_to_connect,
     a_coder_whose_workspaces_end_their_lines_with_carriage_returns,
     a_coder_whose_workspaces_merge_stderr_into_stdout,
     a_coder_whose_workspaces_never_see_the_end_of_their_input,
-    a_coder_whose_workspaces_run_commands_here, the_credentials, DEPLOYMENT_URL, SESSION_TOKEN,
+    a_coder_whose_workspaces_outlive_their_connection, a_coder_whose_workspaces_run_commands_here,
+    a_coder_whose_workspaces_start_with_no_pager_variables, the_credentials, DEPLOYMENT_URL,
+    SESSION_TOKEN,
 };
 
 /// What a one-shot call's arguments start with: never start the workspace, the workspace and its
@@ -60,7 +68,8 @@ fn the_daemons_own_coder_variables() -> (Option<OsString>, Option<OsString>) {
 async fn the_coder_shell_behaves_like_a_remote_shell() {
     // Given a coder shell whose workspace runs commands
     let coder = a_coder_whose_workspaces_run_commands_here();
-    let shell = coder.shell_on(adas_devbox());
+    let ssh = an_ssh_that_connects_through_its_proxy_and_runs_commands_here();
+    let shell = coder.shell_on_through_ssh(adas_devbox(), &ssh);
 
     // When / Then it is held to the contract every transport is held to
     assert_behaves_like_a_remote_shell(&shell, &coder.scratch_dir().to_string_lossy()).await;
@@ -99,7 +108,8 @@ async fn a_command_runs_on_the_named_workspace() {
 async fn the_deployment_url_and_token_reach_only_the_coder_process() {
     // Given a coder whose workspaces run commands, and this process's own environment
     let coder = a_coder_whose_workspaces_run_commands_here();
-    let shell = coder.shell_on(adas_devbox());
+    let ssh = an_ssh_that_connects_through_its_proxy_and_runs_commands_here();
+    let shell = coder.shell_on_through_ssh(adas_devbox(), &ssh);
     let before = the_daemons_own_coder_variables();
 
     // When a one-shot command and a streamed command are run, and an interactive one is built
@@ -141,6 +151,7 @@ async fn the_deployment_url_and_token_reach_only_the_coder_process() {
     let command_lines_naming_the_token: Vec<String> = coder
         .calls()
         .into_iter()
+        .chain(ssh.calls())
         .chain(
             interactive
                 .argv
@@ -396,4 +407,205 @@ async fn lines_a_command_prints_through_a_pty_that_ends_lines_with_carriage_retu
 
     // Then each line ends as the command ended it
     assert_eq!(output, Ok(ExecOutput::succeeded("one\ntwo\n")));
+}
+
+/// The first process id in `pid_file`, once the command has written it.
+async fn the_pid_written_to(pid_file: &std::path::Path) -> String {
+    let started = Instant::now();
+    loop {
+        let written = std::fs::read_to_string(pid_file).unwrap_or_default();
+        if !written.is_empty() || started.elapsed() > STEP_BUDGET {
+            return written;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+fn the_process_is_running(pid: &str) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("kill runs")
+        .success()
+}
+
+/// Whether `pid` is gone within `budget`, polled.
+async fn the_process_is_gone_within(pid: &str, budget: Duration) -> bool {
+    let started = Instant::now();
+    while the_process_is_running(pid) && started.elapsed() < budget {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    !the_process_is_running(pid)
+}
+
+#[tokio::test]
+async fn a_one_shot_past_its_deadline_is_stopped_on_the_workspace_too() {
+    // Given a coder whose workspaces outlive their connection, and a command that records its
+    // pid and then outlives its deadline
+    let coder = a_coder_whose_workspaces_outlive_their_connection();
+    let shell = coder.shell_on(adas_devbox());
+    std::fs::create_dir_all(coder.scratch_dir()).expect("the workspace's directory is made");
+    let pid_file = coder.scratch_dir().join("pid");
+    let command = format!(
+        "printf '%s' $$ > '{}'; exec sleep 30",
+        pid_file.to_string_lossy()
+    );
+
+    // When it is run with a short deadline
+    let outcome = shell
+        .exec(ExecRequest::new(command).within(Duration::from_secs(2)))
+        .await;
+    let pid = the_pid_written_to(&pid_file).await;
+    let gone = the_process_is_gone_within(&pid, Duration::from_secs(8)).await;
+    let _ = std::process::Command::new("kill")
+        .args(["-9", &pid])
+        .status();
+
+    // Then the call timed out
+    assert_eq!(
+        outcome,
+        Err(RemoteShellError::TimedOut {
+            address: ShellAddress::new("coder", "ada/devbox.main"),
+            after: Duration::from_secs(2),
+        })
+    );
+    // And the command it started on the workspace is gone too, not left running
+    assert_eq!(
+        gone, true,
+        "process {pid} is still running on the workspace"
+    );
+}
+
+#[tokio::test]
+async fn a_one_shot_never_starts_a_pager() {
+    // Given a coder whose workspaces start with no pager variables set
+    let coder = a_coder_whose_workspaces_start_with_no_pager_variables();
+    let shell = coder.shell_on(adas_devbox());
+
+    // When a one-shot prints the variables a pager or a git prompt would be chosen by
+    let output = shell
+        .exec(ExecRequest::new(
+            "printf '%s|%s|%s' \"$PAGER\" \"$GIT_PAGER\" \"$GIT_TERMINAL_PROMPT\"",
+        ))
+        .await;
+
+    // Then the pager is `cat` and git never prompts
+    assert_eq!(output, Ok(ExecOutput::succeeded("cat|cat|0")));
+}
+
+#[tokio::test]
+async fn a_streamed_command_keeps_its_bytes_and_its_end_through_a_pty_workspace() {
+    // Given a coder that is a pty to a plain `coder ssh <workspace> -- <command>`: its input never
+    // ends and stderr merges into stdout
+    let coder = a_coder_that_is_a_pty_unless_asked_for_stdio();
+    let ssh = an_ssh_that_connects_through_its_proxy_and_runs_commands_here();
+    let shell = coder.shell_on_through_ssh(adas_devbox(), &ssh);
+
+    // When it is held to the contract's streamed behaviour: echo, EOF, a separate stderr, exit 4
+    // (the whole contract is not run: its one-shot cases are the pty's, covered above)
+    let mut streamed = shell
+        .exec_streamed("cat; printf done >&2; exit 4")
+        .await
+        .expect("a streamed command starts");
+    let relayed = tokio::time::timeout(STEP_BUDGET, async {
+        streamed
+            .stdin
+            .write_all(b"ping\n")
+            .await
+            .expect("stdin is open");
+        streamed.stdin.flush().await.expect("stdin flushes");
+        let mut echoed = vec![0; 5];
+        streamed
+            .stdout
+            .read_exact(&mut echoed)
+            .await
+            .expect("stdout carries the echo while the command runs");
+        streamed.stdin.shutdown().await.expect("stdin closes");
+        let mut stderr = Vec::new();
+        streamed
+            .stderr
+            .read_to_end(&mut stderr)
+            .await
+            .expect("stderr ends with the command");
+        (echoed, stderr, streamed.exit.wait().await)
+    })
+    .await
+    .expect("a streamed command relays and exits within the step budget");
+
+    // Then it echoed while it ran, kept stderr apart, and reported its exit
+    assert_eq!(relayed, (b"ping\n".to_vec(), b"done".to_vec(), Ok(4)));
+}
+
+#[tokio::test]
+async fn every_byte_value_round_trips_through_a_streamed_cat_over_a_pty_workspace() {
+    // Given the same pty-like coder, and all 256 byte values
+    let coder = a_coder_that_is_a_pty_unless_asked_for_stdio();
+    let ssh = an_ssh_that_connects_through_its_proxy_and_runs_commands_here();
+    let shell = coder.shell_on_through_ssh(adas_devbox(), &ssh);
+    let every_byte: Vec<u8> = (0..=255).collect();
+
+    // When they are written to a streamed `cat`, its input is ended, and its output is read
+    let mut streamed = shell
+        .exec_streamed("cat")
+        .await
+        .expect("a streamed command starts");
+    let relayed = tokio::time::timeout(STEP_BUDGET, async {
+        streamed
+            .stdin
+            .write_all(&every_byte)
+            .await
+            .expect("stdin is open");
+        streamed.stdin.shutdown().await.expect("stdin closes");
+        let mut stdout = Vec::new();
+        streamed
+            .stdout
+            .read_to_end(&mut stdout)
+            .await
+            .expect("stdout ends with the command");
+        (stdout, streamed.exit.wait().await)
+    })
+    .await
+    .expect("cat ends within the step budget: its end of input arrived");
+
+    // Then every byte came back as sent, and cat ended on its EOF
+    assert_eq!(relayed, (every_byte, Ok(0)));
+}
+
+#[tokio::test]
+async fn a_streamed_command_reaches_the_workspace_through_coder_ssh_stdio() {
+    // Given a coder and an ssh that drives it as a ProxyCommand
+    let coder = a_coder_that_is_a_pty_unless_asked_for_stdio();
+    let ssh = an_ssh_that_connects_through_its_proxy_and_runs_commands_here();
+    let shell = coder.shell_on_through_ssh(adas_devbox(), &ssh);
+
+    // When a streamed command is run to its end
+    let streamed = shell
+        .exec_streamed("true")
+        .await
+        .expect("the streamed command starts");
+    let exit = tokio::time::timeout(STEP_BUDGET, streamed.exit.wait())
+        .await
+        .expect("the streamed command exits within the step budget");
+
+    // Then it ran, and coder was called once, as a stdio proxy for that workspace's agent that
+    // never starts the workspace
+    assert_eq!(exit, Ok(0));
+    assert_eq!(
+        coder.calls(),
+        vec!["ssh --stdio --disable-autostart ada/devbox.main".to_string()]
+    );
+    // And the proxy was given the deployment and the token in its environment
+    assert_eq!(
+        coder.environments(),
+        vec![GIVEN_THE_DEPLOYMENT_AND_TOKEN.to_string()]
+    );
+    // And neither is on any command line: not ssh's, not the proxy command's
+    let command_lines_naming_the_token: Vec<String> = coder
+        .calls()
+        .into_iter()
+        .chain(ssh.calls())
+        .filter(|line| line.contains(SESSION_TOKEN) || line.contains(DEPLOYMENT_URL))
+        .collect();
+    assert_eq!(command_lines_naming_the_token, Vec::<String>::new());
 }

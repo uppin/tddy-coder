@@ -22,6 +22,22 @@ pub fn an_ssh_that_runs_commands_here() -> StandInSsh {
     )
 }
 
+/// An ssh as OpenSSH behaves with a `ProxyCommand`: it records its arguments, runs the
+/// ProxyCommand's program once (its input and output are nothing: the stand-in's workspace is
+/// this host), then runs its last argument, the remote command, with `sh -c` over plain pipes.
+pub fn an_ssh_that_connects_through_its_proxy_and_runs_commands_here() -> StandInSsh {
+    StandInSsh::running(
+        "printf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/calls\"\n\
+         proxy=\n\
+         for argument; do\n\
+           case \"$argument\" in ProxyCommand=*) proxy=\"${argument#ProxyCommand=}\";; esac\n\
+           last=\"$argument\"\n\
+         done\n\
+         if [ -n \"$proxy\" ]; then sh -c \"$proxy\" </dev/null >/dev/null 2>&1; fi\n\
+         exec sh -c \"$last\"\n",
+    )
+}
+
 /// An ssh that connects to nothing and never returns.
 pub fn an_ssh_that_never_answers() -> StandInSsh {
     StandInSsh::running("exec sleep 30\n")

@@ -158,6 +158,15 @@ impl CoderShell {
         }
     }
 
+    /// This shell, streaming its commands through the OpenSSH client `ssh_binary` rather than the
+    /// `ssh` on `PATH`.
+    pub fn with_ssh_binary(self, ssh_binary: impl Into<PathBuf>) -> Self {
+        // TODO(coder-transport): implement — `exec_streamed` runs this client with a coder
+        // `ProxyCommand`.
+        let _ = ssh_binary.into();
+        self
+    }
+
     /// The `coder` CLI this shell runs.
     pub fn coder_binary(&self) -> &Path {
         &self.coder
