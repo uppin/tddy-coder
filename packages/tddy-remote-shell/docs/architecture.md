@@ -42,8 +42,13 @@ unloaded key is a hard failure, never a prompt, and a connection cannot hang. Op
 with `CODER_URL` and `CODER_SESSION_TOKEN` set on that child alone and scrubbed from every
 probe the daemon runs as another user. The workspace is never started; one that is not
 running is `Unreachable` with what the CLI said, told from a failed command by a start
-marker the one-shot wrapper prints to stderr before the command runs. `interactive` is
-`coder ssh --disable-autostart -t <workspace> -- <command>` for a local PTY. Credentials are
+marker the one-shot wrapper prints to stderr before the command runs. `coder ssh` runs
+the command in a pty, which merges its stderr into its stdout, so the marker is
+recognised on either stream (with the pty's `\r\n`) and stripped from the stream it
+arrived on; only a non-zero exit with the marker on neither stream is `Unreachable`.
+Value-returning probes (the target's home, in `tddy-git`) frame their value with
+sentinels and parse it out, so merged transport words never enter the value.
+`interactive` is `coder ssh --disable-autostart -t <workspace> -- <command>` for a local PTY. Credentials are
 held in memory for the shell's life; `Debug` shows the URL and never the token.
 
 ## Test support

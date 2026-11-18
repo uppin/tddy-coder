@@ -36,6 +36,18 @@ pub fn a_coder_whose_workspaces_run_commands_here() -> StandInCoder {
     ))
 }
 
+/// A coder whose workspaces run commands in a pty, as the real `coder ssh` does: the
+/// workspace's stderr is merged into its stdout, so nothing the command writes to stderr
+/// arrives on a separate stream.
+pub fn a_coder_whose_workspaces_merge_stderr_into_stdout() -> StandInCoder {
+    StandInCoder::running(&format!(
+        "{RECORD_THE_CALL}\
+         while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
+         shift\n\
+         exec sh -c \"$*\" 2>&1\n"
+    ))
+}
+
 /// A coder that refuses before anything runs on a workspace, as the CLI does for a workspace it
 /// will not connect to: `complaint` on stderr and exit status 1.
 pub fn a_coder_that_refuses_to_connect(complaint: &str) -> StandInCoder {
