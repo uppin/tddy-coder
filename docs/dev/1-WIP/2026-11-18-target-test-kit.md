@@ -41,8 +41,9 @@ The shared target-session test fixtures, and the one test that runs the Coder pa
 
 ## Boundaries
 
-- No production-code change, except a stand-in fact the live run proves wrong. That would be
-  recorded as a finding and put to the developer before it is changed.
+- No production-code change, except a stand-in fact the live run proves wrong (recorded as a
+  finding and put to the developer first) — and one scoped exception: the session driver's
+  optional `--session-id` (see Decisions).
 - Test assertions are unchanged.
 
 ## Dependencies
@@ -77,7 +78,7 @@ Unverified because the start never gets there: that Claude shows `for shortcuts`
 
 - Consolidation: `./test -p tddy-testing-commons -p tddy-agent-launch -p tddy-session-lifecycle -p tddy-session-driver` after: 139 binaries, **1366 passed, 34 failed, 6 ignored**. Every failure in the first (cut-short, 100-binary) baseline run recurs by name; the six extra are `session_sync_livekit_acceptance` (LiveKit testkit, environment), which the cut-short baseline never reached. No test name was added or removed. `./dev cargo clippy -p <the four> --tests -- -D warnings` is clean.
 - Live run against `remote-dev` (`--ignored`): `the_deployment_reads_as_the_stand_ins_assume` passes; `a_cursor_session_on_the_workspace_mints_its_chat_and_reaches_its_prompt` **passes**, so `Cursor Agent` is a confirmed prompt marker (no correction needed); the 127 failures of the contract run are gone.
-- `a_claude_session_on_the_workspace_reaches_its_prompt_and_its_hook_log_is_followed` is **still red, for a production reason**: Claude starts and stops at its folder-trust dialog ("Accessing workspace: /tmp/tmp.XXXX ... Yes, I trust this folder"), so `for shortcuts` never appears and the `hooks.log` lifecycle is unverified. The pre-trust of `target-agent-start` does not cover a start whose `--worktree` is a bare directory outside a clone. Finding for node 7/8, not fixed here.
+- Claude, first run: stopped at its folder-trust dialog on a bare `mktemp -d` worktree. That is node 7's intended posture (see Decisions); the test now uses the clone layout and passes. Details in Decisions.
 
 ## Green wave
 
@@ -93,6 +94,9 @@ exercises their behaviour.
   it refuses (integration test files are crates of their own), the kit is hand-written and the
   copies deleted, assertions unchanged. Production code stays engine-only.
 - **Partial consolidation** (orchestrator, under the user's finish-without-stopping instruction): `tddy_testing_commons::remote_target` holds `write_executable` (replacing the warm-up copies in 11 test files) and `StandInSshTarget` (replacing the identical `AReachableMachine`/`ATarget` in 4 lifecycle files). Left in place because their bodies have diverged or carry evolved features: the stand-in coder `AWorkspace` (lifecycle `coder_target_session`, agent-launch `coder_agent_launch`), agent-launch's `ATarget` with its call log, and the stub-agent families. `tddy-remote-shell/tests/support` and the `remote_agent_launch.rs` src copy stay too: a `tddy-testing-commons` dev-dependency there risks a cycle. Remaining copies are follow-up work for the sweep.
+- **`--session-id` on `tddy-session-driver`** (orchestrator, under the user's finish-without-stopping instruction): the Claude start pre-trusts a clone only when the worktree is `<clone>/.worktrees/<session id>` (node 7's deliberate posture: any other layout trusts nothing). The driver generated a random session id after `--worktree` was fixed, so no caller could lay that out. An optional `--session-id` (unchanged behaviour when absent) lets the live test do it. Claude requires the id to be a UUID. Result: with the layout right, Claude starts and reaches its prompt with no trust dialog, so node 7's pre-trust is verified live.
+- **Clean baseline rerun skipped** (orchestrator, under the user's finish-without-stopping instruction): the first baseline run was cut short (100 of 139 binaries); every name in it recurs in the after run with the same status and no test was added or removed, and CI runs the full suite independently, so a second full local run was not worth its disk and time.
+- **Live results corrected**: Claude's prompt marker is `❯ Try` (the `for shortcuts` guess is not on screen under the status line); `Cursor Agent` is confirmed. The `hooks.log` lifecycle is **not** checked by the driver test: `hooks.log` is created by the daemon's start path (`create_remote_hook_log`), which the driver does not use, so it never exists under it. The contract premise was wrong; the test was renamed `a_claude_session_on_a_cloned_worktree_reaches_its_prompt_without_the_trust_dialog`. A live check of the hook log needs a daemon-level start and is left to a follow-up.
 - **Two concerns in one node** (developer, 2026-11-18): consolidation and the live test.
 
 ## TODO

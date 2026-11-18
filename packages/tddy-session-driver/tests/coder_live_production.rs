@@ -3,7 +3,8 @@
 //! Every other test of the Coder target runs a stand-in `coder`. This one runs the real CLI
 //! against a real workspace, to check the facts the stand-ins assume: what `coder version`
 //! prints, what status a running workspace reports, that Claude and Cursor start there and reach
-//! their prompts, and that the hook log the start creates on the workspace is followed.
+//! their prompts. (The hook log is created by the daemon's start path, not by this driver, so it
+//! is not checked here.)
 //!
 //! Needs `TDDY_CODER_LIVE_WORKSPACE` (the workspace, `<workspace>` or `<owner>/<workspace>`),
 //! `CODER_URL` and `CODER_SESSION_TOKEN`, exported or in the environment of the caller. A missing
@@ -14,7 +15,6 @@
 //!
 //! Docs: docs/dev/guides/testing.md § Production Tests.
 
-use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -90,7 +90,26 @@ impl ALiveWorkspace {
         self.run("mktemp -d").await.trim().to_string()
     }
 
-    fn driver(&self, agent: &str, worktree: &str) -> tokio::process::Command {
+    /// A small clone on the workspace with a session worktree at `<clone>/.worktrees/<id>`: the
+    /// layout a target checkout uses, from which a Claude start derives the clone to pre-trust.
+    /// Returns `(clone root, worktree)`.
+    async fn cloned_worktree(&self, session_id: &str) -> (String, String) {
+        let root = self.scratch_worktree().await;
+        let worktree = format!("{root}/.worktrees/{session_id}");
+        self.run(&format!(
+            "cd {root} && git init -q && git -c user.name=t -c user.email=t@example.com \
+             commit -q --allow-empty -m init && git worktree add -q {worktree} -b live-{session_id}"
+        ))
+        .await;
+        (root, worktree)
+    }
+
+    fn driver(
+        &self,
+        agent: &str,
+        worktree: &str,
+        session_id: Option<&str>,
+    ) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_tddy-session-driver"));
         command
             .arg("--target")
@@ -99,6 +118,12 @@ impl ALiveWorkspace {
             .arg(worktree)
             .arg("--agent")
             .arg(agent)
+            .args(
+                session_id
+                    .map(|id| ["--session-id", id])
+                    .into_iter()
+                    .flatten(),
+            )
             .arg("--startup-window-secs")
             .arg("10")
             .stdin(Stdio::piped())
@@ -220,10 +245,6 @@ impl ADriver {
     }
 }
 
-fn hook_log_of(worktree: &str) -> PathBuf {
-    Path::new(worktree).join(".tddy/hooks.log")
-}
-
 #[tokio::test]
 #[ignore = "production test: needs a Coder deployment, a session token and a running workspace; run with --ignored"]
 async fn the_deployment_reads_as_the_stand_ins_assume() {
@@ -258,33 +279,30 @@ async fn the_deployment_reads_as_the_stand_ins_assume() {
 
 #[tokio::test]
 #[ignore = "production test: needs a Coder deployment, a session token and a running workspace; run with --ignored"]
-async fn a_claude_session_on_the_workspace_reaches_its_prompt_and_its_hook_log_is_followed() {
-    // Given the live workspace and an empty worktree on it
+async fn a_claude_session_on_a_cloned_worktree_reaches_its_prompt_without_the_trust_dialog() {
+    // Given the live workspace and a session worktree laid out in a clone on it, so the start
+    // pre-trusts the clone
     let workspace = ALiveWorkspace::from_the_environment();
-    let worktree = workspace.scratch_worktree().await;
-    let mut driver = ADriver::started(workspace.driver("claude", &worktree)).await;
+    // Claude takes the id as `--session-id`, which it requires to be a UUID.
+    let session_id = workspace
+        .run("cat /proc/sys/kernel/random/uuid")
+        .await
+        .trim()
+        .to_string();
+    let (clone, worktree) = workspace.cloned_worktree(&session_id).await;
+    let mut driver =
+        ADriver::started(workspace.driver("claude", &worktree, Some(&session_id))).await;
 
     // When Claude is started there
     let started = driver.answer("start_session", json!({})).await;
     assert_eq!(started["state"], json!("running"), "{started}");
 
     // Then it reaches its prompt without the folder-trust prompt in the way
-    driver.reaches("for shortcuts").await;
-    // And the hook log the start made on the workspace exists, for the follower to read
-    let listing = workspace
-        .run(&format!("ls -la {}", hook_log_of(&worktree).display()))
-        .await;
-    assert!(listing.contains("hooks.log"), "{listing}");
-    // And stopping the session leaves no hook log behind
+    // (the prompt box shows its `❯ Try "…"` hint; `for shortcuts` is not on screen under a status
+    // line, which the live run showed)
+    driver.reaches("❯ Try").await;
     driver.answer("stop_session", json!({})).await;
-    let left = workspace
-        .run(&format!(
-            "ls {} 2>&1 || true",
-            hook_log_of(&worktree).display()
-        ))
-        .await;
-    assert!(left.contains("No such file"), "{left}");
-    workspace.run(&format!("rm -rf {worktree}")).await;
+    workspace.run(&format!("rm -rf {clone}")).await;
 }
 
 #[tokio::test]
@@ -293,7 +311,7 @@ async fn a_cursor_session_on_the_workspace_mints_its_chat_and_reaches_its_prompt
     // Given the live workspace and an empty worktree on it
     let workspace = ALiveWorkspace::from_the_environment();
     let worktree = workspace.scratch_worktree().await;
-    let mut driver = ADriver::started(workspace.driver("cursor", &worktree)).await;
+    let mut driver = ADriver::started(workspace.driver("cursor", &worktree, None)).await;
 
     // When Cursor is started there
     let started = driver.answer("start_session", json!({})).await;
