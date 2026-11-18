@@ -127,3 +127,15 @@ fn a_derived_host_choice_carries_what_a_start_needs_and_what_an_agent_reads() {
         choice
     );
 }
+
+#[test]
+fn the_description_says_usable_means_listed_as_startable_not_probed() {
+    // When
+    let description = start_options_tool_def().description;
+
+    // Then
+    assert!(
+        description.contains("listed as startable, not probed"),
+        "{description}"
+    );
+}

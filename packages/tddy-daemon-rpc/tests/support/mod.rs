@@ -627,6 +627,23 @@ pub fn a_host_with_operator_home(
     (host, operator_home)
 }
 
+/// [`a_host_with_operator_home`], whose daemon maps the test user to the OS user this process runs
+/// as: a start on a target runs as that user, which must resolve on this machine.
+pub fn a_host_as_current_user_with_operator_home(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+) -> (Host, tempfile::TempDir) {
+    let operator_home = tempfile::tempdir().unwrap();
+    let host = host_built_with_host_service(
+        instance_id,
+        peers,
+        config_mapping_test_user_to(&current_os_user()),
+        operator_home.path().to_path_buf(),
+        |host, _sessions| host,
+    );
+    (host, operator_home)
+}
+
 fn host_built_by(
     instance_id: &str,
     peers: &Arc<InProcessPeers>,

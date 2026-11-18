@@ -533,6 +533,8 @@ message StartSessionEvent {
     StartKeepAlive keep_alive = 4;
     CloneProgress clone_progress = 5;
     StartTaskStarted started = 6;
+    StartRemoteCall remote_call = 7;
+    StartWorktreeReady worktree_ready = 8;
   }
 }
 
@@ -542,6 +544,36 @@ message StartSessionEvent {
 message StartTaskStarted {
   string task_id = 1;
   string daemon_instance_id = 2;
+}
+
+// One command a start ran on its target, reported when it ended (`#coder-start` 8/10).
+message StartRemoteCall {
+  enum Outcome {
+    OUTCOME_UNSPECIFIED = 0;
+    // The command ran and exited with `exit_code`.
+    OUTCOME_EXITED = 1;
+    // The command was still running at its deadline and was stopped.
+    OUTCOME_TIMED_OUT = 2;
+    // The transport could not reach the target; nothing ran.
+    OUTCOME_UNREACHABLE = 3;
+  }
+  // The target, as its transport names it (e.g. "ssh target remote-dev").
+  string host = 1;
+  // The caller's command, truncated; credentials scrubbed.
+  string command = 2;
+  uint64 duration_ms = 3;
+  Outcome outcome = 4;
+  // Only for OUTCOME_EXITED.
+  int32 exit_code = 5;
+  // The tail of the command's stderr, kept for a call that failed; credentials scrubbed.
+  string stderr_tail = 6;
+}
+
+// The start cut its worktree on the target: its branch and checkout exist from here on, whether or
+// not the start goes on to succeed.
+message StartWorktreeReady {
+  string branch = 1;
+  string worktree = 2;
 }
 
 // Git's own progress for the clone a start runs (STEP_CLONE), parsed from `git clone --progress`.

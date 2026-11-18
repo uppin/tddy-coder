@@ -25,6 +25,7 @@ use async_trait::async_trait;
 
 mod coder;
 mod error;
+mod recorded;
 mod ssh;
 mod streamed;
 
@@ -35,6 +36,7 @@ mod in_memory;
 
 pub use coder::{CoderCredentials, CoderShell, CoderWorkspaceRef};
 pub use error::RemoteShellError;
+pub use recorded::{RecordedShell, RemoteCallOutcome, RemoteCallReport, RemoteCallSink};
 pub use ssh::SshShell;
 pub use streamed::{ShellOutput, ShellStdin, StreamedExec, StreamedExit};
 

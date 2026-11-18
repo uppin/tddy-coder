@@ -105,6 +105,34 @@ impl AttachmentProgressSink {
         }));
     }
 
+    /// Reports a command the start ran on its target, once it ended. A closed receiver is ignored.
+    // TODO(start-visibility): wired by green - `RecordedShell`'s sink calls this.
+    pub fn remote_call(&self, call: tddy_service::proto::session::StartRemoteCall) {
+        let Some(tx) = self.tx.as_ref() else {
+            return;
+        };
+        let _ = tx.send(Ok(StartSessionEvent {
+            event: Some(StartSessionEventKind::RemoteCall(call)),
+        }));
+    }
+
+    /// Reports that the start cut its worktree: its branch and checkout exist from here on. A
+    /// closed receiver is ignored.
+    // TODO(start-visibility): wired by green - the remote cut calls this once it has cut.
+    pub fn worktree_ready(&self, branch: &str, worktree: &str) {
+        let Some(tx) = self.tx.as_ref() else {
+            return;
+        };
+        let _ = tx.send(Ok(StartSessionEvent {
+            event: Some(StartSessionEventKind::WorktreeReady(
+                tddy_service::proto::session::StartWorktreeReady {
+                    branch: branch.to_string(),
+                    worktree: worktree.to_string(),
+                },
+            )),
+        }));
+    }
+
     /// Passes on an event another daemon reported for its half of this start (a split start's
     /// codebase host), unchanged. A closed receiver is ignored, as for [`Self::report`].
     pub fn relay(&self, event: StartSessionEvent) {

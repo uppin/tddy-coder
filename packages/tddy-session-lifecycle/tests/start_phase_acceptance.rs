@@ -224,6 +224,8 @@ fn what_it_says(event: StartSessionEvent) -> Option<Said> {
         StartEvent::CloneProgress(_) => Some(Said::CloneProgress),
         // Which task a start runs as is pinned by `start_cancel_acceptance.rs`.
         StartEvent::Started(_) => None,
+        // Remote calls and the cut worktree are pinned by tddy-daemon-rpc's `async_start_acceptance.rs`.
+        StartEvent::RemoteCall(_) | StartEvent::WorktreeReady(_) => None,
     }
 }
 

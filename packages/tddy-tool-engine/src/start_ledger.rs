@@ -72,6 +72,37 @@ pub struct StartCloneProgress {
     pub percent: u32,
 }
 
+/// The most remote calls one start's record keeps; past it the oldest are dropped.
+// TODO(start-visibility): implement - `apply_progress` enforces it.
+pub const MAX_REMOTE_CALLS: usize = 50;
+
+/// How a remote call of a start ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteCallOutcome {
+    /// The command ran and exited; `exit_code` says with what.
+    Exited,
+    /// The command was still running at its deadline and was stopped.
+    TimedOut,
+    /// The transport could not reach the target; nothing ran.
+    Unreachable,
+}
+
+/// One command a start ran on its target, as `GetSessionStart` lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteCallRecord {
+    /// The target, as its transport names it.
+    pub host: String,
+    /// The caller's command, truncated; never a credential.
+    pub command: String,
+    pub duration_ms: u64,
+    pub outcome: RemoteCallOutcome,
+    /// Only for [`RemoteCallOutcome::Exited`].
+    pub exit_code: Option<i32>,
+    /// The tail of the command's stderr for a call that failed; empty otherwise.
+    pub stderr_tail: String,
+}
+
 /// One start, as `GetSessionStart` answers it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StartLedgerRecord {
@@ -94,6 +125,10 @@ pub struct StartLedgerRecord {
     /// session has one. Defaulted, so a record written before names existed still reads.
     #[serde(default)]
     pub display_name: Option<String>,
+    /// The start's remote calls, oldest first, at most [`MAX_REMOTE_CALLS`]. Defaulted, so a
+    /// record written before the log existed still reads.
+    #[serde(default)]
+    pub remote_calls: Vec<RemoteCallRecord>,
 }
 
 /// A started session as the host running it lists it: what its record carries beside its id.
@@ -276,6 +311,7 @@ where
         error: None,
         updated_at_unix_ms: now_unix_ms(),
         display_name: None,
+        remote_calls: Vec::new(),
     };
     ledger
         .persist(&record)
@@ -412,6 +448,10 @@ fn apply_progress(record: &mut StartLedgerRecord, event: StartSessionEvent) -> b
             });
             true
         }
+        // TODO(start-visibility): implement - `RemoteCall` is folded into `remote_calls` (capped,
+        // credentials scrubbed, `updated_at_unix_ms` advanced); `WorktreeReady` sets `branch` and
+        // `worktree`, which a failed start keeps.
+        Some(Event::RemoteCall(_) | Event::WorktreeReady(_)) => false,
         _ => false,
     }
 }

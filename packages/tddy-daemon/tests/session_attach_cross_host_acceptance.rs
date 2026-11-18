@@ -706,6 +706,8 @@ async fn stream_start_session_forwards_to_the_peer_that_runs_the_session() {
             StartEvent::CloneProgress(_) => {}
             // The start task is pinned by tddy-session-lifecycle's `start_cancel_acceptance.rs`.
             StartEvent::Started(_) => {}
+            // Remote calls and the cut worktree are pinned by tddy-daemon-rpc's `async_start_acceptance.rs`.
+            StartEvent::RemoteCall(_) | StartEvent::WorktreeReady(_) => {}
         }
     }
 
@@ -854,6 +856,8 @@ async fn stream_start_session_on_the_peer_reports_progress_while_staged_bytes_cr
             StartEvent::CloneProgress(_) => {}
             // The start task is pinned by tddy-session-lifecycle's `start_cancel_acceptance.rs`.
             StartEvent::Started(_) => {}
+            // Remote calls and the cut worktree are pinned by tddy-daemon-rpc's `async_start_acceptance.rs`.
+            StartEvent::RemoteCall(_) | StartEvent::WorktreeReady(_) => {}
         }
     }
 

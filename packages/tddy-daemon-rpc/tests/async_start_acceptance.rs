@@ -369,3 +369,229 @@ async fn cancelling_a_start_on_another_host_stops_it_there() {
         ""
     );
 }
+
+// ── what a start on a target did there (`#coder-start` 8/10) ─────────────────────────────────
+
+/// The ssh alias the operator's config lists, and the derived host id the tool names it by.
+const TARGET_ALIAS: &str = "remote-dev";
+const TARGET_HOST: &str = "host-a/ssh/remote-dev";
+/// A credential a project's git URL carries, which no log may show.
+const SECRET: &str = "s3cret-token";
+
+/// A machine behind a stand-in `ssh` first on this process's `PATH`: it runs the remote command
+/// here, with the machine's `/home/dev` mapped under its own directory — except `git fetch` and
+/// `git clone`, which it fails as a target that cannot reach its remote does, the way a real one
+/// echoes the URL it could not reach.
+struct AMachineWhoseRemoteIsUnreachable {
+    previous_path: Option<std::ffi::OsString>,
+    _dir: tempfile::TempDir,
+}
+
+impl AMachineWhoseRemoteIsUnreachable {
+    fn behind_ssh() -> Self {
+        let dir = tempfile::tempdir().expect("a directory standing for the machine");
+        let root = std::fs::canonicalize(dir.path()).expect("the directory resolves");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let ssh = bin.join("ssh");
+        std::fs::write(
+            &ssh,
+            format!(
+                r#"#!/bin/sh
+for command; do :; done
+case "$command" in
+  *"fetch --all"*)
+    echo "fatal: could not read from remote repository." >&2
+    exit 128;;
+  *"git clone"*)
+    echo "fatal: unable to access 'https://bot:{SECRET}@example.com/acme/repo.git/': Could not resolve host" >&2
+    exit 128;;
+esac
+command=$(printf '%s' "$command" | /usr/bin/sed 's#/home/dev#{root}/home/dev#g')
+export HOME='{root}'
+exec /bin/sh -c "$command" </dev/null
+"#,
+                root = root.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A freshly written executable pays a first-execution scan; pay it before any timed call.
+        let _ = std::process::Command::new(&ssh).arg("warm-up").output();
+        let previous_path = std::env::var_os("PATH");
+        let mut path = std::ffi::OsString::from(&bin);
+        if let Some(previous) = &previous_path {
+            path.push(":");
+            path.push(previous);
+        }
+        std::env::set_var("PATH", path);
+        Self {
+            previous_path,
+            _dir: dir,
+        }
+    }
+}
+
+impl Drop for AMachineWhoseRemoteIsUnreachable {
+    fn drop(&mut self) {
+        match &self.previous_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+}
+
+/// A home session on a host whose operator lists [`TARGET_ALIAS`], the machine behind it, and
+/// the project's git URL as given.
+struct ATargetWorld {
+    a: Host,
+    home: String,
+    _machine: AMachineWhoseRemoteIsUnreachable,
+    _operator_home: tempfile::TempDir,
+}
+
+async fn a_world_with_a_target(git_url: &str) -> ATargetWorld {
+    let machine = AMachineWhoseRemoteIsUnreachable::behind_ssh();
+    let peers = Arc::new(InProcessPeers::default());
+    let (a, operator_home) = support::a_host_as_current_user_with_operator_home(HOST_A, &peers);
+    std::fs::create_dir_all(operator_home.path().join(".ssh")).unwrap();
+    std::fs::write(
+        operator_home.path().join(".ssh/config"),
+        format!("Host {TARGET_ALIAS}\n    HostName 10.0.0.7\n"),
+    )
+    .unwrap();
+    let home = a_workspace_in(&a.daemon, THIS_PROJECT).await;
+    a.make_project_home(&home);
+    let projects_dir = a.sessions.path().join("projects");
+    let mut project = tddy_projects::project_storage::find_project(&projects_dir, THIS_PROJECT)
+        .unwrap()
+        .expect("the project is registered");
+    project.git_url = git_url.to_string();
+    tddy_projects::project_storage::write_projects(&projects_dir, &[project]).unwrap();
+    ATargetWorld {
+        a,
+        home,
+        _machine: machine,
+        _operator_home: operator_home,
+    }
+}
+
+impl ATargetWorld {
+    async fn calls(&self, tool: &str, args: serde_json::Value) -> ExecuteToolResponse {
+        self.a
+            .daemon
+            .execute_tool(Request::direct(ExecuteToolRequest {
+                session_token: TEST_TOKEN.to_string(),
+                session_id: self.home.clone(),
+                tool_name: tool.to_string(),
+                args_json: args.to_string(),
+                daemon_instance_id: String::new(),
+                conversation_id: String::new(),
+            }))
+            .await
+            .unwrap_or_else(|s| panic!("{tool} is served to the home session: {s}"))
+            .into_inner()
+    }
+
+    /// Start a claude-cli session on the target, and read its record once it is no longer running.
+    async fn start_on_the_target_and_wait(&self) -> serde_json::Value {
+        let handle = result_of(
+            &self
+                .calls(
+                    "StartSession",
+                    serde_json::json!({
+                        "session_type": "claude-cli",
+                        "model": "claude-opus-4-8",
+                        "target": TARGET_HOST,
+                        "branch_worktree_intent": "new_branch_from_base",
+                        "new_branch_name": "remote/failing",
+                    }),
+                )
+                .await,
+        );
+        let start_id = handle["start_id"].as_str().expect("a start_id").to_string();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            let record = result_of(
+                &self
+                    .calls(
+                        "GetSessionStart",
+                        serde_json::json!({ "start_id": start_id }),
+                    )
+                    .await,
+            );
+            if record["state"] != "running" {
+                return record;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the start never ended; last: {record}"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_start_whose_fetch_fails_reports_the_failing_call_and_names_its_step() {
+    // Given a target whose remote cannot be fetched from
+    let world = a_world_with_a_target("").await;
+
+    // When the home session starts a claude-cli session on it
+    let record = world.start_on_the_target_and_wait().await;
+
+    // Then the start failed, its error naming the step that failed
+    assert_eq!(record["state"], "failed", "{record}");
+    let error = record["error"].as_str().expect("why it failed");
+    assert!(error.contains("fetching on the target failed"), "{error}");
+    // And its log ends with the fetch: the caller's command, exit 128, the stderr tail, the host
+    let calls = record["remote_calls"]
+        .as_array()
+        .expect("a remote_calls list");
+    let fetch = calls.last().expect("the start made remote calls");
+    assert_eq!(fetch["exit_code"], 128, "{record}");
+    assert_eq!(fetch["outcome"], "exited", "{record}");
+    assert!(
+        fetch["command"].as_str().unwrap().contains("fetch --all"),
+        "{fetch}"
+    );
+    assert!(
+        fetch["stderr_tail"]
+            .as_str()
+            .unwrap()
+            .contains("could not read from remote repository"),
+        "{fetch}"
+    );
+    assert_eq!(fetch["host"], "ssh target remote-dev", "{fetch}");
+    // And the calls before it are listed too, the home probe first, none wrapped by a transport
+    assert!(calls.len() >= 3, "{record}");
+    assert!(
+        calls[0]["command"].as_str().unwrap().contains("$HOME"),
+        "the first call is the home probe: {record}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn no_credential_reaches_the_remote_call_log() {
+    // Given a project whose git URL carries a password, and a target that fails the clone with it
+    let world =
+        a_world_with_a_target(&format!("https://bot:{SECRET}@example.com/acme/repo.git")).await;
+
+    // When the home session starts a claude-cli session on the target
+    let record = world.start_on_the_target_and_wait().await;
+
+    // Then the clone is in the log, failed, and the password is in none of it
+    let calls = record["remote_calls"]
+        .as_array()
+        .expect("a remote_calls list");
+    assert!(
+        calls
+            .iter()
+            .any(|call| call["command"].as_str().unwrap().contains("git clone")),
+        "the clone call is logged: {record}"
+    );
+    let log = serde_json::to_string(calls).unwrap();
+    assert!(!log.contains(SECRET), "{log}");
+}

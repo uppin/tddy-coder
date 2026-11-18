@@ -19,6 +19,10 @@ pub enum RemoteShellError {
     TimedOut {
         address: ShellAddress,
         after: Duration,
+        /// The caller's command (a truncated head of it), so the error says what hung.
+        // TODO(start-visibility): implement - every construction site fills this with the
+        // request's own command (never a transport's wrapper), and Display names it.
+        command: String,
     },
     /// The command ran and exited non-zero, for a caller that needed it to succeed.
     Exited { status: i32, stderr: String },
@@ -32,7 +36,7 @@ impl fmt::Display for RemoteShellError {
             Self::Unreachable { address, detail } => {
                 write!(f, "{address} is unreachable: {detail}")
             }
-            Self::TimedOut { address, after } => write!(
+            Self::TimedOut { address, after, .. } => write!(
                 f,
                 "{address}: no answer within {after:?}; the command was stopped"
             ),
@@ -78,6 +82,7 @@ mod tests {
         let error = RemoteShellError::TimedOut {
             address: buildbox(),
             after: Duration::from_secs(60),
+            command: "git fetch".to_string(),
         };
 
         // When / Then

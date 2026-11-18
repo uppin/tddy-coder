@@ -91,16 +91,25 @@ the worktree event into `branch`/`worktree`. `TimedOut`'s Display is
 
 - **The decorator sits at the `RemoteShell` trait**, the one choke point every start-time call goes
   through (Exploration 3).
-- **How reports reach the ledger** is settled in commit 2. Either they ride `StartSessionEvent` (a
-  proto change, with the TS regenerated), or they go through a sink the ledger owns. The proto route
-  is preferred if remote daemons stream starts.
+- **Reports reach the ledger as `StartSessionEvent`s (proto route, settled in commit 2).** The ledger
+  drains a stream that, for a start on another host, is a relay of that daemon's events
+  (`AttachmentProgressSink::relay`), while the start's shell lives on the daemon running the start.
+  A ledger-owned in-process sink could not see a cross-host start's calls. `session.proto` gains
+  `StartRemoteCall remote_call = 7` and `StartWorktreeReady worktree_ready = 8`; the committed TS is
+  regenerated with `scripts/generated-code.sh write`.
+- **`RecordedShell` (tddy-remote-shell) reports to a `RemoteCallSink`.** It records the caller's
+  `request.command`, never a transport's wrapper (Coder's one-shot preamble). Credentials are
+  scrubbed twice: in `RecordedShell`, so nothing secret crosses the proto, and again in the ledger
+  on record. The ledger keeps at most `MAX_REMOTE_CALLS` (50), newest.
+- **Known leak, not this node's:** `RemoteCheckoutError::Clone` Display carries the project's
+  `git_url`, so a credentialed URL reaches the start's `error`. The tests pin `remote_calls` only.
 
 ## TODO
 
 - [x] Record initial discovery
 - [x] Create PRD
 - [x] Create changeset
-- [ ] Draft PR contract — failing tests (commit 2)
+- [x] Draft PR contract — failing tests (commit 2)
 - [ ] USER REVIEW — acceptance tests (6e)
 - [ ] TDD Green
 - [ ] Validate changes
