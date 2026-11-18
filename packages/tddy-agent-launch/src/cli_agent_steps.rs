@@ -479,6 +479,7 @@ pub(crate) fn hooks_report_over_the_agent_tool_socket(spec: &CodingAgentSpec) ->
         daemon_socket: None,
         answer_wait_secs: spec.answer_wait_secs(),
         remote_log: None,
+        route_env: &[],
     };
     adapter.try_render(Path::new("/"), &probe).is_err()
 }

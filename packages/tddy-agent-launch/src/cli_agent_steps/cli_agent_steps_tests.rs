@@ -465,6 +465,7 @@ fn a_host_launch_of_an_agent_declaring_hooks_renders_its_hooks_file_and_appended
         daemon_socket: None,
         answer_wait_secs: 120,
         remote_log: None,
+        route_env: &[],
     };
 
     // When

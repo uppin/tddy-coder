@@ -21,6 +21,7 @@ pub(crate) mod session_start;
 
 use std::sync::Arc;
 
+use tddy_coding_agent_specs::slots;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::{write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::user_paths::home_dir_for_user;
@@ -276,11 +277,15 @@ pub(crate) async fn start_cli_harness_session(
     })
     .await?;
     progress.begin_phase(StartStep::Agent);
+    let routed = route.is_some();
     let route = route.unwrap_or_default();
     let remote_host = Some(checkout_alias).filter(|alias| !alias.is_empty());
     let toolset = std::mem::take(&mut wiring.toolset);
     let role_args = std::mem::take(&mut wiring.extra_args);
-    let hook_params = wiring.hook_params(spec, session_id, os_user);
+    let mut hook_params = wiring.hook_params(spec, session_id, os_user);
+    if let Some(params) = &mut hook_params {
+        params.route_env = &route.plain_env;
+    }
     let mut slots = render_host_launch_slots(
         agent,
         &worktree_path,
@@ -293,8 +298,17 @@ pub(crate) async fn start_cli_harness_session(
         },
     )?;
     // The role's flags, then the route's arguments, follow the spec's own argv; the route's
-    // environment follows the session's.
+    // environment follows the session's. A routed launch also loads the hooks file its route is
+    // pinned in explicitly: the agent reads that file at the checkout's root, never a git
+    // worktree's, and an unrouted launch pins nothing to load.
     let carried_effort = effort_launch(spec, effort);
+    if routed {
+        if let Ok(adapter) = slots::hooks::adapter(&spec.agent.hooks.adapter) {
+            slots
+                .argv_extra
+                .extend(adapter.file_load_args(&worktree_path));
+        }
+    }
     slots.argv_extra.extend(role_args);
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);

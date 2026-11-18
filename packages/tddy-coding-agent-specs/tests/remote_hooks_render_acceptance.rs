@@ -54,6 +54,7 @@ fn a_session() -> HookCommandParams<'static> {
         daemon_socket: None,
         answer_wait_secs: 120,
         remote_log: None,
+        route_env: &[],
     }
 }
 

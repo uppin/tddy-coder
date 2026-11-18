@@ -501,6 +501,7 @@ mod tests {
             daemon_socket: None,
             answer_wait_secs: 300,
             remote_log: None,
+            route_env: &[],
         };
         let expected = serde_json::to_string_pretty(&build_claude_hooks_settings(&params)).unwrap();
         let inputs = SlotInputs {
@@ -625,6 +626,7 @@ mod tests {
             daemon_socket: Some("/var/folders/xy/T/tddy-agent-tools-1a2b.sock"),
             answer_wait_secs: 300,
             remote_log: None,
+            route_env: &[],
         };
         let inputs = SlotInputs {
             hooks: Some(params),
@@ -664,6 +666,7 @@ mod tests {
             daemon_socket: None,
             answer_wait_secs: 300,
             remote_log: None,
+            route_env: &[],
         };
         let inputs = SlotInputs {
             hooks: Some(params),

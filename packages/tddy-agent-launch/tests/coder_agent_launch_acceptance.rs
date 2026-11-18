@@ -499,6 +499,7 @@ impl ADaemon {
                     daemon_socket: None,
                     answer_wait_secs: 120,
                     remote_log: Some(&log),
+                    route_env: &[],
                 }),
                 home: None,
             },
