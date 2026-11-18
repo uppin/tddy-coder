@@ -14,7 +14,9 @@ watches, their filters, expiries or waiting counts. The watches themselves are t
 
 2026-11-16: the developer chose not to build a web view in the `#activity-wake` stack. This is a
 future enhancement, not a gap in the stack: delivery on tool answers (and the successor's wake)
-is the whole of this stack's surface.
+is the whole of this stack's surface. **Deferred with consent at the `#activity-wake` TODO gate (2026-11-18, after #936):** the user
+answered *defer* — the web surface stays a future enhancement, recorded here, not picked up as a
+follow-up node.
 
 ## What would close it
 
