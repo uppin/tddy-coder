@@ -74,8 +74,8 @@ pub use launch::{LaunchAdapters, ModelsAdapter, ResumeTokenAdapter};
 // `#agent-tools 14/19`: what mints a session's conversation id before its first start (Cursor's
 // `agent create-chat`), named by a spec's `coding_agent.conversation`.
 pub use conversation_id::{
-    ConversationIdAdapter, ConversationMint, ConversationMintError, CursorCreateChat,
-    CURSOR_CREATE_CHAT,
+    AgentOnTarget, ConversationIdAdapter, ConversationMint, ConversationMintError,
+    CursorCreateChat, TargetAgentRun, CURSOR_CREATE_CHAT,
 };
 pub use opencode_models::{OpenCodeModels, OPENCODE_MODELS};
 pub use warp_resume_token::{WarpResumeToken, WARP_RESUME_TOKEN};

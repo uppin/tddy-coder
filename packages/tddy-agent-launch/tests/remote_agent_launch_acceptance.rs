@@ -46,6 +46,8 @@ const UNDECLARED_KEY: &str = "OTHER_VENDOR_API_KEY";
 const DAEMON_ONLY: &str = "TDDY_REMOTE_LAUNCH_PROBE";
 /// A variable the target's login sets for every command it runs.
 const LOGIN_ONLY: &str = "REMOTE_LOGIN_ONLY";
+/// A locale only the daemon's host sets: no agent on a target may see it.
+const DAEMON_LANG: &str = "daemon-host.UTF-8";
 /// What the agent's spec sets in `run.env`.
 const SPEC_SET: &str = "ACME_RUN_MODE";
 /// What the launch sets on purpose.
@@ -66,6 +68,21 @@ fn a_daemon_holding_two_provider_keys_and_a_variable_of_its_own() {
         std::env::set_var(UNDECLARED_KEY, "sk-other");
         std::env::set_var(DAEMON_ONLY, "/etc/tddy/probe");
     });
+}
+
+/// A daemon host whose environment holds a locale and a `TMPDIR` of its own: both are in the
+/// agent's base set, so they reach an agent that runs on the daemon's host, and must not reach one
+/// on a target. Returns the daemon's `TMPDIR`.
+fn a_daemon_host_with_its_own_locale_and_tmpdir() -> PathBuf {
+    static PLANTED: Once = Once::new();
+    let tmpdir = std::env::temp_dir().join("tddy-daemon-host-tmp");
+    PLANTED.call_once(|| {
+        std::fs::create_dir_all(&tmpdir).expect("the daemon host's TMPDIR exists");
+        std::env::set_var("LANG", DAEMON_LANG);
+        std::env::set_var("LC_ALL", DAEMON_LANG);
+        std::env::set_var("TMPDIR", &tmpdir);
+    });
+    tmpdir
 }
 
 fn write_executable(path: &Path, script: &str) {
@@ -118,8 +135,13 @@ struct AnSshCall {
 /// terminal is its own, under a login environment holding [`LOGIN_ONLY`]. It hangs the command up
 /// when it is itself hung up or terminated, and exits with the command's status.
 fn a_reachable_target() -> ATarget {
-    ATarget::reached_through(&format!(
-        r#"for command; do :; done
+    ATarget::reached_through(&a_target_that_runs_what_it_is_asked_to(""))
+}
+
+/// The stand-in `ssh` of [`a_reachable_target`], `before` its first line.
+fn a_target_that_runs_what_it_is_asked_to(before: &str) -> String {
+    format!(
+        r#"{before}for command; do :; done
 printf '%s\t%s\n' "$(/bin/pwd -P)" "$(printf '%s' "$*" | /usr/bin/tr '\n' ' ')" >> "$(dirname "$0")/calls"
 {LOGIN_ONLY}=from-the-login
 export {LOGIN_ONLY}
@@ -130,7 +152,31 @@ trap 'kill -HUP "$remote" 2>/dev/null' HUP TERM
 wait "$remote"
 exit $?
 "#
-    ))
+    )
+}
+
+/// A reachable target whose login shell is its own: `$SHELL` there runs `-lc <command>` under a
+/// `HOME`, a `PATH` and a `TMPDIR` inside the target's filesystem, none of them this host's, and
+/// finds the agent in the target's own `opt/agents`, which this host's `PATH` does not hold.
+fn a_target_with_a_login_of_its_own() -> ATarget {
+    let target = ATarget::reached_through(&a_target_that_runs_what_it_is_asked_to(
+        "SHELL=\"$(dirname \"$0\")/login-shell\"\nexport SHELL\n",
+    ));
+    for dir in [target.home(), target.agents_dir(), target.tmpdir()] {
+        std::fs::create_dir_all(dir).expect("a directory of the target's login");
+    }
+    write_executable(
+        &target.root.join("bin/login-shell"),
+        &format!(
+            "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\n\
+             HOME='{}'\nPATH='{}:/usr/bin:/bin'\nTMPDIR='{}'\nexport HOME PATH TMPDIR\n\
+             exec /bin/sh -c \"$2\"\n",
+            target.home().display(),
+            target.agents_dir().display(),
+            target.tmpdir().display()
+        ),
+    );
+    target
 }
 
 /// A target ssh cannot reach: the stand-in fails as OpenSSH does, [`SSH_COMPLAINT`] on stderr and
@@ -158,6 +204,21 @@ impl ATarget {
     /// The session's worktree on the target.
     fn worktree(&self) -> PathBuf {
         self.root.join("home/dev/repo/.worktrees").join(SESSION_ID)
+    }
+
+    /// The `HOME` of the target's login.
+    fn home(&self) -> PathBuf {
+        self.root.join("home/dev")
+    }
+
+    /// Where the target's login finds its agents: the first directory of its `PATH`.
+    fn agents_dir(&self) -> PathBuf {
+        self.root.join("opt/agents")
+    }
+
+    /// The `TMPDIR` of the target's login.
+    fn tmpdir(&self) -> PathBuf {
+        self.root.join("tmp")
     }
 
     /// Where the session's pointer lives on the target.
@@ -226,13 +287,15 @@ fn this_hosts_name() -> String {
 /// A stub agent installed where the target finds it.
 struct AStubAgent {
     dir: PathBuf,
-    _dir: tempfile::TempDir,
+    _dir: Option<tempfile::TempDir>,
 }
 
 /// What a stub agent recorded when it was started.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AnAgentReport {
     pid: u32,
+    /// How the agent was found: its `$0`.
+    program: PathBuf,
     cwd: PathBuf,
     args: Vec<String>,
     env: BTreeMap<String, String>,
@@ -241,8 +304,18 @@ struct AnAgentReport {
 /// An agent that records its pid, working directory, arguments and environment, prints
 /// [`AGENT_BANNER`] on its terminal, then waits on it.
 fn an_agent_that_stays_up() -> AStubAgent {
-    AStubAgent::running(&format!(
+    AStubAgent::running(&the_body_of_an_agent_that_stays_up())
+}
+
+/// [`an_agent_that_stays_up`] as installed on a target's own `PATH`.
+fn an_agent_that_stays_up_on(target: &ATarget) -> AStubAgent {
+    AStubAgent::installed_on(target, &the_body_of_an_agent_that_stays_up())
+}
+
+fn the_body_of_an_agent_that_stays_up() -> String {
+    format!(
         r#"printf '%s' "$$" > "$here/pid"
+printf '%s' "$0" > "$here/program"
 /bin/pwd -P > "$here/cwd"
 for arg in "$@"; do printf '%s\n' "$arg"; done > "$here/args"
 /usr/bin/env > "$here/env"
@@ -250,7 +323,7 @@ printf '{AGENT_BANNER}\n'
 : > "$here/reported"
 exec /bin/cat
 "#
-    ))
+    )
 }
 
 /// An agent that cannot start: it prints [`AGENT_COMPLAINT`] and exits
@@ -265,14 +338,21 @@ impl AStubAgent {
     fn running(body: &str) -> Self {
         let dir = tempfile::tempdir().expect("a directory for the stub agent");
         let path = std::fs::canonicalize(dir.path()).expect("the stub's directory resolves");
+        Self::written_to(path, Some(dir), body)
+    }
+
+    /// The agent `body` describes, installed in `dir`.
+    fn written_to(dir: PathBuf, held: Option<tempfile::TempDir>, body: &str) -> Self {
         write_executable(
-            &path.join("acme"),
-            &format!("#!/bin/sh\nhere='{}'\n{body}", path.display()),
+            &dir.join("acme"),
+            &format!("#!/bin/sh\nhere='{}'\n{body}", dir.display()),
         );
-        Self {
-            dir: path,
-            _dir: dir,
-        }
+        Self { dir, _dir: held }
+    }
+
+    /// This agent installed where `target`'s login finds it, by its bare name.
+    fn installed_on(target: &ATarget, body: &str) -> Self {
+        Self::written_to(target.agents_dir(), None, body)
     }
 
     fn program(&self) -> PathBuf {
@@ -300,6 +380,7 @@ impl AStubAgent {
         };
         AnAgentReport {
             pid: read("pid").trim().parse().expect("the agent's pid"),
+            program: PathBuf::from(read("program")),
             cwd: PathBuf::from(read("cwd").trim_end()),
             args: read("args").lines().map(str::to_string).collect(),
             env: read("env")
@@ -379,8 +460,19 @@ impl ADaemon {
         target: &ATarget,
         pointer: Option<&SessionPointer>,
     ) -> Result<RemoteLaunched, RemoteLaunchError> {
+        self.launches_resolved_at(&agent.program(), target, pointer)
+            .await
+    }
+
+    /// [`Self::launches`] an agent this host resolved at `program`, wherever the target holds it.
+    async fn launches_resolved_at(
+        &self,
+        program: &Path,
+        target: &ATarget,
+        pointer: Option<&SessionPointer>,
+    ) -> Result<RemoteLaunched, RemoteLaunchError> {
         launch_on_target(
-            &the_acme_agent(&agent.program()),
+            &the_acme_agent(program),
             &TemplateParams::new().with("model", MODEL),
             &RenderedSlots::default(),
             RemoteLaunch {
@@ -389,6 +481,7 @@ impl ADaemon {
                 session_dir: &self.session_dir,
                 pointer,
                 startup_window: STARTUP_WINDOW,
+                clone_root: None,
             },
             HostPtySession {
                 manager: &self.manager,
@@ -594,4 +687,66 @@ async fn an_unreachable_target_fails_the_start_and_leaves_no_session() {
 
     // And nothing is left: no terminal, and the agent never ran
     assert_eq!((daemon.has_a_terminal().await, agent.ran()), (false, false));
+}
+
+#[tokio::test]
+async fn a_target_runs_its_own_agent_with_its_own_home_path_and_tmpdir() {
+    // Given a target whose login has a home, a PATH and a TMPDIR of its own and finds the agent
+    // there by its bare name, and a daemon whose host resolves that agent somewhere else
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_stays_up_on(&target);
+    let daemon = a_daemon();
+    let on_the_daemons_host = Path::new("/daemon-host/opt/acme/bin/acme");
+
+    // When
+    let _launched = daemon
+        .launches_resolved_at(on_the_daemons_host, &target, None)
+        .await
+        .expect("the agent is launched on the target, which holds it");
+    let report = agent.report().await;
+    let seen = ["HOME", "PATH", "TMPDIR"].map(|name| report.env.get(name).cloned());
+
+    // Then the agent that ran is the target's own, found by its bare name
+    assert_eq!(report.program, target.agents_dir().join("acme"));
+
+    // And it sees the target's home, PATH and TMPDIR, as the target's login shell expanded them
+    assert_eq!(
+        seen,
+        [
+            Some(target.home().display().to_string()),
+            Some(format!("{}:/usr/bin:/bin", target.agents_dir().display())),
+            Some(target.tmpdir().display().to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn the_daemon_hosts_environment_never_reaches_a_target_agent() {
+    // Given a daemon host holding its own locale and TMPDIR, and a target with a login of its own
+    let daemons_tmpdir = a_daemon_host_with_its_own_locale_and_tmpdir();
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_stays_up_on(&target);
+    let daemon = a_daemon();
+    let daemons = [
+        ("LANG", DAEMON_LANG.to_string()),
+        ("LC_ALL", DAEMON_LANG.to_string()),
+        ("TMPDIR", daemons_tmpdir.display().to_string()),
+        ("HOME", std::env::var("HOME").expect("the daemon's HOME")),
+        ("PATH", std::env::var("PATH").expect("the daemon's PATH")),
+    ];
+
+    // When
+    let _launched = daemon
+        .launches(&agent, &target, None)
+        .await
+        .expect("the agent is launched on the target");
+    let env = agent.report().await.env;
+
+    // Then none of the daemon host's values is in the agent's environment
+    let leaked: Vec<&str> = daemons
+        .iter()
+        .filter(|(name, value)| env.get(*name) == Some(value))
+        .map(|(name, _)| *name)
+        .collect();
+    assert_eq!(leaked, Vec::<&str>::new());
 }

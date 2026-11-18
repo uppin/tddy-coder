@@ -75,6 +75,21 @@ pub(crate) struct ConversationStart<'a> {
     /// `env_base`'s agent environment with these on top, never from the daemon's whole environment.
     pub env: &'a [(String, String)],
     pub session_id: &'a str,
+    /// The session's target, when it runs on one: a minted conversation is minted through its
+    /// shell — in the worktree there, under the target's own environment — instead of on this
+    /// host. `None` for a start on this host.
+    // TODO(target-agent-start): implement
+    pub target: Option<ConversationTarget<'a>>,
+}
+
+/// The target a conversation is minted on.
+#[derive(Clone, Copy)]
+pub(crate) struct ConversationTarget<'a> {
+    /// The shell that reaches the target.
+    pub shell: &'a std::sync::Arc<dyn tddy_remote_shell::RemoteShell>,
+    /// The agent's bare command (`ResolvedTool::command`): what the target's login shell finds on
+    /// its own `PATH`. [`ConversationStart::binary`] is a path of this host, and means nothing there.
+    pub command: &'a str,
 }
 
 /// The conversation a first start binds: the session id, a freshly minted id (bounded by the
@@ -89,7 +104,10 @@ pub(crate) async fn start_conversation(
         worktree,
         env,
         session_id,
+        target,
     } = start;
+    // TODO(target-agent-start): implement — mint through `target`'s shell when there is one.
+    let _ = target.map(|target| (target.shell, target.command));
     let conversation = spec.conversation();
     match &conversation {
         ConversationSlot::DaemonSessionId { .. } => {

@@ -161,6 +161,7 @@ async fn a_coder_found_only_on_the_daemons_path_carries_the_agents_terminal() {
             session_dir: &std::fs::canonicalize(session_dir.path()).expect("it resolves"),
             pointer: None,
             startup_window: STARTUP_WINDOW,
+            clone_root: None,
         },
         HostPtySession {
             manager: &manager,

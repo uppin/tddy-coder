@@ -511,6 +511,7 @@ impl ADaemon {
                 session_dir: &self.session_dir,
                 pointer: None,
                 startup_window,
+                clone_root: None,
             },
             HostPtySession {
                 manager: &self.manager,

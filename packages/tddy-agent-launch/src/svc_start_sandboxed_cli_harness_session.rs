@@ -298,6 +298,7 @@ impl LaunchSessions {
             worktree: &worktree_path,
             env: &[],
             session_id,
+            target: None,
         })
         .await?;
         let launcher = node_launcher_of(&session_agent.agent.tool.binary);

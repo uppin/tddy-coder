@@ -118,6 +118,8 @@ impl DriverSession {
                         session_dir: &spec.session_dir,
                         pointer: None,
                         startup_window: spec.startup_window,
+                        // TODO(target-agent-start): the clone root of `--worktree`, when known.
+                        clone_root: None,
                     },
                     session,
                     None,

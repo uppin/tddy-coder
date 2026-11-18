@@ -6,7 +6,7 @@
 **Complexity**: 4. It spans several crates: `tddy-agent-launch`, `tddy-agent-backend` and possibly
 `tddy-coding-agent-specs`. It changes the remote-command contract, adds a JSON merge on the target,
 and uses integration tests on stand-in targets.
-**Stack**: `#coder-start` 7/10 — branch `feature/coder-start/target-agent-start`, base `feature/coder-start/idle-status`
+**PR**: #947 · **Stack**: `#coder-start` 7/10 — branch `feature/coder-start/target-agent-start`, base `feature/coder-start/idle-status`
 
 ## Initial Discovery
 
@@ -38,7 +38,7 @@ and uses integration tests on stand-in targets.
 - [ ] Agent binary and base env resolved on the target
 - [ ] Cursor mint through the target shell; a local spawn into a target path is refused
 - [ ] Clone root pre-trusted in the target's `~/.claude.json`
-- [ ] Each pinned by a stand-in test that fails before it
+- [~] Each pinned by a stand-in test that fails before it (red written, commit 2)
 - [ ] Live Claude and Cursor starts on `mantasi/remote-dev`
 - [ ] Scoped gates
 
@@ -112,6 +112,13 @@ See the discovery doc, Exploration 2:
 
 ## Decisions & Trade-offs
 
+- **Red phase (commit 2).** Nine tests fail because the fix is missing: 7 new tests and 2 updated pins in `remote_agent_launch.rs`. The red run reports 595 passed and 9 failed in `tddy-agent-launch` + `tddy-agent-backend`, and clippy is clean.
+- **Mint port.** The backend does not depend on `tddy-remote-shell`, so the mint goes through a port, `AgentOnTarget`, plus `ConversationIdAdapter::mint_on_target`. The implementation lives in `tddy-agent-launch`, and no dependency is added. `ConversationStart.target` carries the shell and the bare command.
+- **MCP reject-all keys: verify live before relying on them.** The trust write goes to `~/.claude.json` as `projects[<root>].hasTrustDialogAccepted`. The planned rejection is `disabledMcpjsonServers`. Claude 2.1.311 migrates `enabled/disabledMcpjsonServers` into the project's `.claude/settings.local.json`, which the launch already renders on the target. Green should write the rejection where a real Claude reads it and confirm that live on `mantasi/remote-dev`. If the `.claude.json` keys are ignored, the rejection moves to the rendered `settings.local.json`. The orchestrator decided this under the developer's finish-without-stopping instruction.
+- **When to pre-trust.** Only for a spec whose hooks adapter is Claude's. `launch_on_target` has no agent-kind flag, so the spec decides.
+- **Existing target tests move to the target's login `PATH`.** The four acceptance files that resolve the agent at a shared absolute host path switch to the new helpers at green. Their assertions do not change.
+- **Flaky in the baseline:** `tddy-agent-backend/tests/spec_headless_turn_deadline::a_turn_that_never_ends_is_cancelled_at_its_deadline_and_its_whole_process_group_is_killed` failed once ("the agent never wrote agent.pid"), then passed. Flaky counts as red, so green fixes its race here.
+
 - Bare command through the target's login shell (developer, 2026-11-18). It needs no per-target
   config and no extra probe. If the binary is missing, the error is the shell's `command not found`
   on the terminal, and that is what the start reports.
@@ -121,13 +128,23 @@ See the discovery doc, Exploration 2:
   servers the daemon configures. The exact `~/.claude.json` keys Claude reads for that answer are
   confirmed against a real Claude in commit 2.
 
+## Refactoring Needed
+
+### From @red (TDD Red Phase)
+
+- `ConversationStart` gained `target: Option<ConversationTarget { shell, command }>`, not a bare shell: the mint needs the agent's **bare command** (`ResolvedTool::command`), and `binary` is a host path.
+- `tddy-agent-backend` has no `tddy-remote-shell` dependency, so the shell-run mint goes through a port of its own, `AgentOnTarget::run(args, deadline)`; `tddy-agent-launch` implements it over `RemoteShell` (cd worktree, login shell, `env -i`, bare command). `ConversationIdAdapter::mint_on_target` is the new method.
+- The pre-existing acceptance tests (`remote_agent_launch_acceptance.rs`, `remote_hooks_acceptance.rs`, `coder_agent_launch*_acceptance.rs`) resolve the agent at an absolute host path that the stand-in target shares. After the fix they need the agent on the target's login `PATH` (`a_target_with_a_login_of_its_own`, `an_agent_that_stays_up_on`).
+- `target_trust_acceptance.rs` duplicates a small stand-in ssh target: belongs to `target-test-kit`.
+- Claude 2.1.311 migrates a project's `enabledMcpjsonServers` / `disabledMcpjsonServers` out of `~/.claude.json` into the project's `.claude/settings.local.json` at startup (`migrateEnableAllProjectMcpServersToSettings`). The legacy keys are still honoured through that migration, but writing `disabledMcpjsonServers` into the `settings.local.json` the launch already renders is the durable route. Confirm with a real Claude before green.
+
 ## TODO
 
 - [x] Record initial discovery
 - [x] Create PRD
 - [x] Create changeset
-- [ ] Draft PR contract: failing tests (commit 2)
-- [ ] USER REVIEW: acceptance tests (6e)
+- [x] Draft PR contract: failing tests (commit 2)
+- [x] USER REVIEW: acceptance tests (6e) — pre-approved under the developer's "finish the remaining ones without stopping" (2026-11-18)
 - [ ] TDD Green
 - [ ] Validate changes
 - [ ] Wrap

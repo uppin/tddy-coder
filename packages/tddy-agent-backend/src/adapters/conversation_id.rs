@@ -68,6 +68,25 @@ impl fmt::Display for ConversationMintError {
 
 impl std::error::Error for ConversationMintError {}
 
+/// What the target's own agent printed and how it ended, when [`AgentOnTarget`] ran it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetAgentRun {
+    /// The agent's exit status; `None` when it was ended by a signal.
+    pub status: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// A target's own agent, run through the target's shell: in the session's worktree there, under the
+/// target's own login environment — its `HOME`, `PATH` and `TMPDIR` — and the agent found by its
+/// bare name, never by a path of the daemon's host. What a mint on a target is run through.
+#[async_trait]
+pub trait AgentOnTarget: Send + Sync {
+    /// Run the target's agent with `args`, bounded by `deadline`. `Err` is the reason the target's
+    /// shell could not run it (unreachable, no answer in time).
+    async fn run(&self, args: &[&str], deadline: Duration) -> Result<TargetAgentRun, String>;
+}
+
 /// How a launch mints the id its session's conversation is known by.
 #[async_trait]
 pub trait ConversationIdAdapter: Send + Sync + fmt::Debug {
@@ -76,6 +95,14 @@ pub trait ConversationIdAdapter: Send + Sync + fmt::Debug {
 
     /// Mint one conversation id, within `mint.deadline`.
     async fn mint(&self, mint: ConversationMint<'_>) -> Result<String, ConversationMintError>;
+
+    /// Mint one conversation id through a target's shell, within `deadline`: the agent runs
+    /// where the session's worktree is, never on this host.
+    async fn mint_on_target(
+        &self,
+        agent: &dyn AgentOnTarget,
+        deadline: Duration,
+    ) -> Result<String, ConversationMintError>;
 }
 
 /// `<binary> create-chat`, its stdout a bare chat id (cursor-agent 2026.07.23).
@@ -86,6 +113,15 @@ pub struct CursorCreateChat;
 impl ConversationIdAdapter for CursorCreateChat {
     fn name(&self) -> &str {
         CURSOR_CREATE_CHAT
+    }
+
+    async fn mint_on_target(
+        &self,
+        _agent: &dyn AgentOnTarget,
+        _deadline: Duration,
+    ) -> Result<String, ConversationMintError> {
+        // TODO(target-agent-start): implement
+        unimplemented!("TODO(target-agent-start): mint through the target's shell")
     }
 
     async fn mint(&self, mint: ConversationMint<'_>) -> Result<String, ConversationMintError> {

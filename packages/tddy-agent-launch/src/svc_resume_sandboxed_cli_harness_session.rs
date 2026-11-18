@@ -237,6 +237,7 @@ impl LaunchSessions {
                 worktree: worktree_path,
                 env: &[],
                 session_id,
+                target: None,
             },
             metadata,
         )

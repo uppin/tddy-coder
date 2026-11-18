@@ -3,6 +3,7 @@
 
 use crate::cli_agent_steps::conversation::resumed_or_adopted_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
+use crate::cli_agent_steps::conversation::ConversationTarget;
 use crate::cli_agent_steps::{
     render_host_launch_slots, write_slot_files_on_target, write_slot_files_through_shell,
     HostLaunchSlots, ResumedWiring,
@@ -270,6 +271,10 @@ async fn resume_cli_harness_session(
             worktree: &worktree_path,
             env: &git_environment,
             session_id,
+            target: target_shell.as_ref().map(|shell| ConversationTarget {
+                shell,
+                command: &agent.tool.command,
+            }),
         },
         &meta,
     )
