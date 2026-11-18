@@ -383,6 +383,9 @@ const SECRET: &str = "s3cret-token";
 /// `git clone`, which it fails as a target that cannot reach its remote does, the way a real one
 /// echoes the URL it could not reach.
 struct AMachineWhoseRemoteIsUnreachable {
+    /// The stand-in `claude` this host resolves its agent to: a start on a target resolves the
+    /// agent here before it runs the target's own, and the start fails before either runs.
+    host_claude: PathBuf,
     previous_path: Option<std::ffi::OsString>,
     _dir: tempfile::TempDir,
 }
@@ -418,6 +421,10 @@ exec /bin/sh -c "$command" </dev/null
         std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
         // A freshly written executable pays a first-execution scan; pay it before any timed call.
         let _ = std::process::Command::new(&ssh).arg("warm-up").output();
+        let host_claude = root.join("host-bin/claude");
+        std::fs::create_dir_all(host_claude.parent().unwrap()).unwrap();
+        std::fs::write(&host_claude, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&host_claude, std::fs::Permissions::from_mode(0o755)).unwrap();
         let previous_path = std::env::var_os("PATH");
         let mut path = std::ffi::OsString::from(&bin);
         if let Some(previous) = &previous_path {
@@ -426,6 +433,7 @@ exec /bin/sh -c "$command" </dev/null
         }
         std::env::set_var("PATH", path);
         Self {
+            host_claude,
             previous_path,
             _dir: dir,
         }
@@ -453,7 +461,11 @@ struct ATargetWorld {
 async fn a_world_with_a_target(git_url: &str) -> ATargetWorld {
     let machine = AMachineWhoseRemoteIsUnreachable::behind_ssh();
     let peers = Arc::new(InProcessPeers::default());
-    let (a, operator_home) = support::a_host_as_current_user_with_operator_home(HOST_A, &peers);
+    let (a, operator_home) = support::a_host_as_current_user_with_operator_home_running_claude_as(
+        HOST_A,
+        &peers,
+        &machine.host_claude,
+    );
     std::fs::create_dir_all(operator_home.path().join(".ssh")).unwrap();
     std::fs::write(
         operator_home.path().join(".ssh/config"),

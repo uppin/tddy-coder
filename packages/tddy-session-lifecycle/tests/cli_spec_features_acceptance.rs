@@ -445,18 +445,21 @@ async fn an_ssh_slot_write_that_never_returns_refuses_the_start_after_its_deadli
     .map(|(session_id, _host)| session_id)
     .expect_err("a start whose slot files never reach the target is refused");
 
-    // Then — refused as a deadline naming the host and the deadline; the agent never spawned. The
-    // file's path on the target is the target's layout, so the message is matched on what it
-    // names rather than in full.
+    // Then — refused as a deadline naming the host, the command that hung and the deadline; the
+    // agent never spawned. The command writes a file whose path on the target is the target's
+    // layout, so the message is matched on what it names rather than in full.
     assert_eq!(
         (
             refusal.code,
+            refusal.message.contains("ssh target buildbox: `"),
             refusal
                 .message
-                .contains("ssh target buildbox: no answer within 60s"),
+                .contains("` gave no answer within 60s; the command was stopped"),
             daemon.spawn_marker.exists(),
         ),
-        (Code::DeadlineExceeded, true, false)
+        (Code::DeadlineExceeded, true, true, false),
+        "{}",
+        refusal.message
     );
 }
 

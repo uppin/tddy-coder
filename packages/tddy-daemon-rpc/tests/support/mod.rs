@@ -628,18 +628,24 @@ pub fn a_host_with_operator_home(
 }
 
 /// [`a_host_with_operator_home`], whose daemon maps the test user to the OS user this process runs
-/// as: a start on a target runs as that user, which must resolve on this machine.
-pub fn a_host_as_current_user_with_operator_home(
+/// as -- a start on a target runs as that user, which must resolve on this machine -- and finds the
+/// `claude` coding agent at `claude`, a stub the suite writes. A start on a target resolves its
+/// agent on this host before it runs the target's own by its bare command, so a host with no
+/// `claude` installed refuses the start before any remote call.
+pub fn a_host_as_current_user_with_operator_home_running_claude_as(
     instance_id: &str,
     peers: &Arc<InProcessPeers>,
+    claude: &Path,
 ) -> (Host, tempfile::TempDir) {
     let operator_home = tempfile::tempdir().unwrap();
+    let agents =
+        tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[("claude", claude)]);
     let host = host_built_with_host_service(
         instance_id,
         peers,
         config_mapping_test_user_to(&current_os_user()),
         operator_home.path().to_path_buf(),
-        |host, _sessions| host,
+        move |host, _sessions| host.with_coding_agents(agents),
     );
     (host, operator_home)
 }
