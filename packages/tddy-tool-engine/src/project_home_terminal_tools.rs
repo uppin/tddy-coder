@@ -227,7 +227,16 @@ pub async fn execute_project_home_terminal_tool(
         Err(outcome) => return outcome,
     };
     match port.read_terminal(&target).await {
-        Ok(grid) => match grid_answer(&grid, args.styles, args.region.as_ref()) {
+        Ok(grid) => match terminal_grid_answer(
+            &grid,
+            args.styles,
+            args.region.as_ref().map(|region| GridRegion {
+                row: region.row,
+                col: region.col,
+                rows: region.rows,
+                cols: region.cols,
+            }),
+        ) {
             Ok(answer) => ToolOutcome::ok(answer.to_string()),
             Err(refusal) => ToolOutcome::err(format!("{READ_SESSION_TERMINAL}: {refusal}")),
         },
@@ -235,7 +244,8 @@ pub async fn execute_project_home_terminal_tool(
     }
 }
 
-/// The answer [`READ_SESSION_TERMINAL`] gives for `grid`. `bracketed_paste` is left out: it is the
+/// The answer [`READ_SESSION_TERMINAL`] gives for `grid` — public so another driver of a terminal
+/// (`tddy-session-driver`) answers exactly what this tool does. `bracketed_paste` is left out: it is the
 /// input-mode state the keys tool reads, not part of what the screen shows.
 ///
 /// `styles` and `highlighted_rows` are added only when `with_styles` is set, so an answer without
@@ -243,10 +253,10 @@ pub async fn execute_project_home_terminal_tool(
 /// `cursor` and the style fields are those of the cropped box, and the answer echoes the region
 /// read; `cols`, `rows` and `offset` stay the whole screen's. A box the screen cannot give is the
 /// `Err`, naming why.
-fn grid_answer(
+pub fn terminal_grid_answer(
     grid: &TextGrid,
     with_styles: bool,
-    region: Option<&RegionArg>,
+    region: Option<GridRegion>,
 ) -> Result<Value, String> {
     let Some(region) = region else {
         let mut answer = json!({
@@ -266,15 +276,7 @@ fn grid_answer(
         }
         return Ok(answer);
     };
-    let cropped = crop(
-        grid,
-        GridRegion {
-            row: region.row,
-            col: region.col,
-            rows: region.rows,
-            cols: region.cols,
-        },
-    )?;
+    let cropped = crop(grid, region)?;
     let mut answer = json!({
         "lines": cropped.lines,
         "cursor": {

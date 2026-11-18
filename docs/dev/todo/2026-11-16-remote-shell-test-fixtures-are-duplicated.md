@@ -21,3 +21,10 @@ stack's sweep (#remote-shell 8/8) is a production restructure and leaves test fi
 `tddy-agent-launch` and in `tddy-session-lifecycle`, or a shared one in `tddy-testing-commons`)
 holding the stand-in target, the stub agents and the warm-up, with the seven files importing it and
 their assertions unchanged.
+
+**Grown 2026-11-18 (`#coder-start` 3/3, #942):** `packages/tddy-session-driver/tests/session_driver_acceptance.rs`
+holds an eighth copy of the `acme` tool file, the stub agents and the guarded warm-up, plus a
+stand-in `coder` **script**. The shared stand-in could not be used: the suite drives the compiled
+binary as a subprocess, so it needs a `coder` executable on disk, and `tddy_remote_shell`'s test
+support offers only the in-process `InMemoryShell`. A shared support module should therefore also
+offer the stand-in `coder` as a script writer.
