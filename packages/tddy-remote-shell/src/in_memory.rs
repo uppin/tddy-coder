@@ -206,7 +206,7 @@ impl RemoteShell for InMemoryShell {
                     return Err(RemoteShellError::TimedOut {
                         address: self.address.clone(),
                         after: request.deadline,
-                        command: String::new(), // TODO(start-visibility): implement
+                        command: crate::redact::command_head(&request.command),
                     });
                 }
                 None => state.answerers.clone(),

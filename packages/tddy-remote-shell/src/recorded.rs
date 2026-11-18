@@ -6,10 +6,11 @@
 //! scrubbed), how long it took, and how it ended. The call itself is unchanged.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 
+use crate::redact::{command_head, scrub_credentials, tail, STDERR_TAIL_CHARS};
 use crate::{
     ExecOutput, ExecRequest, InteractiveCommand, RemoteShell, RemoteShellError, ShellAddress,
     StreamedExec,
@@ -46,8 +47,6 @@ pub trait RemoteCallSink: Send + Sync {
 /// `inner`, reporting each of its calls to `sink`.
 pub struct RecordedShell {
     inner: Arc<dyn RemoteShell>,
-    // TODO(start-visibility): implement - read once `exec` reports.
-    #[allow(dead_code)]
     sink: Arc<dyn RemoteCallSink>,
 }
 
@@ -64,8 +63,42 @@ impl RemoteShell for RecordedShell {
     }
 
     async fn exec(&self, request: ExecRequest) -> Result<ExecOutput, RemoteShellError> {
-        // TODO(start-visibility): implement - time the call and report it to the sink.
-        self.inner.exec(request).await
+        let command = command_head(&request.command);
+        let started = Instant::now();
+        let result = self.inner.exec(request).await;
+        let (outcome, stderr_tail) = match &result {
+            Ok(output) => (
+                RemoteCallOutcome::Exited {
+                    code: output.status,
+                },
+                if output.status == 0 {
+                    String::new()
+                } else {
+                    stderr_of(&output.stderr)
+                },
+            ),
+            Err(RemoteShellError::TimedOut { .. }) => (RemoteCallOutcome::TimedOut, String::new()),
+            Err(RemoteShellError::Unreachable { detail, .. }) => (
+                RemoteCallOutcome::Unreachable,
+                tail(&scrub_credentials(detail.trim()), STDERR_TAIL_CHARS),
+            ),
+            Err(RemoteShellError::Exited { status, stderr }) => (
+                RemoteCallOutcome::Exited { code: *status },
+                tail(&scrub_credentials(stderr.trim()), STDERR_TAIL_CHARS),
+            ),
+            Err(RemoteShellError::Spawn(message)) => (
+                RemoteCallOutcome::Unreachable,
+                tail(&scrub_credentials(message.trim()), STDERR_TAIL_CHARS),
+            ),
+        };
+        self.sink.report(RemoteCallReport {
+            address: self.inner.address(),
+            command,
+            duration: started.elapsed(),
+            outcome,
+            stderr_tail,
+        });
+        result
     }
 
     async fn exec_streamed(&self, command: &str) -> Result<StreamedExec, RemoteShellError> {
@@ -75,4 +108,12 @@ impl RemoteShell for RecordedShell {
     fn interactive(&self, command: &str) -> InteractiveCommand {
         self.inner.interactive(command)
     }
+}
+
+/// A failed command's stderr, as a report keeps it: trimmed, scrubbed, cut to its tail.
+fn stderr_of(stderr: &[u8]) -> String {
+    tail(
+        &scrub_credentials(String::from_utf8_lossy(stderr).trim()),
+        STDERR_TAIL_CHARS,
+    )
 }

@@ -101,8 +101,17 @@ the worktree event into `branch`/`worktree`. `TimedOut`'s Display is
   `request.command`, never a transport's wrapper (Coder's one-shot preamble). Credentials are
   scrubbed twice: in `RecordedShell`, so nothing secret crosses the proto, and again in the ledger
   on record. The ledger keeps at most `MAX_REMOTE_CALLS` (50), newest.
-- **Known leak, not this node's:** `RemoteCheckoutError::Clone` Display carries the project's
-  `git_url`, so a credentialed URL reaches the start's `error`. The tests pin `remote_calls` only.
+- **Credentials in the start's `error` (green, orchestrator, under the user's finish-without-stopping
+  instruction):** `RemoteCheckoutError::Clone` Display carries the project's `git_url`, so the remote
+  worktree step scrubs the error text (`tddy_remote_shell::scrub_credentials`) before it becomes the
+  start's `Status`. The scrubber (user-info of `scheme://user:pw@host`) and the command/stderr
+  truncation live in `tddy-remote-shell` (`redact.rs`) and are shared by the shell layer, the
+  timeout error and the ledger.
+- **Where the shell is decorated (green):** at the remote cut in `cli_session_worktree.rs`
+  (`recorded_by`), so every call of the worktree step is logged; `worktree_ready` is reported when
+  `setup_remote_worktree` returns, i.e. right after `git worktree add` (or the already-cut check)
+  succeeded, which leaves `setup_remote_worktree`'s signature unchanged. Calls made by later steps
+  (home probe, trust write) are not yet routed through the decorator.
 
 ## TODO
 
@@ -111,6 +120,6 @@ the worktree event into `branch`/`worktree`. `TimedOut`'s Display is
 - [x] Create changeset
 - [x] Draft PR contract — failing tests (commit 2)
 - [ ] USER REVIEW — acceptance tests (6e)
-- [ ] TDD Green
+- [x] TDD Green
 - [ ] Validate changes
 - [ ] Wrap

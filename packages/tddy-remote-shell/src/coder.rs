@@ -413,7 +413,7 @@ impl RemoteShell for CoderShell {
                 return Err(RemoteShellError::TimedOut {
                     address: self.address(),
                     after: deadline,
-                    command: String::new(), // TODO(start-visibility): implement
+                    command: crate::redact::command_head(&request.command),
                 });
             }
         };

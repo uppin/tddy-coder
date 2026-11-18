@@ -84,7 +84,14 @@ pub(crate) async fn provision_cli_worktree(
                 )
                 .await?;
             progress.begin_phase(StartStep::Worktree);
-            let path = cut_worktree(start, &repo_root, &project.git_url, chain_base_ref).await?;
+            let path = cut_worktree(
+                start,
+                &repo_root,
+                &project.git_url,
+                chain_base_ref,
+                progress,
+            )
+            .await?;
             progress.end_phase(StartStep::Worktree);
             // The child's branch now exists, so the planned node it materializes can record it —
             // which is what makes that node's descendants spawnable at all, since they base onto
@@ -137,11 +144,13 @@ async fn cut_worktree(
     repo_root: &Path,
     git_url: &str,
     chain_base_ref: Option<String>,
+    progress: &AttachmentProgressSink,
 ) -> Result<PathBuf, Status> {
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(start.selected_integration_base_ref, chain_base_ref);
     let wt = if let Some(shell) = &start.shell {
-        remote_worktree_through(start, git_url, shell.as_ref(), worktree_base_ref).await?
+        let recorded = recorded_by(shell.clone(), progress);
+        remote_worktree_through(start, git_url, &recorded, worktree_base_ref, progress).await?
     } else if start.ssh_alias.is_empty() {
         tddy_session_split::service_util::create_session_worktree(
             start.timeout,
@@ -152,7 +161,7 @@ async fn cut_worktree(
         )
         .await?
     } else {
-        remote_worktree(start, git_url, worktree_base_ref).await?
+        remote_worktree(start, git_url, worktree_base_ref, progress).await?
     };
     tddy_session_split::service_util::push_new_branch_to_origin_if_requested(
         start.create_remote_branch,
@@ -170,9 +179,50 @@ async fn remote_worktree(
     start: &CliWorktreeStart<'_>,
     git_url: &str,
     worktree_base_ref: Option<String>,
+    progress: &AttachmentProgressSink,
 ) -> Result<PathBuf, Status> {
-    let shell = tddy_remote_shell::SshShell::new(start.ssh_alias);
-    remote_worktree_through(start, git_url, &shell, worktree_base_ref).await
+    let shell = recorded_by(
+        std::sync::Arc::new(tddy_remote_shell::SshShell::new(start.ssh_alias)),
+        progress,
+    );
+    remote_worktree_through(start, git_url, &shell, worktree_base_ref, progress).await
+}
+
+/// `shell`, reporting each command it runs to the start's progress, which is how the start's record
+/// comes to list them.
+fn recorded_by(
+    shell: std::sync::Arc<dyn tddy_remote_shell::RemoteShell>,
+    progress: &AttachmentProgressSink,
+) -> tddy_remote_shell::RecordedShell {
+    tddy_remote_shell::RecordedShell::new(
+        shell,
+        std::sync::Arc::new(ProgressCalls(progress.clone())),
+    )
+}
+
+/// A [`tddy_remote_shell::RemoteCallSink`] that turns a call's report into the start's
+/// `remote_call` event.
+struct ProgressCalls(AttachmentProgressSink);
+
+impl tddy_remote_shell::RemoteCallSink for ProgressCalls {
+    fn report(&self, call: tddy_remote_shell::RemoteCallReport) {
+        use tddy_remote_shell::RemoteCallOutcome as Ended;
+        use tddy_service::proto::session::start_remote_call::Outcome;
+        let (outcome, exit_code) = match call.outcome {
+            Ended::Exited { code } => (Outcome::Exited, code),
+            Ended::TimedOut => (Outcome::TimedOut, 0),
+            Ended::Unreachable => (Outcome::Unreachable, 0),
+        };
+        self.0
+            .remote_call(tddy_service::proto::session::StartRemoteCall {
+                host: call.address.to_string(),
+                command: call.command,
+                duration_ms: u64::try_from(call.duration.as_millis()).unwrap_or(u64::MAX),
+                outcome: outcome as i32,
+                exit_code,
+                stderr_tail: call.stderr_tail,
+            });
+    }
 }
 
 /// The session's checkout on its target, cloned from `git_url` through `shell`: under the target
@@ -183,6 +233,7 @@ async fn remote_worktree_through(
     git_url: &str,
     shell: &dyn tddy_remote_shell::RemoteShell,
     worktree_base_ref: Option<String>,
+    progress: &AttachmentProgressSink,
 ) -> Result<PathBuf, Status> {
     // The branch the start resolved, read from its changeset as the local cut reads it: an
     // omitted intent generated a name there, while the request fields this start carries may
@@ -244,7 +295,14 @@ async fn remote_worktree_through(
             start.timeout
         ))
     })?
-    .map_err(|error| Status::internal(format!("remote worktree setup failed: {error}")))?;
+    .map_err(|error| {
+        // The clone's error names the project's URL, which may carry a credential.
+        Status::internal(format!(
+            "remote worktree setup failed: {}",
+            tddy_remote_shell::scrub_credentials(&error.to_string())
+        ))
+    })?;
+    progress.worktree_ready(&checkout.branch, &checkout.worktree);
     Ok(PathBuf::from(checkout.worktree))
 }
 
@@ -370,10 +428,15 @@ mod remote_cut_tests {
         };
 
         // When the checkout is cut on the target
-        let worktree =
-            remote_worktree_through(&start, QAPE_HQ, &workspace, Some("origin/main".to_string()))
-                .await
-                .expect("the cut succeeds");
+        let worktree = remote_worktree_through(
+            &start,
+            QAPE_HQ,
+            &workspace,
+            Some("origin/main".to_string()),
+            &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
+        )
+        .await
+        .expect("the cut succeeds");
 
         // Then it is under the workspace user's home, on the requested branch from its base
         let root = format!("{WORKSPACE_HOME}/.tddy/repos/qape-hq");
@@ -434,9 +497,15 @@ mod remote_cut_tests {
         };
 
         // When the checkout is cut on the target
-        remote_worktree_through(&start, QAPE_HQ, &workspace, None)
-            .await
-            .expect("the cut succeeds");
+        remote_worktree_through(
+            &start,
+            QAPE_HQ,
+            &workspace,
+            None,
+            &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
+        )
+        .await
+        .expect("the cut succeeds");
 
         // Then the branch cut is the generated one the changeset names, never an empty name
         let run = workspace.commands_run().join("\n");

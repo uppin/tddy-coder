@@ -27,8 +27,11 @@ use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tddy_rpc::Code;
 use tddy_service::proto::session::start_phase::{Boundary, Step};
+use tddy_service::proto::session::start_remote_call::Outcome as StartCallOutcome;
 use tddy_service::proto::session::start_session_event::Event;
-use tddy_service::proto::session::{StartPhase, StartSessionEvent, StartSessionResponse};
+use tddy_service::proto::session::{
+    StartPhase, StartRemoteCall, StartSessionEvent, StartSessionResponse,
+};
 
 pub const GET_SESSION_START: &str = "GetSessionStart";
 pub const CANCEL_SESSION_START: &str = "CancelSessionStart";
@@ -73,7 +76,6 @@ pub struct StartCloneProgress {
 }
 
 /// The most remote calls one start's record keeps; past it the oldest are dropped.
-// TODO(start-visibility): implement - `apply_progress` enforces it.
 pub const MAX_REMOTE_CALLS: usize = 50;
 
 /// How a remote call of a start ended.
@@ -448,11 +450,40 @@ fn apply_progress(record: &mut StartLedgerRecord, event: StartSessionEvent) -> b
             });
             true
         }
-        // TODO(start-visibility): implement - `RemoteCall` is folded into `remote_calls` (capped,
-        // credentials scrubbed, `updated_at_unix_ms` advanced); `WorktreeReady` sets `branch` and
-        // `worktree`, which a failed start keeps.
-        Some(Event::RemoteCall(_) | Event::WorktreeReady(_)) => false,
+        Some(Event::RemoteCall(call)) => {
+            record.remote_calls.push(remote_call_record(call));
+            if record.remote_calls.len() > MAX_REMOTE_CALLS {
+                let overflow = record.remote_calls.len() - MAX_REMOTE_CALLS;
+                record.remote_calls.drain(..overflow);
+            }
+            record.updated_at_unix_ms = now_unix_ms();
+            true
+        }
+        Some(Event::WorktreeReady(ready)) => {
+            record.branch = Some(ready.branch);
+            record.worktree = Some(ready.worktree);
+            record.updated_at_unix_ms = now_unix_ms();
+            true
+        }
         _ => false,
+    }
+}
+
+/// A reported call as the record keeps it. The reporter already scrubbed it; this scrubs again, so a
+/// start relayed from a daemon that did not still leaves no credential on record.
+fn remote_call_record(call: StartRemoteCall) -> RemoteCallRecord {
+    let outcome = match StartCallOutcome::try_from(call.outcome) {
+        Ok(StartCallOutcome::TimedOut) => RemoteCallOutcome::TimedOut,
+        Ok(StartCallOutcome::Unreachable) => RemoteCallOutcome::Unreachable,
+        _ => RemoteCallOutcome::Exited,
+    };
+    RemoteCallRecord {
+        host: call.host,
+        command: tddy_remote_shell::command_head(&call.command),
+        duration_ms: call.duration_ms,
+        outcome,
+        exit_code: (outcome == RemoteCallOutcome::Exited).then_some(call.exit_code),
+        stderr_tail: tddy_remote_shell::scrub_credentials(&call.stderr_tail),
     }
 }
 
