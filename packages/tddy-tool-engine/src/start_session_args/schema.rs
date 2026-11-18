@@ -109,7 +109,7 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
     );
     offer(
         "new_branch_name",
-        string("With `new_branch_from_base`: the branch to create; empty lets the start name one. A branch another session owns is refused, never suffixed."),
+        string("With `new_branch_from_base`: the branch to create. Empty lets the start name one, except for an agent whose spec declares `branch_name_required` (the built-in `claude-cli`), which refuses it; an empty `branch_worktree_intent` has a name generated for every agent. A branch another session owns is refused, never suffixed."),
     );
     offer(
         "selected_integration_base_ref",

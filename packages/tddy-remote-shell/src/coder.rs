@@ -99,6 +99,92 @@ fn strip_start_marker(bytes: &[u8]) -> Option<&[u8]> {
     }
 }
 
+/// How wide a base64 line of a one-shot's stdin is: far inside the 4096 bytes a tty's canonical
+/// line holds.
+const STDIN_LINE_WIDTH: usize = 76;
+
+/// What a one-shot exits with when its stdin did not arrive whole, and its command never ran.
+const STDIN_NOT_WHOLE_STATUS: i32 = 125;
+
+/// `bytes` as the lines a one-shot's stdin crosses the workspace's pty in: base64, every line
+/// ended by a newline. A pty in canonical mode hands its reader only complete lines and acts on
+/// control characters (`^D`, `^C`, a carriage return); base64 holds none of them, and the newline
+/// that ends the last line releases it.
+fn stdin_lines(bytes: &[u8]) -> Vec<u8> {
+    use base64::Engine as _;
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let mut lines = Vec::with_capacity(encoded.len() + encoded.len() / STDIN_LINE_WIDTH + 1);
+    for line in encoded.as_bytes().chunks(STDIN_LINE_WIDTH) {
+        lines.extend_from_slice(line);
+        lines.push(b'\n');
+    }
+    lines
+}
+
+/// The command line a one-shot runs on the workspace: the start marker, then `command`.
+///
+/// `coder ssh` runs it in a pty. Its output processing is turned off first (`stty -opost`), so
+/// the bytes the command writes arrive as written — not with every `\n` made `\r\n` (`onlcr`).
+/// Closing the CLI's stdin never reaches the workspace as an EOF, so `command` never reads the
+/// pty itself. With no stdin the shell's stdin is `/dev/null`. With stdin, `stdin` is
+/// `(sent, length)`: exactly `sent` bytes of [`stdin_lines`] are read off
+/// the pty — counted, so no EOF is needed — decoded into a file only its owner can read and
+/// checked to hold `length` bytes; the shell's stdin is then that file, unlinked before `command`
+/// runs. A stdin that did not arrive whole runs nothing and exits [`STDIN_NOT_WHOLE_STATUS`].
+/// Echo is turned off before the marker is printed, so lines written once the marker has arrived
+/// are not echoed into the command's output.
+fn one_shot_command(command: &str, stdin: Option<(usize, usize)>) -> String {
+    let marker = format!("printf '%s\\n' '{START_MARKER}' >&2");
+    match stdin {
+        None => format!("stty -opost 2>/dev/null; exec </dev/null; {marker}; {command}"),
+        Some((sent, length)) => format!(
+            "stty -opost -echo 2>/dev/null; {marker}; \
+             tddy_stdin=$(mktemp) || exit {STDIN_NOT_WHOLE_STATUS}; \
+             if head -c {sent} | base64 -d > \"$tddy_stdin\" \
+             && [ \"$(( $(wc -c < \"$tddy_stdin\") ))\" -eq {length} ]; then \
+             exec < \"$tddy_stdin\"; rm -f \"$tddy_stdin\"; \
+             else rm -f \"$tddy_stdin\"; \
+             echo \"tddy-coder-shell: the command's stdin did not arrive whole\" >&2; \
+             exit {STDIN_NOT_WHOLE_STATUS}; fi; \
+             {command}"
+        ),
+    }
+}
+
+/// Whether `bytes` hold the start marker's whole line, ended `\n` or, from a pty, `\r\n`.
+fn holds_the_start_marker_line(bytes: &[u8]) -> bool {
+    bytes.windows(START_MARKER.len() + 1).any(|window| {
+        window.starts_with(START_MARKER.as_bytes())
+            && matches!(window[START_MARKER.len()], b'\n' | b'\r')
+    })
+}
+
+/// Everything `stream` carries until it ends, noting on `marker_arrived` the moment the start
+/// marker's line is among it.
+async fn read_noting_the_marker(
+    stream: &mut (impl tokio::io::AsyncRead + Unpin),
+    marker_arrived: &tokio::sync::Notify,
+) -> Vec<u8> {
+    use tokio::io::AsyncReadExt as _;
+
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let mut noted = false;
+    loop {
+        match stream.read(&mut chunk).await {
+            Ok(0) | Err(_) => return bytes,
+            Ok(read) => {
+                bytes.extend_from_slice(&chunk[..read]);
+                if !noted && holds_the_start_marker_line(&bytes) {
+                    noted = true;
+                    marker_arrived.notify_one();
+                }
+            }
+        }
+    }
+}
+
 /// A streamed coder command's stdin: shutting it down drops the pipe, which is the command's EOF.
 struct CoderStdin {
     inner: Option<tokio::process::ChildStdin>,
@@ -322,38 +408,47 @@ impl RemoteShell for CoderShell {
     /// an agent that is not connected, a token the deployment refuses — is
     /// [`RemoteShellError::Unreachable`] with what it wrote to stderr.
     async fn exec(&self, request: ExecRequest) -> Result<ExecOutput, RemoteShellError> {
-        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        use tokio::io::AsyncWriteExt as _;
 
         let deadline = request.deadline;
-        let wrapped = format!("printf '%s\\n' '{START_MARKER}' >&2; {}", request.command);
+        let lines = request.stdin.as_deref().map(stdin_lines);
+        let wrapped = one_shot_command(
+            &request.command,
+            lines
+                .as_ref()
+                .zip(request.stdin.as_ref())
+                .map(|(lines, bytes)| (lines.len(), bytes.len())),
+        );
         let mut child = self
             .command(&wrapped)
             .spawn()
             .map_err(|error| self.spawn_error(error))?;
         let (mut stdin, mut stdout, mut stderr) = Self::take_pipes(&mut child)?;
-        let stdin_bytes = request.stdin;
         let coder_path = self.coder.clone();
         let work = async move {
-            let stdin_fut = async {
-                if let Some(bytes) = stdin_bytes {
-                    let _ = stdin.write_all(&bytes).await;
+            let marker_arrived = tokio::sync::Notify::new();
+            let outputs = async {
+                tokio::join!(
+                    child.wait(),
+                    read_noting_the_marker(&mut stdout, &marker_arrived),
+                    read_noting_the_marker(&mut stderr, &marker_arrived),
+                )
+            };
+            // The lines go only to a command that has turned its pty's echo off, which it has
+            // once its marker has arrived; a call that ends without one never sends them.
+            let feed = async {
+                if let Some(lines) = lines {
+                    marker_arrived.notified().await;
+                    let _ = stdin.write_all(&lines).await;
+                    let _ = stdin.flush().await;
                 }
                 drop(stdin);
             };
-            let stdout_fut = async {
-                let mut bytes = Vec::new();
-                let _ = stdout.read_to_end(&mut bytes).await;
-                bytes
-            };
-            let stderr_fut = async {
-                let mut bytes = Vec::new();
-                let _ = stderr.read_to_end(&mut bytes).await;
-                bytes
-            };
-            let status_fut = async { child.wait().await };
-            let (status, (), stdout_bytes, stderr_bytes) =
-                tokio::join!(status_fut, stdin_fut, stdout_fut, stderr_fut);
-            (status, stdout_bytes, stderr_bytes)
+            tokio::pin!(outputs);
+            tokio::select! {
+                finished = &mut outputs => finished,
+                () = feed => outputs.await,
+            }
         };
         let (status, stdout, stderr) = match tokio::time::timeout(deadline, work).await {
             Ok(result) => result,

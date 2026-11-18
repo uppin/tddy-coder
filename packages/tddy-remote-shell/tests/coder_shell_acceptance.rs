@@ -13,12 +13,15 @@ use std::time::Duration;
 use pretty_assertions::assert_eq;
 use tddy_remote_shell::contract::assert_behaves_like_a_remote_shell;
 use tddy_remote_shell::{
-    CoderShell, CoderWorkspaceRef, ExecOutput, ExecRequest, InteractiveCommand, RemoteShell,
-    RemoteShellError, ShellAddress,
+    CoderShell, CoderWorkspaceRef, ExecOutput, ExecRequest, FileMode, InteractiveCommand,
+    RemoteShell, RemoteShellError, ShellAddress,
 };
 
 use coder_support::{
-    a_coder_that_refuses_to_connect, a_coder_whose_workspaces_merge_stderr_into_stdout,
+    a_coder_that_refuses_to_connect,
+    a_coder_whose_workspaces_end_their_lines_with_carriage_returns,
+    a_coder_whose_workspaces_merge_stderr_into_stdout,
+    a_coder_whose_workspaces_never_see_the_end_of_their_input,
     a_coder_whose_workspaces_run_commands_here, the_credentials, DEPLOYMENT_URL, SESSION_TOKEN,
 };
 
@@ -33,6 +36,14 @@ const GIVEN_THE_DEPLOYMENT_AND_TOKEN: &str =
 /// Bounds a step that would otherwise hang the suite on a transport that never relays. Far above
 /// what the step needs.
 const STEP_BUDGET: Duration = Duration::from_secs(10);
+
+/// A settings file as a launch writes it: its last line, the closing brace, has no newline — the
+/// line a pty holds back until its input ends.
+const SETTINGS_FILE: &[u8] = b"{\n  \"hooks\": {\"hook_token\": \"tok-7f3a9c\"}\n}";
+
+/// Not text: a NUL, a byte that is no UTF-8, the pty's end-of-file and interrupt characters, both
+/// line endings, and no trailing newline.
+const CONTROL_BYTES: &[u8] = &[b'a', 0, 0xff, 0x04, 0x03, b'\r', b'\n', b'z'];
 
 fn adas_devbox() -> CoderWorkspaceRef {
     CoderWorkspaceRef::new("ada", "devbox").on_agent("main")
@@ -282,4 +293,108 @@ async fn a_missing_coder_cli_is_a_spawn_failure_that_names_it() {
         matches!(&outcome, Err(RemoteShellError::Spawn(message)) if message.contains("/no/such/dir/coder")),
         "expected a spawn failure naming /no/such/dir/coder, got {outcome:?}"
     );
+}
+
+#[tokio::test]
+async fn a_file_written_through_a_pty_that_never_ends_its_input_reads_back_as_written() {
+    // Given a coder whose workspace's pty never turns the end of its input into an EOF
+    let coder = a_coder_whose_workspaces_never_see_the_end_of_their_input();
+    let shell = coder.shell_on(adas_devbox());
+    let path = format!(
+        "{}/.claude/settings.local.json",
+        coder.scratch_dir().to_string_lossy()
+    );
+
+    // When a settings file whose last line has no newline is written, then read back
+    let written = tokio::time::timeout(
+        STEP_BUDGET,
+        shell.write_file(&path, SETTINGS_FILE, FileMode::OwnerOnly),
+    )
+    .await
+    .expect("the write finishes within the step budget, not at the shell's deadline");
+    let read = shell.read_file(&path).await;
+
+    // Then the file is whole, closing brace and all
+    assert_eq!(written, Ok(()));
+    assert_eq!(read, Ok(SETTINGS_FILE.to_vec()));
+    // And its bytes never travelled on a command line, where any process on the host could read
+    // the hook token they carry
+    let command_lines_naming_the_token: Vec<String> = coder
+        .calls()
+        .into_iter()
+        .filter(|line| line.contains("tok-7f3a9c"))
+        .collect();
+    assert_eq!(command_lines_naming_the_token, Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn stdin_through_a_pty_that_never_ends_its_input_reaches_the_command_byte_for_byte() {
+    // Given a coder whose workspace's pty never turns the end of its input into an EOF
+    let coder = a_coder_whose_workspaces_never_see_the_end_of_their_input();
+    let shell = coder.shell_on(adas_devbox());
+
+    // When a command that copies its stdin is given bytes the pty would otherwise act on
+    let output = tokio::time::timeout(
+        STEP_BUDGET,
+        shell.exec(ExecRequest::new("cat").with_stdin(CONTROL_BYTES)),
+    )
+    .await
+    .expect("the command finishes within the step budget, not at the shell's deadline");
+
+    // Then the command read them exactly, and then the end of its input
+    assert_eq!(output, Ok(ExecOutput::succeeded(CONTROL_BYTES)));
+}
+
+#[tokio::test]
+async fn a_command_given_no_stdin_reads_an_empty_one_through_a_pty_that_never_ends_its_input() {
+    // Given a coder whose workspace's pty never turns the end of its input into an EOF
+    let coder = a_coder_whose_workspaces_never_see_the_end_of_their_input();
+    let shell = coder.shell_on(adas_devbox());
+
+    // When a command that reads its stdin is run with none
+    let output = tokio::time::timeout(STEP_BUDGET, shell.exec(ExecRequest::new("cat")))
+        .await
+        .expect("the command finishes within the step budget, not at the shell's deadline");
+
+    // Then it read an empty one
+    assert_eq!(output, Ok(ExecOutput::succeeded("")));
+}
+
+#[tokio::test]
+async fn a_file_read_through_a_pty_that_ends_lines_with_carriage_returns_reads_as_it_is() {
+    // Given a coder whose workspace's pty ends every line it writes with a carriage return, and a
+    // settings file on the workspace
+    let coder = a_coder_whose_workspaces_end_their_lines_with_carriage_returns();
+    let shell = coder.shell_on(adas_devbox());
+    let dir = coder.scratch_dir().join(".claude");
+    std::fs::create_dir_all(&dir).expect("the workspace's directory is made");
+    let path = dir.join("settings.local.json");
+    std::fs::write(&path, SETTINGS_FILE).expect("the settings file is written");
+
+    // When it is read through the shell
+    let read = tokio::time::timeout(STEP_BUDGET, shell.read_file(&path.to_string_lossy()))
+        .await
+        .expect("the read finishes within the step budget");
+
+    // Then its bytes are the file's, with no carriage return the pty would have added
+    assert_eq!(read, Ok(SETTINGS_FILE.to_vec()));
+}
+
+#[tokio::test]
+async fn lines_a_command_prints_through_a_pty_that_ends_lines_with_carriage_returns_end_as_printed()
+{
+    // Given a coder whose workspace's pty ends every line it writes with a carriage return
+    let coder = a_coder_whose_workspaces_end_their_lines_with_carriage_returns();
+    let shell = coder.shell_on(adas_devbox());
+
+    // When a command prints two lines, as `git worktree list` does
+    let output = tokio::time::timeout(
+        STEP_BUDGET,
+        shell.exec(ExecRequest::new("printf 'one\\ntwo\\n'")),
+    )
+    .await
+    .expect("the command finishes within the step budget");
+
+    // Then each line ends as the command ended it
+    assert_eq!(output, Ok(ExecOutput::succeeded("one\ntwo\n")));
 }
