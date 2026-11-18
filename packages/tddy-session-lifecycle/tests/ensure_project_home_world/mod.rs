@@ -8,8 +8,8 @@
 use std::path::PathBuf;
 
 use crate::project_home_support::{
-    a_home_daemon, a_home_daemon_with_coding_agents, a_repo_with_origin_main, ensure_main, git,
-    HomeDaemon, PROJECT_ID,
+    a_home_daemon, a_home_daemon_with_coding_agents, a_home_daemon_without_stored_main_branch,
+    a_repo_with_origin_main, ensure_main, git, HomeDaemon, PROJECT_ID,
 };
 use tddy_core::session_metadata::{read_session_metadata, write_session_metadata, SessionMetadata};
 use tddy_projects::project_storage;
@@ -144,6 +144,17 @@ pub fn a_daemon_with_a_project_recording(home_session_id: Option<&str>) -> World
         .unwrap_or_default();
     World {
         home: a_home_daemon(repo.path(), &home_session_line, ""),
+        repo,
+    }
+}
+
+/// [`a_daemon_with_a_project`] whose registry row stores no `main_branch_ref` — the row
+/// `CreateProject` writes. The daemon resolves the default branch live from the repository.
+#[allow(dead_code)]
+pub fn a_daemon_with_a_project_without_a_stored_main_branch() -> World {
+    let repo = a_repo_with_origin_main();
+    World {
+        home: a_home_daemon_without_stored_main_branch(repo.path()),
         repo,
     }
 }

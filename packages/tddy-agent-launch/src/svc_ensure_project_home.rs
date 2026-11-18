@@ -181,13 +181,14 @@ impl LaunchSessions {
             ..spec
         })?;
         refuse_a_type_main_cannot_run(Some(&*self.coding_agents), &spec)?;
-        let home = home_worktree_for(project)?;
+        let home = home_worktree_for(&scope.projects_dir, project)?;
         let start = on_home_worktree(spec, PROJECT_HOME_ROLE, &project.project_id, &home);
         self.refuse_a_claude_cli_start_up_front(&start)?;
 
         let previous = self.recorded_main(scope)?;
         if let Some(previous) = &previous {
-            self.stop_previous_main(project, &home, previous).await?;
+            self.stop_previous_main(&scope.projects_dir, project, &home, previous)
+                .await?;
         }
         let started = self.start_and_record_main(scope, start).await?;
         let outcome = match previous {
@@ -201,12 +202,13 @@ impl LaunchSessions {
     /// serves it. Its record and role stay, so it stays read-only.
     async fn stop_previous_main(
         &self,
+        projects_dir: &Path,
         project: &ProjectData,
         home: &Path,
         previous: &session_reader::SessionEntry,
     ) -> Result<(), Status> {
         // The worktree outlives the main it was made for; the new one starts at today's ref.
-        fast_forward_home(home, project)?;
+        fast_forward_home(projects_dir, home, project)?;
         // TODO: a previous main whose pid is alive but whose terminal this daemon no longer
         // serves (a daemon restart) is left running
         // (docs/dev/todo/2026-10-23-project-home-running-heuristic.md).
@@ -317,7 +319,7 @@ impl LaunchSessions {
         let home = metadata.repo_path.map(PathBuf::from).ok_or_else(|| {
             Status::failed_precondition("the home session has no worktree to resume in")
         })?;
-        fast_forward_home(&home, &scope.project)?;
+        fast_forward_home(&scope.projects_dir, &home, &scope.project)?;
         self.resume_session_at_session_coordinate(Request::direct(ResumeSessionRequest {
             session_token: session_token.to_string(),
             session_id: stopped.session_id.clone(),
@@ -344,24 +346,33 @@ impl LaunchSessions {
 }
 
 /// The project's main branch ref, which the home worktree is detached at.
-fn main_branch_ref_of(project: &ProjectData) -> Result<String, Status> {
-    project
-        .main_branch_ref
-        .as_deref()
-        .map(str::trim)
-        .filter(|r| !r.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| {
-            Status::failed_precondition(format!(
-                "project {} has no main branch ref for its home worktree",
-                project.project_id
-            ))
-        })
+///
+/// The stored ref wins. A project whose row stores none — the row `CreateProject` writes — resolves
+/// its default live from the repository (`origin/master`, then `origin/main`, then the remote's
+/// `HEAD`), exactly as every other consumer of the project's integration base does
+/// ([`tddy_projects::project_storage::effective_integration_base_ref_for_project`]). The resolution
+/// is never written back: the default branch stays a runtime-resolvable property.
+fn main_branch_ref_of(projects_dir: &Path, project: &ProjectData) -> Result<String, Status> {
+    tddy_projects::project_storage::effective_integration_base_ref_for_project(
+        projects_dir,
+        &project.project_id,
+    )
+    .map_err(|e| {
+        Status::failed_precondition(format!(
+            "resolving the main branch ref of project {}: {e}",
+            project.project_id
+        ))
+    })
 }
 
 /// Fast-forward `home` to `project`'s main branch ref.
-pub(crate) fn fast_forward_home(home: &Path, project: &ProjectData) -> Result<(), Status> {
-    fast_forward_home_worktree(home, &main_branch_ref_of(project)?).map_err(home_worktree_failure)
+pub(crate) fn fast_forward_home(
+    projects_dir: &Path,
+    home: &Path,
+    project: &ProjectData,
+) -> Result<(), Status> {
+    fast_forward_home_worktree(home, &main_branch_ref_of(projects_dir, project)?)
+        .map_err(home_worktree_failure)
 }
 
 /// A home worktree that could not be made or moved: the project is not in a state main can run in.
@@ -370,14 +381,17 @@ fn home_worktree_failure(error: impl std::fmt::Display) -> Status {
 }
 
 /// The project's home worktree, created at its main branch ref when absent.
-pub(crate) fn home_worktree_for(project: &ProjectData) -> Result<PathBuf, Status> {
+pub(crate) fn home_worktree_for(
+    projects_dir: &Path,
+    project: &ProjectData,
+) -> Result<PathBuf, Status> {
     let main_repo = tddy_session_split::service_util::project_repo_root(project)?;
     let worktrees_root = tddy_core::worktree_dir(&main_repo);
     ensure_home_worktree(
         &main_repo,
         &worktrees_root,
         &project.project_id,
-        &main_branch_ref_of(project)?,
+        &main_branch_ref_of(projects_dir, project)?,
     )
     .map_err(home_worktree_failure)
 }

@@ -13,9 +13,11 @@ mod project_home_support;
 use std::path::{Path, PathBuf};
 
 use ensure_project_home_world::{
-    a_claude_cli_spec, a_daemon_with_a_project, a_daemon_with_a_project_recording, World,
+    a_claude_cli_spec, a_daemon_with_a_project, a_daemon_with_a_project_recording,
+    a_daemon_with_a_project_without_a_stored_main_branch, World,
 };
 use project_home_support::{a_caller_token, git, this_daemons_session_tokens, PROJECT_ID};
+use tddy_projects::project_storage;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::session::{
     AgentClonePlacement, ListSessionsRequest, SessionEntry, SessionService as SessionServiceTrait,
@@ -210,6 +212,34 @@ async fn setting_up_main_records_the_session_on_the_project() {
 
     // Then
     assert_eq!(world.recorded_main(), Some(main.session_id));
+}
+
+/// A project whose row stores no `main_branch_ref` — the row `CreateProject` writes — resolves its
+/// default branch live from the repository when its main is set up, and the row stays unstored.
+#[tokio::test]
+async fn setting_up_main_resolves_the_default_branch_when_the_project_stores_none() {
+    // Given
+    let world = a_daemon_with_a_project_without_a_stored_main_branch();
+
+    // When
+    let set_up = world
+        .set_up_main(a_claude_cli_spec())
+        .await
+        .expect("setting up main succeeds without a stored main branch ref");
+
+    // Then
+    let session = set_up.session.expect("main is returned");
+    let home = world.home_worktree_of(&session.session_id);
+    assert_eq!(head_of(&home), world.origin_main());
+    assert!(is_detached(&home), "the home worktree is on no branch");
+    let stored =
+        project_storage::find_project(&world.home.data.path().join("projects"), PROJECT_ID)
+            .expect("projects.yaml reads")
+            .expect("the project is registered");
+    assert_eq!(
+        stored.main_branch_ref, None,
+        "the resolved ref is not written back: it stays a runtime property"
+    );
 }
 
 #[tokio::test]
