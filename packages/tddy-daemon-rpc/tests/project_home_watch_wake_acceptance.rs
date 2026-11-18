@@ -26,6 +26,7 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_kernel::session_notification::QuestionNotice;
 use tddy_daemon_rpc::exec_tool::watch_wake::WakeTimings;
 use tddy_rpc::Request;
+use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_session_activity::session_notifications::{
     SessionNotification, SessionNotificationBus, SessionNotificationKind, SessionNotificationSource,
@@ -41,6 +42,8 @@ const TIMINGS: WakeTimings = WakeTimings {
 const WAIT_TIMEOUT: Duration = Duration::from_secs(15);
 /// Several settles long: a wake that was going to happen has happened by then.
 const QUIET_PERIOD: Duration = Duration::from_millis(400);
+/// The credential the idle-prompt hook presents.
+const IDLE_HOOK_TOKEN: &str = "tok-idle-prompt";
 const READY_MARKER: &str = "READY";
 /// What every wake starts with: a bracketed paste of the `[tddy watch]` message.
 const WAKE_OPENS: &[u8] = b"\x1b[200~[tddy watch]";
@@ -133,6 +136,29 @@ impl World {
                 ..self.a_notification_of(&self.orchestrator)
             })
             .await;
+    }
+
+    /// The orchestrator's agent finished its turn: Claude's `idle_prompt` `Notification` hook
+    /// reports it through the daemon's activity service, as `tddy-tools session-hook` does.
+    async fn the_orchestrator_reports_its_idle_prompt(&self) {
+        let dir = session_dir(&self.a, &self.orchestrator);
+        let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
+        meta.hook_token = Some(IDLE_HOOK_TOKEN.to_string());
+        tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
+        self.a
+            .daemon
+            .activity_service()
+            .report_session_status(Request::direct(ReportSessionStatusRequest {
+                session_id: self.orchestrator.clone(),
+                hook_token: IDLE_HOOK_TOKEN.to_string(),
+                os_user: self.os_user.clone(),
+                status: "WaitingForInput".to_string(),
+                hook_event_name: "Notification".to_string(),
+                message: "Claude is waiting for your input".to_string(),
+                ..Default::default()
+            }))
+            .await
+            .expect("the idle prompt is accepted");
     }
 
     /// The child asks permission to run `cargo test`; answered by `request_id`.
@@ -305,6 +331,24 @@ async fn an_idle_orchestrator_is_sent_a_turn_naming_a_watched_permission_prompt(
     world.the_child_asks_permission("req-1").await;
 
     // Then one turn is pasted and submitted, naming the child and the request id
+    let typed = world.agent.after_wakes(1).await;
+    assert_eq!(world.agent.wakes(), 1, "typed: {typed:?}");
+    assert!(
+        typed.contains("fix-login") && typed.contains("req-1"),
+        "the wake does not name the session and its request: {typed:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_session_waiting_for_input_with_nothing_to_answer_wakes_as_idle() {
+    // Given an orchestrator whose agent finished its turn: its idle_prompt hook reported
+    let world = a_world().await;
+    world.the_orchestrator_reports_its_idle_prompt().await;
+
+    // When the child it watches asks permission
+    world.the_child_asks_permission("req-1").await;
+
+    // Then it is idle: one turn is pasted, naming the child and the request id
     let typed = world.agent.after_wakes(1).await;
     assert_eq!(world.agent.wakes(), 1, "typed: {typed:?}");
     assert!(

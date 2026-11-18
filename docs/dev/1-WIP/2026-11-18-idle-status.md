@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Fix
 **Complexity**: 4 — two crates (`tddy-session-activity`, `tddy-daemon-rpc`), hook → status → tool-refusal path, integration tests
-**Stack**: `#coder-start` 6/10 — branch `feature/coder-start/idle-status`, base `feature/coder-start/coder-transport`
+**PR**: #946 · **Stack**: `#coder-start` 6/10 — branch `feature/coder-start/idle-status`, base `feature/coder-start/coder-transport`
 
 ## Initial Discovery
 
@@ -25,7 +25,7 @@
 - [ ] No pending-question record without a request id
 - [ ] `SendSessionMessage` refuses only on an answerable question
 - [ ] Idle wakes see a waiting-for-input session with nothing to answer as idle
-- [ ] Reproduced first by a failing test that feeds an `idle_prompt` Notification
+- [x] Reproduced first by a failing test that feeds an `idle_prompt` Notification
 - [ ] Scoped gates
 
 ## Responsibility
@@ -72,7 +72,21 @@ and `tddy-agent-launch/src/project_home_idle.rs` treat any record as non-idle.
 - `turn.rs`: refuse only when the record has a request id. (A record on disk from before this fix is
   the only id-less one left; it is also cleared by the next PostToolUse/UserPromptSubmit/Stop.)
 
+## Red phase (commit 2)
+
+Failing tests, each failing for the missing fix:
+- `tddy-session-activity/tests/pending_question_capture_acceptance.rs:553`, `an_idle_prompt_leaves_the_session_waiting_for_input_with_nothing_to_answer`. It also asserts (565-568) that the plain `ActivityStatus` notification is still published, which already passes. The test fails on the id-less `permission` record.
+- `tddy-daemon-rpc/tests/project_home_turn_control_acceptance.rs:402`, `a_message_to_a_session_waiting_for_input_is_delivered`. It fails with `waiting on permission ""`.
+- `tddy-daemon-rpc/tests/project_home_watch_wake_acceptance.rs:343`, `a_session_waiting_for_input_with_nothing_to_answer_wakes_as_idle`. It fails because the orchestrator is never woken.
+
+The request in test 1 is what `tddy-tools session-hook` sends for an `idle_prompt`, because the `notification_type` → `WaitingForInput` mapping lives in `tddy-tools`.
+
+**Pre-existing failures (not this node's):** the baseline `./test -p tddy-session-activity -p tddy-daemon-rpc` ran 930 tests: 930 passed, 7 failed, 1 ignored. The 7 failures are all macOS seatbelt jail tests (`sandboxed_codebase_{lifecycle,placement}_exec_tool_acceptance`, `sandboxed_codebase_seatbelt_acceptance`), the known "sandbox RPC bridge not installed" harness gap.
+
 ## Decisions & Trade-offs
+
+- **No `#start-parity` 6/9 test pins the id-less record.** `tddy-tools/tests/session_hook_pending_question.rs` checks only the request. The `hook_reports.rs` comment that cites 6/9 is rewritten at green.
+- **Removing the record alone fixes the idle wake.** `watch_wake.rs` already treats only `pending.is_some()` as non-idle. The `turn.rs` change (refuse only an answerable record) covers a stale id-less record already on disk.
 
 - ⚠ **`#start-parity` 6/9 behaviour.** The branch being removed was kept deliberately to surface a
   Notification-only wait as a question. If a 6/9 test pins that record, commit 2 changes its
@@ -83,8 +97,8 @@ and `tddy-agent-launch/src/project_home_idle.rs` treat any record as non-idle.
 - [x] Record initial discovery
 - [x] Create PRD
 - [x] Create changeset
-- [ ] Draft PR contract — failing tests (commit 2)
-- [ ] USER REVIEW — acceptance tests (6e)
+- [x] Draft PR contract — failing tests (commit 2)
+- [x] USER REVIEW — acceptance tests (6e)
 - [ ] TDD Green
 - [ ] Validate changes
 - [ ] Wrap

@@ -29,6 +29,7 @@ use support::{
 use tddy_core::pending_question::{write_pending_question, PendingQuestion};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_rpc::Request;
+use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
@@ -42,6 +43,8 @@ const READY_MARKER: &str = "READY";
 /// The screen a person watching the session in the browser holds control under.
 const BROWSER_SCREEN: &str = "browser-screen-1";
 const TEST_MODEL: &str = "claude-opus-4-8";
+/// The credential the idle-prompt hook presents.
+const IDLE_HOOK_TOKEN: &str = "tok-idle-prompt";
 /// The message the tests hand a session's agent.
 const MESSAGE: &str = "rebase onto the new base and re-run the tests";
 
@@ -129,6 +132,28 @@ impl Host {
             },
         )
         .unwrap();
+    }
+
+    /// `session_id`'s agent finished its turn: Claude's `idle_prompt` `Notification` hook reports
+    /// it through the daemon's activity service, as `tddy-tools session-hook` does.
+    async fn goes_idle_as_its_idle_prompt_reports(&self, session_id: &str) {
+        let dir = self.session_dir(session_id);
+        let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
+        meta.hook_token = Some(IDLE_HOOK_TOKEN.to_string());
+        tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
+        self.daemon
+            .activity_service()
+            .report_session_status(Request::direct(ReportSessionStatusRequest {
+                session_id: session_id.to_string(),
+                hook_token: IDLE_HOOK_TOKEN.to_string(),
+                os_user: "testdev".to_string(),
+                status: "WaitingForInput".to_string(),
+                hook_event_name: "Notification".to_string(),
+                message: "Claude is waiting for your input".to_string(),
+                ..Default::default()
+            }))
+            .await
+            .expect("the idle prompt is accepted");
     }
 
     /// A person watching `session_id` in the browser takes control, as the browser's claim does.
@@ -369,6 +394,29 @@ async fn a_message_to_a_session_waiting_on_a_question_is_refused_naming_the_answ
     assert_eq!(
         agent.typed_after_a_quiet_period().await,
         Vec::<u8>::new(),
+        "the bytes the agent was typed"
+    );
+}
+
+#[tokio::test]
+async fn a_message_to_a_session_waiting_for_input_is_delivered() {
+    // Given a running claude-cli session that finished its turn: its idle_prompt hook reported
+    let world = a_world().await;
+    let (session, agent) = world.a.a_running_session_of("claude-cli").await;
+    world.a.goes_idle_as_its_idle_prompt_reports(&session).await;
+
+    // When main sends it a message
+    let sent = world.main_sends(&session, MESSAGE).await;
+
+    // Then it is delivered by terminal paste, and the agent was typed the message
+    assert_eq!(
+        sent.assert_answered(),
+        serde_json::json!({ "session_id": session, "delivered_via": "terminal_paste" })
+    );
+    let expected = a_pasted_and_submitted(MESSAGE);
+    assert_eq!(
+        agent.typed_after_waiting_for(&expected).await,
+        expected,
         "the bytes the agent was typed"
     );
 }

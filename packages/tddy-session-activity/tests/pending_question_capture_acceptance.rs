@@ -48,6 +48,8 @@ const LABEL: &str = "my-feature-branch";
 
 const A_COMMAND: &str = r#"{"command":"cargo publish"}"#;
 const A_PERMISSION_MESSAGE: &str = "Claude needs your permission to use Bash";
+/// The message of Claude's `idle_prompt` `Notification`: the agent finished its turn.
+const AN_IDLE_MESSAGE: &str = "Claude is waiting for your input";
 
 // ---------------------------------------------------------------------------
 // The host under test
@@ -141,6 +143,13 @@ impl AnActivityHost {
         tddy_core::read_session_metadata(&self.session_dir())
             .expect("the session's .session.yaml")
             .pending_elicitation
+    }
+
+    /// The `activity_status` in the session's `.session.yaml`.
+    fn activity_status(&self) -> Option<String> {
+        tddy_core::read_session_metadata(&self.session_dir())
+            .expect("the session's .session.yaml")
+            .activity_status
     }
 
     fn published(&self) -> Vec<SessionNotification> {
@@ -248,6 +257,15 @@ impl ReportBuilder {
         self.request.status = "WaitingForInput".to_string();
         self.request.hook_event_name = "Notification".to_string();
         self.request.message = A_PERMISSION_MESSAGE.to_string();
+        self.request
+    }
+
+    /// The `Notification` hook of `notification_type: idle_prompt`: the agent finished its turn and
+    /// waits for the next one. No tool, no structured question — only the agent's message.
+    fn of_an_idle_prompt(mut self) -> ReportSessionStatusRequest {
+        self.request.status = "WaitingForInput".to_string();
+        self.request.hook_event_name = "Notification".to_string();
+        self.request.message = AN_IDLE_MESSAGE.to_string();
         self.request
     }
 
@@ -529,6 +547,26 @@ async fn the_notification_that_follows_keeps_the_structured_question() {
             (SessionNotificationSource::ActivityStatus, Some(request_id)),
         ]
     );
+}
+
+#[tokio::test]
+async fn an_idle_prompt_leaves_the_session_waiting_for_input_with_nothing_to_answer() {
+    // Given a session that waits on nothing
+    let host = AnActivityHost::holding_a_claude_cli_session();
+
+    // When Claude's idle_prompt Notification reports that it waits for input
+    host.report(a_report().of_an_idle_prompt())
+        .await
+        .expect("the idle prompt is accepted");
+
+    // Then the session is waiting for input, with no question recorded to answer
+    assert_eq!(host.activity_status().as_deref(), Some("WaitingForInput"));
+    // And the plain activity-status notification is still published, carrying no question
+    assert_eq!(
+        host.published().sources_and_question_ids(),
+        vec![(SessionNotificationSource::ActivityStatus, None)]
+    );
+    host.pending_question().assert_nothing();
 }
 
 #[rstest]
