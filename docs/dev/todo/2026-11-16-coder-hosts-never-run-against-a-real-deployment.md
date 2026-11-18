@@ -20,6 +20,15 @@ orchestrator start are pinned by the same stand-ins above. What still has no
 real-deployment evidence is the hook follower on a Coder workspace; the four facts remain
 unverified against a real deployment.
 
+**Narrowed 2026-11-18 (Coder one-shots cross the pty intact):** `CoderShell` was run against the
+real deployment `coder.ireland-devex.wixprod.net` (CLI v2.33.5, workspace `mantasi/remote-dev`).
+The first two facts hold: `coder ssh --disable-autostart mantasi/remote-dev` reaches the workspace
+in the `owner/workspace` form (the `.agent` suffix was not exercised), and the deployment URL and
+token are taken from `CODER_URL` / `CODER_SESSION_TOKEN`. The same run measured what the CLI does to
+a command (always a pty: no stdin EOF, `onlcr`, merged stderr, about 6–8 s per call), now pinned by
+stand-ins. The CLI probe output, the workspace status values and the hook follower are still
+unverified against a real deployment.
+
 **Why deferred:** no real deployment was available to the stack; the stand-ins pin the
 contract the code was built against, not the deployment's actual answers.
 

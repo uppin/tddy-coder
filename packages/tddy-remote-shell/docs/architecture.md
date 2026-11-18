@@ -48,6 +48,25 @@ recognised on either stream (with the pty's `\r\n`) and stripped from the stream
 arrived on; only a non-zero exit with the marker on neither stream is `Unreachable`.
 Value-returning probes (the target's home, in `tddy-git`) frame their value with
 sentinels and parse it out, so merged transport words never enter the value.
+
+A one-shot never relies on that pty, which turns no end of the CLI's stdin into an EOF and
+rewrites every `\n` the command prints as `\r\n` (`onlcr`):
+
+- **Output** — the wrapper runs `stty -opost` first, so the command's bytes arrive as
+  written.
+- **No stdin** — the shell's stdin is `/dev/null`, so a command that reads it reads an
+  empty one.
+- **Stdin** — sent as base64 lines of 76 characters, each ending `\n`: no character a tty
+  acts on (`^D`, `^C`, `\r`), every line far inside the canonical-mode limit. The workspace
+  reads exactly that many bytes (`head -c`, so no EOF is needed), decodes them into a
+  `mktemp` file, checks it holds the original length, makes it the shell's stdin and
+  unlinks it before the command runs. A stdin that did not arrive whole runs nothing and
+  exits 125, saying so. Echo is turned off before the start marker is printed and the
+  lines are written only once the marker has arrived, so none is echoed into the output.
+  The bytes travel on stdin, never on a command line: `write_file` carries the session
+  pointer, and with it the hook token.
+
+`exec_streamed` relays its pipes through the same pty untranslated.
 `interactive` is `coder ssh --disable-autostart -t <workspace> -- <command>` for a local PTY. Credentials are
 held in memory for the shell's life; `Debug` shows the URL and never the token.
 
@@ -57,7 +76,10 @@ Behind the `test-support` feature: `InMemoryShell`, a scriptable in-memory doubl
 `contract::assert_behaves_like_a_remote_shell`, the behaviour suite every transport is held
 to. The suite runs against `InMemoryShell`, `SshShell` driving a stand-in `ssh`
 executable, and `CoderShell` driving a stand-in `coder` executable; no real SSH server, no
-Coder deployment and no network are involved.
+Coder deployment and no network are involved. The Coder suite's stand-ins also play the
+real CLI's pty: one merges stderr into stdout, one never ends the command's input (its
+stdin is a FIFO the command holds open), and one ends every line with `\r\n` until a
+stand-in `stty -opost` turns that off.
 
 ## Consumers
 
