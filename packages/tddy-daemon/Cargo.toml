@@ -59,7 +59,6 @@ tddy-lsp = { path = "../tddy-lsp" }
 tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 tddy-rpc = { path = "../tddy-rpc" }
 # The agent-facing tool socket wraps a UnixStream as a tddy-rpc endpoint (`StdioEndpoint::from_duplex`).
-tddy-stdio = { path = "../tddy-stdio" }
 tddy-service = { path = "../tddy-service" }
 tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }
@@ -160,6 +159,9 @@ tddy-session-files = { path = "../tddy-session-files" }
 # tddy-daemon's own remaining tests and by no file in `src/`.
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-sandbox = { path = "../tddy-sandbox" }
+# Dev-only since the embedded agent-tool socket moved to `tddy-daemon-kernel`: its acceptance suites
+# connect to an agent-tool socket over it, as a co-located agent does.
+tddy-stdio = { path = "../tddy-stdio" }
 # The code-navigation suite stands a fake `code_index` service up with it, and serves it over a
 # `UnixListener`.
 tddy-index-daemon = { path = "../tddy-index-daemon" }

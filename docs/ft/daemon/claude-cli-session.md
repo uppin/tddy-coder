@@ -819,7 +819,7 @@ user** — a Unix socket the daemon serves its full RPC roster on for co-located
 
 | Host | `--daemon-socket` |
 |---|---|
-| Tddy Desktop (embedded daemon) | the daemon's one socket, `agent_tool_socket_path(<resolved data dir>)`. An embedded daemon serves no HTTP RPC (its `listen.web_port` only answers a GitHub sign-in and returns 404 for `/rpc`), and a session started before the runtime serves the socket is refused rather than pointed at it |
+| Tddy Desktop (embedded daemon) | the socket of this application instance, `$TMPDIR/tddy-agent-tools-<pid>-<n>.sock`, bound when its first session starts — a second instance on the same data dir serves a socket of its own. An embedded daemon serves no HTTP RPC (its `listen.web_port` only answers a GitHub sign-in and returns 404 for `/rpc`) |
 | Server daemon (`tddy-daemon` binary) | `<data dir>/run/<os user>/daemon.sock`: a directory `0700` and a socket `0600`, both owned by that user, so only that user (and root) can connect. Bound when the user's first session starts; the data dir is the one the daemon resolved (`TDDY_DATA_DIR` wins over `tddy_data_dir`) |
 | Server daemon under `tddy-supervisor` | the socket the supervisor created for that user because `users.yaml` maps them (`/run/tddy-users/<os user>/daemon.sock`; the unprivileged daemon cannot `chown` one to another user). An unmapped user has the start **refused** (`FAILED_PRECONDITION`, naming `users.yaml`) — never started with hooks that report nowhere. See [tddy-supervisor § One socket per user](../supervisor/tddy-supervisor.md#one-socket-per-user-handed-to-the-daemon) |
 

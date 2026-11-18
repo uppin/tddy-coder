@@ -84,7 +84,6 @@ impl BuildContext {
             common_room: None,
             oauth_loopback_tunnel: None,
             local_socket: None,
-            agent_tool_socket: None,
             lsp_idle_reaper: None,
             index_daemon: None,
             project_home_reaper: None,
@@ -159,23 +158,13 @@ impl BuildContext {
             ),
         )));
 
-        // An embedded daemon serves no HTTP listener and no tonic local socket, so this socket is the
-        // only channel a *co-located agent* has to it — a separate OS process spawned beside a jailed
-        // checkout, which can use neither the application's in-process bridge nor a port that only
-        // answers the OAuth callback. Built from the finished roster, so a tool call over it reaches
-        // the very handlers the UI does. See `crate::agent_tool_socket`.
-        //
-        // A server daemon serves the same roster on each session OS user's own socket instead,
-        // bound when that user's first session starts: it is installed on the sockets the session
-        // host hands its sessions.
+        // The roster every agent-tool socket serves, so a tool call over one reaches the very
+        // handlers the UI does. A server daemon serves it on each session OS user's own socket; an
+        // embedded daemon — which serves no HTTP listener and no tonic local socket, so this is the
+        // only channel a *co-located agent* has to it — on one socket of this instance's own. Either
+        // is bound when the first session that needs it starts.
         self.agent_tool_sockets
             .install_roster(cloned_entries(&self.identity.rpc_entries));
-        if self.options.host == RuntimeHost::Embedded {
-            self.tasks.agent_tool_socket = Some((
-                crate::agent_tool_socket::agent_tool_socket_path(&self.identity.keys.tddy_data_dir),
-                cloned_entries(&self.identity.rpc_entries),
-            ));
-        }
     }
 
     pub(super) fn into_runtime(self) -> DaemonRuntime {

@@ -80,7 +80,7 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 41] = [
+    const ENDPOINT: [&str; 40] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -110,13 +110,6 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         // hands the registry to `select_lsp_executor`. It can live nowhere else: the port is
         // `tddy-lsp-executor`'s, which this crate depends on, and the registry is this crate's.
         "index_daemon/lsp_channel.rs",
-        // The unix socket an embedded daemon serves to co-located agents — the only channel a
-        // process spawned beside a jailed checkout has to this daemon, since `RuntimeHost::Embedded`
-        // runs no HTTP listener. Wiring by this test's criterion: it implements no RPC method (it
-        // serves the roster `runtime.rs` hands it), holds no session state, touches no
-        // `SessionHost`, and its only caller is `runtime.rs`, which binds it at startup and
-        // removes the socket on the way out.
-        "agent_tool_socket.rs",
         // The adapter that makes the common room `tddy-daemon-auth`'s `KeyDirectory`: it reads
         // the signing keys peers advertise out of `tddy-daemon-livekit`'s registry. Wiring by the
         // same criterion — no RPC method, no session state, built only by `runtime.rs` — and it

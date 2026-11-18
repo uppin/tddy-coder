@@ -66,7 +66,7 @@ pub(crate) async fn exchange(
 }
 
 /// Call a daemon [`ACTIVITY_SERVICE`] method over an embedded daemon's agent-tool socket: the
-/// `tddy-rpc` length-prefixed framing that socket serves (`tddy_daemon::agent_tool_socket`), one
+/// `tddy-rpc` length-prefixed framing that socket serves (`tddy_daemon_kernel::agent_tool_sockets`), one
 /// connection per call. No envelope is needed — both reports authenticate by the `hook_token` they
 /// carry, exactly as they do over HTTP.
 async fn call_over_socket(

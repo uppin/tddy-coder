@@ -455,7 +455,7 @@ async fn a_cursor_post_tool_use_hook_posts_its_tool_call_with_the_tools_id() {
 // ---------------------------------------------------------------------------
 
 /// A daemon's agent-tool socket serving **only** `activity.ActivityService`, one endpoint per
-/// connection exactly as `tddy_daemon::agent_tool_socket` serves its roster. Dropping it stops
+/// connection exactly as `tddy_daemon_kernel::agent_tool_sockets` serves its roster. Dropping it stops
 /// accepting connections and removes the socket.
 struct AnAgentToolSocket {
     path: std::path::PathBuf,

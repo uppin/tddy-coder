@@ -14,8 +14,11 @@
 //! start fails naming `users.yaml` — rather than given a path that user cannot reach, whose every
 //! report the hooks' fail-quiet contract would swallow.
 //!
-//! **An embedded host** (Tddy Desktop) is single-user and keeps its one socket at
-//! [`crate::agent_tool_socket_path`], served by the runtime ([`AgentToolSocketPlacement::Embedded`]).
+//! **An embedded host** (Tddy Desktop) is single-user and binds its socket under `$TMPDIR`, at a
+//! path of its own instance ([`crate::next_embedded_socket_path`],
+//! [`AgentToolSocketPlacement::Embedded`]) — another instance on the same data dir serves its own.
+//! Bound the first time a session needs it, like a per-user socket, and bound afresh if its file
+//! goes; the sockets of instances that are gone are cleared first.
 //!
 //! **What is served.** The daemon's finished RPC roster, installed once `runtime::build` has
 //! assembled it ([`AgentToolSockets::install_roster`]) — the very handlers the UI reaches — plus
@@ -144,8 +147,9 @@ pub fn adopt_user_descriptors(descriptors: Vec<(String, RawFd)>) -> Vec<Inherite
 /// Which agent-tool socket a session is told about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentToolSocketPlacement {
-    /// One socket for the whole daemon, at [`crate::agent_tool_socket_path`] — an embedded host,
-    /// which serves no HTTP and runs every session as its own user.
+    /// One socket for the whole daemon, at a path of this instance's own
+    /// ([`crate::next_embedded_socket_path`]) — an embedded host, which serves no HTTP and runs
+    /// every session as its own user.
     Embedded,
     /// One socket per OS user, bound here or inherited from `tddy-supervisor` — a server daemon.
     PerOsUser,
@@ -270,9 +274,6 @@ impl AgentToolSockets {
     /// with no listener, which is refused at once). Only the first session of a user pays that; later
     /// ones `stat` the bound file. `HostSessionSockets` does the same work on a worker.
     pub fn ensure_bound_blocking(&self, os_user: &str, data_dir: &Path) -> anyhow::Result<PathBuf> {
-        if self.placement == AgentToolSocketPlacement::Embedded {
-            return embedded_socket(data_dir);
-        }
         let mut servers = self.servers.lock().expect("agent-tool servers lock");
         if let Some(server) = servers.get(os_user) {
             let intact = !server.task.is_finished()
@@ -291,9 +292,8 @@ impl AgentToolSockets {
             let mut inherited = self.inherited.lock().expect("inherited sockets lock");
             inherited.get_mut(os_user).map(Option::take)
         };
-        let supervised = self.placement == AgentToolSocketPlacement::Supervised;
         let (path, listener, bound_here) =
-            acquire_agent_tool_socket(os_user, data_dir, inherited, supervised)?;
+            acquire_agent_tool_socket(os_user, data_dir, inherited, self.placement)?;
         let meta = std::fs::symlink_metadata(&path).context("stat the bound socket")?;
         let listener = tokio::net::UnixListener::from_std(listener)
             .context("hand the socket to the runtime")?;
@@ -321,12 +321,21 @@ impl AgentToolSockets {
     }
 }
 
+impl Drop for AgentToolSockets {
+    /// Sockets nobody holds any more are served by nobody: their files go with them, so no session
+    /// is later pointed at a dead peer.
+    fn drop(&mut self) {
+        self.stop_serving();
+    }
+}
+
 fn acquire_agent_tool_socket(
     os_user: &str,
     data_dir: &Path,
     inherited: Option<Option<InheritedAgentToolSocket>>,
-    supervised: bool,
+    placement: AgentToolSocketPlacement,
 ) -> anyhow::Result<(PathBuf, UnixListener, bool)> {
+    let supervised = placement == AgentToolSocketPlacement::Supervised;
     let (path, listener, bound_here) = match inherited {
         Some(Some(socket)) => {
             socket
@@ -349,6 +358,10 @@ fn acquire_agent_tool_socket(
                  socket path of its own — map the user in users.yaml, and the supervisor will \
                  create their socket and hand it over on the next start"
         ),
+        None if placement == AgentToolSocketPlacement::Embedded => {
+            let (path, listener) = bind_embedded_socket()?;
+            (path, listener, true)
+        }
         None => {
             let path = user_socket_path_for_user(data_dir, os_user)?;
             let listener =
@@ -359,18 +372,31 @@ fn acquire_agent_tool_socket(
     Ok((path, listener, bound_here))
 }
 
-/// The one socket an embedded daemon's runtime serves. The runtime binds it at startup, so a
-/// session started before that has nothing to be told and is refused rather than pointed at a path
-/// nobody serves — whose every report the hooks' fail-quiet contract would swallow.
-fn embedded_socket(data_dir: &Path) -> anyhow::Result<PathBuf> {
-    let path = crate::agent_tool_socket_path(data_dir);
-    match std::os::unix::net::UnixStream::connect(&path) {
-        Ok(_) => Ok(path),
-        Err(e) => bail!(
-            "the embedded host's agent-tool socket {} is not being served: {e}",
-            path.display()
-        ),
+/// Bind this embedded instance's next socket ([`crate::next_embedded_socket_path`]), owner-only,
+/// once the sockets of instances that are gone are cleared. The path is this instance's alone, so a
+/// file already there is one a dead process with this pid left — cleared only if nothing listens.
+fn bind_embedded_socket() -> anyhow::Result<(PathBuf, UnixListener)> {
+    use std::os::unix::fs::PermissionsExt;
+    crate::agent_tool_socket::clear_dead_instances_sockets();
+    let path = crate::next_embedded_socket_path();
+    if path.as_os_str().len() > MAX_SOCKET_PATH_BYTES {
+        bail!(
+            "agent-tool socket path {} is too long for a unix socket ({} > \
+             {MAX_SOCKET_PATH_BYTES} bytes); use a shorter TMPDIR",
+            path.display(),
+            path.as_os_str().len()
+        );
     }
+    // SAFETY: reads this process's own credentials.
+    owner_socket::clear_stale_socket(&path, &[unsafe { libc::geteuid() }])?;
+    let listener = UnixListener::bind(&path)
+        .with_context(|| format!("bind the agent-tool socket {}", path.display()))?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("restrict {} to its owner", path.display()))?;
+    listener
+        .set_nonblocking(true)
+        .context("make the agent-tool socket non-blocking")?;
+    Ok((path, listener))
 }
 
 /// Accept every connection for the daemon's lifetime; each gets its own endpoint over the roster as

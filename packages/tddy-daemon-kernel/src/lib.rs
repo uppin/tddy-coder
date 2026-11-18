@@ -82,7 +82,7 @@ pub mod privilege_drop;
 pub mod session_notification;
 pub mod spawn_as_user;
 mod stream_relay;
-pub use agent_tool_socket::agent_tool_socket_path;
+pub use agent_tool_socket::next_embedded_socket_path;
 pub mod local_token_tonic_adapter;
 pub mod relay_idle;
 pub mod toolchain;

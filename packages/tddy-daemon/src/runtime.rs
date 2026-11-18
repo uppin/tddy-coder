@@ -38,7 +38,6 @@ use tokio::sync::Mutex;
 use crate::config::DaemonConfig;
 use crate::daemon_config_service::{CommonRoomSupervisor, DaemonConfigServiceImpl};
 use crate::runtime::tasks::CredentialSyncPublishWatch;
-use crate::runtime::tasks::DaemonChildren;
 use crate::runtime::tasks::LocalSocketTransport;
 use crate::runtime::tasks::OauthLoopbackTunnel;
 use tddy_daemon_livekit::common_room_supervisor::{
@@ -256,7 +255,7 @@ use crate::runtime::env::apply_env_overrides;
 use crate::runtime::env::tddy_data_dir_for;
 use crate::runtime::identity::Identity;
 pub use crate::runtime::tasks::{
-    spawn_common_room_discovery_task, RuntimeTaskHandles, RuntimeTasks,
+    spawn_common_room_discovery_task, DaemonChildren, RuntimeTaskHandles, RuntimeTasks,
 };
 
 /// How this deployment admits its first login, when it may enrol one at all.

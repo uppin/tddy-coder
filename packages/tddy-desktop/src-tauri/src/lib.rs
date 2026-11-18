@@ -12,6 +12,7 @@
 
 mod config_source;
 mod file_drop;
+mod invocation;
 mod ipc;
 pub mod native_notifications;
 mod oauth_callback;
@@ -27,9 +28,8 @@ use tauri::{
     DragDropEvent, Emitter, EventTarget, Manager, RunEvent, Url, Webview, WebviewUrl,
     WebviewWindowBuilder, Window, WindowEvent,
 };
-use tddy_daemon::runtime::{self, RuntimeOptions, RuntimeTaskHandles};
+use tddy_daemon::runtime::{self, DaemonChildren, RuntimeOptions, RuntimeTaskHandles};
 use tddy_rpc::MultiRpcService;
-use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_tauri_rpc::MultiConnectionHost;
 
 /// The window the dashboard is loaded into.
@@ -37,14 +37,29 @@ const MAIN_WINDOW_LABEL: &str = "main";
 
 /// What the application has to stop when it exits: the daemon's own children, and the tasks its
 /// runtime started. The `tddy-daemon` binary does exactly this on `SIGTERM` — a claude-cli session
-/// outlives the RPC surface otherwise, and an orphaned one survives the app that started it.
+/// outlives the RPC surface otherwise, and an orphaned one survives the app that started it; a
+/// workspace jail and the index daemon likewise; and the agent-tool socket this instance bound
+/// would be left as a file nobody listens on.
 struct DaemonShutdown {
-    cli_sessions: Arc<CliSessionManager>,
+    children: DaemonChildren,
     tasks: RuntimeTaskHandles,
 }
 
 /// Start the application: assemble the daemon, host it for the webview, and open the dashboard.
 pub fn run() -> anyhow::Result<()> {
+    // Before anything else: a command line asking for help must not open a second instance.
+    match invocation::from_args(std::env::args_os().skip(1)).map_err(anyhow::Error::msg)? {
+        invocation::Invocation::Run => {}
+        invocation::Invocation::Help => {
+            print!("{}", invocation::help());
+            return Ok(());
+        }
+        invocation::Invocation::Version => {
+            println!("{}", invocation::version());
+            return Ok(());
+        }
+    }
+
     // Ignore SIGPIPE — writing to the spawn worker pipe after it dies would otherwise kill the app.
     #[cfg(unix)]
     unsafe {
@@ -322,12 +337,13 @@ fn start_daemon(
         // TODO: the binary host sends "started"/"stopped" Telegram lifecycle messages from
         // `server::run_server`; this host does not, because window creation would then wait on a
         // Telegram HTTP call. Move the lifecycle message out of the HTTP server to share it.
+        let children = daemon.children();
         // The roster behind every connection, whatever it is addressed to. `Arc` because the
         // resolver hands one out per connection and each connection's engine holds it.
         let roster = Arc::new(MultiRpcService::new(daemon.entries));
         let state = ipc::RpcState::new(MultiConnectionHost::new(ipc::DaemonRosters::over(roster)));
         let shutdown = DaemonShutdown {
-            cli_sessions: daemon.cli_sessions,
+            children,
             tasks: daemon.tasks.spawn(),
         };
         #[cfg(unix)]
@@ -377,12 +393,12 @@ fn exit_on_sigterm(app: &tauri::AppHandle) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Kill the daemon's cli sessions and abort its runtime tasks, the way the binary does on SIGTERM.
+/// Stop the daemon's children and abort its runtime tasks, the way the binary does on SIGTERM.
 fn stop_daemon(app: &tauri::AppHandle) {
     let Some(shutdown) = app.try_state::<DaemonShutdown>() else {
         return;
     };
-    tauri::async_runtime::block_on(shutdown.cli_sessions.kill_all());
+    tauri::async_runtime::block_on(shutdown.children.shut_down());
     shutdown.tasks.abort_all();
     log::info!("[tddy-desktop] daemon stopped");
 }

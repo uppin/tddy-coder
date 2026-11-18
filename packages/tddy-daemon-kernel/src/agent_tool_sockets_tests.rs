@@ -331,43 +331,182 @@ fn a_data_dir_too_deep_for_a_unix_socket_names_no_socket() {
     assert!(path.is_err(), "{path:?}");
 }
 
-#[tokio::test]
-async fn an_embedded_host_tells_every_session_the_runtimes_one_socket() {
-    // Given an embedded host whose runtime is serving its one socket
-    let data = a_data_dir();
-    let runtime_socket = crate::agent_tool_socket_path(data.path());
-    let _served = UnixListener::bind(&runtime_socket).expect("the runtime's socket binds");
+// ---------------------------------------------------------------------------------------------
+// An embedded host's socket: one per instance, never another instance's
+// ---------------------------------------------------------------------------------------------
+
+/// One Tddy Desktop instance's sockets, serving [`ARosterService`].
+fn an_embedded_host_serving_a_roster() -> AgentToolSockets {
     let sockets = AgentToolSockets::new(AgentToolSocketPlacement::Embedded);
-
-    // When a session asks for its socket
-    let path = sockets
-        .ensure_bound(&this_os_user(), data.path())
-        .await
-        .map_err(|e| format!("{e:#}"));
-    let _ = std::fs::remove_file(&runtime_socket);
-
-    // Then — guard: the desktop keeps its single socket
-    assert_eq!(path, Ok(runtime_socket));
+    sockets.install_roster(vec![ServiceEntry {
+        name: A_ROSTER_SERVICE,
+        service: Arc::new(ARosterService),
+    }]);
+    sockets
 }
 
 #[tokio::test]
-async fn an_embedded_host_whose_socket_nobody_serves_is_refused_not_pointed_at_it() {
-    // Given the socket file an exited embedded daemon left behind: binding creates the file, and
-    // dropping the listener does not unlink it
+async fn an_embedded_host_serves_its_roster_on_the_socket_it_tells_a_session() {
+    // Given an embedded host
     let data = a_data_dir();
-    let runtime_socket = crate::agent_tool_socket_path(data.path());
-    drop(UnixListener::bind(&runtime_socket).expect("the runtime's socket binds"));
-    let sockets = AgentToolSockets::new(AgentToolSocketPlacement::Embedded);
+    let host = an_embedded_host_serving_a_roster();
 
-    // When a session asks for its socket
-    let refusal = sockets
+    // When a session asks for its socket, and its agent calls over it
+    let path = host
+        .ensure_bound(&this_os_user(), data.path())
+        .await
+        .expect("the embedded socket is bound");
+
+    // Then the roster answered
+    assert_eq!(a_call_over(&path).await, Ok(ITS_ANSWER.to_string()));
+}
+
+#[tokio::test]
+async fn two_embedded_hosts_on_one_data_dir_each_serve_their_own_socket() {
+    // Given two instances of the application on one data dir
+    let data = a_data_dir();
+    let first = an_embedded_host_serving_a_roster();
+    let second = an_embedded_host_serving_a_roster();
+
+    // When each tells a session its socket
+    let first_path = first
+        .ensure_bound(&this_os_user(), data.path())
+        .await
+        .expect("the first instance's socket is bound");
+    let second_path = second
+        .ensure_bound(&this_os_user(), data.path())
+        .await
+        .expect("the second instance's socket is bound");
+
+    // Then they are two sockets, and each instance answers on its own
+    assert_ne!(first_path, second_path);
+    assert_eq!(
+        (
+            a_call_over(&first_path).await,
+            a_call_over(&second_path).await
+        ),
+        (Ok(ITS_ANSWER.to_string()), Ok(ITS_ANSWER.to_string()))
+    );
+}
+
+#[tokio::test]
+async fn an_embedded_host_that_exits_leaves_another_instances_sessions_served() {
+    // Given an instance serving its sessions, and a second instance started on the same data dir
+    let data = a_data_dir();
+    let first = an_embedded_host_serving_a_roster();
+    let first_path = first
+        .ensure_bound(&this_os_user(), data.path())
+        .await
+        .expect("the first instance's socket is bound");
+    let second = an_embedded_host_serving_a_roster();
+    second
+        .ensure_bound(&this_os_user(), data.path())
+        .await
+        .expect("the second instance's socket is bound");
+
+    // When the second instance exits
+    second.stop_serving();
+    drop(second);
+
+    // Then the first instance still tells its sessions its own socket, and answers on it
+    let told = first
         .ensure_bound(&this_os_user(), data.path())
         .await
         .map_err(|e| format!("{e:#}"));
-    let _ = std::fs::remove_file(&runtime_socket);
+    assert_eq!(told, Ok(first_path.clone()));
+    assert_eq!(a_call_over(&first_path).await, Ok(ITS_ANSWER.to_string()));
+}
 
-    // Then the dead socket is not chosen: every report sent to it would be lost
-    assert!(refusal.is_err(), "{refusal:?}");
+#[tokio::test]
+async fn an_embedded_host_that_stops_serving_leaves_no_socket_behind() {
+    // Given an embedded host serving its socket
+    let data = a_data_dir();
+    let host = an_embedded_host_serving_a_roster();
+    let path = host
+        .ensure_bound(&this_os_user(), data.path())
+        .await
+        .expect("the embedded socket is bound");
+
+    // When it stops serving
+    host.stop_serving();
+
+    // Then its file is gone, so nothing is pointed at a dead peer
+    assert!(!path.exists(), "{} is left behind", path.display());
+}
+
+#[tokio::test]
+async fn an_embedded_host_whose_socket_file_was_removed_serves_its_sessions_on_a_new_one() {
+    // Given an embedded host whose socket file was removed under it — macOS clears `$TMPDIR`
+    let data = a_data_dir();
+    let host = an_embedded_host_serving_a_roster();
+    let removed = host
+        .ensure_bound(&this_os_user(), data.path())
+        .await
+        .expect("the embedded socket is bound");
+    std::fs::remove_file(&removed).expect("the socket file is removed");
+
+    // When the next session asks for its socket
+    let path = host
+        .ensure_bound(&this_os_user(), data.path())
+        .await
+        .expect("the embedded socket is bound again");
+
+    // Then it is served there
+    assert_eq!(a_call_over(&path).await, Ok(ITS_ANSWER.to_string()));
+}
+
+/// The pid of a process that has exited, and so names no live instance.
+fn a_pid_that_has_exited() -> u32 {
+    let mut child = std::process::Command::new("true")
+        .spawn()
+        .expect("`true` runs");
+    let pid = child.id();
+    child.wait().expect("`true` exits");
+    pid
+}
+
+#[tokio::test]
+async fn an_embedded_host_clears_the_socket_an_instance_that_is_gone_left_behind() {
+    // Given the socket file of an instance killed before it could remove it: binding creates the
+    // file, and dropping the listener does not unlink it
+    let left_behind = crate::agent_tool_socket::instance_socket_path(a_pid_that_has_exited(), 0);
+    let _ = std::fs::remove_file(&left_behind);
+    drop(UnixListener::bind(&left_behind).expect("the dead instance's socket binds"));
+    let data = a_data_dir();
+    let host = an_embedded_host_serving_a_roster();
+
+    // When an embedded host binds its own
+    host.ensure_bound(&this_os_user(), data.path())
+        .await
+        .expect("the embedded socket is bound");
+
+    // Then the dead instance's file is gone
+    assert!(
+        !left_behind.exists(),
+        "{} is left behind",
+        left_behind.display()
+    );
+}
+
+#[tokio::test]
+async fn an_embedded_host_leaves_the_socket_of_a_live_process_where_it_is() {
+    // Given a socket file named for a process that is running — pid 1 always is, and is not this
+    // account's, which is the case `kill(pid, 0)` answers `EPERM` for
+    let live = crate::agent_tool_socket::instance_socket_path(1, 0);
+    let _ = std::fs::remove_file(&live);
+    drop(UnixListener::bind(&live).expect("the live instance's socket binds"));
+    let data = a_data_dir();
+    let host = an_embedded_host_serving_a_roster();
+
+    // When an embedded host binds its own
+    host.ensure_bound(&this_os_user(), data.path())
+        .await
+        .expect("the embedded socket is bound");
+    let still_there = live.exists();
+    let _ = std::fs::remove_file(&live);
+
+    // Then that file is left where it is
+    assert!(still_there, "{} was removed", live.display());
 }
 
 // ---------------------------------------------------------------------------------------------
