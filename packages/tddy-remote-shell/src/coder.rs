@@ -488,10 +488,8 @@ impl RemoteShell for CoderShell {
         })
     }
 
-    /// `coder ssh --disable-autostart <workspace> -- <command>`, with the two variables in the
-    /// command's `env`: the caller's PTY child is the one process that is given them. No `-t`:
-    /// the CLI has no such flag (v2.33.5 refuses it), and gives the command a terminal of its own
-    /// when its stdin is one — the caller's PTY.
+    /// `coder ssh --disable-autostart <workspace> -- <command>` (no `-t`: v2.33.5 refuses it, and
+    /// the CLI gives the command the caller's PTY), the two variables in the command's `env`.
     fn interactive(&self, command: &str) -> InteractiveCommand {
         InteractiveCommand {
             argv: vec![

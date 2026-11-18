@@ -10,6 +10,12 @@ About **9.5k production lines** in the crate's modules, under the 10k receiver b
 `remote_agent_launch.rs` is a module whose startup wait, window and settled output live in
 `remote_agent_launch/startup.rs` and whose target resolution and proto conversions live in
 `remote_agent_launch/target.rs`.
+`launch_on_target` spawns the session's local PTY (the transport's client) on a cleared environment
+carrying the transport's credentials, `SSH_AUTH_SOCK` and the daemon's own `PATH`, so a bare `coder` or
+`ssh` resolves; the agent's environment still travels inside the remote command. Each start probe
+(`wait_for_agent_start`'s pid file, `exits_during_startup`'s `kill -0`) is bounded by the time left in
+its start bound or startup window, not a fixed few seconds, because one round trip to a remote
+deployment can take 6-8 s.
 Standing findings are in [`code-issues/`](code-issues/). A production line is any line of a `src/` file
 outside an inline `#[cfg(test)] mod x { … }` block, excluding `*_tests.rs`.
 
