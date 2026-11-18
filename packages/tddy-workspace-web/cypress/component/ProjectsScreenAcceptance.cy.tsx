@@ -81,6 +81,21 @@ function aProjectsBackend(
       }
       const project = state.find((p) => p.projectId === req.projectId)!;
       return { project };
+    })
+    .onUnary(ProjectService.method.updateProject, (req) => {
+      for (const p of state) {
+        if (p.projectId !== req.projectId) continue;
+        if (req.name !== "") p.name = req.name;
+        if (req.gitUrl !== "") p.gitUrl = req.gitUrl;
+        if (req.mainRepoPath !== "") p.mainRepoPath = req.mainRepoPath;
+      }
+      const project = state.find((p) => p.projectId === req.projectId)!;
+      return { project };
+    })
+    .onUnary(ProjectService.method.deleteProject, (req) => {
+      const at = state.findIndex((p) => p.projectId === req.projectId);
+      if (at >= 0) state.splice(at, 1);
+      return {};
     });
 }
 
@@ -446,4 +461,82 @@ it("pre-selects <remote>/master for a project whose default remote is not origin
 
   // Then — the dropdown pre-selects upstream/master (the live-resolution first choice for that remote)
   projectsScreenPage.defaultBranchValue("proj-alpha").should("equal", "upstream/master");
+});
+
+// ---------------------------------------------------------------------------
+// Edit + delete (project edit/update)
+// ---------------------------------------------------------------------------
+
+it("saves an edited name and git URL and shows the refreshed row", () => {
+  // Given
+  const backend = aProjectsBackend([aProject({ projectId: "proj-alpha" })]);
+  mountProjects(backend);
+
+  // When
+  projectsScreenPage.openEdit("proj-alpha");
+  projectsScreenPage.editProject("proj-alpha", "alpha-renamed", "https://example.com/moved.git");
+
+  // Then — UpdateProject carried the edited fields, and the refreshed card shows them
+  cy.wrap(backend).should((b) => {
+    const calls = b.callsTo(ProjectService.method.updateProject);
+    expect(calls).to.have.length(1);
+    expect(calls[0].projectId).to.equal("proj-alpha");
+    expect(calls[0].name).to.equal("alpha-renamed");
+    expect(calls[0].gitUrl).to.equal("https://example.com/moved.git");
+  });
+  projectsScreenPage.editName("proj-alpha").should("have.value", "alpha-renamed");
+});
+
+it("moves one host's checkout path with a local-only UpdateProject addressed at that host", () => {
+  // Given a project on the local host
+  const backend = aProjectsBackend([aProject({ projectId: "proj-alpha" })]);
+  mountProjects(backend);
+
+  // When
+  projectsScreenPage.openEdit("proj-alpha");
+  projectsScreenPage.moveCheckout("proj-alpha", LOCAL_HOST, "/home/dev/repos/alpha-moved");
+
+  // Then — the path edit went to the host's own daemon with local_only, never fanned out
+  cy.wrap(backend).should((b) => {
+    const calls = b.callsTo(ProjectService.method.updateProject);
+    expect(calls).to.have.length(1);
+    expect(calls[0].localOnly).to.equal(true);
+    expect(calls[0].mainRepoPath).to.equal("/home/dev/repos/alpha-moved");
+    expect(calls[0].gitUrl).to.equal("");
+  });
+});
+
+it("deletes a project only after the inline confirmation", () => {
+  // Given
+  const backend = aProjectsBackend([aProject({ projectId: "proj-alpha" })]);
+  mountProjects(backend);
+
+  // When — confirming without opening first is impossible: the confirmation holds the button
+  projectsScreenPage.openDelete("proj-alpha");
+  projectsScreenPage.confirmDelete("proj-alpha");
+
+  // Then — DeleteProject was sent for that project
+  cy.wrap(backend).should((b) => {
+    const calls = b.callsTo(ProjectService.method.deleteProject);
+    expect(calls).to.have.length(1);
+    expect(calls[0].projectId).to.equal("proj-alpha");
+  });
+  // And the deleted project left the live list
+  projectsScreenPage.card("proj-alpha").should("not.exist");
+});
+
+it("keeps the project when the delete confirmation is cancelled", () => {
+  // Given
+  const backend = aProjectsBackend([aProject({ projectId: "proj-alpha" })]);
+  mountProjects(backend);
+
+  // When
+  projectsScreenPage.openDelete("proj-alpha");
+  projectsScreenPage.cancelDelete("proj-alpha");
+
+  // Then
+  cy.wrap(backend).should((b) => {
+    expect(b.callsTo(ProjectService.method.deleteProject)).to.have.length(0);
+  });
+  projectsScreenPage.card("proj-alpha").should("exist");
 });

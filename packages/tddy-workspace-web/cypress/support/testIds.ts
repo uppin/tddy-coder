@@ -332,6 +332,38 @@ export const projectRestore = (projectId: string) => `project-restore-${projectI
 /** `[data-testid="project-restore-error-<projectId>"]` — the daemon's reason a restore was refused. */
 export const projectRestoreError = (projectId: string) => `project-restore-error-${projectId}`;
 
+/** `[data-testid="project-edit-toggle-<projectId>"]` — opens/closes a project card's Edit form. */
+export const projectEditToggle = (projectId: string) => `project-edit-toggle-${projectId}`;
+
+/** `[data-testid="project-edit-name-<projectId>"]` — the Edit form's project-name field. */
+export const projectEditName = (projectId: string) => `project-edit-name-${projectId}`;
+
+/** `[data-testid="project-edit-git-url-<projectId>"]` — the Edit form's git-URL field. */
+export const projectEditGitUrl = (projectId: string) => `project-edit-git-url-${projectId}`;
+
+/** `[data-testid="project-edit-save-<projectId>"]` — saves the Edit form's name and git URL. */
+export const projectEditSave = (projectId: string) => `project-edit-save-${projectId}`;
+
+/** `[data-testid="project-edit-path-<projectId>-<daemonInstanceId>"]` — the Edit form's checkout-path
+ *  field for one host. */
+export const projectEditPath = (projectId: string, daemonInstanceId: string) =>
+  `project-edit-path-${projectId}-${daemonInstanceId}`;
+
+/** `[data-testid="project-edit-path-save-<projectId>-<daemonInstanceId>"]` — moves that host's
+ *  checkout path (`UpdateProject` with `local_only`, addressed at the host). */
+export const projectEditPathSave = (projectId: string, daemonInstanceId: string) =>
+  `project-edit-path-save-${projectId}-${daemonInstanceId}`;
+
+/** `[data-testid="project-delete-<projectId>"]` — **Delete project** on a live project card. */
+export const projectDelete = (projectId: string) => `project-delete-${projectId}`;
+
+/** `[data-testid="project-delete-confirm-yes-<projectId>"]` — confirms the soft delete. */
+export const projectDeleteConfirmYes = (projectId: string) =>
+  `project-delete-confirm-yes-${projectId}`;
+
+/** `[data-testid="project-delete-cancel-<projectId>"]` — cancels the delete confirmation. */
+export const projectDeleteCancel = (projectId: string) => `project-delete-cancel-${projectId}`;
+
 /** `[data-testid="project-card-id-<projectId>"]` — the logical project id shown on its card */
 export const projectCardId = (projectId: string) => `project-card-id-${projectId}`;
 

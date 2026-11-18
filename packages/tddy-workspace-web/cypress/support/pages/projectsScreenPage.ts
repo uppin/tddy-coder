@@ -24,6 +24,15 @@ import {
   projectDeletedCard,
   projectRestore,
   projectRestoreError,
+  projectEditToggle,
+  projectEditName,
+  projectEditGitUrl,
+  projectEditSave,
+  projectEditPath,
+  projectEditPathSave,
+  projectDelete,
+  projectDeleteConfirmYes,
+  projectDeleteCancel,
   TEST_IDS,
 } from "../testIds";
 
@@ -133,6 +142,51 @@ export const projectsScreenPage = {
   /** Choose a remote branch as the project's default branch (the dropdown submits on change). */
   setDefaultBranch(projectId: string, mainBranchRef: string) {
     byTestId(projectDefaultBranchSelect(projectId)).select(mainBranchRef);
+  },
+
+  // ---------------------------------------------------------------------------
+  // Edit + delete
+  // ---------------------------------------------------------------------------
+
+  /** Opens a project card's Edit form. */
+  openEdit(projectId: string) {
+    byTestId(projectEditToggle(projectId)).click();
+  },
+
+  /** The Edit form's project-name field. */
+  editName: (projectId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(projectEditName(projectId), options),
+
+  /** The Edit form's git-URL field. */
+  editGitUrl: (projectId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(projectEditGitUrl(projectId), options),
+
+  /** Types a new name and git URL and saves the Edit form. */
+  editProject(projectId: string, name: string, gitUrl: string) {
+    byTestId(projectEditName(projectId)).clear().type(name);
+    byTestId(projectEditGitUrl(projectId)).clear().type(gitUrl);
+    byTestId(projectEditSave(projectId)).click();
+  },
+
+  /** Types a new checkout path for one host and submits the move. */
+  moveCheckout(projectId: string, daemonInstanceId: string, mainRepoPath: string) {
+    byTestId(projectEditPath(projectId, daemonInstanceId)).clear().type(mainRepoPath);
+    byTestId(projectEditPathSave(projectId, daemonInstanceId)).click();
+  },
+
+  /** Opens the delete confirmation on a project card. */
+  openDelete(projectId: string) {
+    byTestId(projectDelete(projectId)).click();
+  },
+
+  /** Confirms the soft delete. */
+  confirmDelete(projectId: string) {
+    byTestId(projectDeleteConfirmYes(projectId)).click();
+  },
+
+  /** Cancels the delete confirmation. */
+  cancelDelete(projectId: string) {
+    byTestId(projectDeleteCancel(projectId)).click();
   },
 
   // ---------------------------------------------------------------------------
