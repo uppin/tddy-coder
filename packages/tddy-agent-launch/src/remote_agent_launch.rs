@@ -307,8 +307,8 @@ fn remote_command(
     let env = agent
         .env_base
         .agent_env(&agent.spec, std::env::vars_os(), &env);
-    let command = remote_agent_command(remote.worktree, &plan.argv, &env);
-    command
+
+    remote_agent_command(remote.worktree, &plan.argv, &env)
 }
 
 fn client_command(
