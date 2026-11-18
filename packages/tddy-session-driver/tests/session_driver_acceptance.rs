@@ -53,6 +53,14 @@ const AN_AGENT_THAT_ANSWERS: &str = "#!/bin/sh\n\
      printf 'ACME READY in %s\\n' \"$(/bin/pwd -P)\"\n\
      while IFS= read -r line; do printf 'acme heard: %s\\n' \"$line\"; done\n";
 
+/// An agent that ignores the hang-up of a terminal that went away, as an agent on a remote
+/// workspace never sees its client stop, and records it when it is told to terminate.
+const AN_AGENT_THAT_OUTLIVES_ITS_CLIENT: &str = "#!/bin/sh\n\
+     trap '' HUP\n\
+     trap 'printf terminated > \"$(dirname \"$0\")/agent-ended\"; exit 0' TERM\n\
+     printf 'ACME READY in %s\\n' \"$(/bin/pwd -P)\"\n\
+     while :; do /bin/sleep 1; done\n";
+
 /// An agent that refuses to run and says why.
 const AN_AGENT_THAT_EXITS: &str = "#!/bin/sh\nprintf 'acme: no licence for this host\\n'\nexit 3\n";
 
@@ -88,6 +96,19 @@ struct AMachine {
 
 impl AMachine {
     fn with_agent(agent_script: &str) -> Self {
+        Self::on_workspace(agent_script, "exec ")
+    }
+
+    /// A machine whose stand-in `coder` runs the workspace's command as its own child instead of
+    /// becoming it, so stopping the CLI here leaves the agent there running — as dropping a real
+    /// `coder ssh` leaves the agent on the workspace.
+    fn with_agent_outliving_its_client(agent_script: &str) -> Self {
+        Self::on_workspace(agent_script, "")
+    }
+
+    /// The machine, its stand-in `coder` handing the workspace's command to a shell with `run`
+    /// before it (`exec ` to become that shell, empty to wait on it as a child).
+    fn on_workspace(agent_script: &str, run: &str) -> Self {
         let dir = tempfile::tempdir().expect("a directory for the machine");
         let root = std::fs::canonicalize(dir.path()).expect("it resolves");
         std::fs::create_dir_all(root.join("tddy-home/tools")).expect("the tools directory");
@@ -103,7 +124,7 @@ impl AMachine {
                  \"${{CODER_SESSION_TOKEN-}}\" >> '{calls}'\n\
                  while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
                  shift\n\
-                 exec /bin/sh -c \"$*\"\n",
+                 {run}/bin/sh -c \"$*\"\n",
                 calls = root.join("coder-calls").display()
             ),
         );
@@ -434,4 +455,43 @@ async fn with_start_the_session_runs_before_the_first_call() {
     assert!(is_error, "a second start is refused: {text}");
     let _ = driver.answer("stop_session", json!({})).await;
     let _ = driver.child.start_kill();
+}
+
+#[tokio::test]
+async fn stopping_a_coder_session_stops_its_agent_on_the_workspace() {
+    // Given a driver on a Coder target whose agent outlives the CLI that carries its terminal, as an
+    // agent on a real workspace does, and records how it is ended
+    let machine = AMachine::with_agent_outliving_its_client(AN_AGENT_THAT_OUTLIVES_ITS_CLIENT);
+    let mut driver = ADriver::started(machine.driver("coder:ada/devbox", &[])).await;
+    let _ = driver.answer("start_session", json!({})).await;
+    let ready = driver
+        .answer(
+            "wait_for_text",
+            json!({ "text": "ACME READY", "timeout_secs": 20 }),
+        )
+        .await;
+    assert_eq!(ready["matched"], json!(true), "{ready}");
+
+    // When the session is stopped
+    let stopped = driver.answer("stop_session", json!({})).await;
+
+    // Then the agent on the workspace was told to terminate, by the pid its launch recorded there,
+    // and the session reads as exited
+    let ended = machine.root.join("agent-ended");
+    let deadline = std::time::Instant::now() + IO_TIMEOUT;
+    while !ended.exists() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let how = std::fs::read_to_string(&ended).unwrap_or_default();
+    // An agent the stop missed keeps running; end it so the suite leaves nothing behind.
+    if how.is_empty() {
+        if let Ok(pid) = std::fs::read_to_string(machine.worktree().join(".tddy/agent.pid")) {
+            let _ = std::process::Command::new("kill")
+                .arg("-9")
+                .arg(pid.trim())
+                .status();
+        }
+    }
+    assert_eq!(how, "terminated");
+    assert_eq!(stopped["state"], json!("exited"), "{stopped}");
 }

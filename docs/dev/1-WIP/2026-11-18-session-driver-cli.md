@@ -62,15 +62,18 @@ from `tddy-remote-shell`'s test support where it can, rather than adding an eigh
   - `send_keys` encodes through `encode_keys`, bracketed paste included.
   - `stop_session` kills the remote agent by the pid file the launch recorded.
     `REMOTE_AGENT_PID_FILE` is `pub`, re-exported from `remote_agent_launch`.
-- [x] Acceptance suite `tests/session_driver_acceptance.rs`, 6 tests. It spawns the compiled binary
+- [x] Acceptance suite `tests/session_driver_acceptance.rs`, 7 tests. It spawns the compiled binary
       and speaks newline-delimited JSON-RPC, failing on any stdout line that is not a frame:
   - the tool list and `not_started`;
   - a local conversation: banner, keys, echo on the screen, stop, `exited`;
   - the same through a stand-in `coder` given `CODER_URL` / `CODER_SESSION_TOKEN`;
   - a Coder target without a token exits 1 naming the variable, with the CLI never run;
   - an agent that exits at once fails `start_session` with its last words;
-  - `--start`.
-  All six failed against a stub binary before the implementation.
+  - `--start`;
+  - stopping a Coder session terminates its agent on the workspace by the recorded pid. This one was
+    added at the 6e review: the stand-in `coder` waits on the command instead of becoming it, and
+    the agent ignores SIGHUP, so only the remote kill ends it. It fails with that kill disabled.
+  The first six failed against a stub binary before the implementation.
 - [x] Unit tests: target parsing and the Coder variable refusal (`target.rs`, 3).
 - [x] Live use on `mantasi/remote-dev` (2026-11-18), driven over MCP stdio by a ~60-line Python
       client, with `--binary /home/coder/.local/bin/claude --env HOME=… --env PATH=… --env TMPDIR=/tmp`:
