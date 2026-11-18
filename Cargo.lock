@@ -14105,6 +14105,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-session-driver"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "pretty_assertions",
+ "rmcp",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "tddy-actions",
+ "tddy-agent-launch",
+ "tddy-cli-sessions",
+ "tddy-coding-agent-specs",
+ "tddy-credentials",
+ "tddy-remote-shell",
+ "tddy-task",
+ "tddy-tool-engine",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-session-files"
 version = "0.1.0"
 dependencies = [

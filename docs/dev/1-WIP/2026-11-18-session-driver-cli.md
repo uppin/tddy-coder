@@ -39,20 +39,55 @@ from `tddy-remote-shell`'s test support where it can, rather than adding an eigh
   - Dependencies, all already in the workspace: `rmcp` (as `tddy-tools` uses it), `clap`, `tokio`,
     `serde_json`, `tddy-agent-launch`, `tddy-remote-shell`, `tddy-task`, `tddy-tool-engine` (for
     `encode_keys`) and `tddy-cli-sessions`.
-- `tddy-tool-engine`: possibly a narrow `pub` re-export of the screen-region helpers, if they are
-  not reachable as they are.
+- `tddy-tool-engine`: `terminal_grid_answer` is public, the screen answer `ReadSessionTerminal` gives,
+  taking a `GridRegion`.
+- `tddy-agent-launch`: `REMOTE_AGENT_PID_FILE` is public and re-exported from `remote_agent_launch`.
 - `Cargo.toml` (workspace members); `./release`, `./install` and `scripts/dev-runtime-binaries.sh`
   are **not** changed. This is a developer tool and is not installed beside the daemon.
 
 ## Scope
 
-- [ ] Arguments: `--target`, `--worktree`, `--agent`, `--model`, `--prompt`, `--binary`, `--env`,
-      `--start`
-- [ ] Launch through `launch_host_pty` (local) and `launch_on_target` (ssh, coder)
-- [ ] The six MCP tools over stdio
-- [ ] Acceptance suite (local and stand-in Coder) driven over MCP as a subprocess
-- [ ] Live use on `mantasi/remote-dev`
-- [ ] Scoped gates
+- [x] Arguments: `--target`, `--worktree`, `--agent`, `--model`, `--prompt`, `--permission-mode`,
+      `--binary`, repeated `--env`, `--start`, plus:
+  - `--tddy-home` (default `~/.tddy`);
+  - `--coder` (default `coder`, found on `PATH`);
+  - `--startup-window-secs` (default 5);
+  - `--rows` / `--cols` (default 40×120). The screen model answers nothing until the PTY's size is
+    known, so the driver sizes it right after the launch.
+- [x] Launch through `launch_host_pty` (local) and `launch_on_target` (ssh, coder). A local start is
+      judged by the same startup window, here, since `launch_host_pty` does not wait.
+- [x] The six MCP tools over stdio, `rmcp` 1.x.
+  - `read_terminal` answers through `tddy_tool_engine::project_home_terminal_tools::terminal_grid_answer`,
+    made public for it; it was the private `grid_answer`, now taking a `GridRegion`.
+  - `send_keys` encodes through `encode_keys`, bracketed paste included.
+  - `stop_session` kills the remote agent by the pid file the launch recorded.
+    `REMOTE_AGENT_PID_FILE` is `pub`, re-exported from `remote_agent_launch`.
+- [x] Acceptance suite `tests/session_driver_acceptance.rs`, 6 tests. It spawns the compiled binary
+      and speaks newline-delimited JSON-RPC, failing on any stdout line that is not a frame:
+  - the tool list and `not_started`;
+  - a local conversation: banner, keys, echo on the screen, stop, `exited`;
+  - the same through a stand-in `coder` given `CODER_URL` / `CODER_SESSION_TOKEN`;
+  - a Coder target without a token exits 1 naming the variable, with the CLI never run;
+  - an agent that exits at once fails `start_session` with its last words;
+  - `--start`.
+  All six failed against a stub binary before the implementation.
+- [x] Unit tests: target parsing and the Coder variable refusal (`target.rs`, 3).
+- [x] Live use on `mantasi/remote-dev` (2026-11-18), driven over MCP stdio by a ~60-line Python
+      client, with `--binary /home/coder/.local/bin/claude --env HOME=… --env PATH=… --env TMPDIR=/tmp`:
+  - `start_session` → `running` after 44 s;
+  - Claude's turn completed on screen: `hostname: coder-mantasi-remote-dev`, and `pwd:` the fresh
+    worktree;
+  - `stop_session` → `exited`, and no `claude` was left on the VM.
+  - No trust dialog appeared in that fresh worktree. Trusting an earlier qape-hq worktree trusted the
+    repository.
+  - Without `--env TMPDIR=/tmp` the launch failed `EACCES: permission denied, mkdir '/var/folders'`:
+    the agent environment carries this Mac's `TMPDIR` to the target. That is recorded on the backlog
+    entry for the daemon host's agent environment.
+- [x] Scoped gates:
+  - `./test -p tddy-session-driver -p tddy-tool-engine -p tddy-agent-launch` exits 0, with 0 failures
+    in every suite;
+  - `./dev cargo clippy -p tddy-session-driver -p tddy-tool-engine -p tddy-agent-launch --all-targets
+    -- -D warnings` is clean.
 
 ## Responsibility
 

@@ -189,7 +189,7 @@ pub(crate) fn place_session_pointer_locally(
 /// Where an ssh launch's agent records its pid on the target, relative to its worktree, for
 /// [`record_remote_owner`] to read (and remove). The launch writes it as `$$` before it `exec`s the
 /// agent, so it is the agent's own pid.
-pub(crate) const REMOTE_AGENT_PID_FILE: &str = ".tddy/agent.pid";
+pub const REMOTE_AGENT_PID_FILE: &str = ".tddy/agent.pid";
 
 /// Once the agent has started on the target `placed` is on: one bounded command through the port
 /// reads the target's own name for itself (`hostname`) and the agent's pid

@@ -1,0 +1,37 @@
+[package]
+name = "tddy-session-driver"
+version = "0.1.0"
+edition = "2021"
+description = "Run one agent session on a local, ssh or Coder target through the daemon's launch code, and drive its TUI over MCP"
+
+[lib]
+name = "tddy_session_driver"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tddy-session-driver"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+rmcp = { version = "1", features = ["server", "transport-io", "schemars", "macros"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+tddy-actions = { path = "../tddy-actions" }
+tddy-agent-launch = { path = "../tddy-agent-launch" }
+tddy-cli-sessions = { path = "../tddy-cli-sessions" }
+tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
+tddy-credentials = { path = "../tddy-credentials" }
+tddy-remote-shell = { path = "../tddy-remote-shell" }
+tddy-task = { path = "../tddy-task" }
+# `encode_keys` and the screen answer: what `SendSessionKeys` types and `ReadSessionTerminal`
+# answers, so the driver's tools mean what the orchestrator's do.
+tddy-tool-engine = { path = "../tddy-tool-engine" }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = "3"

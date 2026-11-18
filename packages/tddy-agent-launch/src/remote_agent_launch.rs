@@ -36,6 +36,9 @@ use crate::remote_agent_launch::startup::wait_for_agent_start;
 use crate::remote_agent_launch::startup::AgentStart;
 use crate::spec_launch::{plan_host_pty, HostAgent, HostPtySession, SpecLaunchError};
 
+/// Where the remote command records the agent's pid, relative to the session's worktree on the
+/// target: what a caller that stops the agent there reads.
+pub use crate::cli_session_pointer::REMOTE_AGENT_PID_FILE;
 pub(crate) use crate::remote_agent_launch::target::target_config_host;
 pub use crate::remote_agent_launch::target::{
     proto_of_session_target, session_target_of_proto, shell_for_target, TargetError,

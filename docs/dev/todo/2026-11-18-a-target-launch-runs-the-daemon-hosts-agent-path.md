@@ -13,6 +13,14 @@ daemon host's. The tests launch on the same machine, where both paths exist, so 
 The Claude start never got this far on `remote-dev`: it hung writing its settings file first, which is
 fixed.
 
+**Confirmed live 2026-11-18** (`mantasi/remote-dev`, after #941 opened the terminal): as the daemon
+resolves the agent, the launch ends with `env: '/Users/mantasi/.local/share/claude/versions/2.1.311':
+No such file or directory`, exit 127. With the target's binary, `HOME` and `PATH` given by hand
+(`tddy-session-driver --binary … --env …`), the daemon host's **`TMPDIR`** still reached the agent:
+Claude died with `EACCES: permission denied, mkdir '/var/folders'`, and started only with
+`TMPDIR=/tmp`. The leak is the whole environment the daemon host's base set keeps, not only `PATH`
+and `HOME`.
+
 **Why deferred:** which binary a target runs is a design decision: the spec's bare command resolved by
 the target's login shell, a per-target configured path, or a probe at start. It is shared with
 [2026-11-18-cursor-chat-is-minted-on-the-daemon-host-for-a-target.md](2026-11-18-cursor-chat-is-minted-on-the-daemon-host-for-a-target.md).
