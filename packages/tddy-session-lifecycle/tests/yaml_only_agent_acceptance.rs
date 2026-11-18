@@ -637,6 +637,90 @@ async fn an_override_of_claude_yaml_with_answer_wait_secs_holds_a_permission_hoo
     );
 }
 
+/// The model a routed claude-cli start chooses, and the branch it names.
+const ROUTED_MODEL: &str = "acme-coder-main";
+const ROUTED_BRANCH: &str = "route-pin/acme";
+
+/// A routed claude-cli start: the built-in claude.yaml run as the stub, on the owner's Meta account.
+async fn a_routed_claude_cli_session() -> (agent_registry_support::ARegistryDaemon, String) {
+    let daemon = a_registry_daemon()
+        .with_tool("claude.yaml", &builtin_yaml_run_as_the_stub("claude"))
+        .with_a_meta_account()
+        .build();
+    let (session_id, _host) = daemon
+        .start(StartSessionRequest {
+            model: ROUTED_MODEL.to_string(),
+            new_branch_name: ROUTED_BRANCH.to_string(),
+            ..daemon.a_start_on_account("claude-cli", META_ACCOUNT)
+        })
+        .await
+        .expect("a host claude-cli start on the Meta account succeeds");
+    (daemon, session_id)
+}
+
+/// The worktree's `.claude/settings.local.json` as JSON.
+fn the_settings_file_of(
+    daemon: &agent_registry_support::ARegistryDaemon,
+    session_id: &str,
+) -> serde_json::Value {
+    let settings = daemon
+        .worktree_of(session_id)
+        .join(".claude/settings.local.json");
+    serde_json::from_str(
+        &std::fs::read_to_string(&settings)
+            .unwrap_or_else(|e| panic!("{} is written: {e}", settings.display())),
+    )
+    .expect("the settings file is JSON")
+}
+
+/// A tool that writes `env.ANTHROPIC_BASE_URL` into the user-level `~/.claude/settings.json`
+/// hijacks the route of every routed session: a settings-file `env` value replaces the one
+/// inherited from the shell, and the daemon delivers the route only in the child's environment. The
+/// worktree's route must therefore be pinned in its own `settings.local.json`, beside the hooks.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_routed_session_pins_its_route_env_but_not_its_key_in_the_worktree_settings() {
+    // Given — a claude-cli start on a provider account whose route is the Meta endpoint
+    let (daemon, session_id) = a_routed_claude_cli_session().await;
+
+    // When
+    let settings = the_settings_file_of(&daemon, &session_id);
+
+    // Then — the route's endpoint and model are pinned beside the hooks; the key is not written
+    assert_eq!(
+        (
+            settings["env"]["ANTHROPIC_BASE_URL"].as_str(),
+            settings["env"]["ANTHROPIC_MODEL"].as_str(),
+            settings["env"].get("ANTHROPIC_AUTH_TOKEN"),
+            settings["hooks"].is_object(),
+        ),
+        (Some(META_ANTHROPIC_ROOT), Some(ROUTED_MODEL), None, true),
+        "the settings file is {settings:#}"
+    );
+}
+
+/// Claude Code keeps and reads `settings.local.json` at the main checkout's root, not a git
+/// worktree's, so a worktree's pinned route is unread unless that file is passed explicitly.
+#[tokio::test]
+#[serial_test::serial]
+async fn a_routed_session_launches_claude_with_the_worktree_settings_file_loaded_explicitly() {
+    // Given — a claude-cli start on a provider account
+    let (daemon, session_id) = a_routed_claude_cli_session().await;
+
+    // When
+    let started = daemon.stub_report(&session_id).await;
+
+    // Then
+    assert_eq!(
+        started.values_of("--settings"),
+        vec![daemon
+            .worktree_of(&session_id)
+            .join(".claude/settings.local.json")
+            .to_string_lossy()
+            .into_owned()]
+    );
+}
+
 #[tokio::test]
 #[serial_test::serial]
 async fn editing_answer_wait_secs_after_a_start_does_not_change_that_sessions_hold() {
