@@ -3,7 +3,7 @@
 **Date**: 2026-11-18
 **Status**: 🚧 In Progress
 **Type**: Refactor
-**Complexity**: 3 — three packages: one `move_item` of a topic module (`tddy-remote-shell`), six `extract_method`s over one 184-line function, two of them lifted `return Err` guards (`tddy-agent-launch`), one lifted guard (`tddy-session-driver`); a recorded green baseline, no behaviour change, no new public surface
+**Complexity**: 3 — three packages: one `move_item` of a topic module (`tddy-remote-shell`), six `extract_method`s over one 184-line function in two plans, one of them a tail range that keeps its `return`s (`tddy-agent-launch`), one `extract_method` (`tddy-session-driver`); a recorded green baseline, no behaviour change, no new public surface
 **Stack**: `#coder-start` 4/4 (sweep) — branch `feature/coder-start/sweep`, base `feature/coder-start/session-driver-cli` (#942)
 
 ## Initial Discovery
@@ -50,12 +50,13 @@ the function they came from. No `pub` item moves, so no caller outside the three
   the marker-gated feed) is ~108 lines of free functions and constants (lines 80–187) with one
   caller, `CoderShell` — a ready-made seam.
 - `launch_on_target` was 180 lines before the stack and #941 added the `PATH` copy (184). It reads
-  as six steps — prepare the pid directory, write the launch's files, compose the remote command,
-  compose the local client's argv and environment, judge the start, record the owner — and each is
-  a clean range, two of them guard runs ending in `return Err(…)` that the engine lifts into
-  `fn … -> Result<(), RemoteLaunchError>` called with `?`.
-- `DriverSession::launch` is one line over; its local arm's startup-window wait ends in a
-  `return Err(…)` guard, the same liftable shape.
+  as steps — prepare the pid directory, write the launch's files, compose the remote command,
+  compose the local client's argv and environment, spawn the client, judge the start, record the
+  owner. Everything from the start judgement on runs to the function's tail, so it is one
+  tail-range extraction that keeps its `return Err(…)`s verbatim; the owner recording is then cut
+  out of that new function.
+- `DriverSession::launch` is one line over; its local arm's startup-window wait loop is a clean
+  four-line range.
 - The CRAP report scores `DriverSession::launch`/`stop`/`wait_for` 42–56 at 0% coverage. That is a
   blind spot, not a finding: `session_driver_acceptance` drives them through the spawned binary,
   which the coverage capture does not instrument (recorded in the `launch` record's "Verified by
@@ -134,18 +135,19 @@ recorded green baseline stands in for them.
 |---|---|---|
 | `tddy-remote-shell/src/coder.rs` | credentials, workspace ref, `CoderStdin`, `CoderShell` | ~400 |
 | `tddy-remote-shell/src/coder/one_shot.rs` (new) | the eight one-shot items above | ~110 |
-| `remote_agent_launch.rs` `launch_on_target` | the step calls, the start wait (its `AgentStart` match binds `agent_pid`, so it stays) | ~55 |
-| `remote_agent_launch.rs`, new private fns | `prepare_pid_directory`, `write_launch_files`, `remote_command`, `client_command`, `fail_on_an_early_exit` (lifted guard), `recorded_owner` | each < 40 |
-| `session.rs` `DriverSession::launch` | as today, the local wait replaced by a call | ~51 |
-| `session.rs`, new private fn | `judge_local_start` (lifted guard) | ~15 |
+| `remote_agent_launch.rs` `launch_on_target` | the pid directory call, the slot/plan bindings, the file-writing calls, the remote command, the client command call, the spawn, a call to `judge_the_start` as its tail | ~54 |
+| `remote_agent_launch.rs`, new private fns | `prepare_pid_directory` (~22), `write_slot_files` (~10), `write_rendered_session_files` (~24), `client_command` (~30), `judge_the_start` (start wait, early exit, owner call, tail; ~50), `recorded_owner` (~25) | each < 60 |
+| `session.rs` `DriverSession::launch` | as today, the local wait loop replaced by a call | ~58 |
+| `session.rs`, new private fn | `wait_out_the_startup_window` | ~8 |
 
 The names are proposals; the engine's assist names the function and the plan's `name` field sets it.
 
 ### Delta — seams in dependency order
 
 1. `tddy-remote-shell` — `move_item` with `name: "one_shot"`, `to: crate::coder`, `reexport: "none"` — the eight items; `CoderShell`'s uses and the test module's `START_MARKER` re-pointed.
-2. `tddy-agent-launch` — `extract_method` ×6 over `launch_on_target`, **bottom-up**: owner recording → early-exit guard (lifted) → client argv/env → remote env/command → the two file-writing loops → the pid-directory `exec`.
-3. `tddy-session-driver` — `extract_method` ×1: the local startup-window wait and its guard (lifted).
+2. `tddy-agent-launch`, plan 2a — `extract_method` ×5 over `launch_on_target`, **bottom-up**: the tail from `let start_bound` to `Ok(RemoteLaunched { … })` (`judge_the_start`; a tail range, its `return Err`s kept verbatim) → client argv/env (`client_command`) → the session-dir file loop → the slot-file loop → the pid-directory `exec`.
+3. `tddy-agent-launch`, plan 2b — `extract_method` ×1 over `judge_the_start`: `let owner = match remote.pointer { … };` → `recorded_owner`. Its anchor names `judge_the_start`, which exists only after 2a, so **[G] emits it** (`restructure anchors … --at`) after applying 2a and runs `check --deep` on it before applying.
+4. `tddy-session-driver` — `extract_method` ×1: `let deadline …` and its `while` loop → `wait_out_the_startup_window`.
 
 ## Callers
 
@@ -163,11 +165,22 @@ report.
 
 ## Plan
 
-`docs/dev/1-WIP/2026-11-18-coder-start-sweep/plan-{1-one-shot,2-launch-on-target,3-driver-launch}.jsonl` — written at the contract commit from `restructure anchors`.
+`docs/dev/1-WIP/2026-11-18-coder-start-sweep/`, anchors emitted by `restructure anchors` on `82fb5ad57` against the warm index daemon, each `check --deep` → `no findings`:
+
+| Plan | Operations | `check --deep` |
+|---|---|---|
+| `plan-1-one-shot.jsonl` | 1 `move_item` (8 items → `tddy_remote_shell::coder::one_shot`, `reexport: none`) | no findings; reports 5 widenings private → `pub(super)` (`START_MARKER`, `strip_start_marker`, `stdin_lines`, `one_shot_command`, `read_noting_the_marker`) |
+| `plan-2a-launch-on-target.jsonl` | 5 `extract_method` | no findings |
+| plan 2b | 1 `extract_method` (`recorded_owner`) | written and checked by [G] after 2a |
+| `plan-3-driver-launch.jsonl` | 1 `extract_method` | no findings |
+
+Apply order: 1 → 2a → 2b → 3, one commit each.
 
 ## Decisions & Trade-offs
 
-- **The `AgentStart` match stays in `launch_on_target`.** Its `NeverStarted` arm returns early while the other arms bind `agent_pid`, which the code after it reads; the engine refuses that range (a value binding beside a guard). The rest of the function is cut around it.
+- **No guard lift.** The first plan lifted the early-exit `if exits_during_startup(…).await { …; return Err(…) }` and the driver's `if *handle.pty_done.borrow() { return Err(…) }` into `-> Result<()>` functions. `check --deep` refused both: rust-analyzer writes the extracted guard of an `async` function in a shape the engine's lift does not recognise (`expected if let Some(..) = f(..) { return ..; } or f(..)?;`). The tail-range extraction keeps those `return`s verbatim instead, and the driver's cut takes the wait loop only. The lift's gap with `async` guards is an engine limitation, recorded here; not this node's to fix.
+- **The two file-writing loops are two extractions.** As one range, rust-analyzer dropped the three-line comment between them and the engine could not pair it back; split, the comment stays above the second call.
+- **A range cannot start on a comment.** The tail range starts at `let start_bound`; the five-line comment explaining the startup window stays above the call in `launch_on_target`.
 - **`launch_on_target`'s 6 parameters stay.** The record names parameter count 6 > 5 too; `RemoteLaunch`/`HostPtySession` already bundle the rest and a further bundle would change the public signature, which is outside a Refactor node. If the record's parameter threshold still reads as breached at wrap, the record is narrowed, not deleted, and that is put to the developer. ⚠
 - **The session-driver CRAP scores are not findings** (coverage blind spot for binary-spawned tests).
 

@@ -65,3 +65,11 @@ None is closable by a restructure: each is deferred feature or behaviour work (t
 folder-trust prompt, Cursor chat mint location, `exec_streamed` over the pty, one-shot deadline
 cleanup, pagers, start visibility, idle-as-permission status) or test-infrastructure
 consolidation across packages (`2026-11-16-remote-shell-test-fixtures-are-duplicated.md`).
+
+## Revised at the contract commit
+
+`check --deep` refused the lifted guards (steps 6 and the driver's `if`: rust-analyzer's shape for an
+`async` guard is not one the lift knows) and the single range over both file loops (a dropped
+comment it could not pair back). The checked design — a tail range from `let start_bound`, the owner
+cut out of it in a second plan, the loops cut separately, the driver's wait loop alone — is in the
+changeset's **Delta** and **Plan**; its projection is `launch_on_target` ~54, `DriverSession::launch` ~58.
