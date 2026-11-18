@@ -190,18 +190,13 @@ pub async fn launch_on_target(
 
     // The slot files are the target's to hold, so they are taken out before the plan can write
     // them on this host, and written through the port at the paths the agent is told.
-    let mut render_slots = slots.clone();
-    let slot_files = std::mem::take(&mut render_slots.files);
-    let plan = plan_host_pty(agent, params, &render_slots).map_err(RemoteLaunchError::Plan)?;
-    write_slot_files(&remote, &slot_files).await?;
+    let (slot_files, plan) = plan_the_launch(agent, params, slots, &remote).await?;
     // A file the launch rendered into this session's directory on this host (its appended system
     // prompt) is written on the target at the same path, so the argument that names it reads the
     // target's copy, never a path of this host.
     write_rendered_session_files(&remote, slot_files, &plan).await?;
 
-    let command = remote_command(agent, &remote, &session, plan);
-
-    let (argv, local_env) = client_command(&remote, command);
+    let (argv, local_env) = client_argv_and_env(agent, &remote, &session, plan);
 
     let handle = session
         .manager
@@ -223,6 +218,32 @@ pub async fn launch_on_target(
     // spawn-counted window elapses, and an agent that exits at once would be judged started.
     // The remote command writes `.tddy/agent.pid` immediately before it execs the agent.
     judge_the_start(remote, session, handle).await
+}
+
+fn client_argv_and_env(agent: &HostAgent, remote: &RemoteLaunch<'_>, session: &HostPtySession<'_>, plan: crate::spec_launch::HostPtyPlan) -> (Vec<String>, Vec<(String, String)>) {
+    let command = remote_command(agent, remote, session, plan);
+
+    let (argv, local_env) = client_command(remote, command);
+    (argv, local_env)
+}
+
+async fn plan_the_launch(
+    agent: &HostAgent,
+    params: &TemplateParams,
+    slots: &RenderedSlots,
+    remote: &RemoteLaunch<'_>,
+) -> Result<
+    (
+        Vec<(std::path::PathBuf, Vec<u8>)>,
+        crate::spec_launch::HostPtyPlan,
+    ),
+    RemoteLaunchError,
+> {
+    let mut render_slots = slots.clone();
+    let slot_files = std::mem::take(&mut render_slots.files);
+    let plan = plan_host_pty(agent, params, &render_slots).map_err(RemoteLaunchError::Plan)?;
+    write_slot_files(remote, &slot_files).await?;
+    Ok((slot_files, plan))
 }
 
 async fn write_slot_files(

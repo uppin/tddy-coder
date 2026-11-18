@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-agent-launch/src/remote_agent_launch.rs":{"sha256":"sha256:1a691af653ee1fba691e2d57ae1cd9bd9760e8bc35c2e23ffe9a271ee5c8a1fb"}}}
+{"id":"op-1","op":"extract_method","anchor":{"kind":"item","item":"tddy_agent_launch::remote_agent_launch::launch_on_target","file":"packages/tddy-agent-launch/src/remote_agent_launch.rs","start":{"line":49,"col":5},"end":{"line":51,"col":62},"fingerprint":"sha256:3d4036088a4f409671bead0057ed0ce6550626dc4dc89a8ac674b03d8f142e34","hint":{"line":199,"col":5}},"name":"client_argv_and_env"}
