@@ -1,10 +1,15 @@
 # Cursor Agent CLI — the interactive coding agent behind `cursor-cli` sessions (`#agent-tools 7/12`).
 #
 # The argv renders byte-for-byte what `build_cursor_argv` built by hand:
-#   agent [--resume CHAT_ID] [--model M] [PROMPT]
+#   agent [--resume CHAT_ID] [--model M] [--trust] [PROMPT]
 # CHAT_ID is the chat the session owns for its whole lifetime (`agent create-chat`, minted at start
 # and persisted in `.session.yaml`); `--resume` takes an *optional* argument, so it is rendered only
 # with an id — a bare flag drops the CLI into an interactive chat picker.
+#
+# `--trust` is rendered only for a start on a remote target (`on_target`, bound by
+# `tddy-agent-launch`'s `plan_the_launch`): a fresh clone there otherwise opens on Cursor's
+# "Workspace Trust Required" dialog, which nobody on that pty answers. A local start leaves the
+# dialog to the operator, as before.
 #
 # In a jail the published `agent` wrapper cannot resolve its own install dir (it `realpath`s `$0`),
 # so a launch whose resolved binary is that launcher script binds `node_launcher` to the bundled
@@ -31,6 +36,7 @@ run:
       else: ["{binary}"]
     - { if: chat_id, then: ["--resume", "{chat_id}"] }
     - { if: model, then: ["--model", "{model}"] }
+    - { if: on_target, then: ["--trust"] }
     - { splice: slots }
     - { if: prompt, then: ["{prompt}"] }
   env: {}

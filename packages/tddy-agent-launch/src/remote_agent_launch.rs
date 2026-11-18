@@ -322,8 +322,10 @@ async fn plan_the_launch(
     // binary this host resolved means nothing there.
     let mut on_the_target = agent.clone();
     on_the_target.tool.binary = std::path::PathBuf::from(&agent.tool.command);
+    // `on_target` lets a spec render what only a start on a target needs (Cursor's `--trust`).
+    let params = params.clone().with_flag("on_target", true);
     let plan =
-        plan_host_pty(&on_the_target, params, &render_slots).map_err(RemoteLaunchError::Plan)?;
+        plan_host_pty(&on_the_target, &params, &render_slots).map_err(RemoteLaunchError::Plan)?;
     write_slot_files(remote, &slot_files).await?;
     Ok((slot_files, plan))
 }
