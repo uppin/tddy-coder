@@ -6,7 +6,7 @@
 //! target is reached through a stand-in `coder` that runs the workspace's command on this machine.
 //! No deployment is reached.
 //!
-//! PRD: docs/dev/1-WIP/PRD-2026-11-18-session-driver-cli.md.
+//! Docs: packages/tddy-session-driver/docs/architecture.md.
 
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};

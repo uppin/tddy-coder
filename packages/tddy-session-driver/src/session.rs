@@ -215,10 +215,11 @@ impl DriverSession {
                 .unwrap_or_default()
                 .split_whitespace()
                 .collect();
+            let matched = shown.contains(&wanted);
             let exited = *handle.pty_done.borrow();
-            if shown.contains(&wanted) || exited || Instant::now() >= deadline {
+            if matched || exited || Instant::now() >= deadline {
                 return Ok(Waited {
-                    matched: shown.contains(&wanted),
+                    matched,
                     exited,
                     grid,
                 });

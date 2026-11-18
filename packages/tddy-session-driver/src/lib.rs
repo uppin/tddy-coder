@@ -5,7 +5,7 @@
 //! - [`session`]: the session's lifecycle — start, screen, keys, waits, stop.
 //! - [`server`]: the MCP tools over it, served on stdin/stdout by the binary.
 //!
-//! PRD: docs/dev/1-WIP/PRD-2026-11-18-session-driver-cli.md.
+//! Docs: packages/tddy-session-driver/docs/architecture.md.
 
 pub mod server;
 pub mod session;
