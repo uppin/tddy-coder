@@ -513,17 +513,39 @@ fn update_project_row(
     Ok(Some(row))
 }
 
-/// Rename `project_id`. Only `name` changes: the checkout path is stored, not derived from it.
-/// `None` when it is not registered here.
-pub fn rename_project(
+/// Edit `project_id`'s row: `Some(value)` replaces a field, `None` leaves it as stored. `None` is
+/// returned when the project is not registered here.
+///
+/// `name` is the display name; `git_url` is the project's repository identity, the same on every
+/// host; `main_repo_path` is this host's own checkout path, so only the host applying the change
+/// writes it.
+pub fn update_project(
     projects_dir: &Path,
     project_id: &str,
-    name: &str,
+    name: Option<&str>,
+    git_url: Option<&str>,
+    main_repo_path: Option<&str>,
 ) -> anyhow::Result<Option<ProjectData>> {
-    log::info!("rename_project: project_id={project_id} name={name}");
+    log::info!(
+        "update_project: project_id={project_id} name={} git_url={} main_repo_path={}",
+        name.map(|_| "set").unwrap_or("-"),
+        git_url.map(|_| "set").unwrap_or("-"),
+        main_repo_path.map(|_| "set").unwrap_or("-")
+    );
     update_project_row(projects_dir, project_id, |p| {
-        let changed = p.name != name;
-        p.name = name.to_string();
+        let mut changed = false;
+        if let Some(name) = name {
+            changed |= p.name != name;
+            p.name = name.to_string();
+        }
+        if let Some(git_url) = git_url {
+            changed |= p.git_url != git_url;
+            p.git_url = git_url.to_string();
+        }
+        if let Some(main_repo_path) = main_repo_path {
+            changed |= p.main_repo_path != main_repo_path;
+            p.main_repo_path = main_repo_path.to_string();
+        }
         changed
     })
 }
