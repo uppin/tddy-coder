@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 /// The line the one-shot wrapper prints to stderr before the command runs.
 ///
 /// `coder ssh` exits 1 both when the workspace cannot be entered and when the command exits 1,
@@ -55,7 +57,15 @@ pub(super) fn stdin_lines(bytes: &[u8]) -> Vec<u8> {
 /// runs. A stdin that did not arrive whole runs nothing and exits [`STDIN_NOT_WHOLE_STATUS`].
 /// Echo is turned off before the marker is printed, so lines written once the marker has arrived
 /// are not echoed into the command's output.
-pub(super) fn one_shot_command(command: &str, stdin: Option<(usize, usize)>) -> String {
+///
+/// `command` itself is [`bounded`]: pager-free, and stopped on the workspace when `deadline` has
+/// passed.
+pub(super) fn one_shot_command(
+    command: &str,
+    stdin: Option<(usize, usize)>,
+    deadline: Duration,
+) -> String {
+    let command = bounded(command, deadline);
     let marker = format!("printf '%s\\n' '{START_MARKER}' >&2");
     match stdin {
         None => format!("stty -opost 2>/dev/null; exec </dev/null; {marker}; {command}"),
@@ -71,6 +81,37 @@ pub(super) fn one_shot_command(command: &str, stdin: Option<(usize, usize)>) -> 
              {command}"
         ),
     }
+}
+
+/// How long after `TERM` the watchdog waits before `KILL`, for a command that ignored `TERM`.
+const KILL_GRACE_SECONDS: u64 = 2;
+
+/// `command` as the workspace runs it: with the variables that keep a pager and a git prompt from
+/// waiting on a terminal nobody is at, as its own process group, under a watchdog that ends the
+/// group once `deadline` has passed.
+///
+/// Dropping the local `coder` does not stop what it started: the workspace's command outlives the
+/// connection. The watchdog runs on the workspace and needs nothing beyond POSIX `sh`: a job-control
+/// shell gives the background command a process group of its own (`set -m`), and a `sleep`
+/// followed by `kill -- -<pgid>` ends the group, children included. The watchdog starts when the
+/// command does, so it fires inside the caller's deadline by however long the connection took.
+/// The command's status is the wrapper's; a command ended by the watchdog is `143`. A job-control
+/// shell reports each job's end on its own stderr (bash as `sh` does, with `[1]+ Done`), so that
+/// is pointed at `/dev/null` and the command keeps the original stderr as fd 3. A job-control
+/// shell reports each job's end on its own stderr (bash as `sh` does, with `[1]+ Done`), so that
+/// is pointed at `/dev/null` and the command keeps the original stderr as fd 3.
+fn bounded(command: &str, deadline: Duration) -> String {
+    let seconds = (deadline.as_secs() + u64::from(deadline.subsec_nanos() > 0)).max(1);
+    let quoted = crate::shell_single_quote(command);
+    format!(
+        "PAGER=cat GIT_PAGER=cat GIT_TERMINAL_PROMPT=0; export PAGER GIT_PAGER GIT_TERMINAL_PROMPT; \
+         set -m; exec 3>&2 2>/dev/null; sh -c {quoted} 2>&3 3>&- & tddy_command=$!; \
+         ( sleep {seconds}; kill -TERM -- -$tddy_command 2>/dev/null; \
+         sleep {KILL_GRACE_SECONDS}; kill -KILL -- -$tddy_command 2>/dev/null ) \
+         >/dev/null 2>&1 & tddy_watchdog=$!; \
+         wait $tddy_command; tddy_status=$?; \
+         kill -TERM -- -$tddy_watchdog 2>/dev/null; exit $tddy_status"
+    )
 }
 
 /// Whether `bytes` hold the start marker's whole line, ended `\n` or, from a pty, `\r\n`.

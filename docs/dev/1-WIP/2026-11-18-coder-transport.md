@@ -23,12 +23,12 @@
 
 ## Scope
 
-- [ ] Remote bound on a one-shot past its deadline
-- [ ] Pager-free one-shot environment
-- [ ] `exec_streamed` over OpenSSH + `coder ssh --stdio`
+- [x] Remote bound on a one-shot past its deadline
+- [x] Pager-free one-shot environment
+- [x] `exec_streamed` over OpenSSH + `coder ssh --stdio`
 - [x] Each pinned by a test that fails before it
 - [ ] Live check on `mantasi/remote-dev`: a one-shot past its deadline leaves nothing; `git log -1` unpaged; a streamed `cat` round-trips bytes and ends on EOF
-- [ ] Scoped gates
+- [x] Scoped gates
 
 ## Responsibility
 
@@ -94,6 +94,11 @@ Red run: `./test -p tddy-remote-shell`. `coder_shell_acceptance` is 19 tests, 14
 
 - **A POSIX `sh` watchdog bounds the remote side** (developer, 2026-11-18, at 6e). The wrapper starts the command in its own process group, with a `sleep N; kill -TERM -<pgid>` watchdog a little inside the local deadline. It needs nothing beyond `sh`. coreutils `timeout` was rejected: it is not on every workspace, nor on the test `PATH` on macOS.
 - **OpenSSH + `--stdio`** (developer, 2026-11-18) over framing both directions on the pty.
+- **The watchdog sleeps `ceil(deadline)` seconds, from the command's start.** It starts after the connection is up, so it fires inside the caller's deadline by the connect time, and it never kills a command that would have finished within it (a fixed margin would). `TERM` to the group, `KILL` 2 s later. A command it ends exits 143.
+- **Job-control notices are silenced.** bash as `sh` (macOS) prints `[1]+ Done` on the shell's stderr under `set -m`; the wrapper's own stderr goes to `/dev/null` and the command keeps the original as fd 3.
+- **The command now runs as `sh -c '<command>'` under the wrapper**, not in the wrapper's shell; the stdin framing is unchanged (the file is the wrapper's stdin, inherited).
+- **`ssh` host token is the fixed `coder-workspace`**: the `ProxyCommand` reaches the workspace, the name resolves nothing. `StrictHostKeyChecking=no` and `UserKnownHostsFile=/dev/null` because the CLI authenticates the workspace by token.
+- **For the wrap:** `packages/tddy-remote-shell/docs/architecture.md`'s pty section (lines ~40-70) must say `exec_streamed` is OpenSSH over `coder ssh --stdio` (plain pipes, separate stderr, EOF), not the pty relay; a one-shot is bounded by the sh watchdog and exports `PAGER=cat GIT_PAGER=cat GIT_TERMINAL_PROMPT=0`; `exec`, `read_file`, `write_file` and `interactive` keep the pty.
 
 ## TODO
 
@@ -102,6 +107,6 @@ Red run: `./test -p tddy-remote-shell`. `coder_shell_acceptance` is 19 tests, 14
 - [x] Create changeset
 - [x] Draft PR contract — failing tests (commit 2)
 - [x] USER REVIEW — acceptance tests (6e)
-- [ ] TDD Green
+- [x] TDD Green
 - [ ] Validate changes
 - [ ] Wrap

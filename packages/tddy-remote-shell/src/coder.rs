@@ -126,6 +126,7 @@ impl tokio::io::AsyncWrite for CoderStdin {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoderShell {
     coder: PathBuf,
+    ssh: PathBuf,
     credentials: CoderCredentials,
     workspace: CoderWorkspaceRef,
 }
@@ -133,6 +134,9 @@ pub struct CoderShell {
 impl CoderShell {
     /// The tag of this transport in a [`ShellAddress`].
     pub const TRANSPORT: &'static str = "coder";
+
+    /// The host name `ssh` is given: the `ProxyCommand` reaches the workspace, so it names nothing.
+    const SSH_HOST_TOKEN: &'static str = "coder-workspace";
 
     /// The variable the `coder` CLI reads its deployment's URL from.
     pub const URL_VARIABLE: &'static str = "CODER_URL";
@@ -153,6 +157,7 @@ impl CoderShell {
     ) -> Self {
         Self {
             coder: coder_binary.into(),
+            ssh: PathBuf::from("ssh"),
             credentials,
             workspace,
         }
@@ -160,10 +165,8 @@ impl CoderShell {
 
     /// This shell, streaming its commands through the OpenSSH client `ssh_binary` rather than the
     /// `ssh` on `PATH`.
-    pub fn with_ssh_binary(self, ssh_binary: impl Into<PathBuf>) -> Self {
-        // TODO(coder-transport): implement — `exec_streamed` runs this client with a coder
-        // `ProxyCommand`.
-        let _ = ssh_binary.into();
+    pub fn with_ssh_binary(mut self, ssh_binary: impl Into<PathBuf>) -> Self {
+        self.ssh = ssh_binary.into();
         self
     }
 
@@ -210,6 +213,49 @@ impl CoderShell {
             .arg("sh")
             .arg("-c")
             .arg(crate::shell_single_quote(remote_command))
+            .env(Self::URL_VARIABLE, &self.credentials.url)
+            .env(
+                Self::SESSION_TOKEN_VARIABLE,
+                self.credentials.token.expose(),
+            )
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        command
+    }
+
+    /// The `ProxyCommand` that makes OpenSSH talk to the workspace through `coder ssh --stdio`,
+    /// the CLI's plain-pipe transport. The coder path and the workspace are shell-quoted: OpenSSH
+    /// hands the value to the user's shell.
+    fn proxy_command(&self) -> String {
+        format!(
+            "{} ssh --stdio --disable-autostart {}",
+            crate::shell_single_quote(&self.coder.to_string_lossy()),
+            crate::shell_single_quote(&self.workspace.to_string()),
+        )
+    }
+
+    /// `ssh <options> -o ProxyCommand=<proxy> -o StrictHostKeyChecking=no
+    /// -o UserKnownHostsFile=/dev/null -- <host token> <command>`, with the two credential
+    /// variables on this child's environment alone: the proxy inherits them, and neither is on any
+    /// command line. The workspace is authenticated by the CLI's session token, not by a host key,
+    /// so no host key is kept and none is asked about.
+    fn ssh_command(&self, remote_command: &str) -> tokio::process::Command {
+        let mut command = tokio::process::Command::new(&self.ssh);
+        command
+            .args(crate::SshShell::ssh_options())
+            .arg("-o")
+            .arg(format!("ProxyCommand={}", self.proxy_command()))
+            .args([
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "--",
+                Self::SSH_HOST_TOKEN,
+            ])
+            .arg(remote_command)
             .env(Self::URL_VARIABLE, &self.credentials.url)
             .env(
                 Self::SESSION_TOKEN_VARIABLE,
@@ -325,6 +371,7 @@ impl RemoteShell for CoderShell {
                 .as_ref()
                 .zip(request.stdin.as_ref())
                 .map(|(lines, bytes)| (lines.len(), bytes.len())),
+            deadline,
         );
         let mut child = self
             .command(&wrapped)
@@ -372,13 +419,17 @@ impl RemoteShell for CoderShell {
         self.output_of(status.code().unwrap_or(-1), stdout, stderr)
     }
 
+    /// The command over OpenSSH, through `coder ssh --stdio` as its `ProxyCommand`: plain pipes,
+    /// so the bytes are the command's own, its stderr is separate and its stdin's end is an EOF.
+    /// `coder ssh` without `--stdio` runs a pty, which merges stderr, never ends the input and
+    /// rewrites line endings.
     async fn exec_streamed(&self, command: &str) -> Result<StreamedExec, RemoteShellError> {
         let mut child = self
-            .command(command)
+            .ssh_command(command)
             .spawn()
-            .map_err(|error| self.spawn_error(error))?;
+            .map_err(|error| RemoteShellError::Spawn(format!("{}: {error}", self.ssh.display())))?;
         let (stdin, stdout, stderr) = Self::take_pipes(&mut child)?;
-        let coder_path = self.coder.clone();
+        let ssh_path = self.ssh.clone();
         Ok(StreamedExec {
             stdin: Box::new(CoderStdin { inner: Some(stdin) }),
             stdout: Box::new(stdout),
@@ -389,7 +440,7 @@ impl RemoteShell for CoderShell {
                     .await
                     .map(|status| status.code().unwrap_or(-1))
                     .map_err(|error| {
-                        RemoteShellError::Spawn(format!("{}: {error}", coder_path.display()))
+                        RemoteShellError::Spawn(format!("{}: {error}", ssh_path.display()))
                     })
             }),
         })
