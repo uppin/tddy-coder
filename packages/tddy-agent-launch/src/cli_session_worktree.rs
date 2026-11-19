@@ -682,6 +682,171 @@ mod remote_cut_tests {
 }
 
 #[cfg(test)]
+mod provision_tests {
+    //! Where a CLI harness session's worktree comes from: the client's own checkout, used as it
+    //! is, or a registered project — and the starts that name neither usably.
+
+    use std::path::Path;
+    use std::time::Duration;
+
+    use tddy_session_files::attachment_progress::AttachmentProgressSink;
+
+    use super::{provision_cli_worktree, CliWorktree, CliWorktreeStart};
+    use crate::stack_parent::SpawnStackParent;
+
+    /// The directories a start is made in: its session directory, the sessions base and the
+    /// daemon's data directory.
+    struct ADaemonsDirectories {
+        session_dir: tempfile::TempDir,
+        sessions_base: tempfile::TempDir,
+        tddy_data: tempfile::TempDir,
+    }
+
+    fn a_daemons_directories() -> ADaemonsDirectories {
+        ADaemonsDirectories {
+            session_dir: tempfile::tempdir().expect("session dir"),
+            sessions_base: tempfile::tempdir().expect("sessions base"),
+            tddy_data: tempfile::tempdir().expect("tddy data"),
+        }
+    }
+
+    impl ADaemonsDirectories {
+        /// A claude-cli start on this host naming `project_id` and the client's `repo_path`.
+        fn a_start<'a>(&'a self, project_id: &'a str, repo_path: &'a str) -> CliWorktreeStart<'a> {
+            CliWorktreeStart {
+                session_type: "claude-cli",
+                cut_label: "cut the session worktree",
+                session_id: "01a1f24f-7302-7521-b951-e380ae501dd5",
+                session_dir: self.session_dir.path(),
+                sessions_base: self.sessions_base.path(),
+                tddy_data_dir: self.tddy_data.path(),
+                os_user: "testdev",
+                project_id,
+                repo_path,
+                branch_worktree_intent: "new_branch_from_base",
+                new_branch_name: "feature/hooks",
+                selected_integration_base_ref: "",
+                selected_branch_to_work_on: "",
+                create_remote_branch: false,
+                intent: tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+                timeout: Duration::from_secs(5),
+                ssh_alias: "",
+                shell: None,
+            }
+        }
+    }
+
+    async fn provisioned(start: &CliWorktreeStart<'_>) -> Result<CliWorktree, tddy_rpc::Status> {
+        provision_cli_worktree(
+            start,
+            &SpawnStackParent::NoParent,
+            &AttachmentProgressSink::discarding(),
+        )
+        .await
+    }
+
+    /// How a refused provision reads: its code and message.
+    fn refusal(result: Result<CliWorktree, tddy_rpc::Status>) -> (tddy_rpc::Code, String) {
+        match result {
+            Ok(worktree) => panic!("provisioned {}", worktree.path.display()),
+            Err(status) => (status.code(), status.message().to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_client_checkout_is_the_worktree_as_it_is_and_belongs_to_no_project() {
+        // Given a start naming the client's own checkout
+        let directories = a_daemons_directories();
+        let checkout = tempfile::tempdir().expect("the client's checkout");
+        let checkout_path = checkout.path().to_string_lossy().into_owned();
+        let start = directories.a_start("proj-1", &checkout_path);
+
+        // When
+        let worktree = provisioned(&start).await.expect("the checkout is used");
+
+        // Then the checkout itself is the worktree, canonical, and no project owns it
+        assert_eq!(
+            (worktree.path, worktree.project.is_none()),
+            (
+                std::fs::canonicalize(checkout.path()).expect("the checkout resolves"),
+                true
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_client_checkout_that_is_a_file_is_refused() {
+        // Given a start naming a file as the client's checkout
+        let directories = a_daemons_directories();
+        let dir = tempfile::tempdir().expect("a directory holding the file");
+        let file = dir.path().join("README.md");
+        std::fs::write(&file, "not a checkout").expect("the file is written");
+        let file_path = file.to_string_lossy().into_owned();
+        let start = directories.a_start("proj-1", &file_path);
+
+        // When
+        let refused = refusal(provisioned(&start).await);
+
+        // Then
+        assert_eq!(
+            refused,
+            (
+                tddy_rpc::Code::InvalidArgument,
+                format!(
+                    "repo_path {} is not a directory",
+                    std::fs::canonicalize(&file)
+                        .expect("the file resolves")
+                        .display()
+                )
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_client_checkout_that_does_not_exist_is_refused() {
+        // Given a start naming a checkout that is not there
+        let directories = a_daemons_directories();
+        let missing = Path::new("/nonexistent/tddy/checkout");
+        let start = directories.a_start("proj-1", "/nonexistent/tddy/checkout");
+
+        // When
+        let (code, message) = refusal(provisioned(&start).await);
+
+        // Then the refusal names the path
+        assert_eq!(
+            (
+                code,
+                message.starts_with(&format!(
+                    "repo_path {} is not accessible",
+                    missing.display()
+                ))
+            ),
+            (tddy_rpc::Code::InvalidArgument, true),
+            "{message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_start_naming_neither_a_project_nor_a_checkout_is_refused() {
+        // Given
+        let directories = a_daemons_directories();
+        let start = directories.a_start("", "");
+
+        // When
+        let refused = refusal(provisioned(&start).await);
+
+        // Then
+        assert_eq!(
+            refused,
+            (
+                tddy_rpc::Code::InvalidArgument,
+                "project_id is required for claude-cli sessions".to_string()
+            )
+        );
+    }
+}
+
+#[cfg(test)]
 mod recorded_start_shell_tests {
     //! `#coder-start` 8/10: a start's recorded shell lists its calls while the start runs, and a
     //! session that keeps it afterwards neither holds the start's stream open nor reports past it.
