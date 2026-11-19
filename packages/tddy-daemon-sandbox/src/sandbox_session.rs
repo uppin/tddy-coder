@@ -72,6 +72,13 @@ impl SandboxSessionState {
         }
     }
 
+    /// Whether the jail's runner is still running, read from the `Child` this state owns — never
+    /// from [`Self::pid`], which the OS may have reissued once the runner was reaped.
+    pub fn is_running(&self) -> bool {
+        // TODO(session-liveness 1/4): implemented in the green step.
+        todo!("try_wait on the owned runner child")
+    }
+
     pub fn stop(&self) {
         // A poisoned lock is a thread that panicked while holding the handle, not a reason to
         // leave the jail running: `stop` is reached from `Drop`, and panicking here would orphan a
@@ -123,6 +130,13 @@ impl SandboxSessionManager {
 
     pub async fn get(&self, session_id: &str) -> Option<Arc<SandboxSessionState>> {
         self.inner.lock().await.get(session_id).cloned()
+    }
+
+    /// The sandboxed sessions whose runner is still running — an entry outlives its runner until
+    /// resume, relaunch or delete replaces it, so presence alone is not liveness.
+    pub async fn live_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
+        // TODO(session-liveness 1/4): implemented in the green step.
+        todo!("the entries whose runner is running")
     }
 
     pub async fn remove(&self, session_id: &str) -> Option<Arc<SandboxSessionState>> {

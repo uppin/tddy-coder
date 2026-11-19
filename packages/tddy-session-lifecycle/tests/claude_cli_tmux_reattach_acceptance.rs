@@ -14,7 +14,8 @@ use std::sync::Arc;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{
-    ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+    ListSessionsRequest, ResumeSessionRequest, SessionService as SessionServiceTrait,
+    StartSessionRequest,
 };
 use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
@@ -703,4 +704,69 @@ async fn a_recorded_session_without_a_session_type_is_not_reattached() {
         ),
         (false, 1)
     );
+}
+
+/// Whether `host` lists `session_id` as active.
+async fn is_listed_active_on(host: &DaemonSessionHost, session_id: &str) -> bool {
+    host.list_sessions(Request::direct(ListSessionsRequest {
+        session_token: VALID_TOKEN.to_string(),
+    }))
+    .await
+    .expect("ListSessions must succeed")
+    .into_inner()
+    .sessions
+    .into_iter()
+    .find(|s| s.session_id == session_id)
+    .expect("the session is listed")
+    .is_active
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_tmux_run_agent_that_outlived_its_daemon_lists_inactive_until_its_main_is_reattached() {
+    // Given a tmux-run session whose agent outlived its daemon — its recorded pane pid still alive
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, agent_pid) = daemon.is_running_in_tmux().await;
+    daemon.host.shut_down_children().await;
+    let fresh = daemon.restarted();
+    assert!(
+        a_process_is_alive(agent_pid),
+        "the agent survives the restart"
+    );
+
+    // When the fresh daemon lists it, before and after a client re-attaches its main terminal
+    let before = is_listed_active_on(&fresh, &session_id).await;
+    first_stream_of_the_main_terminal(&fresh, &session_id)
+        .await
+        .expect("the first stream re-attaches the main terminal");
+    let after = is_listed_active_on(&fresh, &session_id).await;
+
+    // Then it is inactive until the fresh daemon holds it, and active once it does
+    assert_eq!(
+        (before, after),
+        (false, true),
+        "liveness is what this daemon holds, not the recorded pane pid"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_tmux_run_agent_whose_client_detached_lists_active_while_the_daemon_watches_it() {
+    // Given a running tmux-run session whose client detaches while its agent keeps running
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _) = daemon.is_running_in_tmux().await;
+    let name = daemon.tmux_session_of(&session_id);
+    until_attached(&daemon.tmux, &name, 1).await;
+    assert!(daemon
+        .tmux
+        .tmux(&["detach-client", "-s", &name])
+        .status
+        .success());
+    daemon.until_the_main_left_the_registry(&session_id).await;
+
+    // When the sessions are listed
+    let active = is_listed_active_on(&daemon.host, &session_id).await;
+
+    // Then it is active: the daemon still watches its agent's tmux session
+    assert!(active, "a watched detached agent is a live agent");
 }

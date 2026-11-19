@@ -179,6 +179,9 @@ mod control_lease;
 
 mod terminals;
 
+#[cfg(test)]
+mod live_agent_sessions_tests;
+
 mod tmux_main;
 
 mod tmux_reattach;

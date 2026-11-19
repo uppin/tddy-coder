@@ -68,6 +68,7 @@ pub mod conversation_frames;
 pub mod daemon_hook_urls;
 pub mod daemon_identity;
 pub mod first_login_enrolment;
+pub mod live_sessions;
 pub mod live_users;
 pub mod notification_markdown;
 pub mod open_vault_idle_ttl;

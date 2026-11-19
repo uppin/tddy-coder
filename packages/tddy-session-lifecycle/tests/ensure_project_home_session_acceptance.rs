@@ -309,6 +309,30 @@ async fn ensuring_a_stopped_main_fast_forwards_and_resumes_the_same_conversation
 }
 
 #[tokio::test]
+async fn ensuring_a_main_whose_recorded_pid_names_an_unrelated_process_resumes_it() {
+    // Given main stopped, while the pid its `.session.yaml` records now names an unrelated running
+    // process
+    let world = a_daemon_with_a_project();
+    let main = world.a_running_main().await;
+    let mut unrelated = std::process::Command::new("sleep")
+        .arg("300")
+        .spawn()
+        .expect("sleep must start");
+    world
+        .stop_leaving_its_recorded_pid_naming(&main.session_id, unrelated.id())
+        .await;
+
+    // When
+    let ensured = world.ensure().await.expect("ensure resumes");
+    let _ = unrelated.kill();
+    let _ = unrelated.wait();
+
+    // Then main is resumed, not reported running
+    assert_eq!(ensured.outcome, "resumed");
+    assert_eq!(ensured.session.unwrap().session_id, main.session_id);
+}
+
+#[tokio::test]
 async fn ensuring_a_project_with_no_main_is_not_found_and_starts_nothing() {
     // Given
     let world = a_daemon_with_a_project();
