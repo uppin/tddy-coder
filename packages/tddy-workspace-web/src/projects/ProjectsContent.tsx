@@ -143,6 +143,45 @@ function useProjectsRpc({
     [connected, sessionToken, loadProjects],
   );
 
+  /** Save the logical project's name and git URL; the daemon fans the edit out to every host. */
+  const updateProject = useCallback(
+    async (input: { projectId: string; name: string; gitUrl: string }) => {
+      await connected().updateProject({ sessionToken, ...input });
+      loadProjects();
+    },
+    [connected, sessionToken, loadProjects],
+  );
+
+  /** Move one host's checkout: a per-host edit, addressed at that host alone (`local_only`). */
+  const moveProjectCheckout = useCallback(
+    async (input: {
+      projectId: string;
+      name: string;
+      mainRepoPath: string;
+      daemonInstanceId: string;
+    }) => {
+      const target = clientForHost(input.daemonInstanceId);
+      if (!target) throw hostNotConnected(hostLabel(input.daemonInstanceId));
+      await target.updateProject({
+        sessionToken,
+        projectId: input.projectId,
+        name: input.name,
+        mainRepoPath: input.mainRepoPath,
+        localOnly: true,
+      });
+      loadProjects();
+    },
+    [clientForHost, hostLabel, sessionToken, loadProjects],
+  );
+
+  const deleteProject = useCallback(
+    async (projectId: string) => {
+      await connected().deleteProject({ sessionToken, projectId });
+      loadProjects();
+    },
+    [connected, sessionToken, loadProjects],
+  );
+
   return {
     projects,
     loadError,
@@ -154,6 +193,9 @@ function useProjectsRpc({
     setDefaultBranch,
     loadProjectBranches,
     setProjectAccounts,
+    updateProject,
+    moveProjectCheckout,
+    deleteProject,
   };
 }
 
@@ -261,6 +303,9 @@ export function ProjectsContent() {
     setDefaultBranch,
     loadProjectBranches,
     setProjectAccounts,
+    updateProject,
+    moveProjectCheckout,
+    deleteProject,
   } = useProjectsRpc({
     client,
     clientForHost,
@@ -286,6 +331,9 @@ export function ProjectsContent() {
         showDeleted={includeDeleted}
         onShowDeletedChange={setIncludeDeleted}
         onRestoreProject={restoreProject}
+        onUpdateProject={updateProject}
+        onMoveProjectCheckout={moveProjectCheckout}
+        onDeleteProject={deleteProject}
       />
     </>
   );

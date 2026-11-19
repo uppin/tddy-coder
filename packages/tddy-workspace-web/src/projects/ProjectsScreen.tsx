@@ -75,6 +75,29 @@ export interface ProjectsScreenProps {
   onShowDeletedChange?: (showDeleted: boolean) => void;
   /** Restore a soft-deleted project (`RestoreProject`). Absent: deleted cards offer no Restore. */
   onRestoreProject?: (projectId: string) => Promise<void>;
+  /**
+   * Save a project's name and git URL (`UpdateProject`, which the daemon fans out to every host
+   * owning the project). Absent: no Edit is offered on the cards.
+   */
+  onUpdateProject?: (input: {
+    projectId: string;
+    name: string;
+    gitUrl: string;
+  }) => Promise<void>;
+  /**
+   * Move one host's checkout path (`UpdateProject` with `local_only`, addressed at
+   * `daemonInstanceId`). Absent: the Edit form offers no path fields.
+   */
+  onMoveProjectCheckout?: (input: {
+    projectId: string;
+    name: string;
+    mainRepoPath: string;
+    daemonInstanceId: string;
+  }) => Promise<void>;
+  /**
+   * Soft-delete a project (`DeleteProject`, fanned out). Absent: no Delete is offered on the cards.
+   */
+  onDeleteProject?: (projectId: string) => Promise<void>;
 }
 
 
@@ -129,6 +152,9 @@ export function ProjectsScreen({
   showDeleted = false,
   onShowDeletedChange,
   onRestoreProject,
+  onUpdateProject,
+  onMoveProjectCheckout,
+  onDeleteProject,
 }: ProjectsScreenProps) {
   const groups = useMemo(() => groupByProject(projects), [projects]);
 
@@ -236,6 +262,9 @@ export function ProjectsScreen({
               accounts={accounts}
               onSetProjectAccounts={onSetProjectAccounts}
               loadHostGithubCli={loadHostGithubCli}
+              onUpdateProject={onUpdateProject}
+              onMoveProjectCheckout={onMoveProjectCheckout}
+              onDeleteProject={onDeleteProject}
             />
           ),
         )}

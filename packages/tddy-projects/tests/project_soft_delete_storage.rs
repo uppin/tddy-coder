@@ -62,7 +62,7 @@ fn a_row_written_before_soft_delete_existed_reads_as_live() {
 fn a_live_row_writes_no_tombstone_keys() {
     // Given a live row rewritten by this daemon
     let dir = a_registry_with_alpha("");
-    project_storage::rename_project(dir.path(), ALPHA, "alpha-renamed").unwrap();
+    project_storage::update_project(dir.path(), ALPHA, Some("alpha-renamed"), None, None).unwrap();
 
     // Then the file carries no lifecycle keys an older daemon would trip over
     let yaml = std::fs::read_to_string(dir.path().join("projects.yaml")).unwrap();
@@ -175,7 +175,7 @@ fn renaming_changes_only_the_name() {
     let before = stored_row(dir.path());
 
     // When it is renamed
-    let row = project_storage::rename_project(dir.path(), ALPHA, "Alpha App")
+    let row = project_storage::update_project(dir.path(), ALPHA, Some("Alpha App"), None, None)
         .unwrap()
         .expect("the row exists");
 
@@ -194,7 +194,7 @@ fn renaming_changes_only_the_name() {
 fn renaming_an_unknown_project_reports_no_row() {
     let dir = a_registry_with_alpha("");
     assert_eq!(
-        project_storage::rename_project(dir.path(), UNKNOWN, "x").unwrap(),
+        project_storage::update_project(dir.path(), UNKNOWN, Some("x"), None, None).unwrap(),
         None
     );
 }

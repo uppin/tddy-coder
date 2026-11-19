@@ -10,6 +10,7 @@ import {
   type LoadHostGithubCli,
 } from "./ProjectLocalGh";
 import { ProjectMainSessionLink } from "./ProjectMainSessionLink";
+import { ProjectDeleteSection, ProjectEditSection } from "./ProjectEditSection";
 import type { ProjectsScreenProps } from "./ProjectsScreen";
 
 /**
@@ -58,6 +59,9 @@ export function ProjectCard({
   accounts,
   onSetProjectAccounts,
   loadHostGithubCli,
+  onUpdateProject,
+  onMoveProjectCheckout,
+  onDeleteProject,
 }: {
   group: ProjectGroup;
   daemons: DaemonHost[];
@@ -67,6 +71,9 @@ export function ProjectCard({
   accounts: ProjectsScreenProps["accounts"];
   onSetProjectAccounts: ProjectsScreenProps["onSetProjectAccounts"];
   loadHostGithubCli: LoadHostGithubCli;
+  onUpdateProject?: ProjectsScreenProps["onUpdateProject"];
+  onMoveProjectCheckout?: ProjectsScreenProps["onMoveProjectCheckout"];
+  onDeleteProject?: ProjectsScreenProps["onDeleteProject"];
 }) {
   const hostingIds = useMemo(
     () => new Set(group.hosts.map((h) => h.daemonInstanceId)),
@@ -137,6 +144,7 @@ export function ProjectCard({
   const githubHostname = githubHostnameOf(group.gitUrl);
 
   const [addOpen, setAddOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [selectedHost, setSelectedHost] = useState("");
   const [userRelativePath, setUserRelativePath] = useState("");
 
@@ -157,9 +165,27 @@ export function ProjectCard({
         >
           {group.projectId}
         </span>
+        {onUpdateProject && onMoveProjectCheckout ? (
+          <button
+            type="button"
+            data-testid={`project-edit-toggle-${group.projectId}`}
+            className="ml-auto rounded-md border border-border px-3 py-1 text-sm"
+            onClick={() => setEditOpen((o) => !o)}
+          >
+            {editOpen ? "Close" : "Edit"}
+          </button>
+        ) : null}
       </div>
       <div className="mb-3 text-sm text-muted-foreground">{group.gitUrl}</div>
       <InlineError testId={`project-card-error-${group.projectId}`} message={failure.error} className="mb-3" />
+
+      {editOpen && onUpdateProject && onMoveProjectCheckout ? (
+        <ProjectEditSection
+          group={group}
+          onUpdateProject={onUpdateProject}
+          onMoveProjectCheckout={onMoveProjectCheckout}
+        />
+      ) : null}
 
       <div className="mb-3 flex items-center gap-2 text-sm">
         <span className="text-muted-foreground">Default branch</span>
@@ -321,6 +347,10 @@ export function ProjectCard({
           </div>
         ) : null}
       </div>
+
+      {onDeleteProject ? (
+        <ProjectDeleteSection group={group} onDeleteProject={onDeleteProject} />
+      ) : null}
     </div>
   );
 }

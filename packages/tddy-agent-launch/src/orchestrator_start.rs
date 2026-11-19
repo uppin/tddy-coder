@@ -79,15 +79,15 @@ impl LaunchSessions {
         refuse_what_an_orchestrator_cannot_honour(&req)?;
         refuse_a_type_main_cannot_run(Some(&*self.coding_agents), &req)?;
         let os_user = self.os_user_of(&req.session_token)?;
-        let (_, project) = tddy_session_split::service_util::find_registered_project(
+        let (projects_dir, project) = tddy_session_split::service_util::find_registered_project(
             &self.tddy_data_dir,
             &os_user,
             req.project_id.trim(),
         )?;
-        let home = home_worktree_for(&project)?;
+        let home = home_worktree_for(&projects_dir, &project)?;
         let start = on_home_worktree(req, ORCHESTRATOR_ROLE, &project.project_id, &home);
         self.refuse_a_claude_cli_start_up_front(&start)?;
-        fast_forward_home(&home, &project)?;
+        fast_forward_home(&projects_dir, &home, &project)?;
         Ok(start)
     }
 
@@ -102,7 +102,7 @@ impl LaunchSessions {
         if metadata.session_role.as_deref() != Some(ORCHESTRATOR_ROLE) {
             return Ok(());
         }
-        let (_, project) = tddy_session_split::service_util::find_registered_project(
+        let (projects_dir, project) = tddy_session_split::service_util::find_registered_project(
             &self.tddy_data_dir,
             os_user,
             &metadata.project_id,
@@ -114,7 +114,7 @@ impl LaunchSessions {
             .ok_or_else(|| {
                 Status::failed_precondition("the orchestrator has no worktree to resume in")
             })?;
-        fast_forward_home(&home, &project)
+        fast_forward_home(&projects_dir, &home, &project)
     }
 
     /// The OS user the token's login maps to.

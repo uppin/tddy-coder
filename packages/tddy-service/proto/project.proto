@@ -231,11 +231,16 @@ message SetProjectOrchestratorDefaultsResponse {
 message UpdateProjectRequest {
   string session_token = 1;
   string project_id = 2;
-  // The new display name. Required; the same rules as CreateProject's name. Renaming does not move
-  // the main checkout: `main_repo_path` is stored, not derived.
+  // The new display name. Required; the same rules as CreateProject's name.
   string name = 3;
   // Apply on this host only, without fanning out. Set on the forwarded calls of a fan-out.
   bool local_only = 4;
+  // The project's new git URL. Empty = leave unchanged. Edits fan out with the rename: the URL is
+  // a property of the logical project, the same on every host.
+  string git_url = 5;
+  // The project's new main checkout path on the host applying this change. Empty = leave unchanged.
+  // Each host owns its own checkout, so a path never fans out: it must arrive with `local_only`.
+  string main_repo_path = 6;
 }
 
 message UpdateProjectResponse {

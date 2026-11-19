@@ -72,9 +72,23 @@ pub struct HomeDaemon {
 #[allow(dead_code)]
 pub fn a_home_daemon(repo: &Path, extra_row_yaml: &str, extra_config_yaml: &str) -> HomeDaemon {
     // A host with no coding agents refuses every agent session, so a home daemon always has them.
-    build_home_daemon(repo, extra_row_yaml, extra_config_yaml, true, |host, _| {
-        host
-    })
+    build_home_daemon(
+        repo,
+        "    main_branch_ref: origin/main\n",
+        extra_row_yaml,
+        extra_config_yaml,
+        true,
+        |host, _| host,
+    )
+}
+
+/// [`a_home_daemon`] over a project whose row stores **no** `main_branch_ref` — the normal state
+/// `CreateProject` writes. The default branch is a runtime-resolvable property: the daemon resolves
+/// it live from the repository (`origin/master`, then `origin/main`, then the remote's `HEAD`).
+// Used by the other project-home suites sharing this module; not every suite calls it.
+#[allow(dead_code)]
+pub fn a_home_daemon_without_stored_main_branch(repo: &Path) -> HomeDaemon {
+    build_home_daemon(repo, "", "", "", true, |host, _| host)
 }
 
 /// [`a_home_daemon`] that also keeps a project notification log and session watches over its data
@@ -93,6 +107,7 @@ pub fn a_home_daemon_keeping_session_watches(
     let kept = std::sync::Mutex::new(None);
     let home = build_home_daemon(
         repo,
+        "    main_branch_ref: origin/main\n",
         extra_row_yaml,
         extra_config_yaml,
         true,
@@ -132,20 +147,26 @@ pub fn a_home_daemon_with_coding_agents(
     extra_row_yaml: &str,
     extra_config_yaml: &str,
 ) -> HomeDaemon {
-    build_home_daemon(repo, extra_row_yaml, extra_config_yaml, true, |host, _| {
-        host
-    })
+    build_home_daemon(
+        repo,
+        "    main_branch_ref: origin/main\n",
+        extra_row_yaml,
+        extra_config_yaml,
+        true,
+        |host, _| host,
+    )
 }
 
 fn build_home_daemon(
     repo: &Path,
+    main_branch_ref_line: &str,
     extra_row_yaml: &str,
     extra_config_yaml: &str,
     coding_agents: bool,
     customise: impl FnOnce(DaemonSessionHost, &Path) -> DaemonSessionHost,
 ) -> HomeDaemon {
     let data = tempfile::tempdir().unwrap();
-    write_project_registry(data.path(), repo, extra_row_yaml);
+    write_project_registry_with_branch(data.path(), repo, main_branch_ref_line, extra_row_yaml);
     let stub = tempfile::tempdir().unwrap();
     let claude = write_argv_and_env_script(stub.path());
     let (cfg, config) = write_daemon_config(extra_config_yaml);
@@ -269,13 +290,18 @@ pub fn a_repo_with_origin_main() -> tempfile::TempDir {
     repo
 }
 
-fn write_project_registry(data: &Path, repo: &Path, extra_row_yaml: &str) {
+fn write_project_registry_with_branch(
+    data: &Path,
+    repo: &Path,
+    main_branch_ref_line: &str,
+    extra_row_yaml: &str,
+) {
     let projects = data.join("projects");
     std::fs::create_dir_all(&projects).unwrap();
     std::fs::write(
         projects.join("projects.yaml"),
         format!(
-            "projects:\n  - project_id: {PROJECT_ID}\n    name: home\n    git_url: \"\"\n    main_repo_path: {}\n    main_branch_ref: origin/main\n{extra_row_yaml}",
+            "projects:\n  - project_id: {PROJECT_ID}\n    name: home\n    git_url: \"\"\n    main_repo_path: {}\n{main_branch_ref_line}{extra_row_yaml}",
             repo.display()
         ),
     )

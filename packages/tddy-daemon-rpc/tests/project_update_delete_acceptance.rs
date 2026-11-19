@@ -335,12 +335,26 @@ impl Host {
     }
 
     async fn rename(&self, name: &str) -> Result<UpdateProjectResponse, Status> {
+        self.edit(name, "", "", false).await
+    }
+
+    /// `UpdateProject` with the optional fields: empty = unchanged, and a path only ever with
+    /// `local_only`.
+    async fn edit(
+        &self,
+        name: &str,
+        git_url: &str,
+        main_repo_path: &str,
+        local_only: bool,
+    ) -> Result<UpdateProjectResponse, Status> {
         self.daemon
             .update_project(Request::direct(UpdateProjectRequest {
                 session_token: TEST_TOKEN.to_string(),
                 project_id: THE_PROJECT.to_string(),
                 name: name.to_string(),
-                local_only: false,
+                local_only,
+                git_url: git_url.to_string(),
+                main_repo_path: main_repo_path.to_string(),
             }))
             .await
             .map(|r| r.into_inner())
@@ -454,6 +468,105 @@ async fn renaming_keeps_the_repository_identity() {
     );
 }
 
+/// `git_url` belongs to the logical project: an edit of it fans out with the rename.
+#[tokio::test]
+async fn editing_the_git_url_edits_it_on_every_host_owning_it() {
+    // Given a project on host-a and host-b
+    let world = two_hosts_owning_the_project();
+
+    // When host-a edits the git URL
+    let edited = world
+        .a
+        .edit(
+            "the-project",
+            "https://github.com/acme/moved.git",
+            "",
+            false,
+        )
+        .await
+        .expect("the edit succeeds");
+
+    // Then both hosts' rows carry the new URL, and the answer says where it applied
+    assert_eq!(
+        edited.project.expect("a row").git_url,
+        "https://github.com/acme/moved.git"
+    );
+    assert_eq!(
+        world.a.stored_row().git_url,
+        "https://github.com/acme/moved.git"
+    );
+    assert_eq!(
+        world.b.stored_row().git_url,
+        "https://github.com/acme/moved.git"
+    );
+    assert_eq!(sorted(edited.applied_hosts), vec![HOST_A, HOST_B]);
+}
+
+/// The main checkout path is each host's own: without `local_only` the edit is refused before any
+/// host changes.
+#[tokio::test]
+async fn a_main_repo_path_edit_without_local_only_is_refused_before_any_host_changes() {
+    let world = two_hosts_owning_the_project();
+
+    let refusal = world
+        .a
+        .edit("the-project", "", "/elsewhere/the-project", false)
+        .await
+        .unwrap_err();
+
+    assert_eq!(refusal.code, Code::InvalidArgument);
+    assert_ne!(
+        world.a.stored_row().main_repo_path,
+        "/elsewhere/the-project"
+    );
+    assert_ne!(
+        world.b.stored_row().main_repo_path,
+        "/elsewhere/the-project"
+    );
+}
+
+/// With `local_only`, the path edit moves this host's checkout only — the other host's row keeps
+/// its own path.
+#[tokio::test]
+async fn a_main_repo_path_edit_with_local_only_is_applied_on_the_addressed_host_only() {
+    // Given a project on host-a and host-b, and another directory that exists on host-a
+    let world = two_hosts_owning_the_project();
+    let elsewhere = tempfile::tempdir().unwrap();
+
+    // When host-a edits its checkout path with local_only
+    world
+        .a
+        .edit("the-project", "", elsewhere.path().to_str().unwrap(), true)
+        .await
+        .expect("the edit succeeds");
+
+    // Then host-a's row moved and host-b's did not
+    assert_eq!(
+        world.a.stored_row().main_repo_path,
+        elsewhere.path().to_str().unwrap()
+    );
+    assert_ne!(
+        world.b.stored_row().main_repo_path,
+        elsewhere.path().to_str().unwrap()
+    );
+}
+
+/// A checkout path that does not exist on the applying host is a typo: refused in place.
+#[tokio::test]
+async fn a_main_repo_path_edit_to_a_missing_directory_is_refused() {
+    let world = two_hosts_owning_the_project();
+    let before = world.a.stored_row();
+
+    let refusal = world
+        .a
+        .edit("the-project", "", "/no/such/directory/anywhere", true)
+        .await
+        .unwrap_err();
+
+    assert_eq!(refusal.code, Code::InvalidArgument);
+    assert_eq!(world.a.stored_row(), before);
+}
+
 #[tokio::test]
 async fn a_rename_reaches_a_project_this_host_does_not_own() {
     // Given host-a holds no row for the project, and host-b does
@@ -493,6 +606,7 @@ async fn renaming_a_project_no_reachable_host_owns_is_not_found() {
             project_id: UNKNOWN_PROJECT.to_string(),
             name: "x".to_string(),
             local_only: false,
+            ..Default::default()
         }))
         .await
         .unwrap_err();
