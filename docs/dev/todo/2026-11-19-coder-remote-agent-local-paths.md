@@ -7,6 +7,14 @@
 session `01a1f24f-7302-7521-b951-e380ae501dd5`. Source read at `a4ab9db5b` (#953). `origin/master`
 has not moved since, so every line reference below is current. No code was changed.
 
+**Narrowed 2026-11-19 (this branch, `investigate/coder-remote-agent-local-paths`):** fixes 1 (the
+argv-path part only), 2 and 3 of §6 landed — see
+[`docs/dev/changesets/2026-11-19-target-start-host-paths.md`](../changesets/2026-11-19-target-start-host-paths.md).
+L1/L2, §3 and §4 are closed. **Still open:** L3/L4 (the notify wiring on a target, which needs the
+decision in §2), L5 (usage `agent_home`), L6/L7 (a recipe on a target is not refused), L8 (a route
+config file named by an env value), and fixes 4–5. The live check under *What would close this file*
+has not been run.
+
 The earlier diagnosis holds. This file confirms it against the source, fills the gaps it left open,
 and ranks the fixes.
 
@@ -181,7 +189,7 @@ exit=1
 
 All of these need **new PRs**: there is no open PR in this area to fold them into.
 
-1. **P0. A target launch names no host path** (`tddy-agent-launch`), one PR:
+1. **P0. A target launch names no host path** — *the argv map landed (2026-11-19); the notify, recipe and env bullets remain* (`tddy-agent-launch`), one PR:
    - Replace the "same path" rule (`remote_agent_launch.rs:347-372`) with a **session-dir map**:
      local `session_dir` → `<worktree>/.tddy/` on the target. Rewrite every argv entry (and every
      env value, which covers L8) that names a mapped file. Write each file at its mapped path, owner-only.
@@ -197,13 +205,13 @@ All of these need **new PRs**: there is no open PR in this area to fold them int
      pointer. This is the test that would have caught #917.
    - Decision for the user: confirm "no notify on targets" now, or the hooks-log notify carrier
      (§2) as a follow-up.
-2. **P1. Coder failures say why** (`tddy-remote-shell`), small PR: when the marker came on stdout
+2. ~~**P1. Coder failures say why**~~ — *landed 2026-11-19* (`tddy-remote-shell`), small PR: when the marker came on stdout
    (pty-merged, `coder.rs:328-334`) and the status is non-zero, carry the merged command output as
    `stderr` (the streams cannot be told apart, and the CLI's wrapper text is noise once the marker
    proves the command ran). An exact alternative is to have the one-shot wrapper send the command's
    stderr to a file on the workspace and frame it back after a second marker. `stderr_tail`,
    `success_or_exited` and `target_words` then all improve with no change of their own.
-3. **P1. A remote cut bases on `<remote>/<main>`** (`tddy-agent-launch` and `tddy-git`), small PR:
+3. ~~**P1. A remote cut bases on `<remote>/<main>`**~~ — *landed 2026-11-19 (resolved on this host's checkout, option (a))* (`tddy-agent-launch` and `tddy-git`), small PR:
    resolve the default as the local cut does and pass it as `base_ref` instead of `"HEAD"`
    (`cli_session_worktree.rs:292-297`). Pin it with the `remote_cut_tests` module in the same file.
 4. **P2. Usage context of a target session** (`tddy-agent-launch`, `tddy-usage`): record the

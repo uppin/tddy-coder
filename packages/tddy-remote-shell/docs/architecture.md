@@ -62,7 +62,11 @@ running is `Unreachable` with what the CLI said, told from a failed command by a
 marker the one-shot wrapper (`coder/one_shot.rs`) prints to stderr before the command runs. `coder ssh` runs
 the command in a pty, which merges its stderr into its stdout, so the marker is
 recognised on either stream (with the pty's `\r\n`) and stripped from the stream it
-arrived on; only a non-zero exit with the marker on neither stream is `Unreachable`.
+arrived on; only a non-zero exit with the marker on neither stream is `Unreachable`. A command
+that ran and failed with the marker on stdout is reported with the merged words as its `stderr`
+and an empty `stdout` (`ExecOutput::exited`): the CLI's own stderr then holds only its generic
+wrapper (`Encountered an error running "coder ssh" …`), so every reader of a failure's stderr —
+`success_or_exited`, the recorder's tail, a checkout's error — says what the command said.
 Value-returning probes (the target's home, in `tddy-git`) frame their value with
 sentinels and parse it out, so merged transport words never enter the value.
 

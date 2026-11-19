@@ -245,9 +245,8 @@ pub async fn launch_on_target(
     // them on this host, and written through the port at the paths the agent is told.
     let (slot_files, plan) = plan_the_launch(agent, params, slots, &remote).await?;
     // A file the launch rendered into this session's directory on this host (its appended system
-    // prompt) means nothing on the target, whose filesystem need not have that directory at all.
-    // It is written into the worktree's `.tddy/` on the target instead, and the argument that names
-    // it is rewritten to that copy, so the agent is never handed a path of this host.
+    // prompt) is copied into the worktree's `.tddy/` on the target and its argument rewritten to
+    // that copy: the target need not have this host's directory, so no host path reaches it.
     let plan = write_rendered_session_files(&remote, slot_files, plan).await?;
     pre_trust_a_claude_clone(agent, &remote).await?;
 
