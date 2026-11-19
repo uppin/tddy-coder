@@ -399,18 +399,23 @@ pub(crate) fn hooks_report_over_the_agent_tool_socket(spec: &CodingAgentSpec) ->
 }
 
 impl SessionWiring {
-    /// The hook parameters of `session_id`'s start, when the spec declares `hooks`.
+    /// The hook parameters of `session_id`'s start, when the spec declares `hooks`. `route_env` is
+    /// the provider route's non-secret pairs, pinned beside the hooks in the settings file; the
+    /// key is never among them.
     pub(crate) fn hook_params<'a>(
         &'a self,
         spec: &CodingAgentSpec,
         session_id: &'a str,
         os_user: &'a str,
+        route_env: &'a [(String, String)],
     ) -> Option<HookCommandParams<'a>> {
         let hooks = self
             .hooks
             .as_ref()
             .filter(|_| spec.has(Capability::Hooks))?;
-        Some(hooks.params(session_id, os_user))
+        let mut params = hooks.params(session_id, os_user);
+        params.route_env = route_env;
+        Some(params)
     }
 }
 
