@@ -582,6 +582,8 @@ async fn stream_start_session_reports_progress_for_each_attachment_then_one_term
             StartEvent::CloneProgress(_) => {}
             // The start task is pinned by tddy-session-lifecycle's `start_cancel_acceptance.rs`.
             StartEvent::Started(_) => {}
+            // Remote calls and the cut worktree are pinned by tddy-daemon-rpc's `async_start_acceptance.rs`.
+            StartEvent::RemoteCall(_) | StartEvent::WorktreeReady(_) => {}
         }
     }
 

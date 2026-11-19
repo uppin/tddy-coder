@@ -84,7 +84,14 @@ pub(crate) async fn provision_cli_worktree(
                 )
                 .await?;
             progress.begin_phase(StartStep::Worktree);
-            let path = cut_worktree(start, &repo_root, &project.git_url, chain_base_ref).await?;
+            let path = cut_worktree(
+                start,
+                &repo_root,
+                &project.git_url,
+                chain_base_ref,
+                progress,
+            )
+            .await?;
             progress.end_phase(StartStep::Worktree);
             // The child's branch now exists, so the planned node it materializes can record it —
             // which is what makes that node's descendants spawnable at all, since they base onto
@@ -137,11 +144,13 @@ async fn cut_worktree(
     repo_root: &Path,
     git_url: &str,
     chain_base_ref: Option<String>,
+    progress: &AttachmentProgressSink,
 ) -> Result<PathBuf, Status> {
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(start.selected_integration_base_ref, chain_base_ref);
     let wt = if let Some(shell) = &start.shell {
-        remote_worktree_through(start, git_url, shell.as_ref(), worktree_base_ref).await?
+        let recorded = recorded_by(shell.clone(), progress);
+        remote_worktree_through(start, git_url, &recorded, worktree_base_ref, progress).await?
     } else if start.ssh_alias.is_empty() {
         tddy_session_split::service_util::create_session_worktree(
             start.timeout,
@@ -152,7 +161,7 @@ async fn cut_worktree(
         )
         .await?
     } else {
-        remote_worktree(start, git_url, worktree_base_ref).await?
+        remote_worktree(start, git_url, worktree_base_ref, progress).await?
     };
     tddy_session_split::service_util::push_new_branch_to_origin_if_requested(
         start.create_remote_branch,
@@ -170,9 +179,69 @@ async fn remote_worktree(
     start: &CliWorktreeStart<'_>,
     git_url: &str,
     worktree_base_ref: Option<String>,
+    progress: &AttachmentProgressSink,
 ) -> Result<PathBuf, Status> {
-    let shell = tddy_remote_shell::SshShell::new(start.ssh_alias);
-    remote_worktree_through(start, git_url, &shell, worktree_base_ref).await
+    let shell = recorded_by(
+        std::sync::Arc::new(tddy_remote_shell::SshShell::new(start.ssh_alias)),
+        progress,
+    );
+    remote_worktree_through(start, git_url, &shell, worktree_base_ref, progress).await
+}
+
+/// `shell`, reporting each command it runs to the start's progress, which is how the start's record
+/// comes to list them.
+///
+/// The reports hold the progress stream only weakly: a recorded shell a session keeps past its
+/// start (its pointer's removal on exit, its hook follower) neither keeps the start's stream open
+/// nor reports anything once the start is over.
+pub(crate) fn recorded_by(
+    shell: std::sync::Arc<dyn tddy_remote_shell::RemoteShell>,
+    progress: &AttachmentProgressSink,
+) -> tddy_remote_shell::RecordedShell {
+    tddy_remote_shell::RecordedShell::new(
+        shell,
+        std::sync::Arc::new(ProgressCalls(
+            progress
+                .tx
+                .as_ref()
+                .map(tokio::sync::mpsc::UnboundedSender::downgrade),
+        )),
+    )
+}
+
+/// A [`tddy_remote_shell::RemoteCallSink`] that turns a call's report into the start's
+/// `remote_call` event, while the start's progress stream is still open.
+struct ProgressCalls(
+    Option<
+        tokio::sync::mpsc::WeakUnboundedSender<
+            Result<tddy_service::proto::session::StartSessionEvent, Status>,
+        >,
+    >,
+);
+
+impl tddy_remote_shell::RemoteCallSink for ProgressCalls {
+    fn report(&self, call: tddy_remote_shell::RemoteCallReport) {
+        use tddy_remote_shell::RemoteCallOutcome as Ended;
+        use tddy_service::proto::session::start_remote_call::Outcome;
+        let (outcome, exit_code) = match call.outcome {
+            Ended::Exited { code } => (Outcome::Exited, code),
+            Ended::TimedOut => (Outcome::TimedOut, 0),
+            Ended::Unreachable => (Outcome::Unreachable, 0),
+        };
+        let Some(tx) = self.0.as_ref().and_then(|weak| weak.upgrade()) else {
+            return;
+        };
+        AttachmentProgressSink::streaming(tx).remote_call(
+            tddy_service::proto::session::StartRemoteCall {
+                host: call.address.to_string(),
+                command: call.command,
+                duration_ms: u64::try_from(call.duration.as_millis()).unwrap_or(u64::MAX),
+                outcome: outcome as i32,
+                exit_code,
+                stderr_tail: call.stderr_tail,
+            },
+        );
+    }
 }
 
 /// The session's checkout on its target, cloned from `git_url` through `shell`: under the target
@@ -183,6 +252,7 @@ async fn remote_worktree_through(
     git_url: &str,
     shell: &dyn tddy_remote_shell::RemoteShell,
     worktree_base_ref: Option<String>,
+    progress: &AttachmentProgressSink,
 ) -> Result<PathBuf, Status> {
     // The branch the start resolved, read from its changeset as the local cut reads it: an
     // omitted intent generated a name there, while the request fields this start carries may
@@ -244,7 +314,14 @@ async fn remote_worktree_through(
             start.timeout
         ))
     })?
-    .map_err(|error| Status::internal(format!("remote worktree setup failed: {error}")))?;
+    .map_err(|error| {
+        // The clone's error names the project's URL, which may carry a credential.
+        Status::internal(format!(
+            "remote worktree setup failed: {}",
+            tddy_remote_shell::scrub_credentials(&error.to_string())
+        ))
+    })?;
+    progress.worktree_ready(&checkout.branch, &checkout.worktree);
     Ok(PathBuf::from(checkout.worktree))
 }
 
@@ -370,10 +447,15 @@ mod remote_cut_tests {
         };
 
         // When the checkout is cut on the target
-        let worktree =
-            remote_worktree_through(&start, QAPE_HQ, &workspace, Some("origin/main".to_string()))
-                .await
-                .expect("the cut succeeds");
+        let worktree = remote_worktree_through(
+            &start,
+            QAPE_HQ,
+            &workspace,
+            Some("origin/main".to_string()),
+            &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
+        )
+        .await
+        .expect("the cut succeeds");
 
         // Then it is under the workspace user's home, on the requested branch from its base
         let root = format!("{WORKSPACE_HOME}/.tddy/repos/qape-hq");
@@ -434,9 +516,15 @@ mod remote_cut_tests {
         };
 
         // When the checkout is cut on the target
-        remote_worktree_through(&start, QAPE_HQ, &workspace, None)
-            .await
-            .expect("the cut succeeds");
+        remote_worktree_through(
+            &start,
+            QAPE_HQ,
+            &workspace,
+            None,
+            &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
+        )
+        .await
+        .expect("the cut succeeds");
 
         // Then the branch cut is the generated one the changeset names, never an empty name
         let run = workspace.commands_run().join("\n");
@@ -444,5 +532,62 @@ mod remote_cut_tests {
             run.contains("worktree add -b 'claude-cli/01a1b2c3'"),
             "the generated branch from the changeset is cut:\n{run}"
         );
+    }
+}
+
+#[cfg(test)]
+mod recorded_start_shell_tests {
+    //! `#coder-start` 8/10: a start's recorded shell lists its calls while the start runs, and a
+    //! session that keeps it afterwards neither holds the start's stream open nor reports past it.
+
+    use std::sync::Arc;
+
+    use tddy_remote_shell::{ExecOutput, ExecRequest, InMemoryShell, RemoteShell};
+    use tddy_service::proto::session::start_session_event::Event;
+    use tddy_session_files::attachment_progress::AttachmentProgressSink;
+
+    use super::recorded_by;
+
+    fn a_target() -> Arc<dyn RemoteShell> {
+        let shell = InMemoryShell::new("coder.remote-dev");
+        shell.answers_when(|_| Some(ExecOutput::succeeded(Vec::new())));
+        Arc::new(shell)
+    }
+
+    #[tokio::test]
+    async fn a_call_made_during_the_start_is_reported_on_its_stream() {
+        // Given a start's progress stream and its target's shell, recorded
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let progress = AttachmentProgressSink::streaming(tx);
+        let shell = recorded_by(a_target(), &progress);
+
+        // When the start runs a command there
+        shell
+            .exec(ExecRequest::new("mkdir -p .tddy"))
+            .await
+            .unwrap();
+
+        // Then the stream carries the call
+        let event = rx.try_recv().expect("the call is reported").unwrap();
+        assert!(
+            matches!(&event.event, Some(Event::RemoteCall(call)) if call.command == "mkdir -p .tddy"),
+            "{event:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_shell_kept_past_its_start_neither_holds_the_stream_open_nor_reports() {
+        // Given a recorded shell whose start's own sender has been dropped
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let shell = recorded_by(a_target(), &AttachmentProgressSink::streaming(tx));
+
+        // When the session still runs a command through it
+        shell
+            .exec(ExecRequest::new("rm -f hooks.log"))
+            .await
+            .unwrap();
+
+        // Then the start's stream is closed, with nothing reported after the start
+        assert!(rx.recv().await.is_none(), "the stream ended with the start");
     }
 }

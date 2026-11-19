@@ -4,8 +4,9 @@
 client can say what the host is doing while the start is in flight. Unary `StartSession` runs the same
 start and reports nowhere.
 
-`StartSessionEvent` is a `oneof` of six arms: `attachment_progress` (attachment materialisation, 1),
-`result` (2), `phase` (a `StartPhase`, 3), `keep_alive` (4), `clone_progress` (5) and `started` (6). The
+`StartSessionEvent` is a `oneof` of eight arms: `attachment_progress` (attachment materialisation, 1),
+`result` (2), `phase` (a `StartPhase`, 3), `keep_alive` (4), `clone_progress` (5), `started` (6),
+`remote_call` (7) and `worktree_ready` (8). The
 `result` is always the last event; a failed start ends the stream with the failure's status instead and
 never emits one, and a cancelled start ends it `CANCELLED`.
 
@@ -49,6 +50,30 @@ Every phase event reaches the client before the terminal event: the result never
 Events are throttled at the source: the first line, every stage change, every 100%, and otherwise at most
 one per 250 ms. They arrive between the step's BEGIN and END. A supervised host's clone sends none yet.
 
+## `StartRemoteCall`
+
+`remote_call` (field 7) is one command the start ran on its target (an SSH alias or a Coder
+workspace), sent when that command ended:
+
+| Field | |
+|---|---|
+| `host` | the target, as its transport names it (`ssh target remote-dev`) |
+| `command` | the caller's command, never a transport's wrapper; cut to 200 characters, credentials scrubbed |
+| `duration_ms` | how long the call took |
+| `outcome` | `OUTCOME_EXITED`, `OUTCOME_TIMED_OUT` (still running at its deadline and stopped) or `OUTCOME_UNREACHABLE` (nothing ran) |
+| `exit_code` | only for `OUTCOME_EXITED` |
+| `stderr_tail` | the last 400 characters of stderr (or what the transport said) for a call that failed; empty otherwise; credentials scrubbed |
+
+A credential is the user-info of a `scheme://user:password@host` URL, which reads `***`. A start on
+this host sends none: only a target's calls are reported. A consumer that follows a start (the start
+ledger) folds them into the start's log; a relay passes them on unchanged.
+
+## `StartWorktreeReady`
+
+`worktree_ready` (field 8) is `StartWorktreeReady { string branch; string worktree; }`, sent once a start
+on a target has cut its worktree there: from that event on, the branch and the checkout exist on the
+target whether or not the start goes on to succeed.
+
 ## `StartKeepAlive`
 
 `StartSessionEvent` carries a further variant, `StartKeepAlive { string activity; }` (`keep_alive`, field 4).
@@ -64,7 +89,8 @@ claude-cli, cursor-cli and workspace starts report. The sandboxed claude-cli and
 tool start and the split start report no phases. Children spawned by a PR-stack orchestrator or a
 grill-me conversation discard their start's progress and report none either.
 
-The host-side seam is `AttachmentProgressSink::begin_phase` / `end_phase` (and `keep_alive`, `clone_progress`)
+The host-side seam is `AttachmentProgressSink::begin_phase` / `end_phase` (and `keep_alive`, `clone_progress`,
+`remote_call`, `worktree_ready`)
 ([tddy-session-files](../../tddy-session-files/docs/host-documents-and-attachments.md#materialisation-progress));
 the start code is described in
 [tddy-session-lifecycle's session-service.md](../../tddy-session-lifecycle/docs/session-service.md#start-phases).

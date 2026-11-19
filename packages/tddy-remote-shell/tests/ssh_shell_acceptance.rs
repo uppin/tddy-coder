@@ -84,17 +84,41 @@ async fn a_command_that_outlives_its_deadline_is_stopped_and_reported_as_timed_o
     let outcome = shell.exec(ExecRequest::new("true").within(deadline)).await;
 
     // Then the call gives up at the deadline, naming the target
-    assert_eq!(
-        outcome,
-        Err(RemoteShellError::TimedOut {
-            address: ShellAddress::new("ssh", "buildbox"),
-            after: deadline,
-        })
+    assert!(
+        matches!(
+            &outcome,
+            Err(RemoteShellError::TimedOut { address, after, .. })
+                if *address == ShellAddress::new("ssh", "buildbox") && *after == deadline
+        ),
+        "{outcome:?}"
     );
     assert!(
         started.elapsed() < STEP_BUDGET,
         "the deadline must bound the call, which took {:?}",
         started.elapsed()
+    );
+}
+
+#[tokio::test]
+async fn a_one_shot_past_its_deadline_names_its_command() {
+    // Given an ssh that never returns
+    let ssh = an_ssh_that_never_answers();
+    let shell = ssh.shell_on("buildbox");
+
+    // When a command is run through it with a short deadline
+    let error = shell
+        .exec(ExecRequest::new("git -C /srv/repo fetch --all").within(Duration::from_millis(300)))
+        .await
+        .expect_err("the call gives up at its deadline");
+
+    // Then the error says which command gave no answer, and the field carries it
+    assert_eq!(
+        error.to_string(),
+        "ssh target buildbox: `git -C /srv/repo fetch --all` gave no answer within 300ms; the command was stopped"
+    );
+    assert!(
+        matches!(&error, RemoteShellError::TimedOut { command, .. } if command == "git -C /srv/repo fetch --all"),
+        "{error:?}"
     );
 }
 

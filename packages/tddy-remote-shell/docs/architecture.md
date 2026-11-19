@@ -24,7 +24,24 @@ the QEMU guest path, neither of which runs a command on a session's target).
 - **`InteractiveCommand`** — the argv and environment a **local** PTY runs to be the remote
   command's terminal. The port opens no PTY of its own.
 - **`RemoteShellError`** — `Unreachable`, `TimedOut`, `Exited`, `Spawn`: which of four things
-  happened, each carrying the address it happened on.
+  happened, each carrying the address it happened on. `TimedOut { address, after, command }` names
+  the caller's command (its `command_head`), so the error says what hung:
+  `` <address>: `<command>` gave no answer within <after>; the command was stopped ``.
+
+## Recording calls
+
+`RecordedShell::new(inner, sink)` is a `RemoteShell` that runs every call through `inner`
+unchanged and, when an `exec` ends, tells its `RemoteCallSink` a `RemoteCallReport`: the address,
+the caller's command (never a transport's wrapper, such as Coder's one-shot preamble), the duration,
+and a `RemoteCallOutcome` — `Exited { code }`, `TimedOut`, or `Unreachable` (an unreachable target
+or a client that could not spawn). A call that failed carries the tail of its stderr (or what the
+transport said); one that exited zero carries none. `exec_streamed` and `interactive` pass through
+unrecorded.
+
+`redact.rs` is what a call may say about itself: `scrub_credentials` replaces the user-info of every
+`scheme://user:password@host` URL with `***`; `command_head` scrubs and cuts a command to 200
+characters (`COMMAND_HEAD_CHARS`), and a report keeps the last 400 characters of stderr
+(`STDERR_TAIL_CHARS`). The transports' `TimedOut`, the recorder and the start ledger share them.
 
 ## The SSH transport
 
@@ -109,5 +126,5 @@ stand-in `stty -opost` turns that off.
 - `tddy-tool-engine`: the exec catalog's `RemoteShell` wraps an `Arc<dyn RemoteShell>`;
   `session_shell` builds an `SshShell` for a set `ssh_config_host`.
 - `tddy-git`: `setup_remote_worktree` and `remote_checkout_root` take `&dyn RemoteShell`; a target's checkout is `$HOME/.tddy/repos/<repository>/.worktrees/<session>` on the target, resolved through its shell.
-- `tddy-agent-launch`: slot files and the session pointer are written through the port.
+- `tddy-agent-launch`: slot files and the session pointer are written through the port; a start on a target runs its calls through a `RecordedShell` reporting to the start's progress.
 - `tddy-worktree-service`: remote git pack verbs stream through `exec_streamed`.

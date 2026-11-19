@@ -480,7 +480,7 @@ owns, an invalid option) is the tool's `is_error` result naming why, not a handl
 
 | Tool | Arguments | Answers |
 |---|---|---|
-| `GetSessionStart` | `start_id` | the start's record: `state` (`running`, `succeeded`, `failed`, `cancelled`), its current `step` `{step, status}`, `clone_progress` `{stage, percent}`, and once it succeeded its `session_id`, `branch`, `worktree` and `display_name` (as the host running it lists them; for a split session, its codebase half's branch and worktree as the codebase host lists that half; `display_name` is `null` for an unnamed session), or once it failed or was cancelled, `error` |
+| `GetSessionStart` | `start_id` | the start's record: `state` (`running`, `succeeded`, `failed`, `cancelled`), its current `step` `{step, status}`, `clone_progress` `{stage, percent}`, and once it succeeded its `session_id`, `branch`, `worktree` and `display_name` (as the host running it lists them; for a split session, its codebase half's branch and worktree as the codebase host lists that half; `display_name` is `null` for an unnamed session), or once it failed or was cancelled, `error`; and `remote_calls`, the start's log of what it ran on a target (see below) |
 | `CancelSessionStart` | `start_id` | returns at once; the start's host is sent `CancelTask` (locally, or forwarded to the peer running it), and the record reads `cancelled` once the stream has ended. A start that is no longer running is refused naming its state |
 
 - **The start ledger.** A background consumer on the orchestrator's host drains the start's stream
@@ -488,6 +488,18 @@ owns, an invalid option) is the tool's `is_error` result naming why, not a handl
   (`packages/tddy-tool-engine/src/start_ledger.rs`). The record outlives the task registry's
   five-minute retention, and a start forwarded to another host is followed the same way, since the
   forwarded stream relays the peer's events.
+- **What a start ran on a target.** A start on a target (an SSH alias or a Coder workspace)
+  lists every command it ran there in `remote_calls`, oldest first, at most 50 (the oldest dropped):
+  `{host, command, duration_ms, outcome, exit_code, stderr_tail}`. `outcome` is `exited` (with
+  `exit_code`), `timed_out` or `unreachable`; `stderr_tail` is kept for a call that failed. The
+  command is the caller's own, never a transport's wrapper, cut to 200 characters; neither it nor the
+  stderr tail ever carries a credential (the user-info of a `scheme://user:password@host` URL reads
+  `***`). Each call advances `updated_at_unix_ms`, so a slow command and a hung one read differently.
+  A one-shot past its deadline fails naming its command
+  (`` `<command>` gave no answer within 60s; the command was stopped ``).
+- **What a failed start left behind.** `branch` and `worktree` are recorded as soon as the start
+  cuts its worktree on a target, and stay on the record when the start then fails or is cancelled,
+  or succeeds without a session listing to read them from.
 - **A restart.** The first time a daemon loads a home session's ledger, a record still `running` —
   one an earlier daemon was draining when it stopped — is marked `failed: daemon restarted during
   the start`.
@@ -550,7 +562,7 @@ answers them on demand, each from the RPC the form calls, on the host `daemon_in
 | `provider_routes` `[{account_id, label, preset, supported, reason}]` | `AccountsService.ListProviderRoutes` for the harness: a coding agent's `session_type`, or the `agent` of any other session type (a `workspace` session runs none); `warp-cli` has none |
 | `effort_levels` `[{session_type, default, levels}]` | each declared session type whose coding agent's spec has an `effort` slot (`CatalogService.ListAgents` serves the same as `AgentInfo.effort_levels` / `default_effort`); a type missing from it takes no effort |
 | `ssh_config_hosts` | `HostService.ListSshConfigHosts` |
-| `derived_hosts` `[{id, label, kind, parent_daemon_instance_id, usable, unusable_reason}]` | `HostService.ListDerivedHosts` on the described host: its SSH config aliases and the caller's Coder workspaces, each startable by naming its `id` as `StartSession`'s `target` |
+| `derived_hosts` `[{id, label, kind, parent_daemon_instance_id, usable, unusable_reason}]` | `HostService.ListDerivedHosts` on the described host: its SSH config aliases and the caller's Coder workspaces, each startable by naming its `id` as `StartSession`'s `target`. `usable` means *listed as startable* (an SSH alias always; a Coder workspace when it is running and the daemon has the `coder` CLI), never a probe: a usable host can still fail the start |
 | `subagents` | `CatalogService.ListSubagents`, each qualified `name@daemon_instance_id` as `specialized_agents` takes them |
 | `branches` | `ProjectService.ListProjectBranches` for the project's checkout on that host |
 | `stack_parents` | the host's `ListSessions`, filtered as the form's `prStackOrchestrators`: a PR-stack recipe, not itself a stack child |

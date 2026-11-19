@@ -15,6 +15,11 @@
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
+mod remote_calls;
+
+use remote_calls::remote_call_record;
+pub use remote_calls::{RemoteCallOutcome, RemoteCallRecord, MAX_REMOTE_CALLS};
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -94,6 +99,10 @@ pub struct StartLedgerRecord {
     /// session has one. Defaulted, so a record written before names existed still reads.
     #[serde(default)]
     pub display_name: Option<String>,
+    /// The start's remote calls, oldest first, at most [`MAX_REMOTE_CALLS`]. Defaulted, so a
+    /// record written before the log existed still reads.
+    #[serde(default)]
+    pub remote_calls: Vec<RemoteCallRecord>,
 }
 
 /// A started session as the host running it lists it: what its record carries beside its id.
@@ -276,6 +285,7 @@ where
         error: None,
         updated_at_unix_ms: now_unix_ms(),
         display_name: None,
+        remote_calls: Vec::new(),
     };
     ledger
         .persist(&record)
@@ -379,8 +389,10 @@ fn apply_ending(record: &mut StartLedgerRecord, ending: Ending) {
         } => {
             record.state = StartState::Succeeded;
             record.session_id = Some(session_id);
-            record.branch = branch;
-            record.worktree = worktree;
+            // The session's listing names them when there is one; otherwise the record keeps what
+            // the start reported when it cut its worktree.
+            record.branch = branch.or(record.branch.take());
+            record.worktree = worktree.or(record.worktree.take());
             record.display_name = display_name;
         }
         Ending::Failed(message) => {
@@ -410,6 +422,21 @@ fn apply_progress(record: &mut StartLedgerRecord, event: StartSessionEvent) -> b
                 stage: progress.stage,
                 percent: progress.percent,
             });
+            true
+        }
+        Some(Event::RemoteCall(call)) => {
+            record.remote_calls.push(remote_call_record(call));
+            if record.remote_calls.len() > MAX_REMOTE_CALLS {
+                let overflow = record.remote_calls.len() - MAX_REMOTE_CALLS;
+                record.remote_calls.drain(..overflow);
+            }
+            record.updated_at_unix_ms = now_unix_ms();
+            true
+        }
+        Some(Event::WorktreeReady(ready)) => {
+            record.branch = Some(ready.branch);
+            record.worktree = Some(ready.worktree);
+            record.updated_at_unix_ms = now_unix_ms();
             true
         }
         _ => false,

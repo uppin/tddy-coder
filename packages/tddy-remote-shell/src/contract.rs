@@ -86,8 +86,9 @@ async fn a_command_past_its_deadline_is_timed_out(shell: &dyn RemoteShell, addre
         Err(RemoteShellError::TimedOut {
             address: address.clone(),
             after: SHORT_DEADLINE,
+            command: NEVER_FINISHES.to_string(),
         }),
-        "a command still running at its deadline is timed out, naming the target"
+        "a command still running at its deadline is timed out, naming the target and the command"
     );
     assert!(
         started.elapsed() < STEP_BUDGET,

@@ -178,6 +178,7 @@ impl RemoteShell for SshShell {
                 return Err(RemoteShellError::TimedOut {
                     address: self.address(),
                     after: deadline,
+                    command: crate::redact::command_head(&request.command),
                 });
             }
         };

@@ -206,7 +206,8 @@ impl RemoteShell for InMemoryShell {
                     return Err(RemoteShellError::TimedOut {
                         address: self.address.clone(),
                         after: request.deadline,
-                    })
+                        command: crate::redact::command_head(&request.command),
+                    });
                 }
                 None => state.answerers.clone(),
             };
@@ -420,12 +421,14 @@ mod tests {
             .await;
 
         // Then
-        assert_eq!(
-            outcome,
-            Err(RemoteShellError::TimedOut {
-                address: ShellAddress::new("in-memory", "buildbox"),
-                after: Duration::from_secs(900),
-            })
+        assert!(
+            matches!(
+                &outcome,
+                Err(RemoteShellError::TimedOut { address, after, .. })
+                    if *address == ShellAddress::new("in-memory", "buildbox")
+                        && *after == Duration::from_secs(900)
+            ),
+            "{outcome:?}"
         );
     }
 

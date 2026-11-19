@@ -463,12 +463,14 @@ async fn a_one_shot_past_its_deadline_is_stopped_on_the_workspace_too() {
         .status();
 
     // Then the call timed out
-    assert_eq!(
-        outcome,
-        Err(RemoteShellError::TimedOut {
-            address: ShellAddress::new("coder", "ada/devbox.main"),
-            after: Duration::from_secs(2),
-        })
+    assert!(
+        matches!(
+            &outcome,
+            Err(RemoteShellError::TimedOut { address, after, .. })
+                if *address == ShellAddress::new("coder", "ada/devbox.main")
+                    && *after == Duration::from_secs(2)
+        ),
+        "{outcome:?}"
     );
     // And the command it started on the workspace is gone too, not left running
     assert_eq!(
