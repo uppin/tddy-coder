@@ -15,6 +15,7 @@
 //! moved here has to preserve it, so the worker's constructor stays synchronous and takes no
 //! runtime handle.
 
+pub mod child_exit;
 pub mod clone_env;
 pub mod clone_run;
 pub mod git_progress;

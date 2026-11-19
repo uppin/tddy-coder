@@ -221,6 +221,18 @@ impl SupervisorClient {
         protocol::session_status_from_wire(status).map_err(protocol::error_from_status)
     }
 
+    /// Deliver `signal` to a session this supervisor spawned — see `SignalSession` in
+    /// `supervisor.proto`. Refused, without disclosure, for a pid it never spawned.
+    pub async fn signal_session(
+        &self,
+        pid: u32,
+        signal: i32,
+    ) -> Result<SessionStatus, SupervisorError> {
+        let _ = (pid, signal);
+        // TODO(session-liveness 3/4): implemented in the green step.
+        todo!("call SignalSession")
+    }
+
     /// Spawn a binary as an OS user and stream its stderr — see `SpawnStreamed` in
     /// `supervisor.proto`.
     ///

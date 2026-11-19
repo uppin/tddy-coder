@@ -197,6 +197,12 @@ mod recorded_terminals_tests;
 #[cfg(test)]
 mod live_agent_sessions_tests;
 
+mod process_tab;
+pub use process_tab::{ProcessTab, ProcessTabHolder, SignalRefused, TDDY_CODER_KIND};
+
+#[cfg(test)]
+mod process_tab_tests;
+
 mod tmux_main;
 
 mod tmux_terminal;

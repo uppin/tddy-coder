@@ -14384,6 +14384,7 @@ dependencies = [
  "tddy-daemon-kernel",
  "tddy-discovery",
  "tddy-supervisor",
+ "tddy-task",
  "tddy-testing-commons",
  "tddy-usage",
  "tempfile",

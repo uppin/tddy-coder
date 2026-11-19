@@ -22,6 +22,10 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # The privileged spawn backend. `tddy-supervisor` depends on neither `tddy-core` nor `tddy-daemon`,
 # so it can be reached from here without a cycle.
 tddy-supervisor = { path = "../tddy-supervisor" }
+# `ChildExit` / `ExitReceiver`: the end of a spawned tool, held by the terminal registry's process tab
+# (`#session-liveness` 3/4). They live in `tddy-task` so `tddy-cli-sessions` can hold one without
+# depending on the spawn backends; already in this crate's graph through `tddy-core`.
+tddy-task = { path = "../tddy-task" }
 # `write_usage_context`: a workflow session records where its agent keeps its files, so the daemon can
 # account its usage (`#usage-binding 2/5`).
 tddy-usage = { path = "../tddy-usage" }

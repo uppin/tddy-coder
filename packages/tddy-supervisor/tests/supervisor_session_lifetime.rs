@@ -273,3 +273,61 @@ async fn stops_a_session_on_request_and_reports_that_it_exited() {
         spawned.pid
     );
 }
+
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn delivers_a_signal_to_a_session_it_spawned() {
+    // Given a session that would otherwise run for ten minutes
+    let tool = a_tool_that_records_its_parent();
+    let supervisor = a_supervisor()
+        .managing(a_service("tddy-daemon").that_stays_alive())
+        .allowing_the_current_user()
+        .with_exec_root(tool.path())
+        .start()
+        .await;
+    let client = supervisor.client().await;
+    let spawned = client
+        .spawn_session(a_session_spawn(&current_username(), tool.path()))
+        .await
+        .expect("spawn a session");
+
+    // When it is sent SIGTERM
+    client
+        .signal_session(spawned.pid, libc::SIGTERM)
+        .await
+        .expect("signal the session");
+
+    // Then it exits
+    let status = supervisor.await_session_exit(&client, spawned.pid).await;
+    assert_eq!(status.state, SessionState::Exited);
+    assert!(
+        !process_is_alive(spawned.pid),
+        "session {} survived SIGTERM",
+        spawned.pid
+    );
+}
+
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn denies_a_signal_for_a_pid_it_never_spawned() {
+    // Given
+    let supervisor = a_supervisor()
+        .managing(a_service("tddy-daemon").that_stays_alive())
+        .allowing_the_current_user()
+        .start()
+        .await;
+
+    // When a caller asks it to signal its own pid, which the supervisor did not spawn
+    let result = supervisor
+        .client()
+        .await
+        .signal_session(std::process::id(), libc::SIGTERM)
+        .await;
+
+    // Then — signalling it would make the privileged surface a way to signal arbitrary processes
+    result.assert_denied_without_disclosure();
+}

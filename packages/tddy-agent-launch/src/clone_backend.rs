@@ -78,6 +78,8 @@ impl CloneBackend {
                                     }
                                 }
                                 WorkerEvent::CloneProgress(progress) => on_progress(progress),
+                                // Written for a spawned tool's child only; a clone has none.
+                                WorkerEvent::Exited { .. } => {}
                             },
                         )
                         .map_err(|e| e.to_string())
