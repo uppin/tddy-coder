@@ -55,6 +55,8 @@ agent tab run wrapped in tmux; re-attach every live tmux-wrapped tab when the da
 
 ## Draft PR contract
 
+**Added 2026-11-19 (third commit, found by 4/4's red step):** `CliSessionManager::start_terminal_under_id(session_id, terminal_id, worktree, RecordedTerminal)` (`RecordedTerminal::{Shell, Agent}`; refuses `main` and an id already live) and `CliSessionManager::tab_rosters() -> &TabRosterStore` — the daemon's one roster writer lives on the manager. Unit tests in `cli_session_manager/recorded_terminals_tests.rs` (4).
+
 The first push publishes the `tab_roster` model (types, file name, read and write signatures), the
 `TabRosterStore` and `CliSessionManager` per-terminal tmux signatures as `todo!()`, the proto
 messages, `DaemonSessionHost::reattach_live_tmux_tabs` as `todo!()`, and the failing tests below.
