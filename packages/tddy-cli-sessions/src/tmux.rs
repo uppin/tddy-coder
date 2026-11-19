@@ -220,6 +220,15 @@ pub fn agent_tmux_session_name(session_id: &str) -> String {
     format!("{AGENT_SESSION_NAME_PREFIX}{name}")
 }
 
+/// The tmux session a tmux-wrapped agent **tab** runs in: `tddy-<session_id>-<terminal_id>`, with
+/// `:` and `.` replaced as [`agent_tmux_session_name`] replaces them. Derivable from the two ids
+/// alone, so a restarted daemon finds it without reading anything; the main's tmux session keeps
+/// [`agent_tmux_session_name`], so tmux mains started before tabs could be wrapped still match.
+pub fn agent_tab_tmux_session_name(session_id: &str, terminal_id: &str) -> String {
+    // TODO(session-liveness 2/4): implemented in the green step.
+    todo!("the tmux session of tab {terminal_id} of session {session_id}")
+}
+
 /// The arguments of `tmux new-session` that start the pane command `command` detached in a session
 /// `name`, in `worktree`: `new-session -d -s <name> -c <worktree> -- command`. The environment is not
 /// among them — see [`pane_env`].
@@ -428,6 +437,24 @@ fn pane_environment(account: &ResolvedPtyUser, env: &[(String, String)]) -> Vec<
 mod tests {
     use super::pane::capture_pane_args;
     use super::*;
+
+    #[test]
+    fn a_tab_tmux_session_is_named_by_its_session_and_terminal_ids() {
+        // When
+        let name = agent_tab_tmux_session_name("019a-session", "019b-tab");
+
+        // Then
+        assert_eq!(name, "tddy-019a-session-019b-tab");
+    }
+
+    #[test]
+    fn a_tab_tmux_session_name_holds_no_tmux_target_separators() {
+        // When
+        let name = agent_tab_tmux_session_name("host:1.2", "tab.3");
+
+        // Then
+        assert_eq!(name, "tddy-host_1_2-tab_3");
+    }
 
     #[test]
     fn remain_on_exit_is_set_on_exactly_the_named_session() {

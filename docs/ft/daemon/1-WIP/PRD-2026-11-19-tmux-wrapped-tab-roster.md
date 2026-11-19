@@ -40,7 +40,7 @@ wraps `agent`.
     - terminal_id: main
       launch:                       # outermost first
         - kind: tmux
-          properties: { session: tddy-01a1…-main, os_user: mantasi }
+          properties: { session: tddy-01a1…, os_user: mantasi }   # main keeps tddy-<session_id>; a tab is tddy-<session_id>-<terminal_id>
         - kind: agent
           properties: { harness: claude-cli, conversation_id: 5f3c… }
     - terminal_id: 01a2…

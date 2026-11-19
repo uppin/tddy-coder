@@ -190,6 +190,8 @@ mod live_agent_sessions_tests;
 
 mod tmux_main;
 
+mod tmux_terminal;
+
 mod tmux_reattach;
 pub use tmux_reattach::{classify_main_exit, MainExit};
 

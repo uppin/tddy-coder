@@ -869,6 +869,7 @@ pub fn a_start_request() -> tddy_terminal_rpc::proto::terminal_session::StartTer
         control_token: String::new(),
         kind: String::new(),
         tmux_session: String::new(),
+        wrappers: Vec::new(),
     }
 }
 

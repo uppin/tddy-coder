@@ -6,6 +6,8 @@
 
 #![allow(dead_code)]
 
+pub mod tab_daemon;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -146,6 +148,7 @@ impl TmuxTabDaemon {
                 control_token: String::new(),
                 kind: "tmux-new".to_string(),
                 tmux_session: name.to_string(),
+                wrappers: Vec::new(),
             }))
             .await
             .map(|resp| resp.into_inner().terminal_id)
@@ -159,6 +162,7 @@ impl TmuxTabDaemon {
                 control_token: String::new(),
                 kind: "tmux".to_string(),
                 tmux_session: tmux_session.to_string(),
+                wrappers: Vec::new(),
             }))
             .await
             .map(|resp| resp.into_inner().terminal_id)

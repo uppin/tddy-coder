@@ -740,6 +740,16 @@ export const sessionsTerminalTabClose = (terminalId: string) =>
 export const sessionsTerminalTabNewOption = (kind: string) =>
   `sessions-terminal-tab-new-${kind}`;
 
+/** `[data-testid="sessions-terminal-tab-new-in-tmux-<kind>"]` — the "+" menu's item opening an agent
+ *  tab of `kind` wrapped in tmux. */
+export const sessionsTerminalTabNewInTmuxOption = (kind: string) =>
+  `sessions-terminal-tab-new-in-tmux-${kind}`;
+
+/** `[data-testid="sessions-terminal-tab-tmux-marker-<terminalId>"]` — the marker on a tab whose
+ *  terminal runs wrapped in tmux. */
+export const sessionsTerminalTabTmuxMarker = (terminalId: string) =>
+  `sessions-terminal-tab-tmux-marker-${terminalId}`;
+
 /**
  * `[data-testid="worktree-code-identifier-<line>-<column>"]` — the identifier token starting at a
  * one-based line and one-based byte column of the code preview.

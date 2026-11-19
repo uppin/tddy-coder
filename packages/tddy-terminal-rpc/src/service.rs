@@ -406,6 +406,8 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
                 kind: terminal.kind,
                 pid: terminal.pid,
                 tmux_session: terminal.tmux_session.unwrap_or_default(),
+                // TODO(session-liveness 2/4): the roster's launch chain, in the green step.
+                launch: Vec::new(),
             })
             .collect();
         Ok(Response::new(ListTerminalSessionsResponse { terminals }))

@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 5 — several crates (changeset, cli-sessions, terminal-rpc proto, session-lifecycle, agent-launch, daemon runtime, session-web), a proto change, a new persisted file with a lock, per-terminal watcher concurrency, a startup task
-**Stack**: `#session-liveness` 2/4 — branch `feature/session-liveness/tmux-roster`, base `feature/session-liveness/agent-tab-liveness` (#958)
+**Stack**: `#session-liveness` 2/4 (PR #959, stack #962) — branch `feature/session-liveness/tmux-roster`, base `feature/session-liveness/agent-tab-liveness` (#958)
 
 ## Affected Packages
 
@@ -95,8 +95,8 @@ name tabs.
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests / run them (verify they fail) / USER REVIEW
-- [ ] TDD Red — failing unit/integration tests
+- [x] Create failing acceptance tests / run them (verify they fail) / USER REVIEW — approved 2026-11-19
+- [x] TDD Red — failing unit/integration tests
 - [ ] Implementation (roster, per-terminal tmux, proto, startup re-attach, web)
 - [ ] Package documentation, scoped clippy, single-spec Cypress
 
@@ -125,20 +125,20 @@ name tabs.
 ## Acceptance Tests
 
 `packages/tddy-session-lifecycle/tests/tab_roster_acceptance.rs`:
-- [ ] `opening_tabs_records_each_with_its_launch_chain`
-- [ ] `closing_a_tab_removes_it_from_the_roster`
-- [ ] `a_tab_that_exits_on_its_own_stays_in_the_roster`
+- [x] `opening_tabs_records_each_with_its_launch_chain`
+- [x] `closing_a_tab_removes_it_from_the_roster`
+- [x] `a_tab_that_exits_on_its_own_stays_in_the_roster`
 
 `packages/tddy-session-lifecycle/tests/tmux_wrapped_tab_acceptance.rs` (`PrivateTmux`, serial):
-- [ ] `an_agent_tab_wrapped_in_tmux_runs_in_its_own_tmux_session`
-- [ ] `a_tmux_wrapped_tab_keeps_its_session_live_after_main_exits`
-- [ ] `a_detached_tmux_wrapped_tab_stays_live_until_its_tmux_session_ends`
-- [ ] `a_wrapper_other_than_tmux_is_refused_naming_it`
-- [ ] `the_daemon_reattaches_live_tmux_wrapped_tabs_at_startup`
-- [ ] `the_daemon_reattaches_a_pre_roster_tmux_main_at_startup`
+- [x] `an_agent_tab_wrapped_in_tmux_runs_in_its_own_tmux_session`
+- [x] `a_tmux_wrapped_tab_keeps_its_session_live_after_main_exits`
+- [x] `a_detached_tmux_wrapped_tab_stays_live_until_its_tmux_session_ends`
+- [x] `a_wrapper_other_than_tmux_is_refused_naming_it`
+- [x] `the_daemon_reattaches_live_tmux_wrapped_tabs_at_startup`
+- [x] `the_daemon_reattaches_a_pre_roster_tmux_main_at_startup`
 
 `packages/tddy-session-web/cypress/component/NewTerminalMenuTmuxAcceptance.cy.tsx`:
-- [ ] `adds an agent tab in tmux and marks it`
+- [x] `adds an agent tab in tmux and marks it` (written, not run — Cypress)
 
 ## Unit Tests
 
@@ -148,6 +148,35 @@ name tabs.
   removes only its id.
 - `tddy-terminal-rpc` `TerminalKind::from_request`: `wrappers: [tmux]` with an agent kind maps to a
   tmux-wrapped agent; `[ssh]` is refused.
+
+## Contract as published (red)
+
+Names the changeset left open, as the draft contract fixed them:
+
+- `TerminalKind::TmuxWrappedAgent { agent }` and `TerminalKind::from_wrapped_request(kind,
+  tmux_session, wrappers: &[proto LaunchNode])`; `from_request` is unchanged. `TMUX_WRAPPER_KIND`.
+- `CliSessionManager::attach_terminal_to_tmux(session_id, terminal_id, kind, worktree, os_user,
+  tmux_session)` and `reattach_terminal(...)` (same parameters), in
+  `cli_session_manager/tmux_terminal.rs`; `tmux::agent_tab_tmux_session_name(session_id, terminal_id)`.
+- `DaemonSessionHost::reattach_live_tmux_tabs() -> ReattachReport { reattached: Vec<ReattachedTab
+  { session_id, terminal_id, tmux_session }>, left: Vec<LeftTab { session_id, terminal_id, reason }> }`
+  in `connection_service/svc_reattach_live_tmux_tabs.rs` (re-exported from `connection_service`).
+- `tab_roster` also exports the property-key constants (`HARNESS_PROPERTY`, `CONVERSATION_ID_PROPERTY`,
+  `SESSION_PROPERTY`, `OS_USER_PROPERTY`) and `TabEntry::new` / `LaunchNode::new`.
+- Web test ids: `sessions-terminal-tab-new-in-tmux-<kind>` (menu item) and
+  `sessions-terminal-tab-tmux-marker-<terminalId>` (tab marker).
+
+## Refactoring Needed
+
+### From @red (TDD Red Phase)
+
+- `TerminalDescriptor` has no launch chain yet: `ListTerminalSessions` maps `launch: Vec::new()`
+  (`tddy-terminal-rpc/src/service.rs`). Green adds the field and fills it from the roster, or the
+  `an_agent_tab_wrapped_in_tmux_…` listing assertion stays red.
+- The pre-roster main fallback has no recorded OS user (`.session.yaml` records none); the test runs
+  as the daemon's own user. Green decides where that user comes from.
+- `tests/support/tab_daemon.rs` duplicates the session-host builder of `session_liveness_acceptance.rs`
+  and `claude_cli_tmux_reattach_acceptance.rs`; a shared builder in `tests/support/` would serve all three.
 
 ## Decisions & Trade-offs
 

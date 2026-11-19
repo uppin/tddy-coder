@@ -268,7 +268,7 @@ impl TerminalRoster for CoderTerminalRoster {
         }
         match &launch.kind {
             TerminalKind::Bash => {}
-            TerminalKind::Agent(kind) => {
+            TerminalKind::Agent(kind) | TerminalKind::TmuxWrappedAgent { agent: kind } => {
                 return Err(Status::invalid_argument(format!(
                     "this session's terminals run bash only, not {kind:?}"
                 )));

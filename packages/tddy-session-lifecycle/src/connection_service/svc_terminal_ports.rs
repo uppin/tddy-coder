@@ -376,6 +376,10 @@ impl TerminalRoster for CliManagerTerminalRoster {
                     .await
                     .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
             }
+            TerminalKind::TmuxWrappedAgent { agent } => {
+                // TODO(session-liveness 2/4): implemented in the green step.
+                todo!("start agent {agent:?} wrapped in tmux for {session_id}")
+            }
         };
         Ok(handle.terminal_id.clone())
     }

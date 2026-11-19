@@ -373,6 +373,9 @@ pub use tddy_session_files::svc_materialize_staged_attachment;
 
 mod svc_shut_down_children;
 
+mod svc_reattach_live_tmux_tabs;
+pub use svc_reattach_live_tmux_tabs::{LeftTab, ReattachReport, ReattachedTab};
+
 mod svc_terminal_ports;
 
 mod svc_session_files_ports;

@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file terminal_session.proto.
  */
 export const file_terminal_session: GenFile = /*@__PURE__*/
-  fileDesc("ChZ0ZXJtaW5hbF9zZXNzaW9uLnByb3RvEhB0ZXJtaW5hbF9zZXNzaW9uIp4CChRTZXNzaW9uVGVybWluYWxJbnB1dBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDAoEZGF0YRgDIAEoDBITCgt0ZXJtaW5hbF9pZBgEIAEoCRIVCg1jb250cm9sX3Rva2VuGAUgASgJEhQKDGlucHV0X29mZnNldBgGIAEoBBIwCgRtb2RlGAcgASgOMiIudGVybWluYWxfc2Vzc2lvbi5TdHJlYW1SZXBsYXlNb2RlEhMKC2Zyb21fb2Zmc2V0GAggASgEEhQKDGluaXRpYWxfY29scxgJIAEoDRIUCgxpbml0aWFsX3Jvd3MYCiABKA0SGAoQcmVxdWVzdF9zbmFwc2hvdBgLIAEoCCKcAgoVU2Vzc2lvblRlcm1pbmFsT3V0cHV0EgwKBGRhdGEYASABKAwSGgoSYWNrZWRfaW5wdXRfb2Zmc2V0GAIgASgEEhQKDHN0YXJ0X29mZnNldBgDIAEoBBISCgplbmRfb2Zmc2V0GAQgASgEEhEKCWF0X29sZGVzdBgFIAEoCBISCgpzZXNzaW9uX2lkGAYgASgJEhMKC3Rlcm1pbmFsX2lkGAcgASgJEhAKCHNuYXBzaG90GAggASgIEhUKDXNuYXBzaG90X3Jvd3MYCSABKA0SFQoNc25hcHNob3RfY29scxgKIAEoDRIcChRyZWZ1c2VkX2lucHV0X29mZnNldBgLIAEoBBIVCg1pbnB1dF9yZWZ1c2FsGAwgASgJIucBChtTdHJlYW1UZXJtaW5hbE91dHB1dFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhMKC3Rlcm1pbmFsX2lkGAMgASgJEhQKDGluaXRpYWxfY29scxgEIAEoDRIUCgxpbml0aWFsX3Jvd3MYBSABKA0SMAoEbW9kZRgGIAEoDjIiLnRlcm1pbmFsX3Nlc3Npb24uU3RyZWFtUmVwbGF5TW9kZRITCgtmcm9tX29mZnNldBgHIAEoBBIVCg1jb250cm9sX3Rva2VuGAggASgJIhsKGVNlbmRUZXJtaW5hbElucHV0UmVzcG9uc2UimQEKGUdldFRlcm1pbmFsSGlzdG9yeVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhMKC3Rlcm1pbmFsX2lkGAMgASgJEhMKC2Zyb21fb2Zmc2V0GAQgASgEEhQKDHVudGlsX29mZnNldBgFIAEoBBIRCgltYXhfYnl0ZXMYBiABKA0icQoUVGVybWluYWxIaXN0b3J5Q2h1bmsSDAoEZGF0YRgBIAEoDBIUCgxzdGFydF9vZmZzZXQYAiABKAQSEgoKZW5kX29mZnNldBgDIAEoBBIRCglhdF9vbGRlc3QYBCABKAgSDgoGYXRfZW5kGAUgASgIIoMBChtTdGFydFRlcm1pbmFsU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhUKDWNvbnRyb2xfdG9rZW4YAyABKAkSDAoEa2luZBgEIAEoCRIUCgx0bXV4X3Nlc3Npb24YBSABKAkiMwocU3RhcnRUZXJtaW5hbFNlc3Npb25SZXNwb25zZRITCgt0ZXJtaW5hbF9pZBgBIAEoCSJzChpTdG9wVGVybWluYWxTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEwoLdGVybWluYWxfaWQYAyABKAkSFQoNY29udHJvbF90b2tlbhgEIAEoCSI6ChtTdG9wVGVybWluYWxTZXNzaW9uUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJIChtMaXN0VGVybWluYWxTZXNzaW9uc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIlsKE1Rlcm1pbmFsU2Vzc2lvbkluZm8SEwoLdGVybWluYWxfaWQYASABKAkSDAoEa2luZBgCIAEoCRILCgNwaWQYAyABKA0SFAoMdG11eF9zZXNzaW9uGAQgASgJIlgKHExpc3RUZXJtaW5hbFNlc3Npb25zUmVzcG9uc2USOAoJdGVybWluYWxzGAEgAygLMiUudGVybWluYWxfc2Vzc2lvbi5UZXJtaW5hbFNlc3Npb25JbmZvIkQKF0xpc3RUbXV4U2Vzc2lvbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJCCg9UbXV4U2Vzc2lvbkluZm8SDAoEbmFtZRgBIAEoCRIPCgd3aW5kb3dzGAIgASgNEhAKCGF0dGFjaGVkGAMgASgNIk8KGExpc3RUbXV4U2Vzc2lvbnNSZXNwb25zZRIzCghzZXNzaW9ucxgBIAMoCzIhLnRlcm1pbmFsX3Nlc3Npb24uVG11eFNlc3Npb25JbmZvImoKG0NsYWltVGVybWluYWxDb250cm9sUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEQoJc2NyZWVuX2lkGAMgASgJEg0KBXN0ZWFsGAQgASgIImgKHENsYWltVGVybWluYWxDb250cm9sUmVzcG9uc2USDwoHZ3JhbnRlZBgBIAEoCBIVCg1jb250cm9sX3Rva2VuGAIgASgJEiAKGGN1cnJlbnRfaG9sZGVyX3NjcmVlbl9pZBgDIAEoCSJfChtXYXRjaFRlcm1pbmFsQ29udHJvbFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhUKDWNvbnRyb2xfdG9rZW4YAyABKAkiTAoUVGVybWluYWxDb250cm9sRXZlbnQSGAoQaG9sZGVyX3NjcmVlbl9pZBgBIAEoCRIaChJ5b3VfYXJlX2NvbnRyb2xsZXIYAiABKAgqdAoQU3RyZWFtUmVwbGF5TW9kZRIbChdTVFJFQU1fUkVQTEFZX01PREVfVEFJTBAAEiIKHlNUUkVBTV9SRVBMQVlfTU9ERV9GUk9NX09GRlNFVBABEh8KG1NUUkVBTV9SRVBMQVlfTU9ERV9TTkFQU0hPVBACMoYJChZUZXJtaW5hbFNlc3Npb25TZXJ2aWNlEm4KF1N0cmVhbVNlc3Npb25UZXJtaW5hbElPEiYudGVybWluYWxfc2Vzc2lvbi5TZXNzaW9uVGVybWluYWxJbnB1dBonLnRlcm1pbmFsX3Nlc3Npb24uU2Vzc2lvblRlcm1pbmFsT3V0cHV0KAEwARJwChRTdHJlYW1UZXJtaW5hbE91dHB1dBItLnRlcm1pbmFsX3Nlc3Npb24uU3RyZWFtVGVybWluYWxPdXRwdXRSZXF1ZXN0GicudGVybWluYWxfc2Vzc2lvbi5TZXNzaW9uVGVybWluYWxPdXRwdXQwARJoChFTZW5kVGVybWluYWxJbnB1dBImLnRlcm1pbmFsX3Nlc3Npb24uU2Vzc2lvblRlcm1pbmFsSW5wdXQaKy50ZXJtaW5hbF9zZXNzaW9uLlNlbmRUZXJtaW5hbElucHV0UmVzcG9uc2USawoSR2V0VGVybWluYWxIaXN0b3J5EisudGVybWluYWxfc2Vzc2lvbi5HZXRUZXJtaW5hbEhpc3RvcnlSZXF1ZXN0GiYudGVybWluYWxfc2Vzc2lvbi5UZXJtaW5hbEhpc3RvcnlDaHVuazABEnUKFFN0YXJ0VGVybWluYWxTZXNzaW9uEi0udGVybWluYWxfc2Vzc2lvbi5TdGFydFRlcm1pbmFsU2Vzc2lvblJlcXVlc3QaLi50ZXJtaW5hbF9zZXNzaW9uLlN0YXJ0VGVybWluYWxTZXNzaW9uUmVzcG9uc2UScgoTU3RvcFRlcm1pbmFsU2Vzc2lvbhIsLnRlcm1pbmFsX3Nlc3Npb24uU3RvcFRlcm1pbmFsU2Vzc2lvblJlcXVlc3QaLS50ZXJtaW5hbF9zZXNzaW9uLlN0b3BUZXJtaW5hbFNlc3Npb25SZXNwb25zZRJ1ChRMaXN0VGVybWluYWxTZXNzaW9ucxItLnRlcm1pbmFsX3Nlc3Npb24uTGlzdFRlcm1pbmFsU2Vzc2lvbnNSZXF1ZXN0Gi4udGVybWluYWxfc2Vzc2lvbi5MaXN0VGVybWluYWxTZXNzaW9uc1Jlc3BvbnNlEmkKEExpc3RUbXV4U2Vzc2lvbnMSKS50ZXJtaW5hbF9zZXNzaW9uLkxpc3RUbXV4U2Vzc2lvbnNSZXF1ZXN0GioudGVybWluYWxfc2Vzc2lvbi5MaXN0VG11eFNlc3Npb25zUmVzcG9uc2USdQoUQ2xhaW1UZXJtaW5hbENvbnRyb2wSLS50ZXJtaW5hbF9zZXNzaW9uLkNsYWltVGVybWluYWxDb250cm9sUmVxdWVzdBouLnRlcm1pbmFsX3Nlc3Npb24uQ2xhaW1UZXJtaW5hbENvbnRyb2xSZXNwb25zZRJvChRXYXRjaFRlcm1pbmFsQ29udHJvbBItLnRlcm1pbmFsX3Nlc3Npb24uV2F0Y2hUZXJtaW5hbENvbnRyb2xSZXF1ZXN0GiYudGVybWluYWxfc2Vzc2lvbi5UZXJtaW5hbENvbnRyb2xFdmVudDABYgZwcm90bzM");
+  fileDesc("ChZ0ZXJtaW5hbF9zZXNzaW9uLnByb3RvEhB0ZXJtaW5hbF9zZXNzaW9uIp4CChRTZXNzaW9uVGVybWluYWxJbnB1dBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDAoEZGF0YRgDIAEoDBITCgt0ZXJtaW5hbF9pZBgEIAEoCRIVCg1jb250cm9sX3Rva2VuGAUgASgJEhQKDGlucHV0X29mZnNldBgGIAEoBBIwCgRtb2RlGAcgASgOMiIudGVybWluYWxfc2Vzc2lvbi5TdHJlYW1SZXBsYXlNb2RlEhMKC2Zyb21fb2Zmc2V0GAggASgEEhQKDGluaXRpYWxfY29scxgJIAEoDRIUCgxpbml0aWFsX3Jvd3MYCiABKA0SGAoQcmVxdWVzdF9zbmFwc2hvdBgLIAEoCCKcAgoVU2Vzc2lvblRlcm1pbmFsT3V0cHV0EgwKBGRhdGEYASABKAwSGgoSYWNrZWRfaW5wdXRfb2Zmc2V0GAIgASgEEhQKDHN0YXJ0X29mZnNldBgDIAEoBBISCgplbmRfb2Zmc2V0GAQgASgEEhEKCWF0X29sZGVzdBgFIAEoCBISCgpzZXNzaW9uX2lkGAYgASgJEhMKC3Rlcm1pbmFsX2lkGAcgASgJEhAKCHNuYXBzaG90GAggASgIEhUKDXNuYXBzaG90X3Jvd3MYCSABKA0SFQoNc25hcHNob3RfY29scxgKIAEoDRIcChRyZWZ1c2VkX2lucHV0X29mZnNldBgLIAEoBBIVCg1pbnB1dF9yZWZ1c2FsGAwgASgJIucBChtTdHJlYW1UZXJtaW5hbE91dHB1dFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhMKC3Rlcm1pbmFsX2lkGAMgASgJEhQKDGluaXRpYWxfY29scxgEIAEoDRIUCgxpbml0aWFsX3Jvd3MYBSABKA0SMAoEbW9kZRgGIAEoDjIiLnRlcm1pbmFsX3Nlc3Npb24uU3RyZWFtUmVwbGF5TW9kZRITCgtmcm9tX29mZnNldBgHIAEoBBIVCg1jb250cm9sX3Rva2VuGAggASgJIhsKGVNlbmRUZXJtaW5hbElucHV0UmVzcG9uc2UimQEKGUdldFRlcm1pbmFsSGlzdG9yeVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhMKC3Rlcm1pbmFsX2lkGAMgASgJEhMKC2Zyb21fb2Zmc2V0GAQgASgEEhQKDHVudGlsX29mZnNldBgFIAEoBBIRCgltYXhfYnl0ZXMYBiABKA0icQoUVGVybWluYWxIaXN0b3J5Q2h1bmsSDAoEZGF0YRgBIAEoDBIUCgxzdGFydF9vZmZzZXQYAiABKAQSEgoKZW5kX29mZnNldBgDIAEoBBIRCglhdF9vbGRlc3QYBCABKAgSDgoGYXRfZW5kGAUgASgIIrMBChtTdGFydFRlcm1pbmFsU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhUKDWNvbnRyb2xfdG9rZW4YAyABKAkSDAoEa2luZBgEIAEoCRIUCgx0bXV4X3Nlc3Npb24YBSABKAkSLgoId3JhcHBlcnMYBiADKAsyHC50ZXJtaW5hbF9zZXNzaW9uLkxhdW5jaE5vZGUijwEKCkxhdW5jaE5vZGUSDAoEa2luZBgBIAEoCRJACgpwcm9wZXJ0aWVzGAIgAygLMiwudGVybWluYWxfc2Vzc2lvbi5MYXVuY2hOb2RlLlByb3BlcnRpZXNFbnRyeRoxCg9Qcm9wZXJ0aWVzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIzChxTdGFydFRlcm1pbmFsU2Vzc2lvblJlc3BvbnNlEhMKC3Rlcm1pbmFsX2lkGAEgASgJInMKGlN0b3BUZXJtaW5hbFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRITCgt0ZXJtaW5hbF9pZBgDIAEoCRIVCg1jb250cm9sX3Rva2VuGAQgASgJIjoKG1N0b3BUZXJtaW5hbFNlc3Npb25SZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIkgKG0xpc3RUZXJtaW5hbFNlc3Npb25zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiiQEKE1Rlcm1pbmFsU2Vzc2lvbkluZm8SEwoLdGVybWluYWxfaWQYASABKAkSDAoEa2luZBgCIAEoCRILCgNwaWQYAyABKA0SFAoMdG11eF9zZXNzaW9uGAQgASgJEiwKBmxhdW5jaBgFIAMoCzIcLnRlcm1pbmFsX3Nlc3Npb24uTGF1bmNoTm9kZSJYChxMaXN0VGVybWluYWxTZXNzaW9uc1Jlc3BvbnNlEjgKCXRlcm1pbmFscxgBIAMoCzIlLnRlcm1pbmFsX3Nlc3Npb24uVGVybWluYWxTZXNzaW9uSW5mbyJEChdMaXN0VG11eFNlc3Npb25zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiQgoPVG11eFNlc3Npb25JbmZvEgwKBG5hbWUYASABKAkSDwoHd2luZG93cxgCIAEoDRIQCghhdHRhY2hlZBgDIAEoDSJPChhMaXN0VG11eFNlc3Npb25zUmVzcG9uc2USMwoIc2Vzc2lvbnMYASADKAsyIS50ZXJtaW5hbF9zZXNzaW9uLlRtdXhTZXNzaW9uSW5mbyJqChtDbGFpbVRlcm1pbmFsQ29udHJvbFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXNjcmVlbl9pZBgDIAEoCRINCgVzdGVhbBgEIAEoCCJoChxDbGFpbVRlcm1pbmFsQ29udHJvbFJlc3BvbnNlEg8KB2dyYW50ZWQYASABKAgSFQoNY29udHJvbF90b2tlbhgCIAEoCRIgChhjdXJyZW50X2hvbGRlcl9zY3JlZW5faWQYAyABKAkiXwobV2F0Y2hUZXJtaW5hbENvbnRyb2xSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIVCg1jb250cm9sX3Rva2VuGAMgASgJIkwKFFRlcm1pbmFsQ29udHJvbEV2ZW50EhgKEGhvbGRlcl9zY3JlZW5faWQYASABKAkSGgoSeW91X2FyZV9jb250cm9sbGVyGAIgASgIKnQKEFN0cmVhbVJlcGxheU1vZGUSGwoXU1RSRUFNX1JFUExBWV9NT0RFX1RBSUwQABIiCh5TVFJFQU1fUkVQTEFZX01PREVfRlJPTV9PRkZTRVQQARIfChtTVFJFQU1fUkVQTEFZX01PREVfU05BUFNIT1QQAjKGCQoWVGVybWluYWxTZXNzaW9uU2VydmljZRJuChdTdHJlYW1TZXNzaW9uVGVybWluYWxJTxImLnRlcm1pbmFsX3Nlc3Npb24uU2Vzc2lvblRlcm1pbmFsSW5wdXQaJy50ZXJtaW5hbF9zZXNzaW9uLlNlc3Npb25UZXJtaW5hbE91dHB1dCgBMAEScAoUU3RyZWFtVGVybWluYWxPdXRwdXQSLS50ZXJtaW5hbF9zZXNzaW9uLlN0cmVhbVRlcm1pbmFsT3V0cHV0UmVxdWVzdBonLnRlcm1pbmFsX3Nlc3Npb24uU2Vzc2lvblRlcm1pbmFsT3V0cHV0MAESaAoRU2VuZFRlcm1pbmFsSW5wdXQSJi50ZXJtaW5hbF9zZXNzaW9uLlNlc3Npb25UZXJtaW5hbElucHV0GisudGVybWluYWxfc2Vzc2lvbi5TZW5kVGVybWluYWxJbnB1dFJlc3BvbnNlEmsKEkdldFRlcm1pbmFsSGlzdG9yeRIrLnRlcm1pbmFsX3Nlc3Npb24uR2V0VGVybWluYWxIaXN0b3J5UmVxdWVzdBomLnRlcm1pbmFsX3Nlc3Npb24uVGVybWluYWxIaXN0b3J5Q2h1bmswARJ1ChRTdGFydFRlcm1pbmFsU2Vzc2lvbhItLnRlcm1pbmFsX3Nlc3Npb24uU3RhcnRUZXJtaW5hbFNlc3Npb25SZXF1ZXN0Gi4udGVybWluYWxfc2Vzc2lvbi5TdGFydFRlcm1pbmFsU2Vzc2lvblJlc3BvbnNlEnIKE1N0b3BUZXJtaW5hbFNlc3Npb24SLC50ZXJtaW5hbF9zZXNzaW9uLlN0b3BUZXJtaW5hbFNlc3Npb25SZXF1ZXN0Gi0udGVybWluYWxfc2Vzc2lvbi5TdG9wVGVybWluYWxTZXNzaW9uUmVzcG9uc2USdQoUTGlzdFRlcm1pbmFsU2Vzc2lvbnMSLS50ZXJtaW5hbF9zZXNzaW9uLkxpc3RUZXJtaW5hbFNlc3Npb25zUmVxdWVzdBouLnRlcm1pbmFsX3Nlc3Npb24uTGlzdFRlcm1pbmFsU2Vzc2lvbnNSZXNwb25zZRJpChBMaXN0VG11eFNlc3Npb25zEikudGVybWluYWxfc2Vzc2lvbi5MaXN0VG11eFNlc3Npb25zUmVxdWVzdBoqLnRlcm1pbmFsX3Nlc3Npb24uTGlzdFRtdXhTZXNzaW9uc1Jlc3BvbnNlEnUKFENsYWltVGVybWluYWxDb250cm9sEi0udGVybWluYWxfc2Vzc2lvbi5DbGFpbVRlcm1pbmFsQ29udHJvbFJlcXVlc3QaLi50ZXJtaW5hbF9zZXNzaW9uLkNsYWltVGVybWluYWxDb250cm9sUmVzcG9uc2USbwoUV2F0Y2hUZXJtaW5hbENvbnRyb2wSLS50ZXJtaW5hbF9zZXNzaW9uLldhdGNoVGVybWluYWxDb250cm9sUmVxdWVzdBomLnRlcm1pbmFsX3Nlc3Npb24uVGVybWluYWxDb250cm9sRXZlbnQwAWIGcHJvdG8z");
 
 /**
  * @generated from message terminal_session.SessionTerminalInput
@@ -441,6 +441,16 @@ export type StartTerminalSessionRequest = Message<"terminal_session.StartTermina
    * @generated from field: string tmux_session = 5;
    */
   tmuxSession: string;
+
+  /**
+   * What the terminal runs wrapped in, outermost first. Empty: `kind` runs directly. The only
+   * wrapper accepted is "tmux" around an agent kind: the agent runs in a tmux session of its own,
+   * `tddy-<session_id>-<terminal_id>`, as the session's OS user, and the tab is a client of it.
+   * Any other wrapper kind is refused INVALID_ARGUMENT, naming it.
+   *
+   * @generated from field: repeated terminal_session.LaunchNode wrappers = 6;
+   */
+  wrappers: LaunchNode[];
 };
 
 /**
@@ -449,6 +459,33 @@ export type StartTerminalSessionRequest = Message<"terminal_session.StartTermina
  */
 export const StartTerminalSessionRequestSchema: GenMessage<StartTerminalSessionRequest> = /*@__PURE__*/
   messageDesc(file_terminal_session, 6);
+
+/**
+ * One link of a terminal's launch chain: what it is, and what it was started with. Kinds: "agent"
+ * (`harness`, `conversation_id`), "shell", "tmux" (`session`, `os_user`) for a tmux session the
+ * daemon created to wrap a tab, "tmux-attach" (`session`, `os_user`) for a tab attached to the user's
+ * own tmux session. Unknown kinds and keys are kept, so later wrappers need no schema change.
+ *
+ * @generated from message terminal_session.LaunchNode
+ */
+export type LaunchNode = Message<"terminal_session.LaunchNode"> & {
+  /**
+   * @generated from field: string kind = 1;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: map<string, string> properties = 2;
+   */
+  properties: { [key: string]: string };
+};
+
+/**
+ * Describes the message terminal_session.LaunchNode.
+ * Use `create(LaunchNodeSchema)` to create a new message.
+ */
+export const LaunchNodeSchema: GenMessage<LaunchNode> = /*@__PURE__*/
+  messageDesc(file_terminal_session, 7);
 
 /**
  * @generated from message terminal_session.StartTerminalSessionResponse
@@ -467,7 +504,7 @@ export type StartTerminalSessionResponse = Message<"terminal_session.StartTermin
  * Use `create(StartTerminalSessionResponseSchema)` to create a new message.
  */
 export const StartTerminalSessionResponseSchema: GenMessage<StartTerminalSessionResponse> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 7);
+  messageDesc(file_terminal_session, 8);
 
 /**
  * @generated from message terminal_session.StopTerminalSessionRequest
@@ -501,7 +538,7 @@ export type StopTerminalSessionRequest = Message<"terminal_session.StopTerminalS
  * Use `create(StopTerminalSessionRequestSchema)` to create a new message.
  */
 export const StopTerminalSessionRequestSchema: GenMessage<StopTerminalSessionRequest> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 8);
+  messageDesc(file_terminal_session, 9);
 
 /**
  * @generated from message terminal_session.StopTerminalSessionResponse
@@ -523,7 +560,7 @@ export type StopTerminalSessionResponse = Message<"terminal_session.StopTerminal
  * Use `create(StopTerminalSessionResponseSchema)` to create a new message.
  */
 export const StopTerminalSessionResponseSchema: GenMessage<StopTerminalSessionResponse> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 9);
+  messageDesc(file_terminal_session, 10);
 
 /**
  * @generated from message terminal_session.ListTerminalSessionsRequest
@@ -545,7 +582,7 @@ export type ListTerminalSessionsRequest = Message<"terminal_session.ListTerminal
  * Use `create(ListTerminalSessionsRequestSchema)` to create a new message.
  */
 export const ListTerminalSessionsRequestSchema: GenMessage<ListTerminalSessionsRequest> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 10);
+  messageDesc(file_terminal_session, 11);
 
 /**
  * @generated from message terminal_session.TerminalSessionInfo
@@ -575,6 +612,14 @@ export type TerminalSessionInfo = Message<"terminal_session.TerminalSessionInfo"
    * @generated from field: string tmux_session = 4;
    */
   tmuxSession: string;
+
+  /**
+   * The chain the terminal was launched through, outermost first, as the session's tab roster
+   * records it (a tmux-wrapped agent: [tmux, agent]).
+   *
+   * @generated from field: repeated terminal_session.LaunchNode launch = 5;
+   */
+  launch: LaunchNode[];
 };
 
 /**
@@ -582,7 +627,7 @@ export type TerminalSessionInfo = Message<"terminal_session.TerminalSessionInfo"
  * Use `create(TerminalSessionInfoSchema)` to create a new message.
  */
 export const TerminalSessionInfoSchema: GenMessage<TerminalSessionInfo> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 11);
+  messageDesc(file_terminal_session, 12);
 
 /**
  * @generated from message terminal_session.ListTerminalSessionsResponse
@@ -599,7 +644,7 @@ export type ListTerminalSessionsResponse = Message<"terminal_session.ListTermina
  * Use `create(ListTerminalSessionsResponseSchema)` to create a new message.
  */
 export const ListTerminalSessionsResponseSchema: GenMessage<ListTerminalSessionsResponse> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 12);
+  messageDesc(file_terminal_session, 13);
 
 /**
  * @generated from message terminal_session.ListTmuxSessionsRequest
@@ -621,7 +666,7 @@ export type ListTmuxSessionsRequest = Message<"terminal_session.ListTmuxSessions
  * Use `create(ListTmuxSessionsRequestSchema)` to create a new message.
  */
 export const ListTmuxSessionsRequestSchema: GenMessage<ListTmuxSessionsRequest> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 13);
+  messageDesc(file_terminal_session, 14);
 
 /**
  * @generated from message terminal_session.TmuxSessionInfo
@@ -652,7 +697,7 @@ export type TmuxSessionInfo = Message<"terminal_session.TmuxSessionInfo"> & {
  * Use `create(TmuxSessionInfoSchema)` to create a new message.
  */
 export const TmuxSessionInfoSchema: GenMessage<TmuxSessionInfo> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 14);
+  messageDesc(file_terminal_session, 15);
 
 /**
  * @generated from message terminal_session.ListTmuxSessionsResponse
@@ -669,7 +714,7 @@ export type ListTmuxSessionsResponse = Message<"terminal_session.ListTmuxSession
  * Use `create(ListTmuxSessionsResponseSchema)` to create a new message.
  */
 export const ListTmuxSessionsResponseSchema: GenMessage<ListTmuxSessionsResponse> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 15);
+  messageDesc(file_terminal_session, 16);
 
 /**
  * @generated from message terminal_session.ClaimTerminalControlRequest
@@ -706,7 +751,7 @@ export type ClaimTerminalControlRequest = Message<"terminal_session.ClaimTermina
  * Use `create(ClaimTerminalControlRequestSchema)` to create a new message.
  */
 export const ClaimTerminalControlRequestSchema: GenMessage<ClaimTerminalControlRequest> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 16);
+  messageDesc(file_terminal_session, 17);
 
 /**
  * @generated from message terminal_session.ClaimTerminalControlResponse
@@ -737,7 +782,7 @@ export type ClaimTerminalControlResponse = Message<"terminal_session.ClaimTermin
  * Use `create(ClaimTerminalControlResponseSchema)` to create a new message.
  */
 export const ClaimTerminalControlResponseSchema: GenMessage<ClaimTerminalControlResponse> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 17);
+  messageDesc(file_terminal_session, 18);
 
 /**
  * @generated from message terminal_session.WatchTerminalControlRequest
@@ -767,7 +812,7 @@ export type WatchTerminalControlRequest = Message<"terminal_session.WatchTermina
  * Use `create(WatchTerminalControlRequestSchema)` to create a new message.
  */
 export const WatchTerminalControlRequestSchema: GenMessage<WatchTerminalControlRequest> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 18);
+  messageDesc(file_terminal_session, 19);
 
 /**
  * Emitted once on subscribe (snapshot) and again whenever the lease changes.
@@ -795,7 +840,7 @@ export type TerminalControlEvent = Message<"terminal_session.TerminalControlEven
  * Use `create(TerminalControlEventSchema)` to create a new message.
  */
 export const TerminalControlEventSchema: GenMessage<TerminalControlEvent> = /*@__PURE__*/
-  messageDesc(file_terminal_session, 19);
+  messageDesc(file_terminal_session, 20);
 
 /**
  * Selects the replay behavior of StreamTerminalOutput (and the bidi open frame).

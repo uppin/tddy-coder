@@ -257,6 +257,7 @@ impl LivenessDaemon {
                 control_token: String::new(),
                 kind: kind.to_string(),
                 tmux_session: String::new(),
+                wrappers: Vec::new(),
             }))
             .await
             .expect("StartTerminalSession must succeed")
