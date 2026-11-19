@@ -149,9 +149,8 @@ async fn cut_worktree(
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(start.selected_integration_base_ref, chain_base_ref);
     let wt = if let Some(shell) = &start.shell {
-        let base_ref = remote_base_ref(start, repo_root, worktree_base_ref).await?;
         let recorded = recorded_by(shell.clone(), progress);
-        remote_worktree_through(start, git_url, &recorded, base_ref, progress).await?
+        remote_worktree_through(start, git_url, &recorded, worktree_base_ref, progress).await?
     } else if start.ssh_alias.is_empty() {
         tddy_session_split::service_util::create_session_worktree(
             start.timeout,
@@ -162,8 +161,7 @@ async fn cut_worktree(
         )
         .await?
     } else {
-        let base_ref = remote_base_ref(start, repo_root, worktree_base_ref).await?;
-        remote_worktree(start, git_url, base_ref, progress).await?
+        remote_worktree(start, git_url, worktree_base_ref, progress).await?
     };
     tddy_session_split::service_util::push_new_branch_to_origin_if_requested(
         start.create_remote_branch,
@@ -174,46 +172,6 @@ async fn cut_worktree(
     )
     .await?;
     Ok(wt)
-}
-
-/// The ref a checkout cut on a target branches from: the one the start or its stack parent named,
-/// or else the project's default integration base, resolved on this host's checkout of the
-/// project (`repo_root`) as a local cut resolves it — fetched, then `origin/master`,
-/// `origin/main`, or the remote's `HEAD`.
-///
-/// The target's clone is fetched before the cut, so the remote-tracking ref this names is as
-/// fresh there as here. Its own `HEAD` is not: nothing moves a clone's local branch, so a cut from
-/// it branches from whatever commit the clone was made at. A project whose default cannot be
-/// resolved fails the start with the reason.
-///
-/// `None` for a start that works on an existing branch: it is cut from no base, so nothing is
-/// resolved or fetched for it.
-async fn remote_base_ref(
-    start: &CliWorktreeStart<'_>,
-    repo_root: &Path,
-    worktree_base_ref: Option<String>,
-) -> Result<Option<String>, Status> {
-    if start.intent != tddy_core::BranchWorktreeIntent::NewBranchFromBase {
-        return Ok(None);
-    }
-    if let Some(base_ref) = worktree_base_ref.filter(|base| !base.trim().is_empty()) {
-        return Ok(Some(base_ref));
-    }
-    let repo_root = repo_root.to_path_buf();
-    tddy_session_split::service_util::spawn_blocking_with_timeout(
-        start.timeout,
-        "resolve the project's integration base for a target's worktree",
-        move || {
-            tddy_core::resolve_default_integration_base_ref(&repo_root).map_err(|error| {
-                anyhow::anyhow!(
-                    "the project's integration base could not be resolved in {}: {error}",
-                    repo_root.display()
-                )
-            })
-        },
-    )
-    .await
-    .map(Some)
 }
 
 /// The session's checkout on the ssh target `start.ssh_alias`, cloned from `git_url`.
@@ -288,8 +246,10 @@ impl tddy_remote_shell::RemoteCallSink for ProgressCalls {
 
 /// The session's checkout on its target, cloned from `git_url` through `shell`: under the target
 /// user's home, on the branch the start asked for — a new branch from its base, or the existing
-/// branch it named — as the local cut honours both. A new branch is cut from `base_ref`
-/// ([`remote_base_ref`]), which such a start always has.
+/// branch it named — as the local cut honours both. A new branch is cut from `base_ref` when the
+/// start or its stack parent named one, and otherwise from the clone's own default integration
+/// base, resolved on the target after its fetch (`tddy_core::worktree::DEFAULT_BASE_REFS`) — never
+/// from the clone's `HEAD`, which nothing moves after the clone.
 async fn remote_worktree_through(
     start: &CliWorktreeStart<'_>,
     git_url: &str,
@@ -332,12 +292,10 @@ async fn remote_worktree_through(
                     "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
                 ));
             }
-            let base_ref = base_ref.ok_or_else(|| {
-                Status::internal(format!(
-                    "the new branch {name} on the target was given no base to branch from"
-                ))
-            })?;
-            tddy_core::worktree::RemoteBranch::NewFrom { name, base_ref }
+            tddy_core::worktree::RemoteBranch::NewFrom {
+                name,
+                base_ref: base_ref.filter(|base| !base.trim().is_empty()),
+            }
         }
     };
     let request = tddy_core::worktree::RemoteWorktreeRequest {
@@ -435,12 +393,21 @@ mod remote_cut_tests {
     const SESSION: &str = "01a1b2c3-remote-dev";
     const WORKSPACE_HOME: &str = "/home/coder";
 
-    /// A workspace whose user's home is /home/coder and whose git commands all succeed.
+    /// A workspace whose user's home is /home/coder, whose clone of the project holds
+    /// `origin/master` once fetched, and whose git commands all succeed.
     /// The home probe is answered as a pty-merging transport delivers it: the shell's
     /// start marker, then the probe's sentinels around the home (they spell exactly what
-    /// `remote_checkout_root` prints around `$HOME`).
+    /// `remote_checkout_root` prints around `$HOME`). The cut's base probe is answered with
+    /// `origin/master` between the sentinels `tddy-git`'s `remote_checkout` prints around it.
     fn a_workspace() -> InMemoryShell {
         let shell = InMemoryShell::new("coder.remote-dev");
+        shell.answers_when(|request| {
+            request.command.contains("TDDY_REMOTE_BASE_BEGIN").then(|| {
+                ExecOutput::succeeded(
+                    b"TDDY_REMOTE_BASE_BEGIN:origin/master:TDDY_REMOTE_BASE_END\n".to_vec(),
+                )
+            })
+        });
         shell.answers_when(|request| {
             request.command.contains("$HOME").then(|| {
                 ExecOutput::succeeded(
@@ -576,48 +543,6 @@ mod remote_cut_tests {
             "the generated branch from the changeset is cut:\n{run}"
         );
     }
-    /// `git` run in `dir`, which must succeed.
-    fn git_in(dir: &std::path::Path, args: &[&str]) {
-        let output = std::process::Command::new("git")
-            .args(["-c", "user.email=dev@example.com", "-c", "user.name=Dev"])
-            .args(args)
-            .current_dir(dir)
-            .output()
-            .expect("git runs");
-        assert!(
-            output.status.success(),
-            "git {args:?} in {}: {}",
-            dir.display(),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    /// The project's checkout on this host: a clone whose `origin` (a bare repository beside it)
-    /// has a `master` branch, as a registered project's repo root is.
-    fn a_project_checkout_whose_origin_has_master() -> (tempfile::TempDir, std::path::PathBuf) {
-        let dir = tempfile::tempdir().expect("a directory for the project");
-        let origin = dir.path().join("origin.git");
-        let checkout = dir.path().join("qape-hq");
-        git_in(
-            dir.path(),
-            &["init", "--bare", "-b", "master", "origin.git"],
-        );
-        git_in(
-            dir.path(),
-            &[
-                "clone",
-                &origin.to_string_lossy(),
-                &checkout.to_string_lossy(),
-            ],
-        );
-        git_in(
-            &checkout,
-            &["commit", "--allow-empty", "-m", "the first commit"],
-        );
-        git_in(&checkout, &["push", "origin", "master"]);
-        (dir, checkout)
-    }
-
     /// The base the target's `git worktree add -b` was given: its last argument, unquoted.
     fn the_base_the_target_cut_from(workspace: &InMemoryShell) -> Option<String> {
         workspace
@@ -635,11 +560,11 @@ mod remote_cut_tests {
     /// on this host branches from the freshly fetched `origin/master`.
     #[tokio::test]
     async fn a_target_start_naming_no_base_is_cut_from_the_projects_fetched_main_branch() {
-        // Given a project whose origin has master, and a start on a Coder target naming no base
-        let (_project, repo_root) = a_project_checkout_whose_origin_has_master();
+        // Given a workspace whose clone holds origin/master, and a start naming no base
         let session_dir = tempfile::tempdir().expect("session dir");
         let sessions_base = tempfile::tempdir().expect("sessions base");
         let tddy_data = tempfile::tempdir().expect("tddy data");
+        let project_checkout = tempfile::tempdir().expect("this host's checkout");
         let workspace = a_workspace();
         let start = CliWorktreeStart {
             session_type: "claude-cli",
@@ -665,7 +590,7 @@ mod remote_cut_tests {
         // When the session's worktree is cut, with no stack parent to base it on
         cut_worktree(
             &start,
-            &repo_root,
+            project_checkout.path(),
             QAPE_HQ,
             None,
             &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
@@ -673,7 +598,7 @@ mod remote_cut_tests {
         .await
         .expect("the cut succeeds");
 
-        // Then the target branched from the project's fetched main branch, not its clone's HEAD
+        // Then the target branched from its clone's fetched main branch, not the clone's HEAD
         assert_eq!(
             the_base_the_target_cut_from(&workspace),
             Some("origin/master".to_string())

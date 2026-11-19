@@ -25,7 +25,12 @@ pub const REMOTE_REPOS_DIR: &str = ".tddy/repos";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteBranch {
     /// Create `name` from `base_ref` (a remote-tracking ref such as `origin/main`) and check it out.
-    NewFrom { name: String, base_ref: String },
+    /// `None` branches from the clone's own default integration base, resolved on the target
+    /// after its fetch ([`DEFAULT_BASE_REFS`]).
+    NewFrom {
+        name: String,
+        base_ref: Option<String>,
+    },
     /// Check out the branch `name` the clone already has, fetching it first.
     Existing { name: String },
 }
@@ -64,6 +69,9 @@ pub enum RemoteCheckoutError {
     Fetch(String),
     /// `git worktree add` failed on the target. Carries the stderr.
     Worktree(String),
+    /// A new branch named no base, and the clone has none of [`DEFAULT_BASE_REFS`] to branch
+    /// from. Carries the clone's root.
+    NoDefaultBase { root: String },
     /// The shell itself failed: unreachable, timed out.
     Shell(RemoteShellError),
 }
@@ -81,6 +89,11 @@ impl fmt::Display for RemoteCheckoutError {
             Self::Worktree(stderr) => {
                 write!(f, "adding the worktree on the target failed: {stderr}")
             }
+            Self::NoDefaultBase { root } => write!(
+                f,
+                "the clone at {root} on the target has none of {} to branch a new branch from",
+                DEFAULT_BASE_REFS.join(", ")
+            ),
             Self::Shell(error) => write!(f, "{error}"),
         }
     }
@@ -123,6 +136,15 @@ fn target_words(output: &tddy_remote_shell::ExecOutput) -> String {
     };
     words.trim().to_string()
 }
+
+/// The remote-tracking refs a new branch that names no base is cut from, in order: what a cut on
+/// the daemon's host resolves (`remote::resolve_default_integration_base_ref`), read from the
+/// target's clone. Its remote is `origin`, because this module clones it.
+pub const DEFAULT_BASE_REFS: [&str; 3] = ["origin/master", "origin/main", "origin/HEAD"];
+
+/// The sentinels the base probe prints around the ref it found.
+const BASE_BEGIN: &str = "TDDY_REMOTE_BASE_BEGIN:";
+const BASE_END: &str = ":TDDY_REMOTE_BASE_END";
 
 /// The sentinels the home probe prints around the target's home. A transport may merge
 /// the command's streams or add words of its own around the answer — a pty does both — so
@@ -215,7 +237,9 @@ pub async fn setup_remote_worktree(
             shell_single_quote(&root),
             shell_single_quote(name),
             shell_single_quote(&worktree),
-            shell_single_quote(base_ref),
+            shell_single_quote(
+                &base_of(shell, &root, &request.git_url, base_ref.as_deref()).await?
+            ),
         ),
         RemoteBranch::Existing { name } => format!(
             "git -C {} worktree add {} {}",
@@ -229,6 +253,49 @@ pub async fn setup_remote_worktree(
         return Err(RemoteCheckoutError::Worktree(target_words(&added)));
     }
     Ok(checkout)
+}
+
+/// The ref a new branch is cut from: `base_ref` when the start named one; otherwise the first of
+/// [`DEFAULT_BASE_REFS`] the clone at `root` holds once fetched, read in one call. The clone's own
+/// `HEAD` is never that default for a clone of a URL — nothing moves its local branch after the
+/// clone, so it is as old as the clone. A project with no URL yet has no remote at all, and its
+/// clone's one commit (`ensure_the_clone`) is the only base it has.
+async fn base_of(
+    shell: &dyn RemoteShell,
+    root: &str,
+    git_url: &str,
+    base_ref: Option<&str>,
+) -> Result<String, RemoteCheckoutError> {
+    use crate::ssh_exec::shell_single_quote;
+
+    if let Some(base_ref) = base_ref.filter(|base| !base.trim().is_empty()) {
+        return Ok(base_ref.to_string());
+    }
+    if git_url.trim().is_empty() {
+        return Ok("HEAD".to_string());
+    }
+    let candidates = DEFAULT_BASE_REFS
+        .iter()
+        .map(|candidate| shell_single_quote(candidate))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let probe = format!(
+        "for base in {candidates}; do \
+         if git -C {root} rev-parse --verify --quiet \"refs/remotes/$base\" >/dev/null; then \
+         printf '%s%s%s\\n' '{BASE_BEGIN}' \"$base\" '{BASE_END}'; exit 0; fi; done",
+        root = shell_single_quote(root),
+    );
+    let output = shell
+        .exec(tddy_remote_shell::ExecRequest::new(probe))
+        .await?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.split_once(BASE_BEGIN)
+        .and_then(|(_, rest)| rest.split_once(BASE_END))
+        .map(|(base, _)| base.trim().to_string())
+        .filter(|base| !base.is_empty())
+        .ok_or_else(|| RemoteCheckoutError::NoDefaultBase {
+            root: root.to_string(),
+        })
 }
 
 /// The clone of `git_url` at `root` on the target, made when it is not there yet: cloned from the

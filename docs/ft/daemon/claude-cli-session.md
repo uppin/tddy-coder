@@ -580,8 +580,9 @@ environment the `claude-cli` launch produces:
   is copied, owner-only, into the worktree's `.tddy/` on the target, and the argument names that
   copy: the agent is never handed a path of the daemon's host. A new branch the start names no base
   for is cut from the project's default integration base (`origin/master`, then `origin/main`, then
-  the remote's `HEAD`), resolved as a cut on this host resolves it, never from the target clone's
-  own `HEAD`.
+  `origin/HEAD`), read from the target's clone after its fetch — never from the clone's own `HEAD`,
+  which nothing moves after the clone. A project with no URL yet, whose clone on the target has no
+  remote, branches from that clone's one commit.
 - **An allow-listed environment.** The agent process starts from an environment the daemon
   computes, not from the daemon's own: the base set (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
   `TERM`, `LANG`, `LC_*`, `TMPDIR`, `TZ`, `SSH_AUTH_SOCK`, proxy variables, `XDG_*`) read from the

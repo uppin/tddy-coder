@@ -211,7 +211,7 @@ All of these need **new PRs**: there is no open PR in this area to fold them int
    proves the command ran). An exact alternative is to have the one-shot wrapper send the command's
    stderr to a file on the workspace and frame it back after a second marker. `stderr_tail`,
    `success_or_exited` and `target_words` then all improve with no change of their own.
-3. ~~**P1. A remote cut bases on `<remote>/<main>`**~~ — *landed 2026-11-19 (resolved on this host's checkout, option (a))* (`tddy-agent-launch` and `tddy-git`), small PR:
+3. ~~**P1. A remote cut bases on `<remote>/<main>`**~~ — *landed 2026-11-19 (resolved on the target's clone after its fetch, option (b) — (a) broke a project with no URL, whose target clone has no `origin`)* (`tddy-agent-launch` and `tddy-git`), small PR:
    resolve the default as the local cut does and pass it as `base_ref` instead of `"HEAD"`
    (`cli_session_worktree.rs:292-297`). Pin it with the `remote_cut_tests` module in the same file.
 4. **P2. Usage context of a target session** (`tddy-agent-launch`, `tddy-usage`): record the

@@ -1,6 +1,6 @@
 # 2026-11-19 — A target start names no host path, a failed Coder command says why, and a target cut has a real base
 
-**Type:** Fix · **Packages:** `tddy-agent-launch`, `tddy-remote-shell` · Backlog:
+**Type:** Fix · **Packages:** `tddy-agent-launch`, `tddy-remote-shell`, `tddy-git` · Backlog:
 [`docs/dev/todo/2026-11-19-coder-remote-agent-local-paths.md`](../todo/2026-11-19-coder-remote-agent-local-paths.md)
 (narrowed, not closed)
 
@@ -24,12 +24,17 @@ literal `'HEAD'` — the workspace clone's local `master`, which `git fetch --al
   `ExecOutput::exited(status, merged words)` — stderr is the command's merged output, stdout empty,
   the CLI's wrapper dropped. Status 0 is unchanged. Two existing coder acceptance tests that pinned
   `stderr: []` for a failed command now pin the merged words as stderr.
-- **`cli_session_worktree::remote_base_ref`** (new): a `new_branch_from_base` cut on a target or an
-  ssh exec host takes the explicit or chain base, else resolves the project's default integration
-  base from this host's checkout (`tddy_core::resolve_default_integration_base_ref`, bounded by the
-  spawn timeout); a resolution failure fails the start with its reason. A work-on-selected-branch
-  start resolves nothing. `remote_worktree_through` takes `Option<String>` and no longer defaults to
-  `"HEAD"`; a new branch reaching it with no base is an internal error.
+- **`tddy_git::remote_checkout`**: `RemoteBranch::NewFrom.base_ref` is `Option<String>`. `None` is
+  the clone's own default integration base: after the fetch one call probes the target's clone
+  for the first of `DEFAULT_BASE_REFS` (`origin/master`, `origin/main`, `origin/HEAD`), printed
+  between sentinels; a clone of a URL holding none is `RemoteCheckoutError::NoDefaultBase`, and a
+  project with no URL (a clone `git init`ed in place, with no remote) branches from its `HEAD`.
+  `cli_session_worktree::remote_worktree_through` passes the start's or stack parent's base, or
+  `None`, and no longer defaults to `"HEAD"`.
+  - **Resolved on the target, not on this host.** The first cut resolved the default from this
+    host's checkout (`resolve_default_integration_base_ref`); CI's target-start suites showed it
+    wrong: their project has no URL, so the target's clone has no `origin` at all, and a base named
+    on this host need not exist on the target's clone in any case.
 
 ## Tests
 
@@ -38,7 +43,12 @@ literal `'HEAD'` — the workspace clone's local `master`, which `git fetch --al
 - `coder_shell_acceptance::a_failed_write_through_a_merging_pty_says_why_the_command_failed`, with
   the stand-in `a_coder_that_reports_a_failed_command_as_the_real_cli_does` (merges, and prints
   `CODER_SSH_FAILURE_WRAPPER` on a non-zero exit as v2.33.5 does).
-- `cli_session_worktree::remote_cut_tests::a_target_start_naming_no_base_is_cut_from_the_projects_fetched_main_branch`.
+- `cli_session_worktree::remote_cut_tests::a_target_start_naming_no_base_is_cut_from_the_projects_fetched_main_branch`
+  (its workspace stand-in answers the base probe with `origin/master`).
+- `remote_checkout_acceptance`: `a_new_branch_naming_no_base_is_cut_from_the_clones_fetched_main_branch`,
+  `a_new_branch_of_a_project_with_no_url_is_cut_from_its_clones_only_commit`,
+  `a_clone_with_no_default_base_refuses_a_new_branch_naming_none`.
+- `cli_session_worktree::provision_tests` (4): the client-checkout arm and its refusals.
 
 ## Not in this change
 

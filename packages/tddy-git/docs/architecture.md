@@ -112,9 +112,14 @@ Worktrees live in `.worktrees/` relative to the repository root (**worktree_dir*
   URL, initialises) the repository at that root when it is absent, fetches, then adds
   `.worktrees/<session_id>` on the requested branch — `RemoteBranch::NewFrom { name, base_ref }`
   cuts `name` from `base_ref`, `RemoteBranch::Existing { name }` checks `name` out — and returns
-  `RemoteCheckout { root, worktree, branch }`. Idempotent: a worktree already at that path is
-  left alone. Failures are `RemoteCheckoutError` (`HomeUnresolved`, `Clone { url, stderr }`,
-  `Fetch`, `Worktree`, `Shell`), carrying the target's own words. The session id is only a
+  `RemoteCheckout { root, worktree, branch }`. A `NewFrom` with `base_ref: None` is cut from the
+  clone's own default integration base, probed on the target after the fetch in one call: the
+  first of `DEFAULT_BASE_REFS` (`origin/master`, `origin/main`, `origin/HEAD`) the clone holds,
+  printed between sentinels — never the clone's `HEAD`, which nothing moves after the clone. A
+  project with no URL (no remote on its clone) is cut from its `HEAD`. Idempotent: a worktree already
+  at that path is left alone. Failures are `RemoteCheckoutError` (`HomeUnresolved`,
+  `Clone { url, stderr }`, `Fetch`, `Worktree`, `NoDefaultBase { root }`, `Shell`), carrying the
+  target's own words. The session id is only a
   string; nothing here reads a changeset.
 - **ssh_exec**: `shell_single_quote`, `contain_remote_path`. This crate spawns no `ssh` of its
   own; there is no fallback to the local filesystem when the remote command fails.
