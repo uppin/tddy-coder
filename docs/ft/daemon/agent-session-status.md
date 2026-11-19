@@ -173,7 +173,10 @@ shell and feeds each line into the same hook handling a local hook reaches, so a
 shows working, waiting and idle like a local one. Hooks that wait for an answer are not
 installed on a target: the agent asks in its terminal. A line with the wrong token, an unknown
 event or an unparseable payload is dropped and counted, never acted on; a dropped follower
-stream resumes from the byte it had reached, so every hook is delivered once, in order.
+stream resumes from the byte it had reached, so every hook is delivered once, in order. The session's
+end removes the log, and whatever followed it on the target ends within a second of that — whether
+or not the connection that carried it is still there — so a session leaves nothing running on its
+target.
 
 ## Non-Goals
 

@@ -52,3 +52,14 @@ started or stopped, so the transient words (`starting`, `stopping`, `failed`) we
 are carried verbatim, so none needs code. **Still unverified:** the hook follower on a Coder
 workspace. That needs a daemon-level start on a live workspace (the driver never creates
 `hooks.log`), checking that its `SessionStart` reaches the session's status.
+
+**Narrowed 2026-11-19 (session-driver hooks):** the hook follower ran on a Coder workspace.
+`tddy-session-driver`, which wires and follows a session's hooks exactly as a daemon target start
+does (token, `remote_log` hook slots, `create_remote_hook_log`, `RemoteHookFollower` through
+`CoderShell`, `ActivityHookSink`), drove Claude and Cursor on `mantasi/remote-dev`: every hook
+arrived in order with the daemon's reports (Claude `SessionStart` → `Started`, `UserPromptSubmit` →
+`Running`, `PostToolUse` → `ExecutingTool` + activity `Bash`, `Stop` → `Done`; Cursor's lower-case
+events likewise). The same run found, and the change fixed, a `tail -f` the follower left on the
+workspace after each session. **Still unverified:** the daemon's own delivery of those reports into
+its activity service on a live workspace — the step the driver replaces with a record — that is,
+a daemon-level start whose `SessionStart` shows in the session's status.

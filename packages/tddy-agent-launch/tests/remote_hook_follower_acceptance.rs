@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
-use tddy_agent_launch::remote_hook_follower::{HookLine, HookSink, RemoteHookFollower};
+use tddy_agent_launch::remote_hook_follower::{
+    follow_command, HookLine, HookSink, RemoteHookFollower,
+};
 use tddy_remote_shell::{InMemoryShell, ScriptedStream, ShellCall};
 use tddy_testing_commons::wait::eventually;
 
@@ -24,7 +26,7 @@ const OBSERVE: Duration = Duration::from_secs(600);
 
 /// The command that reads the log from the byte `offset` on, as the target is asked to run it.
 fn the_follow_command_from(offset: usize) -> String {
-    format!("tail -c +{} -f '{LOG}'", offset + 1)
+    follow_command(LOG, offset as u64)
 }
 
 /// One hook as an agent on the target logged it.
