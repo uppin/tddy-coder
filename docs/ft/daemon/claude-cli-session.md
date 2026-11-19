@@ -575,7 +575,14 @@ environment the `claude-cli` launch produces:
   on the target again. An agent that exits within the startup window fails the start with its
   last output; an unreachable target fails it with the shell's reason and leaves no session. A
   target combined with a managed codebase, a sandbox, a split placement or the project-home main
-  is refused with the reason, as is a target named together with `ssh_config_host`.
+  is refused with the reason, as is a target named together with `ssh_config_host`. A file the
+  agent's argv names in the session's directory on the daemon's host (its appended system prompt)
+  is copied, owner-only, into the worktree's `.tddy/` on the target, and the argument names that
+  copy: the agent is never handed a path of the daemon's host. A new branch the start names no base
+  for is cut from the project's default integration base (`origin/master`, then `origin/main`, then
+  `origin/HEAD`), read from the target's clone after its fetch — never from the clone's own `HEAD`,
+  which nothing moves after the clone. A project with no URL yet, whose clone on the target has no
+  remote, branches from that clone's one commit.
 - **An allow-listed environment.** The agent process starts from an environment the daemon
   computes, not from the daemon's own: the base set (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
   `TERM`, `LANG`, `LC_*`, `TMPDIR`, `TZ`, `SSH_AUTH_SOCK`, proxy variables, `XDG_*`) read from the

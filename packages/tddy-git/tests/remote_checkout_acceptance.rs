@@ -58,7 +58,7 @@ fn a_new_branch_from(name: &str, base_ref: &str) -> RemoteWorktreeRequest {
         session_id: SESSION.to_string(),
         branch: RemoteBranch::NewFrom {
             name: name.to_string(),
-            base_ref: base_ref.to_string(),
+            base_ref: Some(base_ref.to_string()),
         },
     }
 }
@@ -312,5 +312,101 @@ async fn a_clone_that_fails_reports_the_targets_words() {
             url: QAPE_HQ.to_string(),
             stderr: "fatal: could not read Username for 'https://github.com'".to_string(),
         })
+    );
+}
+
+/// A request for a new branch that names no base, of a project whose URL is `git_url`.
+fn a_new_branch_naming_no_base(name: &str, git_url: &str) -> RemoteWorktreeRequest {
+    RemoteWorktreeRequest {
+        git_url: git_url.to_string(),
+        session_id: SESSION.to_string(),
+        branch: RemoteBranch::NewFrom {
+            name: name.to_string(),
+            base_ref: None,
+        },
+    }
+}
+
+/// [`a_workspace_whose_home_is`], whose clone holds `found` (one of the default bases) once
+/// fetched, as the base probe prints it — between its sentinels, through a pty-merging transport.
+fn a_workspace_whose_clone_holds(found: &'static str) -> InMemoryShell {
+    let shell = a_target_whose_home_is(WORKSPACE_HOME);
+    shell.answers_when(move |request| {
+        request.command.contains("TDDY_REMOTE_BASE_BEGIN").then(|| {
+            ExecOutput::succeeded(
+                format!("TDDY_REMOTE_BASE_BEGIN:{found}:TDDY_REMOTE_BASE_END\r\n").into_bytes(),
+            )
+        })
+    });
+    shell.answers_when(|request| {
+        request
+            .command
+            .contains("git ")
+            .then(|| ExecOutput::succeeded(Vec::new()))
+    });
+    shell
+}
+
+/// The base the target's `git worktree add -b` was given: its last argument, unquoted.
+fn the_base_cut_from(shell: &InMemoryShell) -> Option<String> {
+    shell
+        .commands_run()
+        .iter()
+        .find(|command| command.contains("worktree add -b"))
+        .and_then(|command| command.rsplit(' ').next().map(str::to_string))
+        .map(|base| base.trim_matches('\'').to_string())
+}
+
+#[tokio::test]
+async fn a_new_branch_naming_no_base_is_cut_from_the_clones_fetched_main_branch() {
+    // Given a workspace whose clone holds origin/main once fetched
+    let shell = a_workspace_whose_clone_holds("origin/main");
+
+    // When a new branch naming no base is cut there
+    setup_remote_worktree(
+        &shell,
+        &a_new_branch_naming_no_base("feature/hooks", QAPE_HQ),
+    )
+    .await
+    .expect("the cut succeeds");
+
+    // Then it branches from the fetched origin/main, never the clone's HEAD
+    assert_eq!(the_base_cut_from(&shell), Some("origin/main".to_string()));
+}
+
+#[tokio::test]
+async fn a_new_branch_of_a_project_with_no_url_is_cut_from_its_clones_only_commit() {
+    // Given a project with no URL yet, whose clone on the target is initialised in place
+    let shell = a_workspace_whose_home_is(WORKSPACE_HOME);
+
+    // When a new branch naming no base is cut there
+    setup_remote_worktree(&shell, &a_new_branch_naming_no_base("feature/hooks", ""))
+        .await
+        .expect("the cut succeeds");
+
+    // Then it branches from the clone's HEAD: a clone with no remote has no other base
+    assert_eq!(the_base_cut_from(&shell), Some("HEAD".to_string()));
+}
+
+#[tokio::test]
+async fn a_clone_with_no_default_base_refuses_a_new_branch_naming_none() {
+    // Given a workspace whose clone has none of the default bases once fetched
+    let shell = a_workspace_whose_home_is(WORKSPACE_HOME);
+
+    // When a new branch naming no base is cut there
+    let refused = setup_remote_worktree(
+        &shell,
+        &a_new_branch_naming_no_base("feature/hooks", QAPE_HQ),
+    )
+    .await
+    .expect_err("a clone with nothing to branch from refuses the cut");
+
+    // Then the refusal names the clone, and no worktree was added
+    assert_eq!(
+        (refused, everything_run_on(&shell).contains("worktree add")),
+        (
+            RemoteCheckoutError::NoDefaultBase { root: the_root() },
+            false
+        )
     );
 }

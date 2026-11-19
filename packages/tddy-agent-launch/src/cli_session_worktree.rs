@@ -178,14 +178,14 @@ async fn cut_worktree(
 async fn remote_worktree(
     start: &CliWorktreeStart<'_>,
     git_url: &str,
-    worktree_base_ref: Option<String>,
+    base_ref: Option<String>,
     progress: &AttachmentProgressSink,
 ) -> Result<PathBuf, Status> {
     let shell = recorded_by(
         std::sync::Arc::new(tddy_remote_shell::SshShell::new(start.ssh_alias)),
         progress,
     );
-    remote_worktree_through(start, git_url, &shell, worktree_base_ref, progress).await
+    remote_worktree_through(start, git_url, &shell, base_ref, progress).await
 }
 
 /// `shell`, reporting each command it runs to the start's progress, which is how the start's record
@@ -246,12 +246,15 @@ impl tddy_remote_shell::RemoteCallSink for ProgressCalls {
 
 /// The session's checkout on its target, cloned from `git_url` through `shell`: under the target
 /// user's home, on the branch the start asked for — a new branch from its base, or the existing
-/// branch it named — as the local cut honours both.
+/// branch it named — as the local cut honours both. A new branch is cut from `base_ref` when the
+/// start or its stack parent named one, and otherwise from the clone's own default integration
+/// base, resolved on the target after its fetch (`tddy_core::worktree::DEFAULT_BASE_REFS`) — never
+/// from the clone's `HEAD`, which nothing moves after the clone.
 async fn remote_worktree_through(
     start: &CliWorktreeStart<'_>,
     git_url: &str,
     shell: &dyn tddy_remote_shell::RemoteShell,
-    worktree_base_ref: Option<String>,
+    base_ref: Option<String>,
     progress: &AttachmentProgressSink,
 ) -> Result<PathBuf, Status> {
     // The branch the start resolved, read from its changeset as the local cut reads it: an
@@ -291,9 +294,7 @@ async fn remote_worktree_through(
             }
             tddy_core::worktree::RemoteBranch::NewFrom {
                 name,
-                base_ref: worktree_base_ref
-                    .filter(|base| !base.trim().is_empty())
-                    .unwrap_or_else(|| "HEAD".to_string()),
+                base_ref: base_ref.filter(|base| !base.trim().is_empty()),
             }
         }
     };
@@ -386,18 +387,27 @@ mod remote_cut_tests {
 
     use tddy_remote_shell::{ExecOutput, InMemoryShell};
 
-    use super::{remote_worktree_through, CliWorktreeStart};
+    use super::{cut_worktree, remote_worktree_through, CliWorktreeStart};
 
     const QAPE_HQ: &str = "git@github.com:wix-private/qape-hq.git";
     const SESSION: &str = "01a1b2c3-remote-dev";
     const WORKSPACE_HOME: &str = "/home/coder";
 
-    /// A workspace whose user's home is /home/coder and whose git commands all succeed.
+    /// A workspace whose user's home is /home/coder, whose clone of the project holds
+    /// `origin/master` once fetched, and whose git commands all succeed.
     /// The home probe is answered as a pty-merging transport delivers it: the shell's
     /// start marker, then the probe's sentinels around the home (they spell exactly what
-    /// `remote_checkout_root` prints around `$HOME`).
+    /// `remote_checkout_root` prints around `$HOME`). The cut's base probe is answered with
+    /// `origin/master` between the sentinels `tddy-git`'s `remote_checkout` prints around it.
     fn a_workspace() -> InMemoryShell {
         let shell = InMemoryShell::new("coder.remote-dev");
+        shell.answers_when(|request| {
+            request.command.contains("TDDY_REMOTE_BASE_BEGIN").then(|| {
+                ExecOutput::succeeded(
+                    b"TDDY_REMOTE_BASE_BEGIN:origin/master:TDDY_REMOTE_BASE_END\n".to_vec(),
+                )
+            })
+        });
         shell.answers_when(|request| {
             request.command.contains("$HOME").then(|| {
                 ExecOutput::succeeded(
@@ -520,7 +530,7 @@ mod remote_cut_tests {
             &start,
             QAPE_HQ,
             &workspace,
-            None,
+            Some("origin/master".to_string()),
             &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
         )
         .await
@@ -531,6 +541,232 @@ mod remote_cut_tests {
         assert!(
             run.contains("worktree add -b 'claude-cli/01a1b2c3'"),
             "the generated branch from the changeset is cut:\n{run}"
+        );
+    }
+    /// The base the target's `git worktree add -b` was given: its last argument, unquoted.
+    fn the_base_the_target_cut_from(workspace: &InMemoryShell) -> Option<String> {
+        workspace
+            .commands_run()
+            .iter()
+            .find(|command| command.contains("worktree add -b"))
+            .and_then(|command| command.rsplit(' ').next().map(str::to_string))
+            .map(|base| base.trim_matches('\'').to_string())
+    }
+
+    /// A `new_branch_from_base` start on a target that names no base and has no stack parent is
+    /// cut from the literal `HEAD` of the target's clone: the clone's local `master`, which the
+    /// cut's `git fetch --all` never moves. A long-lived clone (a Coder workspace's
+    /// `~/.tddy/repos/qape-hq`) then branches every new session from a stale commit, where a cut
+    /// on this host branches from the freshly fetched `origin/master`.
+    #[tokio::test]
+    async fn a_target_start_naming_no_base_is_cut_from_the_projects_fetched_main_branch() {
+        // Given a workspace whose clone holds origin/master, and a start naming no base
+        let session_dir = tempfile::tempdir().expect("session dir");
+        let sessions_base = tempfile::tempdir().expect("sessions base");
+        let tddy_data = tempfile::tempdir().expect("tddy data");
+        let project_checkout = tempfile::tempdir().expect("this host's checkout");
+        let workspace = a_workspace();
+        let start = CliWorktreeStart {
+            session_type: "claude-cli",
+            cut_label: "cut the session worktree",
+            session_id: SESSION,
+            session_dir: session_dir.path(),
+            sessions_base: sessions_base.path(),
+            tddy_data_dir: tddy_data.path(),
+            os_user: "testdev",
+            project_id: "proj-1",
+            repo_path: "",
+            branch_worktree_intent: "new_branch_from_base",
+            new_branch_name: "test-coder-remote-dev",
+            selected_integration_base_ref: "",
+            selected_branch_to_work_on: "",
+            create_remote_branch: false,
+            intent: tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+            timeout: Duration::from_secs(30),
+            ssh_alias: "",
+            shell: Some(Arc::new(workspace.clone())),
+        };
+
+        // When the session's worktree is cut, with no stack parent to base it on
+        cut_worktree(
+            &start,
+            project_checkout.path(),
+            QAPE_HQ,
+            None,
+            &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
+        )
+        .await
+        .expect("the cut succeeds");
+
+        // Then the target branched from its clone's fetched main branch, not the clone's HEAD
+        assert_eq!(
+            the_base_the_target_cut_from(&workspace),
+            Some("origin/master".to_string())
+        );
+    }
+}
+
+#[cfg(test)]
+mod provision_tests {
+    //! Where a CLI harness session's worktree comes from: the client's own checkout, used as it
+    //! is, or a registered project — and the starts that name neither usably.
+
+    use std::path::Path;
+    use std::time::Duration;
+
+    use tddy_session_files::attachment_progress::AttachmentProgressSink;
+
+    use super::{provision_cli_worktree, CliWorktree, CliWorktreeStart};
+    use crate::stack_parent::SpawnStackParent;
+
+    /// The directories a start is made in: its session directory, the sessions base and the
+    /// daemon's data directory.
+    struct ADaemonsDirectories {
+        session_dir: tempfile::TempDir,
+        sessions_base: tempfile::TempDir,
+        tddy_data: tempfile::TempDir,
+    }
+
+    fn a_daemons_directories() -> ADaemonsDirectories {
+        ADaemonsDirectories {
+            session_dir: tempfile::tempdir().expect("session dir"),
+            sessions_base: tempfile::tempdir().expect("sessions base"),
+            tddy_data: tempfile::tempdir().expect("tddy data"),
+        }
+    }
+
+    impl ADaemonsDirectories {
+        /// A claude-cli start on this host naming `project_id` and the client's `repo_path`.
+        fn a_start<'a>(&'a self, project_id: &'a str, repo_path: &'a str) -> CliWorktreeStart<'a> {
+            CliWorktreeStart {
+                session_type: "claude-cli",
+                cut_label: "cut the session worktree",
+                session_id: "01a1f24f-7302-7521-b951-e380ae501dd5",
+                session_dir: self.session_dir.path(),
+                sessions_base: self.sessions_base.path(),
+                tddy_data_dir: self.tddy_data.path(),
+                os_user: "testdev",
+                project_id,
+                repo_path,
+                branch_worktree_intent: "new_branch_from_base",
+                new_branch_name: "feature/hooks",
+                selected_integration_base_ref: "",
+                selected_branch_to_work_on: "",
+                create_remote_branch: false,
+                intent: tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+                timeout: Duration::from_secs(5),
+                ssh_alias: "",
+                shell: None,
+            }
+        }
+    }
+
+    async fn provisioned(start: &CliWorktreeStart<'_>) -> Result<CliWorktree, tddy_rpc::Status> {
+        provision_cli_worktree(
+            start,
+            &SpawnStackParent::NoParent,
+            &AttachmentProgressSink::discarding(),
+        )
+        .await
+    }
+
+    /// How a refused provision reads: its code and message.
+    fn refusal(result: Result<CliWorktree, tddy_rpc::Status>) -> (tddy_rpc::Code, String) {
+        match result {
+            Ok(worktree) => panic!("provisioned {}", worktree.path.display()),
+            Err(status) => (status.code(), status.message().to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_client_checkout_is_the_worktree_as_it_is_and_belongs_to_no_project() {
+        // Given a start naming the client's own checkout
+        let directories = a_daemons_directories();
+        let checkout = tempfile::tempdir().expect("the client's checkout");
+        let checkout_path = checkout.path().to_string_lossy().into_owned();
+        let start = directories.a_start("proj-1", &checkout_path);
+
+        // When
+        let worktree = provisioned(&start).await.expect("the checkout is used");
+
+        // Then the checkout itself is the worktree, canonical, and no project owns it
+        assert_eq!(
+            (worktree.path, worktree.project.is_none()),
+            (
+                std::fs::canonicalize(checkout.path()).expect("the checkout resolves"),
+                true
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_client_checkout_that_is_a_file_is_refused() {
+        // Given a start naming a file as the client's checkout
+        let directories = a_daemons_directories();
+        let dir = tempfile::tempdir().expect("a directory holding the file");
+        let file = dir.path().join("README.md");
+        std::fs::write(&file, "not a checkout").expect("the file is written");
+        let file_path = file.to_string_lossy().into_owned();
+        let start = directories.a_start("proj-1", &file_path);
+
+        // When
+        let refused = refusal(provisioned(&start).await);
+
+        // Then
+        assert_eq!(
+            refused,
+            (
+                tddy_rpc::Code::InvalidArgument,
+                format!(
+                    "repo_path {} is not a directory",
+                    std::fs::canonicalize(&file)
+                        .expect("the file resolves")
+                        .display()
+                )
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_client_checkout_that_does_not_exist_is_refused() {
+        // Given a start naming a checkout that is not there
+        let directories = a_daemons_directories();
+        let missing = Path::new("/nonexistent/tddy/checkout");
+        let start = directories.a_start("proj-1", "/nonexistent/tddy/checkout");
+
+        // When
+        let (code, message) = refusal(provisioned(&start).await);
+
+        // Then the refusal names the path
+        assert_eq!(
+            (
+                code,
+                message.starts_with(&format!(
+                    "repo_path {} is not accessible",
+                    missing.display()
+                ))
+            ),
+            (tddy_rpc::Code::InvalidArgument, true),
+            "{message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_start_naming_neither_a_project_nor_a_checkout_is_refused() {
+        // Given
+        let directories = a_daemons_directories();
+        let start = directories.a_start("", "");
+
+        // When
+        let refused = refusal(provisioned(&start).await);
+
+        // Then
+        assert_eq!(
+            refused,
+            (
+                tddy_rpc::Code::InvalidArgument,
+                "project_id is required for claude-cli sessions".to_string()
+            )
         );
     }
 }

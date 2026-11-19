@@ -25,12 +25,13 @@ use ssh_support::an_ssh_that_connects_through_its_proxy_and_runs_commands_here;
 
 use coder_support::{
     a_coder_that_is_a_pty_unless_asked_for_stdio, a_coder_that_refuses_to_connect,
+    a_coder_that_reports_a_failed_command_as_the_real_cli_does,
     a_coder_whose_workspaces_end_their_lines_with_carriage_returns,
     a_coder_whose_workspaces_merge_stderr_into_stdout,
     a_coder_whose_workspaces_never_see_the_end_of_their_input,
     a_coder_whose_workspaces_outlive_their_connection, a_coder_whose_workspaces_run_commands_here,
-    a_coder_whose_workspaces_start_with_no_pager_variables, the_credentials, DEPLOYMENT_URL,
-    SESSION_TOKEN,
+    a_coder_whose_workspaces_start_with_no_pager_variables, the_credentials,
+    CODER_SSH_FAILURE_WRAPPER, DEPLOYMENT_URL, SESSION_TOKEN,
 };
 
 /// What a one-shot call's arguments start with: never start the workspace, the workspace and its
@@ -213,16 +214,9 @@ async fn a_command_through_a_merging_pty_keeps_its_status_and_merged_words() {
         .exec(ExecRequest::new("printf out; printf err >&2; exit 3"))
         .await;
 
-    // Then the command ran: its status is its own, its words arrive merged, and the start
-    // marker that proves it ran is not part of the output
-    assert_eq!(
-        output,
-        Ok(ExecOutput {
-            status: 3,
-            stdout: b"outerr".to_vec(),
-            stderr: Vec::new(),
-        })
-    );
+    // Then the command ran: its status is its own, its words arrive merged — as the account of
+    // its failure — and the start marker that proves it ran is not part of the output
+    assert_eq!(output, Ok(ExecOutput::exited(3, "outerr")));
 }
 
 #[tokio::test]
@@ -252,14 +246,7 @@ async fn a_failed_command_through_a_merging_pty_is_not_unreachable() {
         .await;
 
     // Then it is a failed command with its words, not an unreachable workspace
-    assert_eq!(
-        output,
-        Ok(ExecOutput {
-            status: 1,
-            stdout: b"no such directory".to_vec(),
-            stderr: Vec::new(),
-        })
-    );
+    assert_eq!(output, Ok(ExecOutput::exited(1, "no such directory")));
 }
 
 #[tokio::test]
@@ -610,4 +597,41 @@ async fn a_streamed_command_reaches_the_workspace_through_coder_ssh_stdio() {
         .filter(|line| line.contains(SESSION_TOKEN) || line.contains(DEPLOYMENT_URL))
         .collect();
     assert_eq!(command_lines_naming_the_token, Vec::<String>::new());
+}
+
+/// `coder ssh` runs a command in a pty, so what the command writes to stderr arrives on the CLI's
+/// stdout, and the CLI's own stderr holds only its generic wrapper. A failed write through the
+/// shell is then reported with that wrapper alone ("Encountered an error running \"coder ssh\" …
+/// Process exited with status 1"), and why the command failed is lost: a launch that wrote its
+/// system prompt at a path the workspace cannot create said nothing of `mkdir`.
+#[tokio::test]
+async fn a_failed_write_through_a_merging_pty_says_why_the_command_failed() {
+    // Given a coder that reports a failed command as the real CLI does, and a file on the
+    // workspace standing where the written file's directory would have to be created
+    let coder = a_coder_that_reports_a_failed_command_as_the_real_cli_does();
+    let shell = coder.shell_on(adas_devbox());
+    std::fs::create_dir_all(coder.scratch_dir()).expect("the workspace's scratch directory");
+    let in_the_way = coder.scratch_dir().join("sessions");
+    std::fs::write(&in_the_way, "a file, not a directory").expect("the file in the way");
+    let prompt_file = in_the_way.join("01a1f24f/agent-system-prompt.md");
+
+    // When the file is written through the shell
+    let failure = shell
+        .write_file(
+            &prompt_file.to_string_lossy(),
+            b"Tell your operator when you are blocked.",
+            FileMode::TargetDefault,
+        )
+        .await
+        .expect_err("a file whose directory cannot be created is not written");
+
+    // Then the failure carries what `mkdir` said, not the CLI's wrapper
+    assert!(
+        matches!(
+            &failure,
+            RemoteShellError::Exited { status: 1, stderr }
+                if stderr.contains("Not a directory") && !stderr.contains(CODER_SSH_FAILURE_WRAPPER)
+        ),
+        "the write failed with: {failure:?}"
+    );
 }

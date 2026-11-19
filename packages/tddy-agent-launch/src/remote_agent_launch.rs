@@ -9,6 +9,7 @@
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-15-remote-shell-ssh-agent-launch.md.
 
+mod session_files;
 mod startup;
 mod target;
 
@@ -25,7 +26,7 @@ use tddy_core::session_pointer::{SessionPointer, SessionPointerOwner};
 use tddy_core::ssh_exec::shell_single_quote;
 #[cfg(test)]
 use tddy_core::SessionTarget;
-use tddy_remote_shell::{FileMode, RemoteShell, RemoteShellError};
+use tddy_remote_shell::{RemoteShell, RemoteShellError};
 
 use crate::cli_session_pointer::{
     record_remote_owner, session_pointer_path, PlacedSessionPointer, PointerHost,
@@ -34,11 +35,13 @@ use crate::remote_agent_launch::startup::exits_during_startup;
 use crate::remote_agent_launch::startup::settled_last_output;
 use crate::remote_agent_launch::startup::wait_for_agent_start;
 use crate::remote_agent_launch::startup::AgentStart;
-use crate::spec_launch::{plan_host_pty, HostAgent, HostPtySession, SpecLaunchError};
+use crate::spec_launch::{HostAgent, HostPtySession, SpecLaunchError};
 
 /// Where the remote command records the agent's pid, relative to the session's worktree on the
 /// target: what a caller that stops the agent there reads.
 pub use crate::cli_session_pointer::REMOTE_AGENT_PID_FILE;
+use crate::remote_agent_launch::session_files::plan_the_launch;
+use crate::remote_agent_launch::session_files::write_rendered_session_files;
 pub(crate) use crate::remote_agent_launch::target::target_config_host;
 pub use crate::remote_agent_launch::target::{
     proto_of_session_target, session_target_of_proto, shell_for_target, TargetError,
@@ -105,7 +108,8 @@ pub struct RemoteLaunch<'a> {
     /// The session's worktree on the target: the agent's working directory.
     pub worktree: &'a Path,
     /// The session's directory on this host: the working directory of the local PTY that runs the
-    /// transport's client.
+    /// transport's client. A file the agent's argv names in it is copied into `worktree`'s `.tddy/`
+    /// on the target, and the argument rewritten to that copy.
     pub session_dir: &'a Path,
     /// The session pointer already placed in `worktree` on the target, when the launch placed one:
     /// rewritten there with the agent as its owner once the agent has started.
@@ -244,9 +248,9 @@ pub async fn launch_on_target(
     // them on this host, and written through the port at the paths the agent is told.
     let (slot_files, plan) = plan_the_launch(agent, params, slots, &remote).await?;
     // A file the launch rendered into this session's directory on this host (its appended system
-    // prompt) is written on the target at the same path, so the argument that names it reads the
-    // target's copy, never a path of this host.
-    write_rendered_session_files(&remote, slot_files, &plan).await?;
+    // prompt) is copied into the worktree's `.tddy/` on the target and its argument rewritten to
+    // that copy: the target need not have this host's directory, so no host path reaches it.
+    let plan = write_rendered_session_files(&remote, slot_files, plan).await?;
     pre_trust_a_claude_clone(agent, &remote).await?;
 
     let (argv, local_env) = client_argv_and_env(agent, &remote, &session, plan);
@@ -302,74 +306,6 @@ fn client_argv_and_env(
 ) -> (Vec<String>, Vec<(String, String)>) {
     let command = remote_command(agent, remote, session, plan);
     client_command(remote, command)
-}
-
-async fn plan_the_launch(
-    agent: &HostAgent,
-    params: &TemplateParams,
-    slots: &RenderedSlots,
-    remote: &RemoteLaunch<'_>,
-) -> Result<
-    (
-        Vec<(std::path::PathBuf, Vec<u8>)>,
-        crate::spec_launch::HostPtyPlan,
-    ),
-    RemoteLaunchError,
-> {
-    let mut render_slots = slots.clone();
-    let slot_files = std::mem::take(&mut render_slots.files);
-    // The agent is the target's own, found by its bare command on the target's login `PATH`: the
-    // binary this host resolved means nothing there.
-    let mut on_the_target = agent.clone();
-    on_the_target.tool.binary = std::path::PathBuf::from(&agent.tool.command);
-    // `on_target` lets a spec render what only a start on a target needs (Cursor's `--trust`).
-    let params = params.clone().with_flag("on_target", true);
-    let plan =
-        plan_host_pty(&on_the_target, &params, &render_slots).map_err(RemoteLaunchError::Plan)?;
-    write_slot_files(remote, &slot_files).await?;
-    Ok((slot_files, plan))
-}
-
-async fn write_slot_files(
-    remote: &RemoteLaunch<'_>,
-    slot_files: &[(std::path::PathBuf, Vec<u8>)],
-) -> Result<(), RemoteLaunchError> {
-    for (path, bytes) in slot_files {
-        remote
-            .shell
-            .write_file(&path.to_string_lossy(), bytes, FileMode::TargetDefault)
-            .await
-            .map_err(RemoteLaunchError::Shell)?;
-    }
-    Ok(())
-}
-
-async fn write_rendered_session_files(
-    remote: &RemoteLaunch<'_>,
-    slot_files: Vec<(std::path::PathBuf, Vec<u8>)>,
-    plan: &crate::spec_launch::HostPtyPlan,
-) -> Result<(), RemoteLaunchError> {
-    for argument in &plan.argv {
-        let path = Path::new(argument);
-        if !path.starts_with(remote.session_dir) || !path.is_file() {
-            continue;
-        }
-        if slot_files.iter().any(|(written, _)| written == path) {
-            continue;
-        }
-        let bytes = std::fs::read(path).map_err(|error| {
-            RemoteLaunchError::Plan(SpecLaunchError::SlotFile {
-                path: path.to_path_buf(),
-                message: error.to_string(),
-            })
-        })?;
-        remote
-            .shell
-            .write_file(&path.to_string_lossy(), &bytes, FileMode::TargetDefault)
-            .await
-            .map_err(RemoteLaunchError::Shell)?;
-    }
-    Ok(())
 }
 
 fn remote_command(

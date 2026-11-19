@@ -312,6 +312,14 @@ impl CoderShell {
     /// merges the command's stderr into its stdout — so it is recognised on either stream,
     /// with the `\r\n` a pty writes. Without it, a stopped workspace and a command that
     /// exits 1 are indistinguishable: `coder ssh` exits 1 for both.
+    ///
+    /// A marker on stdout proves the command ran in a merging pty, so what the CLI wrote on its
+    /// own stderr is the transport's, not the command's — for a failed command, only its generic
+    /// wrapper ("Encountered an error running \"coder ssh\" …"). The command's stderr is inside
+    /// the merged stdout and cannot be told apart from its stdout. A command that failed there
+    /// is therefore reported with the merged words as its stderr and nothing as its stdout, so
+    /// every reader of a failure's stderr says what the command said, never the CLI's wrapper;
+    /// a command that succeeded keeps the merged words as its stdout.
     fn output_of(
         &self,
         code: i32,
@@ -326,10 +334,14 @@ impl CoderShell {
             });
         }
         if let Some(stripped) = strip_start_marker(&stdout) {
-            return Ok(ExecOutput {
-                status: code,
-                stdout: stripped.to_vec(),
-                stderr,
+            return Ok(if code == 0 {
+                ExecOutput {
+                    status: code,
+                    stdout: stripped.to_vec(),
+                    stderr,
+                }
+            } else {
+                ExecOutput::exited(code, stripped.to_vec())
             });
         }
         if code == 0 {
