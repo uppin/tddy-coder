@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Bug Fix
 **Complexity**: 4 — many crates (kernel, session-activity, cli-sessions, daemon-sandbox, agent-launch, session-lifecycle, daemon-rpc, worktree-service, telegram-control), a cross-crate API change (`list_sessions_in_dir`), concurrency of PTY exit vs listing
-**Stack**: `#session-liveness` 1/4 — branch `feature/session-liveness/agent-tab-liveness`, base `master`
+**Stack**: `#session-liveness` 1/4 (PR #958, stack #962) — branch `feature/session-liveness/agent-tab-liveness`, base `master`
 
 ## Responsibility
 
@@ -99,6 +99,8 @@ unrelated (target launch; not touched). No other code issue names the touched sy
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
+- [x] Create failing acceptance tests / run them (verify they fail) / USER REVIEW — approved 2026-11-19
+- [x] TDD Red — failing unit/integration tests
 - [ ] **Implementation**: live set + every listing caller + delete / signal / reaper
 - [ ] **Testing**: acceptance + unit tests below passing; old pid-faking tests reworked
 - [ ] **Interim TODO**: `tool` sessions inactive + yaml-pid signal carve-out, naming node 3
