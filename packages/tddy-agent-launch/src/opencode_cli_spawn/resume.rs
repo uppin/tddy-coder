@@ -441,6 +441,7 @@ fn resumed_session_response(session_id: &str) -> Result<Response<ResumeSessionRe
         livekit_room: String::new(),
         livekit_url: String::new(),
         livekit_server_identity: String::new(),
+        restored_tabs: Vec::new(),
     }))
 }
 

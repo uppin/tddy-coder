@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — several crates (agent-launch, session-lifecycle, service proto, coding-agent-specs use, session-web), a proto change, per-tab failure semantics
-**Stack**: `#session-liveness` 4/4 — branch `feature/session-liveness/resume-roster`, base `feature/session-liveness/tool-tab`
+**Stack**: `#session-liveness` 4/4 (PR #961, stack #962) — branch `feature/session-liveness/resume-roster`, base `feature/session-liveness/tool-tab`
 
 ## Affected Packages
 
@@ -84,8 +84,8 @@ is not re-checked.
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests / run them (verify they fail) / USER REVIEW
-- [ ] TDD Red — failing unit/integration tests
+- [x] Create failing acceptance tests / run them (verify they fail) / USER REVIEW — approved 2026-11-19
+- [x] TDD Red — failing unit/integration tests
 - [ ] Implementation
 - [ ] Per-harness TODOs for non-resumable tabs (opencode, muse, warp)
 - [ ] Package documentation, scoped clippy, single-spec Cypress
@@ -113,22 +113,71 @@ Each entry yields a `RestoredTab`. The web keeps the active id across the stoppe
 ## Acceptance Tests
 
 `packages/tddy-session-lifecycle/tests/resume_tab_roster_acceptance.rs`:
-- [ ] `resume_restores_every_roster_tab_under_its_recorded_id`
-- [ ] `a_claude_tab_resumes_its_own_conversation`
-- [ ] `a_live_tmux_wrapped_tab_is_reattached_not_relaunched_on_resume`
-- [ ] `a_tmux_wrapped_tab_whose_tmux_session_is_gone_is_relaunched_and_resumed`
-- [ ] `a_tmux_attach_tab_whose_session_is_gone_is_dropped_and_reported`
-- [ ] `an_opencode_tab_reopens_fresh_and_is_reported_fresh`
-- [ ] `a_cursor_tab_resumes_its_minted_chat`
-- [ ] `a_tab_live_at_resume_is_not_restarted`
+- [x] `resume_restores_every_roster_tab_under_its_recorded_id`
+- [x] `a_claude_tab_resumes_its_own_conversation`
+- [x] `a_live_tmux_wrapped_tab_is_reattached_not_relaunched_on_resume`
+- [x] `a_tmux_wrapped_tab_whose_tmux_session_is_gone_is_relaunched_and_resumed`
+- [x] `a_tmux_attach_tab_whose_session_is_gone_is_dropped_and_reported`
+- [x] `an_opencode_tab_reopens_fresh_and_is_reported_fresh`
+- [x] `a_cursor_tab_resumes_its_minted_chat`
+- [x] `a_tab_live_at_resume_is_not_restarted`
 
 `packages/tddy-session-web/cypress/component/ResumeKeepsActiveTabAcceptance.cy.tsx`:
-- [ ] `keeps the active tab selected across Resume`
+- [x] `keeps the active tab selected across Resume` (written, type-checks, not run — Cypress)
 
 ## Unit Tests
 
 - `restore_tab_roster`'s per-kind decision (pure, over a roster and a liveness snapshot).
 - Spec rendering: a claude tab with `resume` renders `--resume <id>`.
+
+## Contract as published (red)
+
+Names the changeset left open, as the draft contract fixed them. Module
+`packages/tddy-agent-launch/src/opencode_cli_spawn/restore_tabs.rs`, re-exported as
+`tddy_agent_launch::restore_tabs`:
+
+- `RESUMABLE_PROPERTY = "resumable"` (:26) — the `agent` node key; `"false"` marks a harness that
+  cannot resume a given conversation, absent means resumable. Defined here, not in n2's
+  `tab_roster`, because n2 owns that module.
+- `enum TabRestore { LeaveLive, ResumeAgent { harness, conversation_id }, FreshAgent { harness },
+  ReattachTmux { session, os_user }, RelaunchTmux { session, os_user, harness, resume_conversation:
+  Option<String> }, FreshShell, ReattachTmuxAttach { session, os_user }, Drop { reason } }` (:30).
+- `struct LiveTabs { terminals, tmux_sessions: BTreeSet<(os_user, session)> }` (:62), with
+  `none` / `with_terminal` / `with_tmux_session` / `terminal_is_live` / `tmux_session_exists`
+  (pure data, implemented).
+- `fn restore_plan(entry: &TabEntry, live: &LiveTabs) -> TabRestore` (:110) — `todo!()`.
+- `struct RosterRestore<'a> { session_id, session_dir, worktree, os_user, cli_manager,
+  coding_agents, roster_store: &TabRosterStore }` (:121).
+- `async fn restore_tab_roster(RosterRestore<'_>) -> Vec<RestoredTab>` (:140) — `todo!()`, and **not
+  yet called**: green adds the one call after main's resume and fills `restored_tabs` where the
+  response is built.
+- `fn agent_tab_argv(spec, binary, conversation_id, resume: bool) -> Result<Vec<String>, SpecError>`
+  (:159) — `todo!()`; the seam the spec-rendering unit tests pin, shared by the tab start (n2's
+  `CliManagerTerminalRoster::start`) and the restore.
+- Proto (`packages/tddy-service/proto/session.proto`): `ResumeSessionResponse.restored_tabs = 5`
+  (:247), `message RestoredTab { terminal_id, outcome, reason }` (:251), `enum RestoredTabOutcome
+  { RESTORED_TAB_OUTCOME_UNSPECIFIED, _RESTORED, _FRESH, _DROPPED }` (:259). A live tab left alone
+  is reported `RESTORED`. Every `ResumeSessionResponse` literal fills `restored_tabs: Vec::new()`;
+  TS regenerated in `tddy-client-web` and `tddy-rust-typescript-tests`.
+- Tests: `restore_tabs_tests.rs` (16 unit), `tests/resume_tab_roster_acceptance.rs` (8, serial) over
+  the new fixture `tests/resume_roster_support/mod.rs` (stub claude, cursor with `create-chat`,
+  opencode), `cypress/component/ResumeKeepsActiveTabAcceptance.cy.tsx` (1).
+
+## Refactoring Needed
+
+### From @red (TDD Red Phase)
+
+- **Gap — start a terminal under a given id.** n2's changeset lists "Starting a terminal under a
+  given id" as its responsibility, but its contract publishes no such entry point:
+  `start_terminal` / `start_agent_terminal` / `start_tmux_terminal` still mint `Uuid::now_v7()`
+  (`tddy-cli-sessions/src/cli_session_manager/terminals.rs`). Only the tmux paths
+  (`attach_terminal_to_tmux` / `reattach_terminal`) take a `terminal_id`. `ResumeAgent`,
+  `FreshAgent` and `FreshShell` cannot be carried out until n2 adds it; this node does not.
+- `RosterRestore.roster_store`: no `TabRosterStore` is reachable from `LaunchSessions` yet; green
+  wires the daemon's one instance (n2 owns where it lives).
+- `tests/resume_roster_support/mod.rs` repeats the session-host builder of `support/tab_daemon.rs`
+  (itself flagged by n2 as duplicating two others); a shared builder in `tests/support/` would serve
+  all of them.
 
 ## Decisions & Trade-offs
 

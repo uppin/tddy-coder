@@ -140,6 +140,7 @@ impl LaunchSessions {
             livekit_room: String::new(),
             livekit_url: String::new(),
             livekit_server_identity: String::new(),
+            restored_tabs: Vec::new(),
         }))
     }
 

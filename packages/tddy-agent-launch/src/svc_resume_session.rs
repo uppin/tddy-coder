@@ -116,6 +116,7 @@ impl LaunchSessions {
                 livekit_room: String::new(),
                 livekit_url: String::new(),
                 livekit_server_identity: String::new(),
+                restored_tabs: Vec::new(),
             }));
         }
 
@@ -219,6 +220,7 @@ impl LaunchSessions {
             livekit_room: result.livekit_room,
             livekit_url: result.livekit_url,
             livekit_server_identity: result.livekit_server_identity,
+            restored_tabs: Vec::new(),
         }))
     }
 }
