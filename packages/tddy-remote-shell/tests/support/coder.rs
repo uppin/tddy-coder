@@ -55,20 +55,60 @@ pub fn a_coder_whose_workspaces_merge_stderr_into_stdout() -> StandInCoder {
 /// the bytes it was sent blocks for good, as `cat` does on the workspace. (The CLI's stdin is
 /// kept as fd 4 for the forwarder: an asynchronous list's own stdin is `/dev/null`.)
 pub fn a_coder_whose_workspaces_never_see_the_end_of_their_input() -> StandInCoder {
+    StandInCoder::running(&format!("{RECORD_THE_CALL}{A_PTY_THAT_NEVER_ENDS_INPUT}"))
+}
+
+/// What a workspace's pty does to a command: see
+/// [`a_coder_whose_workspaces_never_see_the_end_of_their_input`].
+const A_PTY_THAT_NEVER_ENDS_INPUT: &str =
+    "while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
+     shift\n\
+     input=\"$here/input.$$\"\n\
+     mkfifo \"$input\"\n\
+     exec 3<>\"$input\" 4<&0\n\
+     cat <&4 >&3 &\n\
+     forwarder=$!\n\
+     sh -c \"$*\" <&3 2>&1\n\
+     status=$?\n\
+     kill \"$forwarder\" 2>/dev/null\n\
+     rm -f \"$input\"\n\
+     exit \"$status\"\n";
+
+/// A coder that is a pty for `coder ssh <workspace> -- <command>` (never-ending input, stderr
+/// merged) and only a transport for `coder ssh --stdio ...`, as it is when OpenSSH runs it as a
+/// `ProxyCommand`: it records the call and ends, the stand-in `ssh` running the command itself.
+/// What it records is how a test sees which of the two a shell used.
+pub fn a_coder_that_is_a_pty_unless_asked_for_stdio() -> StandInCoder {
+    StandInCoder::running(&format!(
+        "{RECORD_THE_CALL}\
+         case \" $* \" in *\" --stdio \"*) exit 0;; esac\n\
+         {A_PTY_THAT_NEVER_ENDS_INPUT}"
+    ))
+}
+
+/// A coder whose workspaces outlive their connection, as a remote process does when the link to
+/// it drops: the command runs in the background of the stand-in, so killing the stand-in (what
+/// dropping a `CoderShell` call does to its local `coder`) leaves the command running. The
+/// command's stdin is `/dev/null`.
+pub fn a_coder_whose_workspaces_outlive_their_connection() -> StandInCoder {
     StandInCoder::running(&format!(
         "{RECORD_THE_CALL}\
          while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
          shift\n\
-         input=\"$here/input.$$\"\n\
-         mkfifo \"$input\"\n\
-         exec 3<>\"$input\" 4<&0\n\
-         cat <&4 >&3 &\n\
-         forwarder=$!\n\
-         sh -c \"$*\" <&3 2>&1\n\
-         status=$?\n\
-         kill \"$forwarder\" 2>/dev/null\n\
-         rm -f \"$input\"\n\
-         exit \"$status\"\n"
+         sh -c \"$*\" </dev/null &\n\
+         wait $!\n"
+    ))
+}
+
+/// A coder whose workspaces run commands here, from an environment that names no pager and no
+/// git prompt policy, as a fresh login on a workspace does.
+pub fn a_coder_whose_workspaces_start_with_no_pager_variables() -> StandInCoder {
+    StandInCoder::running(&format!(
+        "{RECORD_THE_CALL}\
+         unset PAGER GIT_PAGER GIT_TERMINAL_PROMPT\n\
+         while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
+         shift\n\
+         exec sh -c \"$*\"\n"
     ))
 }
 
@@ -141,6 +181,16 @@ impl StandInCoder {
     /// [`SESSION_TOKEN`].
     pub fn shell_on(&self, workspace: CoderWorkspaceRef) -> CoderShell {
         CoderShell::through(self.path(), the_credentials(), workspace)
+    }
+
+    /// The shell on `workspace` through this stand-in, streaming through the stand-in `ssh`
+    /// `ssh` as a `ProxyCommand`-driven client.
+    pub fn shell_on_through_ssh(
+        &self,
+        workspace: CoderWorkspaceRef,
+        ssh: &crate::ssh_support::StandInSsh,
+    ) -> CoderShell {
+        self.shell_on(workspace).with_ssh_binary(ssh.path())
     }
 
     /// The arguments of every call so far, one call per entry, joined by spaces.

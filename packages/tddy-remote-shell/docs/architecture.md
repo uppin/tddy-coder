@@ -66,7 +66,30 @@ rewrites every `\n` the command prints as `\r\n` (`onlcr`):
   The bytes travel on stdin, never on a command line: `write_file` carries the session
   pointer, and with it the hook token.
 
-`exec_streamed` relays its pipes through the same pty untranslated.
+A one-shot is also bounded on the workspace and pager-free. The wrapper exports `PAGER=cat`,
+`GIT_PAGER=cat` and `GIT_TERMINAL_PROMPT=0`, then runs the command as `sh -c` in a process group of
+its own (`set -m`) under a POSIX `sh` watchdog. After `ceil(deadline)` seconds from the command's
+start the watchdog sends `TERM` to the group, and `KILL` 2 s later. A command it ends exits 143, and
+the watchdog never kills one that finished within the deadline. Dropping the local `coder` does not
+stop what it started, so the caller's `TimedOut` and the workspace's cleanup come from different
+clocks that agree to within the connect time. The watchdog needs nothing beyond `sh`: coreutils
+`timeout` is not on every workspace. It signals with `kill -s TERM -- -<pgid>`, the one form both
+dash (the usual workspace `/bin/sh`) and bash accept; `kill -TERM -- -<pgid>` fails in dash and
+leaves the watchdog holding the connection open. Job-control notices go to `/dev/null`, with the
+command keeping the original stderr as fd 3.
+
+`exec_streamed` does **not** use the pty. It runs the host's OpenSSH client with
+`-o ProxyCommand='<coder> ssh --stdio --disable-autostart <workspace>'` and the fixed host token
+`coder-workspace` (the proxy reaches the workspace, the name resolves nothing). The CLI's `--stdio`
+mode is a plain pipe, so the command's bytes arrive as written, its stderr is separate, closing
+stdin is an EOF and its exit status is the command's. `ssh` carries the shared `ssh_options()` plus
+`StrictHostKeyChecking=no`, `UserKnownHostsFile=/dev/null` (the CLI authenticates the workspace by
+token, not by host key) and `LogLevel=ERROR` (so ssh's own known-hosts warning stays off the
+command's stderr). `CODER_URL` and `CODER_SESSION_TOKEN` are on the `ssh` child's environment
+alone, which the proxy inherits; neither is on any argv. `CoderShell::with_ssh_binary` names the
+`ssh` to run (default: `ssh` on `PATH`). `exec`, `read_file`, `write_file` and `interactive` keep
+the pty route.
+
 `interactive` is `coder ssh --disable-autostart <workspace> -- <command>` for a local PTY. Credentials are
 held in memory for the shell's life; `Debug` shows the URL and never the token.
 

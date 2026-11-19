@@ -3,7 +3,10 @@
 //! The target is resolved to a shell by `shell_for_coder_target_through`, with a stand-in for the
 //! vault that holds the Coder account; the shell is the real `CoderShell` behind a stand-in `coder`
 //! executable: a script that stands for both the Coder CLI and the workspace it reaches, running
-//! what follows `--` on this machine. From the shell on, the launch and the hooks are the path an
+//! what follows `--` on this machine — and a stand-in OpenSSH `ssh` beside it, which a streamed
+//! command (the hook follower's) runs through: it runs its `ProxyCommand` (the stand-in `coder`
+//! as `coder ssh --stdio`) and then its command here, as the workspace would. No real `ssh` is
+//! ever reached. From the shell on, the launch and the hooks are the path an
 //! ssh target takes (`remote_agent_launch_acceptance.rs`, `remote_hooks_acceptance.rs`). A temp
 //! directory stands for the workspace's filesystem. No deployment is reached.
 //!
@@ -177,7 +180,9 @@ struct ACoderCall {
 /// A running workspace: the stand-in records its working directory, the deployment and token it
 /// was given and its arguments, then hands what follows `--` to a shell as one command line —
 /// which is what a workspace's login shell is given — and becomes it. Like coder v2.33.5, it
-/// refuses `-t`, a flag that CLI does not have.
+/// refuses `-t`, a flag that CLI does not have. As `coder ssh --stdio`, the stand-in `ssh`'s
+/// `ProxyCommand`, it is the pipe to the workspace and carries nothing: that `ssh` runs its
+/// command here itself.
 fn a_running_workspace() -> AWorkspace {
     a_workspace_answering_one_shots_after("")
 }
@@ -208,11 +213,24 @@ for argument in "$@"; do
     exit 1
   fi
 done
+[ "$2" = "--stdio" ] && exit 0
 while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done
 shift
 {delay}exec /bin/sh -c "$*"
 "#
         ),
+    );
+    write_executable(
+        &root.join("bin/ssh"),
+        r#"#!/bin/sh
+proxy=
+for argument; do
+  case "$argument" in ProxyCommand=*) proxy="${argument#ProxyCommand=}";; esac
+  last="$argument"
+done
+[ -n "$proxy" ] && /bin/sh -c "$proxy" </dev/null >/dev/null 2>&1
+exec /bin/sh -c "$last"
+"#,
     );
     let workspace = AWorkspace { root, _dir: dir };
     std::fs::create_dir_all(workspace.worktree()).expect("the session's worktree in the workspace");
@@ -223,6 +241,11 @@ impl AWorkspace {
     /// The stand-in `coder` that reaches this workspace.
     fn coder(&self) -> PathBuf {
         self.root.join("bin/coder")
+    }
+
+    /// The stand-in OpenSSH client a streamed command reaches this workspace through.
+    fn ssh(&self) -> PathBuf {
+        self.root.join("bin/ssh")
     }
 
     /// The session's worktree in the workspace.
@@ -447,14 +470,14 @@ fn a_daemon() -> ADaemon {
 
 impl ADaemon {
     /// The shell that reaches `target`, asked as [`SUBJECT`] with their `vault`, through
-    /// `workspace`'s stand-in `coder`.
+    /// `workspace`'s stand-in `coder` and `ssh`.
     fn the_shell_for(
         &self,
         target: &SessionTarget,
         workspace: &AWorkspace,
         vault: &AVault,
     ) -> Result<Arc<dyn RemoteShell>, CoderTargetError> {
-        shell_for_coder_target_through(workspace.coder(), target, SUBJECT, vault)
+        shell_for_coder_target_through(workspace.coder(), workspace.ssh(), target, SUBJECT, vault)
     }
 
     /// Launch `agent` through `shell` in the session's worktree in `workspace`.
