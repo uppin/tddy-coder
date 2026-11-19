@@ -12,6 +12,7 @@ pub mod resize;
 pub mod runtime;
 
 pub use bytes::{self, Bytes};
+pub use exit_status::ExitCodeInOutput;
 pub use registry::{PtyControl, PtyRegistry};
 pub use resize::strip_resize;
 pub use runtime::{

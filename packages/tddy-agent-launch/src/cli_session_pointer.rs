@@ -186,19 +186,23 @@ pub(crate) fn place_session_pointer_locally(
     Ok(path)
 }
 
-/// Where an ssh launch's agent records its pid on the target, relative to its worktree, for
-/// [`record_remote_owner`] to read (and remove). The launch writes it as `$$` before it `exec`s the
-/// agent, so it is the agent's own pid.
-pub const REMOTE_AGENT_PID_FILE: &str = ".tddy/agent.pid";
+/// Where the launch of `session_id` records its agent's pid on the target, relative to its
+/// worktree: `.tddy/agents/<session id>.pid`, one file per session, so agents sharing a worktree
+/// each keep their own. The launch writes it as `$$` before it `exec`s the agent, so it is the
+/// agent's own pid; [`record_remote_owner`] reads and removes it.
+pub fn remote_agent_pid_file(session_id: &str) -> PathBuf {
+    Path::new(".tddy/agents").join(format!("{session_id}.pid"))
+}
 
 /// Once the agent has started on the target `placed` is on: one bounded command through the port
-/// reads the target's own name for itself (`hostname`) and the agent's pid
-/// ([`REMOTE_AGENT_PID_FILE`], which it removes), and rewrites the placed `pointer` owner-only
+/// reads the target's own name for itself (`hostname`) and the pid of `session_id`'s agent
+/// ([`remote_agent_pid_file`], which it removes), and rewrites the placed `pointer` owner-only
 /// with that owner, which it returns. A pointer on this host is refused: the daemon that placed
 /// it is its owner.
 pub(crate) async fn record_remote_owner(
     placed: &PlacedSessionPointer,
     pointer: &SessionPointer,
+    session_id: &str,
 ) -> Result<SessionPointerOwner, Status> {
     let (shell, alias): (&dyn RemoteShell, String) = match &placed.host {
         PointerHost::Ssh { shell } => (shell, shell.alias().to_string()),
@@ -220,7 +224,7 @@ pub(crate) async fn record_remote_owner(
         .parent()
         .and_then(Path::parent)
         .unwrap_or(&placed.path);
-    let pid_file = worktree.join(REMOTE_AGENT_PID_FILE);
+    let pid_file = worktree.join(remote_agent_pid_file(session_id));
     let remote = format!(
         "set -e; umask 077; \
          pid=$(cat {pid_file}); rm -f {pid_file}; host=$(hostname); \

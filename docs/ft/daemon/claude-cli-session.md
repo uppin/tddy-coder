@@ -618,10 +618,13 @@ environment the `claude-cli` launch produces:
   bounded ssh command each. A `tddy-tools` on the daemon's host refuses a pointer whose owner has
   exited or whose socket is gone, naming the pointer; one on the ssh target does not check an owner on
   another host. For a session whose agent runs on a target (next bullet), the launch writes the
-  shell's own pid to `.tddy/agent.pid` on the target before it `exec`s the agent, and once the
-  agent has outlived its startup window one bounded command through the remote-shell port reads
-  and removes that file and rewrites the pointer with the remote agent — its pid and the
-  target's own name for itself — as its owner. A jailed session
+  shell's own pid to the session's own `.tddy/agents/<session id>.pid` on the target before it
+  `exec`s the agent — so agents sharing a worktree each keep theirs — and once the agent has
+  outlived its startup window one bounded command through the remote-shell port reads and removes
+  that file and rewrites the pointer with the remote agent — its pid and the target's own name for
+  itself — as its owner. The session's exit status is the agent's own on every target: on a Coder
+  workspace, whose `coder ssh` exits 1 for any failed command, it is read from the CLI's last line
+  (`Process exited with status <N>`). A jailed session
   writes none: its shell relay carries the session, and a pointer copied into the jail would name a
   host socket the jail cannot reach.
 - **Jail.** The generic jailed start and resume bind the same conversation, permission mode and

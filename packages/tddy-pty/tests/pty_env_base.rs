@@ -33,6 +33,7 @@ async fn environment_printed_by_a_child_on(
         kind: "sh".to_string(),
         env,
         env_base,
+        exit_code_in_output: None,
     };
     let (ready_tx, ready_rx) = oneshot::channel();
     let task = PtyRuntime::spawn(&registry, &pty_registry, spec, ready_tx).await;

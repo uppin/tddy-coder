@@ -550,7 +550,7 @@ async fn the_agent_runs_in_the_coder_workspace_named_by_the_target() {
 
     // And the CLI that carries it ran once, in the session's directory, for that workspace's
     // agent, as the account the caller's vault holds
-    let launches = workspace.calls_carrying("> .tddy/agent.pid");
+    let launches = workspace.calls_carrying(&format!("> '.tddy/agents/{SESSION_ID}.pid'"));
     assert_eq!(
         launches
             .iter()

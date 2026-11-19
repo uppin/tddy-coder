@@ -51,8 +51,8 @@ struct Args {
     #[arg(long)]
     permission_mode: Option<String>,
 
-    /// The agent's binary on the target, instead of the path this machine resolves — which only
-    /// a local target can run.
+    /// The agent's binary on the target, instead of the one the agent's spec names: this machine's
+    /// resolved path on a local target, the spec's bare command on a remote one.
     #[arg(long)]
     binary: Option<PathBuf>,
 
@@ -109,6 +109,9 @@ fn session_spec(mut args: Args) -> anyhow::Result<(LaunchSpec, bool)> {
         .resolve(&args.agent, None)
         .map_err(|error| anyhow!("agent {}: {error}", args.agent))?;
     if let Some(binary) = args.binary {
+        // A local launch runs the resolved binary; a target launch runs the tool's command, by
+        // name on the target's own `PATH` — so the override is both.
+        agent.tool.command = binary.to_string_lossy().into_owned();
         agent.tool.binary = binary;
     }
     let session_id = session_id_or_generated(args.session_id.take());

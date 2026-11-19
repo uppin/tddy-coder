@@ -16,8 +16,14 @@ this host's session directory into the worktree's `.tddy/` there and rewrites th
 `launch_on_target` spawns the session's local PTY (the transport's client) on a cleared environment
 carrying the transport's credentials, `SSH_AUTH_SOCK` and the daemon's own `PATH`, so a bare `coder` or
 `ssh` resolves; the agent's environment still travels inside the remote command.
-The remote command is `cd '<worktree>' && mkdir -p .tddy && printf %s "$$" > .tddy/agent.pid && <target_login_exec>`:
-`target_login_exec(argv, env)` `exec`s the target's login shell (`"${SHELL:-/bin/sh}" -lc`), which `exec`s
+The remote command is `cd '<worktree>' && mkdir -p .tddy/agents && printf %s "$$" > '.tddy/agents/<session id>.pid' && <target_login_exec>`
+— the pid file is the session's own (`remote_agent_pid_file(session_id)`), so agents sharing a worktree
+never overwrite each other's; `launch_on_target` clears only that file before it starts
+(`clear_the_agent_pid_file`), and `wait_for_agent_start` and `record_remote_owner` read it by session id.
+The local PTY is spawned through `CliSessionManager::spawn_rendered_client_main` with the transport's
+`InteractiveExit` as a `tddy_pty::ExitCodeInOutput`, so the terminal's status is the agent's even when
+the client exits with a constant code (Coder's 1).
+In the remote command, `target_login_exec(argv, env)` `exec`s the target's login shell (`"${SHELL:-/bin/sh}" -lc`), which `exec`s
 `env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}"` (expanded **on the target**), then exactly the
 spec's explicit `env`, then the spec's **bare command** (`plan_the_launch` renders with
 `tool.binary = tool.command`, no node launcher, and binds the `on_target` flag a spec may render on —

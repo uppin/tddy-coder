@@ -25,6 +25,8 @@ tddy-discovery = { path = "../tddy-discovery" }
 tddy-host-service = { path = "../tddy-host-service" }
 tddy-pr-stack = { path = "../tddy-pr-stack" }
 tddy-projects = { path = "../tddy-projects" }
+# `ExitCodeInOutput`: how a target agent's status is read from its transport client's last words.
+tddy-pty = { path = "../tddy-pty" }
 # The port an agent's slot files and session pointer reach a remote worktree through.
 tddy-remote-shell = { path = "../tddy-remote-shell" }
 tddy-rpc = { path = "../tddy-rpc" }

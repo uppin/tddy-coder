@@ -61,6 +61,23 @@ const AN_AGENT_THAT_OUTLIVES_ITS_CLIENT: &str = "#!/bin/sh\n\
      printf 'ACME READY in %s\\n' \"$(/bin/pwd -P)\"\n\
      while :; do /bin/sleep 1; done\n";
 
+/// An agent that ignores a hang-up, as [`AN_AGENT_THAT_OUTLIVES_ITS_CLIENT`] does, and records being
+/// told to terminate in a file named by its own pid — the pid its launch records — so agents sharing
+/// one worktree each leave their own record.
+const AN_AGENT_THAT_RECORDS_ITS_END_BY_PID: &str = "#!/bin/sh\n\
+     trap '' HUP\n\
+     trap 'printf terminated > \"$(dirname \"$0\")/agent-ended-$$\"; exit 0' TERM\n\
+     printf 'ACME READY in %s\\n' \"$(/bin/pwd -P)\"\n\
+     while :; do /bin/sleep 1; done\n";
+
+/// An agent that answers every line it reads until it reads `bye`, then exits 3.
+const AN_AGENT_THAT_EXITS_3_ON_BYE: &str = "#!/bin/sh\n\
+     printf 'ACME READY in %s\\n' \"$(/bin/pwd -P)\"\n\
+     while IFS= read -r line; do\n\
+       [ \"$line\" = bye ] && exit 3\n\
+       printf 'acme heard: %s\\n' \"$line\"\n\
+     done\n";
+
 /// An agent that refuses to run and says why.
 const AN_AGENT_THAT_EXITS: &str = "#!/bin/sh\nprintf 'acme: no licence for this host\\n'\nexit 3\n";
 
@@ -73,19 +90,36 @@ struct AMachine {
 
 impl AMachine {
     fn with_agent(agent_script: &str) -> Self {
-        Self::on_workspace(agent_script, "exec ")
+        Self::on_workspace(agent_script, "exec ", "")
     }
 
     /// A machine whose stand-in `coder` runs the workspace's command as its own child instead of
     /// becoming it, so stopping the CLI here leaves the agent there running — as dropping a real
     /// `coder ssh` leaves the agent on the workspace.
     fn with_agent_outliving_its_client(agent_script: &str) -> Self {
-        Self::on_workspace(agent_script, "")
+        Self::on_workspace(agent_script, "", "")
+    }
+
+    /// A machine whose stand-in `coder` ends as the real CLI does when the workspace's command
+    /// failed: it says the command's status last, `error: run command: Process exited with status
+    /// <N>`, and exits 1 itself, whatever that status was.
+    fn with_agent_behind_a_cli_that_exits_1_on_failure(agent_script: &str) -> Self {
+        Self::on_workspace(
+            agent_script,
+            "",
+            "status=$?\n\
+             if [ \"$status\" -ne 0 ]; then\n\
+               printf 'Encountered an error running \"coder ssh\", see \"coder ssh --help\" for more information\\r\\n'\n\
+               printf 'error: run command: Process exited with status %s\\r\\n' \"$status\"\n\
+               exit 1\n\
+             fi\n",
+        )
     }
 
     /// The machine, its stand-in `coder` handing the workspace's command to a shell with `run`
-    /// before it (`exec ` to become that shell, empty to wait on it as a child).
-    fn on_workspace(agent_script: &str, run: &str) -> Self {
+    /// before it (`exec ` to become that shell, empty to wait on it as a child), then running
+    /// `after` once a waited-on shell has ended.
+    fn on_workspace(agent_script: &str, run: &str, after: &str) -> Self {
         let dir = tempfile::tempdir().expect("a directory for the machine");
         let root = std::fs::canonicalize(dir.path()).expect("it resolves");
         std::fs::create_dir_all(root.join("tddy-home/tools")).expect("the tools directory");
@@ -111,7 +145,8 @@ impl AMachine {
                  while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
                  shift\n\
                  SHELL='{login}'\nexport SHELL\n\
-                 {run}/bin/sh -c \"$*\"\n",
+                 {run}/bin/sh -c \"$*\"\n\
+                 {after}",
                 calls = root.join("coder-calls").display(),
                 login = root.join("login-shell").display()
             ),
@@ -121,6 +156,42 @@ impl AMachine {
 
     fn worktree(&self) -> PathBuf {
         self.root.join("worktree")
+    }
+
+    /// Where the launch of `session_id` records its agent's pid in the worktree.
+    fn agent_pid_file(&self, session_id: &str) -> PathBuf {
+        self.worktree()
+            .join(".tddy/agents")
+            .join(format!("{session_id}.pid"))
+    }
+
+    /// The pid the launch of `session_id` recorded, once it has.
+    async fn recorded_agent_pid(&self, session_id: &str) -> String {
+        let file = self.agent_pid_file(session_id);
+        let deadline = std::time::Instant::now() + IO_TIMEOUT;
+        loop {
+            if let Ok(pid) = std::fs::read_to_string(&file) {
+                if !pid.trim().is_empty() {
+                    return pid.trim().to_string();
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{} was never written",
+                file.display()
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// Whether the agent under `pid` recorded being told to terminate, waiting up to `within`.
+    async fn agent_ended(&self, pid: &str, within: Duration) -> bool {
+        let record = self.root.join(format!("agent-ended-{pid}"));
+        let deadline = std::time::Instant::now() + within;
+        while !record.exists() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        record.exists()
     }
 
     /// What the stand-in `coder` was given on each call, one line per call.
@@ -450,7 +521,9 @@ async fn stopping_a_coder_session_stops_its_agent_on_the_workspace() {
     // Given a driver on a Coder target whose agent outlives the CLI that carries its terminal, as an
     // agent on a real workspace does, and records how it is ended
     let machine = AMachine::with_agent_outliving_its_client(AN_AGENT_THAT_OUTLIVES_ITS_CLIENT);
-    let mut driver = ADriver::started(machine.driver("coder:ada/devbox", &[])).await;
+    let mut driver =
+        ADriver::started(machine.driver("coder:ada/devbox", &["--session-id", "stopped-session"]))
+            .await;
     let _ = driver.answer("start_session", json!({})).await;
     let ready = driver
         .answer(
@@ -473,7 +546,7 @@ async fn stopping_a_coder_session_stops_its_agent_on_the_workspace() {
     let how = std::fs::read_to_string(&ended).unwrap_or_default();
     // An agent the stop missed keeps running; end it so the suite leaves nothing behind.
     if how.is_empty() {
-        if let Ok(pid) = std::fs::read_to_string(machine.worktree().join(".tddy/agent.pid")) {
+        if let Ok(pid) = std::fs::read_to_string(machine.agent_pid_file("stopped-session")) {
             let _ = std::process::Command::new("kill")
                 .arg("-9")
                 .arg(pid.trim())
@@ -482,4 +555,106 @@ async fn stopping_a_coder_session_stops_its_agent_on_the_workspace() {
     }
     assert_eq!(how, "terminated");
     assert_eq!(stopped["state"], json!("exited"), "{stopped}");
+    // And the stop removed the pid it killed by, so no later stop can kill whatever reuses it
+    assert!(
+        !machine.agent_pid_file("stopped-session").exists(),
+        "the stopped session's pid file is gone"
+    );
+}
+
+#[tokio::test]
+async fn two_sessions_sharing_a_worktree_each_stop_only_their_own_agent() {
+    // Given two driven Coder sessions in one worktree, each agent outliving its client and recording
+    // its own end by its pid
+    let machine = AMachine::with_agent_outliving_its_client(AN_AGENT_THAT_RECORDS_ITS_END_BY_PID);
+    let mut first =
+        ADriver::started(machine.driver("coder:ada/devbox", &["--session-id", "first"])).await;
+    let mut second =
+        ADriver::started(machine.driver("coder:ada/devbox", &["--session-id", "second"])).await;
+    for driver in [&mut first, &mut second] {
+        let started = driver.answer("start_session", json!({})).await;
+        assert_eq!(started["state"], json!("running"), "{started}");
+    }
+    let first_pid = machine.recorded_agent_pid("first").await;
+    let second_pid = machine.recorded_agent_pid("second").await;
+
+    // When the first session is stopped
+    let stopped = first.answer("stop_session", json!({})).await;
+
+    // Then only the first agent was told to terminate, and only its pid file is gone
+    let first_ended = machine.agent_ended(&first_pid, IO_TIMEOUT).await;
+    let second_ended = machine
+        .agent_ended(&second_pid, Duration::from_secs(2))
+        .await;
+    let first_file_left = machine.agent_pid_file("first").exists();
+    let second_file_left = machine.agent_pid_file("second").exists();
+    // The second agent is ended either way, so the suite leaves nothing behind.
+    let _ = second.answer("stop_session", json!({})).await;
+    if !machine.agent_ended(&second_pid, IO_TIMEOUT).await {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &second_pid])
+            .status();
+    }
+    assert_ne!(first_pid, second_pid, "each session recorded its own agent");
+    assert_eq!(stopped["state"], json!("exited"), "{stopped}");
+    assert_eq!(
+        (first_ended, second_ended, first_file_left, second_file_left),
+        (true, false, false, true)
+    );
+}
+
+#[tokio::test]
+async fn a_binary_named_for_a_coder_target_is_the_one_the_workspace_runs() {
+    // Given a Coder workspace whose `PATH` has the agent's bare command, and another binary on it
+    let machine = AMachine::with_agent(AN_AGENT_THAT_ANSWERS);
+    let other = machine.root.join("another-acme");
+    write_executable(
+        &other,
+        "#!/bin/sh\nprintf 'ANOTHER ACME READY\\n'\nwhile IFS= read -r line; do :; done\n",
+    );
+    let other = other.to_string_lossy().into_owned();
+    let mut driver =
+        ADriver::started(machine.driver("coder:ada/devbox", &["--binary", &other])).await;
+
+    // When the session is started
+    let started = driver.answer("start_session", json!({})).await;
+
+    // Then the binary named is the one running on the workspace
+    assert_eq!(started["state"], json!("running"), "{started}");
+    let ready = driver
+        .answer(
+            "wait_for_text",
+            json!({ "text": "ANOTHER ACME READY", "timeout_secs": 20 }),
+        )
+        .await;
+    let _ = driver.answer("stop_session", json!({})).await;
+    assert_eq!(ready["matched"], json!(true), "{ready}");
+}
+
+#[tokio::test]
+async fn a_coder_session_ends_with_its_agent_s_exit_status_not_the_cli_s() {
+    // Given a Coder session behind a CLI that, like the real one, exits 1 whenever the workspace's
+    // command fails and names the command's own status last
+    let machine =
+        AMachine::with_agent_behind_a_cli_that_exits_1_on_failure(AN_AGENT_THAT_EXITS_3_ON_BYE);
+    let mut driver = ADriver::started(machine.driver("coder:ada/devbox", &[])).await;
+    let started = driver.answer("start_session", json!({})).await;
+    assert_eq!(started["state"], json!("running"), "{started}");
+
+    // When the agent is told to exit, which it does with status 3
+    let _ = driver
+        .answer("send_keys", json!({ "text": "bye", "keys": ["Enter"] }))
+        .await;
+    let ended = driver
+        .answer(
+            "wait_for_text",
+            json!({ "text": "text the agent never prints", "timeout_secs": 20 }),
+        )
+        .await;
+
+    // Then the session ended with the agent's status, not the CLI's
+    assert_eq!(ended["exited"], json!(true), "{ended}");
+    let status = driver.answer("session_status", json!({})).await;
+    assert_eq!(status["state"], json!("exited"), "{status}");
+    assert_eq!(status["exit"], json!("exit status 3"), "{status}");
 }

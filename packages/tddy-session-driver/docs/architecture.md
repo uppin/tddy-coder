@@ -30,7 +30,7 @@ tddy-session-driver --target coder:<owner>/<workspace>[.<agent>] --worktree <pat
 | `--session-id` | The session's id (default: a fresh UUID). A Claude start pre-trusts the clone only when the worktree is `<clone>/.worktrees/<session id>`, so a caller that lays out that layout names the id here. Claude requires a UUID |
 | `--agent` | The coding agent's id, resolved as the daemon resolves it: built-in specs plus `<tddy home>/tools` (`host_coding_agents`) |
 | `--model`, `--prompt`, `--permission-mode` | Passed into the harness template as a session start passes them |
-| `--binary <path>` | The agent's binary on the target, replacing the path this host resolved |
+| `--binary <path>` | The agent's binary, replacing the spec's: set as both the tool's resolved binary (what a local launch runs) and its command (what a target launch runs on the target's `PATH`) |
 | `--env KEY=VALUE` | Repeatable; set on the agent on top of its spec's environment |
 | `--tddy-home` | Whose `tools/` the agents are read from (default `~/.tddy`) |
 | `--coder` | The `coder` CLI a Coder target is reached through (default `coder`, on `PATH`) |
@@ -70,8 +70,8 @@ answers) and `send_keys` encodes through `tddy_tool_engine::terminal_keys::encod
 | `read_terminal` | `{lines, cursor, cols, rows, offset}`; `styles: true` adds `styles` and `highlighted_rows`; `region {row, col, rows, cols}` crops to that box |
 | `send_keys` | `{sent_bytes}` for `text` then named `keys` (bracketed paste when the terminal enabled it). No lease. Nothing is sent for an unknown key name or an exited session |
 | `wait_for_text` | `{matched, exited, lines}`, once the screen contains `text` with whitespace ignored on both sides (TUIs place words by cursor moves), the session exits, or `timeout_secs` (default 30) passes |
-| `session_status` | `{state: "not_started"}`, `{state: "running"}`, or `{state: "exited", exit, last_output}` / `{state: "exited", failure}` |
-| `stop_session` | `{state: "exited"}` once the terminal ended. On a remote target it first kills the agent by the pid the launch recorded at `<worktree>/.tddy/agent.pid` (`REMOTE_AGENT_PID_FILE`), since ending the local client does not end the agent there |
+| `session_status` | `{state: "not_started"}`, `{state: "running"}`, or `{state: "exited", exit, last_output}` / `{state: "exited", failure}`. On a target `exit` is the agent's own status, read through the transport (`InteractiveExit`) — on Coder, from the CLI's last line rather than its constant 1 |
+| `stop_session` | `{state: "exited"}` once the terminal ended. On a remote target it first kills the agent by the pid this session's launch recorded at `<worktree>/.tddy/agents/<session id>.pid` (`remote_agent_pid_file`), and removes that file in the same command, since ending the local client does not end the agent there. Sessions sharing a worktree each stop only their own agent |
 
 When the MCP client goes away the driver stops the session before it exits.
 
@@ -90,7 +90,9 @@ caller answers them with `wait_for_text` then `send_keys`.
 `tests/session_driver_acceptance.rs` spawns the compiled binary and speaks newline-delimited JSON-RPC,
 failing on any stdout line that is not a frame. Local and Coder conversations (through a stand-in `coder`
 the suite writes, which runs the workspace's command on this machine), the missing-token refusal, a start failure's last words,
-`--start`, and a Coder stop that must kill the agent by its recorded pid. Unit tests in `target.rs`
+`--start`, a Coder stop that must kill the agent by its recorded pid and remove the file, two sessions
+in one worktree that each stop only their own agent, `--binary` reaching a Coder workspace, and a
+session behind a stand-in that exits 1 as the real CLI does, whose status must still be the agent's. Unit tests in `target.rs`
 cover parsing and the refusal; unit tests in `main.rs` cover the `--session-id` default.
 The stand-in `coder` script, the ssh stand-in and `write_executable` come from
 `tddy_testing_commons::remote_target`.

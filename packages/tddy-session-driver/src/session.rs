@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use tddy_actions::tool::TemplateParams;
 use tddy_agent_launch::remote_agent_launch::{
-    launch_on_target, RemoteLaunch, REMOTE_AGENT_PID_FILE,
+    launch_on_target, remote_agent_pid_file, RemoteLaunch,
 };
 use tddy_agent_launch::spec_launch::{launch_host_pty, HostAgent, HostPtySession};
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
@@ -229,14 +229,18 @@ impl DriverSession {
         }
     }
 
-    /// Stop the session: its agent on a remote target (by the pid the launch recorded there), then
-    /// its terminal here, waiting for the terminal to end.
+    /// Stop the session: its agent on a remote target (by the pid this session's launch recorded
+    /// there, whose file the stop removes so no later stop kills whatever reuses the pid), then its
+    /// terminal here, waiting for the terminal to end.
     pub async fn stop(&self) -> Result<(), String> {
         let handle = self.handle().await?;
         if let Some(shell) = &self.spec.shell {
-            let pid_file = self.spec.worktree.join(REMOTE_AGENT_PID_FILE);
+            let pid_file = self
+                .spec
+                .worktree
+                .join(remote_agent_pid_file(&self.spec.session_id));
             let kill = format!(
-                "pid=$(cat '{}' 2>/dev/null) && kill \"$pid\" 2>/dev/null; true",
+                "f='{}'; pid=$(cat \"$f\" 2>/dev/null) && rm -f \"$f\" && kill \"$pid\" 2>/dev/null; true",
                 pid_file.to_string_lossy().replace('\'', "'\"'\"'")
             );
             shell.exec(ExecRequest::new(kill)).await.map_err(|error| {

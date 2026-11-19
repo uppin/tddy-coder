@@ -18,7 +18,7 @@ use pretty_assertions::assert_eq;
 use tddy_remote_shell::contract::assert_behaves_like_a_remote_shell;
 use tddy_remote_shell::{
     CoderShell, CoderWorkspaceRef, ExecOutput, ExecRequest, FileMode, InteractiveCommand,
-    RemoteShell, RemoteShellError, ShellAddress,
+    InteractiveExit, RemoteShell, RemoteShellError, ShellAddress,
 };
 
 use ssh_support::an_ssh_that_connects_through_its_proxy_and_runs_commands_here;
@@ -199,6 +199,11 @@ fn the_interactive_command_opens_a_terminal_on_the_workspace() {
                     OsString::from(SESSION_TOKEN)
                 ),
             ],
+            // The CLI exits 1 for any failed command and names the command's status last.
+            exit: InteractiveExit::ReportedLast {
+                client_code: 1,
+                marker: "Process exited with status ",
+            },
         }
     );
 }

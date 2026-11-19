@@ -14,8 +14,8 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _, DuplexStream};
 use tokio::sync::oneshot;
 
 use crate::{
-    ExecOutput, ExecRequest, FileMode, InteractiveCommand, RemoteShell, RemoteShellError,
-    ShellAddress, StreamedExec, StreamedExit,
+    ExecOutput, ExecRequest, FileMode, InteractiveCommand, InteractiveExit, RemoteShell,
+    RemoteShellError, ShellAddress, StreamedExec, StreamedExit,
 };
 
 /// How much a scripted stream's pipe holds before its writer waits for the reader.
@@ -246,6 +246,7 @@ impl RemoteShell for InMemoryShell {
                 .map(OsString::from)
                 .collect(),
             env: Vec::new(),
+            exit: InteractiveExit::ClientStatus,
         }
     }
 
@@ -607,6 +608,7 @@ mod tests {
                     "claude --resume".into()
                 ],
                 env: Vec::new(),
+                exit: InteractiveExit::ClientStatus,
             }
         );
     }

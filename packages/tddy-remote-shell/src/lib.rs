@@ -153,11 +153,28 @@ impl ExecOutput {
 }
 
 /// The local command line that is a remote command's terminal: a caller runs `argv`, with `env`
-/// added to its environment, inside a local PTY.
+/// added to its environment, inside a local PTY, and reads the remote command's status from it as
+/// `exit` says.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InteractiveCommand {
     pub argv: Vec<OsString>,
     pub env: Vec<(OsString, OsString)>,
+    pub exit: InteractiveExit,
+}
+
+/// How the remote command's status is read once the local client of an [`InteractiveCommand`] has
+/// exited.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum InteractiveExit {
+    /// The client exits with the command's status (OpenSSH).
+    #[default]
+    ClientStatus,
+    /// The client exits `client_code` for any command that failed, and prints that command's status
+    /// last, as the decimal right after `marker` (Coder: [`CoderShell::FAILED_COMMAND_STATUS`]).
+    ReportedLast {
+        client_code: i32,
+        marker: &'static str,
+    },
 }
 
 /// The permissions a file written through the port is created with.

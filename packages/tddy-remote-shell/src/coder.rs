@@ -17,8 +17,8 @@ use crate::coder::one_shot::read_noting_the_marker;
 use crate::coder::one_shot::stdin_lines;
 use crate::coder::one_shot::strip_start_marker;
 use crate::{
-    ExecOutput, ExecRequest, InteractiveCommand, RemoteShell, RemoteShellError, ShellAddress,
-    StreamedExec,
+    ExecOutput, ExecRequest, InteractiveCommand, InteractiveExit, RemoteShell, RemoteShellError,
+    ShellAddress, StreamedExec,
 };
 
 /// What the `coder` CLI needs to reach a deployment: where it is, and the session token to
@@ -137,6 +137,13 @@ impl CoderShell {
 
     /// The host name `ssh` is given: the `ProxyCommand` reaches the workspace, so it names nothing.
     const SSH_HOST_TOKEN: &'static str = "coder-workspace";
+
+    /// What `coder ssh` exits with when the workspace's command failed, whatever its status was.
+    pub const FAILED_COMMAND_EXIT_CODE: i32 = 1;
+
+    /// What `coder ssh` prints, last, right before a failed command's status:
+    /// `error: run command: Process exited with status 3`.
+    pub const FAILED_COMMAND_STATUS: &'static str = "Process exited with status ";
 
     /// The variable the `coder` CLI reads its deployment's URL from.
     pub const URL_VARIABLE: &'static str = "CODER_URL";
@@ -475,6 +482,10 @@ impl RemoteShell for CoderShell {
                 command.into(),
             ],
             env: self.credential_env(),
+            exit: InteractiveExit::ReportedLast {
+                client_code: Self::FAILED_COMMAND_EXIT_CODE,
+                marker: Self::FAILED_COMMAND_STATUS,
+            },
         }
     }
 }

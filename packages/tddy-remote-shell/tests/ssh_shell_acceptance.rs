@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 
 use pretty_assertions::assert_eq;
 use tddy_remote_shell::{
-    ExecOutput, ExecRequest, InteractiveCommand, RemoteShell, RemoteShellError, ShellAddress,
-    SshShell,
+    ExecOutput, ExecRequest, InteractiveCommand, InteractiveExit, RemoteShell, RemoteShellError,
+    ShellAddress, SshShell,
 };
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
@@ -232,6 +232,7 @@ fn the_interactive_command_asks_ssh_for_a_terminal_on_the_alias() {
         InteractiveCommand {
             argv,
             env: Vec::new(),
+            exit: InteractiveExit::ClientStatus,
         }
     );
 }

@@ -88,6 +88,7 @@ async fn spawn_local_pty_task(
         kind: "local".to_string(),
         env,
         env_base: tddy_pty::PtyEnvBase::Inherited,
+        exit_code_in_output: None,
     };
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     let task = PtyRuntime::spawn(&registry, &pty_registry, spec, ready_tx).await;
