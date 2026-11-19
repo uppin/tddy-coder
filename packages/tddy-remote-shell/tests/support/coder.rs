@@ -48,6 +48,26 @@ pub fn a_coder_whose_workspaces_merge_stderr_into_stdout() -> StandInCoder {
     ))
 }
 
+/// What the real `coder ssh` (v2.33.5) prints on its own stderr when the workspace's command
+/// exits non-zero, whatever the command itself said.
+pub const CODER_SSH_FAILURE_WRAPPER: &str = "Encountered an error running \"coder ssh\", see \"coder ssh --help\" for more information\nerror: run command: Process exited with status 1";
+
+/// A coder whose workspaces run commands in a pty, and that reports a failed command as the real
+/// `coder ssh` does: the command's stderr is merged into the CLI's stdout, and on a non-zero exit
+/// the CLI adds [`CODER_SSH_FAILURE_WRAPPER`] on its own stderr and exits with the command's status.
+pub fn a_coder_that_reports_a_failed_command_as_the_real_cli_does() -> StandInCoder {
+    StandInCoder::running(&format!(
+        "{RECORD_THE_CALL}\
+         while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
+         shift\n\
+         sh -c \"$*\" 2>&1\n\
+         status=$?\n\
+         if [ \"$status\" -ne 0 ]; then printf '%s\\n' '{wrapper}' >&2; fi\n\
+         exit \"$status\"\n",
+        wrapper = CODER_SSH_FAILURE_WRAPPER.replace('\'', "'\\''"),
+    ))
+}
+
 /// A coder whose workspaces run commands in a pty that never ends their input, as the real
 /// `coder ssh` does: what is written to the CLI's stdin reaches the command, but closing it does
 /// not — the pty turns no end of input into an EOF — and the workspace's stderr is merged into its

@@ -55,6 +55,12 @@ const LAUNCH_SET: &str = "ROUTE_BASE_URL";
 
 /// What the agent prints on its terminal once it is up.
 const AGENT_BANNER: &str = "ACME READY on the target";
+/// The system prompt the session appends for its agent, as the operator-notify wiring writes it.
+const APPENDED_SYSTEM_PROMPT: &str =
+    "Tell your operator with `tddy-tools notify` when you are blocked.";
+/// The flag the agent is given its appended system prompt with.
+const APPEND_SYSTEM_PROMPT_FLAG: &str = "--append-system-prompt-file";
+
 /// What an agent that cannot start prints before it exits.
 const AGENT_COMPLAINT: &str = "acme: not logged in";
 const AGENT_FAILURE_STATUS: i32 = 3;
@@ -188,6 +194,16 @@ impl ATarget {
         self.root.join("tmp")
     }
 
+    /// Which machine holds `path`: the target when it is inside the target's filesystem, this
+    /// host (naming the path) otherwise.
+    fn machine_holding(&self, path: &Path) -> String {
+        if path.starts_with(&self.root) {
+            "the target".to_string()
+        } else {
+            format!("the daemon's host, at {}", path.display())
+        }
+    }
+
     /// Where the session's pointer lives on the target.
     fn pointer_file(&self) -> PathBuf {
         self.worktree().join(".tddy/session.json")
@@ -302,6 +318,18 @@ fn an_agent_that_exits_at_once_on(target: &ATarget) -> AStubAgent {
     )
 }
 
+impl AnAgentReport {
+    /// The argument that follows `flag` on the agent's command line.
+    fn value_of(&self, flag: &str) -> PathBuf {
+        let at = self
+            .args
+            .iter()
+            .position(|arg| arg == flag)
+            .unwrap_or_else(|| panic!("the agent was given {flag}: {:?}", self.args));
+        PathBuf::from(&self.args[at + 1])
+    }
+}
+
 impl AStubAgent {
     fn running(body: &str) -> Self {
         let dir = tempfile::tempdir().expect("a directory for the stub agent");
@@ -375,6 +403,7 @@ run:
   argv:
     - "{{binary}}"
     - {{ if: model, then: ["--model", "{{model}}"] }}
+    - {{ splice: slots }}
   env: {{ {SPEC_SET}: on-target }}
 extensions:
   coding_agent:
@@ -439,10 +468,42 @@ impl ADaemon {
         target: &ATarget,
         pointer: Option<&SessionPointer>,
     ) -> Result<RemoteLaunched, RemoteLaunchError> {
+        self.launches_with_slots(program, target, pointer, &RenderedSlots::default())
+            .await
+    }
+
+    /// [`Self::launches`] an agent told to append [`APPENDED_SYSTEM_PROMPT`], which the session
+    /// wrote into its own directory on this host, as a start's operator-notify wiring writes it.
+    async fn launches_appending_a_system_prompt(
+        &self,
+        agent: &AStubAgent,
+        target: &ATarget,
+    ) -> Result<RemoteLaunched, RemoteLaunchError> {
+        let prompt_file = self.session_dir.join("agent-system-prompt.md");
+        std::fs::write(&prompt_file, APPENDED_SYSTEM_PROMPT)
+            .expect("the system prompt is written into the session's directory");
+        let slots = RenderedSlots {
+            argv_extra: vec![
+                APPEND_SYSTEM_PROMPT_FLAG.to_string(),
+                prompt_file.to_string_lossy().into_owned(),
+            ],
+            ..RenderedSlots::default()
+        };
+        self.launches_with_slots(&agent.program(), target, None, &slots)
+            .await
+    }
+
+    async fn launches_with_slots(
+        &self,
+        program: &Path,
+        target: &ATarget,
+        pointer: Option<&SessionPointer>,
+        slots: &RenderedSlots,
+    ) -> Result<RemoteLaunched, RemoteLaunchError> {
         launch_on_target(
             &the_acme_agent(program),
             &TemplateParams::new().with("model", MODEL),
-            &RenderedSlots::default(),
+            slots,
             RemoteLaunch {
                 shell: target.shell(),
                 worktree: &target.worktree(),
@@ -717,4 +778,36 @@ async fn the_daemon_hosts_environment_never_reaches_a_target_agent() {
         .map(|(name, _)| *name)
         .collect();
     assert_eq!(leaked, Vec::<&str>::new());
+}
+
+/// The appended system prompt is a file in the session's directory on the daemon's host. The
+/// launch hands the agent on the target that host path, and writes the file at the same host path
+/// through the target's shell, so on a target whose filesystem has no such directory (a Linux
+/// Coder workspace given `/Users/<operator>/.tddy/sessions/<id>/…`) the start fails at
+/// `mkdir -p '/Users/…'`.
+#[tokio::test]
+async fn the_agent_on_a_target_reads_its_appended_system_prompt_from_the_target() {
+    // Given a target with the agent installed, and a daemon whose session appends a system prompt
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_stays_up_on(&target);
+    let daemon = a_daemon();
+
+    // When
+    let _launched = daemon
+        .launches_appending_a_system_prompt(&agent, &target)
+        .await
+        .expect("the agent is launched on the target");
+    let prompt_file = agent.report().await.value_of(APPEND_SYSTEM_PROMPT_FLAG);
+
+    // Then the file the agent is told to read is on the target, holding the session's prompt
+    assert_eq!(
+        (
+            target.machine_holding(&prompt_file),
+            std::fs::read_to_string(&prompt_file).ok()
+        ),
+        (
+            "the target".to_string(),
+            Some(APPENDED_SYSTEM_PROMPT.to_string())
+        )
+    );
 }

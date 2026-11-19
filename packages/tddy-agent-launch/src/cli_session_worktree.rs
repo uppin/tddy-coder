@@ -386,7 +386,7 @@ mod remote_cut_tests {
 
     use tddy_remote_shell::{ExecOutput, InMemoryShell};
 
-    use super::{remote_worktree_through, CliWorktreeStart};
+    use super::{cut_worktree, remote_worktree_through, CliWorktreeStart};
 
     const QAPE_HQ: &str = "git@github.com:wix-private/qape-hq.git";
     const SESSION: &str = "01a1b2c3-remote-dev";
@@ -531,6 +531,109 @@ mod remote_cut_tests {
         assert!(
             run.contains("worktree add -b 'claude-cli/01a1b2c3'"),
             "the generated branch from the changeset is cut:\n{run}"
+        );
+    }
+    /// `git` run in `dir`, which must succeed.
+    fn git_in(dir: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(["-c", "user.email=dev@example.com", "-c", "user.name=Dev"])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("git runs");
+        assert!(
+            output.status.success(),
+            "git {args:?} in {}: {}",
+            dir.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// The project's checkout on this host: a clone whose `origin` (a bare repository beside it)
+    /// has a `master` branch, as a registered project's repo root is.
+    fn a_project_checkout_whose_origin_has_master() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a directory for the project");
+        let origin = dir.path().join("origin.git");
+        let checkout = dir.path().join("qape-hq");
+        git_in(
+            dir.path(),
+            &["init", "--bare", "-b", "master", "origin.git"],
+        );
+        git_in(
+            dir.path(),
+            &[
+                "clone",
+                &origin.to_string_lossy(),
+                &checkout.to_string_lossy(),
+            ],
+        );
+        git_in(
+            &checkout,
+            &["commit", "--allow-empty", "-m", "the first commit"],
+        );
+        git_in(&checkout, &["push", "origin", "master"]);
+        (dir, checkout)
+    }
+
+    /// The base the target's `git worktree add -b` was given: its last argument, unquoted.
+    fn the_base_the_target_cut_from(workspace: &InMemoryShell) -> Option<String> {
+        workspace
+            .commands_run()
+            .iter()
+            .find(|command| command.contains("worktree add -b"))
+            .and_then(|command| command.rsplit(' ').next().map(str::to_string))
+            .map(|base| base.trim_matches('\'').to_string())
+    }
+
+    /// A `new_branch_from_base` start on a target that names no base and has no stack parent is
+    /// cut from the literal `HEAD` of the target's clone: the clone's local `master`, which the
+    /// cut's `git fetch --all` never moves. A long-lived clone (a Coder workspace's
+    /// `~/.tddy/repos/qape-hq`) then branches every new session from a stale commit, where a cut
+    /// on this host branches from the freshly fetched `origin/master`.
+    #[tokio::test]
+    async fn a_target_start_naming_no_base_is_cut_from_the_projects_fetched_main_branch() {
+        // Given a project whose origin has master, and a start on a Coder target naming no base
+        let (_project, repo_root) = a_project_checkout_whose_origin_has_master();
+        let session_dir = tempfile::tempdir().expect("session dir");
+        let sessions_base = tempfile::tempdir().expect("sessions base");
+        let tddy_data = tempfile::tempdir().expect("tddy data");
+        let workspace = a_workspace();
+        let start = CliWorktreeStart {
+            session_type: "claude-cli",
+            cut_label: "cut the session worktree",
+            session_id: SESSION,
+            session_dir: session_dir.path(),
+            sessions_base: sessions_base.path(),
+            tddy_data_dir: tddy_data.path(),
+            os_user: "testdev",
+            project_id: "proj-1",
+            repo_path: "",
+            branch_worktree_intent: "new_branch_from_base",
+            new_branch_name: "test-coder-remote-dev",
+            selected_integration_base_ref: "",
+            selected_branch_to_work_on: "",
+            create_remote_branch: false,
+            intent: tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+            timeout: Duration::from_secs(30),
+            ssh_alias: "",
+            shell: Some(Arc::new(workspace.clone())),
+        };
+
+        // When the session's worktree is cut, with no stack parent to base it on
+        cut_worktree(
+            &start,
+            &repo_root,
+            QAPE_HQ,
+            None,
+            &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
+        )
+        .await
+        .expect("the cut succeeds");
+
+        // Then the target branched from the project's fetched main branch, not its clone's HEAD
+        assert_eq!(
+            the_base_the_target_cut_from(&workspace),
+            Some("origin/master".to_string())
         );
     }
 }
