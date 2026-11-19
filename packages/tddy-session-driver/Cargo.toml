@@ -14,6 +14,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+async-trait = "0.1"
+log = "0.4"
 clap = { version = "4", features = ["derive"] }
 rmcp = { version = "1", features = ["server", "transport-io", "schemars", "macros"] }
 schemars = "1"
@@ -25,8 +27,12 @@ tddy-actions = { path = "../tddy-actions" }
 tddy-agent-launch = { path = "../tddy-agent-launch" }
 tddy-cli-sessions = { path = "../tddy-cli-sessions" }
 tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
+# `HookCommandParams` and `REMOTE_HOOK_LOG`: a session's hooks rendered as a daemon target start's.
+tddy-core = { path = "../tddy-core" }
 tddy-credentials = { path = "../tddy-credentials" }
 tddy-remote-shell = { path = "../tddy-remote-shell" }
+# The two hook reports (`ReportSessionStatusRequest`, `ReportAgentActivityRequest`) a hook becomes.
+tddy-service = { path = "../tddy-service" }
 tddy-task = { path = "../tddy-task" }
 # `encode_keys` and the screen answer: what `SendSessionKeys` types and `ReadSessionTerminal`
 # answers, so the driver's tools mean what the orchestrator's do.

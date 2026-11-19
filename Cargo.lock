@@ -14110,7 +14110,9 @@ name = "tddy-session-driver"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
+ "log",
  "pretty_assertions",
  "rmcp",
  "schemars 1.2.1",
@@ -14120,8 +14122,10 @@ dependencies = [
  "tddy-agent-launch",
  "tddy-cli-sessions",
  "tddy-coding-agent-specs",
+ "tddy-core",
  "tddy-credentials",
  "tddy-remote-shell",
+ "tddy-service",
  "tddy-task",
  "tddy-testing-commons",
  "tddy-tool-engine",

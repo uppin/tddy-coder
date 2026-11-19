@@ -257,17 +257,25 @@ impl RemoteHookFollowers {
 }
 
 /// The command a follower runs on the target to read `log_path` from the byte `offset` on, and
-/// everything appended after it:
+/// everything appended after it, ending once the log is removed:
 ///
 /// ```text
-/// tail -c +<offset + 1> -f '<log_path>'
+/// tail -c +<offset + 1> -f '<log_path>' & t=$!; (while [ -e '<log_path>' ]; do sleep 1; done; kill "$t") >/dev/null 2>&1 & wait "$t"
 /// ```
 ///
-/// `tail -c +N` starts at the Nth byte, counted from one. The path is single-quoted for a POSIX
-/// shell.
+/// `tail -c +N` starts at the Nth byte, counted from one. Ending the follower's client does not end
+/// a remote command — ssh without a terminal sends it no hang-up, and `tail -f` on a log nobody
+/// writes to never learns its reader is gone — so a watch of its own ends the `tail` within a
+/// second of the log's removal, which every session end performs. The watch runs in a background
+/// subshell, not in the shell that waits on `tail`, so it outlives that shell being killed with its
+/// client. The path is single-quoted for a POSIX shell.
 #[must_use]
 pub fn follow_command(log_path: &str, offset: u64) -> String {
-    format!("tail -c +{} -f {}", offset + 1, shell_quote(log_path))
+    let log = shell_quote(log_path);
+    format!(
+        "tail -c +{} -f {log} & t=$!; (while [ -e {log} ]; do sleep 1; done; kill \"$t\") >/dev/null 2>&1 & wait \"$t\"",
+        offset + 1
+    )
 }
 
 /// Create the session's hook log in `worktree` on `shell`'s target — empty, readable and writable
@@ -559,7 +567,9 @@ mod tests {
         // Then
         assert_eq!(
             command,
-            "tail -c +1 -f '/home/dev/repo/.worktrees/s1/.tddy/hooks.log'"
+            "tail -c +1 -f '/home/dev/repo/.worktrees/s1/.tddy/hooks.log' & t=$!; \
+             (while [ -e '/home/dev/repo/.worktrees/s1/.tddy/hooks.log' ]; do sleep 1; done; \
+             kill \"$t\") >/dev/null 2>&1 & wait \"$t\""
         );
     }
 
@@ -574,7 +584,9 @@ mod tests {
         // Then
         assert_eq!(
             command,
-            "tail -c +4097 -f '/home/dev/repo/.worktrees/s1/.tddy/hooks.log'"
+            "tail -c +4097 -f '/home/dev/repo/.worktrees/s1/.tddy/hooks.log' & t=$!; \
+             (while [ -e '/home/dev/repo/.worktrees/s1/.tddy/hooks.log' ]; do sleep 1; done; \
+             kill \"$t\") >/dev/null 2>&1 & wait \"$t\""
         );
     }
 
@@ -589,7 +601,7 @@ mod tests {
         // Then
         assert_eq!(
             command,
-            r"tail -c +1 -f '/home/dev/o'\''brien'\''s repo/.tddy/hooks.log'"
+            r#"tail -c +1 -f '/home/dev/o'\''brien'\''s repo/.tddy/hooks.log' & t=$!; (while [ -e '/home/dev/o'\''brien'\''s repo/.tddy/hooks.log' ]; do sleep 1; done; kill "$t") >/dev/null 2>&1 & wait "$t""#
         );
     }
 }

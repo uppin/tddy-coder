@@ -23,8 +23,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
+mod child;
 mod coder;
 mod error;
+mod local;
 mod recorded;
 mod redact;
 mod ssh;
@@ -37,6 +39,7 @@ mod in_memory;
 
 pub use coder::{CoderCredentials, CoderShell, CoderWorkspaceRef};
 pub use error::RemoteShellError;
+pub use local::LocalShell;
 pub use recorded::{RecordedShell, RemoteCallOutcome, RemoteCallReport, RemoteCallSink};
 pub use redact::{command_head, scrub_credentials};
 pub use ssh::SshShell;

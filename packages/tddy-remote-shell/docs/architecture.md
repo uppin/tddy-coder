@@ -122,12 +122,21 @@ declares `InteractiveExit::ReportedLast { 1, CoderShell::FAILED_COMMAND_STATUS }
 (`"Process exited with status "`). Credentials are held in memory for the shell's life; `Debug`
 shows the URL and never the token.
 
+## The local transport
+
+`LocalShell::new()` is this machine as a target: `/bin/sh -c <command>` as a local child (tag
+`local`), its exit status the command's. A caller that runs a local session through the same port
+as a remote one uses it — the session driver follows a local session's hook log with it. A streamed
+command is killed when its stream is dropped. `SshShell` and `LocalShell` share `child.rs`: running a
+child to its end under a deadline (`TimedOut` past it, the child killed) and streaming one, its
+stdin closed — an EOF — by shutting the stream's stdin down.
+
 ## Test support
 
 Behind the `test-support` feature: `InMemoryShell`, a scriptable in-memory double, and
 `contract::assert_behaves_like_a_remote_shell`, the behaviour suite every transport is held
 to. The suite runs against `InMemoryShell`, `SshShell` driving a stand-in `ssh`
-executable, and `CoderShell` driving a stand-in `coder` executable; no real SSH server, no
+executable, `LocalShell`, and `CoderShell` driving a stand-in `coder` executable; no real SSH server, no
 Coder deployment and no network are involved. The Coder suite's stand-ins also play the
 real CLI's pty: one merges stderr into stdout, one never ends the command's input (its
 stdin is a FIFO the command holds open), and one ends every line with `\r\n` until a

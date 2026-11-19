@@ -1,5 +1,5 @@
 //! The MCP tools that drive the session: start it, read its screen, type into it, wait for text,
-//! ask its status, stop it.
+//! read and wait for its hooks, ask its status, stop it.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -52,6 +52,24 @@ pub struct SendKeysArgs {
 pub struct WaitForTextArgs {
     #[schemars(description = "The text to wait for; whitespace is ignored on both sides")]
     pub text: String,
+    #[schemars(description = "How long to wait, in seconds (default 30)")]
+    pub timeout_secs: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct ReadHooksArgs {
+    #[schemars(description = "Answer the hooks from this index on (default 0, every hook)")]
+    pub since: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct WaitForHookArgs {
+    #[schemars(
+        description = "The hook event to wait for, as the agent names it (SessionStart, Stop, stop, …)"
+    )]
+    pub event: String,
+    #[schemars(description = "Only a hook from this index on counts (default 0)")]
+    pub since: Option<usize>,
     #[schemars(description = "How long to wait, in seconds (default 30)")]
     pub timeout_secs: Option<u64>,
 }
@@ -133,6 +151,44 @@ impl DriverServer {
             "matched": waited.matched,
             "exited": waited.exited,
             "lines": waited.grid.map(|grid| grid.lines).unwrap_or_default(),
+        })
+        .to_string())
+    }
+
+    #[tool(
+        description = "The session's lifecycle hooks, followed as a daemon follows a target session's: {followed, hooks, next}. Each hook is {index, event, payload, reports} — reports are the ReportSessionStatus / ReportAgentActivity requests the daemon's activity handling would be served for it, as {kind: session_status | agent_activity, …}, without the hook token. followed is false for an agent whose spec declares no hooks, or before the session started; next is how many hooks have arrived."
+    )]
+    async fn read_hooks(
+        &self,
+        Parameters(args): Parameters<ReadHooksArgs>,
+    ) -> Result<String, String> {
+        let read = self.session.hooks_since(args.since.unwrap_or(0));
+        Ok(json!({
+            "followed": read.followed,
+            "hooks": read.hooks.iter().map(|hook| hook.to_json()).collect::<Vec<_>>(),
+            "next": read.next,
+        })
+        .to_string())
+    }
+
+    #[tool(
+        description = "Wait until a hook of event arrives (from index since on), or timeout_secs passes. Answers {matched, hook}, hook as read_hooks answers one, or null. Refused for a session whose hooks are not followed."
+    )]
+    async fn wait_for_hook(
+        &self,
+        Parameters(args): Parameters<WaitForHookArgs>,
+    ) -> Result<String, String> {
+        let timeout = args
+            .timeout_secs
+            .map(Duration::from_secs)
+            .unwrap_or(DEFAULT_WAIT);
+        let hook = self
+            .session
+            .wait_for_hook(&args.event, args.since.unwrap_or(0), timeout)
+            .await?;
+        Ok(json!({
+            "matched": hook.is_some(),
+            "hook": hook.map(|hook| hook.to_json()),
         })
         .to_string())
     }

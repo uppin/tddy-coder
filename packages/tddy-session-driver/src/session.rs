@@ -11,10 +11,12 @@ use tddy_agent_launch::remote_agent_launch::{
 };
 use tddy_agent_launch::spec_launch::{launch_host_pty, HostAgent, HostPtySession};
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
-use tddy_cli_sessions::cli_session_manager::CliSessionManager;
-use tddy_coding_agent_specs::slots::RenderedSlots;
-use tddy_remote_shell::{ExecRequest, RemoteShell};
+use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
+use tddy_coding_agent_specs::slots::{self, RenderedSlots, SlotInputs};
+use tddy_remote_shell::{ExecRequest, LocalShell, RemoteShell};
 use tddy_task::{TaskStatus, TextGrid};
+
+use crate::hooks::{HookRecord, SessionHooks};
 
 /// The session type the driver registers its terminal under.
 const SESSION_TYPE: &str = "session-driver";
@@ -65,6 +67,16 @@ pub struct DriverSession {
     spec: LaunchSpec,
     manager: Arc<CliSessionManager>,
     state: tokio::sync::Mutex<State>,
+    /// The started session's hooks, when its agent's spec declares them.
+    hooks: std::sync::OnceLock<Arc<SessionHooks>>,
+}
+
+/// What `read_hooks` answers: whether the session's hooks are followed, the hooks asked for, and
+/// how many have arrived in all.
+pub struct HooksRead {
+    pub followed: bool,
+    pub hooks: Vec<HookRecord>,
+    pub next: usize,
 }
 
 impl DriverSession {
@@ -73,6 +85,7 @@ impl DriverSession {
             spec,
             manager: Arc::new(CliSessionManager::new()),
             state: tokio::sync::Mutex::new(State::NotStarted),
+            hooks: std::sync::OnceLock::new(),
         }
     }
 
@@ -98,6 +111,64 @@ impl DriverSession {
 
     async fn launch(&self) -> Result<Arc<PtyHandle>, String> {
         let spec = &self.spec;
+        // A target's shell, or this machine's: the hook log lives where the agent runs, and is
+        // followed through the same port either way.
+        let hook_shell: Arc<dyn RemoteShell> = match &spec.shell {
+            Some(shell) => Arc::clone(shell),
+            None => Arc::new(LocalShell::new()),
+        };
+        let hooks = SessionHooks::wired(&spec.agent.spec, hook_shell, &spec.worktree).await?;
+        let launched = self.launch_with(hooks.as_ref()).await;
+        match (&launched, hooks) {
+            (Ok(_), Some(hooks)) => {
+                hooks.follow(&spec.session_id, &spec.worktree);
+                let _ = self.hooks.set(Arc::new(hooks));
+            }
+            // A start that failed leaves no log behind; its follower was never registered.
+            (Err(_), Some(hooks)) => hooks.remove_log(&spec.worktree).await,
+            (_, None) => {}
+        }
+        launched
+    }
+
+    /// The session's slots: its hooks, rendered as a daemon start on a target renders them, or
+    /// none for an agent without hooks.
+    fn slots(&self, hooks: Option<&SessionHooks>) -> Result<RenderedSlots, String> {
+        let Some(hooks) = hooks else {
+            return Ok(RenderedSlots::default());
+        };
+        let spec = &self.spec;
+        slots::render(
+            &spec.agent.spec,
+            &SlotInputs {
+                workdir: spec.worktree.clone(),
+                scratch_dir: spec.session_dir.clone(),
+                mcp_server: None,
+                allowed_tools: Vec::new(),
+                denied_tools: Vec::new(),
+                permission_prompt_tool: None,
+                preamble: None,
+                append_system_prompt_file: None,
+                hooks: Some(hooks.params(&spec.agent.spec, &spec.session_id)),
+                home: None,
+            },
+        )
+        .map_err(|error| format!("the agent's hooks could not be rendered: {error}"))
+    }
+
+    /// What the session's exit does once its terminal ends: stop its hook follower and remove its
+    /// log, as a daemon target session's exit does.
+    fn on_exit(&self, hooks: Option<&SessionHooks>) -> Option<ExitHook> {
+        let followers = hooks?.followers();
+        let session_id = self.spec.session_id.clone();
+        Some(Box::new(move |_capture| {
+            Box::pin(async move { followers.stop_and_remove_log(&session_id).await })
+        }))
+    }
+
+    async fn launch_with(&self, hooks: Option<&SessionHooks>) -> Result<Arc<PtyHandle>, String> {
+        let spec = &self.spec;
+        let slots = self.slots(hooks)?;
         let session = HostPtySession {
             manager: &self.manager,
             session_id: &spec.session_id,
@@ -111,7 +182,7 @@ impl DriverSession {
                 let launched = launch_on_target(
                     &spec.agent,
                     &spec.params,
-                    &RenderedSlots::default(),
+                    &slots,
                     RemoteLaunch {
                         shell: Arc::clone(shell),
                         worktree: &spec.worktree,
@@ -124,7 +195,7 @@ impl DriverSession {
                         ),
                     },
                     session,
-                    None,
+                    self.on_exit(hooks),
                 )
                 .await
                 .map_err(|error| error.to_string())?;
@@ -135,10 +206,10 @@ impl DriverSession {
                 let handle = launch_host_pty(
                     &spec.agent,
                     &spec.params,
-                    &RenderedSlots::default(),
+                    &slots,
                     &spec.worktree,
                     session,
-                    None,
+                    self.on_exit(hooks),
                 )
                 .await
                 .map_err(|error| error.to_string())?;
@@ -257,7 +328,50 @@ impl DriverSession {
             }
             tokio::time::sleep(POLL).await;
         }
+        // The session's exit stops its follower and removes its log too, but a stop returns only
+        // once both are done: the exit's own removal may still be on its way to the target.
+        if let Some(hooks) = self.hooks.get() {
+            hooks
+                .followers()
+                .stop_and_remove_log(&self.spec.session_id)
+                .await;
+            hooks.remove_log(&self.spec.worktree).await;
+        }
         Ok(())
+    }
+
+    /// The hooks from the `since`-th on.
+    pub fn hooks_since(&self, since: usize) -> HooksRead {
+        match self.hooks.get() {
+            Some(hooks) => {
+                let recorder = hooks.recorder();
+                HooksRead {
+                    followed: true,
+                    hooks: recorder.since(since),
+                    next: recorder.count(),
+                }
+            }
+            None => HooksRead {
+                followed: false,
+                hooks: Vec::new(),
+                next: 0,
+            },
+        }
+    }
+
+    /// The first hook of `event` from the `since`-th on, waiting up to `timeout`; refused for a
+    /// session whose hooks are not followed.
+    pub async fn wait_for_hook(
+        &self,
+        event: &str,
+        since: usize,
+        timeout: Duration,
+    ) -> Result<Option<HookRecord>, String> {
+        let hooks = self.hooks.get().ok_or_else(|| {
+            "the session's hooks are not followed: it has not started, or its agent declares no hooks"
+                .to_string()
+        })?;
+        Ok(hooks.recorder().wait_for(event, since, timeout).await)
     }
 }
 
