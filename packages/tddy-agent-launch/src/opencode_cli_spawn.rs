@@ -464,11 +464,10 @@ fn node_launcher_for(
     agent: &crate::spec_launch::HostAgent,
     target_shell: &Option<Arc<dyn tddy_remote_shell::RemoteShell>>,
 ) -> Option<crate::cursor_from_spec::NodeLauncher> {
-    let launcher = match target_shell {
+    match target_shell {
         Some(_) => None,
         None => node_launcher_of(&agent.tool.binary),
-    };
-    launcher
+    }
 }
 
 fn report_the_started_session(
