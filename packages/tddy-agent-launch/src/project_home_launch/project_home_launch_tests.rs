@@ -10,7 +10,8 @@ use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
 use super::*;
-use crate::cli_agent_steps::{render_host_launch_slots, HostLaunchSlots};
+use crate::cli_agent_steps::host_launch_slots::render_host_launch_slots;
+use crate::cli_agent_steps::host_launch_slots::HostLaunchSlots;
 use crate::harness_from_spec::{harness_template_params, HarnessLaunch};
 use crate::spec_launch::{launch_host_pty, HostCodingAgents, HostPtySession};
 

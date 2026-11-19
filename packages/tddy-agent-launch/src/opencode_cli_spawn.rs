@@ -33,10 +33,11 @@ use crate::cli_agent_steps::conversation::refuse_a_role_the_agent_cannot_hold;
 use crate::cli_agent_steps::conversation::start_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::conversation::ConversationTarget;
-use crate::cli_agent_steps::{
-    render_host_launch_slots, wire_session_agent, write_slot_files_on_target,
-    write_slot_files_through_shell, HostLaunchSlots, SessionWiringInputs,
-};
+use crate::cli_agent_steps::host_launch_slots::render_host_launch_slots;
+use crate::cli_agent_steps::host_launch_slots::write_slot_files_on_target;
+use crate::cli_agent_steps::host_launch_slots::write_slot_files_through_shell;
+use crate::cli_agent_steps::host_launch_slots::HostLaunchSlots;
+use crate::cli_agent_steps::{wire_session_agent, SessionWiringInputs};
 use crate::cli_resume_token::resume_token_recorder;
 use crate::cli_route_launch::{routed_launch_model, start_cli_route};
 use crate::cli_session_pointer::{
@@ -280,7 +281,7 @@ pub(crate) async fn start_cli_harness_session(
     let remote_host = Some(checkout_alias).filter(|alias| !alias.is_empty());
     let toolset = std::mem::take(&mut wiring.toolset);
     let role_args = std::mem::take(&mut wiring.extra_args);
-    let hook_params = wiring.hook_params(spec, session_id, os_user);
+    let hook_params = wiring.hook_params(spec, session_id, os_user, &route.plain_env);
     let mut slots = render_host_launch_slots(
         agent,
         &worktree_path,
@@ -292,8 +293,6 @@ pub(crate) async fn start_cli_harness_session(
             home: None,
         },
     )?;
-    // The role's flags, then the route's arguments, follow the spec's own argv; the route's
-    // environment follows the session's.
     let carried_effort = effort_launch(spec, effort);
     slots.argv_extra.extend(role_args);
     slots.argv_extra.extend(carried_effort.args);

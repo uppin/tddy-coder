@@ -345,6 +345,17 @@ The key reaches only the agent child's environment: it is never on argv and neve
 GitHub token there is no per-call socket Claude Code could ask instead, so the environment is where it
 reads its key.
 
+**The route is also pinned in the worktree.** A settings-file `env` value replaces the one inherited
+from the shell (Claude Code's documented precedence), so a tool that writes
+`env.ANTHROPIC_BASE_URL` into the user-level `~/.claude/settings.json` would hijack the route of
+every routed session. A routed start therefore writes the route's non-secret variables (the table's
+`ANTHROPIC_BASE_URL` and model variables, never the key) into the worktree's
+`.claude/settings.local.json` beside the hooks it already carries there, and launches `claude` with
+`--settings <worktree>/.claude/settings.local.json`: in a git worktree Claude Code keeps and reads
+that file at the main checkout's root, so the worktree's pin is unread without the explicit flag. An
+unrouted launch writes no `env` key and passes no `--settings`. A resume re-applies the route in the
+child's environment but does not re-render the pin.
+
 **No fallback.** A start that chose an account never runs on Anthropic instead. It is refused with:
 
 | Situation | Status |

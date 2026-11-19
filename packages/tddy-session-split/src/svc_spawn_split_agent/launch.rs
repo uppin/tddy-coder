@@ -90,6 +90,7 @@ impl SplitSessions {
             daemon_socket: Some(&agent_tool_socket),
             answer_wait_secs,
             remote_log: None,
+            route_env: &[],
         };
         self.render_and_write_split_hooks(session_id, context_dir, hook_params)?;
         Ok(())

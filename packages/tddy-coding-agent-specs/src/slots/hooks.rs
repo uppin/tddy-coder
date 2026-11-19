@@ -51,6 +51,13 @@ pub trait HooksAdapter: Send + Sync {
         &[]
     }
 
+    /// The argv entries that load this adapter's hooks file explicitly, for a launch in `workdir`:
+    /// the load flag and the file path, for an agent that does not read the file from its working
+    /// directory by itself. Empty by default: the agent finds the file where the launch writes it.
+    fn file_load_args(&self, _workdir: &Path) -> Vec<String> {
+        Vec::new()
+    }
+
     /// [`Self::render`] as [`RenderedHooks::File`], or why `params` cannot be rendered by this
     /// adapter. What a launcher calls (`#agent-tools 7/12`): an adapter that reports over the
     /// daemon's agent-tool socket refuses params without one ([`SlotError::NoDaemonSocket`])
@@ -81,6 +88,20 @@ impl HooksAdapter for ClaudeSettingsLocal {
 
     fn installed_events(&self) -> &'static [&'static str] {
         CLAUDE_INSTALLED_EVENTS
+    }
+
+    /// Claude Code keeps and reads `settings.local.json` at the main checkout's root, not a git
+    /// worktree's — the same gap the `host_agent` variant's `hooks_flag: --settings` closes for a
+    /// split agent — so the file the daemon writes is loaded explicitly.
+    fn file_load_args(&self, workdir: &Path) -> Vec<String> {
+        vec![
+            "--settings".to_string(),
+            workdir
+                .join(".claude")
+                .join("settings.local.json")
+                .to_string_lossy()
+                .into_owned(),
+        ]
     }
 
     fn render(&self, workdir: &Path, params: &HookCommandParams<'_>) -> (PathBuf, Vec<u8>) {
@@ -230,6 +251,7 @@ mod tests {
             daemon_socket: Some("/var/folders/xy/T/tddy-agent-tools-1a2b.sock"),
             answer_wait_secs: 120,
             remote_log: None,
+            route_env: &[],
         };
 
         // When
@@ -295,6 +317,7 @@ mod tests {
             daemon_socket: None,
             answer_wait_secs: 120,
             remote_log: None,
+            route_env: &[],
         };
 
         // When
@@ -366,6 +389,7 @@ mod tests {
             daemon_socket: None,
             answer_wait_secs: 120,
             remote_log: None,
+            route_env: &[],
         };
 
         // When

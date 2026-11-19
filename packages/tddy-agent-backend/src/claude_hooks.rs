@@ -56,6 +56,12 @@ pub struct HookCommandParams<'a> {
     /// line to the file `log` there, no hook that waits for an answer is installed, and no daemon
     /// socket is needed (`#remote-shell` 6/7).
     pub remote_log: Option<&'a str>,
+    /// The provider route's non-secret environment pairs, pinned beside the hooks under `env` in
+    /// the settings file: a tool that writes `env.ANTHROPIC_BASE_URL` into the user-level
+    /// `~/.claude/settings.json` would otherwise hijack the route of every routed session, whose
+    /// delivery in the child's environment a settings value replaces. The key is never here — it
+    /// reaches only the agent child's environment. Empty for an unrouted launch.
+    pub route_env: &'a [(String, String)],
 }
 
 /// How far the hook's own client bound sits past the daemon's deadline: the daemon answers
@@ -151,7 +157,8 @@ pub(crate) fn hook_entry_for_event(
 /// Build the `.claude/settings.local.json` value for a claude-cli worktree.
 ///
 /// Returns a `serde_json::Value` with a `hooks` object containing one entry per relevant
-/// Claude Code hook event. The caller writes this to `<worktree>/.claude/settings.local.json`.
+/// Claude Code hook event and, for a routed launch, the route's non-secret variables under `env`.
+/// The caller writes this to `<worktree>/.claude/settings.local.json`.
 ///
 /// # Format
 /// Each event maps to:
@@ -180,7 +187,15 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
         );
     }
 
-    serde_json::json!({ "hooks": hooks_obj })
+    let mut settings = serde_json::json!({ "hooks": hooks_obj });
+    if !p.route_env.is_empty() {
+        let mut env = serde_json::Map::new();
+        for (name, value) in p.route_env {
+            env.insert(name.clone(), serde_json::Value::from(value.as_str()));
+        }
+        settings["env"] = env.into();
+    }
+    settings
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +216,55 @@ mod tests {
             daemon_socket: None,
             answer_wait_secs: 120,
             remote_log: None,
+            route_env: &[],
         }
+    }
+
+    /// A routed launch's non-secret route variables are pinned under `env` beside the hooks, and
+    /// the key is not among them — it reaches only the agent child's environment.
+    #[test]
+    fn build_claude_hooks_settings_pins_the_route_env_but_not_a_secret() {
+        // Given
+        let params = HookCommandParams {
+            route_env: &[
+                (
+                    "ANTHROPIC_BASE_URL".to_string(),
+                    "https://route.example".to_string(),
+                ),
+                ("ANTHROPIC_MODEL".to_string(), "routed-model".to_string()),
+            ],
+            ..test_params()
+        };
+
+        // When
+        let value = build_claude_hooks_settings(&params);
+
+        // Then
+        assert_eq!(
+            (
+                value["env"]["ANTHROPIC_BASE_URL"].as_str(),
+                value["env"]["ANTHROPIC_MODEL"].as_str(),
+                value["env"].get("ANTHROPIC_AUTH_TOKEN"),
+                value["hooks"].is_object(),
+            ),
+            (
+                Some("https://route.example"),
+                Some("routed-model"),
+                None,
+                true
+            ),
+        );
+    }
+
+    /// An unrouted launch writes no `env` key: the settings file carries the hooks alone, as
+    /// before.
+    #[test]
+    fn build_claude_hooks_settings_writes_no_env_key_without_a_route() {
+        // When
+        let value = build_claude_hooks_settings(&test_params());
+
+        // Then
+        assert_eq!(value.get("env"), None);
     }
 
     /// The generated settings must contain all eight hook event keys.

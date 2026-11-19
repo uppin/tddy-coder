@@ -12,7 +12,6 @@ use tddy_core::adapters::ConversationMintError;
 use tddy_core::{HookCommandParams, SessionMetadata};
 use tddy_rpc::Code;
 
-use super::*;
 use crate::cli_agent_steps::conversation::conversation_mint_refused;
 use crate::cli_agent_steps::conversation::refuse_a_role_the_agent_cannot_hold;
 use crate::cli_agent_steps::conversation::resumed_conversation;
@@ -20,6 +19,9 @@ use crate::cli_agent_steps::conversation::start_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::conversation::ConversationTarget;
 use crate::cli_agent_steps::conversation::LaunchConversation;
+use crate::cli_agent_steps::host_launch_slots::render_host_launch_slots;
+use crate::cli_agent_steps::host_launch_slots::write_slot_files_on_target;
+use crate::cli_agent_steps::host_launch_slots::HostLaunchSlots;
 use crate::harness_from_spec::HarnessLaunch;
 use crate::spec_launch::HostAgent;
 
@@ -465,6 +467,7 @@ fn a_host_launch_of_an_agent_declaring_hooks_renders_its_hooks_file_and_appended
         daemon_socket: None,
         answer_wait_secs: 120,
         remote_log: None,
+        route_env: &[],
     };
 
     // When

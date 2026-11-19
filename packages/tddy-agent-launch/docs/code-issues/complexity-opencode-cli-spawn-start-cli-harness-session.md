@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-agent-launch/src/opencode_cli_spawn.rs:56` — `start_cli_harness_session`
 **Category:** complexity
 **Detected:** 2026-11-03 — `/pr-wrap` on #797 (`#agent-tools` 8/12), fn line to closing brace on `origin/feature/agent-tools/cursor-cli` (`ca7814b57`) and HEAD; no coverage run
-**Metrics:** **371 lines** (2026-11-19)
+**Metrics:** **370 lines** (2026-11-19, after the route-env pin's re-placement)
 **Thresholds breached:** length 371 > 60 (`/analyze-clean-code`)
 **Restructure:** not designed — deferred to the #agent-tools sweep node (developer, 2026-11-02)
-**Status:** Open — the `#coder-start` stack's growth (383 → 397) was undone by its sweep (397 → 371, #coder-start 10/10); still over budget — unclaimed
+**Status:** Open — the `#coder-start` sweep undid the stack's growth (397 → 371), and the route-env pin leaves it one better (371 → 370); still over budget — unclaimed
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured
 
 ## Measurement history
@@ -28,6 +28,7 @@
 | 2026-11-16 | 368 → 378 | **worse by 10** in #933: the spawn records `activity_status: Started` in the first `.session.yaml` (a Cursor launch never fires `sessionStart`); brace-matched fn line to closing brace on `origin/master` (`769c16e86`) and HEAD; no coverage run. Not extracted: restructuring stays with the `#agent-tools` sweep as deferred |
 | 2026-11-18 | 391 → 397 | **worse by 6** in #948 (`#coder-start` 8/10): the target shell is wrapped in `recorded_by` after the cut, so the start's later target calls are logged; brace-matched fn line to closing brace on `origin/feature/coder-start/target-agent-start` (`a91b974ec`) and HEAD; no coverage run. The base already measures 391, so the growth from 378 is not this PR's. Not extracted: restructuring stays with the `#agent-tools` sweep as deferred |
 | 2026-11-19 | 397 → 371 | **better by 26** in the `#coder-start` sweep (10/10), below the stack's base (383 on `8b004d090`): four engine `extract_method`s (`tddy-tools restructure`) — `log_hooks_on_the_target` (12 lines, 2 parameters), `place_slot_files_and_pointer` (21, 5), `node_launcher_for` (9, 2), `report_the_started_session` (22, 5). The fifth planned cut, the target-shell resolution, was refused by `check --deep` (its signature names `CoderCredentialSource`, which the file does not import) and left in place rather than unlocked by a hand-written import. Every other step reads seven to twenty locals, so cutting it trades this finding for a parameter-count one; brace-matched fn line to closing brace on `c965b89a7` and HEAD; no coverage run |
+| 2026-11-19 | 371 → 370 | **better by 1** (route-env pin, rebased onto the sweep): the pin rides its launch instead of the spawn site — `SessionWiring::hook_params` gains the route's `route_env` param, and `render_host_launch_slots` (in `cli_agent_steps/host_launch_slots.rs`, the file-length split's module) extends the argv with the hooks adapter's `file_load_args` for a launch whose hooks pin a route; an earlier version added the pin inline (+13, measured 391 on the pre-sweep base) and was re-placed before push. Still far over 60 |
 
 ## What would close it
 

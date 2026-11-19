@@ -25,6 +25,9 @@ pub(super) struct ClaudeCliHooks {
     /// of running `tddy-tools session-hook`. Set by the harness launch when the session has a
     /// target; `None` is a session on this host.
     pub(super) remote_log: Option<String>,
+    /// The provider route's non-secret environment pairs, pinned into the hooks settings file
+    /// ([`tddy_core::HookCommandParams::route_env`]); empty for an unrouted launch.
+    pub(super) route_env: Vec<(String, String)>,
 }
 
 impl ClaudeCliHooks {
@@ -43,6 +46,7 @@ impl ClaudeCliHooks {
             daemon_socket: self.daemon_socket.as_deref(),
             answer_wait_secs: self.answer_wait_secs,
             remote_log: self.remote_log.as_deref(),
+            route_env: &self.route_env,
         }
     }
 }
@@ -119,6 +123,7 @@ pub(super) fn claude_cli_hooks_with_token(
         hook_token,
         answer_wait_secs: spec.answer_wait_secs(),
         remote_log: None,
+        route_env: Vec::new(),
     }
 }
 
