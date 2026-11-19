@@ -214,16 +214,9 @@ async fn a_command_through_a_merging_pty_keeps_its_status_and_merged_words() {
         .exec(ExecRequest::new("printf out; printf err >&2; exit 3"))
         .await;
 
-    // Then the command ran: its status is its own, its words arrive merged, and the start
-    // marker that proves it ran is not part of the output
-    assert_eq!(
-        output,
-        Ok(ExecOutput {
-            status: 3,
-            stdout: b"outerr".to_vec(),
-            stderr: Vec::new(),
-        })
-    );
+    // Then the command ran: its status is its own, its words arrive merged — as the account of
+    // its failure — and the start marker that proves it ran is not part of the output
+    assert_eq!(output, Ok(ExecOutput::exited(3, "outerr")));
 }
 
 #[tokio::test]
@@ -253,14 +246,7 @@ async fn a_failed_command_through_a_merging_pty_is_not_unreachable() {
         .await;
 
     // Then it is a failed command with its words, not an unreachable workspace
-    assert_eq!(
-        output,
-        Ok(ExecOutput {
-            status: 1,
-            stdout: b"no such directory".to_vec(),
-            stderr: Vec::new(),
-        })
-    );
+    assert_eq!(output, Ok(ExecOutput::exited(1, "no such directory")));
 }
 
 #[tokio::test]

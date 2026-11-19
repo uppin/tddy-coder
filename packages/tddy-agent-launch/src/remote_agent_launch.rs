@@ -105,7 +105,8 @@ pub struct RemoteLaunch<'a> {
     /// The session's worktree on the target: the agent's working directory.
     pub worktree: &'a Path,
     /// The session's directory on this host: the working directory of the local PTY that runs the
-    /// transport's client.
+    /// transport's client. A file the agent's argv names in it is copied into `worktree`'s `.tddy/`
+    /// on the target, and the argument rewritten to that copy.
     pub session_dir: &'a Path,
     /// The session pointer already placed in `worktree` on the target, when the launch placed one:
     /// rewritten there with the agent as its owner once the agent has started.
@@ -244,9 +245,10 @@ pub async fn launch_on_target(
     // them on this host, and written through the port at the paths the agent is told.
     let (slot_files, plan) = plan_the_launch(agent, params, slots, &remote).await?;
     // A file the launch rendered into this session's directory on this host (its appended system
-    // prompt) is written on the target at the same path, so the argument that names it reads the
-    // target's copy, never a path of this host.
-    write_rendered_session_files(&remote, slot_files, &plan).await?;
+    // prompt) means nothing on the target, whose filesystem need not have that directory at all.
+    // It is written into the worktree's `.tddy/` on the target instead, and the argument that names
+    // it is rewritten to that copy, so the agent is never handed a path of this host.
+    let plan = write_rendered_session_files(&remote, slot_files, plan).await?;
     pre_trust_a_claude_clone(agent, &remote).await?;
 
     let (argv, local_env) = client_argv_and_env(agent, &remote, &session, plan);
@@ -344,17 +346,28 @@ async fn write_slot_files(
     Ok(())
 }
 
+/// Write every file the plan's argv names under this host's session directory
+/// (`remote.session_dir`) onto the target, and return the plan with those arguments rewritten to
+/// the target's copies.
+///
+/// The session directory maps to the worktree's `.tddy/` on the target — the directory that
+/// already holds the agent's pid file, the session pointer and the hook log, git-excluded and
+/// owner-only — so `<session_dir>/<relative>` is written at `<worktree>/.tddy/<relative>`. The copy
+/// is written owner-only: a file in the session directory can hold a secret. An argument naming a
+/// slot file is left alone, since the slot files were already written at the paths the agent is
+/// told. Only the argv is mapped; an environment value naming a session file is not.
 async fn write_rendered_session_files(
     remote: &RemoteLaunch<'_>,
     slot_files: Vec<(std::path::PathBuf, Vec<u8>)>,
-    plan: &crate::spec_launch::HostPtyPlan,
-) -> Result<(), RemoteLaunchError> {
-    for argument in &plan.argv {
-        let path = Path::new(argument);
-        if !path.starts_with(remote.session_dir) || !path.is_file() {
+    mut plan: crate::spec_launch::HostPtyPlan,
+) -> Result<crate::spec_launch::HostPtyPlan, RemoteLaunchError> {
+    let on_the_target = remote.worktree.join(".tddy");
+    for argument in &mut plan.argv {
+        let path = Path::new(argument.as_str());
+        let Ok(relative) = path.strip_prefix(remote.session_dir) else {
             continue;
-        }
-        if slot_files.iter().any(|(written, _)| written == path) {
+        };
+        if !path.is_file() || slot_files.iter().any(|(written, _)| written == path) {
             continue;
         }
         let bytes = std::fs::read(path).map_err(|error| {
@@ -363,13 +376,15 @@ async fn write_rendered_session_files(
                 message: error.to_string(),
             })
         })?;
+        let target_path = on_the_target.join(relative).to_string_lossy().into_owned();
         remote
             .shell
-            .write_file(&path.to_string_lossy(), &bytes, FileMode::TargetDefault)
+            .write_file(&target_path, &bytes, FileMode::OwnerOnly)
             .await
             .map_err(RemoteLaunchError::Shell)?;
+        *argument = target_path;
     }
-    Ok(())
+    Ok(plan)
 }
 
 fn remote_command(

@@ -149,8 +149,9 @@ async fn cut_worktree(
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(start.selected_integration_base_ref, chain_base_ref);
     let wt = if let Some(shell) = &start.shell {
+        let base_ref = remote_base_ref(start, repo_root, worktree_base_ref).await?;
         let recorded = recorded_by(shell.clone(), progress);
-        remote_worktree_through(start, git_url, &recorded, worktree_base_ref, progress).await?
+        remote_worktree_through(start, git_url, &recorded, base_ref, progress).await?
     } else if start.ssh_alias.is_empty() {
         tddy_session_split::service_util::create_session_worktree(
             start.timeout,
@@ -161,7 +162,8 @@ async fn cut_worktree(
         )
         .await?
     } else {
-        remote_worktree(start, git_url, worktree_base_ref, progress).await?
+        let base_ref = remote_base_ref(start, repo_root, worktree_base_ref).await?;
+        remote_worktree(start, git_url, base_ref, progress).await?
     };
     tddy_session_split::service_util::push_new_branch_to_origin_if_requested(
         start.create_remote_branch,
@@ -174,18 +176,58 @@ async fn cut_worktree(
     Ok(wt)
 }
 
+/// The ref a checkout cut on a target branches from: the one the start or its stack parent named,
+/// or else the project's default integration base, resolved on this host's checkout of the
+/// project (`repo_root`) as a local cut resolves it — fetched, then `origin/master`,
+/// `origin/main`, or the remote's `HEAD`.
+///
+/// The target's clone is fetched before the cut, so the remote-tracking ref this names is as
+/// fresh there as here. Its own `HEAD` is not: nothing moves a clone's local branch, so a cut from
+/// it branches from whatever commit the clone was made at. A project whose default cannot be
+/// resolved fails the start with the reason.
+///
+/// `None` for a start that works on an existing branch: it is cut from no base, so nothing is
+/// resolved or fetched for it.
+async fn remote_base_ref(
+    start: &CliWorktreeStart<'_>,
+    repo_root: &Path,
+    worktree_base_ref: Option<String>,
+) -> Result<Option<String>, Status> {
+    if start.intent != tddy_core::BranchWorktreeIntent::NewBranchFromBase {
+        return Ok(None);
+    }
+    if let Some(base_ref) = worktree_base_ref.filter(|base| !base.trim().is_empty()) {
+        return Ok(Some(base_ref));
+    }
+    let repo_root = repo_root.to_path_buf();
+    tddy_session_split::service_util::spawn_blocking_with_timeout(
+        start.timeout,
+        "resolve the project's integration base for a target's worktree",
+        move || {
+            tddy_core::resolve_default_integration_base_ref(&repo_root).map_err(|error| {
+                anyhow::anyhow!(
+                    "the project's integration base could not be resolved in {}: {error}",
+                    repo_root.display()
+                )
+            })
+        },
+    )
+    .await
+    .map(Some)
+}
+
 /// The session's checkout on the ssh target `start.ssh_alias`, cloned from `git_url`.
 async fn remote_worktree(
     start: &CliWorktreeStart<'_>,
     git_url: &str,
-    worktree_base_ref: Option<String>,
+    base_ref: Option<String>,
     progress: &AttachmentProgressSink,
 ) -> Result<PathBuf, Status> {
     let shell = recorded_by(
         std::sync::Arc::new(tddy_remote_shell::SshShell::new(start.ssh_alias)),
         progress,
     );
-    remote_worktree_through(start, git_url, &shell, worktree_base_ref, progress).await
+    remote_worktree_through(start, git_url, &shell, base_ref, progress).await
 }
 
 /// `shell`, reporting each command it runs to the start's progress, which is how the start's record
@@ -246,12 +288,13 @@ impl tddy_remote_shell::RemoteCallSink for ProgressCalls {
 
 /// The session's checkout on its target, cloned from `git_url` through `shell`: under the target
 /// user's home, on the branch the start asked for — a new branch from its base, or the existing
-/// branch it named — as the local cut honours both.
+/// branch it named — as the local cut honours both. A new branch is cut from `base_ref`
+/// ([`remote_base_ref`]), which such a start always has.
 async fn remote_worktree_through(
     start: &CliWorktreeStart<'_>,
     git_url: &str,
     shell: &dyn tddy_remote_shell::RemoteShell,
-    worktree_base_ref: Option<String>,
+    base_ref: Option<String>,
     progress: &AttachmentProgressSink,
 ) -> Result<PathBuf, Status> {
     // The branch the start resolved, read from its changeset as the local cut reads it: an
@@ -289,12 +332,12 @@ async fn remote_worktree_through(
                     "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
                 ));
             }
-            tddy_core::worktree::RemoteBranch::NewFrom {
-                name,
-                base_ref: worktree_base_ref
-                    .filter(|base| !base.trim().is_empty())
-                    .unwrap_or_else(|| "HEAD".to_string()),
-            }
+            let base_ref = base_ref.ok_or_else(|| {
+                Status::internal(format!(
+                    "the new branch {name} on the target was given no base to branch from"
+                ))
+            })?;
+            tddy_core::worktree::RemoteBranch::NewFrom { name, base_ref }
         }
     };
     let request = tddy_core::worktree::RemoteWorktreeRequest {
@@ -520,7 +563,7 @@ mod remote_cut_tests {
             &start,
             QAPE_HQ,
             &workspace,
-            None,
+            Some("origin/master".to_string()),
             &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
         )
         .await
