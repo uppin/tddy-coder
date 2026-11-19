@@ -1,6 +1,6 @@
 # complexity: launch_on_target
 
-**Location:** `packages/tddy-agent-launch/src/remote_agent_launch.rs:163` — `launch_on_target`
+**Location:** `packages/tddy-agent-launch/src/remote_agent_launch.rs:219` — `launch_on_target`
 **Category:** complexity
 **Detected:** 2026-11-18 — `/yolo-pr-stack` sweep-collect (`#coder-start`), function length by brace matching (fn line to closing brace)
 **Metrics:** **60 lines** (was 184) · **6 parameters** · budget 60 lines, 5 parameters — length closed, parameter count still 6 > 5. CRAP: below the report's top-50 cut-off (CRAP < 42), join rate 65.3% for the package (1340 of 2052), so the function's own coverage figure was not read
@@ -12,6 +12,7 @@
 
 | Run | Lines | Note |
 |---|---|---|
+| 2026-11-19 (target host-path fix) | 60 → 60 | the session-file copy now returns the rewritten plan (`let plan = …`); its comment kept to three lines, so the length stays at the budget. Parameters unchanged at 6. `plan_the_launch`, `write_slot_files` and `write_rendered_session_files` moved to `remote_agent_launch/session_files.rs` (file 518 → 439 production lines) |
 | 2026-11-18 (#947 wrap) | 59 → 60 | `pre_trust_a_claude_clone` call added before the terminal is registered; at the 60-line budget. Parameters unchanged at 6 (the clone root went on `RemoteLaunch`) |
 | 2026-11-18 (sweep) | 184 → 59 | eight engine `extract_method`s: `judge_the_start`, `recorded_owner`, `client_command`, `remote_command`, `client_argv_and_env`, `plan_the_launch`, `write_slot_files`, `write_rendered_session_files`; every extracted function ≤ 33 lines. Parameters unchanged at 6 |
 | 2026-11-18 | 180 → 184 | first detection as a record. 180 on `2ed59a3c7`, 184 on `6e88f90e6`: the ssh-only `SSH_AUTH_SOCK` copy became a `for name in ["SSH_AUTH_SOCK", "PATH"]` loop so a bare `coder`/`ssh` client is found on `PATH` (#942 area). One loop and its comment |

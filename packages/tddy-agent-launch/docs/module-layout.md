@@ -8,8 +8,11 @@ connect, signal and delete handlers; `tddy-session-lifecycle` wires it to the ho
 
 About **9.5k production lines** in the crate's modules, under the 10k receiver budget. No production file is over 500 (by the count to the first `#[cfg(test)]`):
 `remote_agent_launch.rs` is a module whose startup wait, window and settled output live in
-`remote_agent_launch/startup.rs` and whose target resolution and proto conversions live in
-`remote_agent_launch/target.rs`.
+`remote_agent_launch/startup.rs`, whose target resolution and proto conversions live in
+`remote_agent_launch/target.rs`, and whose launch plan and the files it writes on the target
+(`plan_the_launch`, the slot files, and `write_rendered_session_files`, which copies an argv file of
+this host's session directory into the worktree's `.tddy/` there and rewrites the argument) live in
+`remote_agent_launch/session_files.rs`.
 `launch_on_target` spawns the session's local PTY (the transport's client) on a cleared environment
 carrying the transport's credentials, `SSH_AUTH_SOCK` and the daemon's own `PATH`, so a bare `coder` or
 `ssh` resolves; the agent's environment still travels inside the remote command.
