@@ -8,10 +8,10 @@
 //!
 //! Docs: packages/tddy-session-driver/docs/architecture.md.
 
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
+use tddy_testing_commons::remote_target::write_executable;
 
 use pretty_assertions::assert_eq;
 use serde_json::{json, Value};
@@ -63,29 +63,6 @@ const AN_AGENT_THAT_OUTLIVES_ITS_CLIENT: &str = "#!/bin/sh\n\
 
 /// An agent that refuses to run and says why.
 const AN_AGENT_THAT_EXITS: &str = "#!/bin/sh\nprintf 'acme: no licence for this host\\n'\nexit 3\n";
-
-/// `script` as an executable at `path`, run once guarded so this OS's first-execution scan is paid
-/// before anything is timed.
-fn write_executable(path: &Path, script: &str) {
-    let body = script.strip_prefix("#!/bin/sh\n").expect("a shell script");
-    std::fs::write(
-        path,
-        format!("#!/bin/sh\nif [ -n \"$TDDY_FIXTURE_WARMUP\" ]; then exit 0; fi\n{body}"),
-    )
-    .expect("the script is written");
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-        .expect("the script is made executable");
-    let warmed = std::process::Command::new(path)
-        .env("TDDY_FIXTURE_WARMUP", "1")
-        .stdin(Stdio::null())
-        .output()
-        .expect("the freshly written script warms up");
-    assert!(
-        warmed.status.success(),
-        "the warm-up of {} failed",
-        path.display()
-    );
-}
 
 /// A machine for one test: a tddy home holding the `acme` tool file, a worktree, the agent's stub,
 /// and a stand-in `coder` whose every workspace is this machine.

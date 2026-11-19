@@ -25,6 +25,12 @@ struct Args {
     #[arg(long, value_parser = |value: &str| value.parse::<DriverTarget>())]
     target: DriverTarget,
 
+    /// The session's id, instead of a generated one. A target's pre-trust derives the session's
+    /// clone from a worktree laid out as `<clone>/.worktrees/<session id>`, so a caller that lays
+    /// one out must name the id up front.
+    #[arg(long)]
+    session_id: Option<String>,
+
     /// The session's worktree, on the target: the agent's working directory. It must exist.
     #[arg(long)]
     worktree: PathBuf,
@@ -85,7 +91,12 @@ fn parse_env(value: &str) -> Result<(String, String), String> {
         .ok_or_else(|| format!("{value} is not KEY=VALUE"))
 }
 
-fn session_spec(args: Args) -> anyhow::Result<(LaunchSpec, bool)> {
+/// The id the caller named, or a fresh one when it named none.
+fn session_id_or_generated(named: Option<String>) -> String {
+    named.unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+}
+
+fn session_spec(mut args: Args) -> anyhow::Result<(LaunchSpec, bool)> {
     let shell = args
         .target
         .shell(&args.coder, |name| std::env::var(name).ok())
@@ -100,7 +111,7 @@ fn session_spec(args: Args) -> anyhow::Result<(LaunchSpec, bool)> {
     if let Some(binary) = args.binary {
         agent.tool.binary = binary;
     }
-    let session_id = uuid::Uuid::new_v4().to_string();
+    let session_id = session_id_or_generated(args.session_id.take());
     let model = args.model.unwrap_or_default();
     let params = harness_template_params(&HarnessLaunch {
         model: &model,
@@ -156,4 +167,19 @@ async fn main() -> anyhow::Result<()> {
     // The client is gone: end the session rather than leave its agent running.
     let _ = session.stop().await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::session_id_or_generated;
+
+    #[test]
+    fn a_session_id_the_caller_named_is_the_one_used() {
+        assert_eq!(session_id_or_generated(Some("chosen".into())), "chosen");
+    }
+
+    #[test]
+    fn without_a_named_session_id_each_session_gets_its_own() {
+        assert_ne!(session_id_or_generated(None), session_id_or_generated(None));
+    }
 }

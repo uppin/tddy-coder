@@ -35,3 +35,4 @@ tddy-tool-engine = { path = "../tddy-tool-engine" }
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tempfile = "3"
+tddy-testing-commons = { path = "../tddy-testing-commons" }
