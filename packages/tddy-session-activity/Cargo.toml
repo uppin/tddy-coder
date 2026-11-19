@@ -78,6 +78,9 @@ tddy-workflow = { path = "../tddy-workflow" }
 # `stack_plan_json_from_store` runs the startup stack migration sweep over a legacy session. A
 # dev-dependency only: tddy-pr-stack depends on nothing that depends on this crate.
 tddy-pr-stack = { path = "../tddy-pr-stack" }
+# The session-metadata builder for `session_reader`'s liveness tests. Depends on nothing that
+# depends on this crate.
+tddy-testing-commons = { path = "../tddy-testing-commons" }
 tempfile = "3"
 # `session_usage_stream_acceptance` reads the stream the handler returns.
 futures-util = "0.3"

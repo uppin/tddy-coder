@@ -147,6 +147,55 @@ mod tests {
     use std::fs;
     use tddy_core::output::SESSIONS_SUBDIR;
     use tddy_core::{write_session_metadata, SessionMetadata};
+    use tddy_daemon_kernel::live_sessions::LiveSessions;
+    use tddy_testing_commons::a_session_metadata;
+
+    /// Records `session_id` under `sessions_base`, with `pid` as its recorded pid.
+    fn a_recorded_session(sessions_base: &std::path::Path, session_id: &str, pid: Option<u32>) {
+        let dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+        fs::create_dir_all(&dir).unwrap();
+        let builder = a_session_metadata().with_session_id(session_id);
+        let metadata = match pid {
+            Some(pid) => builder.with_pid(pid).build(),
+            None => builder.without_pid().build(),
+        };
+        write_session_metadata(&dir, &metadata).unwrap();
+    }
+
+    fn is_active_in(entries: &[SessionEntry], session_id: &str) -> bool {
+        entries
+            .iter()
+            .find(|e| e.session_id == session_id)
+            .expect("the session is listed")
+            .is_active
+    }
+
+    #[test]
+    fn a_session_whose_recorded_pid_is_a_running_process_but_not_live_lists_inactive() {
+        // Given a session recording this very process's pid — alive by definition
+        let temp = tempfile::tempdir().unwrap();
+        a_recorded_session(temp.path(), "recycled-pid", Some(std::process::id()));
+
+        // When
+        let entries = list_sessions_in_dir(temp.path(), &LiveSessions::none()).unwrap();
+
+        // Then
+        assert!(!is_active_in(&entries, "recycled-pid"));
+    }
+
+    #[test]
+    fn a_live_session_lists_active_without_a_recorded_pid() {
+        // Given
+        let temp = tempfile::tempdir().unwrap();
+        a_recorded_session(temp.path(), "live-session", None);
+
+        // When
+        let entries =
+            list_sessions_in_dir(temp.path(), &LiveSessions::of(["live-session"])).unwrap();
+
+        // Then
+        assert!(is_active_in(&entries, "live-session"));
+    }
 
     #[test]
     fn list_sessions_returns_new_metadata_fields() {
@@ -195,7 +244,7 @@ mod tests {
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
-        let entries = list_sessions_in_dir(temp.path()).unwrap();
+        let entries = list_sessions_in_dir(temp.path(), &LiveSessions::none()).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].tool, "tddy-coder");
         assert_eq!(entries[0].livekit_room, "room-abc");

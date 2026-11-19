@@ -130,6 +130,18 @@ impl CliSessionManager {
         out
     }
 
+    /// Every session this manager holds a live **agent** for: a resolving terminal whose kind is an
+    /// agent's — the main terminal, an agent tab — or a tmux-run agent whose client ended while a
+    /// detach watcher still holds it. A shell (`"bash"`) or a tmux attach (`"tmux"`) is not an
+    /// agent and never makes its session live.
+    ///
+    /// A snapshot, for a listing to read off the async locks — see
+    /// [`tddy_daemon_kernel::live_sessions`].
+    pub async fn live_agent_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
+        // TODO(session-liveness 1/4): implemented in the green step.
+        todo!("live agent sessions from the terminal index and the detach watchers")
+    }
+
     /// Stop a started tool: cancel its task and remove it from the registry.
     /// Returns `true` if the tool existed. The reserved `MAIN_TERMINAL_ID` is not stoppable
     /// here (callers must reject it before calling).

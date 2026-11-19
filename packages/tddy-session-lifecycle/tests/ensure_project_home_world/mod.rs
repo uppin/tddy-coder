@@ -108,6 +108,15 @@ impl World {
         self.rewrite_metadata_of(session_id, &meta);
     }
 
+    /// Stop a started home session the way a recycled pid leaves it: its agent's terminal ends,
+    /// but `.session.yaml` still records a pid — now `pid`, an unrelated running process's.
+    pub async fn stop_leaving_its_recorded_pid_naming(&self, session_id: &str, pid: u32) {
+        self.home.manager.stop_session(session_id).await;
+        let mut meta = self.metadata_of(session_id);
+        meta.pid = Some(pid);
+        self.rewrite_metadata_of(session_id, &meta);
+    }
+
     fn session_dir(&self, session_id: &str) -> PathBuf {
         self.home.data.path().join("sessions").join(session_id)
     }
