@@ -34,10 +34,11 @@ use crate::cli_agent_steps::conversation::refuse_a_role_the_agent_cannot_hold;
 use crate::cli_agent_steps::conversation::start_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::conversation::ConversationTarget;
-use crate::cli_agent_steps::{
-    render_host_launch_slots, wire_session_agent, write_slot_files_on_target,
-    write_slot_files_through_shell, HostLaunchSlots, SessionWiringInputs,
-};
+use crate::cli_agent_steps::host_launch_slots::render_host_launch_slots;
+use crate::cli_agent_steps::host_launch_slots::write_slot_files_on_target;
+use crate::cli_agent_steps::host_launch_slots::write_slot_files_through_shell;
+use crate::cli_agent_steps::host_launch_slots::HostLaunchSlots;
+use crate::cli_agent_steps::{wire_session_agent, SessionWiringInputs};
 use crate::cli_resume_token::resume_token_recorder;
 use crate::cli_route_launch::{routed_launch_model, start_cli_route};
 use crate::cli_session_pointer::{

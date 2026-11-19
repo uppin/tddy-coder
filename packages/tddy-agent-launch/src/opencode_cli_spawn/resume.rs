@@ -4,10 +4,11 @@
 use crate::cli_agent_steps::conversation::resumed_or_adopted_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::conversation::ConversationTarget;
-use crate::cli_agent_steps::{
-    render_host_launch_slots, write_slot_files_on_target, write_slot_files_through_shell,
-    HostLaunchSlots, ResumedWiring,
-};
+use crate::cli_agent_steps::host_launch_slots::render_host_launch_slots;
+use crate::cli_agent_steps::host_launch_slots::write_slot_files_on_target;
+use crate::cli_agent_steps::host_launch_slots::write_slot_files_through_shell;
+use crate::cli_agent_steps::host_launch_slots::HostLaunchSlots;
+use crate::cli_agent_steps::ResumedWiring;
 use crate::cli_resume_token::{resume_token_recorder, settled_resume_token};
 use crate::cli_route_launch::resume_cli_route;
 use crate::cli_session_pointer::{
