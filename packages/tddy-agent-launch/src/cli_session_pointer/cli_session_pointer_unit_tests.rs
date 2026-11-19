@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use tddy_core::session_pointer::{find_session_pointer, SessionPointer, SessionPointerOwner};
 
 use super::{
-    place_session_pointer, record_remote_owner, removing_session_pointer_on_exit,
-    session_pointer_of, PlacedSessionPointer, PointerHost, REMOTE_AGENT_PID_FILE,
+    place_session_pointer, record_remote_owner, remote_agent_pid_file,
+    removing_session_pointer_on_exit, session_pointer_of, PlacedSessionPointer, PointerHost,
 };
 
 const SOCKET: &str = "/run/tddy/managed.sock";
@@ -308,12 +308,10 @@ async fn an_ssh_pointer_is_excluded_owner_only_and_bounded() {
         .await
         .expect("the pointer is written on the target")
         .expect("an ssh pointer is the launch's to remove");
-    std::fs::write(
-        target_checkout.path().join(REMOTE_AGENT_PID_FILE),
-        REMOTE_AGENT_PID.to_string(),
-    )
-    .unwrap();
-    let owner = record_remote_owner(&placed, &pointer)
+    let pid_file = target_checkout.path().join(remote_agent_pid_file("s1"));
+    std::fs::create_dir_all(pid_file.parent().unwrap()).unwrap();
+    std::fs::write(&pid_file, REMOTE_AGENT_PID.to_string()).unwrap();
+    let owner = record_remote_owner(&placed, &pointer, "s1")
         .await
         .expect("the remote agent owns the pointer");
 
@@ -364,7 +362,7 @@ async fn the_owner_of_a_pointer_on_this_host_is_not_looked_up_over_ssh() {
         .expect("a local pointer");
 
     // When
-    let refused = record_remote_owner(&placed, &pointer)
+    let refused = record_remote_owner(&placed, &pointer, "s1")
         .await
         .map_err(|status| status.code());
 

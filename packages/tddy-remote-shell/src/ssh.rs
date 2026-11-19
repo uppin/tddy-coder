@@ -10,8 +10,8 @@ use tokio::io::{AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::process::{ChildStdin, Command};
 
 use crate::{
-    ExecOutput, ExecRequest, InteractiveCommand, RemoteShell, RemoteShellError, ShellAddress,
-    StreamedExec, StreamedExit,
+    ExecOutput, ExecRequest, InteractiveCommand, InteractiveExit, RemoteShell, RemoteShellError,
+    ShellAddress, StreamedExec, StreamedExit,
 };
 
 /// A streamed ssh command's stdin: shutting it down drops the pipe, which is the command's EOF
@@ -242,6 +242,7 @@ impl RemoteShell for SshShell {
         InteractiveCommand {
             argv,
             env: Vec::new(),
+            exit: InteractiveExit::ClientStatus,
         }
     }
 }

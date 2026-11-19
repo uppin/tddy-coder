@@ -118,6 +118,7 @@ impl TerminalManager {
             kind: "bash".to_string(),
             env: Vec::new(),
             env_base: tddy_pty::PtyEnvBase::Inherited,
+            exit_code_in_output: None,
         };
 
         let task =

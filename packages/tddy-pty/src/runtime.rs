@@ -16,6 +16,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use tddy_task::{TaskBody, TaskChannel, TaskContext, TaskHandle, TaskId, TaskRegistry, TaskStatus};
+
+use crate::exit_status::ExitCodeInOutput;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::registry::{PtyControl, PtyRegistry};
@@ -55,6 +57,9 @@ pub struct PtySpawnSpec {
     pub env: Vec<(String, String)>,
     /// What the child starts from before `env` is applied (`#agent-tools 28/28`).
     pub env_base: PtyEnvBase,
+    /// How the command's status is read from a child that does not exit with it (a transport
+    /// client); `None` when the child's own status is the command's.
+    pub exit_code_in_output: Option<ExitCodeInOutput>,
 }
 
 /// What a PTY child's environment starts from before its spec's `env` is applied.
@@ -233,6 +238,11 @@ impl TaskBody for PtyTaskBody {
             status = setup.exit_rx => status.unwrap_or(TaskStatus::Failed {
                 message: "PTY exit monitor dropped".into(),
             }),
+        };
+        // The output is complete by now (the exit monitor waits for the reader to drain).
+        let exit_status = match &self.spec.exit_code_in_output {
+            Some(report) => report.read_from_capture(exit_status, &output_ch.capture_arc()),
+            None => exit_status,
         };
 
         ctx.deregister_child_pid(setup.pid);
@@ -540,6 +550,7 @@ mod tests {
             kind: "bash".to_string(),
             env: Vec::new(),
             env_base: PtyEnvBase::Inherited,
+            exit_code_in_output: None,
         };
         let (ready_tx, ready_rx) = oneshot::channel();
 
@@ -591,6 +602,7 @@ mod tests {
             kind: "sh".to_string(),
             env: Vec::new(),
             env_base: PtyEnvBase::Inherited,
+            exit_code_in_output: None,
         }
     }
 

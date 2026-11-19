@@ -12262,6 +12262,7 @@ dependencies = [
  "tddy-host-service",
  "tddy-pr-stack",
  "tddy-projects",
+ "tddy-pty",
  "tddy-remote-shell",
  "tddy-rpc",
  "tddy-sandbox",

@@ -95,6 +95,10 @@ Tests: `tests/capture_recorder.rs` (a real PTY, a 50 ms interval) —
 agent main — spawns on `Cleared`: the child sees exactly the spec's env (the daemon-computed agent env)
 plus the PTY's own `TERM=xterm-256color` and `COLORTERM=truecolor`, which stand over any the spec names.
 `spawn_tool` and the user's terminals (Bash, tmux clients) stay `Inherited`: a user's terminal is not an
-agent, and still sees the daemon's environment. `spawn_tool_on(env_base, …)` is the shared spawn both
-reach. Tests: `tests/agent_env_allow_list.rs` (`an_agent_main_spawned_through_spawn_rendered_main_sees_no_unlisted_daemon_variable`,
+agent, and still sees the daemon's environment. `spawn_tool_on(env_base, exit_code_in_output, …)` is
+the shared spawn both reach. `spawn_rendered_client_main` is `spawn_rendered_main` for a main whose
+process is a transport's client to an agent on a target: its `tddy_pty::ExitCodeInOutput` says how the
+agent's status is read from what a client that exits with a constant code (Coder's `coder ssh`, 1)
+printed last, so the terminal's status — and the `main exited` line and `AgentEnd` built from it — is
+the agent's own. Tests: `tests/agent_env_allow_list.rs` (`an_agent_main_spawned_through_spawn_rendered_main_sees_no_unlisted_daemon_variable`,
 and the guard `a_user_terminal_still_inherits_the_daemon_environment`).

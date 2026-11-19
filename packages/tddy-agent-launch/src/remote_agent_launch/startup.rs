@@ -14,16 +14,20 @@ pub(super) enum AgentStart {
     NeverStarted,
 }
 
-/// Wait, bounded by `bound`, for the agent to record its pid in `worktree` on the target — the
-/// remote command writes `.tddy/agent.pid` immediately before it `exec`s the agent — or for
-/// `handle`'s terminal to end, whichever comes first.
+/// Wait, bounded by `bound`, for `session_id`'s agent to record its pid in `worktree` on the target
+/// — the remote command writes its [`crate::cli_session_pointer::remote_agent_pid_file`]
+/// immediately before it `exec`s the agent — or for `handle`'s terminal to end, whichever comes
+/// first.
 pub(super) async fn wait_for_agent_start(
     shell: &dyn RemoteShell,
     worktree: &Path,
+    session_id: &str,
     handle: &PtyHandle,
     bound: Duration,
 ) -> AgentStart {
-    let pid_file = worktree.join(crate::cli_session_pointer::REMOTE_AGENT_PID_FILE);
+    let pid_file = worktree.join(crate::cli_session_pointer::remote_agent_pid_file(
+        session_id,
+    ));
     let probe = format!("cat {}", shell_single_quote(&pid_file.to_string_lossy()));
     let deadline = tokio::time::Instant::now() + bound;
     loop {

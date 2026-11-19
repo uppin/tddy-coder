@@ -209,9 +209,10 @@ impl ATarget {
         self.worktree().join(".tddy/session.json")
     }
 
-    /// Where the launch has the agent record its pid on the target.
+    /// Where the launch has the session's agent record its pid on the target.
     fn agent_pid_file(&self) -> PathBuf {
-        self.worktree().join(".tddy/agent.pid")
+        self.worktree()
+            .join(tddy_agent_launch::remote_agent_launch::remote_agent_pid_file(SESSION_ID))
     }
 
     /// A pointer placed in the session's worktree on the target, owned by this daemon — as the
@@ -555,7 +556,7 @@ async fn the_agent_runs_on_the_target_in_the_sessions_worktree() {
     );
 
     // And the client that carries it ran once, for the target's alias, in the session's directory
-    let launches = target.calls_carrying("> .tddy/agent.pid");
+    let launches = target.calls_carrying(&format!("> '.tddy/agents/{SESSION_ID}.pid'"));
     assert_eq!(
         launches
             .iter()

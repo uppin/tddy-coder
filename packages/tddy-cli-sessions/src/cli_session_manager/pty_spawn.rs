@@ -94,6 +94,7 @@ impl CliSessionManager {
             argv,
             env,
             tddy_pty::PtyEnvBase::Inherited,
+            None,
             os_user,
             on_exit,
             tmux_session,
@@ -102,7 +103,8 @@ impl CliSessionManager {
     }
 
     /// [`Self::spawn_tool`] whose child starts from `env_base` before `env` is applied: an agent
-    /// main starts from [`tddy_pty::PtyEnvBase::Cleared`] (`#agent-tools 28/28`).
+    /// main starts from [`tddy_pty::PtyEnvBase::Cleared`] (`#agent-tools 28/28`). A transport
+    /// client's main names how its agent's status is read in `exit_code_in_output`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_tool_on(
         &self,
@@ -114,12 +116,13 @@ impl CliSessionManager {
         argv: Vec<String>,
         env: Vec<(String, String)>,
         env_base: tddy_pty::PtyEnvBase,
+        exit_code_in_output: Option<tddy_pty::ExitCodeInOutput>,
         os_user: Option<&str>,
         on_exit: Option<ExitHook>,
         tmux_session: Option<&str>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         let (ready_tx, ready_rx) = oneshot::channel();
-        let spec = build_pty_spawn_spec(
+        let mut spec = build_pty_spawn_spec(
             (session_id, terminal_id, kind),
             &worktree_path,
             argv,
@@ -127,6 +130,7 @@ impl CliSessionManager {
             env_base,
             os_user,
         );
+        spec.exit_code_in_output = exit_code_in_output;
 
         // The main terminal's recording is finished by the PTY runtime itself, before the terminal
         // leaves the PTY registry: a stopped main must answer history from its recording the moment
@@ -411,6 +415,7 @@ fn build_pty_spawn_spec(
         env,
         env_base,
         os_user: os_user.map(str::to_string),
+        exit_code_in_output: None,
     }
 }
 

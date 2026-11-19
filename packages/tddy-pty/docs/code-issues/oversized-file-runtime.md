@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-pty/src/runtime.rs`
 **Category:** oversized-file
 **Detected:** 2026-11-10 — `/pr-wrap` step 3.5 file-length gate on #876 (`#agent-tools` 33/33 sweep), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **451 → 523 production lines** (2026-11-10) · budget 500
-**Thresholds breached:** length 523 > 500
+**Metrics:** **533 production lines** (2026-11-19; 523 on 2026-11-10) · budget 500
+**Thresholds breached:** length 533 > 500
 **Restructure:** `move_item` / `move_impl_members` into a submodule — `/code-restructuring` territory
-**Status:** Open — deferred by the user, 2026-11-10 (#876 wrap); unclaimed
+**Status:** Open — regressed 2026-11-19 (523 → 533, the reported-exit-status field and its read); deferred by the user, 2026-11-10 (#876 wrap); unclaimed
 
 Deferred by the user, 2026-11-10 (#876 wrap): left for a later refactoring node
 
@@ -16,6 +16,7 @@ Deferred by the user, 2026-11-10 (#876 wrap): left for a later refactoring node
 |---|---:|---|
 | 2026-11-10 | 451 → 523 | #876: the Tier C extracts out of `open_pty_and_pump` (179/9 → 40) added each helper's signature and struct (`spawn_child_and_pump`, `PtyMasterSetup`, `spawn_reader_with_master`, `wait_for_reader_drain`, `spawn_pty_writer`, `spawn_pty_reader`), pushing the file past the budget |
 | 2026-11-15 | 523 → 523 | #905 touched the exit monitor (one line: the status now comes from `exit_status::task_status_of`) and added its tests below `#[cfg(test)]`; production lines unchanged |
+| 2026-11-19 | 523 → 533 | remote-agent pid-per-session fix: `PtySpawnSpec.exit_code_in_output` (field + doc, 3 lines), its import (2) and the read after the exit monitor (5). The read itself and its tail bound live in `exit_status.rs` (`ExitCodeInOutput::read_from_capture`) to keep this file's growth to the call site |
 
 ## What would close it
 

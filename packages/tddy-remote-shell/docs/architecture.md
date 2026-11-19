@@ -22,7 +22,11 @@ the QEMU guest path, neither of which runs a command on a session's target).
 - **`StreamedExec`** — boxed `AsyncWrite` / `AsyncRead` pipes and an exit future, not
   `tokio::process` child handles, so a transport that is not a local child can produce one.
 - **`InteractiveCommand`** — the argv and environment a **local** PTY runs to be the remote
-  command's terminal. The port opens no PTY of its own.
+  command's terminal, and `exit: InteractiveExit`, how the remote command's status is read once
+  that client has exited: `ClientStatus` (the client exits with it — OpenSSH, the in-memory double)
+  or `ReportedLast { client_code, marker }` (the client exits `client_code` for any failed command
+  and prints the command's status last, right after `marker`). The port opens no PTY of its own;
+  `tddy-agent-launch` hands `ReportedLast` to the PTY as `tddy_pty::ExitCodeInOutput`.
 - **`RemoteShellError`** — `Unreachable`, `TimedOut`, `Exited`, `Spawn`: which of four things
   happened, each carrying the address it happened on. `TimedOut { address, after, command }` names
   the caller's command (its `command_head`), so the error says what hung:
@@ -111,8 +115,12 @@ alone, which the proxy inherits; neither is on any argv. `CoderShell::with_ssh_b
 `ssh` to run (default: `ssh` on `PATH`). `exec`, `read_file`, `write_file` and `interactive` keep
 the pty route.
 
-`interactive` is `coder ssh --disable-autostart <workspace> -- <command>` for a local PTY. Credentials are
-held in memory for the shell's life; `Debug` shows the URL and never the token.
+`interactive` is `coder ssh --disable-autostart <workspace> -- <command>` for a local PTY. The CLI
+(v2.33.5 has no flag to change it) exits `CoderShell::FAILED_COMMAND_EXIT_CODE` (1) for any command
+that failed and ends with `error: run command: Process exited with status <N>`, so the command
+declares `InteractiveExit::ReportedLast { 1, CoderShell::FAILED_COMMAND_STATUS }`
+(`"Process exited with status "`). Credentials are held in memory for the shell's life; `Debug`
+shows the URL and never the token.
 
 ## Test support
 

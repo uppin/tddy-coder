@@ -26,7 +26,7 @@ use tddy_core::session_pointer::{SessionPointer, SessionPointerOwner};
 use tddy_core::ssh_exec::shell_single_quote;
 #[cfg(test)]
 use tddy_core::SessionTarget;
-use tddy_remote_shell::{RemoteShell, RemoteShellError};
+use tddy_remote_shell::{InteractiveExit, RemoteShell, RemoteShellError};
 
 use crate::cli_session_pointer::{
     record_remote_owner, session_pointer_path, PlacedSessionPointer, PointerHost,
@@ -37,9 +37,9 @@ use crate::remote_agent_launch::startup::wait_for_agent_start;
 use crate::remote_agent_launch::startup::AgentStart;
 use crate::spec_launch::{HostAgent, HostPtySession, SpecLaunchError};
 
-/// Where the remote command records the agent's pid, relative to the session's worktree on the
-/// target: what a caller that stops the agent there reads.
-pub use crate::cli_session_pointer::REMOTE_AGENT_PID_FILE;
+/// Where the remote command records a session's agent's pid, relative to the session's worktree on
+/// the target: what a caller that stops the agent there reads.
+pub use crate::cli_session_pointer::remote_agent_pid_file;
 use crate::remote_agent_launch::session_files::plan_the_launch;
 use crate::remote_agent_launch::session_files::write_rendered_session_files;
 pub(crate) use crate::remote_agent_launch::target::target_config_host;
@@ -82,21 +82,29 @@ pub fn target_agent_one_shot(worktree: &Path, argv: &[String], env: &[(String, S
     )
 }
 
-/// The one shell command that starts an agent on a target: enter `worktree`, write the shell's own
-/// pid to `.tddy/agent.pid` there, then `exec` the target's login shell, which `exec`s `argv`
+/// The one shell command that starts `session_id`'s agent on a target: enter `worktree`, write the
+/// shell's own pid to its [`remote_agent_pid_file`] there (`.tddy/agents/<session id>.pid`, so
+/// agents sharing a worktree never overwrite each other's), then `exec` the target's login shell,
+/// which `exec`s `argv`
 /// under `env -i` with the target's own `HOME`, `PATH` and `TMPDIR` and exactly `env` — so the
 /// recorded pid is the agent's, and the agent sees nothing of the remote login's other variables:
 ///
 /// ```text
-/// cd '<worktree>' && mkdir -p .tddy && printf %s "$$" > .tddy/agent.pid && <target_login_exec>
+/// cd '<worktree>' && mkdir -p .tddy/agents && printf %s "$$" > '.tddy/agents/<session id>.pid' && <target_login_exec>
 /// ```
 ///
 /// Every path, value and argument is single-quoted for a POSIX shell. `argv[0]` is the agent's
 /// bare command, which the target's login `PATH` resolves.
-pub fn remote_agent_command(worktree: &Path, argv: &[String], env: &[(String, String)]) -> String {
+pub fn remote_agent_command(
+    worktree: &Path,
+    session_id: &str,
+    argv: &[String],
+    env: &[(String, String)],
+) -> String {
     format!(
-        "cd {} && mkdir -p .tddy && printf %s \"$$\" > .tddy/agent.pid && {}",
+        "cd {} && mkdir -p .tddy/agents && printf %s \"$$\" > {} && {}",
         shell_single_quote(&worktree.to_string_lossy()),
+        shell_single_quote(&remote_agent_pid_file(session_id).to_string_lossy()),
         target_login_exec(argv, env)
     )
 }
@@ -224,25 +232,7 @@ pub async fn launch_on_target(
     session: HostPtySession<'_>,
     on_exit: Option<ExitHook>,
 ) -> Result<RemoteLaunched, RemoteLaunchError> {
-    // The directory the agent's pid file is written into, created through the port before any
-    // terminal is registered: a target that cannot be reached fails here, with the shell's own
-    // reason, and leaves no session behind.
-    remote
-        .shell
-        .exec(tddy_remote_shell::ExecRequest::new(format!(
-            "mkdir -p {} && rm -f {}",
-            shell_single_quote(&remote.worktree.join(".tddy").to_string_lossy()),
-            shell_single_quote(
-                &remote
-                    .worktree
-                    .join(crate::cli_session_pointer::REMOTE_AGENT_PID_FILE)
-                    .to_string_lossy()
-            )
-        )))
-        .await
-        .map_err(RemoteLaunchError::Shell)?
-        .success_or_exited()
-        .map_err(RemoteLaunchError::Shell)?;
+    clear_the_agent_pid_file(&remote, session.session_id).await?;
 
     // The slot files are the target's to hold, so they are taken out before the plan can write
     // them on this host, and written through the port at the paths the agent is told.
@@ -253,19 +243,20 @@ pub async fn launch_on_target(
     let plan = write_rendered_session_files(&remote, slot_files, plan).await?;
     pre_trust_a_claude_clone(agent, &remote).await?;
 
-    let (argv, local_env) = client_argv_and_env(agent, &remote, &session, plan);
+    let client = client_argv_and_env(agent, &remote, &session, plan);
 
     let handle = session
         .manager
-        .spawn_rendered_main(
+        .spawn_rendered_client_main(
             session.session_id,
             session.session_type,
             remote.session_dir.to_path_buf(),
             session.model,
-            argv,
-            local_env,
+            client.argv,
+            client.env,
             session.os_user,
             on_exit,
+            client.exit_code_in_output,
         )
         .await
         .map_err(|error| RemoteLaunchError::Spawn(error.to_string()))?;
@@ -273,8 +264,31 @@ pub async fn launch_on_target(
     // The startup window runs from when the agent is known to have started, not from the PTY
     // spawn: under load the remote shell may not have run the remote command yet when a
     // spawn-counted window elapses, and an agent that exits at once would be judged started.
-    // The remote command writes `.tddy/agent.pid` immediately before it execs the agent.
+    // The remote command writes the session's pid file immediately before it execs the agent.
     judge_the_start(remote, session, handle).await
+}
+
+/// The directory `session_id`'s agent pid file is written into, created through the port before
+/// any terminal is registered, with no pid left in it from an earlier start of the session: a
+/// target that cannot be reached fails here, with the shell's own reason, and leaves no session
+/// behind.
+async fn clear_the_agent_pid_file(
+    remote: &RemoteLaunch<'_>,
+    session_id: &str,
+) -> Result<(), RemoteLaunchError> {
+    let pid_file = remote.worktree.join(remote_agent_pid_file(session_id));
+    remote
+        .shell
+        .exec(tddy_remote_shell::ExecRequest::new(format!(
+            "mkdir -p {} && rm -f {}",
+            shell_single_quote(&remote.worktree.join(".tddy/agents").to_string_lossy()),
+            shell_single_quote(&pid_file.to_string_lossy())
+        )))
+        .await
+        .map_err(RemoteLaunchError::Shell)?
+        .success_or_exited()
+        .map_err(RemoteLaunchError::Shell)?;
+    Ok(())
 }
 
 /// A Claude start on a target meets neither the folder-trust nor the project-MCP dialog: the
@@ -298,12 +312,20 @@ async fn pre_trust_a_claude_clone(
         .map_err(RemoteLaunchError::Trust)
 }
 
+/// The local process that is a target agent's terminal: the transport's client, its environment,
+/// and how the agent's status is read from it once it has exited.
+struct TransportClient {
+    argv: Vec<String>,
+    env: Vec<(String, String)>,
+    exit_code_in_output: Option<tddy_pty::ExitCodeInOutput>,
+}
+
 fn client_argv_and_env(
     agent: &HostAgent,
     remote: &RemoteLaunch<'_>,
     session: &HostPtySession<'_>,
     plan: crate::spec_launch::HostPtyPlan,
-) -> (Vec<String>, Vec<(String, String)>) {
+) -> TransportClient {
     let command = remote_command(agent, remote, session, plan);
     client_command(remote, command)
 }
@@ -325,13 +347,10 @@ fn remote_command(
     passed.extend(env);
     let env = passed;
 
-    remote_agent_command(remote.worktree, &plan.argv, &env)
+    remote_agent_command(remote.worktree, session.session_id, &plan.argv, &env)
 }
 
-fn client_command(
-    remote: &RemoteLaunch<'_>,
-    command: String,
-) -> (Vec<String>, Vec<(String, String)>) {
+fn client_command(remote: &RemoteLaunch<'_>, command: String) -> TransportClient {
     let interactive = remote.shell.interactive(&command);
     let argv: Vec<String> = interactive
         .argv
@@ -359,7 +378,23 @@ fn client_command(
             }
         }
     }
-    (argv, local_env)
+    // A client that exits with one code for any failed command (Coder's) names the agent's status
+    // in its output; the terminal's status is read from there, so it is the agent's own.
+    let exit_code_in_output = match interactive.exit {
+        InteractiveExit::ClientStatus => None,
+        InteractiveExit::ReportedLast {
+            client_code,
+            marker,
+        } => Some(tddy_pty::ExitCodeInOutput {
+            client_code,
+            marker: marker.to_string(),
+        }),
+    };
+    TransportClient {
+        argv,
+        env: local_env,
+        exit_code_in_output,
+    }
 }
 
 async fn judge_the_start(
@@ -371,17 +406,22 @@ async fn judge_the_start(
         .startup_window
         .saturating_mul(10)
         .max(Duration::from_secs(5));
-    let agent_pid =
-        match wait_for_agent_start(remote.shell.as_ref(), remote.worktree, &handle, start_bound)
-            .await
-        {
-            AgentStart::Started(pid) => Some(pid),
-            AgentStart::Exited => None,
-            AgentStart::NeverStarted => {
-                session.manager.stop_session(session.session_id).await;
-                return Err(RemoteLaunchError::AgentNeverStarted { after: start_bound });
-            }
-        };
+    let agent_pid = match wait_for_agent_start(
+        remote.shell.as_ref(),
+        remote.worktree,
+        session.session_id,
+        &handle,
+        start_bound,
+    )
+    .await
+    {
+        AgentStart::Started(pid) => Some(pid),
+        AgentStart::Exited => None,
+        AgentStart::NeverStarted => {
+            session.manager.stop_session(session.session_id).await;
+            return Err(RemoteLaunchError::AgentNeverStarted { after: start_bound });
+        }
+    };
 
     if exits_during_startup(
         &handle,
@@ -406,13 +446,14 @@ async fn judge_the_start(
         });
     }
 
-    let owner = recorded_owner(remote).await?;
+    let owner = recorded_owner(remote, session.session_id).await?;
 
     Ok(RemoteLaunched { handle, owner })
 }
 
 async fn recorded_owner(
     remote: RemoteLaunch<'_>,
+    session_id: &str,
 ) -> Result<Option<SessionPointerOwner>, RemoteLaunchError> {
     let owner = match remote.pointer {
         Some(pointer) => {
@@ -423,7 +464,7 @@ async fn recorded_owner(
                 },
             };
             Some(
-                record_remote_owner(&placed, pointer)
+                record_remote_owner(&placed, pointer, session_id)
                     .await
                     .map_err(|status| {
                         RemoteLaunchError::Shell(RemoteShellError::Spawn(format!(
@@ -524,13 +565,13 @@ mod tests {
         let env = [("ANTHROPIC_MODEL".to_string(), "opus".to_string())];
 
         // When
-        let command = remote_agent_command(worktree, &argv, &env);
+        let command = remote_agent_command(worktree, "s1", &argv, &env);
 
         // Then the target's login shell runs `env -i` with the base set expanded there (`HOME`,
         // `PATH`, `TMPDIR`), then only the explicit environment, then the bare command
         assert_eq!(
             command,
-            r#"cd '/home/dev/repo/.worktrees/s1' && mkdir -p .tddy && printf %s "$$" > .tddy/agent.pid && exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" ANTHROPIC_MODEL='\''opus'\'' '\''claude'\'' '\''--model'\'' '\''opus'\'''"#
+            r#"cd '/home/dev/repo/.worktrees/s1' && mkdir -p .tddy/agents && printf %s "$$" > '.tddy/agents/s1.pid' && exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" ANTHROPIC_MODEL='\''opus'\'' '\''claude'\'' '\''--model'\'' '\''opus'\'''"#
         );
     }
 
@@ -541,7 +582,7 @@ mod tests {
         let argv = strings(&["/bin/pwd", "-P"]);
 
         // When the command is run by a shell
-        let printed = printed_by(&remote_agent_command(&worktree, &argv, &[]));
+        let printed = printed_by(&remote_agent_command(&worktree, "s1", &argv, &[]));
 
         // Then the agent ran in that worktree
         assert_eq!(printed.trim_end(), worktree.to_string_lossy());
@@ -556,7 +597,7 @@ mod tests {
         let env = [("GREETING".to_string(), value.to_string())];
 
         // When the command is run by a shell
-        let printed = printed_by(&remote_agent_command(&worktree, &argv, &env));
+        let printed = printed_by(&remote_agent_command(&worktree, "s1", &argv, &env));
 
         // Then the agent reads the value byte for byte
         assert_eq!(printed, value);
@@ -577,7 +618,7 @@ mod tests {
         ]);
 
         // When the command is run by a shell
-        let printed = printed_by(&remote_agent_command(&worktree, &argv, &[]));
+        let printed = printed_by(&remote_agent_command(&worktree, "s1", &argv, &[]));
 
         // Then
         assert_eq!(printed, format!("--prompt|{prompt}|"));
@@ -594,7 +635,7 @@ mod tests {
         )];
 
         // When the command is run by a shell
-        let printed = printed_by(&remote_agent_command(&worktree, &argv, &env));
+        let printed = printed_by(&remote_agent_command(&worktree, "s1", &argv, &env));
         let mut seen: Vec<&str> = printed.lines().collect();
         seen.sort_unstable();
 
@@ -618,14 +659,36 @@ mod tests {
         let argv = strings(&["/bin/sh", "-c", r#"printf %s "$$""#]);
 
         // When the command is run by a shell
-        let agent_pid = printed_by(&remote_agent_command(&worktree, &argv, &[]));
+        let agent_pid = printed_by(&remote_agent_command(&worktree, "s1", &argv, &[]));
         let recorded =
-            std::fs::read_to_string(worktree.join(".tddy/agent.pid")).unwrap_or_default();
+            std::fs::read_to_string(worktree.join(".tddy/agents/s1.pid")).unwrap_or_default();
 
         // Then the file holds the agent's pid: the shell that wrote it became the agent
         assert_eq!(
             (recorded.as_str(), recorded.parse::<u32>().is_ok()),
             (agent_pid.as_str(), true)
+        );
+    }
+
+    #[test]
+    fn agents_sharing_a_worktree_each_record_their_own_pid() {
+        // Given two sessions' agents started in one worktree, each printing its own pid
+        let (_dir, worktree) = a_worktree_named("worktree");
+        let argv = strings(&["/bin/sh", "-c", r#"printf %s "$$""#]);
+
+        // When both commands are run by a shell
+        let first_pid = printed_by(&remote_agent_command(&worktree, "first", &argv, &[]));
+        let second_pid = printed_by(&remote_agent_command(&worktree, "second", &argv, &[]));
+        let recorded = |session_id: &str| {
+            std::fs::read_to_string(worktree.join(remote_agent_pid_file(session_id)))
+                .unwrap_or_default()
+        };
+
+        // Then each session's file holds its own agent's pid: the second did not overwrite the first
+        assert_ne!(first_pid, second_pid);
+        assert_eq!(
+            (recorded("first"), recorded("second")),
+            (first_pid, second_pid)
         );
     }
 

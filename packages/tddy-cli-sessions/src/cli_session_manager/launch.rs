@@ -45,6 +45,37 @@ impl CliSessionManager {
         os_user: Option<&str>,
         on_exit: Option<ExitHook>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
+        self.spawn_rendered_client_main(
+            session_id,
+            session_type,
+            worktree_path,
+            model,
+            argv,
+            env,
+            os_user,
+            on_exit,
+            None,
+        )
+        .await
+    }
+
+    /// [`Self::spawn_rendered_main`] for a main whose process is a transport's client to the agent
+    /// on a target, not the agent: `exit_code_in_output`, when the client does not exit with the
+    /// agent's status, says how that status is read from what the client printed last, so the
+    /// terminal's status is the agent's own.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_rendered_client_main(
+        &self,
+        session_id: &str,
+        session_type: &str,
+        worktree_path: PathBuf,
+        model: &str,
+        argv: Vec<String>,
+        env: Vec<(String, String)>,
+        os_user: Option<&str>,
+        on_exit: Option<ExitHook>,
+        exit_code_in_output: Option<tddy_pty::ExitCodeInOutput>,
+    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         self.spawn_tool_on(
             session_id,
             MAIN_TERMINAL_ID,
@@ -54,6 +85,7 @@ impl CliSessionManager {
             argv,
             env,
             tddy_pty::PtyEnvBase::Cleared,
+            exit_code_in_output,
             os_user,
             on_exit,
             None,

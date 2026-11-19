@@ -58,6 +58,9 @@ pub struct PtySpawnSpec {
     /// `HOME`/`PATH` (see [`pty_user_env_overrides`]). Callers with no user context (e.g. Bash
     /// terminals) pass `None`, leaving the child under the daemon's own identity.
     pub os_user: Option<String>,
+    /// How the command's status is read from a child that does not exit with it — see
+    /// [`tddy_pty::ExitCodeInOutput`]; `None` when the child's own status is the command's.
+    pub exit_code_in_output: Option<tddy_pty::ExitCodeInOutput>,
 }
 
 /// Spawn a PTY-backed tool as a registered task.
@@ -96,6 +99,7 @@ impl PtyRuntime {
                     kind: spec.kind,
                     env,
                     env_base: spec.env_base,
+                    exit_code_in_output: spec.exit_code_in_output,
                 };
                 tddy_pty::PtyRuntime::spawn_with_exit_hook(
                     registry,
@@ -311,6 +315,7 @@ mod tests {
             kind: "claude-cli".to_string(),
             env: Vec::new(),
             env_base: tddy_pty::PtyEnvBase::Inherited,
+            exit_code_in_output: None,
             os_user: Some("tddy".to_string()),
         };
 
@@ -330,6 +335,7 @@ mod tests {
             kind: "claude-cli".to_string(),
             env: Vec::new(),
             env_base: tddy_pty::PtyEnvBase::Inherited,
+            exit_code_in_output: None,
             os_user: Some(os_user.to_string()),
         }
     }
