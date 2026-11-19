@@ -141,10 +141,7 @@ impl DriverSession {
                 handle.resize(spec.rows, spec.cols);
                 // The remote launch judges the startup window itself; a local one is judged here,
                 // the same way: an agent that ends within it failed to start.
-                let deadline = Instant::now() + spec.startup_window;
-                while Instant::now() < deadline && !*handle.pty_done.borrow() {
-                    tokio::time::sleep(POLL.min(spec.startup_window)).await;
-                }
+                wait_out_the_startup_window(spec, &handle).await;
                 if *handle.pty_done.borrow() {
                     return Err(format!(
                         "the agent exited while starting ({}): {}",
@@ -253,6 +250,13 @@ impl DriverSession {
             tokio::time::sleep(POLL).await;
         }
         Ok(())
+    }
+}
+
+async fn wait_out_the_startup_window(spec: &LaunchSpec, handle: &Arc<PtyHandle>) {
+    let deadline = Instant::now() + spec.startup_window;
+    while Instant::now() < deadline && !*handle.pty_done.borrow() {
+        tokio::time::sleep(POLL.min(spec.startup_window)).await;
     }
 }
 

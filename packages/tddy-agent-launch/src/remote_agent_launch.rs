@@ -190,19 +190,84 @@ pub async fn launch_on_target(
 
     // The slot files are the target's to hold, so they are taken out before the plan can write
     // them on this host, and written through the port at the paths the agent is told.
+    let (slot_files, plan) = plan_the_launch(agent, params, slots, &remote).await?;
+    // A file the launch rendered into this session's directory on this host (its appended system
+    // prompt) is written on the target at the same path, so the argument that names it reads the
+    // target's copy, never a path of this host.
+    write_rendered_session_files(&remote, slot_files, &plan).await?;
+
+    let (argv, local_env) = client_argv_and_env(agent, &remote, &session, plan);
+
+    let handle = session
+        .manager
+        .spawn_rendered_main(
+            session.session_id,
+            session.session_type,
+            remote.session_dir.to_path_buf(),
+            session.model,
+            argv,
+            local_env,
+            session.os_user,
+            on_exit,
+        )
+        .await
+        .map_err(|error| RemoteLaunchError::Spawn(error.to_string()))?;
+
+    // The startup window runs from when the agent is known to have started, not from the PTY
+    // spawn: under load the remote shell may not have run the remote command yet when a
+    // spawn-counted window elapses, and an agent that exits at once would be judged started.
+    // The remote command writes `.tddy/agent.pid` immediately before it execs the agent.
+    judge_the_start(remote, session, handle).await
+}
+
+fn client_argv_and_env(
+    agent: &HostAgent,
+    remote: &RemoteLaunch<'_>,
+    session: &HostPtySession<'_>,
+    plan: crate::spec_launch::HostPtyPlan,
+) -> (Vec<String>, Vec<(String, String)>) {
+    let command = remote_command(agent, remote, session, plan);
+    client_command(remote, command)
+}
+
+async fn plan_the_launch(
+    agent: &HostAgent,
+    params: &TemplateParams,
+    slots: &RenderedSlots,
+    remote: &RemoteLaunch<'_>,
+) -> Result<
+    (
+        Vec<(std::path::PathBuf, Vec<u8>)>,
+        crate::spec_launch::HostPtyPlan,
+    ),
+    RemoteLaunchError,
+> {
     let mut render_slots = slots.clone();
     let slot_files = std::mem::take(&mut render_slots.files);
     let plan = plan_host_pty(agent, params, &render_slots).map_err(RemoteLaunchError::Plan)?;
-    for (path, bytes) in &slot_files {
+    write_slot_files(remote, &slot_files).await?;
+    Ok((slot_files, plan))
+}
+
+async fn write_slot_files(
+    remote: &RemoteLaunch<'_>,
+    slot_files: &[(std::path::PathBuf, Vec<u8>)],
+) -> Result<(), RemoteLaunchError> {
+    for (path, bytes) in slot_files {
         remote
             .shell
             .write_file(&path.to_string_lossy(), bytes, FileMode::TargetDefault)
             .await
             .map_err(RemoteLaunchError::Shell)?;
     }
-    // A file the launch rendered into this session's directory on this host (its appended system
-    // prompt) is written on the target at the same path, so the argument that names it reads the
-    // target's copy, never a path of this host.
+    Ok(())
+}
+
+async fn write_rendered_session_files(
+    remote: &RemoteLaunch<'_>,
+    slot_files: Vec<(std::path::PathBuf, Vec<u8>)>,
+    plan: &crate::spec_launch::HostPtyPlan,
+) -> Result<(), RemoteLaunchError> {
     for argument in &plan.argv {
         let path = Path::new(argument);
         if !path.starts_with(remote.session_dir) || !path.is_file() {
@@ -223,7 +288,15 @@ pub async fn launch_on_target(
             .await
             .map_err(RemoteLaunchError::Shell)?;
     }
+    Ok(())
+}
 
+fn remote_command(
+    agent: &HostAgent,
+    remote: &RemoteLaunch<'_>,
+    session: &HostPtySession<'_>,
+    plan: crate::spec_launch::HostPtyPlan,
+) -> String {
     let env: Vec<(String, String)> = plan
         .env
         .into_iter()
@@ -232,8 +305,14 @@ pub async fn launch_on_target(
     let env = agent
         .env_base
         .agent_env(&agent.spec, std::env::vars_os(), &env);
-    let command = remote_agent_command(remote.worktree, &plan.argv, &env);
 
+    remote_agent_command(remote.worktree, &plan.argv, &env)
+}
+
+fn client_command(
+    remote: &RemoteLaunch<'_>,
+    command: String,
+) -> (Vec<String>, Vec<(String, String)>) {
     let interactive = remote.shell.interactive(&command);
     let argv: Vec<String> = interactive
         .argv
@@ -261,26 +340,14 @@ pub async fn launch_on_target(
             }
         }
     }
+    (argv, local_env)
+}
 
-    let handle = session
-        .manager
-        .spawn_rendered_main(
-            session.session_id,
-            session.session_type,
-            remote.session_dir.to_path_buf(),
-            session.model,
-            argv,
-            local_env,
-            session.os_user,
-            on_exit,
-        )
-        .await
-        .map_err(|error| RemoteLaunchError::Spawn(error.to_string()))?;
-
-    // The startup window runs from when the agent is known to have started, not from the PTY
-    // spawn: under load the remote shell may not have run the remote command yet when a
-    // spawn-counted window elapses, and an agent that exits at once would be judged started.
-    // The remote command writes `.tddy/agent.pid` immediately before it execs the agent.
+async fn judge_the_start(
+    remote: RemoteLaunch<'_>,
+    session: HostPtySession<'_>,
+    handle: Arc<PtyHandle>,
+) -> Result<RemoteLaunched, RemoteLaunchError> {
     let start_bound = remote
         .startup_window
         .saturating_mul(10)
@@ -320,6 +387,14 @@ pub async fn launch_on_target(
         });
     }
 
+    let owner = recorded_owner(remote).await?;
+
+    Ok(RemoteLaunched { handle, owner })
+}
+
+async fn recorded_owner(
+    remote: RemoteLaunch<'_>,
+) -> Result<Option<SessionPointerOwner>, RemoteLaunchError> {
     let owner = match remote.pointer {
         Some(pointer) => {
             let placed = PlacedSessionPointer {
@@ -341,8 +416,7 @@ pub async fn launch_on_target(
         }
         None => None,
     };
-
-    Ok(RemoteLaunched { handle, owner })
+    Ok(owner)
 }
 
 #[cfg(test)]
