@@ -125,11 +125,25 @@ async fn a_coder_found_only_on_the_daemons_path_carries_the_agents_terminal() {
         "#!/bin/sh\n\
          while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
          shift\n\
+         SHELL=\"$(dirname \"$0\")/login-shell\"\n\
+         export SHELL\n\
          exec /bin/sh -c \"$*\"\n",
+    );
+    // The workspace's login shell finds its agents on a `PATH` of its own.
+    let agents = root.join("opt/agents");
+    std::fs::create_dir_all(&agents).expect("the directory the workspace's login finds agents in");
+    write_executable(
+        &bin.join("login-shell"),
+        &format!(
+            "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\nHOME='{}'\nPATH='{}:/usr/bin:/bin'\n\
+             export HOME PATH\nexec /bin/sh -c \"$2\"\n",
+            root.join("home/coder").display(),
+            agents.display()
+        ),
     );
     let worktree: PathBuf = root.join("home/coder/repo/.worktrees").join(SESSION_ID);
     std::fs::create_dir_all(&worktree).expect("the session's worktree in the workspace");
-    let agent = root.join("acme");
+    let agent = agents.join("acme");
     write_executable(
         &agent,
         &format!(
@@ -161,6 +175,7 @@ async fn a_coder_found_only_on_the_daemons_path_carries_the_agents_terminal() {
             session_dir: &std::fs::canonicalize(session_dir.path()).expect("it resolves"),
             pointer: None,
             startup_window: STARTUP_WINDOW,
+            clone_root: None,
         },
         HostPtySession {
             manager: &manager,

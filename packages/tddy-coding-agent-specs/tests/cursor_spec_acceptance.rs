@@ -75,3 +75,33 @@ fn the_builtin_registry_holds_cursor_beside_claude_as_a_coding_agent() {
         .collect();
     assert_eq!(ids, vec!["claude".to_string(), "cursor".to_string()]);
 }
+
+#[test]
+fn a_cursor_start_on_a_target_trusts_its_workspace_and_a_local_start_does_not() {
+    // Given — a fresh `<tddyhome>` with no overrides
+    let home = tempfile::tempdir().unwrap();
+    let registry = load_agent_registry(&home.path().join("tools")).expect("the built-ins load");
+    let spec = CodingAgentSpec::of(registry.get("cursor").expect("cursor is built in"))
+        .expect("cursor is a coding agent");
+    let binary = std::path::Path::new("agent");
+    let values = [("chat_id", "chat-0042")];
+
+    // When
+    let on_target = spec
+        .render_run_argv(binary, &values, &["on_target"])
+        .expect("renders");
+    let local = spec.render_run_argv(binary, &values, &[]).expect("renders");
+
+    // Then
+    assert_eq!(
+        (on_target, local),
+        (
+            ["agent", "--resume", "chat-0042", "--trust"]
+                .map(str::to_string)
+                .to_vec(),
+            ["agent", "--resume", "chat-0042"]
+                .map(str::to_string)
+                .to_vec(),
+        )
+    );
+}

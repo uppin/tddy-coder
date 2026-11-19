@@ -18,6 +18,7 @@ use crate::cli_agent_steps::conversation::refuse_a_role_the_agent_cannot_hold;
 use crate::cli_agent_steps::conversation::resumed_conversation;
 use crate::cli_agent_steps::conversation::start_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
+use crate::cli_agent_steps::conversation::ConversationTarget;
 use crate::cli_agent_steps::conversation::LaunchConversation;
 use crate::harness_from_spec::HarnessLaunch;
 use crate::spec_launch::HostAgent;
@@ -100,6 +101,7 @@ async fn a_daemon_session_id_conversation_starts_as_the_session_id() {
         worktree: worktree.path(),
         env: &[],
         session_id: "0190-claude",
+        target: None,
     })
     .await
     .map_err(|status| status.message);
@@ -125,6 +127,7 @@ async fn a_minted_conversation_starts_as_the_id_its_adapter_mints() {
         worktree: bin.path(),
         env: &[],
         session_id: "0190-cursor",
+        target: None,
     })
     .await
     .map_err(|status| status.message);
@@ -154,6 +157,7 @@ async fn a_mint_starts_from_the_base_set_of_the_daemons_environment_plus_its_lau
         worktree: bin.path(),
         env: &[("GIT_AUTHOR_NAME".to_string(), "dev".to_string())],
         session_id: "0190-cursor",
+        target: None,
     })
     .await
     .map_err(|status| status.message);
@@ -162,6 +166,61 @@ async fn a_mint_starts_from_the_base_set_of_the_daemons_environment_plus_its_lau
     assert_eq!(
         conversation,
         Ok(LaunchConversation::Minted("chat-home-dev".to_string()))
+    );
+}
+
+#[tokio::test]
+async fn a_minted_conversation_on_a_target_is_minted_through_its_shell() {
+    // Given — a target whose shell answers `create-chat` with a bare chat id, and an agent whose
+    // resolved binary is a path of this host that does not exist there
+    let target = tddy_remote_shell::InMemoryShell::new("devbox");
+    target.answers_when(|request| {
+        request
+            .command
+            .contains("create-chat")
+            .then(|| tddy_remote_shell::ExecOutput::succeeded("chat-on-the-target\n"))
+    });
+    let shell: std::sync::Arc<dyn tddy_remote_shell::RemoteShell> =
+        std::sync::Arc::new(target.clone());
+    let worktree = Path::new("/home/dev/.tddy/repos/app/.worktrees/s1");
+    let host_binary = Path::new("/daemon-host/bin/agent");
+
+    // When
+    let conversation = start_conversation(ConversationStart {
+        spec: &the_builtin("cursor"),
+        binary: host_binary,
+        env_base: &AgentEnvBase::builtin(),
+        worktree,
+        env: &[],
+        session_id: "0190-cursor",
+        target: Some(ConversationTarget {
+            shell: &shell,
+            command: "agent",
+        }),
+    })
+    .await
+    .map_err(|status| status.message);
+
+    // Then — the chat is the one the target minted
+    assert_eq!(
+        conversation,
+        Ok(LaunchConversation::Minted("chat-on-the-target".to_string()))
+    );
+
+    // And it was minted by one command on the target: in the worktree there, by the agent's bare
+    // name, never by the path of this host
+    let commands = target.commands_run();
+    let the_mint = commands.first().cloned().unwrap_or_default();
+    assert_eq!(
+        (
+            commands.len(),
+            the_mint.contains(&format!("cd '{}'", worktree.display())),
+            the_mint.contains("agent"),
+            the_mint.contains("create-chat"),
+            the_mint.contains(&host_binary.display().to_string()),
+        ),
+        (1, true, true, true, false),
+        "the command run on the target: {the_mint}"
     );
 }
 
@@ -178,6 +237,7 @@ async fn a_worktree_conversation_starts_with_nothing_to_bind() {
         worktree: worktree.path(),
         env: &[],
         session_id: "0190-opencode",
+        target: None,
     })
     .await
     .map_err(|status| status.message);
@@ -201,6 +261,7 @@ async fn a_mint_past_its_deadline_refuses_the_start_naming_the_agent_the_adapter
         worktree: bin.path(),
         env: &[],
         session_id: "0190-cursor",
+        target: None,
     })
     .await
     .map_err(|status| (status.code, status.message));

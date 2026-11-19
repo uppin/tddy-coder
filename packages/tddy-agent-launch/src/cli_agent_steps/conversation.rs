@@ -3,9 +3,12 @@
 
 use crate::harness_from_spec::HarnessLaunch;
 use std::path::Path;
+use std::time::Duration;
 use tddy_coding_agent_specs::slots::conversation::ConversationSlot;
 use tddy_coding_agent_specs::{AgentEnvBase, Capability, CodingAgentSpec};
-use tddy_core::adapters::{ConversationMint, ConversationMintError, LaunchAdapters};
+use tddy_core::adapters::{
+    AgentOnTarget, ConversationMint, ConversationMintError, LaunchAdapters, TargetAgentRun,
+};
 use tddy_core::session_metadata::is_orchestrator_role;
 use tddy_core::SessionMetadata;
 use tddy_rpc::Status;
@@ -75,6 +78,50 @@ pub(crate) struct ConversationStart<'a> {
     /// `env_base`'s agent environment with these on top, never from the daemon's whole environment.
     pub env: &'a [(String, String)],
     pub session_id: &'a str,
+    /// The session's target, when it runs on one: a minted conversation is minted through its
+    /// shell — in the worktree there, under the target's own environment — instead of on this
+    /// host. `None` for a start on this host.
+    pub target: Option<ConversationTarget<'a>>,
+}
+
+/// The target a conversation is minted on.
+#[derive(Clone, Copy)]
+pub(crate) struct ConversationTarget<'a> {
+    /// The shell that reaches the target.
+    pub shell: &'a std::sync::Arc<dyn tddy_remote_shell::RemoteShell>,
+    /// The agent's bare command (`ResolvedTool::command`): what the target's login shell finds on
+    /// its own `PATH`. [`ConversationStart::binary`] is a path of this host, and means nothing there.
+    pub command: &'a str,
+}
+
+/// A target's own agent, run through its shell in the session's worktree there.
+struct AgentThroughShell<'a> {
+    shell: &'a dyn tddy_remote_shell::RemoteShell,
+    worktree: &'a Path,
+    command: &'a str,
+    env: Vec<(String, String)>,
+}
+
+#[async_trait::async_trait]
+impl AgentOnTarget for AgentThroughShell<'_> {
+    async fn run(&self, args: &[&str], deadline: Duration) -> Result<TargetAgentRun, String> {
+        let argv: Vec<String> = std::iter::once(self.command)
+            .chain(args.iter().copied())
+            .map(str::to_string)
+            .collect();
+        let command =
+            crate::remote_agent_launch::target_agent_one_shot(self.worktree, &argv, &self.env);
+        let output = self
+            .shell
+            .exec(tddy_remote_shell::ExecRequest::new(command).within(deadline))
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(TargetAgentRun {
+            status: Some(output.status),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
+    }
 }
 
 /// The conversation a first start binds: the session id, a freshly minted id (bounded by the
@@ -89,6 +136,7 @@ pub(crate) async fn start_conversation(
         worktree,
         env,
         session_id,
+        target,
     } = start;
     let conversation = spec.conversation();
     match &conversation {
@@ -109,14 +157,32 @@ pub(crate) async fn start_conversation(
             let deadline = conversation
                 .mint_deadline()
                 .expect("a minted conversation has a mint deadline");
-            minter
-                .mint(ConversationMint {
-                    binary,
-                    workdir: worktree,
-                    env: &env_base.agent_env(spec, std::env::vars_os(), env),
-                    deadline,
-                })
-                .await
+            let minted = match target {
+                // The agent runs where the session's worktree is: through the target's shell, as
+                // the target's own login runs it, never by a path of this host.
+                Some(target) => {
+                    let mut launch_env = spec.passed_env(std::env::vars_os());
+                    launch_env.extend(env.iter().cloned());
+                    let agent = AgentThroughShell {
+                        shell: target.shell.as_ref(),
+                        worktree,
+                        command: target.command,
+                        env: launch_env,
+                    };
+                    minter.mint_on_target(&agent, deadline).await
+                }
+                None => {
+                    minter
+                        .mint(ConversationMint {
+                            binary,
+                            workdir: worktree,
+                            env: &env_base.agent_env(spec, std::env::vars_os(), env),
+                            deadline,
+                        })
+                        .await
+                }
+            };
+            minted
                 .map(LaunchConversation::Minted)
                 .map_err(|error| conversation_mint_refused(&spec.id, adapter, &error))
         }

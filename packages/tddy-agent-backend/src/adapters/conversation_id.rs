@@ -68,6 +68,25 @@ impl fmt::Display for ConversationMintError {
 
 impl std::error::Error for ConversationMintError {}
 
+/// What the target's own agent printed and how it ended, when [`AgentOnTarget`] ran it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetAgentRun {
+    /// The agent's exit status; `None` when it was ended by a signal.
+    pub status: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// A target's own agent, run through the target's shell: in the session's worktree there, under the
+/// target's own login environment — its `HOME`, `PATH` and `TMPDIR` — and the agent found by its
+/// bare name, never by a path of the daemon's host. What a mint on a target is run through.
+#[async_trait]
+pub trait AgentOnTarget: Send + Sync {
+    /// Run the target's agent with `args`, bounded by `deadline`. `Err` is the reason the target's
+    /// shell could not run it (unreachable, no answer in time).
+    async fn run(&self, args: &[&str], deadline: Duration) -> Result<TargetAgentRun, String>;
+}
+
 /// How a launch mints the id its session's conversation is known by.
 #[async_trait]
 pub trait ConversationIdAdapter: Send + Sync + fmt::Debug {
@@ -76,6 +95,14 @@ pub trait ConversationIdAdapter: Send + Sync + fmt::Debug {
 
     /// Mint one conversation id, within `mint.deadline`.
     async fn mint(&self, mint: ConversationMint<'_>) -> Result<String, ConversationMintError>;
+
+    /// Mint one conversation id through a target's shell, within `deadline`: the agent runs
+    /// where the session's worktree is, never on this host.
+    async fn mint_on_target(
+        &self,
+        agent: &dyn AgentOnTarget,
+        deadline: Duration,
+    ) -> Result<String, ConversationMintError>;
 }
 
 /// `<binary> create-chat`, its stdout a bare chat id (cursor-agent 2026.07.23).
@@ -86,6 +113,38 @@ pub struct CursorCreateChat;
 impl ConversationIdAdapter for CursorCreateChat {
     fn name(&self) -> &str {
         CURSOR_CREATE_CHAT
+    }
+
+    async fn mint_on_target(
+        &self,
+        agent: &dyn AgentOnTarget,
+        deadline: Duration,
+    ) -> Result<String, ConversationMintError> {
+        let command = "the target's `create-chat`";
+        let run = agent
+            .run(&["create-chat"], deadline)
+            .await
+            .map_err(|reason| {
+                ConversationMintError::Failed(format!("{command} could not be run: {reason}"))
+            })?;
+        if run.status != Some(0) {
+            let status = run
+                .status
+                .map_or("a signal".to_string(), |code| format!("status {code}"));
+            return Err(ConversationMintError::Failed(format!(
+                "{command} exited with {status}: {}",
+                run.stderr.trim()
+            )));
+        }
+        // A login shell may print its own banner before the agent runs: the id is the last line.
+        let last_line = run
+            .stdout
+            .lines()
+            .map(str::trim)
+            .rfind(|line| !line.is_empty())
+            .unwrap_or("");
+        parse_created_chat_id(last_line)
+            .map_err(|e| ConversationMintError::Failed(format!("{command} {e}")))
     }
 
     async fn mint(&self, mint: ConversationMint<'_>) -> Result<String, ConversationMintError> {
@@ -106,7 +165,8 @@ impl ConversationIdAdapter for CursorCreateChat {
             }
             Ok(Err(e)) => {
                 return Err(ConversationMintError::Failed(format!(
-                    "{command} could not be run: {e}"
+                    "{command} could not be run in {}: {e}",
+                    mint.workdir.display()
                 )))
             }
             Ok(Ok(output)) => output,

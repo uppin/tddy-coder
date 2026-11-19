@@ -44,27 +44,58 @@ pub use crate::remote_agent_launch::target::{
     proto_of_session_target, session_target_of_proto, shell_for_target, TargetError,
 };
 
-/// The one shell command that starts an agent on a target: enter `worktree`, write the shell's own
-/// pid to `.tddy/agent.pid` there, then `exec` `argv` under `env -i` with exactly `env` — so the
-/// recorded pid is the agent's, and the agent sees nothing of the remote login's environment:
+/// The base set of the agent's environment on a target, expanded by the target's own login shell:
+/// its `HOME`, `PATH` and `TMPDIR`, never the daemon host's.
+const TARGET_BASE_ENV: &str = r#"HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}""#;
+
+/// `argv` run through the target's login shell under `env -i`: the target expands its own base
+/// set ([`TARGET_BASE_ENV`]), then exactly `env`, then the agent is found by `argv[0]` on the
+/// target's `PATH`:
 ///
 /// ```text
-/// cd '<worktree>' && mkdir -p .tddy && printf %s "$$" > .tddy/agent.pid && exec env -i K='V' … '<agent>' '<arg>' …
+/// exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" K='\''V'\'' … '\''<agent>'\'' …'
 /// ```
-///
-/// Every path, value and argument is single-quoted for a POSIX shell.
-pub fn remote_agent_command(worktree: &Path, argv: &[String], env: &[(String, String)]) -> String {
-    let mut command = format!(
-        "cd {} && mkdir -p .tddy && printf %s \"$$\" > .tddy/agent.pid && exec env -i",
-        shell_single_quote(&worktree.to_string_lossy())
-    );
+pub fn target_login_exec(argv: &[String], env: &[(String, String)]) -> String {
+    let mut inner = format!("exec env -i {TARGET_BASE_ENV}");
     for (name, value) in env {
-        command.push_str(&format!(" {name}={}", shell_single_quote(value)));
+        inner.push_str(&format!(" {name}={}", shell_single_quote(value)));
     }
     for argument in argv {
-        command.push_str(&format!(" {}", shell_single_quote(argument)));
+        inner.push_str(&format!(" {}", shell_single_quote(argument)));
     }
-    command
+    format!(
+        "exec \"${{SHELL:-/bin/sh}}\" -lc '{}'",
+        inner.replace('\'', "'\\''")
+    )
+}
+
+/// `argv` run on a target in `worktree`, by [`target_login_exec`]:
+/// `cd '<worktree>' && <login exec>`. What a one-shot of the target's own agent (a chat mint) runs.
+pub fn target_agent_one_shot(worktree: &Path, argv: &[String], env: &[(String, String)]) -> String {
+    format!(
+        "cd {} && {}",
+        shell_single_quote(&worktree.to_string_lossy()),
+        target_login_exec(argv, env)
+    )
+}
+
+/// The one shell command that starts an agent on a target: enter `worktree`, write the shell's own
+/// pid to `.tddy/agent.pid` there, then `exec` the target's login shell, which `exec`s `argv`
+/// under `env -i` with the target's own `HOME`, `PATH` and `TMPDIR` and exactly `env` — so the
+/// recorded pid is the agent's, and the agent sees nothing of the remote login's other variables:
+///
+/// ```text
+/// cd '<worktree>' && mkdir -p .tddy && printf %s "$$" > .tddy/agent.pid && <target_login_exec>
+/// ```
+///
+/// Every path, value and argument is single-quoted for a POSIX shell. `argv[0]` is the agent's
+/// bare command, which the target's login `PATH` resolves.
+pub fn remote_agent_command(worktree: &Path, argv: &[String], env: &[(String, String)]) -> String {
+    format!(
+        "cd {} && mkdir -p .tddy && printf %s \"$$\" > .tddy/agent.pid && {}",
+        shell_single_quote(&worktree.to_string_lossy()),
+        target_login_exec(argv, env)
+    )
 }
 
 /// Where and how an agent is launched on a target.
@@ -82,6 +113,24 @@ pub struct RemoteLaunch<'a> {
     /// How long the agent must stay up for the launch to count as started. An agent — or a
     /// transport — that exits within it fails the launch with its last output.
     pub startup_window: Duration,
+    /// The session's clone on the target: the repository root `worktree` was cut from. A Claude
+    /// start trusts it in the target's `~/.claude.json` ([`crate::target_trust`]); `None` when the
+    /// caller does not know it, and nothing is trusted.
+    pub clone_root: Option<&'a Path>,
+}
+
+/// The clone `worktree` was cut from, when it sits where a target checkout puts a session's
+/// worktree: `<clone root>/.worktrees/<session id>`. `None` for a worktree anywhere else — its
+/// clone is not known, and a start there trusts nothing.
+pub fn clone_root_of_worktree<'a>(worktree: &'a Path, session_id: &str) -> Option<&'a Path> {
+    if worktree.file_name()? != session_id {
+        return None;
+    }
+    let worktrees = worktree.parent()?;
+    if worktrees.file_name()? != ".worktrees" {
+        return None;
+    }
+    worktrees.parent()
 }
 
 /// An agent started on a target.
@@ -102,6 +151,8 @@ pub enum RemoteLaunchError {
     /// The remote shell failed: the target is unreachable, did not answer, or a command there
     /// failed.
     Shell(RemoteShellError),
+    /// The target's `~/.claude.json` could not be made ready for a Claude start.
+    Trust(crate::target_trust::TargetTrustError),
     /// The local PTY for the transport's client could not be spawned.
     Spawn(String),
     /// The agent, or the transport's client, exited within the startup window. `status` is the
@@ -121,6 +172,7 @@ impl fmt::Display for RemoteLaunchError {
         match self {
             Self::Plan(e) => write!(f, "{e}"),
             Self::Shell(e) => write!(f, "{e}"),
+            Self::Trust(e) => write!(f, "the target could not be made ready for the agent: {e}"),
             Self::Spawn(message) => write!(f, "failed to spawn the agent's terminal: {message}"),
             Self::ExitedDuringStartup {
                 status: Some(status),
@@ -195,6 +247,7 @@ pub async fn launch_on_target(
     // prompt) is written on the target at the same path, so the argument that names it reads the
     // target's copy, never a path of this host.
     write_rendered_session_files(&remote, slot_files, &plan).await?;
+    pre_trust_a_claude_clone(agent, &remote).await?;
 
     let (argv, local_env) = client_argv_and_env(agent, &remote, &session, plan);
 
@@ -218,6 +271,27 @@ pub async fn launch_on_target(
     // spawn-counted window elapses, and an agent that exits at once would be judged started.
     // The remote command writes `.tddy/agent.pid` immediately before it execs the agent.
     judge_the_start(remote, session, handle).await
+}
+
+/// A Claude start on a target meets neither the folder-trust nor the project-MCP dialog: the
+/// target's `~/.claude.json` records both answers first. Only for a spec whose hooks adapter is
+/// Claude's, and only when the caller named the clone root.
+async fn pre_trust_a_claude_clone(
+    agent: &HostAgent,
+    remote: &RemoteLaunch<'_>,
+) -> Result<(), RemoteLaunchError> {
+    let Some(clone_root) = remote.clone_root else {
+        return Ok(());
+    };
+    if agent.spec.agent.hooks.adapter
+        != tddy_coding_agent_specs::slots::hooks::CLAUDE_SETTINGS_LOCAL
+    {
+        return Ok(());
+    }
+    crate::target_trust::pre_trust_clone_root(remote.shell.as_ref(), clone_root, remote.worktree)
+        .await
+        .map(drop)
+        .map_err(RemoteLaunchError::Trust)
 }
 
 fn client_argv_and_env(
@@ -244,7 +318,14 @@ async fn plan_the_launch(
 > {
     let mut render_slots = slots.clone();
     let slot_files = std::mem::take(&mut render_slots.files);
-    let plan = plan_host_pty(agent, params, &render_slots).map_err(RemoteLaunchError::Plan)?;
+    // The agent is the target's own, found by its bare command on the target's login `PATH`: the
+    // binary this host resolved means nothing there.
+    let mut on_the_target = agent.clone();
+    on_the_target.tool.binary = std::path::PathBuf::from(&agent.tool.command);
+    // `on_target` lets a spec render what only a start on a target needs (Cursor's `--trust`).
+    let params = params.clone().with_flag("on_target", true);
+    let plan =
+        plan_host_pty(&on_the_target, &params, &render_slots).map_err(RemoteLaunchError::Plan)?;
     write_slot_files(remote, &slot_files).await?;
     Ok((slot_files, plan))
 }
@@ -302,9 +383,11 @@ fn remote_command(
         .into_iter()
         .chain(session.env.iter().cloned())
         .collect();
-    let env = agent
-        .env_base
-        .agent_env(&agent.spec, std::env::vars_os(), &env);
+    // Only what the daemon passes on purpose travels: the spec's `pass_env` values and the launch's
+    // own. The base set (`HOME`, `PATH`, `TMPDIR`) is the target's, expanded there.
+    let mut passed = agent.spec.passed_env(std::env::vars_os());
+    passed.extend(env);
+    let env = passed;
 
     remote_agent_command(remote.worktree, &plan.argv, &env)
 }
@@ -428,11 +511,55 @@ mod tests {
     /// A variable the "remote login" holds and the agent must not see.
     const LOGIN_ONLY: &str = "REMOTE_LOGIN_ONLY";
 
-    /// What `command` printed when a POSIX shell ran it on this host, as a remote shell would.
+    /// What the target's login has for every command it runs, as `printed_by` sets it.
+    const TARGET_HOME: &str = "/home/target";
+    const TARGET_PATH: &str = "/usr/bin:/bin";
+    const TARGET_TMPDIR: &str = "/target/tmp";
+
+    /// A stand-in for the target's login shell: it is run as `$SHELL -lc <command>`, as the remote
+    /// command runs it, and runs the command under the login environment its caller set, so a
+    /// test never depends on what this host's own `zsh -l` or `sh -l` reads.
+    fn a_login_shell() -> &'static Path {
+        static LOGIN_SHELL: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+        LOGIN_SHELL.get_or_init(|| {
+            use std::os::unix::fs::PermissionsExt as _;
+            let dir = std::env::temp_dir().join(format!("tddy-login-shell-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).expect("a directory for the stand-in login shell");
+            let path = dir.join("login-shell");
+            // The warm-up guard and the warm-up run: a freshly written executable pays a
+            // first-execution scan on macOS, which a launch's timing must not absorb.
+            std::fs::write(
+                &path,
+                "#!/bin/sh\nif [ -n \"$TDDY_FIXTURE_WARMUP\" ]; then exit 0; fi\n\
+                 [ \"$1\" = -lc ] || exit 64\nexec /bin/sh -c \"$2\"\n",
+            )
+            .expect("the stand-in login shell is written");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                .expect("the stand-in login shell is made executable");
+            let warmed = std::process::Command::new(&path)
+                .env("TDDY_FIXTURE_WARMUP", "1")
+                .output()
+                .expect("the stand-in login shell warms up");
+            assert!(
+                warmed.status.success(),
+                "the warm-up of the login shell failed"
+            );
+            path
+        })
+    }
+
+    /// What `command` printed when a POSIX shell ran it on this host, as a remote shell would: as
+    /// a child of a login that holds [`LOGIN_ONLY`] and the target's `HOME`, `PATH` and `TMPDIR`,
+    /// whose shell is [`a_login_shell`].
     fn printed_by(command: &str) -> String {
         let output = std::process::Command::new("/bin/sh")
             .arg("-c")
             .arg(command)
+            .env_clear()
+            .env("SHELL", a_login_shell())
+            .env("HOME", TARGET_HOME)
+            .env("PATH", TARGET_PATH)
+            .env("TMPDIR", TARGET_TMPDIR)
             .env(LOGIN_ONLY, "leaked")
             .output()
             .expect("a shell runs on this host");
@@ -455,20 +582,19 @@ mod tests {
     #[test]
     fn the_remote_command_enters_the_worktree_records_the_pid_and_execs_the_agent_under_its_environment(
     ) {
-        // Given
+        // Given the agent's bare command, as a target's own login shell finds it
         let worktree = Path::new("/home/dev/repo/.worktrees/s1");
-        let argv = strings(&["/usr/local/bin/claude", "--model", "opus"]);
+        let argv = strings(&["claude", "--model", "opus"]);
         let env = [("ANTHROPIC_MODEL".to_string(), "opus".to_string())];
 
         // When
         let command = remote_agent_command(worktree, &argv, &env);
 
-        // Then
+        // Then the target's login shell runs `env -i` with the base set expanded there (`HOME`,
+        // `PATH`, `TMPDIR`), then only the explicit environment, then the bare command
         assert_eq!(
             command,
-            "cd '/home/dev/repo/.worktrees/s1' && mkdir -p .tddy && \
-             printf %s \"$$\" > .tddy/agent.pid && \
-             exec env -i ANTHROPIC_MODEL='opus' '/usr/local/bin/claude' '--model' 'opus'"
+            r#"cd '/home/dev/repo/.worktrees/s1' && mkdir -p .tddy && printf %s "$$" > .tddy/agent.pid && exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" ANTHROPIC_MODEL='\''opus'\'' '\''claude'\'' '\''--model'\'' '\''opus'\'''"#
         );
     }
 
@@ -522,7 +648,7 @@ mod tests {
     }
 
     #[test]
-    fn the_agent_sees_only_the_environment_the_command_carries() {
+    fn the_agent_sees_the_targets_base_set_and_only_the_environment_the_command_carries() {
         // Given a login that holds a variable of its own, and a command carrying one variable
         let (_dir, worktree) = a_worktree_named("worktree");
         let argv = strings(&["/usr/bin/env"]);
@@ -533,9 +659,20 @@ mod tests {
 
         // When the command is run by a shell
         let printed = printed_by(&remote_agent_command(&worktree, &argv, &env));
+        let mut seen: Vec<&str> = printed.lines().collect();
+        seen.sort_unstable();
 
-        // Then
-        assert_eq!(printed, "ROUTE_BASE_URL=https://route.example\n");
+        // Then the agent has the target's `HOME`, `PATH` and `TMPDIR`, as the target's login
+        // shell expanded them, and the one variable the command carries, and nothing of the login
+        assert_eq!(
+            seen,
+            vec![
+                "HOME=/home/target",
+                "PATH=/usr/bin:/bin",
+                "ROUTE_BASE_URL=https://route.example",
+                "TMPDIR=/target/tmp",
+            ]
+        );
     }
 
     #[test]

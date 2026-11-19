@@ -49,13 +49,11 @@ the variable.
   daemon target start runs. The session directory (the remote client's local cwd) is
   `$TMPDIR/tddy-session-driver/<session id>`.
 
-**Why `--binary` and `--env` exist.** A target launch renders the agent's argv and `env -i`
-environment from the **daemon host's** resolution: the binary path this machine resolved, and this
-machine's `PATH`, `HOME` and `TMPDIR`. On a remote target none of these is right — a Claude start
-exits 127 on the host's binary path, and with the binary fixed, this Mac's `TMPDIR` made Claude die
-`EACCES: permission denied, mkdir '/var/folders'`. The flags name the target's values explicitly. They
-work around `docs/dev/todo/2026-11-18-a-target-launch-runs-the-daemon-hosts-agent-path.md`; they do
-not fix it, and a daemon start still has no way to choose them.
+**`--binary` and `--env` are overrides, not workarounds.** A target launch runs the target's own
+agent: its bare command on the target's login `PATH`, with the target's `HOME`, `PATH` and `TMPDIR`
+(`tddy_agent_launch::remote_agent_launch::target_login_exec`). The flags only replace that binary or
+add variables for a one-off check. The driver also passes the worktree's clone root
+(`clone_root_of_worktree`), so a Claude start pre-trusts it on the target as a daemon start does.
 
 ## The MCP tools
 

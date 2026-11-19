@@ -12,7 +12,21 @@ About **9.5k production lines** in the crate's modules, under the 10k receiver b
 `remote_agent_launch/target.rs`.
 `launch_on_target` spawns the session's local PTY (the transport's client) on a cleared environment
 carrying the transport's credentials, `SSH_AUTH_SOCK` and the daemon's own `PATH`, so a bare `coder` or
-`ssh` resolves; the agent's environment still travels inside the remote command. Each start probe
+`ssh` resolves; the agent's environment still travels inside the remote command.
+The remote command is `cd '<worktree>' && mkdir -p .tddy && printf %s "$$" > .tddy/agent.pid && <target_login_exec>`:
+`target_login_exec(argv, env)` `exec`s the target's login shell (`"${SHELL:-/bin/sh}" -lc`), which `exec`s
+`env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}"` (expanded **on the target**), then exactly the
+spec's explicit `env`, then the spec's **bare command** (`plan_the_launch` renders with
+`tool.binary = tool.command`, no node launcher, and binds the `on_target` flag a spec may render on —
+Cursor's `--trust`). `target_agent_one_shot` is the same form for a one-shot such as Cursor's
+`create-chat`. `RemoteLaunch.clone_root` (from `clone_root_of_worktree(worktree, session_id)`, the
+`<root>/.worktrees/<session id>` layout; any other is `None`) lets a start whose spec's hooks adapter is
+Claude's run `target_trust::pre_trust_clone_root` first: probe `$HOME`, read `~/.claude.json` (absent is
+`{}`), set `projects["<clone root>"].hasTrustDialogAccepted` and add every `.mcp.json` server to
+`disabledMcpjsonServers` (removing it from `enabledMcpjsonServers`), and write it `OwnerOnly` only when it
+changed. A failure is `RemoteLaunchError::Trust`, before any terminal is registered. Claude itself
+migrates that key into the project's `.claude/settings.local.json` at startup (verified on Claude
+2.1.327). Each start probe
 (`wait_for_agent_start`'s pid file, `exits_during_startup`'s `kill -0`) is bounded by the time left in
 its start bound or startup window, not a fixed few seconds, because one round trip to a remote
 deployment can take 6-8 s.

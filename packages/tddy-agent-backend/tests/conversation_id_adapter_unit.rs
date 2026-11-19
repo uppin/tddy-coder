@@ -113,3 +113,27 @@ async fn cursor_create_chat_is_killed_at_its_deadline_against_a_cli_that_never_a
         )
     );
 }
+
+#[tokio::test]
+async fn a_mint_into_a_missing_directory_names_the_directory() {
+    // Given — a working `create-chat`, and a directory that does not exist on this host (a path
+    // that belongs to a target machine, say)
+    let bin = tempfile::tempdir().unwrap();
+    let agent = a_stub_agent(bin.path(), "echo chat-0042");
+    let missing = bin.path().join("home/dev/.tddy/repos/app/.worktrees/s1");
+
+    // When
+    let minted = minting(&agent, &missing, Duration::from_secs(5)).await;
+
+    // Then — the refusal names the directory, not only the binary that "could not be run"
+    let refusal = match minted {
+        Err(ConversationMintError::Failed(message)) => message,
+        other => panic!("a mint into a missing directory is refused as a failure, got {other:?}"),
+    };
+    assert_eq!(
+        refusal.contains(&missing.display().to_string()),
+        true,
+        "the refusal must name {}: {refusal}",
+        missing.display()
+    );
+}
