@@ -979,6 +979,36 @@ impl ARegistryDaemon {
 
     /// What the stub of `session_id` reported, once it has reported all of it.
     pub async fn stub_report(&self, session_id: &str) -> AStubReport {
+        // The first open only waits for the stub to finish its report: a `Tail` open drops what the
+        // stub writes between the replayed last frame and the live subscription, so a report read
+        // from it can miss a line. Once `STUB-END` is on the terminal the stub writes nothing more
+        // (it sits on `cat`), and a `FromOffset(0)` open replays the whole report from the capture.
+        let finished = self
+            .terminal_output(session_id, StreamReplayMode::Tail, 200, 24)
+            .await;
+        assert!(
+            finished.contains("STUB-END"),
+            "the stub finished its report within {TERMINAL_OBSERVE:?}; it showed: {finished}"
+        );
+        let replayed = self
+            .terminal_output(session_id, StreamReplayMode::FromOffset, 0, 0)
+            .await;
+        assert!(
+            replayed.contains("STUB-END"),
+            "the terminal replays the stub's finished report; it replayed: {replayed}"
+        );
+        AStubReport::parse(&replayed)
+    }
+
+    /// What a `mode` open of `session_id`'s terminal shows until `STUB-END`, or until
+    /// [`TERMINAL_OBSERVE`] runs out.
+    async fn terminal_output(
+        &self,
+        session_id: &str,
+        mode: StreamReplayMode,
+        initial_cols: u32,
+        initial_rows: u32,
+    ) -> String {
         let mut stream = self
             .service
             .terminal_session_service()
@@ -986,9 +1016,9 @@ impl ARegistryDaemon {
                 session_token: VALID_TOKEN.to_string(),
                 session_id: session_id.to_string(),
                 terminal_id: String::new(),
-                initial_cols: 200,
-                initial_rows: 24,
-                mode: StreamReplayMode::Tail as i32,
+                initial_cols,
+                initial_rows,
+                mode: mode as i32,
                 from_offset: 0,
                 control_token: String::new(),
             }))
@@ -1005,11 +1035,7 @@ impl ARegistryDaemon {
             }
         })
         .await;
-        assert!(
-            seen.contains("STUB-END"),
-            "the stub finished its report within {TERMINAL_OBSERVE:?}; it showed: {seen}"
-        );
-        AStubReport::parse(&seen)
+        seen
     }
 }
 
