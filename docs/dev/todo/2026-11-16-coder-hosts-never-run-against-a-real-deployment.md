@@ -42,3 +42,13 @@ runs against `mantasi/remote-dev` and passes: `coder version` prints `Coder v2.3
 usable workspace reports `running`, and Claude and Cursor start there and reach their prompts. Still
 unverified: the hook follower on a workspace (needs a daemon-level start — the driver never creates
 `hooks.log`), and the status words of a non-running workspace (none was tried).
+
+**Narrowed 2026-11-19 (`#coder-start` 10/10, the sweep):** the status words were read from the real
+deployment, read-only. `GET /api/v2/workspaces?q=owner:me` with `Coder-Session-Token` (the request
+`HttpCoderWorkspaceSource` makes) answered 200, with `latest_build.status` `running` for
+`mantasi/remote-dev` and `stopped` for the stopped `bazel`, `qape-hq` and `remote-big`, which is
+the word `CoderWorkspace::is_running` refuses and `the workspace is stopped` carries. No workspace was
+started or stopped, so the transient words (`starting`, `stopping`, `failed`) were not seen. They
+are carried verbatim, so none needs code. **Still unverified:** the hook follower on a Coder
+workspace. That needs a daemon-level start on a live workspace (the driver never creates
+`hooks.log`), checking that its `SessionStart` reaches the session's status.

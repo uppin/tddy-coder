@@ -243,13 +243,7 @@ pub(crate) async fn start_cli_harness_session(
 
     // On a target the agent's hooks append to its hook log there, not to a daemon it cannot
     // reach: the launch creates that log and follows it.
-    if target.is_some() {
-        if let Some(hooks) = &mut wiring.hooks {
-            // Relative to the worktree the agent runs in: the hook appends there, on the
-            // target, wherever that worktree is.
-            hooks.remote_log = Some(tddy_core::REMOTE_HOOK_LOG.to_string());
-        }
-    }
+    log_hooks_on_the_target(&target, &mut wiring);
     let launch_model = routed_launch_model(
         &agent.spec,
         route.as_ref().map(|route| route.args.as_slice()),
@@ -304,27 +298,20 @@ pub(crate) async fn start_cli_harness_session(
     slots.argv_extra.extend(role_args);
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
-    match &target_shell {
-        Some(shell) => write_slot_files_through_shell(&mut slots, shell.as_ref()).await?,
-        None => write_slot_files_on_target(&mut slots, remote_host).await?,
-    }
-    let host = match &target_shell {
-        Some(shell) => PointerHost::Remote {
-            shell: Arc::clone(shell),
-        },
-        None => PointerHost::of(remote_host),
-    };
-    let pointer =
-        place_session_pointer(wiring.session_pointer.as_ref(), &worktree_path, &host).await?;
+    let pointer = place_slot_files_and_pointer(
+        &worktree_path,
+        &target_shell,
+        &wiring,
+        remote_host,
+        &mut slots,
+    )
+    .await?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, run_in_tmux);
     env.extend(std::mem::take(&mut wiring.env));
     env.extend(carried_effort.env);
     env.extend(route.env);
     // The node launcher is a path of this host: a target runs its own agent, found by its name.
-    let launcher = match &target_shell {
-        Some(_) => None,
-        None => node_launcher_of(&agent.tool.binary),
-    };
+    let launcher = node_launcher_for(agent, &target_shell);
     let params = harness_template_params(&conversation.bound(HarnessLaunch {
         model: launch_model,
         prompt: Some(initial_prompt),
@@ -435,6 +422,61 @@ pub(crate) async fn start_cli_harness_session(
         )
         .await;
 
+    report_the_started_session(kind, os_user, session_id, worktree_path, pid)
+}
+
+fn log_hooks_on_the_target(
+    target: &Option<tddy_core::SessionTarget>,
+    wiring: &mut crate::cli_agent_steps::SessionWiring,
+) {
+    if target.is_some() {
+        if let Some(hooks) = &mut wiring.hooks {
+            // Relative to the worktree the agent runs in: the hook appends there, on the
+            // target, wherever that worktree is.
+            hooks.remote_log = Some(tddy_core::REMOTE_HOOK_LOG.to_string());
+        }
+    }
+}
+
+async fn place_slot_files_and_pointer(
+    worktree_path: &std::path::Path,
+    target_shell: &Option<Arc<dyn tddy_remote_shell::RemoteShell>>,
+    wiring: &crate::cli_agent_steps::SessionWiring,
+    remote_host: Option<&str>,
+    slots: &mut tddy_coding_agent_specs::slots::RenderedSlots,
+) -> Result<Option<crate::cli_session_pointer::PlacedSessionPointer>, Status> {
+    match target_shell {
+        Some(shell) => write_slot_files_through_shell(slots, shell.as_ref()).await?,
+        None => write_slot_files_on_target(slots, remote_host).await?,
+    }
+    let host = match target_shell {
+        Some(shell) => PointerHost::Remote {
+            shell: Arc::clone(shell),
+        },
+        None => PointerHost::of(remote_host),
+    };
+    let pointer =
+        place_session_pointer(wiring.session_pointer.as_ref(), worktree_path, &host).await?;
+    Ok(pointer)
+}
+
+fn node_launcher_for(
+    agent: &crate::spec_launch::HostAgent,
+    target_shell: &Option<Arc<dyn tddy_remote_shell::RemoteShell>>,
+) -> Option<crate::cursor_from_spec::NodeLauncher> {
+    match target_shell {
+        Some(_) => None,
+        None => node_launcher_of(&agent.tool.binary),
+    }
+}
+
+fn report_the_started_session(
+    kind: crate::harness_from_spec::CliSessionType,
+    os_user: &str,
+    session_id: &str,
+    worktree_path: std::path::PathBuf,
+    pid: u32,
+) -> Result<Response<StartSessionResponse>, Status> {
     log::info!(
         target: "tddy_daemon::connection_service",
         "started {} session {session_id} pid={pid} worktree={} user={os_user}",

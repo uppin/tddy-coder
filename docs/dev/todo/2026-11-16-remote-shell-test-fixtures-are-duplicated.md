@@ -36,3 +36,16 @@ offer the stand-in `coder` as a script writer.
 agent-launch's `ATarget` with its call log, the stub agent families, the `acme` spec, the daemon
 helpers, and the copies in `tddy-remote-shell/tests/support` and `tddy-agent-launch/src/remote_agent_launch.rs`
 (a `tddy-testing-commons` dev-dependency there risks a cycle).
+
+**Narrowed 2026-11-19 (`#coder-start` 10/10, the sweep):** the copies that were still identical
+line for line are consolidated. `tddy-session-lifecycle/tests/derived_host_support` holds the
+derived-host daemon (`AnOperatorHome`, the stub agent, the host service, `ADaemonReachingAnSshHost`
+with four of its methods) for `derived_host_start` and `orchestrator_target_start`, and
+`tddy-agent-launch/tests/acme_target_support` holds the `acme` spec and host agent, the hook sink,
+`InstalledHooks` and `ADaemon` for `coder_agent_launch` and `remote_hooks` (640 lines removed, 37
+added in the suites). What remains has **drifted**, so merging it means choosing one behaviour for
+every caller: the stand-in coder `AWorkspace` (two bodies), agent-launch's `ATarget`s (different
+call logs), the stub-agent families (their run lines, trap and banner differ), `AnAgentRun`
+(identical in `coder_target_session` and `remote_target_session`, 15 lines, but the two files share
+no support module), and the copies in `tddy-remote-shell/tests/support` and
+`tddy-agent-launch/src/remote_agent_launch.rs` (a `tddy-testing-commons` dev-dependency there risks a cycle).

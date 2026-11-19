@@ -10,34 +10,33 @@
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-15-remote-shell-remote-hooks.md.
 
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use tddy_testing_commons::remote_target::write_executable;
 
-use async_trait::async_trait;
 use pretty_assertions::assert_eq;
-use tddy_actions::tool::{ResolvedTool, TemplateParams, ToolDef};
+use tddy_actions::tool::TemplateParams;
 use tddy_agent_launch::remote_agent_launch::{launch_on_target, RemoteLaunch, RemoteLaunched};
 use tddy_agent_launch::remote_hook_follower::{
-    create_remote_hook_log, remove_remote_hook_log, HookLine, HookSink, RemoteHookFollower,
+    create_remote_hook_log, remove_remote_hook_log, RemoteHookFollower,
 };
 use tddy_agent_launch::slot_files_over_shell::write_slot_files_through;
-use tddy_agent_launch::spec_launch::{HostAgent, HostPtySession};
-use tddy_cli_sessions::cli_session_manager::CliSessionManager;
-use tddy_coding_agent_specs::slots::{self, RenderedSlots, SlotInputs};
-use tddy_coding_agent_specs::CodingAgentSpec;
-use tddy_core::{
-    activity_status_from_hook_with_tool, HookCommandParams, SessionActivityStatus, REMOTE_HOOK_LOG,
-};
+use tddy_agent_launch::spec_launch::HostPtySession;
+use tddy_coding_agent_specs::slots::{self, SlotInputs};
+use tddy_core::{HookCommandParams, SessionActivityStatus, REMOTE_HOOK_LOG};
 use tddy_remote_shell::{RemoteShellError, SshShell};
 use tddy_testing_commons::wait::eventually;
+
+mod acme_target_support;
+use acme_target_support::{
+    a_daemon, the_acme_agent, the_acme_spec, ADaemon, InstalledHooks, MODEL,
+};
 
 /// The ssh `Host` alias the session's target is known by.
 const TARGET_ALIAS: &str = "buildbox";
 const SESSION_ID: &str = "019d2c7e-51aa-7c40-8f0e-2b1d6a9c3e10";
 const SESSION_TYPE: &str = "acme-cli";
-const MODEL: &str = "acme-1";
 /// The session's hook token, as its `.session.yaml` holds it.
 const HOOK_TOKEN: &str = "tok-7f3a9c";
 
@@ -176,97 +175,10 @@ impl AStubAgent {
     }
 }
 
-/// The `acme` coding agent's tool file: its hooks are Claude Code's settings file.
-fn the_acme_spec() -> CodingAgentSpec {
-    let def: ToolDef = serde_yaml::from_str(&format!(
-        r#"schema_version: 1
-id: acme
-summary: a coding agent
-binary:
-  command: acme
-deps: []
-run:
-  transport: pty
-  argv:
-    - "{{binary}}"
-    - {{ if: model, then: ["--model", "{{model}}"] }}
-extensions:
-  coding_agent:
-    mcp: {{ kind: file, flag: --mcp-config, format: claude-mcp-json }}
-    tool_allow: {{ flag: --allowedTools }}
-    tool_deny: {{ flag: --disallowedTools }}
-    permission_prompt: {{ flag: --permission-prompt-tool }}
-    instructions: {{ files: [CLAUDE.md] }}
-    hooks: {{ adapter: claude-settings-local }}
-    models: {{ default: {MODEL}, curated: [{MODEL}] }}
-"#
-    ))
-    .expect("the tool file deserializes");
-    CodingAgentSpec::of(&def).expect("a valid coding agent")
-}
-
-/// The `acme` agent as this host resolves it: its binary is `program`.
-fn the_acme_agent(program: &Path) -> HostAgent {
-    HostAgent {
-        spec: the_acme_spec(),
-        tool: ResolvedTool {
-            id: "acme".to_string(),
-            command: "acme".to_string(),
-            binary: program.to_path_buf(),
-            reads: Vec::new(),
-            network: Default::default(),
-        },
-        deps: Vec::new(),
-        env_base: tddy_coding_agent_specs::AgentEnvBase::builtin(),
-    }
-}
-
-/// The session's activity as the daemon keeps it: every status a delivered hook set, in order.
-#[derive(Default)]
-struct TheSessionsActivity {
-    statuses: Mutex<Vec<SessionActivityStatus>>,
-}
-
-#[async_trait]
-impl HookSink for TheSessionsActivity {
-    async fn deliver(&self, line: HookLine) {
-        let status = activity_status_from_hook_with_tool(
-            &line.event,
-            line.payload["notification_type"].as_str(),
-            line.payload["tool_name"].as_str(),
-        );
-        self.statuses.lock().unwrap().extend(status);
-    }
-}
-
-/// The hooks of a target session, installed: the slots the launch renders and where they log.
-struct InstalledHooks {
-    slots: RenderedSlots,
-    log: String,
-}
-
 /// A target session that is running: its terminal and the follower of its hook log.
 struct ARunningSession {
     _launched: RemoteLaunched,
     follower: RemoteHookFollower,
-}
-
-/// A daemon with one target session: its terminals, the session's own directory and its activity.
-struct ADaemon {
-    manager: Arc<CliSessionManager>,
-    activity: Arc<TheSessionsActivity>,
-    session_dir: PathBuf,
-    _session_dir: tempfile::TempDir,
-}
-
-fn a_daemon() -> ADaemon {
-    let dir = tempfile::tempdir().expect("a session directory");
-    ADaemon {
-        manager: Arc::new(CliSessionManager::new()),
-        activity: Arc::default(),
-        session_dir: std::fs::canonicalize(dir.path()).expect("the session directory resolves"),
-        _session_dir: dir,
-    }
 }
 
 impl ADaemon {
