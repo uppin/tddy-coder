@@ -96,6 +96,8 @@ pub(super) struct HarnessRemote {
     pub(super) pointer: Option<SessionPointer>,
     /// How long the agent must stay up for the launch to count as started.
     pub(super) startup_window: std::time::Duration,
+    /// How long the agent may take to be started on the target.
+    pub(super) start_timeout: std::time::Duration,
     /// The session's hook token, when its agent declares hooks: its hooks append to the hook log
     /// on the target, which this launch creates and then follows. `None` starts no follower.
     pub(super) hook_token: Option<String>,
@@ -174,6 +176,7 @@ pub(super) async fn launch(
                 session_dir,
                 pointer: remote.pointer.as_ref(),
                 startup_window: remote.startup_window,
+                start_timeout: remote.start_timeout,
                 clone_root: crate::remote_agent_launch::clone_root_of_worktree(
                     worktree_path,
                     session_id,

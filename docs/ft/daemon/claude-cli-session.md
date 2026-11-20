@@ -572,7 +572,10 @@ environment the `claude-cli` launch produces:
   its spec declares, and the session's terminal is a local PTY whose child is the transport's
   client. The session record and `.session.yaml` carry the target; stopping the session ends the
   remote agent, the agent's exit ends the terminal with its status, and a resume starts the agent
-  on the target again. An agent that exits within the startup window fails the start with its
+  on the target again. The agent has `remote_agent_start_timeout_secs` (daemon YAML, default 60)
+  from the spawn of its terminal to record its pid on the target — the transport's connect time
+  included, ~10 s for a Coder workspace — or the start fails and its terminal is stopped. An agent
+  that exits within the startup window fails the start with its
   last output; an unreachable target fails it with the shell's reason and leaves no session. A
   target combined with a managed codebase, a sandbox, a split placement or the project-home main
   is refused with the reason, as is a target named together with `ssh_config_host`. A file the

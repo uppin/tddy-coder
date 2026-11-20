@@ -125,6 +125,10 @@ pub struct RemoteLaunch<'a> {
     /// How long the agent must stay up for the launch to count as started. An agent — or a
     /// transport — that exits within it fails the launch with its last output.
     pub startup_window: Duration,
+    /// How long the agent may take to record its pid on the target, from the spawn of its
+    /// terminal: the transport's connect time (a Coder workspace's is ~10 s) and the remote
+    /// command's start. An agent not started within it fails the launch.
+    pub start_timeout: Duration,
     /// The session's clone on the target: the repository root `worktree` was cut from. A Claude
     /// start trusts it in the target's `~/.claude.json` ([`crate::target_trust`]); `None` when the
     /// caller does not know it, and nothing is trusted.
@@ -402,10 +406,7 @@ async fn judge_the_start(
     session: HostPtySession<'_>,
     handle: Arc<PtyHandle>,
 ) -> Result<RemoteLaunched, RemoteLaunchError> {
-    let start_bound = remote
-        .startup_window
-        .saturating_mul(10)
-        .max(Duration::from_secs(5));
+    let start_bound = remote.start_timeout;
     let agent_pid = match wait_for_agent_start(
         remote.shell.as_ref(),
         remote.worktree,

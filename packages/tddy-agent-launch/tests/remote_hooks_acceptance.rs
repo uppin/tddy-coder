@@ -42,6 +42,8 @@ const HOOK_TOKEN: &str = "tok-7f3a9c";
 
 /// How long the agent must stay up for a launch to count as started.
 const STARTUP_WINDOW: Duration = Duration::from_millis(400);
+/// How long the agent may take to record its pid on the target.
+const START_TIMEOUT: Duration = Duration::from_secs(60);
 /// A safety net for a stub to report, not a prediction of how long it takes.
 const OBSERVE: Duration = Duration::from_secs(15);
 
@@ -238,6 +240,7 @@ impl ADaemon {
                 session_dir: &self.session_dir,
                 pointer: None,
                 startup_window: STARTUP_WINDOW,
+                start_timeout: START_TIMEOUT,
                 clone_root: None,
             },
             HostPtySession {

@@ -72,6 +72,11 @@ struct Args {
     #[arg(long, default_value_t = 5)]
     startup_window_secs: u64,
 
+    /// How long an agent on a remote target may take to be started there, in seconds: the
+    /// transport's connect time included (a Coder workspace's is ~10 s). The daemon's default.
+    #[arg(long, default_value_t = 60)]
+    start_timeout_secs: u64,
+
     /// The terminal's size, which the screen is read at.
     #[arg(long, default_value_t = 40)]
     rows: u16,
@@ -140,6 +145,7 @@ fn session_spec(mut args: Args) -> anyhow::Result<(LaunchSpec, bool)> {
             session_id,
             model,
             startup_window: Duration::from_secs(args.startup_window_secs),
+            start_timeout: Duration::from_secs(args.start_timeout_secs),
             rows: args.rows,
             cols: args.cols,
         },

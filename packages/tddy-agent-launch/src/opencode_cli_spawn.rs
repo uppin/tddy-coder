@@ -341,6 +341,7 @@ pub(crate) async fn start_cli_harness_session(
                 shell,
                 pointer: wiring.session_pointer.clone(),
                 startup_window: config.spawn_startup_grace_period(),
+                start_timeout: config.remote_agent_start_timeout(),
                 hook_token: wiring.hooks.as_ref().map(|hooks| hooks.hook_token.clone()),
                 hook_delivery: hook_delivery.clone(),
                 hook_followers: hook_followers.clone(),

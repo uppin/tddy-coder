@@ -43,6 +43,9 @@ pub struct LaunchSpec {
     pub model: String,
     /// How long the agent must stay up for its start to count.
     pub startup_window: Duration,
+    /// How long an agent on a remote target may take to be started there, the transport's connect
+    /// time included.
+    pub start_timeout: Duration,
     /// The terminal's size, which the screen is read at.
     pub rows: u16,
     pub cols: u16,
@@ -189,6 +192,7 @@ impl DriverSession {
                         session_dir: &spec.session_dir,
                         pointer: None,
                         startup_window: spec.startup_window,
+                        start_timeout: spec.start_timeout,
                         clone_root: tddy_agent_launch::remote_agent_launch::clone_root_of_worktree(
                             &spec.worktree,
                             &spec.session_id,

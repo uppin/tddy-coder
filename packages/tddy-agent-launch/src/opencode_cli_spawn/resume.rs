@@ -115,6 +115,7 @@ impl crate::launch_ports::LaunchSessions {
                 wiring,
                 tddy_data_dir: &self.tddy_data_dir,
                 startup_window: self.config.spawn_startup_grace_period(),
+                start_timeout: self.config.remote_agent_start_timeout(),
                 hook_delivery: self.hook_report_delivery.clone(),
                 hook_followers: self.remote_hook_followers.clone(),
                 target_shell,
@@ -205,6 +206,8 @@ struct ResumedSession<'a> {
     tddy_data_dir: &'a Path,
     /// How long a target session's resumed agent must stay up to count as started.
     startup_window: std::time::Duration,
+    /// How long a target session's resumed agent may take to be started there.
+    start_timeout: std::time::Duration,
     /// Where a target session's followed hooks are delivered, and the registry its follower is
     /// kept in.
     hook_delivery: Option<Arc<dyn crate::remote_hook_follower::HookReportDelivery>>,
@@ -248,6 +251,7 @@ async fn resume_cli_harness_session(
         mut wiring,
         tddy_data_dir,
         startup_window,
+        start_timeout,
         hook_delivery,
         hook_followers,
         target_shell,
@@ -351,6 +355,7 @@ async fn resume_cli_harness_session(
                 shell,
                 pointer: session_pointer.clone(),
                 startup_window,
+                start_timeout,
                 hook_token: meta.hook_token.clone(),
                 hook_delivery: hook_delivery.clone(),
                 hook_followers: hook_followers.clone(),
