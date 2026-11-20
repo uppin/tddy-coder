@@ -74,3 +74,18 @@ All three are `#![cfg(target_os = "macos")]` — no CI host runs a Linux jail
 `sandboxed_claude_cli_acceptance`, `sandboxed_cursor_cli_acceptance`, `sandbox_behavior_acceptance`
 and the two `sandboxed_session_lifecycle_acceptance` tests above stay red on the bridge: their
 fixtures do not install it.
+
+## Session liveness
+
+A session is active while the daemon holds a live agent tab for it ([Session
+liveness](../../../docs/ft/daemon/session-liveness.md)); a pid written into `.session.yaml` makes it
+active no longer. `TestDaemon::holds_a_main_agent(session_id)` (`src/test_util.rs`) makes a session live
+the way the daemon defines it — it holds a main agent terminal, a stub that records the first `INT` or
+`TERM` it receives (`HeldMain::signal_received`) and is ready once its traps are installed;
+`serves_a_main_for` and `stops_holding` read and end that hold.
+
+| Suite | What it pins |
+|---|---|
+| `session_liveness_acceptance` | a recorded pid belonging to an unrelated live process lists inactive; a running main lists active with no recorded pid; a main that exited while an agent tab runs lists active; closed agent tabs, a shell-only session and a daemon restart list inactive; delete leaves the process the recorded pid names running and stops the session's agent tabs; `SignalSession` reaches the held main, not the recorded pid; a session with no running agent is refused and nothing is signalled |
+| `claude_cli_tmux_reattach_acceptance` | a tmux-run agent that outlived its daemon lists inactive until its main is re-attached, and a detached one lists active while the daemon watches it; each re-attach attempt is awaited through `reattach_finished()` rather than polled |
+| `ensure_project_home_session_acceptance::ensuring_a_main_whose_recorded_pid_names_an_unrelated_process_resumes_it` | a main whose recorded pid is a running unrelated process is resumed, not reported running |

@@ -53,7 +53,9 @@ session and manage them over RPC, so I can run a shell in the session's worktree
 2. `ListTerminalSessions(session_id)` returns one `TerminalSessionInfo{terminal_id, kind, pid}`
    per running tool of that session — `kind` is the main tool's session type (`"claude-cli"`, …) for
    `"main"`, **`"bash"`** for started Bash tools, and the harness's session type (`"warp-cli"`,
-   `"muse-cli"`, …) for a started agent terminal.
+   `"muse-cli"`, …) for a started agent terminal. A session is **active** while it has a running
+   terminal of an agent's kind (the main or an agent terminal); `"bash"` and `"tmux"` terminals never
+   make a session active — see [Session liveness](session-liveness.md).
 
 ### Start / Stop
 3. `StartTerminalSession(session_id, kind)` starts the tool `kind` names, in the session's worktree,

@@ -7,9 +7,9 @@ the delete paths of the daemon's other services. None of them holds session-host
 | Module | Holds |
 |---|---|
 | `user_sessions_path` | resolving an OS user to their sessions directory: a re-export of `tddy_daemon_kernel::user_paths` (`home_dir_for_user` and the rest), `username_for_uid` (`getpwuid_r`), and `tddy_data_root_matching_child` |
-| `session_reader` | `SessionEntry` and `list_sessions_in_dir`, which read each `<session_id>/.session.yaml`; `DaemonSessionListing`, this daemon's `tddy_worktree_service::branch_owner::SessionListing`; and `is_pid_alive`, the liveness probe a listing and a deletion share |
+| `session_reader` | `SessionEntry` and `list_sessions_in_dir`, which read each `<session_id>/.session.yaml`; `DaemonSessionListing::new(live)`, this daemon's `tddy_worktree_service::branch_owner::SessionListing`; and `is_pid_alive`, the probe a `tool` session's deletion uses. `list_sessions_in_dir(sessions_base, &LiveSessions)` takes the daemon's live set as a required argument and marks a session `is_active` when the set holds its id: the recorded pid is never consulted ([Session liveness](../../../docs/ft/daemon/session-liveness.md)) |
 | `session_list_enrichment` | the display fields a `ListSessions` row carries beyond `.session.yaml` — goal, workflow state, elapsed time, agent, model, the stack plan and a pending elicitation — read from the session's `changeset.yaml` (parity with the TUI's status bar), and `apply_session_list_status_to_proto`. Both take the host's `CodingAgentRegistry`: a session whose type a coding agent declares (`for_session_type`) runs no workflow, so it has no goal or workflow state |
-| `session_deletion` | filesystem-safe deletion: validating the session id, resolving the directory under the sessions tree, stopping a recorded live PID (SIGTERM, a wait, then SIGKILL; `signal_pid`), closing the session room, tearing down a workspace sandbox, and deciding which session types remove a daemon-managed worktree |
+| `session_deletion` | filesystem-safe deletion: validating the session id, resolving the directory under the sessions tree, stopping a `tool` session's recorded live PID (SIGTERM, a wait, then SIGKILL; `signal_pid`) — the daemon stops every other session's processes before the directory goes, closing the session room, tearing down a workspace sandbox, and deciding which session types remove a daemon-managed worktree |
 
 `session_reader` carries the name the session was given (`SessionEntry.display_name`, from
 `.session.yaml`'s `display_name`; empty for an unnamed session) onto the `ListSessions` row as
@@ -38,7 +38,7 @@ for `tddy-daemon`, `tddy-daemon-rpc`, `tddy-telegram-control` and `tddy-worktree
 `tddy-session-catalog` is the catalog `tddy-coder` and `tddy-bsp` read. `session_reader` and
 `user_sessions_path` need `tddy-daemon-kernel`, `tddy-worktree-service`, `tddy-core`, `anyhow` and
 `libc`; in the catalog they would add 85 packages to `tddy-bsp`'s own graph. Every caller is on the
-daemon side, and `session_deletion` needs `is_pid_alive`, so the four live together here.
+daemon side, and `session_deletion` needs `is_pid_alive` for a `tool` session, so the four live together here.
 
 They are what this crate's dependencies on `tddy-projects` (`project_storage`), `tddy-session-files`
 (`session_context_docs`), `tddy-daemon-sandbox` (`RUNNER_PID_FILE`), `tddy-daemon-livekit`
@@ -52,10 +52,10 @@ below it: its dependents are lifecycle, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-
 |---|---|
 | `src/session_deletion.rs` (unit) | 12 |
 | `src/session_list_enrichment.rs` (unit) | 27 |
-| `src/session_reader.rs` (unit) | 1 |
+| `src/session_reader.rs` (unit) | 3: a listing marks a session active from the live set alone — a recorded pid that is a running process does not, a live session with no recorded pid does |
 | `tests/worktree_removal_eligibility.rs` | 8: which session types remove a daemon-managed worktree on delete — `claude-cli`, `opencode-cli`, `muse-cli`, `warp-cli` and `workspace` do (`worktree_removal_applies_to`); `tool`, an unrecorded type and `cursor-cli` do not |
 
-These 48 are the crate's only tests; the activity service itself has none of its own (see the
+These 50 are the crate's only tests; the activity service itself has none of its own (see the
 [README](../README.md#testing)).
 
 ## Related

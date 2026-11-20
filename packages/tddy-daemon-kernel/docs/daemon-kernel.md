@@ -108,6 +108,22 @@ on a daemon with no channel at all.
 `ServerMessage`, and the extensions crate stays free of `tddy-service`. The integration status board
 the Telegram channel reports on stays in extensions.
 
+### `live_sessions` — which sessions the daemon holds a live agent for
+
+`LiveSessions` (`src/live_sessions.rs`) is a snapshot of the session ids with at least one live agent
+tab on this daemon — the one thing `is_active` is read from ([Session liveness](../../../docs/ft/daemon/session-liveness.md)).
+It is a plain value type: `none()`, `of(ids)`, `contains(&str)` and `union(other)`. A snapshot, not a
+handle, because the listing that reads it runs on the blocking pool, away from the async locks of
+the holders that produce it (`CliSessionManager::live_agent_sessions`,
+`SandboxSessionManager::live_sessions`).
+
+`HeldSessions` is the port for a surface handed the daemon's processes without naming the managers:
+`live_sessions()` and `stop_session(session_id)` (stop every process held for the session — its main
+and its tabs). `NoHeldSessions` holds nothing (every test fixture). `LateBoundHeldSessions` answers
+as `NoHeldSessions` until the host exists and the real holder is bound once (`bind`, first binding
+wins) — what Telegram and the remote-git service, both built before the session host, are given.
+`tddy-daemon` binds it in `install_session_host` to the host's terminal-session store.
+
 ### `session_notification` — the types the port names
 
 `SessionNotification`, `SessionNotificationKind` (`Activity`, `AttentionRequired`),

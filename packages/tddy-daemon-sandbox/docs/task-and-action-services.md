@@ -83,6 +83,15 @@ The jail of a tool run from its definition — the sandboxed `claude-cli` sessio
   egress and OAuth inbound replacing what the runner's argv would imply; each secret goes on with
   `SandboxPlan::add_secret`.
 
+`SandboxSessionState::is_running()` reads whether the jail's runner is still running from the `Child` the
+state owns (`try_wait`), never from `pid` — the OS may have reissued that once the runner was reaped; an
+entry outlives its runner until resume, relaunch or delete replaces it, so presence is not liveness.
+`runner_pid()` is the owned child's pid while it runs, `None` once it has exited or been stopped.
+`SandboxSessionManager::live_sessions()` is the set of entries that are running, as a
+`tddy_daemon_kernel::live_sessions::LiveSessions` ([Session
+liveness](../../../docs/ft/daemon/session-liveness.md)). `SandboxSessionState::stop` signals only that owned
+`Child`: once the handle is gone it signals nothing, since `pid` may name an unrelated process.
+
 `sandbox_session::dial_and_bridge_with_egress` is `dial_and_bridge` with the jail's `EgressGuard` on
 the host relay (`HostRelayConfig::with_egress`), so a `TunnelOpen` to an undeclared host is refused on
 the host as well as at the in-jail shim. `dial_and_bridge` is it with an unrestricted guard, for the

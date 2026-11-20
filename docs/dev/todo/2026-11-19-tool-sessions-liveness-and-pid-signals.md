@@ -1,7 +1,7 @@
 # 2026-11-19 — `tool` sessions list inactive and are still signalled by their recorded pid
 
 **Category:** Bug risk (deferred to a planned stack node)
-**Source:** [2026-11-19-session-liveness-from-agent-tabs.md](../1-WIP/2026-11-19-session-liveness-from-agent-tabs.md) (`#session-liveness` 1/4)
+**Source:** [2026-11-20-session-liveness-agent-tab-liveness.md](../changesets/2026-11-20-session-liveness-agent-tab-liveness.md) (`#session-liveness` 1/4)
 
 - Session liveness now comes from the live agent tabs the daemon holds. A `tool` (tddy-coder)
   session has none: its child is held by `tddy-supervisor`, the forked spawn worker or a detached

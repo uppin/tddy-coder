@@ -242,7 +242,7 @@ and answers `{ session, outcome }`. Without `start` it reaches the recorded main
 | A main whose session directory no longer exists | the record is cleared, then `NOT_FOUND` as above |
 | A main whose session record cannot be read | `INTERNAL`; the record is kept |
 | A stopped main | the home worktree is fast-forwarded to the fetched main branch ref, then the session is resumed — same conversation → `resumed` |
-| A running main (its pid is alive, or the daemon still serves its terminal) | returned unchanged → `running` |
+| A running main (the daemon holds a live agent for it — [Session liveness](session-liveness.md)) | returned unchanged → `running` |
 
 With `start` (a `StartSessionRequest`, built by the New-session form's
 [main variant](../web/session-drawer.md#main-variant)) it sets main up, or replaces it:
@@ -335,8 +335,9 @@ an ordinary, still read-only session, and main is set up once more.
   it holds its turn, so two concurrent set-ups record one main: one answers `started`, the other
   `replaced`. Deleting main is allowed; the next ensure answers `NOT_FOUND` and clears the record.
   Because main is managed, it opens with the activity sidebar.
-- The "running" decision is a heuristic with one known false positive: a live pid with no served
-  terminal reads as running.
+- The "running" decision is the live set alone: a main whose recorded pid is alive but whose terminal
+  nobody serves is stopped, so ensure resumes it. A main that outlived a daemon restart is held by
+  nothing, so a replace leaves its process running beside the new main until it is re-attached.
 
 ### Project-home tools
 
@@ -922,14 +923,14 @@ the way a person follows it in the web UI, on any eligible host.
 ### Terminating a session
 
 `TerminateSession` stops a session of the caller's project, on any eligible host, exactly as the web
-UI's Terminate does: the target's host sends **SIGTERM** to the process its `.session.yaml` records,
-through the same code `SessionService.SignalSession` runs (`signal_session_dir` in
+UI's Terminate does: the target's host sends **SIGTERM** to the main agent it holds for the session,
+through the same code `SessionService.SignalSession` runs (`signal_held_session` in
 `tddy-agent-launch`), on the sessions directory the host resolved the target from.
 
 - **Nothing else changes.** The session's record, its worktree and its branch stay; a terminated
   session can be resumed like any stopped one.
-- **Refusals.** A session whose process is not alive, or that records no pid, is an `is_error` result
-  (`process is not alive`, `session has no PID`); another project's session is refused like every
+- **Refusals.** A session the daemon holds no running agent for is an `is_error` result
+  (`session has no running agent`) and nothing is signalled; another project's session is refused like every
   target tool's and its process is left running.
 - **Not offered:** `DeleteSession` (which removes the worktree), SIGINT and SIGKILL.
 

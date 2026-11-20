@@ -45,12 +45,12 @@ Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`T
 - Each entry shows: short session label, status, workflow state, elapsed time.
 - Each entry has inline keyboard buttons: **"Enter"** (connect to session workflow) and **"Delete"** (delete session with confirmation).
 - When more than 10 sessions exist, a **"More"** button at the bottom loads the next page (offset-based pagination via callback data).
-- The list reads from the same **`session_reader::list_sessions_in_dir`** and **`session_list_enrichment`** pipeline as **`ConnectionService::ListSessions`**.
+- The list reads from the same **`session_reader::list_sessions_in_dir`** and **`session_list_enrichment`** pipeline as **`ConnectionService::ListSessions`**, with `is_active` taken from the daemon's live set ([Session liveness](session-liveness.md)).
 
 ### Session deletion (`/delete`)
 
 - Delegates to the same **`session_deletion::delete_session_directory`** logic as **`ConnectionService::DeleteSession`**.
-- If a live PID exists in **`.session.yaml`**, the daemon terminates the process before directory removal.
+- The processes the daemon holds for the session — its agent and its terminal tabs — are stopped before directory removal; the pid recorded in **`.session.yaml`** is not signalled, except for a `tool` session (see [Session liveness](session-liveness.md#known-limitations)).
 - The session's room is closed first, through the `SessionRooms` port, before the directory goes.
 - Bot sends a confirmation message after successful deletion.
 - A `/delete` removes an agent session's git worktree as `ConnectionService::DeleteSession` does: the controller passes the host's coding-agent registry, so the worktree goes unless the agent's spec declares `keep_worktree_on_delete` (Cursor keeps its worktree). `workspace` sessions are unaffected (`#agent-tools` 19/19).
