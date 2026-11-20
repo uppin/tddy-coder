@@ -12278,6 +12278,7 @@ dependencies = [
  "tddy-stdio",
  "tddy-subagent-worktree",
  "tddy-task",
+ "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-tool-engine",
  "tddy-usage",

@@ -23,6 +23,7 @@ use crate::harness_from_spec::{
 use crate::opencode_cli_spawn::harness_launch::{
     launch, HarnessRemote, HarnessRun, HarnessSession, HarnessSpecLaunch,
 };
+use crate::opencode_cli_spawn::restore_tabs::{restore_tab_roster, RosterRestore};
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::usage_context::{record_usage_context, UsageSubject};
 use std::path::{Path, PathBuf};
@@ -94,7 +95,8 @@ impl crate::launch_ports::LaunchSessions {
                 split.is_none(),
             )
             .await?;
-        resume_cli_harness_session(
+        let tab_worktree = worktree.clone();
+        let resumed = resume_cli_harness_session(
             &session_agent,
             &self.cli_manager,
             &self.host.session_account_access(&req.session_token),
@@ -120,6 +122,33 @@ impl crate::launch_ports::LaunchSessions {
                 target_shell,
             },
         )
+        .await?;
+        let mut resumed = resumed.into_inner();
+        resumed.restored_tabs = self
+            .restore_roster_on_resume(os_user, &req.session_id, session_dir, &tab_worktree)
+            .await;
+        Ok(Response::new(resumed))
+    }
+
+    /// Restore the tabs of a resumed session's roster beside its main, each as its own launch chain
+    /// says (`#session-liveness` 4/4). Every resume path restores the whole roster: nothing is
+    /// skipped for where main runs.
+    pub(crate) async fn restore_roster_on_resume(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        session_dir: &Path,
+        worktree: &Path,
+    ) -> Vec<tddy_service::proto::session::RestoredTab> {
+        restore_tab_roster(RosterRestore {
+            session_id,
+            session_dir,
+            worktree,
+            os_user,
+            cli_manager: &self.cli_manager,
+            coding_agents: &self.coding_agents,
+            roster_store: self.cli_manager.tab_rosters(),
+        })
         .await
     }
 

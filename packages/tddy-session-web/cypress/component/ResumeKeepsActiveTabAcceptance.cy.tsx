@@ -49,7 +49,10 @@ const STOPPED = {
  * A daemon whose stopped session lists [`CLAUDE_TAB`], reports it restored by `ResumeSession`, and
  * lists the session live from the resume on. Served host-direct (empty room), like any PTY session.
  */
-function aStoppedSessionWhoseClaudeTabIsRestored(): SessionServiceBackend {
+function aStoppedSessionWhoseClaudeTabIsRestored(
+  outcome: RestoredTabOutcome = RestoredTabOutcome.RESTORED,
+  reason = "",
+): SessionServiceBackend {
   let resumed = false;
   return aSessionServiceBackend({
     listSessionsFactory: () =>
@@ -66,8 +69,8 @@ function aStoppedSessionWhoseClaudeTabIsRestored(): SessionServiceBackend {
         restoredTabs: [
           create(RestoredTabSchema, {
             terminalId: CLAUDE_TAB,
-            outcome: RestoredTabOutcome.RESTORED,
-            reason: "",
+            outcome,
+            reason,
           }),
         ],
       };
@@ -104,5 +107,22 @@ describe("Resume restores the session's tab roster", () => {
     sessionActivitiesPage.resumeBtn(STOPPED.sessionId).should("not.exist");
     tabs.tab(CLAUDE_TAB).should("have.attr", "aria-selected", "true");
     tabs.agentTab().should("have.attr", "aria-selected", "false");
+  });
+
+  it("says which tab reopened fresh, and why", () => {
+    // Given a stopped session whose tab the daemon can only reopen fresh
+    const backend = aStoppedSessionWhoseClaudeTabIsRestored(
+      RestoredTabOutcome.FRESH,
+      "opencode-cli cannot resume a given conversation, so the tab reopened fresh",
+    );
+    selectStoppedSession(backend);
+
+    // When the operator resumes the session
+    sessionActivitiesPage.resume(STOPPED.sessionId);
+
+    // Then a notice names the tab and the reason
+    cy.get("[data-testid=sessions-resume-notice]")
+      .should("contain.text", CLAUDE_TAB)
+      .and("contain.text", "reopened fresh");
   });
 });

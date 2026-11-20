@@ -1,7 +1,7 @@
 # Changeset: Resume restores the whole tab roster
 
 **Date**: 2026-11-19
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress (implementation done; wrap pending)
 **Type**: Feature
 **Complexity**: 4 — several crates (agent-launch, session-lifecycle, service proto, coding-agent-specs use, session-web), a proto change, per-tab failure semantics
 **Stack**: `#session-liveness` 4/4 (PR #961, stack #962) — branch `feature/session-liveness/resume-roster`, base `feature/session-liveness/tool-tab`
@@ -86,9 +86,25 @@ is not re-checked.
 - [x] Create changeset
 - [x] Create failing acceptance tests / run them (verify they fail) / USER REVIEW — approved 2026-11-19
 - [x] TDD Red — failing unit/integration tests
-- [ ] Implementation
-- [ ] Per-harness TODOs for non-resumable tabs (opencode, muse, warp)
-- [ ] Package documentation, scoped clippy, single-spec Cypress
+- [x] Implementation (host-recorded chains; every resume path restores the whole roster)
+- [x] Per-harness TODOs for non-resumable tabs (opencode, muse, warp) — on `tab_conversation_is_resumable`
+- [x] Single-spec Cypress (2 tests), scoped clippy
+- [ ] Package documentation — `/pr-wrap`
+
+### Out of scope (developer decision 2026-11-20: "n4 host-only + new nodes")
+
+- **n5 — jail-side tab spawn + a `sandbox` wrapper node.** Nothing starts a secondary tab inside a running
+  jail today: a sandboxed session's tabs start host-side. Sandboxing is per tab, so n5 records a `sandbox`
+  node only on a tab started in a jail and restores it through the jail's own spawn path.
+- **n6 — target tab launch + a target wrapper node** (ssh / Coder), restoring a target tab through the
+  session's `RemoteShell`.
+- Until then every recorded chain is host-side, and so is its restore. A chain holding a kind restore does
+  not know (`sandbox`, a target kind) is DROPPED with a reason naming it, never a failed resume.
+  `restore_plan` dispatches per node kind, so n5 and n6 add a kind, not a branch.
+- Every resume path restores the whole roster — host, sandboxed and target sessions — with no skip for
+  where main runs. Tests: `remote_target_session_acceptance` (a target session's roster, an unknown-kind
+  tab dropped); the sandboxed path calls the same `restore_roster_on_resume`, but has no new test (its
+  jail harness is the macOS-only one).
 
 ## Technical Changes
 

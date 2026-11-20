@@ -45,6 +45,8 @@ tddy-spawn = { path = "../tddy-spawn" }
 tddy-stdio = { path = "../tddy-stdio" }
 tddy-subagent-worktree = { path = "../tddy-subagent-worktree" }
 tddy-task = { path = "../tddy-task" }
+# `login_shell_for`, `TMUX_KIND`: a restored shell tab and a re-attached tmux tab.
+tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
 tddy-workflow = { path = "../tddy-workflow" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }

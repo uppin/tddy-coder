@@ -58,6 +58,7 @@ import { withoutDeletedProjectsSessions } from "./utils/sessionProjectGroups";
 import {
   SessionsDrawerLoadNotices,
   SessionsDrawerPaneError,
+  SessionsDrawerResumeNotice,
   sessionsDrawerListNotices,
 } from "./SessionsDrawerNotices";
 import { useHostConnector, useHostLabel, useSelectedDaemon } from "tddy-client-web";
@@ -403,6 +404,9 @@ export function SessionsDrawerScreen({
             onOpenProjectStack={handleOpenProjectStack}
           />
           {!unknownSession && <SessionsDrawerPaneError message={paneError} />}
+          {!unknownSession && !paneError && (
+            <SessionsDrawerResumeNotice message={attachmentControls.resumeNotice} />
+          )}
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
               stays visible so the operator can pick a valid session. */}
           <SessionsDrawerDetailPane

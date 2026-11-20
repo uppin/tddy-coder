@@ -244,6 +244,23 @@ fn a_tab_of_a_kind_this_daemon_does_not_know_is_dropped_naming_the_kind() {
 }
 
 #[test]
+fn a_tab_whose_chain_holds_a_wrapper_this_daemon_does_not_know_is_dropped_naming_it() {
+    // Given a tmux-wrapped agent a later daemon also wrapped in a jail
+    let tab = a_tab(vec![
+        LaunchNode::new("sandbox", [("profile", "default")]),
+        LaunchNode::tmux(TAB_TMUX, DEV),
+        LaunchNode::agent("claude-cli", CONVERSATION),
+    ]);
+    let live = LiveTabs::none().with_tmux_session(DEV, TAB_TMUX);
+
+    // When
+    let reason = dropped_reason(restore_plan(&tab, &live));
+
+    // Then
+    assert!(reason.contains("sandbox"), "{reason}");
+}
+
+#[test]
 fn a_tab_with_no_launch_chain_is_dropped() {
     // Given
     let tab = a_tab(Vec::new());

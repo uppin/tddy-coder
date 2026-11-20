@@ -135,12 +135,15 @@ impl LaunchSessions {
         write_session_metadata(session_dir, &updated)
             .map_err(|e| Status::internal(format!("failed to update session metadata: {e}")))?;
 
+        let restored_tabs = self
+            .restore_roster_on_resume(os_user, &req.session_id, session_dir, &worktree_path)
+            .await;
         Ok(Response::new(ResumeSessionResponse {
             session_id: req.session_id.clone(),
             livekit_room: String::new(),
             livekit_url: String::new(),
             livekit_server_identity: String::new(),
-            restored_tabs: Vec::new(),
+            restored_tabs,
         }))
     }
 

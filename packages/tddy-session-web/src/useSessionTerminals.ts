@@ -12,6 +12,13 @@ type TerminalClient = Client<typeof TerminalSessionService>;
 /** The reserved main terminal id — the coding Agent tab. Never handed out by StartTerminalSession. */
 export const AGENT_TERMINAL_ID = "main";
 
+/**
+ * The tab each session was last on, by session id. A Resume swaps the stopped session's strip for the
+ * live one — a different component, so a `useState` here would start over on the Agent tab — and the
+ * restored tabs come back under their recorded ids: the id remembered here is still a tab.
+ */
+const lastActiveTab = new Map<string, string>();
+
 /** The wrapper kind that runs an agent tab in a tmux session of its own. */
 export const TMUX_WRAPPER_KIND = "tmux";
 
@@ -76,7 +83,19 @@ export function useSessionTerminals({
   controlToken = "",
 }: UseSessionTerminalsParams): SessionTerminalsController {
   const [terminals, setTerminals] = useState<SessionTerminal[]>([]);
-  const [activeTerminalId, setActiveTerminalId] = useState<string>(AGENT_TERMINAL_ID);
+  const [activeTerminalId, setActiveTerminalIdState] = useState<string>(
+    () => lastActiveTab.get(sessionId) ?? AGENT_TERMINAL_ID,
+  );
+  const setActiveTerminalId = useCallback(
+    (next: string | ((prev: string) => string)) => {
+      setActiveTerminalIdState((prev) => {
+        const id = typeof next === "function" ? next(prev) : next;
+        lastActiveTab.set(sessionId, id);
+        return id;
+      });
+    },
+    [sessionId],
+  );
   const [error, setError] = useState<string | null>(null);
 
   // Populate the terminal tabs from the session's current terminals once a client is available.
@@ -104,6 +123,13 @@ export function useSessionTerminals({
           }
           return merged;
         });
+        // A remembered tab the daemon no longer lists (dropped on a resume, closed elsewhere) falls
+        // back to the Agent tab rather than selecting nothing.
+        setActiveTerminalId((active) =>
+          active === AGENT_TERMINAL_ID || listed.some((t) => t.terminalId === active)
+            ? active
+            : AGENT_TERMINAL_ID,
+        );
         setError(null);
       } catch (err) {
         dTerm(
@@ -117,11 +143,14 @@ export function useSessionTerminals({
     return () => {
       cancelled = true;
     };
-  }, [client, sessionId, sessionToken]);
+  }, [client, sessionId, sessionToken, setActiveTerminalId]);
 
-  const setActive = useCallback((id: string) => {
-    setActiveTerminalId(id);
-  }, []);
+  const setActive = useCallback(
+    (id: string) => {
+      setActiveTerminalId(id);
+    },
+    [setActiveTerminalId],
+  );
 
   const open = useCallback(
     (kind: string, tmuxSession?: string, wrappers: readonly string[] = []) => {
@@ -166,13 +195,16 @@ export function useSessionTerminals({
         }
       })();
     },
-    [client, sessionId, sessionToken, controlToken],
+    [client, sessionId, sessionToken, controlToken, setActiveTerminalId],
   );
 
-  const dropEnded = useCallback((id: string) => {
-    setTerminals((prev) => prev.filter((t) => t.terminalId !== id));
-    setActiveTerminalId((prev) => (prev === id ? AGENT_TERMINAL_ID : prev));
-  }, []);
+  const dropEnded = useCallback(
+    (id: string) => {
+      setTerminals((prev) => prev.filter((t) => t.terminalId !== id));
+      setActiveTerminalId((prev) => (prev === id ? AGENT_TERMINAL_ID : prev));
+    },
+    [setActiveTerminalId],
+  );
 
   const close = useCallback(
     (id: string) => {

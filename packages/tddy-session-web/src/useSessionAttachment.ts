@@ -22,6 +22,7 @@ import { attachmentHintFromReply } from "tddy-client-web";
 import type { SessionAttachmentHint, SessionAttachmentState } from "tddy-client-web/connections/session";
 import type { HostConnection } from "tddy-client-web/connections/types";
 import { rpcFailureText } from "tddy-client-web";
+import { restoredTabsNotice } from "./lib/restoredTabsNotice";
 
 export type { SessionAttachmentState } from "tddy-client-web/connections/session";
 
@@ -46,6 +47,8 @@ export interface UseSessionAttachmentResult {
   state: SessionAttachmentState;
   /** The routing behind {@link state}'s connection; `null` unless connected. */
   hint: SessionAttachmentHint | null;
+  /** What the last Resume says of the tabs it did not bring back as they were; `null` otherwise. */
+  resumeNotice: string | null;
   /** Resolves `true` once the attach is settled, `false` when it failed (the state is then `error`). */
   connectSession(sessionId: string, sessionToken: string, host: HostConnection): Promise<boolean>;
   /** Resolves `null` once the resume is settled; otherwise the failure's text (the state is then `error`). */
@@ -69,6 +72,7 @@ export interface UseSessionAttachmentResult {
 
 export function useSessionAttachment(): UseSessionAttachmentResult {
   const [attachment, setAttachment] = useState<SessionAttachment>(NOT_ATTACHED);
+  const [resumeNotice, setResumeNotice] = useState<string | null>(null);
 
   // Whether this hook's owner is still mounted. An attach is an in-flight RPC, and the connection
   // it produces is opened *after* the reply lands — which can be after the screen that asked for it
@@ -137,8 +141,15 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
   );
 
   const resumeSession = useCallback(
-    (sessionId: string, sessionToken: string, host: HostConnection) =>
-      attach(sessionId, host, (client) => client.resumeSession({ sessionToken, sessionId })),
+    async (sessionId: string, sessionToken: string, host: HostConnection) => {
+      setResumeNotice(null);
+      const failure = await attach(sessionId, host, async (client) => {
+        const reply = await client.resumeSession({ sessionToken, sessionId });
+        setResumeNotice(restoredTabsNotice(reply.restoredTabs));
+        return reply;
+      });
+      return failure;
+    },
     [attach],
   );
 
@@ -171,11 +182,13 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
 
   const reset = useCallback(() => {
     setAttachment(NOT_ATTACHED);
+    setResumeNotice(null);
   }, []);
 
   return {
     state: attachment.state,
     hint: attachment.hint,
+    resumeNotice,
     connectSession,
     resumeSession,
     deleteSession,
