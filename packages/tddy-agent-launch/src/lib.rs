@@ -118,5 +118,6 @@ mod session_acting_identity_tests;
 mod session_provider_route_tests;
 #[cfg(test)]
 mod start_request_checks_unit_tests;
+mod svc_signal_session;
 #[cfg(test)]
 mod tool_session_route_tests;

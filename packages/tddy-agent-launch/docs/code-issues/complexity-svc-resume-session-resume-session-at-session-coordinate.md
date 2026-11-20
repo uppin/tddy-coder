@@ -56,3 +56,4 @@ the seam with `restructure check --deep` against a warm index (`./run-index-daem
 ⚠ **Re-measure before acting.** This record was generated in a batch of 100 from one sweep. Confirm
 the numbers still hold and that the finding is real before spending a PR on it — an unverified
 finding is a lead, not an issue.
+| 2026-11-20 | 191 → 190 | — | — | — | **better by 1** in #960 (`#session-liveness` 3/4): `tool_session_spawned` takes the spawn result by value, so two lines (`…_spawned(&…, &spawned); let result = spawned?;`) became one. Fn line to closing brace on `origin/feature/session-liveness/tmux-roster` (`dfe3ee833`) and HEAD, whose measurement this row re-bases (the 172 above predates later growth). No coverage run. Still open, unclaimed |
