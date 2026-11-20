@@ -148,6 +148,15 @@ inside a `claude-cli` session shares the worktree's `.claude/settings.local.json
 activity may be reported against the main session — see
 [`docs/dev/todo/2026-10-24-claude-agent-tab-shares-session-hooks.md`](../../dev/todo/2026-10-24-claude-agent-tab-shares-session-hooks.md).
 
+## Wrapped terminals
+
+`StartTerminalSessionRequest.wrappers` (field 6, `repeated LaunchNode{kind, map<string,string>
+properties}`, outermost first) says what a terminal runs wrapped in; empty runs `kind` directly. The
+one wrapper accepted is `"tmux"` around an agent kind: the agent runs in a tmux session of its own as
+the session's OS user and the tab is a client of it, so it survives its client and its daemon. Every
+other wrapper is `INVALID_ARGUMENT`, naming it. Each started terminal is recorded in the session's tab
+roster and closing it removes it — see [Session liveness](session-liveness.md#the-tab-roster).
+
 ## tmux terminals
 
 A started terminal can attach to a **tmux session already running on the session's host**, on the
@@ -170,7 +179,8 @@ tmux server of the **session's OS user** — the sessions that user started in t
   then a tmux tab like an attached one — listed with kind `"tmux-new"` and its `tmux_session`, and
   stopping it detaches, so the new session outlives the tab.
 - **`ListTerminalSessions`** lists the tab with kind `"tmux"` and `TerminalSessionInfo.tmux_session`
-  (field 4) naming the tmux session, so every viewer labels it the same.
+  (field 4) naming the tmux session, so every viewer labels it the same. Every listed tab also carries
+  its recorded launch chain in `TerminalSessionInfo.launch` (field 5).
 - **`StopTerminalSession`** ends the tab's tmux client only, which **detaches** it: the tmux session
   keeps running, with one attached client fewer, and can be attached again from tddy or any terminal.
 

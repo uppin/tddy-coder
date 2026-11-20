@@ -2,7 +2,7 @@
  * Cypress component acceptance: the "+" menu's "in tmux" option starts an agent tab wrapped in tmux,
  * and the tab strip marks it.
  *
- * PRD: `docs/ft/daemon/1-WIP/PRD-2026-11-19-tmux-wrapped-tab-roster.md` (`#session-liveness` 2/4)
+ * PRD: `docs/ft/daemon/session-liveness.md` (`#session-liveness` 2/4)
  *
  * Driven over the deterministic gRPC path: `connectSession` returns an empty `livekitRoom`, so every
  * terminal RPC flows over the daemon client into the in-memory backend, which records each request.

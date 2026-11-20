@@ -3,7 +3,7 @@
 //! client is detached — and is re-attached, not relaunched, when the daemon starts again. A
 //! pre-roster tmux main is re-attached at startup from its `.session.yaml`.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-19-tmux-wrapped-tab-roster.md (`#session-liveness` 2/4)
+//! PRD: docs/ft/daemon/session-liveness.md (`#session-liveness` 2/4)
 //!
 //! A private tmux server stands in for the host's; Muse Code and Claude are stub scripts that log
 //! each launch, so "not relaunched" is a launch count that did not move. The restart is a second

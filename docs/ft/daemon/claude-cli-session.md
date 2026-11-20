@@ -252,7 +252,12 @@ on the host: it shows in `tmux ls` and can be attached from any terminal over SS
   session still lives, and runs the agent-ended cleanup (toolcall socket, exposure) once it is gone. A
   re-attach stops the watcher; daemon shutdown stops every watcher and starts none.
 - **Re-attach.** A session whose tmux session is alive and has no main terminal registered gets one
-  re-attached — the agent is **never relaunched**, and the recorded `pid` is re-read from the pane:
+  re-attached — the agent is **never relaunched**, and the recorded `pid` is re-read from the pane. A
+  main counts as having run in tmux when its [tab roster](session-liveness.md#the-tab-roster) records
+  a `tmux` node for it or, for a session recorded before rosters existed, `.session.yaml` names a tmux
+  session. It is attached:
+  - at **daemon startup**, for every such session whose tmux session is alive — see
+    [Session liveness](session-liveness.md#a-daemon-restart);
   - on **Resume**. A daemon that still serves the session's managed workflow (a client that detached
     from this daemon) keeps it, so the socket its session pointer and tool server name stays bound; a restarted daemon, which has
     none, prepares one bound to the same `tddy-wf-<id>.sock` path. A main already attached to that tmux

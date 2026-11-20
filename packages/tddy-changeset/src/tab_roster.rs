@@ -24,7 +24,7 @@
 //!         properties: { harness: claude-cli, conversation_id: 5f3c… }
 //! ```
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-19-tmux-wrapped-tab-roster.md
+//! PRD: docs/ft/daemon/session-liveness.md
 
 use std::collections::BTreeMap;
 use std::path::Path;

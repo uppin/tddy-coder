@@ -2,7 +2,7 @@
 //! (`<session dir>/tabs.yaml`) as the launch chain it was started through, under its terminal id; a
 //! closed tab leaves the roster, and a tab that exits on its own stays in it.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-19-tmux-wrapped-tab-roster.md (`#session-liveness` 2/4)
+//! PRD: docs/ft/daemon/session-liveness.md (`#session-liveness` 2/4)
 //!
 //! Driven through the daemon's own `StartTerminalSession` / `StopTerminalSession`; the roster is
 //! read back from disk. Serial — the tmux-attach tab needs the process-wide private tmux server.

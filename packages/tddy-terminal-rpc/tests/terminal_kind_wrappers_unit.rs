@@ -1,7 +1,7 @@
 //! `TerminalKind::from_wrapped_request`: a `StartTerminalSession` naming what its terminal runs
 //! wrapped in — an agent in tmux, and the wrappers this host refuses.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-19-tmux-wrapped-tab-roster.md (`#session-liveness` 2/4)
+//! PRD: docs/ft/daemon/session-liveness.md (`#session-liveness` 2/4)
 
 use std::collections::HashMap;
 

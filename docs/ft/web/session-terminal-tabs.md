@@ -69,6 +69,14 @@ styled like the inspector tab strip (`InspectorTabs`).
     scroller's right edge with an opaque background, so it stays reachable. Its menu opens under the
     button, outside the scroller, so the scroller does not clip it, and stays inside the viewport
     even when `+` sits at the viewport's right edge.
+  - **Agents in tmux**: for a session that offers harnesses, a group of its own below the bash and
+    harness group, with one **<agent> in tmux** item per agent kind
+    (`sessions-terminal-tab-new-in-tmux-<kind>`). It calls `StartTerminalSession` with that kind and
+    `wrappers: [tmux]`; the agent runs in a tmux session of its own and survives the tab and a daemon
+    restart (see [Session liveness](../daemon/session-liveness.md#tmux-wrapped-agent-tabs)). Its tab
+    carries a **tmux** marker (`sessions-terminal-tab-tmux-marker-<terminalId>`), rebuilt on reattach
+    from the launch chain `ListTerminalSessions` reports. Closing the tab ends its tmux session and
+    agent. A tool session's menu has no such group.
   - **tmux section**: below the bash and harness group, a group of its own listing the host's tmux
     sessions (`ListTmuxSessions`, fetched afresh **each time the menu opens** — tmux sessions come and
     go outside tddy). Each item (`sessions-terminal-tab-new-tmux-<name>`) shows the session's name,
@@ -197,7 +205,9 @@ without resuming the agent first.
     opens a **tmux: <name>** tab attached to it, which every viewer lists under the same label.
     Closing it detaches, leaving the tmux session running. The section shows **No tmux sessions**
     for an empty listing and the refusal's reason when tmux is unavailable.
-12. **New tmux session…** asks for a name (prefilled with one no listed tmux session has) and opens a
+12. **<agent> in tmux** starts the agent in a tmux session of its own and marks its tab **tmux**; the
+    agent keeps running when the tab's client ends, and closing the tab ends it.
+13. **New tmux session…** asks for a name (prefilled with one no listed tmux session has) and opens a
     **tmux: <name>** tab on a new tmux session in the session's worktree; closing it detaches,
     leaving the session running.
 
@@ -208,7 +218,7 @@ without resuming the agent first.
 - Tiling two terminals side by side — the panes are a tabbed deck, not a split.
 - Restoring full screen from a URL, or a keyboard shortcut for it.
 - Persisting open terminals (bash or agent) across a daemon (or coder) restart — terminals are
-  in-memory. They do survive the session itself stopping and resuming, since the daemon holds them.
+  in-memory, except a tmux-wrapped agent tab, which the daemon re-attaches at startup. They do survive the session itself stopping and resuming, since the daemon holds them.
 - A model, first prompt or provider account for an agent tab; agent tabs inside a sandboxed
   session's jail; agent-to-agent messaging.
 - Per-terminal control leases (the mutex stays per-session).

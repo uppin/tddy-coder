@@ -1,6 +1,6 @@
 # Session liveness
 
-**Status:** ✅ Shipped (`#session-liveness` 1/4, PR #958)
+**Status:** ✅ Shipped (`#session-liveness` 1/4 PR #958, 2/4 PR #959)
 
 ## Summary
 
@@ -20,31 +20,97 @@ processes.
 | Kind of session | Live while |
 |---|---|
 | Local PTY main (project-home, orchestrator, split agent half) | its `main` terminal resolves |
-| tmux-run main | its tmux client `main` resolves, or a detach watcher holds it; after a restart, once re-attached |
+| tmux-run main | its tmux client `main` resolves, or a detach watcher holds it; after a restart, once re-attached (at startup) |
 | Target (ssh / Coder) | its transport-client `main` resolves — it exits with the remote agent |
 | Sandboxed | its runner process has not exited |
 | Agent terminal tab (a CLI harness `kind`) | its terminal resolves |
+| tmux-wrapped agent tab | its tmux client resolves, or its own detach watcher holds it, until its tmux session ends |
 | Bash or tmux-attach tab | never counts — not an agent |
 | `workspace` | never — it runs no agent |
 | `tool` (tddy-coder) | never — see [Known limitations](#known-limitations) |
 
 - A main that exited while an agent tab still runs leaves the session **active**.
 - A session whose agent tabs have all closed, or that has only shell tabs, is **inactive**.
-- A tmux-run agent whose client ended stays live while the daemon's detach watcher holds its tmux
-  session, and for the moment between the client's end and the watcher taking over: a listing never
-  finds the session held by neither.
+- A tmux-run agent — the main, or a tmux-wrapped agent tab — whose client ended stays live while the
+  daemon's detach watcher holds its tmux session, and for the moment between the client's end and the
+  watcher taking over: a listing never finds the session held by neither. Watchers are per terminal,
+  so a main and each wrapped tab are watched on their own.
 - A sandboxed session's entry outlives its runner until resume, relaunch or delete replaces it, so
   its liveness is read off the runner process the entry owns, never off the entry's presence or the
   recorded pid.
 
 ## A daemon restart
 
-A restarted daemon holds nothing: every session lists **inactive**, whatever its `.session.yaml`
-says, until it is started, resumed or re-attached. A tmux-run agent that outlived the daemon lists
-inactive until its main terminal is re-attached (opening its terminal, or Resume) and then lists
-active. Each re-attach attempt announces how it ended — re-attached, already attached, or skipped
-for a named reason — on the terminal manager's `reattach_finished()` stream and in the log under
-the `tddy_cli_sessions::reattach` target.
+A restarted daemon holds nothing at first: every session lists **inactive**, whatever its
+`.session.yaml` says, until it is started, resumed or re-attached.
+
+**Startup re-attach.** Once the host is up and has bound the agent-tool sockets, the daemon reads
+every session's [tab roster](#the-tab-roster) and re-attaches each `tmux` node whose tmux session is
+alive, as the OS user the node records — the main and every tmux-wrapped tab — so a tmux agent that
+outlived the daemon lists **active** without anyone opening it. The agent is never relaunched. A tab
+whose tmux session is gone, or whose chain records no OS user, no agent or no worktree, is left as it
+was, with the reason logged; Resume brings it back. A session with no roster (left by a daemon that
+predates it) falls back to the main `tmux_session` its `.session.yaml` records: the OS user is the
+configured user whose tmux server holds that session, and the main is left when no configured user
+does. The lazy re-attach — the first stream, input or history read of a main, or Resume — stays, for
+whatever the startup pass left.
+
+Each main re-attach attempt announces how it ended — re-attached, already attached, or skipped for a
+named reason — on the terminal manager's `reattach_finished()` stream and in the log under the
+`tddy_cli_sessions::reattach` target.
+
+## The tab roster
+
+Every terminal tab a session opens is recorded in `<session dir>/tabs.yaml` as its **launch chain**:
+an ordered list of nodes, outermost first, each a `kind` and a string `properties` map.
+
+```yaml
+tabs:
+  - terminal_id: main
+    launch:
+      - kind: tmux
+        properties: { session: tddy-01a1…, os_user: dev }
+      - kind: agent
+        properties: { harness: claude-cli }
+  - terminal_id: 01a2…
+    launch:
+      - kind: shell
+        properties: {}
+```
+
+| Node kind | Properties | Is |
+|---|---|---|
+| `agent` | `harness`, `conversation_id` | the agent a tab runs, and the conversation it holds (a main's conversation is `.session.yaml`'s to say) |
+| `shell` | — | the session user's login shell |
+| `tmux` | `session`, `os_user` | a tmux session the daemon created to wrap a tab |
+| `tmux-attach` | `session`, `os_user` | a client on the user's own tmux session — attached to an existing one, or started as a new one |
+
+- **One writer.** The roster is a file of its own, written only by the daemon's terminal roster under
+  one lock per session, atomically. `.session.yaml` is read-modify-written by hook and status updates
+  with no lock and refuses keys it does not know, so a roster inside it would be clobbered or would
+  lock older daemons out. `.session.yaml`'s `tmux_session` stays the main's record for them.
+- **Unknown content survives.** A node kind, property key, entry key or top-level key this daemon does
+  not know is written back verbatim, so a later wrapper (`ssh` with `host`, …) needs no schema change
+  and an older daemon never drops what a newer one wrote.
+- **Lifetime.** A tab enters the roster when it starts and leaves it when it is **closed**
+  (`StopTerminalSession`). A tab that exits on its own stays, so Resume can bring it back; deleting the
+  session removes the file with the session directory. A tab that cannot be recorded is stopped and
+  its start fails: an unrecorded tab could not be restored and nothing would know to stop it.
+- **Listing.** `ListTerminalSessions` reports each recorded tab's chain as
+  `TerminalSessionInfo.launch`; a terminal with no recorded chain lists an empty one.
+
+## tmux-wrapped agent tabs
+
+`StartTerminalSession` with an agent `kind` and `wrappers: [{kind: "tmux"}]` runs the agent in a tmux
+session of its own, `tddy-<session_id>-<terminal_id>`, **as the session's OS user**, and attaches a
+client tab to it (the main keeps `tddy-<session_id>`). The tab's chain is `[tmux, agent]`. Any other
+wrapper kind, a second wrapper, or a tmux wrapper around anything but an agent is refused
+`INVALID_ARGUMENT` naming what was refused; nothing is launched.
+
+The agent outlives the tab's client: closing the browser tab or a daemon restart leaves it running,
+and the session stays live while it does. **Closing the tab** (`StopTerminalSession`) is different from
+a client ending: it ends the tab's tmux session — and its agent — before the tab, and removes the roster
+entry. The web offers it as **Add agent ▸ in tmux**, and marks the tab.
 
 ## What acts on held processes
 
@@ -73,8 +139,13 @@ agent for), and Telegram's list, branch-owner scan and delete.
   the spawn worker or a detached wait thread — so a running tool session lists **inactive**, and
   delete and `SignalSession` still reach it through its recorded pid, the only handle there is. The
   recycled-pid hazard remains for that kind alone.
-- A project-home main that outlived a daemon restart is held by nothing, so a replace cannot stop it
-  until it is re-attached.
+- A tmux-run main that outlived a daemon restart is held by nothing until it is re-attached. The
+  startup pass does so when the roster, or the pre-roster fallback, names an OS user the daemon can
+  serve; until then a replace cannot stop it.
+- What a detached tmux-run agent prints while nobody is attached is not recorded, for a main and for a
+  wrapped tab alike: history serves the recording up to the client's end.
+- A tab started as **New tmux session…** is recorded as `tmux-attach`, like one attached to an existing
+  session; only the wrapper the daemon creates around an agent is a `tmux` node.
 
 ## Related
 
