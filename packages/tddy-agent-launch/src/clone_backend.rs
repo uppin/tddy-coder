@@ -43,7 +43,7 @@ impl CloneBackend {
         dest: &Path,
         env: &BTreeMap<String, String>,
         on_started: impl FnOnce(CloneHandle),
-        mut on_progress: impl FnMut(GitProgress),
+        on_progress: impl FnMut(GitProgress),
     ) -> Result<(), String> {
         match &self.choice {
             SpawnBackendChoice::Supervisor { socket_path } => self
@@ -60,45 +60,59 @@ impl CloneBackend {
                     ),
                 )
                 .map_err(|e| format!("{e:#}")),
-            SpawnBackendChoice::ForkedWorker => match &self.spawn_client {
-                Some(client) => {
-                    let mut on_started = Some(on_started);
-                    client
-                        .clone_repo_observed(
-                            spawn_worker::CloneRequest {
-                                os_user: self.os_user.clone(),
-                                git_url: git_url.to_string(),
-                                destination: dest.display().to_string(),
-                                env: env.clone(),
-                            },
-                            |event| match event {
-                                WorkerEvent::Started { pid } => {
-                                    if let Some(on_started) = on_started.take() {
-                                        on_started(CloneHandle::for_process_group(pid));
-                                    }
+            SpawnBackendChoice::ForkedWorker => {
+                self.clone_in_worker(git_url, dest, env, on_started, on_progress)
+            }
+        }
+    }
+
+    /// [`Self::clone_repo`] on the forked spawn worker, or in this process when there is none.
+    fn clone_in_worker(
+        &self,
+        git_url: &str,
+        dest: &Path,
+        env: &BTreeMap<String, String>,
+        on_started: impl FnOnce(CloneHandle),
+        mut on_progress: impl FnMut(GitProgress),
+    ) -> Result<(), String> {
+        match &self.spawn_client {
+            Some(client) => {
+                let mut on_started = Some(on_started);
+                client
+                    .clone_repo_observed(
+                        spawn_worker::CloneRequest {
+                            os_user: self.os_user.clone(),
+                            git_url: git_url.to_string(),
+                            destination: dest.display().to_string(),
+                            env: env.clone(),
+                        },
+                        |event| match event {
+                            WorkerEvent::Started { pid } => {
+                                if let Some(on_started) = on_started.take() {
+                                    on_started(CloneHandle::for_process_group(pid));
                                 }
-                                WorkerEvent::CloneProgress(progress) => on_progress(progress),
-                                // Written for a spawned tool's child only; a clone has none.
-                                WorkerEvent::Exited { .. } => {}
-                            },
-                        )
-                        .map_err(|e| e.to_string())
-                }
-                // No forked worker at all: clone in this process.
-                None => {
-                    let pairs: Vec<(&str, &str)> =
-                        env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-                    clone_run::clone_with_progress(
-                        &self.os_user,
-                        git_url,
-                        dest,
-                        &pairs,
-                        on_started,
-                        on_progress,
+                            }
+                            WorkerEvent::CloneProgress(progress) => on_progress(progress),
+                            // Written for a spawned tool's child only; a clone has none.
+                            WorkerEvent::Exited { .. } => {}
+                        },
                     )
                     .map_err(|e| e.to_string())
-                }
-            },
+            }
+            // No forked worker at all: clone in this process.
+            None => {
+                let pairs: Vec<(&str, &str)> =
+                    env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+                clone_run::clone_with_progress(
+                    &self.os_user,
+                    git_url,
+                    dest,
+                    &pairs,
+                    on_started,
+                    on_progress,
+                )
+                .map_err(|e| e.to_string())
+            }
         }
     }
 }

@@ -40,7 +40,7 @@ pub(crate) type OnExit = Box<dyn FnOnce(u32, ChildExit) + Send>;
 
 /// Hand `on_exit`, if there is one, the end `waited` reports. A wait that failed leaves the holder
 /// knowing only that the child is gone, which is reported as an end with neither code nor signal.
-pub(crate) fn report_wait(
+fn report_wait(
     on_exit: Option<OnExit>,
     pid: u32,
     waited: &std::io::Result<std::process::ExitStatus>,
@@ -54,6 +54,26 @@ pub(crate) fn report_wait(
         },
     };
     on_exit(pid, exit);
+}
+
+/// Reap `child` on a thread of its own, log how it ended, and hand that end to `on_exit`. The
+/// thread is the child's only waiter, so its wait is what makes the end exact.
+pub(crate) fn reap_in_background(
+    mut child: std::process::Child,
+    session_id: String,
+    pid: u32,
+    on_exit: Option<OnExit>,
+) {
+    std::thread::spawn(move || {
+        let waited = child.wait();
+        match &waited {
+            Ok(status) => {
+                log::info!("child exited session_id={session_id} pid={pid} status={status}")
+            }
+            Err(e) => log::warn!("child wait failed session_id={session_id} pid={pid} err={e}"),
+        }
+        report_wait(on_exit, pid, &waited);
+    });
 }
 
 #[cfg(unix)]

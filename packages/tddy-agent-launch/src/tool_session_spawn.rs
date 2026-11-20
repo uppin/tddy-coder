@@ -176,90 +176,106 @@ impl LaunchSessions {
     /// one, a direct spawn) on the blocking pool. Both run under the spawn deadline. The child's end
     /// is reported by whichever backend holds it.
     pub async fn spawn_tddy_coder(&self, plan: ToolSpawnPlan) -> Result<SpawnedToolChild, Status> {
+        match self.spawn_backend.clone() {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                self.spawn_tddy_coder_supervised(socket_path, plan).await
+            }
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+                self.spawn_tddy_coder_owned(plan).await
+            }
+        }
+    }
+
+    /// [`Self::spawn_tddy_coder`] through `tddy-supervisor` at `socket_path`, which holds the child.
+    async fn spawn_tddy_coder_supervised(
+        &self,
+        socket_path: std::path::PathBuf,
+        plan: ToolSpawnPlan,
+    ) -> Result<SpawnedToolChild, Status> {
+        let coder_log_yaml =
+            spawner::coder_log_config_yaml(self.config.coder_config_path.as_deref());
+        let spawn_req = spawn_worker::build_spawn_request(
+            &plan.os_user,
+            &plan.tool_path,
+            &self.tddy_data_dir,
+            &plan.repo_path,
+            &plan.livekit,
+            plan.options(self.config.spawn_mouse),
+            self.config.log.as_ref(),
+            coder_log_yaml,
+            spawner::StartupWatch::from_config(&self.config),
+        );
+        let tool = service_util::await_supervised_with_timeout(
+            self.config.spawn_worker_request_timeout(),
+            plan.purpose.supervisor_label(),
+            tddy_spawn::child_exit::spawn_tool_via_supervisor(&socket_path, &spawn_req),
+        )
+        .await?;
+        Ok(SpawnedToolChild {
+            tool,
+            backend: ToolBackend::Supervisor { socket_path },
+        })
+    }
+
+    /// [`Self::spawn_tddy_coder`] through the forked spawn worker, or a direct spawn without one, on
+    /// the blocking pool: the child is a descendant of the daemon.
+    async fn spawn_tddy_coder_owned(
+        &self,
+        plan: ToolSpawnPlan,
+    ) -> Result<SpawnedToolChild, Status> {
         let spawn_client = self.spawn_client.clone();
         let spawn_mouse = self.config.spawn_mouse;
         let tddy_data_dir = self.tddy_data_dir.clone();
-        let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
         let startup_watch = spawner::StartupWatch::from_config(&self.config);
         let coder_config_path = self.config.coder_config_path.clone();
         let purpose = plan.purpose;
-        let result = match self.spawn_backend.clone() {
-            tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+        let tool = service_util::spawn_blocking_with_timeout(
+            self.config.spawn_worker_request_timeout(),
+            purpose.worker_label(),
+            move || {
+                if purpose == ToolSpawnPurpose::Start {
+                    log::debug!(
+                        "StartSession: spawn_blocking running, using_spawn_worker={}",
+                        spawn_client.is_some()
+                    );
+                }
                 let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
-                let spawn_req = spawn_worker::build_spawn_request(
-                    &plan.os_user,
-                    &plan.tool_path,
-                    &tddy_data_dir,
-                    &plan.repo_path,
-                    &plan.livekit,
-                    plan.options(spawn_mouse),
-                    daemon_log.as_ref(),
-                    coder_log_yaml,
-                    startup_watch,
-                );
-                let tool = service_util::await_supervised_with_timeout(
-                    timeout,
-                    purpose.supervisor_label(),
-                    tddy_spawn::child_exit::spawn_tool_via_supervisor(&socket_path, &spawn_req),
-                )
-                .await?;
-                SpawnedToolChild {
-                    tool,
-                    backend: ToolBackend::Supervisor { socket_path },
+                if let Some(ref client) = spawn_client {
+                    let spawn_req = spawn_worker::build_spawn_request(
+                        &plan.os_user,
+                        &plan.tool_path,
+                        &tddy_data_dir,
+                        &plan.repo_path,
+                        &plan.livekit,
+                        plan.options(spawn_mouse),
+                        daemon_log.as_ref(),
+                        coder_log_yaml,
+                        startup_watch,
+                    );
+                    client.spawn_tool(spawn_req)
+                } else {
+                    let (child_log_level, child_log_format) =
+                        spawner::child_log_yaml_tuning(daemon_log.as_ref());
+                    tddy_spawn::child_exit::spawn_tool_as_user(
+                        &plan.os_user,
+                        &plan.tool_path,
+                        &tddy_data_dir,
+                        &plan.repo_path,
+                        &plan.livekit,
+                        plan.options(spawn_mouse),
+                        child_log_level.as_str(),
+                        child_log_format.as_str(),
+                        coder_log_yaml.as_deref(),
+                        startup_watch,
+                    )
                 }
-            }
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                let tool = service_util::spawn_blocking_with_timeout(
-                    timeout,
-                    purpose.worker_label(),
-                    move || {
-                        if purpose == ToolSpawnPurpose::Start {
-                            log::debug!(
-                                "StartSession: spawn_blocking running, using_spawn_worker={}",
-                                spawn_client.is_some()
-                            );
-                        }
-                        let coder_log_yaml =
-                            spawner::coder_log_config_yaml(coder_config_path.as_deref());
-                        if let Some(ref client) = spawn_client {
-                            let spawn_req = spawn_worker::build_spawn_request(
-                                &plan.os_user,
-                                &plan.tool_path,
-                                &tddy_data_dir,
-                                &plan.repo_path,
-                                &plan.livekit,
-                                plan.options(spawn_mouse),
-                                daemon_log.as_ref(),
-                                coder_log_yaml,
-                                startup_watch,
-                            );
-                            client.spawn_tool(spawn_req)
-                        } else {
-                            let (child_log_level, child_log_format) =
-                                spawner::child_log_yaml_tuning(daemon_log.as_ref());
-                            tddy_spawn::child_exit::spawn_tool_as_user(
-                                &plan.os_user,
-                                &plan.tool_path,
-                                &tddy_data_dir,
-                                &plan.repo_path,
-                                &plan.livekit,
-                                plan.options(spawn_mouse),
-                                child_log_level.as_str(),
-                                child_log_format.as_str(),
-                                coder_log_yaml.as_deref(),
-                                startup_watch,
-                            )
-                        }
-                    },
-                )
-                .await?;
-                SpawnedToolChild {
-                    tool,
-                    backend: ToolBackend::Owned,
-                }
-            }
-        };
-        Ok(result)
+            },
+        )
+        .await?;
+        Ok(SpawnedToolChild {
+            tool,
+            backend: ToolBackend::Owned,
+        })
     }
 }

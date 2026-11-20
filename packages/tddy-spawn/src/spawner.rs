@@ -1246,25 +1246,7 @@ pub(crate) fn spawn_as_user_reporting(
         ));
     }
 
-    let session_id_exit = session_id.clone();
-    std::thread::spawn(move || {
-        let waited = child.wait();
-        match &waited {
-            Ok(status) => log::info!(
-                "child exited session_id={} pid={} status={}",
-                session_id_exit,
-                pid,
-                status
-            ),
-            Err(e) => log::warn!(
-                "child wait failed session_id={} pid={} err={}",
-                session_id_exit,
-                pid,
-                e
-            ),
-        }
-        crate::child_exit::report_wait(on_exit, pid, &waited);
-    });
+    crate::child_exit::reap_in_background(child, session_id.clone(), pid, on_exit);
 
     Ok(SpawnResult {
         session_id: session_id.clone(),

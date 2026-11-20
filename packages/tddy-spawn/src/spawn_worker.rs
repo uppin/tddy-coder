@@ -229,15 +229,43 @@ fn set_close_on_exec(fds: [std::os::unix::io::RawFd; 2]) {
     }
 }
 
-/// Run one spawn request on the worker's thread: `spawn_as_user` with the request's own parameters.
-fn run_spawn(req: &SpawnRequest, on_exit: Option<crate::child_exit::OnExit>) -> WorkerResponse {
-    let livekit = LiveKitCreds {
+/// The LiveKit credentials a spawn request carries.
+fn livekit_creds_of(req: &SpawnRequest) -> LiveKitCreds {
+    LiveKitCreds {
         url: req.livekit_url.clone(),
         api_key: req.livekit_api_key.clone(),
         api_secret: req.livekit_api_secret.clone(),
         common_room: req.common_room.clone(),
         daemon_instance_id: req.daemon_instance_id.clone(),
-    };
+    }
+}
+
+/// The spawn options a spawn request carries.
+fn spawn_options_of(req: &SpawnRequest) -> SpawnOptions<'_> {
+    SpawnOptions {
+        resume_session_id: req.resume_session_id.as_deref(),
+        new_session_id: req.new_session_id.as_deref(),
+        project_id: req.project_id.as_deref(),
+        agent: req.agent.as_deref(),
+        agent_def_json: req.agent_def_json.as_deref(),
+        provider_route_json: req.provider_route_json.as_deref(),
+        mouse: req.mouse,
+        recipe: req.recipe.as_deref(),
+        stack_parent: req.stack_parent.as_deref(),
+        stack_node_id: req.stack_node_id.as_deref(),
+        stack_seed_base_session: req.stack_seed_base_session.as_deref(),
+        model: req.model.as_deref(),
+        // The reverse `spawn_conversation` channel is a per-session unix socket whose path
+        // crosses this fork boundary as a plain string (unlike stdio fds), so it works from the
+        // worker-spawned child just like the direct path.
+        host_session_socket: req.host_session_socket.as_deref(),
+        git_environment: &req.git_environment,
+    }
+}
+
+/// Run one spawn request on the worker's thread: `spawn_as_user` with the request's own parameters.
+fn run_spawn(req: &SpawnRequest, on_exit: Option<crate::child_exit::OnExit>) -> WorkerResponse {
+    let livekit = livekit_creds_of(req);
     let session = req
         .resume_session_id
         .as_deref()
@@ -254,25 +282,7 @@ fn run_spawn(req: &SpawnRequest, on_exit: Option<crate::child_exit::OnExit>) -> 
         Path::new(&req.tddy_data_dir),
         Path::new(&req.repo_path),
         &livekit,
-        SpawnOptions {
-            resume_session_id: req.resume_session_id.as_deref(),
-            new_session_id: req.new_session_id.as_deref(),
-            project_id: req.project_id.as_deref(),
-            agent: req.agent.as_deref(),
-            agent_def_json: req.agent_def_json.as_deref(),
-            provider_route_json: req.provider_route_json.as_deref(),
-            mouse: req.mouse,
-            recipe: req.recipe.as_deref(),
-            stack_parent: req.stack_parent.as_deref(),
-            stack_node_id: req.stack_node_id.as_deref(),
-            stack_seed_base_session: req.stack_seed_base_session.as_deref(),
-            model: req.model.as_deref(),
-            // The reverse `spawn_conversation` channel is a per-session unix socket whose path
-            // crosses this fork boundary as a plain string (unlike stdio fds), so it works from the
-            // worker-spawned child just like the direct path.
-            host_session_socket: req.host_session_socket.as_deref(),
-            git_environment: &req.git_environment,
-        },
+        spawn_options_of(req),
         req.child_log_level.as_str(),
         req.child_log_format.as_str(),
         req.coder_log_config_yaml.as_deref(),
