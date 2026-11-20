@@ -179,6 +179,9 @@ pub(super) fn build_telegram(
             Some(telegram_tracked),
         )
         .with_session_rooms(registries.shared_session_rooms.clone())
+        // Late-bound: the host owns the sandbox manager and is built after this harness, so the
+        // live set (terminals and sandboxed runners) is bound in `install_session_host`.
+        .with_held_sessions(registries.held_sessions.clone())
         .with_coding_agents(Arc::clone(&coding_agents))
         .with_session_starter(
             Arc::clone(&registries.session_starter) as Arc<dyn tddy_daemon_extensions::SessionStarter>

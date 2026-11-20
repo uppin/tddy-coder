@@ -21,6 +21,10 @@ pub(super) struct Registries {
     /// The daemon's generic session start as a satellite's port: handed to Telegram, which is built
     /// before the host, and bound to the host once it exists (`install_session_host`).
     pub(super) session_starter: Arc<tddy_daemon_extensions::LateBoundSessionStarter>,
+    /// The sessions the daemon holds a live agent for — terminals and sandboxed runners — as a
+    /// port for surfaces built before the host (Telegram, remote git); bound in
+    /// `install_session_host`.
+    pub(super) held_sessions: Arc<tddy_daemon_kernel::live_sessions::LateBoundHeldSessions>,
 }
 
 impl Registries {
@@ -60,6 +64,9 @@ impl Registries {
             shared_session_rooms,
             shared_session_admissions,
             session_starter: Arc::new(tddy_daemon_extensions::LateBoundSessionStarter::new()),
+            held_sessions: Arc::new(
+                tddy_daemon_kernel::live_sessions::LateBoundHeldSessions::new(),
+            ),
         }
     }
 }

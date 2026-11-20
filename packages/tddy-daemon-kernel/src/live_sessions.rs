@@ -47,9 +47,96 @@ impl LiveSessions {
     }
 }
 
+/// What a daemon-side surface that is handed the daemon's processes — the Telegram controller —
+/// reads and acts through: which sessions hold a live agent, and stopping one's processes.
+#[async_trait::async_trait]
+pub trait HeldSessions: Send + Sync {
+    /// The sessions with at least one live agent tab right now.
+    async fn live_sessions(&self) -> LiveSessions;
+
+    /// Stop every process the daemon holds for `session_id`: its main agent and its tabs.
+    async fn stop_session(&self, session_id: &str);
+}
+
+/// A daemon that holds no processes: nothing is live and there is nothing to stop. What a surface
+/// built without the daemon's managers (every test fixture) is given.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoHeldSessions;
+
+#[async_trait::async_trait]
+impl HeldSessions for NoHeldSessions {
+    async fn live_sessions(&self) -> LiveSessions {
+        LiveSessions::none()
+    }
+
+    async fn stop_session(&self, _session_id: &str) {}
+}
+
+/// A [`HeldSessions`] whose holder does not exist yet: a surface built before the daemon's session
+/// host (Telegram, the remote-git service) is handed this, and the host is bound once it is built.
+/// Until then nothing is live and there is nothing to stop — the same answer as [`NoHeldSessions`].
+#[derive(Default)]
+pub struct LateBoundHeldSessions {
+    bound: std::sync::OnceLock<std::sync::Arc<dyn HeldSessions>>,
+}
+
+impl LateBoundHeldSessions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Bind the real holder. The first binding wins; a later one is ignored.
+    pub fn bind(&self, holder: std::sync::Arc<dyn HeldSessions>) {
+        let _ = self.bound.set(holder);
+    }
+}
+
+#[async_trait::async_trait]
+impl HeldSessions for LateBoundHeldSessions {
+    async fn live_sessions(&self) -> LiveSessions {
+        match self.bound.get() {
+            Some(holder) => holder.live_sessions().await,
+            None => LiveSessions::none(),
+        }
+    }
+
+    async fn stop_session(&self, session_id: &str) {
+        if let Some(holder) = self.bound.get() {
+            holder.stop_session(session_id).await;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Holding(&'static str);
+
+    #[async_trait::async_trait]
+    impl HeldSessions for Holding {
+        async fn live_sessions(&self) -> LiveSessions {
+            LiveSessions::of([self.0])
+        }
+        async fn stop_session(&self, _session_id: &str) {}
+    }
+
+    #[tokio::test]
+    async fn a_late_bound_holder_reports_nothing_live_until_it_is_bound() {
+        // Given
+        let late = LateBoundHeldSessions::new();
+        let before = late.live_sessions().await;
+
+        // When
+        late.bind(std::sync::Arc::new(Holding("jailed")));
+        let after = late.live_sessions().await;
+
+        // Then
+        assert_eq!(
+            (before, after),
+            (LiveSessions::none(), LiveSessions::of(["jailed"]))
+        );
+    }
 
     #[test]
     fn a_fresh_daemon_holds_no_live_session() {

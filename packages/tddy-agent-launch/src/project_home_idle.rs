@@ -25,9 +25,9 @@ use crate::launch_ports::LaunchSessions;
 
 /// The hook-reported `activity_status` of a session whose turn is in flight.
 const RUNNING: &str = "Running";
-/// How long a stopped session's process may take to exit before the reaper stops waiting for it.
+/// How long a stopped session may take to leave the live set before the reaper stops waiting for it.
 const EXIT_WAIT: Duration = Duration::from_secs(5);
-/// How often the reaper checks whether a stopped session's process has exited.
+/// How often the reaper checks whether a stopped session has left the live set.
 const EXIT_POLL: Duration = Duration::from_millis(20);
 
 /// What the policy reads about one running project-home session.
@@ -77,8 +77,9 @@ impl LaunchSessions {
             return Vec::new();
         }
         let mut stopped = Vec::new();
+        let live = self.live_sessions().await;
         for (os_user, sessions_base) in self.session_bases() {
-            let sessions = match session_reader::list_sessions_in_dir(&sessions_base) {
+            let sessions = match session_reader::list_sessions_in_dir(&sessions_base, &live) {
                 Ok(sessions) => sessions,
                 Err(e) => {
                     log::warn!(
@@ -165,46 +166,32 @@ impl LaunchSessions {
         if !should_stop(&obs, now, idle_stop) {
             return false;
         }
-        let Some(pid) = metadata.pid else {
-            return false;
-        };
-        log::info!("project-home auto-stop: stopping idle session {session_id} (pid {pid})");
+        log::info!("project-home auto-stop: stopping idle session {session_id}");
         // The stop an explicit termination makes: the tracked terminal is cancelled (SIGTERM, then
         // SIGKILL to its child) and forgotten, so ensure no longer sees it as running. The stop
         // itself writes nothing to `.session.yaml`; a `/clear` rotation (#883) may already have
         // changed it, and the next ensure resumes the conversation it now names.
         self.cli_manager.stop_session(session_id).await;
-        if exits_within(pid, EXIT_WAIT).await {
+        if self.leaves_the_live_set_within(session_id, EXIT_WAIT).await {
             return true;
         }
-        log::warn!("project-home auto-stop: session {session_id} (pid {pid}) did not exit in time");
+        log::warn!(
+            "project-home auto-stop: session {session_id} did not leave the live set in time"
+        );
         false
     }
-}
 
-/// Whether `pid` is gone within `within`.
-async fn exits_within(pid: u32, within: Duration) -> bool {
-    let deadline = tokio::time::Instant::now() + within;
-    while process_alive(pid) {
-        if tokio::time::Instant::now() >= deadline {
-            return false;
+    /// Whether `session_id` is no longer held by this daemon within `within`.
+    async fn leaves_the_live_set_within(&self, session_id: &str, within: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + within;
+        while self.live_sessions().await.contains(session_id) {
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(EXIT_POLL).await;
         }
-        tokio::time::sleep(EXIT_POLL).await;
+        true
     }
-    true
-}
-
-#[cfg(unix)]
-fn process_alive(pid: u32) -> bool {
-    // SAFETY: `kill` with signal 0 sends nothing and touches no memory; it only asks whether the
-    // pid exists (and is ours to signal).
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-}
-
-/// The daemon runs sessions on unix only; elsewhere there is no process to wait for.
-#[cfg(not(unix))]
-fn process_alive(_pid: u32) -> bool {
-    false
 }
 
 #[cfg(test)]

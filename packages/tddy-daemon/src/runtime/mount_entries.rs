@@ -205,7 +205,8 @@ impl BuildContext {
             projects_dir_resolver,
             config_arc.clone(),
             pack_execution_resolver,
-        ),
+        )
+        .with_held_sessions(self.registries.held_sessions.clone()),
     );
         self.identity.rpc_entries.push(tddy_rpc::ServiceEntry {
             name: "remote_git.RemoteGitService",

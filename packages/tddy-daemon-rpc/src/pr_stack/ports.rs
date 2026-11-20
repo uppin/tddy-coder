@@ -175,12 +175,13 @@ impl PrStackHandler for PrStackRpcHandler {
         // surface that asks (prefer active, then most-recently-updated).
         let branch_for_scan = branch.clone();
         let sessions_base_for_scan = sessions_base.clone();
+        let live = self.terminals.live_sessions().await;
         let session = spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "QueryBranch: scan sessions by branch",
             move || {
                 find_session_owning_branch(
-                    &DaemonSessionListing,
+                    &DaemonSessionListing::new(live),
                     &sessions_base_for_scan,
                     &branch_for_scan,
                 )
@@ -750,12 +751,13 @@ impl PrStackHandler for PrStackRpcHandler {
         let resolution_repo_root = repo_root.clone();
         let resolution_sessions_base = sessions_base.clone();
         let resolution_base_branch = req.base_branch.trim().to_string();
+        let live = self.terminals.live_sessions().await;
         let (session, worktree, remote, base_sync) = spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "PullBaseIntoBranch: re-read the branch",
             move || {
                 let session = match find_session_owning_branch(
-                    &DaemonSessionListing,
+                    &DaemonSessionListing::new(live),
                     &resolution_sessions_base,
                     &resolution_branch,
                 )

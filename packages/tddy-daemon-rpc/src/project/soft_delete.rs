@@ -72,6 +72,7 @@ impl ProjectRpcHandler {
         if req.local_only {
             return self
                 .delete_here(&caller, &req, &project_id)
+                .await
                 .map(Response::new);
         }
 
@@ -80,7 +81,13 @@ impl ProjectRpcHandler {
             .map_err(|e| Status::internal(e.to_string()))?
         {
             Some(_) => {
-                sessions_blocking_a_delete(&caller.sessions_base, &project_id, &caller.local_id)?
+                let live = self.terminals.live_sessions().await;
+                sessions_blocking_a_delete(
+                    &caller.sessions_base,
+                    &project_id,
+                    &caller.local_id,
+                    &live,
+                )?
             }
             None => Vec::new(),
         };
@@ -120,7 +127,7 @@ impl ProjectRpcHandler {
             deleted_by: caller.github_user.clone(),
             ..req
         };
-        let here = match self.delete_here(&caller, &stamped, &project_id) {
+        let here = match self.delete_here(&caller, &stamped, &project_id).await {
             Ok(answer) => Some(answer),
             Err(status) if status.code == Code::NotFound => None,
             Err(status) => return Err(status),
@@ -162,7 +169,7 @@ impl ProjectRpcHandler {
     }
 
     /// One host's part of a delete: its preflight answer, or its tombstone and stopped main.
-    fn delete_here(
+    async fn delete_here(
         &self,
         caller: &ProjectCaller,
         req: &DeleteProjectRequest,
@@ -175,8 +182,13 @@ impl ProjectRpcHandler {
             return Err(Status::not_found("project not found"));
         }
         if req.preflight_only {
-            let blocking =
-                sessions_blocking_a_delete(&caller.sessions_base, project_id, &caller.local_id)?;
+            let live = self.terminals.live_sessions().await;
+            let blocking = sessions_blocking_a_delete(
+                &caller.sessions_base,
+                project_id,
+                &caller.local_id,
+                &live,
+            )?;
             if !blocking.is_empty() {
                 return Err(Status::failed_precondition(blocking.join(", ")));
             }
@@ -192,7 +204,8 @@ impl ProjectRpcHandler {
         )
         .map_err(|e| Status::internal(e.to_string()))?
         .ok_or_else(|| Status::not_found("project not found"))?;
-        let stopped_session_ids = stop_project_home_sessions(&caller.sessions_base, project_id)?;
+        let stopped_session_ids =
+            stop_project_home_sessions(&self.terminals, &caller.sessions_base, project_id).await?;
         Ok(DeleteProjectResponse {
             project: Some(self.local_entry(caller, &row)),
             applied_hosts: vec![caller.local_id.clone()],

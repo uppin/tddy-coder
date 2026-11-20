@@ -122,12 +122,14 @@ impl ProjectRpcHandler {
             let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
                 .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
             lifecycle_listing::reconciled_listing(
+                &self.terminals,
                 merged,
                 req.include_deleted,
                 &local_daemon_id,
                 &projects_dir,
                 &sessions_base,
             )
+            .await
         };
         let projects = conn_projects
             .iter()

@@ -26,6 +26,9 @@ pub(crate) type DetachedWatchers = Arc<RwLock<Watchers>>;
 pub(crate) struct Watchers {
     closed: bool,
     by_session: HashMap<String, tokio::task::AbortHandle>,
+    /// Sessions whose tmux client just ended and whose agent has not yet been told apart from the
+    /// client: held, so the session is never between its terminal and its watcher.
+    settling: std::collections::HashSet<String>,
 }
 
 impl Watchers {
@@ -34,6 +37,16 @@ impl Watchers {
         if let Some(watcher) = self.by_session.remove(session_id) {
             watcher.abort();
         }
+    }
+
+    /// The sessions whose detached agent a watcher is still watching.
+    pub(crate) fn watched_sessions(&self) -> Vec<String> {
+        self.by_session
+            .iter()
+            .filter(|(_, watcher)| !watcher.is_finished())
+            .map(|(session_id, _)| session_id.clone())
+            .chain(self.settling.iter().cloned())
+            .collect()
     }
 
     /// Stop every watcher and refuse new ones.
@@ -46,6 +59,7 @@ impl Watchers {
 }
 
 /// What a watcher of a detached agent reads and cleans up: the manager's shared state, cloned.
+#[derive(Clone)]
 pub(crate) struct DetachWatch {
     terminals: TerminalIndex,
     managed_workflows: ManagedWorkflowRegistry,
@@ -130,20 +144,53 @@ impl DetachWatch {
         self,
         session_id: String,
         exit: MainExit,
-        tmux_run: TmuxRun,
         end: Option<super::AgentEnd>,
     ) {
-        match (exit, tmux_run.session, tmux_run.os_user) {
-            (MainExit::AgentEnded, ..) => {
+        match exit {
+            MainExit::AgentEnded => {
                 self.drop_agent_state(&session_id).await;
                 if let Some(end) = end {
                     let _ = self.agent_ends.send(end);
                 }
             }
-            (MainExit::ClientOnly, Some(session), Some(os_user)) => {
+            // The watcher took the session over before the terminal left the index
+            // ([`Self::hold_detached_agent`]).
+            MainExit::ClientOnly => {}
+        }
+    }
+
+    /// Hold `session_id` from the moment its tmux client ended until [`Self::settled`]: whether the
+    /// agent ended with its client is only known after a probe, and the session stays live until
+    /// then.
+    pub(crate) async fn settling(&self, session_id: &str) {
+        self.watchers
+            .write()
+            .await
+            .settling
+            .insert(session_id.to_string());
+    }
+
+    /// Release the hold [`Self::settling`] took: the session is held by a watcher or not at all.
+    pub(crate) async fn settled(&self, session_id: &str) {
+        self.watchers.write().await.settling.remove(session_id);
+    }
+
+    /// Hand a session whose tmux client ended while its agent lives to a detach watcher. Called
+    /// **before** the client's terminal leaves the index, so the session is held by the terminal or
+    /// by the watcher at every moment — a listing never finds it held by neither.
+    pub(crate) async fn hold_detached_agent(self, session_id: String, tmux_run: TmuxRun) {
+        match (tmux_run.session, tmux_run.os_user) {
+            (Some(session), Some(os_user)) => {
+                log::debug!(
+                    target: "tddy_cli_sessions::reattach",
+                    "{session_id}: client ended, agent alive in tmux session {session}; watcher takes over"
+                );
                 self.start(session_id, session, os_user).await;
             }
-            (MainExit::ClientOnly, ..) => {}
+            _ => log::debug!(
+                target: "tddy_cli_sessions::reattach",
+                "{session_id}: client ended but the run names no tmux session or user; no watcher"
+            ),
         }
     }
 

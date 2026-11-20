@@ -256,8 +256,9 @@ impl ExecToolRpcHandler {
         if cue_metadata.project_id.is_empty() {
             return Vec::new();
         }
+        let live = self.project_home_host.terminals.live_sessions().await;
         let Ok(sessions) =
-            tddy_session_activity::session_reader::list_sessions_in_dir(&sessions_base)
+            tddy_session_activity::session_reader::list_sessions_in_dir(&sessions_base, &live)
         else {
             return Vec::new();
         };

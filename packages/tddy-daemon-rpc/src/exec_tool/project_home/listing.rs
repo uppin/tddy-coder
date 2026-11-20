@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_daemon_kernel::live_sessions::LiveSessions;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
 
@@ -15,12 +16,13 @@ pub(super) fn session_rows(
     sessions_base: &Path,
     tddy_data_dir: &Path,
     os_user: &str,
+    live: &LiveSessions,
 ) -> anyhow::Result<Vec<SessionRow>> {
     let projects_dir = projects_path_for_user(os_user, Some(tddy_data_dir));
     // A project's main branch is the diff base of every session in it, so each is read once.
     let mut main_branch_refs: HashMap<String, Option<String>> = HashMap::new();
     let mut rows = Vec::new();
-    for entry in list_sessions_in_dir(sessions_base)? {
+    for entry in list_sessions_in_dir(sessions_base, live)? {
         let session_dir = unified_session_dir_path(sessions_base, &entry.session_id);
         let changeset = tddy_core::read_changeset(&session_dir).ok();
         let branch = changeset

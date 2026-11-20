@@ -28,8 +28,11 @@ pub fn parent_candidates_page_for_chain_picker(
     sessions_base: &Path,
     exclude_session_id: &str,
 ) -> anyhow::Result<Vec<tddy_session_lifecycle::session_reader::SessionEntry>> {
-    let mut parent_candidates =
-        tddy_session_lifecycle::session_reader::list_sessions_in_dir(sessions_base)?;
+    // The picker lists candidates by creation time and never reads whether one is live.
+    let mut parent_candidates = tddy_session_lifecycle::session_reader::list_sessions_in_dir(
+        sessions_base,
+        &tddy_daemon_kernel::live_sessions::LiveSessions::none(),
+    )?;
     parent_candidates.retain(|s| s.session_id != exclude_session_id);
     parent_candidates.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(parent_candidates

@@ -1,6 +1,6 @@
 //! Filesystem-safe deletion of session directories under a resolved sessions tree.
 //!
-//! On Unix, if `.session.yaml` records a live PID, the process is sent **SIGTERM**, waited on,
+//! On Unix, if a `tool` session's `.session.yaml` records a live PID, the process is sent **SIGTERM**, waited on,
 //! then **SIGKILL** if needed, before removing the directory.
 
 use std::path::{Path, PathBuf};
@@ -290,10 +290,14 @@ pub fn delete_session_directory(
 
     #[cfg(unix)]
     {
+        // TODO(session-liveness 3/4): only a `tool` session's recorded pid is signalled, because
+        // it holds no process tab yet; every other session's processes are the daemon's own and
+        // were stopped before this ran. See
+        // docs/dev/todo/2026-11-19-tool-sessions-liveness-and-pid-signals.md.
         if let Some(ref m) = metadata {
-            if let Some(pid) = m.pid {
+            if let (Some(pid), Some("tool")) = (m.pid, m.session_type.as_deref()) {
                 log::debug!(
-                    "delete_session_directory: pid={} is_active={}",
+                    "delete_session_directory: tool session pid={} is_active={}",
                     pid,
                     is_pid_alive(pid)
                 );

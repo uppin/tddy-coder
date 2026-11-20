@@ -50,11 +50,12 @@ Real dependency edges, as opposed to the branch line:
 
 - **tddy-daemon-kernel**: [README.md](../../../packages/tddy-daemon-kernel/README.md) — new `live_sessions::LiveSessions`
 - **tddy-session-activity**: [README.md](../../../packages/tddy-session-activity/README.md) — `list_sessions_in_dir` takes the live set; delete stops held processes only
-- **tddy-cli-sessions**: [README.md](../../../packages/tddy-cli-sessions/README.md) — `CliSessionManager::live_agent_sessions`
+- **tddy-cli-sessions**: [README.md](../../../packages/tddy-cli-sessions/README.md) — `CliSessionManager::live_agent_sessions`; `reattach_finished()` announces each main re-attach attempt's outcome (`ReattachOutcome`), logged under `tddy_cli_sessions::reattach`
 - **tddy-daemon-sandbox**: [README.md](../../../packages/tddy-daemon-sandbox/README.md) — `SandboxSessionManager::live_sessions`, `SandboxSessionState::is_running`; no pid fallback in `stop`
 - **tddy-agent-launch**: [README.md](../../../packages/tddy-agent-launch/README.md) — listing, ensure-home, idle reaper, signal, delete, PR-status owner lookup
 - **tddy-session-lifecycle**: [README.md](../../../packages/tddy-session-lifecycle/README.md) — acceptance tests; host exposes the live set
-- **tddy-daemon-rpc**, **tddy-worktree-service**, **tddy-telegram-control**: pass the live set through
+- **tddy-daemon-rpc**, **tddy-worktree-service**, **tddy-telegram-control**: pass the live set through; the remote-git pack resolver reads it (`PackExecutionContext::live_sessions`)
+- **tddy-daemon**: [README.md](../../../packages/tddy-daemon/README.md) — binds a `LateBoundHeldSessions` (terminals + sandboxes) once the host exists; Telegram and the remote-git service read the live set through it
 
 ## Related Feature Documentation
 

@@ -78,7 +78,11 @@ allowed_tools:
     (dir, config)
 }
 
-fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+fn a_service(
+    config: DaemonConfig,
+    sessions_base: PathBuf,
+    manager: Arc<CliSessionManager>,
+) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let base = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
@@ -94,7 +98,7 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(CliSessionManager::new()),
+        manager,
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
             "claude",
             Path::new("/bin/cat"),
@@ -140,8 +144,9 @@ fn register_project(projects_dir: &Path, repo_path: &Path) {
     std::fs::write(projects_dir.join("projects.yaml"), yaml).unwrap();
 }
 
-/// A session that owns `branch`. `alive` makes it report `is_active` (a live pid);
-/// `updated_at` drives the tie-break between two idle owners.
+/// A session that owns `branch`. `alive` records it as active — it lists as active only once the
+/// daemon holds a live terminal for it ([`World::holds_a_live_terminal_for`]); `updated_at` drives
+/// the tie-break between two idle owners.
 fn a_session_owning(
     sessions_base: &Path,
     session_id: &str,
@@ -159,16 +164,10 @@ fn a_session_owning(
         },
     )
     .unwrap();
-    let builder = a_session_metadata()
+    let mut meta = a_session_metadata()
         .with_session_id(session_id)
-        .with_status(if alive { "active" } else { "idle" });
-    // The current process is by definition alive, so it is the only pid guaranteed to make
-    // `is_active` true; a session with no pid reads as idle.
-    let mut meta = if alive {
-        builder.with_pid(std::process::id()).build()
-    } else {
-        builder.build()
-    };
+        .with_status(if alive { "active" } else { "idle" })
+        .build();
     meta.updated_at = updated_at.to_string();
     write_session_yaml(&dir, &meta);
 }
@@ -218,6 +217,28 @@ struct World {
     sessions_tmp: tempfile::TempDir,
     repo: PathBuf,
     service: DaemonSessionHost,
+    manager: Arc<CliSessionManager>,
+}
+
+impl World {
+    /// The daemon holds a running main terminal for `session_id`: what makes it list as active.
+    async fn holds_a_live_terminal_for(&self, session_id: &str) {
+        self.manager
+            .start_with_options(
+                session_id,
+                self.repo.clone(),
+                TEST_MODEL,
+                vec!["/bin/cat".to_string()],
+                "claude-cli",
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+                None,
+            )
+            .await
+            .expect("the main terminal must start");
+    }
 }
 
 fn a_world() -> World {
@@ -226,13 +247,19 @@ fn a_world() -> World {
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let (config_dir, config) = a_config();
-    let service = a_service(config, sessions_tmp.path().to_path_buf());
+    let manager = Arc::new(CliSessionManager::new());
+    let service = a_service(
+        config,
+        sessions_tmp.path().to_path_buf(),
+        Arc::clone(&manager),
+    );
     World {
         repo: repo_dir.path().to_path_buf(),
         _repo_dir: repo_dir,
         _config_dir: config_dir,
         sessions_tmp,
         service,
+        manager,
     }
 }
 
@@ -317,6 +344,7 @@ async fn start_session_branch_conflict_identifies_the_owning_session() {
         true,
         "2026-07-30T09:00:00Z",
     );
+    world.holds_a_live_terminal_for(OWNER_SESSION).await;
 
     // When
     let resp = start(&world, a_new_branch_request(OWNED_BRANCH, "reject")).await;
@@ -329,7 +357,7 @@ async fn start_session_branch_conflict_identifies_the_owning_session() {
         .expect("conflict must name the owning session");
     assert!(owner.exists, "the owner leg must be populated");
     assert_eq!(owner.session_id, OWNER_SESSION);
-    assert!(owner.is_active, "a session with a live pid is active");
+    assert!(owner.is_active, "a session whose agent runs is active");
     assert_eq!(owner.status, "active");
 }
 
@@ -352,6 +380,7 @@ async fn start_session_branch_conflict_prefers_the_active_owner_over_a_newer_idl
         false,
         "2026-07-30T18:00:00Z",
     );
+    world.holds_a_live_terminal_for(OWNER_SESSION).await;
 
     // When
     let resp = start(&world, a_new_branch_request(OWNED_BRANCH, "reject")).await;

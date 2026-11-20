@@ -10,6 +10,7 @@ use std::path::Path;
 
 use tddy_core::changeset::Changeset;
 use tddy_core::output::SESSIONS_SUBDIR;
+use tddy_daemon_kernel::live_sessions::LiveSessions;
 use tddy_session_lifecycle::session_reader::DaemonSessionListing;
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 use tddy_worktree_service::branch_owner::find_session_owning_branch;
@@ -18,8 +19,8 @@ const BRANCH: &str = "feat/auth";
 const FIRST_SESSION: &str = "019d6392-3cff-0001-aaaa-000000000001";
 const SECOND_SESSION: &str = "019d6392-3cff-0001-aaaa-000000000002";
 
-/// A session on `branch`. `alive` makes it read as active — the current process is the only pid
-/// guaranteed to be running, and a session with no pid reads as idle.
+/// A session on `branch`. `alive` records it as active; whether a listing reads it as active is the
+/// live set the listing is given.
 fn a_session_on(
     sessions_base: &Path,
     session_id: &str,
@@ -39,11 +40,7 @@ fn a_session_on(
     let builder = a_session_metadata()
         .with_session_id(session_id)
         .with_status(if alive { "active" } else { "idle" });
-    let mut metadata = if alive {
-        builder.with_pid(std::process::id()).build()
-    } else {
-        builder.build()
-    };
+    let mut metadata = builder.build();
     metadata.updated_at = updated_at.to_string();
     write_session_yaml(&dir, &metadata);
 }
@@ -77,7 +74,12 @@ fn finds_the_session_whose_changeset_names_the_branch() {
     );
 
     // When
-    let owner = find_session_owning_branch(&DaemonSessionListing, temp.path(), BRANCH).unwrap();
+    let owner = find_session_owning_branch(
+        &DaemonSessionListing::new(LiveSessions::none()),
+        temp.path(),
+        BRANCH,
+    )
+    .unwrap();
 
     // Then
     assert_eq!(owner.map(|s| s.session_id), Some(FIRST_SESSION.to_string()));
@@ -96,7 +98,12 @@ fn finds_no_owner_when_no_session_names_the_branch() {
     );
 
     // When
-    let owner = find_session_owning_branch(&DaemonSessionListing, temp.path(), BRANCH).unwrap();
+    let owner = find_session_owning_branch(
+        &DaemonSessionListing::new(LiveSessions::none()),
+        temp.path(),
+        BRANCH,
+    )
+    .unwrap();
 
     // Then — a branch nobody claims has no owner, so nothing is there to switch to
     assert_eq!(owner.map(|s| s.session_id), None);
@@ -122,7 +129,12 @@ fn prefers_the_active_owner_over_a_more_recently_updated_idle_one() {
     );
 
     // When
-    let owner = find_session_owning_branch(&DaemonSessionListing, temp.path(), BRANCH).unwrap();
+    let owner = find_session_owning_branch(
+        &DaemonSessionListing::new(LiveSessions::of([FIRST_SESSION])),
+        temp.path(),
+        BRANCH,
+    )
+    .unwrap();
 
     // Then — a running agent is the one an operator would switch to, however stale its metadata
     assert_eq!(owner.map(|s| s.session_id), Some(FIRST_SESSION.to_string()));
@@ -148,7 +160,12 @@ fn prefers_the_most_recently_updated_owner_when_neither_is_active() {
     );
 
     // When
-    let owner = find_session_owning_branch(&DaemonSessionListing, temp.path(), BRANCH).unwrap();
+    let owner = find_session_owning_branch(
+        &DaemonSessionListing::new(LiveSessions::none()),
+        temp.path(),
+        BRANCH,
+    )
+    .unwrap();
 
     // Then
     assert_eq!(
@@ -171,7 +188,12 @@ fn skips_a_session_whose_changeset_cannot_be_read() {
     );
 
     // When
-    let owner = find_session_owning_branch(&DaemonSessionListing, temp.path(), BRANCH).unwrap();
+    let owner = find_session_owning_branch(
+        &DaemonSessionListing::new(LiveSessions::none()),
+        temp.path(),
+        BRANCH,
+    )
+    .unwrap();
 
     // Then — a session that names no branch claims none, and does not abort the scan
     assert_eq!(

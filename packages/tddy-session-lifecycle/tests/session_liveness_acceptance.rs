@@ -177,17 +177,32 @@ impl LivenessDaemon {
         self
     }
 
-    /// Start the session's main agent as a stub that records an interrupt it receives.
+    /// Start the session's main agent as a stub that records an interrupt it receives. Returns once
+    /// the stub has installed its trap: a SIGINT sent before that reaches the default disposition
+    /// and kills the stub, so the interrupt would never be recorded.
     async fn with_a_main_agent_recording_interrupts(self) -> Self {
         let record = self.interrupt_record();
+        let ready = self.interrupt_ready();
         let main = a_stub_agent_script(self.stub_dir.path(), "main.sh")
             .with_prelude(&format!(
-                "trap 'echo interrupted > \"{}\"' INT",
-                record.display()
+                "trap 'echo interrupted > \"{}\"' INT\ntouch \"{}\"",
+                record.display(),
+                ready.display()
             ))
             .then_running("while :; do sleep 0.05; done")
             .build();
         self.start_main(&main).await;
+        eventually(
+            "the main agent to install its interrupt trap",
+            OBSERVE,
+            || {
+                ready
+                    .exists()
+                    .then_some(())
+                    .ok_or_else(|| format!("{} not written", ready.display()))
+            },
+        )
+        .await;
         self
     }
 
@@ -215,6 +230,10 @@ impl LivenessDaemon {
 
     fn interrupt_record(&self) -> PathBuf {
         self.stub_dir.path().join("main-interrupted")
+    }
+
+    fn interrupt_ready(&self) -> PathBuf {
+        self.stub_dir.path().join("main-ready")
     }
 
     /// Let the main agent exit, and wait until the daemon no longer serves it.

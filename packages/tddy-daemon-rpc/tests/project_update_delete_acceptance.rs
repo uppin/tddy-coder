@@ -191,6 +191,7 @@ fn a_daemon_named(
     instance_id: &'static str,
     data_dir: &Path,
     peers: Arc<InProcessPeers>,
+    manager: Arc<CliSessionManager>,
 ) -> TestDaemon {
     let mut config = test_config();
     config.daemon_instance_id = Some(instance_id.to_string());
@@ -212,7 +213,7 @@ fn a_daemon_named(
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         routing,
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(CliSessionManager::new()),
+        manager,
         tddy_session_lifecycle::test_util::builtin_coding_agents(),
     );
     TestDaemon::from_host(host)
@@ -225,6 +226,8 @@ struct Host {
     daemon: Arc<TestDaemon>,
     data: tempfile::TempDir,
     checkout: tempfile::TempDir,
+    /// The terminals this host's daemon holds: a session is live while one of them runs its agent.
+    manager: Arc<CliSessionManager>,
 }
 
 fn a_project_row(checkout: &Path) -> ProjectData {
@@ -260,13 +263,20 @@ fn a_host_owning_the_project(id: &'static str, peers: &Arc<InProcessPeers>) -> H
 fn a_host_without_the_project(id: &'static str, peers: &Arc<InProcessPeers>) -> Host {
     let data = tempfile::tempdir().unwrap();
     let checkout = tempfile::tempdir().unwrap();
-    let daemon = Arc::new(a_daemon_named(id, data.path(), Arc::clone(peers)));
+    let manager = Arc::new(CliSessionManager::new());
+    let daemon = Arc::new(a_daemon_named(
+        id,
+        data.path(),
+        Arc::clone(peers),
+        Arc::clone(&manager),
+    ));
     peers.register(id, Arc::clone(&daemon));
     Host {
         id,
         daemon,
         data,
         checkout,
+        manager,
     }
 }
 
@@ -285,37 +295,59 @@ impl Host {
         tddy_core::session_lifecycle::unified_session_dir_path(self.data.path(), session_id)
     }
 
-    /// A session of the project on this host, recorded with `pid` and `role`.
-    fn a_session(&self, session_id: &str, pid: Option<u32>, role: Option<&str>) {
+    /// A session of the project on this host, recorded with `role`.
+    fn a_session(&self, session_id: &str, role: Option<&str>) {
         let dir = self.session_dir(session_id);
         std::fs::create_dir_all(&dir).unwrap();
         let mut yaml = format!(
             "session_id: {session_id}\nproject_id: {THE_PROJECT}\ncreated_at: '2026-11-15T10:00:00Z'\nupdated_at: '2026-11-15T10:00:00Z'\nstatus: active\nsession_type: workspace\nrepo_path: {}\n",
             self.checkout.path().display()
         );
-        if let Some(pid) = pid {
-            yaml.push_str(&format!("pid: {pid}\n"));
-        }
         if let Some(role) = role {
             yaml.push_str(&format!("session_role: {role}\n"));
         }
         std::fs::write(dir.join(".session.yaml"), yaml).unwrap();
     }
 
-    /// The project's main session on this host, run by a real process so stopping it is visible.
-    fn a_running_main(&self, session_id: &str) -> std::process::Child {
-        let child = std::process::Command::new("sleep")
-            .arg("120")
-            .spawn()
-            .expect("spawn a stand-in main process");
-        self.a_session(session_id, Some(child.id()), Some("project-home"));
+    /// The daemon holds a running main terminal for `session_id`: a real process, so stopping it is
+    /// visible, and what makes the session live.
+    async fn holds_a_live_terminal_for(&self, session_id: &str) {
+        self.manager
+            .start_with_options(
+                session_id,
+                self.checkout.path().to_path_buf(),
+                "claude-opus-4-8",
+                vec!["sleep".to_string(), "120".to_string()],
+                "claude-cli",
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+                None,
+            )
+            .await
+            .expect("the main terminal must start");
+    }
+
+    /// The project's main session on this host, held by the daemon as a running terminal.
+    async fn a_running_main(&self, session_id: &str) {
+        self.a_session(session_id, Some("project-home"));
+        self.holds_a_live_terminal_for(session_id).await;
         project_storage::set_project_home_session(
             &self.projects_dir(),
             THE_PROJECT,
             Some(session_id),
         )
         .unwrap();
-        child
+    }
+
+    /// The process id of the main terminal the daemon holds for `session_id`.
+    async fn held_pid(&self, session_id: &str) -> u32 {
+        self.manager
+            .get(session_id)
+            .await
+            .expect("the daemon holds the main terminal")
+            .pid
     }
 
     async fn listed(&self, include_deleted: bool) -> Vec<ProjectEntry> {
@@ -415,14 +447,15 @@ fn unconfirmed_ids(hosts: &[tddy_service::proto::project::UnconfirmedHost]) -> V
     sorted(hosts.iter().map(|h| h.daemon_instance_id.clone()).collect())
 }
 
-fn wait_for_exit(child: &mut std::process::Child) -> bool {
+/// Whether the process `pid` has exited: the daemon stopped the main terminal it ran.
+async fn wait_for_exit(pid: u32) -> bool {
     for _ in 0..100 {
-        if child.try_wait().expect("poll the main process").is_some() {
+        // SAFETY: signal 0 only probes the pid; it sends nothing.
+        if unsafe { libc::kill(pid as i32, 0) } != 0 {
             return true;
         }
-        std::thread::sleep(Duration::from_millis(50));
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    let _ = child.kill();
     false
 }
 
@@ -620,7 +653,7 @@ async fn renaming_a_project_no_reachable_host_owns_is_not_found() {
 async fn deleting_a_project_tombstones_it_on_every_host_and_keeps_its_data() {
     // Given a project on two hosts, with a stopped session on host-b
     let world = two_hosts_owning_the_project();
-    world.b.a_session("stopped-1", None, None);
+    world.b.a_session("stopped-1", None);
 
     // When host-a deletes it
     let deleted = world
@@ -716,7 +749,8 @@ async fn deleting_a_project_no_reachable_host_owns_is_not_found() {
 async fn a_delete_is_refused_while_another_host_runs_one_of_the_projects_sessions() {
     // Given an ordinary session of the project running on host-b
     let world = two_hosts_owning_the_project();
-    world.b.a_session("busy-1", Some(std::process::id()), None);
+    world.b.a_session("busy-1", None);
+    world.b.holds_a_live_terminal_for("busy-1").await;
 
     // When host-a deletes the project
     let refusal = world.a.delete(THE_PROJECT).await.unwrap_err();
@@ -734,7 +768,8 @@ async fn a_delete_is_refused_while_another_host_runs_one_of_the_projects_session
 async fn deleting_stops_the_project_home_session_and_keeps_its_record() {
     // Given the project's main session running on host-a
     let world = two_hosts_owning_the_project();
-    let mut main = world.a.a_running_main("main-1");
+    world.a.a_running_main("main-1").await;
+    let main_pid = world.a.held_pid("main-1").await;
 
     // When the project is deleted
     let deleted = world
@@ -744,7 +779,7 @@ async fn deleting_stops_the_project_home_session_and_keeps_its_record() {
         .expect("main does not block a delete");
 
     // Then main's process is stopped, and the answer names it
-    assert!(wait_for_exit(&mut main), "main's process was stopped");
+    assert!(wait_for_exit(main_pid).await, "main's process was stopped");
     assert_eq!(deleted.stopped_session_ids, vec!["main-1".to_string()]);
     // And its session record and the project's pointer to it are kept for a restore
     assert!(world
@@ -958,7 +993,7 @@ async fn a_deleted_project_sets_up_no_main() {
 async fn a_session_of_a_deleted_project_is_not_resumed() {
     // Given a stopped session of the project, which the delete keeps
     let world = two_hosts_owning_the_project();
-    world.a.a_session("stopped-1", None, None);
+    world.a.a_session("stopped-1", None);
     world.a.delete(THE_PROJECT).await.unwrap();
 
     let refusal = world
@@ -1018,7 +1053,7 @@ async fn a_deleted_projects_main_reaches_no_project_home_tool() {
 
     // Given the project's main, stopped, and the project deleted
     let world = two_hosts_owning_the_project();
-    world.a.a_session("main-1", None, Some("project-home"));
+    world.a.a_session("main-1", Some("project-home"));
     project_storage::set_project_home_session(&world.a.projects_dir(), THE_PROJECT, Some("main-1"))
         .unwrap();
     world.a.delete(THE_PROJECT).await.unwrap();

@@ -23,7 +23,7 @@ use tddy_terminal_rpc::service::{
 use tokio::sync::broadcast;
 
 use super::DaemonSessionHost;
-use crate::cli_session_manager::CliSessionManager;
+use crate::cli_session_manager::{CliSessionManager, ReattachOutcome};
 use crate::terminal_session_adapter::DaemonTerminalSessionStore;
 
 mod recorded_worktree;
@@ -194,7 +194,7 @@ impl MainReattach for TmuxMainReattach {
         let attached = {
             let _one_at_a_time = gate.lock().await;
             if self.manager.get(session_id).await.is_some() {
-                true
+                ReattachOutcome::AlreadyAttached
             } else {
                 self.serve_agent_tool_socket_of(os_user, session_id).await;
                 tddy_agent_launch::claude_cli_tmux::reattach_recorded_main(
@@ -207,13 +207,17 @@ impl MainReattach for TmuxMainReattach {
                 .await
             }
         };
+        self.manager.announce_reattach(session_id, attached);
         // The last access out forgets the session's gate (every clone is taken under this lock, so
         // a count of two — the map's and this one — means nobody else holds or waits on it).
         let mut in_flight = self.in_flight.lock().await;
         if Arc::strong_count(&gate) == 2 {
             in_flight.remove(session_id);
         }
-        attached
+        matches!(
+            attached,
+            ReattachOutcome::Reattached | ReattachOutcome::AlreadyAttached
+        )
     }
 }
 

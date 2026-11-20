@@ -159,7 +159,11 @@ livekit_room: "daemon-session-123"
     std::fs::write(session_dir.join(".session.yaml"), metadata).unwrap();
 
     // When
-    let sessions = session_reader::list_sessions_in_dir(sessions_base.as_path()).unwrap();
+    let sessions = session_reader::list_sessions_in_dir(
+        sessions_base.as_path(),
+        &tddy_daemon_kernel::live_sessions::LiveSessions::none(),
+    )
+    .unwrap();
 
     // Then
     assert!(

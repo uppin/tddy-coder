@@ -286,12 +286,13 @@ impl LaunchSessions {
         )
         .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let branch_for_scan = branch.clone();
+        let live = self.live_sessions().await;
         let owner = service_util::spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "StartSession: scan sessions by branch",
             move || {
                 tddy_worktree_service::branch_owner::find_session_owning_branch(
-                    &tddy_session_activity::session_reader::DaemonSessionListing,
+                    &tddy_session_activity::session_reader::DaemonSessionListing::new(live),
                     &sessions_base,
                     &branch_for_scan,
                 )

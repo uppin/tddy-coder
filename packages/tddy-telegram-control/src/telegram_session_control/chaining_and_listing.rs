@@ -318,8 +318,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         );
         self.ensure_authorized(chat_id)?;
 
-        let mut sessions =
-            tddy_session_lifecycle::session_reader::list_sessions_in_dir(&self.sessions_base)?;
+        let live = self.held_sessions.live_sessions().await;
+        let mut sessions = tddy_session_lifecycle::session_reader::list_sessions_in_dir(
+            &self.sessions_base,
+            &live,
+        )?;
         sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
         let total = sessions.len();
@@ -409,6 +412,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             &*self.session_rooms,
             session_id,
         );
+        // The daemon's own processes for the session — its agent and its tabs — are stopped; the
+        // recorded pid is not signalled, since nothing guarantees it still names this session.
+        self.held_sessions.stop_session(session_id.trim()).await;
         tddy_session_lifecycle::session_deletion::delete_session_directory(
             &self.sessions_base,
             session_id,

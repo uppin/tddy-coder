@@ -67,11 +67,12 @@ impl LaunchSessions {
         let session_agent_inference = Arc::clone(&self.session_agent_inference);
         let agent_activity_hub = Arc::clone(&self.agent_activity_hub);
         let coding_agents = self.coding_agents.clone();
+        let live = self.live_sessions().await;
         let entries = service_util::spawn_blocking_with_timeout(
             timeout,
             "ListSessions: read and enrich",
             move || {
-                let sessions = session_reader::list_sessions_in_dir(&sessions_base_blocking)
+                let sessions = session_reader::list_sessions_in_dir(&sessions_base_blocking, &live)
                     .map_err(|e| anyhow::anyhow!(e))?;
                 let mut out = Vec::with_capacity(sessions.len());
                 for s in sessions {

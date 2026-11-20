@@ -75,8 +75,26 @@ impl SandboxSessionState {
     /// Whether the jail's runner is still running, read from the `Child` this state owns — never
     /// from [`Self::pid`], which the OS may have reissued once the runner was reaped.
     pub fn is_running(&self) -> bool {
-        // TODO(session-liveness 1/4): implemented in the green step.
-        todo!("try_wait on the owned runner child")
+        let mut handle = self
+            .handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match handle.as_mut() {
+            Some(handle) => matches!(handle.child_mut().try_wait(), Ok(None)),
+            // `stop` took the handle: the runner was killed and reaped.
+            None => false,
+        }
+    }
+
+    /// The pid of the runner this state owns while it is running; `None` once it has exited or been
+    /// stopped. Read off the owned `Child`, so it can never name a reissued pid.
+    pub fn runner_pid(&self) -> Option<u32> {
+        let mut handle = self
+            .handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let handle = handle.as_mut()?;
+        matches!(handle.child_mut().try_wait(), Ok(None)).then(|| handle.pid())
     }
 
     pub fn stop(&self) {
@@ -88,11 +106,11 @@ impl SandboxSessionState {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .take();
+        // Only the owned `Child` is ever signalled: once the handle is gone, `self.pid` may name an
+        // unrelated process the OS reissued.
         if let Some(mut handle) = taken {
             let _ = handle.child_mut().kill();
             let _ = handle.child_mut().wait();
-        } else {
-            terminate_sandbox_process(self.pid);
         }
     }
 }
@@ -135,8 +153,15 @@ impl SandboxSessionManager {
     /// The sandboxed sessions whose runner is still running — an entry outlives its runner until
     /// resume, relaunch or delete replaces it, so presence alone is not liveness.
     pub async fn live_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
-        // TODO(session-liveness 1/4): implemented in the green step.
-        todo!("the entries whose runner is running")
+        let live: Vec<String> = self
+            .inner
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, state)| state.is_running())
+            .map(|(session_id, _)| session_id.clone())
+            .collect();
+        tddy_daemon_kernel::live_sessions::LiveSessions::of(live)
     }
 
     pub async fn remove(&self, session_id: &str) -> Option<Arc<SandboxSessionState>> {

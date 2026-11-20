@@ -297,6 +297,15 @@ impl CliSessionManager {
             let mut status_rx = task.status_watch();
             await_terminal_status(&mut status_rx).await;
             let status = task.status();
+            // A tmux client's end is not yet the agent's: the session stays live until that is known.
+            let settling = terminal_id == MAIN_TERMINAL_ID && tmux_run.is_tmux_run();
+            if settling {
+                log::debug!(
+                    target: "tddy_cli_sessions::reattach",
+                    "{session_id}: tmux client ended; holding the session while its agent is probed"
+                );
+                detach_watch.settling(&session_id).await;
+            }
             if terminal_id == MAIN_TERMINAL_ID {
                 super::main_exit::log_main_exit(&session_id, &main_exit, &status);
             }
@@ -312,7 +321,20 @@ impl CliSessionManager {
             } else {
                 None
             };
+            if matches!(main_exit, Some(MainExit::ClientOnly)) {
+                detach_watch
+                    .clone()
+                    .hold_detached_agent(session_id.clone(), tmux_run.clone())
+                    .await;
+            }
             deregister_terminal(&terminals, &session_id, &terminal_id, task_id).await;
+            if settling {
+                detach_watch.settled(&session_id).await;
+                log::debug!(
+                    target: "tddy_cli_sessions::reattach",
+                    "{session_id}: settled as {main_exit:?}"
+                );
+            }
             if let Some(exit) = main_exit {
                 // An agent that ended with its main is announced with how it ended; a client
                 // that ended while its agent lives announces nothing.
@@ -324,9 +346,7 @@ impl CliSessionManager {
                     )),
                     MainExit::ClientOnly => None,
                 };
-                detach_watch
-                    .main_ended(session_id, exit, tmux_run, end)
-                    .await;
+                detach_watch.main_ended(session_id, exit, end).await;
             }
         });
     }

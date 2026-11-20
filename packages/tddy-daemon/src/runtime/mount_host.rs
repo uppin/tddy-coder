@@ -370,6 +370,10 @@ impl BuildContext {
         // started over the socket is visible over every other transport.
         let connection_arc = Arc::new(connection_impl);
         connection_arc.install_sandbox_rpc_bridge();
+        // Surfaces built before the host read the live set through this: terminals and sandboxes.
+        self.registries
+            .held_sessions
+            .bind(Arc::new(connection_arc.terminal_sessions()));
         // The satellites were built before this host: they hold the late-bound port, and this is
         // where it reaches the host's generic start.
         if let Err(refused) = self.registries.session_starter.bind(Arc::new(

@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
-use tddy_cli_sessions::cli_session_manager::CliSessionManager;
+use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ReattachOutcome, ReattachSkip};
 use tddy_cli_sessions::tmux::{agent_tmux_session_name, kill_tmux_session, tmux_session_alive};
 use tddy_rpc::Status;
 
@@ -83,28 +83,32 @@ pub async fn reattach_recorded_main(
     tddy_data_dir: &Path,
     os_user: &str,
     session_id: &str,
-) -> bool {
+) -> ReattachOutcome {
     use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+    log::debug!(
+        target: "tddy_daemon::claude_cli_session",
+        "re-attach of {session_id}: considering its recorded main"
+    );
     if validate_session_id_segment(session_id).is_err() {
-        return false;
+        return ReattachOutcome::Skipped(ReattachSkip::InvalidSessionId);
     }
     let session_dir = unified_session_dir_path(tddy_data_dir, session_id);
     let Ok(meta) = tddy_core::read_session_metadata(&session_dir) else {
-        return false;
+        return ReattachOutcome::Skipped(ReattachSkip::UnreadableRecord);
     };
     if meta.tmux_session.is_none() {
-        return false;
+        return ReattachOutcome::Skipped(ReattachSkip::NotTmuxRun);
     }
     match agent_tmux_session_is_alive(os_user, session_id).await {
         Ok(true) => {}
-        Ok(false) => return false,
+        Ok(false) => return ReattachOutcome::Skipped(ReattachSkip::TmuxSessionGone),
         Err(error) => {
             log::warn!(
                 target: "tddy_daemon::claude_cli_session",
                 "could not tell whether the tmux session of {session_id} is alive: {}",
                 error.message()
             );
-            return false;
+            return ReattachOutcome::Skipped(ReattachSkip::TmuxProbeFailed);
         }
     }
     let worktree_path =
@@ -119,7 +123,7 @@ pub async fn reattach_recorded_main(
                 target: "tddy_daemon::claude_cli_session",
                 "the record of {session_id} names no CLI agent's session type: its main terminal is not re-attached"
             );
-            return false;
+            return ReattachOutcome::Skipped(ReattachSkip::NoSessionType);
         }
         Err(error) => {
             log::warn!(
@@ -127,7 +131,7 @@ pub async fn reattach_recorded_main(
                 "could not re-attach the main terminal of {session_id}: {}",
                 error.message()
             );
-            return false;
+            return ReattachOutcome::Skipped(ReattachSkip::AgentUnresolved);
         }
     };
     let recorded = crate::cli_harness_tmux::RecordedHarness {
@@ -140,16 +144,16 @@ pub async fn reattach_recorded_main(
     match crate::cli_harness_tmux::reattach_recorded_harness(manager, agents, recorded).await {
         Ok(true) => {
             crate::claude_cli_spawn::record_main_terminal(manager, tddy_data_dir, session_id).await;
-            true
+            ReattachOutcome::Reattached
         }
-        Ok(false) => false,
+        Ok(false) => ReattachOutcome::Skipped(ReattachSkip::AttachFailed),
         Err(error) => {
             log::warn!(
                 target: "tddy_daemon::claude_cli_session",
                 "could not re-attach the main terminal of {session_id}: {}",
                 error.message()
             );
-            false
+            ReattachOutcome::Skipped(ReattachSkip::AttachFailed)
         }
     }
 }
