@@ -33,6 +33,15 @@ fn head_of(worktree: &Path) -> String {
     git(worktree, &["rev-parse", "HEAD"])
 }
 
+/// Stop a started home session the way a recycled pid leaves it: its agent's terminal ends, but
+/// `.session.yaml` still records a pid — now `pid`, an unrelated running process's.
+async fn stop_leaving_its_recorded_pid_naming(world: &World, session_id: &str, pid: u32) {
+    world.home.manager.stop_session(session_id).await;
+    let mut meta = world.metadata_of(session_id);
+    meta.pid = Some(pid);
+    world.rewrite_metadata_of(session_id, &meta);
+}
+
 /// Whether `worktree` is detached (on no branch).
 fn is_detached(worktree: &Path) -> bool {
     git(worktree, &["rev-parse", "--abbrev-ref", "HEAD"]) == "HEAD"
@@ -318,9 +327,7 @@ async fn ensuring_a_main_whose_recorded_pid_names_an_unrelated_process_resumes_i
         .arg("300")
         .spawn()
         .expect("sleep must start");
-    world
-        .stop_leaving_its_recorded_pid_naming(&main.session_id, unrelated.id())
-        .await;
+    stop_leaving_its_recorded_pid_naming(&world, &main.session_id, unrelated.id()).await;
 
     // When
     let ensured = world.ensure().await.expect("ensure resumes");

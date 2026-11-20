@@ -1,8 +1,7 @@
 //! The sessions this daemon holds a live agent for, at one moment.
 //!
 //! A session is **active** if and only if the daemon holds at least one live agent tab for it — its
-//! main agent or an agent terminal tab (PRD:
-//! `docs/ft/daemon/1-WIP/PRD-2026-11-19-session-liveness-from-agent-tabs.md`). The pid a session's
+//! main agent or an agent terminal tab (`docs/ft/daemon/session-liveness.md`). The pid a session's
 //! `.session.yaml` records is never consulted: nothing clears it when the agent exits, and once the
 //! OS reissues it to an unrelated process `kill(pid, 0)` reads a dead session as running.
 //!

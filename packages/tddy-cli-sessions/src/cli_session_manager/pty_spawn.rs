@@ -33,6 +33,24 @@ pub type ExitHook = Box<
         + Send,
 >;
 
+/// What an ended main announces: an agent that ended with its main is announced with how it ended;
+/// a client that ended while its agent lives announces nothing.
+fn ended_agent_announcement(
+    exit: MainExit,
+    session_id: &str,
+    tmux_run: &TmuxRun,
+    status: &TaskStatus,
+) -> Option<super::AgentEnd> {
+    match exit {
+        MainExit::AgentEnded => Some(super::AgentEnd::for_ended_main(
+            session_id.to_string(),
+            tmux_run,
+            status,
+        )),
+        MainExit::ClientOnly => None,
+    }
+}
+
 /// Wait until `status_rx` reports a terminal status, or its sender goes away.
 async fn await_terminal_status(status_rx: &mut watch::Receiver<TaskStatus>) {
     loop {
@@ -300,10 +318,6 @@ impl CliSessionManager {
             // A tmux client's end is not yet the agent's: the session stays live until that is known.
             let settling = terminal_id == MAIN_TERMINAL_ID && tmux_run.is_tmux_run();
             if settling {
-                log::debug!(
-                    target: "tddy_cli_sessions::reattach",
-                    "{session_id}: tmux client ended; holding the session while its agent is probed"
-                );
                 detach_watch.settling(&session_id).await;
             }
             if terminal_id == MAIN_TERMINAL_ID {
@@ -329,23 +343,10 @@ impl CliSessionManager {
             }
             deregister_terminal(&terminals, &session_id, &terminal_id, task_id).await;
             if settling {
-                detach_watch.settled(&session_id).await;
-                log::debug!(
-                    target: "tddy_cli_sessions::reattach",
-                    "{session_id}: settled as {main_exit:?}"
-                );
+                detach_watch.settled(&session_id, main_exit).await;
             }
             if let Some(exit) = main_exit {
-                // An agent that ended with its main is announced with how it ended; a client
-                // that ended while its agent lives announces nothing.
-                let end = match exit {
-                    MainExit::AgentEnded => Some(super::AgentEnd::for_ended_main(
-                        session_id.clone(),
-                        &tmux_run,
-                        &status,
-                    )),
-                    MainExit::ClientOnly => None,
-                };
+                let end = ended_agent_announcement(exit, &session_id, &tmux_run, &status);
                 detach_watch.main_ended(session_id, exit, end).await;
             }
         });

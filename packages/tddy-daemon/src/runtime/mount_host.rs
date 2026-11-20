@@ -370,19 +370,7 @@ impl BuildContext {
         // started over the socket is visible over every other transport.
         let connection_arc = Arc::new(connection_impl);
         connection_arc.install_sandbox_rpc_bridge();
-        // Surfaces built before the host read the live set through this: terminals and sandboxes.
-        self.registries
-            .held_sessions
-            .bind(Arc::new(connection_arc.terminal_sessions()));
-        // The satellites were built before this host: they hold the late-bound port, and this is
-        // where it reaches the host's generic start.
-        if let Err(refused) = self.registries.session_starter.bind(Arc::new(
-            tddy_session_lifecycle::connection_service::operator_session_starter::HostSessionStarter::new(
-                Arc::clone(&connection_arc),
-            ),
-        )) {
-            log::error!(target: "tddy_daemon", "session starter not bound: {}", refused.message);
-        }
+        self.bind_late_bound_ports(&connection_arc);
         self.session_host = Some(Arc::clone(&connection_arc));
         // The periodic project-home auto-stop reaps through the same host the sessions run on.
         self.tasks.project_home_reaper = Some(Arc::clone(&connection_arc));
@@ -397,6 +385,24 @@ impl BuildContext {
             rpc_handlers,
             task_registry,
             session_admissions,
+        }
+    }
+
+    /// The surfaces built before the host hold late-bound ports; this is where they reach it.
+    fn bind_late_bound_ports(&self, host: &Arc<DaemonSessionHost>) {
+        // Telegram and the remote-git service read the live set (terminals and sandboxes) through
+        // this.
+        self.registries
+            .held_sessions
+            .bind(Arc::new(host.terminal_sessions()));
+        // The satellites hold the late-bound session starter; this is where it reaches the host's
+        // generic start.
+        if let Err(refused) = self.registries.session_starter.bind(Arc::new(
+            tddy_session_lifecycle::connection_service::operator_session_starter::HostSessionStarter::new(
+                Arc::clone(host),
+            ),
+        )) {
+            log::error!(target: "tddy_daemon", "session starter not bound: {}", refused.message);
         }
     }
 

@@ -2,7 +2,7 @@
 //! for it — its main agent, or an agent terminal tab — never because the pid recorded in its
 //! `.session.yaml` happens to name a running process.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-19-session-liveness-from-agent-tabs.md
+//! Feature: docs/ft/daemon/session-liveness.md
 //!
 //! The recorded pid of every session here belongs to an **unrelated** process the test keeps
 //! running (`sleep`), standing in for the process the OS reissued a dead agent's pid to. Harnesses

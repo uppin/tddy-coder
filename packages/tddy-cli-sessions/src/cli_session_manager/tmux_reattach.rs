@@ -163,6 +163,10 @@ impl DetachWatch {
     /// agent ended with its client is only known after a probe, and the session stays live until
     /// then.
     pub(crate) async fn settling(&self, session_id: &str) {
+        log::debug!(
+            target: "tddy_cli_sessions::reattach",
+            "{session_id}: tmux client ended; holding the session while its agent is probed"
+        );
         self.watchers
             .write()
             .await
@@ -171,8 +175,12 @@ impl DetachWatch {
     }
 
     /// Release the hold [`Self::settling`] took: the session is held by a watcher or not at all.
-    pub(crate) async fn settled(&self, session_id: &str) {
+    pub(crate) async fn settled(&self, session_id: &str, main_exit: Option<MainExit>) {
         self.watchers.write().await.settling.remove(session_id);
+        log::debug!(
+            target: "tddy_cli_sessions::reattach",
+            "{session_id}: settled as {main_exit:?}"
+        );
     }
 
     /// Hand a session whose tmux client ended while its agent lives to a detach watcher. Called

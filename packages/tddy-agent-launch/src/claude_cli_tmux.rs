@@ -67,9 +67,9 @@ pub async fn agent_tmux_session_is_alive(os_user: &str, session_id: &str) -> Res
 /// Re-attach `session_id`'s main terminal from what its session directory records, when the session
 /// ran in tmux and its tmux session is alive — the lazy re-attach a first stream triggers after a
 /// daemon restart or a client's exit — through [`crate::cli_harness_tmux::reattach_recorded_harness`],
-/// and register its main recording as a start registers it. `false` when the record is unreadable,
-/// the session did not run in tmux, its tmux session is gone, its agent has exited or the attach
-/// failed (logged); nothing is relaunched.
+/// and register its main recording as a start registers it. [`ReattachOutcome::Skipped`], naming why,
+/// when the record is unreadable, the session did not run in tmux, its tmux session is gone, its
+/// agent has exited or the attach failed (logged); nothing is relaunched.
 ///
 /// Which agent the record is re-attached as is read from `agents` — the coding agents this daemon
 /// installed, the source every start and resume reads — through its recorded session type alone
@@ -84,56 +84,37 @@ pub async fn reattach_recorded_main(
     os_user: &str,
     session_id: &str,
 ) -> ReattachOutcome {
-    use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
     log::debug!(
         target: "tddy_daemon::claude_cli_session",
         "re-attach of {session_id}: considering its recorded main"
     );
-    if validate_session_id_segment(session_id).is_err() {
-        return ReattachOutcome::Skipped(ReattachSkip::InvalidSessionId);
+    match reattach_when_recorded(manager, agents, tddy_data_dir, os_user, session_id).await {
+        Ok(()) => ReattachOutcome::Reattached,
+        Err(skip) => ReattachOutcome::Skipped(skip),
     }
+}
+
+/// [`reattach_recorded_main`]'s steps, each refusal the [`ReattachSkip`] that names why nothing was
+/// attached.
+async fn reattach_when_recorded(
+    manager: &CliSessionManager,
+    agents: Option<&crate::spec_launch::HostCodingAgents>,
+    tddy_data_dir: &Path,
+    os_user: &str,
+    session_id: &str,
+) -> Result<(), ReattachSkip> {
+    use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+    validate_session_id_segment(session_id).map_err(|_| ReattachSkip::InvalidSessionId)?;
     let session_dir = unified_session_dir_path(tddy_data_dir, session_id);
-    let Ok(meta) = tddy_core::read_session_metadata(&session_dir) else {
-        return ReattachOutcome::Skipped(ReattachSkip::UnreadableRecord);
-    };
+    let meta = tddy_core::read_session_metadata(&session_dir)
+        .map_err(|_| ReattachSkip::UnreadableRecord)?;
     if meta.tmux_session.is_none() {
-        return ReattachOutcome::Skipped(ReattachSkip::NotTmuxRun);
+        return Err(ReattachSkip::NotTmuxRun);
     }
-    match agent_tmux_session_is_alive(os_user, session_id).await {
-        Ok(true) => {}
-        Ok(false) => return ReattachOutcome::Skipped(ReattachSkip::TmuxSessionGone),
-        Err(error) => {
-            log::warn!(
-                target: "tddy_daemon::claude_cli_session",
-                "could not tell whether the tmux session of {session_id} is alive: {}",
-                error.message()
-            );
-            return ReattachOutcome::Skipped(ReattachSkip::TmuxProbeFailed);
-        }
-    }
+    require_live_tmux_session(os_user, session_id).await?;
     let worktree_path =
         tddy_core::repo_root_for_session(&session_dir).unwrap_or_else(|| session_dir.clone());
-    let kind = match crate::harness_from_spec::recorded_cli_session_type(
-        agents,
-        meta.session_type.as_deref(),
-    ) {
-        Ok(Some(kind)) => kind,
-        Ok(None) => {
-            log::warn!(
-                target: "tddy_daemon::claude_cli_session",
-                "the record of {session_id} names no CLI agent's session type: its main terminal is not re-attached"
-            );
-            return ReattachOutcome::Skipped(ReattachSkip::NoSessionType);
-        }
-        Err(error) => {
-            log::warn!(
-                target: "tddy_daemon::claude_cli_session",
-                "could not re-attach the main terminal of {session_id}: {}",
-                error.message()
-            );
-            return ReattachOutcome::Skipped(ReattachSkip::AgentUnresolved);
-        }
-    };
+    let kind = recorded_cli_agent(agents, meta.session_type.as_deref(), session_id)?;
     let recorded = crate::cli_harness_tmux::RecordedHarness {
         os_user,
         session_id,
@@ -144,16 +125,58 @@ pub async fn reattach_recorded_main(
     match crate::cli_harness_tmux::reattach_recorded_harness(manager, agents, recorded).await {
         Ok(true) => {
             crate::claude_cli_spawn::record_main_terminal(manager, tddy_data_dir, session_id).await;
-            ReattachOutcome::Reattached
+            Ok(())
         }
-        Ok(false) => ReattachOutcome::Skipped(ReattachSkip::AttachFailed),
+        Ok(false) => Err(ReattachSkip::AttachFailed),
         Err(error) => {
             log::warn!(
                 target: "tddy_daemon::claude_cli_session",
                 "could not re-attach the main terminal of {session_id}: {}",
                 error.message()
             );
-            ReattachOutcome::Skipped(ReattachSkip::AttachFailed)
+            Err(ReattachSkip::AttachFailed)
+        }
+    }
+}
+
+/// Whether `session_id`'s agent still runs in its tmux session; the skip that says why not.
+async fn require_live_tmux_session(os_user: &str, session_id: &str) -> Result<(), ReattachSkip> {
+    match agent_tmux_session_is_alive(os_user, session_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(ReattachSkip::TmuxSessionGone),
+        Err(error) => {
+            log::warn!(
+                target: "tddy_daemon::claude_cli_session",
+                "could not tell whether the tmux session of {session_id} is alive: {}",
+                error.message()
+            );
+            Err(ReattachSkip::TmuxProbeFailed)
+        }
+    }
+}
+
+/// The CLI agent the record names, resolved against the installed coding agents.
+fn recorded_cli_agent(
+    agents: Option<&crate::spec_launch::HostCodingAgents>,
+    recorded_session_type: Option<&str>,
+    session_id: &str,
+) -> Result<crate::harness_from_spec::CliSessionType, ReattachSkip> {
+    match crate::harness_from_spec::recorded_cli_session_type(agents, recorded_session_type) {
+        Ok(Some(kind)) => Ok(kind),
+        Ok(None) => {
+            log::warn!(
+                target: "tddy_daemon::claude_cli_session",
+                "the record of {session_id} names no CLI agent's session type: its main terminal is not re-attached"
+            );
+            Err(ReattachSkip::NoSessionType)
+        }
+        Err(error) => {
+            log::warn!(
+                target: "tddy_daemon::claude_cli_session",
+                "could not re-attach the main terminal of {session_id}: {}",
+                error.message()
+            );
+            Err(ReattachSkip::AgentUnresolved)
         }
     }
 }

@@ -30,6 +30,12 @@ mod recorded_worktree;
 mod tmux_host;
 
 impl DaemonSessionHost {
+    /// The terminal manager this host starts and holds sessions' terminals in, for
+    /// [`crate::test_util`] to hold a session live.
+    pub(crate) fn terminal_manager(&self) -> &Arc<CliSessionManager> {
+        &self.cli_manager
+    }
+
     /// Every terminal this daemon serves, behind one
     /// [`TerminalSessionStore`](tddy_terminal_rpc::session::TerminalSessionStore).
     ///
@@ -42,12 +48,6 @@ impl DaemonSessionHost {
     /// Public so a daemon-side reader that is not a terminal RPC — the project-home agent's
     /// `ReadSessionTerminal` — resolves a session's `main` terminal through the same store the
     /// terminal RPCs do, sandbox first, rather than assembling a lookalike (`#home-inbox` 2/8).
-    /// The terminal manager this host starts and holds sessions' terminals in, for
-    /// [`crate::test_util`] to hold a session live.
-    pub(crate) fn terminal_manager(&self) -> &Arc<CliSessionManager> {
-        &self.cli_manager
-    }
-
     #[must_use]
     pub fn terminal_sessions(&self) -> DaemonTerminalSessionStore {
         DaemonTerminalSessionStore::new(
