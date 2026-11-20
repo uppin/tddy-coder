@@ -23,7 +23,6 @@ use crate::harness_from_spec::{
 use crate::opencode_cli_spawn::harness_launch::{
     launch, HarnessRemote, HarnessRun, HarnessSession, HarnessSpecLaunch,
 };
-use crate::opencode_cli_spawn::restore_tabs::{restore_tab_roster, RosterRestore};
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::usage_context::{record_usage_context, UsageSubject};
 use std::path::{Path, PathBuf};
@@ -56,16 +55,7 @@ impl crate::launch_ports::LaunchSessions {
             settled_resume_token(&self.cli_manager, &req.session_id, session_dir).await?;
         // Resolved before anything is re-wired: a Coder target whose vault has been locked
         // since the start refuses the resume here, and the session is kept as it was.
-        let target_shell = match &metadata.target {
-            Some(target) => Some(
-                crate::opencode_cli_spawn::session_start::shell_for_session_target(
-                    target,
-                    &(self.user_resolver)(&req.session_token).unwrap_or_default(),
-                    self.coder_credentials.as_ref(),
-                )?,
-            ),
-            None => None,
-        };
+        let target_shell = self.resumed_target_shell(req, &metadata)?;
         let session_agent = resolve_session_agent(&self.coding_agents, kind.clone())?;
         let identity = self.host.session_identity(
             os_user,
@@ -130,26 +120,21 @@ impl crate::launch_ports::LaunchSessions {
         Ok(Response::new(resumed))
     }
 
-    /// Restore the tabs of a resumed session's roster beside its main, each as its own launch chain
-    /// says (`#session-liveness` 4/4). Every resume path restores the whole roster: nothing is
-    /// skipped for where main runs.
-    pub(crate) async fn restore_roster_on_resume(
+    /// The shell a resumed target session's worktree is reached through, `None` for a host session.
+    fn resumed_target_shell(
         &self,
-        os_user: &str,
-        session_id: &str,
-        session_dir: &Path,
-        worktree: &Path,
-    ) -> Vec<tddy_service::proto::session::RestoredTab> {
-        restore_tab_roster(RosterRestore {
-            session_id,
-            session_dir,
-            worktree,
-            os_user,
-            cli_manager: &self.cli_manager,
-            coding_agents: &self.coding_agents,
-            roster_store: self.cli_manager.tab_rosters(),
-        })
-        .await
+        req: &ResumeSessionRequest,
+        metadata: &SessionMetadata,
+    ) -> Result<Option<Arc<dyn tddy_remote_shell::RemoteShell>>, Status> {
+        let Some(target) = &metadata.target else {
+            return Ok(None);
+        };
+        crate::opencode_cli_spawn::session_start::shell_for_session_target(
+            target,
+            &(self.user_resolver)(&req.session_token).unwrap_or_default(),
+            self.coder_credentials.as_ref(),
+        )
+        .map(Some)
     }
 
     async fn resumed_split_wiring(

@@ -113,10 +113,7 @@ impl LaunchSessions {
             }
             return Ok(Response::new(ResumeSessionResponse {
                 session_id: req.session_id,
-                livekit_room: String::new(),
-                livekit_url: String::new(),
-                livekit_server_identity: String::new(),
-                restored_tabs: Vec::new(),
+                ..Default::default()
             }));
         }
 
@@ -220,7 +217,7 @@ impl LaunchSessions {
             livekit_room: result.livekit_room,
             livekit_url: result.livekit_url,
             livekit_server_identity: result.livekit_server_identity,
-            restored_tabs: Vec::new(),
+            ..Default::default()
         }))
     }
 }
