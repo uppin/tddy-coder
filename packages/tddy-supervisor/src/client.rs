@@ -228,9 +228,16 @@ impl SupervisorClient {
         pid: u32,
         signal: i32,
     ) -> Result<SessionStatus, SupervisorError> {
-        let _ = (pid, signal);
-        // TODO(session-liveness 3/4): implemented in the green step.
-        todo!("call SignalSession")
+        let status: wire::SessionStatus = self
+            .call(
+                "SignalSession",
+                wire::SignalSessionRequest {
+                    session: Some(wire::SessionRef { pid }),
+                    signal,
+                },
+            )
+            .await?;
+        protocol::session_status_from_wire(status).map_err(protocol::error_from_status)
     }
 
     /// Spawn a binary as an OS user and stream its stderr — see `SpawnStreamed` in

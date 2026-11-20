@@ -24,6 +24,7 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use crate::launch_ports::LaunchSessions;
 use crate::session_provider_route::session_route_sources;
+use crate::tool_process_tab::{SpawnedToolChild, ToolBackend};
 use crate::tool_session_route::tool_session_route_json;
 use tddy_service::proto::session::StartSessionRequest;
 
@@ -157,8 +158,7 @@ impl LaunchSessions {
                 git_environment,
             })
             .await;
-        self.tool_session_spawned(&tool_session_id, &spawned);
-        let result = spawned?;
+        let result = self.tool_session_spawned(&tool_session_id, spawned).await?;
         log::debug!(
             "StartSession: spawn returned, session_id={}",
             result.session_id
@@ -173,11 +173,9 @@ impl LaunchSessions {
 
     /// Spawn a `tddy-coder` child for a starting or resuming tool session, through whichever
     /// backend the config chooses: `tddy-supervisor`, or the forked spawn worker (or, without
-    /// one, a direct spawn) on the blocking pool. Both run under the spawn deadline.
-    pub async fn spawn_tddy_coder(
-        &self,
-        plan: ToolSpawnPlan,
-    ) -> Result<spawner::SpawnResult, Status> {
+    /// one, a direct spawn) on the blocking pool. Both run under the spawn deadline. The child's end
+    /// is reported by whichever backend holds it.
+    pub async fn spawn_tddy_coder(&self, plan: ToolSpawnPlan) -> Result<SpawnedToolChild, Status> {
         let spawn_client = self.spawn_client.clone();
         let spawn_mouse = self.config.spawn_mouse;
         let tddy_data_dir = self.tddy_data_dir.clone();
@@ -200,18 +198,19 @@ impl LaunchSessions {
                     coder_log_yaml,
                     startup_watch,
                 );
-                service_util::await_supervised_with_timeout(
+                let tool = service_util::await_supervised_with_timeout(
                     timeout,
                     purpose.supervisor_label(),
-                    tddy_spawn::supervisor_spawn::spawn_session_via_supervisor(
-                        &socket_path,
-                        &spawn_req,
-                    ),
+                    tddy_spawn::child_exit::spawn_tool_via_supervisor(&socket_path, &spawn_req),
                 )
-                .await?
+                .await?;
+                SpawnedToolChild {
+                    tool,
+                    backend: ToolBackend::Supervisor { socket_path },
+                }
             }
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                service_util::spawn_blocking_with_timeout(
+                let tool = service_util::spawn_blocking_with_timeout(
                     timeout,
                     purpose.worker_label(),
                     move || {
@@ -235,11 +234,11 @@ impl LaunchSessions {
                                 coder_log_yaml,
                                 startup_watch,
                             );
-                            client.spawn(spawn_req)
+                            client.spawn_tool(spawn_req)
                         } else {
                             let (child_log_level, child_log_format) =
                                 spawner::child_log_yaml_tuning(daemon_log.as_ref());
-                            spawner::spawn_as_user(
+                            tddy_spawn::child_exit::spawn_tool_as_user(
                                 &plan.os_user,
                                 &plan.tool_path,
                                 &tddy_data_dir,
@@ -254,7 +253,11 @@ impl LaunchSessions {
                         }
                     },
                 )
-                .await?
+                .await?;
+                SpawnedToolChild {
+                    tool,
+                    backend: ToolBackend::Owned,
+                }
             }
         };
         Ok(result)

@@ -230,7 +230,7 @@ fn set_close_on_exec(fds: [std::os::unix::io::RawFd; 2]) {
 }
 
 /// Run one spawn request on the worker's thread: `spawn_as_user` with the request's own parameters.
-fn run_spawn(req: &SpawnRequest) -> WorkerResponse {
+fn run_spawn(req: &SpawnRequest, on_exit: Option<crate::child_exit::OnExit>) -> WorkerResponse {
     let livekit = LiveKitCreds {
         url: req.livekit_url.clone(),
         api_key: req.livekit_api_key.clone(),
@@ -248,7 +248,7 @@ fn run_spawn(req: &SpawnRequest) -> WorkerResponse {
         session,
         req.repo_path
     );
-    let result = spawner::spawn_as_user(
+    let result = spawner::spawn_as_user_reporting(
         &req.os_user,
         &req.tool_path,
         Path::new(&req.tddy_data_dir),
@@ -280,6 +280,7 @@ fn run_spawn(req: &SpawnRequest) -> WorkerResponse {
             req.startup_grace_period_ms,
             req.startup_poll_interval_ms,
         ),
+        on_exit,
     );
     log::info!(
         "spawn_worker: spawn_as_user returned session_id={}",

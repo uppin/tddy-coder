@@ -18,18 +18,63 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use tddy_supervisor::request::SessionStatus;
+use tddy_supervisor::request::{SessionState, SessionStatus};
 
 pub use tddy_task::child_exit::{exit_channel, ChildExit, ExitReceiver, ExitSender, HolderGone};
 
-use crate::spawn_worker::{SpawnClient, SpawnRequest};
-use crate::spawner::{LiveKitCreds, SpawnOptions, SpawnResult, StartupWatch};
+use crate::spawn_worker::{SpawnClient, SpawnRequest, WorkerRequest, WorkerResponse};
+use crate::spawner::{self, LiveKitCreds, SpawnOptions, SpawnResult, StartupWatch};
+
+/// How often the daemon asks the supervisor whether a tool child it holds has ended.
+const SUPERVISOR_EXIT_POLL: Duration = Duration::from_millis(500);
 
 /// A tool child that outlived its startup watch, and the report of its end.
 #[derive(Debug)]
 pub struct SpawnedTool {
     pub result: SpawnResult,
     pub exit: ExitReceiver,
+}
+
+/// What a spawn's wait thread calls, once, with the child's pid and how it ended.
+pub(crate) type OnExit = Box<dyn FnOnce(u32, ChildExit) + Send>;
+
+/// Hand `on_exit`, if there is one, the end `waited` reports. A wait that failed leaves the holder
+/// knowing only that the child is gone, which is reported as an end with neither code nor signal.
+pub(crate) fn report_wait(
+    on_exit: Option<OnExit>,
+    pid: u32,
+    waited: &std::io::Result<std::process::ExitStatus>,
+) {
+    let Some(on_exit) = on_exit else { return };
+    let exit = match waited {
+        Ok(status) => of_status(status),
+        Err(_) => ChildExit {
+            code: None,
+            signal: None,
+        },
+    };
+    on_exit(pid, exit);
+}
+
+#[cfg(unix)]
+fn of_status(status: &std::process::ExitStatus) -> ChildExit {
+    use std::os::unix::process::ExitStatusExt;
+    match (status.code(), status.signal()) {
+        (Some(code), _) => ChildExit::with_code(code),
+        (None, Some(signal)) => ChildExit::by_signal(signal),
+        (None, None) => ChildExit {
+            code: None,
+            signal: None,
+        },
+    }
+}
+
+#[cfg(not(unix))]
+fn of_status(status: &std::process::ExitStatus) -> ChildExit {
+    ChildExit {
+        code: status.code(),
+        signal: None,
+    }
 }
 
 /// [`crate::spawner::spawn_as_user`], keeping the end of the child its wait thread reaps.
@@ -47,8 +92,8 @@ pub fn spawn_tool_as_user(
     coder_log_config_yaml: Option<&str>,
     startup: StartupWatch,
 ) -> anyhow::Result<SpawnedTool> {
-    // TODO(session-liveness 3/4): implemented in the green step.
-    let _ = (
+    let (holder, exit) = exit_channel();
+    let result = spawner::spawn_as_user_reporting(
         os_user,
         tool_path,
         tddy_data_dir,
@@ -59,17 +104,21 @@ pub fn spawn_tool_as_user(
         child_log_format,
         coder_log_config_yaml,
         startup,
-    );
-    todo!("spawn as the user and send the wait thread's status on an exit channel")
+        Some(Box::new(move |_pid, end| holder.send(end))),
+    )?;
+    Ok(SpawnedTool { result, exit })
 }
 
 impl SpawnClient {
     /// [`SpawnClient::spawn`], keeping the [`crate::spawn_worker::WorkerEvent::Exited`] the worker
     /// writes for this request once its child ends.
     pub fn spawn_tool(&self, req: SpawnRequest) -> anyhow::Result<SpawnedTool> {
-        // TODO(session-liveness 3/4): implemented in the green step.
-        let _ = req;
-        todo!("spawn through the worker and route its Exited event to an exit channel")
+        let (holder, exit) = exit_channel();
+        match self.request(WorkerRequest::Spawn(Box::new(req)), |_| {}, Some(holder))? {
+            WorkerResponse::SpawnOk { result } => Ok(SpawnedTool { result, exit }),
+            WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
+            WorkerResponse::CloneOk => Err(anyhow::anyhow!("unexpected clone_ok for spawn")),
+        }
     }
 }
 
@@ -80,25 +129,55 @@ pub async fn spawn_tool_via_supervisor(
     socket_path: &Path,
     req: &SpawnRequest,
 ) -> anyhow::Result<SpawnedTool> {
-    // TODO(session-liveness 3/4): implemented in the green step.
-    let _ = (socket_path, req);
-    todo!("spawn through the supervisor and watch its SessionStatus for the exit")
+    let result = crate::supervisor_spawn::spawn_session_via_supervisor(socket_path, req).await?;
+    let exit = watch_supervised_exit(socket_path.to_path_buf(), result.pid, SUPERVISOR_EXIT_POLL);
+    Ok(SpawnedTool { result, exit })
 }
 
 /// Poll the supervisor's `SessionStatus` for `pid` every `interval` until it reports the session
 /// exited, and resolve the returned receiver with [`exit_of`] that status.
+///
+/// A supervisor that cannot be reached, or that no longer knows the pid, leaves the daemon with no
+/// knowledge of the child: the receiver then resolves as [`HolderGone`] rather than guessing.
 pub fn watch_supervised_exit(socket_path: PathBuf, pid: u32, interval: Duration) -> ExitReceiver {
-    // TODO(session-liveness 3/4): implemented in the green step.
-    let _ = (socket_path, pid, interval);
-    todo!("poll SessionStatus until EXITED")
+    let (holder, exit) = exit_channel();
+    tokio::spawn(async move {
+        let client = match crate::supervisor_client::connect_supervisor(&socket_path).await {
+            Ok(client) => client,
+            Err(e) => {
+                log::warn!("supervised exit: cannot reach the supervisor for pid={pid}: {e}");
+                return;
+            }
+        };
+        loop {
+            match client.session_status(pid).await {
+                Ok(status) => {
+                    if let Some(end) = exit_of(&status) {
+                        holder.send(end);
+                        return;
+                    }
+                }
+                Err(e) => {
+                    log::warn!("supervised exit: the supervisor cannot report pid={pid}: {e}");
+                    return;
+                }
+            }
+            tokio::time::sleep(interval).await;
+        }
+    });
+    exit
 }
 
 /// The end a supervisor `SessionStatus` reports: `None` while the session runs. The supervisor
 /// reports an exit code, or none when a signal killed the child — it does not say which signal.
 pub fn exit_of(status: &SessionStatus) -> Option<ChildExit> {
-    // TODO(session-liveness 3/4): implemented in the green step.
-    let _ = status;
-    todo!("map EXITED{{code}} to a ChildExit")
+    match status.state {
+        SessionState::Running => None,
+        SessionState::Exited => Some(ChildExit {
+            code: status.exit_code,
+            signal: None,
+        }),
+    }
 }
 
 #[cfg(test)]

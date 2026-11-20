@@ -66,9 +66,9 @@ Real dependency edges: `n1 → n2, n3      n2 → n4`
 
 ## Prerequisites
 
-### ✅ RESOLVED HERE — `tool` sessions list inactive and are still signalled by their recorded pid — [2026-11-19-tool-sessions-liveness-and-pid-signals.md](../todo/2026-11-19-tool-sessions-liveness-and-pid-signals.md)
+### ✅ RESOLVED HERE — `tool` sessions list inactive and are still signalled by their recorded pid
 
-Created by n1 as the interim; this node closes it.
+n1 recorded this as an interim todo; this node closes it and the todo file is deleted.
 
 ### ⚠ DURING — The modules extracted into `tddy-spawn` are over the file budget — [2026-09-10-tddy-spawn-modules-are-over-budget-and-not-yet-reusable.md](../todo/2026-09-10-tddy-spawn-modules-are-over-budget-and-not-yet-reusable.md)
 
@@ -87,7 +87,7 @@ Created by n1 as the interim; this node closes it.
 - [x] Create changeset
 - [x] Create failing acceptance tests / run them (verify they fail) / USER REVIEW — approved 2026-11-19
 - [x] TDD Red — failing unit/integration tests
-- [ ] Implementation
+- [x] Implementation
 - [ ] Package documentation, scoped clippy
 
 ## Technical Changes

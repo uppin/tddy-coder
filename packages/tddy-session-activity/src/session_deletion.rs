@@ -1,7 +1,8 @@
 //! Filesystem-safe deletion of session directories under a resolved sessions tree.
 //!
-//! On Unix, if a `tool` session's `.session.yaml` records a live PID, the process is sent **SIGTERM**, waited on,
-//! then **SIGKILL** if needed, before removing the directory.
+//! The directory is removed after the caller has stopped the session's processes. The pid a
+//! `.session.yaml` records is never signalled here: the OS may have reissued it, so a session's
+//! processes are stopped through what holds them (its terminals and process tab).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -235,7 +236,7 @@ pub fn close_session_room(rooms: &dyn tddy_daemon_extensions::SessionRooms, sess
     rooms.close(session_id.trim());
 }
 
-/// Deletes a session directory. On Unix, terminates a live recorded PID first.
+/// Deletes a session directory. It signals no process: the caller stops the session's processes first.
 ///
 /// `projects_dir` is optional but recommended for sessions that own a worktree
 /// ([`worktree_removal_applies_to`]): when provided, the linked git worktree is removed via
@@ -287,26 +288,6 @@ pub fn delete_session_directory(
             worktree_removal_applies_to(agents, m.session_type.as_deref().unwrap_or_default())
         })
         .and_then(|m| m.repo_path.clone());
-
-    #[cfg(unix)]
-    {
-        // TODO(session-liveness 3/4): only a `tool` session's recorded pid is signalled, because
-        // it holds no process tab yet; every other session's processes are the daemon's own and
-        // were stopped before this ran. See
-        // docs/dev/todo/2026-11-19-tool-sessions-liveness-and-pid-signals.md.
-        if let Some(ref m) = metadata {
-            if let (Some(pid), Some("tool")) = (m.pid, m.session_type.as_deref()) {
-                log::debug!(
-                    "delete_session_directory: tool session pid={} is_active={}",
-                    pid,
-                    is_pid_alive(pid)
-                );
-                terminate_session_process(pid)?;
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = metadata;
 
     // For session types that own their worktree, remove the linked git worktree.
     remove_session_worktree(projects_dir, session_id, &metadata, &session_worktree);

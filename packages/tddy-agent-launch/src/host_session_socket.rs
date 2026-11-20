@@ -30,6 +30,7 @@
 //! **Authentication.** The socket's filesystem permissions. Every request names its session, and
 //! [`HostSessionService`] refuses an unknown session or one registered for a different OS user.
 
+use crate::tool_process_tab::EndedFlag;
 use std::collections::HashMap;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -123,9 +124,9 @@ impl HostSessionSockets {
     ///
     /// The registered session records `pid`; a later registration of the same id (a resume) replaces
     /// it, and then this watch ends without touching the newer registration. The watch also ends when
-    /// the session is deleted. The process's absence is read with `kill(pid, 0)`: `ESRCH` is gone,
-    /// anything else (including `EPERM`, a process of another user) is still there.
-    pub(crate) fn watch_until_stopped(&self, session_id: &str, pid: u32) {
+    /// the session is deleted. The process's end is what its spawn backend reported (`ended`), not a
+    /// probe of `pid`: a pid the OS has reissued would read as still running.
+    pub(crate) fn watch_until_stopped(&self, session_id: &str, pid: u32, ended: EndedFlag) {
         if !self.registry.attach_process(session_id, pid) {
             return;
         }
@@ -138,7 +139,7 @@ impl HostSessionSockets {
                 if registry.process_of(&session_id) != Some(pid) {
                     return;
                 }
-                if !process_exists(pid) {
+                if ended.load(std::sync::atomic::Ordering::SeqCst) {
                     if registry.unregister_stopped(&session_id, pid) {
                         log::info!(
                             target: "tddy_daemon::connection_service",
@@ -294,13 +295,6 @@ async fn serve(
         );
         tokio::spawn(endpoint.run());
     }
-}
-
-/// Whether a process with `pid` still exists.
-fn process_exists(pid: u32) -> bool {
-    // SAFETY: signal 0 only checks that the process can be signalled.
-    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    rc == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
 /// Whether a session exists on disk — durable state under the daemon's data dir — for the OS user a

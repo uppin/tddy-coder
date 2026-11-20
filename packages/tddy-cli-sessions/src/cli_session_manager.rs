@@ -131,6 +131,8 @@ pub struct CliSessionManager {
     reattach_tx: reattach_outcome::ReattachSender,
     /// The one writer of every session's `tabs.yaml` — [`Self::tab_rosters`].
     tab_rosters: crate::tab_roster_store::TabRosterStore,
+    /// The PTY-less `main` tab of each tool session — [`Self::register_process_tab`].
+    process_tabs: process_tab::ProcessTabs,
 }
 
 impl Default for CliSessionManager {
@@ -165,6 +167,7 @@ impl CliSessionManager {
             agent_end_tx: agent_end::agent_end_channel(),
             reattach_tx: reattach_outcome::reattach_channel(),
             tab_rosters: crate::tab_roster_store::TabRosterStore::new(),
+            process_tabs: process_tab::ProcessTabs::default(),
         }
     }
 

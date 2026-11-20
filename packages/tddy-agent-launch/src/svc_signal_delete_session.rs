@@ -437,20 +437,54 @@ pub async fn signal_held_session(
     session_id: &str,
     signal: i32,
 ) -> Result<String, Status> {
-    let metadata =
-        read_session_metadata(session_dir).map_err(|_| Status::not_found("session not found"))?;
-    // TODO(session-liveness 3/4): a `tool` session holds no process tab yet, so its recorded pid is
-    // still what is signalled; see docs/dev/todo/2026-11-19-tool-sessions-liveness-and-pid-signals.md.
-    let pid = if metadata.session_type.as_deref() == Some("tool") {
-        metadata
-            .pid
-            .ok_or_else(|| Status::failed_precondition("session has no PID"))?
-    } else {
-        held_agent_pid(cli, sandboxes, session_id)
-            .await
-            .ok_or_else(|| Status::failed_precondition("session has no running agent"))?
-    };
+    read_session_metadata(session_dir).map_err(|_| Status::not_found("session not found"))?;
+    // A tool session's `tddy-coder` is held by its spawn backend as a process tab: it is signalled
+    // through that tab, never through the pid the session's record names.
+    if cli.process_tab(session_id).await.is_some() {
+        return signal_process_tab(cli, session_id, signal).await;
+    }
+    let pid = held_agent_pid(cli, sandboxes, session_id)
+        .await
+        .ok_or_else(|| Status::failed_precondition("session has no running agent"))?;
     deliver_signal(pid, session_id, signal)
+}
+
+/// Delivers `signal` (a `Signal` proto value) to the process tab `cli` holds for `session_id`,
+/// through the holder of its child.
+async fn signal_process_tab(
+    cli: &tddy_cli_sessions::cli_session_manager::CliSessionManager,
+    session_id: &str,
+    signal: i32,
+) -> Result<String, Status> {
+    use tddy_cli_sessions::cli_session_manager::SignalRefused;
+
+    let os_signal = os_signal_of(signal)?;
+    log::info!(
+        "SignalSession: sending signal {} to the process tab of session={}",
+        os_signal,
+        session_id
+    );
+    cli.signal_process_tab(session_id, os_signal)
+        .await
+        .map(|()| format!("signal {os_signal} sent to the process tab of {session_id}"))
+        .map_err(|refused| match refused {
+            SignalRefused::NotHeld => Status::failed_precondition("session has no running agent"),
+            SignalRefused::Holder(error) => {
+                Status::internal(format!("failed to send signal: {error}"))
+            }
+        })
+}
+
+/// The OS signal a `Signal` proto value names.
+fn os_signal_of(signal: i32) -> Result<i32, Status> {
+    use tddy_service::proto::session::Signal;
+
+    match Signal::try_from(signal) {
+        Ok(Signal::Sigint) => Ok(libc::SIGINT),
+        Ok(Signal::Sigterm) => Ok(libc::SIGTERM),
+        Ok(Signal::Sigkill) => Ok(libc::SIGKILL),
+        Err(_) => Err(Status::invalid_argument("invalid signal value")),
+    }
 }
 
 /// Delivers `signal` to `pid`, refused when that process is not alive.
@@ -463,20 +497,13 @@ fn deliver_signal(pid: u32, session_id: &str, signal: i32) -> Result<String, Sta
 
     #[cfg(unix)]
     {
-        use tddy_service::proto::session::Signal;
-
         let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
         if !alive {
             log::debug!("SignalSession: pid={} is not alive", pid);
             return Err(Status::failed_precondition("process is not alive"));
         }
 
-        let os_signal = match Signal::try_from(signal) {
-            Ok(Signal::Sigint) => libc::SIGINT,
-            Ok(Signal::Sigterm) => libc::SIGTERM,
-            Ok(Signal::Sigkill) => libc::SIGKILL,
-            Err(_) => return Err(Status::invalid_argument("invalid signal value")),
-        };
+        let os_signal = os_signal_of(signal)?;
 
         log::info!(
             "SignalSession: sending signal {} to pid={} session={}",

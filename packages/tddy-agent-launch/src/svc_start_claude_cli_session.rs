@@ -12,6 +12,12 @@ use tddy_core::output::SESSIONS_SUBDIR;
 
 use crate::launch_ports::LaunchSessions;
 
+use crate::tool_process_tab::{observe, SpawnedToolChild};
+
+use tddy_cli_sessions::cli_session_manager::TDDY_CODER_KIND;
+
+use tddy_rpc::Status;
+
 use crate::session_acting_identity::SessionAccountAccess;
 
 /// A managed session's child spawner and conversation spawner, each present only for its recipe.
@@ -179,19 +185,39 @@ impl LaunchSessions {
 }
 
 impl LaunchSessions {
-    /// The tool session's spawn returned: watch its process, and stop answering the session when it
-    /// stops. A spawn that failed leaves nothing registered — nobody is running to ask.
-    pub(crate) fn tool_session_spawned<E>(
+    /// The tool session's spawn returned: hold its `tddy-coder` as the session's process tab until
+    /// its spawn backend reports its end, and stop answering the session on the host-session socket
+    /// when it ends. A spawn that failed leaves nothing registered — nobody is running to ask.
+    ///
+    /// Returns the spawn's result, so the caller proceeds only with a child that is held.
+    pub(crate) async fn tool_session_spawned(
         &self,
         session_id: &str,
-        spawned: &Result<tddy_spawn::spawner::SpawnResult, E>,
-    ) {
-        match spawned {
-            Ok(result) => self
-                .host_session_sockets
-                .watch_until_stopped(session_id, result.pid),
-            Err(_) => self.host_session_sockets.registry().unregister(session_id),
-        }
+        spawned: Result<SpawnedToolChild, Status>,
+    ) -> Result<tddy_spawn::spawner::SpawnResult, Status> {
+        let child = match spawned {
+            Ok(child) => child,
+            Err(status) => {
+                self.host_session_sockets.registry().unregister(session_id);
+                return Err(status);
+            }
+        };
+        let SpawnedToolChild { tool, backend } = child;
+        let pid = tool.result.pid;
+        let (exit, ended) = observe(tool.exit);
+        self.cli_manager
+            .register_process_tab(
+                session_id,
+                TDDY_CODER_KIND,
+                pid,
+                exit,
+                backend.holder(pid, Arc::clone(&ended)),
+            )
+            .await
+            .map_err(|error| Status::internal(format!("could not hold the session: {error}")))?;
+        self.host_session_sockets
+            .watch_until_stopped(session_id, pid, ended);
+        Ok(tool.result)
     }
 }
 
