@@ -27,6 +27,7 @@ import {
   SESSIONS_NEW_ROUTE,
 } from "tddy-client-web";
 import { useNavigationPort } from "tddy-client-web";
+import { ActiveTabMemoryProvider } from "./lib/ActiveTabMemory";
 import { ProjectStackView, type ProjectStackAddress } from "tddy-prstack-web";
 import type { ProjectStackSummary } from "tddy-client-web/gen/pr_stack_pb";
 import { resolveShortcutsForSession } from "tddy-terminal-web";
@@ -346,6 +347,7 @@ export function SessionsDrawerScreen({
   });
 
   return (
+    <ActiveTabMemoryProvider>
     <UploadProgressProvider>
     <TooltipProvider delayDuration={0}>
       {catalogClient && (
@@ -485,5 +487,6 @@ export function SessionsDrawerScreen({
       </SessionShell>
     </TooltipProvider>
     </UploadProgressProvider>
+    </ActiveTabMemoryProvider>
   );
 }

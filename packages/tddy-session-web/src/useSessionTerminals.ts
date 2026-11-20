@@ -4,6 +4,7 @@ import type { TerminalSessionService } from "tddy-client-web/gen/terminal_sessio
 import { tddyDebug } from "tddy-client-web";
 import { hostNotConnectedText, rpcFailureText } from "tddy-client-web";
 import { BASH_KIND } from "tddy-session-create-web";
+import { useActiveTabMemory } from "./lib/ActiveTabMemory";
 
 const dTerm = tddyDebug("tddy:term:tabs");
 
@@ -11,13 +12,6 @@ type TerminalClient = Client<typeof TerminalSessionService>;
 
 /** The reserved main terminal id — the coding Agent tab. Never handed out by StartTerminalSession. */
 export const AGENT_TERMINAL_ID = "main";
-
-/**
- * The tab each session was last on, by session id. A Resume swaps the stopped session's strip for the
- * live one — a different component, so a `useState` here would start over on the Agent tab — and the
- * restored tabs come back under their recorded ids: the id remembered here is still a tab.
- */
-const lastActiveTab = new Map<string, string>();
 
 /** The wrapper kind that runs an agent tab in a tmux session of its own. */
 export const TMUX_WRAPPER_KIND = "tmux";
@@ -82,6 +76,7 @@ export function useSessionTerminals({
   client,
   controlToken = "",
 }: UseSessionTerminalsParams): SessionTerminalsController {
+  const lastActiveTab = useActiveTabMemory();
   const [terminals, setTerminals] = useState<SessionTerminal[]>([]);
   const [activeTerminalId, setActiveTerminalIdState] = useState<string>(
     () => lastActiveTab.get(sessionId) ?? AGENT_TERMINAL_ID,
@@ -94,7 +89,7 @@ export function useSessionTerminals({
         return id;
       });
     },
-    [sessionId],
+    [lastActiveTab, sessionId],
   );
   const [error, setError] = useState<string | null>(null);
 
