@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::{pty_handle, CliSessionManager};
+use super::{pty_handle, CliSessionManager, MAIN_TERMINAL_ID};
 use crate::tab_roster_store::TabRosterStore;
 
 /// What a terminal started under a recorded id runs.
@@ -28,11 +28,30 @@ impl CliSessionManager {
         worktree: PathBuf,
         terminal: RecordedTerminal,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        // TODO(session-liveness 2/4): implemented in the green step.
-        todo!(
-            "start {terminal:?} for {session_id} under {terminal_id} in {}",
-            worktree.display()
+        if terminal_id == MAIN_TERMINAL_ID {
+            anyhow::bail!("the {MAIN_TERMINAL_ID} terminal is restored by its own resume path");
+        }
+        if self.get_terminal(session_id, terminal_id).await.is_some() {
+            anyhow::bail!("terminal {terminal_id} of session {session_id} is already running");
+        }
+        let (kind, argv) = match terminal {
+            RecordedTerminal::Shell { shell_path } => ("bash".to_string(), vec![shell_path]),
+            // A tab's exit is never recorded: it carries no resume token of its own.
+            RecordedTerminal::Agent { kind, argv } => (kind, argv),
+        };
+        self.spawn_tool(
+            session_id,
+            terminal_id,
+            &kind,
+            worktree,
+            "",
+            argv,
+            Vec::new(),
+            None,
+            None,
+            None,
         )
+        .await
     }
 
     /// The daemon's one tab-roster writer.

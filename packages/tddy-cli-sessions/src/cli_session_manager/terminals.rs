@@ -4,7 +4,7 @@ use tddy_task::TaskId;
 
 use std::path::PathBuf;
 
-use super::MAIN_TERMINAL_ID;
+use super::{RecordedTerminal, MAIN_TERMINAL_ID};
 
 use super::pty_handle;
 
@@ -45,19 +45,13 @@ impl CliSessionManager {
         worktree_path: PathBuf,
         shell_path: &str,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        let terminal_id = uuid::Uuid::now_v7().to_string();
-        let argv = vec![shell_path.to_string()];
-        self.spawn_tool(
+        self.start_terminal_under_id(
             session_id,
-            &terminal_id,
-            "bash",
+            &uuid::Uuid::now_v7().to_string(),
             worktree_path,
-            "",
-            argv,
-            Vec::new(),
-            None,
-            None,
-            None,
+            RecordedTerminal::Shell {
+                shell_path: shell_path.to_string(),
+            },
         )
         .await
     }
@@ -72,19 +66,14 @@ impl CliSessionManager {
         kind: &str,
         argv: Vec<String>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        let terminal_id = uuid::Uuid::now_v7().to_string();
-        self.spawn_tool(
+        self.start_terminal_under_id(
             session_id,
-            &terminal_id,
-            kind,
+            &uuid::Uuid::now_v7().to_string(),
             worktree_path,
-            "",
-            argv,
-            Vec::new(),
-            None,
-            // A tab's exit is never recorded: it carries no resume token of its own.
-            None,
-            None,
+            RecordedTerminal::Agent {
+                kind: kind.to_string(),
+                argv,
+            },
         )
         .await
     }

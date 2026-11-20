@@ -155,10 +155,10 @@ export function DormantSessionRuntime({
           onSelectAgentConversation?.(null);
           setActive(terminalId);
         }}
-        onOpen={(kind, tmuxSession) => {
+        onOpen={(kind, tmuxSession, wrappers) => {
           // A new terminal is shown at once, so it takes the pane from a focused conversation.
           onSelectAgentConversation?.(null);
-          open(kind, tmuxSession);
+          open(kind, tmuxSession, wrappers);
         }}
         tmux={tmux}
         sessionId={session.sessionId}

@@ -351,7 +351,7 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         let session_id = keyed_session_id(&req.session_id);
 
         let launch = TerminalLaunch {
-            kind: TerminalKind::from_request(&req.kind, &req.tmux_session)?,
+            kind: TerminalKind::from_wrapped_request(&req.kind, &req.tmux_session, &req.wrappers)?,
             login_shell: crate::login_shell::login_shell_for(&os_user),
             os_user,
         };
@@ -395,6 +395,7 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         self.os_user(&req.session_token)?;
         let session_id = keyed_session_id(&req.session_id);
 
+        let mut launch_chains = self.ports.roster.launch_chains(&session_id).await?;
         let terminals = self
             .ports
             .roster
@@ -402,12 +403,13 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
             .await
             .into_iter()
             .map(|terminal| TerminalSessionInfo {
+                launch: launch_chains
+                    .remove(&terminal.terminal_id)
+                    .unwrap_or_default(),
                 terminal_id: terminal.terminal_id,
                 kind: terminal.kind,
                 pid: terminal.pid,
                 tmux_session: terminal.tmux_session.unwrap_or_default(),
-                // TODO(session-liveness 2/4): the roster's launch chain, in the green step.
-                launch: Vec::new(),
             })
             .collect();
         Ok(Response::new(ListTerminalSessionsResponse { terminals }))

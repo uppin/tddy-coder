@@ -154,18 +154,25 @@ impl LaunchNode {
 
 /// The roster of the session in `session_dir`; an empty roster when the session has none yet.
 pub fn read_tab_roster(session_dir: &Path) -> anyhow::Result<TabRoster> {
-    // TODO(session-liveness 2/4): implemented in the green step.
-    todo!("read {TAB_ROSTER_FILENAME} from {}", session_dir.display())
+    let path = session_dir.join(TAB_ROSTER_FILENAME);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(TabRoster::default())
+        }
+        Err(error) => return Err(anyhow::anyhow!("read {}: {error}", path.display())),
+    };
+    serde_yaml::from_str(&text)
+        .map_err(|error| anyhow::anyhow!("parse {}: {error}", path.display()))
 }
 
-/// Replace the roster of the session in `session_dir` with `roster`, atomically.
+/// Replace the roster of the session in `session_dir` with `roster`, atomically: a failed rewrite
+/// leaves the previous file standing.
 pub fn write_tab_roster(session_dir: &Path, roster: &TabRoster) -> anyhow::Result<()> {
-    // TODO(session-liveness 2/4): implemented in the green step.
-    todo!(
-        "write {} tab(s) to {TAB_ROSTER_FILENAME} in {}",
-        roster.tabs.len(),
-        session_dir.display()
-    )
+    let path = session_dir.join(TAB_ROSTER_FILENAME);
+    let text = serde_yaml::to_string(roster)
+        .map_err(|error| anyhow::anyhow!("serialize {}: {error}", path.display()))?;
+    crate::atomic_file::write_atomic_labelled(&path, text).map_err(|error| anyhow::anyhow!(error))
 }
 
 #[cfg(test)]

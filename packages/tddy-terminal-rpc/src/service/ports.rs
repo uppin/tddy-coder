@@ -142,11 +142,29 @@ impl TerminalKind {
         tmux_session: &str,
         wrappers: &[crate::proto::terminal_session::LaunchNode],
     ) -> Result<TerminalKind, Status> {
-        // TODO(session-liveness 2/4): implemented in the green step.
-        todo!(
-            "read kind {kind:?} (tmux session {tmux_session:?}) wrapped in {} wrapper(s)",
-            wrappers.len()
-        )
+        let Some((wrapper, inner)) = wrappers.split_first() else {
+            return Self::from_request(kind, tmux_session);
+        };
+        if wrapper.kind != TMUX_WRAPPER_KIND {
+            return Err(Status::invalid_argument(format!(
+                "a terminal cannot be wrapped in {:?}: only {TMUX_WRAPPER_KIND:?} wraps a terminal",
+                wrapper.kind
+            )));
+        }
+        if let Some(refused) = inner.first() {
+            return Err(Status::invalid_argument(format!(
+                "a terminal cannot be wrapped in {:?} inside {TMUX_WRAPPER_KIND:?}: only one \
+                 {TMUX_WRAPPER_KIND:?} wrapper is accepted",
+                refused.kind
+            )));
+        }
+        match Self::from_request(kind, tmux_session)? {
+            TerminalKind::Agent(agent) => Ok(TerminalKind::TmuxWrappedAgent { agent }),
+            _ => Err(Status::invalid_argument(format!(
+                "only an agent can be wrapped in {TMUX_WRAPPER_KIND:?}, not {:?}",
+                kind.trim()
+            ))),
+        }
     }
 }
 
@@ -210,6 +228,19 @@ pub trait TerminalRoster: Send + Sync {
 
     /// Every running terminal of `session_id`, including [`MAIN_TERMINAL_ID`].
     async fn list(&self, session_id: &str) -> Vec<TerminalDescriptor>;
+
+    /// The launch chain each of `session_id`'s terminals was started through, by terminal id,
+    /// outermost first — what the session's tab roster records. A host that keeps no roster answers
+    /// none, and a terminal with no recorded chain is listed with an empty one.
+    async fn launch_chains(
+        &self,
+        _session_id: &str,
+    ) -> Result<
+        std::collections::HashMap<String, Vec<crate::proto::terminal_session::LaunchNode>>,
+        Status,
+    > {
+        Ok(std::collections::HashMap::new())
+    }
 }
 
 /// Brings a session's `main` terminal back when the host has none registered but its agent still

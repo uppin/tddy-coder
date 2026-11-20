@@ -63,6 +63,7 @@ pub async fn start_harness_in_tmux(
     } = launch;
     let name = agent_tmux_session_name(session_id);
     let remain_on_exit = on_exit.is_some();
+    let roster_dir = session_dir.clone();
     let pane_pid = {
         let (os_user_owned, name_owned, worktree) =
             (os_user.to_string(), name.clone(), worktree_path.clone());
@@ -94,6 +95,16 @@ pub async fn start_harness_in_tmux(
             )));
         }
     };
+    if let Err(error) =
+        crate::tmux_main_roster::record_tmux_main(manager, &roster_dir, kind, &name, os_user).await
+    {
+        // An unrecorded main could not be re-attached by the next daemon, and nothing would know
+        // to stop it: the start fails and takes the agent with it.
+        stop_tmux_session_of_failed_start(os_user, &name).await;
+        return Err(Status::internal(format!(
+            "failed to record the main terminal's tmux run: {error:#}"
+        )));
+    }
     if let Some(on_exit) = on_exit {
         manager.run_exit_hook_on_agent_exit(session_id, os_user, &name, on_exit);
     }

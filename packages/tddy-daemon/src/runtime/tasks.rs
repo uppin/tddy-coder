@@ -55,6 +55,10 @@ pub struct RuntimeTasks {
     /// (`#project-home` 6/7). `None` on a host that serves no sessions.
     pub(super) project_home_reaper:
         Option<Arc<tddy_session_lifecycle::connection_service::DaemonSessionHost>>,
+    /// The session host, which once at startup re-attaches every tmux-wrapped tab whose tmux session
+    /// outlived the last daemon (`#session-liveness` 2/4). `None` on a host that serves no sessions.
+    pub(super) tmux_tab_reattach:
+        Option<Arc<tddy_session_lifecycle::connection_service::DaemonSessionHost>>,
     pub(super) relay_idle_monitor: Option<(
         Arc<tddy_session_lifecycle::relay_idle::IdleTimeoutTracker>,
         tokio::sync::oneshot::Sender<()>,
@@ -317,6 +321,15 @@ impl RuntimeTasks {
                         );
                     }
                 }
+            }));
+        }
+
+        // A tmux agent outlives its daemon; without this its session stays inactive until someone
+        // opens its terminal. Runs once, after the host has bound the agent-tool sockets its
+        // agents report over.
+        if let Some(host) = self.tmux_tab_reattach {
+            handles.push(tokio::spawn(async move {
+                host.reattach_live_tmux_tabs().await;
             }));
         }
 

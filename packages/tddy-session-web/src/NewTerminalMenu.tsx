@@ -13,14 +13,15 @@ import {
   terminalKindLabel,
 } from "tddy-session-create-web";
 import { nextTmuxSessionName } from "./tmuxSessionName";
+import { TMUX_WRAPPER_KIND } from "./useSessionTerminals";
 import type { TmuxMenuState } from "./useTmuxSessions";
 
 interface NewTerminalMenuProps {
   /** The session's type: a tool session offers bash only. Unset offers every harness. */
   sessionType?: string;
   /** Open a terminal of the chosen kind: `bash`, a CLI harness's session type, or `tmux` attached
-   *  to `tmuxSession`. */
-  onOpen: (kind: string, tmuxSession?: string) => void;
+   *  to `tmuxSession`; `wrappers` (outermost first) is what it runs wrapped in. */
+  onOpen: (kind: string, tmuxSession?: string, wrappers?: readonly string[]) => void;
   /** The session this menu opens terminals for: its short id (the first segment of the id) names a
    *  new tmux session. */
   sessionId: string;
@@ -133,12 +134,10 @@ export function NewTerminalMenu({
 
   // Bash, then every CLI agent kind a daemon has served this client — the same list the
   // Create pane offers, registered from its `ListAgents` answers.
-  const menuKinds = [
-    BASH_KIND,
-    ...(isTddyCoderSession
-      ? []
-      : cliSessionTypeOptions(knownSessionTypes()).map(({ id }) => id)),
-  ];
+  const agentKinds = isTddyCoderSession
+    ? []
+    : cliSessionTypeOptions(knownSessionTypes()).map(({ id }) => id);
+  const menuKinds = [BASH_KIND, ...agentKinds];
 
   return (
     <div ref={newTabRef} className="flex-shrink-0">
@@ -190,6 +189,26 @@ export function NewTerminalMenu({
                   </li>
                 ))}
               </ul>
+              {agentKinds.length > 0 ? (
+                <ul role="group" aria-label="Agents in tmux" className="mt-1 border-t border-border pt-1">
+                  {agentKinds.map((kind) => (
+                    <li key={kind} role="none">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-testid={`sessions-terminal-tab-new-in-tmux-${kind}`}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onOpen(kind, undefined, [TMUX_WRAPPER_KIND]);
+                        }}
+                        className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
+                      >
+                        {terminalKindLabel(kind)} in tmux
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               {tmux ? (
                 <TmuxMenuSection
                   tmux={tmux}

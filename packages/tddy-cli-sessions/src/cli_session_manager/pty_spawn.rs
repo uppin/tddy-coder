@@ -16,6 +16,8 @@ use super::tmux_reattach::{classify_ended_main, MainExit, TmuxRun};
 
 use tddy_terminal_rpc::pty_runtime::PtyRuntime;
 
+use tddy_terminal_rpc::service::TMUX_KIND;
+
 use tddy_terminal_rpc::pty_runtime::PtySpawnSpec;
 
 use std::sync::Arc;
@@ -216,7 +218,9 @@ impl CliSessionManager {
             handle.task_id.clone(),
             super::main_exit::MainExitWatch::new(handle.pid),
             on_exit,
-            TmuxRun::new(tmux_session, os_user),
+            // A tmux attach of the user's own session is a client of nothing the session keeps; a
+            // main, or a tab wrapping an agent in tmux, is a client of its agent.
+            TmuxRun::new(tmux_session.filter(|_| kind != TMUX_KIND), os_user),
         );
 
         finish_spawned_terminal(session_id, terminal_id, kind, handle)
@@ -306,7 +310,7 @@ impl CliSessionManager {
         let terminals = Arc::clone(&self.terminals);
         let exit_settlements = Arc::clone(&self.exit_settlements);
         let task_registry = self.task_registry.clone();
-        let detach_watch = self.detach_watch();
+        let detach_watch = self.detach_watch().for_terminal(&terminal_id);
         tokio::spawn(async move {
             let task = match task_registry.get(&task_id).await {
                 Some(t) => t,
@@ -316,7 +320,7 @@ impl CliSessionManager {
             await_terminal_status(&mut status_rx).await;
             let status = task.status();
             // A tmux client's end is not yet the agent's: the session stays live until that is known.
-            let settling = terminal_id == MAIN_TERMINAL_ID && tmux_run.is_tmux_run();
+            let settling = tmux_run.is_tmux_run();
             if settling {
                 detach_watch.settling(&session_id).await;
             }
@@ -329,8 +333,9 @@ impl CliSessionManager {
                 let key = (session_id.clone(), terminal_id.clone());
                 pending.finish(&task, key, &exit_settlements).await;
             }
-            // Only a main's exit can end the agent: a tab is a client of nothing the session keeps.
-            let main_exit = if terminal_id == MAIN_TERMINAL_ID {
+            // Only a main or a tmux client of an agent can be ending its agent: a shell, or a tab on
+            // the user's own tmux session, is a client of nothing the session keeps.
+            let main_exit = if terminal_id == MAIN_TERMINAL_ID || tmux_run.is_tmux_run() {
                 Some(classify_ended_main(tmux_run.clone()).await)
             } else {
                 None
@@ -345,7 +350,8 @@ impl CliSessionManager {
             if settling {
                 detach_watch.settled(&session_id, main_exit).await;
             }
-            if let Some(exit) = main_exit {
+            // A tab's agent ending leaves the session's own agent state, and is not the session's end.
+            if let Some(exit) = main_exit.filter(|_| terminal_id == MAIN_TERMINAL_ID) {
                 let end = ended_agent_announcement(exit, &session_id, &tmux_run, &status);
                 detach_watch.main_ended(session_id, exit, end).await;
             }

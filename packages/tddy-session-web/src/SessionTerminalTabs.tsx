@@ -17,8 +17,8 @@ interface SessionTerminalTabsProps {
   /** Focus a tab. */
   onSelect: (terminalId: string) => void;
   /** Open a terminal of the given kind: `bash`, a CLI harness's session type, or `tmux` attached to
-   *  `tmuxSession`. */
-  onOpen: (kind: string, tmuxSession?: string) => void;
+   *  `tmuxSession`, run wrapped in `wrappers` (outermost first). */
+  onOpen: (kind: string, tmuxSession?: string, wrappers?: readonly string[]) => void;
   /** The host's tmux sessions for the "+" menu's tmux section; absent offers none. */
   tmux?: TmuxMenuState;
   /** The session the tabs belong to; its short id names a new tmux session. */
@@ -144,7 +144,7 @@ export function SessionTerminalTabs({
           Agent
         </button>
 
-        {labelledTerminals(terminals).map(({ terminal: { terminalId: id }, label }) => {
+        {labelledTerminals(terminals).map(({ terminal: { terminalId: id, inTmux }, label }) => {
           const selected = terminalHoldsPane && activeTerminalId === id;
           return (
             <div key={id} className="flex items-center">
@@ -156,6 +156,15 @@ export function SessionTerminalTabs({
                 className={cn(TAB_CLASSES, tabColorClasses(selected), "pr-1")}
               >
                 {label}
+                {inTmux ? (
+                  <span
+                    data-testid={`sessions-terminal-tab-tmux-marker-${id}`}
+                    title="Runs in tmux"
+                    className="ml-1 rounded bg-muted px-1 text-[10px] uppercase text-muted-foreground"
+                  >
+                    tmux
+                  </span>
+                ) : null}
               </button>
               <button
                 type="button"

@@ -24,9 +24,9 @@ pub mod session_participant_metadata;
 pub mod session_provider_account;
 pub mod session_target;
 pub mod source_path;
-pub mod tab_roster;
 #[cfg(any(test, feature = "test-support"))]
 pub mod stack_fixtures;
+pub mod tab_roster;
 
 // The storage layer these modules are built on, named at the `crate::` paths they used inside
 // `tddy-core`.

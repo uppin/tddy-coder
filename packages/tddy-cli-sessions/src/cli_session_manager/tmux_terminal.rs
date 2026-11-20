@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::{pty_handle, CliSessionManager};
+use crate::tmux::{tmux_attach_argv, tmux_binary};
 
 impl CliSessionManager {
     /// Attach `session_id`'s terminal `terminal_id` to the tmux session `tmux_session`: a tmux
@@ -24,12 +25,20 @@ impl CliSessionManager {
         os_user: &str,
         tmux_session: &str,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        // TODO(session-liveness 2/4): implemented in the green step.
-        todo!(
-            "attach terminal {terminal_id} ({kind}) of {session_id} in {} to tmux session \
-             {tmux_session:?} as {os_user}",
-            worktree.display()
+        let argv = tmux_attach_argv(&tmux_binary(), tmux_session);
+        self.spawn_tool(
+            session_id,
+            terminal_id,
+            kind,
+            worktree,
+            "",
+            argv,
+            Vec::new(),
+            Some(os_user),
+            None,
+            Some(tmux_session),
         )
+        .await
     }
 
     /// Re-attach `session_id`'s terminal `terminal_id` to the live tmux session `tmux_session`: what
@@ -45,11 +54,25 @@ impl CliSessionManager {
         os_user: &str,
         tmux_session: &str,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        // TODO(session-liveness 2/4): implemented in the green step.
-        todo!(
-            "re-attach terminal {terminal_id} ({kind}) of {session_id} in {} to tmux session \
-             {tmux_session:?} as {os_user}",
-            worktree.display()
+        if let Some(attached) = self
+            .get_terminal(session_id, terminal_id)
+            .await
+            .filter(|terminal| terminal.tmux_session.as_deref() == Some(tmux_session))
+        {
+            return Ok(attached);
+        }
+        self.detached_watchers
+            .write()
+            .await
+            .stop(session_id, terminal_id);
+        self.attach_terminal_to_tmux(
+            session_id,
+            terminal_id,
+            kind,
+            worktree,
+            os_user,
+            tmux_session,
         )
+        .await
     }
 }

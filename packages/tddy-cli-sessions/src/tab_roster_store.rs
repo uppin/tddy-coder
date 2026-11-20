@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tddy_core::tab_roster::TabEntry;
+use tddy_core::tab_roster::{read_tab_roster, write_tab_roster, TabEntry, TabRoster};
 
 /// Records and forgets the tabs of every session this daemon serves, one rewrite at a time per
 /// session.
@@ -27,24 +27,48 @@ impl TabRosterStore {
     /// Record `entry` in the roster of the session in `session_dir`, replacing an entry of the same
     /// terminal id.
     pub async fn record(&self, session_dir: &Path, entry: TabEntry) -> anyhow::Result<()> {
-        // TODO(session-liveness 2/4): implemented in the green step.
-        let _ = &self.locks;
-        todo!(
-            "record terminal {} in the roster of {}",
-            entry.terminal_id,
-            session_dir.display()
-        )
+        self.rewrite(session_dir, move |roster| {
+            match roster
+                .tabs
+                .iter_mut()
+                .find(|tab| tab.terminal_id == entry.terminal_id)
+            {
+                Some(existing) => *existing = entry,
+                None => roster.tabs.push(entry),
+            }
+            true
+        })
+        .await
     }
 
     /// Remove `terminal_id` from the roster of the session in `session_dir`; every other entry is
     /// kept as it is.
     pub async fn forget(&self, session_dir: &Path, terminal_id: &str) -> anyhow::Result<()> {
-        // TODO(session-liveness 2/4): implemented in the green step.
-        let _ = &self.locks;
-        todo!(
-            "forget terminal {terminal_id} from the roster of {}",
-            session_dir.display()
-        )
+        self.rewrite(session_dir, |roster| {
+            let before = roster.tabs.len();
+            roster.tabs.retain(|tab| tab.terminal_id != terminal_id);
+            roster.tabs.len() != before
+        })
+        .await
+    }
+
+    /// One read-modify-write of the roster of `session_dir`, under that session's lock. `change`
+    /// answers whether it changed anything: an unchanged roster is not rewritten.
+    async fn rewrite(
+        &self,
+        session_dir: &Path,
+        change: impl FnOnce(&mut TabRoster) -> bool,
+    ) -> anyhow::Result<()> {
+        let lock = {
+            let mut locks = self.locks.lock().await;
+            Arc::clone(locks.entry(session_dir.to_path_buf()).or_default())
+        };
+        let _held = lock.lock().await;
+        let mut roster = read_tab_roster(session_dir)?;
+        if !change(&mut roster) {
+            return Ok(());
+        }
+        write_tab_roster(session_dir, &roster)
     }
 }
 
