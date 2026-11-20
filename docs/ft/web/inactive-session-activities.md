@@ -103,6 +103,10 @@ only while the session is stopped.
   base view is still derived from liveness — the mark is a fresher liveness fact, not navigation — so
   no view state has to be reset. Terminal tabs opened while the session was stopped are listed by the
   live strip, the same terminals, and open agent conversations carry over uncancelled.
+- **Resume restores the tabs too.** The daemon brings back every tab of the session's roster under its
+  recorded id ([Session liveness](../daemon/session-liveness.md#resume-restores-the-roster)): the strip
+  keeps the tab that was active selected, and a tab reopened fresh or dropped is named, with the daemon's
+  reason, in a status notice over the pane (`sessions-resume-notice`) — not as the pane's error.
 
 ### Inspector
 

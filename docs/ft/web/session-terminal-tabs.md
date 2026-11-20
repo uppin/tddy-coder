@@ -172,7 +172,9 @@ without resuming the agent first.
 - **Resume** (the toast's or the top bar's — one action) swaps the stopped strip for the live one
   as soon as `ResumeSession` succeeds, without waiting for the next session-list poll. Tabs opened
   while the session was stopped are daemon terminals, so the live strip lists them; open
-  conversations are not cancelled. Leaving
+  conversations are not cancelled. Resume also restores the session's other tabs under their
+  recorded ids and keeps the active tab selected ([Session
+  liveness](../daemon/session-liveness.md#resume-restores-the-roster)). Leaving
   the session and coming back does not cancel them either: only closing a tab ends a conversation.
 - A workflow session (PR-Stack, workflow chat) keeps its own view and has no strip.
 

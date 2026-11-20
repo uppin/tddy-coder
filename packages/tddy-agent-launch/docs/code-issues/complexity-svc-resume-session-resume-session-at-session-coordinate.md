@@ -57,3 +57,4 @@ the seam with `restructure check --deep` against a warm index (`./run-index-daem
 the numbers still hold and that the finding is real before spending a PR on it — an unverified
 finding is a lead, not an issue.
 | 2026-11-20 | 191 → 190 | — | — | — | **better by 1** in #960 (`#session-liveness` 3/4): `tool_session_spawned` takes the spawn result by value, so two lines (`…_spawned(&…, &spawned); let result = spawned?;`) became one. Fn line to closing brace on `origin/feature/session-liveness/tmux-roster` (`dfe3ee833`) and HEAD, whose measurement this row re-bases (the 172 above predates later growth). No coverage run. Still open, unclaimed |
+| 2026-11-20 | 190 → 189 | — | — | — | **better by 1** in #961 (`#session-liveness` 4/4): the response literals take `..Default::default()` for `livekit_*` and `restored_tabs` (the field the roster restore added), so the two literals shrink; fn line to closing brace on `e430092a8` and HEAD. Still over 60 |
