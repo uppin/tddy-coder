@@ -124,22 +124,39 @@ async fn signal_session_unit_returns_error_for_missing_session() {
     assert_eq!(result.unwrap_err().code, tddy_rpc::Code::NotFound);
 }
 
+impl DaemonSessionHost {
+    /// Hold a long-running main agent for `session_id`; its pid.
+    async fn holds_a_main_agent_for(&self, session_id: &str) -> u32 {
+        self.cli_manager
+            .start_with_options(
+                session_id,
+                std::env::temp_dir(),
+                "test-model",
+                vec!["/bin/sleep".to_string(), "600".to_string()],
+                "claude-cli",
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+                None,
+            )
+            .await
+            .expect("a main agent terminal starts")
+            .pid
+    }
+}
+
 /// Unit: signal_session with SIGKILL sends correct signal to a live process.
 #[tokio::test]
 async fn signal_session_unit_sigkill_reaches_live_process() {
-    let mut child = std::process::Command::new("sleep")
-        .arg("60")
-        .spawn()
-        .expect("spawn sleep");
-    let pid = child.id();
-
     let temp = tempfile::tempdir().unwrap();
     let sessions_base = temp.path().to_path_buf();
     let session_dir = unified_session_dir_path(&sessions_base, "sigkill-session");
     std::fs::create_dir_all(&session_dir).unwrap();
-    write_unit_session(&session_dir, pid);
+    write_unit_session(&session_dir, 0);
 
     let service = make_unit_service(sessions_base);
+    let main = service.holds_a_main_agent_for("sigkill-session").await;
     let request = Request::direct(SignalSessionRequest {
         session_token: "valid".to_string(),
         session_id: "sigkill-session".to_string(),
@@ -149,6 +166,13 @@ async fn signal_session_unit_sigkill_reaches_live_process() {
     let response = service.signal_session(request).await.unwrap();
     assert!(response.into_inner().ok);
 
-    let status = child.wait().unwrap();
-    assert!(!status.success(), "process should have been killed");
+    // the held main process was killed: the daemon stops serving it
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while service.cli_manager.get("sigkill-session").await.is_some() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the killed main (pid {main}) is still served"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 }

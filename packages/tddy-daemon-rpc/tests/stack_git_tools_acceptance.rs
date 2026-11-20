@@ -494,12 +494,12 @@ impl Host {
         github.has_an_open_pr(&branch, number);
     }
 
-    /// Record `session_id` as running: its process is alive.
-    fn session_is_running(&self, session_id: &str, session_type: &str) {
+    /// Record `session_id` as running: the daemon holds a live main agent for it.
+    async fn session_is_running(&self, session_id: &str, session_type: &str) {
+        let _main = self.daemon.holds_a_main_agent(session_id).await;
         let dir = self.session_dir(session_id);
         let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
         meta.session_type = Some(session_type.to_string());
-        meta.pid = Some(std::process::id());
         meta.status = "active".to_string();
         meta.activity_status = Some("Running".to_string());
         tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
@@ -992,7 +992,7 @@ async fn a_node_with_a_dirty_worktree_or_a_running_session_is_refused_untouched(
         .a_node_session(&world.main, &stack_id, "n3", Some(&n1.branch))
         .await;
     std::fs::write(n2.path.join("work-in-progress.txt"), "not committed\n").unwrap();
-    a.session_is_running(&n3.session_id, "claude-cli");
+    a.session_is_running(&n3.session_id, "claude-cli").await;
     world.the_default_branch_moves_on(a, "base.txt", "moved on\n");
     let (n2_tip, n3_tip) = (n2.head(), n3.head());
 
@@ -1041,7 +1041,7 @@ async fn resolve_conflicts_with_delegate_asks_the_nodes_session_to_resolve_the_n
     let n1 = a.a_node_session(&world.main, &stack_id, "n1", None).await;
     n1.changes_the_conflicting_file();
     world.the_default_branch_moves_on(a, CONFLICTING_FILE, "the base's version\n");
-    a.session_is_running(&n1.session_id, "claude-cli");
+    a.session_is_running(&n1.session_id, "claude-cli").await;
     let agent = RecordingAgent::on_the_main_terminal_of(a, &n1.session_id).await;
     let n1_tip = n1.head();
 

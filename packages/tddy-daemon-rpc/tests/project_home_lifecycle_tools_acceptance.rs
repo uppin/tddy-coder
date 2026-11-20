@@ -4,16 +4,14 @@
 //! or another (`#orchestrators` 5/11). The worktree tools' cases are beside the other worktree
 //! tools, in `worktree_tools_acceptance.rs`; this file also drives them across hosts.
 //!
-//! A running session's process is stood in for by a `sleep` child whose pid is recorded in the
-//! session's `.session.yaml`, which is where `SignalSession` and the listing read it from. The
-//! caller is the project's main (`project-home`).
+//! A running session is one the daemon holds a main agent terminal for — a stub that records the
+//! signal it receives. The caller is the project's main (`project-home`).
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
 mod support;
 
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -49,36 +47,27 @@ async fn a_world() -> World {
     World { a, b, main }
 }
 
-/// A process standing in for a session's; killed when dropped, so a failing test leaks none.
-struct StandIn(Child);
-
-impl Drop for StandIn {
-    fn drop(&mut self) {
-        self.0.kill().ok();
-        self.0.wait().ok();
-    }
+/// The main agent the daemon holds for a running session: the session is live while it runs.
+struct StandIn {
+    main: tddy_session_lifecycle::test_util::HeldMain,
+    daemon: Arc<tddy_daemon_rpc::test_util::TestDaemon>,
+    session_id: String,
 }
 
 impl StandIn {
-    /// How the process exited, waiting a few seconds for it; `None` while it still runs.
-    fn exit_signal(&mut self) -> Option<i32> {
-        use std::os::unix::process::ExitStatusExt;
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        loop {
-            if let Some(status) = self.0.try_wait().unwrap() {
-                return status.signal();
-            }
-            if std::time::Instant::now() > deadline {
-                return None;
-            }
-            std::thread::sleep(Duration::from_millis(50));
+    /// The signal the agent received, waiting a few seconds for it: `SIGTERM` for the `TERM` it
+    /// records, `None` when it received none.
+    async fn exit_signal(&mut self) -> Option<i32> {
+        match self.main.signal_received().await.as_deref() {
+            Some("TERM") => Some(libc::SIGTERM),
+            _ => None,
         }
     }
 
-    /// Whether the process is still running once a short quiet period has passed.
-    fn is_still_running(&mut self) -> bool {
-        std::thread::sleep(Duration::from_millis(300));
-        self.0.try_wait().unwrap().is_none()
+    /// Whether the daemon still holds the agent once a short quiet period has passed.
+    async fn is_still_running(&mut self) -> bool {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        self.daemon.serves_a_main_for(&self.session_id).await
     }
 }
 
@@ -87,15 +76,18 @@ impl Host {
         unified_session_dir_path(self.sessions.path(), session_id)
     }
 
-    /// A session of the project on this host whose process is running.
+    /// A session of the project on this host whose main agent the daemon holds: it is running.
     async fn a_running_session(&self) -> (String, StandIn) {
         let session_id = a_workspace_in(&self.daemon, THIS_PROJECT).await;
-        let child = Command::new("sleep").arg("600").spawn().unwrap();
-        let dir = self.session_dir(&session_id);
-        let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
-        meta.pid = Some(child.id());
-        tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
-        (session_id, StandIn(child))
+        let main = self.daemon.holds_a_main_agent(&session_id).await;
+        (
+            session_id.clone(),
+            StandIn {
+                main,
+                daemon: Arc::clone(&self.daemon),
+                session_id,
+            },
+        )
     }
 
     /// A session of the project on this host with no process.
@@ -291,7 +283,7 @@ async fn marking_a_running_session_paused_stops_it_and_records_the_mark() {
     );
     assert!(answer["at_unix_ms"].as_u64().is_some(), "{answer}");
     // ... its process got SIGTERM, as TerminateSession sends it ...
-    assert_eq!(process.exit_signal(), Some(libc::SIGTERM));
+    assert_eq!(process.exit_signal().await, Some(libc::SIGTERM));
     // ... the session's record holds the mark ...
     assert_eq!(
         the_mark(&world.a.recorded_mark_of(&session)),
@@ -344,7 +336,10 @@ async fn a_blocked_or_done_mark_leaves_the_session_running() {
         .assert_answered();
 
     // Then it is still running, and marked blocked
-    assert!(process.is_still_running(), "a blocked session was stopped");
+    assert!(
+        process.is_still_running().await,
+        "a blocked session was stopped"
+    );
     assert_eq!(
         the_mark(&world.a.recorded_mark_of(&session)),
         Some((
@@ -358,7 +353,10 @@ async fn a_blocked_or_done_mark_leaves_the_session_running() {
     world.main_marks(&session, "done").await.assert_answered();
 
     // Then it is still running, and listed as done
-    assert!(process.is_still_running(), "a done session was stopped");
+    assert!(
+        process.is_still_running().await,
+        "a done session was stopped"
+    );
     assert_eq!(
         world.a.listed_mark_of(&session).await,
         listed("done", NOTE, &world.main)
@@ -394,7 +392,7 @@ async fn delete_session_deletes_a_stopped_session_and_refuses_a_running_one() {
         "the running session was deleted"
     );
     assert!(
-        process.is_still_running(),
+        process.is_still_running().await,
         "the running session was stopped"
     );
 }

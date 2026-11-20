@@ -18,23 +18,18 @@ use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 /// Acceptance: SignalSession sends SIGINT to the session's process.
 #[tokio::test]
 async fn signal_session_sends_sigint_to_pid() {
-    // Given
-    let mut child = std::process::Command::new("sleep")
-        .arg("60")
-        .spawn()
-        .expect("spawn sleep");
-    let pid = child.id();
-
+    // Given a session whose main agent the daemon holds
     let temp = tempfile::tempdir().unwrap();
     let sessions_base = temp.path().to_path_buf();
     let session_dir = unified_session_dir_path(&sessions_base, "test-session");
     std::fs::create_dir_all(&session_dir).unwrap();
     let metadata = a_session_metadata()
         .with_session_id("test-session")
-        .with_pid(pid)
+        .without_pid()
         .build();
     write_session_yaml(&session_dir, &metadata);
     let service = test_service(sessions_base);
+    let main = service.holds_a_main_agent("test-session").await;
 
     // When
     let response = service
@@ -47,16 +42,12 @@ async fn signal_session_sends_sigint_to_pid() {
         .await
         .unwrap();
 
-    // Then
+    // Then the main agent received the interrupt
     assert!(
         response.into_inner().ok,
         "signal_session must return ok=true"
     );
-    let status = child.wait().unwrap();
-    assert!(
-        !status.success(),
-        "process should have been terminated by SIGINT"
-    );
+    assert_eq!(main.signal_received().await.as_deref(), Some("INT"));
 }
 
 /// Acceptance: SignalSession returns error for a dead PID.

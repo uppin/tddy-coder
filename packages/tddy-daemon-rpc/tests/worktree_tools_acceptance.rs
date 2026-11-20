@@ -10,7 +10,6 @@
 mod support;
 
 use std::path::Path;
-use std::process::{Child, Command};
 use std::sync::Arc;
 
 use support::{
@@ -196,25 +195,12 @@ async fn list_worktrees_lists_another_hosts_worktrees() {
 
 // ── Clear, Delete and Restore (`#orchestrators` 5/11) ────────────────────────────────────────
 
-/// A process standing in for a session's; killed when dropped, so a failing test leaks none.
-struct StandIn(Child);
-
-impl Drop for StandIn {
-    fn drop(&mut self) {
-        self.0.kill().ok();
-        self.0.wait().ok();
-    }
-}
-
-/// A long-running process recorded as `session_id`'s on `host`: the session is active.
-fn a_running_process_for(host: &Host, session_id: &str) -> StandIn {
-    let child = Command::new("sleep").arg("600").spawn().unwrap();
-    let dir =
-        tddy_core::session_lifecycle::unified_session_dir_path(host.sessions.path(), session_id);
-    let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
-    meta.pid = Some(child.id());
-    tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
-    StandIn(child)
+/// `session_id`'s main agent, held by `host`'s daemon: the session is active while it is held.
+async fn a_running_process_for(
+    host: &Host,
+    session_id: &str,
+) -> tddy_session_lifecycle::test_util::HeldMain {
+    host.daemon.holds_a_main_agent(session_id).await
 }
 
 impl World {
@@ -372,7 +358,7 @@ async fn delete_worktree_refuses_the_home_worktree() {
 async fn a_worktree_tool_is_refused_while_its_session_is_active() {
     // Given a session whose process runs, with a file in its worktree
     let world = a_world().await;
-    let _process = a_running_process_for(&world.a, &world.on_a);
+    let _process = a_running_process_for(&world.a, &world.on_a).await;
     let worktree = world.a.worktree_of(&world.on_a);
     let build_output = worktree.join("target.o");
     std::fs::write(&build_output, b"object code").unwrap();
