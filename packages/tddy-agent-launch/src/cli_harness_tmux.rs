@@ -11,7 +11,9 @@
 //! ([`reattach_recorded_harness`]), and the exit hook is watched again from then on.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_cli_sessions::cli_session_manager::{
     exit_hook_capture, CliSessionManager, ExitHook, MainExit,
 };
@@ -81,30 +83,14 @@ pub async fn start_harness_in_tmux(
         .await?
         .map_err(|e| Status::internal(format!("failed to spawn {kind}: {e}")))?
     };
-    let handle = match manager
-        .attach_main_to_tmux(session_id, worktree_path, os_user, kind, &name)
-        .await
-    {
-        Ok(handle) => handle,
-        Err(error) => {
-            // The agent must not outlive a start that failed: nothing records it, so nothing could
-            // stop it later.
-            stop_tmux_session_of_failed_start(os_user, &name).await;
-            return Err(Status::internal(format!(
-                "failed to attach the main terminal to tmux session {name:?}: {error}"
-            )));
-        }
+    let main = StartedMain {
+        session_id,
+        worktree_path,
+        os_user,
+        kind,
+        roster_dir: &roster_dir,
     };
-    if let Err(error) =
-        crate::tmux_main_roster::record_tmux_main(manager, &roster_dir, kind, &name, os_user).await
-    {
-        // An unrecorded main could not be re-attached by the next daemon, and nothing would know
-        // to stop it: the start fails and takes the agent with it.
-        stop_tmux_session_of_failed_start(os_user, &name).await;
-        return Err(Status::internal(format!(
-            "failed to record the main terminal's tmux run: {error:#}"
-        )));
-    }
+    let handle = attach_and_record_main(manager, main, &name).await?;
     if let Some(on_exit) = on_exit {
         manager.run_exit_hook_on_agent_exit(session_id, os_user, &name, on_exit);
     }
@@ -113,6 +99,55 @@ pub async fn start_harness_in_tmux(
         pane_pid,
         tmux_session: name,
     })
+}
+
+/// The main terminal of a harness just started in tmux.
+struct StartedMain<'a> {
+    session_id: &'a str,
+    worktree_path: PathBuf,
+    os_user: &'a str,
+    kind: &'a str,
+    /// The session's directory, whose tab roster records the main's tmux run.
+    roster_dir: &'a Path,
+}
+
+/// Attach the main terminal to the tmux session `name` the harness runs in, and record the main's
+/// tmux run in the session's tab roster. Either step failing stops the tmux session: the agent
+/// must not outlive a start that failed, since nothing records it and nothing could stop it later.
+async fn attach_and_record_main(
+    manager: &CliSessionManager,
+    main: StartedMain<'_>,
+    name: &str,
+) -> Result<Arc<PtyHandle>, Status> {
+    let StartedMain {
+        session_id,
+        worktree_path,
+        os_user,
+        kind,
+        roster_dir,
+    } = main;
+    let handle = match manager
+        .attach_main_to_tmux(session_id, worktree_path, os_user, kind, name)
+        .await
+    {
+        Ok(handle) => handle,
+        Err(error) => {
+            stop_tmux_session_of_failed_start(os_user, name).await;
+            return Err(Status::internal(format!(
+                "failed to attach the main terminal to tmux session {name:?}: {error}"
+            )));
+        }
+    };
+    if let Err(error) =
+        crate::tmux_main_roster::record_tmux_main(manager, roster_dir, kind, name, os_user).await
+    {
+        // An unrecorded main could not be re-attached by the next daemon.
+        stop_tmux_session_of_failed_start(os_user, name).await;
+        return Err(Status::internal(format!(
+            "failed to record the main terminal's tmux run: {error:#}"
+        )));
+    }
+    Ok(handle)
 }
 
 /// Resume a tmux-run harness session: re-attach to its tmux session while the agent runs

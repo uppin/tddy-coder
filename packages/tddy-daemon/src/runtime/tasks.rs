@@ -264,142 +264,157 @@ impl RuntimeTasks {
     /// within the host's async runtime.
     pub fn spawn(self) -> RuntimeTaskHandles {
         let mut handles = Vec::new();
-
-        if let Some(tunnel) = self.oauth_loopback_tunnel {
-            if let Some(handle) =
-                tddy_daemon_livekit::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
-                    &tunnel.config,
-                    tunnel.room_slot,
-                )
-            {
-                handles.push(handle);
-            }
-        }
-
-        if let Some(reaper) = self.lsp_idle_reaper {
-            handles.push(tokio::spawn(async move {
-                let mut ticker = tokio::time::interval(Duration::from_secs(60));
-                ticker.tick().await; // consume the immediate first tick
-                loop {
-                    ticker.tick().await;
-                    reaper.reap_idle().await;
-                }
-            }));
-        }
-
-        // The index daemon's idle reaper, on the same 60-second cadence as the LSP one above. It
-        // only ever *stops* a process: starting one is a caller's doing, and a daemon that indexed
-        // on a timer would hold a multi-gigabyte rust-analyzer for a host nobody was restructuring.
-        if let Some(index_daemon) = self.index_daemon {
-            handles.push(tokio::spawn(async move {
-                let mut ticker = tokio::time::interval(Duration::from_secs(60));
-                ticker.tick().await; // consume the immediate first tick
-                loop {
-                    ticker.tick().await;
-                    index_daemon.reap_idle().await;
-                }
-            }));
-        }
-
-        // Stops a project-home session once its agent has been idle for `project_home.idle_stop_secs`
-        // (`#project-home` 6/7). A session stopped here resumes, same conversation, on its next
-        // ensure, so the period is only the granularity of the stop.
-        if let Some(host) = self.project_home_reaper {
-            handles.push(tokio::spawn(async move {
-                let mut ticker = tokio::time::interval(PROJECT_HOME_REAP_PERIOD);
-                ticker.tick().await; // consume the immediate first tick
-                loop {
-                    ticker.tick().await;
-                    let stopped = host
-                        .reap_idle_project_home_sessions(std::time::SystemTime::now())
-                        .await;
-                    if !stopped.is_empty() {
-                        log::info!(
-                            target: "tddy_daemon::project_home",
-                            "stopped {} idle project-home session(s): {stopped:?}",
-                            stopped.len()
-                        );
-                    }
-                }
-            }));
-        }
-
-        // A tmux agent outlives its daemon; without this its session stays inactive until someone
-        // opens its terminal. Runs once, after the host has bound the agent-tool sockets its
-        // agents report over.
-        if let Some(host) = self.tmux_tab_reattach {
-            handles.push(tokio::spawn(async move {
-                host.reattach_live_tmux_tabs().await;
-            }));
-        }
-
-        if let Some(local_socket) = self.local_socket {
-            handles.push(tokio::spawn(async move {
-                let shutdown = async {
-                    let mut term =
-                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                            .ok();
-                    tokio::select! {
-                        _ = tokio::signal::ctrl_c() => {}
-                        _ = async {
-                            match term.as_mut() {
-                                Some(s) => { s.recv().await; }
-                                None => std::future::pending::<()>().await,
-                            }
-                        } => {}
-                    }
-                };
-                if let Err(e) = crate::local_socket_server::serve_connection_uds(
-                    &local_socket.socket_path,
-                    local_socket.services,
-                    shutdown,
-                )
-                .await
-                {
-                    log::error!(
-                        target: "tddy_daemon::local_socket_server",
-                        "local socket server exited with error: {e:#}"
-                    );
-                }
-            }));
-        }
-
-        if let Some((tracker, trigger)) = self.relay_idle_monitor {
-            handles.push(tokio::spawn(async move {
-                let check_interval = Duration::from_secs(30);
-                loop {
-                    tokio::time::sleep(check_interval).await;
-                    if tracker.should_shutdown() {
-                        log::info!(
-                            "relay daemon: idle timeout expired — triggering graceful shutdown"
-                        );
-                        let _ = trigger.send(());
-                        return;
-                    }
-                }
-            }));
-        }
-
-        if let Some(watch) = self.credential_sync_publish_watch {
-            handles.push(tokio::spawn(crate::credential_sync::run_publish_watch(
-                watch.registry,
-                watch.vaults,
-                watch.config,
-                watch.engine,
-            )));
-        }
-
+        handles.extend(self.oauth_loopback_tunnel.and_then(spawn_oauth_loopback));
+        handles.extend(self.lsp_idle_reaper.map(spawn_lsp_idle_reaper));
+        handles.extend(self.index_daemon.map(spawn_index_daemon_reaper));
+        handles.extend(self.project_home_reaper.map(spawn_project_home_reaper));
+        handles.extend(self.tmux_tab_reattach.map(spawn_tmux_tab_reattach));
+        handles.extend(self.local_socket.map(spawn_local_socket_server));
+        handles.extend(self.relay_idle_monitor.map(spawn_relay_idle_monitor));
+        handles.extend(
+            self.credential_sync_publish_watch
+                .map(spawn_credential_sync_publish_watch),
+        );
         handles.extend(spawn_telegram(
             self.telegram_identity_check,
             self.telegram_inbound,
         ));
-
         // The common-room connection, from now until the daemon's roster is dropped: it joins the
         // configured room and rejoins whenever `daemon_config.DaemonConfigService` names another.
-        if let Some(supervisor) = self.common_room {
-            handles.push(tokio::spawn(supervisor.run()));
-        }
-
+        handles.extend(
+            self.common_room
+                .map(|supervisor| tokio::spawn(supervisor.run())),
+        );
         RuntimeTaskHandles { handles }
     }
+}
+
+fn spawn_oauth_loopback(tunnel: OauthLoopbackTunnel) -> Option<tokio::task::JoinHandle<()>> {
+    tddy_daemon_livekit::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
+        &tunnel.config,
+        tunnel.room_slot,
+    )
+}
+
+fn spawn_lsp_idle_reaper(reaper: tddy_lsp::LspRegistry) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(60));
+        ticker.tick().await; // consume the immediate first tick
+        loop {
+            ticker.tick().await;
+            reaper.reap_idle().await;
+        }
+    })
+}
+
+/// The index daemon's idle reaper, on the same 60-second cadence as the LSP one. It only ever
+/// *stops* a process: starting one is a caller's doing, and a daemon that indexed on a timer would
+/// hold a multi-gigabyte rust-analyzer for a host nobody was restructuring.
+fn spawn_index_daemon_reaper(
+    index_daemon: crate::index_daemon::IndexDaemonRegistry,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(60));
+        ticker.tick().await; // consume the immediate first tick
+        loop {
+            ticker.tick().await;
+            index_daemon.reap_idle().await;
+        }
+    })
+}
+
+/// Stops a project-home session once its agent has been idle for `project_home.idle_stop_secs`
+/// (`#project-home` 6/7). A session stopped here resumes, same conversation, on its next ensure, so
+/// the period is only the granularity of the stop.
+fn spawn_project_home_reaper(
+    host: Arc<tddy_session_lifecycle::connection_service::DaemonSessionHost>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(PROJECT_HOME_REAP_PERIOD);
+        ticker.tick().await; // consume the immediate first tick
+        loop {
+            ticker.tick().await;
+            let stopped = host
+                .reap_idle_project_home_sessions(std::time::SystemTime::now())
+                .await;
+            if !stopped.is_empty() {
+                log::info!(
+                    target: "tddy_daemon::project_home",
+                    "stopped {} idle project-home session(s): {stopped:?}",
+                    stopped.len()
+                );
+            }
+        }
+    })
+}
+
+/// A tmux agent outlives its daemon; without this its session stays inactive until someone opens
+/// its terminal. Runs once, after the host has bound the agent-tool sockets its agents report over
+/// (`#session-liveness` 2/4).
+fn spawn_tmux_tab_reattach(
+    host: Arc<tddy_session_lifecycle::connection_service::DaemonSessionHost>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        host.reattach_live_tmux_tabs().await;
+    })
+}
+
+fn spawn_local_socket_server(local_socket: LocalSocketTransport) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let shutdown = async {
+            let mut term =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = async {
+                    match term.as_mut() {
+                        Some(s) => { s.recv().await; }
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {}
+            }
+        };
+        if let Err(e) = crate::local_socket_server::serve_connection_uds(
+            &local_socket.socket_path,
+            local_socket.services,
+            shutdown,
+        )
+        .await
+        {
+            log::error!(
+                target: "tddy_daemon::local_socket_server",
+                "local socket server exited with error: {e:#}"
+            );
+        }
+    })
+}
+
+fn spawn_relay_idle_monitor(
+    (tracker, trigger): (
+        Arc<tddy_session_lifecycle::relay_idle::IdleTimeoutTracker>,
+        tokio::sync::oneshot::Sender<()>,
+    ),
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let check_interval = Duration::from_secs(30);
+        loop {
+            tokio::time::sleep(check_interval).await;
+            if tracker.should_shutdown() {
+                log::info!("relay daemon: idle timeout expired — triggering graceful shutdown");
+                let _ = trigger.send(());
+                return;
+            }
+        }
+    })
+}
+
+fn spawn_credential_sync_publish_watch(
+    watch: CredentialSyncPublishWatch,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(crate::credential_sync::run_publish_watch(
+        watch.registry,
+        watch.vaults,
+        watch.config,
+        watch.engine,
+    ))
 }

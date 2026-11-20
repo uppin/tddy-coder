@@ -112,58 +112,68 @@ impl DetachWatch {
             return;
         }
         registry.stop(&key, &terminal_id);
-        let tracked = terminal_id.clone();
-        let watcher = tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(self.interval).await;
-                let reattached = self
-                    .terminals
-                    .read()
-                    .await
-                    .get(&session_id)
-                    .is_some_and(|tools| tools.contains_key(&tracked));
-                if reattached {
-                    return;
-                }
-                let alive = {
-                    let (os_user, session) = (os_user.clone(), session.clone());
-                    tokio::task::spawn_blocking(move || tmux_session_alive(&os_user, &session))
-                        .await
-                };
-                match alive {
-                    Ok(true) => continue,
-                    Ok(false) => {
-                        log::info!(
-                            target: "tddy_daemon::claude_cli_session",
-                            "the agent of detached session {session_id} ended (tmux session {session:?} is gone): cleaning up"
-                        );
-                        // Only the main's agent is the session's: a tab's ending leaves the main's
-                        // workflow and exposure, and announces nothing.
-                        if tracked == MAIN_TERMINAL_ID {
-                            self.drop_agent_state(&session_id).await;
-                            // Nothing saw the agent's process exit, so its end has no code.
-                            let _ = self.agent_ends.send(super::AgentEnd {
-                                session_id: session_id.clone(),
-                                os_user: Some(os_user.clone()),
-                                outcome: "exit code unknown".to_string(),
-                                exit_code: None,
-                            });
-                        }
-                        return;
-                    }
-                    // A probe that did not finish tears nothing down: it is tried again.
-                    Err(error) => log::warn!(
-                        target: "tddy_daemon::claude_cli_session",
-                        "could not tell whether tmux session {session:?} is alive: {error}"
-                    ),
-                }
-            }
-        });
+        let watcher = tokio::spawn(self.watch_until_gone(session_id, session, os_user));
         registry
             .by_session
             .entry(key)
             .or_default()
             .insert(terminal_id, watcher.abort_handle());
+    }
+
+    /// The watcher [`Self::start`] spawns: probe `session` every interval until it is gone — and
+    /// clean up — or the terminal is registered again.
+    async fn watch_until_gone(self, session_id: String, session: String, os_user: String) {
+        loop {
+            tokio::time::sleep(self.interval).await;
+            if self.terminal_is_registered(&session_id).await {
+                return;
+            }
+            let alive = {
+                let (os_user, session) = (os_user.clone(), session.clone());
+                tokio::task::spawn_blocking(move || tmux_session_alive(&os_user, &session)).await
+            };
+            match alive {
+                Ok(true) => continue,
+                Ok(false) => {
+                    log::info!(
+                        target: "tddy_daemon::claude_cli_session",
+                        "the agent of detached session {session_id} ended (tmux session {session:?} is gone): cleaning up"
+                    );
+                    self.detached_agent_ended(&session_id, &os_user).await;
+                    return;
+                }
+                // A probe that did not finish tears nothing down: it is tried again.
+                Err(error) => log::warn!(
+                    target: "tddy_daemon::claude_cli_session",
+                    "could not tell whether tmux session {session:?} is alive: {error}"
+                ),
+            }
+        }
+    }
+
+    /// Whether this watch's terminal is registered for `session_id` again.
+    async fn terminal_is_registered(&self, session_id: &str) -> bool {
+        self.terminals
+            .read()
+            .await
+            .get(session_id)
+            .is_some_and(|tools| tools.contains_key(&self.terminal_id))
+    }
+
+    /// What a detached agent's tmux session going away leaves. Only the main's agent is the
+    /// session's: a tab's ending leaves the main's workflow and exposure, and announces nothing.
+    async fn detached_agent_ended(&self, session_id: &str, os_user: &str) {
+        if self.terminal_id != MAIN_TERMINAL_ID {
+            return;
+        }
+        self.drop_agent_state(session_id).await;
+        // Nothing saw the agent's process exit, so its end has no code.
+        let _ = self.agent_ends.send(super::AgentEnd {
+            session_id: session_id.to_string(),
+            os_user: Some(os_user.to_string()),
+            outcome: "exit code unknown".to_string(),
+            exit_code: None,
+        });
     }
 
     /// What a main terminal's end leaves of its session, by how it ended.

@@ -250,20 +250,8 @@ impl Reattach<'_> {
         self.main
             .serve_agent_tool_socket_of(os_user, session_id)
             .await;
-        let alive = {
-            let (os_user, name) = (os_user.to_string(), name.to_string());
-            tokio::task::spawn_blocking(move || tmux_session_alive(&os_user, &name)).await
-        };
-        match alive {
-            Ok(true) => {}
-            Ok(false) => return report.leave(session_id, terminal_id, "its tmux session is gone"),
-            Err(error) => {
-                return report.leave(
-                    session_id,
-                    terminal_id,
-                    &format!("its tmux session could not be probed: {error}"),
-                )
-            }
+        if let Some(why) = why_tmux_session_is_not_alive(os_user, name).await {
+            return report.leave(session_id, terminal_id, &why);
         }
         let Some(worktree) = tddy_core::repo_root_for_session(session_dir) else {
             return report.leave(session_id, terminal_id, "the session records no worktree");
@@ -279,6 +267,17 @@ impl Reattach<'_> {
                 &format!("the attach failed: {error:#}"),
             ),
         }
+    }
+}
+
+/// Why `os_user`'s tmux session `name` cannot be attached to — it is gone, or the probe did not
+/// finish — and `None` when it is alive. Probed on the blocking pool.
+async fn why_tmux_session_is_not_alive(os_user: &str, name: &str) -> Option<String> {
+    let (os_user, name) = (os_user.to_string(), name.to_string());
+    match tokio::task::spawn_blocking(move || tmux_session_alive(&os_user, &name)).await {
+        Ok(true) => None,
+        Ok(false) => Some("its tmux session is gone".to_string()),
+        Err(error) => Some(format!("its tmux session could not be probed: {error}")),
     }
 }
 

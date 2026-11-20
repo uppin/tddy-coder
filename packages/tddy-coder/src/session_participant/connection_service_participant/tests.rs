@@ -205,6 +205,23 @@ fn unary_ok(result: RpcResult) -> Vec<u8> {
     }
 }
 
+/// A `StartTerminalSession` request for `session_id` as the test token's user, of `kind` (empty: a
+/// bash shell) and, for a `tmux` kind, attached to `tmux_session`.
+fn a_start_request(
+    session_id: &str,
+    kind: &str,
+    tmux_session: &str,
+) -> pb::StartTerminalSessionRequest {
+    pb::StartTerminalSessionRequest {
+        session_token: TERM_TOKEN.to_string(),
+        session_id: session_id.to_string(),
+        control_token: String::new(),
+        kind: kind.to_string(),
+        tmux_session: tmux_session.to_string(),
+        wrappers: Vec::new(),
+    }
+}
+
 #[tokio::test]
 async fn start_terminal_session_returns_a_fresh_non_main_terminal_id() {
     // Given a session participant
@@ -212,14 +229,7 @@ async fn start_terminal_session_returns_a_fresh_non_main_terminal_id() {
     let entry = a_terminal_entry(dir.path());
 
     // When the web opens a new terminal
-    let req = pb::StartTerminalSessionRequest {
-        session_token: TERM_TOKEN.to_string(),
-        session_id: TERM_SID.to_string(),
-        control_token: String::new(),
-        kind: String::new(),
-        tmux_session: String::new(),
-        wrappers: Vec::new(),
-    };
+    let req = a_start_request(TERM_SID, "", "");
     let resp = pb::StartTerminalSessionResponse::decode(
         &unary_ok(call(&entry, "StartTerminalSession", req.encode_to_vec()).await)[..],
     )
@@ -248,14 +258,7 @@ async fn start_terminal_session_refuses_a_request_naming_another_session() {
     let entry = a_terminal_entry(dir.path());
 
     // When a caller asks it to start a terminal for a different session
-    let req = pb::StartTerminalSessionRequest {
-        session_token: TERM_TOKEN.to_string(),
-        session_id: ANOTHER_SID.to_string(),
-        control_token: String::new(),
-        kind: String::new(),
-        tmux_session: String::new(),
-        wrappers: Vec::new(),
-    };
+    let req = a_start_request(ANOTHER_SID, "", "");
     let result = call(&entry, "StartTerminalSession", req.encode_to_vec()).await;
 
     // Then it is refused, naming the session this participant does run
@@ -307,14 +310,7 @@ async fn start_terminal_session_refuses_an_agent_kind() {
     let entry = a_terminal_entry(dir.path());
 
     // When the web asks it for a Warp terminal
-    let req = pb::StartTerminalSessionRequest {
-        session_token: TERM_TOKEN.to_string(),
-        session_id: TERM_SID.to_string(),
-        control_token: String::new(),
-        kind: "warp-cli".to_string(),
-        tmux_session: String::new(),
-        wrappers: Vec::new(),
-    };
+    let req = a_start_request(TERM_SID, "warp-cli", "");
     let result = call(&entry, "StartTerminalSession", req.encode_to_vec()).await;
 
     // Then it is refused, saying what this session's terminals run
@@ -338,14 +334,7 @@ async fn start_terminal_session_refuses_a_tmux_kind() {
     let entry = a_terminal_entry(dir.path());
 
     // When the web asks it for a tab attached to a tmux session
-    let req = pb::StartTerminalSessionRequest {
-        session_token: TERM_TOKEN.to_string(),
-        session_id: TERM_SID.to_string(),
-        control_token: String::new(),
-        kind: "tmux".to_string(),
-        tmux_session: "alpha".to_string(),
-        wrappers: Vec::new(),
-    };
+    let req = a_start_request(TERM_SID, "tmux", "alpha");
     let result = call(&entry, "StartTerminalSession", req.encode_to_vec()).await;
 
     // Then it is refused as a precondition this host does not meet
@@ -382,14 +371,7 @@ async fn list_terminal_sessions_includes_a_started_bash_terminal() {
     // Given a session participant with one started terminal
     let dir = tempfile::tempdir().unwrap();
     let entry = a_terminal_entry(dir.path());
-    let start = pb::StartTerminalSessionRequest {
-        session_token: TERM_TOKEN.to_string(),
-        session_id: TERM_SID.to_string(),
-        control_token: String::new(),
-        kind: String::new(),
-        tmux_session: String::new(),
-        wrappers: Vec::new(),
-    };
+    let start = a_start_request(TERM_SID, "", "");
     let started = pb::StartTerminalSessionResponse::decode(
         &unary_ok(call(&entry, "StartTerminalSession", start.encode_to_vec()).await)[..],
     )
@@ -450,14 +432,7 @@ async fn send_terminal_input_is_accepted_for_a_started_terminal() {
     // Given a session participant with one started terminal
     let dir = tempfile::tempdir().unwrap();
     let entry = a_terminal_entry(dir.path());
-    let start = pb::StartTerminalSessionRequest {
-        session_token: TERM_TOKEN.to_string(),
-        session_id: TERM_SID.to_string(),
-        control_token: String::new(),
-        kind: String::new(),
-        tmux_session: String::new(),
-        wrappers: Vec::new(),
-    };
+    let start = a_start_request(TERM_SID, "", "");
     let started = pb::StartTerminalSessionResponse::decode(
         &unary_ok(call(&entry, "StartTerminalSession", start.encode_to_vec()).await)[..],
     )
@@ -515,14 +490,7 @@ async fn stream_terminal_output_streams_a_started_shell_output() {
     // Given a session participant with a started bash terminal
     let dir = tempfile::tempdir().unwrap();
     let entry = a_terminal_entry(dir.path());
-    let start = pb::StartTerminalSessionRequest {
-        session_token: TERM_TOKEN.to_string(),
-        session_id: TERM_SID.to_string(),
-        control_token: String::new(),
-        kind: String::new(),
-        tmux_session: String::new(),
-        wrappers: Vec::new(),
-    };
+    let start = a_start_request(TERM_SID, "", "");
     let started = pb::StartTerminalSessionResponse::decode(
         &unary_ok(call(&entry, "StartTerminalSession", start.encode_to_vec()).await)[..],
     )

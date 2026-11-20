@@ -37,78 +37,122 @@ impl CliManagerTerminalRoster {
         worktree: PathBuf,
         launch: &TerminalLaunch,
     ) -> Result<StartedTab, Status> {
-        let internal =
-            |e: anyhow::Error| Status::internal(format!("failed to start terminal: {e}"));
-        let (handle, chain) = match &launch.kind {
+        match &launch.kind {
             TerminalKind::Bash => {
-                let handle = self
-                    .manager
-                    .start_terminal(session_id, worktree, &launch.login_shell)
+                self.start_shell_tab(session_id, worktree, &launch.login_shell)
                     .await
-                    .map_err(internal)?;
-                (handle, vec![LaunchNode::shell()])
             }
-            TerminalKind::Agent(kind) => {
-                let (argv, conversation_id) = self.agent_tab_argv(kind)?;
-                let handle = self
-                    .manager
-                    .start_agent_terminal(session_id, worktree, kind, argv)
-                    .await
-                    .map_err(internal)?;
-                (handle, vec![LaunchNode::agent(kind, &conversation_id)])
-            }
+            TerminalKind::Agent(kind) => self.start_agent_tab(session_id, worktree, kind).await,
             TerminalKind::Tmux { session } => {
-                // Reachability first: a daemon that cannot become the session's user refuses with
-                // the named error, and never starts the tab as the daemon user.
-                ensure_reachable(&launch.os_user, &EffectiveIdentity::current())?;
-                // Checked before anything spawns: a client for a name tmux does not hold would
-                // attach to nothing and exit, leaving a dead tab behind.
-                let sessions = self.tmux.list(&launch.os_user).await?;
-                if !sessions.iter().any(|listed| listed.name == *session) {
-                    return Err(Status::not_found(format!(
-                        "no tmux session named {session:?} on this host for this user"
-                    )));
-                }
-                let handle = self
-                    .manager
-                    .start_tmux_terminal(
-                        session_id,
-                        worktree,
-                        &launch.os_user,
-                        tmux_attach_argv(&tmux_binary(), session),
-                        session,
-                    )
+                self.start_tmux_attach_tab(session_id, worktree, &launch.os_user, session)
                     .await
-                    .map_err(internal)?;
-                (
-                    handle,
-                    vec![LaunchNode::tmux_attach(session, &launch.os_user)],
-                )
             }
             TerminalKind::TmuxNew { session } => {
-                // The name is validated before anything else, so a refused name never reaches tmux.
-                let name = tmux_session_name(session)?;
-                ensure_reachable(&launch.os_user, &EffectiveIdentity::current())?;
-                let argv = tmux_new_session_argv(&tmux_binary(), &name, &worktree);
-                let handle = self
-                    .manager
-                    .start_tmux_terminal(session_id, worktree, &launch.os_user, argv, &name)
+                self.start_tmux_new_tab(session_id, worktree, &launch.os_user, session)
                     .await
-                    .map_err(internal)?;
-                (
-                    handle,
-                    vec![LaunchNode::tmux_attach(&name, &launch.os_user)],
-                )
             }
             TerminalKind::TmuxWrappedAgent { agent } => {
-                return self
-                    .start_agent_in_tmux(session_id, worktree, agent, &launch.os_user)
+                self.start_agent_in_tmux(session_id, worktree, agent, &launch.os_user)
                     .await
             }
-        };
+        }
+    }
+
+    /// A login shell in the session's worktree.
+    async fn start_shell_tab(
+        &self,
+        session_id: &str,
+        worktree: PathBuf,
+        login_shell: &str,
+    ) -> Result<StartedTab, Status> {
+        let handle = self
+            .manager
+            .start_terminal(session_id, worktree, login_shell)
+            .await
+            .map_err(failed_to_start)?;
         Ok(StartedTab {
             handle,
-            launch: chain,
+            launch: vec![LaunchNode::shell()],
+        })
+    }
+
+    /// An agent of `kind` in a conversation of its own.
+    async fn start_agent_tab(
+        &self,
+        session_id: &str,
+        worktree: PathBuf,
+        kind: &str,
+    ) -> Result<StartedTab, Status> {
+        let (argv, conversation_id) = self.agent_tab_argv(kind)?;
+        let handle = self
+            .manager
+            .start_agent_terminal(session_id, worktree, kind, argv)
+            .await
+            .map_err(failed_to_start)?;
+        Ok(StartedTab {
+            handle,
+            launch: vec![LaunchNode::agent(kind, &conversation_id)],
+        })
+    }
+
+    /// A client attached to the user's own tmux session `session`.
+    async fn start_tmux_attach_tab(
+        &self,
+        session_id: &str,
+        worktree: PathBuf,
+        os_user: &str,
+        session: &str,
+    ) -> Result<StartedTab, Status> {
+        // Reachability first: a daemon that cannot become the session's user refuses with the named
+        // error, and never starts the tab as the daemon user.
+        ensure_reachable(os_user, &EffectiveIdentity::current())?;
+        // Checked before anything spawns: a client for a name tmux does not hold would attach to
+        // nothing and exit, leaving a dead tab behind.
+        let sessions = self.tmux.list(os_user).await?;
+        if !sessions.iter().any(|listed| listed.name == session) {
+            return Err(Status::not_found(format!(
+                "no tmux session named {session:?} on this host for this user"
+            )));
+        }
+        let argv = tmux_attach_argv(&tmux_binary(), session);
+        self.start_tmux_client_tab(session_id, worktree, os_user, argv, session)
+            .await
+    }
+
+    /// A client on a new tmux session `session`, started in the worktree.
+    async fn start_tmux_new_tab(
+        &self,
+        session_id: &str,
+        worktree: PathBuf,
+        os_user: &str,
+        session: &str,
+    ) -> Result<StartedTab, Status> {
+        // The name is validated before anything else, so a refused name never reaches tmux.
+        let name = tmux_session_name(session)?;
+        ensure_reachable(os_user, &EffectiveIdentity::current())?;
+        let argv = tmux_new_session_argv(&tmux_binary(), &name, &worktree);
+        self.start_tmux_client_tab(session_id, worktree, os_user, argv, &name)
+            .await
+    }
+
+    /// Run `argv` as a tmux client of session `name`. Both ways of getting a client on the user's
+    /// own tmux are recorded as attaching to `name`: the session is there either way.
+    async fn start_tmux_client_tab(
+        &self,
+        session_id: &str,
+        worktree: PathBuf,
+        os_user: &str,
+        argv: Vec<String>,
+        name: &str,
+    ) -> Result<StartedTab, Status> {
+        let handle = self
+            .manager
+            .start_tmux_terminal(session_id, worktree, os_user, argv, name)
+            .await
+            .map_err(failed_to_start)?;
+        Ok(StartedTab {
+            handle,
+            launch: vec![LaunchNode::tmux_attach(name, os_user)],
         })
     }
 
@@ -315,6 +359,10 @@ impl CliManagerTerminalRoster {
             })
             .collect())
     }
+}
+
+fn failed_to_start(error: anyhow::Error) -> Status {
+    Status::internal(format!("failed to start terminal: {error}"))
 }
 
 fn wire_node(node: LaunchNode) -> WireLaunchNode {

@@ -147,6 +147,29 @@ async fn a_detached_tmux_wrapped_tab_stays_live_until_its_tmux_session_ends() {
 
 #[tokio::test]
 #[serial_test::serial]
+async fn closing_a_tmux_wrapped_tab_ends_its_tmux_session_and_leaves_the_roster() {
+    // Given a running tmux-wrapped agent tab
+    let daemon = a_tab_daemon();
+    let (tab, name) = a_running_tmux_wrapped_muse_tab(&daemon).await;
+
+    // When the tab is closed
+    daemon.closes_the_tab(&tab).await;
+
+    // Then its tmux session is gone with its agent, and the roster no longer records it
+    eventually("the closed tab's tmux session to end", OBSERVE, || {
+        (!daemon.tmux.has_session(&name))
+            .then_some(())
+            .ok_or_else(|| format!("tmux session {name:?} is still present"))
+    })
+    .await;
+    assert!(
+        !daemon.roster_records(&tab),
+        "a closed tab leaves the roster"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
 async fn a_wrapper_other_than_tmux_is_refused_naming_it() {
     // Given a session
     let daemon = a_tab_daemon();
