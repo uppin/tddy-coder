@@ -51,6 +51,13 @@ pub fn default_spawn_startup_poll_interval_ms() -> u64 {
     25
 }
 
+/// How long an agent on a session's target may take to be started there: long enough for a
+/// transport that reaches its target anew for every terminal — a Coder workspace's runs its
+/// command ~10 s after it is spawned — to connect and run it.
+pub fn default_remote_agent_start_timeout_secs() -> u64 {
+    60
+}
+
 pub use crate::config::timings::DEFAULT_SESSION_ROOM_GIT_TIMEOUT;
 
 fn default_codex_oauth_loopback_proxy_eligible() -> bool {
@@ -134,6 +141,11 @@ pub struct DaemonConfig {
     /// How often that watch polls. Minimum effective value is 1ms.
     #[serde(default = "default_spawn_startup_poll_interval_ms")]
     pub spawn_startup_poll_interval_ms: u64,
+    /// Max seconds an agent on a session's target may take to be started there — from the spawn
+    /// of its terminal (the transport's client) until it records its pid on the target — before
+    /// the start fails. Covers the transport's connect time. Minimum effective value is 1.
+    #[serde(default = "default_remote_agent_start_timeout_secs")]
+    pub remote_agent_start_timeout_secs: u64,
     /// Timing budget for the specialized-subagent warm-up gate (see [`AgentWarmupConfig`]).
     #[serde(default)]
     pub agent_warmup: AgentWarmupConfig,
@@ -237,6 +249,7 @@ impl Default for DaemonConfig {
             peer_forward_timeout_secs: default_peer_forward_timeout_secs(),
             spawn_startup_grace_period_ms: default_spawn_startup_grace_period_ms(),
             spawn_startup_poll_interval_ms: default_spawn_startup_poll_interval_ms(),
+            remote_agent_start_timeout_secs: default_remote_agent_start_timeout_secs(),
             agent_warmup: AgentWarmupConfig::default(),
             session_room: SessionRoomConfig::default(),
             daemon_instance_id: None,
@@ -700,6 +713,37 @@ mod startup_and_warmup_timing_tests {
             config.spawn_startup_poll_interval(),
             Duration::from_millis(100)
         );
+    }
+
+    #[test]
+    fn a_target_agent_is_given_a_minute_to_start_by_default() {
+        // Given a daemon YAML that says nothing about target starts
+        let config = DaemonConfig::default();
+
+        // Then an agent on a target has a minute to be started there: a Coder workspace's
+        // terminal alone takes ~10 s to run its command
+        assert_eq!(config.remote_agent_start_timeout(), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn a_yaml_target_start_timeout_overrides_the_default() {
+        // Given a daemon YAML naming its own target start timeout
+        let config = a_daemon_configured_by("remote_agent_start_timeout_secs: 120\n");
+
+        // Then the value comes from the file
+        assert_eq!(
+            config.remote_agent_start_timeout(),
+            Duration::from_secs(120)
+        );
+    }
+
+    #[test]
+    fn a_zero_target_start_timeout_is_clamped_to_one_second() {
+        // Given a daemon YAML asking for no time at all
+        let config = a_daemon_configured_by("remote_agent_start_timeout_secs: 0\n");
+
+        // Then the agent still has a second to be started
+        assert_eq!(config.remote_agent_start_timeout(), Duration::from_secs(1));
     }
 
     #[test]

@@ -191,6 +191,12 @@ impl DaemonConfig {
         Duration::from_millis(self.spawn_startup_poll_interval_ms.max(1))
     }
 
+    /// How long an agent on a session's target may take to be started there (see
+    /// `remote_agent_start_timeout_secs`).
+    pub fn remote_agent_start_timeout(&self) -> Duration {
+        Duration::from_secs(self.remote_agent_start_timeout_secs.max(1))
+    }
+
     /// The warm-up gate's timing budget, in the form `tddy_discovery` takes it.
     ///
     /// On a default config this is exactly `WarmupOptions::default()` — the config path is a way

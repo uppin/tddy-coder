@@ -56,6 +56,8 @@ const HOOK_TOKEN: &str = "tok-7f3a9c";
 
 /// How long the agent must stay up for a launch to count as started.
 const STARTUP_WINDOW: Duration = Duration::from_millis(400);
+/// How long the agent may take to record its pid on the target.
+const START_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long one one-shot takes on a deployment as slow as `coder.ireland-devex.wixprod.net`
 /// measured (6–8 s): past the five seconds a probe was once given.
 const SLOW_DEPLOYMENT_ROUND_TRIP: &str = "5.5";
@@ -437,6 +439,7 @@ impl ADaemon {
                 session_dir: &self.session_dir,
                 pointer: None,
                 startup_window,
+                start_timeout: START_TIMEOUT,
                 clone_root: None,
             },
             HostPtySession {

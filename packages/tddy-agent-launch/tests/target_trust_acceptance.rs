@@ -33,6 +33,8 @@ const SESSION_ID: &str = "019d2c7e-51aa-7c40-8f0e-2b1d6a9c3e11";
 const SESSION_TYPE: &str = "acme-cli";
 const MODEL: &str = "acme-1";
 const STARTUP_WINDOW: Duration = Duration::from_millis(400);
+/// How long the agent may take to record its pid on the target.
+const START_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A machine reached over ssh, with a login of its own: a directory standing for its filesystem,
 /// holding a clone of a repository with the session's worktree cut from it, an agent on its
@@ -222,6 +224,7 @@ impl ADaemon {
                 session_dir: &self.session_dir,
                 pointer: None,
                 startup_window: STARTUP_WINDOW,
+                start_timeout: START_TIMEOUT,
                 clone_root: Some(&clone_root),
             },
             HostPtySession {

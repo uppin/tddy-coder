@@ -31,6 +31,8 @@ use tddy_testing_commons::wait::eventually;
 const SESSION_ID: &str = "019d2c7e-51aa-7c40-8f0e-2b1d6a9c3e11";
 /// How long the agent must stay up for a launch to count as started.
 const STARTUP_WINDOW: Duration = Duration::from_millis(400);
+/// How long the agent may take to record its pid on the target.
+const START_TIMEOUT: Duration = Duration::from_secs(60);
 /// A safety net for the stub to report, not a prediction of how long it takes.
 const OBSERVE: Duration = Duration::from_secs(15);
 
@@ -152,6 +154,7 @@ async fn a_coder_found_only_on_the_daemons_path_carries_the_agents_terminal() {
             session_dir: &std::fs::canonicalize(session_dir.path()).expect("it resolves"),
             pointer: None,
             startup_window: STARTUP_WINDOW,
+            start_timeout: START_TIMEOUT,
             clone_root: None,
         },
         HostPtySession {

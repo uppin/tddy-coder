@@ -35,6 +35,9 @@ const MODEL: &str = "acme-1";
 
 /// How long the agent must stay up for a launch to count as started.
 const STARTUP_WINDOW: Duration = Duration::from_millis(400);
+/// How long the agent may take to record its pid on the target: generous, so no test but the one
+/// that bounds it ever meets it.
+const START_TIMEOUT: Duration = Duration::from_secs(60);
 /// A safety net for a stub to report, not a prediction of how long it takes.
 const OBSERVE: Duration = Duration::from_secs(15);
 
@@ -135,20 +138,20 @@ fn a_target_with_a_login_of_its_own() -> ATarget {
     let target = ATarget::reached_through(&a_target_that_runs_what_it_is_asked_to(
         "SHELL=\"$(dirname \"$0\")/login-shell\"\nexport SHELL\n",
     ));
-    for dir in [target.home(), target.agents_dir(), target.tmpdir()] {
-        std::fs::create_dir_all(dir).expect("a directory of the target's login");
-    }
-    write_executable(
-        &target.root.join("bin/login-shell"),
-        &format!(
-            "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\n\
-             HOME='{}'\nPATH='{}:/usr/bin:/bin'\nTMPDIR='{}'\nexport HOME PATH TMPDIR\n\
-             exec /bin/sh -c \"$2\"\n",
-            target.home().display(),
-            target.agents_dir().display(),
-            target.tmpdir().display()
-        ),
-    );
+    target.has_a_login_of_its_own();
+    target
+}
+
+/// A target whose terminal takes `connect` to run its command, as a transport that reaches its
+/// target anew for every terminal does (a Coder workspace's takes ~10 s): only the interactive
+/// client (`ssh -tt`) is slow, so the probes for the agent's pid answer at once.
+fn a_target_whose_terminal_connects_after(connect: Duration) -> ATarget {
+    let target = ATarget::reached_through(&a_target_that_runs_what_it_is_asked_to(&format!(
+        "SHELL=\"$(dirname \"$0\")/login-shell\"\nexport SHELL\n\
+         if [ \"$1\" = -tt ]; then /bin/sleep {}; fi\n",
+        connect.as_secs_f64()
+    )));
+    target.has_a_login_of_its_own();
     target
 }
 
@@ -167,6 +170,25 @@ impl ATarget {
         let target = Self { root, _dir: dir };
         std::fs::create_dir_all(target.worktree()).expect("the session's worktree on the target");
         target
+    }
+
+    /// The target's own login: its `HOME`, `PATH` and `TMPDIR` directories, and the login shell
+    /// that sets them.
+    fn has_a_login_of_its_own(&self) {
+        for dir in [self.home(), self.agents_dir(), self.tmpdir()] {
+            std::fs::create_dir_all(dir).expect("a directory of the target's login");
+        }
+        write_executable(
+            &self.root.join("bin/login-shell"),
+            &format!(
+                "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\n\
+                 HOME='{}'\nPATH='{}:/usr/bin:/bin'\nTMPDIR='{}'\nexport HOME PATH TMPDIR\n\
+                 exec /bin/sh -c \"$2\"\n",
+                self.home().display(),
+                self.agents_dir().display(),
+                self.tmpdir().display()
+            ),
+        );
     }
 
     /// The remote shell on the target, through the stand-in.
@@ -469,8 +491,31 @@ impl ADaemon {
         target: &ATarget,
         pointer: Option<&SessionPointer>,
     ) -> Result<RemoteLaunched, RemoteLaunchError> {
-        self.launches_with_slots(program, target, pointer, &RenderedSlots::default())
-            .await
+        self.launches_with_slots(
+            program,
+            target,
+            pointer,
+            &RenderedSlots::default(),
+            START_TIMEOUT,
+        )
+        .await
+    }
+
+    /// [`Self::launches`] `agent`, given only `start_timeout` to record its pid on the target.
+    async fn launches_bounded_by(
+        &self,
+        agent: &AStubAgent,
+        target: &ATarget,
+        start_timeout: Duration,
+    ) -> Result<RemoteLaunched, RemoteLaunchError> {
+        self.launches_with_slots(
+            &agent.program(),
+            target,
+            None,
+            &RenderedSlots::default(),
+            start_timeout,
+        )
+        .await
     }
 
     /// [`Self::launches`] an agent told to append [`APPENDED_SYSTEM_PROMPT`], which the session
@@ -490,7 +535,7 @@ impl ADaemon {
             ],
             ..RenderedSlots::default()
         };
-        self.launches_with_slots(&agent.program(), target, None, &slots)
+        self.launches_with_slots(&agent.program(), target, None, &slots, START_TIMEOUT)
             .await
     }
 
@@ -500,6 +545,7 @@ impl ADaemon {
         target: &ATarget,
         pointer: Option<&SessionPointer>,
         slots: &RenderedSlots,
+        start_timeout: Duration,
     ) -> Result<RemoteLaunched, RemoteLaunchError> {
         launch_on_target(
             &the_acme_agent(program),
@@ -511,6 +557,7 @@ impl ADaemon {
                 session_dir: &self.session_dir,
                 pointer,
                 startup_window: STARTUP_WINDOW,
+                start_timeout,
                 clone_root: None,
             },
             HostPtySession {
@@ -689,6 +736,32 @@ async fn an_agent_that_exits_in_the_startup_window_fails_the_start_with_its_last
                 if last_output.contains(AGENT_COMPLAINT)
         ),
         "the launch failed with: {failure:?}"
+    );
+
+    // And the session is left without a terminal
+    assert!(!daemon.has_a_terminal().await);
+}
+
+#[tokio::test]
+async fn an_agent_whose_terminal_has_not_run_it_within_the_start_timeout_fails_the_start() {
+    // Given a target whose terminal runs its command only after two seconds
+    let target = a_target_whose_terminal_connects_after(Duration::from_secs(2));
+    let agent = an_agent_that_stays_up_on(&target);
+    let daemon = a_daemon();
+
+    // When the launch is given one second for the agent to record its pid there
+    let failure = daemon
+        .launches_bounded_by(&agent, &target, Duration::from_secs(1))
+        .await
+        .err()
+        .expect("a launch whose agent is not started in time fails");
+
+    // Then the failure names that bound, not one derived from the startup window
+    assert_eq!(
+        failure,
+        RemoteLaunchError::AgentNeverStarted {
+            after: Duration::from_secs(1)
+        }
     );
 
     // And the session is left without a terminal
