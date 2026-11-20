@@ -7,7 +7,7 @@
 //! process over real pipes, as in `worker_concurrency_acceptance.rs`. Everything runs as the current
 //! OS user.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-19-tool-session-process-tab.md
+//! PRD: docs/ft/daemon/session-liveness.md
 #![cfg(unix)]
 
 use std::os::fd::FromRawFd;

@@ -285,7 +285,7 @@ and its stdout out to the socket (`tokio::io::copy`), and logs stderr at debug â
 stdout. End of input from the caller is a stop: the session is stopped with the host's
 `shutdown_grace_secs`, so a daemon that goes away leaves no agent running as somebody else's user.
 Exit status and explicit stops travel over the existing `SessionStatus` / `StopSession`, keyed by the
-returned pid. `SpawnRelayedRequest.scope` (wire field 7) names a cgroup scope the child joins before
+returned pid; `SignalSession(pid, signal)` delivers a signal to that pid alone (under the session table's lock, so the reap cannot overtake the check) and is denied for a pid the supervisor never spawned. `SpawnRelayedRequest.scope` (wire field 7) names a cgroup scope the child joins before
 it drops privilege; the daemon names none yet ([backlog](../../../docs/dev/todo/2026-11-09-daemon-creates-no-cgroup-scope-for-supervised-spawns.md)).
 
 **A relayed agent's environment is the daemon's, whole.** The supervisor knows no coding-agent

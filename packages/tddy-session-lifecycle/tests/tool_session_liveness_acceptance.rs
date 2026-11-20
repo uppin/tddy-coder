@@ -2,7 +2,7 @@
 //! the spawn backend holding it reports its exit — and delete and signal reach it through that tab,
 //! never through the pid its `.session.yaml` records (`#session-liveness` 3/4).
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-19-tool-session-process-tab.md
+//! PRD: docs/ft/daemon/session-liveness.md
 //!
 //! The tool is a stand-in `tddy-coder` started by the real `StartSession` / `ResumeSession`. It
 //! records its pid, records an interrupt it receives, and runs until the test releases it. It writes
