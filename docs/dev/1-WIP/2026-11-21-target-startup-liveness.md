@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Bug Fix
 **Complexity**: 3 — one crate (agent-launch), integration tests over a stand-in ssh target, a spawned-process seam
-**Stack**: `#target-parity` 5/7 — branch `feature/target-parity/startup-liveness`, base `feature/target-parity/running-tool-calls`
+**Stack**: `#target-parity` 5/7 — branch `feature/target-parity/startup-liveness`, base `feature/target-parity/running-tool-calls` — PR [#973](https://github.com/uppin/tddy-coder/pull/973)
 
 ## Initial Discovery
 
@@ -73,8 +73,8 @@ A probe has the transport allowance to answer; the window closes only on an answ
 ## Acceptance Tests
 
 `packages/tddy-agent-launch/tests/remote_agent_launch_acceptance.rs`:
-- [ ] `an_agent_that_dies_on_a_slow_target_fails_the_start_though_its_terminal_reports_late` (reproduction, exists)
-- [ ] `an_agent_that_stays_up_on_a_slow_target_starts`
+- [ ] `an_agent_that_dies_on_a_slow_target_fails_the_start_though_its_terminal_reports_late` (the reproduction; passes with a round trip shorter than the window — the control)
+- [x] `an_agent_that_stays_up_on_a_slow_target_starts` — a **guard**: green today (an unanswered probe counts as alive), must stay green once the probe has a round trip to answer
 
 ## Decisions & Trade-offs
 
@@ -86,10 +86,10 @@ A probe has the transport allowance to answer; the window closes only on an answ
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (delegated: the user said "finish the rest without approval")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
