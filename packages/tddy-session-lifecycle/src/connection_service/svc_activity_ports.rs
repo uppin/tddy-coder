@@ -297,6 +297,24 @@ impl ActivityService for PeerRoutedActivity {
         self.local.rename_own_session(request).await
     }
 
+    /// Not routed: an orchestrator's access requests are held by the daemon that runs it, which is
+    /// the one serving its session pane.
+    async fn list_path_access_requests(
+        &self,
+        request: Request<tddy_service::proto::activity::ListPathAccessRequestsRequest>,
+    ) -> Result<Response<tddy_service::proto::activity::ListPathAccessRequestsResponse>, Status>
+    {
+        self.local.list_path_access_requests(request).await
+    }
+
+    /// Not routed, for the same reason.
+    async fn answer_path_access(
+        &self,
+        request: Request<tddy_service::proto::activity::AnswerPathAccessRequest>,
+    ) -> Result<Response<tddy_service::proto::activity::AnswerPathAccessResponse>, Status> {
+        self.local.answer_path_access(request).await
+    }
+
     type StreamSessionActivityStream = MpscResultStream<AgentActivityRecord>;
 
     async fn stream_session_activity(

@@ -101,6 +101,12 @@ service ActivityService {
   // terminals, so it is never forwarded again. Carries no session token: a boolean about one session
   // id, asked daemon to daemon.
   rpc IsSessionTerminalServed(IsSessionTerminalServedRequest) returns (IsSessionTerminalServedResponse);
+  // An orchestrator's requests for access to paths beyond its reach that wait for the operator
+  // (`#orchestra` 6/9): its session pane lists them with `ListPathAccessRequests` and answers one
+  // with `AnswerPathAccess`. Allowing writes a grant for the session; the agent's waiting
+  // `RequestPathAccess` returns with the answer.
+  rpc ListPathAccessRequests(ListPathAccessRequestsRequest) returns (ListPathAccessRequestsResponse);
+  rpc AnswerPathAccess(AnswerPathAccessRequest) returns (AnswerPathAccessResponse);
 }
 
 // One replay frame: a service-local wrapper carrying an ACP `tddy.acp.v1.AcpAgentMessage`
@@ -372,6 +378,37 @@ message IsSessionTerminalServedResponse {
   // recorded pid, so a dead session whose pid was reused is not served.
   bool served = 1;
 }
+
+// One request an orchestrator made for access to paths beyond its reach, waiting for the operator.
+message PathAccessRequest {
+  string request_id = 1;
+  // Absolute paths, as the agent named them.
+  repeated string paths = 2;
+  // "read" or "write" (write includes read).
+  string mode = 3;
+  // The agent's reason, shown to the operator as it wrote it.
+  string reason = 4;
+  uint64 requested_at_unix_ms = 5;
+}
+
+message ListPathAccessRequestsRequest {
+  string session_token = 1;
+  string session_id = 2;
+}
+
+message ListPathAccessRequestsResponse {
+  // Oldest first.
+  repeated PathAccessRequest requests = 1;
+}
+
+message AnswerPathAccessRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string request_id = 3;
+  bool allow = 4;
+}
+
+message AnswerPathAccessResponse {}
 
 // How a wait for an answer ended.
 enum AwaitQuestionOutcome {
