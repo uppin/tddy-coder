@@ -240,10 +240,15 @@ fn tool_read(root: &Path, args: &serde_json::Value) -> ToolOutcome {
         Err(e) => return ToolOutcome::err(format!("Read: {e}")),
     };
 
+    read_resolved(&resolved, args)
+}
+
+/// `Read` of an already-contained `resolved` path, windowed by the call's `offset` and `limit`.
+pub(crate) fn read_resolved(resolved: &Path, args: &serde_json::Value) -> ToolOutcome {
     let offset = args.get("offset").and_then(|v| v.as_u64());
     let limit = args.get("limit").and_then(|v| v.as_u64());
 
-    match std::fs::read_to_string(&resolved) {
+    match std::fs::read_to_string(resolved) {
         Ok(content) => {
             ToolOutcome::ok(read_window::line_window(&content, offset, limit).to_string())
         }

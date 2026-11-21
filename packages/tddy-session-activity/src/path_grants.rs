@@ -48,16 +48,29 @@ impl PathGrantStore {
 
     /// Every grant recorded for the session, oldest first; none when the file does not exist.
     pub fn grants(&self) -> std::io::Result<Vec<PathGrant>> {
-        // TODO(path-reach): implement
-        let _ = &self.session_dir;
-        unimplemented!("PathGrantStore::grants")
+        let bytes = match std::fs::read(self.file()) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        serde_json::from_slice(&bytes)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
     /// Record `grant`, keeping every earlier one. Written atomically.
     pub fn add(&self, grant: PathGrant) -> std::io::Result<()> {
-        // TODO(path-reach): implement
-        let _ = (&self.session_dir, grant);
-        unimplemented!("PathGrantStore::add")
+        let mut grants = self.grants()?;
+        grants.push(grant);
+        let bytes = serde_json::to_vec_pretty(&grants)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::create_dir_all(&self.session_dir)?;
+        let staging = self.session_dir.join(format!("{PATH_GRANTS_FILE}.tmp"));
+        std::fs::write(&staging, bytes)?;
+        std::fs::rename(&staging, self.file())
+    }
+
+    fn file(&self) -> PathBuf {
+        self.session_dir.join(PATH_GRANTS_FILE)
     }
 }
 

@@ -188,7 +188,34 @@ fn parse_section(
             .map_err(|e| format!("turn_input: {e}"))
             .map_err(invalid)?;
     }
+    validate_home_dirs(&agent.home_dirs)
+        .map_err(|e| format!("home_dirs: {e}"))
+        .map_err(invalid)?;
     Ok(agent)
+}
+
+/// Each `home_dirs` entry must be a non-empty path relative to the agent's home that stays under
+/// it: an absolute or `..`-climbing entry would put a directory outside the home into an
+/// orchestrator's read reach.
+fn validate_home_dirs(home_dirs: &[String]) -> Result<(), String> {
+    for dir in home_dirs {
+        let path = std::path::Path::new(dir);
+        if dir.is_empty() {
+            return Err("an entry is empty".to_string());
+        }
+        if path.is_absolute() {
+            return Err(format!(
+                "{dir} is absolute; it must be relative to the home"
+            ));
+        }
+        if path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(format!("{dir} climbs out of the home with `..`"));
+        }
+    }
+    Ok(())
 }
 
 /// Why a tool is not a usable coding agent.

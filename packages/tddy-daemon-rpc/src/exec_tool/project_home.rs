@@ -136,6 +136,12 @@ impl ExecToolRpcHandler {
         if is_session_message_tool(&req.tool_name) {
             return self.run_session_message_tool(req, sessions_base).await;
         }
+        if let Some(answered) = self
+            .run_in_orchestrator_reach(req, sessions_base, worktree_root)
+            .await?
+        {
+            return Ok(answered);
+        }
         if self.is_inbox_watch_call(req, sessions_base) {
             return self.run_inbox_watch_tool(req, sessions_base).await;
         }
