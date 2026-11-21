@@ -54,6 +54,22 @@ struct CliHarnessRelaunch<'a> {
     metadata: &'a SessionMetadata,
 }
 
+/// The workflow recipe the session's record names, resolved; `None` for an unmanaged session.
+fn recorded_managed_recipe(
+    metadata: &SessionMetadata,
+) -> Result<Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>, Status> {
+    let Some(name) = metadata
+        .recipe
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(name)
+        .map(Some)
+        .map_err(Status::invalid_argument)
+}
+
 impl LaunchSessions {
     /// Handle `ResumeSession` for a sandboxed CLI coding agent session.
     pub(crate) async fn resume_sandboxed_cli_harness(
@@ -96,17 +112,7 @@ impl LaunchSessions {
             &req.session_token,
         );
         // A recipe in the record marks a managed session; its workflow is re-wired on resume.
-        let managed_recipe = match metadata
-            .recipe
-            .as_deref()
-            .filter(|name| !name.trim().is_empty())
-        {
-            Some(name) => Some(
-                tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(name)
-                    .map_err(Status::invalid_argument)?,
-            ),
-            None => None,
-        };
+        let managed_recipe = recorded_managed_recipe(&metadata)?;
 
         let (pid, adopted_chat) = self
             .relaunch_sandboxed_cli_harness(CliHarnessRelaunch {
@@ -137,9 +143,10 @@ impl LaunchSessions {
 
         Ok(Response::new(ResumeSessionResponse {
             session_id: req.session_id.clone(),
-            livekit_room: String::new(),
-            livekit_url: String::new(),
-            livekit_server_identity: String::new(),
+            restored_tabs: self
+                .restore_roster_on_resume(os_user, &req.session_id, session_dir, &worktree_path)
+                .await,
+            ..Default::default()
         }))
     }
 

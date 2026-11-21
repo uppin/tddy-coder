@@ -16,6 +16,7 @@
 //! Feature docs: `docs/ft/daemon/{opencode,muse,warp}-cli-session.md` (`#agent-tools 8/12`).
 
 mod harness_launch;
+pub mod restore_tabs;
 mod resume;
 pub(crate) mod session_start;
 

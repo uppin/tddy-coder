@@ -16,6 +16,7 @@
 | 2026-11-05 | 72 → 73 | first record — over the threshold before #819. **Worse by 1** in #819: `CliSessionType` is no longer `Copy` (it holds the spec's `RoutedAgent`), so `kind.clone()` wraps the `resolve_session_agent` call onto two lines |
 | 2026-11-05 | 73 → 74 | **worse by 1** in #820: the resume binds the resumed conversation (`resumed_conversation`) and the node launcher; measured on `origin/feature/agent-tools/route-support` (`3c29698cd`) and HEAD at #820's wrap. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer (2026-11-04) |
 | 2026-11-06 | 74 → 87 | **worse by 13** in #823 (`#agent-tools` 17/19): the managed recipe and the renderer env re-wired on a jailed resume; measured fn line to closing brace on `origin/feature/agent-tools/spec-backend` (`d325fba73`) and HEAD; no coverage run. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
+| 2026-11-20 | 86 → 77 | #961 (`#session-liveness` 4/4): the sandboxed resume restores the roster in its response (+1, `..Default::default()`), and the recorded recipe is resolved by `recorded_managed_recipe` (−10); fn line to closing brace on `e430092a8` (86) and HEAD. Better by 9, still over 60 |
 
 ## What would close it
 

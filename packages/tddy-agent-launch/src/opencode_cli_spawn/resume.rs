@@ -55,16 +55,7 @@ impl crate::launch_ports::LaunchSessions {
             settled_resume_token(&self.cli_manager, &req.session_id, session_dir).await?;
         // Resolved before anything is re-wired: a Coder target whose vault has been locked
         // since the start refuses the resume here, and the session is kept as it was.
-        let target_shell = match &metadata.target {
-            Some(target) => Some(
-                crate::opencode_cli_spawn::session_start::shell_for_session_target(
-                    target,
-                    &(self.user_resolver)(&req.session_token).unwrap_or_default(),
-                    self.coder_credentials.as_ref(),
-                )?,
-            ),
-            None => None,
-        };
+        let target_shell = self.resumed_target_shell(req, &metadata)?;
         let session_agent = resolve_session_agent(&self.coding_agents, kind.clone())?;
         let identity = self.host.session_identity(
             os_user,
@@ -94,7 +85,8 @@ impl crate::launch_ports::LaunchSessions {
                 split.is_none(),
             )
             .await?;
-        resume_cli_harness_session(
+        let tab_worktree = worktree.clone();
+        let resumed = resume_cli_harness_session(
             &session_agent,
             &self.cli_manager,
             &self.host.session_account_access(&req.session_token),
@@ -121,7 +113,29 @@ impl crate::launch_ports::LaunchSessions {
                 target_shell,
             },
         )
-        .await
+        .await?;
+        let mut resumed = resumed.into_inner();
+        resumed.restored_tabs = self
+            .restore_roster_on_resume(os_user, &req.session_id, session_dir, &tab_worktree)
+            .await;
+        Ok(Response::new(resumed))
+    }
+
+    /// The shell a resumed target session's worktree is reached through, `None` for a host session.
+    fn resumed_target_shell(
+        &self,
+        req: &ResumeSessionRequest,
+        metadata: &SessionMetadata,
+    ) -> Result<Option<Arc<dyn tddy_remote_shell::RemoteShell>>, Status> {
+        let Some(target) = &metadata.target else {
+            return Ok(None);
+        };
+        crate::opencode_cli_spawn::session_start::shell_for_session_target(
+            target,
+            &(self.user_resolver)(&req.session_token).unwrap_or_default(),
+            self.coder_credentials.as_ref(),
+        )
+        .map(Some)
     }
 
     async fn resumed_split_wiring(
@@ -446,6 +460,7 @@ fn resumed_session_response(session_id: &str) -> Result<Response<ResumeSessionRe
         livekit_room: String::new(),
         livekit_url: String::new(),
         livekit_server_identity: String::new(),
+        restored_tabs: Vec::new(),
     }))
 }
 

@@ -4,6 +4,7 @@ import type { TerminalSessionService } from "tddy-client-web/gen/terminal_sessio
 import { tddyDebug } from "tddy-client-web";
 import { hostNotConnectedText, rpcFailureText } from "tddy-client-web";
 import { BASH_KIND } from "tddy-session-create-web";
+import { useActiveTabMemory } from "./lib/ActiveTabMemory";
 
 const dTerm = tddyDebug("tddy:term:tabs");
 
@@ -75,8 +76,21 @@ export function useSessionTerminals({
   client,
   controlToken = "",
 }: UseSessionTerminalsParams): SessionTerminalsController {
+  const lastActiveTab = useActiveTabMemory();
   const [terminals, setTerminals] = useState<SessionTerminal[]>([]);
-  const [activeTerminalId, setActiveTerminalId] = useState<string>(AGENT_TERMINAL_ID);
+  const [activeTerminalId, setActiveTerminalIdState] = useState<string>(
+    () => lastActiveTab.get(sessionId) ?? AGENT_TERMINAL_ID,
+  );
+  const setActiveTerminalId = useCallback(
+    (next: string | ((prev: string) => string)) => {
+      setActiveTerminalIdState((prev) => {
+        const id = typeof next === "function" ? next(prev) : next;
+        lastActiveTab.set(sessionId, id);
+        return id;
+      });
+    },
+    [lastActiveTab, sessionId],
+  );
   const [error, setError] = useState<string | null>(null);
 
   // Populate the terminal tabs from the session's current terminals once a client is available.
@@ -104,6 +118,13 @@ export function useSessionTerminals({
           }
           return merged;
         });
+        // A remembered tab the daemon no longer lists (dropped on a resume, closed elsewhere) falls
+        // back to the Agent tab rather than selecting nothing.
+        setActiveTerminalId((active) =>
+          active === AGENT_TERMINAL_ID || listed.some((t) => t.terminalId === active)
+            ? active
+            : AGENT_TERMINAL_ID,
+        );
         setError(null);
       } catch (err) {
         dTerm(
@@ -117,11 +138,14 @@ export function useSessionTerminals({
     return () => {
       cancelled = true;
     };
-  }, [client, sessionId, sessionToken]);
+  }, [client, sessionId, sessionToken, setActiveTerminalId]);
 
-  const setActive = useCallback((id: string) => {
-    setActiveTerminalId(id);
-  }, []);
+  const setActive = useCallback(
+    (id: string) => {
+      setActiveTerminalId(id);
+    },
+    [setActiveTerminalId],
+  );
 
   const open = useCallback(
     (kind: string, tmuxSession?: string, wrappers: readonly string[] = []) => {
@@ -166,13 +190,16 @@ export function useSessionTerminals({
         }
       })();
     },
-    [client, sessionId, sessionToken, controlToken],
+    [client, sessionId, sessionToken, controlToken, setActiveTerminalId],
   );
 
-  const dropEnded = useCallback((id: string) => {
-    setTerminals((prev) => prev.filter((t) => t.terminalId !== id));
-    setActiveTerminalId((prev) => (prev === id ? AGENT_TERMINAL_ID : prev));
-  }, []);
+  const dropEnded = useCallback(
+    (id: string) => {
+      setTerminals((prev) => prev.filter((t) => t.terminalId !== id));
+      setActiveTerminalId((prev) => (prev === id ? AGENT_TERMINAL_ID : prev));
+    },
+    [setActiveTerminalId],
+  );
 
   const close = useCallback(
     (id: string) => {

@@ -6,9 +6,10 @@
 //! manager. A tab that exits on its own is not forgotten here: Resume brings it back.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tddy_agent_launch::restore_tabs::{agent_launch_node, new_agent_tab, NewAgentTab};
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_cli_sessions::tmux::{
     agent_tab_tmux_session_name, ensure_reachable, kill_tmux_session, start_agent_tmux_session,
@@ -83,15 +84,15 @@ impl CliManagerTerminalRoster {
         worktree: PathBuf,
         kind: &str,
     ) -> Result<StartedTab, Status> {
-        let (argv, conversation_id) = self.agent_tab_argv(kind)?;
+        let tab = self.new_agent_tab(kind, &worktree).await?;
         let handle = self
             .manager
-            .start_agent_terminal(session_id, worktree, kind, argv)
+            .start_agent_terminal(session_id, worktree, kind, tab.argv)
             .await
             .map_err(failed_to_start)?;
         Ok(StartedTab {
             handle,
-            launch: vec![LaunchNode::agent(kind, &conversation_id)],
+            launch: vec![agent_launch_node(kind, &tab.conversation_id, tab.resumable)],
         })
     }
 
@@ -163,34 +164,14 @@ impl CliManagerTerminalRoster {
         Ok(unified_session_dir_path(&self.tddy_data_dir, session_id))
     }
 
-    /// The argv an agent tab of `kind` runs, and the conversation it holds: the spec's `run.argv`
-    /// rendered with a conversation id of its own — a tab is never the session's conversation.
-    pub(super) fn agent_tab_argv(&self, kind: &str) -> Result<(Vec<String>, String), Status> {
-        let spec = self
-            .coding_agents
-            .agents()
-            .for_session_type(kind)
-            .ok_or_else(|| Status::invalid_argument(format!("unknown terminal kind {kind:?}")))?;
-        // The binary is the agent spec's, resolved on this host (`#agent-tools 19/19`): its
-        // `binary.env`, then the host's search, refusing what is found nowhere.
-        let binary = self
-            .coding_agents
-            .resolve(&spec.id, None)
-            .map_err(|e| Status::failed_precondition(e.to_string()))?
-            .tool
-            .binary;
-        let conversation_id = uuid::Uuid::now_v7().to_string();
-        let argv = spec
-            .render_run_argv(
-                &binary,
-                &[
-                    ("session_id", conversation_id.as_str()),
-                    ("chat_id", conversation_id.as_str()),
-                ],
-                &[],
-            )
-            .map_err(|e| Status::failed_precondition(e.to_string()))?;
-        Ok((argv, conversation_id))
+    /// A new agent tab of `kind` in `worktree`: what it runs and the conversation it holds. The
+    /// restore (`#session-liveness` 4/4) shares the rule — see [`new_agent_tab`].
+    pub(super) async fn new_agent_tab(
+        &self,
+        kind: &str,
+        worktree: &Path,
+    ) -> Result<NewAgentTab, Status> {
+        new_agent_tab(&self.coding_agents, kind, worktree).await
     }
 
     /// Run agent tab `kind` in a tmux session of its own, `tddy-<session_id>-<terminal_id>`, as
@@ -205,7 +186,11 @@ impl CliManagerTerminalRoster {
         // The same reachability check the tmux tab makes: a daemon that cannot become the session's
         // user refuses with the named error, and never starts the agent as the daemon user.
         ensure_reachable(os_user, &EffectiveIdentity::current())?;
-        let (argv, conversation_id) = self.agent_tab_argv(kind)?;
+        let NewAgentTab {
+            argv,
+            conversation_id,
+            resumable,
+        } = self.new_agent_tab(kind, &worktree).await?;
         let session_dir = self.session_dir(session_id)?;
         let terminal_id = uuid::Uuid::now_v7().to_string();
         let name = agent_tab_tmux_session_name(session_id, &terminal_id);
@@ -235,7 +220,7 @@ impl CliManagerTerminalRoster {
                 handle,
                 launch: vec![
                     LaunchNode::tmux(&name, os_user),
-                    LaunchNode::agent(kind, &conversation_id),
+                    agent_launch_node(kind, &conversation_id, resumable),
                 ],
             }),
             Err(error) => {

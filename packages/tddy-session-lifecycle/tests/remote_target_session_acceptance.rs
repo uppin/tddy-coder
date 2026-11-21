@@ -275,13 +275,21 @@ impl ADaemonWithATarget {
     }
 
     async fn resume(&self, session_id: &str) -> Result<(), tddy_rpc::Status> {
+        self.resume_reporting_tabs(session_id).await.map(|_| ())
+    }
+
+    /// Resume `session_id`, and what it reports of its roster's tabs.
+    async fn resume_reporting_tabs(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<tddy_service::proto::session::RestoredTab>, tddy_rpc::Status> {
         self.service
             .resume_session(Request::direct(ResumeSessionRequest {
                 session_token: VALID_TOKEN.to_string(),
                 session_id: session_id.to_string(),
             }))
             .await
-            .map(|_| ())
+            .map(|resumed| resumed.into_inner().restored_tabs)
     }
 
     async fn delete(&self, session_id: &str) -> Result<(), tddy_rpc::Status> {
@@ -576,4 +584,52 @@ async fn deleting_a_target_session_removes_its_worktree_and_pointer_on_the_targe
         ),
         (false, false, false)
     );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_resume_restores_the_roster_of_a_target_session_by_each_tabs_own_chain() {
+    // Given a session on the target whose agent was stopped, and a roster holding a shell tab and a
+    // tab whose chain a later daemon wrapped in a kind this one does not know
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon.a_session_on_the_target().await;
+    let first = daemon.the_agent_on_the_target(&session_id).await;
+    daemon.stop(&session_id).await;
+    the_agent_has_ended(&first).await;
+    tddy_core::tab_roster::write_tab_roster(
+        &daemon.session_dir(&session_id),
+        &tddy_core::tab_roster::TabRoster {
+            tabs: vec![
+                tddy_core::tab_roster::TabEntry::new(
+                    "019b-shell-tab",
+                    vec![tddy_core::tab_roster::LaunchNode::shell()],
+                ),
+                tddy_core::tab_roster::TabEntry::new(
+                    "019b-jailed-tab",
+                    vec![
+                        tddy_core::tab_roster::LaunchNode::new("sandbox", [("profile", "p")]),
+                        tddy_core::tab_roster::LaunchNode::shell(),
+                    ],
+                ),
+            ],
+            ..Default::default()
+        },
+    )
+    .expect("the roster is written");
+
+    // When the session is resumed
+    let tabs = daemon
+        .resume_reporting_tabs(&session_id)
+        .await
+        .expect("a stopped session on a target resumes");
+
+    // Then both tabs are reported — none skipped for where main runs — and the unknown kind is
+    // dropped naming it, without failing the resume
+    let reported: Vec<&str> = tabs.iter().map(|tab| tab.terminal_id.as_str()).collect();
+    assert_eq!(reported, vec!["019b-shell-tab", "019b-jailed-tab"]);
+    assert_eq!(
+        tabs[1].outcome,
+        tddy_service::proto::session::RestoredTabOutcome::Dropped as i32
+    );
+    assert!(tabs[1].reason.contains("sandbox"), "{}", tabs[1].reason);
 }

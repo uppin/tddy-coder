@@ -1,6 +1,6 @@
 # Session liveness
 
-**Status:** ✅ Shipped (`#session-liveness` 1/4 PR #958, 2/4 PR #959, 3/4 PR #960)
+**Status:** ✅ Shipped (`#session-liveness` 1/4 PR #958, 2/4 PR #959, 3/4 PR #960, 4/4 PR #961)
 
 ## Summary
 
@@ -131,6 +131,38 @@ to the child the worker or direct spawn owns. The supervisor's `SignalSession` i
 never spawned. A resumed tool session registers its respawned child the same way, and the host-session
 socket stops answering the session when the child's end is reported.
 
+## Resume restores the roster
+
+`ResumeSession` brings back **every tab of the session's [roster](#the-tab-roster)**, not only main, each
+under its **recorded terminal id**. Main is resumed first, by its own unchanged path; then every other
+entry, in roster order, is restored as its launch chain says. The restore runs on every resume path —
+host, sandboxed and target sessions alike — and a main that fails still fails the resume.
+
+| Outermost node | Restored as |
+|---|---|
+| a terminal already live | left alone (reported `RESTORED`) |
+| `agent` (resumable) | started under its id with the harness's resume: claude `--resume <conversation id>`, cursor `--resume <chat id>` |
+| `agent` (`resumable: false`) | started **fresh** under its id, reported `FRESH` |
+| `tmux` → `agent` | its tmux session alive: a client is **re-attached**, the agent untouched. Gone: the agent is relaunched in a new tmux session of the same name and resumes its conversation (fresh when not resumable) |
+| `shell` | the session user's login shell, fresh |
+| `tmux-attach` | re-attached while the user's tmux session exists; otherwise **dropped** |
+
+- **Resumable conversations.** A tab resumes *its own* conversation only for a harness whose conversation
+  is the daemon's session id (claude) or one the agent mints (cursor). A cursor tab is now started with a
+  real chat the agent creates, so it can be resumed at all; the `agent` node records `conversation_id`.
+  opencode and muse `--continue` the worktree's last conversation (main's, ambiguous across tabs) and warp
+  needs an exit-hook token a tab does not capture: such a tab's `agent` node carries `resumable: "false"`
+  and it reopens fresh.
+- **Unknown kinds are dropped.** A chain holding a node kind this daemon cannot restore — anywhere in the
+  chain — is **dropped** with a reason naming the kind, never a failed resume. The same goes for an empty
+  chain, a node missing a property it needs (`harness`, `session`, `os_user`, `conversation_id`), a harness
+  the host no longer has, or a gone `tmux-attach` session. A dropped tab is forgotten from `tabs.yaml`.
+- **Failures are per tab.** `ResumeSessionResponse.restored_tabs` has one `RestoredTab { terminal_id,
+  outcome: RESTORED | FRESH | DROPPED, reason }` per restored entry; `FRESH` and `DROPPED` carry why.
+- **Web.** The stopped strip is replaced by the live one with the restored tabs under their ids, and the
+  tab that was active stays selected (an id the daemon no longer lists falls back to the Agent tab). A tab
+  reopened fresh or dropped is named, with the daemon's reason, in a notice over the pane.
+
 ## What acts on held processes
 
 - **Delete** stops every terminal the session has (main and tabs), its process tab through its holder,
@@ -164,6 +196,18 @@ agent for), and Telegram's list, branch-owner scan and delete.
   serve; until then a replace cannot stop it.
 - What a detached tmux-run agent prints while nobody is attached is not recorded, for a main and for a
   wrapped tab alike: history serves the recording up to the client's end.
+- **Only host-side tabs are restored.** Nothing starts a secondary tab inside a running jail or on a
+  target today — a sandboxed or target session's tabs start host-side — so every recorded chain is host-side
+  and so is its restore. Two further stack nodes are planned: **sandbox tab restore** (a jail-side tab spawn
+  plus a per-tab `sandbox` wrapper node in `tabs.yaml`; sandboxed and non-sandboxed tabs can then coexist in
+  one session) and **target tab restore** (a target tab launch plus a target wrapper node, restoring through
+  the session's `RemoteShell`). `restore_plan` dispatches per node kind, so each adds a kind. Until then a
+  chain holding such a kind is dropped with a reason, and a target session's host-recorded shell tab is
+  probably dropped on resume.
+- opencode, muse and warp tabs reopen fresh, not in their conversation (`TODO(opencode-cli)`,
+  `TODO(muse-cli)`, `TODO(warp-cli)` on `tab_conversation_is_resumable`).
+- The sandboxed resume path calls the same restore but has no test of its own: its jail harness is the
+  macOS-only one, which already fails on `master`.
 - A tab started as **New tmux session…** is recorded as `tmux-attach`, like one attached to an existing
   session; only the wrapper the daemon creates around an agent is a `tmux` node.
 

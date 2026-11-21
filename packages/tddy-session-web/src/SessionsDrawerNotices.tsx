@@ -68,3 +68,20 @@ export function SessionsDrawerPaneError({ message }: { message: string | null })
     />
   );
 }
+
+/**
+ * What the last Resume says of the tabs it reopened fresh or dropped, over the pane: informational,
+ * so it is not the pane's error.
+ */
+export function SessionsDrawerResumeNotice({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <div
+      data-testid="sessions-resume-notice"
+      role="status"
+      className="absolute bottom-3 left-1/2 z-40 max-w-[min(90%,40rem)] -translate-x-1/2 rounded-md border border-border bg-background px-3 py-1.5 text-xs shadow-md"
+    >
+      {message}
+    </div>
+  );
+}
