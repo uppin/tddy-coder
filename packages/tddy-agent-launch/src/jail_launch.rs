@@ -253,7 +253,9 @@ impl LaunchSessions {
         let (stdout_tx, _) = tokio::sync::broadcast::channel(256);
         let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
         let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
-        dial_and_bridge_with_egress(
+        // TODO(jail-death-watch): hand the bridge to the state (`SandboxSessionState::with_bridge`)
+        // so the jail's stop stops its tasks.
+        let _bridge = dial_and_bridge_with_egress(
             session_id,
             worktree_path.to_path_buf(),
             &mut handle,

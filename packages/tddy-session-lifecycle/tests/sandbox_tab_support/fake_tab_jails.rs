@@ -7,7 +7,6 @@
 //! real capture show — not the kernel sandbox, which `sandbox_shell_tab_jail_linux` covers.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
@@ -140,20 +139,8 @@ impl FakeTabJailSpawn {
         launch: &TabJailLaunch,
         banner: String,
     ) -> SandboxSessionState {
-        let child = Command::new("sleep")
-            .arg("300")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("the stand-in runner starts");
-        let pid = child.id();
-        let handle = tddy_sandbox::SandboxHandle::new(
-            child,
-            self.dir.path().join("profile.sb"),
-            self.dir.path().join("unused.sock"),
-            self.dir.path().join("sandbox.ready"),
-        );
+        let handle = super::a_stand_in_runner(self.dir.path());
+        let pid = handle.pid();
         let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
         capture.lock().unwrap().append(banner.as_bytes());
         let (stdout_tx, _) = broadcast::channel(64);

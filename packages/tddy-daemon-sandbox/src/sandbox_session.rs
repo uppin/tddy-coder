@@ -143,6 +143,8 @@ impl SandboxSessionManager {
     }
 
     pub async fn insert(&self, session_id: String, state: Arc<SandboxSessionState>) {
+        // TODO(jail-death-watch): watch the jail (`jail_exit_watch::watch_jail_exit`); one that
+        // exits on its own leaves the registry and is announced on `subscribe_ended`.
         self.inner.lock().await.insert(session_id, state);
     }
 
@@ -456,7 +458,9 @@ impl tddy_rpc::RpcService for NoCallbackSandboxService {
 
 /// Dial the sandboxed runner over its stdio-served `SessionChannel` and drive the host side via
 /// the shared relay. PTY output fans into the broadcast channel (live subscribers) and the
-/// rolling capture buffer (late subscribers); tool calls run in `worktree_path`.
+/// rolling capture buffer (late subscribers); tool calls run in `worktree_path`. Returns the tasks
+/// that do it, for the jail's state to stop with the jail
+/// ([`JailBridge`](crate::jail_exit_watch::JailBridge)).
 ///
 /// The relay admits every host the jail asks to tunnel to; [`dial_and_bridge_with_egress`] holds it
 /// to a policy.
@@ -473,7 +477,7 @@ pub async fn dial_and_bridge(
     session_dir: PathBuf,
     agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
     rpc_handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler>,
-) -> Result<(), String> {
+) -> Result<crate::jail_exit_watch::JailBridge, String> {
     dial_and_bridge_with_egress(
         session_id,
         worktree_path,
@@ -508,13 +512,13 @@ pub async fn dial_and_bridge_with_egress(
     agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
     rpc_handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler>,
     egress: tddy_sandbox_runner::EgressGuard,
-) -> Result<(), String> {
+) -> Result<crate::jail_exit_watch::JailBridge, String> {
     log::info!(
         target: "tddy_daemon_sandbox::sandbox_session",
         "opening sandbox SessionChannel for session {session_id}"
     );
 
-    let (client, _run_handle) = bridge_sandbox_stdio(handle, NoCallbackSandboxService).await?;
+    let (client, endpoint) = bridge_sandbox_stdio(handle, NoCallbackSandboxService).await?;
     let stdio_client = tddy_sandbox_runner::StdioSandboxClient::new(client);
 
     // Output and the jail's size changes arrive on one channel, in order: a size change read apart
@@ -522,7 +526,8 @@ pub async fn dial_and_bridge_with_egress(
     let (events_tx, events_rx) = mpsc::unbounded_channel();
     // `HostRelayConfig::new` requires a byte sink; with events set the relay never writes to it.
     let (term_tx, _unused_bytes_sink) = mpsc::unbounded_channel::<Bytes>();
-    forward_jail_terminal_events(events_rx, Arc::clone(&capture), stdout_tx.clone());
+    let forwarder =
+        forward_jail_terminal_events(events_rx, Arc::clone(&capture), stdout_tx.clone());
 
     let handler = DaemonToolHandler {
         worktree: worktree_path,
@@ -531,7 +536,7 @@ pub async fn dial_and_bridge_with_egress(
         session_dir,
         agent_activity_hub,
     };
-    tddy_sandbox_runner::run_host_relay_with_rpc(
+    let relay = tddy_sandbox_runner::run_host_relay_with_rpc(
         stdio_client,
         handler,
         rpc_handler,
@@ -541,7 +546,9 @@ pub async fn dial_and_bridge_with_egress(
         stdin_rx,
     )
     .await?;
-    Ok(())
+    Ok(crate::jail_exit_watch::JailBridge::new(
+        endpoint, relay, forwarder,
+    ))
 }
 
 /// Feed a jailed terminal's reported events into its capture and live broadcast: output is appended

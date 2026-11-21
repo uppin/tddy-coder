@@ -3,8 +3,9 @@
 **Date**: 2026-11-21
 **Status**: 🚧 In Progress
 **Type**: Bug Fix
-**Complexity**: 4 — two crates (daemon-sandbox, session-lifecycle) plus agent-launch call sites, exit-watch concurrency against stop/reap
+**Complexity**: 4 — two crates (daemon-sandbox, session-lifecycle) plus agent-launch call sites, exit-watch concurrency against stop/reap (re-scored at the contract: unchanged — 9 failing tests, one new module, three test fixtures folded)
 **Stack**: `#tab-hardening` 3/4 — branch `feature/tab-hardening/jail-death-watch`, base `feature/tab-hardening/tab-hygiene`
+**PR**: #991 https://github.com/uppin/tddy-coder/pull/991
 
 ## Initial Discovery
 
@@ -47,6 +48,18 @@ A main jail that dies on its own ends its terminal (status recorded), leaves the
 
 The first push publishes `JailProcess`, `JailBridge`, `JailEnded`, `subscribe_ended` and `watch_jail_exit` as `todo!()`, and the failing tests below.
 
+Published surface (all in the new module `packages/tddy-daemon-sandbox/src/jail_exit_watch.rs`, bodies `todo!()` unless noted):
+
+- `pub struct JailEnded { session_id: String, exit: tddy_task::ChildExit }`
+- `pub enum JailProcess { Owned(std::process::Child) }` + `From<SandboxHandle>` (implemented); `pid`, `try_exit` (`WNOHANG | WNOWAIT`), `kill_and_reap`
+- `pub fn wait_without_reaping(pid: u32) -> io::Result<ChildExit>` — blocking `waitid(WEXITED | WNOWAIT)`
+- `pub async fn watch_jail_exit(state: Arc<SandboxSessionState>) -> Option<ChildExit>` — `Some` for a death, `None` for a requested stop; records the exit on the state
+- `pub struct JailBridge` + `new(endpoint, relay, forwarder)` (implemented) + `abort`
+- `SandboxSessionState::{with_bridge, exit, subscribe_exit}`; `SandboxSessionManager::subscribe_ended`
+- `dial_and_bridge` / `dial_and_bridge_with_egress` now return `Result<JailBridge, String>` (implemented: the three handles they used to drop). The two agent-launch call sites bind it as `_bridge` with a `TODO(jail-death-watch)` to hand it to `with_bridge` — dropping it detaches the tasks, exactly as before.
+
+Wiring left for green, each marked `TODO(jail-death-watch)`: `SandboxSessionManager::insert` starts the watch; `SandboxTerminalSession::subscribe_pty_done` follows `subscribe_exit`; `is_running`/`runner_pid`/`stop` go through `JailProcess` so a liveness poll never reaps the status away.
+
 ## Green wave
 
 **Wave:** 1 of 2
@@ -76,8 +89,8 @@ Recorded by this node at wrap (developer decision 2026-11-21): jails run as the 
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests / run them (verify they fail) / USER REVIEW
-- [ ] TDD Red — failing unit/integration tests
+- [x] Create failing acceptance tests / run them (verify they fail) / USER REVIEW
+- [x] TDD Red — failing unit/integration tests
 - [ ] Implementation
 - [ ] Package documentation, scoped clippy, single-spec Cypress
 
@@ -94,18 +107,28 @@ As Responsibility.
 ## Acceptance Tests
 
 `packages/tddy-daemon-sandbox/src/sandbox_session_liveness_tests.rs` (extended):
-- [ ] `a_main_jail_that_exits_is_announced_ended_with_its_status`
-- [ ] `a_main_jail_stopped_by_request_is_not_announced`
-- [ ] `a_main_jail_that_exits_leaves_the_registry`
+- [x] `a_main_jail_that_exits_is_announced_ended_with_its_status`
+- [x] `a_main_jail_stopped_by_request_is_not_announced`
+- [x] `a_main_jail_that_exits_leaves_the_registry`
 
 `packages/tddy-session-lifecycle/tests/sandbox_terminal_parity_acceptance.rs` (extended):
-- [ ] `a_sandboxed_sessions_terminal_ends_when_its_jail_dies`
-- [ ] `a_sandboxed_session_whose_jail_died_lists_inactive_and_keeps_its_tab_jails`
+- [x] `a_sandboxed_sessions_terminal_ends_when_its_jail_dies`
+- [x] `a_sandboxed_session_whose_jail_died_lists_inactive_and_keeps_its_tab_jails`
+
+Pre-existing tests this node changed, because their premise is the behaviour it replaces:
+- `a_sandboxed_session_whose_runner_exited_is_not_live` no longer asserts that the dead jail's entry stays registered (it now leaves — the third test above).
+- The parity suite's jail stand-in was an already-exited `true`; it is now a running `sleep` (`a_stand_in_runner`), because a registered dead jail now ends its terminal and leaves the registry.
 
 ## Unit Tests
 
 - `watch_jail_exit`: status recorded for `exit 3` and for a signal; a stop during the wait is silent.
 - `JailBridge`: handles aborted on stop.
+
+Written in `packages/tddy-daemon-sandbox/src/jail_exit_watch_tests.rs`: `waiting_without_reaping_leaves_the_exit_for_its_owner_to_reap`, `a_jail_process_reads_its_exit_without_reaping_it`, `the_watch_records_the_status_of_a_runner_that_exits_3`, `the_watch_records_the_signal_that_killed_its_runner`, `the_watch_keeps_the_status_when_liveness_was_polled_first`, `the_watch_is_silent_for_a_runner_stopped_during_the_wait`, `aborting_a_bridge_ends_every_task_of_it`, `a_jails_stop_aborts_the_bridge_it_holds`.
+
+Test fixture: the stand-in jail built three times in this crate (`a_sandbox_running`, `a_main_jail_running`, `a_sleeping_jail`) is one, `src/jail_test_support.rs`; in tddy-session-lifecycle the parity suite, `sandbox_tab_support` and `fake_tab_jails` share `a_stand_in_runner`.
+
+Running them: the session-lifecycle tab suites need `tddy-tools` prebuilt (`cargo build -p tddy-tools-cli`, `TDDY_TOOLS_BINARY=$PWD/target/debug/tddy-tools`), and the daemon-sandbox lib needs `tddy-sandbox-runner` prebuilt.
 
 ## Decisions & Trade-offs
 
@@ -118,10 +141,10 @@ As Responsibility.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

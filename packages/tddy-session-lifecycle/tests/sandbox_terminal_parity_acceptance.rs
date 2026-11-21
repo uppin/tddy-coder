@@ -25,7 +25,10 @@
 //! channels and everything the bridge asks a terminal for — including the four absences
 //! `SandboxTerminalSession` synthesises an answer for.
 
-use std::path::PathBuf;
+mod sandbox_tab_support;
+mod support;
+
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
@@ -49,6 +52,9 @@ use tddy_terminal_rpc::{
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{timeout, Duration};
 use tokio_stream::StreamExt;
+
+use sandbox_tab_support::{a_sandboxed_session, a_stand_in_runner, the_runner_of_dies_on_its_own};
+use support::OBSERVE;
 
 /// The session id every request below addresses.
 const SESSION_ID: &str = "sandboxed-session";
@@ -166,6 +172,8 @@ fn an_anchored_frame(
 /// A registered sandboxed session and the three channels its jail speaks through.
 struct SandboxedSession {
     store: DaemonTerminalSessionStore,
+    /// The jail itself, whose runner a test can kill.
+    jail: Arc<SandboxSessionState>,
     capture: Arc<Mutex<TerminalCapture>>,
     stdout_tx: broadcast::Sender<Bytes>,
     stdin_rx: mpsc::UnboundedReceiver<Bytes>,
@@ -187,13 +195,16 @@ impl SandboxedSession {
             capture: Arc::clone(&capture),
             stdin_tx,
             ready_marker: PathBuf::from("/unused-by-the-terminal-surface"),
-            handle: an_exited_sandbox_process(),
+            handle: a_stand_in_runner(Path::new(UNUSED_BY_THE_TERMINAL_SURFACE)),
             managed_workflow: None,
         }));
-        sandboxes.insert(SESSION_ID.to_string(), state).await;
+        sandboxes
+            .insert(SESSION_ID.to_string(), Arc::clone(&state))
+            .await;
 
         SandboxedSession {
             store: DaemonTerminalSessionStore::new(Arc::new(CliSessionManager::new()), sandboxes),
+            jail: state,
             capture,
             stdout_tx,
             stdin_rx,
@@ -261,19 +272,10 @@ impl ServedStream {
     }
 }
 
-/// A process standing in for the jail: `SandboxSessionState` keeps the handle only so delete/resume
-/// can kill the tree, and nothing on the terminal surface reads it.
-fn an_exited_sandbox_process() -> tddy_sandbox::SandboxHandle {
-    let child = std::process::Command::new("true")
-        .spawn()
-        .expect("a trivial child process");
-    tddy_sandbox::SandboxHandle::new(
-        child,
-        PathBuf::from("/unused-by-the-terminal-surface"),
-        PathBuf::from("/unused-by-the-terminal-surface"),
-        PathBuf::from("/unused-by-the-terminal-surface"),
-    )
-}
+/// Where a jail's files would be: nothing on the terminal surface reads them. The jail's runner is a
+/// running stand-in — a runner that has already exited would be a jail that died, which ends its
+/// terminal and leaves the registry.
+const UNUSED_BY_THE_TERMINAL_SURFACE: &str = "/unused-by-the-terminal-surface";
 
 /// A `StreamTerminalOutputRequest` for the jail's main terminal, resuming as `mode` says.
 fn an_output_request(mode: StreamReplayMode, from_offset: u64) -> StreamTerminalOutputRequest {
@@ -492,6 +494,68 @@ async fn ends_a_jails_stream_when_its_output_broadcast_closes() {
 }
 
 // ---------------------------------------------------------------------------
+// A jail that dies on its own (`#tab-hardening` 3/4)
+// PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-jail-death-watch.md
+// ---------------------------------------------------------------------------
+
+impl SandboxedSession {
+    /// The jail's runner dies on its own while the session is still held: no stop was asked for,
+    /// and its output broadcast stays open.
+    fn the_jail_dies_on_its_own(&self) {
+        the_runner_of_dies_on_its_own(&self.jail);
+    }
+}
+
+#[tokio::test]
+async fn a_sandboxed_sessions_terminal_ends_when_its_jail_dies() {
+    // Given an open stream on a jail whose runner runs
+    let session = SandboxedSession::holding(b"0123456789").await;
+    let mut rx = serve_stream_terminal_output_with(
+        &session.store,
+        an_output_request(StreamReplayMode::FromOffset, 10),
+        FRAME_BUDGET_BYTES,
+    )
+    .await
+    .expect("the store resolved the jail's terminal");
+    timeout(FRAME_TIMEOUT, rx.recv())
+        .await
+        .expect("the anchoring frame arrives");
+
+    // When its runner dies on its own, the session still held
+    session.the_jail_dies_on_its_own();
+
+    // Then the stream ends rather than hanging open on a dead jail
+    assert!(
+        timeout(OBSERVE, rx.recv())
+            .await
+            .expect("the stream of a jail that died reaches its end")
+            .is_none(),
+        "the stream ends rather than yielding another frame"
+    );
+}
+
+#[tokio::test]
+async fn a_sandboxed_session_whose_jail_died_lists_inactive_and_keeps_its_tab_jails() {
+    // Given a sandboxed session with a jailed shell tab open
+    let daemon = a_sandboxed_session().await;
+    let tab = daemon.opens_a_jailed_shell().await;
+
+    // When its main jail dies on its own
+    daemon.the_main_jail_dies_on_its_own();
+
+    // Then its main terminal ends, it lists inactive, and its tab's jail runs on, still served
+    daemon.until_the_main_terminal_ends().await;
+    assert_eq!(
+        (
+            daemon.is_listed_active().await,
+            daemon.jails.running_jails(),
+            daemon.listed_terminal_ids().await.contains(&tab),
+        ),
+        (false, [tab.clone()].into_iter().collect(), true)
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Input, and the history the old coordinate refused
 // ---------------------------------------------------------------------------
 
@@ -626,7 +690,7 @@ impl ADaemonServingAJailedSession {
                     capture: Arc::new(Mutex::new(TerminalCapture::new())),
                     stdin_tx,
                     ready_marker: PathBuf::from("/unused-by-the-terminal-surface"),
-                    handle: an_exited_sandbox_process(),
+                    handle: a_stand_in_runner(Path::new(UNUSED_BY_THE_TERMINAL_SURFACE)),
                     managed_workflow: None,
                 })),
             )

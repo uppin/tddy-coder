@@ -116,6 +116,8 @@ impl tddy_terminal_rpc::session::TerminalSession for SandboxTerminalSession {
     /// opened. The probe task owns it, and stands down when the last receiver goes away so a
     /// session reconnected to many times does not accumulate probes.
     fn subscribe_pty_done(&self) -> watch::Receiver<bool> {
+        // TODO(jail-death-watch): follow the jail's exit (`SandboxSessionState::subscribe_exit`):
+        // the state holds `stdout_tx`, so a runner that dies on its own never closes the broadcast.
         let (pty_done_tx, pty_done_rx) = watch::channel(false);
         let mut stdout_rx = self.state.stdout_tx.subscribe();
         tokio::spawn(async move {

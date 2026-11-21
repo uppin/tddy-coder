@@ -186,22 +186,36 @@ fn a_session_host(
     )
 }
 
-/// The session's main jail: a `sleep` standing in for its runner.
-fn a_stand_in_main_jail(worktree: &Path) -> SandboxSessionState {
+/// A `sleep` standing in for a jail's runner: it runs until it is stopped or killed. `dir` names the
+/// files its handle carries, which nothing reads.
+pub fn a_stand_in_runner(dir: &Path) -> tddy_sandbox::SandboxHandle {
     let child = Command::new("sleep")
         .arg("300")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("the stand-in main runner starts");
-    let pid = child.id();
-    let handle = tddy_sandbox::SandboxHandle::new(
+        .expect("the stand-in runner starts");
+    tddy_sandbox::SandboxHandle::new(
         child,
-        worktree.join("unused-profile.sb"),
-        worktree.join("unused.sock"),
-        worktree.join("unused.ready"),
-    );
+        dir.join("unused-profile.sb"),
+        dir.join("unused.sock"),
+        dir.join("unused.ready"),
+    )
+}
+
+/// The runner of `jail` is killed from outside the daemon, as a crashed or OOM-killed runner is: it
+/// dies on its own, not by the daemon's request.
+pub fn the_runner_of_dies_on_its_own(jail: &SandboxSessionState) {
+    let pid = jail.runner_pid().expect("the stand-in runner is running") as libc::pid_t;
+    // SAFETY: `pid` is the stand-in runner this fixture spawned, still running and unreaped.
+    unsafe { libc::kill(pid, libc::SIGKILL) };
+}
+
+/// The session's main jail: a `sleep` standing in for its runner.
+fn a_stand_in_main_jail(worktree: &Path) -> SandboxSessionState {
+    let handle = a_stand_in_runner(worktree);
+    let pid = handle.pid();
     let (stdout_tx, _) = broadcast::channel(64);
     let (stdin_tx, _) = mpsc::unbounded_channel();
     SandboxSessionState::new(SandboxSessionStateInit {
@@ -299,6 +313,25 @@ impl SandboxedTabDaemon {
             .as_ref()
             .expect("the session is sandboxed")
             .stop();
+    }
+
+    /// The session's main jail dies on its own: its runner is killed from outside the daemon.
+    pub fn the_main_jail_dies_on_its_own(&self) {
+        the_runner_of_dies_on_its_own(self.main_jail.as_ref().expect("the session is sandboxed"));
+    }
+
+    /// Wait until the store no longer serves the session's main terminal.
+    pub async fn until_the_main_terminal_ends(&self) {
+        eventually_awaiting("the main terminal to end", OBSERVE, || async {
+            self.host
+                .terminal_sessions()
+                .get_terminal(JAILED_SESSION_ID, "main")
+                .await
+                .is_none()
+                .then_some(())
+                .ok_or_else(|| "the main terminal is still served".to_string())
+        })
+        .await;
     }
 
     /// Stop every process the daemon holds for the session, as a stop of its live processes does

@@ -38,12 +38,15 @@
 pub mod action_service;
 pub mod build_action_sandbox;
 mod conversation_tool;
+pub mod jail_exit_watch;
+#[cfg(all(test, unix))]
+mod jail_test_support;
 mod main_recording;
 pub mod sandbox_action;
 pub mod sandbox_plan_builder;
 pub mod sandbox_runtime;
 pub mod sandbox_session;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod sandbox_session_liveness_tests;
 #[cfg(all(test, unix))]
 mod sandbox_session_stop_all_tests;
