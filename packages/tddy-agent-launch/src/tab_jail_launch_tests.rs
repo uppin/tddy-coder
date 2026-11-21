@@ -30,7 +30,8 @@ struct EveryBinaryAt(PathBuf);
 
 impl ToolHost for EveryBinaryAt {
     fn env_var(&self, name: &str) -> Option<String> {
-        name.ends_with("_BINARY").then(|| self.0.display().to_string())
+        name.ends_with("_BINARY")
+            .then(|| self.0.display().to_string())
     }
 
     fn path_dirs(&self) -> Vec<PathBuf> {
