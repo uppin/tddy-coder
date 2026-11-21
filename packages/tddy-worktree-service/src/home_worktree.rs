@@ -90,7 +90,7 @@ fn is_linked_worktree_of(main_repo: &Path, path: &Path) -> Result<bool, HomeWork
 
 /// Fetch the branch `main_branch_ref` (`<remote>/<branch>`) names from its remote. A ref whose
 /// first segment is no remote of this repository (a local branch) has nothing to fetch.
-fn fetch_ref(repo: &Path, main_branch_ref: &str) -> Result<(), HomeWorktreeError> {
+pub(crate) fn fetch_ref(repo: &Path, main_branch_ref: &str) -> Result<(), HomeWorktreeError> {
     let Some((remote, branch)) = main_branch_ref.split_once('/') else {
         return Ok(());
     };
@@ -108,7 +108,7 @@ fn resolve_ref(repo: &Path, main_branch_ref: &str) -> Result<(), HomeWorktreeErr
         .map_err(|_| HomeWorktreeError::UnknownRef(main_branch_ref.to_string()))
 }
 
-fn git(cwd: &Path, args: &[&str]) -> Result<String, HomeWorktreeError> {
+pub(crate) fn git(cwd: &Path, args: &[&str]) -> Result<String, HomeWorktreeError> {
     let output = std::process::Command::new("git")
         .args(args)
         .current_dir(cwd)

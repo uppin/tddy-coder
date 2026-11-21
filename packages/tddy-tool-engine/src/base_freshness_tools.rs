@@ -23,8 +23,24 @@ pub fn is_base_freshness_tool(name: &str) -> bool {
 /// The two tools' definitions. Neither takes an argument: they act on the caller's home and its
 /// project's trunk.
 pub fn base_freshness_tool_defs() -> Vec<ToolDef> {
-    // TODO(base-freshness): implement
-    unimplemented!("base_freshness_tool_defs")
+    let no_arguments = serde_json::json!({ "type": "object", "properties": {} }).to_string();
+    vec![
+        ToolDef {
+            name: CHECK_BASE_FRESHNESS.to_string(),
+            description: "Fetch this project's trunk and report where your home worktree stands \
+                          against its tip: your commit, the tip, and how many commits ahead and \
+                          behind."
+                .to_string(),
+            input_schema_json: no_arguments.clone(),
+        },
+        ToolDef {
+            name: REFRESH_HOME.to_string(),
+            description: "Fetch this project's trunk and fast-forward your home worktree to its \
+                          tip. A home with commits of its own is refused and left untouched."
+                .to_string(),
+            input_schema_json: no_arguments,
+        },
+    ]
 }
 
 /// What the tools need from the daemon: the caller's home worktree and its project's trunk.
@@ -53,9 +69,16 @@ pub async fn execute_base_freshness_tool(
     caller: &HomeCaller,
     tool_name: &str,
 ) -> ToolOutcome {
-    // TODO(base-freshness): implement
-    let _ = (port, caller, tool_name);
-    unimplemented!("execute_base_freshness_tool")
+    let answered = match tool_name {
+        CHECK_BASE_FRESHNESS => port.check_base_freshness(caller).await,
+        REFRESH_HOME => port.refresh_home(caller).await,
+        other => return ToolOutcome::err(format!("{other} is not a base-freshness tool")),
+    };
+    match answered.map(|freshness| serde_json::to_string(&freshness)) {
+        Ok(Ok(json)) => ToolOutcome::ok(json),
+        Ok(Err(e)) => ToolOutcome::err(format!("{tool_name}: {e}")),
+        Err(refusal) => ToolOutcome::err(refusal),
+    }
 }
 
 #[cfg(test)]

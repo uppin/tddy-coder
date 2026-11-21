@@ -446,6 +446,12 @@ fn apply_progress(record: &mut StartLedgerRecord, event: StartSessionEvent) -> b
         Some(Event::WorktreeReady(ready)) => {
             record.branch = Some(ready.branch);
             record.worktree = Some(ready.worktree);
+            // A start that could not tell its base reports it empty: nothing is recorded, rather
+            // than a commit of "" claimed to be zero behind.
+            if !ready.base_commit.is_empty() {
+                record.base_commit = Some(ready.base_commit);
+                record.base_behind = Some(ready.base_behind);
+            }
             record.updated_at_unix_ms = now_unix_ms();
             true
         }
