@@ -54,6 +54,11 @@ deliberately skips.
 the CI result for everything else. Never claim whole-workspace green from a local run, and never
 report a full-repo run you did not actually complete.
 
+**Watch GitHub sparingly.** Every agent shares the operator's 5,000 REST requests/hour. To wait
+for CI, run `scripts/ci-status.sh --watch` in the background under `timeout`, never `gh run watch`
+(it polls every 3 s). Keep one watcher per PR. A foreground command that times out keeps running,
+so do not start another one.
+
 ### Setup (one-time)
 
 ```bash
