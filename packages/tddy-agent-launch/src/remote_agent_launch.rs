@@ -444,6 +444,7 @@ async fn judge_the_start(
         remote.startup_window,
         remote.shell.as_ref(),
         agent_pid,
+        start_bound,
     )
     .await
     {

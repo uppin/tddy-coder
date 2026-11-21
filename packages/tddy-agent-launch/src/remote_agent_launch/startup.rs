@@ -65,11 +65,18 @@ pub(super) async fn wait_for_agent_start(
 /// The agent's own liveness on the target is judged beside the terminal's end, because under
 /// load the terminal's exit is reported long after the agent that caused it is gone: an agent
 /// whose pid is dead on the target has exited, whatever its terminal has yet to say.
+///
+/// Each liveness probe may take up to `probe_bound`: over a transport whose round trip exceeds
+/// the window, a probe bounded by what the window has left would never answer. An unanswered
+/// probe is evidence of nothing, so probing continues; the window counts as passed only once a
+/// probe that answered found the agent alive at or after the window's end. The terminal's end
+/// stops the wait at any time. Without a pid there is nothing to probe and the window elapses.
 pub(super) async fn exits_during_startup(
     handle: &PtyHandle,
     window: Duration,
     shell: &dyn RemoteShell,
     agent_pid: Option<u32>,
+    probe_bound: Duration,
 ) -> bool {
     let deadline = tokio::time::Instant::now() + window;
     let mut probed_at = tokio::time::Instant::now() - Duration::from_secs(1);
@@ -78,28 +85,38 @@ pub(super) async fn exits_during_startup(
             return true;
         }
         let now = tokio::time::Instant::now();
-        if now >= deadline {
-            return false;
-        }
-        if let Some(pid) = agent_pid {
-            if probed_at.elapsed() >= Duration::from_millis(50) {
-                probed_at = now;
-                // Bounded by what the window has left, as the pid probe is by its bound; a probe
-                // that does not answer in time leaves the agent judged alive.
-                let alive = shell
-                    .exec(
-                        tddy_remote_shell::ExecRequest::new(format!("kill -0 {pid}"))
-                            .within(deadline.saturating_duration_since(now)),
-                    )
-                    .await
-                    .map(|output| output.status == 0)
-                    .unwrap_or(true);
-                if !alive {
-                    return true;
+        match agent_pid {
+            None => {
+                if now >= deadline {
+                    return false;
+                }
+            }
+            Some(pid) => {
+                if probed_at.elapsed() >= Duration::from_millis(50) {
+                    probed_at = now;
+                    let answered = shell
+                        .exec(
+                            tddy_remote_shell::ExecRequest::new(format!("kill -0 {pid}"))
+                                .within(probe_bound),
+                        )
+                        .await;
+                    if let Ok(output) = answered {
+                        if output.status != 0 {
+                            return true;
+                        }
+                        if tokio::time::Instant::now() >= deadline {
+                            return false;
+                        }
+                    }
                 }
             }
         }
-        tokio::time::sleep((deadline - now).min(Duration::from_millis(10))).await;
+        let pause = if now >= deadline {
+            Duration::from_millis(10)
+        } else {
+            (deadline - now).min(Duration::from_millis(10))
+        };
+        tokio::time::sleep(pause).await;
     }
 }
 

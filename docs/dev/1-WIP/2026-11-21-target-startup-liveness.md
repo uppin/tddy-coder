@@ -57,7 +57,7 @@ the more foundational); n3–n5 block nothing.
 
 ## Scope
 
-- [ ] Probe bound and judgement
+- [x] Probe bound and judgement
 - [ ] Feature doc updated through the wrap
 
 ## Technical Changes
@@ -73,7 +73,7 @@ A probe has the transport allowance to answer; the window closes only on an answ
 ## Acceptance Tests
 
 `packages/tddy-agent-launch/tests/remote_agent_launch_acceptance.rs`:
-- [ ] `an_agent_that_dies_on_a_slow_target_fails_the_start_though_its_terminal_reports_late` (the reproduction; passes with a round trip shorter than the window — the control)
+- [x] `an_agent_that_dies_on_a_slow_target_fails_the_start_though_its_terminal_reports_late` (the reproduction; passes with a round trip shorter than the window — the control)
 - [x] `an_agent_that_stays_up_on_a_slow_target_starts` — a **guard**: green today (an unanswered probe counts as alive), must stay green once the probe has a round trip to answer
 
 ## Decisions & Trade-offs
@@ -90,13 +90,13 @@ A probe has the transport allowance to answer; the window closes only on an answ
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (delegated: the user said "finish the rest without approval")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
