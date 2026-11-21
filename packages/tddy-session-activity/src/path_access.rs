@@ -23,6 +23,14 @@ pub const PATH_ACCESS_QUESTION_KIND: &str = "path_access";
 /// How long `RequestPathAccess` waits for the operator before answering denied.
 pub const PATH_ACCESS_WAIT: Duration = Duration::from_secs(600);
 
+/// The name a grant mode goes by on the wire and in the operator's copy: `read` or `write`.
+pub fn mode_name(mode: PathGrantMode) -> &'static str {
+    match mode {
+        PathGrantMode::Read => "read",
+        PathGrantMode::Write => "write",
+    }
+}
+
 /// One request waiting for the operator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingPathAccess {
@@ -32,6 +40,19 @@ pub struct PendingPathAccess {
     pub mode: PathGrantMode,
     pub reason: String,
     pub requested_at_unix_ms: u64,
+}
+
+impl PendingPathAccess {
+    /// The request as `ListPathAccessRequests` carries it.
+    pub fn into_proto(self) -> tddy_service::proto::activity::PathAccessRequest {
+        tddy_service::proto::activity::PathAccessRequest {
+            request_id: self.request_id,
+            paths: self.paths.iter().map(|p| p.display().to_string()).collect(),
+            mode: mode_name(self.mode).to_string(),
+            reason: self.reason,
+            requested_at_unix_ms: self.requested_at_unix_ms,
+        }
+    }
 }
 
 /// How a request ended.
@@ -57,6 +78,25 @@ struct Waiting {
     pending: PendingPathAccess,
     session_dir: PathBuf,
     wake: Option<oneshot::Sender<PathAccessOutcome>>,
+}
+
+impl Waiting {
+    /// Write a grant per requested path into the session's grant store.
+    fn grant(&self) -> Result<(), PathAccessAnswerError> {
+        let store = PathGrantStore::open(&self.session_dir);
+        let granted_at_unix_ms = tddy_daemon_kernel::now_unix_ms();
+        for path in &self.pending.paths {
+            store
+                .add(PathGrant {
+                    path: path.clone(),
+                    mode: self.pending.mode,
+                    granted_at_unix_ms,
+                    reason: self.pending.reason.clone(),
+                })
+                .map_err(|e| PathAccessAnswerError::GrantNotWritten(e.to_string()))?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -147,22 +187,8 @@ impl PathAccessRequests {
             .ok_or_else(|| PathAccessAnswerError::NotPending {
                 request_id: request_id.to_string(),
             })?;
-        if allow {
-            let waiting = &held.waiting[index];
-            let store = PathGrantStore::open(&waiting.session_dir);
-            let granted_at_unix_ms = tddy_daemon_kernel::now_unix_ms();
-            for path in &waiting.pending.paths {
-                store
-                    .add(PathGrant {
-                        path: path.clone(),
-                        mode: waiting.pending.mode,
-                        granted_at_unix_ms,
-                        reason: waiting.pending.reason.clone(),
-                    })
-                    .map_err(|e| PathAccessAnswerError::GrantNotWritten(e.to_string()))?;
-            }
-        }
         let outcome = if allow {
+            held.waiting[index].grant()?;
             PathAccessOutcome::Allowed
         } else {
             PathAccessOutcome::Denied

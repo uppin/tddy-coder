@@ -8,7 +8,7 @@
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
-import { createClient } from "@connectrpc/connect";
+import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   ActivityService,
@@ -30,15 +30,17 @@ const A_WRITE_REQUEST = create(PathAccessRequestSchema, {
   requestedAtUnixMs: BigInt(1_000),
 });
 
-/** Mount the request list of an orchestrator whose daemon holds `requests`. */
-function mountTheRequestsOf(requests: (typeof A_WRITE_REQUEST)[]) {
+/** Mount the request list of an orchestrator whose daemon holds `requests`; `answerFails` makes
+ * every answer fail with that error. */
+function mountTheRequestsOf(requests: (typeof A_WRITE_REQUEST)[], answerFails?: ConnectError) {
   const backend = anInMemoryRpcBackend();
   backend.onUnary(ActivityService.method.listPathAccessRequests, () =>
     create(ListPathAccessRequestsResponseSchema, { requests }),
   );
-  backend.onUnary(ActivityService.method.answerPathAccess, () =>
-    create(AnswerPathAccessResponseSchema, {}),
-  );
+  backend.onUnary(ActivityService.method.answerPathAccess, () => {
+    if (answerFails) throw answerFails;
+    return create(AnswerPathAccessResponseSchema, {});
+  });
   cy.mountWithClients(
     <PathAccessRequests
       sessionId={ORCHESTRATOR}
@@ -102,5 +104,29 @@ describe("An orchestrator's path access requests in its session pane", () => {
 
     // Then
     byTestId("path-access-request-access-1").should("not.exist");
+  });
+
+  it("an answer the daemon did not take keeps the request and says why", () => {
+    // Given
+    mountTheRequestsOf([A_WRITE_REQUEST], new ConnectError("daemon unreachable", Code.Unavailable));
+
+    // When
+    byTestId("path-access-allow-access-1").click();
+
+    // Then
+    byTestId("path-access-answer-error").should("contain.text", "daemon unreachable");
+    byTestId("path-access-request-access-1").should("exist");
+  });
+
+  it("a request taken already leaves the list", () => {
+    // Given
+    mountTheRequestsOf([A_WRITE_REQUEST], new ConnectError("not waiting", Code.NotFound));
+
+    // When
+    byTestId("path-access-deny-access-1").click();
+
+    // Then
+    byTestId("path-access-request-access-1").should("not.exist");
+    byTestId("path-access-answer-error").should("not.exist");
   });
 });

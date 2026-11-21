@@ -1,9 +1,11 @@
 //! `RequestPathAccess`: an orchestrator names the paths beyond its reach it needs, read or write,
 //! and why; the operator allows or denies them from its session pane (`#orchestra` 6/9).
 //!
-//! The call waits for the answer. Allowed paths are granted for the rest of the session, so the
-//! `Read`, `Grep`, `Glob` — and, for a write grant, `Write`, `StrReplace` and `Delete` — that follow
-//! succeed there; denied or unanswered ones stay out of reach. Feature doc:
+//! A path the caller can already use at the asked mode — in its read reach, or inside a write grant
+//! it holds — is answered at once and never put to the operator. For the rest the call waits for the
+//! answer. Allowed paths are granted for the rest of the session, so the `Read`, `Grep`, `Glob` —
+//! and, for a write grant, `Write`, `StrReplace` and `Delete` — that follow succeed there; denied or
+//! unanswered ones stay out of reach. Feature doc:
 //! docs/ft/daemon/project-concept.md § Orchestrator sessions.
 
 use std::path::Path;
@@ -26,8 +28,9 @@ pub fn request_path_access_tool_def() -> ToolDef {
     ToolDef {
         name: REQUEST_PATH_ACCESS_TOOL.to_string(),
         description: "Ask the operator for access to paths outside your reach. Name each path in \
-                      full (absolute), the mode (`read`, or `write` for read and write) and why; \
-                      the call waits for the operator's answer. An allowed path is yours for the \
+                      full (absolute), the mode (`read`, or `write` for read and write) and why. \
+                      Paths you can already use at that mode are answered `in_reach` at once; for \
+                      the rest the call waits for the operator's answer. An allowed path is yours for the \
                       rest of the session, together with everything under it: `Read`, `Grep` and \
                       `Glob` reach it and, for `write`, `Write`, `StrReplace` and `Delete` act \
                       there. A denied or unanswered request leaves the paths out of reach."
@@ -87,25 +90,33 @@ pub enum PathAccessAnswer {
     Unanswered,
 }
 
-/// What the tool needs from the daemon: holding the request for the operator and waiting.
+/// What the tool needs from the daemon: the caller's current reach, and holding the request for the
+/// operator and waiting.
 #[async_trait]
 pub trait PathAccessPort: Send + Sync {
+    /// Which of `paths` (absolute) `caller` cannot already use at `mode` — outside its read reach
+    /// for `read`, outside every write grant it holds for `write`. Only these are put to the
+    /// operator.
+    async fn paths_outside_reach(
+        &self,
+        caller: &HomeCaller,
+        paths: &[String],
+        mode: RequestedAccess,
+    ) -> Result<Vec<String>, String>;
+
     /// Record `args` for `caller`'s operator, announce it, and wait for the answer.
-    ///
-    /// The default refuses, so a port that asks no operator need not name it.
     async fn request_path_access(
         &self,
         caller: &HomeCaller,
         args: RequestPathAccessArgs,
-    ) -> Result<PathAccessAnswer, String> {
-        let _ = (caller, args);
-        Err("this host asks no operator for access".to_string())
-    }
+    ) -> Result<PathAccessAnswer, String>;
 }
 
 /// Run [`REQUEST_PATH_ACCESS_TOOL`] for `caller`. A relative path, an empty list or an empty reason
-/// is refused before anything is asked; the answer comes back as `{"answer": "allowed" | "denied" |
-/// "unanswered", "paths": [...]}`.
+/// is refused before anything is asked. Paths already usable at the asked mode are not asked for;
+/// the answer comes back as `{"answer": "allowed" | "denied" | "unanswered" | "in_reach", "paths":
+/// [the paths asked for], "in_reach": [the paths that were usable already]}` — `in_reach` when
+/// nothing needed asking.
 pub async fn execute_path_access_tool(
     port: &dyn PathAccessPort,
     caller: &HomeCaller,
@@ -132,18 +143,40 @@ pub async fn execute_path_access_tool(
             "{REQUEST_PATH_ACCESS_TOOL}: say why you need the access; the operator decides on it"
         ));
     }
-    let paths = args.paths.clone();
-    match port.request_path_access(caller, args).await {
-        Ok(answer) => {
-            let answer = match answer {
-                PathAccessAnswer::Allowed => "allowed",
-                PathAccessAnswer::Denied => "denied",
-                PathAccessAnswer::Unanswered => "unanswered",
-            };
-            ToolOutcome::ok(serde_json::json!({ "answer": answer, "paths": paths }).to_string())
-        }
+    match ask_for_what_is_outside(port, caller, args).await {
+        Ok(answered) => ToolOutcome::ok(answered.to_string()),
         Err(e) => ToolOutcome::err(format!("{REQUEST_PATH_ACCESS_TOOL}: {e}")),
     }
+}
+
+/// Put the paths `caller` cannot already use to the operator, and say how it ended.
+async fn ask_for_what_is_outside(
+    port: &dyn PathAccessPort,
+    caller: &HomeCaller,
+    args: RequestPathAccessArgs,
+) -> Result<serde_json::Value, String> {
+    let outside = port
+        .paths_outside_reach(caller, &args.paths, args.mode)
+        .await?;
+    let in_reach: Vec<String> = args
+        .paths
+        .iter()
+        .filter(|p| !outside.contains(p))
+        .cloned()
+        .collect();
+    if outside.is_empty() {
+        return Ok(serde_json::json!({ "answer": "in_reach", "paths": [], "in_reach": in_reach }));
+    }
+    let asked = RequestPathAccessArgs {
+        paths: outside.clone(),
+        ..args
+    };
+    let answer = match port.request_path_access(caller, asked).await? {
+        PathAccessAnswer::Allowed => "allowed",
+        PathAccessAnswer::Denied => "denied",
+        PathAccessAnswer::Unanswered => "unanswered",
+    };
+    Ok(serde_json::json!({ "answer": answer, "paths": outside, "in_reach": in_reach }))
 }
 
 #[cfg(test)]
@@ -152,14 +185,28 @@ mod tests {
 
     use super::*;
 
-    /// A port that answers `answer` and records what it was asked.
+    /// A port that answers `answer`, holds `in_reach` already, and records what it was asked.
     struct AnOperator {
         answer: PathAccessAnswer,
+        in_reach: Vec<String>,
         asked: Mutex<Vec<RequestPathAccessArgs>>,
     }
 
     #[async_trait]
     impl PathAccessPort for AnOperator {
+        async fn paths_outside_reach(
+            &self,
+            _caller: &HomeCaller,
+            paths: &[String],
+            _mode: RequestedAccess,
+        ) -> Result<Vec<String>, String> {
+            Ok(paths
+                .iter()
+                .filter(|p| !self.in_reach.contains(p))
+                .cloned()
+                .collect())
+        }
+
         async fn request_path_access(
             &self,
             _caller: &HomeCaller,
@@ -173,8 +220,21 @@ mod tests {
     fn an_operator(answer: PathAccessAnswer) -> AnOperator {
         AnOperator {
             answer,
+            in_reach: Vec::new(),
             asked: Mutex::default(),
         }
+    }
+
+    fn an_operator_with_in_reach(answer: PathAccessAnswer, in_reach: &[&str]) -> AnOperator {
+        AnOperator {
+            in_reach: in_reach.iter().map(|p| p.to_string()).collect(),
+            ..an_operator(answer)
+        }
+    }
+
+    fn the_answer(outcome: &ToolOutcome) -> serde_json::Value {
+        assert!(!outcome.is_error, "{}", outcome.error_message);
+        serde_json::from_str(&outcome.result_json).unwrap()
     }
 
     fn the_orchestrator() -> HomeCaller {
@@ -195,11 +255,51 @@ mod tests {
         )
         .await;
 
-        assert!(!outcome.is_error, "{}", outcome.error_message);
-        let answer: serde_json::Value = serde_json::from_str(&outcome.result_json).unwrap();
         assert_eq!(
-            answer,
-            serde_json::json!({ "answer": "allowed", "paths": ["/srv/shared"] })
+            the_answer(&outcome),
+            serde_json::json!({ "answer": "allowed", "paths": ["/srv/shared"], "in_reach": [] })
+        );
+    }
+
+    #[tokio::test]
+    async fn paths_already_in_reach_are_answered_without_asking_the_operator() {
+        let operator = an_operator_with_in_reach(PathAccessAnswer::Denied, &["/srv/shared"]);
+
+        let outcome = execute_path_access_tool(
+            &operator,
+            &the_orchestrator(),
+            r#"{"paths":["/srv/shared"],"mode":"read","reason":"read the fixtures"}"#,
+        )
+        .await;
+
+        assert_eq!(
+            the_answer(&outcome),
+            serde_json::json!({ "answer": "in_reach", "paths": [], "in_reach": ["/srv/shared"] })
+        );
+        assert_eq!(operator.asked.lock().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn only_the_paths_outside_reach_are_put_to_the_operator() {
+        let operator = an_operator_with_in_reach(PathAccessAnswer::Allowed, &["/srv/shared"]);
+
+        let outcome = execute_path_access_tool(
+            &operator,
+            &the_orchestrator(),
+            r#"{"paths":["/srv/shared","/srv/other"],"mode":"write","reason":"update both"}"#,
+        )
+        .await;
+
+        assert_eq!(
+            the_answer(&outcome),
+            serde_json::json!({
+                "answer": "allowed", "paths": ["/srv/other"], "in_reach": ["/srv/shared"]
+            })
+        );
+        let asked = operator.asked.lock().unwrap();
+        assert_eq!(
+            asked.iter().map(|a| a.paths.clone()).collect::<Vec<_>>(),
+            vec![vec!["/srv/other".to_string()]]
         );
     }
 

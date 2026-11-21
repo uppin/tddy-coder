@@ -8,11 +8,17 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import type { Client } from "@connectrpc/connect";
-import { Button } from "tddy-ui-web";
+import { Code, ConnectError, type Client } from "@connectrpc/connect";
+import { rpcFailureText } from "tddy-client-web";
+import { Button, InlineError } from "tddy-ui-web";
 import type { ActivityService, PathAccessRequest } from "tddy-client-web/gen/activity_pb";
 
-/** How often the daemon is asked for the session's waiting requests. */
+/**
+ * How often the daemon is asked for the session's waiting requests. Polled rather than driven by
+ * the `path_access` notification: the notification feed is the drawer's one daemon-wide stream, and
+ * nothing is announced when a request is answered elsewhere or times out, so only a re-read sees it
+ * leave.
+ */
 const POLL_MS = 3000;
 
 export interface PathAccessRequestsProps {
@@ -25,6 +31,7 @@ export interface PathAccessRequestsProps {
 /** The pending requests, oldest first; renders nothing when there are none. */
 export function PathAccessRequests({ sessionId, sessionToken, client }: PathAccessRequestsProps) {
   const [requests, setRequests] = useState<PathAccessRequest[]>([]);
+  const [answerError, setAnswerError] = useState<string | null>(null);
   // Answered ids stay hidden even when a poll that was already in flight lists them again.
   const answered = useRef(new Set<string>());
 
@@ -40,6 +47,7 @@ export function PathAccessRequests({ sessionId, sessionToken, client }: PathAcce
   useEffect(() => {
     answered.current = new Set();
     setRequests([]);
+    setAnswerError(null);
     void refresh();
     const timer = setInterval(() => void refresh(), POLL_MS);
     return () => clearInterval(timer);
@@ -48,9 +56,15 @@ export function PathAccessRequests({ sessionId, sessionToken, client }: PathAcce
   const answer = async (requestId: string, allow: boolean) => {
     try {
       await client.answerPathAccess({ sessionToken, sessionId, requestId, allow });
-    } catch {
-      // Taken already (answered elsewhere or timed out): it is not waiting any more either way.
+    } catch (err) {
+      // Not found means it was taken already (answered elsewhere or timed out), so it leaves the
+      // list either way. Any other failure left it waiting: it stays, and the operator is told.
+      if (ConnectError.from(err).code !== Code.NotFound) {
+        setAnswerError(rpcFailureText(err));
+        return;
+      }
     }
+    setAnswerError(null);
     answered.current.add(requestId);
     setRequests((current) => current.filter((r) => r.requestId !== requestId));
   };
@@ -58,6 +72,9 @@ export function PathAccessRequests({ sessionId, sessionToken, client }: PathAcce
   if (requests.length === 0) return null;
   return (
     <div data-testid="path-access-requests" className="flex flex-col gap-2 border-b border-border p-2">
+      {answerError && (
+        <InlineError testId="path-access-answer-error" message={answerError} className="text-xs" />
+      )}
       {requests.map((request) => (
         <div
           key={request.requestId}

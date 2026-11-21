@@ -137,7 +137,9 @@ impl ExecToolRpcHandler {
             return self.run_stack_tool(req, sessions_base).await;
         }
         if is_path_access_tool(&req.tool_name) {
-            return self.run_path_access_tool(req, sessions_base).await;
+            return self
+                .run_path_access_tool(req, sessions_base, worktree_root)
+                .await;
         }
         if is_base_freshness_tool(&req.tool_name) {
             return self.run_base_freshness_tool(req, sessions_base).await;

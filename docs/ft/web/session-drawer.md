@@ -353,6 +353,22 @@ There is **one** connected state, whatever wire carries the session. What the se
 can do — tracks and a roster, or calls only — is its `capabilities`, so no consumer branches on the
 wire. See [session-connections.md](../../../packages/tddy-web/docs/session-connections.md).
 
+## Orchestrator Access Requests
+
+The session pane of an orchestrator (role `project-home` or `orchestrator`) lists the requests its
+agent made with `RequestPathAccess` that wait for the operator (`PathAccessRequests`, mounted by
+`SessionWithActivitySidebar` above the session's body): each with the paths, the mode (`read` or
+`write`) and the agent's reason, and **Allow** / **Deny**. Nothing renders while none waits.
+
+- The list is re-read every 3 s. It is not driven by the `path_access` notification: the
+  notification feed is the drawer's one daemon-wide stream (NFR1), and nothing is announced when a
+  request is answered elsewhere or times out, so only a re-read sees it leave.
+- An answer removes the request from the list. An answer the daemon reports as not found (answered
+  elsewhere, or timed out) removes it too; any other failure keeps it and shows why above the list.
+- The drawer row lights its attention dot from the request's `path_access` pending-question
+  notification, like any other question. See
+  [project-concept.md § Access requests](../daemon/project-concept.md#access-requests).
+
 ## Fast Session Change
 
 The drawer keeps one self-contained **runtime** per attached session, so switching between
@@ -549,6 +565,7 @@ Adds to `src/components/ui/`:
 - `DeleteSession` — delete session (two-click confirm)
 - `RenameSession` — name a session or clear its name, on its owning host ([Session names](#session-names))
 - `SignalSession` — SIGTERM for active sessions
+- `ListPathAccessRequests` / `AnswerPathAccess` — an orchestrator's waiting access requests, and the operator's answer ([Orchestrator Access Requests](#orchestrator-access-requests))
 
 ## Inspector Tabs
 

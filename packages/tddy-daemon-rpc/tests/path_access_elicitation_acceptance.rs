@@ -267,3 +267,78 @@ async fn a_write_inside_a_write_grant_succeeds_and_outside_it_is_refused() {
     assert!(world.outside_dir().join("new.txt").exists());
     assert!(!elsewhere.path().join("new.txt").exists());
 }
+
+impl World {
+    /// The operator granted the orchestrator `mode` on the outside directory earlier.
+    fn holds_a_grant(&self, mode: PathGrantMode) {
+        PathGrantStore::open(&self.session_dir())
+            .add(PathGrant {
+                path: self.outside_dir(),
+                mode,
+                granted_at_unix_ms: 1_795_000_000_000,
+                reason: "an earlier request".to_string(),
+            })
+            .unwrap();
+    }
+
+    /// How many requests are waiting right now, without waiting for one to appear.
+    async fn requests_waiting_now(&self) -> usize {
+        self.host
+            .daemon
+            .connection()
+            .activity_service()
+            .list_path_access_requests(Request::direct(ListPathAccessRequestsRequest {
+                session_token: TEST_TOKEN.to_string(),
+                session_id: self.orchestrator.clone(),
+            }))
+            .await
+            .expect("the list")
+            .into_inner()
+            .requests
+            .len()
+    }
+}
+
+#[tokio::test]
+async fn a_path_already_in_reach_is_answered_at_once_without_asking_the_operator() {
+    // Given an orchestrator that already holds a read grant on the outside directory
+    let world = a_world().await;
+    world.holds_a_grant(PathGrantMode::Read);
+
+    // When it asks for read access to that directory
+    let answer = answered(world.asks_for("read")).await;
+
+    // Then the call answers in reach at once, and the operator was asked nothing
+    assert_eq!(answer["answer"], "in_reach", "{answer}");
+    assert_eq!(world.requests_waiting_now().await, 0);
+    assert!(
+        !world
+            .notifications
+            .received()
+            .iter()
+            .any(|n| n.question.as_ref().is_some_and(|q| q.kind == "path_access")),
+        "{:?}",
+        world.notifications.received()
+    );
+}
+
+#[tokio::test]
+async fn a_read_grant_does_not_answer_a_write_request() {
+    // Given an orchestrator holding only a read grant on the outside directory
+    let world = a_world().await;
+    world.holds_a_grant(PathGrantMode::Read);
+
+    // When it asks for write access there
+    let waiting = world.asks_for("write");
+
+    // Then the request waits for the operator
+    let pending = world.the_pending_requests().await;
+    assert_eq!(
+        pending.iter().map(|r| r.mode.as_str()).collect::<Vec<_>>(),
+        vec!["write"]
+    );
+    world
+        .the_operator_answers(&pending[0].request_id, true)
+        .await;
+    assert_eq!(answered(waiting).await["answer"], "allowed");
+}

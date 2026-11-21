@@ -49,7 +49,11 @@ pub(super) struct GrantedWrite {
 /// directory it would be created in.
 pub(super) fn granted_write(session_dir: &Path, args_json: &str) -> Option<GrantedWrite> {
     let args: serde_json::Value = serde_json::from_str(args_json).ok()?;
-    let path = args.get("path")?.as_str()?;
+    granted_write_path(session_dir, args.get("path")?.as_str()?)
+}
+
+/// The write grant `path` lies inside, as [`granted_write`] judges a tool's `path` argument.
+pub(super) fn granted_write_path(session_dir: &Path, path: &str) -> Option<GrantedWrite> {
     if !Path::new(path).is_absolute() {
         return None;
     }
@@ -73,6 +77,16 @@ pub(super) fn granted_write(session_dir: &Path, args_json: &str) -> Option<Grant
         root,
         path: resolved,
     })
+}
+
+/// Whether the session whose directory is `session_dir` records an orchestrator role; an unreadable
+/// record is not one.
+fn is_orchestrator_session(session_dir: &Path) -> bool {
+    tddy_core::read_session_metadata(session_dir)
+        .ok()
+        .and_then(|metadata| metadata.session_role)
+        .as_deref()
+        .is_some_and(is_orchestrator_role)
 }
 
 /// One coding agent's contribution to a reach: its declared directories, and the home they are
@@ -106,29 +120,13 @@ impl ExecToolRpcHandler {
             return Ok(None);
         }
         let session_dir = unified_session_dir_path(sessions_base, &req.session_id);
-        let is_orchestrator = tddy_core::read_session_metadata(&session_dir)
-            .ok()
-            .and_then(|metadata| metadata.session_role)
-            .as_deref()
-            .is_some_and(is_orchestrator_role);
-        if !is_orchestrator {
+        if !is_orchestrator_session(&session_dir) {
             return Ok(None);
         }
 
-        let os_user = self.os_user_of(&req.session_token)?;
-        let inputs = ReachInputs {
-            home_worktree: worktree_root.to_path_buf(),
-            session_dir,
-            projects_dir: projects_path_for_user(&os_user, Some(&self.tddy_data_dir)),
-            local_instance_id: local_instance_id_for_config(&self.config),
-            os_user_home: home_dir_for_user(&os_user),
-            agents: self.agent_homes(),
-        };
-        let reach = tokio::task::spawn_blocking(move || build_reach(inputs))
-            .await
-            .map_err(|e| Status::internal(format!("building the read reach failed: {e}")))?
-            .map_err(|e| Status::internal(format!("building the read reach failed: {e}")))?;
-
+        let reach = self
+            .orchestrator_read_reach(&req.session_token, session_dir, worktree_root)
+            .await?;
         let outcome = execute_in_reach(&reach, &req.tool_name, &req.args_json).await;
         let response = ExecuteToolResponse {
             result_json: outcome.result_json,
@@ -139,6 +137,29 @@ impl ExecToolRpcHandler {
         };
         record_call(sessions_base, req, &response);
         Ok(Some(response))
+    }
+
+    /// The [`ReadReach`] of the orchestrator session whose directory is `session_dir` and whose home
+    /// worktree is `worktree_root`, as it stands now (projects, worktrees and grants re-read).
+    pub(super) async fn orchestrator_read_reach(
+        &self,
+        session_token: &str,
+        session_dir: PathBuf,
+        worktree_root: &Path,
+    ) -> Result<ReadReach, Status> {
+        let os_user = self.os_user_of(session_token)?;
+        let inputs = ReachInputs {
+            home_worktree: worktree_root.to_path_buf(),
+            session_dir,
+            projects_dir: projects_path_for_user(&os_user, Some(&self.tddy_data_dir)),
+            local_instance_id: local_instance_id_for_config(&self.config),
+            os_user_home: home_dir_for_user(&os_user),
+            agents: self.agent_homes(),
+        };
+        tokio::task::spawn_blocking(move || build_reach(inputs))
+            .await
+            .map_err(|e| Status::internal(format!("building the read reach failed: {e}")))?
+            .map_err(|e| Status::internal(format!("building the read reach failed: {e}")))
     }
 
     /// Run an orchestrator's `Write`, `StrReplace` or `Delete` that lies inside one of its write
@@ -154,12 +175,7 @@ impl ExecToolRpcHandler {
             return Ok(None);
         }
         let session_dir = unified_session_dir_path(sessions_base, &req.session_id);
-        let is_orchestrator = tddy_core::read_session_metadata(&session_dir)
-            .ok()
-            .and_then(|metadata| metadata.session_role)
-            .as_deref()
-            .is_some_and(is_orchestrator_role);
-        if !is_orchestrator {
+        if !is_orchestrator_session(&session_dir) {
             return Ok(None);
         }
         let Some(granted) = granted_write(&session_dir, &req.args_json) else {

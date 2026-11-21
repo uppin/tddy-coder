@@ -79,21 +79,7 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
                     .path_access
                     .pending(&req.session_id)
                     .into_iter()
-                    .map(|pending| tddy_service::proto::activity::PathAccessRequest {
-                        request_id: pending.request_id,
-                        paths: pending
-                            .paths
-                            .iter()
-                            .map(|p| p.display().to_string())
-                            .collect(),
-                        mode: match pending.mode {
-                            crate::path_grants::PathGrantMode::Read => "read",
-                            crate::path_grants::PathGrantMode::Write => "write",
-                        }
-                        .to_string(),
-                        reason: pending.reason,
-                        requested_at_unix_ms: pending.requested_at_unix_ms,
-                    })
+                    .map(crate::path_access::PendingPathAccess::into_proto)
                     .collect(),
             },
         ))
