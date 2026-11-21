@@ -30,16 +30,23 @@ or SSH target could not report at all.
 
 ## Restructuring (`/pr-wrap` step 3.5)
 
-| File | Production lines | Now |
+| File | Production lines (base → peak → wrap) | Now |
 |---|---:|---|
-| `tddy-agent-launch/src/remote_hook_follower.rs` | 517 (base) → 542 → **386** | delivery side → `remote_hook_delivery.rs` (170), re-exported |
-| `tddy-agent-launch/src/cli_agent_steps.rs` | 494 → 537 → **364** | resume wiring → `cli_agent_steps/resumed_wiring.rs` (193) |
-| `tddy-agent-launch/src/opencode_cli_spawn.rs` | 505 → 522 → **445** | small start steps → `opencode_cli_spawn/start_steps.rs` |
-| `tddy-coding-agent-specs/src/spec.rs` | 500 → 519 → see the package entry | |
+| `tddy-agent-launch/src/remote_hook_follower.rs` | 517 → 542 → **386** | the delivery side (`HookReportDelivery`, `ActivityHookSink`) is in `remote_hook_delivery.rs`, re-exported |
+| `tddy-agent-launch/src/cli_agent_steps.rs` | 494 → 537 → **390** | the resume's wiring is in `cli_agent_steps/resumed_wiring.rs` |
+| `tddy-agent-launch/src/opencode_cli_spawn.rs` | 505 → 522 → **428** | the start's small steps are in `opencode_cli_spawn/start_steps.rs` |
+| `tddy-coding-agent-specs/src/spec.rs` | 500 → 519 → **431** | agent variants are in `spec/variant.rs` (`tddy-tools restructure`, `verify`: every statement accounted for) |
 
-The `tddy-agent-launch` moves were made by hand. `tddy-tools restructure` refused every `move_item` in
-that crate on an unrelated `#[path]`-attributed `mod tests;` (`restore_tabs.rs`). Closed code issue
-`oversized-file-remote-hook-follower` (517 at detection, 542 at its peak here, **386** at close).
+The `tddy-agent-launch` moves were made by hand. `tddy-tools restructure` refused the `move_item` in
+that crate as `plan is malformed`, on an unrelated `#[path]`-attributed `mod tests;`
+(`opencode_cli_spawn/restore_tabs.rs`).
+
+Closed code issues, with their final measurement: `oversized-file-remote-hook-follower`
+(517 at detection, **386** at close) and `oversized-file-spec` (500 at detection, **431** at close).
+Functions the back channel touched were held at or below their base lengths: `wire_session_agent`
+96 → 96, `start_cli_harness_session` 371 → 371, `resumed_session_wiring` 110 → 97 (moved to
+`resumed_wiring.rs`) and `start_cli_harness_from_request` 89 → 83. The longest new function,
+`post_remote_message_to_orchestrator`, is 41 lines.
 
 ## Decisions
 

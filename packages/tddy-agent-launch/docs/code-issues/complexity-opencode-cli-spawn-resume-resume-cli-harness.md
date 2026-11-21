@@ -19,6 +19,7 @@
 | 2026-11-16 | 95 → 108 | #921 (`#remote-shell` 7/7): the resume path carries the session's subject and Coder credentials to the target resolution. Touched, not closed |
 | 2026-11-16 | 108 → 83 | #924 (`#remote-shell` 8/11) sweep: restored to below its before-the-stack length (88). Still over 60, so this record stays open on the remainder |
 | 2026-11-20 | 86 → 83 | #961 (`#session-liveness` 4/4): the resume restores the roster after main (`restore_roster_on_resume`, +6) and the target shell is resolved by `resumed_target_shell` (−9); fn line to closing brace, this script, on `e430092a8` (86) and HEAD. Better by 3, still over 60 |
+| 2026-11-21 | 84 → 84 | #980 (`#orchestra` 2/9): touched (its call into the wiring), unchanged; brace-matched fn line to closing brace on `origin/feature/orchestra/path-reach` (`c4dace05c`) and HEAD |
 
 ## What would close it
 
