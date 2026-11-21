@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — LSP tools offered to a new role with an explicit root, an index-daemon unload RPC, root requests through n6's elicitation
+**PR**: [#986](https://github.com/uppin/tddy-coder/pull/986)
 **Stack**: `#orchestra` 8/9 — branch `feature/orchestra/orchestrator-lsp`, base `feature/orchestra/orchestrator-delivery`
 
 ## Initial Discovery
@@ -13,7 +14,7 @@
 ## Affected Packages
 
 - **tddy-lsp-executor**: `Lsp*` tools take an optional `root`; `IndexLspExecutor` binds to it
-- **tddy-index-daemon**: `UnloadRoot` RPC (today roots are only reaped when idle)
+- **tddy-session-activity**: `SessionLspRoots` — the roots a session added, persisted in its directory
 - **tddy-tool-engine**: `Lsp*` in the orchestrator catalogue; `AddLspRoot`, `RemoveLspRoot`, `ListLspRoots`
 - **tddy-daemon-rpc**: role guard admits the tools; root added outside reach goes through n6's request flow
 - **tddy-agent-launch**: orchestrator wiring offers the LSP tools
@@ -48,7 +49,7 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: `LspToolArgs.root`, `UnloadRoot` proto, `AddLspRoot`/`RemoveLspRoot`/`ListLspRoots` definitions, `SessionLspRoots`; failing tests below.
+The first push of this PR, before its implementation: `lsp_root_for` (the `root` an LSP call runs on), `AddLspRoot`/`RemoveLspRoot`/`ListLspRoots` with their port, `SessionLspRoots`; failing tests below.
 
 ## Green wave
 
@@ -87,7 +88,7 @@ Other projects' roots load with the daemon's one toolchain; a root whose toolcha
 
 - [ ] LSP tools for orchestrator roles with a `root`
 - [ ] `AddLspRoot` / `RemoveLspRoot` / `ListLspRoots`, with operator request outside reach
-- [ ] Index daemon `UnloadRoot`
+- [ ] Removal leaves unloading to the index daemon's idle reaping (no `UnloadRoot`)
 - [ ] Feature docs `docs/ft/coder/reusable-lsp.md`, `warm-code-intelligence-daemon.md` updated through the wrap
 
 ## Technical Changes
@@ -102,15 +103,29 @@ Orchestrators query any root in reach and manage the roots they add.
 
 ## Acceptance Tests
 
-`packages/tddy-daemon-rpc/tests/orchestrator_lsp_acceptance.rs`:
-- [ ] `an_orchestrator_finds_references_in_a_sibling_sessions_worktree`
-- [ ] `adding_a_root_inside_reach_warms_it_without_a_request`
-- [ ] `adding_a_root_outside_reach_raises_a_request_and_allow_warms_it`
-- [ ] `removing_a_root_this_session_added_unloads_it`
+`packages/tddy-daemon-rpc/tests/orchestrator_lsp_acceptance.rs` (real `ExecuteTool` and `ActivityService`):
+- [ ] `an_orchestrators_lsp_tool_naming_a_sibling_root_is_not_refused_as_read_only`
+- [ ] `adding_a_root_inside_reach_lists_it_without_a_request` — needs n1's reach
+- [ ] `adding_a_root_outside_reach_asks_the_operator_and_allow_adds_it` — needs n6's request flow (kept real: asking the operator is the point)
+- [ ] `removing_a_root_this_session_added_drops_it_without_asking`
 - [ ] `removing_a_root_this_session_did_not_add_is_refused`
 
-`packages/tddy-index-daemon/tests/unload_root.rs`:
-- [ ] `unloading_a_root_stops_its_server_and_clears_its_warm_latch`
+Unit — `packages/tddy-session-activity/src/lsp_roots.rs`:
+- [ ] `added_roots_are_listed_oldest_first_and_survive_reopening`
+- [ ] `adding_a_root_twice_keeps_one`
+- [ ] `removing_an_added_root_drops_it`
+- [ ] `removing_a_root_never_added_changes_nothing`
+
+Unit — `packages/tddy-tool-engine/src/lsp_root_tools.rs`:
+- [ ] `a_call_naming_no_root_runs_on_the_home_worktree`
+- [ ] `a_root_in_reach_is_used_as_named`
+- [ ] `an_added_root_outside_reach_is_used_as_named`
+- [ ] `a_root_outside_reach_that_was_never_added_is_refused_naming_add_lsp_root`
+- [ ] `the_three_root_tools_are_defined_with_their_names`
+
+The surface they specify (bodies `TODO(orchestrator-lsp)`): `tddy_session_activity::lsp_roots::{SessionLspRoots, AddedLspRoot, LSP_ROOTS_FILE}`, `tddy_tool_engine::lsp_root_tools::{ADD_LSP_ROOT, REMOVE_LSP_ROOT, LIST_LSP_ROOTS, is_lsp_root_tool, lsp_root_tool_defs, lsp_root_for, AddLspRootArgs, AddedRoot, LspRootPort, execute_lsp_root_tool}`.
+
+**Contract-time decision:** no `UnloadRoot` RPC on the index daemon. Removing a root drops it from this session's roots; the index daemon's idle reaping unloads the server once no session uses it. An explicit unload from one orchestrator could stop a root another session is still querying, and would add a method to five `CodeIndexService` implementations. `tddy-index-daemon` is therefore not touched.
 
 ## Decisions & Trade-offs
 
@@ -138,10 +153,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (delegated: the user said "Finish the remaining ones without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

@@ -21,6 +21,7 @@ pub mod answer_wait;
 pub mod answers;
 pub mod hook_decision;
 pub mod hook_request;
+pub mod lsp_roots;
 pub mod orchestrator_presence;
 pub mod path_access;
 pub mod path_grants;
