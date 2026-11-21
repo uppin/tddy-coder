@@ -15,8 +15,8 @@
 //!
 //! The log is writable by anything running as the session's user on the target: a line is
 //! untrusted input. One with the wrong token, an event no hooks adapter installs or a payload that
-//! is not JSON is dropped and counted, never delivered. Nothing travels the other way: a hook on a
-//! target reports, and is never answered.
+//! is not JSON is dropped and counted, never delivered. A hook that waits for an answer (a
+//! permission request) is answered through the same shell: [`ActivityHookSink::answering_through`].
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-15-remote-shell-remote-hooks.md.
 
@@ -31,7 +31,7 @@ use tddy_remote_shell::{ExecRequest, FileMode, RemoteShell, RemoteShellError};
 use tokio::io::AsyncReadExt as _;
 
 /// Quote `arg` as one single-quoted POSIX shell word (`'\''` for an embedded quote).
-fn shell_quote(arg: &str) -> String {
+pub(crate) fn shell_quote(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', r"'\''"))
 }
 
@@ -49,6 +49,11 @@ pub struct HookLine {
     pub event: String,
     /// The event's payload as the agent wrote it to the hook's stdin.
     pub payload: serde_json::Value,
+    /// The nonce of a hook that **waits for an answer**
+    /// (`tddy_core::remote_answering_hook_command`), written as `<event>@<nonce>` in the line's
+    /// first field: the hook on the target waits for `<REMOTE_ANSWERS_DIR>/<nonce>`. `None` for a
+    /// hook that only reports.
+    pub answer_nonce: Option<String>,
 }
 
 /// Why a line of a hook log is not a hook.
@@ -92,6 +97,10 @@ impl HookLine {
         if token != expected_token {
             return Err(HookLineError::WrongToken);
         }
+        let (event, nonce) = match event.split_once('@') {
+            Some((event, nonce)) => (event, Some(nonce)),
+            None => (event, None),
+        };
         if !is_installed_event(event) {
             return Err(HookLineError::UnknownEvent(event.to_string()));
         }
@@ -100,6 +109,7 @@ impl HookLine {
         Ok(HookLine {
             event: event.to_string(),
             payload,
+            answer_nonce: nonce.map(str::to_string),
         })
     }
 }
@@ -117,11 +127,19 @@ pub trait HookSink: Send + Sync {
 /// a report the handling refuses is the delivery's error, never retried by the follower.
 #[async_trait]
 pub trait HookReportDelivery: Send + Sync {
-    /// Serve one `ReportSessionStatus` request, as the activity service's RPC does.
+    /// Serve one `ReportSessionStatus` request, as the activity service's RPC does, and return its
+    /// response: a permission or a question is answered with the `request_id` it was recorded under.
     async fn report_session_status(
         &self,
         request: tddy_service::proto::activity::ReportSessionStatusRequest,
-    ) -> Result<(), String>;
+    ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, String>;
+    /// Hold for the orchestrator's answer to a recorded request, as the activity service's
+    /// `AwaitQuestionAnswer` does for a local hook: the same presence check, the same recorded
+    /// wait, the same outcomes.
+    async fn await_question_answer(
+        &self,
+        request: tddy_service::proto::activity::AwaitQuestionAnswerRequest,
+    ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, String>;
     /// Serve one `ReportAgentActivity` request, as the activity service's RPC does.
     async fn report_agent_activity(
         &self,
@@ -138,6 +156,9 @@ pub struct ActivityHookSink {
     session_id: String,
     hook_token: String,
     os_user: String,
+    /// Where a waiting hook's answer is written: the session's shell and its worktree on the
+    /// target. `None` delivers report-only.
+    answers: Option<(Arc<dyn RemoteShell>, std::path::PathBuf)>,
 }
 
 impl ActivityHookSink {
@@ -153,7 +174,39 @@ impl ActivityHookSink {
             session_id: session_id.to_string(),
             hook_token: hook_token.to_string(),
             os_user: os_user.to_string(),
+            answers: None,
         }
+    }
+
+    /// This sink, answering the waiting hooks it delivers: once the orchestrator answers, Claude's
+    /// decision is written to `<worktree>/<REMOTE_ANSWERS_DIR>/<nonce>` through `shell`, where the
+    /// hook on the target waits for it (`#target-parity` 1/7).
+    #[must_use]
+    pub fn answering_through(mut self, shell: Arc<dyn RemoteShell>, worktree: &Path) -> Self {
+        self.answers = Some((shell, worktree.to_path_buf()));
+        self
+    }
+
+    /// Hold for the answer of a waiting hook and write it, in a task of its own: the follower's
+    /// reader must not stall on an orchestrator that takes minutes. A hook that only reports, or a
+    /// sink that does not answer, holds nothing.
+    fn answer_in_background(&self, line: &HookLine, request_id: Option<String>) {
+        let (Some(nonce), Some((shell, worktree))) = (&line.answer_nonce, &self.answers) else {
+            return;
+        };
+        tokio::spawn(crate::remote_hook_answer::hold_and_answer(
+            Arc::clone(&self.delivery),
+            Arc::clone(shell),
+            worktree.clone(),
+            nonce.clone(),
+            crate::remote_hook_answer::HeldHook {
+                session_id: self.session_id.clone(),
+                hook_token: self.hook_token.clone(),
+                os_user: self.os_user.clone(),
+                request_id,
+                permission_suggestions: line.payload.get("permission_suggestions").cloned(),
+            },
+        ));
     }
 }
 
@@ -168,13 +221,18 @@ impl HookSink for ActivityHookSink {
             &line.event,
             &payload,
         ) {
-            if let Err(error) = self.delivery.report_session_status(request).await {
-                log::warn!(
-                    "remote hook {} for session {} refused: {error}",
-                    line.event,
-                    self.session_id
-                );
-            }
+            let request_id = match self.delivery.report_session_status(request).await {
+                Ok(response) => Some(response.request_id),
+                Err(error) => {
+                    log::warn!(
+                        "remote hook {} for session {} refused: {error}",
+                        line.event,
+                        self.session_id
+                    );
+                    None
+                }
+            };
+            self.answer_in_background(&line, request_id);
         }
         if let Some(request) = tddy_session_activity::hook_request::agent_activity_request(
             &line.event,
@@ -291,7 +349,8 @@ pub async fn create_remote_hook_log(
     let exclude_command = format!(
         "if exclude=$(git -C {worktree} rev-parse --path-format=absolute --git-path info/exclude 2>/dev/null); then \
          mkdir -p \"$(dirname \"$exclude\")\"; \
-         grep -qxF '/.tddy/hooks.log' \"$exclude\" 2>/dev/null || echo '/.tddy/hooks.log' >> \"$exclude\"; fi",
+         for entry in '/.tddy/hooks.log' '/.tddy/answers/'; do \
+         grep -qxF \"$entry\" \"$exclude\" 2>/dev/null || echo \"$entry\" >> \"$exclude\"; done; fi",
         worktree = shell_quote(&worktree.to_string_lossy()),
     );
     shell
@@ -312,8 +371,16 @@ pub async fn remove_remote_hook_log(
         .join(tddy_core::REMOTE_HOOK_LOG)
         .to_string_lossy()
         .into_owned();
+    let answers = worktree
+        .join(tddy_core::REMOTE_ANSWERS_DIR)
+        .to_string_lossy()
+        .into_owned();
     shell
-        .exec(ExecRequest::new(format!("rm -f {}", shell_quote(&log))))
+        .exec(ExecRequest::new(format!(
+            "rm -f {}; rm -rf {}",
+            shell_quote(&log),
+            shell_quote(&answers)
+        )))
         .await?
         .success_or_exited()?;
     Ok(())
@@ -464,6 +531,29 @@ mod tests {
             Ok(HookLine {
                 event: "Stop".to_string(),
                 payload: serde_json::json!({"hook_event_name": "Stop", "session_id": "c-41"}),
+                answer_nonce: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_waiting_hooks_line_carries_its_nonce() {
+        // Given the line a waiting permission hook appended
+        let line = format!(
+            "PermissionRequest@4711\t{TOKEN}\t{}",
+            r#"{"hook_event_name":"PermissionRequest","tool_name":"Read"}"#
+        );
+
+        // When
+        let hook = HookLine::parse(&line, TOKEN);
+
+        // Then the event is the event, and the nonce is what the hook waits for
+        assert_eq!(
+            hook,
+            Ok(HookLine {
+                event: "PermissionRequest".to_string(),
+                payload: serde_json::json!({"hook_event_name": "PermissionRequest", "tool_name": "Read"}),
+                answer_nonce: Some("4711".to_string()),
             })
         );
     }

@@ -27,10 +27,18 @@ runs on a target. `REMOTE_HOOK_LOG` (`.tddy/hooks.log`) and
 `remote_hook_command(event, hook_token, log_path)`, selected by
 `HookCommandParams.remote_log`: a `printf` one-liner using only `printf`, `cat` and `tr` that
 appends `<event>\t<hook token>\t<payload, newlines removed>` to the log in one write, so two
-hooks firing together each leave a whole line. Under the remote carrier the builders omit the
-hooks that wait for an answer (Claude's `PermissionRequest` and its question matcher; Muse's
-hooks of those names only report, so Muse keeps all eight; Cursor installs none that wait),
-and the Muse and Cursor adapters accept the carrier in place of a daemon socket.
+hooks firing together each leave a whole line. Claude's `PermissionRequest` is the one hook
+that waits on a target: `remote_answering_hook_command(event, hook_token, log_path,
+answers_dir, wait_secs)` mints a nonce (`$$-<epoch seconds>`), appends
+`<event>@<nonce>\t<hook token>\t<payload>`, polls `<answers_dir>/<nonce>` once a second for
+`wait_secs` and prints the file (removing it); an empty file or no file ends it with no output and
+status zero. It names only shell built-ins and `cat`, `tr`, `date`, `sleep`, `rm`.
+`build_claude_hooks_settings` installs it with `answers_dir` = the log's directory + `answers`
+(`REMOTE_ANSWERS_DIR`, `.tddy/answers`), `wait_secs` = `answer_wait_secs +
+AWAIT_CLIENT_MARGIN_SECS` and Claude's `timeout` = `answer_wait_secs +
+CLAUDE_HOOK_TIMEOUT_MARGIN_SECS`. Claude's question matcher is omitted under the remote carrier
+(Muse's hooks of those names only report, so Muse keeps all eight; Cursor installs none that
+wait), and the Muse and Cursor adapters accept the carrier in place of a daemon socket.
 
 ## Backend (`backend`)
 

@@ -150,7 +150,7 @@ impl HookReportDelivery for RecordingDelivery {
     async fn report_session_status(
         &self,
         request: ReportSessionStatusRequest,
-    ) -> Result<(), String> {
+    ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, String> {
         self.recorder.record_report(json!({
             "kind": "session_status",
             "session_id": request.session_id,
@@ -163,7 +163,22 @@ impl HookReportDelivery for RecordingDelivery {
             "agent_conversation_id": request.agent_conversation_id,
             "hook_fields": request.hook_fields,
         }));
-        Ok(())
+        Ok(tddy_service::proto::activity::ReportSessionStatusResponse {
+            ok: true,
+            request_id: String::new(),
+        })
+    }
+
+    /// The driver runs no orchestrator: a waiting hook is never answered here, and the agent asks
+    /// in its own terminal.
+    async fn await_question_answer(
+        &self,
+        _request: tddy_service::proto::activity::AwaitQuestionAnswerRequest,
+    ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, String> {
+        Ok(tddy_service::proto::activity::AwaitQuestionAnswerResponse {
+            outcome: tddy_service::proto::activity::AwaitQuestionOutcome::NoOrchestrator as i32,
+            ..Default::default()
+        })
     }
 
     async fn report_agent_activity(
@@ -241,7 +256,9 @@ impl SessionHooks {
         }
     }
 
-    /// Follow the log from its first byte, once the agent is up.
+    /// Follow the log from its first byte, once the agent is up. A hook that waits for an answer is
+    /// answered through the session's shell as a daemon answers it — here always with no decision,
+    /// so the agent asks in its own terminal at once instead of after its whole answer wait.
     pub fn follow(&self, session_id: &str, worktree: &Path) {
         let sink = Arc::new(RecordingSink {
             recorder: Arc::clone(&self.recorder),
@@ -252,7 +269,8 @@ impl SessionHooks {
                 session_id,
                 &self.hook_token,
                 &self.os_user,
-            ),
+            )
+            .answering_through(Arc::clone(&self.shell), worktree),
         });
         let follower = RemoteHookFollower::start(
             Arc::clone(&self.shell),

@@ -67,10 +67,12 @@ pub fn the_acme_agent(program: &Path) -> HostAgent {
     }
 }
 
-/// The session's activity as the daemon keeps it: every status a delivered hook set, in order.
+/// The session's activity as the daemon keeps it: every status a delivered hook set, and every
+/// hook delivered (its event and payload), in order.
 #[derive(Default)]
 pub struct TheSessionsActivity {
     pub statuses: Mutex<Vec<SessionActivityStatus>>,
+    pub delivered: Mutex<Vec<HookLine>>,
 }
 
 #[async_trait]
@@ -82,6 +84,7 @@ impl HookSink for TheSessionsActivity {
             line.payload["tool_name"].as_str(),
         );
         self.statuses.lock().unwrap().extend(status);
+        self.delivered.lock().unwrap().push(line);
     }
 }
 

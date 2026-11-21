@@ -54,5 +54,7 @@ pub use claude_hooks::{
 };
 pub use cursor_hooks::build_cursor_hooks_settings;
 pub use muse_hooks::build_muse_hooks_config_value;
-pub use remote_hook_command::{remote_hook_command, REMOTE_HOOK_LOG};
+pub use remote_hook_command::{
+    remote_answering_hook_command, remote_hook_command, REMOTE_ANSWERS_DIR, REMOTE_HOOK_LOG,
+};
 pub use stream::ProgressEvent;

@@ -22,8 +22,7 @@ use prost::Message as _;
 use std::io::Read;
 use tddy_core::{parse_hook_event, ASK_USER_QUESTION_TOOL};
 use tddy_service::proto::activity::{
-    AwaitQuestionOutcome, ReportAgentActivityRequest, ReportSessionStatusRequest,
-    ReportSessionStatusResponse,
+    ReportAgentActivityRequest, ReportSessionStatusRequest, ReportSessionStatusResponse,
 };
 
 mod await_answer;
@@ -94,50 +93,9 @@ pub struct SessionHookArgs {
 /// `answer_wait_secs` (120) plus five.
 pub const DEFAULT_AWAIT_TIMEOUT_SECS: u64 = 125;
 
-/// How an orchestrator's answer reached the hook: the `AwaitQuestionAnswer` response, and Claude's
-/// `permission_suggestions` from the hook's stdin, which an `allow_always` answer applies.
-///
-/// The decision is Claude Code's `PermissionRequest` hook output
-/// (<https://code.claude.com/docs/en/hooks> § PermissionRequest decision control):
-///
-/// - `allow_once` → `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`;
-/// - `allow_always` → the same, with `"updatedPermissions"` set to Claude's `permission_suggestions`;
-/// - a `reject_*` option → `"behavior":"deny"` with `"message"`;
-/// - `cancelled`, `TIMED_OUT`, `NO_ORCHESTRATOR` → `None`: nothing is printed, and Claude's own
-///   prompt follows.
-#[must_use]
-pub fn permission_decision_json(
-    answer: &tddy_service::proto::activity::AwaitQuestionAnswerResponse,
-    permission_suggestions: Option<&serde_json::Value>,
-) -> Option<String> {
-    if AwaitQuestionOutcome::try_from(answer.outcome) != Ok(AwaitQuestionOutcome::Answered)
-        || answer.cancelled
-    {
-        return None;
-    }
-    let decision = match answer.option_id.as_str() {
-        "allow_once" => serde_json::json!({ "behavior": "allow" }),
-        "allow_always" => match permission_suggestions {
-            Some(suggestions) => {
-                serde_json::json!({ "behavior": "allow", "updatedPermissions": suggestions })
-            }
-            None => serde_json::json!({ "behavior": "allow" }),
-        },
-        option if option.starts_with("reject_") => {
-            serde_json::json!({ "behavior": "deny", "message": answer.message })
-        }
-        _ => return None,
-    };
-    Some(
-        serde_json::json!({
-            "hookSpecificOutput": {
-                "hookEventName": "PermissionRequest",
-                "decision": decision,
-            }
-        })
-        .to_string(),
-    )
-}
+/// Claude Code's `PermissionRequest` decision for an orchestrator's answer — what this hook prints.
+/// It lives in `tddy-session-activity`, which a target session's hook-log follower shares.
+pub use tddy_session_activity::hook_decision::permission_decision_json;
 
 /// The `ReportSessionStatus` request the hook event in `stdin_json` becomes, or `None` for an
 /// event that maps to no status. The mapping itself lives in

@@ -2,8 +2,9 @@
 //! tddy software on it.
 //!
 //! Every hooks adapter renders the same command from one `HookCommandParams`. With a remote log in
-//! those params the command is the log one-liner (`tddy_agent_backend::remote_hook_command`), and
-//! no hook that waits for an answer is installed: nothing travels back to an agent on a target.
+//! those params the command is the log one-liner (`tddy_agent_backend::remote_hook_command`). Claude
+//! Code's permission hook waits for its answer in a file beside the log
+//! (`remote_answering_hook_command`, `#target-parity` 1/7); its question hook is not installed.
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-15-remote-shell-remote-hooks.md.
 
@@ -12,7 +13,7 @@ use std::path::Path;
 
 use pretty_assertions::assert_eq;
 use tddy_agent_backend::claude_hooks::HookCommandParams;
-use tddy_agent_backend::remote_hook_command::remote_hook_command;
+use tddy_agent_backend::remote_hook_command::{remote_answering_hook_command, remote_hook_command};
 use tddy_coding_agent_specs::slots::hooks::{adapter, RenderedHooks};
 use tddy_coding_agent_specs::slots::SlotError;
 
@@ -282,19 +283,42 @@ fn muse_on_a_target_gets_the_log_command_on_its_command_line() {
 }
 
 #[test]
-fn no_hook_that_waits_for_an_answer_is_installed_on_a_target() {
+fn claude_code_on_a_target_waits_for_a_permission_answer_in_its_worktree() {
     // Given Claude Code, whose permission and question hooks wait for an answer on this host
     let session = a_session_on_a_target();
 
     // When
     let hooks = claude_hooks_for(&session);
 
-    // Then neither is installed, and nothing installed waits
-    let mut reporting_events = REPORTING_EVENTS.map(str::to_string).to_vec();
-    reporting_events.sort_unstable();
+    // Then the permission hook is installed on the target too, waiting — within the session's
+    // answer wait — for an answer file beside the hook log; the question hook is not installed yet
+    let answers = Path::new(REMOTE_LOG)
+        .parent()
+        .expect("the hook log has a directory")
+        .join("answers");
+    let mut events = REPORTING_EVENTS.map(str::to_string).to_vec();
+    events.push("PermissionRequest".to_string());
+    events.sort_unstable();
     assert_eq!(
-        hooks.map(|hooks| (hooks.events(), hooks.waiting)),
-        Ok((reporting_events, Vec::new()))
+        hooks.map(|hooks| (
+            hooks.events(),
+            hooks.waiting.clone(),
+            hooks.commands_of(&["PermissionRequest"])
+        )),
+        Ok((
+            events,
+            vec!["PermissionRequest".to_string()],
+            BTreeMap::from([(
+                "PermissionRequest".to_string(),
+                remote_answering_hook_command(
+                    "PermissionRequest",
+                    HOOK_TOKEN,
+                    REMOTE_LOG,
+                    &answers.to_string_lossy(),
+                    120 + tddy_agent_backend::claude_hooks::AWAIT_CLIENT_MARGIN_SECS,
+                )
+            )])
+        ))
     );
 }
 

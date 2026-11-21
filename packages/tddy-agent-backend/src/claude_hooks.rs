@@ -157,6 +157,35 @@ pub(crate) fn hook_entry_for_event(
     }])
 }
 
+/// The entry of a hook that waits for an answer on a target: the POSIX waiting command, answered
+/// through `<log's directory>/answers`, with Claude's `timeout` for it.
+fn remote_permission_entry(
+    p: &HookCommandParams<'_>,
+    event: &str,
+    matcher: &str,
+    log: &str,
+) -> serde_json::Value {
+    let answers_dir = std::path::Path::new(log)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new(""))
+        .join("answers");
+    let cmd = crate::remote_hook_command::remote_answering_hook_command(
+        event,
+        p.hook_token,
+        log,
+        &answers_dir.to_string_lossy(),
+        p.answer_wait_secs + AWAIT_CLIENT_MARGIN_SECS,
+    );
+    serde_json::json!([{
+        "matcher": matcher,
+        "hooks": [{
+            "type": "command",
+            "command": cmd,
+            "timeout": p.answer_wait_secs + CLAUDE_HOOK_TIMEOUT_MARGIN_SECS,
+        }]
+    }])
+}
+
 /// Build a claude-cli session's hooks settings value.
 ///
 /// Returns a `serde_json::Value` with a `hooks` object containing one entry per relevant
@@ -182,13 +211,16 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
         // for the orchestrator's answer; the daemon decides whether anyone is there.
         let awaits_an_answer = *event == "PermissionRequest"
             || (*event == "PreToolUse" && *matcher == "AskUserQuestion");
-        if p.remote_log.is_some() && awaits_an_answer {
-            continue;
-        }
-        hooks_obj.insert(
-            event.to_string(),
-            hook_entry_for_event(p, event, matcher, awaits_an_answer),
-        );
+        let entry = match p.remote_log {
+            // On a target the permission hook waits for an answer file beside the hook log; the
+            // question hook is not installed there yet.
+            Some(log) if *event == "PermissionRequest" => {
+                remote_permission_entry(p, event, matcher, log)
+            }
+            Some(_) if awaits_an_answer => continue,
+            _ => hook_entry_for_event(p, event, matcher, awaits_an_answer),
+        };
+        hooks_obj.insert(event.to_string(), entry);
     }
 
     let mut settings = serde_json::json!({ "hooks": hooks_obj });

@@ -43,6 +43,13 @@ in `tddy-agent-launch`, which delivers in-process through `HookReportDelivery`. 
 session's hooks are followed from its `.tddy/hooks.log` on the target; a line with the wrong
 token, an unknown event or an unparseable payload is dropped and counted, never delivered.
 
+**Hook decision** (`hook_decision.rs`): `permission_decision_json(answer, permission_suggestions)`
+builds Claude Code's `PermissionRequest` decision from an `AwaitQuestionAnswer` response —
+`allow_once` → allow, `allow_always` → allow with `updatedPermissions`, `reject_*` → deny with the
+message, anything else → `None`. Both hook paths print it: `tddy-tools session-hook
+--await-answer` (re-exported as `tddy_tools::session_hook::permission_decision_json`) and a target
+session's follower, which writes it into the answer file the hook on the target waits for.
+
 Proto: [`packages/tddy-service/proto/activity.proto`](../../tddy-service/proto/activity.proto). It
 imports `types.proto` for `AgentActivityRecord` and `StreamMode`.
 

@@ -230,6 +230,12 @@ impl AMachine {
     /// Fire `event` as Claude Code fires a hook: its installed command under `sh -c`, in the
     /// worktree the agent runs in, with `payload` on its stdin.
     pub fn fire_hook(&self, event: &str, payload: &Value) {
+        self.fire_hook_printing(event, payload);
+    }
+
+    /// [`Self::fire_hook`], returning what the hook printed once it ended: the decision Claude Code
+    /// would read from a hook that waits for an answer.
+    pub fn fire_hook_printing(&self, event: &str, payload: &Value) -> String {
         use std::io::Write as _;
         let command = self
             .installed_hook(event)
@@ -239,6 +245,7 @@ impl AMachine {
             .arg(&command)
             .current_dir(self.worktree())
             .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
             .spawn()
             .expect("the hook command runs");
         hook.stdin
@@ -246,8 +253,13 @@ impl AMachine {
             .expect("the hook's stdin")
             .write_all(payload.to_string().as_bytes())
             .expect("the payload is written");
-        let status = hook.wait().expect("the hook command ends");
-        assert!(status.success(), "the {event} hook exited {status}");
+        let output = hook.wait_with_output().expect("the hook command ends");
+        assert!(
+            output.status.success(),
+            "the {event} hook exited {}",
+            output.status
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
     }
 
     /// Where the launch of `session_id` records its agent's pid in the worktree.
