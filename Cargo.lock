@@ -14040,6 +14040,7 @@ dependencies = [
  "tddy-daemon-kernel",
  "tddy-daemon-sandbox",
  "tddy-discovery",
+ "tddy-github",
  "tddy-pr-stack",
  "tddy-projects",
  "tddy-rpc",
