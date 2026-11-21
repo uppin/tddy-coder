@@ -22,11 +22,15 @@ pub enum WatchKind {
     /// A session sent a message — to the orchestrator itself or to another session
     /// (`#activity-wake` 5/5). Selected by sender.
     Message,
+    /// A commit landed on the project's remote trunk, or a force-push rewrote it (`#orchestra`
+    /// 5/9). The orchestrator's own activity: the one kind a watch may ask for on its owner's own
+    /// session.
+    TrunkCommit,
 }
 
 impl WatchKind {
     /// Every kind, in the order the tools list them.
-    pub const ALL: [WatchKind; 7] = [
+    pub const ALL: [WatchKind; 8] = [
         WatchKind::Question,
         WatchKind::Permission,
         WatchKind::TurnFinished,
@@ -34,6 +38,7 @@ impl WatchKind {
         WatchKind::AgentNotification,
         WatchKind::Ended,
         WatchKind::Message,
+        WatchKind::TrunkCommit,
     ];
 
     /// The kind's name, as the tools take it.
@@ -46,6 +51,7 @@ impl WatchKind {
             WatchKind::AgentNotification => "agent_notification",
             WatchKind::Ended => "ended",
             WatchKind::Message => "message",
+            WatchKind::TrunkCommit => "trunk_commit",
         }
     }
 
@@ -80,6 +86,8 @@ impl WatchKind {
             }
             SessionNotificationSource::AgentToolCall => None,
             SessionNotificationSource::Message => Some(Self::Message),
+            // TODO(trunk-watch): implement — a trunk record is a `TrunkCommit` event.
+            SessionNotificationSource::TrunkCommit => None,
         }
     }
 }
@@ -142,4 +150,77 @@ pub(super) fn watch_matches(
         || (watch.filter.started_by_me
             && record.orchestrator_session_id.as_deref() == Some(watch.owner.session_id.as_str()));
     selected && WatchKind::of(record).is_some_and(|kind| watch.filter.kinds.contains(&kind))
+}
+
+#[cfg(test)]
+mod trunk_commit_tests {
+    use super::*;
+    use crate::session_watches::WatchOwner;
+    use tddy_daemon_kernel::session_notification::SessionNotificationKind;
+
+    const ORCHESTRATOR: &str = "01a1fdd8-0000-7000-8000-00000000000a";
+
+    fn an_orchestrators_watch(kinds: Vec<WatchKind>) -> SessionWatch {
+        SessionWatch {
+            watch_id: "w-1".to_string(),
+            owner: WatchOwner {
+                project_id: "p".to_string(),
+                session_id: ORCHESTRATOR.to_string(),
+                os_user: "dev".to_string(),
+            },
+            filter: WatchFilter {
+                session_ids: vec![ORCHESTRATOR.to_string()],
+                started_by_me: false,
+                kinds,
+            },
+            created_at_unix_ms: 0,
+            expires_at_unix_ms: u64::MAX,
+            position: 0,
+            created_seq: 0,
+        }
+    }
+
+    fn a_trunk_record_of(session_id: &str) -> ProjectNotificationRecord {
+        ProjectNotificationRecord {
+            seq: 1,
+            session_id: session_id.to_string(),
+            label: "orchestrator".to_string(),
+            kind: SessionNotificationKind::Activity,
+            source: SessionNotificationSource::TrunkCommit,
+            text: "origin/main: b Add the outbox (dev)".to_string(),
+            agent: None,
+            question: None,
+            ended: None,
+            activity_status: None,
+            message: None,
+            at_unix_ms: 0,
+            orchestrator_session_id: None,
+        }
+    }
+
+    #[test]
+    fn a_trunk_record_is_a_trunk_commit_event() {
+        assert_eq!(
+            WatchKind::of(&a_trunk_record_of(ORCHESTRATOR)),
+            Some(WatchKind::TrunkCommit)
+        );
+    }
+
+    #[test]
+    fn an_orchestrators_self_watch_matches_its_own_trunk_activity() {
+        let watch = an_orchestrators_watch(vec![WatchKind::TrunkCommit]);
+
+        assert!(watch_matches(&watch, &a_trunk_record_of(ORCHESTRATOR), 0));
+    }
+
+    #[test]
+    fn a_self_watch_still_matches_no_other_kind_of_its_own_session() {
+        let watch = an_orchestrators_watch(vec![WatchKind::TrunkCommit, WatchKind::Ended]);
+        let own_end = ProjectNotificationRecord {
+            source: SessionNotificationSource::SessionEnded,
+            ..a_trunk_record_of(ORCHESTRATOR)
+        };
+
+        assert!(!watch_matches(&watch, &own_end, 0));
+    }
 }

@@ -40,6 +40,12 @@ pub enum SessionNotificationSource {
     /// the project log keeps it for its recipient's inbox and for whoever watches its sender, and
     /// the drawer, Telegram and the desktop skip it.
     Message,
+    /// The trunk watcher — a commit landed on (or a force-push rewrote) the project's remote trunk
+    /// (`#orchestra` 5/9). One per subscribed orchestrator: the notification's `session_id` is that
+    /// orchestrator, so it is the orchestrator's own activity; `text` is one line naming the trunk
+    /// ref, the commit and its subject. Not for the operator: the drawer, Telegram and the desktop
+    /// skip it.
+    TrunkCommit,
 }
 
 /// How an agent grades what it is telling its operator. Chosen by the agent (`tddy-tools notify

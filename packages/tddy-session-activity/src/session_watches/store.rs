@@ -84,7 +84,7 @@ impl SessionWatchStore {
             );
         }
         if filter.kinds.is_empty() {
-            return Err("name at least one kind, or name none for all seven".to_string());
+            return Err("name at least one kind, or name none for every kind".to_string());
         }
         let project = self.project_of(&owner.project_id);
         let mut state = project.lock().await;

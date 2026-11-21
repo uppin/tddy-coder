@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 5 — new central poller with lifecycle tied to session liveness, two GitHub transports with conditional requests, a new activity source and watch kind
+**PR**: [#983](https://github.com/uppin/tddy-coder/pull/983)
 **Stack**: `#orchestra` 5/9 — branch `feature/orchestra/trunk-watch`, base `feature/orchestra/base-freshness`
 
 ## Initial Discovery
@@ -15,7 +16,10 @@
 - **tddy-github**: `TrunkFeed` port with conditional reads (ETag, 304, `X-Poll-Interval`) over REST (vault account) and over `gh api -i` (local gh)
 - **tddy-host-service**: the `gh` transport of `TrunkFeed`
 - **tddy-session-activity**: `TrunkCommit` activity source, a `trunk_commit` watch kind, and an orchestrator's self-watch
-- **tddy-daemon-rpc**: `TrunkWatcher` — one poller per (project, remote, trunk), subscriptions by orchestrator session, stop when none is live
+- **tddy-session-activity**: `TrunkWatcher` — one poller per project, subscriptions by orchestrator session, stop when none is live
+- **tddy-daemon-kernel**: `SessionNotificationSource::TrunkCommit`
+- **tddy-telegram-control**, **tddy-tool-engine**, **tddy-tools**: skip / list the new source and kind
+- **tddy-daemon-rpc**: drives the watcher and builds its `TrunkSource`
 - **tddy-agent-launch**: subscribe on orchestrator start / resume, unsubscribe on stop
 
 ## Related Feature Documentation
@@ -44,7 +48,7 @@ None inside `#orchestra`. It builds on its base, `#target-parity` 7/7 (#975), an
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: `TrunkFeed` trait + `Conditional`, `TrunkWatcher::{subscribe, unsubscribe, live_pollers}`, `ActivitySource::TrunkCommit`, `WatchKind::TrunkCommit`; failing tests below with a hand clock and a fake feed.
+The first push of this PR, before its implementation: `TrunkFeed` + `Conditional` + `TrunkPoller` (tddy-github), `TrunkWatcher::{subscribe, unsubscribe, live_pollers, step}` (tddy-session-activity), `SessionNotificationSource::TrunkCommit`, `WatchKind::TrunkCommit`; failing tests below with a hand clock and a scripted feed.
 
 ## Green wave
 
@@ -94,17 +98,31 @@ Every live orchestrator receives trunk commits as its own activities.
 
 ## Acceptance Tests
 
-`packages/tddy-daemon-rpc/tests/trunk_watch_acceptance.rs`:
+`packages/tddy-session-activity/tests/trunk_watch_acceptance.rs` (scripted GitHub, recording bus, hand clock):
 - [ ] `two_live_orchestrators_of_one_project_share_one_poller`
-- [ ] `a_new_trunk_commit_lands_as_an_activity_on_every_subscribed_orchestrator`
+- [ ] `a_new_trunk_commit_lands_as_an_activity_of_every_subscribed_orchestrator`
 - [ ] `the_poller_stops_when_the_last_subscribed_orchestrator_stops`
-- [ ] `an_orchestrators_self_watch_fires_on_a_new_trunk_commit`
+- [ ] `an_unsubscribed_orchestrator_gets_no_more_trunk_activities`
 - [ ] `a_forced_push_is_reported_as_a_rewritten_trunk`
 
 `packages/tddy-github/tests/trunk_feed.rs`:
-- [ ] `a_not_modified_answer_produces_nothing_and_waits_out_the_poll_interval`
+- [ ] `the_first_poll_is_a_baseline_and_reports_nothing`
+- [ ] `new_commits_are_reported_once_oldest_first`
+- [ ] `a_not_modified_answer_reports_nothing_and_waits_out_the_poll_interval`
 - [ ] `a_failed_read_backs_off_before_the_next_poll`
+- [ ] `a_tip_that_does_not_descend_from_the_last_one_is_a_rewrite`
+- [ ] `every_fifteen_minutes_the_read_ignores_its_etag`
 - [ ] `the_gh_transport_reads_a_304_as_not_modified`
+- [ ] `the_gh_transport_reads_commits_and_their_etag`
+
+Unit — `packages/tddy-session-activity/src/session_watches/matcher.rs` (`trunk_commit_tests`):
+- [ ] `a_trunk_record_is_a_trunk_commit_event`
+- [ ] `an_orchestrators_self_watch_matches_its_own_trunk_activity`
+- [x] `a_self_watch_still_matches_no_other_kind_of_its_own_session` — regression guard
+
+The surface they specify (bodies `TODO(trunk-watch)`): `tddy_github::trunk_feed::{TrunkFeed, Conditional, TrunkCommit, RepoSlug, TrunkReadError, RestTrunkFeed, GhApi, GhApiOutput, GhCliTrunkFeed, TrunkPoller, TrunkChange, PollOutcome, DEFAULT_POLL_INTERVAL_MS, ERROR_BACKOFF_MS, SWEEP_EVERY_MS}`, `tddy_session_activity::trunk_watch::{TrunkWatcher, TrunkSubscription, TrunkSource, SubscriberLiveness, trunk_activity_text}`, `SessionNotificationSource::TrunkCommit` (stored, no wire form, skipped by Telegram), `WatchKind::TrunkCommit` / `"trunk_commit"` in `WATCH_KINDS`.
+
+**Contract-time decisions:** a trunk commit travels as a `TrunkCommit`-source notification whose `session_id` is the subscribed orchestrator and whose `text` is one line per commit — no new field on `SessionNotification`, which has 119 struct literals. The poll reads the trunk's newest commits conditionally (ETag), not the repository events feed: one call answers both "what landed" and "was it rewritten". The daemon's wiring — subscribe on orchestrator start and resume, the step task, and the `TrunkSource` building `GhCliTrunkFeed` (host `gh` as the OS user) or `RestTrunkFeed` (vault token) from `ProjectRecord.local_gh` — is implementation; `/green` adds an orchestrator-start test for it.
 
 ## Decisions & Trade-offs
 
@@ -133,10 +151,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (delegated: the user said "Finish the remaining ones without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
