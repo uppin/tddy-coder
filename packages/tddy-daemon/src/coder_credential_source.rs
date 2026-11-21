@@ -84,6 +84,23 @@ pub fn coder_credential_source(
     )))
 }
 
+/// The shells the Worktree tab's actions reach a target session's worktree through, resolved as a
+/// session start resolves them: a Coder target through the daemon's `vaults`, or, for a daemon
+/// started without Coder accounts, refused while an ssh target stays reachable.
+#[must_use]
+pub fn worktree_target_shells(
+    vaults: Option<Arc<tddy_credentials::SessionVaults>>,
+    user_resolver: tddy_daemon_kernel::SessionUserResolver,
+) -> Arc<dyn tddy_worktree_service::target_worktrees::TargetShells> {
+    let credentials: Arc<dyn CoderCredentialSource> = match vaults {
+        Some(vaults) => coder_credential_source(vaults, user_resolver),
+        None => Arc::new(tddy_agent_launch::coder_target::NoCoderAccounts),
+    };
+    Arc::new(tddy_agent_launch::target_shells::SessionTargetShells::new(
+        credentials,
+    ))
+}
+
 /// Wire a host service for Coder: its accounts read from `vaults` as the user a session token
 /// resolves to, and its listings asked of each account's deployment over HTTP. Kept here, with
 /// the credential source it installs, rather than in the host mounting that calls it.

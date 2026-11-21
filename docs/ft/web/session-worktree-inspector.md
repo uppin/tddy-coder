@@ -87,6 +87,25 @@ New daemon RPC **`RestoreSessionWorktree`**:
 UI: single **Restore** button (shown only in the missing state); after success the tab reloads
 stats and returns to the present state.
 
+### On a target session
+
+For a session whose agent runs on a **target** (an ssh host or a Coder workspace), the worktree lives
+on that target, not in the project's clone on the daemon host. The three actions then run **on the
+target**, through the same remote shell a session start uses, and never touch the daemon host's clone:
+
+- **Clear** runs `git clean -fdx` in the target worktree.
+- **Delete** runs `git worktree remove --force`, then `git worktree prune`, in the target's clone.
+- **Restore** checks the recorded branch out again at the recorded path when the target's clone still
+  has it, otherwise cuts it from the recorded integration base after a fetch. A worktree already
+  present is left as it is. The session's recorded worktree path is **not** rewritten, and nothing
+  is cut on the daemon host.
+
+The target session is found from what each request already carries: `session_id` for Restore, and
+for Clear and Delete the caller's session of `project_id` whose recorded target worktree equals
+`worktree_path`. A target that cannot be reached — a locked Coder vault, an unknown account, a
+daemon with no Coder accounts — fails the action with its reason and changes nothing. The proto and
+the tab are unchanged; local sessions behave as above.
+
 ## Streaming design — no new streaming endpoint
 
 Unlike the [Usage tab](session-usage-inspector.md), worktree stats do **not** ride a server stream:

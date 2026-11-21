@@ -130,6 +130,12 @@ impl BuildContext {
             if let Some(ref tracker) = idle_tracker {
                 worktree_service = worktree_service.with_idle_tracker(tracker.clone());
             }
+            worktree_service = worktree_service.with_target_shells(
+                crate::coder_credential_source::worktree_target_shells(
+                    self.identity.credential_vaults.clone(),
+                    Arc::clone(user_resolver),
+                ),
+            );
             Arc::new(worktree_service)
         };
         Served {
