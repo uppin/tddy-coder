@@ -10,7 +10,7 @@
 //! workspace reached with its owner's vault credentials) lives in `tddy-agent-launch`, which
 //! depends on this crate.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-11-21-target-worktree-actions.md.
+//! Feature: docs/ft/web/session-worktree-inspector.md § On a target session.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -70,7 +70,7 @@ pub fn target_session_in(session_dir: &Path) -> Option<TargetSession> {
     )
 }
 
-fn target_session_from(
+pub(crate) fn target_session_from(
     session_dir: &Path,
     metadata: tddy_core::SessionMetadata,
 ) -> Option<TargetSession> {
@@ -137,15 +137,19 @@ async fn succeeds_on_target(shell: &dyn RemoteShell, command: String) -> Result<
     Ok(output.status == 0)
 }
 
-/// Run `command` on the target; a non-zero exit is an `internal` error carrying its output.
-async fn run_on_target(shell: &dyn RemoteShell, command: String) -> Result<(), Status> {
-    shell
+/// Run `command` on the target and answer its stdout; a non-zero exit is an `internal` error
+/// carrying its output.
+pub(crate) async fn run_on_target(
+    shell: &dyn RemoteShell,
+    command: String,
+) -> Result<Vec<u8>, Status> {
+    let output = shell
         .exec(tddy_remote_shell::ExecRequest::new(command))
         .await
         .map_err(|e| Status::internal(e.to_string()))?
         .success_or_exited()
         .map_err(|e| Status::internal(e.to_string()))?;
-    Ok(())
+    Ok(output.stdout)
 }
 
 /// Remove a target session's worktree on its target, through `shell`: the worktree, the pointer
@@ -168,7 +172,8 @@ pub async fn remove_target_worktree(shell: &dyn RemoteShell, worktree: &str) -> 
 
 /// Clean a target session's worktree on its target: untracked and ignored files go.
 pub async fn clean_target_worktree(shell: &dyn RemoteShell, worktree: &str) -> Result<(), Status> {
-    run_on_target(shell, format!("git -C {} clean -fdx", quoted(worktree))).await
+    run_on_target(shell, format!("git -C {} clean -fdx", quoted(worktree))).await?;
+    Ok(())
 }
 
 /// A recorded, non-blank changeset field.

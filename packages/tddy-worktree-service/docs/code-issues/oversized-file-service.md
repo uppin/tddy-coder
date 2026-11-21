@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-worktree-service/src/service.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-24 — `/pr-wrap` step 3.5 file-length gate on #509 (`#keyring` 2/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **883 production lines** (2026-11-21, #970; 808 at 2026-10-25, #752; 772 at 2026-10-18, #625; 777 at 2026-10-04, #571; `awk '/#\[cfg\(test\)\]/{exit} {n++} END{print n}'`; 752 at 2026-09-24) — originally **752 production lines** of 752 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.77× over**
-**Thresholds breached:** length 883 > 500
+**Metrics:** **831 production lines** (2026-11-21, #975; 883 at 2026-11-21, #970; 808 at 2026-10-25, #752; 772 at 2026-10-18, #625; 777 at 2026-10-04, #571; `awk '/#\[cfg\(test\)\]/{exit} {n++} END{print n}'`; 752 at 2026-09-24) — originally **752 production lines** of 752 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.66× over**
+**Thresholds breached:** length 831 > 500
 **Restructure:** not designed
-**Status:** Open — regressed 2026-11-21 (+75 from #970; 1.77× over) — **unclaimed**
+**Status:** Open — partially fixed 2026-11-21 (#975: 883 → 831, seam A moved out; seams B and C remain) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
 ## Measurement history
@@ -18,16 +18,16 @@
 | 2026-10-18 | 772 | 777 at the base → 772 after #625 (`#satellite` 3/13): −5 lines. The local `WorktreeRoomCloser` trait and `NoSessionRooms` became re-exports of the `SessionRooms` port. Improved, not clean; the split is still deferred (dependents of the `#keyring` stack touch this file) |
 | 2026-10-25 | 808 | **regressed by #752** (`#start-parity` 3/9): 772 → 808 (+36) — `resolve_main_repo`'s body became the public `project_main_repo_on_host` (the project-home worktree tools resolve the same main repo), the `worktree_size_calculator()` accessor, and `stream_worktree_stats` reading its first frame through `worktrees::project_worktree_snapshot`. **Split deferred by developer instruction**: later `#start-parity` nodes (8/9 `disk-refresh`, 9/9) import `project_main_repo_on_host` from this module, so a move here breaks each of them on rebase. Seam ranges above need re-deriving |
 | 2026-11-21 | 883 | **regressed by #970** (`#target-parity` 2/7): 808 → 883 (+75) — the `target_shells` field and `with_target_shells` builder, `shell_of_target` / `target_session_of`, and the target dispatch at the head of `remove_worktree`, `clean_worktree` and `restore_session_worktree`; the work itself is in the new `target_worktrees.rs`. **Split not done here**: the file is stack-shared with `#target-parity` 7/7 (#975), so it is recorded, not split, under the stack rule |
+| 2026-11-21 | 831 | **improved by #975** (`#target-parity` 7/7): 883 → 831 (−52). Seam A — `blocking_within`, `proto_worktree_size_status`, `worktree_row_from_diff`, `map_remove_worktree_error`, `map_clean_worktree_error` — moved to `service_helpers.rs`; n7's target-row code lives in `target_worktree_stats.rs`, with two call sites, `sessions_dir_of` and one bus accessor here |
 
 ## What would close it — candidate seams (not proven)
 
 | Seam | Items | Out |
 |---|---|---|
-| A | free helpers: `blocking_within`, `proto_worktree_size_status`, `worktree_row_from_diff`, `map_remove_worktree_error`, `map_clean_worktree_error` (L213–299) | ~85 |
 | B | stats and size, from the `WorktreeService` impl: `stream_worktree_stats`, `calculate_worktree_size` (L610–751) | ~140 |
 | C | file reading: `list_worktree_directory`, `read_worktree_file`, `stream_read_worktree_file` (L505–609) | ~105 |
 | — | stays: struct, builders and auth/resolve helpers (L44–211), plus list/remove/clean/restore (L311–504) | — |
 
-Seams B and C sit inside a trait impl. Their bodies move to free functions and the impl keeps delegating stubs. From this first reading, A+B+C take it to about 440 lines with stubs, and A+B alone leave it just over budget. Prove the seams with `restructure check --deep` before applying them.
+Seams B and C sit inside a trait impl. Their bodies move to free functions and the impl keeps delegating stubs. Seam A is done (#975). B+C take it to about 440 lines with stubs; B alone leaves it over budget. Prove the seams with `restructure check --deep` before applying them.
 
 **Stack constraint:** `#keyring` dependents #510–#516 are still open, so no split lands until that stack does. `#keyring` 3/9 (#510) touches this file, so a split now would conflict with it.

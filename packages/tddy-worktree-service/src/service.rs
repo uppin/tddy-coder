@@ -27,10 +27,15 @@ use tddy_service::proto::worktree::{
 use tddy_task::IdleTimeoutTracker;
 
 use crate::project_storage;
+use crate::service_helpers::{
+    blocking_within, map_clean_worktree_error, map_remove_worktree_error,
+    proto_worktree_size_status, worktree_row_from_diff,
+};
 use crate::stream::{worktree_file_frames, MpscResultStream, MpscWorktreeStatsStream};
+use crate::target_worktrees::TargetSession;
 use crate::worktrees::{
-    self, CleanWorktreeError, RemoveWorktreeError, WorktreeDiffRow, WorktreeSizeCalculator,
-    WorktreeSizeStatus, WorktreeStatsCache, DAEMON_SIZE_WALK_PERMITS,
+    self, WorktreeDiffRow, WorktreeSizeCalculator, WorktreeSizeStatus, WorktreeStatsCache,
+    DAEMON_SIZE_WALK_PERMITS,
 };
 
 /// What must stop watching a checkout before it is taken away: the daemon's session rooms, through
@@ -72,6 +77,8 @@ pub struct WorktreeServiceImpl {
     idle_tracker: Option<Arc<IdleTimeoutTracker>>,
     /// The shells of target sessions' targets — see [`crate::target_worktrees`].
     target_shells: Arc<dyn crate::target_worktrees::TargetShells>,
+    /// Target rows measured outside a stream — see [`crate::target_worktree_stats`].
+    target_row_bus: Arc<crate::target_worktree_stats::TargetRowBus>,
 }
 
 impl WorktreeServiceImpl {
@@ -91,6 +98,7 @@ impl WorktreeServiceImpl {
             session_rooms: Arc::new(NoSessionRooms),
             idle_tracker: None,
             target_shells: Arc::new(crate::target_worktrees::NoTargetShells),
+            target_row_bus: Arc::default(),
             tddy_data_dir,
             user_resolver,
             config,
@@ -175,10 +183,10 @@ impl WorktreeServiceImpl {
 
     /// The shell of `session`'s target, resolved as the caller (the subject a session start
     /// resolves a Coder target's account with). A refusal is returned as it is.
-    async fn shell_of_target(
+    pub(crate) async fn shell_of_target(
         &self,
         session_token: &str,
-        session: &crate::target_worktrees::TargetSession,
+        session: &TargetSession,
     ) -> Result<Arc<dyn tddy_remote_shell::RemoteShell>, Status> {
         let subject = (self.user_resolver)(session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
@@ -187,19 +195,25 @@ impl WorktreeServiceImpl {
             .await
     }
 
+    pub(crate) fn target_row_bus(&self) -> &Arc<crate::target_worktree_stats::TargetRowBus> {
+        &self.target_row_bus
+    }
+
+    /// The caller's sessions directory: `<sessions base>/sessions`.
+    pub(crate) fn sessions_dir_of(&self, os_user: &str) -> Option<PathBuf> {
+        sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+            .map(|base| base.join(tddy_core::output::SESSIONS_SUBDIR))
+    }
+
     /// The caller's target session of `project_id` whose worktree on its target is `worktree`.
     fn target_session_of(
         &self,
         os_user: &str,
         project_id: &str,
         worktree: &str,
-    ) -> Option<crate::target_worktrees::TargetSession> {
-        let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))?;
-        crate::target_worktrees::target_session_of_worktree(
-            &sessions_base.join(tddy_core::output::SESSIONS_SUBDIR),
-            project_id,
-            worktree,
-        )
+    ) -> Option<TargetSession> {
+        let sessions_dir = self.sessions_dir_of(os_user)?;
+        crate::target_worktrees::target_session_of_worktree(&sessions_dir, project_id, worktree)
     }
 
     /// Authenticates the caller and returns the directory of `session_id` when it exists under the
@@ -264,7 +278,7 @@ impl WorktreeServiceImpl {
         Ok(worktree_path)
     }
 
-    fn request_timeout(&self) -> Duration {
+    pub(crate) fn request_timeout(&self) -> Duration {
         self.config.spawn_worker_request_timeout()
     }
 }
@@ -302,94 +316,6 @@ pub fn project_main_repo_on_host(
         ));
     }
     Ok(main_repo)
-}
-
-/// Run blocking git/filesystem work under a wall-clock cap, so a hung git cannot block an RPC
-/// forever.
-///
-/// `op_label` names the RPC in the deadline message, because the operator reading it is looking at
-/// one call and needs to know which.
-async fn blocking_within<T: Send + 'static>(
-    timeout: Duration,
-    op_label: &'static str,
-    f: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
-) -> Result<T, Status> {
-    match tokio::time::timeout(timeout, tokio::task::spawn_blocking(f)).await {
-        Ok(Ok(Ok(v))) => Ok(v),
-        Ok(Ok(Err(e))) => {
-            log::error!("{} failed: {}", op_label, e);
-            Err(Status::internal(e.to_string()))
-        }
-        Ok(Err(join_err)) => Err(Status::internal(join_err.to_string())),
-        Err(_elapsed) => Err(Status::deadline_exceeded(format!(
-            "{}: timed out after {}s (spawn_worker_request_timeout_secs)",
-            op_label,
-            timeout.as_secs()
-        ))),
-    }
-}
-
-/// Map the library disk-size lifecycle status to its wire enum.
-fn proto_worktree_size_status(
-    status: WorktreeSizeStatus,
-) -> tddy_service::proto::worktree::WorktreeSizeStatus {
-    use tddy_service::proto::worktree::WorktreeSizeStatus as Wire;
-    match status {
-        WorktreeSizeStatus::None => Wire::None,
-        WorktreeSizeStatus::Calculating => Wire::Calculating,
-        WorktreeSizeStatus::Cached => Wire::Cached,
-    }
-}
-
-/// Build a `WorktreeRow` from a worktree's branch/diff summary plus its current size state. The
-/// size fields (`disk_bytes`, `size_status`, `size_calculated_at_unix_ms`) come from the
-/// calculator; `disk_bytes`/timestamp are 0 until a size has been computed.
-fn worktree_row_from_diff(
-    diff: &WorktreeDiffRow,
-    status: WorktreeSizeStatus,
-    disk_bytes: Option<u64>,
-    calculated_at_unix_ms: Option<i64>,
-) -> WorktreeRow {
-    WorktreeRow {
-        path: diff.path.to_string_lossy().to_string(),
-        branch_label: diff.branch_label.clone(),
-        disk_bytes: disk_bytes.unwrap_or(0),
-        changed_files: diff.changed_files,
-        lines_added: diff.lines_added,
-        lines_removed: diff.lines_removed,
-        updated_at_unix_ms: calculated_at_unix_ms.unwrap_or(0),
-        stale: false,
-        size_status: proto_worktree_size_status(status) as i32,
-        size_calculated_at_unix_ms: calculated_at_unix_ms.unwrap_or(0),
-    }
-}
-
-fn map_remove_worktree_error(e: RemoveWorktreeError) -> Status {
-    match e {
-        RemoveWorktreeError::NotListed => {
-            Status::not_found("worktree path is not in git worktree list")
-        }
-        RemoveWorktreeError::CannotRemovePrimary => {
-            Status::failed_precondition("cannot remove primary worktree")
-        }
-        RemoveWorktreeError::GitFailed { message } | RemoveWorktreeError::Io(message) => {
-            Status::internal(message)
-        }
-    }
-}
-
-fn map_clean_worktree_error(e: CleanWorktreeError) -> Status {
-    match e {
-        CleanWorktreeError::NotListed => {
-            Status::not_found("worktree path is not in git worktree list")
-        }
-        CleanWorktreeError::CannotCleanPrimary => {
-            Status::failed_precondition("cannot clean primary worktree")
-        }
-        CleanWorktreeError::GitFailed { message } | CleanWorktreeError::Io(message) => {
-            Status::internal(message)
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -770,7 +696,7 @@ impl WorktreeService for WorktreeServiceImpl {
             .collect();
 
         // Snapshot: the size state per worktree, as read before any enqueue triggered below.
-        let snapshot: Vec<WorktreeRow> = rows
+        let mut snapshot: Vec<WorktreeRow> = rows
             .iter()
             .map(|r| {
                 worktree_row_from_diff(
@@ -791,6 +717,16 @@ impl WorktreeService for WorktreeServiceImpl {
         }
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<WorktreeStatsEvent>();
+        crate::target_worktree_stats::add_target_rows(
+            self,
+            &req.session_token,
+            project_id,
+            self.sessions_dir_of(&os_user).map_or_else(Vec::new, |dir| {
+                crate::target_worktree_stats::target_sessions_of_project(&dir, project_id)
+            }),
+            &mut snapshot,
+            &tx,
+        );
         if tx
             .send(WorktreeStatsEvent {
                 snapshot,
@@ -852,6 +788,18 @@ impl WorktreeService for WorktreeServiceImpl {
         let worktree_path_raw = req.worktree_path.trim();
         if worktree_path_raw.is_empty() {
             return Err(Status::invalid_argument("worktree_path is required"));
+        }
+        if let Some(session) = self.target_session_of(&os_user, project_id, worktree_path_raw) {
+            crate::target_worktree_stats::recalculate_target_row(
+                self,
+                &req.session_token,
+                project_id,
+                session,
+            );
+            return Ok(Response::new(CalculateWorktreeSizeResponse {
+                ok: true,
+                message: String::new(),
+            }));
         }
         let main_repo = self.resolve_main_repo(&os_user, project_id)?;
         let worktree_path = PathBuf::from(worktree_path_raw);

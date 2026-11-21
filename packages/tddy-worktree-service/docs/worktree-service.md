@@ -133,8 +133,26 @@ route such a session to its target before resolving anything against the host's 
   -b` from the recorded integration base; neither recorded → `FAILED_PRECONDITION`). A non-zero exit
   is `INTERNAL` with its output. Restore never rewrites the changeset.
 
-`tests/target_worktree_actions_acceptance.rs` drives the three RPCs against a stand-in ssh target
-(real git on both sides) through the port.
+### Target rows in the stats stream (`target_worktree_stats.rs`)
+
+`StreamWorktreeStats` adds the caller's target sessions of the project
+(`target_sessions_of_project(sessions_dir, project_id)`, one metadata read per session) through
+`add_target_rows`: each joins the first snapshot as a `CALCULATING` row, and `measure_in_background`
+measures it on its target — `git branch --show-current`, `git diff --numstat HEAD`, `du -sk`, each
+through `run_on_target` — bounded by `spawn_worker_request_timeout`. The measured row is sent as an
+`updated` event; a refused shell, a failing command or the timeout give a `stale` row with no
+numbers. `CalculateWorktreeSize` of a target path calls `recalculate_target_row`, which publishes the
+new row on the service's `TargetRowBus` — a per-project `broadcast` channel each stream with target
+rows forwards (for its own target paths) until the client goes away. Target rows bypass
+`WorktreeSizeCalculator`: they are neither semaphore-bounded nor persisted.
+
+`tests/target_worktree_actions_acceptance.rs` drives the three actions and
+`tests/target_worktree_stats_acceptance.rs` the stream and `CalculateWorktreeSize` against a
+stand-in ssh target (real git on both sides) through the port; both share
+`tests/target_session_support/`.
+
+The service's free helpers (`blocking_within`, `worktree_row_from_diff`, the Remove/Clean error
+mappings) live in `service_helpers.rs`.
 
 ## Session git operations (`session_git_ops.rs`)
 
