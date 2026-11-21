@@ -24,6 +24,7 @@ use tddy_service::proto::session::{RestoredTab, RestoredTabOutcome};
 use super::new_tab::agent_tab_argv;
 use super::plan::{restore_plan, tmux_names, LiveTabs, TabRestore};
 use crate::spec_launch::HostCodingAgents;
+use crate::tab_target_shell::TabTargetShell;
 
 /// What [`restore_tab_roster`] restores, and with what.
 pub struct RosterRestore<'a> {
@@ -45,6 +46,9 @@ pub struct RosterRestore<'a> {
     pub tab_jails: &'a TabJails,
     /// What starts that jail.
     pub tab_jail_spawn: &'a dyn TabJailSpawn,
+    /// What resolves the session's target a `target` → `shell` tab reopens on
+    /// (`#session-liveness` 6/8).
+    pub tab_target_shell: &'a dyn TabTargetShell,
 }
 
 /// Restore every entry of the session's roster other than main, in roster order, each under its
@@ -190,6 +194,10 @@ async fn carry_out(
             restore_jailed_shell(restore, tab).await?;
             Ok(Restored::AsRecorded)
         }
+        TabRestore::TargetShell => {
+            restore_target_shell(restore, tab).await?;
+            Ok(Restored::AsRecorded)
+        }
         TabRestore::ReattachTmux { session, os_user } => {
             let harness = recorded_harness(tab)?;
             reattach(restore, tab, &harness, &os_user, &session).await?;
@@ -242,6 +250,15 @@ async fn restore_jailed_shell(restore: &RosterRestore<'_>, tab: &TabEntry) -> an
         .await
         .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))?;
     Ok(())
+}
+
+/// Start the target user's login shell under the tab's recorded id on the session's target, in the
+/// session's worktree there ([`crate::remote_agent_launch::launch_tab_on_target`]). A target that
+/// cannot be resolved (a locked vault) or reached fails the tab with the reason.
+async fn restore_target_shell(restore: &RosterRestore<'_>, tab: &TabEntry) -> anyhow::Result<()> {
+    // TODO(target-shell-tab): implement
+    let _ = (restore.tab_target_shell, restore.subject, tab);
+    todo!("restore a shell tab on the session's target")
 }
 
 /// Start `terminal` under the tab's recorded id.

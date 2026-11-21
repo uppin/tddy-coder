@@ -60,6 +60,10 @@ impl CliManagerTerminalRoster {
             TerminalKind::SandboxedShell => Err(Status::internal(
                 "a sandboxed shell starts in a jail of its own, not on the host",
             )),
+            // A target shell runs on the target: `TerminalRoster::start` hands it to its transport.
+            TerminalKind::TargetShell => Err(Status::internal(
+                "a target shell starts on the session's target, not in a worktree on this host",
+            )),
         }
     }
 

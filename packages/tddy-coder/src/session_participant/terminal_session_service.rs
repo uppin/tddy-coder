@@ -284,6 +284,12 @@ impl TerminalRoster for CoderTerminalRoster {
                     "this session's terminals run bash only; a sandbox tab is not offered here",
                 ));
             }
+            // A participant reaches no target: its terminals run on its own host.
+            TerminalKind::TargetShell => {
+                return Err(Status::failed_precondition(
+                    "this session's terminals run bash only; a tab on a target is not offered here",
+                ));
+            }
         }
         self.svc
             .terminal_manager

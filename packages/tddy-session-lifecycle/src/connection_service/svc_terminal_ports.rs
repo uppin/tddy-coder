@@ -25,6 +25,7 @@ use crate::terminal_session_adapter::DaemonTerminalSessionStore;
 mod jailed_tabs;
 mod recorded_tabs;
 mod recorded_worktree;
+mod target_tabs;
 mod tmux_host;
 
 impl DaemonSessionHost {
@@ -63,6 +64,17 @@ impl DaemonSessionHost {
         spawn: Arc<dyn tddy_daemon_sandbox::tab_jails::TabJailSpawn>,
     ) -> Self {
         self.tab_jail_spawn = Some(spawn);
+        self
+    }
+
+    /// Resolve every target session's target for its tabs through `shells` instead of the launch
+    /// topic's own (builder pattern) — lets a test prove what a target tab does without a reachable
+    /// target or an unlocked vault (`#session-liveness` 6/8).
+    pub fn with_tab_target_shell(
+        mut self,
+        shells: Arc<dyn tddy_agent_launch::tab_target_shell::TabTargetShell>,
+    ) -> Self {
+        self.tab_target_shell = Some(shells);
         self
     }
 
@@ -133,7 +145,8 @@ impl DaemonSessionHost {
                 .with_tab_jails(
                     Arc::clone(&self.tab_jails),
                     self.launch_sessions().tab_jail_spawn(),
-                ),
+                )
+                .with_tab_target_shell(self.launch_sessions().tab_target_shell()),
             ),
             recorded_history: Arc::new(
                 crate::session_dir_recorded_history::SessionDirRecordedHistory::new(
@@ -301,6 +314,9 @@ struct CliManagerTerminalRoster {
     /// Where a jailed shell tab's jail is registered, and what starts it (`#session-liveness` 5/8);
     /// `None` on a roster that starts no jailed tab.
     tab_jails: Option<JailedTabs>,
+    /// What resolves a target session's target for a tab opened "On target" (`#session-liveness`
+    /// 6/8); `None` on a roster that starts no target tab.
+    target_shell: Option<Arc<dyn tddy_agent_launch::tab_target_shell::TabTargetShell>>,
 }
 
 /// The tab-jail registry and the spawn a roster starts jailed shell tabs through.
@@ -322,6 +338,7 @@ impl CliManagerTerminalRoster {
             tddy_data_dir,
             tmux,
             tab_jails: None,
+            target_shell: None,
         }
     }
 
@@ -334,18 +351,36 @@ impl CliManagerTerminalRoster {
         self.tab_jails = Some(JailedTabs { jails, spawn });
         self
     }
+
+    /// Resolve the target of a tab opened "On target" through `shells`.
+    fn with_tab_target_shell(
+        mut self,
+        shells: Arc<dyn tddy_agent_launch::tab_target_shell::TabTargetShell>,
+    ) -> Self {
+        self.target_shell = Some(shells);
+        self
+    }
 }
 
 #[async_trait]
 impl TerminalRoster for CliManagerTerminalRoster {
     /// A started terminal runs in the same worktree the session's agent does: the live main
-    /// terminal's when the agent runs, and the one the session's record names when it is stopped.
+    /// terminal's when the agent runs, and the one the session's record names when it is stopped —
+    /// but for a target session, whose worktree is on its target, the session's directory here.
     async fn start(&self, session_id: &str, launch: &TerminalLaunch) -> Result<String, Status> {
         if launch.kind == tddy_terminal_rpc::service::TerminalKind::SandboxedShell {
             return self.start_jailed_shell_tab(session_id, launch).await;
         }
+        if launch.kind == tddy_terminal_rpc::service::TerminalKind::TargetShell {
+            return self.start_target_shell_tab(session_id, launch).await;
+        }
         let worktree = match self.manager.get(session_id).await {
             Some(main) => main.worktree_path.clone(),
+            // A target session's worktree is on its target: a tab "On this host" runs in the
+            // session's own directory here (`#session-liveness` 6/8).
+            None if target_tabs::records_a_target(&self.tddy_data_dir, session_id) => {
+                self.target_sessions_host_directory(session_id)?
+            }
             None => recorded_worktree::recorded_worktree(&self.tddy_data_dir, session_id)?,
         };
         let tab = self.start_tab(session_id, worktree, launch).await?;

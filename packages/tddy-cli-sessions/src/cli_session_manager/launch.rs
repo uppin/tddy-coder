@@ -19,6 +19,21 @@ pub struct HarnessLaunchExtras {
 
 use super::MAIN_TERMINAL_ID;
 
+/// The local process that is a target tab's terminal ([`CliSessionManager::spawn_rendered_client_tab`]):
+/// a transport's client, already rendered by the launcher that reaches the target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientTab {
+    /// The tab's kind as a listing reports it: `"bash"` for a shell on the target.
+    pub kind: String,
+    /// The client's argv (`ssh -tt … <command>`, `coder ssh … -- <command>`).
+    pub argv: Vec<String>,
+    /// The client's whole environment: its child starts from nothing else.
+    pub env: Vec<(String, String)>,
+    /// How the status of what ran on the target is read from the client's last output, for a
+    /// client that does not exit with it (Coder's).
+    pub exit_code_in_output: Option<tddy_pty::ExitCodeInOutput>,
+}
+
 use std::sync::Arc;
 
 use std::path::PathBuf;
@@ -91,6 +106,23 @@ impl CliSessionManager {
             None,
         )
         .await
+    }
+
+    /// [`Self::spawn_rendered_client_main`] for a **tab** whose process is a transport's client to
+    /// what runs on a target (`#session-liveness` 6/8): registered under `terminal_id` — never
+    /// [`MAIN_TERMINAL_ID`] — so nothing of the session's main (its recording, its exit hook, its
+    /// status) is touched, and its exit ends the tab alone. Refused for the main's id and for an id
+    /// already live in the session.
+    pub async fn spawn_rendered_client_tab(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        worktree_path: PathBuf,
+        client: ClientTab,
+    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
+        // TODO(target-shell-tab): implement
+        let _ = (session_id, terminal_id, worktree_path, client);
+        todo!("spawn a transport client as a tab")
     }
 
     /// Spawn a new CLI process for `session_id` in `worktree_path` from an argv the caller

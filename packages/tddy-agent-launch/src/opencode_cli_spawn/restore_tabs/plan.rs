@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use tddy_core::tab_roster::{
     LaunchNode, TabEntry, AGENT_KIND, CONVERSATION_ID_PROPERTY, HARNESS_PROPERTY, OS_USER_PROPERTY,
-    SANDBOX_KIND, SESSION_PROPERTY, SHELL_KIND, TMUX_ATTACH_KIND, TMUX_KIND,
+    SANDBOX_KIND, SESSION_PROPERTY, SHELL_KIND, TARGET_KIND, TMUX_ATTACH_KIND, TMUX_KIND,
 };
 
 /// An [`AGENT_KIND`](tddy_core::tab_roster::AGENT_KIND) node's resumability: `"false"` on a tab
@@ -41,6 +41,9 @@ pub enum TabRestore {
     /// The session user's login shell, reopened fresh under its id in a new jail of its own over
     /// the session's worktree and grants (`sandbox` → `shell`, `#session-liveness` 5/8).
     JailedShell,
+    /// The target user's login shell, reopened fresh under its id on the session's target, in the
+    /// session's worktree there (`target` → `shell`, `#session-liveness` 6/8).
+    TargetShell,
     /// A tab attached to the user's own tmux session, which still exists: re-attached under its id.
     ReattachTmuxAttach { session: String, os_user: String },
     /// Not restorable: dropped from the roster and reported with `reason`.
@@ -96,6 +99,8 @@ impl LiveTabs {
 /// - `shell` → [`TabRestore::FreshShell`];
 /// - `sandbox` → `shell` → [`TabRestore::JailedShell`]; a `sandbox` around anything else is
 ///   [`TabRestore::Drop`] naming why;
+/// - `target` → `shell` → [`TabRestore::TargetShell`]; a `target` around anything else is
+///   [`TabRestore::Drop`] naming why;
 /// - `tmux-attach` → [`TabRestore::ReattachTmuxAttach`] when the user's tmux session exists,
 ///   otherwise [`TabRestore::Drop`] naming it;
 /// - an empty chain, an unknown kind, or a node missing what it needs → [`TabRestore::Drop`]
@@ -121,6 +126,7 @@ pub fn restore_plan(entry: &TabEntry, live: &LiveTabs) -> TabRestore {
         TMUX_ATTACH_KIND => tmux_attach_plan(outermost, live),
         TMUX_KIND => tmux_wrapped_plan(entry, outermost, live),
         SANDBOX_KIND => sandbox_plan(entry),
+        TARGET_KIND => target_plan(entry),
         other => drop_because(format!(
             "its launch kind {other:?} is not one this daemon can restore"
         )),
@@ -134,6 +140,7 @@ fn is_known_kind(kind: &str) -> bool {
         TMUX_KIND,
         TMUX_ATTACH_KIND,
         SANDBOX_KIND,
+        TARGET_KIND,
     ]
     .contains(&kind)
 }
@@ -233,6 +240,14 @@ fn sandbox_plan(entry: &TabEntry) -> TabRestore {
             inner.kind
         )),
     }
+}
+
+/// A `target`-wrapped tab: a shell is reopened on the session's target; anything else on a target is
+/// dropped naming why (an agent on a target is `target-agent-tab`'s).
+fn target_plan(entry: &TabEntry) -> TabRestore {
+    // TODO(target-shell-tab): implement
+    let _ = entry;
+    todo!("the restore of a target-wrapped tab")
 }
 
 /// The tmux session name and OS user a `tmux` or `tmux-attach` node records.

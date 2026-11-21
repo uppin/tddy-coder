@@ -31,6 +31,10 @@ interface NewTerminalMenuProps {
   /** Whether the session runs sandboxed (`SessionEntry.sandbox`): its shell opens "In sandbox" — in
    *  a jail of its own — by default, or "On host". */
   sandboxed?: boolean;
+  /** Whether the session runs on a target (`SessionEntry.target` is set): its shell opens "On
+   *  target" — on that machine, in the session's worktree there — by default, or "On this host".
+   *  TODO(target-shell-tab): implement the groups. */
+  onTarget?: boolean;
 }
 
 /** Gap between the "+" button and the top of its menu, in pixels. */

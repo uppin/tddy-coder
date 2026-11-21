@@ -12,6 +12,7 @@
 mod session_files;
 mod startup;
 mod target;
+mod target_tab;
 
 use std::fmt;
 use std::path::Path;
@@ -45,6 +46,9 @@ use crate::remote_agent_launch::session_files::write_rendered_session_files;
 pub(crate) use crate::remote_agent_launch::target::target_config_host;
 pub use crate::remote_agent_launch::target::{
     proto_of_session_target, session_target_of_proto, shell_for_target, TargetError,
+};
+pub use crate::remote_agent_launch::target_tab::{
+    launch_tab_on_target, target_shell_tab_command, TargetTab,
 };
 
 /// The base set of the agent's environment on a target, expanded by the target's own login shell:

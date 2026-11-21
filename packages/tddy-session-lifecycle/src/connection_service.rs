@@ -91,6 +91,10 @@ pub struct DaemonSessionHost {
     /// What starts a tab's jail in place of the launch topic's own; `None` but on a host a test
     /// gave a double ([`Self::with_tab_jail_spawn`]).
     tab_jail_spawn: Option<Arc<dyn tddy_daemon_sandbox::tab_jails::TabJailSpawn>>,
+    /// What resolves a target session's target for its tabs in place of the launch topic's own;
+    /// `None` but on a host a test gave a double ([`Self::with_tab_target_shell`],
+    /// `#session-liveness` 6/8).
+    tab_target_shell: Option<Arc<dyn tddy_agent_launch::tab_target_shell::TabTargetShell>>,
     /// The per-session jails sandboxed `workspace` sessions dispatch their tools through
     /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox). Keyed by session id, and
     /// shared across clones so the jail a start provisioned is the one the next handler's

@@ -14,6 +14,7 @@
 mod resume_roster_support;
 mod sandbox_tab_support;
 mod support;
+mod target_tab_support;
 
 use std::sync::Arc;
 
@@ -26,12 +27,19 @@ use tddy_service::proto::session::{RestoredTab, RestoredTabOutcome};
 use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
 
 use resume_roster_support::{
-    a_stopped_session, a_stopped_session_whose_tab_jails_start_through, MINTED_CHAT_ID,
-    RESUMED_SESSION_ID,
+    a_stopped_session, a_stopped_session_whose_tab_jails_start_through,
+    a_stopped_session_whose_target_shells_resolve_through, MINTED_CHAT_ID, RESUMED_SESSION_ID,
 };
 use sandbox_tab_support::fake_tab_jails::{a_tab_jail_spawn, a_tab_jail_spawn_refusing};
 use support::{this_os_user, until_attached};
+use target_tab_support::fake_target_shells::{
+    target_shells_reaching_a_machine, target_shells_reaching_an_unreachable_machine,
+    target_shells_refusing, UNREACHABLE,
+};
+use target_tab_support::{where_the_login_shell_started, OWNER};
+use tddy_agent_launch::tab_target_shell::TabTargetShell;
 use tddy_daemon_sandbox::tab_jails::TabJailSpawn;
+use tddy_rpc::Status;
 
 /// The conversation main resumes: a claude-cli main's is its session id.
 const MAIN_CONVERSATION: &str = RESUMED_SESSION_ID;
@@ -48,6 +56,12 @@ const TMUX_TAB_CONVERSATION: &str = "5f3c0000-0000-7000-8000-00000000712a";
 const ATTACH_TAB: &str = "019b0000-0000-7000-8000-00000000a77a";
 /// A shell tab run in a jail of its own (`#session-liveness` 5/8).
 const JAILED_TAB: &str = "019b0000-0000-7000-8000-0000000a11ed";
+/// A shell tab run on the session's target (`#session-liveness` 6/8).
+const TARGET_TAB: &str = "019b0000-0000-7000-8000-0000000a7a26";
+/// Why the target of a Coder session cannot be resolved while its owner's vault is locked, as the
+/// daemon's target shells refuse it.
+const VAULT_LOCKED: &str =
+    "the vault holding this session's Coder account is locked: unlock it and try again";
 /// Why the jail of [`JAILED_TAB`] cannot start, when a test says it cannot.
 const JAIL_REFUSAL: &str = "the session's sandbox grants cannot be lowered: no claude tool";
 
@@ -78,6 +92,11 @@ fn a_tmux_wrapped_claude_tab() -> TabEntry {
 /// A shell tab recorded in a jail of its own.
 fn a_jailed_shell_tab() -> TabEntry {
     TabEntry::new(JAILED_TAB, vec![LaunchNode::sandbox(), LaunchNode::shell()])
+}
+
+/// A shell tab recorded on the session's target.
+fn a_target_shell_tab() -> TabEntry {
+    TabEntry::new(TARGET_TAB, vec![LaunchNode::target(), LaunchNode::shell()])
 }
 
 fn restored(terminal_id: &str) -> RestoredTab {
@@ -420,4 +439,102 @@ async fn a_mixed_roster_restores_each_tab_where_its_chain_says() {
         response.restored_tabs,
         vec![restored(JAILED_TAB), restored(SHELL_TAB)]
     );
+}
+
+// ---------------------------------------------------------------------------
+// Shell tabs on the session's target (`#session-liveness` 6/8)
+//
+// The session's main resumes on the host here: a target main cannot resume without a reachable
+// target, and every resume path restores the whole roster the same way, wherever its main runs.
+// What is under test is the tab's own target, resolved through the in-memory `TabTargetShell`.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_target_shell_tab_is_reopened_on_the_target_on_resume() {
+    // Given a stopped session whose roster holds a shell tab recorded on its target, a reachable
+    // machine
+    let (target_shells, machine) = target_shells_reaching_a_machine();
+    let daemon = a_stopped_session_whose_target_shells_resolve_through(
+        target_shells.clone() as Arc<dyn TabTargetShell>
+    );
+    daemon.has_recorded_tabs(vec![the_main_tab(), a_target_shell_tab()]);
+
+    // When it is resumed
+    let response = daemon.resumes().await;
+
+    // Then the session's target was resolved as the resume's caller, and the target's login shell
+    // runs in the session's worktree there ...
+    assert_eq!(
+        target_shells.asked(),
+        vec![(daemon.session_dir(), OWNER.to_string())]
+    );
+    assert_eq!(
+        where_the_login_shell_started(&machine).await,
+        machine.worktree()
+    );
+    // ... and the tab is back under its id, still recorded on the target, and reported restored
+    assert!(daemon.listed_terminal_ids().await.contains(TARGET_TAB));
+    assert_eq!(
+        daemon.roster_entry(TARGET_TAB).launch,
+        vec![LaunchNode::target(), LaunchNode::shell()]
+    );
+    assert_eq!(response.restored_tabs, vec![restored(TARGET_TAB)]);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_target_tab_whose_target_is_unreachable_is_dropped_with_its_reason() {
+    // Given a stopped session with a shell tab on its target, a machine its transport cannot reach
+    let (target_shells, machine) = target_shells_reaching_an_unreachable_machine();
+    let daemon = a_stopped_session_whose_target_shells_resolve_through(
+        target_shells as Arc<dyn TabTargetShell>,
+    );
+    daemon.has_recorded_tabs(vec![the_main_tab(), a_target_shell_tab()]);
+
+    // When it is resumed
+    let response = daemon.resumes().await;
+
+    // Then the resume succeeds without the tab, which is reported dropped with what the transport
+    // said, is gone from the roster, and opened no terminal on the target
+    assert_eq!(
+        outcomes_of(&response.restored_tabs),
+        vec![(TARGET_TAB.to_string(), RestoredTabOutcome::Dropped)]
+    );
+    assert!(
+        response.restored_tabs[0].reason.contains(UNREACHABLE),
+        "{}",
+        response.restored_tabs[0].reason
+    );
+    assert!(!daemon.listed_terminal_ids().await.contains(TARGET_TAB));
+    assert!(!daemon.roster_records(TARGET_TAB));
+    assert_eq!(machine.interactive_commands(), Vec::<String>::new());
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_coder_target_tab_with_a_locked_vault_is_dropped_with_its_reason() {
+    // Given a stopped session with a shell tab on its Coder target, whose owner's vault is locked
+    let target_shells = target_shells_refusing(Status::failed_precondition(VAULT_LOCKED));
+    let daemon = a_stopped_session_whose_target_shells_resolve_through(
+        target_shells as Arc<dyn TabTargetShell>,
+    );
+    daemon.has_recorded_tabs(vec![the_main_tab(), a_target_shell_tab()]);
+
+    // When it is resumed
+    let response = daemon.resumes().await;
+
+    // Then the resume succeeds without the tab, which is reported dropped saying the vault is
+    // locked, and is gone from the roster
+    assert_eq!(
+        outcomes_of(&response.restored_tabs),
+        vec![(TARGET_TAB.to_string(), RestoredTabOutcome::Dropped)]
+    );
+    assert!(
+        response.restored_tabs[0].reason.contains(VAULT_LOCKED),
+        "{}",
+        response.restored_tabs[0].reason
+    );
+    assert!(!daemon.listed_terminal_ids().await.contains(TARGET_TAB));
+    assert!(!daemon.roster_records(TARGET_TAB));
 }

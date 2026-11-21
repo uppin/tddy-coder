@@ -43,8 +43,17 @@ pub fn write_executable(path: &Path, script: &str) {
 /// The login shell of a stand-in machine: `$SHELL -lc <command>` runs the command under the `PATH`
 /// the stand-in set, whose first directory is the machine's own `opt/agents` -- where its agent is
 /// installed, as a target start runs the agent's bare command, never this host's path to it.
-const A_TARGET_LOGIN_SHELL: &str =
-    "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\nexec /bin/sh -c \"$2\"\n";
+///
+/// `$SHELL -l` -- a person's login shell, as a shell tab on the target runs it -- records the
+/// directory it started in beside itself ([`LOGIN_SHELL_STARTED_IN`]) and becomes an interactive
+/// `/bin/sh` on its terminal.
+const A_TARGET_LOGIN_SHELL: &str = "#!/bin/sh\n\
+     if [ \"$1\" = -l ]; then /bin/pwd -P > \"$(dirname \"$0\")/login-shell-started-in\"; exec /bin/sh; fi\n\
+     [ \"$1\" = -lc ] || exit 64\nexec /bin/sh -c \"$2\"\n";
+
+/// The file beside a stand-in machine's login shell that its `-l` run records the directory it
+/// started in.
+pub const LOGIN_SHELL_STARTED_IN: &str = "login-shell-started-in";
 
 /// The machine behind an ssh target, for as long as it lives: a stand-in `ssh` first on this
 /// process's `PATH`, and the directory standing for the machine's filesystem.
@@ -124,6 +133,12 @@ exit $?
     /// Where the pointer of `session_id` lives on the machine.
     pub fn pointer_of(&self, session_id: &str) -> PathBuf {
         self.worktree_of(session_id).join(".tddy/session.json")
+    }
+
+    /// Where the machine's login shell, run as a person's login shell (`-l`), records the directory
+    /// it started in.
+    pub fn login_shell_started_in(&self) -> PathBuf {
+        self.root.join("bin").join(LOGIN_SHELL_STARTED_IN)
     }
 
     /// Where the hook log of `session_id` lives on the machine.

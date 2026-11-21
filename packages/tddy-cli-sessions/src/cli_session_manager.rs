@@ -219,7 +219,7 @@ pub use tmux_exit_hook::exit_hook_capture;
 mod relaunch;
 
 mod launch;
-pub use launch::HarnessLaunchExtras;
+pub use launch::{ClientTab, HarnessLaunchExtras};
 
 mod argv;
 

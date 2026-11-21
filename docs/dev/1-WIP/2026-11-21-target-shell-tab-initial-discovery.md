@@ -29,3 +29,19 @@ See conclusions above; full report kept in the orchestrator transcript. Key file
 - Tests: behaviour against an in-memory sandbox spawn port; real-jail tests Linux-only on CI; no new macOS-harness dependence.
 - n6 target tabs: one `target` wrapper kind (properties: transport ssh alias / coder workspace, worktree); new tabs of a target session open on the target by default ("on target" / "on this host"); run via RemoteShell.interactive in the target worktree; restored the same way; dropped with a reason when unreachable.
 - Order: n5 sandbox, n6 target; both on top of n4 (#961).
+
+## Exploration 2 — pass-2 contract (2026-11-21)
+
+- **No owner identity reaches the roster.** `TerminalLaunch` carries `os_user` only (no GitHub subject), and n4's `restore_roster_on_resume(os_user, …)` likewise. Rather than change either (parent / merged signatures), the port takes the session's OS user and the daemon's `SessionTargetShells` maps it back to its GitHub user through `users.yaml` (`DaemonConfig`), the vault owner `CoderCredentialSource` reads. Ambiguous only when two GitHub users map to one OS user — flagged for the developer.
+- **The main's resume needs the target too.** A target session's `ResumeSession` resolves the main's shell first (`LaunchSessions::resumed_target_shell`, opencode_cli_spawn/resume.rs ~124); a locked vault fails the whole resume before any tab is restored. So the roster tests resume a session whose main runs on the host and answer the tab's target through the double — n5's arrangement. The locked-vault mapping itself is pinned by unit tests on `SessionTargetShells` (tab_target_shell_tests.rs).
+- **A tab fails before its PTY.** `launch_on_target` fails an unreachable target in `clear_the_agent_pid_file` (an `exec` through the port) before anything is registered; a tab has no pid file, so `launch_tab_on_target` reaches the target with `cd '<wt>'` first. That is what lets Resume drop an unreachable target's tab with the transport's words.
+- **A shell tab is not an agent launch.** `target_login_exec` runs argv under `env -i`; a person's shell wants the login's own environment, so the tab runs `cd '<wt>' && exec "${SHELL:-/bin/sh}" -l` (`target_shell_tab_command`).
+- **Non-main client spawn** — `spawn_rendered_client_main` hard-codes `MAIN_TERMINAL_ID` (cli_session_manager/launch.rs:67); its sibling `spawn_rendered_client_tab` takes a `ClientTab` bundle and calls `spawn_tool_on` with the existing parameters.
+- **Fixtures** — the shared `StandInSshTarget` (tddy-testing-commons) and the Coder `AWorkspace` (moved to `tddy-agent-launch/tests/coder_workspace_support`) each gained a `-l` login-shell branch that records where it started.
+- **"On this host" for a target session** — today `recorded_worktree` answers `repo_path`, a path that exists only on the target, so a host tab of a stopped target session cannot start. The acceptance test only requires it to start as a plain shell; where it runs (the session directory is the natural choice — the main's client runs there) is green's decision.
+
+### Rulings at the acceptance-test review (2026-11-21)
+
+- **Owner via subject**: `TerminalLaunch.subject` and `RosterRestore.subject` / `restore_roster_on_resume(os_user, subject, …)` carry the caller's GitHub user to `TabTargetShell::target_of(session_dir, subject)`; the OS-user → `users.yaml` mapping above is dropped.
+- **Login shell with the target's own environment**: `cd '<wt>' && exec "${SHELL:-/bin/sh}" -l` kept.
+- **"On this host" of a target session** runs in the session's directory on this host — pinned by the acceptance test (`target_sessions_host_directory`).

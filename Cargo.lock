@@ -14207,6 +14207,7 @@ dependencies = [
  "tddy-model-registry",
  "tddy-pr-stack",
  "tddy-projects",
+ "tddy-remote-shell",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-sandbox-cgroups",

@@ -127,6 +127,9 @@ tokio = { version = "1", features = ["test-util"] }
 # in-jail socket, rather than re-implementing its wire format.
 tddy-session-tool-client = { path = "../tddy-session-tool-client" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
+# The target-tab suites stand a machine on this host in for a session's target, behind the port a
+# target tab is reached through (`#session-liveness` 6/8).
+tddy-remote-shell = { path = "../tddy-remote-shell" }
 # Dev-only since the spawn subsystem left: `supervisor_spawn_delegation.rs` builds a
 # `SpawnSessionRequest` directly to pin what the daemon asks the supervisor for, and its two
 # fail-closed tests mount `ConnectionServiceImpl`, so the suite stays with the service it exercises.
