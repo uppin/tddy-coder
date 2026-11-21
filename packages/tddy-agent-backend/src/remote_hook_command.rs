@@ -38,6 +38,13 @@ pub fn remote_hook_command(event: &str, hook_token: &str, log_path: &str) -> Str
     )
 }
 
+/// The hook-log event a child session on a target reports to its orchestrator with
+/// (`#orchestra` 2/9): the child pipes `{"text": "<message>"}` into
+/// `remote_hook_command(REMOTE_MESSAGE_EVENT, <hook token>, <log>)`, and the daemon's follower posts
+/// the text to the session's orchestrator as a session message. No hooks adapter installs it; a
+/// target has no `tddy-tools`, so this line is its only way to send one.
+pub const REMOTE_MESSAGE_EVENT: &str = "TddyMessage";
+
 /// Where a target session's answers live, relative to the session's worktree on the target: one
 /// file per waiting hook, named by the nonce the hook minted (`#target-parity` 1/7).
 pub const REMOTE_ANSWERS_DIR: &str = ".tddy/answers";
