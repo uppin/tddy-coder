@@ -264,12 +264,14 @@ async fn a_copy_of_claude_yaml_under_another_id_on_an_ssh_host_writes_its_slot_f
     // Then — the hooks settings were written on the target, at the remote worktree, and never at
     // that path on this host
     let meta = daemon.metadata_of(&session_id);
-    let hooks_file = PathBuf::from(
-        meta.repo_path
-            .clone()
-            .expect("a remote worktree is recorded"),
-    )
-    .join(".claude/settings.local.json");
+    let hooks_file = tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+        &PathBuf::from(
+            meta.repo_path
+                .clone()
+                .expect("a remote worktree is recorded"),
+        ),
+        &session_id,
+    );
     assert_eq!(
         (
             meta.ssh_config_host,

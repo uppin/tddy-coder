@@ -5,7 +5,7 @@
 //!
 //! - **The environment** ([`notify_env_pairs`]): the session it runs in, the OS user that owns it,
 //!   its hook token and how to reach the daemon. These are the credentials its hooks already carry
-//!   in `.claude/settings.local.json`, so exporting them grants the agent nothing it could not
+//!   in its per-session hooks file, so exporting them grants the agent nothing it could not
 //!   already do.
 //! - **The guidance** ([`AGENT_NOTIFY_GUIDANCE`]): one paragraph appended to a claude-cli agent's
 //!   system prompt, telling it the command exists and when — and when not — to use it.

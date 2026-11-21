@@ -30,8 +30,8 @@ pub struct CliRouteLaunch {
     /// Environment for the agent child — the route's plain and secret pairs, and the harness's
     /// configuration variable naming the written file.
     pub env: Vec<(String, String)>,
-    /// The route's plain pairs alone — no secret: what a worktree's settings file may pin beside
-    /// the hooks (Claude Code's `env` in `settings.local.json`), where the secret never goes.
+    /// The route's plain pairs alone — no secret: what a session's hooks file may pin beside the
+    /// hooks (Claude Code's `env` in its per-session `--settings` file), where the secret never goes.
     pub plain_env: Vec<(String, String)>,
     /// Arguments appended to the harness's argv.
     pub args: Vec<String>,

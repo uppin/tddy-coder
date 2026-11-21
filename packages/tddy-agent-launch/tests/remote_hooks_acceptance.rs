@@ -128,12 +128,17 @@ impl ATarget {
         .expect("the hook log is on the target");
     }
 
-    /// The command Claude Code would run for `event`, read from the settings file the launch
-    /// installed in the worktree on the target.
+    /// The command Claude Code would run for `event`, read from the session's hooks file the
+    /// launch installed in the worktree on the target.
     fn installed_hook(&self, event: &str) -> String {
         let settings: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(self.worktree().join(".claude/settings.local.json"))
-                .expect("the hooks file is in the worktree on the target"),
+            &std::fs::read(
+                tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+                    &self.worktree(),
+                    SESSION_ID,
+                ),
+            )
+            .expect("the hooks file is in the worktree on the target"),
         )
         .expect("the hooks file is JSON");
         settings["hooks"][event][0]["hooks"][0]["command"]

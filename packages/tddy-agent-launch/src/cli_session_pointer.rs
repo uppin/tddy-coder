@@ -260,8 +260,9 @@ pub(crate) async fn record_remote_owner(
 /// Whether `worktree` lies in a git checkout — one of its own, or one of a directory above it. Only
 /// a checkout can commit the pointer, so only a checkout's `info/exclude` needs it: a session whose
 /// worktree is no checkout at all (a peer given a plain directory, a resume in its session
-/// directory) gets its pointer with nothing to exclude it from. Refused when git cannot be run.
-fn inside_a_git_checkout(worktree: &Path) -> Result<bool, Status> {
+/// directory) gets its pointer with nothing to exclude it from — the session's hooks directory
+/// likewise (`session_hooks_worktree`). Refused when git cannot be run.
+pub(crate) fn inside_a_git_checkout(worktree: &Path) -> Result<bool, Status> {
     std::process::Command::new("git")
         .arg("-C")
         .arg(worktree)
@@ -272,7 +273,7 @@ fn inside_a_git_checkout(worktree: &Path) -> Result<bool, Status> {
         .map(|status| status.success())
         .map_err(|e| {
             Status::internal(format!(
-                "git could not be run to keep the session pointer out of commits: {e}"
+                "git could not be run to keep the session's files out of commits: {e}"
             ))
         })
 }

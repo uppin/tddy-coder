@@ -3,6 +3,10 @@
 
 use std::path::{Path, PathBuf};
 
+pub use tddy_agent_backend::claude_hooks::session_file::LegacyRelease;
+use tddy_agent_backend::claude_hooks::session_file::{
+    claude_session_hooks_file, release_legacy_claude_settings, LEGACY_CLAUDE_SETTINGS_FILE,
+};
 use tddy_agent_backend::claude_hooks::{
     build_claude_hooks_settings, HookCommandParams, CLAUDE_INSTALLED_EVENTS,
 };
@@ -33,8 +37,9 @@ pub trait HooksAdapter: Send + Sync {
     /// The name a spec's `hooks.adapter` uses.
     fn name(&self) -> &'static str;
 
-    /// How this adapter's hooks reach the agent. A resume re-renders argv hooks and keeps a start's
-    /// file as it is: only argv delivery passes hooks to a resumed launch.
+    /// How this adapter's hooks reach the agent. Every launch — a start and each resume — renders
+    /// them again, whichever way they are delivered: the socket they report over is the running
+    /// daemon's, and a file left from an earlier launch may name a daemon that has since exited.
     fn delivery(&self) -> HooksDelivery {
         HooksDelivery::File
     }
@@ -51,11 +56,25 @@ pub trait HooksAdapter: Send + Sync {
         &[]
     }
 
-    /// The argv entries that load this adapter's hooks file explicitly, for a launch in `workdir`:
-    /// the load flag and the file path, for an agent that does not read the file from its working
-    /// directory by itself. Empty by default: the agent finds the file where the launch writes it.
-    fn file_load_args(&self, _workdir: &Path) -> Vec<String> {
+    /// The argv entries that load the hooks file this adapter rendered at `hooks_file`: the load
+    /// flag and the path, for an agent that does not find the file by itself. Empty by default:
+    /// the agent finds the file where the launch writes it.
+    fn file_load_args(&self, _hooks_file: &Path) -> Vec<String> {
         Vec::new()
+    }
+
+    /// A file under `workdir` that an earlier build of this adapter wrote every session's hooks
+    /// into, shared by all the sessions working there. A launch takes the daemon's entries out of
+    /// it ([`Self::release_legacy_shared_file`]) before its agent starts, or the agent would load
+    /// them beside its own file. `None` by default: the adapter never wrote one.
+    fn legacy_shared_file(&self, _workdir: &Path) -> Option<PathBuf> {
+        None
+    }
+
+    /// What becomes of [`Self::legacy_shared_file`], holding `bytes`, once the daemon's entries are
+    /// out of it. [`LegacyRelease::Keep`] by default.
+    fn release_legacy_shared_file(&self, _bytes: &[u8]) -> LegacyRelease {
+        LegacyRelease::Keep
     }
 
     /// [`Self::render`] as [`RenderedHooks::File`], or why `params` cannot be rendered by this
@@ -73,8 +92,14 @@ pub trait HooksAdapter: Send + Sync {
     }
 }
 
-/// Claude Code's `<workdir>/.claude/settings.local.json`, built by
-/// `tddy_agent_backend::build_claude_hooks_settings`.
+/// Claude Code's hooks, one file per session — `<workdir>/.tddy/hooks/<session_id>/claude-settings.json`
+/// ([`claude_session_hooks_file`]) — built by `tddy_agent_backend::build_claude_hooks_settings` and
+/// loaded with `--settings`.
+///
+/// The name is the adapter's historical one: its file used to be `<workdir>/.claude/settings.local.json`,
+/// one per worktree, so a second session started in the same worktree took the first one's hooks
+/// (reported 2026-11-21). The daemon's entries left in that file are released on every launch
+/// ([`HooksAdapter::legacy_shared_file`]).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ClaudeSettingsLocal;
 
@@ -90,25 +115,27 @@ impl HooksAdapter for ClaudeSettingsLocal {
         CLAUDE_INSTALLED_EVENTS
     }
 
-    /// Claude Code keeps and reads `settings.local.json` at the main checkout's root, not a git
-    /// worktree's — the same gap the `host_agent` variant's `hooks_flag: --settings` closes for a
-    /// split agent — so the file the daemon writes is loaded explicitly.
-    fn file_load_args(&self, workdir: &Path) -> Vec<String> {
+    /// Claude Code reads no file under `.tddy/`, so the session's file is loaded explicitly.
+    fn file_load_args(&self, hooks_file: &Path) -> Vec<String> {
         vec![
             "--settings".to_string(),
-            workdir
-                .join(".claude")
-                .join("settings.local.json")
-                .to_string_lossy()
-                .into_owned(),
+            hooks_file.to_string_lossy().into_owned(),
         ]
+    }
+
+    fn legacy_shared_file(&self, workdir: &Path) -> Option<PathBuf> {
+        Some(workdir.join(LEGACY_CLAUDE_SETTINGS_FILE))
+    }
+
+    fn release_legacy_shared_file(&self, bytes: &[u8]) -> LegacyRelease {
+        release_legacy_claude_settings(bytes)
     }
 
     fn render(&self, workdir: &Path, params: &HookCommandParams<'_>) -> (PathBuf, Vec<u8>) {
         let settings = build_claude_hooks_settings(params);
         // `{:#}` is `serde_json`'s pretty form, and unlike `to_string_pretty` cannot fail.
         (
-            workdir.join(".claude").join("settings.local.json"),
+            claude_session_hooks_file(workdir, params.session_id),
             format!("{settings:#}").into_bytes(),
         )
     }

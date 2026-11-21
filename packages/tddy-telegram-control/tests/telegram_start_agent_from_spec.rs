@@ -625,7 +625,10 @@ async fn a_telegram_claude_start_launches_the_argv_the_claude_spec_renders_with_
             launch.tddy_variables.clone(),
             session.session_type.clone(),
             session.model.clone(),
-            hooks_file_carries_the_hook_token(&session, ".claude/settings.local.json"),
+            hooks_file_carries_the_hook_token(
+                &session,
+                &format!(".tddy/hooks/{}/claude-settings.json", session.session_id),
+            ),
         ),
         (
             vec![

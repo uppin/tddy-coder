@@ -301,7 +301,7 @@ async fn resume_cli_harness_session(
     let remote_host = remote_host_of(&meta);
     hooks_append_to_the_target_log(&meta, &mut wiring);
     let toolset = std::mem::take(&mut wiring.toolset);
-    let hook_params = wiring.hook_params(spec, session_id, os_user);
+    let hook_params = wiring.hook_params(spec, session_id, os_user, &route.plain_env);
     let mut slots = render_host_launch_slots(
         agent,
         &worktree_path,
@@ -318,16 +318,23 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(wiring.extra_args);
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
-    match &target_shell {
-        Some(shell) => write_slot_files_through_shell(&mut slots, shell.as_ref()).await?,
-        None => write_slot_files_on_target(&mut slots, remote_host).await?,
-    }
     let host = match &target_shell {
         Some(shell) => PointerHost::Remote {
             shell: Arc::clone(shell),
         },
         None => PointerHost::of(remote_host),
     };
+    crate::session_hooks_worktree::prepare_worktree_for_session_hooks(
+        spec,
+        &worktree_path,
+        &slots,
+        &host,
+    )
+    .await?;
+    match &target_shell {
+        Some(shell) => write_slot_files_through_shell(&mut slots, shell.as_ref()).await?,
+        None => write_slot_files_on_target(&mut slots, remote_host).await?,
+    }
     let pointer = place_session_pointer(session_pointer.as_ref(), &worktree_path, &host).await?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, meta.tmux_session.is_some());
     let mut env = git_environment;
@@ -401,9 +408,8 @@ fn remote_host_of(meta: &SessionMetadata) -> Option<&str> {
 }
 
 fn hooks_append_to_the_target_log(meta: &SessionMetadata, wiring: &mut ResumedWiring) {
-    // Argv hooks (Muse's `-c hooks=…`) render again from the recorded token; a file
-    // adapter's file is kept as the start wrote it. On a target both append to the hook log
-    // there, which this launch recreates and follows again.
+    // Every resume renders its hooks again from the recorded token, argv and file alike. On a
+    // target they append to the hook log there, which this launch recreates and follows again.
     if meta.target.is_some() {
         if let Some(hooks) = &mut wiring.hooks {
             // Relative to the worktree the agent runs in: the hook appends there, on the

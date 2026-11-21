@@ -41,6 +41,7 @@ pub mod launch_ports;
 pub mod managed_launch;
 pub mod notify_env;
 mod opencode_cli_spawn;
+mod session_hooks_worktree;
 pub use opencode_cli_spawn::restore_tabs;
 pub mod operator_start;
 mod orchestrator_start;

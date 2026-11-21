@@ -203,9 +203,15 @@ fn split_denied_tools(spec: &CodingAgentSpec, withdrawn_refs: &[&str]) -> Vec<St
 /// The hooks file a split agent's launch writes into its context dir under `session_dir` — the
 /// file the `host_agent` variant's `hooks_flag` loads.
 pub fn split_hooks_file(session_dir: &Path) -> PathBuf {
-    crate::split_session::split_context_dir(session_dir)
-        .join(".claude")
-        .join("settings.local.json")
+    split_hooks_file_in(&crate::split_session::split_context_dir(session_dir))
+}
+
+/// [`split_hooks_file`] for the split agent's context dir `context_dir`. The context dir is the
+/// session's own, so — unlike a worktree, where each session's hooks are a file of their own under
+/// `.tddy/hooks/` — one file there cannot be taken by another session; the split launch writes
+/// the hooks the adapter renders here, whatever path the adapter would give them in a worktree.
+pub fn split_hooks_file_in(context_dir: &Path) -> PathBuf {
+    context_dir.join(".claude").join("settings.local.json")
 }
 
 /// The coding agent a split session runs (split placement is `claude-cli` only).

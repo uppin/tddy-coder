@@ -6,7 +6,7 @@
 //! `HOME` of its own. The agent is a stub that stays up. Nothing opens a connection.
 //!
 //! The `acme` agent is Claude-shaped: it takes `--mcp-config` in Claude's format and its hooks
-//! are Claude's `settings.local.json`. The duplicated stand-in fixtures belong to the
+//! are Claude's per-session `--settings` file. The duplicated stand-in fixtures belong to the
 //! `target-test-kit` node (docs/dev/todo/2026-11-16-remote-shell-test-fixtures-are-duplicated.md).
 //!
 //! The keys follow Claude Code 2.1.311's per-project record in `~/.claude.json`:

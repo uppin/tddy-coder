@@ -955,9 +955,10 @@ impl ARegistryDaemon {
     /// The `timeout` the hooks file written into `session_id`'s worktree gives its
     /// `PermissionRequest` hook — how long Claude lets that hook run.
     pub fn permission_hook_timeout_of(&self, session_id: &str) -> u64 {
-        let settings = self
-            .worktree_of(session_id)
-            .join(".claude/settings.local.json");
+        let settings = tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+            &self.worktree_of(session_id),
+            session_id,
+        );
         let json: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(&settings)
                 .unwrap_or_else(|e| panic!("{} is written: {e}", settings.display())),

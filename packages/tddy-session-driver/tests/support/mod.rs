@@ -44,7 +44,7 @@ extensions:
 "#;
 
 /// `acme-hooked`: the `acme` agent with the `hooks` capability, so a start wires its lifecycle hooks
-/// into `.claude/settings.local.json` in the worktree, as a daemon start does for Claude Code.
+/// into the session's own hooks file in the worktree, as a daemon start does for Claude Code.
 pub const ACME_HOOKED_TOOL_FILE: &str = r#"schema_version: 1
 id: acme-hooked
 summary: a coding agent with lifecycle hooks
@@ -210,11 +210,16 @@ impl AMachine {
         self.worktree().join(".tddy/hooks.log")
     }
 
-    /// The command the launch installed for `event`, read from the hooks file in the worktree as
-    /// Claude Code reads it; `None` when the file or the event's command is missing.
+    /// The command the launch installed for `event`, read from the session's hooks file in the
+    /// worktree (`.tddy/hooks/<session_id>/claude-settings.json`, one session runs here) as Claude
+    /// Code reads it; `None` when the file or the event's command is missing.
     pub fn installed_hook(&self, event: &str) -> Option<String> {
+        let session_dir = std::fs::read_dir(self.worktree().join(".tddy/hooks"))
+            .ok()?
+            .filter_map(Result::ok)
+            .find(|entry| entry.path().is_dir())?;
         let settings: Value = serde_json::from_slice(
-            &std::fs::read(self.worktree().join(".claude/settings.local.json")).ok()?,
+            &std::fs::read(session_dir.path().join("claude-settings.json")).ok()?,
         )
         .ok()?;
         settings["hooks"][event][0]["hooks"][0]["command"]

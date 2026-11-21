@@ -21,10 +21,8 @@ pub(crate) struct HostLaunchSlots<'a> {
 }
 
 /// `agent`'s slots for a host launch in `worktree`, its registration files under `session_dir`. A
-/// launch whose hooks pin a provider route (`hooks`'s `route_env` non-empty) also loads the file
-/// that pin is in on the argv: Claude Code keeps and reads `settings.local.json` at the main
-/// checkout's root, never a git worktree's, so the worktree's pin is unread without the explicit
-/// flag.
+/// hooks file the agent does not find by itself — Claude's per-session `--settings` file, which also
+/// holds a provider route's pin — is loaded by the flags its adapter renders beside it.
 pub(crate) fn render_host_launch_slots(
     agent: &HostAgent,
     worktree: &Path,
@@ -37,9 +35,6 @@ pub(crate) fn render_host_launch_slots(
         system_prompt_file,
         home,
     } = slots;
-    let routed = hooks
-        .as_ref()
-        .is_some_and(|hooks| !hooks.route_env.is_empty());
     let AgentToolset {
         mcp,
         allowed_tools,
@@ -49,7 +44,7 @@ pub(crate) fn render_host_launch_slots(
         Some(McpRegistration { server, dir }) => (Some(server), dir),
         None => (None, session_dir.to_path_buf()),
     };
-    let mut rendered = slots::render(
+    slots::render(
         &agent.spec,
         &SlotInputs {
             workdir: worktree.to_path_buf(),
@@ -64,13 +59,7 @@ pub(crate) fn render_host_launch_slots(
             home,
         },
     )
-    .map_err(|e| Status::internal(e.to_string()))?;
-    if routed {
-        if let Ok(adapter) = slots::hooks::adapter(&agent.spec.agent.hooks.adapter) {
-            rendered.argv_extra.extend(adapter.file_load_args(worktree));
-        }
-    }
-    Ok(rendered)
+    .map_err(|e| Status::internal(e.to_string()))
 }
 
 /// Write `slots.files` on `remote_host` over ssh and take them out of `slots`, so the launch's

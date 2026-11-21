@@ -3,7 +3,7 @@
 //!
 //! The agent is `acme-hooked`, whose spec declares the `hooks` capability and Claude Code's hooks
 //! adapter. Each test fires a hook as Claude Code does — the command the launch installed in the
-//! worktree's `.claude/settings.local.json`, under `sh -c`, payload on stdin — and reads what the
+//! session's hooks file in the worktree, under `sh -c`, payload on stdin — and reads what the
 //! driver made of it with `read_hooks` / `wait_for_hook`. A Coder target is reached through the
 //! stand-in `coder` the suite writes; no deployment is reached.
 //!

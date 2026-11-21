@@ -493,15 +493,20 @@ fn a_host_launch_of_an_agent_declaring_hooks_renders_its_hooks_file_and_appended
     })
     .map_err(|s| s.message);
 
-    // Then
+    // Then — the session's own hooks file, loaded by name beside the appended prompt
+    let hooks_file = worktree
+        .path()
+        .join(".tddy/hooks/0190-claude/claude-settings.json");
     assert_eq!(
         rendered,
         Ok((
             vec![
                 "--append-system-prompt-file".to_string(),
                 prompt.to_string_lossy().into_owned(),
+                "--settings".to_string(),
+                hooks_file.to_string_lossy().into_owned(),
             ],
-            vec![worktree.path().join(".claude/settings.local.json")],
+            vec![hooks_file],
         ))
     );
 }
@@ -511,7 +516,7 @@ async fn a_local_checkouts_slot_files_are_left_for_the_local_write() {
     // Given
     let mut slots = RenderedSlots {
         files: vec![(
-            PathBuf::from("/w/.claude/settings.local.json"),
+            PathBuf::from("/w/.tddy/hooks/s1/claude-settings.json"),
             b"{}".to_vec(),
         )],
         ..RenderedSlots::default()
