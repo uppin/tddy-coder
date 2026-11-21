@@ -6,13 +6,14 @@
 //!
 //! Feature doc: docs/ft/coder/reusable-lsp.md.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use serde::Deserialize;
 use tddy_worktree_service::session_target::HomeCaller;
 
 use crate::catalog::ToolDef;
+use crate::project_home_catalogue::tool_def;
 use crate::reach::ReadReach;
 use crate::ToolOutcome;
 
@@ -25,10 +26,120 @@ pub fn is_lsp_root_tool(name: &str) -> bool {
     matches!(name, ADD_LSP_ROOT | REMOVE_LSP_ROOT | LIST_LSP_ROOTS)
 }
 
+/// Whether `name` is one of the five `Lsp*` tools.
+pub fn is_orchestrator_lsp_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "LspDiagnostics" | "LspDefinition" | "LspReferences" | "LspHover" | "LspSymbols"
+    )
+}
+
 /// The three root tools' definitions.
 pub fn lsp_root_tool_defs() -> Vec<ToolDef> {
-    // TODO(orchestrator-lsp): implement
-    unimplemented!("lsp_root_tool_defs")
+    vec![
+        tool_def(
+            ADD_LSP_ROOT,
+            "Add a code root for your `Lsp*` queries and warm its index. A root inside your reach \
+             (any tddy worktree on this host) is added at once; one outside it is requested from \
+             the operator, like `RequestPathAccess`, and added once allowed. Name the root in full \
+             (absolute) and why.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "root": { "type": "string", "description": "Absolute path of the worktree to index." },
+                    "reason": { "type": "string", "description": "Why you need it, in your own words." }
+                },
+                "required": ["root", "reason"],
+                "additionalProperties": false
+            }),
+        ),
+        tool_def(
+            REMOVE_LSP_ROOT,
+            "Remove a root you added with `AddLspRoot`. No request is made. The index unloads the \
+             root once no session uses it.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "root": { "type": "string", "description": "Absolute path of a root you added." }
+                },
+                "required": ["root"],
+                "additionalProperties": false
+            }),
+        ),
+        tool_def(
+            LIST_LSP_ROOTS,
+            "List the roots you added with `AddLspRoot`, oldest first.",
+            serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+        ),
+    ]
+}
+
+/// The five `Lsp*` tools as an orchestrator is offered them: the same operations as every session's,
+/// each with an optional `root` naming the worktree to query (default: its home worktree).
+pub fn orchestrator_lsp_tool_defs() -> Vec<ToolDef> {
+    const ROOT_DESCRIPTION: &str = "Absolute path of the worktree to query: any tddy worktree \
+         on this host, or a root added with `AddLspRoot`. Defaults to your home worktree.";
+    let position = |description: &str| {
+        tool_def(
+            "",
+            description,
+            serde_json::json!({
+                "type": "object",
+                "required": ["target", "file", "line", "character"],
+                "properties": {
+                    "root": { "type": "string", "description": ROOT_DESCRIPTION },
+                    "target": { "type": "string" },
+                    "file": { "type": "string" },
+                    "line": { "type": "integer" },
+                    "character": { "type": "integer" }
+                }
+            }),
+        )
+    };
+    let named = |name: &str, mut def: ToolDef| {
+        def.name = name.to_string();
+        def
+    };
+    vec![
+        tool_def(
+            "LspDiagnostics",
+            "List language-server diagnostics for a file in a build target.",
+            serde_json::json!({
+                "type": "object",
+                "required": ["target", "file"],
+                "properties": {
+                    "root": { "type": "string", "description": ROOT_DESCRIPTION },
+                    "target": { "type": "string" },
+                    "file": { "type": "string" }
+                }
+            }),
+        ),
+        named(
+            "LspDefinition",
+            position("Go to the definition of the symbol at a file position."),
+        ),
+        named(
+            "LspReferences",
+            position("Find references to the symbol at a file position."),
+        ),
+        named(
+            "LspHover",
+            position("Show hover information for the symbol at a file position."),
+        ),
+        tool_def(
+            "LspSymbols",
+            "Search workspace symbols for a build target.",
+            serde_json::json!({
+                "type": "object",
+                "required": ["target"],
+                "properties": {
+                    "root": { "type": "string", "description": ROOT_DESCRIPTION },
+                    "target": { "type": "string" },
+                    "query": { "type": "string" }
+                }
+            }),
+        ),
+    ]
 }
 
 /// The root an orchestrator's LSP tool call runs on: its home worktree when the call names none,
@@ -39,9 +150,27 @@ pub fn lsp_root_for(
     reach: &ReadReach,
     added_roots: &[PathBuf],
 ) -> Result<PathBuf, String> {
-    // TODO(orchestrator-lsp): implement
-    let _ = (args, reach, added_roots);
-    unimplemented!("lsp_root_for")
+    let Some(named) = args.get("root").and_then(|root| root.as_str()) else {
+        return Ok(reach.home().to_path_buf());
+    };
+    if !Path::new(named).is_absolute() {
+        return Err(format!(
+            "root {named} is not an absolute path; name the root in full"
+        ));
+    }
+    let root = std::fs::canonicalize(named).unwrap_or_else(|_| PathBuf::from(named));
+    let added = added_roots.iter().any(|added| {
+        let added = std::fs::canonicalize(added).unwrap_or_else(|_| added.clone());
+        root.starts_with(added)
+    });
+    if reach.contains(&root) || added {
+        Ok(root)
+    } else {
+        Err(format!(
+            "root {named} is outside your reach and was not added: call {ADD_LSP_ROOT} with it \
+             first (the operator is asked)"
+        ))
+    }
 }
 
 /// [`ADD_LSP_ROOT`]'s arguments.
@@ -90,6 +219,13 @@ pub trait LspRootPort: Send + Sync {
     }
 }
 
+/// [`REMOVE_LSP_ROOT`]'s arguments.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RemoveLspRootArgs {
+    root: String,
+}
+
 /// Run a root tool for `caller`.
 pub async fn execute_lsp_root_tool(
     port: &dyn LspRootPort,
@@ -97,9 +233,59 @@ pub async fn execute_lsp_root_tool(
     tool_name: &str,
     args_json: &str,
 ) -> ToolOutcome {
-    // TODO(orchestrator-lsp): implement
-    let _ = (port, caller, tool_name, args_json);
-    unimplemented!("execute_lsp_root_tool")
+    match tool_name {
+        ADD_LSP_ROOT => {
+            let args: AddLspRootArgs = match serde_json::from_str(args_json) {
+                Ok(args) => args,
+                Err(e) => return ToolOutcome::err(format!("{ADD_LSP_ROOT}: invalid args: {e}")),
+            };
+            if !Path::new(&args.root).is_absolute() {
+                return ToolOutcome::err(format!(
+                    "{ADD_LSP_ROOT}: {} is not an absolute path; name the root in full",
+                    args.root
+                ));
+            }
+            if args.reason.trim().is_empty() {
+                return ToolOutcome::err(format!(
+                    "{ADD_LSP_ROOT}: say why you need the root; the operator decides on it \
+                     when it is outside your reach"
+                ));
+            }
+            let root = args.root.clone();
+            match port.add_lsp_root(caller, args).await {
+                Ok(AddedRoot::Added) => {
+                    ToolOutcome::ok(serde_json::json!({ "added": true, "root": root }).to_string())
+                }
+                Ok(AddedRoot::Refused) => ToolOutcome::err(format!(
+                    "{ADD_LSP_ROOT}: {root} is outside your reach and the operator did not allow it"
+                )),
+                Err(e) => ToolOutcome::err(format!("{ADD_LSP_ROOT}: {e}")),
+            }
+        }
+        REMOVE_LSP_ROOT => {
+            let args: RemoveLspRootArgs = match serde_json::from_str(args_json) {
+                Ok(args) => args,
+                Err(e) => return ToolOutcome::err(format!("{REMOVE_LSP_ROOT}: invalid args: {e}")),
+            };
+            match port
+                .remove_lsp_root(caller, PathBuf::from(&args.root))
+                .await
+            {
+                Ok(()) => ToolOutcome::ok(
+                    serde_json::json!({ "removed": true, "root": args.root }).to_string(),
+                ),
+                Err(e) => ToolOutcome::err(format!("{REMOVE_LSP_ROOT}: {e}")),
+            }
+        }
+        LIST_LSP_ROOTS => match port.list_lsp_roots(caller).await {
+            Ok(roots) => {
+                let roots: Vec<String> = roots.iter().map(|r| r.display().to_string()).collect();
+                ToolOutcome::ok(serde_json::json!({ "roots": roots }).to_string())
+            }
+            Err(e) => ToolOutcome::err(format!("{LIST_LSP_ROOTS}: {e}")),
+        },
+        other => ToolOutcome::err(format!("unknown tool: {other}")),
+    }
 }
 
 #[cfg(test)]

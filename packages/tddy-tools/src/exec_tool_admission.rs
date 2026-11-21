@@ -20,6 +20,9 @@ use std::sync::LazyLock;
 
 use tddy_session_tool_client::SessionExecToolAnswer;
 use tddy_tool_engine::base_freshness_tools::base_freshness_tool_defs;
+use tddy_tool_engine::lsp_root_tools::{
+    is_orchestrator_lsp_tool, lsp_root_tool_defs, orchestrator_lsp_tool_defs,
+};
 use tddy_tool_engine::path_access_tools::request_path_access_tool_def;
 use tddy_tool_engine::project_home_git_tools::project_home_git_tool_defs;
 use tddy_tool_engine::project_home_tools::project_home_tool_defs;
@@ -73,6 +76,8 @@ pub fn project_home_remote_tool_defs() -> Vec<RemoteToolDef> {
         .chain(session_file_tool_defs())
         .chain(base_freshness_tool_defs())
         .chain([request_path_access_tool_def()])
+        .chain(orchestrator_lsp_tool_defs())
+        .chain(lsp_root_tool_defs())
         .map(|tool| RemoteToolDef {
             name: tool.name,
             description: tool.description,
@@ -110,6 +115,11 @@ static EXEC_CATALOG_NAMES: LazyLock<HashSet<String>> = LazyLock::new(|| {
 
 /// Whether the tool `name` is advertised, given the exec tool names the daemon admits.
 pub fn is_advertised(name: &str, admitted: &[String]) -> bool {
+    // The `Lsp*` tools are also an ordinary session's when its owner signalled a language server
+    // (`TDDY_LSP_TOOLS`); an orchestrator is offered them by the daemon's admission instead.
+    if is_orchestrator_lsp_tool(name) && tddy_lsp_executor::lsp_tools::lsp_tools_enabled() {
+        return true;
+    }
     !EXEC_CATALOG_NAMES.contains(name) || admitted.iter().any(|admitted| admitted == name)
 }
 
@@ -222,6 +232,14 @@ mod tests {
                 "CheckBaseFreshness",
                 "RefreshHome",
                 "RequestPathAccess",
+                "LspDiagnostics",
+                "LspDefinition",
+                "LspReferences",
+                "LspHover",
+                "LspSymbols",
+                "AddLspRoot",
+                "RemoveLspRoot",
+                "ListLspRoots",
             ])
         );
     }

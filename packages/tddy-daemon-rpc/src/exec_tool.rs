@@ -2,6 +2,7 @@
 
 mod base_freshness;
 pub mod home_terminal_leases;
+mod lsp_roots;
 mod orchestrator_reach;
 mod path_access;
 mod path_guard;

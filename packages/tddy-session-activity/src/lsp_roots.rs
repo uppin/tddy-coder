@@ -37,24 +37,50 @@ impl SessionLspRoots {
 
     /// Every root the session added, oldest first; none when the file does not exist.
     pub fn roots(&self) -> std::io::Result<Vec<AddedLspRoot>> {
-        // TODO(orchestrator-lsp): implement
-        let _ = &self.session_dir;
-        unimplemented!("SessionLspRoots::roots")
+        let bytes = match std::fs::read(self.file()) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        serde_json::from_slice(&bytes)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
     /// Record `root`; adding a root the session already added keeps the first record.
     pub fn add(&self, root: AddedLspRoot) -> std::io::Result<()> {
-        // TODO(orchestrator-lsp): implement
-        let _ = (&self.session_dir, root);
-        unimplemented!("SessionLspRoots::add")
+        let mut roots = self.roots()?;
+        if roots.iter().any(|added| added.root == root.root) {
+            return Ok(());
+        }
+        roots.push(root);
+        self.write(&roots)
     }
 
     /// Remove `root`: `true` when the session had added it, `false` — and nothing changed — when it
     /// had not.
     pub fn remove(&self, root: &Path) -> std::io::Result<bool> {
-        // TODO(orchestrator-lsp): implement
-        let _ = (&self.session_dir, root);
-        unimplemented!("SessionLspRoots::remove")
+        let mut roots = self.roots()?;
+        let before = roots.len();
+        roots.retain(|added| added.root != root);
+        if roots.len() == before {
+            return Ok(false);
+        }
+        self.write(&roots)?;
+        Ok(true)
+    }
+
+    /// Written atomically.
+    fn write(&self, roots: &[AddedLspRoot]) -> std::io::Result<()> {
+        let bytes = serde_json::to_vec_pretty(roots)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::create_dir_all(&self.session_dir)?;
+        let staging = self.session_dir.join(format!("{LSP_ROOTS_FILE}.tmp"));
+        std::fs::write(&staging, bytes)?;
+        std::fs::rename(&staging, self.file())
+    }
+
+    fn file(&self) -> PathBuf {
+        self.session_dir.join(LSP_ROOTS_FILE)
     }
 }
 
