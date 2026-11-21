@@ -1,12 +1,12 @@
-//! What `session-hook --await-answer` prints for an orchestrator's answers to an `AskUserQuestion`:
-//! Claude Code's `PreToolUse` decision, `permissionDecision: allow` with the call's own input
-//! plus an `answers` map (`#home-inbox` 8/9). The mechanism was verified against Claude Code
-//! 2.1.312; see `question_decision.rs`.
+//! The `PreToolUse` decision an orchestrator's answers to an `AskUserQuestion` become: Claude Code's
+//! `permissionDecision: allow` with the call's own input plus an `answers` map (`#home-inbox` 8/9;
+//! moved here with the encoding in `#target-parity` 6/7). The mechanism is documented on
+//! `tddy_session_activity::hook_decision::encode_question_decision`.
 
 use pretty_assertions::assert_eq;
 use serde_json::{json, Value};
-use tddy_tools::session_hook::question_decision::encode_question_decision;
-use tddy_tools::session_hook::QuestionAnswer;
+use tddy_service::proto::activity::QuestionAnswer;
+use tddy_session_activity::hook_decision::encode_question_decision;
 
 /// A single-choice and a multi-select question, as Claude sends them.
 fn the_input() -> Value {

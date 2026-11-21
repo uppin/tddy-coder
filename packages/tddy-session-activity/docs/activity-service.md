@@ -49,6 +49,12 @@ builds Claude Code's `PermissionRequest` decision from an `AwaitQuestionAnswer` 
 message, anything else → `None`. Both hook paths print it: `tddy-tools session-hook
 --await-answer` (re-exported as `tddy_tools::session_hook::permission_decision_json`) and a target
 session's follower, which writes it into the answer file the hook on the target waits for.
+`question_decision_json(answer, tool_input)` (over `encode_question_decision`) builds the
+`AskUserQuestion` decision: `PreToolUse` `permissionDecision: "allow"` with `updatedInput` — the
+call's own input plus an `answers` map (question text → chosen labels joined with `", "`, then
+`other`). Only an `ANSWERED` wait with answers that fit the call's questions produces one; otherwise
+`None`, and Claude shows its own dialog. It moved here from `tddy-tools` (`#target-parity` 6/7) so
+the target follower can print it too; the encoding is pinned by `tests/question_decision_unit.rs`.
 
 Proto: [`packages/tddy-service/proto/activity.proto`](../../tddy-service/proto/activity.proto). It
 imports `types.proto` for `AgentActivityRecord` and `StreamMode`.

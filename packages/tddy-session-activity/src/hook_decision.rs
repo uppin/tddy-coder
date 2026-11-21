@@ -185,16 +185,15 @@ mod tests {
         assert_eq!(permission_decision_json(&answer, None), None);
     }
 
+    /// The encoding itself is pinned by `tests/question_decision_unit.rs`; this pins the gate on
+    /// the wait's outcome in front of it.
     #[test]
-    fn an_answered_question_is_handed_to_claude_in_its_own_input() {
-        // Given the orchestrator chose "Rust" for the call's one question
-        let tool_input = serde_json::json!({"questions": [{
-            "question": "Which language?", "header": "Language", "multiSelect": false,
-            "options": [{"label": "Rust"}, {"label": "Go"}]
-        }]});
+    fn a_question_wait_nobody_answered_hands_nothing_to_claude() {
+        // Given the wait timed out, even with an answer recorded
+        let tool_input = serde_json::json!({"questions": [{"question": "Which language?"}]});
         let answer = AwaitQuestionAnswerResponse {
-            outcome: AwaitQuestionOutcome::Answered as i32,
-            answers: vec![tddy_service::proto::activity::QuestionAnswer {
+            outcome: AwaitQuestionOutcome::TimedOut as i32,
+            answers: vec![QuestionAnswer {
                 question_index: 0,
                 selected: vec!["Rust".to_string()],
                 ..Default::default()
@@ -202,21 +201,7 @@ mod tests {
             ..Default::default()
         };
 
-        // When
-        let decision = question_decision_json(&answer, &tool_input);
-
-        // Then
-        let mut updated = tool_input.clone();
-        updated["answers"] = serde_json::json!({"Which language?": "Rust"});
-        assert_eq!(
-            decision.map(|json| serde_json::from_str::<serde_json::Value>(&json).unwrap()),
-            Some(serde_json::json!({
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "allow",
-                    "updatedInput": updated
-                }
-            }))
-        );
+        // When / Then Claude shows its own dialog
+        assert_eq!(question_decision_json(&answer, &tool_input), None);
     }
 }

@@ -27,16 +27,15 @@ pub(crate) struct HeldHook {
     pub question_input: Option<serde_json::Value>,
 }
 
-impl HeldHook {
+impl crate::remote_hook_follower::HookLine {
     /// The `tool_input` of a hook line that is a question — a `PreToolUse` of `AskUserQuestion`.
-    pub(crate) fn question_input_of(
-        event: &str,
-        payload: &serde_json::Value,
-    ) -> Option<serde_json::Value> {
-        (event == "PreToolUse"
-            && payload.get("tool_name").and_then(|t| t.as_str()) == Some("AskUserQuestion"))
+    /// Kept beside the hold rather than in `remote_hook_follower.rs`, which is over its length
+    /// budget (`docs/code-issues/oversized-file-remote-hook-follower.md`).
+    pub(crate) fn question_input(&self) -> Option<serde_json::Value> {
+        (self.event == "PreToolUse"
+            && self.payload.get("tool_name").and_then(|t| t.as_str()) == Some("AskUserQuestion"))
         .then(|| {
-            payload
+            self.payload
                 .get("tool_input")
                 .cloned()
                 .unwrap_or(serde_json::Value::Null)

@@ -3,7 +3,7 @@
 
 use prost::Message as _;
 use tddy_service::proto::activity::{AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse};
-pub use tddy_session_activity::hook_decision::question_decision_json;
+use tddy_session_activity::hook_decision::question_decision_json;
 
 use super::{exchange, SessionHookArgs};
 
