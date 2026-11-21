@@ -116,6 +116,12 @@ struct AnSshCall {
 /// command up when it is itself hung up or terminated, and exits with the command's status.
 /// `before` is run first.
 fn a_target_that_runs_what_it_is_asked_to(before: &str) -> String {
+    a_target_that_runs_what_it_is_asked_to_then(before, "")
+}
+
+/// [`a_target_that_runs_what_it_is_asked_to`], running `after` once the command has ended and
+/// before the client exits with its status.
+fn a_target_that_runs_what_it_is_asked_to_then(before: &str, after: &str) -> String {
     format!(
         r#"{before}for command; do :; done
 printf '%s\t%s\n' "$(/bin/pwd -P)" "$(printf '%s' "$*" | /usr/bin/tr '\n' ' ')" >> "$(dirname "$0")/calls"
@@ -126,7 +132,8 @@ exec 3<&0
 remote=$!
 trap 'kill -HUP "$remote" 2>/dev/null' HUP TERM
 wait "$remote"
-exit $?
+status=$?
+{after}exit $status
 "#
     )
 }
@@ -150,6 +157,42 @@ fn a_target_whose_terminal_connects_after(connect: Duration) -> ATarget {
         "SHELL=\"$(dirname \"$0\")/login-shell\"\nexport SHELL\n\
          if [ \"$1\" = -tt ]; then /bin/sleep {}; fi\n",
         connect.as_secs_f64()
+    )));
+    target.has_a_login_of_its_own();
+    target
+}
+
+/// A target reached as a Coder workspace is: every one-shot command (the probes for the agent's
+/// pid and its liveness) takes `round_trip` to answer, and the session's terminal (`ssh -tt`)
+/// reports its end `terminal_lag` after its command has ended, as a client still tearing its
+/// connection down does.
+fn a_target_with_a_slow_round_trip_and_a_late_terminal_end(
+    round_trip: Duration,
+    terminal_lag: Duration,
+) -> ATarget {
+    let target = ATarget::reached_through(&a_target_that_runs_what_it_is_asked_to_then(
+        &format!(
+            "SHELL=\"$(dirname \"$0\")/login-shell\"\nexport SHELL\n\
+             if [ \"$1\" != -tt ]; then /bin/sleep {}; fi\n",
+            round_trip.as_secs_f64()
+        ),
+        &format!(
+            "if [ \"$1\" = -tt ]; then /bin/sleep {}; fi\n",
+            terminal_lag.as_secs_f64()
+        ),
+    ));
+    target.has_a_login_of_its_own();
+    target
+}
+
+/// A target whose liveness probes (`kill -0 <pid>`) never return: they sleep for `hang`, while
+/// every other one-shot command answers at once and the session's terminal stays up — a transport
+/// that carries the agent's pid back but has gone silent since.
+fn a_target_whose_liveness_probes_never_answer(hang: Duration) -> ATarget {
+    let target = ATarget::reached_through(&a_target_that_runs_what_it_is_asked_to(&format!(
+        "SHELL=\"$(dirname \"$0\")/login-shell\"\nexport SHELL\n\
+         case \"$*\" in *'kill -0'*) /bin/sleep {} ;; esac\n",
+        hang.as_secs_f64()
     )));
     target.has_a_login_of_its_own();
     target
@@ -762,6 +805,98 @@ async fn an_agent_whose_terminal_has_not_run_it_within_the_start_timeout_fails_t
         RemoteLaunchError::AgentNeverStarted {
             after: Duration::from_secs(1)
         }
+    );
+
+    // And the session is left without a terminal
+    assert!(!daemon.has_a_terminal().await);
+}
+
+/// Reproduces the `kill -0 <pid>` liveness probe recorded as `timed_out` after ~500 ms on the
+/// Coder workspace `mantasi/remote-dev` (2026-11-21), where every one-shot call takes 6-9 s.
+///
+/// The probe in `exits_during_startup` is bounded by what the startup window has left
+/// (`spawn_startup_grace_period_ms`, 500 ms by default), and a probe that does not answer leaves
+/// the agent judged alive. Over a transport whose round trip is longer than the window, no probe
+/// ever answers, so an agent that dies on the target counts as started as long as its terminal
+/// is slow to report the end.
+#[tokio::test]
+async fn an_agent_that_dies_on_a_slow_target_fails_the_start_though_its_terminal_reports_late() {
+    // Given a target whose one-shot commands take longer to answer than the startup window, and
+    // whose terminal reports its end only well after the window has closed
+    let target = a_target_with_a_slow_round_trip_and_a_late_terminal_end(
+        STARTUP_WINDOW * 3,
+        STARTUP_WINDOW * 10,
+    );
+    // And an agent that records its pid there, then exits at once
+    let agent = an_agent_that_exits_at_once_on(&target);
+    let daemon = a_daemon();
+
+    // When
+    let outcome = daemon.launches(&agent, &target, None).await;
+
+    // Then the start fails: the agent's pid is dead on the target
+    assert!(
+        matches!(outcome, Err(RemoteLaunchError::ExitedDuringStartup { .. })),
+        "the launch of an agent already dead on the target returned: {:?}",
+        outcome.as_ref().map(|_| "a started session")
+    );
+}
+
+/// The other half of the probe's judgement: on the same slow target, an agent that stays up is
+/// started — a probe that has a round trip to answer finds it alive.
+#[tokio::test]
+async fn an_agent_that_stays_up_on_a_slow_target_starts() {
+    // Given a target whose one-shot commands take longer to answer than the startup window
+    let target = a_target_with_a_slow_round_trip_and_a_late_terminal_end(
+        STARTUP_WINDOW * 3,
+        STARTUP_WINDOW * 10,
+    );
+    // And an agent there that stays up
+    let agent = an_agent_that_stays_up_on(&target);
+    let daemon = a_daemon();
+
+    // When
+    let outcome = daemon.launches(&agent, &target, None).await;
+
+    // Then
+    assert!(
+        outcome.is_ok(),
+        "the launch of an agent that stays up failed: {:?}",
+        outcome.err()
+    );
+}
+
+/// A hung transport is not a live agent: probes that never answer, with the terminal still up,
+/// end the judgement at the start's own bound (the startup window plus the start timeout) with a
+/// failure that names it — the start neither probes forever nor counts the agent alive.
+#[tokio::test]
+async fn an_agent_on_a_target_that_never_answers_fails_the_start_after_its_bound() {
+    // Given a target whose liveness probes never return, and whose terminal stays up
+    let target = a_target_whose_liveness_probes_never_answer(Duration::from_secs(60));
+    // And an agent there that stays up
+    let agent = an_agent_that_stays_up_on(&target);
+    let daemon = a_daemon();
+
+    // When the launch is given a small start timeout
+    let start_timeout = Duration::from_secs(1);
+    let started = std::time::Instant::now();
+    let failure = daemon
+        .launches_bounded_by(&agent, &target, start_timeout)
+        .await
+        .err()
+        .expect("a start whose probes never answer fails");
+
+    // Then the failure names the bound: the startup window plus the start timeout
+    assert_eq!(
+        failure,
+        RemoteLaunchError::AgentNeverAnswered {
+            after: STARTUP_WINDOW + start_timeout
+        }
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "the start took {:?} to give up",
+        started.elapsed()
     );
 
     // And the session is left without a terminal

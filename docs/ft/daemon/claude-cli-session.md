@@ -581,7 +581,13 @@ environment the `claude-cli` launch produces:
   from the spawn of its terminal to record its pid on the target — the transport's connect time
   included, ~10 s for a Coder workspace — or the start fails and its terminal is stopped. An agent
   that exits within the startup window fails the start with its
-  last output; an unreachable target fails it with the shell's reason and leaves no session. A
+  last output. Its liveness there is a `kill -0` of the recorded pid, and each probe has the same
+  allowance to answer, not what the window has left: a Coder round trip (6–9 s) outlasts the 500 ms
+  window, and a probe cut off at the window never saw a dead agent. The window passes only on a
+  probe that answered alive; a pid found dead fails the start with the terminal's last output,
+  whenever the terminal reports its end. A target that answers no probe within the window plus that
+  allowance, with its terminal still up, fails the start — the agent is neither judged alive nor
+  left running — with an error that names the bound and leaves no session (`#target-parity` 5/7). An unreachable target fails it with the shell's reason and leaves no session. A
   target combined with a managed codebase, a sandbox, a split placement or the project-home main
   is refused with the reason, as is a target named together with `ssh_config_host`. A file the
   agent's argv names in the session's directory on the daemon's host (its appended system prompt)

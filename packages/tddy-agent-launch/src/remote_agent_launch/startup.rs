@@ -58,48 +58,84 @@ pub(super) async fn wait_for_agent_start(
     }
 }
 
-/// Whether the agent ends within `window`, failing the launch. Called only once the agent is
-/// known to have started (its pid is recorded on the target), so the window runs from the
-/// agent's start: an agent still running when it closes has started.
+/// How judging an agent's startup window ended.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum StartupJudgement {
+    /// The agent (or its terminal) ended within the window: the launch fails.
+    Exited,
+    /// The window passed with the agent confirmed alive by an answered probe (or, with no pid to
+    /// probe, with the terminal still up).
+    Stayed,
+    /// No probe was answered by the cap, with the terminal still up: the target went silent.
+    NeverAnswered,
+}
+
+/// Judge whether the agent ends within `window`. Called only once the agent is known to have
+/// started (its pid is recorded on the target), so the window runs from the agent's start: an
+/// agent still running when it closes has started.
 ///
 /// The agent's own liveness on the target is judged beside the terminal's end, because under
 /// load the terminal's exit is reported long after the agent that caused it is gone: an agent
 /// whose pid is dead on the target has exited, whatever its terminal has yet to say.
+///
+/// Each liveness probe may take up to `probe_bound`: over a transport whose round trip exceeds
+/// the window, a probe bounded by what the window has left would never answer. An unanswered
+/// probe is evidence of nothing, so probing continues; the window counts as passed only once a
+/// probe that answered found the agent alive at or after the window's end. The terminal's end
+/// stops the wait at any time. Probing is capped at `window + probe_bound` from the call: a
+/// start with no answered probe by then is [`StartupJudgement::NeverAnswered`], never taken as
+/// alive. Without a pid there is nothing to probe and the window elapses.
 pub(super) async fn exits_during_startup(
     handle: &PtyHandle,
     window: Duration,
     shell: &dyn RemoteShell,
     agent_pid: Option<u32>,
-) -> bool {
+    probe_bound: Duration,
+) -> StartupJudgement {
     let deadline = tokio::time::Instant::now() + window;
+    let cap = deadline + probe_bound;
     let mut probed_at = tokio::time::Instant::now() - Duration::from_secs(1);
     loop {
         if *handle.pty_done.borrow() {
-            return true;
+            return StartupJudgement::Exited;
         }
         let now = tokio::time::Instant::now();
-        if now >= deadline {
-            return false;
-        }
-        if let Some(pid) = agent_pid {
-            if probed_at.elapsed() >= Duration::from_millis(50) {
-                probed_at = now;
-                // Bounded by what the window has left, as the pid probe is by its bound; a probe
-                // that does not answer in time leaves the agent judged alive.
-                let alive = shell
-                    .exec(
-                        tddy_remote_shell::ExecRequest::new(format!("kill -0 {pid}"))
-                            .within(deadline.saturating_duration_since(now)),
-                    )
-                    .await
-                    .map(|output| output.status == 0)
-                    .unwrap_or(true);
-                if !alive {
-                    return true;
+        match agent_pid {
+            None => {
+                if now >= deadline {
+                    return StartupJudgement::Stayed;
+                }
+            }
+            Some(pid) => {
+                if now >= cap {
+                    return StartupJudgement::NeverAnswered;
+                }
+                if probed_at.elapsed() >= Duration::from_millis(50) {
+                    probed_at = now;
+                    let probe_left = probe_bound.min(cap.saturating_duration_since(now));
+                    let answered = shell
+                        .exec(
+                            tddy_remote_shell::ExecRequest::new(format!("kill -0 {pid}"))
+                                .within(probe_left),
+                        )
+                        .await;
+                    if let Ok(output) = answered {
+                        if output.status != 0 {
+                            return StartupJudgement::Exited;
+                        }
+                        if tokio::time::Instant::now() >= deadline {
+                            return StartupJudgement::Stayed;
+                        }
+                    }
                 }
             }
         }
-        tokio::time::sleep((deadline - now).min(Duration::from_millis(10))).await;
+        let pause = if now >= deadline {
+            Duration::from_millis(10)
+        } else {
+            (deadline - now).min(Duration::from_millis(10))
+        };
+        tokio::time::sleep(pause).await;
     }
 }
 

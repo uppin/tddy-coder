@@ -33,10 +33,10 @@ use tddy_remote_shell::{InteractiveExit, RemoteShell, RemoteShellError};
 use crate::cli_session_pointer::{
     record_remote_owner, session_pointer_path, PlacedSessionPointer, PointerHost,
 };
-use crate::remote_agent_launch::startup::exits_during_startup;
 use crate::remote_agent_launch::startup::settled_last_output;
 use crate::remote_agent_launch::startup::wait_for_agent_start;
 use crate::remote_agent_launch::startup::AgentStart;
+use crate::remote_agent_launch::startup::{exits_during_startup, StartupJudgement};
 use crate::spec_launch::{HostAgent, HostPtySession, SpecLaunchError};
 
 /// Where the remote command records a session's agent's pid, relative to the session's worktree on
@@ -190,6 +190,10 @@ pub enum RemoteLaunchError {
     /// The agent never recorded its pid on the target within the bound, though its terminal is
     /// still running: it never started, so there is no startup window to judge it by.
     AgentNeverStarted { after: Duration },
+    /// The agent recorded its pid, but no liveness probe of it was answered within the bound
+    /// (the startup window plus the start timeout, from the pid's recording) while its terminal
+    /// kept running: the target went silent, and the agent can be judged neither up nor down.
+    AgentNeverAnswered { after: Duration },
 }
 
 impl fmt::Display for RemoteLaunchError {
@@ -218,6 +222,10 @@ impl fmt::Display for RemoteLaunchError {
             Self::AgentNeverStarted { after } => write!(
                 f,
                 "the agent on the target did not record its pid within {after:?}: it never started, though its terminal is still running"
+            ),
+            Self::AgentNeverAnswered { after } => write!(
+                f,
+                "the target did not answer a liveness probe of the agent within {after:?}: its terminal is still running, but the agent can not be confirmed alive"
             ),
         }
     }
@@ -439,14 +447,21 @@ async fn judge_the_start(
         }
     };
 
-    if exits_during_startup(
+    let judgement = exits_during_startup(
         &handle,
         remote.startup_window,
         remote.shell.as_ref(),
         agent_pid,
+        start_bound,
     )
-    .await
-    {
+    .await;
+    if judgement == StartupJudgement::NeverAnswered {
+        session.manager.stop_session(session.session_id).await;
+        return Err(RemoteLaunchError::AgentNeverAnswered {
+            after: remote.startup_window + start_bound,
+        });
+    }
+    if judgement == StartupJudgement::Exited {
         // The output settles first: an agent judged exited by its pid may not have its exit
         // status recorded yet, and settling the capture gives the terminal time to record it.
         let last_output = settled_last_output(&handle).await;
