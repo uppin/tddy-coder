@@ -8,9 +8,14 @@
 
 use std::path::Path;
 
-use tddy_remote_shell::RemoteShell;
+use tddy_remote_shell::{ExecRequest, RemoteShell};
 
 use super::RemoteLaunchError;
+
+/// `value` single-quoted for a POSIX shell, each embedded quote written `'\''`.
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
 
 /// Ask the target `shell` reaches whether its login shell, in `worktree`, finds `command` — an
 /// agent's bare command, as its spec names it (`claude`, `agent`) — with one call through the port:
@@ -29,9 +34,22 @@ pub async fn probe_agent_on_target(
     worktree: &Path,
     command: &str,
 ) -> Result<(), RemoteLaunchError> {
-    // TODO(tab-errors): implement
-    let _ = (shell, worktree, command);
-    todo!()
+    let inner = format!("command -v {}", shell_single_quote(command));
+    let line = format!(
+        "cd {} && exec \"${{SHELL:-/bin/sh}}\" -lc {}",
+        shell_single_quote(&worktree.to_string_lossy()),
+        shell_single_quote(&inner)
+    );
+    let output = shell
+        .exec(ExecRequest::new(line))
+        .await
+        .map_err(RemoteLaunchError::Shell)?;
+    if output.status != 0 {
+        return Err(RemoteLaunchError::AgentNotOnTarget {
+            command: command.to_string(),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

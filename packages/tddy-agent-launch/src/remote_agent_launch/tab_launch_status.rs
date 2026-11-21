@@ -6,6 +6,7 @@
 use tddy_rpc::Status;
 
 use super::RemoteLaunchError;
+use crate::target_trust::TargetTrustError;
 
 /// What a target tab's failed launch says to the caller, the error's own words as the message:
 ///
@@ -21,9 +22,19 @@ use super::RemoteLaunchError;
 /// A target that cannot be resolved (a locked vault, a missing account) never reaches this mapping:
 /// the target-shell port refuses it `FAILED_PRECONDITION` before any launch.
 pub fn tab_launch_status(error: &RemoteLaunchError) -> Status {
-    // TODO(tab-errors): implement
-    let _ = error;
-    todo!()
+    let message = error.to_string();
+    match error {
+        RemoteLaunchError::Shell(_) | RemoteLaunchError::Trust(TargetTrustError::Shell(_)) => {
+            Status::unavailable(message)
+        }
+        RemoteLaunchError::Spawn(_) => Status::internal(message),
+        RemoteLaunchError::AgentNotOnTarget { .. }
+        | RemoteLaunchError::Plan(_)
+        | RemoteLaunchError::Trust(TargetTrustError::Malformed { .. })
+        | RemoteLaunchError::ExitedDuringStartup { .. }
+        | RemoteLaunchError::AgentNeverStarted { .. }
+        | RemoteLaunchError::AgentNeverAnswered { .. } => Status::failed_precondition(message),
+    }
 }
 
 #[cfg(test)]
