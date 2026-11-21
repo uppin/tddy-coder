@@ -329,6 +329,19 @@ pub struct CodingAgentSection {
     /// [`CodingAgentSpec::home_dirs`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub home_dirs: Vec<String>,
+    /// How a session of this agent is given the name other sessions of it on the same host address
+    /// it by natively (`#orchestra` 2/9): the flag the name is passed with. `None` for an agent
+    /// with no native peer messaging. Read through [`CodingAgentSpec::peer_name`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_name: Option<PeerNameSlot>,
+}
+
+/// The `peer_name` slot: `peer_name: { flag: --name }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PeerNameSlot {
+    /// The flag the session's peer name follows on the agent's command line.
+    pub flag: String,
 }
 
 /// How long an orchestrated session's permission hook waits for its orchestrator's answer when the
@@ -386,6 +399,12 @@ impl CodingAgentSpec {
     /// chat files, relative to that home; empty when the agent declares none.
     pub fn home_dirs(&self) -> &[String] {
         &self.agent.home_dirs
+    }
+
+    /// `coding_agent.peer_name`: how a session is given the name its peers on the host address it by
+    /// natively; `None` for an agent with no native peer messaging.
+    pub fn peer_name(&self) -> Option<&PeerNameSlot> {
+        self.agent.peer_name.as_ref()
     }
 
     /// `coding_agent.turn_input`: how a new turn reaches a running session of the agent; `None`

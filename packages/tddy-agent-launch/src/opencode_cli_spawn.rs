@@ -78,6 +78,7 @@ pub(crate) async fn start_cli_harness_session(
         selected_branch_to_work_on,
         stack_parent,
         orchestrator,
+        reports_to,
         initial_prompt,
         agents,
         semantic_index,
@@ -241,6 +242,8 @@ pub(crate) async fn start_cli_harness_session(
         // name this daemon's host, which that shell cannot reach — detection would prefer the
         // dead route over the remote one.
         session_tool_token: session_tool_token.filter(|_| checkout_alias.is_empty()),
+        reports_to: reports_to.as_ref(),
+        on_target: target.is_some(),
     })?;
 
     // On a target the agent's hooks append to its hook log there, not to a daemon it cannot
@@ -296,6 +299,14 @@ pub(crate) async fn start_cli_harness_session(
     )?;
     let carried_effort = effort_launch(spec, effort);
     slots.argv_extra.extend(role_args);
+    // An orchestrator and its children on this host message each other by peer name.
+    if target.is_none()
+        && (reports_to.is_some() || tddy_core::session_metadata::is_orchestrator_role(role_name))
+    {
+        slots
+            .argv_extra
+            .extend(crate::back_channel::peer_name_args(spec, session_id));
+    }
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
     let pointer = place_slot_files_and_pointer(
