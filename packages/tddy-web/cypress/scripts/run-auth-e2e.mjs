@@ -41,6 +41,8 @@ const baseUrl = `http://127.0.0.1:${webPort}`;
 // Start tddy-coder
 const server = spawn(binaryPath, [
   "--daemon",
+  // Kernel-picked gRPC port: the default fixed 0.0.0.0:50051 may already be held.
+  "--grpc", "0",
   "--livekit-url", wsUrl,
   "--livekit-api-key", "devkey",
   "--livekit-api-secret", "secret",

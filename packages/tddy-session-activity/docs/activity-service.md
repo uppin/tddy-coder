@@ -235,6 +235,7 @@ written twice. See
 | `answers.rs` | 434 | `answer_permission`, `clear_answered_pending_question`, its refusals and `permission_request_view` |
 | `pending_answers.rs` | 249 | `PendingAnswers`, the in-memory waiters |
 | `orchestrator_presence.rs` | 32 | the `OrchestratorPresence` port and `NoOrchestratorIsActive` |
+| `path_grants.rs` | 76 | `PathGrantStore`, `PathGrant`, `PathGrantMode`: an orchestrator session's operator-granted paths, persisted as `<session_dir>/path-grants.json` (read by the daemon's read reach — [project concept § Read reach](../../../docs/ft/daemon/project-concept.md#read-reach)) |
 | `service/hook_reports.rs` | 215 | the two hook reports' bodies, `report_session_status_impl` and `report_agent_activity_impl`, as inherent methods: a trait impl cannot be split across files and `restructure`'s `extract_method` is refused inside an `#[async_trait]` impl, so the trait methods delegate here |
 | `service/transcript_messages.rs` | 54 | `record_spoken_message`: a status report's `prompt` (`UserPromptSubmit`) and `last_assistant_message` (`Stop`) appended to `acp-transcript.jsonl` as user and agent message frames, for the session's own conversation only |
 
@@ -242,8 +243,8 @@ Production lines are counted to the first `#[cfg(test)]`; the budget is 500.
 
 ## Known gaps
 
-- ⚠ **This crate has no tests at all** — no `tests/` directory, no `#[cfg(test)]` module, across
-  1,573 production lines. Every assertion about the subsystem is made from `tddy-daemon`'s suites.
+- ⚠ **This crate barely tests itself** — no `tests/` directory, and the only `#[cfg(test)]` module
+  is `path_grants.rs`'s three store tests. Every assertion about the subsystem is made from `tddy-daemon`'s suites.
   See [`docs/dev/todo/2026-09-12-tddy-session-activity-has-no-tests-of-its-own.md`](../../../docs/dev/todo/2026-09-12-tddy-session-activity-has-no-tests-of-its-own.md).
 - ⚠ **Nothing checks that the moved ACP replay output matches what the old coordinate produced.**
   For a move-only change that is the key check, and it is absent. Same entry as above.

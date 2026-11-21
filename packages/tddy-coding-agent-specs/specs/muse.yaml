@@ -49,6 +49,7 @@ extensions:
     instructions:
       files: []
     hooks: { adapter: muse-config-arg }
+    home_dirs: [".muse"]
     # What a session of this agent offers (`#agent-tools 12/12`): the gates read these, never the
     # agent's name. Unknown words are refused at load. No `ask_user_question`: Muse's `PreToolUse`
     # never fires for `request_user_input`, so no hook of ours can carry a structured answer back.

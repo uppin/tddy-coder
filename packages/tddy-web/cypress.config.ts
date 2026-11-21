@@ -508,6 +508,9 @@ export default defineConfig({
               binaryPath,
               [
                 "--daemon",
+                // Kernel-picked gRPC port: the default fixed 0.0.0.0:50051 may already be held.
+                "--grpc",
+                "0",
                 "--livekit-url",
                 wsUrl,
                 "--livekit-api-key",
@@ -602,6 +605,9 @@ export default defineConfig({
               binaryPath,
               [
                 "--daemon",
+                // Kernel-picked gRPC port: the default fixed 0.0.0.0:50051 may already be held.
+                "--grpc",
+                "0",
                 "--livekit-url",
                 wsUrl,
                 "--livekit-api-key",
