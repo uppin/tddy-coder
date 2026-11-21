@@ -143,10 +143,9 @@ no provider route, no `os_user` — are not stopped by `DeleteSession` or the ma
 **not persisted**: they do not resume after a daemon restart or a session resume. The web surface is
 the `+` menu of [Session Terminal Tabs](../web/session-terminal-tabs.md).
 
-Known limitation: an agent terminal gets no hooks or activity status of its own. A `claude-cli` tab
-inside a `claude-cli` session shares the worktree's `.claude/settings.local.json` hooks, so its
-activity may be reported against the main session — see
-[`docs/dev/todo/2026-10-24-claude-agent-tab-shares-session-hooks.md`](../../dev/todo/2026-10-24-claude-agent-tab-shares-session-hooks.md).
+Known limitation: an agent terminal gets no hooks or activity status of its own. A claude-cli
+session's hooks are its own `--settings` file (`.tddy/hooks/<session_id>/claude-settings.json`),
+which a `claude` started in a tab does not load, so a tab's activity is reported nowhere.
 
 ## Wrapped terminals
 

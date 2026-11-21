@@ -351,16 +351,14 @@ The key reaches only the agent child's environment: it is never on argv and neve
 GitHub token there is no per-call socket Claude Code could ask instead, so the environment is where it
 reads its key.
 
-**The route is also pinned in the worktree.** A settings-file `env` value replaces the one inherited
-from the shell (Claude Code's documented precedence), so a tool that writes
+**The route is also pinned in the session's settings file.** A settings-file `env` value replaces
+the one inherited from the shell (Claude Code's documented precedence), so a tool that writes
 `env.ANTHROPIC_BASE_URL` into the user-level `~/.claude/settings.json` would hijack the route of
-every routed session. A routed start therefore writes the route's non-secret variables (the table's
-`ANTHROPIC_BASE_URL` and model variables, never the key) into the worktree's
-`.claude/settings.local.json` beside the hooks it already carries there, and launches `claude` with
-`--settings <worktree>/.claude/settings.local.json`: in a git worktree Claude Code keeps and reads
-that file at the main checkout's root, so the worktree's pin is unread without the explicit flag. An
-unrouted launch writes no `env` key and passes no `--settings`. A resume re-applies the route in the
-child's environment but does not re-render the pin.
+every routed session. A routed launch therefore writes the route's non-secret variables (the table's
+`ANTHROPIC_BASE_URL` and model variables, never the key) under `env` in the session's own hooks file,
+`<worktree>/.tddy/hooks/<session_id>/claude-settings.json`, which every launch loads with
+`--settings`. An unrouted launch writes no `env` key. A resume renders the file again, pin included,
+and re-applies the route in the child's environment.
 
 **No fallback.** A start that chose an account never runs on Anthropic instead. It is refused with:
 
@@ -527,8 +525,9 @@ extensions:
   prompt from being swallowed.
 - **Slots.** The `coding_agent` extension declares the tddy integration points, and the launch fills
   them:
-  - The hooks adapter writes `<worktree>/.claude/settings.local.json`, the six lifecycle hooks that
-    call `tddy-tools session-hook`.
+  - The hooks adapter writes the session's own hooks file,
+    `<worktree>/.tddy/hooks/<session_id>/claude-settings.json` — the lifecycle hooks that call
+    `tddy-tools session-hook` — and the launch loads it with `--settings <file>`.
   - A session's appended system prompt goes through `--append-system-prompt-file`.
   - A project-home main's pre-approved tools go through `--allowedTools`. Its withdrawn native
     filesystem and shell tools go through `--disallowedTools`.
@@ -708,10 +707,14 @@ classic renderer after a fullscreen launch failed to start.
 | Status | `active` / `inactive` |
 | Activity | `Started` / `Running` / `ExecutingTool` / `WaitingForInput` / `Done` / `Ended` (see below) |
 
-## Session activity status via per-worktree hooks
+## Session activity status via per-session hooks
 
-When the daemon starts a claude-cli session it writes `.claude/settings.local.json` into the git
-worktree configuring eight Claude Code hooks. Each hook invokes
+On every launch of a claude-cli session — its start and each resume — the daemon writes the
+session's own hooks file, `<worktree>/.tddy/hooks/<session_id>/claude-settings.json`, configuring
+eight Claude Code hooks, and launches `claude` with `--settings <that file>`. The file names the
+session, so several sessions sharing a worktree (a project-home worktree holds the home session and
+the project's orchestrators) each report as themselves, and a resume after a daemon restart reports
+over the running daemon's socket. Each hook invokes
 `tddy-tools session-hook` which maps the event to a granular `SessionActivityStatus` and calls
 `ReportSessionStatus` on `activity.ActivityService`. The daemon validates the per-session
 `hook_token`, writes `activity_status` to `.session.yaml`, and surfaces it via
@@ -833,8 +836,18 @@ its terminal. The daemon follows the log through the session's remote shell
 
 `start_claude_cli_session` generates a per-session UUID `hook_token` and calls
 `tddy_core::build_claude_hooks_settings(&HookCommandParams { tddy_tools_path, daemon_url, daemon_socket, session_id, os_user, hook_token, answer_wait_secs, remote_log })`.
-The resulting JSON is written to `<worktree>/.claude/settings.local.json`. The `hook_token` is also
-stored in `.session.yaml` for validation on inbound `ReportSessionStatus` calls.
+The resulting JSON is written to `<worktree>/.tddy/hooks/<session_id>/claude-settings.json`
+(`tddy_core::claude_hooks::session_file::claude_session_hooks_file`). The `hook_token` is also
+stored in `.session.yaml` for validation on inbound `ReportSessionStatus` calls. A resume rebuilds
+the same file around the recorded token.
+
+Before the slot files are written — on this host, or through a target's remote shell — the launch
+(`tddy_agent_launch::session_hooks_worktree`) adds `/.tddy/hooks/` to the checkout's `info/exclude`
+and releases the daemon's entries from the worktree's `.claude/settings.local.json`: its
+`session-hook` and hook-log commands, and the route `env` pin beside them. Claude Code merges hooks
+from every settings source, so entries left there would fire beside the session's own file. Every
+other key in that file (Claude Code's saved `permissions`, MCP server choices, the operator's own
+hooks) is kept; a file left empty is removed.
 
 The `tddy-tools` binary is `binary.command` of `tools/tddy-tools.yaml` (default: `current_exe` sibling → `"tddy-tools"`), the hook's `daemon_url` is the daemon's `listen.advertise_url` (default: `http://127.0.0.1:{web_port}`) and `answer_wait_secs` is 120. A daemon.yaml `claude_cli:` block is refused at start-up.
 
