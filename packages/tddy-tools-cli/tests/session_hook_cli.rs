@@ -629,6 +629,28 @@ async fn a_hook_given_a_dead_agent_tool_socket_still_exits_zero_promptly() {
 /// stdout. Blocking, so it runs off the reactor: the endpoint under test is served by this same
 /// runtime.
 async fn stdout_of_session_hook_against(daemon: &str, session: &str, stdin_json: &str) -> Vec<u8> {
+    stdout_of_session_hook_with(&[], daemon, session, stdin_json).await
+}
+
+/// Run the **waiting** `session-hook` (`--await-answer`) against `daemon`, as the settings install
+/// it for `AskUserQuestion`, and return what it printed on stdout. Since the catch-all `PreToolUse`
+/// group (`#target-parity` 4/7), a `PreToolUse` without `--await-answer` reports activity only, so
+/// the status report a question raises comes from this one.
+async fn stdout_of_waiting_session_hook_against(
+    daemon: &str,
+    session: &str,
+    stdin_json: &str,
+) -> Vec<u8> {
+    stdout_of_session_hook_with(&["--await-answer"], daemon, session, stdin_json).await
+}
+
+async fn stdout_of_session_hook_with(
+    extra_args: &[&str],
+    daemon: &str,
+    session: &str,
+    stdin_json: &str,
+) -> Vec<u8> {
+    let extra_args: Vec<String> = extra_args.iter().map(|a| a.to_string()).collect();
     let daemon = daemon.to_string();
     let session = session.to_string();
     let stdin_json = stdin_json.to_string();
@@ -636,6 +658,7 @@ async fn stdout_of_session_hook_against(daemon: &str, session: &str, stdin_json:
         tddy_tools_bin()
             .args(["session-hook", "--session", &session, "--daemon", &daemon])
             .args(["--os-user", "testuser", "--hook-token", "tok-coordinate"])
+            .args(&extra_args)
             .write_stdin(stdin_json)
             .assert()
             .success()
@@ -688,8 +711,8 @@ async fn the_ask_user_question_hook_sends_the_tool_and_input_and_exits_zero_with
     // Given a daemon serving the activity service
     let endpoint = AnActivityEndpoint::start().await;
 
-    // When Claude's PreToolUse hook fires for AskUserQuestion
-    let stdout = stdout_of_session_hook_against(
+    // When Claude's waiting PreToolUse hook fires for AskUserQuestion, and no orchestrator answers
+    let stdout = stdout_of_waiting_session_hook_against(
         &endpoint.base_url,
         "question-session-2",
         r#"{"hook_event_name":"PreToolUse","session_id":"question-session-2","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which language?","header":"Language","multiSelect":false,"options":[{"label":"Rust","description":"fast"}]}]}}"#,
