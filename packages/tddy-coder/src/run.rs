@@ -1991,8 +1991,12 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
         let addr: std::net::SocketAddr = ([0, 0, 0, 0], port).into();
         let listener = tokio::net::TcpListener::bind(addr)
             .await
-            .context("bind gRPC port")?;
-        log::info!("tddy-coder daemon listening on port {}", port);
+            .with_context(|| format!("bind gRPC port {addr}"))?;
+        // The bound address, not `port`: `--grpc 0` asks the kernel for a free port.
+        log::info!(
+            "tddy-coder daemon listening on {}",
+            listener.local_addr().context("read bound gRPC address")?
+        );
 
         // The chat stream (`tddy.v1.TddyRemote/Stream`) is served by the Presenter — the single
         // source of truth — via its `connect_view` `view_factory`, on both the gRPC port (here)

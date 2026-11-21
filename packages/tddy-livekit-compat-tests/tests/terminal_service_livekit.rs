@@ -279,6 +279,12 @@ mod livekit_tests {
                 "--agent",
                 "stub",
                 "--daemon",
+                // A port the kernel picks: without `--grpc` the daemon binds the fixed
+                // 0.0.0.0:50051, which any other socket on the host (another suite's
+                // listener, an outbound connection's ephemeral port) may already hold —
+                // the daemon then exits 1 with "bind gRPC port" before joining.
+                "--grpc",
+                "0",
                 "--tddy-data-dir",
                 sessions_base.to_str().unwrap(),
                 "--livekit-url",
