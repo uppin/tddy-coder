@@ -17,12 +17,16 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use futures_util::StreamExt as _;
 use pretty_assertions::assert_eq;
+use prost::Message as _;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::AgentActivityHub;
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::acp::{acp_agent_message, content_block, session_update, AcpAgentMessage};
-use tddy_service::proto::activity::ActivityService as _;
+use tddy_service::proto::activity::{
+    AcpReplayFrame, ActivityService, StreamAcpReplayRequest, StreamMode,
+};
 use tddy_session_activity::hook_request::session_status_request;
 use tddy_session_activity::{
     ActivityPorts, ActivityServiceImpl, NoSessionDeltaStores, SessionLabels,
@@ -31,6 +35,8 @@ use tddy_session_activity::{
 const OS_USER: &str = "ada";
 const SESSION_ID: &str = "01a1fcba-5ee1-7240-9d69-a7512de61640";
 const HOOK_TOKEN: &str = "tok-transcript-messages";
+/// What a web client presents to `StreamAcpReplay`.
+const WEB_TOKEN: &str = "web-token";
 
 const PROMPT: &str =
     "Run `pwd` and `ls` in the shell, read README.md's first 5 lines, then reply \"probe done\".";
@@ -55,10 +61,14 @@ impl AnActivityHost {
         let data_dir = tempfile::tempdir().expect("a temporary data dir");
         write_session(data_dir.path());
         let service = ActivityServiceImpl::new(ActivityPorts {
-            os_users: Arc::new(|_token: &str| {
-                Err(Status::unauthenticated(
-                    "no session token is presented on the hook path",
-                ))
+            os_users: Arc::new(|token: &str| {
+                if token == WEB_TOKEN {
+                    Ok(OS_USER.to_string())
+                } else {
+                    Err(Status::unauthenticated(
+                        "no session token is presented on the hook path",
+                    ))
+                }
             }),
             tddy_data_dir: data_dir.path().to_path_buf(),
             activity: Arc::new(AgentActivityHub::default()),
@@ -115,6 +125,22 @@ impl AnActivityHost {
             .report_agent_activity(Request::direct(request))
             .await
             .expect("the tool call is accepted");
+    }
+
+    /// A web client opens `StreamAcpReplay` on the session, live-only, before anything is reported.
+    async fn live_tail_opened(
+        &self,
+    ) -> <ActivityServiceImpl as ActivityService>::StreamAcpReplayStream {
+        self.service
+            .stream_acp_replay(Request::direct(StreamAcpReplayRequest {
+                session_token: WEB_TOKEN.to_string(),
+                session_id: SESSION_ID.to_string(),
+                mode: StreamMode::LiveOnly as i32,
+                ..Default::default()
+            }))
+            .await
+            .expect("the stream opens")
+            .into_inner()
     }
 
     /// What `ReadSessionTranscript` lists: each frame's kind and text, in order.
@@ -307,4 +333,49 @@ async fn a_prompt_from_another_conversation_is_not_added() {
 
     // Then the session's transcript holds none of it
     assert_eq!(host.transcript(), Vec::<(String, String)>::new());
+}
+
+/// The next frame a live tail delivers: its kind, text and `seq`.
+async fn next_live_frame(
+    tail: &mut <ActivityServiceImpl as ActivityService>::StreamAcpReplayStream,
+) -> (String, String, u64) {
+    let frame: AcpReplayFrame =
+        tokio::time::timeout(std::time::Duration::from_secs(5), tail.next())
+            .await
+            .expect("a frame within the deadline")
+            .expect("the stream is still open")
+            .expect("a frame, not an error");
+    let message = AcpAgentMessage::decode(frame.acp_agent_message.as_slice())
+        .expect("the frame carries an AcpAgentMessage");
+    let (kind, text) = kind_and_text(&message);
+    (kind, text, frame.seq)
+}
+
+#[tokio::test]
+async fn a_live_tail_receives_the_prompt_and_the_reply_among_the_tool_calls() {
+    // Given a claude-cli session with a live transcript tail opened before anything is reported
+    let host = AnActivityHost::holding_a_claude_cli_session();
+    let mut tail = host.live_tail_opened().await;
+
+    // When it is prompted, runs a tool, and replies
+    host.hook_fires("UserPromptSubmit", a_prompt(SESSION_ID, PROMPT))
+        .await;
+    a_moment().await;
+    host.tool_call_reported("Bash").await;
+    a_moment().await;
+    host.hook_fires("Stop", a_stop(SESSION_ID, REPLY)).await;
+
+    // Then the tail delivers each in order, at the position a re-read gives it
+    assert_eq!(
+        vec![
+            next_live_frame(&mut tail).await,
+            next_live_frame(&mut tail).await,
+            next_live_frame(&mut tail).await,
+        ],
+        vec![
+            ("user_message".to_string(), PROMPT.to_string(), 0),
+            ("tool_call".to_string(), "Bash pwd && ls".to_string(), 1),
+            ("agent_message".to_string(), REPLY.to_string(), 2),
+        ]
+    );
 }

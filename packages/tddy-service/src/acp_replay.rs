@@ -113,7 +113,7 @@ pub fn read_session_transcript(session_dir: &Path) -> io::Result<Vec<AcpAgentMes
 
 /// The wall-clock stamp a frame was recorded at; `0` for a frame shape that carries no timestamp
 /// (only `session_update` frames are ever persisted), which replays it as the oldest.
-fn frame_timestamp(frame: &AcpAgentMessage) -> i64 {
+pub fn frame_timestamp(frame: &AcpAgentMessage) -> i64 {
     match &frame.msg {
         Some(acp_agent_message::Msg::SessionUpdate(n)) => n.timestamp_unix_ms,
         _ => 0,
