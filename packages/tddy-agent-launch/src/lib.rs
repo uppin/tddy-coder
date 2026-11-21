@@ -56,6 +56,7 @@ pub mod relaunch_jail_steps;
 pub mod remote_agent_launch;
 mod remote_hook_answer;
 pub mod remote_hook_follower;
+mod remote_hook_message;
 mod remote_hook_report;
 pub mod session_acting_identity;
 pub mod session_coordinate_handlers;

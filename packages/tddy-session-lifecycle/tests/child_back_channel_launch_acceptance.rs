@@ -14,7 +14,9 @@ use ensure_project_home_world::{a_claude_cli_spec, a_daemon_with_a_project, Worl
 use project_home_support::{a_caller_token, PROJECT_ID};
 use tddy_agent_launch::back_channel::native_peer_name_of;
 use tddy_rpc::Request;
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_service::proto::session::{
+    ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+};
 use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
 impl World {
@@ -67,6 +69,43 @@ impl World {
         rest[..rest.find(['\r', '\n']).unwrap_or(rest.len())]
             .trim_end()
             .to_string()
+    }
+
+    /// A Claude child of `orchestrator` whose process has exited: its record, its changeset naming
+    /// the orchestrator, and its worktree.
+    fn an_exited_claude_child_of(&self, orchestrator: &str, worktree: &std::path::Path) -> String {
+        let child = "01a1fe01-0000-7000-8000-0000000000aa".to_string();
+        let session_dir = self.home.data.path().join("sessions").join(&child);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let mut meta = tddy_session_split::service_util::starting_session_metadata(
+            &child,
+            PROJECT_ID,
+            "claude-cli",
+        );
+        meta.status = "inactive".to_string();
+        meta.repo_path = Some(worktree.to_string_lossy().into_owned());
+        meta.hook_token = Some("a-hook-token".to_string());
+        tddy_core::write_session_metadata(&session_dir, &meta).unwrap();
+        tddy_core::write_changeset(
+            &session_dir,
+            &tddy_core::Changeset {
+                orchestrator_session_id: Some(orchestrator.to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        child
+    }
+
+    async fn a_person_resumes(&self, session_id: &str) {
+        self.home
+            .service
+            .resume_session(Request::direct(ResumeSessionRequest {
+                session_token: a_caller_token().to_string(),
+                session_id: session_id.to_string(),
+            }))
+            .await
+            .expect("the session resumes");
     }
 
     fn system_prompt_of(&self, session_id: &str) -> String {
@@ -136,5 +175,30 @@ async fn a_session_without_an_orchestrator_is_launched_unnamed_and_told_of_none(
         !world.system_prompt_of(&session).contains("orchestrator"),
         "prompt: {}",
         world.system_prompt_of(&session)
+    );
+}
+
+#[tokio::test]
+async fn a_resumed_claude_child_keeps_its_peer_name_and_back_channel_guidance() {
+    // Given a running Claude orchestrator and an exited Claude child of it
+    let world = a_daemon_with_a_project();
+    let orchestrator = world.a_running_orchestrator().await;
+    let worktree = tempfile::tempdir().unwrap();
+    let child = world.an_exited_claude_child_of(&orchestrator, worktree.path());
+
+    // When the child is resumed
+    world.a_person_resumes(&child).await;
+
+    // Then it is relaunched under its peer name
+    let argv = world.argv_of(&child).await;
+    assert!(
+        argv.contains(&format!("--name {}", native_peer_name_of(&child))),
+        "argv: {argv}"
+    );
+    // And its system prompt again tells it to report to its orchestrator
+    let prompt = world.system_prompt_of(&child);
+    assert!(
+        prompt.contains(&native_peer_name_of(&orchestrator)) && prompt.contains("progress"),
+        "prompt: {prompt}"
     );
 }
