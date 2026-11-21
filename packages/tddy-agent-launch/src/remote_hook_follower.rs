@@ -145,6 +145,18 @@ pub trait HookReportDelivery: Send + Sync {
         &self,
         request: tddy_service::proto::activity::ReportAgentActivityRequest,
     ) -> Result<(), String>;
+    /// Post a target child's report to its orchestrator as a session message (`#orchestra` 2/9),
+    /// as `PostSessionMessage` from the child would. A delivery that serves no session messages
+    /// refuses it, naming why; the session host's delivery serves them.
+    async fn post_message_to_orchestrator(
+        &self,
+        message: crate::back_channel::RemoteMessage,
+    ) -> Result<(), String> {
+        Err(format!(
+            "this hook delivery posts no session messages; {}'s report was not delivered",
+            message.session_id
+        ))
+    }
 }
 
 /// The production [`HookSink`]: each followed hook is mapped to the daemon's hook reports by

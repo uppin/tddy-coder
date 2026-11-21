@@ -1,4 +1,5 @@
 //! Agent session launch, split out of `tddy-session-lifecycle` by `#carve` 21/21.
+pub mod back_channel;
 pub mod chat;
 pub mod child_spawn_handler;
 pub mod claude_cli_spawn;

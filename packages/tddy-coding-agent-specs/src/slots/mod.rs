@@ -304,6 +304,7 @@ mod tests {
                 effort: None,
                 turn_input: None,
                 home_dirs: Vec::new(),
+                peer_name: None,
             },
         }
     }
