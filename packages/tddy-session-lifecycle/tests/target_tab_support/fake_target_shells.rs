@@ -2,9 +2,12 @@
 //! the target, holding the session's worktree there, whose shell runs commands with this machine's
 //! `/bin/sh` under a login shell of the target's own. Run as `-l` — as a shell tab runs it — that
 //! login shell records the directory it started in, prints [`ON_TARGET_BANNER`] and stays up. Run as
-//! `-lc <command>` — as an agent tab's launch runs it — it runs the command with the target's own
-//! agents directory first on its `PATH`, where [`AStandInTarget::installs_the_agent`] puts an agent
-//! (`#session-liveness` 8/8).
+//! `-lc <command>` — as an agent tab's launch and the probe of its agent run it — it runs the
+//! command with the target's own agents directory first on its `PATH`, where
+//! [`AStandInTarget::installs_the_agent`] puts an agent, followed by the system's directories alone:
+//! never this host's `PATH`, so an agent the target was not given is not found there
+//! (`#session-liveness` 8/8, `#tab-hardening` 1/4). Every command the shell runs — a terminal's or a
+//! one-shot `exec` — sees that login shell as its `$SHELL`.
 //!
 //! What the daemon owns of a target tab is which target it asks for, the command it runs there and
 //! the tab's lifetime and record — which a real local process shows — not the transport, which the
@@ -16,6 +19,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
 use tddy_agent_launch::tab_target_shell::{TabTarget, TabTargetShell};
+use tddy_core::ssh_exec::shell_single_quote;
 use tddy_remote_shell::{
     ExecOutput, ExecRequest, InteractiveCommand, InteractiveExit, LocalShell, RemoteShell,
     RemoteShellError, ShellAddress, StreamedExec,
@@ -29,16 +33,28 @@ pub const ON_TARGET_BANNER: &str = "on-target shell $ ";
 /// The name the stand-in target goes by.
 pub const TARGET_NAME: &str = "buildbox";
 
+/// The transport client of a target whose client this host does not have: no file is there.
+pub const A_CLIENT_THIS_HOST_LACKS: &str = "/nonexistent/tddy-test/transport-client";
+
+/// The `/bin/sh` that stands for the transport's client of a reachable target.
+const THE_LOCAL_CLIENT: &str = "/bin/sh";
+
 /// The machine a session's target shell reaches.
 pub struct AStandInTarget {
     root: PathBuf,
     reachable: bool,
+    /// The program a terminal on the target runs locally: the transport's client.
+    client: &'static str,
     interactive: StdMutex<Vec<String>>,
     _dir: tempfile::TempDir,
 }
 
 impl AStandInTarget {
     fn new(reachable: bool) -> Arc<Self> {
+        Self::reached_through(reachable, THE_LOCAL_CLIENT)
+    }
+
+    fn reached_through(reachable: bool, client: &'static str) -> Arc<Self> {
         let dir = tempfile::tempdir().expect("a directory standing for the target");
         let root = std::fs::canonicalize(dir.path()).expect("the target's directory resolves");
         std::fs::create_dir_all(root.join("home/dev/repo/.worktrees/target-tab"))
@@ -48,7 +64,7 @@ impl AStandInTarget {
             &root.join("login-shell"),
             &format!(
                 "#!/bin/sh\n\
-                 if [ \"$1\" = -lc ]; then PATH='{agents}':\"$PATH\"; export PATH; exec /bin/sh -c \"$2\"; fi\n\
+                 if [ \"$1\" = -lc ]; then PATH='{agents}':/usr/bin:/bin; export PATH; exec /bin/sh -c \"$2\"; fi\n\
                  [ \"$1\" = -l ] || exit 64\n/bin/pwd -P > '{started_in}.part' && mv '{started_in}.part' '{started_in}'\n\
                  printf '{ON_TARGET_BANNER}'\nexec /bin/sh\n",
                 started_in = root.join("login-shell-started-in").display(),
@@ -58,6 +74,7 @@ impl AStandInTarget {
         Arc::new(Self {
             root,
             reachable,
+            client,
             interactive: StdMutex::new(Vec::new()),
             _dir: dir,
         })
@@ -106,6 +123,15 @@ impl AStandInTarget {
         self.interactive.lock().unwrap().clone()
     }
 
+    /// `command` run under the target's own login shell as its `$SHELL`, as the target's remote
+    /// shell runs every command.
+    fn under_the_login_shell(&self, command: &str) -> String {
+        format!(
+            "SHELL={}; export SHELL; {command}",
+            shell_single_quote(&self.root.join("login-shell").to_string_lossy())
+        )
+    }
+
     fn unreachable(&self) -> RemoteShellError {
         RemoteShellError::Unreachable {
             address: self.address(),
@@ -127,22 +153,29 @@ impl RemoteShell for AStandInTarget {
         if !self.reachable {
             return Err(self.unreachable());
         }
-        LocalShell::new().exec(request).await
+        LocalShell::new()
+            .exec(ExecRequest {
+                command: self.under_the_login_shell(&request.command),
+                ..request
+            })
+            .await
     }
 
     async fn exec_streamed(&self, command: &str) -> Result<StreamedExec, RemoteShellError> {
         if !self.reachable {
             return Err(self.unreachable());
         }
-        LocalShell::new().exec_streamed(command).await
+        LocalShell::new()
+            .exec_streamed(&self.under_the_login_shell(command))
+            .await
     }
 
-    /// `/bin/sh -c <command>` under the target's own login shell.
+    /// The transport's client (`/bin/sh`) running `-c <command>` under the target's own login shell.
     fn interactive(&self, command: &str) -> InteractiveCommand {
         self.interactive.lock().unwrap().push(command.to_string());
         InteractiveCommand {
             argv: vec![
-                OsString::from("/bin/sh"),
+                OsString::from(self.client),
                 OsString::from("-c"),
                 OsString::from(command),
             ],
@@ -181,6 +214,17 @@ pub fn target_shells_reaching_a_machine() -> (Arc<FakeTabTargetShells>, Arc<ASta
 pub fn target_shells_reaching_an_unreachable_machine(
 ) -> (Arc<FakeTabTargetShells>, Arc<AStandInTarget>) {
     let machine = AStandInTarget::new(false);
+    (
+        FakeTabTargetShells::answering(Answer::Reaches(Arc::clone(&machine))),
+        machine,
+    )
+}
+
+/// A port whose every session's target is a reachable stand-in machine, but whose transport client
+/// this host does not have ([`A_CLIENT_THIS_HOST_LACKS`]): a terminal on it cannot be spawned here.
+pub fn target_shells_whose_client_this_host_lacks(
+) -> (Arc<FakeTabTargetShells>, Arc<AStandInTarget>) {
+    let machine = AStandInTarget::reached_through(true, A_CLIENT_THIS_HOST_LACKS);
     (
         FakeTabTargetShells::answering(Answer::Reaches(Arc::clone(&machine))),
         machine,

@@ -73,8 +73,21 @@ impl StandInSshTarget {
     /// mapped under the machine's directory. It hangs the command up when it is itself hung up or
     /// terminated, and exits with the command's status. Its `$SHELL` is a login shell of the
     /// machine's own, and its `PATH` starts with [`Self::agents_dir`], where a test installs the
-    /// agent a start runs by its bare command.
+    /// agent a start runs by its bare command. The rest of its `PATH` is this process's.
     pub fn behind_ssh() -> Self {
+        Self::behind_ssh_with_a_path_after_its_agents("\"$PATH\"")
+    }
+
+    /// A machine as [`Self::behind_ssh`] makes one, whose `PATH` holds [`Self::agents_dir`] and the
+    /// system's own directories (`/usr/bin:/bin`) only, never this process's `PATH`: an agent not
+    /// installed in its agents directory is not found there, whatever this host has installed.
+    pub fn behind_ssh_with_only_the_system_path() -> Self {
+        Self::behind_ssh_with_a_path_after_its_agents("/usr/bin:/bin")
+    }
+
+    /// `rest` is what follows the machine's agents directory on its `PATH`, as the stand-in `ssh`
+    /// writes it.
+    fn behind_ssh_with_a_path_after_its_agents(rest: &str) -> Self {
         let dir = tempfile::tempdir().expect("a directory standing for the machine");
         let root = std::fs::canonicalize(dir.path()).expect("the machine's directory resolves");
         let bin = root.join("bin");
@@ -89,7 +102,7 @@ for command; do :; done
 command=$(printf '%s' "$command" | /usr/bin/sed 's#/home/dev#{root}/home/dev#g')
 export HOME='{root}'
 SHELL='{root}/bin/login-shell'
-PATH='{root}/opt/agents':"$PATH"
+PATH='{root}/opt/agents':{rest}
 export SHELL PATH
 exec 3<&0
 /bin/sh -c "$command" <&3 3<&- &
@@ -98,7 +111,8 @@ trap 'kill -HUP "$remote" 2>/dev/null' HUP TERM
 wait "$remote"
 exit $?
 "#,
-                root = root.display()
+                root = root.display(),
+                rest = rest
             ),
         );
         let previous_path = std::env::var_os("PATH");

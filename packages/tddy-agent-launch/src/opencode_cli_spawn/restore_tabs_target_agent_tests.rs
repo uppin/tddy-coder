@@ -108,11 +108,8 @@ fn a_target_cursor_tab_resumes_its_chat_by_the_bare_command() {
     let tab =
         target_agent_tab(&agents, "cursor-cli", CHAT, true).expect("a Cursor tab on the target");
 
-    // Then the target's `agent` is run into the tab's chat
-    assert_eq!(
-        tab.argv[..3].to_vec(),
-        strings(&["agent", "--resume", CHAT])
-    );
+    // Then the target's `agent` is run into the tab's chat, trusting the worktree on the target
+    assert_eq!(tab.argv, strings(&["agent", "--resume", CHAT, "--trust"]));
 }
 
 #[test]
