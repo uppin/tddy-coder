@@ -299,9 +299,10 @@ pub(crate) async fn start_cli_harness_session(
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
     let pointer = place_slot_files_and_pointer(
+        spec,
         &worktree_path,
         &target_shell,
-        &wiring,
+        wiring.session_pointer.as_ref(),
         remote_host,
         &mut slots,
     )
@@ -439,26 +440,35 @@ fn log_hooks_on_the_target(
     }
 }
 
+/// Write a launch's slot files and its session pointer where its worktree is — this host, an ssh
+/// alias, or the target's shell — once the worktree is ready for the session's own hooks file.
+/// Shared by the start and the resume.
 async fn place_slot_files_and_pointer(
+    spec: &tddy_coding_agent_specs::CodingAgentSpec,
     worktree_path: &std::path::Path,
     target_shell: &Option<Arc<dyn tddy_remote_shell::RemoteShell>>,
-    wiring: &crate::cli_agent_steps::SessionWiring,
+    session_pointer: Option<&tddy_core::session_pointer::SessionPointer>,
     remote_host: Option<&str>,
     slots: &mut tddy_coding_agent_specs::slots::RenderedSlots,
 ) -> Result<Option<crate::cli_session_pointer::PlacedSessionPointer>, Status> {
-    match target_shell {
-        Some(shell) => write_slot_files_through_shell(slots, shell.as_ref()).await?,
-        None => write_slot_files_on_target(slots, remote_host).await?,
-    }
     let host = match target_shell {
         Some(shell) => PointerHost::Remote {
             shell: Arc::clone(shell),
         },
         None => PointerHost::of(remote_host),
     };
-    let pointer =
-        place_session_pointer(wiring.session_pointer.as_ref(), worktree_path, &host).await?;
-    Ok(pointer)
+    crate::session_hooks_worktree::prepare_worktree_for_session_hooks(
+        spec,
+        worktree_path,
+        slots,
+        &host,
+    )
+    .await?;
+    match target_shell {
+        Some(shell) => write_slot_files_through_shell(slots, shell.as_ref()).await?,
+        None => write_slot_files_on_target(slots, remote_host).await?,
+    }
+    place_session_pointer(session_pointer, worktree_path, &host).await
 }
 
 fn node_launcher_for(

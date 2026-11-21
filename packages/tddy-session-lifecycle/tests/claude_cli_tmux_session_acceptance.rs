@@ -690,6 +690,22 @@ fn the_marked_claude_argv(
     .to_vec()
 }
 
+/// The flags that load `session_id`'s own hooks file, rendered again on every launch.
+fn the_session_hooks_loaded(
+    daemon: &agent_registry_support::ARegistryDaemon,
+    session_id: &str,
+) -> Vec<String> {
+    vec![
+        "--settings".to_string(),
+        tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+            &daemon.worktree_of(session_id),
+            session_id,
+        )
+        .to_string_lossy()
+        .into_owned(),
+    ]
+}
+
 /// `argv` without the system-prompt file the operator-notify guidance is appended with: the claude
 /// spec's `append_system_prompt` flag renders it, beyond what this test pins of the argv.
 fn without_the_notify_guidance(argv: Vec<String>) -> Vec<String> {
@@ -742,8 +758,16 @@ async fn a_claude_cli_start_in_tmux_runs_the_argv_the_claude_spec_renders_and_re
             daemon.metadata_of(&session_id).tmux_session.is_some(),
         ),
         (
-            the_marked_claude_argv(&stub, model, "--session-id", &session_id),
-            the_marked_claude_argv(&stub, model, "--resume", &session_id),
+            [
+                the_marked_claude_argv(&stub, model, "--session-id", &session_id),
+                the_session_hooks_loaded(&daemon, &session_id),
+            ]
+            .concat(),
+            [
+                the_marked_claude_argv(&stub, model, "--resume", &session_id),
+                the_session_hooks_loaded(&daemon, &session_id),
+            ]
+            .concat(),
             true,
         )
     );

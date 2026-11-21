@@ -125,9 +125,10 @@ async fn a_host_claude_sessions_hooks_report_over_its_users_served_agent_tool_so
     // Then its hooks name its user's socket, and that socket is served
     let socket = the_session_users_agent_tool_socket(&daemon);
     let hooks = daemon_sockets_named_in(
-        &daemon
-            .worktree_of(&session_id)
-            .join(".claude/settings.local.json"),
+        &tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+            &daemon.worktree_of(&session_id),
+            &session_id,
+        ),
     );
     assert_eq!(
         (hooks, is_served(&socket).await),

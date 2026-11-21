@@ -5,15 +5,11 @@ use crate::cli_agent_steps::conversation::resumed_or_adopted_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::conversation::ConversationTarget;
 use crate::cli_agent_steps::host_launch_slots::render_host_launch_slots;
-use crate::cli_agent_steps::host_launch_slots::write_slot_files_on_target;
-use crate::cli_agent_steps::host_launch_slots::write_slot_files_through_shell;
 use crate::cli_agent_steps::host_launch_slots::HostLaunchSlots;
 use crate::cli_agent_steps::ResumedWiring;
 use crate::cli_resume_token::{resume_token_recorder, settled_resume_token};
 use crate::cli_route_launch::resume_cli_route;
-use crate::cli_session_pointer::{
-    place_session_pointer, removing_session_pointer_on_exit, PointerHost,
-};
+use crate::cli_session_pointer::removing_session_pointer_on_exit;
 use crate::cursor_from_spec::node_launcher_of;
 use crate::effort_launch::effort_launch;
 use crate::harness_from_spec::{
@@ -301,7 +297,7 @@ async fn resume_cli_harness_session(
     let remote_host = remote_host_of(&meta);
     hooks_append_to_the_target_log(&meta, &mut wiring);
     let toolset = std::mem::take(&mut wiring.toolset);
-    let hook_params = wiring.hook_params(spec, session_id, os_user);
+    let hook_params = wiring.hook_params(spec, session_id, os_user, &route.plain_env);
     let mut slots = render_host_launch_slots(
         agent,
         &worktree_path,
@@ -318,17 +314,15 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(wiring.extra_args);
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
-    match &target_shell {
-        Some(shell) => write_slot_files_through_shell(&mut slots, shell.as_ref()).await?,
-        None => write_slot_files_on_target(&mut slots, remote_host).await?,
-    }
-    let host = match &target_shell {
-        Some(shell) => PointerHost::Remote {
-            shell: Arc::clone(shell),
-        },
-        None => PointerHost::of(remote_host),
-    };
-    let pointer = place_session_pointer(session_pointer.as_ref(), &worktree_path, &host).await?;
+    let pointer = super::place_slot_files_and_pointer(
+        spec,
+        &worktree_path,
+        &target_shell,
+        session_pointer.as_ref(),
+        remote_host,
+        &mut slots,
+    )
+    .await?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, meta.tmux_session.is_some());
     let mut env = git_environment;
     env.extend(split_env);
@@ -401,9 +395,8 @@ fn remote_host_of(meta: &SessionMetadata) -> Option<&str> {
 }
 
 fn hooks_append_to_the_target_log(meta: &SessionMetadata, wiring: &mut ResumedWiring) {
-    // Argv hooks (Muse's `-c hooks=…`) render again from the recorded token; a file
-    // adapter's file is kept as the start wrote it. On a target both append to the hook log
-    // there, which this launch recreates and follows again.
+    // Every resume renders its hooks again from the recorded token, argv and file alike. On a
+    // target they append to the hook log there, which this launch recreates and follows again.
     if meta.target.is_some() {
         if let Some(hooks) = &mut wiring.hooks {
             // Relative to the worktree the agent runs in: the hook appends there, on the

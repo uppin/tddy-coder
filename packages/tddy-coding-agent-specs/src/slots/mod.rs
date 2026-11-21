@@ -40,7 +40,8 @@ pub struct McpServerCommand {
 /// What one launch fills the slots with.
 pub struct SlotInputs<'a> {
     /// The agent's working directory: instruction files are read from it and the hooks adapter's
-    /// file is written under it.
+    /// file is written under it — a file adapter's own per-session path, as Claude's
+    /// `.tddy/hooks/<session_id>/` is.
     pub workdir: PathBuf,
     /// Where a registration file (the MCP config) is written — a per-session directory.
     pub scratch_dir: PathBuf,
@@ -191,7 +192,10 @@ fn render_hooks_slot(
 ) -> Result<(), SlotError> {
     let adapter = hooks::adapter(adapter_name)?;
     match adapter.try_render(workdir, params)? {
-        hooks::RenderedHooks::File(path, bytes) => rendered.files.push((path, bytes)),
+        hooks::RenderedHooks::File(path, bytes) => {
+            rendered.argv_extra.extend(adapter.file_load_args(&path));
+            rendered.files.push((path, bytes));
+        }
         hooks::RenderedHooks::Argv(argv) => rendered.argv_extra.extend(argv),
     }
     Ok(())
@@ -512,13 +516,19 @@ mod tests {
         // When
         let rendered = render(&a_claude_spec(), &inputs);
 
-        // Then
+        // Then the session's own hooks file is written, and the launch loads it
+        let hooks_file = workdir
+            .path()
+            .join(".tddy/hooks/0190-a/claude-settings.json");
         assert_eq!(
-            rendered.map(|slots| slots.files),
-            Ok(vec![(
-                workdir.path().join(".claude").join("settings.local.json"),
-                expected.into_bytes(),
-            )])
+            rendered.map(|slots| (slots.files, slots.argv_extra)),
+            Ok((
+                vec![(hooks_file.clone(), expected.into_bytes())],
+                vec![
+                    "--settings".to_string(),
+                    hooks_file.to_string_lossy().into_owned()
+                ],
+            ))
         );
     }
 

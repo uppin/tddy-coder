@@ -17,6 +17,7 @@
 | 2026-11-07 | 79 → 80 | **worse by 1** in #834 (`#agent-tools` 26/28): a resume resolves the session user's agent-tool socket (`agent_tool_socket_of`) and passes it to the notify wiring and the role; measured fn line to closing brace on `origin/feature/agent-tools/split-remote-env` (`cd9026d9d`) and HEAD; no coverage run |
 | 2026-11-15 | 80 → 82 | **worse by 2** in #911: the `resumed_argv_hooks` call and the `hooks` field; the logic lives in the new helper beside `claude_cli_hooks`. Brace-matched on `origin/master` (`66bb45213`) and HEAD at #911's wrap |
 | 2026-11-16 | 82 → 82 | #921 (`#remote-shell` 7/7): re-measured, brace-matched on `origin/feature/remote-shell/remote-hooks` (`529e4c653`) and HEAD — unchanged; this PR's `cli_agent_steps` growth is the shell slot writer beside it |
+| 2026-11-21 | unchanged | #977: `resumed_argv_hooks` renamed `resumed_hooks` (it renders every adapter's hooks on resume); the call and field are the same lines. Brace-matched on `origin/master` (`2af17f11c`) and HEAD |
 
 ## What would close it
 

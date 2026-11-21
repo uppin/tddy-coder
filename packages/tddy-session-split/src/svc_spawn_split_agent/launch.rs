@@ -154,11 +154,14 @@ impl SplitSessions {
             },
         ) {
             Ok(rendered) => {
-                for (path, bytes) in &rendered.files {
+                // The hooks file is the one rendered file; it goes where the variant's
+                // `hooks_flag` loads it from (`split_hooks_file_in`).
+                let path = crate::agent_argv::split_hooks_file_in(context_dir);
+                if let Some((_, bytes)) = rendered.files.first() {
                     if let Some(parent) = path.parent() {
                         let _ = std::fs::create_dir_all(parent);
                     }
-                    if let Err(e) = std::fs::write(path, bytes) {
+                    if let Err(e) = std::fs::write(&path, bytes) {
                         log::warn!(
                             "session {session_id}: failed to write {} — hooks will not fire: {e}",
                             path.display()

@@ -14,7 +14,7 @@ use tddy_core::session_pointer::{SessionPointer, SessionPointerOwner};
 use tddy_remote_shell::{ExecOutput, FileMode, InMemoryShell};
 
 const WORKTREE: &str = "/home/dev/repo/.worktrees/sess";
-const HOOKS_FILE: &str = "/home/dev/repo/.worktrees/sess/.claude/settings.local.json";
+const HOOKS_FILE: &str = "/home/dev/repo/.worktrees/sess/.tddy/hooks/sess/claude-settings.json";
 const POINTER_FILE: &str = "/home/dev/repo/.worktrees/sess/.tddy/session.json";
 
 /// A pointer for an agent that notifies its operator, owned by a daemon on another host.

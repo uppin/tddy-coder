@@ -5,7 +5,7 @@
 //! stand-in `ssh` first on this process's `PATH`, a temp directory stands for its filesystem,
 //! and the agent is `claude.yaml` dropped in under another id. The stub agent fires its
 //! `SessionStart` hook as Claude Code does: the hook command installed in its worktree's
-//! `.claude/settings.local.json`, run under `sh -c` with the event's payload on its stdin.
+//! session's `--settings` file, run under `sh -c` with the event's payload on its stdin.
 //! Nothing calls the follower, the log creation or its removal directly: the session is started,
 //! stopped and deleted through the service, and the daemon's own follower delivers the hook.
 //!
@@ -47,7 +47,7 @@ const STARTED: &str = "Started";
 const OBSERVE: Duration = Duration::from_secs(30);
 
 /// A stub agent that, as Claude Code does on a `SessionStart`, hands the event's payload to the
-/// hook command installed in its worktree — read from its `.claude/settings.local.json` — then
+/// hook command installed in its worktree — read from the file its `--settings` names — then
 /// stays up. It fires once it has had time to be recorded as started, so the daemon's own
 /// record of the session (which carries the hook token the report is checked against) is the
 /// one written at the start.
@@ -56,7 +56,13 @@ fn an_agent_that_fires_its_start_hook() -> String {
 PATH=/usr/bin:/bin
 export PATH
 /bin/sleep 3
-command=$(/usr/bin/python3 -c "import json; print(json.load(open('.claude/settings.local.json'))['hooks']['SessionStart'][0]['hooks'][0]['command'])")
+settings=
+prev=
+for arg in "$@"; do
+  [ "$prev" = --settings ] && settings=$arg
+  prev=$arg
+done
+command=$(/usr/bin/python3 -c "import json, sys; print(json.load(open(sys.argv[1]))['hooks']['SessionStart'][0]['hooks'][0]['command'])" "$settings")
 printf '%s' '{"hook_event_name":"SessionStart","session_id":"c-41","source":"startup"}' | /bin/sh -c "$command"
 printf 'ACME UP\n'
 while :; do /bin/sleep 0.1; done

@@ -25,6 +25,7 @@
 | 2026-11-15 | 131 → 136 | **worse by 5** in #911: argv hooks render again on resume (the toolset take, the `hook_params` call, the hooks slot field, a two-line comment), mirroring the start path; the 131 base is growth since #891. Brace-matched on `origin/master` (`66bb45213`) and HEAD at #911's wrap |
 | 2026-11-16 | 157 → 166 | #921 (`#remote-shell` 7/7): a resume resolves its target's shell as its caller, so a locked vault refuses it before anything runs. Touched, not closed |
 | 2026-11-16 | 166 → 135 | #924 (`#remote-shell` 8/11) sweep: restored to below its before-the-stack length (136). Still over 60, so this record stays open on the remainder |
+| 2026-11-21 | 145 → 143 | **better by 2** in #977 (claude hooks per session): the resume's slot-file write and pointer placement move into the start's `place_slot_files_and_pointer`, which also prepares the worktree for the session's own hooks file (`session_hooks_worktree`). Brace-matched fn line to closing brace on `origin/master` (`2af17f11c`) and HEAD by this PR's counter, which reads 145 on master where the last row's reads 135 — the delta is what this PR did. Still over 60 |
 
 ## What would close it
 

@@ -1,11 +1,14 @@
-//! Pure builder for the per-worktree `.claude/settings.local.json` hooks configuration.
+//! Pure builder for a session's Claude Code hooks configuration.
 //!
-//! The daemon calls [`build_claude_hooks_settings`] during `start_claude_cli_session` to produce
-//! the JSON that Claude Code will read from the worktree. Each of the relevant hook events is
+//! The daemon calls [`build_claude_hooks_settings`] on every claude-cli launch — start and resume —
+//! to produce the JSON written to the session's own hooks file
+//! ([`session_file::claude_session_hooks_file`]) and loaded with `--settings`. Each of the relevant hook events is
 //! wired to `tddy-tools session-hook` with the session id, daemon URL, os_user, and hook_token
 //! baked in so the hook can authenticate and report status without additional config.
 //!
 //! All functions in this module are pure (no I/O) to maximize unit testability.
+
+pub mod session_file;
 
 /// Wrap `arg` so the shell that runs a hook command sees it as a single word.
 ///
@@ -154,11 +157,12 @@ pub(crate) fn hook_entry_for_event(
     }])
 }
 
-/// Build the `.claude/settings.local.json` value for a claude-cli worktree.
+/// Build a claude-cli session's hooks settings value.
 ///
 /// Returns a `serde_json::Value` with a `hooks` object containing one entry per relevant
 /// Claude Code hook event and, for a routed launch, the route's non-secret variables under `env`.
-/// The caller writes this to `<worktree>/.claude/settings.local.json`.
+/// The caller writes this to the session's own hooks file
+/// ([`session_file::claude_session_hooks_file`]).
 ///
 /// # Format
 /// Each event maps to:

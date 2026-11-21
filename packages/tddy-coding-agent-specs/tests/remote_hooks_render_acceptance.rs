@@ -174,7 +174,7 @@ fn the_file(rendered: RenderedHooks) -> (serde_json::Value, String) {
     )
 }
 
-/// The hooks Claude Code reads from `.claude/settings.local.json` for `session`.
+/// The hooks Claude Code loads from the session's `--settings` file for `session`.
 fn claude_hooks_for(session: &HookCommandParams<'_>) -> Result<InstalledHooks, SlotError> {
     rendered_by("claude-settings-local", session).map(|rendered| {
         let (settings, text) = the_file(rendered);

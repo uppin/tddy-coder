@@ -536,6 +536,13 @@ async fn an_unsandboxed_claude_cli_start_runs_the_spec_binary_with_the_argv_its_
                 .join("agent-system-prompt.md")
                 .to_string_lossy()
                 .into_owned(),
+            "--settings".to_string(),
+            tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+                &worktree_of(sessions_tmp.path(), &session_id),
+                &session_id
+            )
+            .to_string_lossy()
+            .into_owned(),
         ]
     );
     assert_eq!(launch.cwd, worktree_of(sessions_tmp.path(), &session_id));
@@ -629,8 +636,10 @@ async fn the_mcp_config_allow_deny_flags_permission_prompt_and_preamble_equal_to
         (meta.hook_token.unwrap_or_default(), "<HOOK_TOKEN>"),
         (current_os_user(), "<OS_USER>"),
     ]);
-    let settings = std::fs::read_to_string(worktree.join(".claude").join("settings.local.json"))
-        .expect("the hooks settings are written into the worktree");
+    let settings = std::fs::read_to_string(
+        tddy_core::claude_hooks::session_file::claude_session_hooks_file(&worktree, &session_id),
+    )
+    .expect("the session's hooks settings are written into the worktree");
     let pinned_env = launch
         .pinned_env()
         .into_iter()

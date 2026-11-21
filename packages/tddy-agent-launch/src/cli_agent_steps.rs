@@ -32,7 +32,7 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_core::session_pointer::SessionPointer;
 
 use crate::claude_cli_spawn_steps::{
-    claude_cli_hooks, record_hook_answer_wait, resumed_argv_hooks, ClaudeCliHooks,
+    claude_cli_hooks, record_hook_answer_wait, resumed_hooks, ClaudeCliHooks,
 };
 use crate::cli_session_pointer::session_pointer_of;
 use crate::launch_ports::LaunchSessions;
@@ -363,7 +363,7 @@ impl LaunchSessions {
             &tddy_tools_path,
             session_dir,
         );
-        let hooks = resumed_argv_hooks(spec, &self.config, &tool_socket, &tddy_tools_path, meta)?;
+        let hooks = resumed_hooks(spec, &self.config, &tool_socket, &tddy_tools_path, meta)?;
         Ok(ResumedWiring {
             hooks,
             workflow,
@@ -420,18 +420,23 @@ impl SessionWiring {
 }
 
 impl ResumedWiring {
-    /// The hook parameters of the resumed launch, when the start's wiring was argv-delivered.
+    /// The hook parameters of the resumed launch, when the session recorded a hook token.
+    /// `route_env` is the resumed route's non-secret pairs, pinned beside the hooks as a start
+    /// pins them: the resume rewrites the file that pin is in.
     pub(crate) fn hook_params<'a>(
         &'a self,
         spec: &CodingAgentSpec,
         session_id: &'a str,
         os_user: &'a str,
+        route_env: &'a [(String, String)],
     ) -> Option<HookCommandParams<'a>> {
         let hooks = self
             .hooks
             .as_ref()
             .filter(|_| spec.has(Capability::Hooks))?;
-        Some(hooks.params(session_id, os_user))
+        let mut params = hooks.params(session_id, os_user);
+        params.route_env = route_env;
+        Some(params)
     }
 }
 

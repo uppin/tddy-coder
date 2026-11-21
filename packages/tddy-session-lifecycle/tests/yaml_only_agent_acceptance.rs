@@ -382,10 +382,11 @@ async fn a_dropped_in_agent_declaring_hooks_and_managed_workflow_starts_over_a_m
         (
             meta.managed_codebase,
             meta.recipe,
-            daemon
-                .worktree_of(&session_id)
-                .join(".claude/settings.local.json")
-                .is_file(),
+            tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+                &daemon.worktree_of(&session_id),
+                &session_id
+            )
+            .is_file(),
             prompt_files,
         ),
         (true, Some("tdd".to_string()), true, vec![true])
@@ -658,14 +659,15 @@ async fn a_routed_claude_cli_session() -> (agent_registry_support::ARegistryDaem
     (daemon, session_id)
 }
 
-/// The worktree's `.claude/settings.local.json` as JSON.
+/// The session's own hooks settings file as JSON.
 fn the_settings_file_of(
     daemon: &agent_registry_support::ARegistryDaemon,
     session_id: &str,
 ) -> serde_json::Value {
-    let settings = daemon
-        .worktree_of(session_id)
-        .join(".claude/settings.local.json");
+    let settings = tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+        &daemon.worktree_of(session_id),
+        session_id,
+    );
     serde_json::from_str(
         &std::fs::read_to_string(&settings)
             .unwrap_or_else(|e| panic!("{} is written: {e}", settings.display())),
@@ -676,7 +678,7 @@ fn the_settings_file_of(
 /// A tool that writes `env.ANTHROPIC_BASE_URL` into the user-level `~/.claude/settings.json`
 /// hijacks the route of every routed session: a settings-file `env` value replaces the one
 /// inherited from the shell, and the daemon delivers the route only in the child's environment. The
-/// worktree's route must therefore be pinned in its own `settings.local.json`, beside the hooks.
+/// session's route must therefore be pinned in its own settings file, beside the hooks.
 #[tokio::test]
 #[serial_test::serial]
 async fn a_routed_session_pins_its_route_env_but_not_its_key_in_the_worktree_settings() {
@@ -699,11 +701,11 @@ async fn a_routed_session_pins_its_route_env_but_not_its_key_in_the_worktree_set
     );
 }
 
-/// Claude Code keeps and reads `settings.local.json` at the main checkout's root, not a git
-/// worktree's, so a worktree's pinned route is unread unless that file is passed explicitly.
+/// Claude Code reads no file under `.tddy/`, so the session's settings file — its hooks and its
+/// pinned route — is unread unless it is passed explicitly.
 #[tokio::test]
 #[serial_test::serial]
-async fn a_routed_session_launches_claude_with_the_worktree_settings_file_loaded_explicitly() {
+async fn a_routed_session_launches_claude_with_its_settings_file_loaded_explicitly() {
     // Given — a claude-cli start on a provider account
     let (daemon, session_id) = a_routed_claude_cli_session().await;
 
@@ -713,11 +715,14 @@ async fn a_routed_session_launches_claude_with_the_worktree_settings_file_loaded
     // Then
     assert_eq!(
         started.values_of("--settings"),
-        vec![daemon
-            .worktree_of(&session_id)
-            .join(".claude/settings.local.json")
+        vec![
+            tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+                &daemon.worktree_of(&session_id),
+                &session_id
+            )
             .to_string_lossy()
-            .into_owned()]
+            .into_owned()
+        ]
     );
 }
 

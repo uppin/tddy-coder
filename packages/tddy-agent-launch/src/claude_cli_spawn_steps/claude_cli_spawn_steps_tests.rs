@@ -122,10 +122,12 @@ fn the_daemon_socket_argument_for(socket: &str) -> String {
     )
 }
 
-/// The shell command Claude Code runs for `event`, as installed in `worktree`.
-fn the_installed_hook_command(worktree: &Path, event: &str) -> String {
-    let settings = std::fs::read_to_string(worktree.join(".claude/settings.local.json"))
-        .expect("the hooks settings were written into the worktree");
+/// The shell command Claude Code runs for `event`, as installed in `worktree` for `session_id`.
+fn the_installed_hook_command(worktree: &Path, session_id: &str, event: &str) -> String {
+    let file =
+        tddy_core::claude_hooks::session_file::claude_session_hooks_file(worktree, session_id);
+    let settings = std::fs::read_to_string(&file)
+        .expect("the session's hooks settings were written into the worktree");
     let settings: serde_json::Value =
         serde_json::from_str(&settings).expect("the hooks settings are JSON");
     settings["hooks"][event][0]["hooks"][0]["command"]
@@ -155,7 +157,11 @@ fn on_an_embedded_host_the_tool_use_hook_reports_over_the_agent_tool_socket() {
     );
 
     // Then the tool-use hook reaches the daemon over that socket
-    let command = the_installed_hook_command(worktree.path(), "PostToolUse");
+    let command = the_installed_hook_command(
+        worktree.path(),
+        "01a14a71-f790-7083-8ad8-e4df3feed64e",
+        "PostToolUse",
+    );
     let expected = the_daemon_socket_argument_for(&host.agent_tool_socket());
     assert!(
         command.contains(&expected),
@@ -181,7 +187,11 @@ fn on_a_server_host_the_tool_use_hook_reports_over_its_users_agent_tool_socket()
     );
 
     // Then the tool-use hook reaches the daemon over that user's socket
-    let command = the_installed_hook_command(worktree.path(), "PostToolUse");
+    let command = the_installed_hook_command(
+        worktree.path(),
+        "01a14a71-f790-7083-8ad8-e4df3feed64e",
+        "PostToolUse",
+    );
     let expected = the_daemon_socket_argument_for(&host.agent_tool_socket());
     assert!(
         command.contains(&expected),
@@ -622,5 +632,165 @@ fn a_managed_sessions_recipe_prompt_follows_the_notify_guidance_in_the_one_appen
             "{}\n\nYou are driving the tdd recipe.",
             crate::notify_env::AGENT_NOTIFY_GUIDANCE.trim_end()
         )
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// `/clear` in the project-home session was not recorded (reported 2026-11-21).
+//
+// A claude-cli session's hooks name its session id, its hook token and the daemon's agent-tool
+// socket. They were one worktree-wide file (`.claude/settings.local.json`) that a resume never
+// rewrote, so two ordinary events left them naming the wrong thing:
+//
+// 1. The daemon restarted: the agent-tool socket is `tddy-agent-tools-<daemon pid>-<n>.sock`, so the
+//    file named a socket nothing listens on, and `tddy-tools session-hook` failed quietly.
+// 2. Another session started in the same worktree: the project-home worktree also hosts the
+//    project's orchestrator sessions, so the file named THEIR session id and token.
+//
+// Either way no hook of the resumed session reached it — its tool calls went unrecorded, and the
+// `SessionEnd{reason: clear}` / `SessionStart{source: clear}` pair never reached the rotation that
+// appends the new conversation to `agent_conversations`, so the next resume bound the old one.
+// Each session now has a hooks file of its own (`.tddy/hooks/<session_id>/`), rendered again on
+// every resume.
+// ---------------------------------------------------------------------------------------------
+
+const THE_HOME_SESSION: &str = "01a16dc6-ab4c-7dc3-844e-baca4514f86e";
+const THE_HOME_HOOK_TOKEN: &str = "b45669f6-e4d8-4808-8787-58e465c6a475";
+const AN_ORCHESTRATOR_SESSION: &str = "01a1f0a7-11cd-7753-bb33-d733709924ef";
+
+/// A stopped claude-cli session recorded with its hook token, as the daemon resumes it.
+fn a_stopped_claude_cli_session(session_id: &str, hook_token: &str) -> tddy_core::SessionMetadata {
+    tddy_core::SessionMetadata {
+        hook_token: Some(hook_token.to_string()),
+        ..service_util::starting_session_metadata(session_id, "p-1", "claude-cli")
+    }
+}
+
+/// What a resume of `recorded` leaves installed in `worktree`: its hooks are rendered with the
+/// claude spec's slots and written, exactly as the start path writes them — when the resume
+/// renders any at all.
+fn resume_its_hooks_into(
+    config: &DaemonConfig,
+    agent_tool_socket: &Path,
+    recorded: &tddy_core::SessionMetadata,
+    worktree: &Path,
+) {
+    let claude = tddy_coding_agent_specs::embedded_spec("claude").expect("claude.yaml is built in");
+    let hooks = resumed_hooks(
+        &claude,
+        config,
+        agent_tool_socket,
+        "/usr/local/bin/tddy-tools",
+        recorded,
+    )
+    .expect("a resume's hooks are decided");
+    let rendered = tddy_coding_agent_specs::slots::render(
+        &claude,
+        &tddy_coding_agent_specs::slots::SlotInputs {
+            workdir: worktree.to_path_buf(),
+            scratch_dir: worktree.to_path_buf(),
+            mcp_server: None,
+            allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
+            permission_prompt_tool: None,
+            preamble: None,
+            append_system_prompt_file: None,
+            hooks: hooks
+                .as_ref()
+                .map(|hooks| hooks.params(&recorded.session_id, ITS_OS_USER)),
+            home: None,
+        },
+    )
+    .expect("the slots render");
+    for (path, bytes) in &rendered.files {
+        std::fs::create_dir_all(path.parent().expect("a hooks file has a parent"))
+            .expect("the hooks directory is created");
+        std::fs::write(path, bytes).expect("the hooks file is written");
+    }
+}
+
+/// The hook events that carry a `/clear` (`SessionEnd`, `SessionStart`) and a tool call
+/// (`PostToolUse`): each must report the resumed session, with its token, over the live socket.
+fn assert_every_clear_and_tool_hook_reports(worktree: &Path, session_id: &str, socket: &str) {
+    for event in ["SessionEnd", "SessionStart", "PostToolUse"] {
+        let command = the_installed_hook_command(worktree, session_id, event);
+        let session = format!(" --session {session_id} ");
+        let token = format!(" --hook-token {THE_HOME_HOOK_TOKEN} ");
+        let over = the_daemon_socket_argument_for(socket);
+        assert!(
+            command.contains(&session) && command.contains(&token) && command.contains(&over),
+            "after the resume, the {event} hook must report session {session_id} with its own \
+             token over the live agent-tool socket {socket:?}; the worktree still holds: {command}"
+        );
+    }
+}
+
+#[test]
+fn a_resume_after_a_daemon_restart_rewires_the_hooks_to_the_live_agent_tool_socket() {
+    // Given the home session's hooks, installed by a daemon that has since exited
+    let worktree = tempfile::tempdir().expect("a temporary worktree");
+    let gone = tempfile::tempdir().expect("the exited daemon's temp dir");
+    let exited_socket = gone.path().join("tddy-agent-tools-46362-0.sock");
+    install_claude_cli_hooks(
+        &DaemonConfig::default(),
+        &exited_socket,
+        ITS_OS_USER,
+        THE_HOME_SESSION,
+        worktree.path(),
+    );
+    // (the start's token is fresh; the resume reads the one the record holds)
+    let recorded = a_stopped_claude_cli_session(THE_HOME_SESSION, THE_HOME_HOOK_TOKEN);
+
+    // When the restarted daemon, on a socket of its own, resumes the session
+    let host = AnEmbeddedHost::with_its_agent_tool_socket_bound();
+    resume_its_hooks_into(
+        &host.config,
+        &host.socket_path(),
+        &recorded,
+        worktree.path(),
+    );
+
+    // Then its `/clear` and tool-call hooks reach this daemon
+    assert_every_clear_and_tool_hook_reports(
+        worktree.path(),
+        THE_HOME_SESSION,
+        &host.agent_tool_socket(),
+    );
+}
+
+#[test]
+fn a_session_started_in_the_same_worktree_leaves_a_resumed_sessions_hooks_its_own() {
+    // Given one daemon, and the project-home worktree where an orchestrator session was started
+    let host = AnEmbeddedHost::with_its_agent_tool_socket_bound();
+    let worktree = tempfile::tempdir().expect("the project-home worktree");
+    install_claude_cli_hooks(
+        &host.config,
+        &host.socket_path(),
+        ITS_OS_USER,
+        AN_ORCHESTRATOR_SESSION,
+        worktree.path(),
+    );
+    let recorded = a_stopped_claude_cli_session(THE_HOME_SESSION, THE_HOME_HOOK_TOKEN);
+
+    // When the home session is resumed in that worktree
+    resume_its_hooks_into(
+        &host.config,
+        &host.socket_path(),
+        &recorded,
+        worktree.path(),
+    );
+
+    // Then its `/clear` and tool-call hooks report the home session…
+    assert_every_clear_and_tool_hook_reports(
+        worktree.path(),
+        THE_HOME_SESSION,
+        &host.agent_tool_socket(),
+    );
+    // …and the orchestrator's still report the orchestrator
+    let orchestrators =
+        the_installed_hook_command(worktree.path(), AN_ORCHESTRATOR_SESSION, "Stop");
+    assert!(
+        orchestrators.contains(&format!(" --session {AN_ORCHESTRATOR_SESSION} ")),
+        "the orchestrator's hooks must stay its own: {orchestrators}"
     );
 }

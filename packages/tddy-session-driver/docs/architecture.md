@@ -126,7 +126,8 @@ command as a child it waits on, so killing the client leaves the command running
 session does. `write_executable` comes from `tddy_testing_commons::remote_target`.
 
 `tests/session_driver_hooks_acceptance.rs` fires hooks as Claude Code does — the command installed
-in the worktree's `.claude/settings.local.json`, under `sh -c`, payload on stdin — on a Coder and a
+in the session's hooks file in the worktree (`.tddy/hooks/<session_id>/claude-settings.json`),
+under `sh -c`, payload on stdin — on a Coder and a
 local session, and checks what `read_hooks` and `wait_for_hook` answer: the daemon's reports, in
 order, a forged line dropped, the Coder log read through the CLI, and after the stop the log gone
 and nothing left following it. Also `since`, a wait that times out, and an agent without hooks.

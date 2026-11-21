@@ -279,12 +279,17 @@ impl AWorkspace {
             .collect()
     }
 
-    /// The command Claude Code would run for `event`, read from the settings file the start
-    /// installed in the worktree in the workspace.
+    /// The command Claude Code would run for `event`, read from the session's hooks file the
+    /// start installed in the worktree in the workspace.
     fn installed_hook(&self, event: &str) -> String {
         let settings: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(self.worktree().join(".claude/settings.local.json"))
-                .expect("the hooks file is in the worktree in the workspace"),
+            &std::fs::read(
+                tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+                    &self.worktree(),
+                    SESSION_ID,
+                ),
+            )
+            .expect("the hooks file is in the worktree in the workspace"),
         )
         .expect("the hooks file is JSON");
         settings["hooks"][event][0]["hooks"][0]["command"]

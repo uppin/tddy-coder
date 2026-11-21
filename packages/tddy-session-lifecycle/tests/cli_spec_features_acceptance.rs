@@ -125,6 +125,16 @@ async fn a_copy_of_claude_yaml_under_another_id_starts_in_tmux_with_the_argv_the
             .to_string_lossy()
             .into_owned(),
     ];
+    // …and the session's own hooks file loaded on both, rendered again on the resume
+    let hooks_loaded = [
+        "--settings".to_string(),
+        tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+            &daemon.worktree_of(&session_id),
+            &session_id,
+        )
+        .to_string_lossy()
+        .into_owned(),
+    ];
     assert_eq!(
         (
             started.argv(),
@@ -134,12 +144,14 @@ async fn a_copy_of_claude_yaml_under_another_id_starts_in_tmux_with_the_argv_the
         (
             [
                 claude_start_argv(&daemon.stub_path(), &session_id),
-                notify_prompt.to_vec()
+                notify_prompt.to_vec(),
+                hooks_loaded.to_vec(),
             ]
             .concat(),
             [
                 claude_resume_argv(&daemon.stub_path(), &session_id),
-                notify_prompt.to_vec()
+                notify_prompt.to_vec(),
+                hooks_loaded.to_vec(),
             ]
             .concat(),
             true,
@@ -264,12 +276,14 @@ async fn a_copy_of_claude_yaml_under_another_id_on_an_ssh_host_writes_its_slot_f
     // Then — the hooks settings were written on the target, at the remote worktree, and never at
     // that path on this host
     let meta = daemon.metadata_of(&session_id);
-    let hooks_file = PathBuf::from(
-        meta.repo_path
-            .clone()
-            .expect("a remote worktree is recorded"),
-    )
-    .join(".claude/settings.local.json");
+    let hooks_file = tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+        &PathBuf::from(
+            meta.repo_path
+                .clone()
+                .expect("a remote worktree is recorded"),
+        ),
+        &session_id,
+    );
     assert_eq!(
         (
             meta.ssh_config_host,

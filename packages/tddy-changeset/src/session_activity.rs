@@ -1,6 +1,7 @@
-//! Granular session activity status driven by per-worktree Claude Code hooks.
+//! Granular session activity status driven by per-session Claude Code hooks.
 //!
-//! The daemon writes a `.claude/settings.local.json` into each claude-cli worktree wiring six
+//! The daemon writes each claude-cli session a hooks file of its own in its worktree
+//! (`.tddy/hooks/<session_id>/claude-settings.json`, loaded with `--settings`) wiring its
 //! hook events to `tddy-tools session-hook`. That command reads the hook event JSON from stdin,
 //! calls [`activity_status_from_hook`] to get a status, and POSTs it to the daemon via
 //! [`ReportSessionStatus`] gRPC. This module owns the pure, side-effect-free mapping and parse
