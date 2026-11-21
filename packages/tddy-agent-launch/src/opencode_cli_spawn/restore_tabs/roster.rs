@@ -23,11 +23,11 @@ use tddy_service::proto::session::{RestoredTab, RestoredTabOutcome};
 
 use super::new_tab::agent_tab_argv;
 use super::plan::{restore_plan, tmux_names, LiveTabs, TabRestore};
+use crate::spec_launch::HostCodingAgents;
+use crate::tab_target_shell::TabTargetShell;
 use wrapped_tabs::{
     restore_jailed_agent, restore_jailed_shell, restore_target_agent, restore_target_shell,
 };
-use crate::spec_launch::HostCodingAgents;
-use crate::tab_target_shell::TabTargetShell;
 
 mod wrapped_tabs;
 

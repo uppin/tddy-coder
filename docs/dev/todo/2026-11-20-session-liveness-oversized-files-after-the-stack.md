@@ -37,15 +37,12 @@ changes. **What closes it:** once #967 has merged, extract one component taking 
 kind, the test-id prefixes and the two group names; the menu's Cypress specs
 (`NewTerminalMenuSandboxAcceptance`, `NewTerminalMenuTargetAcceptance`) stay as they are.
 
-## Left for after the stack: files #966 (`#session-liveness` 7/8) grew that #967 also edits
+## Closed in #967 (`#session-liveness` 8/8): `restore_tabs/roster.rs`
 
-No file #966 touched is at or over 500 production lines, so nothing was split or recorded as crossing. Three
-files #967 (`target-agent-tab`) also modifies came close, and were left whole for that reason:
-`packages/tddy-agent-launch/src/opencode_cli_spawn/restore_tabs/roster.rs` (446 → 494, 6 lines under the
-budget), `…/restore_tabs/plan.rs` (263 → 305) and `packages/tddy-session-lifecycle/src/connection_service/svc_terminal_ports/jailed_tabs.rs`
-(90 → 176; #967 edits its sibling `target_tabs.rs`, not this one, and it is far under). `roster.rs` will cross 500
-the moment #967 adds its restore arm. **What closes it:** after #967 merges, move the per-kind restores
-(`restore_jailed_shell`, `restore_jailed_agent`, `restore_target_shell`, `relaunch_tmux_tab`) into
-`restore_tabs/restore_one.rs`, move-only through `/code-restructuring`. `NewTerminalMenu.tsx` (468 production
-lines) gained its agent items in the "In sandbox" block (still under budget); the group-pair dedupe above now
-covers both blocks.
+`packages/tddy-agent-launch/src/opencode_cli_spawn/restore_tabs/roster.rs` was 494 production lines at #966 and
+would have crossed 500 with #967's restore arm (540). #967 is the top node, so it split the file itself: the
+per-kind restores of a jailed or target tab (`restore_jailed_shell`, `restore_jailed_agent`, `restore_target_shell`,
+`restore_target_agent`) moved, unchanged, into the child module `restore_tabs/roster/wrapped_tabs.rs` (a child of
+`roster.rs`, so it reads the private helpers without widening them); `roster.rs` is now 408 production lines
+`restore_tabs/plan.rs` (263 → 339) and `jailed_tabs.rs` stay far under the budget.
+`NewTerminalMenu.tsx` (473 production lines) is still under budget; the group-pair dedupe above covers both blocks.

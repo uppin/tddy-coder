@@ -12,7 +12,10 @@ use crate::remote_agent_launch::{launch_agent_tab_on_target, launch_tab_on_targe
 
 /// Start the session user's login shell under the tab's recorded id, in a new jail of its own over
 /// the session's worktree and grants. A jail that cannot start fails the tab with the reason.
-pub(super) async fn restore_jailed_shell(restore: &RosterRestore<'_>, tab: &TabEntry) -> anyhow::Result<()> {
+pub(super) async fn restore_jailed_shell(
+    restore: &RosterRestore<'_>,
+    tab: &TabEntry,
+) -> anyhow::Result<()> {
     let login_shell = tddy_terminal_rpc::login_shell_for(restore.os_user);
     let launch = TabJailLaunch::for_tab(
         restore.session_id,
@@ -78,7 +81,10 @@ pub(super) async fn restore_jailed_agent(
 /// Start the target user's login shell under the tab's recorded id on the session's target, in the
 /// session's worktree there ([`crate::remote_agent_launch::launch_tab_on_target`]). A target that
 /// cannot be resolved (a locked vault) or reached fails the tab with the reason.
-pub(super) async fn restore_target_shell(restore: &RosterRestore<'_>, tab: &TabEntry) -> anyhow::Result<()> {
+pub(super) async fn restore_target_shell(
+    restore: &RosterRestore<'_>,
+    tab: &TabEntry,
+) -> anyhow::Result<()> {
     let target = restore
         .tab_target_shell
         .target_of(restore.session_dir, restore.subject)
