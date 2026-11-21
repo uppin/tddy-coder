@@ -88,7 +88,7 @@ impl TargetShells for TheTargetShells {
     async fn shell_for(
         &self,
         _target: &SessionTarget,
-        _os_user: &str,
+        _subject: &str,
     ) -> Result<Arc<dyn RemoteShell>, Status> {
         match &self.0 {
             Reach::Through(ssh) => Ok(Arc::new(SshShell::through(ssh.clone(), "devbox"))),

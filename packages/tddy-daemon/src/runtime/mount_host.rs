@@ -130,6 +130,21 @@ impl BuildContext {
             if let Some(ref tracker) = idle_tracker {
                 worktree_service = worktree_service.with_idle_tracker(tracker.clone());
             }
+            // The Worktree tab's actions on a target session's worktree reach its target as a
+            // session start does: through the daemon's vaults, or, for a daemon started without
+            // Coder accounts, refusing a Coder target while an ssh target stays reachable.
+            let coder_credentials: Arc<
+                dyn tddy_host_service::coder_workspaces::CoderCredentialSource,
+            > = match self.identity.credential_vaults.clone() {
+                Some(vaults) => crate::coder_credential_source::coder_credential_source(
+                    vaults,
+                    Arc::clone(user_resolver),
+                ),
+                None => Arc::new(tddy_agent_launch::coder_target::NoCoderAccounts),
+            };
+            worktree_service = worktree_service.with_target_shells(Arc::new(
+                tddy_agent_launch::target_shells::SessionTargetShells::new(coder_credentials),
+            ));
             Arc::new(worktree_service)
         };
         Served {

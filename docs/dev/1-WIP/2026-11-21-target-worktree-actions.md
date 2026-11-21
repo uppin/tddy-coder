@@ -70,9 +70,9 @@ Both files are over budget and unclaimed. The target routing goes in a new modul
 
 ## Scope
 
-- [ ] Port, builder and the target-session lookup
-- [ ] Clean / Remove / Restore on the target
-- [ ] Port implementation and daemon wiring
+- [x] Port, builder and the target-session lookup
+- [x] Clean / Remove / Restore on the target
+- [x] Port implementation and daemon wiring
 - [ ] Feature doc `session-worktree-inspector.md` updated through the wrap
 
 ## Technical Changes
@@ -88,11 +88,11 @@ A target session's actions run through its shell on the target; the daemon host 
 ## Acceptance Tests
 
 `packages/tddy-worktree-service/tests/target_worktree_actions_acceptance.rs` (`StandInSshTarget` through the port, real git on both sides):
-- [ ] `restore_of_a_target_sessions_worktree_never_cuts_one_on_the_daemons_host` (the reproduction)
-- [ ] `restore_of_a_target_sessions_worktree_recreates_it_on_the_target`
-- [ ] `clean_of_a_target_sessions_worktree_cleans_it_on_the_target`
-- [ ] `delete_of_a_target_sessions_worktree_removes_it_on_the_target`
-- [ ] `an_action_on_an_unreachable_target_fails_with_its_reason_and_changes_nothing`
+- [x] `restore_of_a_target_sessions_worktree_never_cuts_one_on_the_daemons_host` (the reproduction)
+- [x] `restore_of_a_target_sessions_worktree_recreates_it_on_the_target`
+- [x] `clean_of_a_target_sessions_worktree_cleans_it_on_the_target`
+- [x] `delete_of_a_target_sessions_worktree_removes_it_on_the_target`
+- [x] `an_action_on_an_unreachable_target_fails_with_its_reason_and_changes_nothing`
 
 `packages/tddy-agent-launch/src/target_shells.rs` (unit): the port resolves an ssh target's shell, and refuses a Coder target with a locked vault as `FAILED_PRECONDITION`.
 
@@ -111,8 +111,8 @@ A target session's actions run through its shell on the target; the daemon host 
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation

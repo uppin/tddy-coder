@@ -71,8 +71,6 @@ pub struct WorktreeServiceImpl {
     /// Bumped on the streaming and sizing RPCs, so relay mode's idle timer sees worktree traffic.
     idle_tracker: Option<Arc<IdleTimeoutTracker>>,
     /// The shells of target sessions' targets — see [`crate::target_worktrees`].
-    // TODO(target-worktree-actions): read by the target routing of Clean / Remove / Restore.
-    #[allow(dead_code)]
     target_shells: Arc<dyn crate::target_worktrees::TargetShells>,
 }
 
@@ -112,7 +110,6 @@ impl WorktreeServiceImpl {
         mut self,
         shells: Arc<dyn crate::target_worktrees::TargetShells>,
     ) -> Self {
-        // TODO(target-worktree-actions): route Clean / Remove / Restore of a target session here.
         self.target_shells = shells;
         self
     }
@@ -174,6 +171,34 @@ impl WorktreeServiceImpl {
         Ok(sessions_base
             .join(tddy_core::output::SESSIONS_SUBDIR)
             .join(session_id))
+    }
+
+    /// The shell of `session`'s target, resolved as the caller (the subject a session start
+    /// resolves a Coder target's account with). A refusal is returned as it is.
+    async fn shell_of_target(
+        &self,
+        session_token: &str,
+        session: &crate::target_worktrees::TargetSession,
+    ) -> Result<Arc<dyn tddy_remote_shell::RemoteShell>, Status> {
+        let subject = (self.user_resolver)(session_token).unwrap_or_default();
+        self.target_shells
+            .shell_for(&session.target, &subject)
+            .await
+    }
+
+    /// The caller's target session of `project_id` whose worktree on its target is `worktree`.
+    fn target_session_of(
+        &self,
+        os_user: &str,
+        project_id: &str,
+        worktree: &str,
+    ) -> Option<crate::target_worktrees::TargetSession> {
+        let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))?;
+        crate::target_worktrees::target_session_of_worktree(
+            &sessions_base.join(tddy_core::output::SESSIONS_SUBDIR),
+            project_id,
+            worktree,
+        )
     }
 
     /// Authenticates the caller and returns the directory of `session_id` when it exists under the
@@ -441,6 +466,18 @@ impl WorktreeService for WorktreeServiceImpl {
         if worktree_path_raw.is_empty() {
             return Err(Status::invalid_argument("worktree_path is required"));
         }
+        if let Some(session) = self.target_session_of(&os_user, project_id, worktree_path_raw) {
+            let shell = self.shell_of_target(&req.session_token, &session).await?;
+            self.session_rooms
+                .close_for_worktree(&PathBuf::from(&session.worktree));
+            crate::target_worktrees::remove_target_worktree(shell.as_ref(), &session.worktree)
+                .await?;
+            self.worktree_stats_cache.invalidate_project(project_id);
+            return Ok(Response::new(RemoveWorktreeResponse {
+                ok: true,
+                message: String::new(),
+            }));
+        }
         let main_repo = self.resolve_main_repo(&os_user, project_id)?;
         let worktree_path = PathBuf::from(worktree_path_raw);
 
@@ -482,6 +519,16 @@ impl WorktreeService for WorktreeServiceImpl {
         let worktree_path_raw = req.worktree_path.trim();
         if worktree_path_raw.is_empty() {
             return Err(Status::invalid_argument("worktree_path is required"));
+        }
+        if let Some(session) = self.target_session_of(&os_user, project_id, worktree_path_raw) {
+            let shell = self.shell_of_target(&req.session_token, &session).await?;
+            crate::target_worktrees::clean_target_worktree(shell.as_ref(), &session.worktree)
+                .await?;
+            self.worktree_stats_cache.invalidate_project(project_id);
+            return Ok(Response::new(CleanWorktreeResponse {
+                ok: true,
+                message: String::new(),
+            }));
         }
         let main_repo = self.resolve_main_repo(&os_user, project_id)?;
         let worktree_path = PathBuf::from(worktree_path_raw);
@@ -527,8 +574,19 @@ impl WorktreeService for WorktreeServiceImpl {
         tddy_core::session_lifecycle::validate_session_id_segment(session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
 
-        let main_repo = self.resolve_main_repo(&os_user, project_id)?;
         let session_dir = self.session_dir_for(&os_user, session_id)?;
+        if let Some(session) = crate::target_worktrees::target_session_in(&session_dir) {
+            let shell = self.shell_of_target(&req.session_token, &session).await?;
+            let worktree_path =
+                crate::target_worktrees::restore_target_worktree(shell.as_ref(), &session).await?;
+            self.worktree_stats_cache.invalidate_project(project_id);
+            return Ok(Response::new(RestoreSessionWorktreeResponse {
+                ok: true,
+                message: String::new(),
+                worktree_path,
+            }));
+        }
+        let main_repo = self.resolve_main_repo(&os_user, project_id)?;
 
         let repo_blocking = main_repo.clone();
         let session_dir_blocking = session_dir.clone();

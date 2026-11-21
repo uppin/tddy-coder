@@ -30,11 +30,13 @@ impl TargetShells for SessionTargetShells {
     async fn shell_for(
         &self,
         target: &SessionTarget,
-        os_user: &str,
+        subject: &str,
     ) -> Result<Arc<dyn RemoteShell>, Status> {
-        // TODO(target-worktree-actions): implement over `shell_for_session_target`.
-        let _ = (target, os_user, &self.credentials);
-        todo!("SessionTargetShells::shell_for")
+        crate::opencode_cli_spawn::session_start::shell_for_session_target(
+            target,
+            subject,
+            self.credentials.as_ref(),
+        )
     }
 }
 
