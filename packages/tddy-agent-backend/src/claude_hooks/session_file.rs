@@ -46,10 +46,11 @@ pub enum LegacyRelease {
 }
 
 /// Whether `command` is a hook command the daemon installs: `tddy-tools session-hook` on a host,
-/// or the append to the target's hook log.
+/// or, on a target, an append to its hook log — the plain one, or the waiting one that numbers
+/// its line and then reads its answer file, which does not start with the `printf`.
 fn is_daemon_hook_command(command: &str) -> bool {
     command.contains(" session-hook --session ")
-        || (command.starts_with("printf ") && command.contains(REMOTE_HOOK_LOG))
+        || (command.contains("printf ") && command.contains(REMOTE_HOOK_LOG))
 }
 
 /// Take the daemon's hooks out of a legacy `settings.local.json` holding `bytes`.
