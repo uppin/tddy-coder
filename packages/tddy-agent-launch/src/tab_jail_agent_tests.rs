@@ -128,6 +128,9 @@ impl ASandboxedSession {
                 egress_dir: root.join("egress"),
                 scratch_dir: root.join(".work"),
             },
+            os_user: "tddy".to_string(),
+            login_shell: "/bin/zsh".to_string(),
+            subject: "ada".to_string(),
         }
     }
 
