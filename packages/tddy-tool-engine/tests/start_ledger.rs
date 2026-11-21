@@ -318,6 +318,7 @@ fn the_worktree_was_cut(branch: &str, worktree: &str) -> Event {
     Event::WorktreeReady(StartWorktreeReady {
         branch: branch.to_string(),
         worktree: worktree.to_string(),
+        ..Default::default()
     })
 }
 

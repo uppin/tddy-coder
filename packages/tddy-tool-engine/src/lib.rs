@@ -6,6 +6,7 @@
 //! Shared by `tddy-daemon` (remote-codebase workspace sessions) and `tddy-coder` (session
 //! participant `ExecuteTool` / `ListExecTools`).
 
+pub mod base_freshness_tools;
 pub mod catalog;
 pub(crate) mod contained_shell;
 pub(crate) mod edited_region;
