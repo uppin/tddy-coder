@@ -22,6 +22,26 @@ pub(crate) struct HeldHook {
     /// The `request_id` the report was recorded under; `None` when the report was refused.
     pub request_id: Option<String>,
     pub permission_suggestions: Option<serde_json::Value>,
+    /// The held call's `tool_input` when it is an `AskUserQuestion`: the hook's answer is then a
+    /// question decision, not a permission one.
+    pub question_input: Option<serde_json::Value>,
+}
+
+impl HeldHook {
+    /// The `tool_input` of a hook line that is a question — a `PreToolUse` of `AskUserQuestion`.
+    pub(crate) fn question_input_of(
+        event: &str,
+        payload: &serde_json::Value,
+    ) -> Option<serde_json::Value> {
+        (event == "PreToolUse"
+            && payload.get("tool_name").and_then(|t| t.as_str()) == Some("AskUserQuestion"))
+        .then(|| {
+            payload
+                .get("tool_input")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        })
+    }
 }
 
 /// Hold for the orchestrator's answer to `hook`, then write the decision — or an empty file — as
@@ -36,6 +56,7 @@ pub(crate) async fn hold_and_answer(
     let decision = match hook.request_id.filter(|id| !id.is_empty()) {
         Some(request_id) => {
             let suggestions = hook.permission_suggestions;
+            let question_input = hook.question_input;
             let request = tddy_service::proto::activity::AwaitQuestionAnswerRequest {
                 session_id: hook.session_id.clone(),
                 hook_token: hook.hook_token,
@@ -47,10 +68,17 @@ pub(crate) async fn hold_and_answer(
                     .unwrap_or_default(),
             };
             match delivery.await_question_answer(request).await {
-                Ok(answer) => tddy_session_activity::hook_decision::permission_decision_json(
-                    &answer,
-                    suggestions.as_ref(),
-                ),
+                Ok(answer) => match &question_input {
+                    Some(tool_input) => {
+                        tddy_session_activity::hook_decision::question_decision_json(
+                            &answer, tool_input,
+                        )
+                    }
+                    None => tddy_session_activity::hook_decision::permission_decision_json(
+                        &answer,
+                        suggestions.as_ref(),
+                    ),
+                },
                 Err(error) => {
                     log::warn!(
                         "holding for the answer of session {}'s waiting hook refused: {error}",

@@ -61,8 +61,8 @@ the more foundational); n3–n5 block nothing.
 
 ## Scope
 
-- [ ] Waiting question entry on a target
-- [ ] Question decisions on the channel
+- [x] Waiting question entry on a target
+- [x] Question decisions on the channel
 - [ ] Feature doc updated through the wrap
 
 ## Technical Changes
@@ -100,8 +100,8 @@ A remote question is the pending question, and its answer reaches the agent as C
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (delegated: the user said "finish the rest without approval")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation

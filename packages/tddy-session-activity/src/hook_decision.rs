@@ -6,7 +6,9 @@
 //! it into the answer file the hook on the target waits for (`#target-parity` 1/7). Only daemon-side
 //! crates reach a target's shell, and `tddy-tools` already depends on this crate.
 
-use tddy_service::proto::activity::{AwaitQuestionAnswerResponse, AwaitQuestionOutcome};
+use tddy_service::proto::activity::{
+    AwaitQuestionAnswerResponse, AwaitQuestionOutcome, QuestionAnswer,
+};
 
 /// Claude Code's `PermissionRequest` decision for `answer`
 /// (<https://code.claude.com/docs/en/hooks> § PermissionRequest decision control):
@@ -59,10 +61,66 @@ pub fn question_decision_json(
     answer: &AwaitQuestionAnswerResponse,
     tool_input: &serde_json::Value,
 ) -> Option<String> {
-    // TODO(question-answer): implement — move `tddy_tools::session_hook::question_decision_json`
-    // and `encode_question_decision` here and have tddy-tools call them.
-    let _ = (answer, tool_input);
-    todo!("question_decision_json")
+    if AwaitQuestionOutcome::try_from(answer.outcome) != Ok(AwaitQuestionOutcome::Answered) {
+        return None;
+    }
+    encode_question_decision(tool_input, &answer.answers)
+}
+
+/// The decision JSON that hands `answers` to Claude for the call whose input is `tool_input`, or
+/// `None` when nothing can be handed over: `answers` is empty, `tool_input` has no `questions`, or
+/// an answer names a question index it does not have. `None` prints nothing, and Claude shows its
+/// own dialog.
+///
+/// Verified against Claude Code 2.1.312 (2026-10-28), interactively (`claude -p` offers no
+/// `AskUserQuestion`): a `PreToolUse` hook's `permissionDecision: "allow"` with `updatedInput` —
+/// the tool's input with an `answers` map — makes Claude skip the dialog and run the tool as if the
+/// person had answered.
+///
+/// - `updatedInput` replaces the whole input, so `questions` is the call's own, unchanged.
+/// - An answer string is the chosen labels joined with `", "` (Claude's schema: multi-select answers
+///   are comma-separated), then `other` when given. An `other` alone is the text itself.
+/// - A question the answers leave out is absent from `answers`; Claude then asks it.
+#[must_use]
+pub fn encode_question_decision(
+    tool_input: &serde_json::Value,
+    answers: &[QuestionAnswer],
+) -> Option<String> {
+    if answers.is_empty() {
+        return None;
+    }
+    let questions = tool_input.get("questions")?.as_array()?;
+    let mut by_question = serde_json::Map::new();
+    for answer in answers {
+        let question = questions.get(answer.question_index as usize)?;
+        let text = question.get("question")?.as_str()?;
+        let free_text = answer.other.as_deref().filter(|text| !text.is_empty());
+        let parts: Vec<&str> = answer
+            .selected
+            .iter()
+            .map(String::as_str)
+            .chain(free_text)
+            .collect();
+        by_question.insert(
+            text.to_string(),
+            serde_json::Value::String(parts.join(", ")),
+        );
+    }
+    let mut updated_input = tool_input.as_object()?.clone();
+    updated_input.insert(
+        "answers".to_string(),
+        serde_json::Value::Object(by_question),
+    );
+    Some(
+        serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": updated_input,
+            }
+        })
+        .to_string(),
+    )
 }
 
 #[cfg(test)]

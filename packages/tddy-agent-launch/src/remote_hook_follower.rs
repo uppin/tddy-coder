@@ -205,6 +205,10 @@ impl ActivityHookSink {
                 os_user: self.os_user.clone(),
                 request_id,
                 permission_suggestions: line.payload.get("permission_suggestions").cloned(),
+                question_input: crate::remote_hook_answer::HeldHook::question_input_of(
+                    &line.event,
+                    &line.payload,
+                ),
             },
         ));
     }

@@ -213,12 +213,9 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
         let awaits_an_answer = *event == "PermissionRequest"
             || (*event == "PreToolUse" && *matcher == "AskUserQuestion");
         let entry = match p.remote_log {
-            // On a target the permission hook waits for an answer file beside the hook log; the
-            // question hook is not installed there yet.
-            Some(log) if *event == "PermissionRequest" => {
-                remote_permission_entry(p, event, matcher, log)
-            }
-            Some(_) if awaits_an_answer => continue,
+            // On a target a waiting hook (permission, question) waits for an answer file beside
+            // the hook log.
+            Some(log) if awaits_an_answer => remote_permission_entry(p, event, matcher, log),
             _ => hook_entry_for_event(p, event, matcher, awaits_an_answer),
         };
         // An event's matcher groups accumulate in order: `PreToolUse` has the catch-all reporting
