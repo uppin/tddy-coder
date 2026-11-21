@@ -6,6 +6,9 @@
 //! user's home and under the agent's own home, and the paths the operator granted the session. Any
 //! other session's call is not answered here and takes the ordinary worktree-confined route.
 //!
+//! In another project's worktree only what git lists is readable (`.git` and git-ignored paths
+//! stay hidden); agent homes and grants are read as-is.
+//!
 //! The reach is rebuilt for every call, so a project, a worktree or a grant added since the last
 //! call is in it, and nothing is cached that could outlive what it describes.
 //!
@@ -127,7 +130,8 @@ fn build_reach(inputs: ReachInputs) -> Result<ReadReach, String> {
             inputs.home_worktree.display()
         )
     })?;
-    let mut roots = project_worktrees(&inputs);
+    let worktrees = project_worktrees(&inputs);
+    let mut roots = Vec::new();
     for agent in &inputs.agents {
         for home_dir in &agent.home_dirs {
             roots.extend(inputs.os_user_home.iter().map(|h| h.join(home_dir)));
@@ -138,7 +142,7 @@ fn build_reach(inputs: ReachInputs) -> Result<ReadReach, String> {
         .grants()
         .map_err(|e| format!("cannot read the session's path grants: {e}"))?;
     roots.extend(grants.into_iter().map(|grant| grant.path));
-    Ok(ReadReach::new(home, roots))
+    Ok(ReadReach::new(home, roots).with_worktrees(worktrees))
 }
 
 /// Every worktree of every project registered on this host, each project's main checkout included.
