@@ -220,15 +220,18 @@ message StartTerminalSessionRequest {
   // around anything else, is refused INVALID_ARGUMENT, naming it; a "sandbox" wrapper on a session
   // that is not sandboxed, and a "target" wrapper on a session that records no target, a worktree
   // there, or an account its owner's vault holds (or whose vault is locked), is refused
-  // FAILED_PRECONDITION.
+  // FAILED_PRECONDITION; a target that resolves but cannot be reached (its transport fails to
+  // connect, or the worktree cannot be entered) is refused UNAVAILABLE, with the transport's own
+  // message.
   repeated LaunchNode wrappers = 6;
 }
 
 // One link of a terminal's launch chain: what it is, and what it was started with. Kinds: "agent"
 // (`harness`, `conversation_id`), "shell", "tmux" (`session`, `os_user`) for a tmux session the
 // daemon created to wrap a tab, "tmux-attach" (`session`, `os_user`) for a tab attached to the user's
-// own tmux session, "sandbox" (no properties) for a jail of its own a tab runs in. Unknown kinds and
-// keys are kept, so later wrappers need no schema change.
+// own tmux session, "sandbox" (no properties) for a jail of its own a tab runs in, "target" (no
+// properties) for the session's target a tab runs on. Unknown kinds and keys are kept, so later
+// wrappers need no schema change.
 message LaunchNode {
   string kind = 1;
   map<string, string> properties = 2;

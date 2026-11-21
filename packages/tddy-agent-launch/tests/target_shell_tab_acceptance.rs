@@ -9,7 +9,7 @@
 //! `CoderShell` with an account a stand-in vault holds. Each target's login shell, run as `-l` — as
 //! a shell tab runs it — records the directory it started in and stays up on its terminal.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-target-shell-tab.md
+//! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs)
 
 mod coder_workspace_support;
 

@@ -128,5 +128,9 @@ the shared spawn both reach. `spawn_rendered_client_main` is `spawn_rendered_mai
 process is a transport's client to an agent on a target: its `tddy_pty::ExitCodeInOutput` says how the
 agent's status is read from what a client that exits with a constant code (Coder's `coder ssh`, 1)
 printed last, so the terminal's status — and the `main exited` line and `AgentEnd` built from it — is
-the agent's own. Tests: `tests/agent_env_allow_list.rs` (`an_agent_main_spawned_through_spawn_rendered_main_sees_no_unlisted_daemon_variable`,
+the agent's own. `spawn_rendered_client_tab(session_id, terminal_id, worktree_path, ClientTab)` is its sibling
+for a **tab** (`#session-liveness` 6/8): the same transport client, registered under the tab's id, never `main`
+(refused for `main` and for an id already live), so nothing of the session's main — its recording, its exit hook,
+its status — is touched and the client's exit ends the tab alone; it takes `spawn_tool_on`'s existing parameters.
+Tests: `tests/agent_env_allow_list.rs` (`an_agent_main_spawned_through_spawn_rendered_main_sees_no_unlisted_daemon_variable`,
 and the guard `a_user_terminal_still_inherits_the_daemon_environment`).

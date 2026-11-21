@@ -28,6 +28,15 @@ printed a banner naming its tab, so lifetime, death, teardown and routing are ob
 kernel sandbox itself is `sandbox_shell_tab_jail_linux`'s, which self-skips off Linux and needs a VM
 (`docs/dev/todo/2026-11-02-ci-runs-no-linux-jail.md`).
 
+### Target tabs (`#session-liveness` 6/8)
+
+`target_shell_tab_acceptance` and the target-tab cases of `resume_tab_roster_acceptance` drive a target session's
+shell tabs through the daemon's own terminal RPCs and roster, with an in-memory `TabTargetShell` injected by
+`DaemonSessionHost::with_tab_target_shell` (`tests/target_tab_support/`): the "target" is a directory on this host
+behind a stand-in ssh whose login shell records where it started, so the worktree a tab runs in, the recorded
+chain, the owner the target was resolved as and Resume's reopen-or-drop are observed on real processes. The
+transport itself (`ssh`, `coder ssh`) is `tddy-agent-launch`'s `target_shell_tab_acceptance`.
+
 ## Writing one
 
 - A suite goes in the crate whose production code it exercises. `tddy-daemon` keeps only the suites

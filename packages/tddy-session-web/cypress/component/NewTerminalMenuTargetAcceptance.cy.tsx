@@ -3,7 +3,7 @@
  * session's target, first and so the default — and "On this host"; a session that runs on this host
  * offers no such choice.
  *
- * PRD: `docs/ft/daemon/1-WIP/PRD-2026-11-21-target-shell-tab.md` (`#session-liveness` 6/8)
+ * PRD: `docs/ft/daemon/session-liveness.md (A target session's tabs)` (`#session-liveness` 6/8)
  *
  * Driven over the deterministic gRPC path: `connectSession` returns an empty `livekitRoom`, so every
  * terminal RPC flows over the daemon client into the in-memory backend, which records each request.

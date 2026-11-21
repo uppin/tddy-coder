@@ -8,6 +8,7 @@ use tddy_credentials::{
     FIRST_VERSION,
 };
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
+use tddy_testing_commons::remote_target::write_executable;
 use tddy_testing_commons::wait::eventually;
 use tddy_workflow::SESSION_ATTACHMENTS_SUBDIR;
 
@@ -388,20 +389,19 @@ fn register_project(projects_dir: &Path, repo: &Path) {
 /// multi-line prompt is recoverable verbatim.
 fn write_argv_recording_stub(dir: &Path, record_to: &Path, environment_to: &Path) -> PathBuf {
     let script = dir.join("stub_claude.sh");
-    std::fs::write(
+    // Written through the shared fixture writer, which runs the fresh script once (guarded, so it
+    // records nothing) before any launch is timed: macOS's first exec of a new script costs seconds,
+    // which under a loaded package run outlasted `AGENT_SPAWN`.
+    write_executable(
         &script,
-        format!(
+        &format!(
             // Both records land by rename, so a reader never sees a file half-written: a reader
             // polling for the command line could otherwise read it truncated, mid-`printf`.
             "#!/bin/sh\nenv > '{env}.partial' && mv '{env}.partial' '{env}'\nprintf '%s\\n' \"$@\" > '{argv}.partial' && mv '{argv}.partial' '{argv}'\n",
             argv = record_to.display(),
             env = environment_to.display()
         ),
-    )
-    .expect("write stub");
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
-        .expect("stub must be executable");
+    );
     script
 }
 

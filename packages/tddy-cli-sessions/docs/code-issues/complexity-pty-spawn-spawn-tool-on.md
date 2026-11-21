@@ -18,6 +18,7 @@ Deferred by the user, 2026-11-10 (#876 sweep): the restructure engine refused th
 | 2026-11-17 | 75 → 75 | 3 | #929 (`#activity-wake` 1/3): re-measured — `spawn_tool_on` untouched; the agent-end announcement landed in `spawn_terminal_cleanup` and `agent_end.rs`. Unchanged, stays open |
 | 2026-11-19 | 75 → 77 | 3 | remote-agent pid-per-session fix: the `exit_code_in_output` parameter (12 → 13 parameters) and its one-line assignment onto the built spec. Worse, stays open |
 | 2026-11-20 | 77 → 77 | 3 | #959 (`#session-liveness` 2/4): re-measured — `spawn_tool_on` untouched (no parameter added); the tmux-client filter landed in `spawn_cleanup_for`, the per-terminal exit handling in `spawn_terminal_cleanup` (59 lines). Unchanged, stays open |
+| 2026-11-21 | 77 → 77 | 3 | #965 (`#session-liveness` 6/8): re-measured — `spawn_tool_on` untouched (still 13 parameters); the non-main client spawn `spawn_rendered_client_tab` calls it with the parameters it already has. Unchanged, stays open |
 
 ## What would close it
 

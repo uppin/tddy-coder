@@ -8,7 +8,7 @@
 //! or rewritten, there is no startup window, and nothing it does stops the session. A target it
 //! cannot reach fails the tab alone, before any terminal is registered.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-target-shell-tab.md
+//! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs)
 
 use std::path::Path;
 use std::sync::Arc;

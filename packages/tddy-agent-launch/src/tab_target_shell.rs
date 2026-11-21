@@ -7,7 +7,7 @@
 //! on Resume) both ask it. The daemon's is [`SessionTargetShells`]; a test gives the host a double
 //! instead ([`LaunchSessions::tab_target_shell`]).
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-target-shell-tab.md
+//! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs)
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

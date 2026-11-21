@@ -49,3 +49,8 @@ call logs), the stub-agent families (their run lines, trap and banner differ), `
 (identical in `coder_target_session` and `remote_target_session`, 15 lines, but the two files share
 no support module), and the copies in `tddy-remote-shell/tests/support` and
 `tddy-agent-launch/src/remote_agent_launch.rs` (a `tddy-testing-commons` dev-dependency there risks a cycle).
+
+**Narrowed 2026-11-21 (`#session-liveness` 6/8, #965):** the stand-in coder `AWorkspace` of
+`tddy-agent-launch` moved out of `coder_agent_launch_acceptance.rs` into `tests/coder_workspace_support`,
+shared by that suite and `target_shell_tab_acceptance` (one body, not two; the target tab's `-l` login shell
+is a branch of it). The lifecycle `coder_target_session` copy is still separate and still differs.

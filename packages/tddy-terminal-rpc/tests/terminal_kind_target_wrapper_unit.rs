@@ -2,7 +2,7 @@
 //! target is accepted, and nothing else is — an agent on a target is `target-agent-tab`'s, and a
 //! target wraps no other wrapper.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-target-shell-tab.md (`#session-liveness` 6/8)
+//! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs) (`#session-liveness` 6/8)
 
 use std::collections::HashMap;
 

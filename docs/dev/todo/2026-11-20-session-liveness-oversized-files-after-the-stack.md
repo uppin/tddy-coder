@@ -25,3 +25,14 @@ green before and after. The four files that were already over budget keep their 
 longer on this list. #961 does not edit it, so #960's wrap split it — the signal half moved to
 `svc_signal_session.rs` (538 → 384 and 159 production lines), `signal_held_session` kept its old
 path through a `pub use`, and its record was deleted on that measurement.
+
+## Also left for after the stack: the new-tab menu's repeated groups (#965, `#session-liveness` 6/8)
+
+`packages/tddy-session-web/src/NewTerminalMenu.tsx` (464 production lines, under the budget) renders the
+"In sandbox" / "On host" group pair (#964) and, since #965, an "On target" / "On this host" pair that repeats
+its markup with other labels, test ids and wrapper kinds. `sandbox-agent-tab` (7/8) and `target-agent-tab`
+(8/8) each edit one of the two blocks again (they list the agents in them), so folding both into one
+`WrappedKindGroups` component inside node 6 would turn each successor into a conflict in the very lines it
+changes. **What closes it:** once #967 has merged, extract one component taking the group label, the wrapper
+kind, the test-id prefixes and the two group names; the menu's Cypress specs
+(`NewTerminalMenuSandboxAcceptance`, `NewTerminalMenuTargetAcceptance`) stay as they are.

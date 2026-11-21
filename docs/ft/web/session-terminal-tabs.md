@@ -76,6 +76,13 @@ styled like the inspector tab strip (`InspectorTabs`).
     liveness](../daemon/session-liveness.md#a-sandboxed-sessions-tabs)). **On host** holds the usual
     items (`sessions-terminal-tab-new-on-host-<kind>`), unjailed. A session that is not sandboxed, and a
     tool session, keep the single group. An agent is not offered in a jail yet.
+  - **Target sessions** (`SessionEntry.target` set, not sandboxed): the group splits in two as well. **On
+    target** (the default, first) holds **Bash** alone (`sessions-terminal-tab-new-on-target-bash`): it
+    calls `StartTerminalSession` with `wrappers: [target]`, and the shell runs on the session's target, in
+    the session's worktree there (see [Session
+    liveness](../daemon/session-liveness.md#a-target-sessions-tabs)). **On this host** holds the usual
+    items (`sessions-terminal-tab-new-on-this-host-<kind>`), run in the session's directory on this host.
+    A tool session keeps the single group. An agent is not offered on a target yet.
   - **Agents in tmux**: for a session that offers harnesses, a group of its own below the bash and
     harness group, with one **<agent> in tmux** item per agent kind
     (`sessions-terminal-tab-new-in-tmux-<kind>`). It calls `StartTerminalSession` with that kind and
