@@ -45,7 +45,7 @@ pub trait TabTargetShell: Send + Sync {
 /// (`opencode_cli_spawn::session_start::shell_for_session_target`) — an ssh target's transport, or a
 /// Coder workspace's with the account the caller's vault holds.
 pub struct SessionTargetShells {
-    coder_credentials: Arc<dyn CoderCredentialSource>,
+    pub(crate) coder_credentials: Arc<dyn CoderCredentialSource>,
 }
 
 impl SessionTargetShells {

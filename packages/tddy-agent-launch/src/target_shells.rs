@@ -1,29 +1,17 @@
-//! The worktree service's [`TargetShells`] port, over the same target shells a session start and a
-//! resume use (`#target-parity` 2/7): an ssh target's transport, or a Coder workspace reached with
-//! the owner's vault credentials.
+//! The worktree service's [`TargetShells`] port, over the same target shells a session start, a
+//! resume and a target session's tabs use (`#target-parity` 2/7): an ssh target's transport, or a
+//! Coder workspace reached with the owner's vault credentials. The daemon's resolver is the tabs'
+//! [`SessionTargetShells`], so the Worktree tab's actions and a tab on the target reach it alike.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_core::SessionTarget;
-use tddy_host_service::coder_workspaces::CoderCredentialSource;
 use tddy_remote_shell::RemoteShell;
 use tddy_rpc::Status;
 use tddy_worktree_service::target_worktrees::TargetShells;
 
-/// Target shells resolved as a session start resolves them, Coder credentials read from
-/// `credentials`.
-pub struct SessionTargetShells {
-    credentials: Arc<dyn CoderCredentialSource>,
-}
-
-impl SessionTargetShells {
-    /// Target shells whose Coder workspaces are reached with credentials from `credentials`.
-    #[must_use]
-    pub fn new(credentials: Arc<dyn CoderCredentialSource>) -> Self {
-        Self { credentials }
-    }
-}
+pub use crate::tab_target_shell::SessionTargetShells;
 
 #[async_trait]
 impl TargetShells for SessionTargetShells {
@@ -35,7 +23,7 @@ impl TargetShells for SessionTargetShells {
         crate::opencode_cli_spawn::session_start::shell_for_session_target(
             target,
             subject,
-            self.credentials.as_ref(),
+            self.coder_credentials.as_ref(),
         )
     }
 }
@@ -43,7 +31,9 @@ impl TargetShells for SessionTargetShells {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use tddy_host_service::coder_workspaces::{CoderCredentialError, CoderCredentials};
+    use tddy_host_service::coder_workspaces::{
+        CoderCredentialError, CoderCredentialSource, CoderCredentials,
+    };
     use tddy_rpc::Code;
 
     use super::*;
