@@ -230,6 +230,7 @@ written twice. See
 | `pending_answers.rs` | 249 | `PendingAnswers`, the in-memory waiters |
 | `orchestrator_presence.rs` | 32 | the `OrchestratorPresence` port and `NoOrchestratorIsActive` |
 | `service/hook_reports.rs` | 215 | the two hook reports' bodies, `report_session_status_impl` and `report_agent_activity_impl`, as inherent methods: a trait impl cannot be split across files and `restructure`'s `extract_method` is refused inside an `#[async_trait]` impl, so the trait methods delegate here |
+| `service/transcript_messages.rs` | 54 | `record_spoken_message`: a status report's `prompt` (`UserPromptSubmit`) and `last_assistant_message` (`Stop`) appended to `acp-transcript.jsonl` as user and agent message frames, for the session's own conversation only |
 
 Production lines are counted to the first `#[cfg(test)]`; the budget is 500.
 

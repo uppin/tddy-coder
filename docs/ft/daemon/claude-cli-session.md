@@ -850,6 +850,23 @@ The `PreToolUse` question matcher is not installed on a target, so Claude asks i
 terminal. `.tddy/hooks.log` and `.tddy/answers/` are kept out of the checkout's git status
 (`info/exclude`) and both are removed when the session goes.
 
+### The transcript holds what was said
+
+Only the coder presenter writes `acp-transcript.jsonl`, so a claude-cli session's own transcript would
+be its tool calls alone. The status report appends the two texts the hooks already carry: `UserPromptSubmit`'s
+`prompt` becomes a user message and `Stop`'s `last_assistant_message` an agent message, each stamped
+when it was reported, so `ReadSessionTranscript` and the Activities view list them in order among the
+tool calls. This holds for local and target sessions alike, since both reach the same report handling.
+
+- An empty or absent text adds nothing: a turn that ends with no reply text adds no agent message.
+- Only the session's own conversation is recorded — the last of its recorded conversations, else the
+  session id. A Claude in an agent tab fires the session's hooks too, and its prompts and replies are
+  not the session's transcript.
+- The texts are the hook payload's, not Claude's own transcript file: thoughts and intermediate text
+  stay out, and no file is read over a target's shell.
+- A live `StreamAcpReplay` tail follows tool calls only; the two messages appear on the next read.
+  Recorded in `docs/dev/todo/2026-11-21-transcript-text-has-no-live-tail.md`.
+
 ### Hook wiring
 
 `start_claude_cli_session` generates a per-session UUID `hook_token` and calls
