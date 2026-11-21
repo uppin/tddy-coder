@@ -536,6 +536,13 @@ async fn an_unsandboxed_claude_cli_start_runs_the_spec_binary_with_the_argv_its_
                 .join("agent-system-prompt.md")
                 .to_string_lossy()
                 .into_owned(),
+            "--settings".to_string(),
+            tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+                &worktree_of(sessions_tmp.path(), &session_id),
+                &session_id
+            )
+            .to_string_lossy()
+            .into_owned(),
         ]
     );
     assert_eq!(launch.cwd, worktree_of(sessions_tmp.path(), &session_id));

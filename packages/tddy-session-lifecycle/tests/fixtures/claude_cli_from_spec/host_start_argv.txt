@@ -7,3 +7,5 @@ claude-opus-4-8
 auto
 --append-system-prompt-file
 <SESSIONS>/sessions/<SESSION_ID>/agent-system-prompt.md
+--settings
+<WORKTREE>/.tddy/hooks/<SESSION_ID>/claude-settings.json
