@@ -3,8 +3,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::tmux::{tmux_attach_argv, tmux_binary};
-
 use super::{pty_handle, CliSessionManager, MAIN_TERMINAL_ID};
 
 impl CliSessionManager {
@@ -26,19 +24,7 @@ impl CliSessionManager {
         kind: &str,
         name: &str,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        let argv = tmux_attach_argv(&tmux_binary(), name);
-        self.spawn_tool(
-            session_id,
-            MAIN_TERMINAL_ID,
-            kind,
-            worktree,
-            "",
-            argv,
-            Vec::new(),
-            Some(os_user),
-            None,
-            Some(name),
-        )
-        .await
+        self.attach_terminal_to_tmux(session_id, MAIN_TERMINAL_ID, kind, worktree, os_user, name)
+            .await
     }
 }

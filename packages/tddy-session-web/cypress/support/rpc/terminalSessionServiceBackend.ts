@@ -127,13 +127,19 @@ export function aTerminalSessionServiceFake(
   }[] = [];
 
   // Live bash-terminal list — mutated by Start/Stop so ListTerminalSessions stays consistent.
-  const liveTerminals: { terminalId: string; kind: string; pid: number; tmuxSession: string }[] = (
-    scenario.terminals ?? []
-  ).map((t, i) => ({
+  // `launch` is the chain the daemon reports: the requested wrappers around the agent, outermost first.
+  const liveTerminals: {
+    terminalId: string;
+    kind: string;
+    pid: number;
+    tmuxSession: string;
+    launch: { kind: string; properties: Record<string, string> }[];
+  }[] = (scenario.terminals ?? []).map((t, i) => ({
     terminalId: t.terminalId,
     kind: t.kind ?? "bash",
     pid: t.pid ?? 8000 + i,
     tmuxSession: "",
+    launch: [],
   }));
   const nextTerminalId = scenario.newTerminalId ?? ((index: number) => `bash-${index + 1}`);
 
@@ -194,6 +200,13 @@ export function aTerminalSessionServiceFake(
         kind: req.kind === "" ? "bash" : req.kind,
         pid: 8000 + liveTerminals.length,
         tmuxSession: req.tmuxSession,
+        launch:
+          req.wrappers.length === 0
+            ? []
+            : [
+                ...req.wrappers.map((w) => ({ kind: w.kind, properties: { ...w.properties } })),
+                { kind: "agent", properties: { harness: req.kind } },
+              ],
       });
       return create(StartTerminalSessionResponseSchema, { terminalId });
     },

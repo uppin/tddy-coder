@@ -1,8 +1,10 @@
 # `terminal_session.TerminalSessionService` (tddy-terminal-rpc)
 
 The nine RPCs that carry a terminal, and the one implementation behind them. The proto is
-`packages/tddy-terminal-rpc/proto/terminal_session.proto`; the service is `src/service.rs`, with
-the host port types in `src/service/ports.rs`; the streaming logic every method shares is `src/bridge.rs`.
+`packages/tddy-terminal-rpc/proto/terminal_session.proto`; the service is `src/service.rs` — the handlers —
+with the host port types in `src/service/ports.rs`, the entry a host registers and its coordinate in
+`src/service/entry.rs`, and the control-lease relay and gate (`relay_control_changes`, the event
+channel capacity, `may_resize_on_open`, `control_verifier`) in `src/service/control_relay.rs`; the streaming logic every method shares is `src/bridge.rs`.
 
 Product contract: [terminal-sessions.md](../../../docs/ft/daemon/terminal-sessions.md).
 
@@ -16,7 +18,7 @@ Product contract: [terminal-sessions.md](../../../docs/ft/daemon/terminal-sessio
 | `GetTerminalHistory` | server stream | Bytes older than what a stream replayed, addressed by absolute offsets. |
 | `StartTerminalSession` | unary | Spawn the tool `kind` names — the login shell, a CLI harness, or a tmux client attached to `tmux_session` — in the session's checkout and return its `terminal_id`. |
 | `StopTerminalSession` | unary | Terminate one tool and deregister it. |
-| `ListTerminalSessions` | unary | The tools running in a session, each with its `kind` and, for a tmux terminal, its `tmux_session`. |
+| `ListTerminalSessions` | unary | The tools running in a session, each with its `kind`, for a tmux terminal its `tmux_session`, and its recorded launch chain (`launch`, from `TerminalRoster::launch_chains`). |
 | `ListTmuxSessions` | unary | The tmux sessions on the session's host for the caller's OS user (name, windows, attached clients) — what a `tmux` terminal can attach to. |
 | `ClaimTerminalControl` | unary | Take the session's single-screen control lease, optionally by stealing it. |
 | `WatchTerminalControl` | server stream | Lease changes, starting with an immediate snapshot. |
@@ -54,7 +56,7 @@ a handler has no per-host branch in it.
 |---|---|
 | `TerminalSessionStore` | Which live terminal a `(session_id, terminal_id)` names — after the host's own auth. An empty `terminal_id` resolves to the reserved `"main"`. |
 | `TerminalSession` | One live terminal: its capture (screen model and replay ring), its stdout broadcast, its exit watch, its acked-offset watch, resize and input. |
-| `TerminalRoster` | Starting (from a `TerminalLaunch`), stopping and listing the tools a session runs. |
+| `TerminalRoster` | Starting (from a `TerminalLaunch`), stopping and listing the tools a session runs, and `launch_chains` — the launch chain each terminal was started through, by terminal id (a default method answering none, for a host that keeps no roster). |
 | `TerminalControl` | The single-screen control lease — claim, steal, and the change broadcast. |
 
 `TerminalSessionPorts` also carries **`recorded_history: Arc<dyn RecordedTerminalHistory>`** — the
@@ -327,7 +329,11 @@ opens through `RoomSession::open_duplex("terminal.TerminalService", "StreamTermi
 `TerminalKind::Bash`; `"tmux"` (`TMUX_KIND`) with a non-empty `tmux_session` is
 `TerminalKind::Tmux { session }`, and without one `INVALID_ARGUMENT`; `"tmux-new"` (`TMUX_NEW_KIND`) with a non-empty `tmux_session`
 is `TerminalKind::TmuxNew { session }` (empty: `INVALID_ARGUMENT`); anything else is
-`TerminalKind::Agent(kind)` — resolves the login shell, and hands the roster
+`TerminalKind::Agent(kind)`. With `wrappers` the handler reads the request through
+`TerminalKind::from_wrapped_request(kind, tmux_session, wrappers)`: none is `from_request`; a single
+`"tmux"` wrapper (`TMUX_WRAPPER_KIND`) around an agent kind is `TerminalKind::TmuxWrappedAgent { agent }`;
+any other wrapper, a second one, or a tmux wrapper around a non-agent is `INVALID_ARGUMENT` naming what
+was refused. The handler resolves the login shell, and hands the roster
 `start(session_id, &TerminalLaunch { kind, login_shell, os_user })`, `os_user` being the OS user the
 token maps to (who a tmux terminal runs as). A started terminal's `TerminalDescriptor` carries
 `tmux_session: Option<String>`, which `ListTerminalSessions` sends as `TerminalSessionInfo.tmux_session`
@@ -344,12 +350,18 @@ is one the host runs is the roster's decision, because only the host knows its h
   or when `TmuxHost::list` does not hold that name (`NOT_FOUND`); otherwise
   `CliSessionManager::start_tmux_terminal` spawns `tmux -T clipboard attach-session -t =<session>` as
   that user. `TmuxNew { session }` validates the name first (`tmux_session_name`), then spawns
-  `tmux -T clipboard new-session -A -s <name> -c <worktree>` the same way.
+  `tmux -T clipboard new-session -A -s <name> -c <worktree>` the same way. `TmuxWrappedAgent { agent }`
+  starts the agent in a tmux session of its own (`agent_tab_tmux_session_name`) as `launch.os_user`
+  after the same reachability check, then attaches a client tab with
+  `CliSessionManager::attach_terminal_to_tmux`; the tmux session is killed when the attach fails.
+  Every started tab is recorded in the session's tab roster with its launch chain
+  (`recorded_tabs.rs`), and `StopTerminalSession` of a wrapped tab ends its tmux session before the
+  tab; a tab that cannot be recorded is stopped and the start fails.
   Either kind starts in the session's worktree: the live main terminal's, or — for a stopped
   session — the one its session directory records (`recorded_worktree`, `FAILED_PRECONDITION`
   naming the session when there is none).
 - **`tddy-coder`** (`CoderTerminalRoster`) runs `Bash` only and refuses `Agent(_)` with
-  `INVALID_ARGUMENT` "this session's terminals run bash only", and `Tmux { .. }` / `TmuxNew { .. }` with
+  `INVALID_ARGUMENT` "this session's terminals run bash only" (`TmuxWrappedAgent { .. }` included), and `Tmux { .. }` / `TmuxNew { .. }` with
   `FAILED_PRECONDITION` "tmux is not offered here".
 
 A kind is a registered harness name, never an argv, so a client cannot choose the binary.

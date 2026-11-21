@@ -12,12 +12,18 @@ type TerminalClient = Client<typeof TerminalSessionService>;
 /** The reserved main terminal id — the coding Agent tab. Never handed out by StartTerminalSession. */
 export const AGENT_TERMINAL_ID = "main";
 
+/** The wrapper kind that runs an agent tab in a tmux session of its own. */
+export const TMUX_WRAPPER_KIND = "tmux";
+
 /** A started terminal of this session: its id, and what it runs (`bash`, or a harness's session type). */
 export interface SessionTerminal {
   readonly terminalId: string;
   readonly kind: string;
   /** The tmux session a `tmux` terminal is attached to; absent for every other kind. */
   readonly tmuxSession?: string;
+  /** True when the terminal's agent runs wrapped in tmux (its launch chain starts with a tmux
+   *  wrapper), rather than being attached to a tmux session of the user's. */
+  readonly inTmux?: boolean;
 }
 
 export interface SessionTerminalsController {
@@ -28,8 +34,8 @@ export interface SessionTerminalsController {
   /** Focus an existing terminal tab. */
   setActive: (terminalId: string) => void;
   /** Start a terminal of `kind` (`bash`, a harness's session type, or `tmux` attached to
-   *  `tmuxSession`), append its tab, focus it. */
-  open: (kind: string, tmuxSession?: string) => void;
+   *  `tmuxSession`), run wrapped in `wrappers` (outermost first), append its tab, focus it. */
+  open: (kind: string, tmuxSession?: string, wrappers?: readonly string[]) => void;
   /** Stop a terminal, remove its tab, and fall back to the Agent tab if it was focused. */
   close: (terminalId: string) => void;
   /** Drop a tab whose terminal has already ended (its output stream closed) — no Stop RPC. */
@@ -88,6 +94,7 @@ export function useSessionTerminals({
             kind: t.kind,
             // Empty on the wire for every kind but tmux; absent here, as on `SessionTerminal`.
             tmuxSession: t.tmuxSession || undefined,
+            inTmux: t.launch[0]?.kind === TMUX_WRAPPER_KIND,
           }));
         setTerminals((prev) => {
           // Merge: keep any locally-opened tab not yet reflected by the daemon list.
@@ -117,7 +124,7 @@ export function useSessionTerminals({
   }, []);
 
   const open = useCallback(
-    (kind: string, tmuxSession?: string) => {
+    (kind: string, tmuxSession?: string, wrappers: readonly string[] = []) => {
       if (!client) {
         setError(hostNotConnectedText(null));
         return;
@@ -132,6 +139,7 @@ export function useSessionTerminals({
             controlToken,
             kind: requestedKind,
             tmuxSession: tmuxSession ?? "",
+            wrappers: wrappers.map((wrapper) => ({ kind: wrapper })),
           });
           const id = res.terminalId;
           if (!id) {
@@ -140,7 +148,10 @@ export function useSessionTerminals({
           setTerminals((prev) =>
             prev.some((t) => t.terminalId === id)
               ? prev
-              : [...prev, { terminalId: id, kind, tmuxSession }],
+              : [
+                  ...prev,
+                  { terminalId: id, kind, tmuxSession, inTmux: wrappers[0] === TMUX_WRAPPER_KIND },
+                ],
           );
           setActiveTerminalId(id);
           setError(null);

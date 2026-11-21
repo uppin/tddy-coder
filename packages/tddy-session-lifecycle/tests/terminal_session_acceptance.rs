@@ -343,6 +343,7 @@ async fn start_terminal_session_returns_fresh_terminal_id() {
             control_token: String::new(),
             kind: String::new(),
             tmux_session: String::new(),
+            wrappers: Vec::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed");
@@ -373,6 +374,7 @@ async fn list_terminal_sessions_returns_main_and_started() {
             control_token: String::new(),
             kind: String::new(),
             tmux_session: String::new(),
+            wrappers: Vec::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed")
@@ -419,6 +421,7 @@ async fn stop_terminal_session_removes_from_list() {
             control_token: String::new(),
             kind: String::new(),
             tmux_session: String::new(),
+            wrappers: Vec::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed")
@@ -498,6 +501,7 @@ async fn terminal_session_rpcs_require_valid_token() {
             control_token: String::new(),
             kind: String::new(),
             tmux_session: String::new(),
+            wrappers: Vec::new(),
         }))
         .await
         .expect_err("StartTerminalSession with bad token must fail");
@@ -543,6 +547,7 @@ async fn stream_terminal_output_routes_by_terminal_id() {
             control_token: String::new(),
             kind: String::new(),
             tmux_session: String::new(),
+            wrappers: Vec::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed")
@@ -605,6 +610,7 @@ async fn send_terminal_input_targets_identified_terminal() {
             control_token: String::new(),
             kind: String::new(),
             tmux_session: String::new(),
+            wrappers: Vec::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed")

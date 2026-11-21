@@ -15,6 +15,15 @@ in tmux's scrollback.
 - If the agent ends while detached (the watcher notices and cleans up), `GetTerminalHistory` serves
   the recording as of the client's exit, never the agent's final output.
 
+## Applies to tabs too
+
+Since `#session-liveness` 2/4 (#959) an agent tab can run wrapped in tmux (`tddy-<session id>-<terminal id>`),
+and each such tab has its own detach watcher. The gap is the same for it: a tab's recording is written by
+its tmux client, so what the agent prints after the client ended — a daemon restart, a closed browser tab,
+a re-attach that has not happened yet — is only in tmux's scrollback. The capture the entry proposes below
+therefore has to run per watched terminal, not per session: one `capture-pane` snapshot per
+`(session, terminal)` watcher poll, written to that terminal's own recording.
+
 ## Why deferred
 
 #815 is the survive-and-re-attach node; recording while detached needs a reader of the tmux server

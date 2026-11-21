@@ -108,8 +108,16 @@ async fn reattach_when_recorded(
     let session_dir = unified_session_dir_path(tddy_data_dir, session_id);
     let meta = tddy_core::read_session_metadata(&session_dir)
         .map_err(|_| ReattachSkip::UnreadableRecord)?;
-    if meta.tmux_session.is_none() {
-        return Err(ReattachSkip::NotTmuxRun);
+    match crate::tmux_main_roster::main_ran_in_tmux(&session_dir, &meta) {
+        Ok(true) => {}
+        Ok(false) => return Err(ReattachSkip::NotTmuxRun),
+        Err(error) => {
+            log::warn!(
+                target: "tddy_daemon::claude_cli_session",
+                "the tab roster of {session_id} cannot be read, so its main is not re-attached: {error:#}"
+            );
+            return Err(ReattachSkip::UnreadableRecord);
+        }
     }
     require_live_tmux_session(os_user, session_id).await?;
     let worktree_path =

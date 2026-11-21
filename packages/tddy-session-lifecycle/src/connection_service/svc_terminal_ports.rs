@@ -11,14 +11,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tddy_cli_sessions::tmux::{
-    ensure_reachable, tmux_attach_argv, tmux_binary, tmux_new_session_argv, tmux_session_name,
-};
-use tddy_daemon_kernel::privilege_drop::EffectiveIdentity;
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::{
-    ControlChange, ControlClaim, MainReattach, TerminalControl, TerminalDescriptor, TerminalKind,
-    TerminalLaunch, TerminalRoster, TerminalSessionPorts, TmuxHost,
+    ControlChange, ControlClaim, MainReattach, TerminalControl, TerminalDescriptor, TerminalLaunch,
+    TerminalRoster, TerminalSessionPorts, TmuxHost,
 };
 use tokio::sync::broadcast;
 
@@ -26,6 +22,7 @@ use super::DaemonSessionHost;
 use crate::cli_session_manager::{CliSessionManager, ReattachOutcome};
 use crate::terminal_session_adapter::DaemonTerminalSessionStore;
 
+mod recorded_tabs;
 mod recorded_worktree;
 mod tmux_host;
 
@@ -141,7 +138,7 @@ impl DaemonSessionHost {
 ///
 /// Single-flight per session: concurrent first accesses wait on one lock, and the second finds the
 /// main the first attached.
-struct TmuxMainReattach {
+pub(super) struct TmuxMainReattach {
     manager: Arc<CliSessionManager>,
     /// The coding agents this daemon installed: what a record is re-attached as.
     coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
@@ -154,7 +151,7 @@ struct TmuxMainReattach {
 }
 
 impl TmuxMainReattach {
-    fn new(
+    pub(super) fn new(
         manager: Arc<CliSessionManager>,
         coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
         tddy_data_dir: PathBuf,
@@ -173,7 +170,7 @@ impl TmuxMainReattach {
     /// server were pointed at when it started. A user this daemon can no longer serve (under the
     /// supervisor, one dropped from `agent_tool_sockets:`) still gets the terminal back: the refusal
     /// is logged, naming the setting, and that agent's reports are not answered.
-    async fn serve_agent_tool_socket_of(&self, os_user: &str, session_id: &str) {
+    pub(super) async fn serve_agent_tool_socket_of(&self, os_user: &str, session_id: &str) {
         if let Err(e) = self
             .agent_tool_sockets
             .ensure_bound(os_user, &self.tddy_data_dir)
@@ -187,9 +184,10 @@ impl TmuxMainReattach {
     }
 }
 
-#[async_trait]
-impl MainReattach for TmuxMainReattach {
-    async fn reattach_main(&self, os_user: &str, session_id: &str) -> bool {
+impl TmuxMainReattach {
+    /// Re-attach `session_id`'s main on behalf of `os_user`, and say how that ended. The outcome is
+    /// announced on the manager, as every re-attach attempt is.
+    pub(super) async fn attach(&self, os_user: &str, session_id: &str) -> ReattachOutcome {
         let gate = Arc::clone(
             self.in_flight
                 .lock()
@@ -220,8 +218,15 @@ impl MainReattach for TmuxMainReattach {
         if Arc::strong_count(&gate) == 2 {
             in_flight.remove(session_id);
         }
+        attached
+    }
+}
+
+#[async_trait]
+impl MainReattach for TmuxMainReattach {
+    async fn reattach_main(&self, os_user: &str, session_id: &str) -> bool {
         matches!(
-            attached,
+            self.attach(os_user, session_id).await,
             ReattachOutcome::Reattached | ReattachOutcome::AlreadyAttached
         )
     }
@@ -301,87 +306,13 @@ impl TerminalRoster for CliManagerTerminalRoster {
             Some(main) => main.worktree_path.clone(),
             None => recorded_worktree::recorded_worktree(&self.tddy_data_dir, session_id)?,
         };
-        let handle = match &launch.kind {
-            TerminalKind::Bash => self
-                .manager
-                .start_terminal(session_id, worktree, &launch.login_shell)
-                .await
-                .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?,
-            TerminalKind::Agent(kind) => {
-                let spec = self
-                    .coding_agents
-                    .agents()
-                    .for_session_type(kind)
-                    .ok_or_else(|| {
-                        Status::invalid_argument(format!("unknown terminal kind {kind:?}"))
-                    })?;
-                // The binary is the agent spec's, resolved on this host (`#agent-tools 19/19`): its
-                // `binary.env`, then the host's search, refusing what is found nowhere.
-                let binary = self
-                    .coding_agents
-                    .resolve(&spec.id, None)
-                    .map_err(|e| Status::failed_precondition(e.to_string()))?
-                    .tool
-                    .binary;
-                // A tab is a conversation of its own: an agent told a session id gets a fresh
-                // one, never the session's. The argv is the spec's `run.argv` rendered with it.
-                let conversation_id = uuid::Uuid::now_v7().to_string();
-                let argv = spec
-                    .render_run_argv(
-                        &binary,
-                        &[
-                            ("session_id", conversation_id.as_str()),
-                            ("chat_id", conversation_id.as_str()),
-                        ],
-                        &[],
-                    )
-                    .map_err(|e| Status::failed_precondition(e.to_string()))?;
-                self.manager
-                    .start_agent_terminal(session_id, worktree, kind, argv)
-                    .await
-                    .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
-            }
-            TerminalKind::Tmux { session } => {
-                // Reachability first: a daemon that cannot become the session's user refuses with
-                // the named error, and never starts the tab as the daemon user.
-                ensure_reachable(&launch.os_user, &EffectiveIdentity::current())?;
-                // Checked before anything spawns: a client for a name tmux does not hold would
-                // attach to nothing and exit, leaving a dead tab behind.
-                let sessions = self.tmux.list(&launch.os_user).await?;
-                if !sessions.iter().any(|listed| listed.name == *session) {
-                    return Err(Status::not_found(format!(
-                        "no tmux session named {session:?} on this host for this user"
-                    )));
-                }
-                let binary = tmux_binary();
-                self.manager
-                    .start_tmux_terminal(
-                        session_id,
-                        worktree,
-                        &launch.os_user,
-                        tmux_attach_argv(&binary, session),
-                        session,
-                    )
-                    .await
-                    .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
-            }
-            TerminalKind::TmuxNew { session } => {
-                // The name is validated before anything else, so a refused name never reaches tmux.
-                let name = tmux_session_name(session)?;
-                ensure_reachable(&launch.os_user, &EffectiveIdentity::current())?;
-                let binary = tmux_binary();
-                let argv = tmux_new_session_argv(&binary, &name, &worktree);
-                self.manager
-                    .start_tmux_terminal(session_id, worktree, &launch.os_user, argv, &name)
-                    .await
-                    .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
-            }
-        };
-        Ok(handle.terminal_id.clone())
+        let tab = self.start_tab(session_id, worktree, launch).await?;
+        self.record_started(session_id, &tab).await?;
+        Ok(tab.handle.terminal_id.clone())
     }
 
     async fn stop(&self, session_id: &str, terminal_id: &str) -> bool {
-        self.manager.stop_terminal(session_id, terminal_id).await
+        self.close_tab(session_id, terminal_id).await
     }
 
     async fn list(&self, session_id: &str) -> Vec<TerminalDescriptor> {
@@ -396,5 +327,18 @@ impl TerminalRoster for CliManagerTerminalRoster {
                 tmux_session: handle.tmux_session.clone(),
             })
             .collect()
+    }
+
+    async fn launch_chains(
+        &self,
+        session_id: &str,
+    ) -> Result<
+        std::collections::HashMap<
+            String,
+            Vec<tddy_terminal_rpc::proto::terminal_session::LaunchNode>,
+        >,
+        Status,
+    > {
+        self.recorded_chains(session_id)
     }
 }

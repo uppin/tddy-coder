@@ -8,6 +8,8 @@ import {
   byTestId,
   sessionsTerminalTab,
   sessionsTerminalTabNewOption,
+  sessionsTerminalTabNewInTmuxOption,
+  sessionsTerminalTabTmuxMarker,
   sessionsTerminalTabClose,
   sessionsTerminalPane,
   sessionsTerminalPaneStack,
@@ -71,6 +73,14 @@ export const sessionTerminalTabsPage = {
   /** The "+" menu's tmux section when the host cannot list tmux sessions. */
   tmuxError: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId("sessions-terminal-tab-new-tmux-error", { timeout: 10000, ...options }),
+
+  /** The "+" menu's item opening an agent tab of `kind` wrapped in tmux. */
+  newTabInTmuxOption: (kind: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsTerminalTabNewInTmuxOption(kind), { timeout: 10000, ...options }),
+
+  /** The tmux marker on the tab of `terminalId`, drawn when its terminal runs wrapped in tmux. */
+  tmuxMarker: (terminalId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsTerminalTabTmuxMarker(terminalId), { timeout: 10000, ...options }),
 
   /** A single bash terminal tab, keyed by terminal id. */
   tab: (terminalId: string, options?: Parameters<typeof cy.get>[1]) =>

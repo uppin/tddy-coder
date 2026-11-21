@@ -129,6 +129,8 @@ pub struct CliSessionManager {
     agent_end_tx: agent_end::AgentEndSender,
     /// Where finished re-attach attempts are announced — [`Self::reattach_finished`].
     reattach_tx: reattach_outcome::ReattachSender,
+    /// The one writer of every session's `tabs.yaml` — [`Self::tab_rosters`].
+    tab_rosters: crate::tab_roster_store::TabRosterStore,
 }
 
 impl Default for CliSessionManager {
@@ -162,6 +164,7 @@ impl CliSessionManager {
             exit_hook_watched: tmux_exit_hook::ExitHookWatched::default(),
             agent_end_tx: agent_end::agent_end_channel(),
             reattach_tx: reattach_outcome::reattach_channel(),
+            tab_rosters: crate::tab_roster_store::TabRosterStore::new(),
         }
     }
 
@@ -185,10 +188,18 @@ mod control_lease;
 
 mod terminals;
 
+mod recorded_terminals;
+pub use recorded_terminals::RecordedTerminal;
+
+#[cfg(test)]
+mod recorded_terminals_tests;
+
 #[cfg(test)]
 mod live_agent_sessions_tests;
 
 mod tmux_main;
+
+mod tmux_terminal;
 
 mod tmux_reattach;
 pub use tmux_reattach::{classify_main_exit, MainExit};

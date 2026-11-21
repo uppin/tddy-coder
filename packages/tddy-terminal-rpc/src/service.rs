@@ -17,6 +17,8 @@
 //! coder-local PTY) differs per host while the streaming, replay and control semantics above do
 //! not.
 
+mod control_relay;
+mod entry;
 mod ports;
 mod recorded_history;
 
@@ -24,7 +26,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
-use tokio::sync::broadcast;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
@@ -32,6 +33,7 @@ use crate::bridge::{
     resolved_terminal_id, serve_get_terminal_history_with, serve_send_terminal_input_to,
     serve_stream_session_terminal_io_with, serve_stream_terminal_output_with, MAIN_TERMINAL_ID,
 };
+use crate::proto::terminal_session::TerminalSessionService;
 use crate::proto::terminal_session::{
     ClaimTerminalControlRequest, ClaimTerminalControlResponse, GetTerminalHistoryRequest,
     ListTerminalSessionsRequest, ListTerminalSessionsResponse, ListTmuxSessionsRequest,
@@ -41,17 +43,10 @@ use crate::proto::terminal_session::{
     TerminalControlEvent, TerminalHistoryChunk, TerminalSessionInfo, TmuxSessionInfo,
     WatchTerminalControlRequest,
 };
-use crate::proto::terminal_session::{TerminalSessionService, TerminalSessionServiceServer};
 use crate::session::TerminalSession;
 
-/// How many control events are buffered for a `WatchTerminalControl` subscriber before the relay
-/// waits on it.
-///
-/// A lease changes when a human clicks "Claim terminal", so a screen that cannot keep up with
-/// sixteen of those is not reading its stream at all — and making the relay wait is the right
-/// answer there, rather than growing a queue nobody drains.
-const CONTROL_EVENT_CHANNEL_CAPACITY: usize = 16;
-
+use control_relay::{relay_control_changes, CONTROL_EVENT_CHANNEL_CAPACITY};
+pub use entry::{build_terminal_session_entry, TERMINAL_SESSION_SERVICE};
 pub use ports::*;
 use recorded_history::serve_recorded_history;
 pub use recorded_history::{NoRecordedHistory, RecordedTerminalHistory};
@@ -145,46 +140,7 @@ impl TerminalSessionServiceImpl {
         }
         resolved.ok_or_else(|| Status::not_found("terminal not found or not running"))
     }
-
-    /// Whether an open may resize the PTY to the grid it measured.
-    ///
-    /// Opening a terminal is watching, so it is served without a lease — but the grid it carries
-    /// resizes the PTY, and that is driving: a phone merely looking at a session a desktop drives
-    /// would otherwise reflow the desktop's terminal to the phone's width. So the grid is honoured
-    /// under the same rule as input ([`Self::controlled_terminal`]), and a watcher's open is served
-    /// at whatever size the driving screen set.
-    async fn may_resize_on_open(
-        &self,
-        session_id: &str,
-        terminal_id: &str,
-        control_token: &str,
-    ) -> bool {
-        let terminal_id = resolved_terminal_id(terminal_id);
-        let gated = self
-            .ports
-            .terminals
-            .get_terminal(session_id, terminal_id)
-            .await
-            .is_some_and(|session| session.requires_control());
-        !gated || self.ports.control.verify(session_id, control_token).await
-    }
-
-    /// A `verify_control` closure for the bidi bridge, which re-checks every subsequent input chunk
-    /// so a screen that loses the lease mid-stream stops being able to type.
-    fn control_verifier(&self) -> impl Fn(&str, &str) -> ControlVerification + Send + Sync + use<> {
-        let control = Arc::clone(&self.ports.control);
-        move |session_id: &str, control_token: &str| {
-            let control = Arc::clone(&control);
-            let session_id = session_id.to_string();
-            let control_token = control_token.to_string();
-            Box::pin(async move { control.verify(&session_id, &control_token).await })
-        }
-    }
 }
-
-/// The future [`TerminalSessionServiceImpl::control_verifier`] hands the bridge. Boxed because the
-/// closure it comes from is returned from a method, so its `async move` body has no nameable type.
-type ControlVerification = std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>;
 
 /// A session id as the handlers key on it: whitespace-trimmed.
 ///
@@ -351,7 +307,7 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         let session_id = keyed_session_id(&req.session_id);
 
         let launch = TerminalLaunch {
-            kind: TerminalKind::from_request(&req.kind, &req.tmux_session)?,
+            kind: TerminalKind::from_wrapped_request(&req.kind, &req.tmux_session, &req.wrappers)?,
             login_shell: crate::login_shell::login_shell_for(&os_user),
             os_user,
         };
@@ -395,6 +351,7 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         self.os_user(&req.session_token)?;
         let session_id = keyed_session_id(&req.session_id);
 
+        let mut launch_chains = self.ports.roster.launch_chains(&session_id).await?;
         let terminals = self
             .ports
             .roster
@@ -402,6 +359,9 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
             .await
             .into_iter()
             .map(|terminal| TerminalSessionInfo {
+                launch: launch_chains
+                    .remove(&terminal.terminal_id)
+                    .unwrap_or_default(),
                 terminal_id: terminal.terminal_id,
                 kind: terminal.kind,
                 pid: terminal.pid,
@@ -503,71 +463,5 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
             tx,
         ));
         Ok(Response::new(ReceiverStream::new(rx)))
-    }
-}
-
-/// Forward the lease changes of one session as `TerminalControlEvent`s.
-///
-/// `you_are_controller` is re-derived from the watcher's own token on every change rather than
-/// inferred from the holder id: the two disagree exactly when this screen is the one being
-/// displaced, which is the case the CTA exists for.
-async fn relay_control_changes(
-    session_id: String,
-    control_token: String,
-    control: Arc<dyn TerminalControl>,
-    mut changes: broadcast::Receiver<ControlChange>,
-    tx: tokio::sync::mpsc::Sender<Result<TerminalControlEvent, Status>>,
-) {
-    use tokio::sync::broadcast::error::RecvError;
-    loop {
-        match changes.recv().await {
-            Ok(change) if change.session_id == session_id => {
-                let you_are_controller = control.verify(&session_id, &control_token).await;
-                let event = TerminalControlEvent {
-                    holder_screen_id: change.holder_screen_id,
-                    you_are_controller,
-                };
-                if tx.send(Ok(event)).await.is_err() {
-                    break;
-                }
-            }
-            Ok(_) => {}
-            Err(RecvError::Lagged(_)) => {}
-            Err(RecvError::Closed) => break,
-        }
-    }
-}
-
-/// The coordinate `terminal_session.proto`'s nine methods are served at.
-///
-/// A routing address has to be spelled the same by the host that registers it and by every caller
-/// that puts it on the wire, and nothing checks that it is: a mismatch is a **runtime** "unknown
-/// service", reported as a failure of the method rather than of the spelling. So the name is
-/// published once, here, and consumed by both ends.
-///
-/// It lives in this crate rather than in `tddy-service` (where the cross-crate coordinates of
-/// protos `tddy-service` owns are published) because this crate owns `terminal_session.proto`, is
-/// the only crate that *serves* it — [`build_terminal_session_entry`], and the coder's wrapper
-/// around it, which reads the name off that entry — and is already a dependency of every caller
-/// that addresses it, [`crate::pty_relay`] included.
-pub const TERMINAL_SESSION_SERVICE: &str = "terminal_session.TerminalSessionService";
-
-/// The `terminal_session.TerminalSessionService` entry a host's wiring layer registers.
-///
-/// `#unbundle` node 6 made this crate *serve* the proto it already owned: the nine methods had been
-/// extracted here as [`crate::bridge`] functions but were only ever reachable through
-/// `the pre-unbundle monolithic RPC coordinate`'s duplicate copy of the same schema, with hand-written converters
-/// between the two. Both the copy and the converters are gone; this entry is where the nine
-/// answer.
-///
-/// Takes the whole [`TerminalSessionPorts`] because every field is wiring rather than behaviour:
-/// which identity a token belongs to, which OS user it maps to, where the live terminals and the
-/// control lease live, and what the host's transport accepts as one frame.
-#[must_use]
-pub fn build_terminal_session_entry(ports: TerminalSessionPorts) -> tddy_rpc::ServiceEntry {
-    let server = TerminalSessionServiceServer::new(TerminalSessionServiceImpl::new(ports));
-    tddy_rpc::ServiceEntry {
-        name: TERMINAL_SESSION_SERVICE,
-        service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
     }
 }

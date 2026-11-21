@@ -56,3 +56,10 @@ Related: [`2026-09-24-lifecycle-files-over-the-400-line-target`](../../../../doc
 `DaemonSessionHost` with its doc comment, and `mod svc_askpass_wiring;`. The builder that sets it lives in the new
 `connection_service/svc_askpass_wiring.rs`. Not claimed by any PR; deferred with the other oversized files this change touched in
 `docs/dev/todo/2026-10-17-oversized-files-this-change-grew-by-wiring.md`.
+
+## Measurement update 2026-11-20 — tmux tab re-attach (`#session-liveness` 2/4)
+
+By `tddy-tools restructure lines`: **434 → 437**. The three lines are `mod svc_reattach_live_tmux_tabs;` and its
+`pub use` of the report types; the re-attach itself lives in the new `connection_service/svc_reattach_live_tmux_tabs.rs`,
+as the changeset required. Still under 500 by this metric; the whole-file count this record's status names is unchanged in kind.
+Not claimed, no other change.
