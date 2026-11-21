@@ -105,6 +105,10 @@ this seam: they appear only when a language server is available.
     described above. With an index configured, `ReadLints` is refused rather than answered by a second
     server that would disagree with the index. See
     [`index-backed-executor.md`](../../../packages/tddy-lsp-executor/docs/index-backed-executor.md).
+18. An **orchestrator-role** session is offered the five tools regardless of the per-session flag,
+    each with an optional absolute `root` naming the worktree to query (any worktree in its read
+    reach, or a root it added with `AddLspRoot`); the daemon runs the call with that root as the
+    worktree. See [Project concept § LSP roots](../daemon/project-concept.md#lsp-roots).
 
 ## Testing Plan
 

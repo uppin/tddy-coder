@@ -328,3 +328,8 @@ path that exists without a daemon installed.
   resolves symlinks.
 - **Warming several worktrees at once narrows the per-root benefit**, because the resident
   rust-analyzers compete for CPU.
+- **An orchestrator's added root is not warmed through `Warm`.** `AddLspRoot` starts the load with an
+  empty symbol query through the session's `Lsp*` executor, which has no warm call; the root's first
+  real query may still wait for its graph. There is no unload RPC either: a removed root is unloaded
+  by idle reaping once no session queries it. Backlog:
+  [`2026-11-21-add-lsp-root-warms-by-symbol-query.md`](../../dev/todo/2026-11-21-add-lsp-root-warms-by-symbol-query.md).

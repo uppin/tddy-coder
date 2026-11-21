@@ -51,8 +51,9 @@ fn now_unix_ms() -> u64 {
 /// Ask the registered language-server executor about `root` in the background, so the index loads
 /// it before the first real query. Best effort: a host with no executor, or one that does not serve
 /// the root, loads it on the first query as before.
-// TODO(orchestrator-lsp): the executor has no explicit warm call (the contract adds no
-// index-daemon RPC); an empty symbol search is the cheapest query that makes it load the root.
+// TODO(docs/dev/todo/2026-11-21-add-lsp-root-warms-by-symbol-query.md): the executor has no warm
+// call and this handler holds no index channel for `code_index.Warm`; an empty symbol search is the
+// cheapest query that makes the index load the root.
 fn warm(root: PathBuf) {
     let Some(executor) = tddy_core::toolcall::lsp::lsp_executor() else {
         return;
