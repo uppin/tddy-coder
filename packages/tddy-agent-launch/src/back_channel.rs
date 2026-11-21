@@ -64,22 +64,111 @@ pub struct BackChannelInputs<'a> {
 
 /// The name a session of an agent with native peer messaging is launched under, and addressed by.
 pub fn native_peer_name_of(session_id: &str) -> String {
-    // TODO(child-back-channel): implement
-    let _ = session_id;
-    unimplemented!("native_peer_name_of")
+    format!("tddy-{session_id}")
 }
 
 /// The channel a child described by `inputs` reports back over.
 pub fn back_channel_for(inputs: &BackChannelInputs<'_>) -> BackChannel {
-    // TODO(child-back-channel): implement
-    let _ = inputs;
-    unimplemented!("back_channel_for")
+    match inputs.placement {
+        ChildPlacement::Target {
+            hook_token,
+            hook_log_path,
+        } => hook_log_channel(hook_token, hook_log_path),
+        ChildPlacement::Local
+            if inputs.child_agent.peer_name().is_some()
+                && inputs.orchestrator_agent.peer_name().is_some() =>
+        {
+            BackChannel::NativePeer {
+                orchestrator_peer_name: native_peer_name_of(inputs.orchestrator_session_id),
+            }
+        }
+        ChildPlacement::Local => BackChannel::ToolsSend,
+    }
+}
+
+fn hook_log_channel(hook_token: &str, hook_log_path: &str) -> BackChannel {
+    BackChannel::HookLog {
+        command: tddy_core::remote_hook_command(
+            tddy_core::REMOTE_MESSAGE_EVENT,
+            hook_token,
+            hook_log_path,
+        ),
+    }
 }
 
 /// The guidance appended to a child's system prompt: who its orchestrator is, to report progress
 /// and status to it periodically, and the exact way to do so over `channel`.
 pub fn back_channel_guidance(orchestrator_session_id: &str, channel: &BackChannel) -> String {
-    // TODO(child-back-channel): implement
-    let _ = (orchestrator_session_id, channel);
-    unimplemented!("back_channel_guidance")
+    let how = match channel {
+        BackChannel::NativePeer {
+            orchestrator_peer_name,
+        } => format!(
+            "Your orchestrator is a Claude Code session on this host, named \
+             `{orchestrator_peer_name}`. Message it by that name with Claude Code's peer \
+             messaging."
+        ),
+        BackChannel::ToolsSend => format!(
+            "Send it a message with:\n\n```bash\ntddy-tools send --to {orchestrator_session_id} \
+             \"<your progress and status>\"\n```\n\nThe command exits non-zero and says why when \
+             the message was not sent."
+        ),
+        BackChannel::HookLog { command } => format!(
+            "This machine has no `tddy-tools`. Send it a message by piping a JSON object whose \
+             `text` is your message into this command, from the directory you were started in:\n\n\
+             ```bash\necho '{{\"text\": \"<your progress and status>\"}}' | {command}\n```\n\n\
+             The text must be valid JSON (escape quotes and newlines). The line is appended to a \
+             log the daemon follows; the command prints nothing when it is written."
+        ),
+    };
+    format!(
+        "## Reporting to your orchestrator\n\nThis session was started by an orchestrator, \
+         session `{orchestrator_session_id}`. Report your progress and status to it periodically: \
+         when you start, after each milestone, when you are blocked, and when you finish. Keep each \
+         report to a few lines.\n\n{how}"
+    )
+}
+
+/// The orchestrator a starting session reports to.
+#[derive(Debug, Clone)]
+pub struct ReportsTo<'a> {
+    pub orchestrator_session_id: &'a str,
+    /// The orchestrator's agent, when it is a coding agent this host knows. An orchestrator whose
+    /// agent is unknown offers no native peer messaging, so a local child reports with
+    /// `tddy-tools send`.
+    pub orchestrator_agent: Option<&'a CodingAgentSpec>,
+}
+
+impl ReportsTo<'_> {
+    /// The guidance for a child running `child_agent` at `placement`.
+    pub fn guidance_for(
+        &self,
+        child_agent: &CodingAgentSpec,
+        placement: ChildPlacement<'_>,
+    ) -> String {
+        let channel = match (self.orchestrator_agent, placement) {
+            (Some(orchestrator_agent), placement) => back_channel_for(&BackChannelInputs {
+                orchestrator_session_id: self.orchestrator_session_id,
+                orchestrator_agent,
+                child_agent,
+                placement,
+            }),
+            (None, ChildPlacement::Local) => BackChannel::ToolsSend,
+            (
+                None,
+                ChildPlacement::Target {
+                    hook_token,
+                    hook_log_path,
+                },
+            ) => hook_log_channel(hook_token, hook_log_path),
+        };
+        back_channel_guidance(self.orchestrator_session_id, &channel)
+    }
+}
+
+/// The arguments that launch a session of `spec` under its native peer name: the spec's
+/// `peer_name` flag and [`native_peer_name_of`] `session_id`; none for an agent without one.
+pub fn peer_name_args(spec: &CodingAgentSpec, session_id: &str) -> Vec<String> {
+    spec.peer_name()
+        .map(|slot| vec![slot.flag.clone(), native_peer_name_of(session_id)])
+        .unwrap_or_default()
 }

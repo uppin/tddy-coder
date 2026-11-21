@@ -175,6 +175,8 @@ impl LaunchSessions {
         // `tddy-tools monitor` / `send` resolve this daemon and authenticate as the session
         // (`#activity-wake` 4/5, 5/5).
         let session_tool_token = self.session_tool_token_for(&start.session_id, &req.session_token);
+        let orchestrator = self.orchestrator_link_of(req);
+        let reports_to = self.reports_to_of(orchestrator.as_ref(), &start.sessions_base);
         crate::opencode_cli_spawn::start_cli_harness_session(
             crate::opencode_cli_spawn::session_start::CliSessionStart {
                 kind: session_agent.kind.clone(),
@@ -204,7 +206,8 @@ impl LaunchSessions {
                     },
                     None => stack_parent::SpawnStackParent::NoParent,
                 },
-                orchestrator: self.orchestrator_link_of(req),
+                orchestrator: orchestrator.clone(),
+                reports_to,
                 initial_prompt: &start.initial_prompt,
                 agents: &mut started_agents,
                 semantic_index: req.semantic_index,
@@ -321,6 +324,7 @@ impl LaunchSessions {
                 selected_branch_to_work_on: "",
                 stack_parent: child.stack_parent,
                 orchestrator: None,
+                reports_to: None,
                 initial_prompt: child.initial_prompt,
                 agents: &mut started_agents,
                 // A spawned child never runs its own semantic index, nor pushes a remote branch.

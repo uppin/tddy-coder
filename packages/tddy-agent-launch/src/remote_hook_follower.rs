@@ -35,9 +35,12 @@ pub(crate) fn shell_quote(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', r"'\''"))
 }
 
-/// Whether `event` is installed by any hooks adapter (Claude Code, Muse or Cursor).
+/// Whether `event` is one a followed log may carry: installed by a hooks adapter (Claude Code,
+/// Muse or Cursor), or the message line a child reports to its orchestrator with
+/// ([`tddy_core::REMOTE_MESSAGE_EVENT`]).
 fn is_installed_event(event: &str) -> bool {
-    tddy_core::claude_hooks::CLAUDE_INSTALLED_EVENTS.contains(&event)
+    event == tddy_core::REMOTE_MESSAGE_EVENT
+        || tddy_core::claude_hooks::CLAUDE_INSTALLED_EVENTS.contains(&event)
         || tddy_core::muse_hooks::MUSE_INSTALLED_EVENTS.contains(&event)
         || tddy_core::cursor_hooks::CURSOR_HOOK_EVENTS.contains(&event)
 }
@@ -226,6 +229,16 @@ impl ActivityHookSink {
 #[async_trait]
 impl HookSink for ActivityHookSink {
     async fn deliver(&self, line: HookLine) {
+        if line.event == tddy_core::REMOTE_MESSAGE_EVENT {
+            crate::remote_hook_message::post_reported_message(
+                self.delivery.as_ref(),
+                &line,
+                &self.session_id,
+                &self.os_user,
+            )
+            .await;
+            return;
+        }
         let payload = line.payload.to_string();
         if let Some(request) = crate::remote_hook_report::reports_a_status(&line)
             .then(|| {

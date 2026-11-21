@@ -65,6 +65,11 @@ pub(crate) struct SessionWiringInputs<'a> {
     pub session_tool_token: Option<String>,
     /// Answers the agent's tools' `github-token` over the managed session's toolcall socket.
     pub github_credential_handler: Option<Arc<dyn tddy_core::toolcall::GithubCredentialHandler>>,
+    /// The orchestrator that started the session, when one did: its system prompt is told how to
+    /// report back (`#orchestra` 2/9).
+    pub reports_to: Option<&'a crate::back_channel::ReportsTo<'a>>,
+    /// Whether the agent runs on a target, which decides the channel it reports over.
+    pub on_target: bool,
 }
 
 /// A session's managed workflow: its recipe and the handlers its toolcall listener is bound to.
@@ -122,6 +127,8 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         role,
         session_tool_token,
         github_credential_handler,
+        reports_to,
+        on_target,
     } = inputs;
     let hooks = (spec.has(Capability::Hooks) || spec.has(Capability::OperatorNotify))
         .then(|| claude_cli_hooks(config, agent_tool_socket, spec, tddy_tools_path));
@@ -168,6 +175,17 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         workflow = Some(launch.workflow);
     }
     if let (true, Some(hooks)) = (spec.has(Capability::OperatorNotify), hooks.as_ref()) {
+        let back_channel = reports_to.map(|reports_to| {
+            let placement = if on_target {
+                crate::back_channel::ChildPlacement::Target {
+                    hook_token: &hooks.hook_token,
+                    hook_log_path: tddy_core::REMOTE_HOOK_LOG,
+                }
+            } else {
+                crate::back_channel::ChildPlacement::Local
+            };
+            reports_to.guidance_for(spec, placement)
+        });
         system_prompt_file = crate::notify_env::agent_notify_unless_role(
             role.name,
             crate::notify_env::AgentNotifyLaunch {
@@ -179,6 +197,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
                 session_dir,
                 managed_prompt_file: system_prompt_file.as_deref(),
             },
+            back_channel.as_deref(),
             &mut notify_env,
         )?;
     }
@@ -340,21 +359,51 @@ impl LaunchSessions {
                 workflow = Some(launch.workflow);
             }
         }
+        let orchestrator = self.resumed_orchestrator_link(session_dir);
+        let sessions_base = session_dir.parent().and_then(Path::parent);
+        let reports_to =
+            sessions_base.and_then(|base| self.reports_to_of(orchestrator.as_ref(), base));
+        let on_target = meta.target.is_some();
         if spec.has(Capability::OperatorNotify) {
-            let notify = crate::notify_env::resumed_agent_notify_launch(
+            let back_channel = reports_to.as_ref().and_then(|reports_to| {
+                let placement = if on_target {
+                    crate::back_channel::ChildPlacement::Target {
+                        hook_token: meta
+                            .hook_token
+                            .as_deref()
+                            .filter(|token| !token.is_empty())?,
+                        hook_log_path: tddy_core::REMOTE_HOOK_LOG,
+                    }
+                } else {
+                    crate::back_channel::ChildPlacement::Local
+                };
+                Some(reports_to.guidance_for(spec, placement))
+            });
+            let notify = crate::notify_env::resumed_agent_notify_launch_reporting(
                 &self.config,
                 &tool_socket,
                 os_user,
                 session_dir,
                 meta,
                 system_prompt_file.as_deref(),
+                back_channel.as_deref(),
             )?;
             notify_env.extend(notify.env);
             system_prompt_file = notify.append_system_prompt_file.or(system_prompt_file);
         }
         let role = self.resumed_role(meta, session_id, session_dir, session_token, &tool_socket)?;
         route_tool_server_env(role.env, &mut process_env, &mut tool_server_env);
-        let (extra_args, mut toolset) = spec_role_launch(role.main.as_ref());
+        let (mut extra_args, mut toolset) = spec_role_launch(role.main.as_ref());
+        // An orchestrator and its children on this host message each other by peer name.
+        if !on_target
+            && (reports_to.is_some()
+                || meta
+                    .session_role
+                    .as_deref()
+                    .is_some_and(tddy_core::session_metadata::is_orchestrator_role))
+        {
+            extra_args.extend(crate::back_channel::peer_name_args(spec, session_id));
+        }
         let session_pointer = session_pointer_of(&tool_server_env, notify_env, worktree);
         carry_on_the_tool_server(
             spec,
