@@ -44,6 +44,9 @@ impl SpawnClient {
             WorkerResponse::CloneOk => Ok(()),
             WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
             WorkerResponse::SpawnOk { .. } => Err(anyhow::anyhow!("unexpected spawn_ok for clone")),
+            WorkerResponse::Signalled { .. } => {
+                Err(anyhow::anyhow!("unexpected signalled for clone"))
+            }
         }
     }
 
@@ -52,7 +55,22 @@ impl SpawnClient {
             WorkerResponse::SpawnOk { result } => Ok(result),
             WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
             WorkerResponse::CloneOk => Err(anyhow::anyhow!("unexpected clone_ok for spawn")),
+            WorkerResponse::Signalled { .. } => {
+                Err(anyhow::anyhow!("unexpected signalled for spawn"))
+            }
         }
+    }
+
+    /// Ask the worker to send `signal` to `pid`, a child it spawned for this client
+    /// ([`WorkerRequest::Signal`]), and wait for its answer.
+    pub fn signal_child(
+        &self,
+        pid: u32,
+        signal: i32,
+    ) -> anyhow::Result<crate::child_signal::Signalled> {
+        let _ = (pid, signal);
+        // TODO(tab-hygiene): implement
+        todo!()
     }
 
     pub fn clone_repo(&self, req: CloneRequest) -> anyhow::Result<()> {
@@ -138,6 +156,7 @@ fn worker_request_label(req: &WorkerRequest) -> String {
             s.repo_path
         ),
         WorkerRequest::Clone(c) => format!("op=clone dest={} os_user={}", c.destination, c.os_user),
+        WorkerRequest::Signal { pid, signal } => format!("op=signal pid={pid} signal={signal}"),
     }
 }
 

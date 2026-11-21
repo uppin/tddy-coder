@@ -22,17 +22,21 @@ use tddy_supervisor::request::{SessionState, SessionStatus};
 
 pub use tddy_task::child_exit::{exit_channel, ChildExit, ExitReceiver, ExitSender, HolderGone};
 
+use crate::child_signal::{ReapGate, ToolSignal};
 use crate::spawn_worker::{SpawnClient, SpawnRequest, WorkerRequest, WorkerResponse};
 use crate::spawner::{self, LiveKitCreds, SpawnOptions, SpawnResult, StartupWatch};
 
 /// How often the daemon asks the supervisor whether a tool child it holds has ended.
 const SUPERVISOR_EXIT_POLL: Duration = Duration::from_millis(500);
 
-/// A tool child that outlived its startup watch, and the report of its end.
+/// A tool child that outlived its startup watch, the report of its end, and — when the daemon or
+/// its forked worker is the child's parent — how to signal it without reaching a recycled pid
+/// ([`crate::child_signal`]). `None` for a child the supervisor holds: it signals its own children.
 #[derive(Debug)]
 pub struct SpawnedTool {
     pub result: SpawnResult,
     pub exit: ExitReceiver,
+    pub signal: Option<ToolSignal>,
 }
 
 /// What a spawn's wait thread calls, once, with the child's pid and how it ended.
@@ -126,7 +130,16 @@ pub fn spawn_tool_as_user(
         startup,
         Some(Box::new(move |_pid, end| holder.send(end))),
     )?;
-    Ok(SpawnedTool { result, exit })
+    // TODO(tab-hygiene): the gate the child's reaper holds, handed to `spawn_as_user_reporting`
+    let signal = Some(ToolSignal::Direct {
+        pid: result.pid,
+        gate: ReapGate::new(),
+    });
+    Ok(SpawnedTool {
+        result,
+        exit,
+        signal,
+    })
 }
 
 impl SpawnClient {
@@ -135,9 +148,22 @@ impl SpawnClient {
     pub fn spawn_tool(&self, req: SpawnRequest) -> anyhow::Result<SpawnedTool> {
         let (holder, exit) = exit_channel();
         match self.request(WorkerRequest::Spawn(Box::new(req)), |_| {}, Some(holder))? {
-            WorkerResponse::SpawnOk { result } => Ok(SpawnedTool { result, exit }),
+            WorkerResponse::SpawnOk { result } => {
+                let signal = Some(ToolSignal::Worker {
+                    pid: result.pid,
+                    client: self.clone(),
+                });
+                Ok(SpawnedTool {
+                    result,
+                    exit,
+                    signal,
+                })
+            }
             WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
             WorkerResponse::CloneOk => Err(anyhow::anyhow!("unexpected clone_ok for spawn")),
+            WorkerResponse::Signalled { .. } => {
+                Err(anyhow::anyhow!("unexpected signalled for spawn"))
+            }
         }
     }
 }
@@ -151,7 +177,11 @@ pub async fn spawn_tool_via_supervisor(
 ) -> anyhow::Result<SpawnedTool> {
     let result = crate::supervisor_spawn::spawn_session_via_supervisor(socket_path, req).await?;
     let exit = watch_supervised_exit(socket_path.to_path_buf(), result.pid, SUPERVISOR_EXIT_POLL);
-    Ok(SpawnedTool { result, exit })
+    Ok(SpawnedTool {
+        result,
+        exit,
+        signal: None,
+    })
 }
 
 /// Poll the supervisor's `SessionStatus` for `pid` every `interval` until it reports the session

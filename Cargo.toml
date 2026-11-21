@@ -104,6 +104,7 @@ members = [
     "packages/tddy-tool-engine",
     "packages/tddy-semantic-index",
     "packages/tddy-testing-commons",
+    "packages/tddy-test-hosts",
     "packages/tddy-workflow",
     "packages/tddy-integration-tests",
     "packages/tddy-livekit-screen-capture",

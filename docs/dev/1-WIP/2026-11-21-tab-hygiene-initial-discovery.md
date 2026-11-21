@@ -31,3 +31,27 @@ Scope: functionality + DRY only (no size/length refactors). Five nodes, all wave
 - n3 jail-death-watch: watch the main jail runner's exit; end the main terminal (pty_done, exit status recorded), remove the jail from the registry, session becomes inactive and resumable; tab jails left as they are. Resolves the open half of todo 2026-09-15.
 - n4 jail-uid: jails (main + tab) run as the session's OS user through the root supervisor (it already brokers setuid for tool sessions); user/desktop mode without a supervisor keeps the daemon's uid, documented.
 - n5 target-start-agent: a target session's start resolves the agent on the target (bare command via the target's login PATH, chat minted on the target, a probe first with a clear error), like n8's tabs; host spec still renders argv/env. Resolves the session-start half of todo 2026-11-19-a-target-start-requires-the-agent-on-the-daemon-host.
+
+## Exploration 2 — draft-PR contract (pass 2, 2026-11-21)
+
+- **Start time storage moved to the tab roster** (developer decision during 6d): a `SessionMetadata`
+  field would have broken ~105 full struct literals across 11 crates (no `Default`, `deny_unknown_fields`).
+  The pane process's start is the `start` property (`tab_roster::START_PROPERTY`) of the tmux main's
+  `tmux` node in `tabs.yaml`, written by `tmux_main_roster::record_tmux_main(…, start)` and read by
+  `recorded_tmux_main_start`. `tabs.yaml` keeps unknown properties verbatim, so older daemons are unaffected.
+- **The existing "ignores hangup" delete test is weak**: `claude_cli_tmux_session_acceptance::deleting_a_tmux_run_session_ends_an_agent_that_ignores_hangup`
+  passes on master because its stub ends in `exec cat`, which dies on the pty's EIO once tmux closes it —
+  not because anything signals the agent. The new delete tests use a stub that ignores SIGHUP **and**
+  holds no terminal (`exec sleep 120 </dev/null >/dev/null`), which only a signal to its own pid ends.
+- **Fixture moved**: the tmux-agent daemon fixture of `claude_cli_tmux_session_acceptance.rs` is now
+  `tests/tmux_agent_support/mod.rs`, shared with `delete_session.rs` (DRY, no behaviour change).
+- **Reap/signal ordering**: both the direct and the worker backends reap through
+  `child_exit::reap_in_background`, so one `ReapGate` (in the new `tddy_spawn::child_signal`) serves both:
+  the reaper waits with `waitid(WNOWAIT)`, then marks ended and reaps under the gate's lock. The daemon signals a
+  direct child under that gate (`ToolSignal::Direct`) and asks the worker for a worker child
+  (`ToolSignal::Worker` → `WorkerRequest::Signal`). The worker keeps a gate per child it spawned. The
+  `deliver` seam is on `ReapGate::signal_with` (where the lock is) and on `OwnedChild` (the holder's backend),
+  which is how the window is provoked deterministically in unit tests. The acceptance tests prove the
+  outcome after the end is reported.
+- **Cypress**: `WrappedKindGroups` is a skeleton and not yet wired into `NewTerminalMenu`, so the two
+  menu specs stay green (6/6) and the new `WrappedKindGroups.cy.tsx` (4) is red on the skeleton.

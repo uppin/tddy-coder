@@ -1,0 +1,15 @@
+[package]
+name = "tddy-test-hosts"
+version = "0.1.0"
+edition = "2021"
+description = "Test fixtures for tool resolution: one ToolHost a test declares (its environment, its PATH) over the real filesystem"
+
+# Kept free of the sandbox crates on purpose: `tddy-session-lifecycle::test_util` is a public module
+# of a production library, so whatever it depends on is in the production graph. `tddy-actions` is
+# already there; `tddy-testing-commons` (which pulls in `tddy-sandbox-darwin` and the runner) is not.
+[dependencies]
+tddy-actions = { path = "../tddy-actions" }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = "3"

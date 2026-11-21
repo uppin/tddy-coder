@@ -144,6 +144,11 @@ pub enum WorkerRequest {
     Spawn(Box<SpawnRequest>),
     #[serde(rename = "clone")]
     Clone(CloneRequest),
+    /// Send `signal` to `pid`, a child this worker spawned and holds, unless the worker has
+    /// already reaped it: the worker is the child's parent, so only it knows whether the pid is
+    /// still the child's (`#tab-hardening` 2/4, [`crate::child_signal`]).
+    #[serde(rename = "signal")]
+    Signal { pid: u32, signal: i32 },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -155,6 +160,11 @@ pub enum WorkerResponse {
     CloneOk,
     #[serde(rename = "error")]
     Error { message: String },
+    /// The answer to [`WorkerRequest::Signal`].
+    #[serde(rename = "signalled")]
+    Signalled {
+        outcome: crate::child_signal::Signalled,
+    },
 }
 
 /// Fork the spawn worker before tokio starts. Returns (SpawnClient, worker_pid).
@@ -499,7 +509,7 @@ mod tests {
         let wire = serde_json::to_string(&WorkerRequest::Spawn(Box::new(sent))).unwrap();
         let received = match serde_json::from_str::<WorkerRequest>(&wire).unwrap() {
             WorkerRequest::Spawn(req) => req,
-            WorkerRequest::Clone(_) => panic!("a spawn request decoded as a clone"),
+            other => panic!("a spawn request decoded as {other:?}"),
         };
 
         // Then the same pairs arrive

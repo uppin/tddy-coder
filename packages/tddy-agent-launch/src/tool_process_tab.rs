@@ -5,7 +5,10 @@
 //!   is its `SignalSession`; it signals the pid it spawned and no other.
 //! - **forked spawn worker and direct spawn** — the child is the daemon's own descendant, so the
 //!   daemon signals its pid. The pid is valid until the backend reports the child's end, which
-//!   [`observe`] records, so nothing is sent to a pid after the child is known to be gone.
+//!   [`observe`] records, so nothing is sent to a pid after the child is known to be gone. Each
+//!   signal goes through the holder's `deliver` seam: the spawn's
+//!   [`tddy_spawn::child_signal::ToolSignal`], which sends it only while the pid is still the
+//!   child's and answers [`Signalled::ChildEnded`] once it is not (`#tab-hardening` 2/4).
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,6 +17,7 @@ use std::time::Duration;
 
 use tddy_cli_sessions::cli_session_manager::ProcessTabHolder;
 use tddy_spawn::child_exit::SpawnedTool;
+use tddy_spawn::child_signal::Signalled;
 use tddy_task::{exit_channel, ExitReceiver};
 
 /// How long a child that was asked to stop gets before it is killed — the grace the supervisor's
@@ -63,7 +67,14 @@ impl ToolBackend {
                 socket_path: socket_path.clone(),
                 pid,
             }),
-            Self::Owned => Arc::new(OwnedChild { pid, ended }),
+            // TODO(tab-hygiene): deliver through the spawn's `ToolSignal`, not `kill(2)` of the pid
+            Self::Owned => Arc::new(OwnedChild {
+                pid,
+                ended,
+                deliver: Arc::new(move |signal| {
+                    deliver(pid, signal).map(|()| Signalled::Delivered)
+                }),
+            }),
         }
     }
 }
@@ -93,10 +104,15 @@ impl ProcessTabHolder for SupervisedChild {
     }
 }
 
+/// How an [`OwnedChild`]'s signal is sent, and whether it reached the child — the seam a test
+/// replaces to stand in for the backend.
+pub(crate) type Deliver = Arc<dyn Fn(i32) -> anyhow::Result<Signalled> + Send + Sync>;
+
 /// A child that is a descendant of the daemon.
 struct OwnedChild {
     pid: u32,
     ended: EndedFlag,
+    deliver: Deliver,
 }
 
 impl OwnedChild {
@@ -104,8 +120,13 @@ impl OwnedChild {
         self.ended.load(Ordering::SeqCst)
     }
 
+    /// Send `signal` through the seam: `Ok(())` once it reached the child.
     fn deliver(&self, signal: i32) -> anyhow::Result<()> {
-        deliver(self.pid, signal)
+        match (self.deliver)(signal)? {
+            Signalled::Delivered => Ok(()),
+            // TODO(tab-hygiene): implement — the backend found the child ended
+            Signalled::ChildEnded => todo!(),
+        }
     }
 }
 
@@ -127,12 +148,12 @@ impl ProcessTabHolder for OwnedChild {
             return Ok(());
         }
         self.deliver(libc::SIGTERM)?;
-        let (pid, ended) = (self.pid, Arc::clone(&self.ended));
+        let (pid, ended, deliver) = (self.pid, Arc::clone(&self.ended), Arc::clone(&self.deliver));
         tokio::spawn(async move {
             tokio::time::sleep(STOP_GRACE).await;
             if !ended.load(Ordering::SeqCst) {
                 log::warn!("tool child pid={pid} outlived its grace period; killing it");
-                if let Err(error) = deliver(pid, libc::SIGKILL) {
+                if let Err(error) = deliver(libc::SIGKILL) {
                     log::warn!("tool child pid={pid} could not be killed: {error}");
                 }
             }
@@ -145,5 +166,81 @@ impl ProcessTabHolder for OwnedChild {
             anyhow::bail!("the child has ended");
         }
         self.deliver(signal)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    /// A pid no test signals: the seam stands in for the backend, so it is never `kill`ed.
+    const STAND_IN_PID: u32 = 4_000_000;
+
+    /// An owned child whose backend answers every signal with `answer`, recording each it is sent.
+    fn an_owned_child_whose_backend_answers(
+        answer: Signalled,
+    ) -> (OwnedChild, Arc<Mutex<Vec<i32>>>) {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&sent);
+        let child = OwnedChild {
+            pid: STAND_IN_PID,
+            ended: Arc::default(),
+            deliver: Arc::new(move |signal| {
+                recorded.lock().unwrap().push(signal);
+                Ok(answer)
+            }),
+        };
+        (child, sent)
+    }
+
+    #[tokio::test]
+    async fn a_signal_to_a_running_child_goes_through_its_backend() {
+        // Given
+        let (child, sent) = an_owned_child_whose_backend_answers(Signalled::Delivered);
+
+        // When
+        let signalled = child.signal(libc::SIGUSR1).await;
+
+        // Then
+        assert_eq!(
+            (signalled.is_ok(), sent.lock().unwrap().clone()),
+            (true, vec![libc::SIGUSR1])
+        );
+    }
+
+    #[tokio::test]
+    async fn a_signal_the_backend_found_the_child_ended_for_is_refused_as_ended() {
+        // Given
+        let (child, _sent) = an_owned_child_whose_backend_answers(Signalled::ChildEnded);
+
+        // When
+        let refusal = child
+            .signal(libc::SIGUSR1)
+            .await
+            .expect_err("a signal that reached no child is refused");
+
+        // Then
+        assert!(
+            refusal.to_string().contains("ended"),
+            "the refusal says the child ended: {refusal}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stopping_a_child_the_backend_found_ended_is_done_and_kills_nothing() {
+        // Given
+        let (child, sent) = an_owned_child_whose_backend_answers(Signalled::ChildEnded);
+
+        // When
+        let stopped = child.stop().await;
+        tokio::time::sleep(STOP_GRACE + Duration::from_secs(1)).await;
+
+        // Then
+        assert_eq!(
+            (stopped.is_ok(), sent.lock().unwrap().clone()),
+            (true, vec![libc::SIGTERM])
+        );
     }
 }

@@ -25,6 +25,7 @@ use tddy_terminal_rpc::TmuxSession;
 pub(crate) mod pane;
 pub mod pane_env;
 
+use crate::process_start::ProcessStart;
 use pane::remain_on_exit_args;
 pub use pane::{capture_final_screen, pane_state, PaneState};
 use pane_env::{pane_command, remove_pane_env_file, write_pane_env_file, PaneEnvOwner};
@@ -387,6 +388,27 @@ pub fn pane_pid(os_user: &str, name: &str) -> Result<u32, TmuxError> {
             stdout.trim()
         ))
     })
+}
+
+/// The pid of the process in the first pane of `os_user`'s tmux session `name` ([`pane_pid`]), and
+/// when that process started ([`crate::process_start::process_start`]) — read together, so a
+/// signal sent to the pid later can first check it still names the same process.
+pub fn pane_pid_and_start(os_user: &str, name: &str) -> Result<(u32, ProcessStart), TmuxError> {
+    let _ = (os_user, name);
+    // TODO(tab-hygiene): implement
+    todo!()
+}
+
+/// Kill tmux session `name` of `os_user` on the blocking pool. The caller is already failing or
+/// closing, so a kill that fails is logged — saying it was `why` (`"a start that failed"`, `"a tab
+/// that closed"`) — rather than returned; a session that is not there is not a failure.
+///
+/// The one copy of what `claude_cli_tmux::stop_tmux_session_of_failed_start` and
+/// `recorded_tabs::kill_tmux_session_blocking` each did (`#tab-hardening` 2/4).
+pub async fn kill_tmux_session_logged(os_user: &str, name: &str, why: &str) {
+    let _ = (os_user, name, why);
+    // TODO(tab-hygiene): implement
+    todo!()
 }
 
 /// The `=`-prefixed target that names exactly `name`, not a session whose name it starts with.
