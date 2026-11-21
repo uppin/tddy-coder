@@ -77,7 +77,7 @@ pub(crate) struct CliSessionStart<'a> {
     pub coder_credentials: Arc<dyn tddy_host_service::coder_workspaces::CoderCredentialSource>,
     /// Where a target session's followed hooks are delivered, and the registry its follower is
     /// kept in (`LaunchSessions`' fields, lent for the start).
-    pub hook_delivery: Option<Arc<dyn crate::remote_hook_follower::HookReportDelivery>>,
+    pub hook_delivery: Option<Arc<dyn crate::remote_hook_delivery::HookReportDelivery>>,
     pub hook_followers: crate::remote_hook_follower::RemoteHookFollowers,
     /// Whether the session was started over a managed codebase; recorded on the session.
     pub managed_codebase: bool,

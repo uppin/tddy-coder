@@ -55,6 +55,7 @@ pub mod relaunch_jail_dirs;
 pub mod relaunch_jail_steps;
 pub mod remote_agent_launch;
 mod remote_hook_answer;
+mod remote_hook_delivery;
 pub mod remote_hook_follower;
 mod remote_hook_message;
 mod remote_hook_report;

@@ -5,7 +5,8 @@
 //! Kept apart from [`crate::remote_hook_follower`], whose split is reserved for a sweep.
 
 use crate::back_channel::RemoteMessage;
-use crate::remote_hook_follower::{HookLine, HookReportDelivery};
+use crate::remote_hook_delivery::HookReportDelivery;
+use crate::remote_hook_follower::HookLine;
 
 /// The report `line` carries, written by `session_id`'s agent as `os_user`: its payload's `text`.
 /// `None` for a line whose payload has no non-empty text.
