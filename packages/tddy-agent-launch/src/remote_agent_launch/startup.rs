@@ -58,9 +58,21 @@ pub(super) async fn wait_for_agent_start(
     }
 }
 
-/// Whether the agent ends within `window`, failing the launch. Called only once the agent is
-/// known to have started (its pid is recorded on the target), so the window runs from the
-/// agent's start: an agent still running when it closes has started.
+/// How judging an agent's startup window ended.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum StartupJudgement {
+    /// The agent (or its terminal) ended within the window: the launch fails.
+    Exited,
+    /// The window passed with the agent confirmed alive by an answered probe (or, with no pid to
+    /// probe, with the terminal still up).
+    Stayed,
+    /// No probe was answered by the cap, with the terminal still up: the target went silent.
+    NeverAnswered,
+}
+
+/// Judge whether the agent ends within `window`. Called only once the agent is known to have
+/// started (its pid is recorded on the target), so the window runs from the agent's start: an
+/// agent still running when it closes has started.
 ///
 /// The agent's own liveness on the target is judged beside the terminal's end, because under
 /// load the terminal's exit is reported long after the agent that caused it is gone: an agent
@@ -70,42 +82,49 @@ pub(super) async fn wait_for_agent_start(
 /// the window, a probe bounded by what the window has left would never answer. An unanswered
 /// probe is evidence of nothing, so probing continues; the window counts as passed only once a
 /// probe that answered found the agent alive at or after the window's end. The terminal's end
-/// stops the wait at any time. Without a pid there is nothing to probe and the window elapses.
+/// stops the wait at any time. Probing is capped at `window + probe_bound` from the call: a
+/// start with no answered probe by then is [`StartupJudgement::NeverAnswered`], never taken as
+/// alive. Without a pid there is nothing to probe and the window elapses.
 pub(super) async fn exits_during_startup(
     handle: &PtyHandle,
     window: Duration,
     shell: &dyn RemoteShell,
     agent_pid: Option<u32>,
     probe_bound: Duration,
-) -> bool {
+) -> StartupJudgement {
     let deadline = tokio::time::Instant::now() + window;
+    let cap = deadline + probe_bound;
     let mut probed_at = tokio::time::Instant::now() - Duration::from_secs(1);
     loop {
         if *handle.pty_done.borrow() {
-            return true;
+            return StartupJudgement::Exited;
         }
         let now = tokio::time::Instant::now();
         match agent_pid {
             None => {
                 if now >= deadline {
-                    return false;
+                    return StartupJudgement::Stayed;
                 }
             }
             Some(pid) => {
+                if now >= cap {
+                    return StartupJudgement::NeverAnswered;
+                }
                 if probed_at.elapsed() >= Duration::from_millis(50) {
                     probed_at = now;
+                    let probe_left = probe_bound.min(cap.saturating_duration_since(now));
                     let answered = shell
                         .exec(
                             tddy_remote_shell::ExecRequest::new(format!("kill -0 {pid}"))
-                                .within(probe_bound),
+                                .within(probe_left),
                         )
                         .await;
                     if let Ok(output) = answered {
                         if output.status != 0 {
-                            return true;
+                            return StartupJudgement::Exited;
                         }
                         if tokio::time::Instant::now() >= deadline {
-                            return false;
+                            return StartupJudgement::Stayed;
                         }
                     }
                 }

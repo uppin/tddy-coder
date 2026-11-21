@@ -185,6 +185,19 @@ fn a_target_with_a_slow_round_trip_and_a_late_terminal_end(
     target
 }
 
+/// A target whose liveness probes (`kill -0 <pid>`) never return: they sleep for `hang`, while
+/// every other one-shot command answers at once and the session's terminal stays up — a transport
+/// that carries the agent's pid back but has gone silent since.
+fn a_target_whose_liveness_probes_never_answer(hang: Duration) -> ATarget {
+    let target = ATarget::reached_through(&a_target_that_runs_what_it_is_asked_to(&format!(
+        "SHELL=\"$(dirname \"$0\")/login-shell\"\nexport SHELL\n\
+         case \"$*\" in *'kill -0'*) /bin/sleep {} ;; esac\n",
+        hang.as_secs_f64()
+    )));
+    target.has_a_login_of_its_own();
+    target
+}
+
 /// A target ssh cannot reach: the stand-in fails as OpenSSH does, [`SSH_COMPLAINT`] on stderr and
 /// exit status 255, the remote command never run.
 fn an_unreachable_target() -> ATarget {
@@ -851,6 +864,43 @@ async fn an_agent_that_stays_up_on_a_slow_target_starts() {
         "the launch of an agent that stays up failed: {:?}",
         outcome.err()
     );
+}
+
+/// A hung transport is not a live agent: probes that never answer, with the terminal still up,
+/// end the judgement at the start's own bound (the startup window plus the start timeout) with a
+/// failure that names it — the start neither probes forever nor counts the agent alive.
+#[tokio::test]
+async fn an_agent_on_a_target_that_never_answers_fails_the_start_after_its_bound() {
+    // Given a target whose liveness probes never return, and whose terminal stays up
+    let target = a_target_whose_liveness_probes_never_answer(Duration::from_secs(60));
+    // And an agent there that stays up
+    let agent = an_agent_that_stays_up_on(&target);
+    let daemon = a_daemon();
+
+    // When the launch is given a small start timeout
+    let start_timeout = Duration::from_secs(1);
+    let started = std::time::Instant::now();
+    let failure = daemon
+        .launches_bounded_by(&agent, &target, start_timeout)
+        .await
+        .err()
+        .expect("a start whose probes never answer fails");
+
+    // Then the failure names the bound: the startup window plus the start timeout
+    assert_eq!(
+        failure,
+        RemoteLaunchError::AgentNeverAnswered {
+            after: STARTUP_WINDOW + start_timeout
+        }
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "the start took {:?} to give up",
+        started.elapsed()
+    );
+
+    // And the session is left without a terminal
+    assert!(!daemon.has_a_terminal().await);
 }
 
 #[tokio::test]
