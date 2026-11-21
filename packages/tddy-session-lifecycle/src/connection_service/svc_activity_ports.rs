@@ -15,6 +15,7 @@
 //! stays here too: it is a statement about this transport's idle deadline, not about activity.
 
 pub(super) mod hook_delivery;
+mod orchestrator_message;
 mod orchestrator_presence;
 
 use std::sync::Arc;
