@@ -45,6 +45,10 @@ pub const TMUX_ATTACH_KIND: &str = "tmux-attach";
 /// The node kind of a jail of its own a tab runs in: a `tddy-sandbox-runner` over its session's
 /// worktree and sandbox grants, wrapping what the tab runs (`#session-liveness` 5/8).
 pub const SANDBOX_KIND: &str = "sandbox";
+/// The node kind of a session's target a tab runs on: the machine the session's `.session.yaml`
+/// `target` names, reached through its remote shell, in the session's worktree there, wrapping what
+/// the tab runs (`#session-liveness` 6/8).
+pub const TARGET_KIND: &str = "target";
 
 /// An [`AGENT_KIND`] node's harness: the session type it runs (`claude-cli`, …).
 pub const HARNESS_PROPERTY: &str = "harness";
@@ -80,8 +84,8 @@ pub struct TabEntry {
 /// One link of a launch chain: what it is, and what it was started with.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LaunchNode {
-    /// [`AGENT_KIND`], [`SHELL_KIND`], [`TMUX_KIND`], [`TMUX_ATTACH_KIND`], [`SANDBOX_KIND`], or a
-    /// kind a later daemon added.
+    /// [`AGENT_KIND`], [`SHELL_KIND`], [`TMUX_KIND`], [`TMUX_ATTACH_KIND`], [`SANDBOX_KIND`],
+    /// [`TARGET_KIND`], or a kind a later daemon added.
     pub kind: String,
     #[serde(default)]
     pub properties: BTreeMap<String, String>,
@@ -153,6 +157,13 @@ impl LaunchNode {
     /// a resume rebuilds the jail from the session, as it rebuilds the session's main jail.
     pub fn sandbox() -> Self {
         LaunchNode::new(SANDBOX_KIND, [])
+    }
+
+    /// The session's target. It records no properties: the transport (ssh alias or Coder workspace)
+    /// and the worktree there are the session's, read from its `.session.yaml` on every start and
+    /// resume, never duplicated in the roster.
+    pub fn target() -> Self {
+        LaunchNode::new(TARGET_KIND, [])
     }
 
     /// The property `key`, when the node carries it.

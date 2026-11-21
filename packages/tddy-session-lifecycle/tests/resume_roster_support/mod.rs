@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use tddy_agent_launch::tab_target_shell::TabTargetShell;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::tab_roster::{read_tab_roster, write_tab_roster, TabEntry, TabRoster};
 use tddy_daemon_kernel::config::DaemonConfig;
@@ -138,6 +139,8 @@ pub struct ResumeRosterDaemon {
     sessions_base: PathBuf,
     /// Where a jailed tab's jail starts, when a test gave one (`#session-liveness` 5/8).
     tab_jails: Option<Arc<dyn TabJailSpawn>>,
+    /// Where a target tab's target resolves, when a test gave one (`#session-liveness` 6/8).
+    target_shells: Option<Arc<dyn TabTargetShell>>,
     _dirs: Vec<tempfile::TempDir>,
 }
 
@@ -152,6 +155,19 @@ pub fn a_stopped_session_whose_tab_jails_start_through(
     tab_jails: Arc<dyn TabJailSpawn>,
 ) -> ResumeRosterDaemon {
     a_stopped_session_with(Some(tab_jails))
+}
+
+/// [`a_stopped_session`], whose target tabs' targets resolve through `target_shells` — on this
+/// daemon and on every restart of it. The session itself records no target, so its main resumes on
+/// this host: what is under test is the tab's own target, which the double answers for.
+pub fn a_stopped_session_whose_target_shells_resolve_through(
+    target_shells: Arc<dyn TabTargetShell>,
+) -> ResumeRosterDaemon {
+    ResumeRosterDaemon {
+        target_shells: Some(target_shells),
+        ..a_stopped_session_with(None)
+    }
+    .with_its_host_rebuilt()
 }
 
 fn a_stopped_session_with(tab_jails: Option<Arc<dyn TabJailSpawn>>) -> ResumeRosterDaemon {
@@ -185,6 +201,7 @@ fn a_stopped_session_with(tab_jails: Option<Arc<dyn TabJailSpawn>>) -> ResumeRos
         agents.clone(),
         sessions_base.clone(),
         tab_jails.clone(),
+        None,
     );
     ResumeRosterDaemon {
         host,
@@ -198,6 +215,7 @@ fn a_stopped_session_with(tab_jails: Option<Arc<dyn TabJailSpawn>>) -> ResumeRos
         agents,
         sessions_base,
         tab_jails,
+        target_shells: None,
         _dirs: vec![config_dir, stub_dir, worktree_dir, sessions_dir],
     }
 }
@@ -221,6 +239,7 @@ fn a_session_host(
     agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     sessions_base: PathBuf,
     tab_jails: Option<Arc<dyn TabJailSpawn>>,
+    target_shells: Option<Arc<dyn TabTargetShell>>,
 ) -> Arc<DaemonSessionHost> {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -239,8 +258,12 @@ fn a_session_host(
         Arc::new(CliSessionManager::new()),
         agents,
     );
-    Arc::new(match tab_jails {
+    let host = match tab_jails {
         Some(spawn) => host.with_tab_jail_spawn(spawn),
+        None => host,
+    };
+    Arc::new(match target_shells {
+        Some(shells) => host.with_tab_target_shell(shells),
         None => host,
     })
 }
@@ -333,11 +356,17 @@ impl ResumeRosterDaemon {
     /// same sessions directory and tmux server, which serves no terminal yet.
     pub async fn restarts(self) -> Self {
         self.host.shut_down_children().await;
+        self.with_its_host_rebuilt()
+    }
+
+    /// This daemon with a fresh host over the same configuration, sessions and doubles.
+    fn with_its_host_rebuilt(self) -> Self {
         let host = a_session_host(
             self.config.clone(),
             self.agents.clone(),
             self.sessions_base.clone(),
             self.tab_jails.clone(),
+            self.target_shells.clone(),
         );
         ResumeRosterDaemon { host, ..self }
     }

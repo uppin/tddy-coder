@@ -443,13 +443,20 @@ export type StartTerminalSessionRequest = Message<"terminal_session.StartTermina
   tmuxSession: string;
 
   /**
-   * What the terminal runs wrapped in, outermost first. Empty: `kind` runs directly. Two wrappers
+   * What the terminal runs wrapped in, outermost first. Empty: `kind` runs directly. Three wrappers
    * are accepted, each alone: "tmux" around an agent kind — the agent runs in a tmux session of its
    * own, `tddy-<session_id>-<terminal_id>`, as the session's OS user, and the tab is a client of it
-   * — and "sandbox" around the login shell ("" or "bash") of a sandboxed session — the shell runs in
-   * a jail of its own over the session's worktree and sandbox grants, which ends with the tab. Any
-   * other wrapper kind, or either around anything else, is refused INVALID_ARGUMENT, naming it; a
-   * "sandbox" wrapper on a session that is not sandboxed is refused FAILED_PRECONDITION.
+   * — "sandbox" around the login shell ("" or "bash") of a sandboxed session — the shell runs in
+   * a jail of its own over the session's worktree and sandbox grants, which ends with the tab — and
+   * "target" around the login shell of a session that runs on a target: the target user's own login
+   * shell runs on that machine, in the session's worktree there, reached through the session's
+   * remote shell as a tab of its own; it ends with the tab. Any other wrapper kind, or any of them
+   * around anything else, is refused INVALID_ARGUMENT, naming it; a "sandbox" wrapper on a session
+   * that is not sandboxed, and a "target" wrapper on a session that records no target, a worktree
+   * there, or an account its owner's vault holds (or whose vault is locked), is refused
+   * FAILED_PRECONDITION; a target that resolves but cannot be reached (its transport fails to
+   * connect, or the worktree cannot be entered) is refused UNAVAILABLE, with the transport's own
+   * message.
    *
    * @generated from field: repeated terminal_session.LaunchNode wrappers = 6;
    */
@@ -467,8 +474,9 @@ export const StartTerminalSessionRequestSchema: GenMessage<StartTerminalSessionR
  * One link of a terminal's launch chain: what it is, and what it was started with. Kinds: "agent"
  * (`harness`, `conversation_id`), "shell", "tmux" (`session`, `os_user`) for a tmux session the
  * daemon created to wrap a tab, "tmux-attach" (`session`, `os_user`) for a tab attached to the user's
- * own tmux session, "sandbox" (no properties) for a jail of its own a tab runs in. Unknown kinds and
- * keys are kept, so later wrappers need no schema change.
+ * own tmux session, "sandbox" (no properties) for a jail of its own a tab runs in, "target" (no
+ * properties) for the session's target a tab runs on. Unknown kinds and keys are kept, so later
+ * wrappers need no schema change.
  *
  * @generated from message terminal_session.LaunchNode
  */

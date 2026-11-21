@@ -165,6 +165,10 @@ pub struct LaunchSessions {
     /// What starts a tab's jail in place of this topic's own jail launch
     /// ([`crate::tab_jail_launch`]); `None` on every host but one a test gave a double.
     pub tab_jail_spawn: Option<Arc<dyn tddy_daemon_sandbox::tab_jails::TabJailSpawn>>,
+    /// What resolves a target session's target for its tabs in place of this topic's own
+    /// ([`crate::tab_target_shell`], `#session-liveness` 6/8); `None` on every host but one a test
+    /// gave a double.
+    pub tab_target_shell: Option<Arc<dyn crate::tab_target_shell::TabTargetShell>>,
 }
 
 impl LaunchSessions {

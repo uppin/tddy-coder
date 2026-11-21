@@ -92,6 +92,12 @@ pub enum TerminalKind {
     /// grants — an empty kind or `"bash"` with `wrappers: [sandbox]`. Only a sandboxed session runs
     /// one; the jail ends with the tab (`#session-liveness` 5/8).
     SandboxedShell,
+    /// The target user's login shell on the session's **target** — the machine its `.session.yaml`
+    /// `target` names — in the session's worktree there, run through the session's remote shell as
+    /// a local tab terminal: an empty kind or `"bash"` with `wrappers: [target]`. Only a target
+    /// session runs one; it writes nothing of the session's main on the target
+    /// (`#session-liveness` 6/8).
+    TargetShell,
 }
 
 /// The wrapper kind `StartTerminalSessionRequest.wrappers` names for a tmux-wrapped agent.
@@ -99,6 +105,10 @@ pub const TMUX_WRAPPER_KIND: &str = "tmux";
 
 /// The wrapper kind `StartTerminalSessionRequest.wrappers` names for a tab run in a jail of its own.
 pub const SANDBOX_WRAPPER_KIND: &str = "sandbox";
+
+/// The wrapper kind `StartTerminalSessionRequest.wrappers` names for a tab run on the session's
+/// target.
+pub const TARGET_WRAPPER_KIND: &str = "target";
 
 /// The kind `StartTerminalSessionRequest.kind` names for a tmux terminal.
 pub const TMUX_KIND: &str = "tmux";
@@ -143,9 +153,10 @@ impl TerminalKind {
     /// The kind a request names wrapped in `wrappers` (outermost first): with no wrappers, what
     /// [`Self::from_request`] reads. A single [`TMUX_WRAPPER_KIND`] wrapper around an agent kind is
     /// a [`TerminalKind::TmuxWrappedAgent`]; a single [`SANDBOX_WRAPPER_KIND`] wrapper around the
-    /// login shell is a [`TerminalKind::SandboxedShell`]. Any other wrapper kind, a tmux wrapper
-    /// around something that is not an agent, or a sandbox wrapper around something that is not the
-    /// login shell, is `INVALID_ARGUMENT` naming what was refused.
+    /// login shell is a [`TerminalKind::SandboxedShell`]; a single [`TARGET_WRAPPER_KIND`] wrapper
+    /// around the login shell is a [`TerminalKind::TargetShell`]. Any other wrapper kind, a tmux
+    /// wrapper around something that is not an agent, or a sandbox or target wrapper around
+    /// something that is not the login shell, is `INVALID_ARGUMENT` naming what was refused.
     pub fn from_wrapped_request(
         kind: &str,
         tmux_session: &str,
@@ -156,6 +167,9 @@ impl TerminalKind {
         };
         if wrapper.kind == SANDBOX_WRAPPER_KIND {
             return Self::sandboxed(kind, tmux_session, inner);
+        }
+        if wrapper.kind == TARGET_WRAPPER_KIND {
+            return Self::on_target(kind, tmux_session, inner);
         }
         if wrapper.kind != TMUX_WRAPPER_KIND {
             return Err(Status::invalid_argument(format!(
@@ -199,6 +213,31 @@ impl TerminalKind {
             TerminalKind::Bash => Ok(TerminalKind::SandboxedShell),
             _ => Err(Status::invalid_argument(format!(
                 "only the login shell can be wrapped in {SANDBOX_WRAPPER_KIND:?} here, not {:?}",
+                kind.trim()
+            ))),
+        }
+    }
+
+    /// What `kind` wrapped in a [`TARGET_WRAPPER_KIND`] wrapper (with `inner` wrappers inside it)
+    /// runs: the login shell only. An agent on a target is `target-agent-tab`'s (`#session-liveness`
+    /// 8/8), refused here naming it.
+    fn on_target(
+        kind: &str,
+        tmux_session: &str,
+        inner: &[crate::proto::terminal_session::LaunchNode],
+    ) -> Result<TerminalKind, Status> {
+        if let Some(refused) = inner.first() {
+            return Err(Status::invalid_argument(format!(
+                "a terminal cannot be wrapped in {:?} inside {TARGET_WRAPPER_KIND:?}: a target \
+                 wraps the login shell alone",
+                refused.kind
+            )));
+        }
+        match Self::from_request(kind, tmux_session)? {
+            TerminalKind::Bash => Ok(TerminalKind::TargetShell),
+            _ => Err(Status::invalid_argument(format!(
+                "only the login shell can be wrapped in {TARGET_WRAPPER_KIND:?} here, not {:?}: \
+                 an agent on a target is not started yet",
                 kind.trim()
             ))),
         }

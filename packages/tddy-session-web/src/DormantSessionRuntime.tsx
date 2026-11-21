@@ -165,6 +165,7 @@ export function DormantSessionRuntime({
         onClose={close}
         sessionType={session.sessionType}
         sandboxed={session.sandbox}
+        onTarget={session.target !== undefined}
         agentConversations={agentConversations}
         activeAgentConversationId={activeAgentConversationId}
         onSelectAgentConversation={onSelectAgentConversation}

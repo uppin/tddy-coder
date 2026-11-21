@@ -36,9 +36,11 @@ use tddy_remote_shell::RemoteShell;
 use tddy_testing_commons::wait::eventually;
 
 mod acme_target_support;
+mod coder_workspace_support;
 use acme_target_support::{
     a_daemon, the_acme_agent, the_acme_spec, ADaemon, InstalledHooks, MODEL,
 };
+use coder_workspace_support::{a_workspace_answering_one_shots_after, AWorkspace};
 
 /// Who the session's token resolved to: the owner of the vault the account is read from.
 const SUBJECT: &str = "ada-on-github";
@@ -127,158 +129,22 @@ fn an_open_vault_holding_no_coder_account() -> AVault {
     )))
 }
 
-/// A Coder workspace the daemon reaches: a directory standing for its filesystem, holding the
-/// session's worktree, and the stand-in `coder` that reaches it.
-struct AWorkspace {
-    root: PathBuf,
-    _dir: tempfile::TempDir,
-}
-
-/// One call of the stand-in `coder`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ACoderCall {
-    /// The directory the CLI was run in.
-    cwd: PathBuf,
-    /// The deployment it was given in `CODER_URL`.
-    deployment: String,
-    /// The token it was given in `CODER_SESSION_TOKEN`.
-    token: String,
-    /// Its arguments, joined by spaces.
-    args: String,
-}
-
-/// A running workspace: the stand-in records its working directory, the deployment and token it
-/// was given and its arguments, then hands what follows `--` to a shell as one command line —
-/// which is what a workspace's login shell is given — and becomes it. Like coder v2.33.5, it
-/// refuses `-t`, a flag that CLI does not have. As `coder ssh --stdio`, the stand-in `ssh`'s
-/// `ProxyCommand`, it is the pipe to the workspace and carries nothing: that `ssh` runs its
-/// command here itself.
+/// A running workspace holding the session's worktree ([`coder_workspace_support`]).
 fn a_running_workspace() -> AWorkspace {
-    a_workspace_answering_one_shots_after("")
+    coder_workspace_support::a_running_workspace(SESSION_ID)
 }
 
 /// A running workspace on a deployment as slow as a real one: every one-shot (`sh -c …`) answers
 /// after [`SLOW_DEPLOYMENT_ROUND_TRIP`], longer than any fixed five-second probe; the terminal's
 /// command starts at once.
 fn a_workspace_on_a_slow_deployment() -> AWorkspace {
-    a_workspace_answering_one_shots_after(&format!(
-        "if [ \"$1\" = sh ]; then /bin/sleep {SLOW_DEPLOYMENT_ROUND_TRIP}; fi\n"
-    ))
-}
-
-fn a_workspace_answering_one_shots_after(delay: &str) -> AWorkspace {
-    let dir = tempfile::tempdir().expect("a directory standing for the workspace");
-    let root = std::fs::canonicalize(dir.path()).expect("the workspace's directory resolves");
-    std::fs::create_dir_all(root.join("bin")).expect("a directory for the stand-in coder");
-    write_executable(
-        &root.join("bin/coder"),
-        &format!(
-            r#"#!/bin/sh
-printf '%s\t%s\t%s\t%s\n' "$(/bin/pwd -P)" "${{CODER_URL-}}" "${{CODER_SESSION_TOKEN-}}" \
-  "$(printf '%s' "$*" | /usr/bin/tr '\n\t' '  ')" >> "$(dirname "$0")/calls"
-for argument in "$@"; do
-  [ "$argument" = "--" ] && break
-  if [ "$argument" = "-t" ]; then
-    echo "unknown shorthand flag: 't' in -t" >&2
-    exit 1
-  fi
-done
-[ "$2" = "--stdio" ] && exit 0
-while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done
-shift
-{delay}SHELL="$(dirname "$0")/login-shell"
-export SHELL
-exec /bin/sh -c "$*"
-"#
-        ),
-    );
-    write_executable(
-        &root.join("bin/ssh"),
-        r#"#!/bin/sh
-proxy=
-for argument; do
-  case "$argument" in ProxyCommand=*) proxy="${argument#ProxyCommand=}";; esac
-  last="$argument"
-done
-[ -n "$proxy" ] && /bin/sh -c "$proxy" </dev/null >/dev/null 2>&1
-SHELL="$(dirname "$0")/login-shell"
-export SHELL
-exec /bin/sh -c "$last"
-"#,
-    );
-    let workspace = AWorkspace { root, _dir: dir };
-    for dir in [
-        workspace.worktree(),
-        workspace.home(),
-        workspace.agents_dir(),
-    ] {
-        std::fs::create_dir_all(dir).expect("a directory of the workspace");
-    }
-    // The workspace's login shell: a `HOME` and a `PATH` of its own, which holds its agents.
-    write_executable(
-        &workspace.root.join("bin/login-shell"),
-        &format!(
-            "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\nHOME='{}'\nPATH='{}:/usr/bin:/bin'\nexport HOME PATH\n\
-             exec /bin/sh -c \"$2\"\n",
-            workspace.home().display(),
-            workspace.agents_dir().display()
-        ),
-    );
-    workspace
+    a_workspace_answering_one_shots_after(
+        SESSION_ID,
+        &format!("if [ \"$1\" = sh ]; then /bin/sleep {SLOW_DEPLOYMENT_ROUND_TRIP}; fi\n"),
+    )
 }
 
 impl AWorkspace {
-    /// The stand-in `coder` that reaches this workspace.
-    fn coder(&self) -> PathBuf {
-        self.root.join("bin/coder")
-    }
-
-    /// The stand-in OpenSSH client a streamed command reaches this workspace through.
-    fn ssh(&self) -> PathBuf {
-        self.root.join("bin/ssh")
-    }
-
-    /// The `HOME` of the workspace's login.
-    fn home(&self) -> PathBuf {
-        self.root.join("home/coder")
-    }
-
-    /// Where the workspace's login finds its agents: the first directory of its `PATH`.
-    fn agents_dir(&self) -> PathBuf {
-        self.root.join("opt/agents")
-    }
-
-    /// The session's worktree in the workspace.
-    fn worktree(&self) -> PathBuf {
-        self.root
-            .join("home/coder/repo/.worktrees")
-            .join(SESSION_ID)
-    }
-
-    /// Every call of the stand-in so far.
-    fn calls(&self) -> Vec<ACoderCall> {
-        std::fs::read_to_string(self.root.join("bin/calls"))
-            .unwrap_or_default()
-            .lines()
-            .map(|line| line.splitn(4, '\t').collect::<Vec<_>>())
-            .filter(|fields| fields.len() == 4)
-            .map(|fields| ACoderCall {
-                cwd: PathBuf::from(fields[0]),
-                deployment: fields[1].to_string(),
-                token: fields[2].to_string(),
-                args: fields[3].to_string(),
-            })
-            .collect()
-    }
-
-    /// Every call of the stand-in so far whose arguments hold `needle`.
-    fn calls_carrying(&self, needle: &str) -> Vec<ACoderCall> {
-        self.calls()
-            .into_iter()
-            .filter(|call| call.args.contains(needle))
-            .collect()
-    }
-
     /// The command Claude Code would run for `event`, read from the session's hooks file the
     /// start installed in the worktree in the workspace.
     fn installed_hook(&self, event: &str) -> String {

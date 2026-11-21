@@ -7,6 +7,9 @@ Test-only helpers for target-session tests (dev-dependency use only).
   test's timing starts.
 - `StandInSshTarget` — a directory standing for a machine reached over ssh, holding the session's
   worktree, and the stand-in `ssh` that runs the remote command locally under that root.
+  Its login shell answers `$SHELL -l` — a person's login shell, as a shell tab on a target runs it — by
+  recording the directory it started in (`login_shell_started_in()`, written through a `.part` file and
+  `mv` so a reader never sees a half-written record) and becoming an interactive `/bin/sh`.
 
 Used by `tddy-agent-launch`, `tddy-session-lifecycle` and `tddy-session-driver` acceptance suites.
 Copies that diverged (the stand-in coder `AWorkspace`, agent-launch's call-logging `ATarget`, the stub

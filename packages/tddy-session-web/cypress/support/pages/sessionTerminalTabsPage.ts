@@ -11,6 +11,8 @@ import {
   sessionsTerminalTabNewInTmuxOption,
   sessionsTerminalTabNewInSandboxOption,
   sessionsTerminalTabNewOnHostOption,
+  sessionsTerminalTabNewOnTargetOption,
+  sessionsTerminalTabNewOnThisHostOption,
   sessionsTerminalTabTmuxMarker,
   sessionsTerminalTabClose,
   sessionsTerminalPane,
@@ -87,6 +89,14 @@ export const sessionTerminalTabsPage = {
   /** A sandboxed session's "+" menu item opening a terminal of `kind` "On host". */
   newTabOnHostOption: (kind: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsTerminalTabNewOnHostOption(kind), { timeout: 10000, ...options }),
+
+  /** A target session's "+" menu item opening a terminal of `kind` "On target". */
+  newTabOnTargetOption: (kind: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsTerminalTabNewOnTargetOption(kind), { timeout: 10000, ...options }),
+
+  /** A target session's "+" menu item opening a terminal of `kind` "On this host". */
+  newTabOnThisHostOption: (kind: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsTerminalTabNewOnThisHostOption(kind), { timeout: 10000, ...options }),
 
   /** The labelled groups of the open "+" menu, in the order the menu shows them. */
   newTabMenuGroups: (options?: Parameters<typeof cy.get>[1]) =>

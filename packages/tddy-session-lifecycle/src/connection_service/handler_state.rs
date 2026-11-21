@@ -251,6 +251,7 @@ impl DaemonSessionHost {
             session_watches: self.session_watches().zip(self.project_notification_log()),
             tab_jails: Arc::clone(&self.tab_jails),
             tab_jail_spawn: self.tab_jail_spawn.clone(),
+            tab_target_shell: self.tab_target_shell.clone(),
         }
     }
 }

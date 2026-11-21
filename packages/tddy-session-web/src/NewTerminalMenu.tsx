@@ -13,7 +13,7 @@ import {
   terminalKindLabel,
 } from "tddy-session-create-web";
 import { nextTmuxSessionName } from "./tmuxSessionName";
-import { SANDBOX_WRAPPER_KIND, TMUX_WRAPPER_KIND } from "./useSessionTerminals";
+import { SANDBOX_WRAPPER_KIND, TARGET_WRAPPER_KIND, TMUX_WRAPPER_KIND } from "./useSessionTerminals";
 import type { TmuxMenuState } from "./useTmuxSessions";
 
 interface NewTerminalMenuProps {
@@ -31,6 +31,9 @@ interface NewTerminalMenuProps {
   /** Whether the session runs sandboxed (`SessionEntry.sandbox`): its shell opens "In sandbox" — in
    *  a jail of its own — by default, or "On host". */
   sandboxed?: boolean;
+  /** Whether the session runs on a target (`SessionEntry.target` is set): its shell opens "On
+   *  target" — on that machine, in the session's worktree there — by default, or "On this host". */
+  onTarget?: boolean;
 }
 
 /** Gap between the "+" button and the top of its menu, in pixels. */
@@ -66,6 +69,7 @@ export function NewTerminalMenu({
   sessionId,
   tmux: tmuxState,
   sandboxed = false,
+  onTarget = false,
 }: NewTerminalMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   // The name typed for "New tmux session…", or null while that item is not open.
@@ -81,6 +85,9 @@ export function NewTerminalMenu({
   const tmux = isTddyCoderSession ? undefined : tmuxState;
   // A tddy-coder participant runs bash on its own side only: it opens no jail.
   const offersSandbox = sandboxed && !isTddyCoderSession;
+  // A tddy-coder participant opens nothing on a target. A sandboxed session's shell is the jail's
+  // choice, so a session offers one grouping or the other.
+  const offersTarget = onTarget && !offersSandbox && !isTddyCoderSession;
 
   // Closing the menu drops an unsent name.
   useEffect(() => {
@@ -195,6 +202,32 @@ export function NewTerminalMenu({
                         key={kind}
                         kind={kind}
                         testId={`sessions-terminal-tab-new-on-host-${kind}`}
+                        onChoose={() => {
+                          setMenuOpen(false);
+                          onOpen(kind);
+                        }}
+                      />
+                    ))}
+                  </ul>
+                </>
+              ) : offersTarget ? (
+                <>
+                  <ul role="group" aria-label="On target" data-testid="sessions-terminal-tab-new-menu">
+                    <MenuKindItem
+                      kind={BASH_KIND}
+                      testId={`sessions-terminal-tab-new-on-target-${BASH_KIND}`}
+                      onChoose={() => {
+                        setMenuOpen(false);
+                        onOpen(BASH_KIND, undefined, [TARGET_WRAPPER_KIND]);
+                      }}
+                    />
+                  </ul>
+                  <ul role="group" aria-label="On this host" className="mt-1 border-t border-border pt-1">
+                    {menuKinds.map((kind) => (
+                      <MenuKindItem
+                        key={kind}
+                        kind={kind}
+                        testId={`sessions-terminal-tab-new-on-this-host-${kind}`}
                         onChoose={() => {
                           setMenuOpen(false);
                           onOpen(kind);

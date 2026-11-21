@@ -19,6 +19,9 @@ export const TMUX_WRAPPER_KIND = "tmux";
 /** The wrapper kind that runs a shell tab of a sandboxed session in a jail of its own. */
 export const SANDBOX_WRAPPER_KIND = "sandbox";
 
+/** The wrapper kind that runs a shell tab of a target session on its target. */
+export const TARGET_WRAPPER_KIND = "target";
+
 /** A started terminal of this session: its id, and what it runs (`bash`, or a harness's session type). */
 export interface SessionTerminal {
   readonly terminalId: string;

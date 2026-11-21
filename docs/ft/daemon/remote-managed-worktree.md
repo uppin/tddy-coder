@@ -103,6 +103,10 @@ keeps the meaning above — agent local, tools remote — and the two fields are
 on a start. Session targets are specified in
 [claude-cli-session.md](claude-cli-session.md#the-generic-cli-spec-launch-serves-claudes-needs).
 
+A target session's **secondary shell tabs** open on the target as well: a tab "On target" runs the target
+user's login shell in the session's worktree there, through the same remote shell, and is recorded and
+restored as such — see [Session liveness § A target session's tabs](session-liveness.md#a-target-sessions-tabs).
+
 ### Split: SSH Host alias (`ssh_config_host`)
 
 When `codebase_daemon_instance_id` names a different host than `daemon_instance_id`, the **codebase

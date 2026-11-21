@@ -146,6 +146,7 @@ export function SessionRuntime({
   const sessionEntry = sessions.find((s) => s.sessionId === runtime.sessionId);
   const sessionType = sessionEntry?.sessionType;
   const sandboxed = sessionEntry?.sandbox === true;
+  const onTarget = sessionEntry?.target !== undefined;
 
   // Whether a file dropped from this machine onto the session's terminals is handed over by its
   // real path (an unconfined session on the daemon Tddy Desktop hosts) or uploaded (any other).
@@ -268,6 +269,7 @@ export function SessionRuntime({
         onClose={close}
         sessionType={sessionType}
         sandboxed={sandboxed}
+        onTarget={onTarget}
         childSessions={childSessions}
         activeChildSessionId={activeChildSessionId}
         onSelectChild={selectChild}

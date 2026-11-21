@@ -34,6 +34,9 @@ interface SessionTerminalTabsProps {
   /** Whether the session runs sandboxed (`SessionEntry.sandbox`): its "+" menu offers its shell "In
    *  sandbox" or "On host". */
   sandboxed?: boolean;
+  /** Whether the session runs on a target (`SessionEntry.target` is set): its "+" menu offers its
+   *  shell "On target" or "On this host". */
+  onTarget?: boolean;
   /** Spawned child conversations of this session, rendered as tabs after the terminal tabs. */
   childSessions?: readonly ChildSession[];
   /** The selected child conversation's session id, or `null` when a terminal tab is active. */
@@ -114,6 +117,7 @@ export function SessionTerminalTabs({
   onClose,
   sessionType,
   sandboxed,
+  onTarget,
   childSessions = [],
   activeChildSessionId = null,
   onSelectChild,
@@ -238,6 +242,7 @@ export function SessionTerminalTabs({
           <NewTerminalMenu
             sessionType={sessionType}
             sandboxed={sandboxed}
+            onTarget={onTarget}
             onOpen={onOpen}
             sessionId={sessionId}
             tmux={tmux}

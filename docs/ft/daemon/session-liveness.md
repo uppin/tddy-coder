@@ -1,6 +1,6 @@
 # Session liveness
 
-**Status:** ✅ Shipped (`#session-liveness` 1/8 PR #958, 2/8 PR #959, 3/8 PR #960, 4/8 PR #961, 5/8 PR #964)
+**Status:** ✅ Shipped (`#session-liveness` 1/8 PR #958, 2/8 PR #959, 3/8 PR #960, 4/8 PR #961, 5/8 PR #964, 6/8 PR #965)
 
 ## Summary
 
@@ -85,6 +85,7 @@ tabs:
 | `tmux` | `session`, `os_user` | a tmux session the daemon created to wrap a tab |
 | `tmux-attach` | `session`, `os_user` | a client on the user's own tmux session — attached to an existing one, or started as a new one |
 | `sandbox` | — | a jail of the tab's own, around the node it wraps (see [A sandboxed session's tabs](#a-sandboxed-sessions-tabs)) |
+| `target` | — | the session's target, around the node it wraps: the machine `.session.yaml`'s `target` names, in the session's worktree there (see [A target session's tabs](#a-target-sessions-tabs)). It records no properties — the transport and the worktree are the session's, read on every start |
 
 - **One writer.** The roster is a file of its own, written only by the daemon's terminal roster under
   one lock per session, atomically. `.session.yaml` is read-modify-written by hook and status updates
@@ -147,6 +148,7 @@ host, sandboxed and target sessions alike — and a main that fails still fails 
 | `tmux` → `agent` | its tmux session alive: a client is **re-attached**, the agent untouched. Gone: the agent is relaunched in a new tmux session of the same name and resumes its conversation (fresh when not resumable) |
 | `shell` | the session user's login shell, fresh |
 | `sandbox` → `shell` | the session user's login shell, fresh, in a **new jail** of its own; dropped with the jail's reason when it cannot start |
+| `target` → `shell` | the target user's login shell, fresh, **on the session's target**, in the session's worktree there; dropped with the reason (an unreachable target, a locked vault) when it cannot start |
 | `tmux-attach` | re-attached while the user's tmux session exists; otherwise **dropped** |
 
 - **Resumable conversations.** A tab resumes *its own* conversation only for a harness whose conversation
@@ -204,6 +206,38 @@ in one session.
   session's main jail**, which it left running before.
 - **Liveness.** A shell tab's jail never counts as a live agent, like any shell.
 
+## A target session's tabs
+
+A target (ssh or Coder) session's main runs on its target, reached through its remote shell. A secondary
+**shell** tab of that session is opened where the person picks it, in the web's new-tab menu: **On target**
+(the default) or **On this host**. Both can coexist in one session.
+
+- **On target.** The tab runs `cd '<worktree>' && exec "${SHELL:-/bin/sh}" -l` on the target: the target user's
+  own login shell, with the target login's own environment — a person's shell, not the `env -i` launch of an
+  agent — through the session's remote shell, as a local tab terminal (one interactive `ssh -tt` or `coder ssh`
+  client per tab, in the session's directory on this host).
+- **A tab is not a main.** Opening it writes no pid file on the target, places or rewrites no session pointer,
+  applies no startup window, and never stops the session: its failure, and its exit, end only the tab.
+- **Whose target.** The session's `.session.yaml` `target` and `repo_path` name the machine and the worktree;
+  a Coder workspace is reached with the account **the caller's** vault holds, the caller being who their
+  session token resolves to. A session that records no target or no worktree, a locked vault, and an account
+  the vault does not hold are refused `FAILED_PRECONDITION`, naming why.
+- **Reached first.** The target is entered with `cd '<worktree>'` through the port before any terminal is
+  registered, so a target that resolved but cannot be reached — its transport fails to connect, or the
+  worktree cannot be entered — fails the start with the transport's own words, `UNAVAILABLE`, and records
+  nothing. A target that could not be *resolved* (a locked vault, a missing account, no recorded target or
+  worktree) stays `FAILED_PRECONDITION`: the caller can meet it.
+- **Recorded `[target, shell]`.** A `target` wrapper around an agent, or around another wrapper, is
+  `INVALID_ARGUMENT`; an agent on a target is a later node's. A tddy-coder participant, which reaches no
+  target, refuses it.
+- **On this host.** A tab "On this host" of a target session is a plain shell in the session's own directory
+  on this host, where its main's client runs: the recorded worktree exists only on the target. It is
+  reachable whether or not the session's main runs.
+- **Resume.** The roster restore reopens a `[target, shell]` tab on the target under its recorded id, as the
+  caller of the resume; it is dropped, with the reason, when the target cannot be reached or the vault is
+  locked.
+- **Liveness.** A shell tab never counts as a live agent, on a target as anywhere.
+
 ## What acts on held processes
 
 - **Delete** stops every terminal the session has (main and tabs), its process tab through its holder,
@@ -237,13 +271,10 @@ agent for), and Telegram's list, branch-owner scan and delete.
   serve; until then a replace cannot stop it.
 - What a detached tmux-run agent prints while nobody is attached is not recorded, for a main and for a
   wrapped tab alike: history serves the recording up to the client's end.
-- **Only host-side and sandbox shell tabs are restored.** An agent tab never starts in a jail, and
-  nothing starts a secondary tab on a target, so every other recorded chain is host-side and so is its
-  restore. Three further stack nodes are planned: **target shell tab** (a target tab launch plus a target
-  wrapper node, restoring through the session's `RemoteShell`), **sandbox agent tab** and **target agent
-  tab**. `restore_plan` dispatches per node kind, so each adds a kind. Until then a chain holding such a
-  kind is dropped with a reason, and a target session's host-recorded shell tab is probably dropped on
-  resume.
+- **Only host-side, sandbox and target shell tabs are restored.** An agent tab never starts in a jail or on
+  a target, so every other recorded chain is host-side and so is its restore. Two further stack nodes are
+  planned: **sandbox agent tab** and **target agent tab**. `restore_plan` dispatches per node kind, so each
+  adds a kind. Until then a chain holding such a kind is dropped with a reason.
 - opencode, muse and warp tabs reopen fresh, not in their conversation (`TODO(opencode-cli)`,
   `TODO(muse-cli)`, `TODO(warp-cli)` on `tab_conversation_is_resumable`).
 - The sandboxed resume path calls the same restore but has no test of its own: its jail harness is the
