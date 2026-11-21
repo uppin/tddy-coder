@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 5 — new elicitation kind end to end (tool, pending record, bus notification, web pane prompt, answer RPC), and writes opened on a security boundary
+**PR**: [#984](https://github.com/uppin/tddy-coder/pull/984)
 **Stack**: `#orchestra` 6/9 — branch `feature/orchestra/access-elicitation`, base `feature/orchestra/trunk-watch`
 
 ## Initial Discovery
@@ -14,7 +15,8 @@
 
 - **tddy-tool-engine**: `RequestPathAccess { paths, mode, reason }` (blocks until answered or times out); write tools admit granted paths
 - **tddy-session-activity**: pending access request record, answer, grant written to n1's `PathGrantStore`
-- **tddy-service**: `activity.proto`: `AnswerPathAccess` RPC, `PATH_ACCESS_REQUESTED` notification kind
+- **tddy-service**: `activity.proto`: `ListPathAccessRequests` / `AnswerPathAccess` RPCs, `PathAccessRequest`; TS regenerated in `tddy-client-web`, `tddy-rust-typescript-tests`
+- **tddy-session-lifecycle**: `PeerRoutedActivity` delegates the two RPCs locally
 - **tddy-daemon-rpc**: role guard: Write/StrReplace/Delete admitted inside write grants only
 - **tddy-session-web**: the request in the orchestrator's session pane: paths, mode, reason, Allow / Deny
 
@@ -48,7 +50,7 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: `RequestPathAccess`/`AnswerPathAccess` definitions, `PendingAccessRequest`, `SessionNotificationKind::PATH_ACCESS_REQUESTED`, the pane component's props; failing tests below.
+The first push of this PR, before its implementation: `RequestPathAccess` with its port, the `PathAccessRequests` store, `ListPathAccessRequests`/`AnswerPathAccess` RPCs, the pane component's props; the request is announced as a `path_access` pending question. Failing tests below.
 
 ## Green wave
 
@@ -99,16 +101,35 @@ The orchestrator asks; the operator answers in its pane; grants widen reads and 
 
 ## Acceptance Tests
 
-`packages/tddy-daemon-rpc/tests/path_access_elicitation_acceptance.rs`:
-- [ ] `a_read_request_raises_an_attention_notification`
+`packages/tddy-daemon-rpc/tests/path_access_elicitation_acceptance.rs` (real `ExecuteTool` and `ActivityService`, notification bus recorded):
+- [ ] `a_request_waits_in_the_pane_and_raises_an_attention_notification`
 - [ ] `an_allowed_read_request_makes_the_path_readable`
-- [ ] `a_denied_request_answers_the_agent_with_a_refusal`
-- [ ] `an_unanswered_request_times_out_as_denied`
-- [ ] `a_write_inside_a_write_grant_succeeds_and_outside_it_is_refused`
+- [ ] `a_denied_request_answers_denied_and_the_path_stays_out_of_reach`
+- [ ] `a_write_inside_a_write_grant_succeeds_and_outside_it_is_refused` — also needs n1's `PathGrantStore` (kept real: the grant is what this node opens writes on)
 
-`packages/tddy-session-web/cypress/component/PathAccessRequest.cy.tsx`:
-- [ ] shows the requested paths, mode and reason with Allow and Deny
-- [ ] Allow answers the request through AnswerPathAccess
+`packages/tddy-session-web/cypress/component/PathAccessRequestsAcceptance.cy.tsx` (`mountWithClients` + in-memory RPC backend):
+- [ ] shows each requested path, the mode and the agent's reason
+- [ ] Allow answers the request allowed, as the orchestrator's session
+- [ ] Deny answers the request denied
+- [ ] an answered request leaves the list
+
+Unit — `packages/tddy-session-activity/src/path_access.rs`:
+- [ ] `a_request_is_pending_until_answered`
+- [ ] `allowing_writes_a_grant_for_each_path`
+- [ ] `a_relative_path_is_refused`
+- [ ] `answering_a_request_that_is_not_pending_is_refused`
+- [ ] `an_unanswered_request_times_out_and_is_withdrawn`
+- [ ] `a_waiter_wakes_with_the_answer`
+
+Unit — `packages/tddy-tool-engine/src/path_access_tools.rs`:
+- [ ] `an_allowed_request_answers_allowed_with_its_paths`
+- [ ] `a_relative_path_is_refused_before_the_operator_is_asked`
+- [ ] `an_empty_reason_is_refused_before_the_operator_is_asked`
+- [ ] `the_tool_is_defined_under_its_name`
+
+The surface they specify (bodies `TODO(access-elicitation)`): proto `ActivityService.{ListPathAccessRequests, AnswerPathAccess}` with `PathAccessRequest` (TS regenerated), served unimplemented by `ActivityServiceImpl` and delegated by `PeerRoutedActivity`; `tddy_session_activity::path_access::{PathAccessRequests, PendingPathAccess, PathAccessOutcome, PathAccessAnswerError, PATH_ACCESS_QUESTION_KIND, PATH_ACCESS_WAIT}`; `tddy_tool_engine::path_access_tools::{is_path_access_tool, request_path_access_tool_def, RequestedAccess, RequestPathAccessArgs, PathAccessAnswer, PathAccessPort, execute_path_access_tool}`; `tddy-session-web` `PathAccessRequests` component.
+
+**Contract-time decision:** the notification is a `PendingQuestion` of kind `path_access` (`QuestionNotice.kind`), so the drawer, the desktop and Telegram announce it the way they announce a question, with no new notification source or kind.
 
 ## Decisions & Trade-offs
 
@@ -137,10 +158,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (delegated: the user said "Finish the remaining ones without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

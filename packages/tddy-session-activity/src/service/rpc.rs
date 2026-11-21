@@ -62,6 +62,30 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         self.rename_own_session_impl(request.into_inner()).await
     }
 
+    /// An orchestrator's access requests waiting for the operator (`#orchestra` 6/9) — see
+    /// `crate::path_access`.
+    async fn list_path_access_requests(
+        &self,
+        request: Request<tddy_service::proto::activity::ListPathAccessRequestsRequest>,
+    ) -> Result<Response<tddy_service::proto::activity::ListPathAccessRequestsResponse>, Status>
+    {
+        // TODO(access-elicitation): implement
+        let _ = request;
+        Err(Status::unimplemented(
+            "ListPathAccessRequests is not served yet",
+        ))
+    }
+
+    /// The operator's answer to one of an orchestrator's access requests (`#orchestra` 6/9).
+    async fn answer_path_access(
+        &self,
+        request: Request<tddy_service::proto::activity::AnswerPathAccessRequest>,
+    ) -> Result<Response<tddy_service::proto::activity::AnswerPathAccessResponse>, Status> {
+        // TODO(access-elicitation): implement
+        let _ = request;
+        Err(Status::unimplemented("AnswerPathAccess is not served yet"))
+    }
+
     /// An orchestrated session's `PermissionRequest` hook waiting for its orchestrator's answer —
     /// see `question_answers`.
     async fn await_question_answer(
