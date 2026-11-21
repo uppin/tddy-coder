@@ -263,9 +263,25 @@ fn wraps_an_agent(entry: &TabEntry) -> bool {
 /// conversation when its harness can, fresh otherwise; dropped naming what it is missing, or a node
 /// the agent is recorded wrapping.
 fn jailed_agent_plan(entry: &TabEntry) -> TabRestore {
-    // TODO(sandbox-agent-tab): implement
-    let _ = entry;
-    todo!("the restore of a sandbox-wrapped agent tab")
+    if entry.launch.len() > 2 {
+        return drop_because(
+            "a sandbox around an agent wrapping anything more is not one this daemon can restore",
+        );
+    }
+    match agent_plan(&entry.launch[1]) {
+        TabRestore::ResumeAgent {
+            harness,
+            conversation_id,
+        } => TabRestore::JailedAgent {
+            harness,
+            resume_conversation: Some(conversation_id),
+        },
+        TabRestore::FreshAgent { harness } => TabRestore::JailedAgent {
+            harness,
+            resume_conversation: None,
+        },
+        dropped => dropped,
+    }
 }
 
 /// A `target`-wrapped tab: a shell is reopened on the session's target; anything else on a target is

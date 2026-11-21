@@ -29,28 +29,29 @@ use std::sync::{Arc, Mutex as StdMutex};
 use async_trait::async_trait;
 use tddy_core::provider_route::HarnessRoute;
 use tddy_daemon_sandbox::sandbox_session::{
-    dial_and_bridge_with_egress, pick_free_loopback_port, sandbox_error_to_status,
-    spawn_sandbox_plan, wait_for_sandbox_ready, SandboxRunnerSpawn, SandboxSessionState,
-    SandboxSessionStateInit,
+    dial_and_bridge_with_egress, sandbox_error_to_status, spawn_sandbox_plan,
+    wait_for_sandbox_ready, SandboxRunnerSpawn, SandboxSessionState, SandboxSessionStateInit,
 };
 use tddy_daemon_sandbox::tab_jails::{TabJailAgent, TabJailLaunch, TabJailPaths, TabJailSpawn};
 use tddy_daemon_sandbox::tool_jail::{
     build_tool_jail_plan, lower_tool_jail, ToolJailGrants, ToolJailInputs,
 };
 use tddy_rpc::Status;
-use tddy_sandbox::{EgressPolicy, MountSpec};
+use tddy_sandbox::MountSpec;
 use tddy_sandbox_runner::{EgressGuard, ExecPlan};
 use tddy_task::TerminalCapture;
 
 use crate::cli_harness_jail::{closure_defs, require_jail_route};
 use crate::harness_from_spec::{cli_launcher, resolve_session_agent, CliSessionAgent};
 use crate::jail_launch::{
-    host_home, jail_path, runner_argv, write_exec_plan, RunnerArgv, JAIL_READY_TIMEOUT,
+    host_home, jail_path, needs_egress_shim, pick_egress_shim_port, runner_argv, write_exec_plan,
+    RunnerArgv, JAIL_READY_TIMEOUT,
 };
 use crate::launch_ports::LaunchSessions;
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::session_provider_route::resume_route;
 use crate::svc_start_sandboxed_claude_cli_session::JailDirs;
+use crate::tab_jail_agent::TabJailAgentPlanner;
 
 impl LaunchSessions {
     /// What starts a tab's jail: the double a test gave the host, or this topic's own launch.
@@ -103,7 +104,9 @@ impl TabJailSpawn for LaunchSessions {
         })?;
         // The session's worktree is the shell's whole point: mounted writable, as the tab's cwd.
         grants.mounts.push(MountSpec::read_write(&launch.worktree));
-        self.run_tab_jail(launch, &dirs, grants, &closure_ids(&closure))
+        let exec_plan = shell_exec_plan(launch, &grants);
+        write_exec_plan(&exec_plan_path_of(launch, &dirs), &exec_plan)?;
+        self.run_tab_jail(launch, &dirs, grants, &closure_ids(&closure), None)
             .await
     }
 
@@ -114,13 +117,58 @@ impl TabJailSpawn for LaunchSessions {
         launch: &TabJailLaunch,
         agent: &TabJailAgent,
     ) -> Result<Arc<SandboxSessionState>, Status> {
-        // TODO(sandbox-agent-tab): implement
-        let _ = (launch, agent);
-        todo!("launch an agent tab's jail")
+        let tab_agent = self.tab_agent_of(agent)?;
+        let dirs = prepare_tab_dirs(launch)?;
+        let route = tab_route(
+            &self.host.subject_account_access(&launch.subject),
+            &tab_agent,
+            &launch.session_dir,
+        )?;
+        // The plan is written where the runner reads it: the tab's files, under the canonical root.
+        let mut canonical = launch.clone();
+        canonical.paths.exec_plan = exec_plan_path_of(launch, &dirs);
+        canonical.paths.scratch_dir = dirs.scratch_dir.clone();
+        let host_home = host_home()?;
+        let planner = TabJailAgentPlanner {
+            coding_agents: &self.coding_agents,
+            tddy_home: &self.tddy_data_dir,
+            host_home: &host_home,
+        };
+        let plan = planner.plan_on_route(&canonical, agent, route.as_ref())?;
+        log::debug!(
+            "tab {} of session {}: a jail running {} in conversation {}",
+            launch.terminal_id,
+            launch.session_id,
+            agent.harness,
+            agent.conversation_id
+        );
+        let tool_ids = closure_ids(
+            &tab_agent
+                .agent
+                .deps
+                .iter()
+                .chain([&tab_agent.agent.tool])
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
+        self.run_tab_jail(launch, &dirs, plan.grants, &tool_ids, route)
+            .await
     }
 }
 
 impl LaunchSessions {
+    /// The coding agent an agent tab of `agent`'s harness runs: its session type must be a CLI
+    /// coding agent this host installed.
+    fn tab_agent_of(&self, agent: &TabJailAgent) -> Result<CliSessionAgent, Status> {
+        let kind = cli_launcher(Some(&self.coding_agents), &agent.harness)?.ok_or_else(|| {
+            Status::failed_precondition(format!(
+                "{:?} runs no coding agent, so a tab cannot run it in a jail",
+                agent.harness
+            ))
+        })?;
+        resolve_session_agent(&self.coding_agents, kind)
+    }
+
     /// The coding agent whose grants a tab of `launch`'s session runs on: the session must be
     /// sandboxed and run a CLI coding agent, or there are no grants to lower.
     fn session_agent_of_tab(&self, launch: &TabJailLaunch) -> Result<CliSessionAgent, Status> {
@@ -203,16 +251,21 @@ fn under_canonical_root(paths: &TabJailPaths, dirs: &JailDirs, path: &Path) -> P
     }
 }
 
+/// Where the tab jail's runner reads its exec plan: the tab's file under the canonical sandbox root.
+fn exec_plan_path_of(launch: &TabJailLaunch, dirs: &JailDirs) -> PathBuf {
+    under_canonical_root(&launch.paths, dirs, &launch.paths.exec_plan)
+}
+
 /// What the tab jail's runner execs: the login shell, with the grants' env and tool links first on
 /// its `PATH`.
-fn shell_exec_plan(launch: &TabJailLaunch, grants: &ToolJailGrants, egress_shim: bool) -> ExecPlan {
+fn shell_exec_plan(launch: &TabJailLaunch, grants: &ToolJailGrants) -> ExecPlan {
     let mut env: BTreeMap<String, String> = grants.env.clone();
     env.insert("PATH".to_string(), jail_path(&grants.bin_dir));
     ExecPlan {
         argv: vec![launch.login_shell.clone()],
         env,
         files: Vec::new(),
-        egress_shim,
+        egress_shim: needs_egress_shim(&grants.egress),
     }
 }
 
@@ -226,19 +279,22 @@ struct PlannedTabJail {
 
 impl LaunchSessions {
     /// Spawn the runner of `launch` with `grants`, wait for it, bridge its terminal, and return its
-    /// state — the tab jail's counterpart of the main's launch, over the tab's own files.
+    /// state — the tab jail's counterpart of the main's launch, over the tab's own files. The
+    /// runner execs the plan already written at [`exec_plan_path_of`]; `route` is the agent's
+    /// provider route, handed to the runner (a shell is given none).
     async fn run_tab_jail(
         &self,
         launch: &TabJailLaunch,
         dirs: &JailDirs,
         grants: ToolJailGrants,
         tool_ids: &[String],
+        route: Option<HarnessRoute>,
     ) -> Result<Arc<SandboxSessionState>, Status> {
         let PlannedTabJail {
             plan,
             ready_marker,
             egress_guard,
-        } = self.plan_tab_jail(launch, dirs, grants, tool_ids)?;
+        } = self.plan_tab_jail(launch, dirs, grants, tool_ids, route)?;
         let mut handle = spawn_sandbox_plan(plan).map_err(|e| {
             let mut status = sandbox_error_to_status(e);
             status.message = format!("{}\n{}", status.message, egress_logs(dirs));
@@ -259,7 +315,7 @@ impl LaunchSessions {
             .await
     }
 
-    /// Write the shell's exec plan and plan the runner over the tab's own files: socket, marker, plan
+    /// Plan the runner over the tab's own files, which hold its exec plan already: socket, marker, plan
     /// and profile re-rooted under the canonical sandbox root, no stale socket or marker of an earlier
     /// jail of this tab left to be read as this one's.
     fn plan_tab_jail(
@@ -268,21 +324,13 @@ impl LaunchSessions {
         dirs: &JailDirs,
         grants: ToolJailGrants,
         tool_ids: &[String],
+        route: Option<HarnessRoute>,
     ) -> Result<PlannedTabJail, Status> {
         let paths = &launch.paths;
         let session_id = launch.session_id.as_str();
         let ready_marker = under_canonical_root(paths, dirs, &paths.ready_marker);
-        let exec_plan_path = under_canonical_root(paths, dirs, &paths.exec_plan);
-        let shim_port = match grants.egress {
-            EgressPolicy::None => None,
-            EgressPolicy::Any | EgressPolicy::Hosts(_) => {
-                Some(pick_free_loopback_port().map_err(Status::internal)?)
-            }
-        };
-        write_exec_plan(
-            &exec_plan_path,
-            &shell_exec_plan(launch, &grants, shim_port.is_some()),
-        )?;
+        let exec_plan_path = exec_plan_path_of(launch, dirs);
+        let shim_port = pick_egress_shim_port(&grants.egress)?;
         let egress_guard = EgressGuard::new(grants.egress.clone(), session_id, tool_ids.to_vec());
         let _ = std::fs::remove_file(&paths.ipc_socket);
         let _ = std::fs::remove_file(&ready_marker);
@@ -300,7 +348,7 @@ impl LaunchSessions {
             "--cwd".to_string(),
             launch.worktree.to_string_lossy().into_owned(),
         ]);
-        let spawn = self.tab_runner_spawn(launch, dirs, runner_argv, &grants, shim_port);
+        let spawn = self.tab_runner_spawn(launch, dirs, runner_argv, &grants, shim_port, route);
         let plan = build_tool_jail_plan(spawn, grants).map_err(sandbox_error_to_status)?;
         Ok(PlannedTabJail {
             plan,
@@ -318,6 +366,7 @@ impl LaunchSessions {
         runner_argv: Vec<String>,
         grants: &ToolJailGrants,
         shim_port: Option<u16>,
+        route: Option<HarnessRoute>,
     ) -> SandboxRunnerSpawn {
         let paths = &launch.paths;
         SandboxRunnerSpawn {
@@ -338,9 +387,9 @@ impl LaunchSessions {
             mounts: grants.mounts.clone(),
             host_home: None,
             cgroup: self.config.sandbox_cgroup_config(),
-            // The route's env and credentials are the agent's: the shell's jail is lowered on the
+            // The route's env and credentials are the agent's: a shell's jail is lowered on the
             // route's egress ([`tab_route`]) and is given none of them.
-            route: None,
+            route,
             context_dir: Some(dirs.context_dir.clone()),
             stdio: true,
         }

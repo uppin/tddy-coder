@@ -372,7 +372,7 @@ impl TerminalRoster for CliManagerTerminalRoster {
             return self.start_jailed_shell_tab(session_id, launch).await;
         }
         if let tddy_terminal_rpc::service::TerminalKind::SandboxedAgent { agent } = &launch.kind {
-            return self.start_jailed_agent_tab(session_id, agent).await;
+            return self.start_jailed_agent_tab(session_id, agent, launch).await;
         }
         if launch.kind == tddy_terminal_rpc::service::TerminalKind::TargetShell {
             return self.start_target_shell_tab(session_id, launch).await;

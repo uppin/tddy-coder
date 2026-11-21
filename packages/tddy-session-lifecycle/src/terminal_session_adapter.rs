@@ -249,13 +249,15 @@ impl DaemonTerminalSessionStore {
         .await
     }
 
-    /// The sessions this daemon holds a live agent for: its terminals' and its sandboxed runners'.
+    /// The sessions this daemon holds a live agent for: its terminals', its sandboxed runners' and its
+    /// jailed agent tabs'.
     /// The live set every session listing reads (`list_sessions_in_dir`).
     pub async fn live_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
         self.manager
             .live_agent_sessions()
             .await
             .union(self.sandboxes.live_sessions().await)
+            .union(self.tab_jails.live_agent_sessions().await)
     }
 }
 

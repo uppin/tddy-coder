@@ -236,9 +236,14 @@ impl TerminalKind {
         agent: String,
         inner: &[crate::proto::terminal_session::LaunchNode],
     ) -> Result<TerminalKind, Status> {
-        // TODO(sandbox-agent-tab): implement
-        let _ = (agent, inner);
-        todo!("a sandbox-wrapped agent kind")
+        if let Some(refused) = inner.first() {
+            return Err(Status::invalid_argument(format!(
+                "a terminal cannot be wrapped in {:?} inside {SANDBOX_WRAPPER_KIND:?}: a sandbox \
+                 wraps an agent alone",
+                refused.kind
+            )));
+        }
+        Ok(TerminalKind::SandboxedAgent { agent })
     }
 
     /// What `kind` wrapped in a [`TARGET_WRAPPER_KIND`] wrapper (with `inner` wrappers inside it)

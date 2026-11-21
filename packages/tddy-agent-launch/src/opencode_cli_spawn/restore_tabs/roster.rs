@@ -18,7 +18,9 @@ use tddy_core::tab_roster::{
     TMUX_ATTACH_KIND, TMUX_KIND,
 };
 use tddy_daemon_kernel::privilege_drop::EffectiveIdentity;
-use tddy_daemon_sandbox::tab_jails::{TabJailLaunch, TabJailOwner, TabJailSpawn, TabJails};
+use tddy_daemon_sandbox::tab_jails::{
+    TabJailAgent, TabJailLaunch, TabJailOwner, TabJailSpawn, TabJails,
+};
 use tddy_service::proto::session::{RestoredTab, RestoredTabOutcome};
 
 use super::new_tab::agent_tab_argv;
@@ -268,15 +270,35 @@ async fn restore_jailed_agent(
     harness: String,
     resume_conversation: Option<String>,
 ) -> anyhow::Result<Restored> {
-    // TODO(sandbox-agent-tab): implement
-    let _ = (
-        restore.tab_jails,
-        restore.tab_jail_spawn,
-        tab,
-        harness,
-        resume_conversation,
-    );
-    todo!("restore a jailed agent tab")
+    let login_shell = tddy_terminal_rpc::login_shell_for(restore.os_user);
+    let launch = TabJailLaunch::for_tab(
+        restore.session_id,
+        &tab.terminal_id,
+        restore.session_dir,
+        restore.worktree,
+        TabJailOwner {
+            os_user: restore.os_user,
+            login_shell: &login_shell,
+            subject: restore.subject,
+        },
+    )
+    .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))?;
+    let resumed = resume_conversation.is_some();
+    let agent = TabJailAgent {
+        conversation_id: resume_conversation.unwrap_or_else(|| recorded_conversation(tab)),
+        resume: resumed,
+        harness: harness.clone(),
+    };
+    restore
+        .tab_jails
+        .start_agent(restore.tab_jail_spawn, launch, agent)
+        .await
+        .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))?;
+    Ok(if resumed {
+        Restored::AsRecorded
+    } else {
+        Restored::Fresh(reopened_fresh_reason(&harness))
+    })
 }
 
 /// Start the target user's login shell under the tab's recorded id on the session's target, in the

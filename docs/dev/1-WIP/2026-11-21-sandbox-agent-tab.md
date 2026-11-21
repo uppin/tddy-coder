@@ -113,9 +113,9 @@ A jailed claude tab shares the session's hooks like a host agent tab; unchanged 
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [x] Create failing acceptance tests / run them (verify they fail) / USER REVIEW — written and failing; USER REVIEW pending
+- [x] Create failing acceptance tests / run them (verify they fail) / USER REVIEW — written and failing; review approved
 - [x] TDD Red — failing unit/integration tests
-- [ ] Implementation
+- [x] Implementation
 - [ ] Package documentation, scoped clippy, single-spec Cypress
 
 ## Technical Changes
@@ -174,7 +174,7 @@ After n5, `sandbox` around an agent is refused; only shell tabs run in tab jails
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
