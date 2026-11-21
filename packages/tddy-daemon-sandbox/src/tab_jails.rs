@@ -1,4 +1,5 @@
-//! The jails a sandboxed session's **shell tabs** run in, one per tab (`#session-liveness` 5/8).
+//! The jails a sandboxed session's **shell and agent tabs** run in, one per tab (`#session-liveness`
+//! 5/8; agent tabs 7/8).
 //!
 //! A session's main jail is [`SandboxSessionManager`](crate::sandbox_session::SandboxSessionManager)'s,
 //! one per session. A tab opened "In sandbox" gets a jail of its own — a second
@@ -11,6 +12,7 @@
 //! forgotten and announced on [`TabJails::subscribe_ended`], so the tab it served ends with it.
 //!
 //! PRD: docs/ft/daemon/session-liveness.md (A sandboxed session's tabs)
+//! PRD: docs/ft/daemon/session-liveness.md (agent tabs, `#session-liveness` 7/8)
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -104,6 +106,19 @@ impl TabJailLaunch {
     }
 }
 
+/// What one **agent** tab's jail runs (`#session-liveness` 7/8): the harness, by its session type,
+/// and the conversation the tab holds — its own, never the session main's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabJailAgent {
+    /// The session type of the CLI harness the tab runs (`"claude-cli"`, `"opencode-cli"`, …).
+    pub harness: String,
+    /// The conversation the tab holds: a fresh one for a new tab, the recorded one on a resume.
+    pub conversation_id: String,
+    /// Whether the agent continues [`Self::conversation_id`] (a restored tab whose harness can
+    /// resume a given conversation) rather than starting it.
+    pub resume: bool,
+}
+
 /// Starts the jail a shell tab runs in.
 ///
 /// A port because starting one needs what only the daemon has — the session's tool definitions,
@@ -118,11 +133,31 @@ pub trait TabJailSpawn: Send + Sync {
     /// nothing running.
     async fn spawn_shell(&self, launch: &TabJailLaunch)
         -> Result<Arc<SandboxSessionState>, Status>;
+
+    /// Start a jail running `agent` in `launch.worktree` (`#session-liveness` 7/8): the agent's exec
+    /// plan built as the session main's jail builds it — its spec's argv in the tab's conversation,
+    /// its tool's grants — with `launch.paths` as its files, and return it once its runner is ready
+    /// and its terminal bridged. A persistent agent home the main's jail also uses is used as is.
+    /// It writes **none** of the session's records (its role, its usage context): those are the
+    /// main's. A jail that cannot start is an error naming why, and leaves nothing running.
+    async fn spawn_agent(
+        &self,
+        launch: &TabJailLaunch,
+        agent: &TabJailAgent,
+    ) -> Result<Arc<SandboxSessionState>, Status>;
+}
+
+/// One registered tab jail: its runner's state and whether it serves an agent tab.
+struct RegisteredJail {
+    state: Arc<SandboxSessionState>,
+    /// The session type of the agent an agent tab's jail runs; `None` for a shell's. An agent tab's
+    /// jail counts toward its session's liveness, a shell's never does.
+    agent: Option<String>,
 }
 
 /// The jails of every jailed tab this daemon runs, keyed `(session_id, terminal_id)`.
 pub struct TabJails {
-    jails: Arc<Mutex<HashMap<TabJailKey, Arc<SandboxSessionState>>>>,
+    jails: Arc<Mutex<HashMap<TabJailKey, RegisteredJail>>>,
     /// Every jail whose runner exited on its own: the death watch's announcements.
     ended: broadcast::Sender<TabJailKey>,
 }
@@ -150,8 +185,32 @@ impl TabJails {
         spawn: &dyn TabJailSpawn,
         launch: TabJailLaunch,
     ) -> Result<Arc<SandboxSessionState>, Status> {
+        self.register(spawn, launch, None).await
+    }
+
+    /// Start the **agent** tab's jail `launch` describes, running `agent`, through `spawn`
+    /// (`#session-liveness` 7/8): registered under its tab and watched as [`Self::start`] does, and
+    /// counted by [`Self::live_agent_sessions`] while its runner runs. A tab that already has a jail
+    /// is `ALREADY_EXISTS`, and nothing is started; a refused spawn registers nothing.
+    pub async fn start_agent(
+        &self,
+        spawn: &dyn TabJailSpawn,
+        launch: TabJailLaunch,
+        agent: TabJailAgent,
+    ) -> Result<Arc<SandboxSessionState>, Status> {
+        self.register(spawn, launch, Some(agent)).await
+    }
+
+    /// Start the jail of `launch` — an agent's when `agent` is given, a shell's otherwise — register
+    /// it under its tab, and watch it. The map's lock is held across the spawn: two starts of one tab
+    /// must not both launch a runner.
+    async fn register(
+        &self,
+        spawn: &dyn TabJailSpawn,
+        launch: TabJailLaunch,
+        agent: Option<TabJailAgent>,
+    ) -> Result<Arc<SandboxSessionState>, Status> {
         let key = launch.key();
-        // The map's lock is held across the spawn: two starts of one tab must not both launch a runner.
         let mut jails = self.jails.lock().await;
         if jails.contains_key(&key) {
             return Err(Status::already_exists(format!(
@@ -159,11 +218,43 @@ impl TabJails {
                 key.terminal_id, key.session_id
             )));
         }
-        let state = spawn.spawn_shell(&launch).await?;
-        jails.insert(key.clone(), Arc::clone(&state));
+        let state = match &agent {
+            Some(agent) => spawn.spawn_agent(&launch, agent).await?,
+            None => spawn.spawn_shell(&launch).await?,
+        };
+        jails.insert(
+            key.clone(),
+            RegisteredJail {
+                state: Arc::clone(&state),
+                agent: agent.map(|agent| agent.harness),
+            },
+        );
         drop(jails);
         self.watch_for_death(key, Arc::clone(&state));
         Ok(state)
+    }
+
+    /// The sessions with a jailed **agent** tab whose runner is running now — what a session's
+    /// liveness counts beside its main and its host agent tabs (`#session-liveness` 7/8). A jailed
+    /// shell never makes its session live.
+    pub async fn live_agent_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
+        let jails = self.jails.lock().await;
+        tddy_daemon_kernel::live_sessions::LiveSessions::of(
+            jails
+                .iter()
+                .filter(|(_, jail)| jail.agent.is_some() && jail.state.is_running())
+                .map(|(key, _)| key.session_id.clone()),
+        )
+    }
+
+    /// The session type of the agent tab `terminal_id` of `session_id` runs in a jail; `None` for a
+    /// jailed shell or a tab with no jail.
+    pub async fn agent_harness(&self, session_id: &str, terminal_id: &str) -> Option<String> {
+        self.jails
+            .lock()
+            .await
+            .get(&TabJailKey::new(session_id, terminal_id))
+            .and_then(|jail| jail.agent.clone())
     }
 
     /// The jail of tab `terminal_id` of `session_id`, while it is registered.
@@ -176,7 +267,7 @@ impl TabJails {
             .lock()
             .await
             .get(&TabJailKey::new(session_id, terminal_id))
-            .cloned()
+            .map(|jail| Arc::clone(&jail.state))
     }
 
     /// Stop the jail of tab `terminal_id` of `session_id` and forget it. `false` when the tab has no
@@ -188,8 +279,8 @@ impl TabJails {
             .await
             .remove(&TabJailKey::new(session_id, terminal_id));
         match removed {
-            Some(state) => {
-                state.stop();
+            Some(jail) => {
+                jail.state.stop();
                 true
             }
             None => false,
@@ -199,7 +290,7 @@ impl TabJails {
     /// Stop every tab jail of `session_id` and forget them; the terminal ids stopped, sorted. Every
     /// other session's jails are left running.
     pub async fn stop_session(&self, session_id: &str) -> Vec<String> {
-        let mut stopped: Vec<(TabJailKey, Arc<SandboxSessionState>)> = Vec::new();
+        let mut stopped: Vec<(TabJailKey, RegisteredJail)> = Vec::new();
         {
             let mut jails = self.jails.lock().await;
             let keys: Vec<TabJailKey> = jails
@@ -208,16 +299,16 @@ impl TabJails {
                 .cloned()
                 .collect();
             for key in keys {
-                if let Some(state) = jails.remove(&key) {
-                    stopped.push((key, state));
+                if let Some(jail) = jails.remove(&key) {
+                    stopped.push((key, jail));
                 }
             }
         }
         stopped.sort_by(|(left, _), (right, _)| left.cmp(right));
         stopped
             .into_iter()
-            .map(|(key, state)| {
-                state.stop();
+            .map(|(key, jail)| {
+                jail.state.stop();
                 key.terminal_id
             })
             .collect()
@@ -230,8 +321,8 @@ impl TabJails {
         drained.sort_by(|(left, _), (right, _)| left.cmp(right));
         drained
             .into_iter()
-            .map(|(key, state)| {
-                state.stop();
+            .map(|(key, jail)| {
+                jail.state.stop();
                 key
             })
             .collect()
@@ -243,7 +334,7 @@ impl TabJails {
             .lock()
             .await
             .iter()
-            .filter(|(key, state)| key.session_id == session_id && state.is_running())
+            .filter(|(key, jail)| key.session_id == session_id && jail.state.is_running())
             .map(|(key, _)| key.terminal_id.clone())
             .collect()
     }
@@ -262,7 +353,7 @@ impl TabJails {
             let mut jails = jails.lock().await;
             let still_registered = jails
                 .get(&key)
-                .is_some_and(|registered| Arc::ptr_eq(registered, &state));
+                .is_some_and(|registered| Arc::ptr_eq(&registered.state, &state));
             if still_registered {
                 jails.remove(&key);
                 drop(jails);
@@ -279,5 +370,13 @@ impl TabJails {
 }
 
 #[cfg(all(test, unix))]
+#[path = "tab_jails_test_support.rs"]
+mod test_support;
+
+#[cfg(all(test, unix))]
 #[path = "tab_jails_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "tab_jails_agent_tests.rs"]
+mod agent_tests;

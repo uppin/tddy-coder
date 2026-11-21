@@ -189,12 +189,7 @@ impl LaunchSessions {
             worktree_path,
         )?;
 
-        let shim_port = match grants.egress {
-            EgressPolicy::None => None,
-            EgressPolicy::Any | EgressPolicy::Hosts(_) => {
-                Some(pick_free_loopback_port().map_err(Status::internal)?)
-            }
-        };
+        let shim_port = pick_egress_shim_port(&grants.egress)?;
         let exec_plan_path = session.dirs.sandbox_root.join(EXEC_PLAN_FILE);
         let plan = exec_plan(&spec, params, slots, &session, &grants, shim_port.is_some())?;
         write_exec_plan(&exec_plan_path, &plan)?;
@@ -297,6 +292,21 @@ impl LaunchSessions {
         self.record_jailed_main(session_id).await;
         Ok(pid)
     }
+}
+
+/// Whether a jail on `egress` is given the in-jail egress shim: any policy but none.
+pub(crate) fn needs_egress_shim(egress: &EgressPolicy) -> bool {
+    !matches!(egress, EgressPolicy::None)
+}
+
+/// The loopback port the jail's egress shim listens on; `None` when the policy allows no egress.
+pub(crate) fn pick_egress_shim_port(egress: &EgressPolicy) -> Result<Option<u16>, Status> {
+    if !needs_egress_shim(egress) {
+        return Ok(None);
+    }
+    pick_free_loopback_port()
+        .map(Some)
+        .map_err(Status::internal)
 }
 
 /// The `HOME` a jail of `def` runs with, resolved as [`LaunchSessions::launch_jailed`] resolves it,

@@ -29,7 +29,8 @@ interface NewTerminalMenuProps {
    *  section lists again each time the menu opens. */
   tmux?: TmuxMenuState;
   /** Whether the session runs sandboxed (`SessionEntry.sandbox`): its shell opens "In sandbox" — in
-   *  a jail of its own — by default, or "On host". */
+   *  a jail of its own — by default, or "On host". Its agent kinds are listed under
+   *  "In sandbox" too, each opening with `wrappers: [sandbox]` (`#session-liveness` 7/8). */
   sandboxed?: boolean;
   /** Whether the session runs on a target (`SessionEntry.target` is set): its shell opens "On
    *  target" — on that machine, in the session's worktree there — by default, or "On this host". */
@@ -187,14 +188,17 @@ export function NewTerminalMenu({
               {offersSandbox ? (
                 <>
                   <ul role="group" aria-label="In sandbox" data-testid="sessions-terminal-tab-new-menu">
-                    <MenuKindItem
-                      kind={BASH_KIND}
-                      testId={`sessions-terminal-tab-new-in-sandbox-${BASH_KIND}`}
-                      onChoose={() => {
-                        setMenuOpen(false);
-                        onOpen(BASH_KIND, undefined, [SANDBOX_WRAPPER_KIND]);
-                      }}
-                    />
+                    {menuKinds.map((kind) => (
+                      <MenuKindItem
+                        key={kind}
+                        kind={kind}
+                        testId={`sessions-terminal-tab-new-in-sandbox-${kind}`}
+                        onChoose={() => {
+                          setMenuOpen(false);
+                          onOpen(kind, undefined, [SANDBOX_WRAPPER_KIND]);
+                        }}
+                      />
+                    ))}
                   </ul>
                   <ul role="group" aria-label="On host" className="mt-1 border-t border-border pt-1">
                     {menuKinds.map((kind) => (

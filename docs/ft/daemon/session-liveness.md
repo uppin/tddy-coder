@@ -1,6 +1,6 @@
 # Session liveness
 
-**Status:** ✅ Shipped (`#session-liveness` 1/8 PR #958, 2/8 PR #959, 3/8 PR #960, 4/8 PR #961, 5/8 PR #964, 6/8 PR #965)
+**Status:** ✅ Shipped (`#session-liveness` 1/8 PR #958, 2/8 PR #959, 3/8 PR #960, 4/8 PR #961, 5/8 PR #964, 6/8 PR #965, 7/8 PR #966)
 
 ## Summary
 
@@ -24,6 +24,7 @@ processes.
 | Target (ssh / Coder) | its transport-client `main` resolves — it exits with the remote agent |
 | Sandboxed | its runner process has not exited |
 | Agent terminal tab (a CLI harness `kind`) | its terminal resolves |
+| Jailed agent tab (`sandbox` around a harness) | its tab jail's runner has not exited — see [A sandboxed session's tabs](#a-sandboxed-sessions-tabs) |
 | tmux-wrapped agent tab | its tmux client resolves, or its own detach watcher holds it, until its tmux session ends |
 | Bash or tmux-attach tab | never counts — not an agent |
 | `workspace` | never — it runs no agent |
@@ -148,6 +149,7 @@ host, sandboxed and target sessions alike — and a main that fails still fails 
 | `tmux` → `agent` | its tmux session alive: a client is **re-attached**, the agent untouched. Gone: the agent is relaunched in a new tmux session of the same name and resumes its conversation (fresh when not resumable) |
 | `shell` | the session user's login shell, fresh |
 | `sandbox` → `shell` | the session user's login shell, fresh, in a **new jail** of its own; dropped with the jail's reason when it cannot start |
+| `sandbox` → `agent` | the agent, in a **new jail** of its own, under its recorded id: resuming its recorded conversation where the harness can (as an `agent` tab does), otherwise started fresh and reported `FRESH` with why; dropped with the jail's reason when the jail cannot start |
 | `target` → `shell` | the target user's login shell, fresh, **on the session's target**, in the session's worktree there; dropped with the reason (an unreachable target, a locked vault) when it cannot start |
 | `tmux-attach` | re-attached while the user's tmux session exists; otherwise **dropped** |
 
@@ -169,7 +171,7 @@ host, sandboxed and target sessions alike — and a main that fails still fails 
 
 ## A sandboxed session's tabs
 
-A sandboxed session's main runs in a jail. A secondary **shell** tab of that session is opened where the
+A sandboxed session's main runs in a jail. A secondary **shell or agent** tab of that session is opened where the
 person picks it, in the web's new-tab menu: **In sandbox** (the default) or **On host**. Both can coexist
 in one session.
 
@@ -189,13 +191,21 @@ in one session.
 - **Files of its own.** Each tab's jail keeps its files under `<session dir>/sandbox/tabs/<terminal_id>/`
   — IPC socket (hashed from the session and terminal ids, inside the `AF_UNIX` path limit), ready marker,
   exec plan, profile, egress log and scratch — so two tabs, and the main, never share one.
-- **Records are the main's alone.** A tab jail writes no usage context and no capture recording: the
-  session's usage is its agent's, and its capture is its agent's terminal.
-- **Recorded `[sandbox, shell]`.** The roster records the chain as a `sandbox` node around a `shell`
-  node; a jail that cannot start fails the tab's start with why, and records nothing. A `sandbox` wrapper
-  around an agent, nested in `tmux`, or on a session that is not sandboxed is refused
-  (`INVALID_ARGUMENT` / `FAILED_PRECONDITION`) and nothing is launched.
-- **Streaming and listing.** A jailed tab streams, is listed as a shell run in a sandbox, and is served
+- **Records are the main's alone.** A tab jail writes no usage context, no capture recording and no
+  session role: the session's usage is its agent's, its capture is its agent's terminal, and its role is
+  the one its start recorded — a jailed agent tab's launch never rewrites them.
+- **Recorded `[sandbox, shell]` or `[sandbox, agent]`.** The roster records the chain as a `sandbox` node
+  around a `shell` or an `agent` node; a jail that cannot start fails the tab's start with why, and records
+  nothing. A `sandbox` wrapper nested in `tmux` or in another `sandbox`, around anything but the login shell
+  or a CLI agent kind, or on a session that is not sandboxed is refused (`INVALID_ARGUMENT` /
+  `FAILED_PRECONDITION`) and nothing is launched. A tddy-coder participant, which runs bash only, refuses a
+  jailed agent as it refuses a jailed shell.
+- **An agent in a jail of its own.** A jailed agent tab runs the agent as the session's main does: its tool
+  closure lowered into the same grants (egress, mounts, tool links), on the session's provider route, with its
+  argv rendered from the agent's spec — but under the tab's own files and in **a conversation of its own**,
+  minted by the rule a host agent tab's is (a fresh id, or a chat the agent mints), never the main's. A
+  persistent agent home the main's jail also uses is used as it is, with no second credential bootstrap.
+- **Streaming and listing.** A jailed tab streams, is listed as a shell run in a sandbox (a jailed agent tab as its agent's kind), and is served
   by its own jail through the terminal store; jail terminals keep the main's limits (no resize, no control
   lease). An *On host* tab of a sandboxed session is now reachable the same way: the store resolves any
   non-main id by its owner, a tab jail or the terminal manager.
@@ -204,7 +214,10 @@ in one session.
 - **Teardown.** Closing the tab stops its jail; deleting the session, stopping it, and resuming it stop
   every jail of the session (Resume then opens new ones); **daemon shutdown stops every tab jail and every
   session's main jail**, which it left running before.
-- **Liveness.** A shell tab's jail never counts as a live agent, like any shell.
+- **Liveness.** A shell tab's jail never counts as a live agent, like any shell. A **jailed agent tab does**: its
+  session is live while that tab jail's runner runs, even when the main's has exited, and it stops counting the
+  moment the runner exits or the tab is closed. Stopping or deleting the session stops its jailed agent tabs
+  with the rest of its tab jails.
 
 ## A target session's tabs
 
@@ -271,14 +284,16 @@ agent for), and Telegram's list, branch-owner scan and delete.
   serve; until then a replace cannot stop it.
 - What a detached tmux-run agent prints while nobody is attached is not recorded, for a main and for a
   wrapped tab alike: history serves the recording up to the client's end.
-- **Only host-side, sandbox and target shell tabs are restored.** An agent tab never starts in a jail or on
-  a target, so every other recorded chain is host-side and so is its restore. Two further stack nodes are
-  planned: **sandbox agent tab** and **target agent tab**. `restore_plan` dispatches per node kind, so each
-  adds a kind. Until then a chain holding such a kind is dropped with a reason.
+- **An agent tab on a target is not restored.** An agent tab never starts on a target, so a `target` chain
+  around an agent is dropped with a reason; **target agent tab** is a further stack node. `restore_plan`
+  dispatches per node kind, so it adds a kind.
 - opencode, muse and warp tabs reopen fresh, not in their conversation (`TODO(opencode-cli)`,
   `TODO(muse-cli)`, `TODO(warp-cli)` on `tab_conversation_is_resumable`).
 - The sandboxed resume path calls the same restore but has no test of its own: its jail harness is the
   macOS-only one, which already fails on `master`.
+- **A jailed claude tab shares the session's hooks and loads the project's `.mcp.json`**, as the main's jail does
+  ([hooks](../../dev/todo/2026-10-24-claude-agent-tab-shares-session-hooks.md),
+  [`.mcp.json`](../../dev/todo/2026-11-02-jailed-claude-loads-project-mcp-json.md)).
 - **The kernel sandbox of a tab jail is not tested by CI.** Every behaviour above is pinned against an
   in-memory `TabJailSpawn` over a real process; the real-jail test
   (`sandbox_shell_tab_jail_linux`) self-skips off Linux and needs a VM, which waits for VM-backed testing

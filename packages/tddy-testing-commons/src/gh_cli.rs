@@ -16,7 +16,6 @@
 //! [`GhCliStub::recording_env_to`] records the environment of the **last** invocation with one
 //! `mv -f`, so a reader never sees a torn record (see [`crate::stub_scripts`]).
 
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
 /// Builder for a `gh` stub. Nothing is written until [`GhCliStub::build`].
@@ -65,7 +64,8 @@ impl GhCliStub {
         self
     }
 
-    /// Write the stub, executable, and return its path.
+    /// Write the stub, executable and warmed up (the first exec of a fresh script is slow on macOS and
+    /// would otherwise land inside the caller's probe deadline), and return its path.
     pub fn build(self) -> PathBuf {
         let host = &self.hostname;
         let mut body = String::from("#!/bin/sh\n");
@@ -105,9 +105,7 @@ printf '%s\n' 'You are not logged into any GitHub hosts. To log in, run: gh auth
 exit 1
 "#,
         );
-        std::fs::write(&self.path, body).expect("write the gh stub");
-        std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o755))
-            .expect("make the gh stub executable");
+        crate::remote_target::write_executable(&self.path, &body);
         self.path
     }
 }

@@ -1,6 +1,6 @@
 //! `TerminalKind::from_wrapped_request` with a `sandbox` wrapper: the login shell run in a jail of
-//! its own is accepted, and nothing else is — an agent in a jail is a later node's, and a sandbox
-//! wraps no other wrapper.
+//! its own is accepted, and nothing but an agent is (`terminal_kind_sandbox_agent_unit`,
+//! `#session-liveness` 7/8) — a sandbox wraps no other wrapper.
 //!
 //! PRD: docs/ft/daemon/session-liveness.md (A sandboxed session's tabs) (`#session-liveness` 5/8)
 
@@ -36,22 +36,6 @@ fn an_empty_kind_wrapped_in_sandbox_is_a_sandboxed_shell() {
 
     // Then
     assert_eq!(kind, TerminalKind::SandboxedShell);
-}
-
-#[test]
-fn an_agent_wrapped_in_sandbox_is_refused_naming_the_agent() {
-    // When
-    let refusal =
-        TerminalKind::from_wrapped_request("claude-cli", "", &[a_wrapper(SANDBOX_WRAPPER_KIND)])
-            .unwrap_err();
-
-    // Then
-    assert_eq!(refusal.code(), Code::InvalidArgument);
-    assert!(
-        refusal.message().contains("\"claude-cli\""),
-        "the refusal names the agent: {}",
-        refusal.message()
-    );
 }
 
 #[test]

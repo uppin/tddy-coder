@@ -284,6 +284,13 @@ impl TerminalRoster for CoderTerminalRoster {
                     "this session's terminals run bash only; a sandbox tab is not offered here",
                 ));
             }
+            // Nor does it run an agent, jailed or not (`#session-liveness` 7/8).
+            TerminalKind::SandboxedAgent { agent } => {
+                return Err(Status::failed_precondition(format!(
+                    "this session's terminals run bash only; {agent:?} in a sandbox tab is not \
+                     offered here"
+                )));
+            }
             // A participant reaches no target: its terminals run on its own host.
             TerminalKind::TargetShell => {
                 return Err(Status::failed_precondition(

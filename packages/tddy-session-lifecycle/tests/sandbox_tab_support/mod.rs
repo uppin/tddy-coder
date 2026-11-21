@@ -5,7 +5,9 @@
 //! any host. The resume suite uses the double alone, over its own fixture.
 //!
 //! The session's identity maps to the OS user running the test, so an "On host" tab is that user's
-//! login shell.
+//! login shell. [`a_sandboxed_session_running_agents`] installs stub Claude Code and OpenCode
+//! binaries, resolved for a jailed agent tab but never run (`sandbox_agent_tab_acceptance`,
+//! `#session-liveness` 7/8).
 
 #![allow(dead_code)]
 
@@ -37,6 +39,7 @@ use tddy_terminal_rpc::proto::terminal_session::{
 };
 use tddy_terminal_rpc::serve_stream_terminal_output_with;
 use tddy_terminal_rpc::session::TerminalSessionStore;
+use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 use tddy_testing_commons::wait::eventually_awaiting;
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 use tokio::sync::{broadcast, mpsc};
@@ -67,7 +70,29 @@ pub struct SandboxedTabDaemon {
 
 /// A daemon serving the session recorded as sandboxed, its main jail running and no tab open yet.
 pub async fn a_sandboxed_session() -> SandboxedTabDaemon {
-    let daemon = a_daemon_over_the_session(true);
+    with_its_main_jail_running(a_daemon_over_the_session(true)).await
+}
+
+/// [`a_sandboxed_session`], whose Claude Code and OpenCode are stub binaries: what a jailed agent
+/// tab resolves its harness to.
+pub async fn a_sandboxed_session_running_agents() -> SandboxedTabDaemon {
+    let stubs = tempfile::tempdir().unwrap();
+    let agents = tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[
+        (
+            "claude",
+            &a_stub_agent_script(stubs.path(), "claude.sh").build(),
+        ),
+        (
+            "opencode",
+            &a_stub_agent_script(stubs.path(), "opencode.sh").build(),
+        ),
+    ]);
+    let mut daemon = a_daemon_over_the_session_with(true, agents);
+    daemon._dirs.push(stubs);
+    with_its_main_jail_running(daemon).await
+}
+
+async fn with_its_main_jail_running(daemon: SandboxedTabDaemon) -> SandboxedTabDaemon {
     let main_jail = Arc::new(a_stand_in_main_jail(&daemon.worktree));
     daemon
         .host
@@ -86,6 +111,16 @@ pub fn an_unsandboxed_session() -> SandboxedTabDaemon {
 }
 
 fn a_daemon_over_the_session(sandboxed: bool) -> SandboxedTabDaemon {
+    a_daemon_over_the_session_with(
+        sandboxed,
+        tddy_session_lifecycle::test_util::builtin_coding_agents(),
+    )
+}
+
+fn a_daemon_over_the_session_with(
+    sandboxed: bool,
+    agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
+) -> SandboxedTabDaemon {
     let (config_dir, config) = a_config_mapping_to_this_user();
     let worktree_dir = tempfile::tempdir().unwrap();
     let worktree = worktree_dir.path().canonicalize().unwrap();
@@ -97,6 +132,7 @@ fn a_daemon_over_the_session(sandboxed: bool) -> SandboxedTabDaemon {
         config,
         sessions_base.clone(),
         Arc::clone(&jails) as Arc<dyn TabJailSpawn>,
+        agents,
     );
     SandboxedTabDaemon {
         host,
@@ -126,6 +162,7 @@ fn a_session_host(
     config: DaemonConfig,
     sessions_base: PathBuf,
     tab_jails: Arc<dyn TabJailSpawn>,
+    agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
 ) -> Arc<DaemonSessionHost> {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -143,7 +180,7 @@ fn a_session_host(
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(CliSessionManager::new()),
-            tddy_session_lifecycle::test_util::builtin_coding_agents(),
+            agents,
         )
         .with_tab_jail_spawn(tab_jails),
     )
@@ -249,6 +286,61 @@ impl SandboxedTabDaemon {
             .expect("a jailed shell tab starts")
     }
 
+    /// Open an agent tab of `kind` "In sandbox", which must start (`#session-liveness` 7/8).
+    pub async fn opens_a_jailed_agent(&self, kind: &str) -> String {
+        self.opens_a_tab_in_sandbox(kind)
+            .await
+            .unwrap_or_else(|status| panic!("a jailed {kind} tab starts: {status:?}"))
+    }
+
+    /// The session's main agent exits: its stand-in runner is stopped, as an exited jail's is.
+    pub fn the_main_jail_exits(&self) {
+        self.main_jail
+            .as_ref()
+            .expect("the session is sandboxed")
+            .stop();
+    }
+
+    /// Stop every process the daemon holds for the session, as a stop of its live processes does
+    /// (`HeldSessions::stop_session`).
+    pub async fn stops_the_session(&self) {
+        tddy_daemon_kernel::live_sessions::HeldSessions::stop_session(
+            &self.host.terminal_sessions(),
+            JAILED_SESSION_ID,
+        )
+        .await;
+    }
+
+    /// Whether `ListSessions` reports the session active.
+    pub async fn is_listed_active(&self) -> bool {
+        self.listed_session().await.is_active
+    }
+
+    /// The main has recorded the session's usage context beside its `.session.yaml`, as its launch
+    /// does.
+    pub fn has_a_main_usage_context(&self) {
+        tddy_usage::write_usage_context(
+            &self.session_dir(),
+            &tddy_usage::UsageContextFile {
+                spec_id: "claude".to_string(),
+                agent_home: Some(self.sessions_base.join("homes").join("claude")),
+                conversation_id: Some(JAILED_SESSION_ID.to_string()),
+                worktree: Some(self.worktree.clone()),
+                model: Some("claude-opus-4-8".to_string()),
+            },
+        )
+        .expect("the main's usage context is written");
+    }
+
+    /// The session's records, as files: its `.session.yaml` and its usage context.
+    pub fn session_records(&self) -> (String, String) {
+        let read = |name: &str| {
+            std::fs::read_to_string(self.session_dir().join(name))
+                .unwrap_or_else(|e| panic!("the session's {name} reads: {e}"))
+        };
+        (read(".session.yaml"), read(tddy_usage::USAGE_CONTEXT_FILE))
+    }
+
     /// Open a shell tab "On host": the session user's login shell, unjailed.
     pub async fn opens_a_host_shell(&self) -> String {
         self.start_tab("bash", Vec::new())
@@ -352,6 +444,11 @@ impl SandboxedTabDaemon {
 
     /// Whether `ListSessions` reports the session as sandboxed.
     pub async fn is_listed_sandboxed(&self) -> bool {
+        self.listed_session().await.sandbox
+    }
+
+    /// The session, as `ListSessions` reports it.
+    async fn listed_session(&self) -> tddy_service::proto::session::SessionEntry {
         self.host
             .list_sessions(Request::direct(ListSessionsRequest {
                 session_token: VALID_TOKEN.to_string(),
@@ -363,7 +460,6 @@ impl SandboxedTabDaemon {
             .into_iter()
             .find(|session| session.session_id == JAILED_SESSION_ID)
             .expect("the recorded session is listed")
-            .sandbox
     }
 
     /// Type `text` into terminal `terminal_id`, through the store every terminal RPC resolves it in.

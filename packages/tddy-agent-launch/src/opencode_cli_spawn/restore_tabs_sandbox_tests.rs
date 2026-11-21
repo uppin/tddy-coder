@@ -1,6 +1,7 @@
 //! Unit tests: the restore rule ([`restore_plan`]) for a tab recorded in a jail of its own —
-//! `sandbox` → `shell` reopens in a new jail; anything else in a jail is dropped naming why
-//! (`#session-liveness` 5/8; an agent in a jail is `sandbox-agent-tab`'s).
+//! `sandbox` → `shell` reopens in a new jail; anything else in a jail but an agent
+//! (`restore_tabs_sandbox_agent_tests`, `#session-liveness` 7/8) is dropped naming why
+//! (`#session-liveness` 5/8).
 
 use pretty_assertions::assert_eq;
 use tddy_core::tab_roster::{LaunchNode, TabEntry};
@@ -32,21 +33,6 @@ fn a_shell_recorded_in_a_sandbox_is_planned_as_a_shell_in_a_new_jail() {
 
     // Then
     assert_eq!(plan, TabRestore::JailedShell);
-}
-
-#[test]
-fn an_agent_recorded_in_a_sandbox_is_dropped_naming_the_agent() {
-    // Given
-    let tab = a_tab(vec![
-        LaunchNode::sandbox(),
-        LaunchNode::agent("claude-cli", CONVERSATION),
-    ]);
-
-    // When
-    let reason = dropped_reason(restore_plan(&tab, &LiveTabs::none()));
-
-    // Then
-    assert!(reason.contains("agent"), "{reason}");
 }
 
 #[test]

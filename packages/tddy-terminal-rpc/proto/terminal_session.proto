@@ -213,7 +213,9 @@ message StartTerminalSessionRequest {
   // are accepted, each alone: "tmux" around an agent kind — the agent runs in a tmux session of its
   // own, `tddy-<session_id>-<terminal_id>`, as the session's OS user, and the tab is a client of it
   // — "sandbox" around the login shell ("" or "bash") of a sandboxed session — the shell runs in
-  // a jail of its own over the session's worktree and sandbox grants, which ends with the tab — and
+  // a jail of its own over the session's worktree and sandbox grants, which ends with the tab —
+  // or around an agent kind of a sandboxed session — the agent runs in such a jail, in a
+  // conversation of its own, and keeps the session live while it runs — and
   // "target" around the login shell of a session that runs on a target: the target user's own login
   // shell runs on that machine, in the session's worktree there, reached through the session's
   // remote shell as a tab of its own; it ends with the tab. Any other wrapper kind, or any of them

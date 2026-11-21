@@ -29,5 +29,9 @@ mod tests;
 mod sandbox_tests;
 
 #[cfg(test)]
+#[path = "restore_tabs_sandbox_agent_tests.rs"]
+mod sandbox_agent_tests;
+
+#[cfg(test)]
 #[path = "restore_tabs_target_tests.rs"]
 mod target_tests;

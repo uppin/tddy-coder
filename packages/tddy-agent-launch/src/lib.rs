@@ -84,6 +84,7 @@ pub mod svc_start_claude_cli_session;
 pub mod svc_start_sandboxed_claude_cli_session;
 pub mod svc_start_sandboxed_cli_harness_session;
 pub mod svc_start_session_core;
+pub mod tab_jail_agent;
 pub mod tab_jail_launch;
 pub mod tab_target_shell;
 pub mod target_trust;

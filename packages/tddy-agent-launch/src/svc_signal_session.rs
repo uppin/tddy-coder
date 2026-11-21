@@ -130,13 +130,15 @@ pub(crate) fn deliver_signal(pid: u32, session_id: &str, signal: i32) -> Result<
     }
 }
 impl LaunchSessions {
-    /// The sessions this daemon holds a live agent for: its terminals' and its sandboxed runners'.
-    /// The one live set every listing, the ensure-home check and the idle reaper read.
+    /// The sessions this daemon holds a live agent for: its terminals', its sandboxed runners'
+    /// and its jailed agent tabs'. The one live set every listing, the ensure-home check and the
+    /// idle reaper read.
     pub async fn live_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
         self.cli_manager
             .live_agent_sessions()
             .await
             .union(self.sandbox_manager.live_sessions().await)
+            .union(self.tab_jails.live_agent_sessions().await)
     }
 
     /// Sends `signal` to the main agent this daemon holds for the session in `session_dir`; see
