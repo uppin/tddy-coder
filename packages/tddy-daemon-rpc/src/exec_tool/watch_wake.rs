@@ -89,6 +89,9 @@ impl SessionNotificationSubscriber for WakeTrigger {
     fn wants(&self, notification: &SessionNotification) -> bool {
         notification.kind == SessionNotificationKind::AttentionRequired
             || notification.source == SessionNotificationSource::ActivityStatus
+            // An idle orchestrator watching its own trunk is woken by a new commit (`#orchestra`
+            // 5/9).
+            || notification.source == SessionNotificationSource::TrunkCommit
     }
 
     async fn deliver(&self, notification: &SessionNotification) -> anyhow::Result<()> {
@@ -505,5 +508,28 @@ mod tests {
             (delivered.is_ok(), trigger.wants(&notification)),
             (true, true)
         );
+    }
+
+    #[test]
+    fn a_trunk_commit_cues_the_waker_though_it_is_activity() {
+        // Given a new trunk commit, published as its orchestrator's own activity
+        let (trigger, _cues) = WakeTrigger::channel();
+        let trunk_commit = SessionNotification {
+            session_id: "s-orchestrator".to_string(),
+            os_user: "ada".to_string(),
+            label: "orchestrator".to_string(),
+            kind: SessionNotificationKind::Activity,
+            source: SessionNotificationSource::TrunkCommit,
+            text: "origin/main: 3f2a1c0 Add the outbox (dev)".to_string(),
+            agent: None,
+            question: None,
+            ended: None,
+            activity_status: None,
+            at_unix_ms: 1_790_000_000_000,
+            message: None,
+        };
+
+        // Then the trigger wants it, so an idle orchestrator watching its trunk is woken
+        assert!(trigger.wants(&trunk_commit));
     }
 }

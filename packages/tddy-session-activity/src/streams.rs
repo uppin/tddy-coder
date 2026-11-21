@@ -145,8 +145,8 @@ pub async fn relay_session_notifications(
                     continue;
                 }
                 // A message between sessions is for its recipient's inbox, not the drawer
-                // (`#activity-wake` 5/5).
-                if notification.source == SessionNotificationSource::Message {
+                // (`#activity-wake` 5/5); a trunk commit is its orchestrator's own (`#orchestra` 5/9).
+                if notification.source.is_a_sessions_own() {
                     continue;
                 }
                 if tx.send(session_notification_event(notification)).is_err() {

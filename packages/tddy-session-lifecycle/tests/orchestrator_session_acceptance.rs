@@ -16,10 +16,15 @@ mod project_home_support;
 
 use std::path::{Path, PathBuf};
 
-use ensure_project_home_world::{a_claude_cli_spec, a_daemon_with_a_project, World};
+use ensure_project_home_world::{
+    a_claude_cli_spec, a_daemon_with_a_github_project_watching_trunks, a_daemon_with_a_project,
+    World,
+};
 use project_home_support::{a_caller_token, git, PROJECT_ID};
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_service::proto::session::{
+    ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+};
 use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_worktree_service::home_worktree::home_worktree_path;
 
@@ -314,4 +319,86 @@ async fn starting_an_orchestrator_fast_forwards_the_home_worktree() {
         git(&world.worktree_of(&orchestrator), &["rev-parse", "HEAD"]),
         moved_to
     );
+}
+
+// ── the trunk watch: orchestrators alone subscribe, at start and at resume (`#orchestra` 5/9) ──
+
+impl World {
+    /// `ResumeSession` of a stopped session, as the person at the browser.
+    async fn a_person_resumes(&self, session_id: &str) {
+        self.home
+            .service
+            .resume_session(Request::direct(ResumeSessionRequest {
+                session_token: a_caller_token().to_string(),
+                session_id: session_id.to_string(),
+            }))
+            .await
+            .unwrap_or_else(|status| panic!("{session_id} resumes: {status:?}"));
+    }
+
+    /// The projects whose trunk the daemon watches.
+    fn the_watched_trunks(&self) -> Vec<String> {
+        self.home
+            .service
+            .trunk_watcher()
+            .expect("the daemon watches trunks")
+            .live_pollers()
+    }
+
+    /// Drop `session_id`'s trunk subscription, as the watch's liveness sweep drops a stopped one.
+    fn the_sweep_drops(&self, session_id: &str) {
+        self.home
+            .service
+            .trunk_watcher()
+            .expect("the daemon watches trunks")
+            .unsubscribe(session_id);
+    }
+}
+
+#[tokio::test]
+async fn an_orchestrator_that_starts_watches_its_projects_trunk() {
+    // Given a project on GitHub, on a daemon that watches trunks
+    let world = a_daemon_with_a_github_project_watching_trunks();
+
+    // When a person starts an orchestrator
+    world.a_running_orchestrator().await;
+
+    // Then the project's trunk is watched
+    assert_eq!(world.the_watched_trunks(), vec![PROJECT_ID.to_string()]);
+}
+
+#[tokio::test]
+async fn an_orchestrator_that_resumes_watches_its_projects_trunk_again() {
+    // Given a stopped orchestrator, its subscription swept
+    let world = a_daemon_with_a_github_project_watching_trunks();
+    let orchestrator = world.a_running_orchestrator().await;
+    world.stop(&orchestrator).await;
+    world.the_sweep_drops(&orchestrator);
+    assert_eq!(world.the_watched_trunks(), Vec::<String>::new());
+
+    // When a person resumes it
+    world.a_person_resumes(&orchestrator).await;
+
+    // Then the project's trunk is watched again
+    assert_eq!(world.the_watched_trunks(), vec![PROJECT_ID.to_string()]);
+}
+
+#[tokio::test]
+async fn a_session_that_is_not_an_orchestrator_watches_no_trunk_when_it_starts_or_resumes() {
+    // Given a project on GitHub, on a daemon that watches trunks
+    let world = a_daemon_with_a_github_project_watching_trunks();
+
+    // When a person starts an ordinary Claude CLI session of the project
+    let session = world
+        .a_person_starts(a_claude_cli_spec())
+        .await
+        .expect("a person starts a session");
+
+    // Then no trunk is watched
+    assert_eq!(world.the_watched_trunks(), Vec::<String>::new());
+
+    // And none is once it is stopped and resumed
+    world.stop(&session).await;
+    world.a_person_resumes(&session).await;
+    assert_eq!(world.the_watched_trunks(), Vec::<String>::new());
 }

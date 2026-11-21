@@ -153,8 +153,8 @@ opens it over the data dir before the bus is assembled and installs the same `Ar
 ## Session watches (`session_watches`)
 
 An orchestrator's watches over the sessions it can see (`#activity-wake` 2/3): a filter — sessions
-by id and/or `started_by_me`, seven kinds (`WatchKind`: `question`, `permission`, `turn_finished`,
-`waiting_for_input`, `agent_notification`, `ended`, `message`) — with its own position in the project
+by id and/or `started_by_me`, eight kinds (`WatchKind`: `question`, `permission`, `turn_finished`,
+`waiting_for_input`, `agent_notification`, `ended`, `message`, `trunk_commit`) — with its own position in the project
 notification log and a required TTL of at most 24 hours (`MAX_WATCH_TTL_SECS` = 86 400, at most
 `MAX_LIVE_WATCHES` = 16 live per orchestrator).
 
@@ -206,6 +206,29 @@ notification log and a required TTL of at most 24 hours (`MAX_WATCH_TTL_SECS` = 
   lease map and the acknowledgement live in `session_watches/stream.rs`.
 - `has_live_watches(owner, log, now)` is the live check the wake and the auto-stop hold call;
   this crate only answers it.
+
+## The trunk watch (`trunk_watch`)
+
+`TrunkWatcher` (`#orchestra` 5/9) watches each project's remote trunk for its orchestrators. It
+holds one `ProjectPoller` per project — a `tddy_github::trunk_feed::TrunkPoller`, the trunk ref it
+reports (`origin/main`), when it is next due and its `TrunkSubscription`s (project, OS user, session,
+and the subscribing caller's GitHub user).
+
+- **`subscribe`** builds a project's poller for its first subscriber through the `TrunkSource` port
+  (the daemon's `HostTrunkSource`: `gh` or REST by the project's `local_gh`); an error names why
+  the trunk cannot be watched and nothing is subscribed. **`unsubscribe`** drops a session and a
+  poller left with none.
+- **`step(now)`** first drops every subscriber the `SubscriberLiveness` port reports gone and every
+  poller left with none, then polls each poller due, taking it out of the map while the poll is
+  awaited so no lock is held across it. Each change becomes the lines `trunk_activity_text` words
+  (one per landed commit, one per rewrite), each published once per subscriber as a
+  `SessionNotificationSource::TrunkCommit`, `ACTIVITY`, labelled `orchestrator`, whose `session_id`
+  is that subscriber. It returns the earliest next due time, or `None` with no poller left; the
+  daemon's task sleeps until then, clamped to 1–5 s.
+- **Where the records go.** The project log keeps `TrunkCommit` though it is activity, and the
+  waker takes it; `watch_matches` lets a watch match its owner's own record of this source alone;
+  `SessionNotificationSource::is_a_sessions_own` keeps it — like a message — out of the drawer's
+  stream and `ReadProjectNotifications`.
 
 ## Messages between sessions (`session_messages`)
 

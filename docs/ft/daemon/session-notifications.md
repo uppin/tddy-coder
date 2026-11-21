@@ -62,6 +62,13 @@ it, and the project log keeps it out of `ReadProjectNotifications` / `WaitProjec
 It is its recipient's, read through the inbox watch and `ReadSessionMessages`
 ([Project concept § Messages between sessions](project-concept.md#messages-between-sessions)).
 
+**Trunk commits are not operator notifications either.** A new commit on a project's remote trunk
+(source `trunk_commit`, `#orchestra` 5/9) is published as `ACTIVITY` on each subscribed
+orchestrator's own session. The project log keeps it, though it is activity, and the waker takes it,
+so an orchestrator's self-watch fires and an idle one is woken; Telegram, the drawer's stream and
+Tddy Desktop skip it, and `ReadProjectNotifications` / `WaitProjectNotifications` never list it
+([Project concept § Watching the trunk](project-concept.md#watching-the-trunk)).
+
 ## Agent-written notifications
 
 Every other notification is a fixed sentence the daemon writes. An agent in a daemon-launched
@@ -166,8 +173,8 @@ binary registers none.
 The stream is live-only; the **project notification log** is what a project-home agent reads instead
 ([Project concept § Waiting for notifications](project-concept.md#waiting-for-notifications)).
 
-- A bus subscriber on every daemon appends each `ATTENTION_REQUIRED` notification to the log of the
-  project its session belongs to, read from the session's record. A session of no project is skipped;
+- A bus subscriber on every daemon appends each `ATTENTION_REQUIRED` notification — and each
+  `trunk_commit` activity — to the log of the project its session belongs to, read from the session's record. A session of no project is skipped;
   one whose owner or record cannot be resolved is a delivery failure the bus logs.
 - Each record names the orchestrator that started its session (`orchestrator_session_id`, from the
   session's changeset when the record is appended), so a reader can ask for its own sessions only.

@@ -35,12 +35,10 @@ const SHORTEST_STEP_WAIT: Duration = Duration::from_secs(1);
 /// How long a just-started session counts as live before the host's own snapshot must show it.
 const START_GRACE: Duration = Duration::from_secs(60);
 
-/// What the host keeps to watch trunks: the watcher, the sessions' liveness, and the GitHub
-/// subject each subscribed session's token named.
+/// What the host keeps to watch trunks: the watcher and the sessions' liveness.
 pub(crate) struct TrunkWatching {
     watcher: Arc<TrunkWatcher>,
     liveness: Arc<HostLiveness>,
-    subjects: Arc<Mutex<HashMap<String, String>>>,
 }
 
 /// Which subscribed sessions are live: the host's snapshot, taken before each step, and the
@@ -49,6 +47,16 @@ pub(crate) struct TrunkWatching {
 struct HostLiveness {
     snapshot: RwLock<LiveSessions>,
     just_started: Mutex<HashMap<String, Instant>>,
+}
+
+impl HostLiveness {
+    /// Forget the starts whose grace has passed: from then on the snapshot alone decides.
+    fn forget_expired_starts(&self) {
+        self.just_started
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|_, at| at.elapsed() < START_GRACE);
+    }
 }
 
 impl SubscriberLiveness for HostLiveness {
@@ -101,7 +109,26 @@ impl GhApi for HostGh {
 /// Builds a project's poller from its row on this host.
 struct HostTrunkSource {
     host: DaemonSessionHost,
-    subjects: Arc<Mutex<HashMap<String, String>>>,
+}
+
+/// The GitHub token `subject`'s vault holds for the project's account, read from the project's
+/// row as it is now.
+fn project_account_token(
+    host: &DaemonSessionHost,
+    subscription: &TrunkSubscription,
+    subject: &str,
+) -> Result<String, String> {
+    let row = host
+        .project_row(
+            &subscription.os_user,
+            &subscription.session_id,
+            &subscription.project_id,
+        )
+        .ok_or_else(|| "the project's row cannot be read".to_string())?;
+    SessionAccountAccess::for_subject(host.credential_vaults(), subject)
+        .acting_identity(&row.accounts)
+        .map(|identity| identity.token)
+        .map_err(|refusal| refusal.to_string())
 }
 
 impl HostTrunkSource {
@@ -119,18 +146,17 @@ impl HostTrunkSource {
                 hostname,
             }))));
         }
-        let subject = self
-            .subjects
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&subscription.session_id)
-            .cloned()
+        let subject = subscription
+            .github_subject
+            .clone()
             .ok_or_else(|| "the session's GitHub user is unknown".to_string())?;
-        let token = SessionAccountAccess::for_subject(self.host.credential_vaults(), &subject)
-            .acting_identity(&row.accounts)
-            .map_err(|refusal| refusal.to_string())?
-            .token;
-        Ok(Arc::new(RestTrunkFeed::new(token)))
+        // Resolved now, so a project with no usable account is left unwatched at once, and again
+        // on every read, so a token rotated in the vault is picked up without a re-subscribe.
+        project_account_token(&self.host, subscription, &subject)?;
+        let (host, subscription) = (self.host.clone(), subscription.clone());
+        Ok(Arc::new(RestTrunkFeed::new(Arc::new(move || {
+            project_account_token(&host, &subscription, &subject).map_err(TrunkReadError)
+        }))))
     }
 }
 
@@ -190,22 +216,14 @@ impl DaemonSessionHost {
         mut self,
         bus: Arc<crate::session_notifications::SessionNotificationBus>,
     ) -> Self {
-        let subjects = Arc::new(Mutex::new(HashMap::new()));
         let liveness = Arc::new(HostLiveness::default());
-        let source = Arc::new(HostTrunkSource {
-            host: self.clone(),
-            subjects: Arc::clone(&subjects),
-        });
+        let source = Arc::new(HostTrunkSource { host: self.clone() });
         let watcher = Arc::new(TrunkWatcher::new(
             source,
             Arc::clone(&liveness) as Arc<dyn SubscriberLiveness>,
             bus,
         ));
-        self.trunk_watching = Some(Arc::new(TrunkWatching {
-            watcher,
-            liveness,
-            subjects,
-        }));
+        self.trunk_watching = Some(Arc::new(TrunkWatching { watcher, liveness }));
         self
     }
 
@@ -228,13 +246,6 @@ impl DaemonSessionHost {
         let Some(watching) = &self.trunk_watching else {
             return;
         };
-        if let Some(subject) = (self.user_resolver())(session_token) {
-            watching
-                .subjects
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(session_id.to_string(), subject);
-        }
         watching
             .liveness
             .just_started
@@ -245,6 +256,7 @@ impl DaemonSessionHost {
             project_id: project_id.to_string(),
             os_user: os_user.to_string(),
             session_id: session_id.to_string(),
+            github_subject: (self.user_resolver())(session_token),
         }) {
             log::warn!(
                 target: "tddy_daemon::trunk_watch",
@@ -265,6 +277,7 @@ impl DaemonSessionHost {
                     .snapshot
                     .write()
                     .unwrap_or_else(|e| e.into_inner()) = host.live_sessions().await;
+                watching.liveness.forget_expired_starts();
                 let now = tddy_daemon_kernel::now_unix_ms();
                 let wait = watching
                     .watcher

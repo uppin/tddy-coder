@@ -111,3 +111,46 @@ async fn the_web_stream_never_carries_a_message() {
         vec![ProtoSessionNotificationSource::SessionEnded as i32]
     );
 }
+
+// ── a trunk commit is its orchestrator's own activity, never the web's (`#orchestra` 5/9) ─────
+
+/// One new trunk commit, as the trunk watch publishes it for one subscribed orchestrator.
+fn a_trunk_commit() -> SessionNotification {
+    SessionNotification {
+        source: SessionNotificationSource::TrunkCommit,
+        kind: SessionNotificationKind::Activity,
+        text: "origin/main: 3f2a1c0 Add the outbox (dev)".to_string(),
+        ended: None,
+        ..a_session_end("unused", None)
+    }
+}
+
+#[tokio::test]
+async fn the_web_stream_never_carries_a_trunk_commit() {
+    // Given a browser of the session's operator subscribed to the notification stream
+    let (published, subscribed) = tokio::sync::broadcast::channel(8);
+    let (to_the_browser, mut the_browser) = tokio::sync::mpsc::unbounded_channel();
+    let relay = tokio::spawn(tddy_session_activity::streams::relay_session_notifications(
+        subscribed,
+        to_the_browser,
+        "ada".to_string(),
+    ));
+
+    // When a trunk commit is published for an orchestrator, and then a session ends
+    published.send(a_trunk_commit()).unwrap();
+    published
+        .send(a_session_end("exit code 0", Some(0)))
+        .unwrap();
+    drop(published);
+    relay.await.expect("the relay ends with the bus");
+
+    // Then the browser is sent the end alone
+    let mut sources = Vec::new();
+    while let Ok(event) = the_browser.try_recv() {
+        sources.push(event.source);
+    }
+    assert_eq!(
+        sources,
+        vec![ProtoSessionNotificationSource::SessionEnded as i32]
+    );
+}

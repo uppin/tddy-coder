@@ -48,6 +48,15 @@ pub enum SessionNotificationSource {
     TrunkCommit,
 }
 
+impl SessionNotificationSource {
+    /// Whether a notification of this source belongs to one session rather than to the operator: a
+    /// message is its recipient's, a trunk commit its orchestrator's. The operator surfaces (the
+    /// drawer, Telegram, the desktop, `ReadProjectNotifications`) skip it.
+    pub fn is_a_sessions_own(self) -> bool {
+        matches!(self, Self::Message | Self::TrunkCommit)
+    }
+}
+
 /// How an agent grades what it is telling its operator. Chosen by the agent (`tddy-tools notify
 /// --level`); a surface may colour or iconify by it, and none of them filters on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

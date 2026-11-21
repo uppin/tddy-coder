@@ -2,7 +2,7 @@
 //! it is running, and a project whose trunk cannot be read is left unwatched while the session
 //! runs on (`#orchestra` 5/9).
 //!
-//! Feature: docs/ft/daemon/project-concept.md § Watching sessions
+//! Feature: docs/ft/daemon/project-concept.md § Watching the trunk
 
 use super::launch_ports::LaunchHost;
 use super::*;

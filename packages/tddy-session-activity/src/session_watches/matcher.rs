@@ -102,8 +102,9 @@ pub struct WatchFilter {
 
 /// Whether `watch` matches `record`, `owner_inbox_position` being the `seq` up to which the
 /// watch's owner has read the messages addressed to it. Its session is named, or it started the
-/// session, and the record is of a kind it asks for, and it is never the owner's own session (bar the owner's own trunk activity). The
-/// record's project and OS user are the log read's, which is the owner's.
+/// session, and the record is of a kind it asks for, and it is never the owner's own session —
+/// bar the owner's own trunk activity. The record's project and OS user are the log read's, which
+/// is the owner's.
 ///
 /// A **message** record matches by who it is addressed to and who sent it: an inbox watch
 /// ([`WatchFilter::is_inbox_of`] its owner) matches the messages addressed to its owner, whoever

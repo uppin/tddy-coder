@@ -83,13 +83,17 @@ pub trait TrunkFeed: Send + Sync {
     ) -> Result<Conditional<Vec<TrunkCommit>>, TrunkReadError>;
 }
 
+/// Where [`RestTrunkFeed`] reads its GitHub token from, once per read: a token rotated in the vault
+/// is used from the next poll on, and one revoked fails that poll.
+pub type TokenSource = Arc<dyn Fn() -> Result<String, TrunkReadError> + Send + Sync>;
+
 /// [`TrunkFeed`] over the REST API with a GitHub token.
 pub struct RestTrunkFeed {
-    token: String,
+    token: TokenSource,
 }
 
 impl RestTrunkFeed {
-    pub fn new(token: String) -> Self {
+    pub fn new(token: TokenSource) -> Self {
         Self { token }
     }
 }
@@ -103,9 +107,10 @@ impl TrunkFeed for RestTrunkFeed {
         etag: Option<&str>,
     ) -> Result<Conditional<Vec<TrunkCommit>>, TrunkReadError> {
         let url = format!("https://api.github.com/{}", commits_path(repo, branch));
+        let token = (self.token)()?;
         let mut request = reqwest::Client::new()
             .get(url)
-            .bearer_auth(&self.token)
+            .bearer_auth(token)
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "tddy-trunk-watch")
             .header("X-GitHub-Api-Version", "2022-11-28");
@@ -295,35 +300,34 @@ impl TrunkPoller {
             .feed
             .newest_commits(&self.repo, &self.branch, etag.as_deref())
             .await;
-        match answer {
+        let (changes, wait_ms) = match answer {
             Err(e) => {
                 log::warn!(
                     "trunk poll of {}/{} failed: {e}",
                     self.repo.owner,
                     self.repo.name
                 );
-                PollOutcome {
-                    changes: vec![],
-                    next_poll_at_unix_ms: now_unix_ms + ERROR_BACKOFF_MS,
-                }
+                (vec![], ERROR_BACKOFF_MS)
             }
-            Ok(Conditional::NotModified { poll_interval_ms }) => PollOutcome {
-                changes: vec![],
-                next_poll_at_unix_ms: now_unix_ms
-                    + poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS),
-            },
+            Ok(Conditional::NotModified { poll_interval_ms }) => {
+                (vec![], poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS))
+            }
             Ok(Conditional::Modified {
                 value,
                 etag,
                 poll_interval_ms,
             }) => {
                 self.etag = etag;
-                PollOutcome {
-                    changes: self.absorb(value),
-                    next_poll_at_unix_ms: now_unix_ms
-                        + poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS),
-                }
+                let changes = self.absorb(value);
+                (
+                    changes,
+                    poll_interval_ms.unwrap_or(DEFAULT_POLL_INTERVAL_MS),
+                )
             }
+        };
+        PollOutcome {
+            changes,
+            next_poll_at_unix_ms: now_unix_ms + wait_ms,
         }
     }
 }

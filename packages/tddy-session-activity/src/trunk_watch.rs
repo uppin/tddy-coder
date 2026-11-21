@@ -14,6 +14,7 @@
 //!
 //! [`SessionNotificationSource::TrunkCommit`]: tddy_daemon_kernel::session_notification::SessionNotificationSource::TrunkCommit
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -31,6 +32,10 @@ pub struct TrunkSubscription {
     pub project_id: String,
     pub os_user: String,
     pub session_id: String,
+    /// The GitHub user who started or resumed the session, whose vault holds the project's
+    /// GitHub account; `None` when the caller's token named nobody. Kept with the subscription,
+    /// so it goes when the subscription does.
+    pub github_subject: Option<String>,
 }
 
 /// A project's trunk poller, built for its first subscriber: the project's repository read through
@@ -117,21 +122,18 @@ impl TrunkWatcher {
     /// the project's trunk cannot be watched; the session runs on without it.
     pub fn subscribe(&self, subscription: TrunkSubscription) -> Result<(), String> {
         let mut projects = self.projects();
-        if !projects.contains_key(&subscription.project_id) {
-            let (poller, trunk_ref) = self.source.poller_for(&subscription)?;
-            projects.insert(
-                subscription.project_id.clone(),
-                ProjectPoller {
+        let project = match projects.entry(subscription.project_id.clone()) {
+            Entry::Occupied(project) => project.into_mut(),
+            Entry::Vacant(slot) => {
+                let (poller, trunk_ref) = self.source.poller_for(&subscription)?;
+                slot.insert(ProjectPoller {
                     poller: Some(poller),
                     trunk_ref,
                     next_due_unix_ms: 0,
                     subscribers: Vec::new(),
-                },
-            );
-        }
-        let project = projects
-            .get_mut(&subscription.project_id)
-            .expect("inserted above");
+                })
+            }
+        };
         project
             .subscribers
             .retain(|s| s.session_id != subscription.session_id);
@@ -159,54 +161,80 @@ impl TrunkWatcher {
     /// poller due at `now_unix_ms` and publish what each found to each of its subscribers. Returns
     /// the earliest time a poller is next due, or `None` when no poller is left.
     pub async fn step(&self, now_unix_ms: u64) -> Option<u64> {
-        let due: Vec<(String, TrunkPoller)> = {
-            let mut projects = self.projects();
-            for project in projects.values_mut() {
-                project
-                    .subscribers
-                    .retain(|s| self.liveness.is_live(&s.session_id));
-            }
-            projects.retain(|_, p| !p.subscribers.is_empty());
-            projects
-                .iter_mut()
-                .filter(|(_, p)| p.next_due_unix_ms <= now_unix_ms)
-                .filter_map(|(id, p)| Some((id.clone(), p.poller.take()?)))
-                .collect()
-        };
-        for (project_id, mut poller) in due {
+        for (project_id, mut poller) in self.sweep_and_take_due(now_unix_ms) {
             let outcome = poller.poll(now_unix_ms).await;
-            let (trunk_ref, subscribers) = {
-                let mut projects = self.projects();
-                let Some(project) = projects.get_mut(&project_id) else {
-                    continue;
-                };
-                project.poller = Some(poller);
-                project.next_due_unix_ms = outcome.next_poll_at_unix_ms;
-                (project.trunk_ref.clone(), project.subscribers.clone())
+            let Some((trunk_ref, subscribers)) =
+                self.put_back(&project_id, poller, outcome.next_poll_at_unix_ms)
+            else {
+                continue;
             };
-            for change in &outcome.changes {
-                for text in trunk_activity_text(&trunk_ref, change) {
-                    for subscriber in &subscribers {
-                        self.bus
-                            .publish(SessionNotification {
-                                session_id: subscriber.session_id.clone(),
-                                os_user: subscriber.os_user.clone(),
-                                label: ACTIVITY_LABEL.to_string(),
-                                kind: SessionNotificationKind::Activity,
-                                source: SessionNotificationSource::TrunkCommit,
-                                text: text.clone(),
-                                agent: None,
-                                question: None,
-                                ended: None,
-                                activity_status: None,
-                                message: None,
-                                at_unix_ms: now_unix_ms,
-                            })
-                            .await;
-                    }
+            let texts = outcome
+                .changes
+                .iter()
+                .flat_map(|change| trunk_activity_text(&trunk_ref, change));
+            for text in texts {
+                for subscriber in &subscribers {
+                    self.bus
+                        .publish(trunk_activity(subscriber, text.clone(), now_unix_ms))
+                        .await;
                 }
             }
         }
         self.projects().values().map(|p| p.next_due_unix_ms).min()
+    }
+
+    /// Drop the subscribers no longer live and the pollers left with none, then take out every
+    /// poller due at `now_unix_ms`, so no lock is held while it polls.
+    fn sweep_and_take_due(&self, now_unix_ms: u64) -> Vec<(String, TrunkPoller)> {
+        let mut projects = self.projects();
+        for project in projects.values_mut() {
+            project
+                .subscribers
+                .retain(|s| self.liveness.is_live(&s.session_id));
+        }
+        projects.retain(|_, p| !p.subscribers.is_empty());
+        projects
+            .iter_mut()
+            .filter(|(_, p)| p.next_due_unix_ms <= now_unix_ms)
+            .filter_map(|(id, p)| Some((id.clone(), p.poller.take()?)))
+            .collect()
+    }
+
+    /// Return a polled poller to its project, due next at `next_due_unix_ms`, and answer the
+    /// project's trunk ref and subscribers — or `None` when the project lost its last subscriber
+    /// while the poll was awaited.
+    fn put_back(
+        &self,
+        project_id: &str,
+        poller: TrunkPoller,
+        next_due_unix_ms: u64,
+    ) -> Option<(String, Vec<TrunkSubscription>)> {
+        let mut projects = self.projects();
+        let project = projects.get_mut(project_id)?;
+        project.poller = Some(poller);
+        project.next_due_unix_ms = next_due_unix_ms;
+        Some((project.trunk_ref.clone(), project.subscribers.clone()))
+    }
+}
+
+/// One line of a trunk change, as an activity of `subscriber`'s own session.
+fn trunk_activity(
+    subscriber: &TrunkSubscription,
+    text: String,
+    at_unix_ms: u64,
+) -> SessionNotification {
+    SessionNotification {
+        session_id: subscriber.session_id.clone(),
+        os_user: subscriber.os_user.clone(),
+        label: ACTIVITY_LABEL.to_string(),
+        kind: SessionNotificationKind::Activity,
+        source: SessionNotificationSource::TrunkCommit,
+        text,
+        agent: None,
+        question: None,
+        ended: None,
+        activity_status: None,
+        message: None,
+        at_unix_ms,
     }
 }

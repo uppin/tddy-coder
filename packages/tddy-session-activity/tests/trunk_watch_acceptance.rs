@@ -3,20 +3,28 @@
 //! subscribed orchestrator's own session, and stops polling once no live session is subscribed
 //! (`#orchestra` 5/9).
 //!
-//! Feature doc: docs/ft/daemon/project-concept.md § Watching sessions.
+//! Feature doc: docs/ft/daemon/project-concept.md § Watching the trunk.
+
+mod project_notification_log_support;
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
+use project_notification_log_support::{a_log_over, write_session};
 use tddy_daemon_kernel::session_notification::SessionNotificationSource;
 use tddy_github::trunk_feed::{
     Conditional, RepoSlug, TrunkCommit, TrunkFeed, TrunkPoller, TrunkReadError,
     DEFAULT_POLL_INTERVAL_MS,
 };
+use tddy_session_activity::project_notification_log::ProjectNotificationScope;
 use tddy_session_activity::session_notifications::{
     RecordingSessionNotificationSubscriber, SessionNotificationBus,
+};
+use tddy_session_activity::session_watches::{
+    SessionWatchStore, WatchFilter, WatchKind, WatchOwner,
 };
 use tddy_session_activity::trunk_watch::{
     SubscriberLiveness, TrunkSource, TrunkSubscription, TrunkWatcher,
@@ -100,6 +108,11 @@ struct World {
 
 /// A watcher over a trunk whose answers are `answers` (baseline first).
 fn a_world(answers: Vec<Answer>) -> World {
+    a_world_publishing_on(answers, SessionNotificationBus::new())
+}
+
+/// [`a_world`] whose watcher publishes on `bus`, recorded besides.
+fn a_world_publishing_on(answers: Vec<Answer>, bus: SessionNotificationBus) -> World {
     let host = Arc::new(AHost {
         github: Arc::new(AGitHub {
             answers: Mutex::new(answers.into()),
@@ -109,7 +122,7 @@ fn a_world(answers: Vec<Answer>) -> World {
         live: Mutex::default(),
     });
     let published = Arc::new(RecordingSessionNotificationSubscriber::new());
-    let bus = Arc::new(SessionNotificationBus::new().with_subscriber(Arc::clone(&published)));
+    let bus = Arc::new(bus.with_subscriber(Arc::clone(&published)));
     let watcher = TrunkWatcher::new(
         Arc::clone(&host) as Arc<dyn TrunkSource>,
         Arc::clone(&host) as Arc<dyn SubscriberLiveness>,
@@ -134,6 +147,7 @@ impl World {
                 project_id: PROJECT.to_string(),
                 os_user: "dev".to_string(),
                 session_id: session_id.to_string(),
+                github_subject: None,
             })
             .expect("the trunk can be watched");
     }
@@ -286,4 +300,82 @@ async fn a_forced_push_is_reported_as_a_rewritten_trunk() {
         text.contains("rewritten") && text.contains('c') && text.contains('x'),
         "{text}"
     );
+}
+
+/// The trunk's baseline at a, then b landed on it.
+fn b_lands_after_a() -> Vec<Answer> {
+    vec![
+        Ok(Conditional::Modified {
+            value: vec![commit("a", "", "init")],
+            etag: None,
+            poll_interval_ms: None,
+        }),
+        Ok(Conditional::Modified {
+            value: vec![commit("b", "a", "Add the outbox"), commit("a", "", "init")],
+            etag: None,
+            poll_interval_ms: None,
+        }),
+    ]
+}
+
+fn the_owner(session_id: &str) -> WatchOwner {
+    WatchOwner {
+        project_id: PROJECT.to_string(),
+        session_id: session_id.to_string(),
+        os_user: "dev".to_string(),
+    }
+}
+
+#[tokio::test]
+async fn an_orchestrators_self_watch_delivers_its_new_trunk_commit_and_no_inbox_lists_it() {
+    // Given two orchestrators of the project, the daemon's notification log on the watcher's bus,
+    // and the first orchestrator's watch of its own trunk activity
+    let data = tempfile::tempdir().unwrap();
+    for session in [ORCHESTRATOR_A, ORCHESTRATOR_B] {
+        write_session(data.path(), "dev", session, PROJECT);
+    }
+    let (log, bus) = a_log_over(data.path());
+    let watches = SessionWatchStore::open(data.path()).expect("the watch store opens");
+    watches
+        .create(
+            &the_owner(ORCHESTRATOR_A),
+            WatchFilter {
+                session_ids: vec![ORCHESTRATOR_A.to_string()],
+                started_by_me: false,
+                kinds: vec![WatchKind::TrunkCommit],
+            },
+            Duration::from_secs(3_600),
+            &log,
+            0,
+        )
+        .await
+        .expect("the self-watch is created");
+    let world = a_world_publishing_on(b_lands_after_a(), bus);
+    world.a_live_orchestrator_subscribes(ORCHESTRATOR_A);
+    world.a_live_orchestrator_subscribes(ORCHESTRATOR_B);
+    world.watcher.step(0).await;
+
+    // When a commit lands and the next poll is due
+    world.watcher.step(DEFAULT_POLL_INTERVAL_MS).await;
+
+    // Then the self-watch delivers it, once
+    let delivered = watches
+        .take_delivery(&the_owner(ORCHESTRATOR_A), &log, DEFAULT_POLL_INTERVAL_MS)
+        .await;
+    let texts: Vec<&str> = delivered.events.iter().map(|r| r.text.as_str()).collect();
+    assert_eq!(texts, vec!["origin/main: b Add the outbox (dev)"]);
+    // And the other orchestrator's read of the project's notifications does not list it
+    let read = log
+        .read(
+            &ProjectNotificationScope {
+                project_id: PROJECT.to_string(),
+                os_user: "dev".to_string(),
+                exclude_session_id: ORCHESTRATOR_B.to_string(),
+                started_by: None,
+            },
+            "",
+            None,
+        )
+        .expect("the read is served");
+    assert_eq!(read.page.items.len(), 0, "{:?}", read.page.items);
 }
