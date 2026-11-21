@@ -305,3 +305,21 @@ table (`Enter`, `Escape`, `Tab`, `BTab`, `Backspace`, `Delete`, arrows, `Home`, 
 
 Tests: `tests/spec_turn_input_acceptance.rs` (claude's slot, an unknown kind, a submit key that is
 not a key name).
+
+## Home directories (`coding_agent.home_dirs`)
+
+`CodingAgentSection.home_dirs: Vec<String>` (read through `CodingAgentSpec::home_dirs`) names the
+directories under the agent's home that hold its settings and chat files, each relative to that home:
+
+```yaml
+home_dirs: [".claude"]
+```
+
+An orchestrator's read reach includes each entry under the OS user's home and under the agent's
+persistent tddy home ([project concept § Read reach](../../../docs/ft/daemon/project-concept.md#read-reach)).
+`parse_section` calls `validate_home_dirs`, refusing at load (messages prefixed `home_dirs:`) an
+empty entry, an absolute one, and one that climbs out of the home with `..` — any of those would put a
+directory outside the home into reach. Every shipped spec declares one: claude `.claude`, codex
+`.codex`, cursor `.cursor`, muse `.muse`, opencode `.local/share/opencode`.
+
+Tests: `tests/spec_home_dirs_acceptance.rs`.

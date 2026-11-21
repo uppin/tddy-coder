@@ -303,6 +303,7 @@ mod tests {
                 pass_env: Vec::new(),
                 effort: None,
                 turn_input: None,
+                home_dirs: Vec::new(),
             },
         }
     }

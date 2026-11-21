@@ -60,6 +60,7 @@ extensions:
       files: []
       rules_file: .cursor/rules/tddy-managed-workflow.mdc
     hooks: { adapter: cursor-hooks-json }
+    home_dirs: [".cursor"]
     # What a session of this agent offers (`#agent-tools 12/12`): the gates read these, never the
     # agent's name. Unknown words are refused at load.
     # The chat id `agent create-chat` prints, minted before the first start (bounded: 30 s) and passed as `--resume`.

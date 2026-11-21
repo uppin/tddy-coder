@@ -339,6 +339,33 @@ an ordinary, still read-only session, and main is set up once more.
   nobody serves is stopped, so ensure resumes it. A main that outlived a daemon restart is held by
   nothing, so a replace leaves its process running beside the new main until it is re-attached.
 
+#### Read reach
+
+An orchestrator-role session's daemon `Read`, `Grep` and `Glob` (not a conversation's) accept
+absolute paths and answer for any path inside its **reach**; a relative path still means its own home
+worktree. Reach is rebuilt on every call, so a project, a worktree or a grant added since the last
+call is in it at once:
+
+- **Every worktree of every tddy project on its host** — what `git worktree list` reports for each
+  project's main checkout on this host, its own project's included. Inside another worktree only what
+  git lists is readable (tracked and untracked-but-not-ignored files): `.git` and git-ignored paths
+  stay hidden, as they do in `ReadSessionWorktree`. `Grep` (`rg`) skips them on its own; `Glob` drops
+  them from its matches.
+- **Every coding agent's home and chat directories** — the agent spec's `coding_agent.home_dirs`
+  (`.claude`, `.cursor`, `.codex`, `.muse`, `.local/share/opencode` in the shipped YAMLs), each under the OS
+  user's home and under the agent's persistent tddy home (`<tddyhome>/homes/<key>`, or a `path`
+  home). Read as-is. They enter reach only when the daemon has its session-launch registry attached.
+- **The session's grants** — `<session_dir>/path-grants.json` (`PathGrantStore`), each a path, a
+  mode (`read` / `write`), when it was granted and the agent's reason. A grant lives as long as the
+  session and survives a resume. Read as-is. Nothing writes grants yet; the access-request tool
+  (`#orchestra` 6/9) will.
+
+Containment is by path component after symlinks are resolved, so a sibling whose name extends a root
+is outside it and a symlink inside reach that points out of it is refused; `..` is refused. A path
+outside reach is refused with a message listing the reach and naming `RequestPathAccess`; `Glob` with
+an absolute pattern outside reach gets the same refusal. Writes stay refused for orchestrator roles,
+and a non-orchestrator session's reads stay confined to its own worktree.
+
 ### Project-home tools
 
 A session holding an orchestrator role is also offered the eleven stack plan and read tools

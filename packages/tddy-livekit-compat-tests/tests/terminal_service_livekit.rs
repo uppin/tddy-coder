@@ -48,6 +48,47 @@ mod livekit_tests {
     /// soon as the daemon joins or exits; this only bounds a daemon that hangs alive.
     const DAEMON_JOIN_TIMEOUT: Duration = Duration::from_secs(90);
 
+    /// How many trailing lines of each daemon `debug.log` a failure quotes.
+    const DEBUG_LOG_TAIL_LINES: usize = 80;
+
+    /// What the daemon said before it failed: the stderr the test captured, then every
+    /// `daemon_stderr.log` and the tail of every `debug.log` under the daemon's data directory
+    /// (the parent of `stderr_path`). A `--daemon` run moves its own stderr into
+    /// `<session>/logs/daemon_stderr.log` once logging starts, so the captured stream alone is
+    /// empty for any failure after that point.
+    fn daemon_diagnostics(stderr_path: &std::path::Path) -> String {
+        let mut report = std::fs::read_to_string(stderr_path).unwrap_or_default();
+        let Some(data_dir) = stderr_path.parent() else {
+            return report;
+        };
+        let mut pending = vec![data_dir.to_path_buf()];
+        while let Some(dir) = pending.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    pending.push(path);
+                    continue;
+                }
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let text = match name {
+                    "daemon_stderr.log" => std::fs::read_to_string(&path).unwrap_or_default(),
+                    "debug.log" => {
+                        let full = std::fs::read_to_string(&path).unwrap_or_default();
+                        let lines: Vec<&str> = full.lines().collect();
+                        let start = lines.len().saturating_sub(DEBUG_LOG_TAIL_LINES);
+                        lines[start..].join("\n")
+                    }
+                    _ => continue,
+                };
+                report.push_str(&format!("\n--- {} ---\n{}", path.display(), text));
+            }
+        }
+        report
+    }
+
     /// Waits until the daemon joins the room as `server`, polling the daemon process
     /// so an early exit fails immediately (with its stderr) instead of timing out.
     async fn wait_for_daemon_participant(
@@ -58,7 +99,7 @@ mod livekit_tests {
     ) -> Result<()> {
         let target: ParticipantIdentity = SERVER_IDENTITY.to_string().into();
         let deadline = tokio::time::Instant::now() + DAEMON_JOIN_TIMEOUT;
-        let stderr = || std::fs::read_to_string(stderr_path).unwrap_or_default();
+        let stderr = || daemon_diagnostics(stderr_path);
         loop {
             if room.remote_participants().contains_key(&target) {
                 return Ok(());
