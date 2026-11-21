@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 2 — prompt rewrite with role-specific wording and tests pinning each instruction
+**PR**: [#987](https://github.com/uppin/tddy-coder/pull/987)
 **Stack**: `#orchestra` 9/9 — branch `feature/orchestra/orchestrator-prompt`, base `feature/orchestra/orchestrator-lsp`
 
 ## Initial Discovery
@@ -79,11 +80,16 @@ A prompt that drives delegation, tracking, reporting and freshness.
 
 ## Acceptance Tests
 
-`packages/tddy-agent-launch/src/project_home_launch/project_home_launch_tests.rs (unit)`:
+Unit — `packages/tddy-agent-launch/src/project_home_launch/project_home_prompt_tests.rs`:
 - [ ] `an_orchestrators_prompt_opens_as_an_orchestrator_and_mains_as_main`
-- [ ] `the_prompt_sends_coding_work_through_tracked_sessions`
-- [ ] `the_prompt_tells_the_orchestrator_to_have_children_report_over_their_back_channel`
-- [ ] `every_tool_the_orchestrator_catalogue_offers_is_named_in_the_prompt`
+- [ ] `the_prompt_sends_coding_work_through_sessions_it_starts_and_follows`
+- [ ] `the_prompt_has_children_report_progress_and_status_over_their_back_channel`
+- [ ] `the_prompt_checks_the_base_before_work_and_reads_trunk_activities`
+- [ ] `every_tool_the_orchestrator_is_offered_is_named_in_its_prompt` — passes only once n1–n8 offer their tools in `project_home_offered_catalog`; each of them adds its own there
+
+The existing `project_home_launch_tests.rs` launch tests keep pinning how the prompt file is delivered (`--append-system-prompt-file`).
+
+The surface they specify (body `TODO(orchestrator-prompt)`): `project_home_prompt(role) -> String` in `packages/tddy-agent-launch/src/project_home_launch.rs` — `allow(dead_code)` until the role wiring writes it in place of `PROJECT_HOME_PROMPT`.
 
 ## Decisions & Trade-offs
 
@@ -111,10 +117,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (delegated: the user said "Finish the remaining ones without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

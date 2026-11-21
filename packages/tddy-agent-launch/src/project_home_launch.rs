@@ -195,6 +195,23 @@ pub(crate) fn project_home_wiring(launch: ProjectHomeLaunch<'_>) -> Result<RoleW
 /// What a main is told it is, appended to its system prompt.
 const PROJECT_HOME_PROMPT: &str = include_str!("project_home_prompt.md");
 
+/// The role prompt an orchestrator-role session is launched with (`#orchestra` 9/9): one prompt for
+/// both roles, opening with what this session is — the project's main (`project-home`) or one of
+/// its orchestrators (`orchestrator`) — then how it works: every piece of coding goes through a tddy
+/// session it starts and follows to its end; each child is told to report its progress and status
+/// over its back channel; children are messaged by their listed route; the base is checked and
+/// refreshed before work starts and trunk commits are its own activities; reads beyond its reach
+/// and any write go through `RequestPathAccess`; session files are attached to the sessions it
+/// starts; the LSP tools take a root; a terminal it claimed is released when it is done with it.
+// TODO(orchestrator-prompt): the role wiring writes this instead of `PROJECT_HOME_PROMPT`; until
+// then only its tests call it.
+#[allow(dead_code)]
+pub(crate) fn project_home_prompt(role: &str) -> String {
+    // TODO(orchestrator-prompt): implement
+    let _ = role;
+    unimplemented!("project_home_prompt")
+}
+
 /// The main's role prompt, under its session dir.
 const PROJECT_HOME_PROMPT_BASENAME: &str = "project-home-prompt.md";
 
@@ -269,3 +286,5 @@ impl LaunchSessions {
 
 #[cfg(test)]
 mod project_home_launch_tests;
+#[cfg(test)]
+mod project_home_prompt_tests;
