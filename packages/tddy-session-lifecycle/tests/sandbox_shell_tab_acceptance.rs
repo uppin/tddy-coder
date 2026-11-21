@@ -2,7 +2,8 @@
 //! a second runner over the session's worktree, with files of its own — streams, is listed, is
 //! recorded `[sandbox, shell]`, and leaves no jail behind when it is closed or its session is
 //! deleted; a jail that exits ends its tab, which stays recorded for Resume. An "On host" tab of a sandboxed session is reachable, and a `sandbox` wrapper is refused
-//! around an agent and on a session that is not sandboxed.
+//! on a session that is not sandboxed. An agent in a jail of its own is `sandbox_agent_tab_acceptance`'s
+//! (`#session-liveness` 7/8).
 //!
 //! PRD: docs/ft/daemon/session-liveness.md (A sandboxed session's tabs) (`#session-liveness` 5/8)
 //!
@@ -235,28 +236,6 @@ async fn an_on_host_tab_of_a_sandboxed_session_streams_its_output() {
         .await;
     assert_eq!(daemon.roster_entry(&tab).launch, vec![LaunchNode::shell()]);
     assert_eq!(daemon.jails.launched_terminals(), Vec::<String>::new());
-}
-
-#[tokio::test]
-async fn a_sandbox_wrapper_around_an_agent_is_refused() {
-    // Given a sandboxed session
-    let daemon = a_sandboxed_session().await;
-
-    // When Claude is asked for "In sandbox"
-    let refused = daemon
-        .opens_a_tab_in_sandbox("claude-cli")
-        .await
-        .expect_err("an agent tab runs in no jail of its own here");
-
-    // Then the start is refused naming the agent, and nothing is started or recorded
-    assert_eq!(refused.code(), Code::InvalidArgument);
-    assert!(
-        refused.message().contains("\"claude-cli\""),
-        "{}",
-        refused.message()
-    );
-    assert_eq!(daemon.jails.launched_terminals(), Vec::<String>::new());
-    assert_eq!(daemon.roster().tabs, Vec::new());
 }
 
 #[tokio::test]

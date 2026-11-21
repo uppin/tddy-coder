@@ -17,7 +17,7 @@ use tddy_rpc::{Code, Status};
 use tddy_task::TerminalCapture;
 use tokio::sync::{broadcast, mpsc};
 
-use super::{TabJailKey, TabJailLaunch, TabJailPaths, TabJailSpawn, TabJails};
+use super::{TabJailAgent, TabJailKey, TabJailLaunch, TabJailPaths, TabJailSpawn, TabJails};
 use crate::sandbox_session::{SandboxSessionState, SandboxSessionStateInit};
 
 const SESSION: &str = "jailed-session";
@@ -96,6 +96,15 @@ impl TabJailSpawn for StandInSpawn {
                 managed_workflow: None,
             },
         )))
+    }
+
+    /// An agent's jail is the same stand-in: this suite is about the registry, not what runs in it.
+    async fn spawn_agent(
+        &self,
+        launch: &TabJailLaunch,
+        _agent: &TabJailAgent,
+    ) -> Result<Arc<SandboxSessionState>, Status> {
+        self.spawn_shell(launch).await
     }
 }
 

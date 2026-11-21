@@ -1,4 +1,5 @@
-//! The jails a sandboxed session's **shell tabs** run in, one per tab (`#session-liveness` 5/8).
+//! The jails a sandboxed session's **shell and agent tabs** run in, one per tab (`#session-liveness`
+//! 5/8; agent tabs 7/8).
 //!
 //! A session's main jail is [`SandboxSessionManager`](crate::sandbox_session::SandboxSessionManager)'s,
 //! one per session. A tab opened "In sandbox" gets a jail of its own — a second
@@ -11,6 +12,7 @@
 //! forgotten and announced on [`TabJails::subscribe_ended`], so the tab it served ends with it.
 //!
 //! PRD: docs/ft/daemon/session-liveness.md (A sandboxed session's tabs)
+//! PRD: docs/ft/daemon/session-liveness.md (agent tabs, `#session-liveness` 7/8)
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -104,6 +106,19 @@ impl TabJailLaunch {
     }
 }
 
+/// What one **agent** tab's jail runs (`#session-liveness` 7/8): the harness, by its session type,
+/// and the conversation the tab holds — its own, never the session main's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabJailAgent {
+    /// The session type of the CLI harness the tab runs (`"claude-cli"`, `"opencode-cli"`, …).
+    pub harness: String,
+    /// The conversation the tab holds: a fresh one for a new tab, the recorded one on a resume.
+    pub conversation_id: String,
+    /// Whether the agent continues [`Self::conversation_id`] (a restored tab whose harness can
+    /// resume a given conversation) rather than starting it.
+    pub resume: bool,
+}
+
 /// Starts the jail a shell tab runs in.
 ///
 /// A port because starting one needs what only the daemon has — the session's tool definitions,
@@ -118,6 +133,18 @@ pub trait TabJailSpawn: Send + Sync {
     /// nothing running.
     async fn spawn_shell(&self, launch: &TabJailLaunch)
         -> Result<Arc<SandboxSessionState>, Status>;
+
+    /// Start a jail running `agent` in `launch.worktree` (`#session-liveness` 7/8): the agent's exec
+    /// plan built as the session main's jail builds it — its spec's argv in the tab's conversation,
+    /// its tool's grants — with `launch.paths` as its files, and return it once its runner is ready
+    /// and its terminal bridged. A persistent agent home the main's jail also uses is used as is.
+    /// It writes **none** of the session's records (its role, its usage context): those are the
+    /// main's. A jail that cannot start is an error naming why, and leaves nothing running.
+    async fn spawn_agent(
+        &self,
+        launch: &TabJailLaunch,
+        agent: &TabJailAgent,
+    ) -> Result<Arc<SandboxSessionState>, Status>;
 }
 
 /// The jails of every jailed tab this daemon runs, keyed `(session_id, terminal_id)`.
@@ -164,6 +191,29 @@ impl TabJails {
         drop(jails);
         self.watch_for_death(key, Arc::clone(&state));
         Ok(state)
+    }
+
+    /// Start the **agent** tab's jail `launch` describes, running `agent`, through `spawn`
+    /// (`#session-liveness` 7/8): registered under its tab and watched as [`Self::start`] does, and
+    /// counted by [`Self::live_agent_sessions`] while its runner runs. A tab that already has a jail
+    /// is `ALREADY_EXISTS`, and nothing is started; a refused spawn registers nothing.
+    pub async fn start_agent(
+        &self,
+        spawn: &dyn TabJailSpawn,
+        launch: TabJailLaunch,
+        agent: TabJailAgent,
+    ) -> Result<Arc<SandboxSessionState>, Status> {
+        // TODO(sandbox-agent-tab): implement
+        let _ = (spawn, launch, agent);
+        todo!("start and watch an agent tab's jail")
+    }
+
+    /// The sessions with a jailed **agent** tab whose runner is running now — what a session's
+    /// liveness counts beside its main and its host agent tabs (`#session-liveness` 7/8). A jailed
+    /// shell never makes its session live.
+    pub async fn live_agent_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
+        // TODO(sandbox-agent-tab): implement
+        todo!("the sessions with a live jailed agent tab")
     }
 
     /// The jail of tab `terminal_id` of `session_id`, while it is registered.
@@ -281,3 +331,7 @@ impl TabJails {
 #[cfg(all(test, unix))]
 #[path = "tab_jails_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "tab_jails_agent_tests.rs"]
+mod agent_tests;

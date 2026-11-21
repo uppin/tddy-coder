@@ -311,8 +311,8 @@ struct CliManagerTerminalRoster {
     tddy_data_dir: PathBuf,
     /// The host's tmux, which a tmux tab's session name is checked against before anything spawns.
     tmux: Arc<dyn TmuxHost>,
-    /// Where a jailed shell tab's jail is registered, and what starts it (`#session-liveness` 5/8);
-    /// `None` on a roster that starts no jailed tab.
+    /// Where a jailed tab's jail is registered, and what starts it (`#session-liveness` 5/8; agent
+    /// tabs 7/8); `None` on a roster that starts no jailed tab.
     tab_jails: Option<JailedTabs>,
     /// What resolves a target session's target for a tab opened "On target" (`#session-liveness`
     /// 6/8); `None` on a roster that starts no target tab.
@@ -370,6 +370,9 @@ impl TerminalRoster for CliManagerTerminalRoster {
     async fn start(&self, session_id: &str, launch: &TerminalLaunch) -> Result<String, Status> {
         if launch.kind == tddy_terminal_rpc::service::TerminalKind::SandboxedShell {
             return self.start_jailed_shell_tab(session_id, launch).await;
+        }
+        if let tddy_terminal_rpc::service::TerminalKind::SandboxedAgent { agent } = &launch.kind {
+            return self.start_jailed_agent_tab(session_id, agent).await;
         }
         if launch.kind == tddy_terminal_rpc::service::TerminalKind::TargetShell {
             return self.start_target_shell_tab(session_id, launch).await;

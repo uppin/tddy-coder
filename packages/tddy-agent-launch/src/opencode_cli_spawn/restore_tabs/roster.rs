@@ -43,7 +43,8 @@ pub struct RosterRestore<'a> {
     pub coding_agents: &'a HostCodingAgents,
     /// The roster's single writer: a dropped tab is forgotten through it.
     pub roster_store: &'a TabRosterStore,
-    /// The registry a `sandbox` → `shell` tab's new jail is registered in (`#session-liveness` 5/8).
+    /// The registry a `sandbox` → `shell` or `sandbox` → `agent` tab's new jail is registered in
+    /// (`#session-liveness` 5/8, 7/8).
     pub tab_jails: &'a TabJails,
     /// What starts that jail.
     pub tab_jail_spawn: &'a dyn TabJailSpawn,
@@ -195,6 +196,10 @@ async fn carry_out(
             restore_jailed_shell(restore, tab).await?;
             Ok(Restored::AsRecorded)
         }
+        TabRestore::JailedAgent {
+            harness,
+            resume_conversation,
+        } => restore_jailed_agent(restore, tab, harness, resume_conversation).await,
         TabRestore::TargetShell => {
             restore_target_shell(restore, tab).await?;
             Ok(Restored::AsRecorded)
@@ -251,6 +256,27 @@ async fn restore_jailed_shell(restore: &RosterRestore<'_>, tab: &TabEntry) -> an
         .await
         .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))?;
     Ok(())
+}
+
+/// Start the agent of `harness` under the tab's recorded id in a new jail of its own over the
+/// session's worktree and the agent's grants (`#session-liveness` 7/8), resuming
+/// `resume_conversation` when there is one — [`Restored::AsRecorded`] — and fresh otherwise —
+/// [`Restored::Fresh`] with the reason. A jail that cannot start fails the tab with the reason.
+async fn restore_jailed_agent(
+    restore: &RosterRestore<'_>,
+    tab: &TabEntry,
+    harness: String,
+    resume_conversation: Option<String>,
+) -> anyhow::Result<Restored> {
+    // TODO(sandbox-agent-tab): implement
+    let _ = (
+        restore.tab_jails,
+        restore.tab_jail_spawn,
+        tab,
+        harness,
+        resume_conversation,
+    );
+    todo!("restore a jailed agent tab")
 }
 
 /// Start the target user's login shell under the tab's recorded id on the session's target, in the

@@ -41,6 +41,13 @@ pub enum TabRestore {
     /// The session user's login shell, reopened fresh under its id in a new jail of its own over
     /// the session's worktree and grants (`sandbox` → `shell`, `#session-liveness` 5/8).
     JailedShell,
+    /// An agent tab started under its id in a new jail of its own over the session's worktree and
+    /// the agent's grants (`sandbox` → `agent`, `#session-liveness` 7/8), resuming
+    /// `resume_conversation` when its harness can, fresh when it is `None`.
+    JailedAgent {
+        harness: String,
+        resume_conversation: Option<String>,
+    },
     /// The target user's login shell, reopened fresh under its id on the session's target, in the
     /// session's worktree there (`target` → `shell`, `#session-liveness` 6/8).
     TargetShell,
@@ -97,8 +104,9 @@ impl LiveTabs {
 /// - `tmux` → `agent` → [`TabRestore::ReattachTmux`] when the tmux session exists, otherwise
 ///   [`TabRestore::RelaunchTmux`];
 /// - `shell` → [`TabRestore::FreshShell`];
-/// - `sandbox` → `shell` → [`TabRestore::JailedShell`]; a `sandbox` around anything else is
-///   [`TabRestore::Drop`] naming why;
+/// - `sandbox` → `shell` → [`TabRestore::JailedShell`]; `sandbox` → `agent` →
+///   [`TabRestore::JailedAgent`]; a `sandbox` around anything else is [`TabRestore::Drop`] naming
+///   why;
 /// - `target` → `shell` → [`TabRestore::TargetShell`]; a `target` around anything else is
 ///   [`TabRestore::Drop`] naming why;
 /// - `tmux-attach` → [`TabRestore::ReattachTmuxAttach`] when the user's tmux session exists,
@@ -125,6 +133,7 @@ pub fn restore_plan(entry: &TabEntry, live: &LiveTabs) -> TabRestore {
         SHELL_KIND => TabRestore::FreshShell,
         TMUX_ATTACH_KIND => tmux_attach_plan(outermost, live),
         TMUX_KIND => tmux_wrapped_plan(entry, outermost, live),
+        SANDBOX_KIND if wraps_an_agent(entry) => jailed_agent_plan(entry),
         SANDBOX_KIND => sandbox_plan(entry),
         TARGET_KIND => target_plan(entry),
         other => drop_because(format!(
@@ -240,6 +249,23 @@ fn sandbox_plan(entry: &TabEntry) -> TabRestore {
             inner.kind
         )),
     }
+}
+
+/// Whether `entry`'s outermost wrapper wraps an `agent` node.
+fn wraps_an_agent(entry: &TabEntry) -> bool {
+    entry
+        .launch
+        .get(1)
+        .is_some_and(|node| node.kind == AGENT_KIND)
+}
+
+/// A `sandbox`-wrapped agent (`#session-liveness` 7/8): started in a new jail, resuming its
+/// conversation when its harness can, fresh otherwise; dropped naming what it is missing, or a node
+/// the agent is recorded wrapping.
+fn jailed_agent_plan(entry: &TabEntry) -> TabRestore {
+    // TODO(sandbox-agent-tab): implement
+    let _ = entry;
+    todo!("the restore of a sandbox-wrapped agent tab")
 }
 
 /// A `target`-wrapped tab: a shell is reopened on the session's target; anything else on a target is

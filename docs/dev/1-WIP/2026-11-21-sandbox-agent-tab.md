@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — several crates (agent-launch, daemon-sandbox, session-lifecycle, terminal-rpc, session-web), a shared persistent home between two live jails, liveness counting for jailed agent tabs
 **Stack**: `#session-liveness` 7/8 — branch `feature/session-liveness/sandbox-agent-tab`, base `feature/session-liveness/target-shell-tab`
+**PR**: #966 https://github.com/uppin/tddy-coder/pull/966
 
 ## Initial Discovery
 
@@ -50,9 +51,38 @@ An agent tab opened "In sandbox" runs the agent in a jail of its own, in its own
 | `n1` agent-tab-liveness (#958) | liveness from held agent tabs | a jailed agent tab keeps the session live | change the rule |
 | `n6` target-shell-tab | nothing consumed — the line puts it below | — | — |
 
+**Sequencing of this node's tests on n5's green** (pass 2, 2026-11-21). Each n7 path sits *ahead* of
+n5's `todo!()` instead of inside it (`from_wrapped_request` → `sandboxed_agent`, `restore_plan` →
+`jailed_agent_plan`), so the parsing, restore-rule, `TabJails::start_agent` / `live_agent_sessions`
+and `TabJailAgentPlanner` unit tests fail on n7's own todo. These pass only once n5 is green too,
+because they run through n5's real objects:
+
+- `tab_jails_agent_tests::a_jailed_shell_tab_never_makes_its_session_live` (n5's `TabJails::start`)
+  and `a_stopped_agent_tab_no_longer_makes_its_session_live` (n5's `TabJails::stop`).
+- `sandbox_agent_tab_acceptance::stopping_the_session_stops_its_jailed_agent_tabs` (n5's
+  `HeldSessions::stop_session` teardown of tab jails), and every acceptance test that lists or
+  streams a jailed tab (n5's store routing, `sandboxed_session_tab`).
+- `resume_tab_roster_acceptance::a_jailed_*_tab_*` (n5's `TabJailPaths::for_tab` and restore wiring).
+- Cypress `lists agent kinds under In sandbox for a sandboxed session` (n5's "In sandbox" group).
+
+n7 inverts three n5 tests and deletes them:
+`terminal_kind_sandbox_wrapper_unit::an_agent_wrapped_in_sandbox_is_refused_naming_the_agent`,
+`restore_tabs_sandbox_tests::an_agent_recorded_in_a_sandbox_is_dropped_naming_the_agent`, and
+`sandbox_shell_tab_acceptance::a_sandbox_wrapper_around_an_agent_is_refused`.
+
 ## Draft PR contract
 
 The first push publishes the agent variant of `TabJailSpawn` as `todo!()` and the failing tests below.
+
+Published surface (bodies `todo!()`, `TODO(sandbox-agent-tab)`, unless marked):
+
+- tddy-daemon-sandbox `tab_jails.rs`: `TabJailAgent { harness, conversation_id, resume }`; `TabJailSpawn::spawn_agent` (a required method beside n5's `spawn_shell`); `TabJails::start_agent`, `TabJails::live_agent_sessions`.
+- tddy-terminal-rpc `service/ports.rs`: `TerminalKind::SandboxedAgent { agent }`; `sandboxed_agent`, reached from `from_wrapped_request` ahead of n5's `sandboxed`.
+- tddy-agent-launch: `tab_jail_agent.rs` — `TabJailAgentPlan`, `TabJailAgentPlanner::plan` (the jail's grants and exec plan, writing no session record — the seam the main-only-records rule is tested at); `LaunchSessions::spawn_agent`; `TabRestore::JailedAgent { harness, resume_conversation }`, `jailed_agent_plan` (dispatched ahead of n5's `sandbox_plan`), `restore_jailed_agent`.
+- tddy-session-lifecycle: `start_jailed_agent_tab` (`jailed_tabs.rs`), routed from `TerminalRoster::start`.
+- tddy-coder participant: the `SandboxedAgent` refusal arm (`FAILED_PRECONDITION`, implemented).
+- tddy-session-web: `TODO(sandbox-agent-tab)` on `NewTerminalMenu`'s `sandboxed` prop.
+- Left to green: the `DaemonTerminalSessionStore::live_sessions` union with `live_agent_sessions` (a `todo!()` there would panic every listing) and the `wrappers` proto comment (regenerates TS).
 
 ## Green wave
 
@@ -83,8 +113,8 @@ A jailed claude tab shares the session's hooks like a host agent tab; unchanged 
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests / run them (verify they fail) / USER REVIEW
-- [ ] TDD Red — failing unit/integration tests
+- [x] Create failing acceptance tests / run them (verify they fail) / USER REVIEW — written and failing; USER REVIEW pending
+- [x] TDD Red — failing unit/integration tests
 - [ ] Implementation
 - [ ] Package documentation, scoped clippy, single-spec Cypress
 
@@ -101,23 +131,33 @@ After n5, `sandbox` around an agent is refused; only shell tabs run in tab jails
 ## Acceptance Tests
 
 `packages/tddy-session-lifecycle/tests/sandbox_agent_tab_acceptance.rs` (fake `TabJailSpawn`):
-- [ ] `an_agent_tab_opened_in_sandbox_runs_the_agent_in_a_jail_of_its_own`
-- [ ] `a_jailed_agent_tab_runs_in_a_conversation_of_its_own`
-- [ ] `a_jailed_agent_tab_keeps_the_session_live`
-- [ ] `a_jailed_agent_tab_does_not_overwrite_the_mains_session_records`
-- [ ] `stopping_the_session_stops_its_jailed_agent_tabs`
+- [x] `an_agent_tab_opened_in_sandbox_runs_the_agent_in_a_jail_of_its_own`
+- [x] `a_jailed_agent_tab_runs_in_a_conversation_of_its_own`
+- [x] `a_jailed_agent_tab_keeps_the_session_live`
+- [x] `a_jailed_agent_tab_does_not_overwrite_the_mains_session_records`
+- [x] `stopping_the_session_stops_its_jailed_agent_tabs`
 
 `packages/tddy-session-lifecycle/tests/resume_tab_roster_acceptance.rs` (extended):
-- [ ] `a_jailed_claude_tab_is_restored_into_a_new_jail_resuming_its_conversation`
-- [ ] `a_jailed_opencode_tab_reopens_fresh_and_is_reported_fresh`
+- [x] `a_jailed_claude_tab_is_restored_into_a_new_jail_resuming_its_conversation`
+- [x] `a_jailed_opencode_tab_reopens_fresh_and_is_reported_fresh`
 
 `packages/tddy-session-web/cypress/component/NewTerminalMenuSandboxAcceptance.cy.tsx` (extended):
-- [ ] `lists agent kinds under In sandbox for a sandboxed session`
+- [x] `lists agent kinds under In sandbox for a sandboxed session`
 
 ## Unit Tests
 
-- The tab-jail agent exec plan: same grants as the main's for the same agent, the tab's own paths.
-- `restore_plan`: `[sandbox, agent]` plans a jailed resume or a jailed fresh agent.
+- [x] The tab-jail agent exec plan: same grants as the main's for the same agent, the tab's own paths — `tddy-agent-launch/src/tab_jail_agent_tests.rs` (7).
+- [x] `restore_plan`: `[sandbox, agent]` plans a jailed resume or a jailed fresh agent — `tddy-agent-launch/src/opencode_cli_spawn/restore_tabs_sandbox_agent_tests.rs` (5).
+- [x] `TabJails::start_agent` / `live_agent_sessions` — `tddy-daemon-sandbox/src/tab_jails_agent_tests.rs` (9; 2 blocked on n5's `start`/`stop`).
+- [x] `sandbox` around an agent parses to `SandboxedAgent` — `tddy-terminal-rpc/tests/terminal_kind_sandbox_agent_unit.rs` (4).
+
+## Refactoring Needed
+
+### From @red (TDD Red Phase)
+
+- `tab_jails_agent_tests.rs` and n5's `tab_jails_tests.rs` each carry a `sleep`-runner stand-in `TabJailSpawn`; share one test helper once both are green.
+- `tab_jail_agent_tests.rs`'s `AHostOfStubs` duplicates `tddy-session-lifecycle::test_util::AHostOfBinaries`; a shared fixture host belongs in `tddy-testing-commons` (or `tddy-agent-launch` test support).
+- The `has_a_main_usage_context` / `session_records` helpers exist in both `sandbox_tab_support` and `tab_jail_agent_tests.rs`.
 
 ## Decisions & Trade-offs
 
@@ -130,10 +170,10 @@ After n5, `sandbox` around an agent is refused; only shell tabs run in tab jails
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

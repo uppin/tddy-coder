@@ -29,7 +29,9 @@ interface NewTerminalMenuProps {
    *  section lists again each time the menu opens. */
   tmux?: TmuxMenuState;
   /** Whether the session runs sandboxed (`SessionEntry.sandbox`): its shell opens "In sandbox" — in
-   *  a jail of its own — by default, or "On host". */
+   *  a jail of its own — by default, or "On host". Its agent kinds are listed under
+   *  "In sandbox" too, each opening with `wrappers: [sandbox]` (`#session-liveness` 7/8).
+   *  TODO(sandbox-agent-tab): list the agents in that group. */
   sandboxed?: boolean;
   /** Whether the session runs on a target (`SessionEntry.target` is set): its shell opens "On
    *  target" — on that machine, in the session's worktree there — by default, or "On this host". */

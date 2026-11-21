@@ -33,7 +33,7 @@ use tddy_daemon_sandbox::sandbox_session::{
     spawn_sandbox_plan, wait_for_sandbox_ready, SandboxRunnerSpawn, SandboxSessionState,
     SandboxSessionStateInit,
 };
-use tddy_daemon_sandbox::tab_jails::{TabJailLaunch, TabJailPaths, TabJailSpawn};
+use tddy_daemon_sandbox::tab_jails::{TabJailAgent, TabJailLaunch, TabJailPaths, TabJailSpawn};
 use tddy_daemon_sandbox::tool_jail::{
     build_tool_jail_plan, lower_tool_jail, ToolJailGrants, ToolJailInputs,
 };
@@ -105,6 +105,18 @@ impl TabJailSpawn for LaunchSessions {
         grants.mounts.push(MountSpec::read_write(&launch.worktree));
         self.run_tab_jail(launch, &dirs, grants, &closure_ids(&closure))
             .await
+    }
+
+    /// The jail planned by [`crate::tab_jail_agent::TabJailAgentPlanner`], spawned, waited for and
+    /// bridged as the main's is (`#session-liveness` 7/8). Writes none of the session's records.
+    async fn spawn_agent(
+        &self,
+        launch: &TabJailLaunch,
+        agent: &TabJailAgent,
+    ) -> Result<Arc<SandboxSessionState>, Status> {
+        // TODO(sandbox-agent-tab): implement
+        let _ = (launch, agent);
+        todo!("launch an agent tab's jail")
     }
 }
 

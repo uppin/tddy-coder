@@ -1,7 +1,7 @@
 /**
  * Cypress component acceptance: a sandboxed session's "+" menu offers its shell "In sandbox" — in a
  * jail of its own, first and so the default — and "On host"; a session that is not sandboxed offers
- * no such choice.
+ * no such choice. Its agents are offered "In sandbox" too (`#session-liveness` 7/8).
  *
  * PRD: `docs/ft/daemon/session-liveness.md (A sandboxed session's tabs)` (`#session-liveness` 5/8)
  *
@@ -53,6 +53,16 @@ function aBackendServing(session: Partial<SessionEntry>): SessionServiceBackend 
   });
 }
 
+/** A host-served session whose daemon runs Muse Code; started terminals are `term-1`, `term-2`, … */
+function aBackendRunningMuseServing(session: Partial<SessionEntry>): SessionServiceBackend {
+  return aSessionServiceBackend({
+    sessions: [session],
+    agents: [{ id: "muse", label: "Muse Code" }],
+    connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
+    newTerminalId: (index) => `term-${index + 1}`,
+  });
+}
+
 function attachSession(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(SESSION_ID).click();
@@ -77,7 +87,7 @@ function menuGroupLabels($groups: JQuery<HTMLElement>): string[] {
 
 // ---------------------------------------------------------------------------
 
-describe("NewTerminalMenu — shell tabs in a sandbox", () => {
+describe("NewTerminalMenu — tabs in a sandbox", () => {
   beforeEach(() => {
     cy.viewport(1280, 800);
     cy.clearLocalStorage();
@@ -108,6 +118,32 @@ describe("NewTerminalMenu — shell tabs in a sandbox", () => {
       expect(startedTerminals(b)).to.deep.equal([
         { kind: "", wrappers: [{ kind: "sandbox" }] },
         { kind: "", wrappers: [] },
+      ]);
+    });
+  });
+
+  it("lists agent kinds under In sandbox for a sandboxed session", () => {
+    // Given a connected sandboxed session whose daemon runs Muse Code
+    const backend = aBackendRunningMuseServing(aSession(true));
+    attachSession(backend);
+
+    // When the "+" menu is opened
+    tabs.newTab().click();
+
+    // Then Muse Code is offered both "In sandbox" and "On host"
+    tabs.newTabInSandboxOption("muse-cli").should("exist");
+    tabs.newTabOnHostOption("muse-cli").should("exist");
+
+    // When it is opened from each
+    tabs.newTabInSandboxOption("muse-cli").click();
+    tabs.newTab().click();
+    tabs.newTabOnHostOption("muse-cli").click();
+
+    // Then the daemon is asked for Muse Code in a jail of its own, then for Muse Code on the host
+    cy.wrap(backend).should((b: SessionServiceBackend) => {
+      expect(startedTerminals(b)).to.deep.equal([
+        { kind: "muse-cli", wrappers: [{ kind: "sandbox" }] },
+        { kind: "muse-cli", wrappers: [] },
       ]);
     });
   });

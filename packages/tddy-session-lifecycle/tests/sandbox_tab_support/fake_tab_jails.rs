@@ -1,6 +1,7 @@
 //! An in-memory [`TabJailSpawn`]: each "jail" is a `sleep` standing in for its runner, whose
-//! terminal has already printed [`jailed_shell_banner`]. It records every launch it is asked for,
-//! and can be told to refuse every one.
+//! terminal has already printed [`jailed_shell_banner`] — or, for an agent's jail,
+//! [`jailed_agent_banner`] (`#session-liveness` 7/8). It records every launch it is asked for, with
+//! the agent an agent's jail was asked to run, and can be told to refuse every one.
 //!
 //! What the daemon owns of a tab jail is its lifetime and its terminal — which a real process and a
 //! real capture show — not the kernel sandbox, which `sandbox_shell_tab_jail_linux` covers.
@@ -12,7 +13,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use async_trait::async_trait;
 use bytes::Bytes;
 use tddy_daemon_sandbox::sandbox_session::{SandboxSessionState, SandboxSessionStateInit};
-use tddy_daemon_sandbox::tab_jails::{TabJailLaunch, TabJailSpawn};
+use tddy_daemon_sandbox::tab_jails::{TabJailAgent, TabJailLaunch, TabJailSpawn};
 use tddy_rpc::Status;
 use tddy_task::TerminalCapture;
 use tokio::sync::{broadcast, mpsc};
@@ -23,9 +24,17 @@ pub fn jailed_shell_banner(terminal_id: &str) -> String {
     format!("jailed shell of {terminal_id} $ ")
 }
 
+/// What a fake agent's jail has printed by the time it is handed back: names its harness and its
+/// tab, so a stream served from the wrong jail — or a shell's — shows it.
+pub fn jailed_agent_banner(harness: &str, terminal_id: &str) -> String {
+    format!("jailed {harness} of {terminal_id} > ")
+}
+
 /// The double: jails started, by terminal id, and every launch asked for, in order.
 pub struct FakeTabJailSpawn {
     launches: StdMutex<Vec<TabJailLaunch>>,
+    /// The agent each agent's jail was asked to run, by terminal id.
+    agents: StdMutex<BTreeMap<String, TabJailAgent>>,
     jails: StdMutex<BTreeMap<String, Arc<SandboxSessionState>>>,
     refusal: Option<String>,
     dir: tempfile::TempDir,
@@ -35,6 +44,7 @@ pub struct FakeTabJailSpawn {
 pub fn a_tab_jail_spawn() -> Arc<FakeTabJailSpawn> {
     Arc::new(FakeTabJailSpawn {
         launches: StdMutex::new(Vec::new()),
+        agents: StdMutex::new(BTreeMap::new()),
         jails: StdMutex::new(BTreeMap::new()),
         refusal: None,
         dir: tempfile::tempdir().unwrap(),
@@ -46,6 +56,7 @@ pub fn a_tab_jail_spawn() -> Arc<FakeTabJailSpawn> {
 pub fn a_tab_jail_spawn_refusing(reason: &str) -> Arc<FakeTabJailSpawn> {
     Arc::new(FakeTabJailSpawn {
         launches: StdMutex::new(Vec::new()),
+        agents: StdMutex::new(BTreeMap::new()),
         jails: StdMutex::new(BTreeMap::new()),
         refusal: Some(reason.to_string()),
         dir: tempfile::tempdir().unwrap(),
@@ -72,6 +83,16 @@ impl FakeTabJailSpawn {
             .into_iter()
             .find(|launch| launch.terminal_id == terminal_id)
             .unwrap_or_else(|| panic!("no jail was asked for terminal {terminal_id}"))
+    }
+
+    /// The agent `terminal_id`'s jail was asked to run.
+    pub fn agent_of(&self, terminal_id: &str) -> TabJailAgent {
+        self.agents
+            .lock()
+            .unwrap()
+            .get(terminal_id)
+            .cloned()
+            .unwrap_or_else(|| panic!("no agent's jail was asked for terminal {terminal_id}"))
     }
 
     /// Whether the jail started for `terminal_id` still runs.
@@ -111,6 +132,14 @@ impl FakeTabJailSpawn {
     }
 
     fn a_stand_in_jail(&self, launch: &TabJailLaunch) -> SandboxSessionState {
+        self.a_stand_in_jail_printing(launch, jailed_shell_banner(&launch.terminal_id))
+    }
+
+    fn a_stand_in_jail_printing(
+        &self,
+        launch: &TabJailLaunch,
+        banner: String,
+    ) -> SandboxSessionState {
         let child = Command::new("sleep")
             .arg("300")
             .stdin(Stdio::null())
@@ -125,7 +154,6 @@ impl FakeTabJailSpawn {
             self.dir.path().join("unused.sock"),
             self.dir.path().join("sandbox.ready"),
         );
-        let banner = jailed_shell_banner(&launch.terminal_id);
         let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
         capture.lock().unwrap().append(banner.as_bytes());
         let (stdout_tx, _) = broadcast::channel(64);
@@ -155,6 +183,28 @@ impl TabJailSpawn for FakeTabJailSpawn {
             return Err(Status::failed_precondition(reason.clone()));
         }
         let jail = Arc::new(self.a_stand_in_jail(launch));
+        self.jails
+            .lock()
+            .unwrap()
+            .insert(launch.terminal_id.clone(), Arc::clone(&jail));
+        Ok(jail)
+    }
+
+    async fn spawn_agent(
+        &self,
+        launch: &TabJailLaunch,
+        agent: &TabJailAgent,
+    ) -> Result<Arc<SandboxSessionState>, Status> {
+        self.launches.lock().unwrap().push(launch.clone());
+        self.agents
+            .lock()
+            .unwrap()
+            .insert(launch.terminal_id.clone(), agent.clone());
+        if let Some(reason) = &self.refusal {
+            return Err(Status::failed_precondition(reason.clone()));
+        }
+        let banner = jailed_agent_banner(&agent.harness, &launch.terminal_id);
+        let jail = Arc::new(self.a_stand_in_jail_printing(launch, banner));
         self.jails
             .lock()
             .unwrap()

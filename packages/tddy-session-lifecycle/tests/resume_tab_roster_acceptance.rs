@@ -3,6 +3,9 @@
 //! its harness can, a tmux-wrapped tab re-attached or relaunched, a shell fresh, a `tmux-attach` tab
 //! re-attached or dropped — and reports each in `ResumeSessionResponse.restored_tabs`.
 //!
+//! Extended by `#session-liveness` 7/8: an agent tab recorded in a jail of its own is restored into a
+//! new jail, resuming its conversation where its harness can (PRD-2026-11-21-sandbox-agent-tab.md).
+//!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-19-resume-restores-tab-roster.md (`#session-liveness` 4/4)
 //!
 //! Each roster is arranged as an earlier daemon run left it — written to `tabs.yaml`, or recorded by
@@ -19,7 +22,7 @@ mod target_tab_support;
 use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
-use tddy_agent_launch::restore_tabs::RESUMABLE_PROPERTY;
+use tddy_agent_launch::restore_tabs::{agent_launch_node, RESUMABLE_PROPERTY};
 use tddy_core::tab_roster::{
     LaunchNode, TabEntry, CONVERSATION_ID_PROPERTY, SESSION_PROPERTY, TMUX_KIND,
 };
@@ -56,6 +59,12 @@ const TMUX_TAB_CONVERSATION: &str = "5f3c0000-0000-7000-8000-00000000712a";
 const ATTACH_TAB: &str = "019b0000-0000-7000-8000-00000000a77a";
 /// A shell tab run in a jail of its own (`#session-liveness` 5/8).
 const JAILED_TAB: &str = "019b0000-0000-7000-8000-0000000a11ed";
+/// A Claude tab and an OpenCode tab, each run in a jail of its own (`#session-liveness` 7/8), and
+/// the conversation each recorded.
+const JAILED_CLAUDE_TAB: &str = "019b0000-0000-7000-8000-0000000ac1a0";
+const JAILED_CLAUDE_CONVERSATION: &str = "5f3c0000-0000-7000-8000-0000000ac1a0";
+const JAILED_OPENCODE_TAB: &str = "019b0000-0000-7000-8000-0000000a0c0d";
+const JAILED_OPENCODE_CONVERSATION: &str = "5f3c0000-0000-7000-8000-0000000a0c0d";
 /// A shell tab run on the session's target (`#session-liveness` 6/8).
 const TARGET_TAB: &str = "019b0000-0000-7000-8000-0000000a7a26";
 /// Why the target of a Coder session cannot be resolved while its owner's vault is locked, as the
@@ -92,6 +101,29 @@ fn a_tmux_wrapped_claude_tab() -> TabEntry {
 /// A shell tab recorded in a jail of its own.
 fn a_jailed_shell_tab() -> TabEntry {
     TabEntry::new(JAILED_TAB, vec![LaunchNode::sandbox(), LaunchNode::shell()])
+}
+
+/// A Claude tab recorded in a jail of its own, in a conversation its harness can resume.
+fn a_jailed_claude_tab() -> TabEntry {
+    TabEntry::new(
+        JAILED_CLAUDE_TAB,
+        vec![
+            LaunchNode::sandbox(),
+            agent_launch_node("claude-cli", JAILED_CLAUDE_CONVERSATION, true),
+        ],
+    )
+}
+
+/// An OpenCode tab recorded in a jail of its own — a harness that cannot resume a given
+/// conversation.
+fn a_jailed_opencode_tab() -> TabEntry {
+    TabEntry::new(
+        JAILED_OPENCODE_TAB,
+        vec![
+            LaunchNode::sandbox(),
+            agent_launch_node("opencode-cli", JAILED_OPENCODE_CONVERSATION, false),
+        ],
+    )
 }
 
 /// A shell tab recorded on the session's target.
@@ -438,6 +470,95 @@ async fn a_mixed_roster_restores_each_tab_where_its_chain_says() {
     assert_eq!(
         response.restored_tabs,
         vec![restored(JAILED_TAB), restored(SHELL_TAB)]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Jailed agent tabs (`#session-liveness` 7/8)
+//
+// As for jailed shells, the session's main resumes on the host and the tab's own jail starts through
+// the in-memory `TabJailSpawn`, which records the agent each jail was asked to run.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_jailed_claude_tab_is_restored_into_a_new_jail_resuming_its_conversation() {
+    // Given a stopped session whose roster holds a Claude tab recorded in a jail of its own
+    let jails = a_tab_jail_spawn();
+    let daemon =
+        a_stopped_session_whose_tab_jails_start_through(jails.clone() as Arc<dyn TabJailSpawn>);
+    daemon.has_recorded_tabs(vec![the_main_tab(), a_jailed_claude_tab()]);
+
+    // When it is resumed
+    let response = daemon.resumes().await;
+
+    // Then a new jail is started for that tab, over the session's worktree, running Claude resuming
+    // the tab's own conversation ...
+    let launch = jails.launch_of(JAILED_CLAUDE_TAB);
+    assert_eq!(
+        (launch.session_id.as_str(), launch.worktree.clone()),
+        (RESUMED_SESSION_ID, daemon.worktree.clone())
+    );
+    let agent = jails.agent_of(JAILED_CLAUDE_TAB);
+    assert_eq!(
+        (
+            agent.harness.as_str(),
+            agent.conversation_id.as_str(),
+            agent.resume
+        ),
+        ("claude-cli", JAILED_CLAUDE_CONVERSATION, true)
+    );
+    assert!(jails.jail_runs(JAILED_CLAUDE_TAB));
+    // ... never on the host, and the tab is back under its id, still recorded in a jail, and
+    // reported restored
+    assert_eq!(
+        daemon.claude.launches_carrying(JAILED_CLAUDE_CONVERSATION),
+        0
+    );
+    assert!(daemon
+        .listed_terminal_ids()
+        .await
+        .contains(JAILED_CLAUDE_TAB));
+    assert_eq!(
+        daemon.roster_entry(JAILED_CLAUDE_TAB).launch,
+        a_jailed_claude_tab().launch
+    );
+    assert_eq!(response.restored_tabs, vec![restored(JAILED_CLAUDE_TAB)]);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_jailed_opencode_tab_reopens_fresh_and_is_reported_fresh() {
+    // Given a stopped session whose roster holds an OpenCode tab recorded in a jail of its own
+    let jails = a_tab_jail_spawn();
+    let daemon =
+        a_stopped_session_whose_tab_jails_start_through(jails.clone() as Arc<dyn TabJailSpawn>);
+    daemon.has_recorded_tabs(vec![the_main_tab(), a_jailed_opencode_tab()]);
+
+    // When it is resumed
+    let response = daemon.resumes().await;
+
+    // Then a new jail is started for that tab running OpenCode fresh, never on the host ...
+    let agent = jails.agent_of(JAILED_OPENCODE_TAB);
+    assert_eq!(
+        (agent.harness.as_str(), agent.resume),
+        ("opencode-cli", false)
+    );
+    assert!(jails.jail_runs(JAILED_OPENCODE_TAB));
+    assert_eq!(daemon.opencode.launch_count(), 0);
+    // ... and the tab is back under its id, reported fresh with the reason
+    assert!(daemon
+        .listed_terminal_ids()
+        .await
+        .contains(JAILED_OPENCODE_TAB));
+    assert_eq!(
+        outcomes_of(&response.restored_tabs),
+        vec![(JAILED_OPENCODE_TAB.to_string(), RestoredTabOutcome::Fresh)]
+    );
+    assert!(
+        response.restored_tabs[0].reason.contains("opencode-cli"),
+        "{}",
+        response.restored_tabs[0].reason
     );
 }
 

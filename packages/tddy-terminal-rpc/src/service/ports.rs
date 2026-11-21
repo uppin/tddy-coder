@@ -92,6 +92,11 @@ pub enum TerminalKind {
     /// grants — an empty kind or `"bash"` with `wrappers: [sandbox]`. Only a sandboxed session runs
     /// one; the jail ends with the tab (`#session-liveness` 5/8).
     SandboxedShell,
+    /// A CLI harness, by its session type, in a jail of its own over the session's worktree and the
+    /// agent's sandbox grants, in a conversation of its own — an agent kind with `wrappers:
+    /// [sandbox]`. Only a sandboxed session runs one; the jail ends with the tab, and the tab keeps
+    /// its session live while its agent runs (`#session-liveness` 7/8).
+    SandboxedAgent { agent: String },
     /// The target user's login shell on the session's **target** — the machine its `.session.yaml`
     /// `target` names — in the session's worktree there, run through the session's remote shell as
     /// a local tab terminal: an empty kind or `"bash"` with `wrappers: [target]`. Only a target
@@ -153,10 +158,12 @@ impl TerminalKind {
     /// The kind a request names wrapped in `wrappers` (outermost first): with no wrappers, what
     /// [`Self::from_request`] reads. A single [`TMUX_WRAPPER_KIND`] wrapper around an agent kind is
     /// a [`TerminalKind::TmuxWrappedAgent`]; a single [`SANDBOX_WRAPPER_KIND`] wrapper around the
-    /// login shell is a [`TerminalKind::SandboxedShell`]; a single [`TARGET_WRAPPER_KIND`] wrapper
-    /// around the login shell is a [`TerminalKind::TargetShell`]. Any other wrapper kind, a tmux
-    /// wrapper around something that is not an agent, or a sandbox or target wrapper around
-    /// something that is not the login shell, is `INVALID_ARGUMENT` naming what was refused.
+    /// login shell is a [`TerminalKind::SandboxedShell`], and around an agent kind a
+    /// [`TerminalKind::SandboxedAgent`]; a single [`TARGET_WRAPPER_KIND`] wrapper around the login
+    /// shell is a [`TerminalKind::TargetShell`]. Any other wrapper kind, a tmux wrapper around
+    /// something that is not an agent, a sandbox wrapper around something that is neither the login
+    /// shell nor an agent, or a target wrapper around something that is not the login shell, is
+    /// `INVALID_ARGUMENT` naming what was refused.
     pub fn from_wrapped_request(
         kind: &str,
         tmux_session: &str,
@@ -166,6 +173,10 @@ impl TerminalKind {
             return Self::from_request(kind, tmux_session);
         };
         if wrapper.kind == SANDBOX_WRAPPER_KIND {
+            // An agent in a jail of its own is `sandbox-agent-tab`'s (`#session-liveness` 7/8).
+            if let Ok(TerminalKind::Agent(agent)) = Self::from_request(kind, tmux_session) {
+                return Self::sandboxed_agent(agent, inner);
+            }
             return Self::sandboxed(kind, tmux_session, inner);
         }
         if wrapper.kind == TARGET_WRAPPER_KIND {
@@ -216,6 +227,18 @@ impl TerminalKind {
                 kind.trim()
             ))),
         }
+    }
+
+    /// What the agent kind `agent` wrapped in a [`SANDBOX_WRAPPER_KIND`] wrapper (with `inner`
+    /// wrappers inside it) runs: the agent in a jail of its own. A wrapper inside the sandbox is
+    /// `INVALID_ARGUMENT` naming it.
+    fn sandboxed_agent(
+        agent: String,
+        inner: &[crate::proto::terminal_session::LaunchNode],
+    ) -> Result<TerminalKind, Status> {
+        // TODO(sandbox-agent-tab): implement
+        let _ = (agent, inner);
+        todo!("a sandbox-wrapped agent kind")
     }
 
     /// What `kind` wrapped in a [`TARGET_WRAPPER_KIND`] wrapper (with `inner` wrappers inside it)

@@ -1,4 +1,5 @@
-//! A sandboxed session's **jailed shell tab** (`#session-liveness` 5/8): started in a jail of its
+//! A sandboxed session's **jailed shell and agent tabs** (`#session-liveness` 5/8, 7/8): each
+//! started in a jail of its
 //! own through the roster's [`TabJailSpawn`](tddy_daemon_sandbox::tab_jails::TabJailSpawn),
 //! registered in [`TabJails`](tddy_daemon_sandbox::tab_jails::TabJails) under
 //! `(session_id, terminal_id)`, and recorded `[sandbox, shell]` in the session's roster. A session
@@ -86,5 +87,29 @@ impl CliManagerTerminalRoster {
             )));
         }
         Ok(terminal_id)
+    }
+
+    /// Start an agent tab of `session_id` running the harness `agent` in a jail of its own over the
+    /// session's worktree and the agent's grants (`#session-liveness` 7/8): its conversation settled
+    /// by the agent-tab rule (`tddy_agent_launch::restore_tabs::new_agent_tab`), registered as an
+    /// agent jail so it keeps the session live, recorded `[sandbox, agent]`; return its fresh
+    /// terminal id. Writes none of the session's records. A session that is not sandboxed refuses
+    /// it `FAILED_PRECONDITION`; a jail that cannot start fails the start with why, and nothing is
+    /// recorded.
+    pub(super) async fn start_jailed_agent_tab(
+        &self,
+        session_id: &str,
+        agent: &str,
+    ) -> Result<String, Status> {
+        // TODO(sandbox-agent-tab): implement
+        let _ = (
+            self.tab_jails
+                .as_ref()
+                .map(|tabs| (&tabs.jails, &tabs.spawn)),
+            &self.coding_agents,
+            session_id,
+            agent,
+        );
+        todo!("start a jailed agent tab")
     }
 }
