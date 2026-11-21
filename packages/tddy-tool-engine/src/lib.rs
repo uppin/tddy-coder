@@ -11,6 +11,7 @@ pub mod catalog;
 pub(crate) mod contained_shell;
 pub mod delivery_route;
 pub(crate) mod edited_region;
+pub mod lsp_root_tools;
 pub mod path_access_tools;
 pub mod project_home_answer_tools;
 pub(crate) mod project_home_diff;
