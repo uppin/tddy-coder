@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — three crates (agent-backend, agent-launch, session-activity), the channel's second decision kind
-**Stack**: `#target-parity` 6/7 — branch `feature/target-parity/question-answer`, base `feature/target-parity/startup-liveness`
+**Stack**: `#target-parity` 6/7 — branch `feature/target-parity/question-answer`, base `feature/target-parity/startup-liveness` — PR [#974](https://github.com/uppin/tddy-coder/pull/974)
 
 ## Initial Discovery
 
@@ -77,10 +77,18 @@ A remote question is the pending question, and its answer reaches the agent as C
 
 ## Acceptance Tests
 
-`packages/tddy-agent-launch/tests/remote_hooks_acceptance.rs`:
-- [ ] `a_question_of_an_agent_on_a_target_becomes_the_sessions_pending_question`
+`packages/tddy-agent-launch/tests/remote_hooks_acceptance.rs` (the `AnOrchestrator` harness of n1; `installed_hook_for_tool` now prefers a group naming the tool over a catch-all):
+- [ ] `a_question_of_an_agent_on_a_target_is_held_for_its_orchestrators_answer`
 - [ ] `an_orchestrators_answer_to_a_target_agents_question_is_printed_by_its_hook`
 - [ ] `a_question_nobody_answers_leaves_the_target_agent_to_ask_in_its_dialog`
+
+`packages/tddy-coding-agent-specs/tests/remote_hooks_render_acceptance.rs`: n1's `claude_code_on_a_target_waits_for_a_permission_answer_in_its_worktree` now expects `PreToolUse` among the waiting events.
+
+`packages/tddy-agent-backend/src/claude_hooks.rs` (unit):
+- [ ] `a_target_waits_for_a_question_answer_beside_its_hook_log`
+
+`packages/tddy-session-activity/src/hook_decision.rs` (unit):
+- [ ] `an_answered_question_is_handed_to_claude_in_its_own_input`
 
 ## TODO
 
@@ -88,10 +96,10 @@ A remote question is the pending question, and its answer reaches the agent as C
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (delegated: the user said "finish the rest without approval")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

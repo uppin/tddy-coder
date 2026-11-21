@@ -145,13 +145,23 @@ impl ATarget {
             .expect("the hooks file is in the worktree on the target"),
         )
         .expect("the hooks file is JSON");
-        settings["hooks"][event]
-            .as_array()?
+        // A group naming the tool comes before a catch-all one: `PreToolUse` carries both for a
+        // question tool (`#target-parity` 4/7, 6/7), and the named one is the one that waits.
+        let groups = settings["hooks"][event].as_array()?;
+        let names_it = |entry: &&serde_json::Value| {
+            entry["matcher"]
+                .as_str()
+                .unwrap_or("")
+                .split('|')
+                .any(|m| m == tool)
+        };
+        let matches_all = |entry: &&serde_json::Value| {
+            matches!(entry["matcher"].as_str().unwrap_or(""), "" | "*")
+        };
+        groups
             .iter()
-            .find(|entry| {
-                let matcher = entry["matcher"].as_str().unwrap_or("");
-                matcher.is_empty() || matcher == "*" || matcher.split('|').any(|m| m == tool)
-            })
+            .find(names_it)
+            .or_else(|| groups.iter().find(matches_all))
             .and_then(|entry| entry["hooks"][0]["command"].as_str())
             .map(str::to_string)
     }
@@ -475,6 +485,20 @@ impl AnOrchestrator {
         })
     }
 
+    /// The orchestrator answers the agent's question `question_index` with `selected`.
+    fn choosing(question_index: u32, selected: &str) -> Arc<Self> {
+        Self::with(tddy_service::proto::activity::AwaitQuestionAnswerResponse {
+            outcome: tddy_service::proto::activity::AwaitQuestionOutcome::Answered as i32,
+            answered_by: "home-session".to_string(),
+            answers: vec![tddy_service::proto::activity::QuestionAnswer {
+                question_index,
+                selected: vec![selected.to_string()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        })
+    }
+
     fn with(answer: tddy_service::proto::activity::AwaitQuestionAnswerResponse) -> Arc<Self> {
         Arc::new(Self {
             answer,
@@ -705,5 +729,102 @@ async fn a_tool_call_of_an_agent_on_a_target_is_reported_before_it_runs() {
         started,
         Some((serde_json::json!("Bash"), serde_json::json!("toolu_01")))
     );
+    session.follower.stop().await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Answering a target agent's question (`#target-parity` 6/7)
+// ---------------------------------------------------------------------------------------------
+
+/// The question an agent on the target asks with `AskUserQuestion`.
+fn the_question() -> serde_json::Value {
+    serde_json::json!({"questions": [{
+        "question": "Which language should the service use?",
+        "header": "Language",
+        "multiSelect": false,
+        "options": [{"label": "Rust", "description": "Memory safe"}, {"label": "Go", "description": "Simple"}]
+    }]})
+}
+
+/// An agent on `target` that asks a question as it starts, through the waiting `PreToolUse` hook
+/// the session installed there for `AskUserQuestion`.
+fn an_agent_asking_a_question(target: &ATarget) -> AStubAgent {
+    let hook = target
+        .installed_hook_for_tool("PreToolUse", "AskUserQuestion")
+        .expect("the hooks file on the target installs a PreToolUse hook for AskUserQuestion");
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "session_id": "c-41",
+        "tool_name": "AskUserQuestion",
+        "tool_input": the_question(),
+    });
+    an_agent_that_fires_as_it_starts_with(target, &hook, &payload.to_string())
+}
+
+#[tokio::test]
+async fn a_question_of_an_agent_on_a_target_is_held_for_its_orchestrators_answer() {
+    // Given a target session whose orchestrator is there
+    let target = a_reachable_target();
+    let daemon = a_daemon();
+    let hooks = daemon.installs_the_sessions_hooks_on(&target).await;
+    let orchestrator = AnOrchestrator::choosing(0, "Rust");
+    let agent = an_agent_asking_a_question(&target);
+
+    // When
+    let session = daemon
+        .launches_answered_by(&agent, &target, &hooks, Arc::clone(&orchestrator))
+        .await;
+    agent.hook_output_once_it_ends().await;
+
+    // Then the daemon recorded the question and held for its answer
+    assert_eq!(orchestrator.held_for(), vec![REQUEST_ID.to_string()]);
+    session.follower.stop().await;
+}
+
+#[tokio::test]
+async fn an_orchestrators_answer_to_a_target_agents_question_is_printed_by_its_hook() {
+    // Given a target session whose orchestrator chooses "Rust"
+    let target = a_reachable_target();
+    let daemon = a_daemon();
+    let hooks = daemon.installs_the_sessions_hooks_on(&target).await;
+    let agent = an_agent_asking_a_question(&target);
+
+    // When
+    let session = daemon
+        .launches_answered_by(&agent, &target, &hooks, AnOrchestrator::choosing(0, "Rust"))
+        .await;
+    let printed = agent.hook_output_once_it_ends().await;
+
+    // Then the hook hands the answer to Claude in the call's own input
+    let mut answered = the_question();
+    answered["answers"] = serde_json::json!({"Which language should the service use?": "Rust"});
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(printed.trim()).ok(),
+        Some(serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": answered
+            }
+        }))
+    );
+    session.follower.stop().await;
+}
+
+#[tokio::test]
+async fn a_question_nobody_answers_leaves_the_target_agent_to_ask_in_its_dialog() {
+    // Given a target session with no orchestrator to answer
+    let target = a_reachable_target();
+    let daemon = a_daemon();
+    let hooks = daemon.installs_the_sessions_hooks_on(&target).await;
+    let agent = an_agent_asking_a_question(&target);
+
+    // When
+    let session = daemon
+        .launches_answered_by(&agent, &target, &hooks, AnOrchestrator::absent())
+        .await;
+
+    // Then the hook ends at once with no decision, so Claude shows its own dialog
+    assert_eq!(agent.hook_output_once_it_ends().await, "");
     session.follower.stop().await;
 }

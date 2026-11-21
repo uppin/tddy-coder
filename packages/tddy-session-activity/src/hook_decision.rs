@@ -50,6 +50,21 @@ pub fn permission_decision_json(
     )
 }
 
+/// Claude Code's `PreToolUse` decision handing the orchestrator's answers to an `AskUserQuestion`
+/// over: `permissionDecision: "allow"` with `updatedInput` — the call's own `tool_input` with an
+/// `answers` map (question text → the chosen labels joined with `", "`, then `other`). `None` when
+/// the wait was not answered or nothing can be handed over; Claude then shows its own dialog.
+#[must_use]
+pub fn question_decision_json(
+    answer: &AwaitQuestionAnswerResponse,
+    tool_input: &serde_json::Value,
+) -> Option<String> {
+    // TODO(question-answer): implement — move `tddy_tools::session_hook::question_decision_json`
+    // and `encode_question_decision` here and have tddy-tools call them.
+    let _ = (answer, tool_input);
+    todo!("question_decision_json")
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -110,5 +125,40 @@ mod tests {
 
         // When / Then
         assert_eq!(permission_decision_json(&answer, None), None);
+    }
+
+    #[test]
+    fn an_answered_question_is_handed_to_claude_in_its_own_input() {
+        // Given the orchestrator chose "Rust" for the call's one question
+        let tool_input = serde_json::json!({"questions": [{
+            "question": "Which language?", "header": "Language", "multiSelect": false,
+            "options": [{"label": "Rust"}, {"label": "Go"}]
+        }]});
+        let answer = AwaitQuestionAnswerResponse {
+            outcome: AwaitQuestionOutcome::Answered as i32,
+            answers: vec![tddy_service::proto::activity::QuestionAnswer {
+                question_index: 0,
+                selected: vec!["Rust".to_string()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        // When
+        let decision = question_decision_json(&answer, &tool_input);
+
+        // Then
+        let mut updated = tool_input.clone();
+        updated["answers"] = serde_json::json!({"Which language?": "Rust"});
+        assert_eq!(
+            decision.map(|json| serde_json::from_str::<serde_json::Value>(&json).unwrap()),
+            Some(serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                    "updatedInput": updated
+                }
+            }))
+        );
     }
 }

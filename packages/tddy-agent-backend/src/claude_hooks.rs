@@ -652,4 +652,39 @@ mod tests {
             "a single quote must be escaped for sh; got: {cmd}"
         );
     }
+
+    /// On a target the `AskUserQuestion` group of `PreToolUse` waits for its answer in the answer
+    /// file beside the hook log, as the permission hook does (`#target-parity` 6/7).
+    #[test]
+    fn a_target_waits_for_a_question_answer_beside_its_hook_log() {
+        // Given
+        let params = HookCommandParams {
+            remote_log: Some(".tddy/hooks.log"),
+            ..test_params()
+        };
+
+        // When
+        let value = build_claude_hooks_settings(&params);
+
+        // Then
+        let question = &value["hooks"]["PreToolUse"][1];
+        assert_eq!(
+            (
+                question["matcher"].as_str(),
+                question["hooks"][0]["command"].as_str().map(str::to_string),
+                question["hooks"][0]["timeout"].as_u64(),
+            ),
+            (
+                Some("AskUserQuestion"),
+                Some(crate::remote_hook_command::remote_answering_hook_command(
+                    "PreToolUse",
+                    "tok-xyz",
+                    ".tddy/hooks.log",
+                    ".tddy/answers",
+                    120 + AWAIT_CLIENT_MARGIN_SECS,
+                )),
+                Some(120 + CLAUDE_HOOK_TIMEOUT_MARGIN_SECS),
+            )
+        );
+    }
 }
