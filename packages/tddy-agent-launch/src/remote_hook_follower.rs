@@ -156,9 +156,9 @@ pub struct ActivityHookSink {
     session_id: String,
     hook_token: String,
     os_user: String,
-    /// Where a waiting hook's answer is written: the session's shell and its worktree on the
-    /// target. `None` delivers report-only.
-    answers: Option<(Arc<dyn RemoteShell>, std::path::PathBuf)>,
+    /// Where a waiting hook's answer is written: the session's shell, its worktree on the target
+    /// and its hooks' answer wait. `None` delivers report-only.
+    answers: Option<(Arc<dyn RemoteShell>, std::path::PathBuf, u64)>,
 }
 
 impl ActivityHookSink {
@@ -180,10 +180,16 @@ impl ActivityHookSink {
 
     /// This sink, answering the waiting hooks it delivers: once the orchestrator answers, Claude's
     /// decision is written to `<worktree>/<REMOTE_ANSWERS_DIR>/<nonce>` through `shell`, where the
-    /// hook on the target waits for it (`#target-parity` 1/7).
+    /// hook on the target waits for it (`#target-parity` 1/7). `answer_wait_secs` is the wait the
+    /// session's hooks were rendered with: an answer still there once it has passed is removed.
     #[must_use]
-    pub fn answering_through(mut self, shell: Arc<dyn RemoteShell>, worktree: &Path) -> Self {
-        self.answers = Some((shell, worktree.to_path_buf()));
+    pub fn answering_through(
+        mut self,
+        shell: Arc<dyn RemoteShell>,
+        worktree: &Path,
+        answer_wait_secs: u64,
+    ) -> Self {
+        self.answers = Some((shell, worktree.to_path_buf(), answer_wait_secs));
         self
     }
 
@@ -191,7 +197,9 @@ impl ActivityHookSink {
     /// reader must not stall on an orchestrator that takes minutes. A hook that only reports, or a
     /// sink that does not answer, holds nothing.
     fn answer_in_background(&self, line: &HookLine, request_id: Option<String>) {
-        let (Some(nonce), Some((shell, worktree))) = (&line.answer_nonce, &self.answers) else {
+        let (Some(nonce), Some((shell, worktree, answer_wait_secs))) =
+            (&line.answer_nonce, &self.answers)
+        else {
             return;
         };
         tokio::spawn(crate::remote_hook_answer::hold_and_answer(
@@ -206,6 +214,7 @@ impl ActivityHookSink {
                 request_id,
                 permission_suggestions: line.payload.get("permission_suggestions").cloned(),
                 question_input: line.question_input(),
+                window_ends: crate::remote_hook_answer::hook_window_end(*answer_wait_secs),
             },
         ));
     }

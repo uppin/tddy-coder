@@ -63,7 +63,8 @@ struct ATarget {
 
 /// A target that runs what it is asked to: the stand-in runs its last argument — the remote
 /// command — with `sh -c` as a child of its own, its stdin passed on. It hangs the command up
-/// when it is itself hung up or terminated, and exits with the command's status.
+/// when it is itself hung up or terminated, and exits with the command's status. Every command
+/// that has ended is recorded in `<root>/ran`, so a test can tell when the daemon's work is done.
 fn a_reachable_target() -> ATarget {
     let dir = tempfile::tempdir().expect("a directory standing for the target");
     let root = std::fs::canonicalize(dir.path()).expect("the target's directory resolves");
@@ -79,7 +80,9 @@ exec 3<&0
 remote=$!
 trap 'kill -HUP "$remote" 2>/dev/null' HUP TERM
 wait "$remote"
-exit $?
+status=$?
+printf '%s\n' "$command" >> "$(dirname "$0")/../ran"
+exit $status
 "#,
     );
     let target = ATarget { root, _dir: dir };
@@ -164,6 +167,37 @@ impl ATarget {
             .or_else(|| groups.iter().find(matches_all))
             .and_then(|entry| entry["hooks"][0]["command"].as_str())
             .map(str::to_string)
+    }
+
+    /// The answers the daemon wrote for the session's waiting hooks that are still on the target.
+    fn answers_left(&self) -> Vec<String> {
+        std::fs::read_dir(self.worktree().join(tddy_core::REMOTE_ANSWERS_DIR))
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Once a command that writes an answer into the session's answers directory has ended.
+    async fn once_an_answer_is_written(&self) {
+        eventually(
+            "the daemon to write an answer on the target",
+            OBSERVE,
+            || {
+                std::fs::read_to_string(self.root.join("ran"))
+                    .unwrap_or_default()
+                    .lines()
+                    .any(|command| {
+                        command.contains(tddy_core::REMOTE_ANSWERS_DIR) && command.contains(" mv ")
+                    })
+                    .then_some(())
+                    .ok_or_else(|| "no answer has been written on the target".to_string())
+            },
+        )
+        .await;
     }
 
     /// The command Claude Code would run for `event`, read from the session's hooks file the
@@ -254,6 +288,17 @@ impl ADaemon {
     /// What a start does before it launches the agent: create the hook log on the target, render
     /// the agent's hooks to log there, and write the hooks file into the worktree on the target.
     async fn installs_the_sessions_hooks_on(&self, target: &ATarget) -> InstalledHooks {
+        self.installs_the_sessions_hooks_waiting(target, ANSWER_WAIT_SECS)
+            .await
+    }
+
+    /// [`Self::installs_the_sessions_hooks_on`], with waiting hooks that wait `answer_wait_secs` for
+    /// their orchestrator's answer.
+    async fn installs_the_sessions_hooks_waiting(
+        &self,
+        target: &ATarget,
+        answer_wait_secs: u64,
+    ) -> InstalledHooks {
         let shell = target.shell();
         let log = create_remote_hook_log(shell.as_ref(), &target.worktree())
             .await
@@ -276,7 +321,7 @@ impl ADaemon {
                     os_user: "dev",
                     hook_token: HOOK_TOKEN,
                     daemon_socket: None,
-                    answer_wait_secs: ANSWER_WAIT_SECS,
+                    answer_wait_secs,
                     remote_log: Some(&log),
                     route_env: &[],
                 }),
@@ -464,6 +509,8 @@ const REQUEST_ID: &str = "req-7f3a";
 struct AnOrchestrator {
     answer: tddy_service::proto::activity::AwaitQuestionAnswerResponse,
     asked: std::sync::Mutex<Vec<tddy_service::proto::activity::AwaitQuestionAnswerRequest>>,
+    /// How long the orchestrator takes to answer once it is asked.
+    takes: Duration,
 }
 
 impl AnOrchestrator {
@@ -503,6 +550,17 @@ impl AnOrchestrator {
         Arc::new(Self {
             answer,
             asked: std::sync::Mutex::new(Vec::new()),
+            takes: Duration::ZERO,
+        })
+    }
+
+    /// The orchestrator allows what is asked, but only `takes` after it is asked.
+    fn allowing_after(takes: Duration) -> Arc<Self> {
+        let allowing = Self::answering("allow_once", "");
+        Arc::new(Self {
+            answer: allowing.answer.clone(),
+            asked: std::sync::Mutex::new(Vec::new()),
+            takes,
         })
     }
 
@@ -546,6 +604,7 @@ impl tddy_agent_launch::remote_hook_follower::HookReportDelivery for AnOrchestra
         request: tddy_service::proto::activity::AwaitQuestionAnswerRequest,
     ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, String> {
         self.asked.lock().unwrap().push(request);
+        tokio::time::sleep(self.takes).await;
         Ok(self.answer.clone())
     }
 }
@@ -560,6 +619,19 @@ impl ADaemon {
         hooks: &InstalledHooks,
         orchestrator: Arc<AnOrchestrator>,
     ) -> ARunningSession {
+        self.launches_answered_by_waiting(agent, target, hooks, orchestrator, ANSWER_WAIT_SECS)
+            .await
+    }
+
+    /// [`Self::launches_answered_by`], for a session whose waiting hooks wait `answer_wait_secs`.
+    async fn launches_answered_by_waiting(
+        &self,
+        agent: &AStubAgent,
+        target: &ATarget,
+        hooks: &InstalledHooks,
+        orchestrator: Arc<AnOrchestrator>,
+        answer_wait_secs: u64,
+    ) -> ARunningSession {
         let mut session = self.launches(agent, target, hooks).await;
         session.follower.stop().await;
         let sink = tddy_agent_launch::remote_hook_follower::ActivityHookSink::new(
@@ -568,7 +640,7 @@ impl ADaemon {
             HOOK_TOKEN,
             "dev",
         )
-        .answering_through(target.shell(), &target.worktree());
+        .answering_through(target.shell(), &target.worktree(), answer_wait_secs);
         session.follower =
             RemoteHookFollower::start(target.shell(), &hooks.log, HOOK_TOKEN, Arc::new(sink));
         session
@@ -689,6 +761,56 @@ async fn ending_a_target_session_removes_its_answers_on_the_target() {
         (ended, target.hook_log().exists(), answers.exists()),
         (Ok(()), false, false)
     );
+}
+
+/// A waiting hook's answer wait short enough for a test to outlast: the hook gives up after this
+/// plus `AWAIT_CLIENT_MARGIN_SECS`.
+const SHORT_ANSWER_WAIT_SECS: u64 = 1;
+
+/// An answer that reaches the target after its hook gave up — a Coder write takes 6–9 s — is
+/// never read: the hook removes only an answer it reads. Nothing else removed it before the
+/// session ended (`#target-parity` sweep).
+#[tokio::test]
+async fn an_answer_written_after_the_hook_gave_up_is_not_left_on_the_target() {
+    // Given a target session whose waiting hooks wait briefly
+    let target = a_reachable_target();
+    let daemon = a_daemon();
+    let hooks = daemon
+        .installs_the_sessions_hooks_waiting(&target, SHORT_ANSWER_WAIT_SECS)
+        .await;
+    // And an orchestrator that answers only once the hook has given up
+    let hook_gives_up_after = SHORT_ANSWER_WAIT_SECS + tddy_core::AWAIT_CLIENT_MARGIN_SECS + 1;
+    let orchestrator = AnOrchestrator::allowing_after(Duration::from_secs(hook_gives_up_after + 3));
+    let agent = an_agent_asking_to_read_a_file(&target);
+
+    // When the agent asks, its hook gives up, and the answer is written afterwards
+    let session = daemon
+        .launches_answered_by_waiting(
+            &agent,
+            &target,
+            &hooks,
+            orchestrator,
+            SHORT_ANSWER_WAIT_SECS,
+        )
+        .await;
+    let printed = agent.hook_output_once_it_ends().await;
+    target.once_an_answer_is_written().await;
+
+    // Then the hook printed no decision
+    assert_eq!(printed, "");
+    // And once its window has passed no answer is left on the target
+    eventually(
+        "the late answer to be removed from the target",
+        OBSERVE,
+        || {
+            let left = target.answers_left();
+            left.is_empty()
+                .then_some(())
+                .ok_or_else(|| format!("answers still on the target: {left:?}"))
+        },
+    )
+    .await;
+    session.follower.stop().await;
 }
 
 // ---------------------------------------------------------------------------------------------

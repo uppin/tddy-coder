@@ -6,9 +6,14 @@
 //! answer to the recorded request, builds Claude's decision from it and writes the answer file
 //! through the session's shell. No decision is an **empty** file, which ends the hook's wait at
 //! once so Claude asks in its own terminal.
+//!
+//! The hook removes only an answer it reads. One written after the hook gave up — a Coder write
+//! takes 6–9 s — would stay on the target until the session ends, so once the hook's window has
+//! passed the daemon removes the answer it wrote ([`HeldHook::window_ends`]).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tddy_remote_shell::{ExecRequest, RemoteShell};
 
@@ -25,6 +30,22 @@ pub(crate) struct HeldHook {
     /// The held call's `tool_input` when it is an `AskUserQuestion`: the hook's answer is then a
     /// question decision, not a permission one.
     pub question_input: Option<serde_json::Value>,
+    /// When the hook has certainly stopped polling for its answer (see [`hook_window_end`]).
+    pub window_ends: tokio::time::Instant,
+}
+
+/// How far past its own count of seconds a waiting hook's poll can run: its loop polls once more
+/// than it counts, and each `sleep 1` takes a little over a second.
+const HOOK_POLL_OVERRUN_SECS: u64 = 3;
+
+/// When a waiting hook whose line has just been delivered stops polling, at the latest. The hook
+/// waits `answer_wait_secs + AWAIT_CLIENT_MARGIN_SECS` from before its line was written, so a
+/// window counted from now ends after it.
+pub(crate) fn hook_window_end(answer_wait_secs: u64) -> tokio::time::Instant {
+    tokio::time::Instant::now()
+        + Duration::from_secs(
+            answer_wait_secs + tddy_core::AWAIT_CLIENT_MARGIN_SECS + HOOK_POLL_OVERRUN_SECS,
+        )
 }
 
 impl crate::remote_hook_follower::HookLine {
@@ -52,6 +73,7 @@ pub(crate) async fn hold_and_answer(
     nonce: String,
     hook: HeldHook,
 ) {
+    let window_ends = hook.window_ends;
     let decision = match hook.request_id.filter(|id| !id.is_empty()) {
         Some(request_id) => {
             let suggestions = hook.permission_suggestions;
@@ -101,7 +123,46 @@ pub(crate) async fn hold_and_answer(
             "writing the answer of session {}'s waiting hook on its target: {error}",
             hook.session_id
         );
+        return;
     }
+    // A hook that read its answer removed it; one that gave up first never will.
+    tokio::time::sleep_until(window_ends).await;
+    if let Err(error) = remove_answer(shell.as_ref(), &worktree, &nonce).await {
+        log::warn!(
+            "removing the answer of session {}'s waiting hook from its target: {error}",
+            hook.session_id
+        );
+    }
+}
+
+/// The path of the answer for `nonce` in `worktree`, refused unless `nonce` is one a hook mints.
+fn answer_path(worktree: &Path, nonce: &str) -> Result<String, String> {
+    if nonce.is_empty()
+        || !nonce
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!("{nonce:?} is not a nonce a hook mints"));
+    }
+    let dir = worktree.join(tddy_core::REMOTE_ANSWERS_DIR);
+    Ok(format!("{}/{nonce}", dir.to_string_lossy()))
+}
+
+/// Remove the answer for `nonce` from `worktree` on the target. An answer already gone is not an
+/// error.
+async fn remove_answer(
+    shell: &dyn RemoteShell,
+    worktree: &Path,
+    nonce: &str,
+) -> Result<(), String> {
+    let answer = answer_path(worktree, nonce)?;
+    shell
+        .exec(ExecRequest::new(format!("rm -f {}", shell_quote(&answer))))
+        .await
+        .map_err(|error| error.to_string())?
+        .success_or_exited()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 /// Write `content` as `<worktree>/<REMOTE_ANSWERS_DIR>/<nonce>`: into a temporary file beside it,
@@ -112,16 +173,10 @@ async fn write_answer(
     nonce: &str,
     content: &str,
 ) -> Result<(), String> {
-    if nonce.is_empty()
-        || !nonce
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
-        return Err(format!("{nonce:?} is not a nonce a hook mints"));
-    }
+    let answer = answer_path(worktree, nonce)?;
     let dir = worktree.join(tddy_core::REMOTE_ANSWERS_DIR);
     let dir = dir.to_string_lossy();
-    let destination = shell_quote(&format!("{dir}/{nonce}"));
+    let destination = shell_quote(&answer);
     let temporary = shell_quote(&format!("{dir}/.{nonce}.tmp"));
     let command = format!(
         "umask 077; mkdir -p {dir} && cat > {temporary} && mv {temporary} {destination}",

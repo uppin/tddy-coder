@@ -188,7 +188,14 @@ pub(super) async fn launch(
         .await
         .map_err(|e| Status::internal(format!("failed to spawn {kind}: {e}")))?;
         if let Some(log) = hook_log {
-            follow_the_hook_log(&remote, &log, session_id, os_user, worktree_path);
+            follow_the_hook_log(
+                &remote,
+                &log,
+                session_id,
+                os_user,
+                worktree_path,
+                agent.spec.answer_wait_secs(),
+            );
         }
         return Ok(LaunchedHarness {
             pid: launched.handle.pid,
@@ -240,6 +247,7 @@ fn follow_the_hook_log(
     session_id: &str,
     os_user: &str,
     worktree_path: &Path,
+    answer_wait_secs: u64,
 ) {
     let (Some(token), Some(delivery)) = (remote.hook_token.as_ref(), remote.hook_delivery.as_ref())
     else {
@@ -252,7 +260,7 @@ fn follow_the_hook_log(
         token,
         os_user,
     )
-    .answering_through(Arc::clone(&shell), worktree_path);
+    .answering_through(Arc::clone(&shell), worktree_path, answer_wait_secs);
     let follower = crate::remote_hook_follower::RemoteHookFollower::start(
         Arc::clone(&shell),
         log,
