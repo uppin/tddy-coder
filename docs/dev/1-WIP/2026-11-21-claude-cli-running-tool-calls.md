@@ -61,8 +61,8 @@ the more foundational); n3–n5 block nothing.
 
 ## Scope
 
-- [ ] Catch-all entry in the settings builder
-- [ ] Activity-only reporting PreToolUse (local hook and follower)
+- [x] Catch-all entry in the settings builder
+- [x] Activity-only reporting PreToolUse (local hook and follower)
 - [ ] Feature doc updated through the wrap
 
 ## Technical Changes
@@ -114,7 +114,7 @@ The running row itself (`PreToolUse` then `PostToolUse` paired by `tool_use_id`)
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (delegated: the user said "finish the rest without approval")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
