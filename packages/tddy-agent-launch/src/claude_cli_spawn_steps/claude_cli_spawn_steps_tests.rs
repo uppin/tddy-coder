@@ -219,6 +219,7 @@ impl AMainLaunch {
     fn on(config: &DaemonConfig, agent_tool_socket: &Path) -> Self {
         let session_dir = tempfile::tempdir().expect("a temporary session dir");
         let wiring = project_home_wiring(ProjectHomeLaunch {
+            role: "project-home",
             config,
             agent_tool_socket,
             session_dir: session_dir.path(),

@@ -87,6 +87,7 @@ async fn a_main_launched_from_the_claude_spec_gets_its_tool_flags_and_mcp_file_f
     let session_dir = tempfile::tempdir().unwrap();
     let worktree = tempfile::tempdir().unwrap();
     let wiring = project_home_wiring(ProjectHomeLaunch {
+        role: "project-home",
         config: &config,
         agent_tool_socket: &data_dir.path().join("agent.sock"),
         session_dir: session_dir.path(),

@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::session_metadata::is_orchestrator_role;
+use tddy_core::session_metadata::{is_orchestrator_role, ORCHESTRATOR_ROLE};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::daemon_hook_urls;
 use tddy_rpc::Status;
@@ -16,6 +16,8 @@ use crate::spec_launch::{AgentToolset, McpRegistration};
 
 /// What a project-home (main) agent's launch is built from. See [`project_home_wiring`].
 pub(crate) struct ProjectHomeLaunch<'a> {
+    /// The session's standing role (`project-home` or `orchestrator`), which words its prompt.
+    pub(crate) role: &'a str,
     pub(crate) config: &'a DaemonConfig,
     /// The main's OS user's agent-tool socket, which its tool calls reach this daemon over.
     pub(crate) agent_tool_socket: &'a Path,
@@ -124,6 +126,7 @@ impl StartRole<'static> {
 /// Everything a main's launch is built from, its credential already minted. Nothing is written
 /// until [`Self::launch`], so a start refused before its agent is spawned leaves nothing on disk.
 pub(crate) struct MainLaunchPlan<'a> {
+    role: &'a str,
     config: &'a DaemonConfig,
     agent_tool_socket: PathBuf,
     session_dir: PathBuf,
@@ -136,6 +139,7 @@ impl MainLaunchPlan<'_> {
     /// written into its session dir.
     fn launch(self) -> Result<RoleWiring, Status> {
         project_home_wiring(ProjectHomeLaunch {
+            role: self.role,
             config: self.config,
             agent_tool_socket: &self.agent_tool_socket,
             session_dir: &self.session_dir,
@@ -158,6 +162,7 @@ impl MainLaunchPlan<'_> {
 /// pre-approved set prompts its operator there.
 pub(crate) fn project_home_wiring(launch: ProjectHomeLaunch<'_>) -> Result<RoleWiring, Status> {
     let ProjectHomeLaunch {
+        role,
         config,
         agent_tool_socket,
         session_dir,
@@ -166,7 +171,7 @@ pub(crate) fn project_home_wiring(launch: ProjectHomeLaunch<'_>) -> Result<RoleW
         tddy_tools_path,
     } = launch;
     let prompt_file = session_dir.join(PROJECT_HOME_PROMPT_BASENAME);
-    std::fs::write(&prompt_file, PROJECT_HOME_PROMPT).map_err(|e| {
+    std::fs::write(&prompt_file, project_home_prompt(role)).map_err(|e| {
         Status::internal(format!(
             "failed to write the main's role prompt {}: {e}",
             prompt_file.display()
@@ -192,8 +197,8 @@ pub(crate) fn project_home_wiring(launch: ProjectHomeLaunch<'_>) -> Result<RoleW
     })
 }
 
-/// What a main is told it is, appended to its system prompt.
-const PROJECT_HOME_PROMPT: &str = include_str!("project_home_prompt.md");
+/// What a role is told after what it is: how it works and every tool it is offered.
+const PROJECT_HOME_PROMPT_BODY: &str = include_str!("project_home_prompt.md");
 
 /// The role prompt an orchestrator-role session is launched with (`#orchestra` 9/9): one prompt for
 /// both roles, opening with what this session is — the project's main (`project-home`) or one of
@@ -203,13 +208,13 @@ const PROJECT_HOME_PROMPT: &str = include_str!("project_home_prompt.md");
 /// refreshed before work starts and trunk commits are its own activities; reads beyond its reach
 /// and any write go through `RequestPathAccess`; session files are attached to the sessions it
 /// starts; the LSP tools take a root; a terminal it claimed is released when it is done with it.
-// TODO(orchestrator-prompt): the role wiring writes this instead of `PROJECT_HOME_PROMPT`; until
-// then only its tests call it.
-#[allow(dead_code)]
 pub(crate) fn project_home_prompt(role: &str) -> String {
-    // TODO(orchestrator-prompt): implement
-    let _ = role;
-    unimplemented!("project_home_prompt")
+    let opening = if role == ORCHESTRATOR_ROLE {
+        "# You are one of this project's orchestrators"
+    } else {
+        "# You are this project's main session"
+    };
+    format!("{opening}\n\n{PROJECT_HOME_PROMPT_BODY}")
 }
 
 /// The main's role prompt, under its session dir.
@@ -263,16 +268,17 @@ impl LaunchSessions {
     /// refusal fails the launch. Every other role has no plan and mints nothing.
     fn main_plan<'a>(
         &'a self,
-        role: Option<&str>,
+        role: Option<&'a str>,
         session_id: &'a str,
         session_dir: PathBuf,
         session_token: &str,
         agent_tool_socket: &Path,
     ) -> Result<Option<MainLaunchPlan<'a>>, Status> {
-        if !role.is_some_and(is_orchestrator_role) {
+        let Some(role) = role.filter(|role| is_orchestrator_role(role)) else {
             return Ok(None);
-        }
+        };
         Ok(Some(MainLaunchPlan {
+            role,
             config: &self.config,
             agent_tool_socket: agent_tool_socket.to_path_buf(),
             session_dir,
