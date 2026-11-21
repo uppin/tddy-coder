@@ -70,12 +70,13 @@ styled like the inspector tab strip (`InspectorTabs`).
     button, outside the scroller, so the scroller does not clip it, and stays inside the viewport
     even when `+` sits at the viewport's right edge.
   - **Sandboxed sessions** (`SessionEntry.sandbox`): the bash-and-harness group splits in two. **In
-    sandbox** (the default, first) holds **Bash** alone
-    (`sessions-terminal-tab-new-in-sandbox-bash`): it calls `StartTerminalSession` with `wrappers:
-    [sandbox]`, and the shell runs in a jail of its own over the session's worktree (see [Session
+    sandbox** (the default, first) holds **Bash** and every agent kind the session offers
+    (`sessions-terminal-tab-new-in-sandbox-<kind>`): each calls `StartTerminalSession` with `wrappers:
+    [sandbox]`, and the shell or the agent runs in a jail of its own over the session's worktree, an agent
+    in a conversation of its own (see [Session
     liveness](../daemon/session-liveness.md#a-sandboxed-sessions-tabs)). **On host** holds the usual
     items (`sessions-terminal-tab-new-on-host-<kind>`), unjailed. A session that is not sandboxed, and a
-    tool session, keep the single group. An agent is not offered in a jail yet.
+    tool session, keep the single group.
   - **Target sessions** (`SessionEntry.target` set, not sandboxed): the group splits in two as well. **On
     target** (the default, first) holds **Bash** alone (`sessions-terminal-tab-new-on-target-bash`): it
     calls `StartTerminalSession` with `wrappers: [target]`, and the shell runs on the session's target, in
@@ -235,8 +236,7 @@ without resuming the agent first.
 - Restoring full screen from a URL, or a keyboard shortcut for it.
 - Persisting open terminals (bash or agent) across a daemon (or coder) restart — terminals are
   in-memory, except a tmux-wrapped agent tab, which the daemon re-attaches at startup. They do survive the session itself stopping and resuming, since the daemon holds them.
-- A model, first prompt or provider account for an agent tab; agent tabs inside a sandboxed
-  session's jail; agent-to-agent messaging.
+- A model, first prompt or provider account for an agent tab; agent-to-agent messaging.
 - Per-terminal control leases (the mutex stays per-session).
 - Killing a tmux session from tddy; tmux layouts or windows; tmux inside a sandboxed session's jail; tmux on a host
   other than the session's.

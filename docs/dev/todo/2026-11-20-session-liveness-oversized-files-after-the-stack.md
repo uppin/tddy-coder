@@ -36,3 +36,16 @@ its markup with other labels, test ids and wrapper kinds. `sandbox-agent-tab` (7
 changes. **What closes it:** once #967 has merged, extract one component taking the group label, the wrapper
 kind, the test-id prefixes and the two group names; the menu's Cypress specs
 (`NewTerminalMenuSandboxAcceptance`, `NewTerminalMenuTargetAcceptance`) stay as they are.
+
+## Left for after the stack: files #966 (`#session-liveness` 7/8) grew that #967 also edits
+
+No file #966 touched is at or over 500 production lines, so nothing was split or recorded as crossing. Three
+files #967 (`target-agent-tab`) also modifies came close, and were left whole for that reason:
+`packages/tddy-agent-launch/src/opencode_cli_spawn/restore_tabs/roster.rs` (446 → 494, 6 lines under the
+budget), `…/restore_tabs/plan.rs` (263 → 305) and `packages/tddy-session-lifecycle/src/connection_service/svc_terminal_ports/jailed_tabs.rs`
+(90 → 176; #967 edits its sibling `target_tabs.rs`, not this one, and it is far under). `roster.rs` will cross 500
+the moment #967 adds its restore arm. **What closes it:** after #967 merges, move the per-kind restores
+(`restore_jailed_shell`, `restore_jailed_agent`, `restore_target_shell`, `relaunch_tmux_tab`) into
+`restore_tabs/restore_one.rs`, move-only through `/code-restructuring`. `NewTerminalMenu.tsx` (468 production
+lines) gained its agent items in the "In sandbox" block (still under budget); the group-pair dedupe above now
+covers both blocks.

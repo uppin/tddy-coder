@@ -18,9 +18,9 @@ here: the same suites, reaching the same code through `tddy-daemon`'s re-export 
 crate looking untested from inside it and untestable on its own — the worst property a coverage gap
 can have, because nothing in the crate shows it.
 
-### Tab jails (`#session-liveness` 5/8)
+### Tab jails (`#session-liveness` 5/8, 7/8)
 
-`sandbox_shell_tab_acceptance`, `sandbox_shutdown_acceptance` and the jailed-tab cases of
+`sandbox_shell_tab_acceptance`, `sandbox_agent_tab_acceptance` (a jailed agent tab: its own jail and conversation, liveness, the main's records untouched, teardown), `sandbox_shutdown_acceptance` and the jailed-tab cases of
 `resume_tab_roster_acceptance` drive a sandboxed session's shell tabs through the daemon's own terminal RPCs,
 roster and store, with an in-memory `TabJailSpawn` injected by `DaemonSessionHost::with_tab_jail_spawn`
 (`tests/sandbox_tab_support/`): each "jail" is a `sleep` standing in for its runner, whose terminal has already

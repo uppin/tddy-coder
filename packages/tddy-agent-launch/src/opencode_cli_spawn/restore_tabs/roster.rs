@@ -170,6 +170,11 @@ fn reopened_fresh_reason(harness: &str) -> String {
     format!("{harness} cannot resume a given conversation, so the tab reopened fresh")
 }
 
+/// A tab restored where and as it was recorded, once `started` succeeded.
+fn recorded(started: anyhow::Result<()>) -> anyhow::Result<Restored> {
+    started.map(|()| Restored::AsRecorded)
+}
+
 async fn carry_out(
     restore: &RosterRestore<'_>,
     tab: &TabEntry,
@@ -180,10 +185,7 @@ async fn carry_out(
         TabRestore::ResumeAgent {
             harness,
             conversation_id,
-        } => {
-            start_agent(restore, tab, harness, &conversation_id, true).await?;
-            Ok(Restored::AsRecorded)
-        }
+        } => recorded(start_agent(restore, tab, harness, &conversation_id, true).await),
         TabRestore::FreshAgent { harness } => {
             let reason = reopened_fresh_reason(&harness);
             start_agent(restore, tab, harness, &recorded_conversation(tab), false).await?;
@@ -191,13 +193,9 @@ async fn carry_out(
         }
         TabRestore::FreshShell => {
             let shell_path = tddy_terminal_rpc::login_shell_for(restore.os_user);
-            start_under_id(restore, tab, RecordedTerminal::Shell { shell_path }).await?;
-            Ok(Restored::AsRecorded)
+            recorded(start_under_id(restore, tab, RecordedTerminal::Shell { shell_path }).await)
         }
-        TabRestore::JailedShell => {
-            restore_jailed_shell(restore, tab).await?;
-            Ok(Restored::AsRecorded)
-        }
+        TabRestore::JailedShell => recorded(restore_jailed_shell(restore, tab).await),
         TabRestore::JailedAgent {
             harness,
             resume_conversation,

@@ -5,8 +5,6 @@
 //! The jails are started through a stand-in [`TabJailSpawn`] whose "runner" is a `sleep`: what the
 //! registry owns is the runner's lifetime and what the jail was asked to run.
 
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
@@ -14,11 +12,10 @@ use async_trait::async_trait;
 use pretty_assertions::assert_eq;
 use tddy_daemon_kernel::live_sessions::LiveSessions;
 use tddy_rpc::{Code, Status};
-use tddy_task::TerminalCapture;
-use tokio::sync::{broadcast, mpsc};
 
-use super::{TabJailAgent, TabJailKey, TabJailLaunch, TabJailPaths, TabJailSpawn, TabJails};
-use crate::sandbox_session::{SandboxSessionState, SandboxSessionStateInit};
+use super::test_support::{a_launch, a_sleeping_jail};
+use super::{TabJailAgent, TabJailKey, TabJailLaunch, TabJailSpawn, TabJails};
+use crate::sandbox_session::SandboxSessionState;
 
 const SESSION: &str = "jailed-agent-session";
 const OTHER_SESSION: &str = "other-jailed-agent-session";
@@ -72,34 +69,7 @@ impl StandInSpawn {
         if let Some(reason) = &self.refusal {
             return Err(Status::failed_precondition(reason.clone()));
         }
-        let child = Command::new("sleep")
-            .arg("300")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("the stand-in runner starts");
-        let pid = child.id();
-        let handle = tddy_sandbox::SandboxHandle::new(
-            child,
-            self.dir.path().join("profile.sb"),
-            self.dir.path().join("unused.sock"),
-            self.dir.path().join("sandbox.ready"),
-        );
-        let (stdout_tx, _) = broadcast::channel(4);
-        let (stdin_tx, _) = mpsc::unbounded_channel();
-        Ok(Arc::new(SandboxSessionState::new(
-            SandboxSessionStateInit {
-                pid,
-                worktree_path: launch.worktree.clone(),
-                stdout_tx,
-                capture: Arc::new(StdMutex::new(TerminalCapture::new())),
-                stdin_tx,
-                ready_marker: launch.paths.ready_marker.clone(),
-                handle,
-                managed_workflow: None,
-            },
-        )))
+        Ok(a_sleeping_jail(self.dir.path(), launch))
     }
 }
 
@@ -125,32 +95,6 @@ impl TabJailSpawn for StandInSpawn {
             agent: agent.clone(),
         });
         self.a_stand_in_jail(launch)
-    }
-}
-
-/// The launch of tab `terminal_id`'s jail, with paths that only have to be distinct.
-fn a_launch(session_id: &str, terminal_id: &str) -> TabJailLaunch {
-    let root = PathBuf::from("/sessions")
-        .join(session_id)
-        .join("sandbox/tabs")
-        .join(terminal_id);
-    TabJailLaunch {
-        session_id: session_id.to_string(),
-        terminal_id: terminal_id.to_string(),
-        session_dir: PathBuf::from("/sessions").join(session_id),
-        worktree: PathBuf::from("/worktrees").join(session_id),
-        paths: TabJailPaths {
-            root: root.clone(),
-            ipc_socket: root.join("tab.sock"),
-            ready_marker: root.join("sandbox.ready"),
-            exec_plan: root.join("exec-plan.json"),
-            profile: root.join("sandbox.sb"),
-            egress_dir: root.join("egress"),
-            scratch_dir: root.join(".work"),
-        },
-        os_user: "tddy".to_string(),
-        login_shell: "/bin/zsh".to_string(),
-        subject: "ada".to_string(),
     }
 }
 

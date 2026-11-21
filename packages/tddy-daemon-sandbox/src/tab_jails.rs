@@ -370,6 +370,10 @@ impl TabJails {
 }
 
 #[cfg(all(test, unix))]
+#[path = "tab_jails_test_support.rs"]
+mod test_support;
+
+#[cfg(all(test, unix))]
 #[path = "tab_jails_tests.rs"]
 mod tests;
 

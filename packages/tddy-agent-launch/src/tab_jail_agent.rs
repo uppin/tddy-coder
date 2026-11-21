@@ -35,7 +35,7 @@ use crate::spec_launch::HostCodingAgents;
 /// What a jailed agent tab's runner is started from.
 #[derive(Debug, Clone)]
 pub struct TabJailAgentPlan {
-    /// What the runner execs: the agent's argv in the tab's conversation, its env, its slot files.
+    /// What the runner execs: the agent's argv in the tab's conversation, its env (a tab places no slot files).
     pub exec_plan: ExecPlan,
     /// What the tab's jail is granted: the main's for the same agent, over the tab's own scratch.
     pub grants: ToolJailGrants,
