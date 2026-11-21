@@ -582,6 +582,17 @@ impl TerminalControl for ArbitratedControl {
             .map(|(_, holder)| holder.clone())
     }
 
+    async fn release(&self, _session_id: &str, control_token: &str) -> bool {
+        let mut lease = self.lease.lock().await;
+        match lease.as_ref() {
+            Some((held, _)) if held == control_token => {
+                *lease = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn subscribe(&self) -> broadcast::Receiver<ControlChange> {
         self.changes.subscribe()
     }
