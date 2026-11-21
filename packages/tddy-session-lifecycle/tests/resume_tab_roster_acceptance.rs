@@ -12,7 +12,10 @@
 //! response. Serial — the tmux socket directory is process-wide.
 
 mod resume_roster_support;
+mod sandbox_tab_support;
 mod support;
+
+use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
 use tddy_agent_launch::restore_tabs::RESUMABLE_PROPERTY;
@@ -22,8 +25,13 @@ use tddy_core::tab_roster::{
 use tddy_service::proto::session::{RestoredTab, RestoredTabOutcome};
 use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
 
-use resume_roster_support::{a_stopped_session, MINTED_CHAT_ID, RESUMED_SESSION_ID};
+use resume_roster_support::{
+    a_stopped_session, a_stopped_session_whose_tab_jails_start_through, MINTED_CHAT_ID,
+    RESUMED_SESSION_ID,
+};
+use sandbox_tab_support::fake_tab_jails::{a_tab_jail_spawn, a_tab_jail_spawn_refusing};
 use support::{this_os_user, until_attached};
+use tddy_daemon_sandbox::tab_jails::TabJailSpawn;
 
 /// The conversation main resumes: a claude-cli main's is its session id.
 const MAIN_CONVERSATION: &str = RESUMED_SESSION_ID;
@@ -38,6 +46,10 @@ const TMUX_TAB_SESSION: &str = "tddy-resume-roster-session-tmux-tab";
 const TMUX_TAB_CONVERSATION: &str = "5f3c0000-0000-7000-8000-00000000712a";
 /// A tab attached to the user's own tmux session `work`.
 const ATTACH_TAB: &str = "019b0000-0000-7000-8000-00000000a77a";
+/// A shell tab run in a jail of its own (`#session-liveness` 5/8).
+const JAILED_TAB: &str = "019b0000-0000-7000-8000-0000000a11ed";
+/// Why the jail of [`JAILED_TAB`] cannot start, when a test says it cannot.
+const JAIL_REFUSAL: &str = "the session's sandbox grants cannot be lowered: no claude tool";
 
 fn the_main_tab() -> TabEntry {
     TabEntry::new(
@@ -61,6 +73,11 @@ fn a_tmux_wrapped_claude_tab() -> TabEntry {
             LaunchNode::agent("claude-cli", TMUX_TAB_CONVERSATION),
         ],
     )
+}
+
+/// A shell tab recorded in a jail of its own.
+fn a_jailed_shell_tab() -> TabEntry {
+    TabEntry::new(JAILED_TAB, vec![LaunchNode::sandbox(), LaunchNode::shell()])
 }
 
 fn restored(terminal_id: &str) -> RestoredTab {
@@ -299,4 +316,95 @@ async fn a_tmux_attach_tab_whose_session_is_gone_is_dropped_and_reported() {
     );
     assert!(!daemon.listed_terminal_ids().await.contains(ATTACH_TAB));
     assert!(!daemon.roster_records(ATTACH_TAB));
+}
+
+// ---------------------------------------------------------------------------
+// Jailed shell tabs (`#session-liveness` 5/8)
+//
+// The session's main resumes on the host here: a jailed main cannot start without a kernel
+// sandbox, and every resume path restores the whole roster the same way, wherever its main runs.
+// What is under test is the tab's own jail, started through the in-memory `TabJailSpawn`.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_jailed_shell_tab_is_restored_into_a_new_jail_on_resume() {
+    // Given a stopped session whose roster holds a shell tab recorded in a jail of its own
+    let jails = a_tab_jail_spawn();
+    let daemon =
+        a_stopped_session_whose_tab_jails_start_through(jails.clone() as Arc<dyn TabJailSpawn>);
+    daemon.has_recorded_tabs(vec![the_main_tab(), a_jailed_shell_tab()]);
+
+    // When it is resumed
+    let response = daemon.resumes().await;
+
+    // Then a new jail is started for that tab, over the session's worktree, and the tab is back
+    // under its id, still recorded in a jail, and reported restored
+    let launch = jails.launch_of(JAILED_TAB);
+    assert_eq!(
+        (launch.session_id.as_str(), launch.worktree.clone()),
+        (RESUMED_SESSION_ID, daemon.worktree.clone())
+    );
+    assert!(jails.jail_runs(JAILED_TAB));
+    assert!(daemon.listed_terminal_ids().await.contains(JAILED_TAB));
+    assert_eq!(
+        daemon.roster_entry(JAILED_TAB).launch,
+        vec![LaunchNode::sandbox(), LaunchNode::shell()]
+    );
+    assert_eq!(response.restored_tabs, vec![restored(JAILED_TAB)]);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_jailed_tab_whose_jail_cannot_start_is_dropped_with_its_reason() {
+    // Given a stopped session with a jailed shell tab, on a daemon whose tab jails cannot start
+    let jails = a_tab_jail_spawn_refusing(JAIL_REFUSAL);
+    let daemon =
+        a_stopped_session_whose_tab_jails_start_through(jails.clone() as Arc<dyn TabJailSpawn>);
+    daemon.has_recorded_tabs(vec![the_main_tab(), a_jailed_shell_tab()]);
+
+    // When it is resumed
+    let response = daemon.resumes().await;
+
+    // Then the resume succeeds without the tab, which is reported dropped with why its jail did
+    // not start, and is gone from the roster
+    assert_eq!(
+        outcomes_of(&response.restored_tabs),
+        vec![(JAILED_TAB.to_string(), RestoredTabOutcome::Dropped)]
+    );
+    assert!(
+        response.restored_tabs[0].reason.contains(JAIL_REFUSAL),
+        "{}",
+        response.restored_tabs[0].reason
+    );
+    assert!(!daemon.listed_terminal_ids().await.contains(JAILED_TAB));
+    assert!(!daemon.roster_records(JAILED_TAB));
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_mixed_roster_restores_each_tab_where_its_chain_says() {
+    // Given a stopped session whose roster holds a jailed shell tab and a shell tab on the host
+    let jails = a_tab_jail_spawn();
+    let daemon =
+        a_stopped_session_whose_tab_jails_start_through(jails.clone() as Arc<dyn TabJailSpawn>);
+    daemon.has_recorded_tabs(vec![
+        the_main_tab(),
+        a_jailed_shell_tab(),
+        TabEntry::new(SHELL_TAB, vec![LaunchNode::shell()]),
+    ]);
+
+    // When it is resumed
+    let response = daemon.resumes().await;
+
+    // Then only the jailed tab gets a jail, both tabs are back under their ids, and both are
+    // reported restored
+    assert_eq!(jails.launched_terminals(), vec![JAILED_TAB.to_string()]);
+    daemon
+        .until_listed_terminals_are(&[MAIN_TERMINAL_ID, JAILED_TAB, SHELL_TAB])
+        .await;
+    assert_eq!(
+        response.restored_tabs,
+        vec![restored(JAILED_TAB), restored(SHELL_TAB)]
+    );
 }

@@ -86,6 +86,11 @@ pub struct DaemonSessionHost {
     cli_manager: Arc<CliSessionManager>,
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     sandbox_manager: Arc<tddy_daemon_sandbox::sandbox_session::SandboxSessionManager>,
+    /// The jails of sandboxed sessions' jailed shell tabs, one per tab (`#session-liveness` 5/8).
+    tab_jails: Arc<tddy_daemon_sandbox::tab_jails::TabJails>,
+    /// What starts a tab's jail in place of the launch topic's own; `None` but on a host a test
+    /// gave a double ([`Self::with_tab_jail_spawn`]).
+    tab_jail_spawn: Option<Arc<dyn tddy_daemon_sandbox::tab_jails::TabJailSpawn>>,
     /// The per-session jails sandboxed `workspace` sessions dispatch their tools through
     /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox). Keyed by session id, and
     /// shared across clones so the jail a start provisioned is the one the next handler's

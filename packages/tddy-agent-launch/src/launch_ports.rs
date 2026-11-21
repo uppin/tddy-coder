@@ -154,6 +154,12 @@ pub struct LaunchSessions {
     /// Reads a Coder account's credentials from its owner's vault, for a session whose target
     /// is a Coder workspace (`coder_target::shell_for_coder_target`).
     pub coder_credentials: Arc<dyn tddy_host_service::coder_workspaces::CoderCredentialSource>,
+    /// The jails of the host's jailed shell tabs (`#session-liveness` 5/8): a restored
+    /// `sandbox` → `shell` tab is registered here, and a delete stops its session's.
+    pub tab_jails: Arc<tddy_daemon_sandbox::tab_jails::TabJails>,
+    /// What starts a tab's jail in place of this topic's own jail launch
+    /// ([`crate::tab_jail_launch`]); `None` on every host but one a test gave a double.
+    pub tab_jail_spawn: Option<Arc<dyn tddy_daemon_sandbox::tab_jails::TabJailSpawn>>,
 }
 
 impl LaunchSessions {

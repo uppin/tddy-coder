@@ -83,6 +83,7 @@ pub mod svc_start_claude_cli_session;
 pub mod svc_start_sandboxed_claude_cli_session;
 pub mod svc_start_sandboxed_cli_harness_session;
 pub mod svc_start_session_core;
+pub mod tab_jail_launch;
 pub mod target_trust;
 mod tmux_main_roster;
 pub mod tool_process_tab;

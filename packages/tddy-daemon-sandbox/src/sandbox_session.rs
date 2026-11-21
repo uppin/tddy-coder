@@ -164,6 +164,13 @@ impl SandboxSessionManager {
         tddy_daemon_kernel::live_sessions::LiveSessions::of(live)
     }
 
+    /// Stop every session's main jail and forget it — a daemon shutting down leaves none behind;
+    /// the session ids stopped, sorted.
+    pub async fn stop_all(&self) -> Vec<String> {
+        // TODO(sandbox-shell-tab): implement
+        todo!("stop every main jail")
+    }
+
     pub async fn remove(&self, session_id: &str) -> Option<Arc<SandboxSessionState>> {
         let removed = self.inner.lock().await.remove(session_id);
         self.recorder.finish(session_id).await;

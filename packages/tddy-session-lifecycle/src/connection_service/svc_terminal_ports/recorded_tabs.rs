@@ -56,6 +56,10 @@ impl CliManagerTerminalRoster {
                 self.start_agent_in_tmux(session_id, worktree, agent, &launch.os_user)
                     .await
             }
+            // A jailed shell has no host PTY: `TerminalRoster::start` hands it to its jail.
+            TerminalKind::SandboxedShell => Err(Status::internal(
+                "a sandboxed shell starts in a jail of its own, not on the host",
+            )),
         }
     }
 

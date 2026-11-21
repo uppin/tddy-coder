@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use bytes::Bytes;
 use tddy_daemon_sandbox::sandbox_session::{SandboxSessionManager, SandboxSessionState};
+use tddy_daemon_sandbox::tab_jails::TabJails;
 use tddy_task::TerminalCapture;
 use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
 use tokio::sync::{broadcast, watch};
@@ -174,6 +175,8 @@ impl tddy_terminal_rpc::session::TerminalSession for SandboxTerminalSession {
 pub struct DaemonTerminalSessionStore {
     manager: Arc<CliSessionManager>,
     sandboxes: Arc<SandboxSessionManager>,
+    /// The jails of sandboxed sessions' jailed shell tabs (`#session-liveness` 5/8).
+    tab_jails: Arc<TabJails>,
 }
 
 #[async_trait]
@@ -191,8 +194,32 @@ impl tddy_daemon_kernel::live_sessions::HeldSessions for DaemonTerminalSessionSt
 }
 
 impl DaemonTerminalSessionStore {
+    /// A store over `manager` and `sandboxes`, holding no tab jails until [`Self::with_tab_jails`].
     pub fn new(manager: Arc<CliSessionManager>, sandboxes: Arc<SandboxSessionManager>) -> Self {
-        DaemonTerminalSessionStore { manager, sandboxes }
+        DaemonTerminalSessionStore {
+            manager,
+            sandboxes,
+            tab_jails: Arc::new(TabJails::new()),
+        }
+    }
+
+    /// Resolve jailed shell tabs out of `tab_jails`.
+    #[must_use]
+    pub fn with_tab_jails(mut self, tab_jails: Arc<TabJails>) -> Self {
+        self.tab_jails = tab_jails;
+        self
+    }
+
+    /// A tab of a sandboxed session other than its main: its own jail's terminal, or the CLI
+    /// manager's "On host" terminal of that id.
+    async fn sandboxed_session_tab(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+    ) -> Option<Arc<dyn tddy_terminal_rpc::session::TerminalSession>> {
+        // TODO(sandbox-shell-tab): implement
+        let _ = (&self.tab_jails, session_id, terminal_id);
+        todo!("route a sandboxed session's tab to its owner")
     }
 
     /// Signals the main agent this daemon holds for the session in `session_dir`; refused, with
@@ -225,12 +252,11 @@ impl DaemonTerminalSessionStore {
 
 #[async_trait]
 impl tddy_terminal_rpc::session::TerminalSessionStore for DaemonTerminalSessionStore {
-    /// A sandboxed session wins the lookup: while a session is running in a jail its PTY is the
-    /// jail's, and the CLI manager holds nothing for it.
+    /// A sandboxed session wins the lookup for its main: while a session is running in a jail its
+    /// main PTY is the jail's, and the CLI manager holds nothing for it.
     ///
-    /// Such a session has exactly one terminal, the reserved main one — `StartTerminalSession` runs
-    /// through the CLI manager and never reaches a jail — so any other `terminal_id` resolves to
-    /// nothing and the caller answers `not_found`.
+    /// Any other `terminal_id` of a sandboxed session is resolved by its owner: a jailed shell
+    /// tab's own jail, or the CLI manager for an "On host" tab (`#session-liveness` 5/8).
     async fn get_terminal(
         &self,
         session_id: &str,
@@ -238,7 +264,7 @@ impl tddy_terminal_rpc::session::TerminalSessionStore for DaemonTerminalSessionS
     ) -> Option<Arc<dyn tddy_terminal_rpc::session::TerminalSession>> {
         if let Some(state) = self.sandboxes.get(session_id).await {
             if terminal_id != MAIN_TERMINAL_ID {
-                return None;
+                return self.sandboxed_session_tab(session_id, terminal_id).await;
             }
             return Some(Arc::new(SandboxTerminalSession::new(state))
                 as Arc<dyn tddy_terminal_rpc::session::TerminalSession>);

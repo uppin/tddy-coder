@@ -249,6 +249,8 @@ impl DaemonSessionHost {
             })),
             coder_credentials: self.coder_credentials(),
             session_watches: self.session_watches().zip(self.project_notification_log()),
+            tab_jails: Arc::clone(&self.tab_jails),
+            tab_jail_spawn: self.tab_jail_spawn.clone(),
         }
     }
 }

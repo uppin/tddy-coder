@@ -68,6 +68,8 @@ impl DaemonSessionHost {
             sandbox_manager: Arc::new(
                 tddy_daemon_sandbox::sandbox_session::SandboxSessionManager::new(),
             ),
+            tab_jails: Arc::new(tddy_daemon_sandbox::tab_jails::TabJails::new()),
+            tab_jail_spawn: None,
             workspace_sandboxes: Arc::new(
                 tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry::new(),
             ),

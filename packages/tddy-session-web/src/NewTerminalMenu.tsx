@@ -28,6 +28,9 @@ interface NewTerminalMenuProps {
   /** The host's tmux sessions, offered as a section of the menu; absent offers no tmux section. The
    *  section lists again each time the menu opens. */
   tmux?: TmuxMenuState;
+  /** Whether the session runs sandboxed (`SessionEntry.sandbox`): its shell opens "In sandbox" — in
+   *  a jail of its own — by default, or "On host". TODO(sandbox-shell-tab): implement the groups. */
+  sandboxed?: boolean;
 }
 
 /** Gap between the "+" button and the top of its menu, in pixels. */

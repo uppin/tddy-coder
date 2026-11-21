@@ -23,3 +23,7 @@ pub use roster::{restore_tab_roster, RosterRestore};
 #[cfg(test)]
 #[path = "restore_tabs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "restore_tabs_sandbox_tests.rs"]
+mod sandbox_tests;

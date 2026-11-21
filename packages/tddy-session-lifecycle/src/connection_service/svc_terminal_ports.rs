@@ -22,6 +22,7 @@ use super::DaemonSessionHost;
 use crate::cli_session_manager::{CliSessionManager, ReattachOutcome};
 use crate::terminal_session_adapter::DaemonTerminalSessionStore;
 
+mod jailed_tabs;
 mod recorded_tabs;
 mod recorded_worktree;
 mod tmux_host;
@@ -51,6 +52,18 @@ impl DaemonSessionHost {
             Arc::clone(&self.cli_manager),
             Arc::clone(&self.sandbox_manager),
         )
+        .with_tab_jails(Arc::clone(&self.tab_jails))
+    }
+
+    /// Start every jailed shell tab's jail through `spawn` instead of the launch topic's own jail
+    /// launch (builder pattern) — lets a test prove what a jailed tab does without a kernel sandbox
+    /// on the machine running it (`#session-liveness` 5/8).
+    pub fn with_tab_jail_spawn(
+        mut self,
+        spawn: Arc<dyn tddy_daemon_sandbox::tab_jails::TabJailSpawn>,
+    ) -> Self {
+        self.tab_jail_spawn = Some(spawn);
+        self
     }
 
     /// The single-screen control lease of every terminal this daemon serves — the one
@@ -110,12 +123,18 @@ impl DaemonSessionHost {
             os_users: Arc::new(move |github_user: &str| config.os_user_for_github(github_user)),
             terminals: Arc::new(self.terminal_sessions()),
             control: self.terminal_control(),
-            roster: Arc::new(CliManagerTerminalRoster::new(
-                Arc::clone(&self.cli_manager),
-                self.launch_coding_agents(),
-                self.tddy_data_dir.clone(),
-                Arc::clone(&tmux),
-            )),
+            roster: Arc::new(
+                CliManagerTerminalRoster::new(
+                    Arc::clone(&self.cli_manager),
+                    self.launch_coding_agents(),
+                    self.tddy_data_dir.clone(),
+                    Arc::clone(&tmux),
+                )
+                .with_tab_jails(
+                    Arc::clone(&self.tab_jails),
+                    self.launch_sessions().tab_jail_spawn(),
+                ),
+            ),
             recorded_history: Arc::new(
                 crate::session_dir_recorded_history::SessionDirRecordedHistory::new(
                     self.tddy_data_dir.clone(),
@@ -279,6 +298,15 @@ struct CliManagerTerminalRoster {
     tddy_data_dir: PathBuf,
     /// The host's tmux, which a tmux tab's session name is checked against before anything spawns.
     tmux: Arc<dyn TmuxHost>,
+    /// Where a jailed shell tab's jail is registered, and what starts it (`#session-liveness` 5/8);
+    /// `None` on a roster that starts no jailed tab.
+    tab_jails: Option<JailedTabs>,
+}
+
+/// The tab-jail registry and the spawn a roster starts jailed shell tabs through.
+struct JailedTabs {
+    jails: Arc<tddy_daemon_sandbox::tab_jails::TabJails>,
+    spawn: Arc<dyn tddy_daemon_sandbox::tab_jails::TabJailSpawn>,
 }
 
 impl CliManagerTerminalRoster {
@@ -293,7 +321,18 @@ impl CliManagerTerminalRoster {
             coding_agents,
             tddy_data_dir,
             tmux,
+            tab_jails: None,
         }
+    }
+
+    /// Start jailed shell tabs through `spawn`, registering their jails in `jails`.
+    fn with_tab_jails(
+        mut self,
+        jails: Arc<tddy_daemon_sandbox::tab_jails::TabJails>,
+        spawn: Arc<dyn tddy_daemon_sandbox::tab_jails::TabJailSpawn>,
+    ) -> Self {
+        self.tab_jails = Some(JailedTabs { jails, spawn });
+        self
     }
 }
 
@@ -302,6 +341,9 @@ impl TerminalRoster for CliManagerTerminalRoster {
     /// A started terminal runs in the same worktree the session's agent does: the live main
     /// terminal's when the agent runs, and the one the session's record names when it is stopped.
     async fn start(&self, session_id: &str, launch: &TerminalLaunch) -> Result<String, Status> {
+        if launch.kind == tddy_terminal_rpc::service::TerminalKind::SandboxedShell {
+            return self.start_jailed_shell_tab(session_id, launch).await;
+        }
         let worktree = match self.manager.get(session_id).await {
             Some(main) => main.worktree_path.clone(),
             None => recorded_worktree::recorded_worktree(&self.tddy_data_dir, session_id)?,

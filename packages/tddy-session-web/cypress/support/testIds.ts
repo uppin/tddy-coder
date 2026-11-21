@@ -745,6 +745,16 @@ export const sessionsTerminalTabNewOption = (kind: string) =>
 export const sessionsTerminalTabNewInTmuxOption = (kind: string) =>
   `sessions-terminal-tab-new-in-tmux-${kind}`;
 
+/** `[data-testid="sessions-terminal-tab-new-in-sandbox-<kind>"]` — a sandboxed session's "+" menu
+ *  item opening a terminal of `kind` in a jail of its own ("In sandbox"). */
+export const sessionsTerminalTabNewInSandboxOption = (kind: string) =>
+  `sessions-terminal-tab-new-in-sandbox-${kind}`;
+
+/** `[data-testid="sessions-terminal-tab-new-on-host-<kind>"]` — a sandboxed session's "+" menu item
+ *  opening a terminal of `kind` on the host, unjailed ("On host"). */
+export const sessionsTerminalTabNewOnHostOption = (kind: string) =>
+  `sessions-terminal-tab-new-on-host-${kind}`;
+
 /** `[data-testid="sessions-terminal-tab-tmux-marker-<terminalId>"]` — the marker on a tab whose
  *  terminal runs wrapped in tmux. */
 export const sessionsTerminalTabTmuxMarker = (terminalId: string) =>

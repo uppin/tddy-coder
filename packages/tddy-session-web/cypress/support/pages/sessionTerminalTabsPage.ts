@@ -9,6 +9,8 @@ import {
   sessionsTerminalTab,
   sessionsTerminalTabNewOption,
   sessionsTerminalTabNewInTmuxOption,
+  sessionsTerminalTabNewInSandboxOption,
+  sessionsTerminalTabNewOnHostOption,
   sessionsTerminalTabTmuxMarker,
   sessionsTerminalTabClose,
   sessionsTerminalPane,
@@ -77,6 +79,21 @@ export const sessionTerminalTabsPage = {
   /** The "+" menu's item opening an agent tab of `kind` wrapped in tmux. */
   newTabInTmuxOption: (kind: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsTerminalTabNewInTmuxOption(kind), { timeout: 10000, ...options }),
+
+  /** A sandboxed session's "+" menu item opening a terminal of `kind` "In sandbox". */
+  newTabInSandboxOption: (kind: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsTerminalTabNewInSandboxOption(kind), { timeout: 10000, ...options }),
+
+  /** A sandboxed session's "+" menu item opening a terminal of `kind` "On host". */
+  newTabOnHostOption: (kind: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsTerminalTabNewOnHostOption(kind), { timeout: 10000, ...options }),
+
+  /** The labelled groups of the open "+" menu, in the order the menu shows them. */
+  newTabMenuGroups: (options?: Parameters<typeof cy.get>[1]) =>
+    cy.get("[role='menu'][aria-label='New terminal'] [role='group'][aria-label]", {
+      timeout: 10000,
+      ...options,
+    }),
 
   /** The tmux marker on the tab of `terminalId`, drawn when its terminal runs wrapped in tmux. */
   tmuxMarker: (terminalId: string, options?: Parameters<typeof cy.get>[1]) =>

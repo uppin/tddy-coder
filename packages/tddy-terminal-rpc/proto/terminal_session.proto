@@ -209,17 +209,21 @@ message StartTerminalSessionRequest {
   string kind          = 4;
   // The tmux session a "tmux" terminal attaches to. Empty for every other kind.
   string tmux_session  = 5;
-  // What the terminal runs wrapped in, outermost first. Empty: `kind` runs directly. The only
-  // wrapper accepted is "tmux" around an agent kind: the agent runs in a tmux session of its own,
-  // `tddy-<session_id>-<terminal_id>`, as the session's OS user, and the tab is a client of it.
-  // Any other wrapper kind is refused INVALID_ARGUMENT, naming it.
+  // What the terminal runs wrapped in, outermost first. Empty: `kind` runs directly. Two wrappers
+  // are accepted, each alone: "tmux" around an agent kind — the agent runs in a tmux session of its
+  // own, `tddy-<session_id>-<terminal_id>`, as the session's OS user, and the tab is a client of it
+  // — and "sandbox" around the login shell ("" or "bash") of a sandboxed session — the shell runs in
+  // a jail of its own over the session's worktree and sandbox grants, which ends with the tab. Any
+  // other wrapper kind, or either around anything else, is refused INVALID_ARGUMENT, naming it; a
+  // "sandbox" wrapper on a session that is not sandboxed is refused FAILED_PRECONDITION.
   repeated LaunchNode wrappers = 6;
 }
 
 // One link of a terminal's launch chain: what it is, and what it was started with. Kinds: "agent"
 // (`harness`, `conversation_id`), "shell", "tmux" (`session`, `os_user`) for a tmux session the
 // daemon created to wrap a tab, "tmux-attach" (`session`, `os_user`) for a tab attached to the user's
-// own tmux session. Unknown kinds and keys are kept, so later wrappers need no schema change.
+// own tmux session, "sandbox" (no properties) for a jail of its own a tab runs in. Unknown kinds and
+// keys are kept, so later wrappers need no schema change.
 message LaunchNode {
   string kind = 1;
   map<string, string> properties = 2;

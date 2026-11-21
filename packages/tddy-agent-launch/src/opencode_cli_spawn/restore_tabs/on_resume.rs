@@ -17,6 +17,7 @@ impl crate::launch_ports::LaunchSessions {
         session_dir: &Path,
         worktree: &Path,
     ) -> Vec<RestoredTab> {
+        let tab_jail_spawn = self.tab_jail_spawn();
         restore_tab_roster(RosterRestore {
             session_id,
             session_dir,
@@ -25,6 +26,8 @@ impl crate::launch_ports::LaunchSessions {
             cli_manager: &self.cli_manager,
             coding_agents: &self.coding_agents,
             roster_store: self.cli_manager.tab_rosters(),
+            tab_jails: &self.tab_jails,
+            tab_jail_spawn: &*tab_jail_spawn,
         })
         .await
     }

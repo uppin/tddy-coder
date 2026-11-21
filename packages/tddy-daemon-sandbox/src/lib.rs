@@ -45,6 +45,10 @@ pub mod sandbox_runtime;
 pub mod sandbox_session;
 #[cfg(test)]
 mod sandbox_session_liveness_tests;
+#[cfg(all(test, unix))]
+mod sandbox_session_stop_all_tests;
+pub mod tab_jail_paths;
+pub mod tab_jails;
 pub mod task_service;
 pub mod tool_jail;
 pub mod workspace_tool_sandbox;

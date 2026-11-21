@@ -18,6 +18,7 @@ use tddy_core::tab_roster::{
     TMUX_ATTACH_KIND, TMUX_KIND,
 };
 use tddy_daemon_kernel::privilege_drop::EffectiveIdentity;
+use tddy_daemon_sandbox::tab_jails::{TabJailSpawn, TabJails};
 use tddy_service::proto::session::{RestoredTab, RestoredTabOutcome};
 
 use super::new_tab::agent_tab_argv;
@@ -37,6 +38,10 @@ pub struct RosterRestore<'a> {
     pub coding_agents: &'a HostCodingAgents,
     /// The roster's single writer: a dropped tab is forgotten through it.
     pub roster_store: &'a TabRosterStore,
+    /// The registry a `sandbox` → `shell` tab's new jail is registered in (`#session-liveness` 5/8).
+    pub tab_jails: &'a TabJails,
+    /// What starts that jail.
+    pub tab_jail_spawn: &'a dyn TabJailSpawn,
 }
 
 /// Restore every entry of the session's roster other than main, in roster order, each under its
@@ -175,6 +180,10 @@ async fn carry_out(
             start_under_id(restore, tab, RecordedTerminal::Shell { shell_path }).await?;
             Ok(Restored::AsRecorded)
         }
+        TabRestore::JailedShell => {
+            restore_jailed_shell(restore, tab).await?;
+            Ok(Restored::AsRecorded)
+        }
         TabRestore::ReattachTmux { session, os_user } => {
             let harness = recorded_harness(tab)?;
             reattach(restore, tab, &harness, &os_user, &session).await?;
@@ -203,6 +212,14 @@ async fn carry_out(
         }
         TabRestore::Drop { reason } => Err(anyhow::anyhow!(reason)),
     }
+}
+
+/// Start the session user's login shell under the tab's recorded id, in a new jail of its own over
+/// the session's worktree and grants. A jail that cannot start fails the tab with the reason.
+async fn restore_jailed_shell(restore: &RosterRestore<'_>, tab: &TabEntry) -> anyhow::Result<()> {
+    // TODO(sandbox-shell-tab): implement
+    let _ = (restore.tab_jails, restore.tab_jail_spawn, tab);
+    todo!("restore a jailed shell tab")
 }
 
 /// Start `terminal` under the tab's recorded id.

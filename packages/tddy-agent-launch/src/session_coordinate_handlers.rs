@@ -431,6 +431,8 @@ fn session_entry_from_listing(
             .as_ref()
             .map(crate::remote_agent_launch::proto_of_session_target),
         managed_codebase: s.managed_codebase,
+        // TODO(sandbox-shell-tab): implement — from the session's record (`sandbox: true`).
+        sandbox: false,
         session_role: s.session_role,
         reads_host_paths: s.reads_host_paths,
         orchestration_mark: s.orchestration_mark.map(|mark| {

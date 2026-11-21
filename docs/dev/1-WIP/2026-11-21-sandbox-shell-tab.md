@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 5 — several crates (terminal-rpc, changeset, daemon-sandbox, agent-launch, session-lifecycle, service proto, session-web), a proto change, a second-runner-per-session registry with per-tab jail paths, teardown ordering at close/delete/resume/shutdown
 **Stack**: `#session-liveness` 5/8 — branch `feature/session-liveness/sandbox-shell-tab`, base `feature/session-liveness/resume-roster`
+**PR**: #964 https://github.com/uppin/tddy-coder/pull/964
 
 ## Initial Discovery
 
@@ -31,7 +32,7 @@ A shell tab opened "In sandbox" on a sandboxed session runs in a jail of its own
 
 ## Responsibility
 
-- `TabJails` (tddy-daemon-sandbox): the registry of tab jails, keyed `(session_id, terminal_id)`, with `start`, `stop`, `stop_session`, `stop_all`, `live`, and a death watch that ends the tab when its runner exits.
+- `TabJails` (tddy-daemon-sandbox): the registry of tab jails, keyed `(session_id, terminal_id)`, with `start`, `stop`, `stop_session`, `stop_all`, `live`, and a death watch that ends the tab when its runner exits. An exited tab jail's tab stays in the roster, like a host tab, so Resume reopens it (developer ruling, 2026-11-21).
 - `TabJailSpawn` port: start a shell tab jail for `(session, terminal_id)` with the session's worktree and grants; the daemon's implementation reuses `lower_tool_jail` / `build_tool_jail_plan` / `spawn_sandbox_plan` / the host relay, under per-tab paths.
 - Per-tab jail paths: `<session>/sandbox/tabs/<terminal_id>/…`, an IPC socket hashing session and terminal id, a per-tab egress dir.
 - Wire: `sandbox` accepted around `bash` in `StartTerminalSession.wrappers`; `TerminalKind::Sandboxed…` variant; participant refusal arm.
@@ -54,6 +55,12 @@ A shell tab opened "In sandbox" on a sandboxed session runs in a jail of its own
 | `n4` resume-roster (#961) | `restore_plan` per-kind dispatch, `RosterRestore`, `restore_roster_on_resume` on both resume paths, unknown kinds DROPPED | adds the `sandbox` kind and a `carry_out` arm; gives `RosterRestore` the tab-jail port | change the dispatch shape, the outcome proto, or the host resume |
 | `n2` tmux-roster (#959) | `tabs.yaml` (`TabRoster`, `LaunchNode`), `TabRosterStore`, `CliManagerTerminalRoster` start/end/close, start under a recorded id | records `[sandbox, shell]` through the store; adds a sandbox branch to start/end | change the roster schema or the store |
 | `n1` agent-tab-liveness (#958) | liveness from held agent tabs; `HeldSessions` | a shell tab jail never counts as live | change the liveness rule |
+
+Sequencing found writing the tests (pass 2):
+
+- n4's unit test `a_tab_whose_chain_holds_a_wrapper_this_daemon_does_not_know_is_dropped_naming_it` (`restore_tabs_tests.rs`) used `sandbox` as its example of a kind no daemon knows. By developer ruling (2026-11-21) its example is now `ssh` (one fixture line in n4's test), so it stays green on this contract and through the stack.
+- The jailed-tab resume tests resume a **host** `claude-cli` main: a jailed main cannot be started without a kernel sandbox, and `restore_roster_on_resume` restores the whole roster the same way on every resume path. No parent `TODO(` is reached by any of this node's tests (n1–n4 are green).
+- Tab jails are injected through `DaemonSessionHost::with_tab_jail_spawn`; `RosterRestore` gains `tab_jails` + `tab_jail_spawn`, `LaunchSessions` gains `tab_jails` + `tab_jail_spawn` (this node's wiring; n4's `restore_plan` dispatch shape is unchanged — one arm added).
 
 ## Draft PR contract
 
@@ -94,8 +101,8 @@ Agent-only; n7's concern.
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests / run them (verify they fail) / USER REVIEW
-- [ ] TDD Red — failing unit/integration tests
+- [x] Create failing acceptance tests / run them (verify they fail) / USER REVIEW
+- [x] TDD Red — failing unit/integration tests
 - [ ] Implementation
 - [ ] Package documentation, scoped clippy, single-spec Cypress
 
@@ -112,31 +119,33 @@ Agent-only; n7's concern.
 ## Acceptance Tests
 
 `packages/tddy-session-lifecycle/tests/sandbox_shell_tab_acceptance.rs` (fake `TabJailSpawn`):
-- [ ] `a_shell_tab_opened_in_sandbox_starts_a_jail_of_its_own_over_the_session_worktree`
-- [ ] `a_jailed_shell_tab_streams_its_output_and_is_listed`
-- [ ] `a_jailed_shell_tab_is_recorded_as_sandbox_then_shell`
-- [ ] `two_jailed_tabs_of_one_session_get_distinct_jail_paths`
-- [ ] `closing_a_jailed_tab_stops_its_jail_and_leaves_the_roster`
-- [ ] `a_tab_jail_that_exits_ends_its_tab`
-- [ ] `deleting_a_sandboxed_session_stops_every_tab_jail`
-- [ ] `an_on_host_tab_of_a_sandboxed_session_streams_its_output`
-- [ ] `a_sandbox_wrapper_around_an_agent_is_refused`
-- [ ] `a_sandbox_wrapper_on_an_unsandboxed_session_is_refused`
+- [x] `a_shell_tab_opened_in_sandbox_starts_a_jail_of_its_own_over_the_session_worktree`
+- [x] `a_jailed_shell_tab_streams_its_output_and_is_listed`
+- [x] `a_jailed_shell_tab_is_recorded_as_sandbox_then_shell`
+- [x] `two_jailed_tabs_of_one_session_get_distinct_jail_paths`
+- [x] `closing_a_jailed_tab_stops_its_jail_and_leaves_the_roster`
+- [x] `a_tab_jail_that_exits_ends_its_tab`
+- [x] `deleting_a_sandboxed_session_stops_every_tab_jail`
+- [x] `an_on_host_tab_of_a_sandboxed_session_streams_its_output`
+- [x] `a_sandbox_wrapper_around_an_agent_is_refused`
+- [x] `a_sandbox_wrapper_on_an_unsandboxed_session_is_refused`
 
 `packages/tddy-session-lifecycle/tests/resume_tab_roster_acceptance.rs` (extended):
-- [ ] `a_jailed_shell_tab_is_restored_into_a_new_jail_on_resume`
-- [ ] `a_jailed_tab_whose_jail_cannot_start_is_dropped_with_its_reason`
-- [ ] `a_mixed_roster_restores_each_tab_where_its_chain_says`
+- [x] `a_jailed_shell_tab_is_restored_into_a_new_jail_on_resume`
+- [x] `a_jailed_tab_whose_jail_cannot_start_is_dropped_with_its_reason`
+- [x] `a_mixed_roster_restores_each_tab_where_its_chain_says`
 
 `packages/tddy-session-lifecycle/tests/sandbox_shutdown_acceptance.rs`:
-- [ ] `shutting_down_the_daemon_stops_main_and_tab_jails`
+- [x] `shutting_down_the_daemon_stops_main_and_tab_jails`
 
 `packages/tddy-session-lifecycle/tests/sandbox_shell_tab_jail_linux.rs` (`#[cfg(target_os = "linux")]`, real jail):
-- [ ] `a_jailed_shell_tab_works_in_the_worktree_and_cannot_write_outside_its_grants`
+- [x] `a_jailed_shell_tab_works_in_the_worktree_and_cannot_write_outside_its_grants`
 
 `packages/tddy-session-web/cypress/component/NewTerminalMenuSandboxAcceptance.cy.tsx`:
-- [ ] `offers In sandbox (default) and On host for a sandboxed session`
-- [ ] `offers no sandbox choice for an unsandboxed session`
+- [x] `offers In sandbox (default) and On host for a sandboxed session`
+- [x] `offers no sandbox choice for an unsandboxed session`
+
+Added in pass 2: `sandbox_shell_tab_acceptance.rs` — `a_sandboxed_session_is_listed_as_sandboxed` (`SessionEntry.sandbox`, which the menu reads).
 
 ## Unit Tests
 
@@ -145,11 +154,16 @@ Agent-only; n7's concern.
 - Per-tab jail paths: distinct per terminal id; the socket path stays inside the AF_UNIX limit.
 - `restore_plan`: `[sandbox, shell]` plans a jailed fresh shell; `[sandbox, agent]` drops with a reason (n7 adds it).
 
+Written (pass 2): `tddy-terminal-rpc/tests/terminal_kind_sandbox_wrapper_unit.rs` (6),
+`tddy-daemon-sandbox/src/tab_jails_tests.rs` (10), `tab_jail_paths_tests.rs` (7),
+`sandbox_session_stop_all_tests.rs` (2), `tddy-agent-launch/src/opencode_cli_spawn/restore_tabs_sandbox_tests.rs` (4).
+
 ## Decisions & Trade-offs
 
 - **One jail per tab** (developer decision), same worktree and grants as the session: a tab's crash or exit never takes the main's jail with it; costs one runner per tab.
 - **Per-tab choice, jail by default** (developer decision); "On host" stays.
 - **Jail terminals keep the main's limits** — no resize, no control lease (developer decision).
+- **An exited tab jail stays in the roster** (developer ruling, 2026-11-21), like a host tab: unlisted, still recorded `[sandbox, shell]`, reopened by Resume.
 - **Shutdown stops every jail**, main ones included (developer decision) — resolves part 1 of the 2026-09-15 entry.
 - **Real-jail coverage via a prerequisite CI PR** (developer decision), not inside this node.
 
@@ -159,10 +173,10 @@ Agent-only; n7's concern.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

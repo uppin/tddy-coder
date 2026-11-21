@@ -247,7 +247,7 @@ fn a_tab_of_a_kind_this_daemon_does_not_know_is_dropped_naming_the_kind() {
 fn a_tab_whose_chain_holds_a_wrapper_this_daemon_does_not_know_is_dropped_naming_it() {
     // Given a tmux-wrapped agent a later daemon also wrapped in a jail
     let tab = a_tab(vec![
-        LaunchNode::new("sandbox", [("profile", "default")]),
+        LaunchNode::new("ssh", [("host", "build-box")]),
         LaunchNode::tmux(TAB_TMUX, DEV),
         LaunchNode::agent("claude-cli", CONVERSATION),
     ]);
@@ -257,7 +257,7 @@ fn a_tab_whose_chain_holds_a_wrapper_this_daemon_does_not_know_is_dropped_naming
     let reason = dropped_reason(restore_plan(&tab, &live));
 
     // Then
-    assert!(reason.contains("sandbox"), "{reason}");
+    assert!(reason.contains("ssh"), "{reason}");
 }
 
 #[test]
