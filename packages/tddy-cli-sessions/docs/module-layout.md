@@ -107,6 +107,16 @@ Tests: `tests/capture_recorder.rs` (a real PTY, a 50 ms interval) —
 `tddy_session_lifecycle` re-exports both modules (`cli_session_manager`, `session_toolcall`) and keeps
 `claude_cli_session` as a historical alias of `cli_session_manager`.
 
+## Process tabs
+
+`cli_session_manager/process_tab.rs` holds a PTY-less `main` tab for a tool session's `tddy-coder`:
+`register_process_tab(session, kind, pid, exit, holder)`, `process_tab`, `signal_process_tab` and the
+crate-private `stop_process_tab` (called by `stop_session`). A tab counts in `live_agent_sessions`, is
+absent from `list_terminals`, and leaves when its `tddy_task::ExitReceiver` resolves; a generation
+number keeps a late exit from removing the tab of a resumed child. `ProcessTabHolder` (`stop`, `signal`)
+is implemented beside each spawn backend, in `tddy-agent-launch`. `ChildExit` and the exit channel live
+in `tddy-task`, so this crate does not depend on the spawn backends.
+
 ## Agent and user process environments
 
 `tddy_pty::PtySpawnSpec.env_base` is `PtyEnvBase::{Inherited, Cleared}`. `spawn_rendered_main` — every

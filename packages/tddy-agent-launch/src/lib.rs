@@ -84,6 +84,7 @@ pub mod svc_start_sandboxed_cli_harness_session;
 pub mod svc_start_session_core;
 pub mod target_trust;
 mod tmux_main_roster;
+pub mod tool_process_tab;
 pub mod tool_session_route;
 pub mod tool_session_spawn;
 pub mod tool_spawn_plan;
@@ -117,5 +118,6 @@ mod session_acting_identity_tests;
 mod session_provider_route_tests;
 #[cfg(test)]
 mod start_request_checks_unit_tests;
+mod svc_signal_session;
 #[cfg(test)]
 mod tool_session_route_tests;

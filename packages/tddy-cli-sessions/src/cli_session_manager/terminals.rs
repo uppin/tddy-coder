@@ -163,6 +163,7 @@ impl CliSessionManager {
             }
         }
         live.extend(self.detached_watchers.read().await.watched_sessions());
+        live.extend(self.process_tabs.read().await.keys().cloned());
         tddy_daemon_kernel::live_sessions::LiveSessions::of(live)
     }
 
@@ -193,8 +194,10 @@ impl CliSessionManager {
     /// Stop all PTY terminals belonging to `session_id`: cancel each task and remove from registry.
     ///
     /// Called when a session ends (natural exit or explicit termination) so its processes don't
-    /// outlive the session. This is the per-session counterpart to [`kill_all`].
+    /// outlive the session. This is the per-session counterpart to [`kill_all`]. A process tab is not a
+    /// terminal: its holder is asked to stop the child, and the tab leaves with the child's reported end.
     pub async fn stop_session(&self, session_id: &str) {
+        self.stop_process_tab(session_id).await;
         let task_ids: Vec<TaskId> = {
             let mut reg = self.terminals.write().await;
             reg.remove(session_id)

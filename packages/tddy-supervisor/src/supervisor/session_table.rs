@@ -1,7 +1,7 @@
 use crate::cgroup_broker::{self, ScopeRemoval};
 use crate::error::SupervisorError;
 use crate::request::{SessionState, SessionStatus};
-use crate::signals::{signal_process_group, KILL, TERMINATE};
+use crate::signals::{signal_process, signal_process_group, KILL, TERMINATE};
 use crate::spawn_broker::fork_broker::ChildStdio;
 use crate::spawn_broker::fork_broker::SpawnedChild;
 use crate::spawn_broker::fork_broker::StdioMode;
@@ -14,6 +14,9 @@ use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// The highest signal number a caller may name: the real-time range ends at 64 on Linux.
+const MAX_SIGNAL: i32 = 64;
 
 /// What became of one session the supervisor spawned on a caller's behalf.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -350,6 +353,35 @@ impl Supervisor {
                 signal_process_group(pid, KILL);
             }
         });
+        Ok(status)
+    }
+
+    /// Deliver `signal` to the process of a session this supervisor spawned, and report its state as
+    /// of the request.
+    ///
+    /// The pid alone, not its group: the caller means "interrupt the agent" or "ask it to end", and
+    /// a group signal would also reach the descendants the agent started. A pid the supervisor never
+    /// spawned is [`SupervisorError::Denied`], as for [`Self::session_status`] — the privileged
+    /// surface is not a way to signal arbitrary processes. A session that has already exited is
+    /// reported, not signalled: its pid may already belong to somebody else.
+    ///
+    /// The signal is sent under the session table's lock, so the record that says the session is
+    /// running cannot be overtaken by its reap between the check and the `kill`.
+    pub fn signal_session(&self, pid: u32, signal: i32) -> Result<SessionStatus, SupervisorError> {
+        if !(1..=MAX_SIGNAL).contains(&signal) {
+            return Err(SupervisorError::Invalid {
+                message: format!("{signal} is not a signal number"),
+            });
+        }
+        let sessions = self.sessions();
+        let status = sessions.status(pid).ok_or(SupervisorError::Denied)?;
+        if status.state == SessionState::Running {
+            log::info!(
+                target: "tddy_supervisor::supervisor",
+                "signalling session {pid} with {signal}"
+            );
+            signal_process(pid, signal);
+        }
         Ok(status)
     }
 

@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use super::wire::{RequestId, WorkerEnvelope, WorkerLine};
 use super::{CloneRequest, SpawnRequest, SpawnResult, WorkerEvent, WorkerRequest, WorkerResponse};
+use crate::child_exit::{ChildExit, ExitSender};
 
 /// Client for sending spawn requests to the worker. Used by the async daemon. Clones share one
 /// worker, and concurrent calls each wait only for their own answer.
@@ -26,6 +27,9 @@ pub struct SpawnClient {
 struct Pending {
     open: bool,
     by_id: HashMap<RequestId, mpsc::Sender<WorkerLine>>,
+    /// Where the end of the child a spawn request started is reported. Outlives the request's
+    /// result: the worker writes [`WorkerEvent::Exited`] for as long as it holds the child.
+    exits: HashMap<RequestId, ExitSender>,
 }
 
 impl SpawnClient {
@@ -36,7 +40,7 @@ impl SpawnClient {
         req: CloneRequest,
         on_event: impl FnMut(WorkerEvent),
     ) -> anyhow::Result<()> {
-        match self.request(WorkerRequest::Clone(req), on_event)? {
+        match self.request(WorkerRequest::Clone(req), on_event, None)? {
             WorkerResponse::CloneOk => Ok(()),
             WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
             WorkerResponse::SpawnOk { .. } => Err(anyhow::anyhow!("unexpected spawn_ok for clone")),
@@ -44,7 +48,7 @@ impl SpawnClient {
     }
 
     pub fn spawn(&self, req: SpawnRequest) -> anyhow::Result<SpawnResult> {
-        match self.request(WorkerRequest::Spawn(Box::new(req)), |_| {})? {
+        match self.request(WorkerRequest::Spawn(Box::new(req)), |_| {}, None)? {
             WorkerResponse::SpawnOk { result } => Ok(result),
             WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
             WorkerResponse::CloneOk => Err(anyhow::anyhow!("unexpected clone_ok for spawn")),
@@ -56,10 +60,13 @@ impl SpawnClient {
     }
 
     /// Send one request under a fresh id and wait for its result, handing its events to `on_event`.
-    fn request(
+    /// `exit`, when given, is resolved by the [`WorkerEvent::Exited`] the worker writes for this
+    /// request — after its result, for as long as the child lives.
+    pub(crate) fn request(
         &self,
         req: WorkerRequest,
         mut on_event: impl FnMut(WorkerEvent),
+        exit: Option<ExitSender>,
     ) -> anyhow::Result<WorkerResponse> {
         let label = worker_request_label(&req);
         let started = Instant::now();
@@ -77,10 +84,15 @@ impl SpawnClient {
                 );
             }
             pending.by_id.insert(id, answers_tx);
+            if let Some(exit) = exit {
+                pending.exits.insert(id, exit);
+            }
         }
         log::info!("SpawnClient: sending {} id={}", label, id);
         if let Err(e) = self.write_envelope(&envelope) {
-            self.pending.lock().unwrap().by_id.remove(&id);
+            let mut pending = self.pending.lock().unwrap();
+            pending.by_id.remove(&id);
+            pending.exits.remove(&id);
             return Err(e);
         }
         log::info!("SpawnClient: waiting for worker {} id={}", label, id);
@@ -163,20 +175,46 @@ fn route_worker_lines(response_reader: File, pending: Arc<Mutex<Pending>>, worke
     let mut pending = pending.lock().unwrap();
     pending.open = false;
     pending.by_id.clear();
+    pending.exits.clear();
     log::info!(
         "SpawnClient: spawn worker pid={} closed its response pipe",
         worker_pid
     );
 }
 
-/// Hand one line to the caller waiting on its id. A result is the last line for its id.
+/// Hand one line to the caller waiting on its id. A result is the last line for its id, except for
+/// the [`WorkerEvent::Exited`] of a spawned child, which resolves the exit its spawn registered.
 #[cfg(unix)]
 fn deliver(pending: &Mutex<Pending>, line: WorkerLine) {
-    let (id, is_result) = match &line {
-        WorkerLine::Event { id, .. } => (*id, false),
-        WorkerLine::Result { id, .. } => (*id, true),
-    };
     let mut pending = pending.lock().unwrap();
+    let (id, is_result) = match &line {
+        WorkerLine::Event {
+            id,
+            event: WorkerEvent::Exited { pid, code, signal },
+        } => {
+            match pending.exits.remove(id) {
+                Some(exit) => exit.send(ChildExit {
+                    code: *code,
+                    signal: *signal,
+                }),
+                // A plain spawn does not wait on its child's end.
+                None => log::debug!(
+                    "SpawnClient: nobody waits on the end of pid={} of request id={}",
+                    pid,
+                    id
+                ),
+            }
+            return;
+        }
+        WorkerLine::Event { id, .. } => (*id, false),
+        WorkerLine::Result { id, response } => {
+            if !matches!(response, WorkerResponse::SpawnOk { .. }) {
+                // A request that started no child has no end to report.
+                pending.exits.remove(id);
+            }
+            (*id, true)
+        }
+    };
     let Some(answers) = pending.by_id.get(&id) else {
         log::warn!(
             "SpawnClient: dropping a line for request id={} that is not pending",
@@ -208,6 +246,7 @@ pub fn client_over(request_writer: File, response_reader: File, worker_pid: u32)
     let pending = Arc::new(Mutex::new(Pending {
         open: true,
         by_id: HashMap::new(),
+        exits: HashMap::new(),
     }));
     let routed = Arc::clone(&pending);
     std::thread::spawn(move || route_worker_lines(response_reader, routed, worker_pid));

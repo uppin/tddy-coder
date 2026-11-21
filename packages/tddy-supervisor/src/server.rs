@@ -282,6 +282,11 @@ impl PrivilegedSurface {
         self.supervisor.stop_session(pid, self.shutdown_grace())
     }
 
+    /// Deliver one signal to a session this supervisor spawned.
+    fn signal_session(&self, pid: u32, signal: i32) -> Result<SessionStatus, SupervisorError> {
+        self.supervisor.signal_session(pid, signal)
+    }
+
     /// How long a stopped session gets before `SIGKILL` — see [`Self::stop_session`].
     fn shutdown_grace(&self) -> Duration {
         Duration::from_secs(self.config.shutdown_grace_secs)

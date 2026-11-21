@@ -208,8 +208,7 @@ impl LaunchSessions {
                 git_environment,
             })
             .await;
-        self.tool_session_spawned(&req.session_id, &spawned);
-        let result = spawned?;
+        let result = self.tool_session_spawned(&req.session_id, spawned).await?;
         self.maybe_spawn_presenter_observer(
             &observer_os_user,
             &result.session_id,

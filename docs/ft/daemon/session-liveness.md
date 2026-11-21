@@ -1,6 +1,6 @@
 # Session liveness
 
-**Status:** ✅ Shipped (`#session-liveness` 1/4 PR #958, 2/4 PR #959)
+**Status:** ✅ Shipped (`#session-liveness` 1/4 PR #958, 2/4 PR #959, 3/4 PR #960)
 
 ## Summary
 
@@ -27,7 +27,7 @@ processes.
 | tmux-wrapped agent tab | its tmux client resolves, or its own detach watcher holds it, until its tmux session ends |
 | Bash or tmux-attach tab | never counts — not an agent |
 | `workspace` | never — it runs no agent |
-| `tool` (tddy-coder) | never — see [Known limitations](#known-limitations) |
+| `tool` (tddy-coder) | its process tab is held, until the spawn backend that holds the child reports its exit — see [Tool sessions](#tool-sessions-as-a-process-tab) |
 
 - A main that exited while an agent tab still runs leaves the session **active**.
 - A session whose agent tabs have all closed, or that has only shell tabs, is **inactive**.
@@ -112,12 +112,31 @@ and the session stays live while it does. **Closing the tab** (`StopTerminalSess
 a client ending: it ends the tab's tmux session — and its agent — before the tab, and removes the roster
 entry. The web offers it as **Add agent ▸ in tmux**, and marks the tab.
 
+## Tool sessions as a process tab
+
+A tool session's `tddy-coder` is registered, as soon as its spawn returns, as a **process tab** of its
+session: the session's `main` tab, of kind `tddy-coder`, with no PTY. It counts as a live agent, it is
+not listed by `ListTerminalSessions` (the session's UI is tddy-coder's own), and it leaves when the
+spawn backend reports the child's end. Each backend reports it as the daemon's own value, "exited, with
+this status", never as a pid probe:
+
+| Backend | Who holds the child | How its end reaches the daemon |
+|---|---|---|
+| `tddy-supervisor` | the supervisor | the daemon polls `SessionStatus` (the supervisor reaps its own children, so `EXITED` is exact) |
+| forked spawn worker | the worker's wait thread | `WorkerEvent::Exited{pid, code, signal}` on the request's event stream |
+| direct spawn | the spawner's wait thread | the thread sends the status on a channel |
+
+Stopping and signalling go to the holder: `StopSession` / `SignalSession` on the supervisor, a signal
+to the child the worker or direct spawn owns. The supervisor's `SignalSession` is refused for a pid it
+never spawned. A resumed tool session registers its respawned child the same way, and the host-session
+socket stops answering the session when the child's end is reported.
+
 ## What acts on held processes
 
-- **Delete** stops every terminal the session has (main and tabs) and its sandbox, then removes the
-  directory. It never signals the recorded pid.
+- **Delete** stops every terminal the session has (main and tabs), its process tab through its holder,
+  and its sandbox, then removes the directory. It never signals the recorded pid.
 - **`SignalSession` and the project-home `TerminateSession`** signal the session's held main agent: its
-  main terminal's process, or its sandbox runner. With none held they are refused
+  main terminal's process, its process tab's child, or its sandbox runner. With none held they are refused
   (`FAILED_PRECONDITION`, `session has no running agent`) and nothing is signalled.
 - **`EnsureProjectHomeSession`** answers `running` only for a main the daemon holds; a main whose
   recorded pid is alive but whose terminal nobody serves is **resumed**.
@@ -135,10 +154,11 @@ agent for), and Telegram's list, branch-owner scan and delete.
 
 ## Known limitations
 
-- A `tool` (tddy-coder) session has no process the daemon holds — its child lives in the supervisor,
-  the spawn worker or a detached wait thread — so a running tool session lists **inactive**, and
-  delete and `SignalSession` still reach it through its recorded pid, the only handle there is. The
-  recycled-pid hazard remains for that kind alone.
+- A tool session's child is not re-attached after a daemon restart: the session lists **inactive**
+  until it is resumed, whether or not the child outlived the daemon.
+- For a forked worker or a direct spawn the daemon signals the child's pid itself. Between the kernel
+  reaping the child and the wait thread's report reaching the daemon the pid could in principle be
+  reissued; a signal sent in that window is not prevented. The supervisor backend has no such window.
 - A tmux-run main that outlived a daemon restart is held by nothing until it is re-attached. The
   startup pass does so when the roster, or the pre-roster fallback, names an OS user the daemon can
   serve; until then a replace cannot stop it.

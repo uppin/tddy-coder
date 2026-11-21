@@ -8,6 +8,7 @@
 //! - [`CaptureRecording`] — a capture's retained window on disk, for history after the process
 
 pub mod capture_recording;
+pub mod child_exit;
 pub mod idle;
 pub mod registry;
 mod screen_dump;
@@ -15,6 +16,7 @@ pub mod task;
 pub mod terminal_capture;
 
 pub use capture_recording::{CaptureRecording, RECORDING_INTERVAL};
+pub use child_exit::{exit_channel, ChildExit, ExitReceiver, ExitSender, HolderGone};
 pub use idle::IdleTimeoutTracker;
 pub use registry::{TaskRegistry, TaskRegistryEvent};
 pub use task::{

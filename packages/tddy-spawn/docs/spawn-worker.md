@@ -34,7 +34,7 @@ Newline-delimited JSON, one line per message.
 - **Event** (worker → daemon): `{"line":"event","id":N,"event":{"kind":"started","pid":P}}` — something
   that happened to request `N` before its result. `Started { pid }` is sent as soon as a clone's `git`
   child is running (`clone_run::clone_with_progress` hands its `CloneHandle` out between `spawn` and
-  `wait`); `CloneProgress(GitProgress)` (`"kind":"clone_progress"`) for each throttled line of git's
+  `wait`); `Exited{pid, code, signal}` (`"kind":"exited"`), written by the worker's wait thread after a spawn request's result, for as long as it holds the child — `SpawnClient::spawn_tool` resolves the request's `ExitReceiver` with it, and a plain `spawn` drops it at debug level; `CloneProgress(GitProgress)` (`"kind":"clone_progress"`) for each throttled line of git's
   progress, all before the clone's result. See [clone-run.md](clone-run.md).
 - **Result** (worker → daemon): `{"line":"result","id":N,"response":…}` — the last line for request `N`.
 

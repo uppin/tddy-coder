@@ -188,6 +188,7 @@ owning declared services:
 | `SpawnRelayed` | the same, with stdin/stdout relayed over the daemon's unix socket |
 | `SpawnStreamed` | the same, its stderr **streamed**: `Started{pid}`, one `Line` per stderr line, `Exited{code, signal, stderr_tail}`; a refusal fails the call. `StopSession(pid)` stops it, as does the caller hanging up |
 | `SessionStatus` / `StopSession` | the supervisor reaps its own children, so it is the only process that can answer |
+| `SignalSession(pid, signal)` | delivers one signal (1–64) to the process of a session it spawned, not its group; answers with its `SessionStatus`. A pid it never spawned is denied, and an exited session is reported, not signalled |
 | `CreateScope` / `AttachPid` / `DestroyScope` | cgroup v2 scopes inside the subtree it owns |
 
 Requested resource limits are **clamped down to policy ceilings, not rejected** — a session that asks

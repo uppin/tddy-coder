@@ -164,6 +164,20 @@ impl SupervisorService for SupervisorServiceImpl {
         Ok(Response::new(protocol::session_status_to_wire(status)))
     }
 
+    async fn signal_session(
+        &self,
+        request: Request<wire::SignalSessionRequest>,
+    ) -> Result<Response<wire::SessionStatus>, Status> {
+        self.authorize_peer()?;
+        let request = request.into_inner();
+        let pid = request.session.unwrap_or_default().pid;
+        let status = self
+            .surface
+            .signal_session(pid, request.signal)
+            .map_err(protocol::status_from_error)?;
+        Ok(Response::new(protocol::session_status_to_wire(status)))
+    }
+
     async fn create_scope(
         &self,
         request: Request<wire::CreateScopeRequest>,

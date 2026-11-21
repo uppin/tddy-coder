@@ -1056,6 +1056,38 @@ pub fn spawn_as_user(
     coder_log_config_yaml: Option<&str>,
     startup: StartupWatch,
 ) -> anyhow::Result<SpawnResult> {
+    spawn_as_user_reporting(
+        os_user,
+        tool_path,
+        tddy_data_dir,
+        repo_path,
+        livekit,
+        opts,
+        child_log_level,
+        child_log_format,
+        coder_log_config_yaml,
+        startup,
+        None,
+    )
+}
+
+/// [`spawn_as_user`], handing the child's end to `on_exit` from the wait thread that reaps it —
+/// see [`crate::child_exit`].
+#[cfg(unix)]
+#[allow(clippy::too_many_arguments)] // Mirrors `spawn_as_user`, plus the exit report.
+pub(crate) fn spawn_as_user_reporting(
+    os_user: &str,
+    tool_path: &str,
+    tddy_data_dir: &Path,
+    repo_path: &Path,
+    livekit: &LiveKitCreds,
+    opts: SpawnOptions<'_>,
+    child_log_level: &str,
+    child_log_format: &str,
+    coder_log_config_yaml: Option<&str>,
+    startup: StartupWatch,
+    on_exit: Option<crate::child_exit::OnExit>,
+) -> anyhow::Result<SpawnResult> {
     let SessionChildPlan {
         program: resolved_tool_path,
         args,
@@ -1214,21 +1246,7 @@ pub fn spawn_as_user(
         ));
     }
 
-    let session_id_exit = session_id.clone();
-    std::thread::spawn(move || match child.wait() {
-        Ok(status) => log::info!(
-            "child exited session_id={} pid={} status={}",
-            session_id_exit,
-            pid,
-            status
-        ),
-        Err(e) => log::warn!(
-            "child wait failed session_id={} pid={} err={}",
-            session_id_exit,
-            pid,
-            e
-        ),
-    });
+    crate::child_exit::reap_in_background(child, session_id.clone(), pid, on_exit);
 
     Ok(SpawnResult {
         session_id: session_id.clone(),
@@ -1253,6 +1271,24 @@ pub fn spawn_as_user(
     _child_log_format: &str,
     _coder_log_config_yaml: Option<&str>,
     _startup: StartupWatch,
+) -> anyhow::Result<SpawnResult> {
+    anyhow::bail!("spawn_as_user is only supported on Unix")
+}
+
+#[cfg(not(unix))]
+#[allow(clippy::too_many_arguments)] // Mirrors the #[cfg(unix)] spawn_as_user_reporting signature.
+pub(crate) fn spawn_as_user_reporting(
+    _os_user: &str,
+    _tool_path: &str,
+    _tddy_data_dir: &Path,
+    _repo_path: &Path,
+    _livekit: &LiveKitCreds,
+    _opts: SpawnOptions<'_>,
+    _child_log_level: &str,
+    _child_log_format: &str,
+    _coder_log_config_yaml: Option<&str>,
+    _startup: StartupWatch,
+    _on_exit: Option<crate::child_exit::OnExit>,
 ) -> anyhow::Result<SpawnResult> {
     anyhow::bail!("spawn_as_user is only supported on Unix")
 }

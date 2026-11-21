@@ -6,17 +6,18 @@
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use super::wire::{RequestId, WorkerEnvelope, WorkerLine};
 use super::{run_spawn, CloneRequest, WorkerEvent, WorkerRequest, WorkerResponse};
+use crate::child_exit::ChildExit;
 use crate::git_progress::GitProgress;
 
 /// Serve requests until the request pipe closes, then return once every request still running has
 /// written its result.
 pub(super) fn serve(request_reader: File, response_writer: File) {
     log::info!("spawn_worker: started, waiting for requests");
-    let response_writer = Mutex::new(response_writer);
+    let response_writer = Arc::new(Mutex::new(response_writer));
     std::thread::scope(|scope| {
         for line in BufReader::new(request_reader).lines() {
             let line = match line {
@@ -33,7 +34,7 @@ pub(super) fn serve(request_reader: File, response_writer: File) {
     });
 }
 
-fn serve_line(line: &str, out: &Mutex<File>) {
+fn serve_line(line: &str, out: &Arc<Mutex<File>>) {
     let envelope: WorkerEnvelope = match serde_json::from_str(line) {
         Ok(envelope) => envelope,
         Err(e) => {
@@ -50,7 +51,14 @@ fn serve_line(line: &str, out: &Mutex<File>) {
     };
     let id = envelope.id;
     let response = match envelope.request {
-        WorkerRequest::Spawn(req) => run_spawn(&req),
+        WorkerRequest::Spawn(req) => {
+            // The wait thread of the child outlives this request, so its report owns the pipe.
+            let pipe = Arc::clone(out);
+            run_spawn(
+                &req,
+                Some(Box::new(move |pid, exit| report_exit(&pipe, id, pid, exit))),
+            )
+        }
         WorkerRequest::Clone(req) => run_clone(
             &req,
             |pid| write_event(out, id, WorkerEvent::Started { pid }),
@@ -85,6 +93,19 @@ fn run_clone(
             message: e.to_string(),
         },
     }
+}
+
+/// Report that the child spawned for request `id` ended, from the thread that reaped it.
+fn report_exit(out: &Mutex<File>, id: RequestId, pid: u32, exit: ChildExit) {
+    write_event(
+        out,
+        id,
+        WorkerEvent::Exited {
+            pid,
+            code: exit.code,
+            signal: exit.signal,
+        },
+    );
 }
 
 /// Report an event of request `id`, ahead of its result.

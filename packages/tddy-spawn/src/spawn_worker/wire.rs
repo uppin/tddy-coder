@@ -40,4 +40,12 @@ pub enum WorkerEvent {
     /// A throttled line of the clone's progress.
     #[serde(rename = "clone_progress")]
     CloneProgress(crate::git_progress::GitProgress),
+    /// The request's spawned child ended: the worker's wait thread reaped it. Written after the
+    /// request's result, for as long as the worker holds the child — see [`crate::child_exit`].
+    #[serde(rename = "exited")]
+    Exited {
+        pid: u32,
+        code: Option<i32>,
+        signal: Option<i32>,
+    },
 }

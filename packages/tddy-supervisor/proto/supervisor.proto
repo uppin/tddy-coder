@@ -41,6 +41,10 @@ service SupervisorService {
   // resolve to the method of that name declared just above rather than to the message.
   rpc SessionStatus(SessionRef) returns (.supervisor.SessionStatus);
   rpc StopSession(SessionRef) returns (.supervisor.SessionStatus);
+  // Deliver one signal to a session the supervisor spawned (SIGINT to interrupt an agent, SIGTERM to
+  // ask it to end), to its process alone, not its group. A pid the supervisor did not spawn is
+  // refused exactly as SessionStatus refuses it. Returns the session's state as of the request.
+  rpc SignalSession(SignalSessionRequest) returns (.supervisor.SessionStatus);
   // Spawn a binary as another OS user and stream its stderr: the first event names its pid
   // (StopSession stops it), then one Line per line it writes to stderr (split on `\r` as well as
   // `\n`), then Exited with its exit and the last lines of stderr. The same user, exec and
@@ -185,6 +189,12 @@ message StreamedExited {
 // Addresses one session by the pid the supervisor reported when it spawned it.
 message SessionRef {
   uint32 pid = 1;
+}
+
+// A signal for the session `session` names; `signal` is the POSIX number (SIGINT = 2, SIGTERM = 15).
+message SignalSessionRequest {
+  SessionRef session = 1;
+  int32 signal = 2;
 }
 
 enum SessionState {

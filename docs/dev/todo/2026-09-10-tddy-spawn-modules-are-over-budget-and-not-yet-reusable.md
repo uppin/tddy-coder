@@ -70,3 +70,10 @@ pair honest in the interval by **relocating rather than deleting** the guard tes
 Still open. `spawner.rs` only lost code here (its passwd lookups and three `pre_exec` closures moved to
 `tddy_daemon_kernel::privilege_drop` / `pre_exec_stages`); it was not split, because later
 `#start-progress` nodes also modify it.
+
+## Measurement history
+
+| Date | File | Lines | Note |
+|---|---|---:|---|
+| 2026-11-20 | `spawner.rs` | 2,152 → 2,188 (+36) | `#session-liveness` 3/4 (#960): the tool spawn reports its child's end, so `spawn_as_user` gained a reporting twin `spawn_as_user_reporting` (the 195-line body moved there and **shrank to 182**: the wait thread is `child_exit::reap_in_background`), a 14-line `spawn_as_user` that forwards to it, and the 19-line non-Unix stub. The growth is the two forwarding signatures. `SpawnOptions` and `StartupWatch` are `Copy`, so the exit report cannot ride in them without losing that; folding it in is the way to take the +36 back |
+| 2026-11-20 | `spawn_worker.rs` | 516 → 527 (+11) | the same node: `WorkerEvent::Exited`, and `run_spawn` (69 → 46 lines) split into `livekit_creds_of` and `spawn_options_of`. Still over budget |
