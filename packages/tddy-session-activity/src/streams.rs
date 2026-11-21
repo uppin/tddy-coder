@@ -8,7 +8,7 @@
 //! subscription's whole life, and all four lose the daemon nothing by living here: none of them
 //! touches a peer, a room or a config.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use prost::Message as _;
 use tddy_core::agent_activity::AgentActivityRecord;
@@ -241,32 +241,35 @@ pub async fn relay_acp_replay(
     mut seq_by_tool_call: HashMap<String, u64>,
 ) {
     loop {
-        // Wait for either feed, then take everything both already hold, so what arrived together
-        // is ordered by its recorded timestamp — the order a later re-read gives it — rather than
-        // by which receiver the scheduler polled first. A message frame wins a tie, as it does in
-        // `read_session_transcript`.
-        let mut batch: Vec<(i64, bool, AcpAgentMessage)> = Vec::new();
+        // Wait for either feed, then take everything both already hold, and merge the two by
+        // recorded timestamp — the order a later re-read gives them — rather than by which receiver
+        // the scheduler polled first. A message frame wins a tie, as it does in
+        // `read_session_transcript`. Each feed keeps its own order: the hub's records are numbered
+        // in the order they were published (a refinement after the call it refines, the next call
+        // after both), whatever their timestamps say.
+        let mut records: VecDeque<(i64, AcpAgentMessage)> = VecDeque::new();
+        let mut messages: VecDeque<(i64, AcpAgentMessage)> = VecDeque::new();
         tokio::select! {
             received = records_rx.recv() => match received {
-                Ok(record) => batch.push(record_entry(&record)),
+                Ok(record) => records.push_back(record_entry(&record)),
                 Err(RecvError::Lagged(_)) => {}
                 Err(RecvError::Closed) => break,
             },
             received = frames_rx.recv() => match received {
-                Ok(frame) => batch.push(frame_entry(frame)),
+                Ok(frame) => messages.push_back(frame_entry(frame)),
                 Err(RecvError::Lagged(_)) => {}
                 Err(RecvError::Closed) => break,
             },
         }
         while let Ok(record) = records_rx.try_recv() {
-            batch.push(record_entry(&record));
+            records.push_back(record_entry(&record));
         }
         while let Ok(frame) = frames_rx.try_recv() {
-            batch.push(frame_entry(frame));
+            messages.push_back(frame_entry(frame));
         }
-        batch.sort_by_key(|(at, is_record, _)| (*at, *is_record));
+        let batch = merge_by_timestamp(records, messages);
 
-        for (_, _, frame) in batch {
+        for frame in batch {
             let seq = match tddy_service::acp_replay::tool_call_id_of(&frame) {
                 Some(id) => *seq_by_tool_call.entry(id.to_string()).or_insert_with(|| {
                     let seq = next_seq;
@@ -286,23 +289,38 @@ pub async fn relay_acp_replay(
     }
 }
 
-/// A hub record as a batch entry: its replay frame, flagged as a record.
-fn record_entry(record: &AgentActivityRecord) -> (i64, bool, AcpAgentMessage) {
+/// A hub record as a batch entry: its replay frame and the time it was recorded.
+fn record_entry(record: &AgentActivityRecord) -> (i64, AcpAgentMessage) {
     let frame = tddy_service::acp_replay::frame_for_agent_activity(record);
-    (
-        tddy_service::acp_replay::frame_timestamp(&frame),
-        true,
-        frame,
-    )
+    (tddy_service::acp_replay::frame_timestamp(&frame), frame)
 }
 
 /// A published message frame as a batch entry.
-fn frame_entry(frame: AcpAgentMessage) -> (i64, bool, AcpAgentMessage) {
-    (
-        tddy_service::acp_replay::frame_timestamp(&frame),
-        false,
-        frame,
-    )
+fn frame_entry(frame: AcpAgentMessage) -> (i64, AcpAgentMessage) {
+    (tddy_service::acp_replay::frame_timestamp(&frame), frame)
+}
+
+/// Merge the records and the message frames that arrived together, each kept in its own order: a
+/// message goes ahead of the next record when it was recorded no later than that record.
+fn merge_by_timestamp(
+    mut records: VecDeque<(i64, AcpAgentMessage)>,
+    mut messages: VecDeque<(i64, AcpAgentMessage)>,
+) -> Vec<AcpAgentMessage> {
+    let mut merged = Vec::with_capacity(records.len() + messages.len());
+    loop {
+        let message_first = match (messages.front(), records.front()) {
+            (Some((message_at, _)), Some((record_at, _))) => message_at <= record_at,
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (None, None) => return merged,
+        };
+        let next = if message_first {
+            messages.pop_front()
+        } else {
+            records.pop_front()
+        };
+        merged.extend(next.map(|(_, frame)| frame));
+    }
 }
 
 /// Count-only relay task for `StreamAcpReplay`'s `CountThenLive` mode: each **newly-seen** tool
