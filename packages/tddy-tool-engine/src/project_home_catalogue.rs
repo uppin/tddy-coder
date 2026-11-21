@@ -1,3 +1,4 @@
+use crate::base_freshness_tools::base_freshness_tool_defs;
 use crate::catalog::{tool_catalog, ToolDef};
 use crate::project_home_answer_tools::{
     project_home_answer_tool_defs, ANSWER_SESSION_PERMISSION, ANSWER_SESSION_QUESTION,
@@ -190,6 +191,7 @@ pub(crate) fn project_home_catalog_with(start_schema: Value) -> Vec<ToolDef> {
         .chain(stack_tool_defs())
         .chain(stack_git_tool_defs())
         .chain(session_message_tool_defs())
+        .chain(base_freshness_tool_defs())
         .collect()
 }
 

@@ -19,6 +19,7 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use tddy_session_tool_client::SessionExecToolAnswer;
+use tddy_tool_engine::base_freshness_tools::base_freshness_tool_defs;
 use tddy_tool_engine::project_home_git_tools::project_home_git_tool_defs;
 use tddy_tool_engine::project_home_tools::project_home_tool_defs;
 use tddy_tool_engine::session_message_tools::session_message_tool_defs;
@@ -67,6 +68,7 @@ pub fn project_home_remote_tool_defs() -> Vec<RemoteToolDef> {
         .chain(stack_tool_defs())
         .chain(stack_git_tool_defs())
         .chain(session_message_tool_defs())
+        .chain(base_freshness_tool_defs())
         .map(|tool| RemoteToolDef {
             name: tool.name,
             description: tool.description,
@@ -210,6 +212,8 @@ mod tests {
                 "pr_spawn_child",
                 "PostSessionMessage",
                 "ReadSessionMessages",
+                "CheckBaseFreshness",
+                "RefreshHome",
             ])
         );
     }

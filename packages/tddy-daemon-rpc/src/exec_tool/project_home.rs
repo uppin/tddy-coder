@@ -49,6 +49,7 @@ use tddy_session_lifecycle::connection_service::PeerRoutedActivity;
 use tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore;
 use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
 use tddy_terminal_rpc::TerminalControl;
+use tddy_tool_engine::base_freshness_tools::is_base_freshness_tool;
 use tddy_tool_engine::catalog::ToolDef;
 use tddy_tool_engine::project_home_answer_tools::{
     execute_project_home_answer_tool, is_project_home_answer_tool,
@@ -132,6 +133,9 @@ impl ExecToolRpcHandler {
         }
         if is_stack_tool(&req.tool_name) {
             return self.run_stack_tool(req, sessions_base).await;
+        }
+        if is_base_freshness_tool(&req.tool_name) {
+            return self.run_base_freshness_tool(req, sessions_base).await;
         }
         if is_session_message_tool(&req.tool_name) {
             return self.run_session_message_tool(req, sessions_base).await;
