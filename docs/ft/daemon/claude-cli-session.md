@@ -851,7 +851,9 @@ decision — the table above — is written into `.tddy/answers/<nonce>` through
 into a temporary file first and then moved into place, so the hook never reads half an answer. No
 decision (`NO_ORCHESTRATOR`, `TIMED_OUT`, `cancelled`, a refused report) is an **empty** file, which
 ends the hook at once with no output, and Claude asks in its terminal. On Coder each answer costs one
-shell round trip (about 6–9 s) before the agent continues.
+shell round trip (about 6–9 s) before the agent continues. The hook removes only an answer it reads:
+an answer that lands after the hook gave up is removed by the daemon once the hook's wait
+(`answer_wait_secs + AWAIT_CLIENT_MARGIN_SECS`, plus a few seconds for its last poll) has passed.
 
 The `PreToolUse` hook matched to `AskUserQuestion` is installed there the same way, as a waiting
 hook with the same command, wait and timeout. Its line is reported like a local question — the

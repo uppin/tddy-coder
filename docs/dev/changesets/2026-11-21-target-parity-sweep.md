@@ -1,9 +1,9 @@
-# Changeset: the `#target-parity` sweep — split the files the stack left oversized, and clear a late answer
+# 2026-11-21 — The `#target-parity` sweep: a late answer is cleared from the target, and two engine refusals are recorded
 
 **Date**: 2026-11-21
-**Status**: 🚧 In Progress
-**Type**: Refactor
-**Complexity**: 3 — two engine-driven splits in two packages plus one small behaviour fix with its acceptance test
+**Status**: ✅ Complete
+**Type**: Bug Fix
+**Complexity**: 2 — one small behaviour fix with its acceptance test; the planned splits were refused by the engine and deferred
 
 ## Affected Packages
 
@@ -41,6 +41,10 @@ developer:
    hook's window — at once when the window has already passed. The sink is told the session's
    `answer_wait_secs` (`ActivityHookSink::answering_through` takes it), so the window is the same
    number the hook was rendered with.
+   - Fix as shipped: `remote_hook_answer::hold_and_answer` sleeps until `HeldHook::window_ends`
+     (`answer_wait_secs + AWAIT_CLIENT_MARGIN_SECS + 3 s` from when the line is handled; the 3 s
+     cover the hook's last extra poll) and runs `rm -f` on the answer. `tddy-session-driver`'s
+     `SessionHooks` keeps its spec's `answer_wait_secs` for the same call.
    - Test: `remote_hooks_acceptance.rs` — `an_answer_written_after_the_hook_gave_up_is_not_left_on_the_target`,
      an `AnOrchestrator` that answers after a short hook wait; asserts no answer file is left once the
      window has passed.
@@ -58,14 +62,25 @@ Recorded before the first move, re-run after the last (by test name):
 
 - [x] **Plan**: changeset, baseline
 - [x] **Stale answer**: failing acceptance test, then the fix (commit `805085c8f`)
-- [ ] 🔴 **Split remote_hook_follower.rs** — refused by the engine (below)
-- [ ] 🔴 **Split service.rs** (seams B, C) — refused by the engine (below)
-- [ ] **Baseline re-run**, clippy `-D warnings`, fmt
-- [ ] **Docs**: records closed or narrowed, changesets and changelogs wrapped
+- [ ] **Split remote_hook_follower.rs** — refused by the engine; **deferred by the developer**
+- [ ] **Split service.rs** (seams B, C) — refused by the engine; **deferred by the developer**
+- [x] **Gates**: `cargo clippy -p tddy-agent-launch -p tddy-session-driver --all-targets -- -D warnings` and `cargo fmt --check` clean
+- [x] **Docs**: both records kept open with today's measurement and the refusal; engine defect recorded
 
-## Engine refusals (2026-11-21) — waiting for the developer
+## Decision (developer, 2026-11-21)
 
-Both splits stopped at `restructure check --deep`; nothing was written. Plans in `tmp/restructure/`.
+Ship the stale-answer fix; **splits deferred by the user, engine refusals recorded**. No hand moves.
+The records stay open, set to "deferred until the engine is fixed":
+`packages/tddy-agent-launch/docs/code-issues/oversized-file-remote-hook-follower.md` (517 → 526 with
+this fix) and `packages/tddy-worktree-service/docs/code-issues/oversized-file-service.md` (831,
+unchanged; seams B and C alone land near 590, so a third seam is needed). The engine defects are in
+`docs/dev/todo/2026-11-21-restructure-engine-refuses-the-target-parity-splits.md`. The timing failure
+`remote_agent_launch_acceptance::an_agent_on_a_target_that_never_answers_fails_the_start_after_its_bound`
+is left alone by the same decision.
+
+## Engine refusals (2026-11-21)
+
+Both splits stopped at `restructure check --deep`; nothing was written. Plans were in `tmp/restructure/` (git-ignored).
 
 1. `follower.jsonl` (`move_item` of the delivery side into `remote_hook_delivery`, `reexport: outside`,
    and again with `named`):
