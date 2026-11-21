@@ -298,6 +298,12 @@ impl TerminalControl for CliManagerTerminalControl {
             .map(|lease| lease.holder_screen_id)
     }
 
+    async fn release(&self, session_id: &str, control_token: &str) -> bool {
+        self.manager
+            .release_control(session_id, control_token)
+            .await
+    }
+
     fn subscribe(&self) -> broadcast::Receiver<ControlChange> {
         self.manager.subscribe_control()
     }

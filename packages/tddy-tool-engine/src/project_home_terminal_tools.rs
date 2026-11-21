@@ -34,6 +34,14 @@ use crate::ToolOutcome;
 pub const READ_SESSION_TERMINAL: &str = "ReadSessionTerminal";
 pub const CLAIM_SESSION_TERMINAL: &str = "ClaimSessionTerminal";
 pub const SEND_SESSION_KEYS: &str = "SendSessionKeys";
+/// Give back a terminal this session claimed (`#orchestra` 7/9).
+pub const RELEASE_SESSION_TERMINAL: &str = "ReleaseSessionTerminal";
+
+/// [`RELEASE_SESSION_TERMINAL`]'s definition.
+pub fn release_session_terminal_tool_def() -> ToolDef {
+    // TODO(orchestrator-delivery): implement
+    unimplemented!("release_session_terminal_tool_def")
+}
 
 /// The screen id a project-home session holds a terminal's control lease under.
 ///
@@ -159,6 +167,20 @@ pub trait ProjectHomeTerminalPort: ProjectHomePort {
         screen_id: &str,
         bytes: Vec<u8>,
     ) -> Result<(), String>;
+
+    /// Give back `target`'s terminal lease that `screen_id` holds, forgetting its token. An error
+    /// names why nothing was released: this session never claimed it, or another screen holds it
+    /// now (`#orchestra` 7/9).
+    ///
+    /// The default refuses, so a port that holds no claims need not name it.
+    async fn release_terminal(
+        &self,
+        target: &SessionTarget,
+        screen_id: &str,
+    ) -> Result<(), String> {
+        let _ = (target, screen_id);
+        Err("this host holds no terminal claims".to_string())
+    }
 }
 
 #[derive(Deserialize)]
