@@ -6,7 +6,7 @@
 //! it lies inside a root, after symlinks are resolved; anything else is refused with a message that
 //! names `RequestPathAccess`, the tool that asks the operator for more.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::ToolOutcome;
 
@@ -27,8 +27,13 @@ pub struct ReadReach {
 
 impl ReadReach {
     /// A reach whose relative paths resolve under `home` (the caller's home worktree, always in
-    /// reach) and whose absolute paths may lie under `home` or any of `roots`.
+    /// reach) and whose absolute paths may lie under `home` or any of `roots`. Roots are compared
+    /// with symlinks resolved, so each is canonicalised here when it exists.
     pub fn new(home: PathBuf, roots: Vec<PathBuf>) -> Self {
+        let roots = roots
+            .into_iter()
+            .map(|root| root.canonicalize().unwrap_or(root))
+            .collect();
         Self { home, roots }
     }
 
@@ -42,27 +47,136 @@ impl ReadReach {
         &self.roots
     }
 
-    /// Whether `path` (absolute, symlinks resolved) lies under the home or a root.
+    /// Whether `path` (absolute, symlinks resolved) lies under the home or a root. Containment is
+    /// by path component, so `/srv/repo-sibling` is not inside `/srv/repo`.
     pub fn contains(&self, path: &Path) -> bool {
-        // TODO(path-reach): implement
-        let _ = path;
-        unimplemented!("ReadReach::contains")
+        path.starts_with(&self.home) || self.roots.iter().any(|root| path.starts_with(root))
     }
 
     /// Resolve a tool's path argument: relative under the home, absolute as given, then canonical
     /// and inside reach — or a refusal naming [`REQUEST_PATH_ACCESS_TOOL`].
     pub fn resolve(&self, arg_path: &str) -> Result<PathBuf, String> {
-        // TODO(path-reach): implement
-        let _ = arg_path;
-        unimplemented!("ReadReach::resolve")
+        let candidate = if Path::new(arg_path).is_absolute() {
+            PathBuf::from(arg_path)
+        } else {
+            self.home.join(arg_path)
+        };
+        if candidate
+            .components()
+            .any(|component| component == Component::ParentDir)
+        {
+            return Err(format!(
+                "path contains '..' component: {}",
+                candidate.display()
+            ));
+        }
+        // The nearest existing ancestor decides: a path that does not exist yet is judged by the
+        // directory it would be created in, and a symlink anywhere on the way is followed.
+        let mut existing = candidate.clone();
+        while !existing.exists() {
+            if !existing.pop() {
+                return Err(self.refusal(&candidate));
+            }
+        }
+        let canonical_ancestor = existing
+            .canonicalize()
+            .map_err(|e| format!("cannot canonicalize path: {e}"))?;
+        if !self.contains(&canonical_ancestor) {
+            return Err(self.refusal(&candidate));
+        }
+        if existing == candidate {
+            return Ok(canonical_ancestor);
+        }
+        let missing = candidate
+            .strip_prefix(&existing)
+            .map_err(|e| format!("cannot resolve path: {e}"))?;
+        Ok(canonical_ancestor.join(missing))
+    }
+
+    fn refusal(&self, path: &Path) -> String {
+        let roots: Vec<String> = std::iter::once(&self.home)
+            .chain(&self.roots)
+            .map(|root| root.display().to_string())
+            .collect();
+        format!(
+            "{} is outside the paths this session may read ({}); ask the operator for it with {}",
+            path.display(),
+            roots.join(", "),
+            REQUEST_PATH_ACCESS_TOOL
+        )
     }
 }
 
 /// Run `Read`, `Grep` or `Glob` within `reach`. Any other tool is an error outcome.
 pub async fn execute_in_reach(reach: &ReadReach, tool_name: &str, args_json: &str) -> ToolOutcome {
-    // TODO(path-reach): implement
-    let _ = (reach, tool_name, args_json);
-    unimplemented!("execute_in_reach")
+    let args: serde_json::Value = match serde_json::from_str(args_json) {
+        Ok(v) => v,
+        Err(e) => return ToolOutcome::err(format!("invalid args_json: {e}")),
+    };
+    match tool_name {
+        "Read" => read_in_reach(reach, &args),
+        "Grep" => grep_in_reach(reach, &args).await,
+        "Glob" => glob_in_reach(reach, &args),
+        other => ToolOutcome::err(format!("{other} is not answered within a read reach")),
+    }
+}
+
+fn read_in_reach(reach: &ReadReach, args: &serde_json::Value) -> ToolOutcome {
+    let Some(path) = args.get("path").and_then(|v| v.as_str()) else {
+        return ToolOutcome::err("Read: missing 'path' argument");
+    };
+    match reach.resolve(path) {
+        Ok(resolved) => crate::read_resolved(&resolved, args),
+        Err(e) => ToolOutcome::err(format!("Read: {e}")),
+    }
+}
+
+async fn grep_in_reach(reach: &ReadReach, args: &serde_json::Value) -> ToolOutcome {
+    let target = match args.get("path").and_then(|v| v.as_str()) {
+        None => ".".to_string(),
+        Some(path) => match reach.resolve(path) {
+            Ok(resolved) => resolved.display().to_string(),
+            Err(e) => return ToolOutcome::err(format!("Grep: {e}")),
+        },
+    };
+    crate::search_tools::grep_target(reach.home(), &target, args).await
+}
+
+fn glob_in_reach(reach: &ReadReach, args: &serde_json::Value) -> ToolOutcome {
+    let Some(pattern) = args.get("pattern").and_then(|v| v.as_str()) else {
+        return ToolOutcome::err("Glob: missing 'pattern' argument");
+    };
+    if let Err(e) = reach.resolve(&literal_prefix(pattern)) {
+        return ToolOutcome::err(format!("Glob: {e}"));
+    }
+    // An entry that is a symlink out of reach is dropped, not listed.
+    crate::search_tools::glob_where(reach.home(), args, |entry| {
+        entry
+            .canonicalize()
+            .map(|canonical| reach.contains(&canonical))
+            .unwrap_or(false)
+    })
+}
+
+/// The leading components of a glob `pattern` that hold no wildcard: the directory the match
+/// starts from. A pattern that starts with a wildcard has none, which is the home itself.
+fn literal_prefix(pattern: &str) -> String {
+    let mut prefix = PathBuf::new();
+    for component in Path::new(pattern).components() {
+        if component
+            .as_os_str()
+            .to_string_lossy()
+            .contains(['*', '?', '[', '{'])
+        {
+            break;
+        }
+        prefix.push(component);
+    }
+    if prefix.as_os_str().is_empty() {
+        ".".to_string()
+    } else {
+        prefix.display().to_string()
+    }
 }
 
 #[cfg(test)]
