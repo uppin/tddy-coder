@@ -70,8 +70,8 @@ A Claude started in an agent tab fires the session's hooks. Its prompts and repl
 
 ## Scope
 
-- [ ] Prompt and reply frames written from the status report
-- [ ] Only the session's own conversation
+- [x] Prompt and reply frames written from the status report
+- [x] Only the session's own conversation
 - [ ] Feature doc updated through the wrap
 
 ## Technical Changes
@@ -87,9 +87,9 @@ Both are appended as `user_message_chunk` / `agent_message_chunk` frames and rep
 ## Acceptance Tests
 
 `packages/tddy-session-activity/tests/claude_cli_transcript_messages.rs`:
-- [ ] `the_prompt_and_the_agents_reply_reach_the_transcript` (the reproduction)
-- [ ] `a_tool_call_keeps_its_place_between_the_prompt_and_the_reply`
-- [ ] `a_stop_with_no_reply_text_adds_no_agent_message`
+- [x] `the_prompt_and_the_agents_reply_reach_the_transcript` (the reproduction)
+- [x] `a_tool_call_keeps_its_place_between_the_prompt_and_the_reply`
+- [x] `a_stop_with_no_reply_text_adds_no_agent_message`
 - [x] `a_prompt_from_another_conversation_is_not_added` — a **guard**: green today, must stay green. "The session's own conversation" is the last `agent_conversations` entry's id, or the session id when none is recorded (Claude runs with `--session-id` = the session id)
 
 ## Decisions & Trade-offs
@@ -106,8 +106,8 @@ Both are appended as `user_message_chunk` / `agent_message_chunk` frames and rep
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
