@@ -54,35 +54,10 @@ deliberately skips.
 the CI result for everything else. Never claim whole-workspace green from a local run, and never
 report a full-repo run you did not actually complete.
 
-### Watching GitHub: one rate limit shared by everything
-
-Every `gh` call made by any agent, subagent, orchestrator, or loop uses the **operator's single
-GitHub login**. Superset, Coderplex, Warp, and the daemon use it too. The limit is **5,000 REST
-requests/hour for all of them combined**. When it reaches zero, every session loses CI and PR access
-for up to an hour. On 2026-11-21 one session used the whole hour in 32 minutes with stacked
-`gh run watch` processes.
-
-- **Never run `gh run watch` with its default interval.** It polls every 3 s and costs about **50
-  REST requests a minute** for each watcher. To wait for CI, use `scripts/ci-status.sh --watch`
-  (`gh pr checks --watch`, GraphQL), or `gh run watch -i 30` if you need one run.
-- **A wait that outlasts your tool timeout must start in the background** (`run_in_background`),
-  wrapped in `timeout <secs>`. A foreground command that times out is **not killed**: the harness
-  may move it to the background, where it keeps polling.
-- **One watcher per run or PR.** Before starting a watch, check that none is running for that target
-  (`pgrep -fl "gh run watch <id>"`, `pgrep -fl "gh pr checks <N>"`, or your own background tasks).
-  If one is running, read its output instead of starting another. Stop the watchers you started
-  once you have the result.
-- **Hand-written poll loops sleep ≥ 60 s**, poll **one** target per iteration where possible, and
-  have an end (`timeout`, an iteration cap, or a terminal state). Do not loop `gh run view` or
-  `gh api` over many runs or PRs every cycle.
-- **Bulk reads are a budget decision.** A scan such as `gh run view --log-failed` across 40 runs
-  costs hundreds of requests. Narrow it first, for example with `gh run list --limit` and a filter
-  on the failing job, then fetch logs only for the runs that matter.
-- **Prefer GraphQL-backed reads** (`gh pr view --json …`, `gh pr checks`), which use a separate
-  bucket, over REST loops (`gh run view`, `gh api repos/…`).
-- **On `API rate limit exceeded`, stop all GitHub polling.** Run `gh api rate_limit` (free) to read
-  `core.reset`, schedule **one** retry after that time, and tell the operator. Do not retry in a
-  loop; every retry fails and nothing useful happens until the reset.
+**Watch GitHub sparingly.** Every agent shares the operator's 5,000 REST requests/hour. To wait
+for CI, run `scripts/ci-status.sh --watch` in the background under `timeout`, never `gh run watch`
+(it polls every 3 s). Keep one watcher per PR. A foreground command that times out keeps running,
+so do not start another one.
 
 ### Setup (one-time)
 
