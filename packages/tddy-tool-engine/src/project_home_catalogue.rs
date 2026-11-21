@@ -34,6 +34,7 @@ use crate::project_home_watch_tools::{
 };
 use crate::project_home_worktree_tools::{worktree_tool_defs, GET_WORKTREE, LIST_WORKTREES};
 use crate::read_only::is_project_home_allowed_tool;
+use crate::session_file_tools::session_file_tool_defs;
 use crate::session_follow::{
     session_follow_tool_defs, READ_SESSION_ACTIVITY, READ_SESSION_TRANSCRIPT,
 };
@@ -190,6 +191,7 @@ pub(crate) fn project_home_catalog_with(start_schema: Value) -> Vec<ToolDef> {
         .chain(stack_tool_defs())
         .chain(stack_git_tool_defs())
         .chain(session_message_tool_defs())
+        .chain(session_file_tool_defs())
         .collect()
 }
 
