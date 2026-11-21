@@ -23,6 +23,7 @@ pub mod project_home_turn_tools;
 pub mod project_home_watch_stream_tools;
 pub mod project_home_watch_tools;
 pub mod project_home_worktree_tools;
+pub mod reach;
 pub mod read_only;
 pub(crate) mod read_window;
 pub(crate) mod restructure_tools;
