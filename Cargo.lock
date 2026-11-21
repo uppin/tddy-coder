@@ -12955,6 +12955,7 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tddy-accounts",
+ "tddy-actions",
  "tddy-agent-launch",
  "tddy-changeset",
  "tddy-code-restructuring",

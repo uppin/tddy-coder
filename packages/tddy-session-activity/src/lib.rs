@@ -22,6 +22,7 @@ pub mod answers;
 pub mod hook_decision;
 pub mod hook_request;
 pub mod orchestrator_presence;
+pub mod path_grants;
 pub mod pending_answers;
 pub mod pending_elicitation;
 pub mod pending_question_notice;

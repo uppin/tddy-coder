@@ -17,6 +17,15 @@ const GREP_BUDGET: Duration = Duration::from_secs(30);
 const GREP_CONTEXT_LINE_CEILING: u64 = 50;
 
 pub(crate) async fn tool_grep(root: &Path, args: &serde_json::Value) -> ToolOutcome {
+    grep_target(root, ".", args).await
+}
+
+/// `Grep` of `target` (a path `rg` is handed as given) with `root` as the process's cwd.
+pub(crate) async fn grep_target(
+    root: &Path,
+    target: &str,
+    args: &serde_json::Value,
+) -> ToolOutcome {
     let pattern = match args.get("pattern").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => return ToolOutcome::err("Grep: missing 'pattern' argument"),
@@ -43,7 +52,7 @@ pub(crate) async fn tool_grep(root: &Path, args: &serde_json::Value) -> ToolOutc
     if let Some(flag) = after_flag.as_deref() {
         argv.extend(["-A", flag]);
     }
-    argv.extend(["-e", pattern, "."]);
+    argv.extend(["-e", pattern, target]);
 
     let output =
         contained_shell::run_contained_argv("rg", &argv, root, &[], Some(GREP_BUDGET)).await;
@@ -126,6 +135,15 @@ fn context_line(line_number: u64, text: &str, relation: &str) -> serde_json::Val
 }
 
 pub(crate) fn tool_glob(root: &Path, args: &serde_json::Value) -> ToolOutcome {
+    glob_where(root, args, |_| true)
+}
+
+/// `Glob` keeping only the entries `keep` admits; an absolute pattern is matched as given.
+pub(crate) fn glob_where(
+    root: &Path,
+    args: &serde_json::Value,
+    keep: impl Fn(&Path) -> bool,
+) -> ToolOutcome {
     let pattern = match args.get("pattern").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => return ToolOutcome::err("Glob: missing 'pattern' argument"),
@@ -138,7 +156,7 @@ pub(crate) fn tool_glob(root: &Path, args: &serde_json::Value) -> ToolOutcome {
     match glob::glob(&pattern_str) {
         Ok(entries) => {
             let mut paths = vec![];
-            for entry in entries.flatten() {
+            for entry in entries.flatten().filter(|entry| keep(entry)) {
                 // Strip the root prefix for relative output.
                 let display = entry
                     .strip_prefix(root)

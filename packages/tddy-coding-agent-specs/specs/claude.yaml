@@ -48,6 +48,7 @@ extensions:
       files: [CLAUDE.md, AGENTS.md]
       append_system_prompt: { flag: --append-system-prompt-file }
     hooks: { adapter: claude-settings-local }
+    home_dirs: [".claude"]
     # What a session of this agent offers (`#agent-tools 12/12`): the gates read these, never the
     # agent's name. Unknown words are refused at load.
     conversation: { kind: daemon_session_id, rotation: { ends: { hook: SessionEnd, when: { reason: clear }, id_field: session_id }, begins: { hook: SessionStart, when: { source: clear }, id_field: session_id } } }
