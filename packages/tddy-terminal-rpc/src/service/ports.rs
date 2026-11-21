@@ -258,8 +258,7 @@ impl TerminalKind {
     }
 
     /// What `kind` wrapped in a [`TARGET_WRAPPER_KIND`] wrapper (with `inner` wrappers inside it)
-    /// runs: the login shell only. An agent on a target is `target-agent-tab`'s (`#session-liveness`
-    /// 8/8), refused here naming it.
+    /// runs: the login shell only; an agent on a target is [`Self::on_target_agent`]'s.
     fn on_target(
         kind: &str,
         tmux_session: &str,
@@ -275,8 +274,7 @@ impl TerminalKind {
         match Self::from_request(kind, tmux_session)? {
             TerminalKind::Bash => Ok(TerminalKind::TargetShell),
             _ => Err(Status::invalid_argument(format!(
-                "only the login shell can be wrapped in {TARGET_WRAPPER_KIND:?} here, not {:?}: \
-                 an agent on a target is not started yet",
+                "only the login shell can be wrapped in {TARGET_WRAPPER_KIND:?} here, not {:?}",
                 kind.trim()
             ))),
         }
@@ -289,9 +287,14 @@ impl TerminalKind {
         agent: String,
         inner: &[crate::proto::terminal_session::LaunchNode],
     ) -> Result<TerminalKind, Status> {
-        // TODO(target-agent-tab): implement
-        let _ = (agent, inner);
-        todo!("a target-wrapped agent kind")
+        if let Some(refused) = inner.first() {
+            return Err(Status::invalid_argument(format!(
+                "a terminal cannot be wrapped in {:?} inside {TARGET_WRAPPER_KIND:?}: a target \
+                 wraps an agent alone",
+                refused.kind
+            )));
+        }
+        Ok(TerminalKind::TargetAgent { agent })
     }
 }
 

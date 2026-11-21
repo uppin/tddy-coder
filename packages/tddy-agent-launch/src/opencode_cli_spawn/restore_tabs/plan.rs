@@ -310,9 +310,25 @@ fn target_plan(entry: &TabEntry) -> TabRestore {
 /// conversation when its harness can, fresh otherwise; dropped naming what it is missing, or a node
 /// the agent is recorded wrapping.
 fn target_agent_plan(entry: &TabEntry) -> TabRestore {
-    // TODO(target-agent-tab): implement
-    let _ = entry;
-    todo!("the restore of a target-wrapped agent tab")
+    if entry.launch.len() > 2 {
+        return drop_because(
+            "a target around an agent wrapping anything more is not one this daemon can restore",
+        );
+    }
+    match agent_plan(&entry.launch[1]) {
+        TabRestore::ResumeAgent {
+            harness,
+            conversation_id,
+        } => TabRestore::TargetAgent {
+            harness,
+            resume_conversation: Some(conversation_id),
+        },
+        TabRestore::FreshAgent { harness } => TabRestore::TargetAgent {
+            harness,
+            resume_conversation: None,
+        },
+        dropped => dropped,
+    }
 }
 
 /// The tmux session name and OS user a `tmux` or `tmux-attach` node records.

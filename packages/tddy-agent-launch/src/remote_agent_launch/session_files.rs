@@ -4,7 +4,7 @@ use crate::spec_launch::{plan_host_pty, HostAgent, SpecLaunchError};
 use std::path::Path;
 use tddy_actions::tool::TemplateParams;
 use tddy_coding_agent_specs::slots::RenderedSlots;
-use tddy_remote_shell::FileMode;
+use tddy_remote_shell::{FileMode, RemoteShell};
 
 pub(super) async fn plan_the_launch(
     agent: &HostAgent,
@@ -46,8 +46,16 @@ async fn write_slot_files(
     Ok(())
 }
 
+/// Where a launch's rendered session files are copied to: the target a shell reaches, the session's
+/// worktree there, and the session's directory on this host the files are rendered into.
+pub(super) struct SessionFilesPlace<'a> {
+    pub shell: &'a dyn RemoteShell,
+    pub worktree: &'a Path,
+    pub session_dir: &'a Path,
+}
+
 /// Write every file the plan's argv names under this host's session directory
-/// (`remote.session_dir`) onto the target, and return the plan with those arguments rewritten to
+/// (`place.session_dir`) onto the target, and return the plan with those arguments rewritten to
 /// the target's copies.
 ///
 /// The session directory maps to the worktree's `.tddy/` on the target — the directory that
@@ -57,14 +65,14 @@ async fn write_slot_files(
 /// slot file is left alone, since the slot files were already written at the paths the agent is
 /// told. Only the argv is mapped; an environment value naming a session file is not.
 pub(super) async fn write_rendered_session_files(
-    remote: &RemoteLaunch<'_>,
+    place: &SessionFilesPlace<'_>,
     slot_files: Vec<(std::path::PathBuf, Vec<u8>)>,
     mut plan: crate::spec_launch::HostPtyPlan,
 ) -> Result<crate::spec_launch::HostPtyPlan, RemoteLaunchError> {
-    let on_the_target = remote.worktree.join(".tddy");
+    let on_the_target = place.worktree.join(".tddy");
     for argument in &mut plan.argv {
         let path = Path::new(argument.as_str());
-        let Ok(relative) = path.strip_prefix(remote.session_dir) else {
+        let Ok(relative) = path.strip_prefix(place.session_dir) else {
             continue;
         };
         if !path.is_file() || slot_files.iter().any(|(written, _)| written == path) {
@@ -77,7 +85,7 @@ pub(super) async fn write_rendered_session_files(
             })
         })?;
         let target_path = on_the_target.join(relative).to_string_lossy().into_owned();
-        remote
+        place
             .shell
             .write_file(&target_path, &bytes, FileMode::OwnerOnly)
             .await

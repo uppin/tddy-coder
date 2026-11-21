@@ -9,6 +9,9 @@
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-target-agent-tab.md
 
+use tddy_agent_launch::remote_agent_launch::{launch_agent_tab_on_target, TargetTab};
+use tddy_agent_launch::restore_tabs::{agent_launch_node, new_target_agent_tab, NewTargetAgentTab};
+use tddy_core::tab_roster::{LaunchNode, TabEntry};
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::TerminalLaunch;
 
@@ -23,14 +26,48 @@ impl CliManagerTerminalRoster {
         agent: &str,
         launch: &TerminalLaunch,
     ) -> Result<String, Status> {
-        // TODO(target-agent-tab): implement
-        let _ = (
-            &self.target_shell,
-            &self.coding_agents,
+        let Some(shells) = &self.target_shell else {
+            return Err(Status::failed_precondition(
+                "this daemon starts no tabs on a target",
+            ));
+        };
+        let session_dir = self.session_dir(session_id)?;
+        let target = shells.target_of(&session_dir, &launch.subject)?;
+        let NewTargetAgentTab {
+            agent: tab,
+            conversation_id,
+            resumable,
+        } = new_target_agent_tab(&self.coding_agents, agent, &target).await?;
+        let terminal_id = uuid::Uuid::now_v7().to_string();
+        launch_agent_tab_on_target(
+            &self.manager,
             session_id,
-            agent,
-            launch,
-        );
-        todo!("start an agent tab on the session's target")
+            &terminal_id,
+            TargetTab {
+                shell: target.shell,
+                worktree: &target.worktree,
+                session_dir: &session_dir,
+            },
+            &tab,
+        )
+        .await
+        .map_err(|error| Status::failed_precondition(error.to_string()))?;
+        let chain = vec![
+            LaunchNode::target(),
+            agent_launch_node(agent, &conversation_id, resumable),
+        ];
+        if let Err(error) = self
+            .manager
+            .tab_rosters()
+            .record(&session_dir, TabEntry::new(&terminal_id, chain))
+            .await
+        {
+            // An unrecorded tab could not be restored, and nothing would know to end it.
+            self.manager.stop_terminal(session_id, &terminal_id).await;
+            return Err(Status::internal(format!(
+                "failed to record the tab: {error}"
+            )));
+        }
+        Ok(terminal_id)
     }
 }

@@ -111,7 +111,7 @@ A target agent tab must not hand the target a host path (rendered session files 
 - [x] Create changeset
 - [ ] Create failing acceptance tests / run them (verify they fail) / USER REVIEW
 - [x] TDD Red — failing unit/integration tests
-- [ ] Implementation
+- [x] Implementation
 - [ ] Package documentation, scoped clippy, single-spec Cypress
 
 ## Technical Changes
@@ -161,7 +161,7 @@ After n6, `target` around an agent is refused. `new_agent_tab` resolves the bina
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)

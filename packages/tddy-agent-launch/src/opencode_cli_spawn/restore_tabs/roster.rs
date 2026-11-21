@@ -24,8 +24,9 @@ use tddy_daemon_sandbox::tab_jails::{
 use tddy_service::proto::session::{RestoredTab, RestoredTabOutcome};
 
 use super::new_tab::agent_tab_argv;
+use super::new_target_tab::target_agent_tab;
 use super::plan::{restore_plan, tmux_names, LiveTabs, TabRestore};
-use crate::remote_agent_launch::{launch_tab_on_target, TargetTab};
+use crate::remote_agent_launch::{launch_agent_tab_on_target, launch_tab_on_target, TargetTab};
 use crate::spec_launch::HostCodingAgents;
 use crate::tab_target_shell::TabTargetShell;
 
@@ -339,15 +340,31 @@ async fn restore_target_agent(
     harness: String,
     resume_conversation: Option<String>,
 ) -> anyhow::Result<Restored> {
-    // TODO(target-agent-tab): implement
-    let _ = (
-        restore.tab_target_shell,
-        restore.subject,
-        tab,
-        harness,
-        resume_conversation,
-    );
-    todo!("restore an agent tab on the session's target")
+    let target = restore
+        .tab_target_shell
+        .target_of(restore.session_dir, restore.subject)
+        .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))?;
+    let resumed = resume_conversation.is_some();
+    let conversation = resume_conversation.unwrap_or_else(|| recorded_conversation(tab));
+    let agent = target_agent_tab(restore.coding_agents, &harness, &conversation, resumed)
+        .map_err(|status| anyhow::anyhow!(status.message().to_string()))?;
+    launch_agent_tab_on_target(
+        restore.cli_manager,
+        restore.session_id,
+        &tab.terminal_id,
+        TargetTab {
+            shell: target.shell,
+            worktree: &target.worktree,
+            session_dir: restore.session_dir,
+        },
+        &agent,
+    )
+    .await?;
+    Ok(if resumed {
+        Restored::AsRecorded
+    } else {
+        Restored::Fresh(reopened_fresh_reason(&harness))
+    })
 }
 
 /// Start `terminal` under the tab's recorded id.
