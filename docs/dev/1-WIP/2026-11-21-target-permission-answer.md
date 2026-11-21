@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 5 — four crates (agent-backend, agent-launch, session-activity, tools) plus lifecycle wiring; a daemon-side hold on concurrent follower lines; a delivery-port signature change; the hook's shell protocol is new
-**Stack**: `#target-parity` 1/7 — branch `feature/target-parity/permission-answer`, base `master`
+**Stack**: `#target-parity` 1/7 — branch `feature/target-parity/permission-answer`, base `master` — PR [#969](https://github.com/uppin/tddy-coder/pull/969)
 
 ## Initial Discovery
 
@@ -16,7 +16,9 @@
 - **tddy-agent-launch**: `HookLine` carries the answer nonce; the follower holds for the answer and writes `.tddy/answers/<nonce>`; the answers directory is excluded from git and removed with the log
 - **tddy-session-activity**: `permission_decision_json` moves here from tddy-tools; the hold the follower uses is the one `AwaitQuestionAnswer` uses
 - **tddy-tools**: `session-hook` uses the moved decision builder
-- **tddy-session-lifecycle**: `ActivityHookDelivery` returns the report's `request_id` and serves the hold
+- **tddy-session-lifecycle**: `ActivityHookDelivery` returns the report's `request_id` and serves the hold (adapter landed with the contract)
+- **tddy-session-driver**: its recording `HookReportDelivery` answers "no orchestrator" (adapter landed with the contract)
+- **tddy-coding-agent-specs**: the target render acceptance test now pins the waiting permission hook
 
 ## Related Feature Documentation
 
@@ -104,10 +106,20 @@ The target's settings carry a waiting `PermissionRequest`. Its line reaches the 
 - [ ] `a_permission_request_nobody_answers_leaves_the_target_agent_to_ask_in_its_terminal`
 - [ ] `ending_a_target_session_removes_its_answers_on_the_target`
 
+`packages/tddy-coding-agent-specs/tests/remote_hooks_render_acceptance.rs`:
+- [ ] `claude_code_on_a_target_waits_for_a_permission_answer_in_its_worktree` (replaces `no_hook_that_waits_for_an_answer_is_installed_on_a_target`)
+
 `packages/tddy-agent-backend/src/remote_hook_command.rs` (unit, real `sh`):
 - [ ] `the_waiting_command_prints_the_answer_written_for_its_nonce`
+- [ ] `an_empty_answer_ends_the_waiting_command_at_once_with_no_output`
 - [ ] `the_waiting_command_gives_up_silently_when_no_answer_comes`
 - [ ] `the_waiting_command_names_no_tddy_binary`
+
+`packages/tddy-session-activity/src/hook_decision.rs` (unit): allow, deny with message, no orchestrator → no decision.
+
+`packages/tddy-agent-launch/src/remote_hook_follower.rs` (unit): `a_waiting_hooks_line_carries_its_nonce`.
+
+**Line format of a waiting hook** (approved at review): `<event>@<nonce>\t<token>\t<payload>`; report-only lines are unchanged.
 
 ## Decisions & Trade-offs
 
@@ -121,10 +133,10 @@ The target's settings carry a waiting `PermissionRequest`. Its line reaches the 
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

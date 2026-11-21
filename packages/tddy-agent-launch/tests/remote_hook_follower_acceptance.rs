@@ -68,6 +68,7 @@ impl ALoggedHook {
         HookLine {
             event: self.event.to_string(),
             payload: serde_json::from_str(&self.payload).expect("the hook's payload is JSON"),
+            answer_nonce: None,
         }
     }
 }

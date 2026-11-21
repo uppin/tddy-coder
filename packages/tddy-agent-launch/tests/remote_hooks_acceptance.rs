@@ -46,6 +46,9 @@ const STARTUP_WINDOW: Duration = Duration::from_millis(400);
 const START_TIMEOUT: Duration = Duration::from_secs(60);
 /// A safety net for a stub to report, not a prediction of how long it takes.
 const OBSERVE: Duration = Duration::from_secs(15);
+/// How long the session's waiting hooks wait for an answer: longer than [`OBSERVE`], so a hook that
+/// ends within [`OBSERVE`] ended because it was answered, not because it gave up.
+const ANSWER_WAIT_SECS: u64 = 30;
 
 /// What the agent hands its `SessionStart` hook.
 const SESSION_START_PAYLOAD: &str =
@@ -128,6 +131,31 @@ impl ATarget {
         .expect("the hook log is on the target");
     }
 
+    /// The command Claude Code would run for `event` on a call of `tool`, read from the session's
+    /// hooks file the launch installed in the worktree on the target: the entry whose matcher covers the
+    /// tool (`""`, `"*"`, the tool's name, or an alternation naming it). `None` when no entry does.
+    fn installed_hook_for_tool(&self, event: &str, tool: &str) -> Option<String> {
+        let settings: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(
+                tddy_core::claude_hooks::session_file::claude_session_hooks_file(
+                    &self.worktree(),
+                    SESSION_ID,
+                ),
+            )
+            .expect("the hooks file is in the worktree on the target"),
+        )
+        .expect("the hooks file is JSON");
+        settings["hooks"][event]
+            .as_array()?
+            .iter()
+            .find(|entry| {
+                let matcher = entry["matcher"].as_str().unwrap_or("");
+                matcher.is_empty() || matcher == "*" || matcher.split('|').any(|m| m == tool)
+            })
+            .and_then(|entry| entry["hooks"][0]["command"].as_str())
+            .map(str::to_string)
+    }
+
     /// The command Claude Code would run for `event`, read from the session's hooks file the
     /// launch installed in the worktree on the target.
     fn installed_hook(&self, event: &str) -> String {
@@ -156,7 +184,17 @@ struct AStubAgent {
 /// An agent that fires its `SessionStart` hook as it starts — `hook_command` under `sh -c`, with
 /// [`SESSION_START_PAYLOAD`] on its stdin, as Claude Code runs a hook — then waits on its terminal.
 fn an_agent_that_fires_as_it_starts(target: &ATarget, hook_command: &str) -> AStubAgent {
+    an_agent_that_fires_as_it_starts_with(target, hook_command, SESSION_START_PAYLOAD)
+}
+
+/// [`an_agent_that_fires_as_it_starts`], handing the hook `payload` instead.
+fn an_agent_that_fires_as_it_starts_with(
+    target: &ATarget,
+    hook_command: &str,
+    payload: &str,
+) -> AStubAgent {
     let path = target.agents_dir();
+    std::fs::write(path.join("hook-payload"), payload).expect("the payload is kept for the stub");
     std::fs::write(path.join("session-start-hook"), hook_command)
         .expect("the hook command is kept for the stub");
     write_executable(
@@ -166,7 +204,8 @@ fn an_agent_that_fires_as_it_starts(target: &ATarget, hook_command: &str) -> ASt
 here='{here}'
 PATH=/usr/bin:/bin
 export PATH
-printf '%s' '{SESSION_START_PAYLOAD}' | /bin/sh -c "$(/bin/cat "$here/session-start-hook")"
+/bin/cat "$here/hook-payload" | /bin/sh -c "$(/bin/cat "$here/session-start-hook")" > "$here/hook-output"
+: > "$here/hook-done"
 printf 'ACME READY on the target\n'
 exec /bin/cat
 "#,
@@ -179,6 +218,19 @@ exec /bin/cat
 impl AStubAgent {
     fn program(&self) -> PathBuf {
         self.dir.join("acme")
+    }
+
+    /// What the hook printed — the decision Claude Code would read — once the hook has ended.
+    async fn hook_output_once_it_ends(&self) -> String {
+        eventually("the agent's hook to end", OBSERVE, || {
+            self.dir
+                .join("hook-done")
+                .exists()
+                .then_some(())
+                .ok_or_else(|| "the hook is still running".to_string())
+        })
+        .await;
+        std::fs::read_to_string(self.dir.join("hook-output")).expect("the hook's output is kept")
     }
 }
 
@@ -214,7 +266,7 @@ impl ADaemon {
                     os_user: "dev",
                     hook_token: HOOK_TOKEN,
                     daemon_socket: None,
-                    answer_wait_secs: 120,
+                    answer_wait_secs: ANSWER_WAIT_SECS,
                     remote_log: Some(&log),
                     route_env: &[],
                 }),
@@ -281,6 +333,30 @@ impl ADaemon {
         remove_remote_hook_log(target.shell().as_ref(), &target.worktree()).await
     }
 
+    /// Every hook delivered to the session once `event` has been, in order.
+    async fn hooks_once_delivered(&self, event: &str) -> Vec<(String, serde_json::Value)> {
+        eventually(
+            &format!("a {event} hook to reach the daemon"),
+            OBSERVE,
+            || {
+                let delivered: Vec<(String, serde_json::Value)> = self
+                    .activity
+                    .delivered
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|line| (line.event.clone(), line.payload.clone()))
+                    .collect();
+                delivered
+                    .iter()
+                    .any(|(name, _)| name == event)
+                    .then_some(delivered.clone())
+                    .ok_or_else(|| format!("no {event} hook has reached the daemon: {delivered:?}"))
+            },
+        )
+        .await
+    }
+
     /// The session's activity once a hook has set it.
     async fn activity_once_a_hook_arrives(&self) -> Vec<SessionActivityStatus> {
         eventually("a hook to change the session's activity", OBSERVE, || {
@@ -324,4 +400,269 @@ async fn deleting_the_session_removes_the_hook_log_on_the_target() {
 
     // Then
     assert_eq!((deleted, target.hook_log().exists()), (Ok(()), false));
+}
+
+/// What Claude Code hands its `PermissionRequest` hook when it wants to read a file, as the probe
+/// session `01a1fcba-…` on the Coder workspace `mantasi/remote-dev` asked (2026-11-21).
+const PERMISSION_REQUEST_PAYLOAD: &str = r#"{"hook_event_name":"PermissionRequest","session_id":"c-41","tool_name":"Read","tool_input":{"file_path":"README.md","limit":5}}"#;
+
+/// Reproduces gap 1 of the 2026-11-21 Coder probe: a permission prompt of an agent on a target is
+/// never reported, so the session has no pending question and `AnswerSessionPermission` has
+/// nothing to answer. `build_claude_hooks_settings` leaves `PermissionRequest` out of a target's
+/// settings (`tddy-agent-backend/src/claude_hooks.rs:181`), so the agent asks in its terminal and
+/// the daemon is told only by the `Notification` that follows, which carries no tool or input.
+#[tokio::test]
+async fn a_permission_request_of_an_agent_on_a_target_reaches_the_daemon_with_its_tool_and_input() {
+    // Given a target session whose hooks are installed in its worktree on the target
+    let target = a_reachable_target();
+    let daemon = a_daemon();
+    let hooks = daemon.installs_the_sessions_hooks_on(&target).await;
+    let hook = target
+        .installed_hook_for_tool("PermissionRequest", "Read")
+        .expect("the hooks file on the target installs a PermissionRequest hook for Read");
+    // And an agent there that asks for permission to read a file as it starts
+    let agent = an_agent_that_fires_as_it_starts_with(&target, &hook, PERMISSION_REQUEST_PAYLOAD);
+
+    // When
+    let session = daemon.launches(&agent, &target, &hooks).await;
+    let delivered = daemon.hooks_once_delivered("PermissionRequest").await;
+
+    // Then the daemon is told what is asked: the tool and its input
+    let asked = delivered
+        .iter()
+        .find(|(event, _)| event == "PermissionRequest")
+        .map(|(_, payload)| (payload["tool_name"].clone(), payload["tool_input"].clone()));
+    assert_eq!(
+        asked,
+        Some((
+            serde_json::json!("Read"),
+            serde_json::json!({"file_path": "README.md", "limit": 5})
+        ))
+    );
+    session.follower.stop().await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Answering a target agent's permission prompt (`#target-parity` 1/7)
+// ---------------------------------------------------------------------------------------------
+
+/// The request id the daemon records a target agent's permission prompt under.
+const REQUEST_ID: &str = "req-7f3a";
+
+/// The daemon's end of a target session whose orchestrator answers: a permission or a question is
+/// recorded under [`REQUEST_ID`], and the orchestrator's answer to it is `answer`.
+struct AnOrchestrator {
+    answer: tddy_service::proto::activity::AwaitQuestionAnswerResponse,
+    asked: std::sync::Mutex<Vec<tddy_service::proto::activity::AwaitQuestionAnswerRequest>>,
+}
+
+impl AnOrchestrator {
+    fn answering(option_id: &str, message: &str) -> Arc<Self> {
+        Self::with(tddy_service::proto::activity::AwaitQuestionAnswerResponse {
+            outcome: tddy_service::proto::activity::AwaitQuestionOutcome::Answered as i32,
+            option_id: option_id.to_string(),
+            message: message.to_string(),
+            answered_by: "home-session".to_string(),
+            ..Default::default()
+        })
+    }
+
+    /// No orchestrator is there to answer: the daemon says so at once.
+    fn absent() -> Arc<Self> {
+        Self::with(tddy_service::proto::activity::AwaitQuestionAnswerResponse {
+            outcome: tddy_service::proto::activity::AwaitQuestionOutcome::NoOrchestrator as i32,
+            ..Default::default()
+        })
+    }
+
+    fn with(answer: tddy_service::proto::activity::AwaitQuestionAnswerResponse) -> Arc<Self> {
+        Arc::new(Self {
+            answer,
+            asked: std::sync::Mutex::new(Vec::new()),
+        })
+    }
+
+    /// The request ids the daemon held for an answer to.
+    fn held_for(&self) -> Vec<String> {
+        self.asked
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.request_id.clone())
+            .collect()
+    }
+}
+
+#[async_trait::async_trait]
+impl tddy_agent_launch::remote_hook_follower::HookReportDelivery for AnOrchestrator {
+    async fn report_session_status(
+        &self,
+        request: tddy_service::proto::activity::ReportSessionStatusRequest,
+    ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, String> {
+        let asks = !request.tool_name.is_empty();
+        Ok(tddy_service::proto::activity::ReportSessionStatusResponse {
+            ok: true,
+            request_id: if asks {
+                REQUEST_ID.to_string()
+            } else {
+                String::new()
+            },
+        })
+    }
+
+    async fn report_agent_activity(
+        &self,
+        _request: tddy_service::proto::activity::ReportAgentActivityRequest,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn await_question_answer(
+        &self,
+        request: tddy_service::proto::activity::AwaitQuestionAnswerRequest,
+    ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, String> {
+        self.asked.lock().unwrap().push(request);
+        Ok(self.answer.clone())
+    }
+}
+
+impl ADaemon {
+    /// Launch `agent` on `target` and follow the session's hook log with the production sink,
+    /// answering through the session's shell, in front of `orchestrator`.
+    async fn launches_answered_by(
+        &self,
+        agent: &AStubAgent,
+        target: &ATarget,
+        hooks: &InstalledHooks,
+        orchestrator: Arc<AnOrchestrator>,
+    ) -> ARunningSession {
+        let mut session = self.launches(agent, target, hooks).await;
+        session.follower.stop().await;
+        let sink = tddy_agent_launch::remote_hook_follower::ActivityHookSink::new(
+            orchestrator,
+            SESSION_ID,
+            HOOK_TOKEN,
+            "dev",
+        )
+        .answering_through(target.shell(), &target.worktree());
+        session.follower =
+            RemoteHookFollower::start(target.shell(), &hooks.log, HOOK_TOKEN, Arc::new(sink));
+        session
+    }
+}
+
+/// An agent on `target` that asks for permission to read a file as it starts, through the waiting
+/// `PermissionRequest` hook the session installed there.
+fn an_agent_asking_to_read_a_file(target: &ATarget) -> AStubAgent {
+    let hook = target
+        .installed_hook_for_tool("PermissionRequest", "Read")
+        .expect("the hooks file on the target installs a PermissionRequest hook for Read");
+    an_agent_that_fires_as_it_starts_with(target, &hook, PERMISSION_REQUEST_PAYLOAD)
+}
+
+#[tokio::test]
+async fn an_orchestrators_answer_to_a_target_agents_permission_request_is_printed_by_its_hook() {
+    // Given a target session whose orchestrator allows what is asked
+    let target = a_reachable_target();
+    let daemon = a_daemon();
+    let hooks = daemon.installs_the_sessions_hooks_on(&target).await;
+    let orchestrator = AnOrchestrator::answering("allow_once", "");
+    // And an agent there that asks to read a file as it starts
+    let agent = an_agent_asking_to_read_a_file(&target);
+
+    // When
+    let session = daemon
+        .launches_answered_by(&agent, &target, &hooks, Arc::clone(&orchestrator))
+        .await;
+    let printed = agent.hook_output_once_it_ends().await;
+
+    // Then the hook printed Claude's allow decision for the request the daemon recorded
+    assert_eq!(
+        (
+            serde_json::from_str::<serde_json::Value>(printed.trim()).ok(),
+            orchestrator.held_for()
+        ),
+        (
+            Some(serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": {"behavior": "allow"}
+                }
+            })),
+            vec![REQUEST_ID.to_string()]
+        )
+    );
+    session.follower.stop().await;
+}
+
+#[tokio::test]
+async fn an_orchestrators_denial_reaches_the_target_agent_with_its_message() {
+    // Given a target session whose orchestrator refuses what is asked, saying why
+    let target = a_reachable_target();
+    let daemon = a_daemon();
+    let hooks = daemon.installs_the_sessions_hooks_on(&target).await;
+    let orchestrator = AnOrchestrator::answering("reject_once", "read the spec instead");
+    let agent = an_agent_asking_to_read_a_file(&target);
+
+    // When
+    let session = daemon
+        .launches_answered_by(&agent, &target, &hooks, orchestrator)
+        .await;
+    let printed = agent.hook_output_once_it_ends().await;
+
+    // Then
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(printed.trim()).ok(),
+        Some(serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {"behavior": "deny", "message": "read the spec instead"}
+            }
+        }))
+    );
+    session.follower.stop().await;
+}
+
+#[tokio::test]
+async fn a_permission_request_nobody_answers_leaves_the_target_agent_to_ask_in_its_terminal() {
+    // Given a target session with no orchestrator to answer
+    let target = a_reachable_target();
+    let daemon = a_daemon();
+    let hooks = daemon.installs_the_sessions_hooks_on(&target).await;
+    let agent = an_agent_asking_to_read_a_file(&target);
+
+    // When
+    let session = daemon
+        .launches_answered_by(&agent, &target, &hooks, AnOrchestrator::absent())
+        .await;
+
+    // Then the hook ends at once — well inside its own wait — and prints no decision, so Claude
+    // asks in its terminal
+    assert_eq!(agent.hook_output_once_it_ends().await, "");
+    session.follower.stop().await;
+}
+
+#[tokio::test]
+async fn ending_a_target_session_removes_its_answers_on_the_target() {
+    // Given a target session whose agent's permission request was answered
+    let target = a_reachable_target();
+    let daemon = a_daemon();
+    let hooks = daemon.installs_the_sessions_hooks_on(&target).await;
+    let agent = an_agent_asking_to_read_a_file(&target);
+    let session = daemon
+        .launches_answered_by(&agent, &target, &hooks, AnOrchestrator::absent())
+        .await;
+    agent.hook_output_once_it_ends().await;
+    let answers = target.worktree().join(tddy_core::REMOTE_ANSWERS_DIR);
+    std::fs::create_dir_all(&answers).expect("the answers directory on the target");
+    std::fs::write(answers.join("left-over"), "").expect("an answer left on the target");
+
+    // When the session ends
+    let ended = daemon.deletes_the_session(session.follower, &target).await;
+
+    // Then neither the hook log nor the answers are left on the target
+    assert_eq!(
+        (ended, target.hook_log().exists(), answers.exists()),
+        (Ok(()), false, false)
+    );
 }

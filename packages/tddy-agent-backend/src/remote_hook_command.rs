@@ -38,6 +38,34 @@ pub fn remote_hook_command(event: &str, hook_token: &str, log_path: &str) -> Str
     )
 }
 
+/// Where a target session's answers live, relative to the session's worktree on the target: one
+/// file per waiting hook, named by the nonce the hook minted (`#target-parity` 1/7).
+pub const REMOTE_ANSWERS_DIR: &str = ".tddy/answers";
+
+/// The shell command an agent on a target runs for a hook that **waits for an answer** (a
+/// `PermissionRequest`): it mints a nonce, appends `<event>@<nonce>\t<hook_token>\t<payload>\n` to
+/// `log_path` (the payload's newlines removed, as [`remote_hook_command`] does), then waits up to
+/// `wait_secs` for `<answers_dir>/<nonce>` and prints that file's content — Claude's decision — as
+/// its only output, removing the file. An empty answer file ends the wait at once with no output;
+/// no file within `wait_secs` ends it with no output too. Either way Claude then asks in its own
+/// terminal.
+///
+/// Like [`remote_hook_command`] it names nothing but POSIX shell built-ins and `cat`, `tr`,
+/// `date`, `sleep` and `rm`: the target has no tddy software. The daemon writes the answer file
+/// through the session's remote shell (`tddy_agent_launch::remote_hook_follower`).
+#[must_use]
+pub fn remote_answering_hook_command(
+    event: &str,
+    hook_token: &str,
+    log_path: &str,
+    answers_dir: &str,
+    wait_secs: u64,
+) -> String {
+    // TODO(permission-answer): implement
+    let _ = (event, hook_token, log_path, answers_dir, wait_secs);
+    todo!("remote_answering_hook_command")
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use std::io::Write as _;
@@ -327,5 +355,208 @@ mod tests {
 
         // Then
         assert_eq!(worktree.log(), format!("Stop\t{token}\t{payload}\n"));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The waiting command (`#target-parity` 1/7)
+    // -----------------------------------------------------------------------------------------
+
+    const PERMISSION_PAYLOAD: &str = r#"{"hook_event_name":"PermissionRequest","tool_name":"Read","tool_input":{"file_path":"README.md"}}"#;
+    const ALLOW: &str = r#"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}"#;
+
+    impl AWorktree {
+        fn answers_dir(&self) -> String {
+            self.root
+                .join(REMOTE_ANSWERS_DIR)
+                .to_string_lossy()
+                .into_owned()
+        }
+
+        /// The nonce the waiting hook wrote in its line (`<event>@<nonce>`), once it has written it.
+        fn nonce_once_logged(&self, event: &str) -> String {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                if let Some(nonce) = self.log_lines().iter().find_map(|line| {
+                    line.split('\t')
+                        .next()
+                        .and_then(|first| first.strip_prefix(&format!("{event}@")))
+                        .map(str::to_string)
+                }) {
+                    return nonce;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the waiting hook never logged its line: {:?}",
+                    self.log()
+                );
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+
+        /// The daemon writes `decision` as the answer for `nonce`.
+        fn answers(&self, nonce: &str, decision: &str) {
+            let dir = self.root.join(REMOTE_ANSWERS_DIR);
+            std::fs::create_dir_all(&dir).expect("the answers directory");
+            std::fs::write(dir.join(nonce), decision).expect("the answer file");
+        }
+    }
+
+    /// A waiting hook fired with its stdout captured.
+    fn fire_capturing(command: &str, path: Option<&Path>) -> Child {
+        let mut shell = Command::new("/bin/sh");
+        shell.arg("-c").arg(command);
+        if let Some(path) = path {
+            shell.env_clear().env("PATH", path);
+        }
+        shell
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("a shell runs on this host")
+    }
+
+    /// Hand `child` its payload and close it.
+    fn send_payload(child: &mut Child, payload: &str) {
+        let mut stdin = child.stdin.take().expect("the hook's stdin is piped");
+        stdin
+            .write_all(payload.as_bytes())
+            .expect("the hook reads its payload");
+    }
+
+    /// What the hook printed, and whether it exited zero, once it ends.
+    fn printed_once_it_ends(child: Child) -> (String, bool) {
+        let output = child.wait_with_output().expect("the hook ends");
+        (
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            output.status.success(),
+        )
+    }
+
+    #[test]
+    fn the_waiting_command_prints_the_answer_written_for_its_nonce() {
+        // Given a waiting permission hook that has logged its line
+        let worktree = a_worktree();
+        let command = remote_answering_hook_command(
+            "PermissionRequest",
+            HOOK_TOKEN,
+            &worktree.log_path(),
+            &worktree.answers_dir(),
+            30,
+        );
+        let mut hook = fire_capturing(&command, None);
+        send_payload(&mut hook, PERMISSION_PAYLOAD);
+        let nonce = worktree.nonce_once_logged("PermissionRequest");
+
+        // When the daemon answers it
+        worktree.answers(&nonce, ALLOW);
+
+        // Then the hook prints the decision, and the line it logged is the event, its token and
+        // its payload
+        assert_eq!(
+            (printed_once_it_ends(hook), worktree.log_lines()),
+            (
+                (ALLOW.to_string(), true),
+                vec![format!(
+                    "PermissionRequest@{nonce}\t{HOOK_TOKEN}\t{PERMISSION_PAYLOAD}"
+                )]
+            )
+        );
+    }
+
+    #[test]
+    fn an_empty_answer_ends_the_waiting_command_at_once_with_no_output() {
+        // Given a waiting hook with a long wait
+        let worktree = a_worktree();
+        let command = remote_answering_hook_command(
+            "PermissionRequest",
+            HOOK_TOKEN,
+            &worktree.log_path(),
+            &worktree.answers_dir(),
+            300,
+        );
+        let mut hook = fire_capturing(&command, None);
+        send_payload(&mut hook, PERMISSION_PAYLOAD);
+        let nonce = worktree.nonce_once_logged("PermissionRequest");
+        let started = std::time::Instant::now();
+
+        // When the daemon has no decision to give
+        worktree.answers(&nonce, "");
+
+        // Then the hook ends with no output, long before its wait is over
+        let printed = printed_once_it_ends(hook);
+        assert_eq!(
+            (
+                printed,
+                started.elapsed() < std::time::Duration::from_secs(10)
+            ),
+            ((String::new(), true), true)
+        );
+    }
+
+    #[test]
+    fn the_waiting_command_gives_up_silently_when_no_answer_comes() {
+        // Given a waiting hook that waits one second
+        let worktree = a_worktree();
+        let command = remote_answering_hook_command(
+            "PermissionRequest",
+            HOOK_TOKEN,
+            &worktree.log_path(),
+            &worktree.answers_dir(),
+            1,
+        );
+
+        // When nobody answers
+        let mut hook = fire_capturing(&command, None);
+        send_payload(&mut hook, PERMISSION_PAYLOAD);
+
+        // Then it ends with no output and status zero, and leaves no answer behind
+        assert_eq!(
+            (
+                printed_once_it_ends(hook),
+                worktree
+                    .root
+                    .join(REMOTE_ANSWERS_DIR)
+                    .read_dir()
+                    .map(|d| d.count())
+                    .unwrap_or(0)
+            ),
+            ((String::new(), true), 0)
+        );
+    }
+
+    #[test]
+    fn the_waiting_command_names_no_tddy_binary() {
+        // Given a target that has a shell and a few POSIX tools, and nothing of tddy's
+        let worktree = a_worktree();
+        let bin = worktree.root.join("bare-bin");
+        std::fs::create_dir_all(&bin).expect("a directory for the programs");
+        for program in ["cat", "tr", "date", "sleep", "rm"] {
+            std::os::unix::fs::symlink(program_on_this_host(program), bin.join(program))
+                .expect("the program is linked");
+        }
+        let command = remote_answering_hook_command(
+            "PermissionRequest",
+            HOOK_TOKEN,
+            &worktree.log_path(),
+            &worktree.answers_dir(),
+            30,
+        );
+
+        // When the hook runs there and is answered
+        let mut hook = fire_capturing(&command, Some(&bin));
+        send_payload(&mut hook, PERMISSION_PAYLOAD);
+        let nonce = worktree.nonce_once_logged("PermissionRequest");
+        worktree.answers(&nonce, ALLOW);
+
+        // Then it prints the answer, and names neither the tools binary nor its subcommand
+        assert_eq!(
+            (
+                printed_once_it_ends(hook),
+                command.contains("tddy-tools"),
+                command.contains("session-hook")
+            ),
+            ((ALLOW.to_string(), true), false, false)
+        );
     }
 }

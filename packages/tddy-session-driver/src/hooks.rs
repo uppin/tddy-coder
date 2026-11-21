@@ -150,7 +150,7 @@ impl HookReportDelivery for RecordingDelivery {
     async fn report_session_status(
         &self,
         request: ReportSessionStatusRequest,
-    ) -> Result<(), String> {
+    ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, String> {
         self.recorder.record_report(json!({
             "kind": "session_status",
             "session_id": request.session_id,
@@ -163,7 +163,22 @@ impl HookReportDelivery for RecordingDelivery {
             "agent_conversation_id": request.agent_conversation_id,
             "hook_fields": request.hook_fields,
         }));
-        Ok(())
+        Ok(tddy_service::proto::activity::ReportSessionStatusResponse {
+            ok: true,
+            request_id: String::new(),
+        })
+    }
+
+    /// The driver runs no orchestrator: a waiting hook is never answered here, and the agent asks
+    /// in its own terminal.
+    async fn await_question_answer(
+        &self,
+        _request: tddy_service::proto::activity::AwaitQuestionAnswerRequest,
+    ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, String> {
+        Ok(tddy_service::proto::activity::AwaitQuestionAnswerResponse {
+            outcome: tddy_service::proto::activity::AwaitQuestionOutcome::NoOrchestrator as i32,
+            ..Default::default()
+        })
     }
 
     async fn report_agent_activity(
