@@ -124,7 +124,12 @@ impl ProjectHomeWatchPort for DaemonProjectHome {
         request: WatchRequest,
     ) -> Result<Value, String> {
         self.refuse_an_agent_that_takes_no_turn(home)?;
+        // The one self-watch: the orchestrator's own trunk activity (`#orchestra` 5/9).
+        let own_trunk_watch = request.kinds == [WatchKind::TrunkCommit.as_str()];
         for session_id in &request.session_ids {
+            if own_trunk_watch && session_id == &home.session_id {
+                continue;
+            }
             self.refuse_an_unseen_session(home, session_id)?;
         }
         let kinds = request

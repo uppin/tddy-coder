@@ -116,7 +116,7 @@ pub fn project_home_watch_tool_defs() -> Vec<ToolDef> {
     vec![
         tool_def(
             CREATE_SESSION_WATCH,
-            "Watch sessions of this project you can see, on this host: from now on, every tool answer you receive carries `watchEvents` with what they did since your last answer — a question or a permission prompt (with the request_id AnswerSessionQuestion / AnswerSessionPermission take), a finished turn, a wait for input, an agent's notification, or a session ending — each event once. Name sessions by session_ids, or set started_by_me for every session you started, or both. Your own session is never watched. While you are idle with events waiting, you are sent a turn listing them. Answers the watch with its watch_id and expires_at_unix_ms.",
+            "Watch sessions of this project you can see, on this host: from now on, every tool answer you receive carries `watchEvents` with what they did since your last answer — a question or a permission prompt (with the request_id AnswerSessionQuestion / AnswerSessionPermission take), a finished turn, a wait for input, an agent's notification, or a session ending — each event once. Name sessions by session_ids, or set started_by_me for every session you started, or both. Your own session is never watched, except for kind trunk_commit: a new commit on the project's remote trunk (or a force-push rewriting it), which every live orchestrator of the project receives as its own activity. While you are idle with events waiting, you are sent a turn listing them. Answers the watch with its watch_id and expires_at_unix_ms.",
             json!({
                 "type": "object",
                 "properties": {

@@ -92,7 +92,8 @@ impl BuildContext {
         let askpass_endpoint = self.bind_askpass(&shared, &served).await?;
         let connection_impl = self
             .build_session_host(&mut mount, &shared, &served, askpass_endpoint)?
-            .with_session_watches(Arc::clone(&shared.session_watches));
+            .with_session_watches(Arc::clone(&shared.session_watches))
+            .with_trunk_watch(Arc::clone(&shared.session_notification_bus));
         let hosted = self.install_session_host(connection_impl);
         // The project-home tools answer host questions from the daemon's wired host
         // service — the one `HostService` is served from, with its Coder vaults — so an
@@ -102,6 +103,8 @@ impl BuildContext {
             .rpc_handlers
             .attach_host_service(Arc::clone(&served.host_service_impl));
         start_watch_waker(&shared, &hosted);
+        // The trunk watch runs for the daemon's life; its handle is not kept.
+        drop(hosted.connection_arc.spawn_trunk_watch());
         self.register_code_intelligence(&hosted.task_registry);
         let livekit_service = livekit_service(&mount);
         let mounted = Mounted {

@@ -79,6 +79,17 @@ pub trait LaunchHost: Send + Sync {
         project_id: &str,
         session_token: &str,
     ) -> SessionIdentity;
+
+    /// An orchestrator-role session of `project_id` is running — just started, or just resumed
+    /// — so the host watches the project's remote trunk for it until it stops (`#orchestra` 5/9).
+    /// `session_token` is the caller's, from which the project's GitHub account is read.
+    fn orchestrator_running(
+        &self,
+        os_user: &str,
+        project_id: &str,
+        session_id: &str,
+        session_token: &str,
+    );
 }
 
 /// The session host's launch fields, owned, plus its callbacks.

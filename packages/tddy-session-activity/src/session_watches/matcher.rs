@@ -86,8 +86,7 @@ impl WatchKind {
             }
             SessionNotificationSource::AgentToolCall => None,
             SessionNotificationSource::Message => Some(Self::Message),
-            // TODO(trunk-watch): implement — a trunk record is a `TrunkCommit` event.
-            SessionNotificationSource::TrunkCommit => None,
+            SessionNotificationSource::TrunkCommit => Some(Self::TrunkCommit),
         }
     }
 }
@@ -103,7 +102,7 @@ pub struct WatchFilter {
 
 /// Whether `watch` matches `record`, `owner_inbox_position` being the `seq` up to which the
 /// watch's owner has read the messages addressed to it. Its session is named, or it started the
-/// session, and the record is of a kind it asks for, and it is never the owner's own session. The
+/// session, and the record is of a kind it asks for, and it is never the owner's own session (bar the owner's own trunk activity). The
 /// record's project and OS user are the log read's, which is the owner's.
 ///
 /// A **message** record matches by who it is addressed to and who sent it: an inbox watch
@@ -116,7 +115,11 @@ pub(super) fn watch_matches(
     record: &ProjectNotificationRecord,
     owner_inbox_position: u64,
 ) -> bool {
-    if record.session_id == watch.owner.session_id {
+    // A watch never matches its owner's own session — except for the owner's trunk activity, which
+    // is the orchestrator's own and exactly what its self-watch asks for.
+    if record.session_id == watch.owner.session_id
+        && record.source != SessionNotificationSource::TrunkCommit
+    {
         return false;
     }
     if record.source == SessionNotificationSource::Message {

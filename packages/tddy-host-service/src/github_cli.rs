@@ -155,6 +155,31 @@ impl GithubCli {
         Ok(token.to_string())
     }
 
+    /// `gh api -i <path>` asked as `os_user`, with `If-None-Match: <etag>` when given: the status
+    /// line, headers and body as `gh` printed them, and its exit code. A non-2xx answer — a 304
+    /// included — makes `gh` exit non-zero while still printing the head, so a non-zero exit is an
+    /// answer here, never a refusal; only `gh` being absent, unrunnable or killed is.
+    #[cfg(unix)]
+    pub fn api_with_headers(
+        &self,
+        os_user: &str,
+        hostname: &str,
+        path: &str,
+        if_none_match: Option<&str>,
+    ) -> Result<(String, i32), GithubCliRefusal> {
+        let condition = if_none_match.map(|etag| format!("If-None-Match: {etag}"));
+        let mut args = vec!["api", "-i", "--hostname", hostname];
+        if let Some(condition) = &condition {
+            args.extend(["-H", condition.as_str()]);
+        }
+        args.push(path);
+        let output = self.run(os_user, &args)?;
+        let code = output.status.code().ok_or_else(|| {
+            GithubCliRefusal::Failed(format!("gh {} was killed by a signal", args.join(" ")))
+        })?;
+        Ok((String::from_utf8_lossy(&output.stdout).into_owned(), code))
+    }
+
     /// Run `gh <args>` as `os_user` and return what it wrote to stdout.
     ///
     /// Bounded by [`PROBE_TIMEOUT`]; the child is ended when it overruns. The token variables are
@@ -166,18 +191,7 @@ impl GithubCli {
         hostname: &str,
         args: &[&str],
     ) -> Result<String, GithubCliRefusal> {
-        let program = match &self.program {
-            GhProgram::OnSpawnChildPath => {
-                tddy_daemon_kernel::spawn_as_user::find_program_on_spawn_child_path("gh")
-            }
-            GhProgram::At(path) => Path::new(path).is_file().then(|| path.clone()),
-        }
-        .ok_or(GithubCliRefusal::NotInstalled)?;
-
-        let deadline = std::time::Instant::now() + PROBE_TIMEOUT;
-        let output: ProbeOutput = start_probe(os_user, &program, args)
-            .collect(deadline)
-            .map_err(GithubCliRefusal::Failed)?;
+        let output = self.run(os_user, args)?;
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         match output.status.code() {
@@ -190,7 +204,36 @@ impl GithubCli {
         }
     }
 
+    #[cfg(unix)]
+    fn run(&self, os_user: &str, args: &[&str]) -> Result<ProbeOutput, GithubCliRefusal> {
+        let program = match &self.program {
+            GhProgram::OnSpawnChildPath => {
+                tddy_daemon_kernel::spawn_as_user::find_program_on_spawn_child_path("gh")
+            }
+            GhProgram::At(path) => Path::new(path).is_file().then(|| path.clone()),
+        }
+        .ok_or(GithubCliRefusal::NotInstalled)?;
+
+        let deadline = std::time::Instant::now() + PROBE_TIMEOUT;
+        start_probe(os_user, &program, args)
+            .collect(deadline)
+            .map_err(GithubCliRefusal::Failed)
+    }
+
     /// `start_output_as_user` is Unix-only, so there is nothing to run here.
+    #[cfg(not(unix))]
+    pub fn api_with_headers(
+        &self,
+        _os_user: &str,
+        _hostname: &str,
+        _path: &str,
+        _if_none_match: Option<&str>,
+    ) -> Result<(String, i32), GithubCliRefusal> {
+        Err(GithubCliRefusal::Failed(
+            "asking gh as another OS user is supported on Unix only".to_string(),
+        ))
+    }
+
     #[cfg(not(unix))]
     fn ask(
         &self,

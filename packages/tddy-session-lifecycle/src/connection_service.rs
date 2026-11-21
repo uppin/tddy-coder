@@ -236,6 +236,9 @@ pub struct DaemonSessionHost {
         Option<Arc<tddy_session_activity::project_notification_log::ProjectNotificationLog>>,
     /// The project-home watch tools' store (`#activity-wake` 2/3); `None` on a host with none.
     session_watches: Option<Arc<tddy_session_activity::session_watches::SessionWatchStore>>,
+    /// The central watch over each project's remote trunk (`#orchestra` 5/9); `None` on a host
+    /// with none.
+    trunk_watching: Option<Arc<svc_trunk_watch_wiring::TrunkWatching>>,
     /// This host's own handle, installed once the top-level `Arc` exists (`runtime::build`), from
     /// which each jail's sandbox-IPC bridge is built. Weak: it is a field of the host itself.
     sandbox_rpc_bridge: Arc<std::sync::OnceLock<std::sync::Weak<DaemonSessionHost>>>,
@@ -561,6 +564,8 @@ mod svc_askpass_wiring;
 mod svc_conversation_worktree_wiring;
 mod svc_host_builders;
 mod svc_list_exec_tools_wiring;
+#[cfg(test)]
+mod trunk_watch_wiring_unit_tests;
 pub use svc_list_exec_tools_wiring::start_choices;
 mod roster_keepalive;
 mod svc_coding_agents_wiring;
@@ -568,4 +573,5 @@ mod svc_project_notification_log_wiring;
 mod svc_reachable_sessions;
 mod svc_session_identity_wiring;
 mod svc_session_watches_wiring;
+mod svc_trunk_watch_wiring;
 mod svc_worktree_observer_wiring;
