@@ -14,7 +14,6 @@
     "ask": [
       "Read(//etc/**)",
       "Read(//root/**)",
-      "Read(//home/**)",
       "Read(~/.ssh/**)",
       "Read(~/.aws/**)",
       "Read(~/.gnupg/**)",
@@ -22,7 +21,6 @@
       "Read(~/.claude/**)",
       "Edit(//etc/**)",
       "Edit(//root/**)",
-      "Edit(//home/**)",
       "Edit(~/.ssh/**)",
       "Edit(~/.aws/**)",
       "Edit(~/.gnupg/**)",
