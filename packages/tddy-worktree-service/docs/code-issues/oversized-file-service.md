@@ -6,7 +6,7 @@
 **Metrics:** **831 production lines** (2026-11-21, #975; 883 at 2026-11-21, #970; 808 at 2026-10-25, #752; 772 at 2026-10-18, #625; 777 at 2026-10-04, #571; `awk '/#\[cfg\(test\)\]/{exit} {n++} END{print n}'`; 752 at 2026-09-24) — originally **752 production lines** of 752 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.66× over**
 **Thresholds breached:** length 831 > 500
 **Restructure:** not designed
-**Status:** Open — partially fixed 2026-11-21 (#975: 883 → 831, seam A moved out; seams B and C remain) — **unclaimed**
+**Status:** Open — partially fixed 2026-11-21 (#975: 883 → 831, seam A moved out); **deferred until the engine is fixed** (developer decision, 2026-11-21, `#target-parity` sweep): seam C was refused by `restructure check --deep`, and no hand move is consented. Engine defect: `docs/dev/todo/2026-11-21-restructure-engine-refuses-the-target-parity-splits.md`
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
 ## Measurement history
@@ -20,6 +20,24 @@
 | 2026-11-21 | 883 | **regressed by #970** (`#target-parity` 2/7): 808 → 883 (+75) — the `target_shells` field and `with_target_shells` builder, `shell_of_target` / `target_session_of`, and the target dispatch at the head of `remove_worktree`, `clean_worktree` and `restore_session_worktree`; the work itself is in the new `target_worktrees.rs`. **Split not done here**: the file is stack-shared with `#target-parity` 7/7 (#975), so it is recorded, not split, under the stack rule |
 | 2026-11-21 | 831 | **improved by #975** (`#target-parity` 7/7): 883 → 831 (−52). Seam A — `blocking_within`, `proto_worktree_size_status`, `worktree_row_from_diff`, `map_remove_worktree_error`, `map_clean_worktree_error` — moved to `service_helpers.rs`; n7's target-row code lives in `target_worktree_stats.rs`, with two call sites, `sessions_dir_of` and one bus accessor here |
 
+| 2026-11-21 | 831 | unchanged by the `#target-parity` sweep: **split attempted and refused by the engine** — see below |
+
+## Engine refusal (2026-11-21)
+
+Seam C's first method, `list_worktree_directory`, as the record prescribes: `read_fields_through`
+(`expr: self`, `name: service`) then `extract_method` over the same item-relative range of the body, one
+`group`, with the warm index daemon:
+
+```text
+$ ./dev target/debug/tddy-tools restructure check tmp/restructure/service-c1.jsonl --deep
+   note: read_fields_through: rebound every self (2 sites) through `service`
+1: group `c1` is refused whole, because a member of it is: op 1: this seam cannot be cut here: rust-analyzer offers no "extract into function" assist for the given range (it offered: Extract into variable)
+Error: 1 finding(s) — see above. Nothing was written.
+```
+
+A second item anchor shifted past the inserted `let` cannot be written: item anchors resolve against
+the tree the run opens on, and a range without a fingerprint is refused as malformed.
+
 ## What would close it — candidate seams (not proven)
 
 | Seam | Items | Out |
@@ -28,6 +46,6 @@
 | C | file reading: `list_worktree_directory`, `read_worktree_file`, `stream_read_worktree_file` (L505–609) | ~105 |
 | — | stays: struct, builders and auth/resolve helpers (L44–211), plus list/remove/clean/restore (L311–504) | — |
 
-Seams B and C sit inside a trait impl. Their bodies move to free functions and the impl keeps delegating stubs. Seam A is done (#975). B+C take it to about 440 lines with stubs; B alone leaves it over budget. Prove the seams with `restructure check --deep` before applying them.
+Seams B and C sit inside a trait impl. Their bodies move to free functions and the impl keeps delegating stubs. Seam A is done (#975). **B+C alone land near 590 lines, not 440** (re-measured 2026-11-21): the five trait-method signatures, their doc comments and the delegating calls stay. A third seam is needed — the inherent resolve helpers (`target_session_of`, `resolve_main_repo`, and the free `project_main_repo_on_host`, about 110 lines) through `move_impl_members` / `move_item` into a child module of `service`. Prove the seams with `restructure check --deep` before applying them.
 
 **Stack constraint:** `#keyring` dependents #510–#516 are still open, so no split lands until that stack does. `#keyring` 3/9 (#510) touches this file, so a split now would conflict with it.
