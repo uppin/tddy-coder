@@ -314,7 +314,7 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(wiring.extra_args);
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
-    let pointer = super::place_slot_files_and_pointer(
+    let pointer = super::start_steps::place_slot_files_and_pointer(
         spec,
         &worktree_path,
         &target_shell,
