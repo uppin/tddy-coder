@@ -1,6 +1,11 @@
 //! The smaller steps of a CLI harness start (split out of `opencode_cli_spawn.rs`): pointing a
 //! target's hooks at its log, placing the slot files and the session pointer (shared with the
 //! resume), the node launcher, and the start's answer.
+//!
+//! TODO(restructure-path-attr): moved here by hand, without running `tddy-tools restructure` on
+//! this move — on the inference that the refusal it gave `remote_hook_follower.rs`'s split in this
+//! crate (`#[path]` test modules, "plan is malformed") would hit it too. See
+//! `docs/dev/todo/2026-11-21-restructure-ignores-path-attribute-modules.md`.
 
 use std::sync::Arc;
 

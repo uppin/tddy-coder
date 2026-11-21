@@ -37,9 +37,12 @@ or SSH target could not report at all.
 | `tddy-agent-launch/src/opencode_cli_spawn.rs` | 505 → 522 → **428** | the start's small steps are in `opencode_cli_spawn/start_steps.rs` |
 | `tddy-coding-agent-specs/src/spec.rs` | 500 → 519 → **431** | agent variants are in `spec/variant.rs` (`tddy-tools restructure`, `verify`: every statement accounted for) |
 
-The `tddy-agent-launch` moves were made by hand. `tddy-tools restructure` refused the `move_item` in
-that crate as `plan is malformed`, on an unrelated `#[path]`-attributed `mod tests;`
-(`opencode_cli_spawn/restore_tabs.rs`).
+The `tddy-agent-launch` moves were made by hand, with the developer's consent, and each carries
+`TODO(restructure-path-attr)`. `tddy-tools restructure` refused the `remote_hook_follower.rs`
+`move_item` as `plan is malformed`, on an unrelated `#[path]`-attributed `mod tests;`
+(`opencode_cli_spawn/restore_tabs.rs`). The other two were not run through the engine; they were
+split by hand on the inference that the same refusal applies
+([todo](../todo/2026-11-21-restructure-ignores-path-attribute-modules.md)).
 
 Closed code issues, with their final measurement: `oversized-file-remote-hook-follower`
 (517 at detection, **386** at close) and `oversized-file-spec` (500 at detection, **431** at close).

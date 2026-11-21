@@ -2,6 +2,11 @@
 //! daemon's end of a delivered hook ([`HookReportDelivery`]) and the production [`HookSink`] that maps
 //! each followed line onto it ([`ActivityHookSink`]). Re-exported from `remote_hook_follower`, so
 //! the paths other packages name are unchanged.
+//!
+//! TODO(restructure-path-attr): moved here by hand, not by `tddy-tools restructure`. The engine
+//! refused this `move_item` ("plan is malformed": its module-file resolution ignores the `#[path]`
+//! test modules of `opencode_cli_spawn/restore_tabs.rs`), see
+//! `docs/dev/todo/2026-11-21-restructure-ignores-path-attribute-modules.md`.
 
 use std::path::Path;
 use std::sync::Arc;

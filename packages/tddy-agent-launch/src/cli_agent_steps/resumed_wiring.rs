@@ -1,6 +1,11 @@
 //! A resumed generic launch's wiring (split out of `cli_agent_steps.rs`): [`ResumedWiring`] and
 //! [`LaunchSessions::resumed_session_wiring`], which gives a resumed agent again what a start gave it
 //! — none of it is in a persisted argv.
+//!
+//! TODO(restructure-path-attr): moved here by hand, without running `tddy-tools restructure` on
+//! this move — on the inference that the refusal it gave `remote_hook_follower.rs`'s split in this
+//! crate (`#[path]` test modules, "plan is malformed") would hit it too. See
+//! `docs/dev/todo/2026-11-21-restructure-ignores-path-attribute-modules.md`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
