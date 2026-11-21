@@ -435,7 +435,7 @@ role's (see [Messages between sessions](#messages-between-sessions)).
 
 | Tool | Arguments | Answers |
 |---|---|---|
-| `ListProjectSessions` | — | `{"sessions": [{session_id, branch, worktree, is_active, agent_status, pending_elicitation, daemon_instance_id, display_name}], "unreachable_hosts": [{daemon_instance_id, reason}]}`: every other session of the project **on every eligible host**, each with the host it runs on, the status the web's session list shows, and the name it was given (`null` when it has none; see [Session names](../web/session-drawer.md#session-names)). A host from before session names lists every session with `null`. A split session's agent half carries the branch its codebase half works on, recorded in its changeset at start, with no worktree of its own. A CLI agent session carries the orchestrator and recipe its changeset records. A host that does not answer is named in `unreachable_hosts`, never silently left out |
+| `ListProjectSessions` | — | `{"sessions": [{session_id, branch, worktree, is_active, agent_status, pending_elicitation, daemon_instance_id, display_name, delivery_route}], "unreachable_hosts": [{daemon_instance_id, reason}]}`: every other session of the project **on every eligible host**, each with the host it runs on, the status the web's session list shows, the name it was given (`null` when it has none; see [Session names](../web/session-drawer.md#session-names)), and how it is best messaged (`delivery_route`; see [Sending a session a turn § Which route](#which-route)). A host from before session names lists every session with `null`. A split session's agent half carries the branch its codebase half works on, recorded in its changeset at start, with no worktree of its own. A CLI agent session carries the orchestrator and recipe its changeset records. A host that does not answer is named in `unreachable_hosts`, never silently left out |
 | `StartSession` | the `StartSessionRequest` fields the New-session form can send, under their proto names: `session_type` (required), `daemon_instance_id`, `tool_path`, `agent`, `recipe`, `model`, `provider_account_id`, `provider_built_in`, `branch_worktree_intent`, `new_branch_name`, `selected_integration_base_ref`, `selected_branch_to_work_on`, `create_remote_branch`, `initial_prompt`, `permission_mode`, `dangerously_skip_permissions`, `stack_parent`, `stack_parent_daemon_instance_id`, `stack_node_id`, `pr_stack_base_session_id`, `sandbox`, `managed_codebase`, `sandboxed_codebase`, `codebase_daemon_instance_id`, `ssh_config_host`, `target` (a derived-host id from `DescribeSessionStartOptions.derived_hosts`), `semantic_index`, `specialized_agents`, `attachments` (host documents), `display_name` (the session's name: one line, at most 80 characters; refused for a tool session type) | `{"start_id", "task_id", "daemon_instance_id"}` at once (see [Asynchronous session start](#asynchronous-session-start)); the start's outcome is a session started in the project as the caller's user, on this host or the eligible host `daemon_instance_id` names; the daemon that creates it records the home session in its changeset as `orchestrator_session_id`, with the home session's host as `orchestrator_daemon_instance_id`. See [StartSession](#startsession) |
 | `DescribeSessionStartOptions` | `daemon_instance_id?`, `session_type?`, `agent?`, `provider_account_id?` | the choices a `StartSession` on that host can make, from the RPCs the New-session form fills its pickers from. See [Start options](#start-options) |
 | `ReadSessionWorktree` | `session_id`, `path` (relative; empty for the root), `daemon_instance_id?` | a file's text (`content`, `truncated`, `byte_size`) or a directory's `entries`, through the same worktree reader as the Code pane |
@@ -447,7 +447,8 @@ role's (see [Messages between sessions](#messages-between-sessions)).
 | `TerminateSession` | `session_id`, `daemon_instance_id?` | `{session_id, signal: "SIGTERM"}`: what the web UI's **Terminate** does — `SignalSession` with SIGTERM to the session's process on its host. The session's record, worktree and branch are kept, so it can be resumed; deleting them is the UI's separate Delete, which is not offered. A session whose process has already ended (or that records none) is refused as an `is_error` result saying so. See [Terminating a session](#terminating-a-session) |
 | `RefreshWorktreeDiskUsage` | `path?` (as `ListWorktrees` lists it; every worktree when empty), `daemon_instance_id?` | `{queued}`: what the Worktrees screen's **Refresh** does — queues the background size walk (`WorktreeSizeCalculator`, two walks at a time) for one worktree or all of the project's, and answers at once. Progress is read with `ListWorktrees` (`sizing {done, total}`, the screen's "{done} of {total}") or `GetWorktree` (`size_status`: `calculating` until cached). A path not in git's worktree list is refused naming it. No ledger of its own: the calculator's persisted per-path state is the record |
 | `ReadSessionTerminal` | `session_id`, `styles?`, `region? {row, col, rows, cols}`, `daemon_instance_id?` | `{lines, cursor: {row, col, visible}, cols, rows, offset}`: what the session's **main** terminal shows right now, as text — the visible rows of the screen it is on (the alternate screen while a full-screen TUI runs), each with trailing whitespace trimmed, and the cursor, zero-based. `offset` is the position in the terminal's output stream the text corresponds to: the same sequence point a reconnecting browser's snapshot carries. Text only, no scrollback, unless `styles: true` adds `styles` and `highlighted_rows`; `region` reads one box. Reading sends no input, takes no control lease and disturbs no attached screen. A session with no live terminal, or whose terminal has not reported its size, is refused naming why. See [Reading a terminal](#reading-a-terminal) |
-| `ClaimSessionTerminal` | `session_id`, `daemon_instance_id?` | `{holder}`: takes the session's terminal control lease for the screen `project-home:<home session id>`, stealing it from whoever holds it, as a browser's claim with `steal` does — the change is broadcast, so an attached browser drops to watch-only and names the new holder. The control token stays on the host that owns the terminal and is never returned. There is no release: a person takes control back by claiming it in the browser. See [Typing into a terminal](#typing-into-a-terminal) |
+| `ClaimSessionTerminal` | `session_id`, `daemon_instance_id?` | `{holder}`: takes the session's terminal control lease for the screen `project-home:<home session id>`, stealing it from whoever holds it, as a browser's claim with `steal` does — the change is broadcast, so an attached browser drops to watch-only and names the new holder. The control token stays on the host that owns the terminal and is never returned. Control stays this home's until a person claims it in the browser or the home gives it back with `ReleaseSessionTerminal`. See [Typing into a terminal](#typing-into-a-terminal) |
+| `ReleaseSessionTerminal` | `session_id`, `daemon_instance_id?` | `{released: true}`: gives back the lease this home session's `ClaimSessionTerminal` took, leaving the session uncontrolled — the change is broadcast, so a browser can take control without stealing. For this home's own claim only: a terminal it never claimed, or whose lease another screen has taken since, is refused naming why, and nothing changes. See [Typing into a terminal](#typing-into-a-terminal) |
 | `SendSessionKeys` | `session_id`, `daemon_instance_id?`, `text?`, `keys?` | `{sent_bytes}`: types `text`, then each named key in order, into the session's **main** terminal while this home session holds its lease. Refused, naming the holder, when it does not, and nothing is sent. See [Typing into a terminal](#typing-into-a-terminal) |
 | `AnswerSessionPermission` | `session_id`, `request_id`, `option_id` or `cancelled`, `message?`, `daemon_instance_id?` | `{session_id, request_id, answered_by, option_id, cancelled, at_unix_ms}`: answers the Claude permission prompt a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. `option_id` is `allow_once`, `reject_once` (with `message` saying why), or `allow_always` when Claude suggested a rule; `cancelled` leaves the prompt to the person at its terminal. Only the target's orchestrator may answer, and the first answer wins. See [Answering a permission prompt](#answering-a-permission-prompt) |
 | `AnswerSessionQuestion` | `session_id`, `request_id`, `answers: [{question_index, selected, other?}]`, `daemon_instance_id?` | `{session_id, request_id, answered_by, answers, at_unix_ms}`: answers the `AskUserQuestion` a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. Each answer names a question by index, the option labels chosen and, optionally, free text. Only the target's orchestrator may answer, the answers are checked against the question as asked, and the first answer wins. See [Answering a question](#answering-a-question) |
@@ -495,7 +496,7 @@ role's (see [Messages between sessions](#messages-between-sessions)).
   limitation:** the name tie-break mirrors the browser's `localeCompare` for ASCII names (case-insensitive,
   lowercase first on a case-only difference, punctuation before digits before letters); for non-ASCII
   names it is an approximation and may order equal-sized worktrees differently from the screen.
-- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, `RefreshWorktreeDiskUsage`, `ReadSessionTerminal`, `ClaimSessionTerminal`, `SendSessionKeys`, `SendSessionMessage`, `ResumeSession`, `AnswerSessionPermission`, the two notification tools, `SetSessionMark`, `RenameSession`, `DeleteSession`, `ClearWorktree`, `DeleteWorktree`, `RestoreWorktree`, every git tool) naming another host is
+- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, `RefreshWorktreeDiskUsage`, `ReadSessionTerminal`, `ClaimSessionTerminal`, `SendSessionKeys`, `ReleaseSessionTerminal`, `SendSessionMessage`, `ResumeSession`, `AnswerSessionPermission`, the two notification tools, `SetSessionMark`, `RenameSession`, `DeleteSession`, `ClearWorktree`, `DeleteWorktree`, `RestoreWorktree`, every git tool) naming another host is
   forwarded whole to that host over the peer forward and runs there unchanged: that host's path
   containment, activity gate and push identity apply. The host receiving it does not hold the calling
   session, so it confirms the caller **at the daemon that owns it**: it asks every other eligible
@@ -713,7 +714,7 @@ agent and the screen cannot disagree.
 
 `ClaimSessionTerminal` and `SendSessionKeys` act through the same single-screen control lease the
 browsers share ([Terminal sessions § Terminal Control Ownership](terminal-sessions.md#terminal-control-ownership-single-screen-mutex)).
-The rule is "type only while you hold it", since leases are never released.
+The rule is "type only while you hold it".
 
 - **Whose lease.** The home agent holds it as the screen `project-home:<home session id>`. The token
   is kept on the host that owns the terminal, keyed by the calling home session, the daemon that owns
@@ -734,7 +735,16 @@ The rule is "type only while you hold it", since leases are never released.
   any byte is written; so does a request with neither text nor keys.
 - **Input offset.** Input is written with offset 0, which the terminal treats as unset and does not
   acknowledge, so a browser's un-acknowledged-input overlay is untouched.
-- Not offered: a release tool, mouse input, resizing, or typing into the home session itself.
+- **Release.** `ReleaseSessionTerminal` gives the lease back when this home's remembered token is
+  still the session's lease: the session is left uncontrolled, the change is broadcast with no
+  holder, and a browser claims without stealing. The token is forgotten either way; a home that
+  never claimed, or whose lease another screen took since, is refused naming the holder (or that
+  nothing holds it), and nothing changes. After a release `SendSessionKeys` is refused until the
+  home claims again.
+- **A session's end takes its claims.** When a session's agent ends (or the session is stopped), its
+  lease is dropped and every home's remembered token for it is forgotten, so nothing claims the
+  terminal of a session that is gone.
+- Not offered: mouse input, resizing, or typing into the home session itself.
 
 ### Sending a session a turn
 
@@ -743,7 +753,8 @@ a subagent: give it a follow-up turn, resume it when it has stopped, and learn w
 
 - **Declared by the agent.** How a turn reaches a running agent is the agent spec's
   `coding_agent.turn_input` ([Coding agent specs § Turn input](../../../packages/tddy-coding-agent-specs/docs/coding-agent-specs.md#turn-input-coding_agentturn_input)):
-  `terminal_paste` with a `submit_key` (claude-cli declares `Enter`), or `acp_prompt`. The daemon
+  `terminal_paste` with a `submit_key` (claude-cli, cursor-cli and muse-cli declare `Enter`), or
+  `acp_prompt`. The daemon
   reads the slot, never the agent's id. A session whose agent declares none is refused naming the
   agent and `turn_input`.
 - **No lease.** A message is one turn, not control of the terminal: the daemon writes the text —
@@ -761,6 +772,18 @@ a subagent: give it a follow-up turn, resume it when it has stopped, and learn w
   delivered. An empty message is no message.
 - **`acp_prompt` is not delivered yet.** No shipped agent declares it, and a session whose agent did
   would be refused saying this host cannot deliver it.
+- <a id="which-route"></a>**Which route.** `ListProjectSessions` says per session how the orchestrator
+  best reaches it, as `delivery_route`, decided from the session's agent spec and where it runs,
+  never from the agent's name:
+  - `{"kind": "terminal"}` — the session runs on a target (Coder, SSH): `SendSessionMessage`, typed
+    into its TUI, which reaches the remote agent where no `tddy-tools` runs. Preferred for a target
+    even when the other routes would work.
+  - `{"kind": "native", "peer_name"}` — on this host, the session's agent and the orchestrator's both
+    have native peer messaging (`coding_agent.peer_name`, claude-cli): message it by `peer_name`,
+    agent to agent.
+  - `{"kind": "inbox"}` — any other session, including one with no coding agent:
+    `PostSessionMessage`, read from its inbox, which wakes it.
+  A host from before routes lists `null`.
 - **Learning that the turn ended.** The turn's end is the session's `attention_required` record in
   the project notification log; `WaitProjectNotifications { started_by_me: true }` waits for the
   caller's own sessions only. Read the result with `ReadSessionActivity`, `ReadSessionTranscript` or
@@ -770,8 +793,8 @@ a subagent: give it a follow-up turn, resume it when it has stopped, and learn w
 
 `PostSessionMessage` lets a session answer its orchestrator, and an orchestrator leave a session
 something for later, without typing into anyone's terminal — the counterpart
-[SendSessionMessage](#sending-a-session-a-turn) lacks for agents that declare no `turn_input`
-(Cursor, for one), and the only way a started session's agent can answer the orchestrator that
+[SendSessionMessage](#sending-a-session-a-turn) lacks for agents that declare no `turn_input`,
+and the only way a started session's agent can answer the orchestrator that
 started it. The message is recorded once, as a **`message` record of the project notification log**
 ([Session notifications § The project notification log](session-notifications.md#the-project-notification-log)),
 and read from there — nothing of the message is kept anywhere else.

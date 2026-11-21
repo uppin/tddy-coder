@@ -52,6 +52,12 @@ session with no project hooks at all.
 
 ## Side finding — orchestrators cannot send a Cursor session a turn
 
+**Update 2026-11-21 (`#orchestra` 7/9, PR #985):** `cursor.yaml` now declares
+`turn_input: { kind: terminal_paste, submit_key: Enter }` and an acceptance test pins it. The paste
+behaviour checks below are still open, tracked with Muse's in
+[`2026-11-21-cursor-muse-terminal-paste-unverified.md`](2026-11-21-cursor-muse-terminal-paste-unverified.md).
+The text below is the state before that change.
+
 `SendSessionMessage` refuses with `agent cursor declares no turn_input, so a session of it takes no
 message` (`packages/tddy-daemon-rpc/src/exec_tool/project_home/turn.rs:118`). The slot is declared
 per agent in its spec. `claude.yaml:112` has `turn_input: { kind: terminal_paste, submit_key: Enter }`

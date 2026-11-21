@@ -97,17 +97,16 @@ impl ProjectHomeTerminalPort for DaemonProjectHome {
     ) -> Result<(), String> {
         let session_id = target.session_id.as_str();
         let key = self.claim_key(session_id);
-        let Some(token) = self.leases.token_of(&key) else {
+        // Forgotten whatever the outcome: a token the release refuses is stale — another screen
+        // took the lease, or it ended — so there is nothing to keep.
+        let Some(token) = self.leases.forget(&key) else {
             return Err(format!(
                 "session {session_id}'s terminal was never claimed by {screen_id}; claim it with ClaimSessionTerminal before releasing it"
             ));
         };
         if self.terminal_control.release(session_id, &token).await {
-            self.leases.forget(&key);
             return Ok(());
         }
-        // The token is stale: another screen took the lease, or it ended. There is nothing to keep.
-        self.leases.forget(&key);
         let holder = self.terminal_control.holder_screen_id(session_id).await;
         Err(match holder {
             Some(holder) => format!(

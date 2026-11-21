@@ -24,6 +24,7 @@ fn no_other_project_home_tool_is_scoped_to_a_spawners_sessions() {
         "ReadSessionTranscript",
         "ReadSessionTerminal",
         "SendSessionKeys",
+        "ReleaseSessionTerminal",
         "ListProjectSessions",
         "ReadSessionWorktree",
         "DiffSessionWorktree",

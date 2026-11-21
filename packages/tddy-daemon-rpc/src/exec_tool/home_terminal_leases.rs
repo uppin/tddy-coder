@@ -66,8 +66,7 @@ impl HomeTerminalLeases {
 
     /// Forget every token held on `target_session_id`'s terminal: the session ended.
     pub fn forget_target(&self, target_session_id: &str) {
-        self.tokens()
-            .retain(|key, _| key.target_session_id != target_session_id);
+        drop_claims_on(&mut self.tokens(), target_session_id);
     }
 
     /// The map, locked. Each method is one insert or one lookup, so a panic on another thread
@@ -83,7 +82,7 @@ impl HomeTerminalLeases {
         if let Some(ends) = ends.as_mut() {
             loop {
                 match ends.try_recv() {
-                    Ok(end) => tokens.retain(|key, _| key.target_session_id != end.session_id),
+                    Ok(end) => drop_claims_on(&mut tokens, &end.session_id),
                     Err(TryRecvError::Lagged(_)) => {}
                     Err(TryRecvError::Empty | TryRecvError::Closed) => break,
                 }
@@ -91,6 +90,11 @@ impl HomeTerminalLeases {
         }
         tokens
     }
+}
+
+/// Remove every claim on `target_session_id`'s terminal from `tokens`.
+fn drop_claims_on(tokens: &mut HashMap<HomeTerminalClaimKey, String>, target_session_id: &str) {
+    tokens.retain(|key, _| key.target_session_id != target_session_id);
 }
 
 #[cfg(test)]

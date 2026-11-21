@@ -57,7 +57,7 @@ a handler has no per-host branch in it.
 | `TerminalSessionStore` | Which live terminal a `(session_id, terminal_id)` names — after the host's own auth. An empty `terminal_id` resolves to the reserved `"main"`. |
 | `TerminalSession` | One live terminal: its capture (screen model and replay ring), its stdout broadcast, its exit watch, its acked-offset watch, resize and input. |
 | `TerminalRoster` | Starting (from a `TerminalLaunch`), stopping and listing the tools a session runs, and `launch_chains` — the launch chain each terminal was started through, by terminal id (a default method answering none, for a host that keeps no roster). |
-| `TerminalControl` | The single-screen control lease — claim, steal, and the change broadcast. |
+| `TerminalControl` | The single-screen control lease — claim, steal, release, and the change broadcast. |
 
 `TerminalSessionPorts` also carries **`recorded_history: Arc<dyn RecordedTerminalHistory>`** — the
 history of a terminal that is no longer running (`src/service/recorded_history.rs`).
@@ -238,6 +238,12 @@ bidi chunk under a stale token is answered with a refusal frame instead (see abo
 
 The lease is a port rather than state this crate keeps: a session is served by exactly one host, and
 that host's other surfaces (session deletion, the LiveKit bridge) read and clear the same lease.
+
+`TerminalControl::release(session_id, control_token)` gives the lease up when `control_token` is the
+current one — the session is left uncontrolled and the change is broadcast with an empty holder —
+and answers `false`, changing nothing, otherwise (`#orchestra` 7/9). It is daemon-internal: there is
+no release RPC; a project-home orchestrator's `ReleaseSessionTerminal` is its one caller. The CLI
+manager drops a session's lease when the session is stopped or its agent ends.
 
 ## Transports
 

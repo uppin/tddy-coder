@@ -296,7 +296,9 @@ turn_input: { kind: acp_prompt }                          # a prompt over the se
 The slot is serde-tagged with `deny_unknown_fields`, so an unknown `kind` or field is refused at
 load naming it; `parse_section` also calls `validate_turn_input_slot`, refusing a `submit_key` that
 is not a key name (messages prefixed `turn_input:`). An agent without the slot takes no message.
-`specs/claude.yaml` declares `terminal_paste` with `Enter`; no other built-in declares one.
+`specs/claude.yaml`, `specs/cursor.yaml` and `specs/muse.yaml` declare `terminal_paste` with `Enter`
+(Cursor and Muse since `#orchestra` 7/9; their TUIs' paste behaviour is not yet observed live —
+`docs/dev/todo/2026-11-21-cursor-muse-terminal-paste-unverified.md`); no other built-in declares one.
 
 **Key names** live in `terminal_keys.rs` — `named_key_bytes(name)` and `is_key_name(name)`, the one
 table (`Enter`, `Escape`, `Tab`, `BTab`, `Backspace`, `Delete`, arrows, `Home`, `End`, `PageUp`,
@@ -304,7 +306,7 @@ table (`Enter`, `Escape`, `Tab`, `BTab`, `Backspace`, `Delete`, arrows, `Home`, 
 `tddy-tool-engine::terminal_keys::encode_keys` (`SendSessionKeys`) read.
 
 Tests: `tests/spec_turn_input_acceptance.rs` (claude's slot, an unknown kind, a submit key that is
-not a key name).
+not a key name), `tests/spec_turn_input_delivery_acceptance.rs` (Cursor's and Muse's slots).
 
 ## Home directories (`coding_agent.home_dirs`)
 
