@@ -541,7 +541,7 @@ fn wired_as_a_child_of(
     on_target: bool,
 ) -> crate::cli_agent_steps::SessionWiring {
     let reports_to = crate::back_channel::ReportsTo {
-        orchestrator_session_id: orchestrator,
+        orchestrator_session_id: orchestrator.to_string(),
         orchestrator_agent: None,
     };
     crate::cli_agent_steps::wire_session_agent(crate::cli_agent_steps::SessionWiringInputs {

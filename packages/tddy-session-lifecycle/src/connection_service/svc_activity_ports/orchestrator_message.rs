@@ -31,30 +31,7 @@ impl DaemonSessionHost {
             Some(&self.tddy_data_dir),
         )
         .ok_or_else(|| format!("no sessions path for {}", message.os_user))?;
-        let child_dir = tddy_core::session_lifecycle::unified_session_dir_path(
-            &sessions_base,
-            &message.session_id,
-        );
-        let changeset = tddy_core::read_changeset(&child_dir).map_err(|e| {
-            format!(
-                "cannot read session {}'s changeset: {e}",
-                message.session_id
-            )
-        })?;
-        let orchestrator = changeset
-            .orchestrator_session_id
-            .filter(|orchestrator| !orchestrator.trim().is_empty())
-            .ok_or_else(|| format!("session {} has no orchestrator", message.session_id))?;
-        if changeset
-            .orchestrator_daemon_instance_id
-            .is_some_and(|host| !host.trim().is_empty())
-        {
-            return Err(format!(
-                "session {}'s orchestrator {orchestrator} runs on another daemon, which a report \
-                 does not reach",
-                message.session_id
-            ));
-        }
+        let orchestrator = local_orchestrator_of(&sessions_base, &message.session_id)?;
         let agents = self.coding_agents.agents_shared();
         bus.publish(SessionNotification {
             label: tddy_session_activity::session_notification_publishing::resolve_session_label(
@@ -82,4 +59,31 @@ impl DaemonSessionHost {
         .await;
         Ok(())
     }
+}
+
+/// The orchestrator `session_id`'s changeset names, on this daemon. Refused, naming why, for a
+/// changeset that cannot be read, a session with no orchestrator, and one whose orchestrator runs
+/// on another daemon (a cross-host report is not carried).
+fn local_orchestrator_of(
+    sessions_base: &std::path::Path,
+    session_id: &str,
+) -> Result<String, String> {
+    let child_dir =
+        tddy_core::session_lifecycle::unified_session_dir_path(sessions_base, session_id);
+    let changeset = tddy_core::read_changeset(&child_dir)
+        .map_err(|e| format!("cannot read session {session_id}'s changeset: {e}"))?;
+    let orchestrator = changeset
+        .orchestrator_session_id
+        .filter(|orchestrator| !orchestrator.trim().is_empty())
+        .ok_or_else(|| format!("session {session_id} has no orchestrator"))?;
+    if changeset
+        .orchestrator_daemon_instance_id
+        .is_some_and(|host| !host.trim().is_empty())
+    {
+        return Err(format!(
+            "session {session_id}'s orchestrator {orchestrator} runs on another daemon, which a \
+             report does not reach"
+        ));
+    }
+    Ok(orchestrator)
 }

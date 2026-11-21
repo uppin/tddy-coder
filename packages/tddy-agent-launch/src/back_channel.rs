@@ -68,17 +68,6 @@ impl<'a> ChildPlacement<'a> {
     }
 }
 
-/// Whether a session is launched under its native peer name: an orchestrator (`role`), or a child
-/// that reports to one, running on the orchestrator's host.
-pub fn launches_under_peer_name(
-    on_target: bool,
-    reports_to_an_orchestrator: bool,
-    role: &str,
-) -> bool {
-    !on_target
-        && (reports_to_an_orchestrator || tddy_core::session_metadata::is_orchestrator_role(role))
-}
-
 /// What [`back_channel_for`] decides from.
 #[derive(Debug, Clone)]
 pub struct BackChannelInputs<'a> {
@@ -170,7 +159,7 @@ pub fn first_prompt_with(guidance: Option<&str>, task: &str) -> String {
 /// The orchestrator a starting session reports to.
 #[derive(Debug, Clone)]
 pub struct ReportsTo<'a> {
-    pub orchestrator_session_id: &'a str,
+    pub orchestrator_session_id: String,
     /// The orchestrator's agent, when it is a coding agent this host knows. An orchestrator whose
     /// agent is unknown offers no native peer messaging, so a local child reports with
     /// `tddy-tools send`.
@@ -186,7 +175,7 @@ impl ReportsTo<'_> {
     ) -> String {
         let channel = match (self.orchestrator_agent, placement) {
             (Some(orchestrator_agent), placement) => back_channel_for(&BackChannelInputs {
-                orchestrator_session_id: self.orchestrator_session_id,
+                orchestrator_session_id: &self.orchestrator_session_id,
                 orchestrator_agent,
                 child_agent,
                 placement,
@@ -200,14 +189,37 @@ impl ReportsTo<'_> {
                 },
             ) => hook_log_channel(hook_token, hook_log_path),
         };
-        back_channel_guidance(self.orchestrator_session_id, &channel)
+        back_channel_guidance(&self.orchestrator_session_id, &channel)
+    }
+
+    /// The guidance for a child running `child_agent`, on a target when `on_target` with its
+    /// `hook_token`; `None` for a target child with no hook token ([`ChildPlacement::of`]).
+    pub fn guidance_at(
+        &self,
+        child_agent: &CodingAgentSpec,
+        on_target: bool,
+        hook_token: Option<&str>,
+    ) -> Option<String> {
+        ChildPlacement::of(on_target, hook_token)
+            .map(|placement| self.guidance_for(child_agent, placement))
     }
 }
 
-/// The arguments that launch a session of `spec` under its native peer name: the spec's
-/// `peer_name` flag and [`native_peer_name_of`] `session_id`; none for an agent without one.
-pub fn peer_name_args(spec: &CodingAgentSpec, session_id: &str) -> Vec<String> {
+/// The arguments that launch `session_id` of `spec` under its native peer name: the spec's
+/// `peer_name` flag and [`native_peer_name_of`] `session_id`, for an orchestrator (`role`) or a child
+/// that reports to one, running on the orchestrator's host. None for any other session, and for an
+/// agent without the slot.
+pub fn peer_name_args(
+    spec: &CodingAgentSpec,
+    session_id: &str,
+    on_target: bool,
+    reports_to_an_orchestrator: bool,
+    role: &str,
+) -> Vec<String> {
+    let named = !on_target
+        && (reports_to_an_orchestrator || tddy_core::session_metadata::is_orchestrator_role(role));
     spec.peer_name()
+        .filter(|_| named)
         .map(|slot| vec![slot.flag.clone(), native_peer_name_of(session_id)])
         .unwrap_or_default()
 }

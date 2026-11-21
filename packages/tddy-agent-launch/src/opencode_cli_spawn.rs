@@ -113,14 +113,10 @@ pub(crate) async fn start_cli_harness_session(
         crate::remote_agent_launch::target_config_host(target.as_ref()).unwrap_or(ssh_alias);
     // Resolved before anything is cut: a Coder target whose vault is locked, or whose account
     // the vault does not hold, refuses the start here rather than after a worktree exists.
-    let target_shell = match &target {
-        Some(target) => Some(shell_for_session_target(
-            target,
-            &subject,
-            coder_credentials.as_ref(),
-        )?),
-        None => None,
-    };
+    let target_shell = target
+        .as_ref()
+        .map(|target| shell_for_session_target(target, &subject, coder_credentials.as_ref()))
+        .transpose()?;
     let spec = &agent.spec;
     let role_name = role.name;
     refuse_a_role_the_agent_cannot_hold(spec, role_name)?;
@@ -285,10 +281,7 @@ pub(crate) async fn start_cli_harness_session(
     let remote_host = Some(checkout_alias).filter(|alias| !alias.is_empty());
     let toolset = std::mem::take(&mut wiring.toolset);
     let role_args = std::mem::take(&mut wiring.extra_args);
-    let first_prompt = crate::back_channel::first_prompt_with(
-        wiring.first_prompt_guidance.as_deref(),
-        initial_prompt,
-    );
+    let first_prompt = wiring.first_prompt(initial_prompt);
     let hook_params = wiring.hook_params(spec, session_id, os_user, &route.plain_env);
     let mut slots = render_host_launch_slots(
         agent,
@@ -303,16 +296,6 @@ pub(crate) async fn start_cli_harness_session(
     )?;
     let carried_effort = effort_launch(spec, effort);
     slots.argv_extra.extend(role_args);
-    // An orchestrator and its children on this host message each other by peer name.
-    if crate::back_channel::launches_under_peer_name(
-        target.is_some(),
-        reports_to.is_some(),
-        role_name,
-    ) {
-        slots
-            .argv_extra
-            .extend(crate::back_channel::peer_name_args(spec, session_id));
-    }
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
     let pointer = place_slot_files_and_pointer(

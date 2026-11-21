@@ -31,6 +31,7 @@ use tddy_daemon_kernel::config::DaemonConfig;
 
 use tddy_core::session_pointer::SessionPointer;
 
+use crate::back_channel::peer_name_args;
 use crate::claude_cli_spawn_steps::{claude_cli_hooks, record_hook_answer_wait, ClaudeCliHooks};
 use crate::cli_session_pointer::session_pointer_of;
 use crate::launch_ports::LaunchSessions;
@@ -91,7 +92,8 @@ pub(crate) struct SessionWiring {
     /// session's wiring produced, plus the session tool transport (`TDDY_REMOTE_*`), whose export
     /// to the agent process is what a `tddy-tools` run from its own shell routes by.
     pub env: Vec<(String, String)>,
-    /// Flags already rendered (a main's role prompt), placed after the slot flags.
+    /// Flags already rendered (a main's role prompt, the session's native peer name), placed after
+    /// the slot flags.
     pub extra_args: Vec<String>,
     /// The back-channel guidance (`#orchestra` 2/9) the agent's system prompt does not carry — an
     /// agent with no operator-notify system prompt (Codex, Muse, …), or a session holding a role —
@@ -132,35 +134,15 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         reports_to,
         on_target,
     } = inputs;
-    // A child on a target reports over its hook log, which is followed only for a session with a
-    // hook token: one is minted for it even when its agent installs no hooks.
-    let hooks = (spec.has(Capability::Hooks)
-        || spec.has(Capability::OperatorNotify)
-        || (on_target && reports_to.is_some()))
-    .then(|| claude_cli_hooks(config, agent_tool_socket, spec, tddy_tools_path));
+    let hooks = has_hooks(spec, on_target && reports_to.is_some())
+        .then(|| claude_cli_hooks(config, agent_tool_socket, spec, tddy_tools_path));
     if let Some(hooks) = &hooks {
         record_hook_answer_wait(session_dir, hooks)?;
     }
-    let back_channel = reports_to.and_then(|reports_to| {
-        let hook_token = hooks.as_ref().map(|hooks| hooks.hook_token.as_str());
-        crate::back_channel::ChildPlacement::of(on_target, hook_token)
-            .map(|placement| reports_to.guidance_for(spec, placement))
-    });
-    // The operator-notify system prompt carries it; a role's session, or an agent without one,
-    // is told in its first prompt.
-    let in_system_prompt = spec.has(Capability::OperatorNotify) && role.name.is_empty();
-    let mut process_env: Vec<(String, String)> = Vec::new();
-    if let Some(agent_session_token) = session_tool_token {
-        process_env.extend(
-            tddy_session_split::split_session::colocated_jail_tool_env(
-                &tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(config),
-                session_id,
-                &agent_session_token,
-                Some(agent_tool_socket.to_string_lossy().into_owned()),
-            )
-            .env_pairs(),
-        );
-    }
+    let hook_token = hooks.as_ref().map(|hooks| hooks.hook_token.as_str());
+    let back_channel = reports_to.and_then(|to| to.guidance_at(spec, on_target, hook_token));
+    let mut process_env =
+        session_tool_env(config, session_id, session_tool_token, agent_tool_socket);
     let mut tool_server_env: Vec<(String, String)> = Vec::new();
     let mut notify_env: Vec<(String, String)> = Vec::new();
     let mut system_prompt_file: Option<PathBuf> = None;
@@ -206,7 +188,11 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
     }
     let role_wiring = RoleWiring::of(role.main)?;
     route_tool_server_env(role_wiring.env, &mut process_env, &mut tool_server_env);
-    let (extra_args, mut toolset) = spec_role_launch(role_wiring.main.as_ref());
+    let (mut extra_args, mut toolset) = spec_role_launch(role_wiring.main.as_ref());
+    let reports = reports_to.is_some();
+    extra_args.extend(peer_name_args(
+        spec, session_id, on_target, reports, role.name,
+    ));
     let session_pointer = session_pointer_of(&tool_server_env, notify_env, worktree);
     carry_on_the_tool_server(
         spec,
@@ -221,7 +207,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         system_prompt_file,
         env: process_env,
         extra_args,
-        first_prompt_guidance: back_channel.filter(|_| !in_system_prompt),
+        first_prompt_guidance: back_channel.filter(|_| !system_prompt_carries_it(spec, role.name)),
         toolset,
         session_pointer,
     })
@@ -267,6 +253,40 @@ impl LaunchSessions {
     }
 }
 
+/// The session tool transport (`TDDY_REMOTE_*`) a `session_tool_token` exports to the agent
+/// process, so its shell routes `tddy-tools monitor` and `send` to this daemon; none without a
+/// token.
+fn session_tool_env(
+    config: &DaemonConfig,
+    session_id: &str,
+    session_tool_token: Option<String>,
+    agent_tool_socket: &Path,
+) -> Vec<(String, String)> {
+    let Some(agent_session_token) = session_tool_token else {
+        return Vec::new();
+    };
+    tddy_session_split::split_session::colocated_jail_tool_env(
+        &tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(config),
+        session_id,
+        &agent_session_token,
+        Some(agent_tool_socket.to_string_lossy().into_owned()),
+    )
+    .env_pairs()
+}
+
+/// Whether a start wires hooks: for an agent declaring them or operator notify, and for a child on a
+/// target that reports to an orchestrator (`target_child_reports`) — its report rides the hook log,
+/// which is followed only for a session with a hook token, even when its agent installs no hooks.
+fn has_hooks(spec: &CodingAgentSpec, target_child_reports: bool) -> bool {
+    spec.has(Capability::Hooks) || spec.has(Capability::OperatorNotify) || target_child_reports
+}
+
+/// Whether the back-channel guidance rides the operator-notify system prompt; a session holding a
+/// role, or an agent without that prompt, is told in its first prompt instead.
+fn system_prompt_carries_it(spec: &CodingAgentSpec, role_name: &str) -> bool {
+    spec.has(Capability::OperatorNotify) && role_name.is_empty()
+}
+
 /// Whether `spec`'s hooks adapter reports over the daemon's agent-tool socket: it refuses params
 /// that carry none (`SlotError::NoDaemonSocket`), where the hooks of an adapter that reports over
 /// HTTP render with none.
@@ -290,6 +310,12 @@ pub(crate) fn hooks_report_over_the_agent_tool_socket(spec: &CodingAgentSpec) ->
 }
 
 impl SessionWiring {
+    /// The first prompt the agent is started with: `task`, after the back-channel guidance its
+    /// system prompt could not carry ([`crate::back_channel::first_prompt_with`]).
+    pub(crate) fn first_prompt(&self, task: &str) -> String {
+        crate::back_channel::first_prompt_with(self.first_prompt_guidance.as_deref(), task)
+    }
+
     /// The hook parameters of `session_id`'s start, when the spec declares `hooks`. `route_env` is
     /// the provider route's non-secret pairs, pinned beside the hooks in the settings file; the
     /// key is never among them.

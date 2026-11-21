@@ -12,7 +12,8 @@ use tddy_rpc::Status;
 use tddy_cli_sessions::session_toolcall::ManagedWorkflow;
 use tddy_core::session_pointer::SessionPointer;
 
-use super::{carry_on_the_tool_server, route_tool_server_env};
+use super::{carry_on_the_tool_server, route_tool_server_env, session_tool_env};
+use crate::back_channel::peer_name_args;
 use crate::claude_cli_spawn_steps::{resumed_hooks, ClaudeCliHooks};
 use crate::cli_session_pointer::session_pointer_of;
 use crate::launch_ports::LaunchSessions;
@@ -56,34 +57,10 @@ impl LaunchSessions {
         let tddy_tools_path = crate::cli_harness_jail::agent_tddy_tools(agent)?;
         let session_id = meta.session_id.as_str();
         let tool_socket = self.agent_tool_socket_of(os_user).await?;
-        let mut process_env = Vec::new();
-        // A resumed agent's shell gets the session tool transport again, under a credential minted
-        // now — nothing persists the previous process's token. A session whose agent runs on
-        // another host is exported none: the socket and the URL name this host, which its shell
-        // cannot reach, and detection would prefer the dead route. A split agent's process runs
-        // model-authored code joined to its room over its own split transport — none of this.
-        let runs_on_this_host = local_session
-            && meta.target.is_none()
-            && meta
-                .ssh_config_host
-                .as_deref()
-                .is_none_or(|host| host.trim().is_empty());
-        let session_tool_token = if runs_on_this_host {
-            self.session_tool_token_for(session_id, session_token)
-        } else {
-            None
-        };
-        if let Some(agent_session_token) = session_tool_token {
-            process_env.extend(
-                tddy_session_split::split_session::colocated_jail_tool_env(
-                    &tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(&self.config),
-                    session_id,
-                    &agent_session_token,
-                    Some(tool_socket.to_string_lossy().into_owned()),
-                )
-                .env_pairs(),
-            );
-        }
+        let session_tool_token =
+            self.resumed_session_tool_token(meta, session_token, local_session);
+        let mut process_env =
+            session_tool_env(&self.config, session_id, session_tool_token, &tool_socket);
         let mut tool_server_env = Vec::new();
         let mut notify_env = Vec::new();
         let mut system_prompt_file = None;
@@ -117,16 +94,12 @@ impl LaunchSessions {
                 workflow = Some(launch.workflow);
             }
         }
-        let orchestrator = self.resumed_orchestrator_link(session_dir);
-        let sessions_base = session_dir.parent().and_then(Path::parent);
-        let reports_to =
-            sessions_base.and_then(|base| self.reports_to_of(orchestrator.as_ref(), base));
+        let reports_to = self.resumed_reports_to(session_dir);
         let on_target = meta.target.is_some();
         if spec.has(Capability::OperatorNotify) {
-            let back_channel = reports_to.as_ref().and_then(|reports_to| {
-                crate::back_channel::ChildPlacement::of(on_target, meta.hook_token.as_deref())
-                    .map(|placement| reports_to.guidance_for(spec, placement))
-            });
+            let back_channel = reports_to
+                .as_ref()
+                .and_then(|to| to.guidance_at(spec, on_target, meta.hook_token.as_deref()));
             let notify = crate::notify_env::resumed_agent_notify_launch(
                 &self.config,
                 &tool_socket,
@@ -142,14 +115,11 @@ impl LaunchSessions {
         let role = self.resumed_role(meta, session_id, session_dir, session_token, &tool_socket)?;
         route_tool_server_env(role.env, &mut process_env, &mut tool_server_env);
         let (mut extra_args, mut toolset) = spec_role_launch(role.main.as_ref());
-        // An orchestrator and its children on this host message each other by peer name.
-        if crate::back_channel::launches_under_peer_name(
-            on_target,
-            reports_to.is_some(),
-            meta.session_role.as_deref().unwrap_or_default(),
-        ) {
-            extra_args.extend(crate::back_channel::peer_name_args(spec, session_id));
-        }
+        let role_name = meta.session_role.as_deref().unwrap_or_default();
+        let reports = reports_to.is_some();
+        extra_args.extend(peer_name_args(
+            spec, session_id, on_target, reports, role_name,
+        ));
         let session_pointer = session_pointer_of(&tool_server_env, notify_env, worktree);
         carry_on_the_tool_server(
             spec,
@@ -168,6 +138,27 @@ impl LaunchSessions {
             toolset,
             session_pointer,
         })
+    }
+    /// The credential a resumed agent's session tool transport is minted around, minted now —
+    /// nothing persists the previous process's token. A session whose agent runs on another host
+    /// is given none: the socket and the URL name this host, which its shell cannot reach, and
+    /// detection would prefer the dead route. A split agent's process runs model-authored code
+    /// joined to its room over its own split transport — none of this.
+    fn resumed_session_tool_token(
+        &self,
+        meta: &SessionMetadata,
+        session_token: &str,
+        local_session: bool,
+    ) -> Option<String> {
+        let runs_on_this_host = local_session
+            && meta.target.is_none()
+            && meta
+                .ssh_config_host
+                .as_deref()
+                .is_none_or(|host| host.trim().is_empty());
+        runs_on_this_host
+            .then(|| self.session_tool_token_for(&meta.session_id, session_token))
+            .flatten()
     }
 }
 
