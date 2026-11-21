@@ -214,13 +214,18 @@ impl ActivityHookSink {
 impl HookSink for ActivityHookSink {
     async fn deliver(&self, line: HookLine) {
         let payload = line.payload.to_string();
-        if let Some(request) = tddy_session_activity::hook_request::session_status_request(
-            &self.session_id,
-            &self.hook_token,
-            &self.os_user,
-            &line.event,
-            &payload,
-        ) {
+        if let Some(request) = crate::remote_hook_report::reports_a_status(&line)
+            .then(|| {
+                tddy_session_activity::hook_request::session_status_request(
+                    &self.session_id,
+                    &self.hook_token,
+                    &self.os_user,
+                    &line.event,
+                    &payload,
+                )
+            })
+            .flatten()
+        {
             let request_id = match self.delivery.report_session_status(request).await {
                 Ok(response) => Some(response.request_id),
                 Err(error) => {

@@ -101,10 +101,21 @@ pub use tddy_session_activity::hook_decision::permission_decision_json;
 /// event that maps to no status. The mapping itself lives in
 /// [`tddy_session_activity::hook_request`], beside the daemon handling it serves, so a target
 /// session's hook-log follower delivers with the same one.
+///
+/// A `PreToolUse` that does not wait for an answer is the catch-all reporting hook: it maps to no
+/// status, only to the agent-activity report (a question is recorded by the hook that waits).
 pub fn session_status_request(
     args: &SessionHookArgs,
     stdin_json: &str,
 ) -> Option<ReportSessionStatusRequest> {
+    let hook_event_name = parse_hook_event(stdin_json)
+        .ok()
+        .map(|ev| ev.hook_event_name)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| args.event.clone());
+    if hook_event_name == "PreToolUse" && !args.await_answer {
+        return None;
+    }
     tddy_session_activity::hook_request::session_status_request(
         &args.session,
         &args.hook_token,

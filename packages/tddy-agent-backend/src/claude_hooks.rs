@@ -84,12 +84,13 @@ pub(crate) fn daemon_socket_arg(p: &HookCommandParams<'_>) -> String {
 }
 
 /// The `(event, matcher)` pairs [`build_claude_hooks_settings`] installs.
-const CLAUDE_HOOK_EVENTS: [(&str, &str); 8] = [
+const CLAUDE_HOOK_EVENTS: [(&str, &str); 9] = [
     ("SessionStart", ""),
     ("UserPromptSubmit", ""),
     ("PostToolUse", ""),
     ("Notification", ""),
     ("PermissionRequest", ""),
+    ("PreToolUse", ""),
     ("PreToolUse", "AskUserQuestion"),
     ("Stop", ""),
     ("SessionEnd", ""),
@@ -199,15 +200,15 @@ fn remote_permission_entry(
 /// { "matcher": "", "hooks": [{ "type": "command", "command": "<cmd>" }] }
 /// ```
 /// `matcher = ""` matches all tool names (for `PostToolUse`/`Notification`) and all other
-/// variants. `PreToolUse` is matched to `AskUserQuestion` alone: a hook on every tool would run a
-/// process before each call of the agent's loop, and only that one tool's input is a question
-/// (`#home-inbox` 3/8).
+/// variants. `PreToolUse` has two groups: `""` reports every tool call before it runs (activity
+/// only, never waiting), and `AskUserQuestion` waits for the orchestrator's answer, since only that
+/// tool's input is a question (`#home-inbox` 3/8, `#target-parity` 4/7).
 pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Value {
     let events = CLAUDE_HOOK_EVENTS;
 
     let mut hooks_obj = serde_json::Map::new();
     for (event, matcher) in &events {
-        // A permission prompt, and a question (`PreToolUse` matched to `AskUserQuestion` alone), wait
+        // A permission prompt, and a question (`PreToolUse` matched to `AskUserQuestion`), wait
         // for the orchestrator's answer; the daemon decides whether anyone is there.
         let awaits_an_answer = *event == "PermissionRequest"
             || (*event == "PreToolUse" && *matcher == "AskUserQuestion");
@@ -220,7 +221,14 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
             Some(_) if awaits_an_answer => continue,
             _ => hook_entry_for_event(p, event, matcher, awaits_an_answer),
         };
-        hooks_obj.insert(event.to_string(), entry);
+        // An event's matcher groups accumulate in order: `PreToolUse` has the catch-all reporting
+        // group, then the waiting `AskUserQuestion` one.
+        let groups = hooks_obj
+            .entry(event.to_string())
+            .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+        if let (Some(groups), Some(entry)) = (groups.as_array_mut(), entry.as_array()) {
+            groups.extend(entry.iter().cloned());
+        }
     }
 
     let mut settings = serde_json::json!({ "hooks": hooks_obj });
