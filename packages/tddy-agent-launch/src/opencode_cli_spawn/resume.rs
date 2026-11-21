@@ -5,15 +5,11 @@ use crate::cli_agent_steps::conversation::resumed_or_adopted_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::conversation::ConversationTarget;
 use crate::cli_agent_steps::host_launch_slots::render_host_launch_slots;
-use crate::cli_agent_steps::host_launch_slots::write_slot_files_on_target;
-use crate::cli_agent_steps::host_launch_slots::write_slot_files_through_shell;
 use crate::cli_agent_steps::host_launch_slots::HostLaunchSlots;
 use crate::cli_agent_steps::ResumedWiring;
 use crate::cli_resume_token::{resume_token_recorder, settled_resume_token};
 use crate::cli_route_launch::resume_cli_route;
-use crate::cli_session_pointer::{
-    place_session_pointer, removing_session_pointer_on_exit, PointerHost,
-};
+use crate::cli_session_pointer::removing_session_pointer_on_exit;
 use crate::cursor_from_spec::node_launcher_of;
 use crate::effort_launch::effort_launch;
 use crate::harness_from_spec::{
@@ -318,24 +314,15 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(wiring.extra_args);
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
-    let host = match &target_shell {
-        Some(shell) => PointerHost::Remote {
-            shell: Arc::clone(shell),
-        },
-        None => PointerHost::of(remote_host),
-    };
-    crate::session_hooks_worktree::prepare_worktree_for_session_hooks(
+    let pointer = super::place_slot_files_and_pointer(
         spec,
         &worktree_path,
-        &slots,
-        &host,
+        &target_shell,
+        session_pointer.as_ref(),
+        remote_host,
+        &mut slots,
     )
     .await?;
-    match &target_shell {
-        Some(shell) => write_slot_files_through_shell(&mut slots, shell.as_ref()).await?,
-        None => write_slot_files_on_target(&mut slots, remote_host).await?,
-    }
-    let pointer = place_session_pointer(session_pointer.as_ref(), &worktree_path, &host).await?;
     let on_exit = removing_session_pointer_on_exit(on_exit, pointer, meta.tmux_session.is_some());
     let mut env = git_environment;
     env.extend(split_env);
