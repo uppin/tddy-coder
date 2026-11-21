@@ -204,6 +204,10 @@ async fn carry_out(
             restore_target_shell(restore, tab).await?;
             Ok(Restored::AsRecorded)
         }
+        TabRestore::TargetAgent {
+            harness,
+            resume_conversation,
+        } => restore_target_agent(restore, tab, harness, resume_conversation).await,
         TabRestore::ReattachTmux { session, os_user } => {
             let harness = recorded_harness(tab)?;
             reattach(restore, tab, &harness, &os_user, &session).await?;
@@ -319,6 +323,31 @@ async fn restore_target_shell(restore: &RosterRestore<'_>, tab: &TabEntry) -> an
     )
     .await?;
     Ok(())
+}
+
+/// Start the agent of `harness` under the tab's recorded id on the session's target, in the
+/// session's worktree there (`#session-liveness` 8/8): the target resolved through
+/// `restore.tab_target_shell` as `restore.subject`, the agent run by its bare command
+/// ([`super::target_agent_tab`]) through
+/// [`crate::remote_agent_launch::launch_agent_tab_on_target`], resuming `resume_conversation` when
+/// there is one — [`Restored::AsRecorded`] — and fresh otherwise — [`Restored::Fresh`] with the
+/// reason. A target that cannot be resolved (a locked vault) or reached fails the tab with the
+/// reason.
+async fn restore_target_agent(
+    restore: &RosterRestore<'_>,
+    tab: &TabEntry,
+    harness: String,
+    resume_conversation: Option<String>,
+) -> anyhow::Result<Restored> {
+    // TODO(target-agent-tab): implement
+    let _ = (
+        restore.tab_target_shell,
+        restore.subject,
+        tab,
+        harness,
+        resume_conversation,
+    );
+    todo!("restore an agent tab on the session's target")
 }
 
 /// Start `terminal` under the tab's recorded id.

@@ -1,7 +1,7 @@
 /**
  * Cypress component acceptance: a target session's "+" menu offers its shell "On target" — on the
  * session's target, first and so the default — and "On this host"; a session that runs on this host
- * offers no such choice.
+ * offers no such choice. Its agents are offered "On target" too (`#session-liveness` 8/8).
  *
  * PRD: `docs/ft/daemon/session-liveness.md (A target session's tabs)` (`#session-liveness` 6/8)
  *
@@ -62,6 +62,16 @@ function aBackendServing(session: Partial<SessionEntry>): SessionServiceBackend 
   });
 }
 
+/** A host-served session whose daemon runs Muse Code; started terminals are `term-1`, `term-2`, … */
+function aBackendRunningMuseServing(session: Partial<SessionEntry>): SessionServiceBackend {
+  return aSessionServiceBackend({
+    sessions: [session],
+    agents: [{ id: "muse", label: "Muse Code" }],
+    connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
+    newTerminalId: (index) => `term-${index + 1}`,
+  });
+}
+
 function attachSession(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(SESSION_ID).click();
@@ -86,7 +96,7 @@ function menuGroupLabels($groups: JQuery<HTMLElement>): string[] {
 
 // ---------------------------------------------------------------------------
 
-describe("NewTerminalMenu — shell tabs on a target", () => {
+describe("NewTerminalMenu — tabs on a target", () => {
   beforeEach(() => {
     cy.viewport(1280, 800);
     cy.clearLocalStorage();
@@ -117,6 +127,32 @@ describe("NewTerminalMenu — shell tabs on a target", () => {
       expect(startedTerminals(b)).to.deep.equal([
         { kind: "", wrappers: [{ kind: "target" }] },
         { kind: "", wrappers: [] },
+      ]);
+    });
+  });
+
+  it("lists agent kinds under On target for a target session", () => {
+    // Given a connected session on a target whose daemon runs Muse Code
+    const backend = aBackendRunningMuseServing(aTargetSession());
+    attachSession(backend);
+
+    // When the "+" menu is opened
+    tabs.newTab().click();
+
+    // Then Muse Code is offered both "On target" and "On this host"
+    tabs.newTabOnTargetOption("muse-cli").should("exist");
+    tabs.newTabOnThisHostOption("muse-cli").should("exist");
+
+    // When it is opened from each
+    tabs.newTabOnTargetOption("muse-cli").click();
+    tabs.newTab().click();
+    tabs.newTabOnThisHostOption("muse-cli").click();
+
+    // Then the daemon is asked for Muse Code on the target, then for Muse Code on this host
+    cy.wrap(backend).should((b: SessionServiceBackend) => {
+      expect(startedTerminals(b)).to.deep.equal([
+        { kind: "muse-cli", wrappers: [{ kind: "target" }] },
+        { kind: "muse-cli", wrappers: [] },
       ]);
     });
   });

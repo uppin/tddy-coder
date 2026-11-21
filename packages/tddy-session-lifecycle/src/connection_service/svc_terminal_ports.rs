@@ -25,6 +25,7 @@ use crate::terminal_session_adapter::DaemonTerminalSessionStore;
 mod jailed_tabs;
 mod recorded_tabs;
 mod recorded_worktree;
+mod target_agent_tabs;
 mod target_tabs;
 mod tmux_host;
 
@@ -376,6 +377,9 @@ impl TerminalRoster for CliManagerTerminalRoster {
         }
         if launch.kind == tddy_terminal_rpc::service::TerminalKind::TargetShell {
             return self.start_target_shell_tab(session_id, launch).await;
+        }
+        if let tddy_terminal_rpc::service::TerminalKind::TargetAgent { agent } = &launch.kind {
+            return self.start_target_agent_tab(session_id, agent, launch).await;
         }
         let worktree = match self.manager.get(session_id).await {
             Some(main) => main.worktree_path.clone(),

@@ -33,7 +33,9 @@ interface NewTerminalMenuProps {
    *  "In sandbox" too, each opening with `wrappers: [sandbox]` (`#session-liveness` 7/8). */
   sandboxed?: boolean;
   /** Whether the session runs on a target (`SessionEntry.target` is set): its shell opens "On
-   *  target" — on that machine, in the session's worktree there — by default, or "On this host". */
+   *  target" — on that machine, in the session's worktree there — by default, or "On this host".
+   *  Its agent kinds are listed under "On target" too, each opening with `wrappers: [target]`
+   *  (`#session-liveness` 8/8). TODO(target-agent-tab): list the agents in that group. */
   onTarget?: boolean;
 }
 

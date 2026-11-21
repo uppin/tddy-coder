@@ -297,6 +297,13 @@ impl TerminalRoster for CoderTerminalRoster {
                     "this session's terminals run bash only; a tab on a target is not offered here",
                 ));
             }
+            // Nor an agent on one (`#session-liveness` 8/8).
+            TerminalKind::TargetAgent { agent } => {
+                return Err(Status::failed_precondition(format!(
+                    "this session's terminals run bash only; {agent:?} in a tab on a target is not \
+                     offered here"
+                )));
+            }
         }
         self.svc
             .terminal_manager

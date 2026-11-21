@@ -2,8 +2,8 @@
 //! the target its owner's credentials reach, in the session's worktree there — is listed, and is
 //! recorded `[target, shell]`; a tab opened "On this host" is a plain shell here, in the session's
 //! own directory; a target that resolves but cannot be reached fails the tab `UNAVAILABLE` with the
-//! transport's words, and one that cannot be resolved (a locked vault) `FAILED_PRECONDITION`; a
-//! `target` wrapper around an agent is refused (an agent on a target is `target-agent-tab`'s).
+//! transport's words, and one that cannot be resolved (a locked vault) `FAILED_PRECONDITION`. An
+//! agent tab on a target is `target-agent-tab`'s (`target_agent_tab_acceptance.rs`).
 //!
 //! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs) (`#session-liveness` 6/8)
 //!
@@ -85,30 +85,6 @@ async fn an_on_this_host_tab_of_a_target_session_is_a_plain_shell() {
     );
     assert_eq!(daemon.target_shells.asked(), Vec::new());
     assert_eq!(machine.interactive_commands(), Vec::<String>::new());
-}
-
-#[tokio::test]
-async fn a_target_wrapper_around_an_agent_is_refused() {
-    // Given a target session whose target is a reachable machine
-    let (target_shells, machine) = target_shells_reaching_a_machine();
-    let daemon = a_target_session_whose_shells_resolve_through(target_shells);
-
-    // When an agent tab is opened "On target"
-    let refusal = daemon
-        .opens_a_tab_on_target("claude-cli")
-        .await
-        .expect_err("an agent cannot be opened on a target here");
-
-    // Then it is refused naming the agent, nothing was started on the target, and nothing is
-    // recorded
-    assert_eq!(refusal.code(), Code::InvalidArgument);
-    assert!(
-        refusal.message().contains("claude-cli"),
-        "the refusal names the agent: {}",
-        refusal.message()
-    );
-    assert_eq!(machine.interactive_commands(), Vec::<String>::new());
-    assert_eq!(daemon.roster().tabs, Vec::new());
 }
 
 #[tokio::test]

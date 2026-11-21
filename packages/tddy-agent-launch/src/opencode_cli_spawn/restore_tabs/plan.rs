@@ -51,6 +51,13 @@ pub enum TabRestore {
     /// The target user's login shell, reopened fresh under its id on the session's target, in the
     /// session's worktree there (`target` → `shell`, `#session-liveness` 6/8).
     TargetShell,
+    /// An agent tab started under its id on the session's target, in the session's worktree there
+    /// (`target` → `agent`, `#session-liveness` 8/8), resuming `resume_conversation` when its harness
+    /// can, fresh when it is `None`.
+    TargetAgent {
+        harness: String,
+        resume_conversation: Option<String>,
+    },
     /// A tab attached to the user's own tmux session, which still exists: re-attached under its id.
     ReattachTmuxAttach { session: String, os_user: String },
     /// Not restorable: dropped from the roster and reported with `reason`.
@@ -107,8 +114,9 @@ impl LiveTabs {
 /// - `sandbox` → `shell` → [`TabRestore::JailedShell`]; `sandbox` → `agent` →
 ///   [`TabRestore::JailedAgent`]; a `sandbox` around anything else is [`TabRestore::Drop`] naming
 ///   why;
-/// - `target` → `shell` → [`TabRestore::TargetShell`]; a `target` around anything else is
-///   [`TabRestore::Drop`] naming why;
+/// - `target` → `shell` → [`TabRestore::TargetShell`]; `target` → `agent` →
+///   [`TabRestore::TargetAgent`]; a `target` around anything else is [`TabRestore::Drop`] naming
+///   why;
 /// - `tmux-attach` → [`TabRestore::ReattachTmuxAttach`] when the user's tmux session exists,
 ///   otherwise [`TabRestore::Drop`] naming it;
 /// - an empty chain, an unknown kind, or a node missing what it needs → [`TabRestore::Drop`]
@@ -135,6 +143,7 @@ pub fn restore_plan(entry: &TabEntry, live: &LiveTabs) -> TabRestore {
         TMUX_KIND => tmux_wrapped_plan(entry, outermost, live),
         SANDBOX_KIND if wraps_an_agent(entry) => jailed_agent_plan(entry),
         SANDBOX_KIND => sandbox_plan(entry),
+        TARGET_KIND if wraps_an_agent(entry) => target_agent_plan(entry),
         TARGET_KIND => target_plan(entry),
         other => drop_because(format!(
             "its launch kind {other:?} is not one this daemon can restore"
@@ -295,6 +304,15 @@ fn target_plan(entry: &TabEntry) -> TabRestore {
             inner.kind
         )),
     }
+}
+
+/// A `target`-wrapped agent (`#session-liveness` 8/8): started on the session's target, resuming its
+/// conversation when its harness can, fresh otherwise; dropped naming what it is missing, or a node
+/// the agent is recorded wrapping.
+fn target_agent_plan(entry: &TabEntry) -> TabRestore {
+    // TODO(target-agent-tab): implement
+    let _ = entry;
+    todo!("the restore of a target-wrapped agent tab")
 }
 
 /// The tmux session name and OS user a `tmux` or `tmux-attach` node records.

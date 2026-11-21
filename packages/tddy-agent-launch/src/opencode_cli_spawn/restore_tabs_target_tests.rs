@@ -1,6 +1,7 @@
 //! Unit tests: the restore rule ([`restore_plan`]) for a tab recorded on its session's target —
-//! `target` → `shell` reopens on the target; anything else on a target is dropped naming why
-//! (`#session-liveness` 6/8; an agent on a target is `target-agent-tab`'s).
+//! `target` → `shell` reopens on the target; anything else on a target but an agent is dropped naming
+//! why (`#session-liveness` 6/8; an agent on a target is `target-agent-tab`'s,
+//! `restore_tabs_target_agent_tests.rs`).
 
 use pretty_assertions::assert_eq;
 use tddy_core::tab_roster::{LaunchNode, TabEntry};
@@ -8,7 +9,6 @@ use tddy_core::tab_roster::{LaunchNode, TabEntry};
 use super::{restore_plan, LiveTabs, TabRestore};
 
 const TAB: &str = "019b-target-tab";
-const CONVERSATION: &str = "5f3c0000-0000-7000-8000-000000000003";
 
 fn a_tab(launch: Vec<LaunchNode>) -> TabEntry {
     TabEntry::new(TAB, launch)
@@ -32,21 +32,6 @@ fn a_shell_recorded_on_a_target_is_planned_as_a_shell_on_the_target() {
 
     // Then
     assert_eq!(plan, TabRestore::TargetShell);
-}
-
-#[test]
-fn an_agent_recorded_on_a_target_is_dropped_naming_the_agent() {
-    // Given
-    let tab = a_tab(vec![
-        LaunchNode::target(),
-        LaunchNode::agent("claude-cli", CONVERSATION),
-    ]);
-
-    // When
-    let reason = dropped_reason(restore_plan(&tab, &LiveTabs::none()));
-
-    // Then
-    assert!(reason.contains("agent"), "{reason}");
 }
 
 #[test]
