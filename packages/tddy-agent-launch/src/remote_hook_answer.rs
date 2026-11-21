@@ -17,7 +17,8 @@ use std::time::Duration;
 
 use tddy_remote_shell::{ExecRequest, RemoteShell};
 
-use crate::remote_hook_follower::{shell_quote, HookReportDelivery};
+use crate::remote_hook_delivery::HookReportDelivery;
+use crate::remote_hook_follower::shell_quote;
 
 /// Who a held hook belongs to: the identity `AwaitQuestionAnswer` authenticates with.
 pub(crate) struct HeldHook {

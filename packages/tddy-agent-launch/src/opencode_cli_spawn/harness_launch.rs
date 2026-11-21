@@ -103,7 +103,7 @@ pub(super) struct HarnessRemote {
     pub(super) hook_token: Option<String>,
     /// Where followed hooks are delivered, and the registry the follower is kept in for the
     /// session's exit, stop and delete. `None` delivery starts no follower.
-    pub(super) hook_delivery: Option<Arc<dyn crate::remote_hook_follower::HookReportDelivery>>,
+    pub(super) hook_delivery: Option<Arc<dyn crate::remote_hook_delivery::HookReportDelivery>>,
     pub(super) hook_followers: crate::remote_hook_follower::RemoteHookFollowers,
 }
 
@@ -254,7 +254,7 @@ fn follow_the_hook_log(
         return;
     };
     let shell = Arc::clone(&remote.shell);
-    let sink = crate::remote_hook_follower::ActivityHookSink::new(
+    let sink = crate::remote_hook_delivery::ActivityHookSink::new(
         Arc::clone(delivery),
         session_id,
         token,

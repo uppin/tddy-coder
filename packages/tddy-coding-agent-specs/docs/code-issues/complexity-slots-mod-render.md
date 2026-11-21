@@ -17,6 +17,7 @@
 | 2026-11-05 | 69 (unchanged) | touched by #820 (one line in the module, not in `render`); measured on `origin/feature/agent-tools/route-support` (`3c29698cd`) and HEAD at #820's wrap |
 | 2026-11-15 | 69 → 66 | **better by 3** in #911: the hooks arm moved into `render_hooks_slot` beside `render_tool_slot`; brace-matched on `origin/master` (`66bb45213`) and HEAD at #911's wrap |
 | 2026-11-16 | 66 (unchanged) | touched by #920 (`#remote-shell` 6/7): three test literals in the module gained `remote_log: None`; `render` itself gained no branch — the carrier is a field of the params it passes through. Brace-matched at #920's wrap |
+| 2026-11-21 | 66 → 66 | #980 (`#orchestra` 2/9): only the file's test fixture changed (`peer_name: None`); brace-matched fn line to closing brace on `origin/feature/orchestra/path-reach` (`c4dace05c`) and HEAD. Unchanged |
 
 ## What would close it
 

@@ -1,4 +1,5 @@
 //! Agent session launch, split out of `tddy-session-lifecycle` by `#carve` 21/21.
+pub mod back_channel;
 pub mod chat;
 pub mod child_spawn_handler;
 pub mod claude_cli_spawn;
@@ -54,7 +55,9 @@ pub mod relaunch_jail_dirs;
 pub mod relaunch_jail_steps;
 pub mod remote_agent_launch;
 mod remote_hook_answer;
+mod remote_hook_delivery;
 pub mod remote_hook_follower;
+mod remote_hook_message;
 mod remote_hook_report;
 pub mod session_acting_identity;
 pub mod session_coordinate_handlers;

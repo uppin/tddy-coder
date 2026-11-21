@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_coding_agent_specs::{Capability, CodingAgentSpec};
-use tddy_core::{HookCommandParams, SessionMetadata};
+use tddy_core::HookCommandParams;
 use tddy_rpc::Status;
 
 use tddy_cli_sessions::session_toolcall::ManagedWorkflow;
@@ -31,14 +31,13 @@ use tddy_daemon_kernel::config::DaemonConfig;
 
 use tddy_core::session_pointer::SessionPointer;
 
-use crate::claude_cli_spawn_steps::{
-    claude_cli_hooks, record_hook_answer_wait, resumed_hooks, ClaudeCliHooks,
-};
+use crate::back_channel::peer_name_args;
+use crate::claude_cli_spawn_steps::{claude_cli_hooks, record_hook_answer_wait, ClaudeCliHooks};
 use crate::cli_session_pointer::session_pointer_of;
 use crate::launch_ports::LaunchSessions;
 use crate::managed_launch;
 use crate::project_home_launch::{spec_role_launch, RoleWiring, StartRole};
-use crate::spec_launch::{AgentToolset, HostAgent, McpRegistration};
+use crate::spec_launch::{AgentToolset, McpRegistration};
 
 /// What a generic launch's session wiring is built from.
 pub(crate) struct SessionWiringInputs<'a> {
@@ -65,6 +64,11 @@ pub(crate) struct SessionWiringInputs<'a> {
     pub session_tool_token: Option<String>,
     /// Answers the agent's tools' `github-token` over the managed session's toolcall socket.
     pub github_credential_handler: Option<Arc<dyn tddy_core::toolcall::GithubCredentialHandler>>,
+    /// The orchestrator that started the session, when one did: its system prompt is told how to
+    /// report back (`#orchestra` 2/9).
+    pub reports_to: Option<&'a crate::back_channel::ReportsTo<'a>>,
+    /// Whether the agent runs on a target, which decides the channel it reports over.
+    pub on_target: bool,
 }
 
 /// A session's managed workflow: its recipe and the handlers its toolcall listener is bound to.
@@ -88,8 +92,13 @@ pub(crate) struct SessionWiring {
     /// session's wiring produced, plus the session tool transport (`TDDY_REMOTE_*`), whose export
     /// to the agent process is what a `tddy-tools` run from its own shell routes by.
     pub env: Vec<(String, String)>,
-    /// Flags already rendered (a main's role prompt), placed after the slot flags.
+    /// Flags already rendered (a main's role prompt, the session's native peer name), placed after
+    /// the slot flags.
     pub extra_args: Vec<String>,
+    /// The back-channel guidance (`#orchestra` 2/9) the agent's system prompt does not carry — an
+    /// agent with no operator-notify system prompt (Codex, Muse, …), or a session holding a role —
+    /// which its first prompt is prefixed with instead ([`crate::back_channel::first_prompt_with`]).
+    pub first_prompt_guidance: Option<String>,
     /// The tool server, the pre-approved tools and the withdrawn ones.
     pub toolset: AgentToolset,
     /// What a `tddy-tools` the agent runs from its shell finds its session by — the managed
@@ -122,24 +131,18 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         role,
         session_tool_token,
         github_credential_handler,
+        reports_to,
+        on_target,
     } = inputs;
-    let hooks = (spec.has(Capability::Hooks) || spec.has(Capability::OperatorNotify))
+    let hooks = has_hooks(spec, on_target && reports_to.is_some())
         .then(|| claude_cli_hooks(config, agent_tool_socket, spec, tddy_tools_path));
     if let Some(hooks) = &hooks {
         record_hook_answer_wait(session_dir, hooks)?;
     }
-    let mut process_env: Vec<(String, String)> = Vec::new();
-    if let Some(agent_session_token) = session_tool_token {
-        process_env.extend(
-            tddy_session_split::split_session::colocated_jail_tool_env(
-                &tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(config),
-                session_id,
-                &agent_session_token,
-                Some(agent_tool_socket.to_string_lossy().into_owned()),
-            )
-            .env_pairs(),
-        );
-    }
+    let hook_token = hooks.as_ref().map(|hooks| hooks.hook_token.as_str());
+    let back_channel = reports_to.and_then(|to| to.guidance_at(spec, on_target, hook_token));
+    let mut process_env =
+        session_tool_env(config, session_id, session_tool_token, agent_tool_socket);
     let mut tool_server_env: Vec<(String, String)> = Vec::new();
     let mut notify_env: Vec<(String, String)> = Vec::new();
     let mut system_prompt_file: Option<PathBuf> = None;
@@ -178,13 +181,18 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
                 hook_token: &hooks.hook_token,
                 session_dir,
                 managed_prompt_file: system_prompt_file.as_deref(),
+                back_channel_guidance: back_channel.as_deref(),
             },
             &mut notify_env,
         )?;
     }
     let role_wiring = RoleWiring::of(role.main)?;
     route_tool_server_env(role_wiring.env, &mut process_env, &mut tool_server_env);
-    let (extra_args, mut toolset) = spec_role_launch(role_wiring.main.as_ref());
+    let (mut extra_args, mut toolset) = spec_role_launch(role_wiring.main.as_ref());
+    let reports = reports_to.is_some();
+    extra_args.extend(peer_name_args(
+        spec, session_id, on_target, reports, role.name,
+    ));
     let session_pointer = session_pointer_of(&tool_server_env, notify_env, worktree);
     carry_on_the_tool_server(
         spec,
@@ -199,26 +207,10 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         system_prompt_file,
         env: process_env,
         extra_args,
+        first_prompt_guidance: back_channel.filter(|_| !system_prompt_carries_it(spec, role.name)),
         toolset,
         session_pointer,
     })
-}
-
-/// What a resumed generic launch re-wires: a main's tool restriction, the managed workflow resumed
-/// at the goal it persisted, and the operator-notify wiring a session recorded a hook token for. The
-/// hooks file its start wrote is kept as it is; argv hooks (Muse's `-c hooks=…`) are rendered again.
-#[derive(Default)]
-pub(crate) struct ResumedWiring {
-    /// The session's hooks, rebuilt around its recorded token — for an argv adapter only.
-    pub hooks: Option<ClaudeCliHooks>,
-    pub workflow: Option<ManagedWorkflow>,
-    pub system_prompt_file: Option<PathBuf>,
-    /// Never a `TDDY_*` variable.
-    pub env: Vec<(String, String)>,
-    pub extra_args: Vec<String>,
-    pub toolset: AgentToolset,
-    /// The session pointer written again into the worktree, as at the start.
-    pub session_pointer: Option<SessionPointer>,
 }
 
 impl LaunchSessions {
@@ -259,121 +251,40 @@ impl LaunchSessions {
             }
         }
     }
+}
 
-    /// The wiring a resume of `meta` gives `spec`'s agent again — none of it is in a persisted argv.
-    /// `local_session` says the session is neither split nor aimed at another host: only such a
-    /// session's agent is given the session tool transport.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn resumed_session_wiring(
-        &self,
-        agent: &HostAgent,
-        meta: &SessionMetadata,
-        session_dir: &Path,
-        worktree: &Path,
-        os_user: &str,
-        session_token: &str,
-        github_credential_handler: Option<Arc<dyn tddy_core::toolcall::GithubCredentialHandler>>,
-        local_session: bool,
-    ) -> Result<ResumedWiring, Status> {
-        let spec = &agent.spec;
-        let tddy_tools_path = crate::cli_harness_jail::agent_tddy_tools(agent)?;
-        let session_id = meta.session_id.as_str();
-        let tool_socket = self.agent_tool_socket_of(os_user).await?;
-        let mut process_env = Vec::new();
-        // A resumed agent's shell gets the session tool transport again, under a credential minted
-        // now — nothing persists the previous process's token. A session whose agent runs on
-        // another host is exported none: the socket and the URL name this host, which its shell
-        // cannot reach, and detection would prefer the dead route. A split agent's process runs
-        // model-authored code joined to its room over its own split transport — none of this.
-        let runs_on_this_host = local_session
-            && meta.target.is_none()
-            && meta
-                .ssh_config_host
-                .as_deref()
-                .is_none_or(|host| host.trim().is_empty());
-        let session_tool_token = if runs_on_this_host {
-            self.session_tool_token_for(session_id, session_token)
-        } else {
-            None
-        };
-        if let Some(agent_session_token) = session_tool_token {
-            process_env.extend(
-                tddy_session_split::split_session::colocated_jail_tool_env(
-                    &tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(&self.config),
-                    session_id,
-                    &agent_session_token,
-                    Some(tool_socket.to_string_lossy().into_owned()),
-                )
-                .env_pairs(),
-            );
-        }
-        let mut tool_server_env = Vec::new();
-        let mut notify_env = Vec::new();
-        let mut system_prompt_file = None;
-        let mut workflow = None;
-        if spec.has(Capability::ManagedWorkflow) {
-            if let Some(recipe_name) = crate::svc_resume_claude_cli_session::resumed_recipe(
-                &self.cli_manager,
-                meta,
-                os_user,
-                session_id,
-            )
-            .await?
-            {
-                let recipe =
-                    tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
-                        .map_err(Status::invalid_argument)?;
-                let resume_goal = LaunchSessions::managed_resume_goal(session_dir, &recipe);
-                let launch = self.prepare_managed_workflow(
-                    session_id,
-                    recipe,
-                    session_dir,
-                    worktree,
-                    session_dir,
-                    &tddy_tools_path,
-                    Some(resume_goal),
-                    None,
-                    github_credential_handler,
-                )?;
-                system_prompt_file = Some(launch.prompt_file);
-                route_tool_server_env(launch.env, &mut process_env, &mut tool_server_env);
-                workflow = Some(launch.workflow);
-            }
-        }
-        if spec.has(Capability::OperatorNotify) {
-            let notify = crate::notify_env::resumed_agent_notify_launch(
-                &self.config,
-                &tool_socket,
-                os_user,
-                session_dir,
-                meta,
-                system_prompt_file.as_deref(),
-            )?;
-            notify_env.extend(notify.env);
-            system_prompt_file = notify.append_system_prompt_file.or(system_prompt_file);
-        }
-        let role = self.resumed_role(meta, session_id, session_dir, session_token, &tool_socket)?;
-        route_tool_server_env(role.env, &mut process_env, &mut tool_server_env);
-        let (extra_args, mut toolset) = spec_role_launch(role.main.as_ref());
-        let session_pointer = session_pointer_of(&tool_server_env, notify_env, worktree);
-        carry_on_the_tool_server(
-            spec,
-            &mut toolset,
-            tool_server_env,
-            &tddy_tools_path,
-            session_dir,
-        );
-        let hooks = resumed_hooks(spec, &self.config, &tool_socket, &tddy_tools_path, meta)?;
-        Ok(ResumedWiring {
-            hooks,
-            workflow,
-            system_prompt_file,
-            env: process_env,
-            extra_args,
-            toolset,
-            session_pointer,
-        })
-    }
+/// The session tool transport (`TDDY_REMOTE_*`) a `session_tool_token` exports to the agent
+/// process, so its shell routes `tddy-tools monitor` and `send` to this daemon; none without a
+/// token.
+fn session_tool_env(
+    config: &DaemonConfig,
+    session_id: &str,
+    session_tool_token: Option<String>,
+    agent_tool_socket: &Path,
+) -> Vec<(String, String)> {
+    let Some(agent_session_token) = session_tool_token else {
+        return Vec::new();
+    };
+    tddy_session_split::split_session::colocated_jail_tool_env(
+        &tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(config),
+        session_id,
+        &agent_session_token,
+        Some(agent_tool_socket.to_string_lossy().into_owned()),
+    )
+    .env_pairs()
+}
+
+/// Whether a start wires hooks: for an agent declaring them or operator notify, and for a child on a
+/// target that reports to an orchestrator (`target_child_reports`) — its report rides the hook log,
+/// which is followed only for a session with a hook token, even when its agent installs no hooks.
+fn has_hooks(spec: &CodingAgentSpec, target_child_reports: bool) -> bool {
+    spec.has(Capability::Hooks) || spec.has(Capability::OperatorNotify) || target_child_reports
+}
+
+/// Whether the back-channel guidance rides the operator-notify system prompt; a session holding a
+/// role, or an agent without that prompt, is told in its first prompt instead.
+fn system_prompt_carries_it(spec: &CodingAgentSpec, role_name: &str) -> bool {
+    spec.has(Capability::OperatorNotify) && role_name.is_empty()
 }
 
 /// Whether `spec`'s hooks adapter reports over the daemon's agent-tool socket: it refuses params
@@ -399,30 +310,15 @@ pub(crate) fn hooks_report_over_the_agent_tool_socket(spec: &CodingAgentSpec) ->
 }
 
 impl SessionWiring {
+    /// The first prompt the agent is started with: `task`, after the back-channel guidance its
+    /// system prompt could not carry ([`crate::back_channel::first_prompt_with`]).
+    pub(crate) fn first_prompt(&self, task: &str) -> String {
+        crate::back_channel::first_prompt_with(self.first_prompt_guidance.as_deref(), task)
+    }
+
     /// The hook parameters of `session_id`'s start, when the spec declares `hooks`. `route_env` is
     /// the provider route's non-secret pairs, pinned beside the hooks in the settings file; the
     /// key is never among them.
-    pub(crate) fn hook_params<'a>(
-        &'a self,
-        spec: &CodingAgentSpec,
-        session_id: &'a str,
-        os_user: &'a str,
-        route_env: &'a [(String, String)],
-    ) -> Option<HookCommandParams<'a>> {
-        let hooks = self
-            .hooks
-            .as_ref()
-            .filter(|_| spec.has(Capability::Hooks))?;
-        let mut params = hooks.params(session_id, os_user);
-        params.route_env = route_env;
-        Some(params)
-    }
-}
-
-impl ResumedWiring {
-    /// The hook parameters of the resumed launch, when the session recorded a hook token.
-    /// `route_env` is the resumed route's non-secret pairs, pinned beside the hooks as a start
-    /// pins them: the resume rewrites the file that pin is in.
     pub(crate) fn hook_params<'a>(
         &'a self,
         spec: &CodingAgentSpec,
@@ -496,3 +392,6 @@ fn route_tool_server_env(
 mod cli_agent_steps_tests;
 pub(crate) mod conversation;
 pub(crate) mod host_launch_slots;
+mod resumed_wiring;
+
+pub(crate) use resumed_wiring::ResumedWiring;

@@ -220,7 +220,7 @@ struct ResumedSession<'a> {
     start_timeout: std::time::Duration,
     /// Where a target session's followed hooks are delivered, and the registry its follower is
     /// kept in.
-    hook_delivery: Option<Arc<dyn crate::remote_hook_follower::HookReportDelivery>>,
+    hook_delivery: Option<Arc<dyn crate::remote_hook_delivery::HookReportDelivery>>,
     hook_followers: crate::remote_hook_follower::RemoteHookFollowers,
     /// The shell that reaches the session's target, resolved from its recorded target.
     target_shell: Option<Arc<dyn tddy_remote_shell::RemoteShell>>,
@@ -314,7 +314,7 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(wiring.extra_args);
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
-    let pointer = super::place_slot_files_and_pointer(
+    let pointer = super::start_steps::place_slot_files_and_pointer(
         spec,
         &worktree_path,
         &target_shell,

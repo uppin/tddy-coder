@@ -26,6 +26,7 @@
 | 2026-11-16 | 157 → 166 | #921 (`#remote-shell` 7/7): a resume resolves its target's shell as its caller, so a locked vault refuses it before anything runs. Touched, not closed |
 | 2026-11-16 | 166 → 135 | #924 (`#remote-shell` 8/11) sweep: restored to below its before-the-stack length (136). Still over 60, so this record stays open on the remainder |
 | 2026-11-21 | 145 → 143 | **better by 2** in #977 (claude hooks per session): the resume's slot-file write and pointer placement move into the start's `place_slot_files_and_pointer`, which also prepares the worktree for the session's own hooks file (`session_hooks_worktree`). Brace-matched fn line to closing brace on `origin/master` (`2af17f11c`) and HEAD by this PR's counter, which reads 145 on master where the last row's reads 135 — the delta is what this PR did. Still over 60 |
+| 2026-11-21 | 143 → 143 | #980 (`#orchestra` 2/9): touched (`place_slot_files_and_pointer` now in `start_steps`), unchanged; brace-matched fn line to closing brace on `origin/feature/orchestra/path-reach` (`c4dace05c`) and HEAD |
 
 ## What would close it
 

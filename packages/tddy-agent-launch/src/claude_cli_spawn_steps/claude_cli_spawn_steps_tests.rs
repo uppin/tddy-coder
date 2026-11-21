@@ -523,6 +523,7 @@ fn a_started_sessions_notify_wiring(
             hook_token: ITS_HOOK_TOKEN,
             session_dir,
             managed_prompt_file: None,
+            back_channel_guidance: None,
         })
         .expect("a start's notify wiring is built"),
     )
@@ -570,6 +571,7 @@ fn a_resumed_claude_cli_session_carries_the_notify_environment_again() {
             ITS_OS_USER,
             session_dir.path(),
             &recorded,
+            None,
             None,
         )
         .expect("a resume's notify wiring is built"),
@@ -621,6 +623,7 @@ fn a_managed_sessions_recipe_prompt_follows_the_notify_guidance_in_the_one_appen
             hook_token: ITS_HOOK_TOKEN,
             session_dir: session_dir.path(),
             managed_prompt_file: Some(&recipe_prompt),
+            back_channel_guidance: None,
         })
         .expect("a start's notify wiring is built"),
     );

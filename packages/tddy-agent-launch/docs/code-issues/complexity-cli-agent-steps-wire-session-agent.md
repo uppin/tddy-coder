@@ -17,6 +17,7 @@
 | 2026-11-07 | 87 → 84 | **better by 3** in #834 (`#agent-tools` 26/28): the hooks are given the session user's socket (`agent_tool_socket` input) instead of probing for one, so the `hook_socket` fallback is gone; measured fn line to closing brace on `origin/feature/agent-tools/split-remote-env` (`cd9026d9d`) and HEAD; no coverage run. Still over 60 |
 | 2026-11-16 | 84 → 84 | #921 (`#remote-shell` 7/7): re-measured, brace-matched on `origin/feature/remote-shell/remote-hooks` (`529e4c653`) and HEAD — unchanged; this PR's `cli_agent_steps` growth is the shell slot writer beside it |
 | 2026-11-19 | 84 → 84 | route-env pin: re-measured, brace-matched on this branch's HEAD — unchanged; the function is untouched, its file's slot-render group moved out to `cli_agent_steps/host_launch_slots.rs` (file 571 → 484 production lines) and `hook_params` gained the route's `route_env` param beside it |
+| 2026-11-21 | 96 → 96 | #980 (`#orchestra` 2/9): the back channel (guidance, the hook token minted for a target child, the peer-name args, `first_prompt_guidance`) went in without growing it — the session tool transport moved out to `session_tool_env` and the hooks rule to `has_hooks`; brace-matched fn line to closing brace on `origin/feature/orchestra/path-reach` (`c4dace05c`) and HEAD. The 84 of the last row was measured by another counter; this one reads 96 on the base. Unchanged, still over 60 |
 
 ## What would close it
 

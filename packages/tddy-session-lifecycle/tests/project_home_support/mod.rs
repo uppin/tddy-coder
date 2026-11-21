@@ -176,8 +176,10 @@ fn build_home_daemon(
     if coding_agents {
         let tools_dir = std::fs::canonicalize(stub.path()).unwrap();
         std::os::unix::fs::symlink(tddy_tools_binary(), tools_dir.join("tddy-tools")).unwrap();
-        // The stub stands for `claude` on the declared `PATH`.
+        // The stub stands for `claude` — and for `codex`, whose children the back-channel suite
+        // starts — on the declared `PATH`.
         std::os::unix::fs::symlink(&claude, tools_dir.join("claude")).unwrap();
+        std::os::unix::fs::symlink(&claude, tools_dir.join("codex")).unwrap();
         let registry = tddy_coding_agent_specs::load_agent_registry(&data.path().join("tools"))
             .expect("the agent registry loads");
         host = host.with_coding_agents(Arc::new(

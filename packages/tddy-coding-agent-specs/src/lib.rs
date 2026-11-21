@@ -44,6 +44,9 @@ pub use crate::spec::slot_shapes::McpSlot;
 pub use crate::spec::slot_shapes::ToolSlot;
 pub use crate::spec::slot_shapes::Unsupported;
 pub use crate::spec::turn_input_slot::TurnInputSlot;
+pub use crate::spec::variant::AgentVariant;
+pub use crate::spec::variant::VariantError;
+pub use crate::spec::variant::HOST_AGENT_VARIANT;
 pub use agent_env_base::{
     AgentEnvBase, AgentEnvBaseError, AGENT_ENV_BASE_EMBEDDED_PATH, AGENT_ENV_BASE_OVERRIDE,
     AGENT_ENV_BASE_YAML,
@@ -56,8 +59,8 @@ pub use session::{
     NO_AGENT_SESSION_TYPE, SESSION_EXTENSION,
 };
 pub use spec::{
-    AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec, SpecError,
-    VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
+    CodingAgentExtension, CodingAgentSection, CodingAgentSpec, PeerNameSlot, SpecError,
+    CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS,
 };
 
 /// `specs/cursor.yaml` (`#agent-tools 7/12`), embedded.

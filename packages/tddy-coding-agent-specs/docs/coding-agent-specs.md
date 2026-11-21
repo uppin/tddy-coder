@@ -39,7 +39,7 @@ This crate owns both sections' vocabulary. `tddy-actions` stays agent-agnostic.
 | `claude_tools.rs` | Claude's tool vocabulary for its `tool_allow` / `tool_deny` slots: `workspace_exec_tool_names` (mirrors `tddy_tool_engine::tool_catalog`), `build_claude_allowlist(subagent_enabled, replaced)`, `build_claude_disallowlist(replaced)`, `effective_replaced_tools` and `PERMISSION_PROMPT_TOOL`. It lives with Claude's spec because the jail crates name no agent |
 | `specs/cursor.yaml` | Cursor Agent CLI: `agent [--resume {chat_id}] [--model {model}] <slots> [{prompt}]`, or the bundled `node` and `index.js` when the binary is the launcher script; placed `{home}/.cursor/mcp.json`; the managed-workflow `rules_file`; `cursor-hooks-json`; `tool_allow` / `tool_deny` / `permission_prompt` all `unsupported`. Jail sections: `home: { kind: persistent, key: cursor }`, seed-once `~/.cursor/{auth,cli-config}.json`, the install mirrored, `CURSOR_TMPDIR` / `CURSOR_SKIP_KEYCHAIN` / `CI` overlays, `policy:` and `network.egress.hosts` — see [Cursor CLI session § Launch](../../../docs/ft/daemon/cursor-cli-session.md#launch-from-the-cursor-tool-definition) |
 | `specs/cursor.yaml` (headless) | `coding_agent.headless`: `agent [--plan] [--resume {session_id}] -p {prompt} [--model] --output-format stream-json --stream-partial-output [--force] --trust --approve-mcps <slots>`; `plan` and `force` are turn params (the workflow backend binds `force`, a conversation does not). `adapter: cursor-stream`; `headless.mcp: { kind: workdir, path: .cursor/mcp.json }`. `models` gains `list_command: ["{binary}", --list-models]` and `adapter: cursor-models`. Protocol: `system_prompt: prepend`, `goal_params: { always: { force: "1" }, plan_mode: { plan: "1" } }`, `workflow_mcp`, `fresh_session: agent`, `scratch: workdir` (its MCP file lies in the worktree) |
-| `specs/codex.yaml` | Codex CLI (`codex`, `TDDY_CODEX_CLI`): headless `exec <slots> -C {workdir} -s {sandbox_mode\|workspace-write} --json [resume] <route_args> [-m {model}] [{thread}] {prompt}`, `adapter: codex-jsonl`, `exit_ok_if_structured: true`; `headless.env` `BROWSER: "{self_exe}"` and `TDDY_CODEX_OAUTH_OUT: "{session_dir}/codex_oauth_authorize.url"` (its OAuth capture: the one `TDDY_*` variable a headless agent sees); protocol `system_prompt: prepend`, `goal_params: { read_only_plan: { sandbox_mode: read-only } }`, `route_model: { kind: replaced }`, `fresh_session: agent`, `scratch: session_dir`; MCP `inline` (`-c`, `mcp_servers`); `tool_deny: unsupported`; `placements: [host]` |
+| `specs/codex.yaml` | Codex CLI (`codex`, `TDDY_CODEX_CLI`): `codex-cli` sessions run `codex [{prompt}]` (the first prompt as the positional `[PROMPT]`); headless `exec <slots> -C {workdir} -s {sandbox_mode\|workspace-write} --json [resume] <route_args> [-m {model}] [{thread}] {prompt}`, `adapter: codex-jsonl`, `exit_ok_if_structured: true`; `headless.env` `BROWSER: "{self_exe}"` and `TDDY_CODEX_OAUTH_OUT: "{session_dir}/codex_oauth_authorize.url"` (its OAuth capture: the one `TDDY_*` variable a headless agent sees); protocol `system_prompt: prepend`, `goal_params: { read_only_plan: { sandbox_mode: read-only } }`, `route_model: { kind: replaced }`, `fresh_session: agent`, `scratch: session_dir`; MCP `inline` (`-c`, `mcp_servers`); `tool_deny: unsupported`; `placements: [host]` |
 | `specs/oz.yaml` | Warp's headless runner (`oz`, `TDDY_OZ_CLI`), distinct from `warp.yaml`: headless `oz agent run -p {prompt} --output-format ndjson -C {workdir} [--conversation] [--model] <slots> [--profile]`, `adapter: oz-ndjson`; protocol `system_prompt: prepend`, `workflow_mcp`, `fresh_session: agent`, `scratch: session_dir`; MCP `argv` (`--mcp`); tool slots `unsupported`; `placements: [host]` |
 | `specs/opencode.yaml` | OpenCode CLI: `opencode` then `--continue` on a resume, else `[--model {model}] [--prompt {prompt}]`; `mcp`, hooks and tool slots `unsupported`; `models: { list_command: ["{binary}", models], adapter: opencode-models }`; `route: { required_in_jail: true, providers: [openai_responses, openai_chat], shape: inline_config, config_env: OPENCODE_CONFIG_CONTENT, key_env: OPENCODE_PROVIDER_KEY }`; `route_slot_errors` refuses at load an `inline_config` slot without `config_env`, with a `TDDY_*` one, or with a `files_dir` (`tests/route_inline_config_load.rs`); `routed_agent` copies `route.config_env` into `RoutedAgent.config_env``; `placements: [host, jail]` — see [OpenCode CLI session](../../../docs/ft/daemon/opencode-cli-session.md) |
 | `specs/muse.yaml` | Muse Code CLI: `muse` then `--continue` on a resume, else `[--model {model}] [{prompt}]`; the no-JIT jail policy; `route` with `key_env: META_API_KEY`, `required_in_jail: true`; `placements: [host, jail]` — see [Muse CLI session](../../../docs/ft/daemon/muse-cli-session.md) |
@@ -323,3 +323,22 @@ directory outside the home into reach. Every shipped spec declares one: claude `
 `.codex`, cursor `.cursor`, muse `.muse`, opencode `.local/share/opencode`.
 
 Tests: `tests/spec_home_dirs_acceptance.rs`.
+
+## Peer name (`coding_agent.peer_name`)
+
+`CodingAgentSection.peer_name: Option<PeerNameSlot>` (read through `CodingAgentSpec::peer_name`)
+declares that the agent has **native peer messaging** — sessions of it on one host message each
+other by name — and the flag a session's name is passed with:
+
+```yaml
+peer_name: { flag: --name }   # claude.yaml: `claude --name <name>` (Claude Code 2.1.323)
+```
+
+`PeerNameSlot` denies unknown fields. The name itself is not the spec's: `tddy-agent-launch`'s
+`back_channel::native_peer_name_of` derives it from the session id, and launches an orchestrator, or a
+child reporting to one on the same host, under it
+([project concept § Reporting to the orchestrator](../../../docs/ft/daemon/project-concept.md#reporting-to-the-orchestrator)).
+An agent without the slot has no native channel: its children report with `tddy-tools send`. Only
+`specs/claude.yaml` declares one.
+
+Tests: `tests/spec_peer_name_acceptance.rs`.

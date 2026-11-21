@@ -1,11 +1,12 @@
 # complexity: resumed_session_wiring
 
-**Location:** `packages/tddy-agent-launch/src/cli_agent_steps.rs:465` — `LaunchSessions::resumed_session_wiring`
+**Location:** `packages/tddy-agent-launch/src/cli_agent_steps/resumed_wiring.rs` — `LaunchSessions::resumed_session_wiring`
+**Moved:** 2026-11-21 by #980 (`#orchestra` 2/9), from `cli_agent_steps.rs` (the file-length split)
 **Category:** complexity
 **Detected:** 2026-11-05 by `/pr-wrap` on PR #820 (`#agent-tools` 14/19), measured on `origin/feature/agent-tools/route-support` (`3c29698cd`) and HEAD at #820's wrap
-**Metrics:** **82 lines** (fn line to closing brace)
+**Metrics:** **97 lines** (fn line to closing brace, 2026-11-21)
 **Thresholds breached:** length 72 > 60 (`/analyze-clean-code`)
-**Status:** Open — regressed 2026-11-15 by #911 (80 → 82): the `resumed_argv_hooks` call and the `hooks` field; the logic lives in the new helper — unclaimed
+**Status:** Open — partially fixed 2026-11-21 by #980 (110 → 97), still over 60 — unclaimed
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured
 
 ## Measurement history
@@ -18,6 +19,7 @@
 | 2026-11-15 | 80 → 82 | **worse by 2** in #911: the `resumed_argv_hooks` call and the `hooks` field; the logic lives in the new helper beside `claude_cli_hooks`. Brace-matched on `origin/master` (`66bb45213`) and HEAD at #911's wrap |
 | 2026-11-16 | 82 → 82 | #921 (`#remote-shell` 7/7): re-measured, brace-matched on `origin/feature/remote-shell/remote-hooks` (`529e4c653`) and HEAD — unchanged; this PR's `cli_agent_steps` growth is the shell slot writer beside it |
 | 2026-11-21 | unchanged | #977: `resumed_argv_hooks` renamed `resumed_hooks` (it renders every adapter's hooks on resume); the call and field are the same lines. Brace-matched on `origin/master` (`2af17f11c`) and HEAD |
+| 2026-11-21 | 110 → 97 | **better by 13** in #980 (`#orchestra` 2/9): the back channel (`resumed_reports_to`, `guidance_at`, the peer-name args) went in while the session-tool-token decision moved to `resumed_session_tool_token` and the transport to `session_tool_env`; the function moved to `cli_agent_steps/resumed_wiring.rs`. brace-matched fn line to closing brace on `origin/feature/orchestra/path-reach` (`c4dace05c`) and HEAD; this counter reads 110 on the base. Still over 60 |
 
 ## What would close it
 

@@ -19,6 +19,7 @@ mod harness_launch;
 pub mod restore_tabs;
 mod resume;
 pub(crate) mod session_start;
+mod start_steps;
 
 use std::sync::Arc;
 
@@ -35,25 +36,24 @@ use crate::cli_agent_steps::conversation::start_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::conversation::ConversationTarget;
 use crate::cli_agent_steps::host_launch_slots::render_host_launch_slots;
-use crate::cli_agent_steps::host_launch_slots::write_slot_files_on_target;
-use crate::cli_agent_steps::host_launch_slots::write_slot_files_through_shell;
 use crate::cli_agent_steps::host_launch_slots::HostLaunchSlots;
 use crate::cli_agent_steps::{wire_session_agent, SessionWiringInputs};
 use crate::cli_resume_token::resume_token_recorder;
 use crate::cli_route_launch::{routed_launch_model, start_cli_route};
-use crate::cli_session_pointer::{
-    place_session_pointer, removing_session_pointer_on_exit, PointerHost,
-};
+use crate::cli_session_pointer::removing_session_pointer_on_exit;
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
-use crate::cursor_from_spec::node_launcher_of;
 use crate::effort_launch::effort_launch;
 use crate::harness_from_spec::{harness_template_params, resume_token_adapter, HarnessLaunch};
 use crate::opencode_cli_spawn::session_start::shell_for_session_target;
 use crate::opencode_cli_spawn::session_start::CliSessionStart;
 use crate::usage_context::{record_usage_context, UsageSubject};
 use harness_launch::{launch, HarnessRemote, HarnessRun, HarnessSession, HarnessSpecLaunch};
+use start_steps::{
+    log_hooks_on_the_target, node_launcher_for, place_slot_files_and_pointer,
+    report_the_started_session,
+};
 
 pub(crate) async fn start_cli_harness_session(
     start: CliSessionStart<'_>,
@@ -78,6 +78,7 @@ pub(crate) async fn start_cli_harness_session(
         selected_branch_to_work_on,
         stack_parent,
         orchestrator,
+        reports_to,
         initial_prompt,
         agents,
         semantic_index,
@@ -112,14 +113,10 @@ pub(crate) async fn start_cli_harness_session(
         crate::remote_agent_launch::target_config_host(target.as_ref()).unwrap_or(ssh_alias);
     // Resolved before anything is cut: a Coder target whose vault is locked, or whose account
     // the vault does not hold, refuses the start here rather than after a worktree exists.
-    let target_shell = match &target {
-        Some(target) => Some(shell_for_session_target(
-            target,
-            &subject,
-            coder_credentials.as_ref(),
-        )?),
-        None => None,
-    };
+    let target_shell = target
+        .as_ref()
+        .map(|target| shell_for_session_target(target, &subject, coder_credentials.as_ref()))
+        .transpose()?;
     let spec = &agent.spec;
     let role_name = role.name;
     refuse_a_role_the_agent_cannot_hold(spec, role_name)?;
@@ -241,6 +238,8 @@ pub(crate) async fn start_cli_harness_session(
         // name this daemon's host, which that shell cannot reach — detection would prefer the
         // dead route over the remote one.
         session_tool_token: session_tool_token.filter(|_| checkout_alias.is_empty()),
+        reports_to: reports_to.as_ref(),
+        on_target: target.is_some(),
     })?;
 
     // On a target the agent's hooks append to its hook log there, not to a daemon it cannot
@@ -282,6 +281,7 @@ pub(crate) async fn start_cli_harness_session(
     let remote_host = Some(checkout_alias).filter(|alias| !alias.is_empty());
     let toolset = std::mem::take(&mut wiring.toolset);
     let role_args = std::mem::take(&mut wiring.extra_args);
+    let first_prompt = wiring.first_prompt(initial_prompt);
     let hook_params = wiring.hook_params(spec, session_id, os_user, &route.plain_env);
     let mut slots = render_host_launch_slots(
         agent,
@@ -315,7 +315,7 @@ pub(crate) async fn start_cli_harness_session(
     let launcher = node_launcher_for(agent, &target_shell);
     let params = harness_template_params(&conversation.bound(HarnessLaunch {
         model: launch_model,
-        prompt: Some(initial_prompt),
+        prompt: Some(&first_prompt),
         permission_mode: Some(permission_mode),
         dangerously_skip_permissions,
         node_launcher: launcher.as_ref(),
@@ -425,81 +425,4 @@ pub(crate) async fn start_cli_harness_session(
         .await;
 
     report_the_started_session(kind, os_user, session_id, worktree_path, pid)
-}
-
-fn log_hooks_on_the_target(
-    target: &Option<tddy_core::SessionTarget>,
-    wiring: &mut crate::cli_agent_steps::SessionWiring,
-) {
-    if target.is_some() {
-        if let Some(hooks) = &mut wiring.hooks {
-            // Relative to the worktree the agent runs in: the hook appends there, on the
-            // target, wherever that worktree is.
-            hooks.remote_log = Some(tddy_core::REMOTE_HOOK_LOG.to_string());
-        }
-    }
-}
-
-/// Write a launch's slot files and its session pointer where its worktree is — this host, an ssh
-/// alias, or the target's shell — once the worktree is ready for the session's own hooks file.
-/// Shared by the start and the resume.
-async fn place_slot_files_and_pointer(
-    spec: &tddy_coding_agent_specs::CodingAgentSpec,
-    worktree_path: &std::path::Path,
-    target_shell: &Option<Arc<dyn tddy_remote_shell::RemoteShell>>,
-    session_pointer: Option<&tddy_core::session_pointer::SessionPointer>,
-    remote_host: Option<&str>,
-    slots: &mut tddy_coding_agent_specs::slots::RenderedSlots,
-) -> Result<Option<crate::cli_session_pointer::PlacedSessionPointer>, Status> {
-    let host = match target_shell {
-        Some(shell) => PointerHost::Remote {
-            shell: Arc::clone(shell),
-        },
-        None => PointerHost::of(remote_host),
-    };
-    crate::session_hooks_worktree::prepare_worktree_for_session_hooks(
-        spec,
-        worktree_path,
-        slots,
-        &host,
-    )
-    .await?;
-    match target_shell {
-        Some(shell) => write_slot_files_through_shell(slots, shell.as_ref()).await?,
-        None => write_slot_files_on_target(slots, remote_host).await?,
-    }
-    place_session_pointer(session_pointer, worktree_path, &host).await
-}
-
-fn node_launcher_for(
-    agent: &crate::spec_launch::HostAgent,
-    target_shell: &Option<Arc<dyn tddy_remote_shell::RemoteShell>>,
-) -> Option<crate::cursor_from_spec::NodeLauncher> {
-    match target_shell {
-        Some(_) => None,
-        None => node_launcher_of(&agent.tool.binary),
-    }
-}
-
-fn report_the_started_session(
-    kind: crate::harness_from_spec::CliSessionType,
-    os_user: &str,
-    session_id: &str,
-    worktree_path: std::path::PathBuf,
-    pid: u32,
-) -> Result<Response<StartSessionResponse>, Status> {
-    log::info!(
-        target: "tddy_daemon::connection_service",
-        "started {} session {session_id} pid={pid} worktree={} user={os_user}",
-        kind.name,
-        worktree_path.display()
-    );
-
-    Ok(Response::new(StartSessionResponse {
-        session_id: session_id.to_string(),
-        livekit_room: String::new(),
-        livekit_url: String::new(),
-        livekit_server_identity: String::new(),
-        branch_conflict: None,
-    }))
 }

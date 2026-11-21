@@ -72,6 +72,9 @@ pub struct AgentNotifyLaunch<'a> {
     /// A managed recipe's orchestration prompt, when the session has one: the guidance is
     /// composed with it, because `claude` takes one `--append-system-prompt-file`.
     pub managed_prompt_file: Option<&'a Path>,
+    /// How the agent reports to the orchestrator that started it (`#orchestra` 2/9), when one did:
+    /// appended to the system prompt after the notify guidance.
+    pub back_channel_guidance: Option<&'a str>,
 }
 
 /// The notify environment and the system-prompt file a claude-cli agent is launched with.
@@ -94,6 +97,7 @@ pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyW
         hook_token,
         session_dir,
         managed_prompt_file,
+        back_channel_guidance,
     } = launch;
     let daemon_url = daemon_hook_urls::advertise_daemon_url(config);
     let env = notify_env_pairs(
@@ -104,7 +108,11 @@ pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyW
         Some(agent_tool_socket),
     );
     let prompt_file = session_dir.join(NOTIFY_SYSTEM_PROMPT_FILE);
-    std::fs::write(&prompt_file, composed_system_prompt(managed_prompt_file)?).map_err(|e| {
+    std::fs::write(
+        &prompt_file,
+        composed_system_prompt(managed_prompt_file, back_channel_guidance)?,
+    )
+    .map_err(|e| {
         Status::internal(format!(
             "failed to write the system prompt {}: {e}",
             prompt_file.display()
@@ -116,11 +124,22 @@ pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyW
     })
 }
 
-/// The notify guidance, followed by the managed recipe's prompt read from `managed_prompt_file`.
-fn composed_system_prompt(managed_prompt_file: Option<&Path>) -> Result<String, Status> {
-    let guidance = AGENT_NOTIFY_GUIDANCE.trim_end();
+/// The notify guidance, then the back-channel guidance when there is one, followed by the managed
+/// recipe's prompt read from `managed_prompt_file`.
+fn composed_system_prompt(
+    managed_prompt_file: Option<&Path>,
+    back_channel_guidance: Option<&str>,
+) -> Result<String, Status> {
+    let guidance = match back_channel_guidance {
+        Some(back_channel) => format!(
+            "{}\n\n{}",
+            AGENT_NOTIFY_GUIDANCE.trim_end(),
+            back_channel.trim_end()
+        ),
+        None => AGENT_NOTIFY_GUIDANCE.trim_end().to_string(),
+    };
     let Some(file) = managed_prompt_file else {
-        return Ok(guidance.to_string());
+        return Ok(guidance);
     };
     let recipe_prompt = std::fs::read_to_string(file).map_err(|e| {
         Status::internal(format!(
@@ -149,7 +168,8 @@ pub fn agent_notify_unless_role(
 
 /// What a resumed claude-cli agent is given again: the same wiring as at its start, built from the
 /// hook token its `.session.yaml` recorded. A session that recorded none — a sandboxed one has no
-/// hooks — and a session with a standing role are given nothing.
+/// hooks — and a session with a standing role are given nothing. `back_channel_guidance` is the
+/// guidance the session's start gave it (`#orchestra` 2/9), appended again.
 pub fn resumed_agent_notify_launch(
     config: &DaemonConfig,
     agent_tool_socket: &Path,
@@ -157,6 +177,7 @@ pub fn resumed_agent_notify_launch(
     session_dir: &Path,
     meta: &tddy_core::SessionMetadata,
     managed_prompt_file: Option<&Path>,
+    back_channel_guidance: Option<&str>,
 ) -> Result<AgentNotifyWiring, Status> {
     if !meta.session_role.as_deref().unwrap_or("").is_empty() {
         return Ok(AgentNotifyWiring::default());
@@ -172,5 +193,6 @@ pub fn resumed_agent_notify_launch(
         hook_token,
         session_dir,
         managed_prompt_file,
+        back_channel_guidance,
     })
 }

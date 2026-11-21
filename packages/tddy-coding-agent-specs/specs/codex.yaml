@@ -17,7 +17,9 @@
 # Codex cannot withdraw its native tools: the tool slots are `unsupported`, and a managed launch
 # that asks it to is refused by name (docs/dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md).
 #
-# Codex runs only headless here: `run:` is the bare CLI, which no session type launches.
+# A `codex-cli` session runs the interactive CLI (`run:`) with its first prompt as the positional
+# `[PROMPT]` — which is how an orchestrator's child, having no system-prompt slot, is told its back
+# channel (`#orchestra` 2/9).
 #
 # Override whole with `<tddyhome>/tools/codex.yaml`. `TDDY_CODEX_CLI` (and `--codex-cli-path`)
 # still names the binary.
@@ -36,6 +38,7 @@ run:
   transport: pty
   argv:
     - "{binary}"
+    - { if: prompt, then: ["{prompt}"] }
   env: {}
 extensions:
   # The session type a session of this agent is started and recorded as, and its launch. Declared

@@ -20,6 +20,7 @@
 | 2026-11-07 | 89 → 92 | **worse by 3** in #834 (`#agent-tools` 26/28): the request branch resolves the session user's agent-tool socket before anything is cut (`agent_tool_socket_of`, refusing an unlisted user) and hands it to the role wiring and to `CliSessionStart`; measured fn line to closing brace on `origin/feature/agent-tools/split-remote-env` (`cd9026d9d`) and HEAD; no coverage run (89 at the base by this count; 90 above) |
 | 2026-11-16 | 98 → 100 | #921 (`#remote-shell` 7/7): the two branch starts hand the start its caller subject and Coder credentials. Touched, not closed |
 | 2026-11-16 | 100 → 84 | #924 (`#remote-shell` 8/11) sweep: restored to below its before-the-stack length (94). Still over 60, so this record stays open on the remainder |
+| 2026-11-21 | 89 → 83 | **better by 6** in #980 (`#orchestra` 2/9): `reports_to` added, the stack-parent resolution moved to `spawn_stack_parent_of`; brace-matched fn line to closing brace on `origin/feature/orchestra/path-reach` (`c4dace05c`) and HEAD. Still over 60 |
 
 ## What would close it
 
