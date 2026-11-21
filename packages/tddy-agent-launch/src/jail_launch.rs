@@ -47,7 +47,7 @@ use crate::usage_context::{record_usage_context, UsageSubject};
 pub const EXEC_PLAN_FILE: &str = "exec-plan.json";
 
 /// How long a jail is given to write its ready marker.
-const JAIL_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+pub(crate) const JAIL_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// `RUST_LOG` of the in-jail `tddy-tools --mcp` server: captures specialized-subagent turns and HTTP
 /// activity, so failures land in the persisted log.
@@ -320,7 +320,7 @@ pub(crate) fn jail_home(
 }
 
 /// The host user's home, which a tool definition's `from_host` paths are relative to.
-fn host_home() -> Result<PathBuf, Status> {
+pub(crate) fn host_home() -> Result<PathBuf, Status> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|home| home.is_absolute())
@@ -361,13 +361,7 @@ fn exec_plan(
             .map(|(name, value)| (name.clone(), value.clone())),
     );
     env.extend(grants.env.clone());
-    let baseline_path = tddy_sandbox::process_jail_env(Path::new(""), Path::new(""))
-        .remove("PATH")
-        .unwrap_or_default();
-    env.insert(
-        "PATH".to_string(),
-        format!("{}:{baseline_path}", grants.bin_dir.display()),
-    );
+    env.insert("PATH".to_string(), jail_path(&grants.bin_dir));
     Ok(ExecPlan {
         argv,
         env,
@@ -383,7 +377,15 @@ fn exec_plan(
     })
 }
 
-fn write_exec_plan(path: &Path, plan: &ExecPlan) -> Result<(), Status> {
+/// The `PATH` of a jailed process: the jail's tool links first, then the jail's baseline.
+pub(crate) fn jail_path(bin_dir: &Path) -> String {
+    let baseline_path = tddy_sandbox::process_jail_env(Path::new(""), Path::new(""))
+        .remove("PATH")
+        .unwrap_or_default();
+    format!("{}:{baseline_path}", bin_dir.display())
+}
+
+pub(crate) fn write_exec_plan(path: &Path, plan: &ExecPlan) -> Result<(), Status> {
     let json = serde_json::to_vec_pretty(plan)
         .map_err(|e| Status::internal(format!("serialize the exec plan: {e}")))?;
     tddy_core::atomic_file::write_atomic(path, json)
@@ -391,19 +393,19 @@ fn write_exec_plan(path: &Path, plan: &ExecPlan) -> Result<(), Status> {
 }
 
 /// What the runner's argv is built from.
-struct RunnerArgv<'a> {
-    session_id: &'a str,
-    dirs: &'a JailDirs,
-    ipc_socket: &'a Path,
-    ready_marker: &'a Path,
-    exec_plan: &'a Path,
-    shim_port: Option<u16>,
-    egress: &'a EgressPolicy,
-    tool_ids: &'a [String],
+pub(crate) struct RunnerArgv<'a> {
+    pub(crate) session_id: &'a str,
+    pub(crate) dirs: &'a JailDirs,
+    pub(crate) ipc_socket: &'a Path,
+    pub(crate) ready_marker: &'a Path,
+    pub(crate) exec_plan: &'a Path,
+    pub(crate) shim_port: Option<u16>,
+    pub(crate) egress: &'a EgressPolicy,
+    pub(crate) tool_ids: &'a [String],
 }
 
 /// `tddy-sandbox-runner --exec-plan <file>` and the flags every jail takes. No flag names an agent.
-fn runner_argv(argv: RunnerArgv<'_>) -> Vec<String> {
+pub(crate) fn runner_argv(argv: RunnerArgv<'_>) -> Vec<String> {
     let path = |path: &Path| path.to_string_lossy().into_owned();
     let mut runner_argv = vec![
         canonical_exec_path(&resolve_sandbox_runner_path()),

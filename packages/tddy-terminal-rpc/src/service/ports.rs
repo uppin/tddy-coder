@@ -88,10 +88,17 @@ pub enum TerminalKind {
     /// an agent kind with `wrappers: [tmux]`. A client that ends while its tmux session lives
     /// leaves the agent running.
     TmuxWrappedAgent { agent: String },
+    /// The session user's login shell in a jail of its own over the session's worktree and sandbox
+    /// grants — an empty kind or `"bash"` with `wrappers: [sandbox]`. Only a sandboxed session runs
+    /// one; the jail ends with the tab (`#session-liveness` 5/8).
+    SandboxedShell,
 }
 
 /// The wrapper kind `StartTerminalSessionRequest.wrappers` names for a tmux-wrapped agent.
 pub const TMUX_WRAPPER_KIND: &str = "tmux";
+
+/// The wrapper kind `StartTerminalSessionRequest.wrappers` names for a tab run in a jail of its own.
+pub const SANDBOX_WRAPPER_KIND: &str = "sandbox";
 
 /// The kind `StartTerminalSessionRequest.kind` names for a tmux terminal.
 pub const TMUX_KIND: &str = "tmux";
@@ -135,8 +142,10 @@ impl TerminalKind {
 
     /// The kind a request names wrapped in `wrappers` (outermost first): with no wrappers, what
     /// [`Self::from_request`] reads. A single [`TMUX_WRAPPER_KIND`] wrapper around an agent kind is
-    /// a [`TerminalKind::TmuxWrappedAgent`]. Any other wrapper kind, or a tmux wrapper around
-    /// something that is not an agent, is `INVALID_ARGUMENT` naming what was refused.
+    /// a [`TerminalKind::TmuxWrappedAgent`]; a single [`SANDBOX_WRAPPER_KIND`] wrapper around the
+    /// login shell is a [`TerminalKind::SandboxedShell`]. Any other wrapper kind, a tmux wrapper
+    /// around something that is not an agent, or a sandbox wrapper around something that is not the
+    /// login shell, is `INVALID_ARGUMENT` naming what was refused.
     pub fn from_wrapped_request(
         kind: &str,
         tmux_session: &str,
@@ -145,6 +154,9 @@ impl TerminalKind {
         let Some((wrapper, inner)) = wrappers.split_first() else {
             return Self::from_request(kind, tmux_session);
         };
+        if wrapper.kind == SANDBOX_WRAPPER_KIND {
+            return Self::sandboxed(kind, tmux_session, inner);
+        }
         if wrapper.kind != TMUX_WRAPPER_KIND {
             return Err(Status::invalid_argument(format!(
                 "a terminal cannot be wrapped in {:?}: only {TMUX_WRAPPER_KIND:?} wraps a terminal",
@@ -168,6 +180,31 @@ impl TerminalKind {
     }
 }
 
+impl TerminalKind {
+    /// What `kind` wrapped in a [`SANDBOX_WRAPPER_KIND`] wrapper (with `inner` wrappers inside it)
+    /// runs: the login shell only.
+    fn sandboxed(
+        kind: &str,
+        tmux_session: &str,
+        inner: &[crate::proto::terminal_session::LaunchNode],
+    ) -> Result<TerminalKind, Status> {
+        if let Some(refused) = inner.first() {
+            return Err(Status::invalid_argument(format!(
+                "a terminal cannot be wrapped in {:?} inside {SANDBOX_WRAPPER_KIND:?}: a sandbox \
+                 wraps the login shell alone",
+                refused.kind
+            )));
+        }
+        match Self::from_request(kind, tmux_session)? {
+            TerminalKind::Bash => Ok(TerminalKind::SandboxedShell),
+            _ => Err(Status::invalid_argument(format!(
+                "only the login shell can be wrapped in {SANDBOX_WRAPPER_KIND:?} here, not {:?}",
+                kind.trim()
+            ))),
+        }
+    }
+}
+
 /// One terminal start as the roster receives it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalLaunch {
@@ -178,6 +215,9 @@ pub struct TerminalLaunch {
     /// The OS user the request's token maps to — who a [`TerminalKind::Tmux`] terminal runs as, so
     /// it reaches that user's own tmux server.
     pub os_user: String,
+    /// The GitHub user the request's session token resolves to — whose vault a tab that must act for
+    /// the session's owner (a jailed shell's provider route, `#session-liveness` 5/8) reads.
+    pub subject: String,
 }
 
 /// One tmux session on a host's tmux server.

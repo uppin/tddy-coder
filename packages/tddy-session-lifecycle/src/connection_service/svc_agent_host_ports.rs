@@ -126,6 +126,10 @@ impl LaunchHost for DaemonSessionHost {
         DaemonSessionHost::session_account_access(self, session_token)
     }
 
+    fn subject_account_access(&self, subject: &str) -> SessionAccountAccess {
+        DaemonSessionHost::subject_account_access(self, subject)
+    }
+
     fn session_identity(
         &self,
         os_user: &str,

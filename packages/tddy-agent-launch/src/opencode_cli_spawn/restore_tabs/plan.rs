@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use tddy_core::tab_roster::{
     LaunchNode, TabEntry, AGENT_KIND, CONVERSATION_ID_PROPERTY, HARNESS_PROPERTY, OS_USER_PROPERTY,
-    SESSION_PROPERTY, SHELL_KIND, TMUX_ATTACH_KIND, TMUX_KIND,
+    SANDBOX_KIND, SESSION_PROPERTY, SHELL_KIND, TMUX_ATTACH_KIND, TMUX_KIND,
 };
 
 /// An [`AGENT_KIND`](tddy_core::tab_roster::AGENT_KIND) node's resumability: `"false"` on a tab
@@ -38,6 +38,9 @@ pub enum TabRestore {
     },
     /// The session user's login shell, reopened fresh under its id.
     FreshShell,
+    /// The session user's login shell, reopened fresh under its id in a new jail of its own over
+    /// the session's worktree and grants (`sandbox` → `shell`, `#session-liveness` 5/8).
+    JailedShell,
     /// A tab attached to the user's own tmux session, which still exists: re-attached under its id.
     ReattachTmuxAttach { session: String, os_user: String },
     /// Not restorable: dropped from the roster and reported with `reason`.
@@ -91,6 +94,8 @@ impl LiveTabs {
 /// - `tmux` → `agent` → [`TabRestore::ReattachTmux`] when the tmux session exists, otherwise
 ///   [`TabRestore::RelaunchTmux`];
 /// - `shell` → [`TabRestore::FreshShell`];
+/// - `sandbox` → `shell` → [`TabRestore::JailedShell`]; a `sandbox` around anything else is
+///   [`TabRestore::Drop`] naming why;
 /// - `tmux-attach` → [`TabRestore::ReattachTmuxAttach`] when the user's tmux session exists,
 ///   otherwise [`TabRestore::Drop`] naming it;
 /// - an empty chain, an unknown kind, or a node missing what it needs → [`TabRestore::Drop`]
@@ -115,6 +120,7 @@ pub fn restore_plan(entry: &TabEntry, live: &LiveTabs) -> TabRestore {
         SHELL_KIND => TabRestore::FreshShell,
         TMUX_ATTACH_KIND => tmux_attach_plan(outermost, live),
         TMUX_KIND => tmux_wrapped_plan(entry, outermost, live),
+        SANDBOX_KIND => sandbox_plan(entry),
         other => drop_because(format!(
             "its launch kind {other:?} is not one this daemon can restore"
         )),
@@ -122,7 +128,14 @@ pub fn restore_plan(entry: &TabEntry, live: &LiveTabs) -> TabRestore {
 }
 
 fn is_known_kind(kind: &str) -> bool {
-    [AGENT_KIND, SHELL_KIND, TMUX_KIND, TMUX_ATTACH_KIND].contains(&kind)
+    [
+        AGENT_KIND,
+        SHELL_KIND,
+        TMUX_KIND,
+        TMUX_ATTACH_KIND,
+        SANDBOX_KIND,
+    ]
+    .contains(&kind)
 }
 
 fn drop_because(reason: impl Into<String>) -> TabRestore {
@@ -206,6 +219,19 @@ fn tmux_wrapped_plan(entry: &TabEntry, tmux: &LaunchNode, live: &LiveTabs) -> Ta
             resume_conversation: None,
         },
         dropped => dropped,
+    }
+}
+
+/// A `sandbox`-wrapped tab: a shell is reopened in a new jail; anything else in the jail is dropped
+/// naming why.
+fn sandbox_plan(entry: &TabEntry) -> TabRestore {
+    match entry.launch.get(1) {
+        None => drop_because("its sandbox launch node records nothing run inside the jail"),
+        Some(inner) if inner.kind == SHELL_KIND => TabRestore::JailedShell,
+        Some(inner) => drop_because(format!(
+            "a {:?} run in a sandbox is not one this daemon can restore",
+            inner.kind
+        )),
     }
 }
 

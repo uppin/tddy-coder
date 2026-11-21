@@ -304,12 +304,14 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
     ) -> Result<Response<StartTerminalSessionResponse>, Status> {
         let req = request.into_inner();
         let os_user = self.os_user(&req.session_token)?;
+        let subject = self.github_user(&req.session_token)?;
         let session_id = keyed_session_id(&req.session_id);
 
         let launch = TerminalLaunch {
             kind: TerminalKind::from_wrapped_request(&req.kind, &req.tmux_session, &req.wrappers)?,
             login_shell: crate::login_shell::login_shell_for(&os_user),
             os_user,
+            subject,
         };
         let terminal_id = self.ports.roster.start(&session_id, &launch).await?;
         Ok(Response::new(StartTerminalSessionResponse { terminal_id }))

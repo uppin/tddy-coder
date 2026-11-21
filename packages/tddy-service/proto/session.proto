@@ -432,6 +432,10 @@ message SessionEntry {
   // `.session.yaml`; unset for every session whose agent runs on the daemon's host. `repo_path` is
   // then the worktree on the target. See StartSessionRequest.target.
   SessionTarget target = 40;
+  // Whether the session runs sandboxed — its main agent in a jail — from its `.session.yaml`. A
+  // sandboxed session's new tab opens "In sandbox" by default, in a jail of its own, or "On host"
+  // (`StartTerminalSessionRequest.wrappers`).
+  bool sandbox = 41;
 }
 
 // A machine a session's agent runs on that the serving daemon reaches through a remote shell, with

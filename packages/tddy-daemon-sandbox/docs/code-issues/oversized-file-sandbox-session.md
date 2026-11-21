@@ -24,6 +24,7 @@
 | 2026-11-02 | 985 | **worse** by 39 in PR #794 (`#agent-tools` 5/12): `dial_and_bridge_with_egress`, which holds the host relay's `TunnelOpen`s to the jail's egress policy, with `dial_and_bridge` now a wrapper passing an unrestricted guard. The jail plan of a tool definition lives in the new `tool_jail.rs`. Not split: deferred to the #agent-tools sweep node (developer, 2026-11-02) |
 | 2026-11-03 | 882 | **better** by 103 in PR #799 (`#agent-tools` 10/12): `build_allow_read_paths`' runner-argv sniffing and the agent-home helpers are deleted; the plan carries `context_dir`/`stdio` instead. Still 1.8× over |
 | 2026-11-20 | 885 → 924 | **Regressed by 39** in #958 (`#session-liveness` 1/4): `SandboxSessionState::is_running` and `runner_pid` (read off the owned `Child`) and `SandboxSessionManager::live_sessions`; `stop` no longer signals a bare pid (−2). Not split: the file is stack-shared with n2–n4 of that stack |
+| 2026-11-21 | 924 → 938 | **Regressed by 14** in #964 (`#session-liveness` 5/8): `SandboxSessionManager::stop_all`, the daemon shutdown's stop of every main jail (the planned growth; `launch_jailed` and `dial_and_bridge` untouched, `dial_and_bridge` still 12 parameters). Every tab-jail module (`tab_jails.rs`, `tab_jail_paths.rs`) is new and outside this file. Not split: the file is stack-shared with n6–n8 of that stack |
 
 ## What the tool found
 

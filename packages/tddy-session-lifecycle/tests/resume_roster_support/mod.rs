@@ -20,6 +20,7 @@ use std::time::Duration;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::tab_roster::{read_tab_roster, write_tab_roster, TabEntry, TabRoster};
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_sandbox::tab_jails::TabJailSpawn;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{
     ResumeSessionRequest, ResumeSessionResponse, SessionService as SessionServiceTrait,
@@ -135,11 +136,25 @@ pub struct ResumeRosterDaemon {
     config: DaemonConfig,
     agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     sessions_base: PathBuf,
+    /// Where a jailed tab's jail starts, when a test gave one (`#session-liveness` 5/8).
+    tab_jails: Option<Arc<dyn TabJailSpawn>>,
     _dirs: Vec<tempfile::TempDir>,
 }
 
 /// A daemon serving the stopped session, with none of its terminals running.
 pub fn a_stopped_session() -> ResumeRosterDaemon {
+    a_stopped_session_with(None)
+}
+
+/// [`a_stopped_session`], whose jailed tabs' jails start through `tab_jails` — on this daemon and
+/// on every restart of it.
+pub fn a_stopped_session_whose_tab_jails_start_through(
+    tab_jails: Arc<dyn TabJailSpawn>,
+) -> ResumeRosterDaemon {
+    a_stopped_session_with(Some(tab_jails))
+}
+
+fn a_stopped_session_with(tab_jails: Option<Arc<dyn TabJailSpawn>>) -> ResumeRosterDaemon {
     let tmux = PrivateTmux::started();
     let stub_dir = tempfile::tempdir().unwrap();
     let create_chats = stub_dir.path().join("create-chat.log");
@@ -165,7 +180,12 @@ pub fn a_stopped_session() -> ResumeRosterDaemon {
     let sessions_dir = tempfile::tempdir().unwrap();
     let sessions_base = sessions_dir.path().to_path_buf();
     a_recorded_stopped_session(&sessions_base, &worktree);
-    let host = a_session_host(config.clone(), agents.clone(), sessions_base.clone());
+    let host = a_session_host(
+        config.clone(),
+        agents.clone(),
+        sessions_base.clone(),
+        tab_jails.clone(),
+    );
     ResumeRosterDaemon {
         host,
         tmux,
@@ -177,6 +197,7 @@ pub fn a_stopped_session() -> ResumeRosterDaemon {
         config,
         agents,
         sessions_base,
+        tab_jails,
         _dirs: vec![config_dir, stub_dir, worktree_dir, sessions_dir],
     }
 }
@@ -199,13 +220,14 @@ fn a_session_host(
     config: DaemonConfig,
     agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
     sessions_base: PathBuf,
+    tab_jails: Option<Arc<dyn TabJailSpawn>>,
 ) -> Arc<DaemonSessionHost> {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
-    Arc::new(DaemonSessionHost::new(
+    let host = DaemonSessionHost::new(
         config.clone(),
         sessions_base_resolver,
         tddy_data_dir,
@@ -216,7 +238,11 @@ fn a_session_host(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
         agents,
-    ))
+    );
+    Arc::new(match tab_jails {
+        Some(spawn) => host.with_tab_jail_spawn(spawn),
+        None => host,
+    })
 }
 
 impl ResumeRosterDaemon {
@@ -311,6 +337,7 @@ impl ResumeRosterDaemon {
             self.config.clone(),
             self.agents.clone(),
             self.sessions_base.clone(),
+            self.tab_jails.clone(),
         );
         ResumeRosterDaemon { host, ..self }
     }

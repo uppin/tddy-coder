@@ -16,6 +16,9 @@ export const AGENT_TERMINAL_ID = "main";
 /** The wrapper kind that runs an agent tab in a tmux session of its own. */
 export const TMUX_WRAPPER_KIND = "tmux";
 
+/** The wrapper kind that runs a shell tab of a sandboxed session in a jail of its own. */
+export const SANDBOX_WRAPPER_KIND = "sandbox";
+
 /** A started terminal of this session: its id, and what it runs (`bash`, or a harness's session type). */
 export interface SessionTerminal {
   readonly terminalId: string;

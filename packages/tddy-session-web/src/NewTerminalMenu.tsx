@@ -13,7 +13,7 @@ import {
   terminalKindLabel,
 } from "tddy-session-create-web";
 import { nextTmuxSessionName } from "./tmuxSessionName";
-import { TMUX_WRAPPER_KIND } from "./useSessionTerminals";
+import { SANDBOX_WRAPPER_KIND, TMUX_WRAPPER_KIND } from "./useSessionTerminals";
 import type { TmuxMenuState } from "./useTmuxSessions";
 
 interface NewTerminalMenuProps {
@@ -28,6 +28,9 @@ interface NewTerminalMenuProps {
   /** The host's tmux sessions, offered as a section of the menu; absent offers no tmux section. The
    *  section lists again each time the menu opens. */
   tmux?: TmuxMenuState;
+  /** Whether the session runs sandboxed (`SessionEntry.sandbox`): its shell opens "In sandbox" — in
+   *  a jail of its own — by default, or "On host". */
+  sandboxed?: boolean;
 }
 
 /** Gap between the "+" button and the top of its menu, in pixels. */
@@ -62,6 +65,7 @@ export function NewTerminalMenu({
   onOpen,
   sessionId,
   tmux: tmuxState,
+  sandboxed = false,
 }: NewTerminalMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   // The name typed for "New tmux session…", or null while that item is not open.
@@ -75,6 +79,8 @@ export function NewTerminalMenu({
   // list. Which sessions those are is the launch kind their daemon declared for the session type.
   const isTddyCoderSession = knownSessionLaunch(sessionType) === TDDY_CODER_LAUNCH;
   const tmux = isTddyCoderSession ? undefined : tmuxState;
+  // A tddy-coder participant runs bash on its own side only: it opens no jail.
+  const offersSandbox = sandboxed && !isTddyCoderSession;
 
   // Closing the menu drops an unsent name.
   useEffect(() => {
@@ -171,24 +177,47 @@ export function NewTerminalMenu({
               }}
               className="min-w-[10rem] rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md"
             >
-              <ul role="group" data-testid="sessions-terminal-tab-new-menu">
-                {menuKinds.map((kind) => (
-                  <li key={kind} role="none">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      data-testid={`sessions-terminal-tab-new-${kind}`}
-                      onClick={() => {
+              {offersSandbox ? (
+                <>
+                  <ul role="group" aria-label="In sandbox" data-testid="sessions-terminal-tab-new-menu">
+                    <MenuKindItem
+                      kind={BASH_KIND}
+                      testId={`sessions-terminal-tab-new-in-sandbox-${BASH_KIND}`}
+                      onChoose={() => {
+                        setMenuOpen(false);
+                        onOpen(BASH_KIND, undefined, [SANDBOX_WRAPPER_KIND]);
+                      }}
+                    />
+                  </ul>
+                  <ul role="group" aria-label="On host" className="mt-1 border-t border-border pt-1">
+                    {menuKinds.map((kind) => (
+                      <MenuKindItem
+                        key={kind}
+                        kind={kind}
+                        testId={`sessions-terminal-tab-new-on-host-${kind}`}
+                        onChoose={() => {
+                          setMenuOpen(false);
+                          onOpen(kind);
+                        }}
+                      />
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <ul role="group" data-testid="sessions-terminal-tab-new-menu">
+                  {menuKinds.map((kind) => (
+                    <MenuKindItem
+                      key={kind}
+                      kind={kind}
+                      testId={`sessions-terminal-tab-new-${kind}`}
+                      onChoose={() => {
                         setMenuOpen(false);
                         onOpen(kind);
                       }}
-                      className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
-                    >
-                      {terminalKindLabel(kind)}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+                    />
+                  ))}
+                </ul>
+              )}
               {agentKinds.length > 0 ? (
                 <ul role="group" aria-label="Agents in tmux" className="mt-1 border-t border-border pt-1">
                   {agentKinds.map((kind) => (
@@ -238,6 +267,31 @@ export function NewTerminalMenu({
           )
         : null}
     </div>
+  );
+}
+
+/** One item of a "+" menu group: the terminal kind's label, opening it when chosen. */
+function MenuKindItem({
+  kind,
+  testId,
+  onChoose,
+}: {
+  kind: string;
+  testId: string;
+  onChoose: () => void;
+}) {
+  return (
+    <li role="none">
+      <button
+        type="button"
+        role="menuitem"
+        data-testid={testId}
+        onClick={onChoose}
+        className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
+      >
+        {terminalKindLabel(kind)}
+      </button>
+    </li>
   );
 }
 

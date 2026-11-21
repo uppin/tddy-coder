@@ -367,6 +367,66 @@ impl LaunchSessions {
     }
 }
 
+/// The entry a listed session starts as: what its `.session.yaml` says, and nothing else.
+///
+/// Every other field is left at its default for a later step to fill, so that step is the single
+/// source of truth: `apply_session_list_status_to_proto` sets the workflow, recipe, branch, context
+/// docs and stack id; the inference in [`session_entry_from_listing`] sets `agent_status` and
+/// `last_activity` (UNSPECIFIED is the honest value for a session nothing has been observed on, and
+/// stays the value of every session type that runs no agent).
+///
+/// FIXME(2026-07-12-fast-session-change): `bytes_in`, `bytes_out` and `last_data_received_at` stay
+/// zero until a per-session traffic meter is wired for GrpcSessionTerminal sessions the daemon owns;
+/// tddy-coder sessions report live counters via the participant runtime instead.
+fn session_entry_of_listing(
+    local_daemon_id: &str,
+    s: session_reader::SessionEntry,
+) -> SessionEntry {
+    SessionEntry {
+        // The name the session was given; empty when it has none.
+        display_name: s.display_name,
+        session_id: s.session_id,
+        created_at: s.created_at,
+        status: s.status,
+        repo_path: s.repo_path,
+        pid: s.pid.unwrap_or(0),
+        is_active: s.is_active,
+        project_id: s.project_id,
+        daemon_instance_id: local_daemon_id.to_owned(),
+        tool: s.tool,
+        session_type: s.session_type,
+        updated_at: s.updated_at,
+        livekit_room: s.livekit_room,
+        previous_session_id: s.previous_session_id,
+        // A split session's pairing. Empty for a co-located session, which is every session that
+        // does not name another daemon as its codebase host.
+        codebase_daemon_instance_id: s.codebase_daemon_instance_id,
+        codebase_session_id: s.codebase_session_id,
+        ssh_config_host: s.ssh_config_host,
+        target: s
+            .target
+            .as_ref()
+            .map(crate::remote_agent_launch::proto_of_session_target),
+        managed_codebase: s.managed_codebase,
+        sandbox: s.sandbox,
+        session_role: s.session_role,
+        reads_host_paths: s.reads_host_paths,
+        orchestration_mark: s.orchestration_mark.map(orchestration_mark_proto),
+        ..SessionEntry::default()
+    }
+}
+
+fn orchestration_mark_proto(
+    mark: tddy_core::OrchestrationMark,
+) -> tddy_service::proto::session::OrchestrationMark {
+    tddy_service::proto::session::OrchestrationMark {
+        mark: mark.mark.as_str().to_string(),
+        note: mark.note.unwrap_or_default(),
+        set_by_session_id: mark.set_by_session_id,
+        at_unix_ms: mark.at_unix_ms,
+    }
+}
+
 fn session_entry_from_listing(
     sessions_base_blocking: &Path,
     local_daemon_id: &str,
@@ -380,77 +440,7 @@ fn session_entry_from_listing(
     let session_dir = sessions_base_blocking
         .join(SESSIONS_SUBDIR)
         .join(&s.session_id);
-    let mut entry = SessionEntry {
-        // The name the session was given, straight from `.session.yaml`; empty when it has none.
-        display_name: s.display_name,
-        session_id: s.session_id,
-        created_at: s.created_at,
-        status: s.status,
-        repo_path: s.repo_path,
-        pid: s.pid.unwrap_or(0),
-        is_active: s.is_active,
-        project_id: s.project_id,
-        daemon_instance_id: local_daemon_id.to_owned(),
-        workflow_goal: String::new(),
-        workflow_state: String::new(),
-        elapsed_display: String::new(),
-        agent: String::new(),
-        model: String::new(),
-        pending_elicitation: false,
-        activity_status: String::new(),
-        tool: s.tool,
-        session_type: s.session_type,
-        updated_at: s.updated_at,
-        livekit_room: s.livekit_room,
-        previous_session_id: s.previous_session_id,
-        orchestrator_session_id: String::new(),
-        recipe: String::new(),
-        stack_plan_json: String::new(),
-        // FIXME(2026-07-12-fast-session-change): populate from a per-session
-        // traffic meter for GrpcSessionTerminal sessions the daemon owns.
-        // Zero/empty is the honest value until that meter is wired; tddy-coder
-        // sessions report live counters via the participant runtime instead.
-        bytes_in: 0,
-        bytes_out: 0,
-        last_data_received_at: String::new(),
-        // Populated by `apply_session_list_status_to_proto` below from the recipe
-        // manifest; left empty here so the enrichment is the single source of truth.
-        context_docs: Vec::new(),
-        // Populated by `apply_session_list_status_to_proto` below from
-        // Changeset.branch; left empty here so the enrichment is the single source
-        // of truth.
-        branch: String::new(),
-        // A split session's pairing, straight from `.session.yaml`. Empty for a
-        // co-located session, which is every session that does not name another
-        // daemon as its codebase host.
-        codebase_daemon_instance_id: s.codebase_daemon_instance_id,
-        codebase_session_id: s.codebase_session_id,
-        ssh_config_host: s.ssh_config_host,
-        target: s
-            .target
-            .as_ref()
-            .map(crate::remote_agent_launch::proto_of_session_target),
-        managed_codebase: s.managed_codebase,
-        session_role: s.session_role,
-        reads_host_paths: s.reads_host_paths,
-        orchestration_mark: s.orchestration_mark.map(|mark| {
-            tddy_service::proto::session::OrchestrationMark {
-                mark: mark.mark.as_str().to_string(),
-                note: mark.note.unwrap_or_default(),
-                set_by_session_id: mark.set_by_session_id,
-                at_unix_ms: mark.at_unix_ms,
-            }
-        }),
-        // Populated by `apply_session_list_status_to_proto` below from the changeset's
-        // `stack_id`; left empty here so the enrichment is the single source of truth.
-        stack_id: String::new(),
-        // Inferred below from the session's own conversation
-        // (docs/ft/daemon/agent-session-status.md). UNSPECIFIED with no activity is
-        // the honest value for a session nothing has been observed on, and stays the
-        // value for every session type that runs no agent.
-        agent_status: tddy_service::proto::types::SessionAgentStatus::Unspecified as i32,
-        last_activity: None,
-    };
+    let mut entry = session_entry_of_listing(local_daemon_id, s);
     let mut conn_entry: ConnSessionEntry = crate::family_proto_bridge::wire_same(&entry)
         .map_err(|s| anyhow::anyhow!(s.to_string()))?;
     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(

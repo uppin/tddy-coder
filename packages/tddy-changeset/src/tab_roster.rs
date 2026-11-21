@@ -42,6 +42,9 @@ pub const SHELL_KIND: &str = "shell";
 pub const TMUX_KIND: &str = "tmux";
 /// The node kind of a tab attached to the user's own tmux session.
 pub const TMUX_ATTACH_KIND: &str = "tmux-attach";
+/// The node kind of a jail of its own a tab runs in: a `tddy-sandbox-runner` over its session's
+/// worktree and sandbox grants, wrapping what the tab runs (`#session-liveness` 5/8).
+pub const SANDBOX_KIND: &str = "sandbox";
 
 /// An [`AGENT_KIND`] node's harness: the session type it runs (`claude-cli`, …).
 pub const HARNESS_PROPERTY: &str = "harness";
@@ -77,8 +80,8 @@ pub struct TabEntry {
 /// One link of a launch chain: what it is, and what it was started with.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LaunchNode {
-    /// [`AGENT_KIND`], [`SHELL_KIND`], [`TMUX_KIND`], [`TMUX_ATTACH_KIND`], or a kind a later daemon
-    /// added.
+    /// [`AGENT_KIND`], [`SHELL_KIND`], [`TMUX_KIND`], [`TMUX_ATTACH_KIND`], [`SANDBOX_KIND`], or a
+    /// kind a later daemon added.
     pub kind: String,
     #[serde(default)]
     pub properties: BTreeMap<String, String>,
@@ -144,6 +147,12 @@ impl LaunchNode {
             TMUX_ATTACH_KIND,
             [(SESSION_PROPERTY, session), (OS_USER_PROPERTY, os_user)],
         )
+    }
+
+    /// A jail of its own over the session's worktree and sandbox grants. It records no properties:
+    /// a resume rebuilds the jail from the session, as it rebuilds the session's main jail.
+    pub fn sandbox() -> Self {
+        LaunchNode::new(SANDBOX_KIND, [])
     }
 
     /// The property `key`, when the node carries it.

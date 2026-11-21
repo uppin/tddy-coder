@@ -24,6 +24,7 @@ use std::path::PathBuf;
 use crate::config::DaemonConfig;
 use crate::connection_service::svc_host_builders::stores::build_host_stores;
 use crate::connection_service::svc_host_builders::stores::default_agent_tool_sockets;
+use crate::connection_service::svc_host_builders::stores::default_session_agent_rosters;
 use crate::connection_service::svc_host_builders::stores::HostStores;
 
 impl DaemonSessionHost {
@@ -68,6 +69,8 @@ impl DaemonSessionHost {
             sandbox_manager: Arc::new(
                 tddy_daemon_sandbox::sandbox_session::SandboxSessionManager::new(),
             ),
+            tab_jails: Arc::new(tddy_daemon_sandbox::tab_jails::TabJails::new()),
+            tab_jail_spawn: None,
             workspace_sandboxes: Arc::new(
                 tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry::new(),
             ),
@@ -106,13 +109,7 @@ impl DaemonSessionHost {
             coding_agent_launcher: None,
             approval_routes: None,
             model_registry: None,
-            session_agent_rosters: Arc::new(
-                crate::session_agent_roster::SessionAgentRosterStore::new(
-                    Arc::clone(&session_agent_clones),
-                    Arc::new(crate::session_agent_status::SessionAgentActivityStore::new()),
-                    tddy_agent_launch::host_coding_agents::no_coding_agents().agents_shared(),
-                ),
-            ),
+            session_agent_rosters: default_session_agent_rosters(&session_agent_clones),
             session_agent_clones,
             hosted_agent_clones: Arc::new(crate::session_agent_clone::HostedAgentClones::new()),
             session_admissions: Arc::new(NoRoomAdmission),

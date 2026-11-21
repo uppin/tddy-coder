@@ -278,6 +278,12 @@ impl TerminalRoster for CoderTerminalRoster {
                     "this session's terminals run bash only; tmux is not offered here",
                 ));
             }
+            // A participant runs no jails: its terminals are its own process's, on its own host.
+            TerminalKind::SandboxedShell => {
+                return Err(Status::failed_precondition(
+                    "this session's terminals run bash only; a sandbox tab is not offered here",
+                ));
+            }
         }
         self.svc
             .terminal_manager

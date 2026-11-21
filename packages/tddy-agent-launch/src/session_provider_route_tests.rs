@@ -30,12 +30,12 @@ use tddy_core::{
     SESSION_PROVIDER_ACCOUNT_FILENAME,
 };
 
-const ADA: &str = "ada";
+pub(crate) const ADA: &str = "ada";
 const ADAS_SESSION: &str = "session-token-for-ada";
 const ADAS_PASSPHRASE: &str = "correct horse battery staple";
 const META_KEY: &str = "a-meta-key";
 
-fn adas_meta_account() -> ProviderAccount {
+pub(crate) fn adas_meta_account() -> ProviderAccount {
     let meta = preset("meta").expect("the meta preset");
     ProviderAccount {
         account: AccountId::new("meta-hackathon"),
@@ -47,10 +47,24 @@ fn adas_meta_account() -> ProviderAccount {
 }
 
 /// A daemon on which Ada's vault holds `accounts`, unlocked (`unlocked: true`) or not.
-fn a_daemon_where_ada_holds(
+pub(crate) fn a_daemon_where_ada_holds(
     accounts: &[ProviderAccount],
     unlocked: bool,
 ) -> (tempfile::TempDir, SessionAccountAccess) {
+    let (dir, vaults) = adas_vaults_holding(accounts, unlocked);
+    let access = SessionAccountAccess::new(
+        Some(vaults),
+        Arc::new(|t: &str| (t == ADAS_SESSION).then(|| ADA.to_string())),
+        ADAS_SESSION,
+    );
+    (dir, access)
+}
+
+/// The vaults of a daemon on which Ada's holds `accounts`, unlocked (`unlocked: true`) or not.
+pub(crate) fn adas_vaults_holding(
+    accounts: &[ProviderAccount],
+    unlocked: bool,
+) -> (tempfile::TempDir, Arc<SessionVaults>) {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let passphrase = SecretString::new(ADAS_PASSPHRASE);
     let store =
@@ -67,12 +81,7 @@ fn a_daemon_where_ada_holds(
             .unlock(ADA, &passphrase)
             .expect("Ada's passphrase opens her vault");
     }
-    let access = SessionAccountAccess::new(
-        Some(vaults),
-        Arc::new(|t: &str| (t == ADAS_SESSION).then(|| ADA.to_string())),
-        ADAS_SESSION,
-    );
-    (dir, access)
+    (dir, vaults)
 }
 
 fn on_account(id: &str) -> RouteSources {
@@ -102,7 +111,7 @@ fn the_routed(id: &str) -> RoutedAgent {
 }
 
 /// The coding agents of a fixture host: every built-in spec, resolved as the daemon resolves them.
-fn the_host_agents() -> Arc<crate::spec_launch::HostCodingAgents> {
+pub(crate) fn the_host_agents() -> Arc<crate::spec_launch::HostCodingAgents> {
     crate::host_coding_agents::host_coding_agents(std::path::Path::new("/nonexistent-tddy-home"))
         .expect("the built-in coding agents load")
 }

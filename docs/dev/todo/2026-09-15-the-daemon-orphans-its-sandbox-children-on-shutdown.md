@@ -1,4 +1,4 @@
-# 2026-09-15 — The daemon orphans sandboxed runners on shutdown, and never notices one that died
+# 2026-09-15 — The daemon never notices a sandboxed main runner that died (shutdown no longer orphans them)
 
 **Category:** Defect
 **Source:** `2026-09-15-warm-code-intelligence-daemon` changeset — planning discovery of the
@@ -81,3 +81,25 @@ described in §2. The workspace jail's relaunch primitive already existed and is
   `Starting → Running → Backoff → GaveUp` state machine. The `tddy-lsp` and `tddy-supervisor`
   patterns this entry holds up are still not copied.
 - **The claude-cli jail family is untouched.**
+
+## Narrowed — 2026-11-21, by `#session-liveness` 5/8 (PR #964)
+
+**§1 is resolved.** `DaemonSessionHost::shut_down_children` now stops every session's **main** jail
+(`SandboxSessionManager::stop_all`, which also finishes each jail's terminal recording) and every **tab**
+jail (`TabJails::stop_all`) after the CLI sessions and before the workspace jails, so a sandboxed session's
+runner no longer survives the daemon that spawned it. Pinned by
+`shutting_down_the_daemon_stops_main_and_tab_jails` (`sandbox_shutdown_acceptance.rs`).
+
+**§2 is closed for the tab jails only.** `TabJails` polls each tab jail's runner and, when it exits, forgets
+the jail and announces it (`subscribe_ended`), so the tab it served is unlisted; the tab stays in the roster
+for Resume. The registry's contracts (one jail per tab, every teardown stops it, an exited one ends its tab)
+are unit-tested against a real child process.
+
+**What is still open, and why this entry is not deleted:**
+
+- **The main jail has no death watch.** `SandboxSessionManager` still discovers a dead main runner only when
+  something asks (`SandboxSessionState::is_running`), as §2 describes; there is no `child.wait()`
+  observation, no crash detector, no restart policy or backoff. The tab-jail watch is a poll
+  (`TabJails::watch_for_death`, 100 ms), not the `tddy-lsp` / `tddy-supervisor` pattern, and nothing yet
+  shares it with the main's.
+- **The workspace-jail and claude-cli-jail items above** are as the 2026-09-26 narrowing left them.

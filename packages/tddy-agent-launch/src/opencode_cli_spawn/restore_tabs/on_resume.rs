@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use tddy_service::proto::session::RestoredTab;
+use tddy_service::proto::session::{RestoredTab, ResumeSessionRequest};
 
 use super::{restore_tab_roster, RosterRestore};
 
@@ -13,18 +13,23 @@ impl crate::launch_ports::LaunchSessions {
     pub(crate) async fn restore_roster_on_resume(
         &self,
         os_user: &str,
-        session_id: &str,
+        req: &ResumeSessionRequest,
         session_dir: &Path,
         worktree: &Path,
     ) -> Vec<RestoredTab> {
+        let tab_jail_spawn = self.tab_jail_spawn();
+        let subject = (self.user_resolver)(&req.session_token).unwrap_or_default();
         restore_tab_roster(RosterRestore {
-            session_id,
+            session_id: &req.session_id,
             session_dir,
             worktree,
             os_user,
+            subject: &subject,
             cli_manager: &self.cli_manager,
             coding_agents: &self.coding_agents,
             roster_store: self.cli_manager.tab_rosters(),
+            tab_jails: &self.tab_jails,
+            tab_jail_spawn: &*tab_jail_spawn,
         })
         .await
     }

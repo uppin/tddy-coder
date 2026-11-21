@@ -56,6 +56,10 @@ impl CliManagerTerminalRoster {
                 self.start_agent_in_tmux(session_id, worktree, agent, &launch.os_user)
                     .await
             }
+            // A jailed shell has no host PTY: `TerminalRoster::start` hands it to its jail.
+            TerminalKind::SandboxedShell => Err(Status::internal(
+                "a sandboxed shell starts in a jail of its own, not on the host",
+            )),
         }
     }
 
@@ -158,7 +162,7 @@ impl CliManagerTerminalRoster {
     }
 
     /// The session's directory, refusing an id that is not one path segment.
-    fn session_dir(&self, session_id: &str) -> Result<PathBuf, Status> {
+    pub(super) fn session_dir(&self, session_id: &str) -> Result<PathBuf, Status> {
         validate_session_id_segment(session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         Ok(unified_session_dir_path(&self.tddy_data_dir, session_id))
@@ -274,16 +278,29 @@ impl CliManagerTerminalRoster {
     /// Close `terminal_id`: end it, and remove it from the roster. `false` when the session has no
     /// such terminal.
     pub(super) async fn close_tab(&self, session_id: &str, terminal_id: &str) -> bool {
-        if self
-            .manager
-            .get_terminal(session_id, terminal_id)
-            .await
-            .is_none()
-        {
-            return false;
+        let jailed = match &self.tab_jails {
+            Some(tabs) => tabs.jails.stop(session_id, terminal_id).await,
+            None => false,
+        };
+        if !jailed {
+            if self
+                .manager
+                .get_terminal(session_id, terminal_id)
+                .await
+                .is_none()
+            {
+                return false;
+            }
+            let recorded = self.recorded_chain(session_id, terminal_id);
+            self.end(session_id, terminal_id, &recorded).await;
         }
-        let recorded = self.recorded_chain(session_id, terminal_id);
-        self.end(session_id, terminal_id, &recorded).await;
+        self.forget_closed_tab(session_id, terminal_id).await;
+        true
+    }
+
+    /// Remove the closed `terminal_id` from its session's roster; a roster that cannot be written
+    /// is logged, the tab being closed either way.
+    async fn forget_closed_tab(&self, session_id: &str, terminal_id: &str) {
         match self.session_dir(session_id) {
             Ok(dir) => {
                 if let Err(error) = self.manager.tab_rosters().forget(&dir, terminal_id).await {
@@ -298,7 +315,6 @@ impl CliManagerTerminalRoster {
                 refusal.message()
             ),
         }
-        true
     }
 
     /// The chain the roster records for `terminal_id`; empty when it records none (or the roster

@@ -69,6 +69,13 @@ styled like the inspector tab strip (`InspectorTabs`).
     scroller's right edge with an opaque background, so it stays reachable. Its menu opens under the
     button, outside the scroller, so the scroller does not clip it, and stays inside the viewport
     even when `+` sits at the viewport's right edge.
+  - **Sandboxed sessions** (`SessionEntry.sandbox`): the bash-and-harness group splits in two. **In
+    sandbox** (the default, first) holds **Bash** alone
+    (`sessions-terminal-tab-new-in-sandbox-bash`): it calls `StartTerminalSession` with `wrappers:
+    [sandbox]`, and the shell runs in a jail of its own over the session's worktree (see [Session
+    liveness](../daemon/session-liveness.md#a-sandboxed-sessions-tabs)). **On host** holds the usual
+    items (`sessions-terminal-tab-new-on-host-<kind>`), unjailed. A session that is not sandboxed, and a
+    tool session, keep the single group. An agent is not offered in a jail yet.
   - **Agents in tmux**: for a session that offers harnesses, a group of its own below the bash and
     harness group, with one **<agent> in tmux** item per agent kind
     (`sessions-terminal-tab-new-in-tmux-<kind>`). It calls `StartTerminalSession` with that kind and

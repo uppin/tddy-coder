@@ -17,6 +17,7 @@
 | 2026-11-05 | 73 → 74 | **worse by 1** in #820: the resume binds the resumed conversation (`resumed_conversation`) and the node launcher; measured on `origin/feature/agent-tools/route-support` (`3c29698cd`) and HEAD at #820's wrap. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer (2026-11-04) |
 | 2026-11-06 | 74 → 87 | **worse by 13** in #823 (`#agent-tools` 17/19): the managed recipe and the renderer env re-wired on a jailed resume; measured fn line to closing brace on `origin/feature/agent-tools/spec-backend` (`d325fba73`) and HEAD; no coverage run. Not split: restructuring deferred to the `#agent-tools` sweep node (n20) by the developer |
 | 2026-11-20 | 86 → 77 | #961 (`#session-liveness` 4/4): the sandboxed resume restores the roster in its response (+1, `..Default::default()`), and the recorded recipe is resolved by `recorded_managed_recipe` (−10); fn line to closing brace on `e430092a8` (86) and HEAD. Better by 9, still over 60 |
+| 2026-11-21 | 77 → 72 | #964 (`#session-liveness` 5/8): the resume also stops the stopped run's tab jails, and the three stop steps (main jail or recorded runner, tab jails, the settle sleep) moved into `stop_previous_run` (−10, +2 for the roster call that takes the request); fn line to closing brace on master (77) and HEAD. Better by 5, still over 60 |
 
 ## What would close it
 

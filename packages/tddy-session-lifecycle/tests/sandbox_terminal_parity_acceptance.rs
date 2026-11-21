@@ -574,7 +574,7 @@ async fn refuses_a_terminal_of_a_jail_that_only_has_the_main_one() {
     // When a client addresses some other terminal id on it
     let resolved = session.store.get_terminal(SESSION_ID, "bash-1").await;
 
-    // Then nothing resolves, so the caller answers `not_found` — a started shell never reaches a jail
+    // Then nothing resolves, so the caller answers `not_found`: no tab jail or host terminal has that id
     assert!(resolved.is_none());
 }
 

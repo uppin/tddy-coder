@@ -16,7 +16,7 @@ impl DaemonSessionHost {
     /// that spawned it
     /// (`docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md`).
     ///
-    /// Scoped to what this host *holds*: the CLI sessions and the workspace jails. The index
+    /// Scoped to what this host *holds*: the CLI sessions, the sessions' jails (main and tab) and the workspace jails. The index
     /// daemon belongs to the runtime, which stops it beside this call. The crash-detector and
     /// restart-policy half of that entry stays open.
     ///
@@ -25,6 +25,20 @@ impl DaemonSessionHost {
     /// being stopped is still answered.
     pub async fn shut_down_children(&self) {
         self.cli_manager.kill_all().await;
+        let main_jails = self.sandbox_manager.stop_all().await;
+        if !main_jails.is_empty() {
+            log::info!(
+                "shutdown: stopped {} sandbox jail(s) of sessions: {main_jails:?}",
+                main_jails.len()
+            );
+        }
+        let tab_jails = self.tab_jails.stop_all().await;
+        if !tab_jails.is_empty() {
+            log::info!(
+                "shutdown: stopped {} tab jail(s): {tab_jails:?}",
+                tab_jails.len()
+            );
+        }
         let stopped = self.workspace_sandboxes.stop_all().await;
         if !stopped.is_empty() {
             log::info!(

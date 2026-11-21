@@ -18,6 +18,7 @@ use tddy_core::tab_roster::{
     TMUX_ATTACH_KIND, TMUX_KIND,
 };
 use tddy_daemon_kernel::privilege_drop::EffectiveIdentity;
+use tddy_daemon_sandbox::tab_jails::{TabJailLaunch, TabJailOwner, TabJailSpawn, TabJails};
 use tddy_service::proto::session::{RestoredTab, RestoredTabOutcome};
 
 use super::new_tab::agent_tab_argv;
@@ -33,10 +34,17 @@ pub struct RosterRestore<'a> {
     pub worktree: &'a Path,
     /// The session's OS user, as main was resumed as.
     pub os_user: &'a str,
+    /// The GitHub user the resume's session token resolves to: whose vault a restored jailed tab's
+    /// provider route is resolved from.
+    pub subject: &'a str,
     pub cli_manager: &'a Arc<CliSessionManager>,
     pub coding_agents: &'a HostCodingAgents,
     /// The roster's single writer: a dropped tab is forgotten through it.
     pub roster_store: &'a TabRosterStore,
+    /// The registry a `sandbox` → `shell` tab's new jail is registered in (`#session-liveness` 5/8).
+    pub tab_jails: &'a TabJails,
+    /// What starts that jail.
+    pub tab_jail_spawn: &'a dyn TabJailSpawn,
 }
 
 /// Restore every entry of the session's roster other than main, in roster order, each under its
@@ -76,6 +84,9 @@ async fn live_tabs(restore: &RosterRestore<'_>, tabs: &[TabEntry]) -> LiveTabs {
     let mut live = LiveTabs::none();
     for handle in restore.cli_manager.list_terminals(restore.session_id).await {
         live = live.with_terminal(&handle.terminal_id);
+    }
+    for terminal_id in restore.tab_jails.live(restore.session_id).await {
+        live = live.with_terminal(&terminal_id);
     }
     let named: BTreeSet<(String, String)> = tabs
         .iter()
@@ -175,6 +186,10 @@ async fn carry_out(
             start_under_id(restore, tab, RecordedTerminal::Shell { shell_path }).await?;
             Ok(Restored::AsRecorded)
         }
+        TabRestore::JailedShell => {
+            restore_jailed_shell(restore, tab).await?;
+            Ok(Restored::AsRecorded)
+        }
         TabRestore::ReattachTmux { session, os_user } => {
             let harness = recorded_harness(tab)?;
             reattach(restore, tab, &harness, &os_user, &session).await?;
@@ -203,6 +218,30 @@ async fn carry_out(
         }
         TabRestore::Drop { reason } => Err(anyhow::anyhow!(reason)),
     }
+}
+
+/// Start the session user's login shell under the tab's recorded id, in a new jail of its own over
+/// the session's worktree and grants. A jail that cannot start fails the tab with the reason.
+async fn restore_jailed_shell(restore: &RosterRestore<'_>, tab: &TabEntry) -> anyhow::Result<()> {
+    let login_shell = tddy_terminal_rpc::login_shell_for(restore.os_user);
+    let launch = TabJailLaunch::for_tab(
+        restore.session_id,
+        &tab.terminal_id,
+        restore.session_dir,
+        restore.worktree,
+        TabJailOwner {
+            os_user: restore.os_user,
+            login_shell: &login_shell,
+            subject: restore.subject,
+        },
+    )
+    .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))?;
+    restore
+        .tab_jails
+        .start(restore.tab_jail_spawn, launch)
+        .await
+        .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))?;
+    Ok(())
 }
 
 /// Start `terminal` under the tab's recorded id.
