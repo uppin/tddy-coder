@@ -245,6 +245,17 @@ A **cross-host** staged fetch reports frame by frame as the bytes arrive; one-st
 
 Streaming is added **alongside** unary rather than replacing it: `tddy-tools remote start-session`, `tddy-sandbox-app`, recipe hooks and PR-stack chain spawns all call unary `StartSession`, and both entry points delegate to one implementation whose only difference is where progress is reported. The unary path reports nowhere, so its behavior is unchanged.
 
+## Session files an orchestrator writes
+
+An orchestrator session (`project-home` main or `orchestrator`) can write its own attachments. `WriteSessionFile { name, content }` writes `{session_dir}/artifacts/files/<name>` in the **calling session's own directory** (resolved from the authenticated session, never from an argument), replacing a file of that name; `ListSessionFiles` lists them with size and mtime, by name.
+
+- A name is one flat file name: 1 to 128 bytes, no `/`, `\`, NUL or `..`, no leading `.`. Content is text, at most 1 MiB. Anything else is refused naming why, and nothing is written. A write is atomic (a hidden temporary, then a rename), so a reader never sees a half file.
+- Both answers carry `attachment`: the exact `StartSession` `attachments[]` entry for the file — `HOST_DOCUMENT_SCOPE_SESSION_ARTIFACT`, the orchestrator's session id and `files/<name>`. No new attachment source exists: the file is a session artifact, so `StartSession` copies it into the child's `artifacts/attachments/` as it does any host document, and the child never reads the orchestrator's directory.
+- A worker session is refused both tools (`permission_denied`); the write is a session-directory write, not a worktree write, so it needs no grant.
+- Served on the host that holds the orchestrator; there is no peer forwarding yet.
+
+Tools: [project-concept.md § Project-home tools](../daemon/project-concept.md). Store: `tddy_session_files::session_files::SessionFileStore`.
+
 ## Constraints
 
 - `copy_attachment_into_session` is the host-side store the start-session materialization path calls; the staging RPCs and `ReadHostDocument` are the wire surface that feeds it. Nothing else reaches the wire except the `SessionContextDoc` fields and the attachment RPCs. Implementation reference: [host-documents-and-attachments.md](../../../packages/tddy-session-files/docs/host-documents-and-attachments.md).

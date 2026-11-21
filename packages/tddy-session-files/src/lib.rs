@@ -36,6 +36,7 @@ pub mod session_attachment_staging;
 pub mod session_attachments;
 pub mod session_context_docs;
 pub mod session_file_upload;
+pub mod session_files;
 pub mod session_uploads;
 pub mod session_workflow_files;
 pub mod stack_doc_attachments;
