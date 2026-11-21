@@ -50,8 +50,10 @@ resolve against the tree the run opens on, and a range without a `fingerprint` i
 
 Fix both in `tddy-code-restructuring`, then re-run the two splits through the engine:
 
-1. the `move_item` above (`reexport: outside`), which brings `remote_hook_follower.rs` to about 390
-   lines and closes its record;
+1. ~~the `move_item` above (`reexport: outside`), which brings `remote_hook_follower.rs` to about 390
+   lines and closes its record~~ — **done by hand** in `#orchestra` 2/9 (#980): the delivery side is in
+   `remote_hook_delivery.rs` (184), the follower is at 386 and its record is closed. Defect 1 itself
+   stays open, also recorded as `2026-11-21-restructure-ignores-path-attribute-modules.md`;
 2. seams B and C of `service.rs` (five trait-method bodies into child modules of `service`) plus the third
    seam the record now names (the resolve helpers), which together take it under 500 and close its
    record.
