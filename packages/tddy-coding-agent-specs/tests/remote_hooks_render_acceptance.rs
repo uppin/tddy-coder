@@ -120,15 +120,31 @@ impl InstalledHooks {
 /// The hooks of Claude's settings shape — `{event: [{matcher, hooks: [{command, timeout?}]}]}` —
 /// which Muse's `-c hooks=` value shares.
 fn hooks_in_claude_shape(hooks: &serde_json::Value, rendered: &str) -> InstalledHooks {
-    let entries: Vec<(String, serde_json::Value)> = hooks
+    // Every matcher group of every event: `PreToolUse` carries a reporting group for every tool
+    // and a waiting one for `AskUserQuestion` (`#target-parity` 4/7). An event's command is its
+    // first group's.
+    let all_groups: Vec<(String, serde_json::Value)> = hooks
         .as_object()
         .map(|events| {
             events
                 .iter()
-                .map(|(event, groups)| (event.clone(), groups[0]["hooks"][0].clone()))
+                .flat_map(|(event, groups)| {
+                    groups
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|group| (event.clone(), group["hooks"][0].clone()))
+                        .collect::<Vec<_>>()
+                })
                 .collect()
         })
         .unwrap_or_default();
+    let mut entries: Vec<(String, serde_json::Value)> = Vec::new();
+    for (event, hook) in &all_groups {
+        if !entries.iter().any(|(seen, _)| seen == event) {
+            entries.push((event.clone(), hook.clone()));
+        }
+    }
     InstalledHooks {
         commands: entries
             .iter()
@@ -139,7 +155,7 @@ fn hooks_in_claude_shape(hooks: &serde_json::Value, rendered: &str) -> Installed
                 )
             })
             .collect(),
-        waiting: entries
+        waiting: all_groups
             .iter()
             .filter(|(_, hook)| {
                 hook.get("timeout").is_some()
@@ -149,7 +165,12 @@ fn hooks_in_claude_shape(hooks: &serde_json::Value, rendered: &str) -> Installed
                         .contains("--await-answer")
             })
             .map(|(event, _)| event.clone())
-            .collect(),
+            .fold(Vec::new(), |mut events, event| {
+                if !events.contains(&event) {
+                    events.push(event);
+                }
+                events
+            }),
         names_a_tddy_binary: names_a_tddy_binary(rendered),
     }
 }
@@ -298,6 +319,8 @@ fn claude_code_on_a_target_waits_for_a_permission_answer_in_its_worktree() {
         .join("answers");
     let mut events = REPORTING_EVENTS.map(str::to_string).to_vec();
     events.push("PermissionRequest".to_string());
+    // The catch-all reporting `PreToolUse` (`#target-parity` 4/7).
+    events.push("PreToolUse".to_string());
     events.sort_unstable();
     assert_eq!(
         hooks.map(|hooks| (
@@ -364,5 +387,20 @@ fn a_local_claude_session_keeps_the_hooks_that_wait_for_an_answer() {
             "PermissionRequest".to_string(),
             "PreToolUse".to_string()
         ])
+    );
+}
+
+#[test]
+fn claude_code_on_a_target_reports_every_tool_before_it_runs() {
+    // Given
+    let session = a_session_on_a_target();
+
+    // When
+    let hooks = claude_hooks_for(&session);
+
+    // Then its first PreToolUse group is the log command, which waits for nothing
+    assert_eq!(
+        hooks.map(|hooks| hooks.commands_of(&["PreToolUse"])),
+        Ok(the_log_command_for_each_of(&["PreToolUse"]))
     );
 }

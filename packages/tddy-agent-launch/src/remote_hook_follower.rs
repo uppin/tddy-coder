@@ -214,13 +214,18 @@ impl ActivityHookSink {
 impl HookSink for ActivityHookSink {
     async fn deliver(&self, line: HookLine) {
         let payload = line.payload.to_string();
-        if let Some(request) = tddy_session_activity::hook_request::session_status_request(
-            &self.session_id,
-            &self.hook_token,
-            &self.os_user,
-            &line.event,
-            &payload,
-        ) {
+        if let Some(request) = crate::remote_hook_report::reports_a_status(&line)
+            .then(|| {
+                tddy_session_activity::hook_request::session_status_request(
+                    &self.session_id,
+                    &self.hook_token,
+                    &self.os_user,
+                    &line.event,
+                    &payload,
+                )
+            })
+            .flatten()
+        {
             let request_id = match self.delivery.report_session_status(request).await {
                 Ok(response) => Some(response.request_id),
                 Err(error) => {
@@ -692,6 +697,79 @@ mod tests {
         assert_eq!(
             command,
             r#"tail -c +1 -f '/home/dev/o'\''brien'\''s repo/.tddy/hooks.log' & t=$!; (while [ -e '/home/dev/o'\''brien'\''s repo/.tddy/hooks.log' ]; do sleep 1; done; kill "$t") >/dev/null 2>&1 & wait "$t""#
+        );
+    }
+
+    /// The daemon's end, recording what each delivered hook reported.
+    #[derive(Default)]
+    struct ARecordingDaemon {
+        statuses: std::sync::Mutex<Vec<String>>,
+        activities: std::sync::Mutex<Vec<(String, String)>>,
+    }
+
+    #[async_trait]
+    impl HookReportDelivery for ARecordingDaemon {
+        async fn report_session_status(
+            &self,
+            request: tddy_service::proto::activity::ReportSessionStatusRequest,
+        ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, String> {
+            self.statuses
+                .lock()
+                .unwrap()
+                .push(format!("{} {}", request.hook_event_name, request.tool_name));
+            Ok(Default::default())
+        }
+
+        async fn report_agent_activity(
+            &self,
+            request: tddy_service::proto::activity::ReportAgentActivityRequest,
+        ) -> Result<(), String> {
+            self.activities
+                .lock()
+                .unwrap()
+                .push((request.event, request.tool_name));
+            Ok(())
+        }
+
+        async fn await_question_answer(
+            &self,
+            _request: tddy_service::proto::activity::AwaitQuestionAnswerRequest,
+        ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, String> {
+            Ok(Default::default())
+        }
+    }
+
+    /// The catch-all `PreToolUse` hook reports the tool call and never a status: the question tools
+    /// are reported by the hook that waits for their answer (`#target-parity` 4/7).
+    #[tokio::test]
+    async fn a_reporting_pre_tool_use_line_reports_the_call_and_no_status() {
+        // Given
+        let daemon = Arc::new(ARecordingDaemon::default());
+        let sink = ActivityHookSink::new(daemon.clone(), "s1", TOKEN, "dev");
+
+        // When the catch-all hook reports a shell command and a question
+        for payload in [
+            serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "toolu_01", "tool_input": {"command": "ls"}}),
+            serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}),
+        ] {
+            sink.deliver(HookLine {
+                event: "PreToolUse".to_string(),
+                payload,
+                answer_nonce: None,
+            })
+            .await;
+        }
+
+        // Then the shell command is a running call, the question nothing, and no status was sent
+        assert_eq!(
+            (
+                daemon.statuses.lock().unwrap().clone(),
+                daemon.activities.lock().unwrap().clone()
+            ),
+            (
+                Vec::<String>::new(),
+                vec![("PreToolUse".to_string(), "Bash".to_string())]
+            )
         );
     }
 }

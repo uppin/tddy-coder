@@ -84,12 +84,13 @@ pub(crate) fn daemon_socket_arg(p: &HookCommandParams<'_>) -> String {
 }
 
 /// The `(event, matcher)` pairs [`build_claude_hooks_settings`] installs.
-const CLAUDE_HOOK_EVENTS: [(&str, &str); 8] = [
+const CLAUDE_HOOK_EVENTS: [(&str, &str); 9] = [
     ("SessionStart", ""),
     ("UserPromptSubmit", ""),
     ("PostToolUse", ""),
     ("Notification", ""),
     ("PermissionRequest", ""),
+    ("PreToolUse", ""),
     ("PreToolUse", "AskUserQuestion"),
     ("Stop", ""),
     ("SessionEnd", ""),
@@ -199,15 +200,15 @@ fn remote_permission_entry(
 /// { "matcher": "", "hooks": [{ "type": "command", "command": "<cmd>" }] }
 /// ```
 /// `matcher = ""` matches all tool names (for `PostToolUse`/`Notification`) and all other
-/// variants. `PreToolUse` is matched to `AskUserQuestion` alone: a hook on every tool would run a
-/// process before each call of the agent's loop, and only that one tool's input is a question
-/// (`#home-inbox` 3/8).
+/// variants. `PreToolUse` has two groups: `""` reports every tool call before it runs (activity
+/// only, never waiting), and `AskUserQuestion` waits for the orchestrator's answer, since only that
+/// tool's input is a question (`#home-inbox` 3/8, `#target-parity` 4/7).
 pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Value {
     let events = CLAUDE_HOOK_EVENTS;
 
     let mut hooks_obj = serde_json::Map::new();
     for (event, matcher) in &events {
-        // A permission prompt, and a question (`PreToolUse` matched to `AskUserQuestion` alone), wait
+        // A permission prompt, and a question (`PreToolUse` matched to `AskUserQuestion`), wait
         // for the orchestrator's answer; the daemon decides whether anyone is there.
         let awaits_an_answer = *event == "PermissionRequest"
             || (*event == "PreToolUse" && *matcher == "AskUserQuestion");
@@ -220,7 +221,14 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
             Some(_) if awaits_an_answer => continue,
             _ => hook_entry_for_event(p, event, matcher, awaits_an_answer),
         };
-        hooks_obj.insert(event.to_string(), entry);
+        // An event's matcher groups accumulate in order: `PreToolUse` has the catch-all reporting
+        // group, then the waiting `AskUserQuestion` one.
+        let groups = hooks_obj
+            .entry(event.to_string())
+            .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+        if let (Some(groups), Some(entry)) = (groups.as_array_mut(), entry.as_array()) {
+            groups.extend(entry.iter().cloned());
+        }
     }
 
     let mut settings = serde_json::json!({ "hooks": hooks_obj });
@@ -332,75 +340,136 @@ mod tests {
         );
     }
 
-    /// `PreToolUse` is installed for the one tool whose input is a question; a hook on every tool
-    /// would run a process before each call of the agent's loop. Every other event matches all.
+    /// The matcher groups of each installed event, in order: `PreToolUse` reports every tool
+    /// (`""`), and its `AskUserQuestion` group waits for the orchestrator's answer
+    /// (`#target-parity` 4/7). Every other event has one group matching all.
+    fn matcher_groups(
+        value: &serde_json::Value,
+    ) -> std::collections::BTreeMap<String, Vec<String>> {
+        value["hooks"]
+            .as_object()
+            .expect("hooks must be an object")
+            .iter()
+            .map(|(event, groups)| {
+                (
+                    event.clone(),
+                    groups
+                        .as_array()
+                        .expect("an event's hooks are an array of matcher groups")
+                        .iter()
+                        .map(|group| {
+                            group["matcher"]
+                                .as_str()
+                                .expect("a string matcher")
+                                .to_string()
+                        })
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
     #[test]
-    fn the_pre_tool_use_hook_matches_ask_user_question_only() {
+    fn pre_tool_use_reports_every_tool_and_waits_on_ask_user_question() {
         // When
         let value = build_claude_hooks_settings(&test_params());
 
         // Then
-        let hooks = value["hooks"].as_object().expect("hooks must be an object");
-        let matchers: std::collections::BTreeMap<&str, &str> = hooks
-            .iter()
-            .map(|(event, entries)| {
-                (
-                    event.as_str(),
-                    entries[0]["matcher"].as_str().expect("a string matcher"),
-                )
-            })
-            .collect();
+        let one = |m: &str| vec![m.to_string()];
         assert_eq!(
-            matchers,
+            matcher_groups(&value),
             std::collections::BTreeMap::from([
-                ("Notification", ""),
-                ("PermissionRequest", ""),
-                ("PostToolUse", ""),
-                ("PreToolUse", "AskUserQuestion"),
-                ("SessionEnd", ""),
-                ("SessionStart", ""),
-                ("Stop", ""),
-                ("UserPromptSubmit", ""),
+                ("Notification".to_string(), one("")),
+                ("PermissionRequest".to_string(), one("")),
+                ("PostToolUse".to_string(), one("")),
+                (
+                    "PreToolUse".to_string(),
+                    vec!["".to_string(), "AskUserQuestion".to_string()]
+                ),
+                ("SessionEnd".to_string(), one("")),
+                ("SessionStart".to_string(), one("")),
+                ("Stop".to_string(), one("")),
+                ("UserPromptSubmit".to_string(), one("")),
             ])
         );
     }
 
-    /// Each hook entry must be an array with one matcher group containing one command hook.
+    /// The catch-all `PreToolUse` group reports and never waits: it is the plain hook command, with
+    /// no `--await-answer` and no `timeout`.
     #[test]
-    fn each_event_has_one_matcher_group_with_one_command_hook() {
+    fn the_catch_all_pre_tool_use_hook_only_reports() {
+        // When
+        let value = build_claude_hooks_settings(&test_params());
+
+        // Then
+        let catch_all = &value["hooks"]["PreToolUse"][0];
+        assert_eq!(
+            (
+                catch_all["matcher"].as_str(),
+                catch_all["hooks"][0]["command"]
+                    .as_str()
+                    .map(|c| c.contains("--event PreToolUse") && !c.contains("--await-answer")),
+                catch_all["hooks"][0].get("timeout").is_none(),
+            ),
+            (Some(""), Some(true), true)
+        );
+    }
+
+    /// On a target the catch-all `PreToolUse` group is the log one-liner, like every reporting hook.
+    #[test]
+    fn a_target_reports_every_tool_before_it_runs_through_its_hook_log() {
+        // Given
+        let params = HookCommandParams {
+            remote_log: Some(".tddy/hooks.log"),
+            ..test_params()
+        };
+
+        // When
+        let value = build_claude_hooks_settings(&params);
+
+        // Then
+        assert_eq!(
+            (
+                value["hooks"]["PreToolUse"][0]["matcher"].as_str(),
+                value["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str(),
+            ),
+            (
+                Some(""),
+                Some(
+                    crate::remote_hook_command::remote_hook_command(
+                        "PreToolUse",
+                        "tok-xyz",
+                        ".tddy/hooks.log"
+                    )
+                    .as_str()
+                )
+            )
+        );
+    }
+
+    /// Each matcher group carries one command hook.
+    #[test]
+    fn each_matcher_group_has_one_command_hook() {
         // When
         let value = build_claude_hooks_settings(&test_params());
 
         // Then
         let hooks = value["hooks"].as_object().unwrap();
-
-        for (event_name, entries) in hooks {
-            let arr = entries
+        for (event_name, groups) in hooks {
+            for group in groups
                 .as_array()
-                .unwrap_or_else(|| panic!("{event_name}: hook value must be an array"));
-            assert_eq!(
-                arr.len(),
-                1,
-                "{event_name}: must have exactly one matcher group"
-            );
-
-            let group = &arr[0];
-            // The matchers — `PreToolUse` alone carries one — are pinned whole by
-            // `the_pre_tool_use_hook_matches_ask_user_question_only`.
-            assert!(
-                group.get("matcher").and_then(|v| v.as_str()).is_some(),
-                "{event_name}: a matcher group must carry a string matcher"
-            );
-
-            let inner = group["hooks"]
-                .as_array()
-                .unwrap_or_else(|| panic!("{event_name}: inner hooks must be array"));
-            assert_eq!(inner.len(), 1, "{event_name}: must have exactly one hook");
-            assert_eq!(
-                inner[0].get("type").and_then(|v| v.as_str()),
-                Some("command"),
-                "{event_name}: hook type must be 'command'"
-            );
+                .unwrap_or_else(|| panic!("{event_name}: hook value must be an array"))
+            {
+                let inner = group["hooks"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("{event_name}: inner hooks must be array"));
+                assert_eq!(inner.len(), 1, "{event_name}: must have exactly one hook");
+                assert_eq!(
+                    inner[0].get("type").and_then(|v| v.as_str()),
+                    Some("command"),
+                    "{event_name}: hook type must be 'command'"
+                );
+            }
         }
     }
 

@@ -729,7 +729,8 @@ over the running daemon's socket. Each hook invokes
 | `PostToolUse` | — | `ExecutingTool` |
 | `Notification` | `permission_prompt` / `elicitation_dialog` / `idle_prompt` | `WaitingForInput` |
 | `PermissionRequest` | — | `WaitingForInput`, with the tool and its input |
-| `PreToolUse` (matcher `AskUserQuestion` only) | — | `WaitingForInput`, with every question and option |
+| `PreToolUse` (matcher `AskUserQuestion`, the waiting hook) | — | `WaitingForInput`, with every question and option |
+| `PreToolUse` (matcher `""`, the reporting hook) | — | no status; the tool call is reported `running` |
 | `Stop` | — | `Done` |
 | `SessionEnd` | — | `Ended` |
 | anything else | — | no-op (hook exits 0, no RPC) |
@@ -847,7 +848,8 @@ ends the hook at once with no output, and Claude asks in its terminal. On Coder 
 shell round trip (about 6–9 s) before the agent continues.
 
 The `PreToolUse` question matcher is not installed on a target, so Claude asks its questions in its
-terminal. `.tddy/hooks.log` and `.tddy/answers/` are kept out of the checkout's git status
+terminal. The reporting `PreToolUse` hook is: its line carries no answer nonce, and the follower
+reports it as agent activity only. `.tddy/hooks.log` and `.tddy/answers/` are kept out of the checkout's git status
 (`info/exclude`) and both are removed when the session goes.
 
 ### The transcript holds what was said
@@ -887,6 +889,19 @@ hooks) is kept; a file left empty is removed.
 The `tddy-tools` binary is `binary.command` of `tools/tddy-tools.yaml` (default: `current_exe` sibling → `"tddy-tools"`), the hook's `daemon_url` is the daemon's `listen.advertise_url` (default: `http://127.0.0.1:{web_port}`) and `answer_wait_secs` is 120. A daemon.yaml `claude_cli:` block is refused at start-up.
 
 **Capabilities.** The `claude` spec declares `hooks`, `ask_user_question`, `split_host`, `project_home_main`, `requires_model`, `branch_name_required` and `operator_notify`. Hook status reports need `hooks`; `AwaitQuestionAnswer` needs `ask_user_question`; operator notifications and the `notify` tool need `operator_notify`; a split or sandboxed-codebase placement needs `split_host`. Gates read the spec, not the session-type string.
+
+**Running tool calls.** `PreToolUse` has two matcher groups, in order: `""` reports every tool call
+before it runs, and `AskUserQuestion` (local only) waits for an answer. The reporting hook never
+waits and records no status — `tddy-tools session-hook` skips the status report for a `PreToolUse`
+without `--await-answer`, and a target's follower for a `PreToolUse` line without an answer nonce. Its
+agent-activity report writes the call's `running` row with its start time, and the `PostToolUse` of
+the same call (paired by Claude's `tool_use_id`) completes it. An `AskUserQuestion` is still recorded
+once, as a question, by its waiting hook. This holds locally and on a target (`#target-parity` 4/7).
+
+*Decision (user, 2026-11-21):* one extra short `tddy-tools` process per tool call locally is accepted
+in exchange for the same running-call behaviour locally and on a target, where the hook is one
+`printf` into `.tddy/hooks.log`. A matcher regex excluding the question tools was not used: the
+client-side rule is pinned by this repo's tests, Claude's matcher syntax is not.
 
 ### Which transport a hook reports over
 
