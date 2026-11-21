@@ -88,6 +88,7 @@ pub mod svc_start_session_core;
 pub mod tab_jail_agent;
 pub mod tab_jail_launch;
 pub mod tab_target_shell;
+pub mod target_shells;
 pub mod target_trust;
 mod tmux_main_roster;
 pub mod tool_process_tab;

@@ -70,6 +70,10 @@ pub struct WorktreeServiceImpl {
     session_rooms: Arc<dyn WorktreeRoomCloser>,
     /// Bumped on the streaming and sizing RPCs, so relay mode's idle timer sees worktree traffic.
     idle_tracker: Option<Arc<IdleTimeoutTracker>>,
+    /// The shells of target sessions' targets — see [`crate::target_worktrees`].
+    // TODO(target-worktree-actions): read by the target routing of Clean / Remove / Restore.
+    #[allow(dead_code)]
+    target_shells: Arc<dyn crate::target_worktrees::TargetShells>,
 }
 
 impl WorktreeServiceImpl {
@@ -88,6 +92,7 @@ impl WorktreeServiceImpl {
             )),
             session_rooms: Arc::new(NoSessionRooms),
             idle_tracker: None,
+            target_shells: Arc::new(crate::target_worktrees::NoTargetShells),
             tddy_data_dir,
             user_resolver,
             config,
@@ -98,6 +103,17 @@ impl WorktreeServiceImpl {
     #[must_use]
     pub fn with_session_rooms(mut self, rooms: Arc<dyn WorktreeRoomCloser>) -> Self {
         self.session_rooms = rooms;
+        self
+    }
+
+    /// Reach target sessions' worktrees through `shells` (`#target-parity` 2/7).
+    #[must_use]
+    pub fn with_target_shells(
+        mut self,
+        shells: Arc<dyn crate::target_worktrees::TargetShells>,
+    ) -> Self {
+        // TODO(target-worktree-actions): route Clean / Remove / Restore of a target session here.
+        self.target_shells = shells;
         self
     }
 

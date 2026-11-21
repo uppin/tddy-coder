@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Bug Fix
 **Complexity**: 4 — three crates (worktree-service, agent-launch, daemon wiring), a new injected port, remote I/O seam
-**Stack**: `#target-parity` 2/7 — branch `feature/target-parity/target-worktree-actions`, base `feature/target-parity/permission-answer`
+**Stack**: `#target-parity` 2/7 — branch `feature/target-parity/target-worktree-actions`, base `feature/target-parity/permission-answer` — PR [#970](https://github.com/uppin/tddy-coder/pull/970)
 
 ## Initial Discovery
 
@@ -87,14 +87,14 @@ A target session's actions run through its shell on the target; the daemon host 
 
 ## Acceptance Tests
 
-`packages/tddy-worktree-service/tests/worktrees_rpc.rs` / `target_worktree_actions_acceptance.rs` (stand-in target shell through the port, real git on both sides):
-- [ ] `restore_of_a_target_sessions_worktree_never_cuts_one_on_the_daemons_host` (reproduction, exists)
+`packages/tddy-worktree-service/tests/target_worktree_actions_acceptance.rs` (`StandInSshTarget` through the port, real git on both sides):
+- [ ] `restore_of_a_target_sessions_worktree_never_cuts_one_on_the_daemons_host` (the reproduction)
 - [ ] `restore_of_a_target_sessions_worktree_recreates_it_on_the_target`
 - [ ] `clean_of_a_target_sessions_worktree_cleans_it_on_the_target`
 - [ ] `delete_of_a_target_sessions_worktree_removes_it_on_the_target`
-- [ ] `an_action_on_an_unreachable_target_fails_with_its_reason_and_changes_nothing_locally`
+- [ ] `an_action_on_an_unreachable_target_fails_with_its_reason_and_changes_nothing`
 
-`packages/tddy-agent-launch` (unit): the port resolves an ssh target's shell, and refuses a Coder target with a locked vault as `FAILED_PRECONDITION`.
+`packages/tddy-agent-launch/src/target_shells.rs` (unit): the port resolves an ssh target's shell, and refuses a Coder target with a locked vault as `FAILED_PRECONDITION`.
 
 ## Decisions & Trade-offs
 
@@ -107,10 +107,10 @@ A target session's actions run through its shell on the target; the daemon host 
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

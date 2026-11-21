@@ -13,6 +13,7 @@ pub use tddy_projects::{project_provision, project_storage};
 pub mod remote_git_service;
 pub mod session_git_ops;
 pub mod session_target;
+pub mod target_worktrees;
 pub mod worktree_files;
 pub mod worktree_measurement;
 pub mod worktrees;
