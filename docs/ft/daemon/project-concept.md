@@ -231,6 +231,9 @@ orchestrator?" gate asks one predicate, `tddy_changeset::session_metadata::is_or
   records `orchestrator_session_id` / `orchestrator_daemon_instance_id` in the changeset its start
   path first writes, before its agent spawns, so who may answer its prompts is on record from the
   start.
+- **A child is told how to report back.** Every session started by an orchestrator on this daemon is
+  given guidance naming its orchestrator and one back channel to report its progress and status over
+  ([Reporting to the orchestrator](#reporting-to-the-orchestrator)).
 - A forwarded tool call from an orchestrator on another host is served as one from main is.
 
 `SessionService.EnsureProjectHomeSession(project_id, daemon_instance_id, start?)` owns its lifecycle
@@ -752,6 +755,38 @@ and read from there — nothing of the message is kept anywhere else.
   read skips one a watch of the reader has already delivered.
 - **No cross-host.** A message never crosses to another daemon, and the tools take no
   `daemon_instance_id`.
+
+#### Reporting to the orchestrator
+
+A session started by an orchestrator on this daemon is told, at launch, who its orchestrator is and
+to report its progress and status to it periodically — when it starts, after each milestone, when it
+is blocked and when it finishes — over **exactly one channel**, chosen by where it runs and what both
+agents can do:
+
+| The child | Its channel |
+|---|---|
+| On the orchestrator's host, both agents declaring native peer messaging (`coding_agent.peer_name`: Claude Code) | Claude Code's own peer messaging, addressed to the orchestrator's **peer name** |
+| Any other child on the orchestrator's host | `tddy-tools send --to <orchestrator session id> "<report>"` |
+| On a Coder or SSH target (no tddy software there) | a `TddyMessage` line appended to the worktree's `.tddy/hooks.log`: `echo '{"text": "<report>"}' \| <command>`, the exact command — with its hook token and log path — given in the guidance |
+
+- **Peer names.** A session of an agent declaring `peer_name` is launched under
+  `tddy-<session id>` (`claude --name …`) when it is an orchestrator (`is_orchestrator_role`) or a
+  child reporting to one, on this host — on start and on resume. The name is a function of the
+  session id, so nothing more is recorded.
+- **Where the guidance goes.** An agent with the operator-notify system prompt (Claude Code) carries
+  it there, after the notify guidance, and a resume writes it again from the changeset's
+  orchestrator link. Any other agent — Codex, Muse, Cursor, OpenCode, a session holding a role — gets
+  it ahead of its first prompt, under `## Your task`; a start with no prompt starts on the guidance
+  alone. A target child whose agent installs no hooks is still given a hook token, so its log is
+  followed.
+- **A target child's report.** The daemon's follower turns a `TddyMessage` line into the `message`
+  record `PostSessionMessage` publishes, from the child to the orchestrator its changeset names, so it
+  reaches the orchestrator's inbox watch and reads like any message. A line with no `text`, a child
+  with no orchestrator, an orchestrator on another daemon, and a text `PostSessionMessage` would
+  refuse are dropped, each with a log line.
+- **Not covered.** A child whose orchestrator runs on another daemon, a sandboxed child and an ACP
+  child are given no back-channel guidance
+  ([todo](../../dev/todo/2026-11-21-back-channel-for-sandboxed-and-acp-children.md)).
 
 ### Answering a permission prompt
 

@@ -866,6 +866,13 @@ questions) is an empty file, and Claude shows its own question dialog. The catch
 `PreToolUse` hook carries no answer nonce, and the follower reports it as agent activity only. `.tddy/hooks.log` and `.tddy/answers/` are kept out of the checkout's git status
 (`info/exclude`) and both are removed when the session goes.
 
+The log carries one event no hooks adapter installs: **`TddyMessage`**
+(`tddy_core::REMOTE_MESSAGE_EVENT`), the line a child of an orchestrator reports to it with, since a
+target has no `tddy-tools`. The child pipes `{"text": "<report>"}` into
+`remote_hook_command("TddyMessage", <hook token>, ".tddy/hooks.log")`, the command its back-channel
+guidance spells out, and the follower posts the text to the orchestrator as a session message
+([Project concept § Reporting to the orchestrator](project-concept.md#reporting-to-the-orchestrator)).
+
 ### The transcript holds what was said
 
 Only the coder presenter writes `acp-transcript.jsonl`, so a claude-cli session's own transcript would
