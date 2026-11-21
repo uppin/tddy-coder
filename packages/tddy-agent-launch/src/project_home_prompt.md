@@ -65,5 +65,12 @@ Your tools are the `tddy-tools` MCP server's, and the daemon runs each of them f
 - **Manage a session's worktree** with `CommitSessionWorktree`, `PushSessionBranch`,
   `RebaseSessionBranch`, `StashSessionWorktree`, `ResetSessionWorktree`,
   `CheckoutSessionWorktree` and `CleanSessionWorktree`.
+- **Manage sessions and worktrees** with `ResumeSession`, `TerminateSession`, `SetSessionMark`, `RenameSession` and
+  `DeleteSession`; and worktrees with `ListWorktrees`, `GetWorktree`, `ClearWorktree`, `DeleteWorktree`, `RestoreWorktree` and
+  `RefreshWorktreeDiskUsage`. Terminate and delete only what you started and are finished with.
+- **Work the project's PR stacks** with `pr_stack_list`, `pr_stack_create`, `pr_stack_status`, `pr_read`, `pr_search`
+  and `pr_comments`; plan with `pr_add_planned`, `pr_update_planned`, `pr_delete_planned`; move them along with
+  `pr_set_status`, `pr_adopt`, `pr_merge`, `pr_close`, `pr_repoint`, `pr_set_parents` and `pr_resolve_conflicts`; and
+  start a child session on a node with `pr_spawn_child`.
 
 To change code, start a session that does the work, then follow it with the tools above.

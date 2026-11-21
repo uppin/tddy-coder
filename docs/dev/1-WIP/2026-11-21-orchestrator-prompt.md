@@ -65,7 +65,7 @@ in the line only because `gh stack` needs a line; none depends on its neighbour.
 
 ## Scope
 
-- [ ] Role prompt rewrite with main / orchestrator openings
+- [x] Role prompt rewrite with main / orchestrator openings
 - [ ] Feature doc `project-concept.md` § Role prompt updated through the wrap
 
 ## Technical Changes
