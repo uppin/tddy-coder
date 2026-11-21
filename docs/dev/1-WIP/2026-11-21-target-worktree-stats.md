@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — worktree-service streaming with asynchronous remote measurements (ordering: local rows first), remote I/O seam, possibly a web hint
-**Stack**: `#target-parity` 7/7 — branch `feature/target-parity/target-worktree-stats`, base `feature/target-parity/question-answer`
+**Stack**: `#target-parity` 7/7 — branch `feature/target-parity/target-worktree-stats`, base `feature/target-parity/question-answer` — PR [#975](https://github.com/uppin/tddy-coder/pull/975)
 
 ## Initial Discovery
 
@@ -80,9 +80,9 @@ The stream holds the target session's row, measured on the target, after the loc
 
 ## Acceptance Tests
 
-`packages/tddy-worktree-service/tests/target_worktree_stats_acceptance.rs` (stand-in target shell through n2's port):
+`packages/tddy-worktree-service/tests/target_worktree_stats_acceptance.rs` (`StandInSshTarget` through n2's port; its setup is duplicated from n2's `target_worktree_actions_acceptance.rs` — for the sweep node to share):
 - [ ] `the_stream_holds_a_target_sessions_worktree_with_its_branch_diff_and_size`
-- [ ] `the_local_snapshot_is_sent_before_the_target_answers`
+- [x] `the_local_snapshot_is_sent_before_the_target_answers` — a **guard** (a target that takes 5 s a command): green today, must stay green once target rows are measured
 - [ ] `an_unreachable_targets_row_is_stale_without_numbers`
 - [ ] `calculating_a_target_worktrees_size_measures_it_on_the_target`
 
@@ -92,10 +92,10 @@ The stream holds the target session's row, measured on the target, after the loc
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (delegated: the user said "finish the rest without approval")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
