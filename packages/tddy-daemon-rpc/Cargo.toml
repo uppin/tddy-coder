@@ -23,6 +23,8 @@ tddy-agent-launch = { path = "../tddy-agent-launch" }
 # The registry `ListAgents` reads each agent's kind and route support from (`#agent-tools 12/12`).
 tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 tddy-core = { path = "../tddy-core" }
+# An orchestrator's own session files (`WriteSessionFile`, `#orchestra` 3/9).
+tddy-session-files = { path = "../tddy-session-files" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-discovery = { path = "../tddy-discovery" }
@@ -94,7 +96,6 @@ tddy-livekit = { path = "../tddy-livekit" }
 tddy-room-testkit = { path = "../tddy-room-testkit" }
 # The session-room exec-tool suite joins a room with the SDK directly; `src/` never names it.
 livekit = "0.7"
-tddy-session-files = { path = "../tddy-session-files" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 # The cross-daemon token and sandboxed-codebase suites give each daemon a signing identity of its
 # own (`DaemonSigningKey`, `SessionTokens`). An existing workspace crate the lifecycle crate

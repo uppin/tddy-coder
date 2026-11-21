@@ -12,6 +12,7 @@ mod project_home_watch_stream;
 mod project_home_watches;
 mod result_frames;
 mod role_guard;
+mod session_files;
 mod session_messages;
 mod stack_git_tools;
 pub mod stack_tools;
