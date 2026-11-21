@@ -823,14 +823,32 @@ before Claude kills it. Waiters are held in memory, one per `request_id`: a daem
 them and each hook falls back to Claude's prompt. A person can still answer in Claude's terminal once
 the wait ends.
 
-On a target session the settings carry the remote carrier instead: with
-`HookCommandParams.remote_log` set, every reporting event's command is
-`tddy_core::remote_hook_command` — a `printf` one-liner appending the event, the hook token and
-the payload to `.tddy/hooks.log` in the worktree — and the hooks that wait for an answer
-(`PermissionRequest`, the `PreToolUse` question matcher) are not installed, so Claude asks in
-its terminal. The daemon follows the log through the session's remote shell
-(`tddy_agent_launch::remote_hook_follower`) into the same `ReportSessionStatus` /
-`ReportAgentActivity` handling, and removes the log when the session goes.
+#### On a target session
+
+On a target session (a Coder workspace or an SSH host, with no tddy software on it) the settings
+carry the remote carrier instead. With `HookCommandParams.remote_log` set, every reporting event's
+command is `tddy_core::remote_hook_command` — a `printf` one-liner appending the event, the hook token
+and the payload to `.tddy/hooks.log` in the worktree. The daemon follows the log through the
+session's remote shell (`tddy_agent_launch::remote_hook_follower`) into the same
+`ReportSessionStatus` / `ReportAgentActivity` handling.
+
+`PermissionRequest` is installed there as a **waiting** hook, still POSIX shell only
+(`tddy_core::remote_answering_hook_command`). It mints a nonce, appends
+`PermissionRequest@<nonce>\t<token>\t<payload>` to the log, then polls `.tddy/answers/<nonce>` once a
+second for `<wait + 5>` seconds and prints that file as its only output. Claude's hook `timeout` is
+`<wait + 10>`, as for a local session. The follower reports the line like a local hook: the
+permission becomes the session's pending question, with its tool, its input and a `request_id`. It
+then holds for the orchestrator's answer through the same `AwaitQuestionAnswer` handling (presence
+check, recorded wait, outcomes), in a task of its own so the log's reader never stalls. Claude's
+decision — the table above — is written into `.tddy/answers/<nonce>` through the session's shell,
+into a temporary file first and then moved into place, so the hook never reads half an answer. No
+decision (`NO_ORCHESTRATOR`, `TIMED_OUT`, `cancelled`, a refused report) is an **empty** file, which
+ends the hook at once with no output, and Claude asks in its terminal. On Coder each answer costs one
+shell round trip (about 6–9 s) before the agent continues.
+
+The `PreToolUse` question matcher is not installed on a target, so Claude asks its questions in its
+terminal. `.tddy/hooks.log` and `.tddy/answers/` are kept out of the checkout's git status
+(`info/exclude`) and both are removed when the session goes.
 
 ### Hook wiring
 

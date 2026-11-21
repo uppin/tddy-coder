@@ -256,7 +256,9 @@ impl SessionHooks {
         }
     }
 
-    /// Follow the log from its first byte, once the agent is up.
+    /// Follow the log from its first byte, once the agent is up. A hook that waits for an answer is
+    /// answered through the session's shell as a daemon answers it — here always with no decision,
+    /// so the agent asks in its own terminal at once instead of after its whole answer wait.
     pub fn follow(&self, session_id: &str, worktree: &Path) {
         let sink = Arc::new(RecordingSink {
             recorder: Arc::clone(&self.recorder),
@@ -267,7 +269,8 @@ impl SessionHooks {
                 session_id,
                 &self.hook_token,
                 &self.os_user,
-            ),
+            )
+            .answering_through(Arc::clone(&self.shell), worktree),
         });
         let follower = RemoteHookFollower::start(
             Arc::clone(&self.shell),

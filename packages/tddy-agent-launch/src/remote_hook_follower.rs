@@ -15,8 +15,8 @@
 //!
 //! The log is writable by anything running as the session's user on the target: a line is
 //! untrusted input. One with the wrong token, an event no hooks adapter installs or a payload that
-//! is not JSON is dropped and counted, never delivered. A hook that waits for an answer (a permission request) is
-//! answered through the same shell: [`ActivityHookSink::answering_through`].
+//! is not JSON is dropped and counted, never delivered. A hook that waits for an answer (a
+//! permission request) is answered through the same shell: [`ActivityHookSink::answering_through`].
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-15-remote-shell-remote-hooks.md.
 
@@ -186,9 +186,7 @@ impl ActivityHookSink {
         self.answers = Some((shell, worktree.to_path_buf()));
         self
     }
-}
 
-impl ActivityHookSink {
     /// Hold for the answer of a waiting hook and write it, in a task of its own: the follower's
     /// reader must not stall on an orchestrator that takes minutes. A hook that only reports, or a
     /// sink that does not answer, holds nothing.

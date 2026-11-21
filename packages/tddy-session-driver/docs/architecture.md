@@ -97,6 +97,9 @@ followed exactly as a daemon start on a target wires and follows them (`hooks.rs
 
 Only the delivery differs. A daemon serves each report to its activity service; the driver's
 `HookReportDelivery` records it beside the hook that raised it, for `read_hooks` and `wait_for_hook`.
+The driver runs no orchestrator: its `await_question_answer` answers `NO_ORCHESTRATOR`, and the sink
+answers through the session's shell, so a waiting `PermissionRequest` hook gets an empty answer file
+at once and the agent asks in its own terminal instead of after its whole answer wait.
 
 Agent dialogs (Claude's folder trust, a project's MCP servers) are not answered automatically; a
 caller answers them with `wait_for_text` then `send_keys`.

@@ -187,29 +187,8 @@ pub(super) async fn launch(
         )
         .await
         .map_err(|e| Status::internal(format!("failed to spawn {kind}: {e}")))?;
-        if let (Some(log), Some(token), Some(delivery)) = (
-            hook_log,
-            remote.hook_token.as_ref(),
-            remote.hook_delivery.as_ref(),
-        ) {
-            let sink = Arc::new(
-                crate::remote_hook_follower::ActivityHookSink::new(
-                    Arc::clone(delivery),
-                    session_id,
-                    token,
-                    os_user,
-                )
-                .answering_through(Arc::clone(&shell), worktree_path),
-            );
-            let follower = crate::remote_hook_follower::RemoteHookFollower::start(
-                Arc::clone(&shell),
-                &log,
-                token,
-                sink,
-            );
-            remote
-                .hook_followers
-                .insert(session_id, follower, shell, worktree_path.to_path_buf());
+        if let Some(log) = hook_log {
+            follow_the_hook_log(&remote, &log, session_id, os_user, worktree_path);
         }
         return Ok(LaunchedHarness {
             pid: launched.handle.pid,
@@ -250,6 +229,39 @@ pub(super) async fn launch(
         pid: handle.pid,
         tmux_session: None,
     })
+}
+
+/// Follow the hook log `log` of a target session that is up, delivering its hooks to the
+/// session's activity and answering its waiting hooks through the session's shell; the follower is
+/// registered so the session's exit stops it and removes the log.
+fn follow_the_hook_log(
+    remote: &HarnessRemote,
+    log: &str,
+    session_id: &str,
+    os_user: &str,
+    worktree_path: &Path,
+) {
+    let (Some(token), Some(delivery)) = (remote.hook_token.as_ref(), remote.hook_delivery.as_ref())
+    else {
+        return;
+    };
+    let shell = Arc::clone(&remote.shell);
+    let sink = crate::remote_hook_follower::ActivityHookSink::new(
+        Arc::clone(delivery),
+        session_id,
+        token,
+        os_user,
+    )
+    .answering_through(Arc::clone(&shell), worktree_path);
+    let follower = crate::remote_hook_follower::RemoteHookFollower::start(
+        Arc::clone(&shell),
+        log,
+        token,
+        Arc::new(sink),
+    );
+    remote
+        .hook_followers
+        .insert(session_id, follower, shell, worktree_path.to_path_buf());
 }
 
 fn host_pty_session<'a>(

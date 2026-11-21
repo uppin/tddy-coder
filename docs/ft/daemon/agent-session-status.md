@@ -170,8 +170,11 @@ tddy software on it — reports the same hook word. Its hook command is a POSIX 
 (`printf`, `cat`, `tr`, nothing of tddy's) that appends one line — event, hook token, payload —
 to `.tddy/hooks.log` in the worktree. The daemon follows that file through the session's remote
 shell and feeds each line into the same hook handling a local hook reaches, so a target session
-shows working, waiting and idle like a local one. Hooks that wait for an answer are not
-installed on a target: the agent asks in its terminal. A line with the wrong token, an unknown
+shows working, waiting and idle like a local one. Claude Code's permission prompt is answered
+there too: its hook waits for a file the daemon writes into `.tddy/answers/` through the same
+shell once the orchestrator answers, and with no answer the agent asks in its terminal
+([Claude CLI session § On a target session](claude-cli-session.md#on-a-target-session)). Its
+question hook is not installed on a target. A line with the wrong token, an unknown
 event or an unparseable payload is dropped and counted, never acted on; a dropped follower
 stream resumes from the byte it had reached, so every hook is delivered once, in order. The session's
 end removes the log, and whatever followed it on the target ends within a second of that — whether

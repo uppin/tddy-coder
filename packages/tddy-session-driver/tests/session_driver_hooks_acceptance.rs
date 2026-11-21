@@ -230,6 +230,33 @@ async fn a_local_session_s_hooks_reach_the_driver_the_same_way() {
 }
 
 #[tokio::test]
+async fn a_driven_session_s_permission_prompt_is_left_to_the_agent_s_terminal_at_once() {
+    // Given a hooked agent started on this machine, with no orchestrator to answer it
+    let machine = AMachine::with_agent(AN_AGENT_THAT_WAITS);
+    let mut driver = ADriver::started(machine.driver_of("acme-hooked", "local", &[])).await;
+    started(&mut driver, &machine).await;
+
+    // When the agent asks for permission through its waiting hook
+    let asked_at = std::time::Instant::now();
+    let printed = machine.fire_hook_printing(
+        "PermissionRequest",
+        &json!({
+            "hook_event_name": "PermissionRequest",
+            "session_id": "conv-1",
+            "tool_name": "Read",
+            "tool_input": { "file_path": "README.md" },
+        }),
+    );
+
+    // Then the hook prints no decision, and ends long before its answer wait is over
+    assert_eq!(
+        (printed, asked_at.elapsed() < Duration::from_secs(30)),
+        (String::new(), true)
+    );
+    let _ = driver.answer("stop_session", json!({})).await;
+}
+
+#[tokio::test]
 async fn read_hooks_since_answers_only_the_hooks_after_it() {
     // Given a session whose turn fired three hooks
     let machine = AMachine::with_agent(AN_AGENT_THAT_WAITS);

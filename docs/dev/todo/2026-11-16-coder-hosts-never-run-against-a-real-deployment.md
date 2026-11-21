@@ -63,3 +63,16 @@ events likewise). The same run found, and the change fixed, a `tail -f` the foll
 workspace after each session. **Still unverified:** the daemon's own delivery of those reports into
 its activity service on a live workspace — the step the driver replaces with a record — that is,
 a daemon-level start whose `SessionStart` shows in the session's status.
+
+**Narrowed 2026-11-21 (`#target-parity` 1/7, #969):** the daemon's own delivery is evidenced. A
+daemon-level start of Claude on `mantasi/remote-dev` (the probe that planned `#target-parity`) had
+its `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Notification` and `Stop` followed from
+`.tddy/hooks.log` through `CoderShell` into the daemon's activity service, and the session's
+status followed them. The hook follower on a Coder workspace is no longer unverified. **Still
+unverified:** the answer channel #969 adds — the waiting `PermissionRequest` hook polling
+`.tddy/answers/<nonce>` on the workspace and the daemon writing that file through `CoderShell`
+(temporary file, then `mv`) within the hook's `<wait + 5>` seconds. It is pinned by a stand-in
+target running the real hook commands under `sh`
+(`tddy-agent-launch/tests/remote_hooks_acceptance.rs`), not by a live workspace. **What would
+close it:** answer one permission prompt of a target session on `mantasi/remote-dev` with
+`AnswerSessionPermission` and see the agent proceed.
