@@ -6,7 +6,7 @@
 //! it into the answer file the hook on the target waits for (`#target-parity` 1/7). Only daemon-side
 //! crates reach a target's shell, and `tddy-tools` already depends on this crate.
 
-use tddy_service::proto::activity::AwaitQuestionAnswerResponse;
+use tddy_service::proto::activity::{AwaitQuestionAnswerResponse, AwaitQuestionOutcome};
 
 /// Claude Code's `PermissionRequest` decision for `answer`
 /// (<https://code.claude.com/docs/en/hooks> § PermissionRequest decision control):
@@ -21,10 +21,33 @@ pub fn permission_decision_json(
     answer: &AwaitQuestionAnswerResponse,
     permission_suggestions: Option<&serde_json::Value>,
 ) -> Option<String> {
-    // TODO(permission-answer): implement — move the body of
-    // `tddy_tools::session_hook::permission_decision_json` here and have tddy-tools call it.
-    let _ = (answer, permission_suggestions);
-    todo!("permission_decision_json")
+    if AwaitQuestionOutcome::try_from(answer.outcome) != Ok(AwaitQuestionOutcome::Answered)
+        || answer.cancelled
+    {
+        return None;
+    }
+    let decision = match answer.option_id.as_str() {
+        "allow_once" => serde_json::json!({ "behavior": "allow" }),
+        "allow_always" => match permission_suggestions {
+            Some(suggestions) => {
+                serde_json::json!({ "behavior": "allow", "updatedPermissions": suggestions })
+            }
+            None => serde_json::json!({ "behavior": "allow" }),
+        },
+        option if option.starts_with("reject_") => {
+            serde_json::json!({ "behavior": "deny", "message": answer.message })
+        }
+        _ => return None,
+    };
+    Some(
+        serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": decision,
+            }
+        })
+        .to_string(),
+    )
 }
 
 #[cfg(test)]

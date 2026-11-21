@@ -80,11 +80,11 @@ The 2026-11-21 probe on `mantasi/remote-dev` delivered SessionStart, UserPromptS
 
 ## Scope
 
-- [ ] Waiting remote hook command + its settings entry
-- [ ] Nonce on the hook line; follower hold and answer-file write
-- [ ] Delivery port returns the request id and serves the hold
-- [ ] Decision JSON moved to tddy-session-activity
-- [ ] Answers directory excluded and removed
+- [x] Waiting remote hook command + its settings entry
+- [x] Nonce on the hook line; follower hold and answer-file write
+- [x] Delivery port returns the request id and serves the hold
+- [x] Decision JSON moved to tddy-session-activity
+- [x] Answers directory excluded and removed
 - [ ] Feature doc `claude-cli-session.md` § "On a target session" updated through the wrap
 
 ## Technical Changes
@@ -100,20 +100,20 @@ The target's settings carry a waiting `PermissionRequest`. Its line reaches the 
 ## Acceptance Tests
 
 `packages/tddy-agent-launch/tests/remote_hooks_acceptance.rs` (stand-in target, real hook commands under `sh`):
-- [ ] `a_permission_request_of_an_agent_on_a_target_reaches_the_daemon_with_its_tool_and_input` (reproduction, exists)
-- [ ] `an_orchestrators_answer_to_a_target_agents_permission_request_is_printed_by_its_hook`
-- [ ] `an_orchestrators_denial_reaches_the_target_agent_with_its_message`
-- [ ] `a_permission_request_nobody_answers_leaves_the_target_agent_to_ask_in_its_terminal`
-- [ ] `ending_a_target_session_removes_its_answers_on_the_target`
+- [x] `a_permission_request_of_an_agent_on_a_target_reaches_the_daemon_with_its_tool_and_input` (reproduction, exists)
+- [x] `an_orchestrators_answer_to_a_target_agents_permission_request_is_printed_by_its_hook`
+- [x] `an_orchestrators_denial_reaches_the_target_agent_with_its_message`
+- [x] `a_permission_request_nobody_answers_leaves_the_target_agent_to_ask_in_its_terminal`
+- [x] `ending_a_target_session_removes_its_answers_on_the_target`
 
 `packages/tddy-coding-agent-specs/tests/remote_hooks_render_acceptance.rs`:
-- [ ] `claude_code_on_a_target_waits_for_a_permission_answer_in_its_worktree` (replaces `no_hook_that_waits_for_an_answer_is_installed_on_a_target`)
+- [x] `claude_code_on_a_target_waits_for_a_permission_answer_in_its_worktree` (replaces `no_hook_that_waits_for_an_answer_is_installed_on_a_target`)
 
 `packages/tddy-agent-backend/src/remote_hook_command.rs` (unit, real `sh`):
-- [ ] `the_waiting_command_prints_the_answer_written_for_its_nonce`
-- [ ] `an_empty_answer_ends_the_waiting_command_at_once_with_no_output`
-- [ ] `the_waiting_command_gives_up_silently_when_no_answer_comes`
-- [ ] `the_waiting_command_names_no_tddy_binary`
+- [x] `the_waiting_command_prints_the_answer_written_for_its_nonce`
+- [x] `an_empty_answer_ends_the_waiting_command_at_once_with_no_output`
+- [x] `the_waiting_command_gives_up_silently_when_no_answer_comes`
+- [x] `the_waiting_command_names_no_tddy_binary`
 
 `packages/tddy-session-activity/src/hook_decision.rs` (unit): allow, deny with message, no orchestrator → no decision.
 
@@ -137,7 +137,7 @@ The target's settings carry a waiting `PermissionRequest`. Its line reaches the 
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)

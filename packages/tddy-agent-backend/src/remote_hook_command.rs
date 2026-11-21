@@ -61,9 +61,19 @@ pub fn remote_answering_hook_command(
     answers_dir: &str,
     wait_secs: u64,
 ) -> String {
-    // TODO(permission-answer): implement
-    let _ = (event, hook_token, log_path, answers_dir, wait_secs);
-    todo!("remote_answering_hook_command")
+    use crate::claude_hooks::shell_quote;
+    format!(
+        "n=\"$$-$(date +%s)\"; payload=\"$(cat | tr -d '\\n')\"; \
+         printf '%s@%s\\t%s\\t%s\\n' {event} \"$n\" {token} \"$payload\" >> {log}; \
+         answer={answers}/\"$n\"; waited=0; \
+         while [ \"$waited\" -le {wait_secs} ]; do \
+         if [ -e \"$answer\" ]; then cat \"$answer\"; rm -f \"$answer\"; break; fi; \
+         sleep 1; waited=$((waited + 1)); done; exit 0",
+        event = shell_quote(event),
+        token = shell_quote(hook_token),
+        log = shell_quote(log_path),
+        answers = shell_quote(answers_dir),
+    )
 }
 
 #[cfg(all(test, unix))]

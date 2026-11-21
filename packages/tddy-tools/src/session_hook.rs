@@ -22,8 +22,7 @@ use prost::Message as _;
 use std::io::Read;
 use tddy_core::{parse_hook_event, ASK_USER_QUESTION_TOOL};
 use tddy_service::proto::activity::{
-    AwaitQuestionOutcome, ReportAgentActivityRequest, ReportSessionStatusRequest,
-    ReportSessionStatusResponse,
+    ReportAgentActivityRequest, ReportSessionStatusRequest, ReportSessionStatusResponse,
 };
 
 mod await_answer;
@@ -110,33 +109,7 @@ pub fn permission_decision_json(
     answer: &tddy_service::proto::activity::AwaitQuestionAnswerResponse,
     permission_suggestions: Option<&serde_json::Value>,
 ) -> Option<String> {
-    if AwaitQuestionOutcome::try_from(answer.outcome) != Ok(AwaitQuestionOutcome::Answered)
-        || answer.cancelled
-    {
-        return None;
-    }
-    let decision = match answer.option_id.as_str() {
-        "allow_once" => serde_json::json!({ "behavior": "allow" }),
-        "allow_always" => match permission_suggestions {
-            Some(suggestions) => {
-                serde_json::json!({ "behavior": "allow", "updatedPermissions": suggestions })
-            }
-            None => serde_json::json!({ "behavior": "allow" }),
-        },
-        option if option.starts_with("reject_") => {
-            serde_json::json!({ "behavior": "deny", "message": answer.message })
-        }
-        _ => return None,
-    };
-    Some(
-        serde_json::json!({
-            "hookSpecificOutput": {
-                "hookEventName": "PermissionRequest",
-                "decision": decision,
-            }
-        })
-        .to_string(),
-    )
+    tddy_session_activity::hook_decision::permission_decision_json(answer, permission_suggestions)
 }
 
 /// The `ReportSessionStatus` request the hook event in `stdin_json` becomes, or `None` for an

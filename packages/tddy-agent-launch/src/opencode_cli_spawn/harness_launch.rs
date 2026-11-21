@@ -192,12 +192,15 @@ pub(super) async fn launch(
             remote.hook_token.as_ref(),
             remote.hook_delivery.as_ref(),
         ) {
-            let sink = Arc::new(crate::remote_hook_follower::ActivityHookSink::new(
-                Arc::clone(delivery),
-                session_id,
-                token,
-                os_user,
-            ));
+            let sink = Arc::new(
+                crate::remote_hook_follower::ActivityHookSink::new(
+                    Arc::clone(delivery),
+                    session_id,
+                    token,
+                    os_user,
+                )
+                .answering_through(Arc::clone(&shell), worktree_path),
+            );
             let follower = crate::remote_hook_follower::RemoteHookFollower::start(
                 Arc::clone(&shell),
                 &log,
