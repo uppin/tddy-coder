@@ -167,8 +167,15 @@ impl SandboxSessionManager {
     /// Stop every session's main jail and forget it — a daemon shutting down leaves none behind;
     /// the session ids stopped, sorted.
     pub async fn stop_all(&self) -> Vec<String> {
-        // TODO(sandbox-shell-tab): implement
-        todo!("stop every main jail")
+        let mut drained: Vec<_> = self.inner.lock().await.drain().collect();
+        drained.sort_by(|(left, _), (right, _)| left.cmp(right));
+        let mut stopped = Vec::with_capacity(drained.len());
+        for (session_id, state) in drained {
+            state.stop();
+            self.recorder.finish(&session_id).await;
+            stopped.push(session_id);
+        }
+        stopped
     }
 
     pub async fn remove(&self, session_id: &str) -> Option<Arc<SandboxSessionState>> {

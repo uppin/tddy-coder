@@ -35,6 +35,8 @@ pub struct SessionEntry {
     pub target: Option<tddy_core::SessionTarget>,
     /// Whether the session was started in managed-codebase mode (`.session.yaml`).
     pub managed_codebase: bool,
+    /// Whether the session's main agent runs in a jail (`.session.yaml`'s `sandbox: true`).
+    pub sandbox: bool,
     /// The session's standing role (`.session.yaml`); empty for an ordinary session.
     pub session_role: String,
     /// Whether the session's agent reads this host's filesystem directly
@@ -111,6 +113,7 @@ pub fn list_sessions_in_dir(
             ssh_config_host: metadata.ssh_config_host.unwrap_or_default(),
             target: metadata.target,
             managed_codebase: metadata.managed_codebase,
+            sandbox: metadata.sandbox == Some(true),
             session_role: metadata.session_role.unwrap_or_default(),
             reads_host_paths,
             orchestration_mark: metadata.orchestration_mark,

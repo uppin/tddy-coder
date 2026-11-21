@@ -200,6 +200,8 @@ impl LaunchSessions {
             sandbox.stop();
         }
         let _ = self.sandbox_manager.remove(session_id).await;
+        // Each jailed shell tab runs a runner of its own: none outlives the session's delete.
+        self.tab_jails.stop_session(session_id).await;
         // The workspace jail goes the same way, and *before* the directory does: the jail is a live
         // process holding the worktree open, so a jail left registered would go on running against
         // a checkout that no longer exists — for the rest of this daemon's life, since the registry

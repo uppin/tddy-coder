@@ -225,9 +225,14 @@ fn tmux_wrapped_plan(entry: &TabEntry, tmux: &LaunchNode, live: &LiveTabs) -> Ta
 /// A `sandbox`-wrapped tab: a shell is reopened in a new jail; anything else in the jail is dropped
 /// naming why.
 fn sandbox_plan(entry: &TabEntry) -> TabRestore {
-    // TODO(sandbox-shell-tab): implement
-    let _ = entry;
-    todo!("the restore of a sandbox-wrapped tab")
+    match entry.launch.get(1) {
+        None => drop_because("its sandbox launch node records nothing run inside the jail"),
+        Some(inner) if inner.kind == SHELL_KIND => TabRestore::JailedShell,
+        Some(inner) => drop_because(format!(
+            "a {:?} run in a sandbox is not one this daemon can restore",
+            inner.kind
+        )),
+    }
 }
 
 /// The tmux session name and OS user a `tmux` or `tmux-attach` node records.

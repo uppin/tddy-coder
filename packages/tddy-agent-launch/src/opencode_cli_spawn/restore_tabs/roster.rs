@@ -18,7 +18,7 @@ use tddy_core::tab_roster::{
     TMUX_ATTACH_KIND, TMUX_KIND,
 };
 use tddy_daemon_kernel::privilege_drop::EffectiveIdentity;
-use tddy_daemon_sandbox::tab_jails::{TabJailSpawn, TabJails};
+use tddy_daemon_sandbox::tab_jails::{TabJailLaunch, TabJailSpawn, TabJails};
 use tddy_service::proto::session::{RestoredTab, RestoredTabOutcome};
 
 use super::new_tab::agent_tab_argv;
@@ -81,6 +81,9 @@ async fn live_tabs(restore: &RosterRestore<'_>, tabs: &[TabEntry]) -> LiveTabs {
     let mut live = LiveTabs::none();
     for handle in restore.cli_manager.list_terminals(restore.session_id).await {
         live = live.with_terminal(&handle.terminal_id);
+    }
+    for terminal_id in restore.tab_jails.live(restore.session_id).await {
+        live = live.with_terminal(&terminal_id);
     }
     let named: BTreeSet<(String, String)> = tabs
         .iter()
@@ -217,9 +220,19 @@ async fn carry_out(
 /// Start the session user's login shell under the tab's recorded id, in a new jail of its own over
 /// the session's worktree and grants. A jail that cannot start fails the tab with the reason.
 async fn restore_jailed_shell(restore: &RosterRestore<'_>, tab: &TabEntry) -> anyhow::Result<()> {
-    // TODO(sandbox-shell-tab): implement
-    let _ = (restore.tab_jails, restore.tab_jail_spawn, tab);
-    todo!("restore a jailed shell tab")
+    let launch = TabJailLaunch::for_tab(
+        restore.session_id,
+        &tab.terminal_id,
+        restore.session_dir,
+        restore.worktree,
+    )
+    .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))?;
+    restore
+        .tab_jails
+        .start(restore.tab_jail_spawn, launch)
+        .await
+        .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))?;
+    Ok(())
 }
 
 /// Start `terminal` under the tab's recorded id.

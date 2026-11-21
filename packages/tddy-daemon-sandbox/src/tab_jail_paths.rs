@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use tddy_rpc::Status;
+use tddy_sandbox::SandboxSpec;
 
 /// The directory under a session's `sandbox/` holding one directory per jailed tab.
 pub const TAB_JAILS_DIR: &str = "tabs";
@@ -46,19 +47,43 @@ impl TabJailPaths {
         session_id: &str,
         terminal_id: &str,
     ) -> Result<TabJailPaths, Status> {
-        // TODO(sandbox-shell-tab): implement
-        let _ = (session_dir, session_id, terminal_id, TAB_JAILS_DIR);
-        todo!("the paths of a tab's jail")
+        if !is_one_path_segment(terminal_id) {
+            return Err(Status::invalid_argument(format!(
+                "terminal id {terminal_id:?} is not one path segment; a tab jail's files stay inside its session"
+            )));
+        }
+        let root = session_dir
+            .join("sandbox")
+            .join(TAB_JAILS_DIR)
+            .join(terminal_id);
+        Ok(TabJailPaths {
+            ipc_socket: tab_ipc_socket_path(session_id, terminal_id),
+            ready_marker: root.join("sandbox.ready"),
+            exec_plan: root.join("exec-plan.json"),
+            profile: root.join("sandbox.sb"),
+            egress_dir: root.join("egress"),
+            scratch_dir: root.join(".work"),
+            root,
+        })
     }
+}
+
+/// Whether `id` is exactly one ordinary path segment: it names a directory directly under another.
+fn is_one_path_segment(id: &str) -> bool {
+    let mut components = Path::new(id).components();
+    matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    ) && !id.contains(['/', '\\', '\0'])
 }
 
 /// The tool-IPC socket of the jail of tab `terminal_id` of session `session_id`: short enough for
 /// `SUN_LEN`, and distinct from the session's main socket
 /// ([`tddy_sandbox::SandboxSpec::short_ipc_socket_path`]) and from every other tab's.
 pub fn tab_ipc_socket_path(session_id: &str, terminal_id: &str) -> PathBuf {
-    // TODO(sandbox-shell-tab): implement
-    let _ = (session_id, terminal_id);
-    todo!("the IPC socket of a tab's jail")
+    // The main jail's socket hashes the session id; hashing the pair keeps a tab's socket in the
+    // same short temp directory yet distinct from the main's and from every other tab's.
+    SandboxSpec::short_ipc_socket_path(&format!("{session_id}\0{terminal_id}"))
 }
 
 #[cfg(test)]

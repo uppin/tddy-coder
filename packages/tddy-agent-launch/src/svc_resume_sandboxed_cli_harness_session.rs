@@ -87,6 +87,8 @@ impl LaunchSessions {
         } else if let Some(pid) = metadata.pid {
             tddy_daemon_sandbox::sandbox_session::terminate_sandbox_process(pid);
         }
+        // The jails of the stopped run's shell tabs go with it; the roster restore opens new ones.
+        self.tab_jails.stop_session(&req.session_id).await;
         tokio::time::sleep(Duration::from_millis(300)).await;
 
         let worktree_path = metadata

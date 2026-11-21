@@ -607,7 +607,7 @@ async fn a_resume_restores_the_roster_of_a_target_session_by_each_tabs_own_chain
                 tddy_core::tab_roster::TabEntry::new(
                     "019b-jailed-tab",
                     vec![
-                        tddy_core::tab_roster::LaunchNode::new("sandbox", [("profile", "p")]),
+                        tddy_core::tab_roster::LaunchNode::new("ssh", [("profile", "p")]),
                         tddy_core::tab_roster::LaunchNode::shell(),
                     ],
                 ),
@@ -631,5 +631,5 @@ async fn a_resume_restores_the_roster_of_a_target_session_by_each_tabs_own_chain
         tabs[1].outcome,
         tddy_service::proto::session::RestoredTabOutcome::Dropped as i32
     );
-    assert!(tabs[1].reason.contains("sandbox"), "{}", tabs[1].reason);
+    assert!(tabs[1].reason.contains("ssh"), "{}", tabs[1].reason);
 }

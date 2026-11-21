@@ -190,6 +190,7 @@ impl tddy_daemon_kernel::live_sessions::HeldSessions for DaemonTerminalSessionSt
         if let Some(sandbox) = self.sandboxes.get(session_id).await {
             sandbox.stop();
         }
+        self.tab_jails.stop_session(session_id).await;
     }
 }
 
@@ -210,16 +211,24 @@ impl DaemonTerminalSessionStore {
         self
     }
 
-    /// A tab of a sandboxed session other than its main: its own jail's terminal, or the CLI
-    /// manager's "On host" terminal of that id.
-    async fn sandboxed_session_tab(
+    /// A tab other than a session's main: its own jail's terminal when it runs in one, else the
+    /// CLI manager's host terminal of that id.
+    async fn tab_terminal(
         &self,
         session_id: &str,
         terminal_id: &str,
     ) -> Option<Arc<dyn tddy_terminal_rpc::session::TerminalSession>> {
-        // TODO(sandbox-shell-tab): implement
-        let _ = (&self.tab_jails, session_id, terminal_id);
-        todo!("route a sandboxed session's tab to its owner")
+        if let Some(jail) = self.tab_jails.get(session_id, terminal_id).await {
+            return Some(Arc::new(SandboxTerminalSession::new(jail))
+                as Arc<dyn tddy_terminal_rpc::session::TerminalSession>);
+        }
+        self.manager
+            .get_terminal(session_id, terminal_id)
+            .await
+            .map(|handle| {
+                Arc::new(DaemonTerminalSession::new(handle))
+                    as Arc<dyn tddy_terminal_rpc::session::TerminalSession>
+            })
     }
 
     /// Signals the main agent this daemon holds for the session in `session_dir`; refused, with
@@ -262,10 +271,10 @@ impl tddy_terminal_rpc::session::TerminalSessionStore for DaemonTerminalSessionS
         session_id: &str,
         terminal_id: &str,
     ) -> Option<Arc<dyn tddy_terminal_rpc::session::TerminalSession>> {
+        if terminal_id != MAIN_TERMINAL_ID {
+            return self.tab_terminal(session_id, terminal_id).await;
+        }
         if let Some(state) = self.sandboxes.get(session_id).await {
-            if terminal_id != MAIN_TERMINAL_ID {
-                return self.sandboxed_session_tab(session_id, terminal_id).await;
-            }
             return Some(Arc::new(SandboxTerminalSession::new(state))
                 as Arc<dyn tddy_terminal_rpc::session::TerminalSession>);
         }

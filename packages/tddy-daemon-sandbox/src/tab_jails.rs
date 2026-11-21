@@ -15,6 +15,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use tddy_rpc::Status;
@@ -25,6 +26,9 @@ pub use crate::tab_jail_paths::TabJailPaths;
 
 /// How many jail ends [`TabJails::subscribe_ended`] buffers for a subscriber that has fallen behind.
 const ENDED_CAPACITY: usize = 64;
+
+/// How often the death watch looks at a jail's runner.
+const DEATH_POLL: Duration = Duration::from_millis(100);
 
 /// The tab a jail serves: its session and its terminal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -98,7 +102,7 @@ pub trait TabJailSpawn: Send + Sync {
 
 /// The jails of every jailed tab this daemon runs, keyed `(session_id, terminal_id)`.
 pub struct TabJails {
-    jails: Mutex<HashMap<TabJailKey, Arc<SandboxSessionState>>>,
+    jails: Arc<Mutex<HashMap<TabJailKey, Arc<SandboxSessionState>>>>,
     /// Every jail whose runner exited on its own: the death watch's announcements.
     ended: broadcast::Sender<TabJailKey>,
 }
@@ -106,7 +110,7 @@ pub struct TabJails {
 impl Default for TabJails {
     fn default() -> Self {
         TabJails {
-            jails: Mutex::new(HashMap::new()),
+            jails: Arc::new(Mutex::new(HashMap::new())),
             ended: broadcast::channel(ENDED_CAPACITY).0,
         }
     }
@@ -126,9 +130,20 @@ impl TabJails {
         spawn: &dyn TabJailSpawn,
         launch: TabJailLaunch,
     ) -> Result<Arc<SandboxSessionState>, Status> {
-        // TODO(sandbox-shell-tab): implement
-        let _ = (spawn, launch);
-        todo!("start and watch a tab's jail")
+        let key = launch.key();
+        // The map's lock is held across the spawn: two starts of one tab must not both launch a runner.
+        let mut jails = self.jails.lock().await;
+        if jails.contains_key(&key) {
+            return Err(Status::already_exists(format!(
+                "tab {} of session {} already runs in a jail",
+                key.terminal_id, key.session_id
+            )));
+        }
+        let state = spawn.spawn_shell(&launch).await?;
+        jails.insert(key.clone(), Arc::clone(&state));
+        drop(jails);
+        self.watch_for_death(key, Arc::clone(&state));
+        Ok(state)
     }
 
     /// The jail of tab `terminal_id` of `session_id`, while it is registered.
@@ -147,31 +162,94 @@ impl TabJails {
     /// Stop the jail of tab `terminal_id` of `session_id` and forget it. `false` when the tab has no
     /// jail. A jail stopped here is not announced as ended: its stop was asked for.
     pub async fn stop(&self, session_id: &str, terminal_id: &str) -> bool {
-        // TODO(sandbox-shell-tab): implement
-        let _ = (session_id, terminal_id);
-        todo!("stop a tab's jail")
+        let removed = self
+            .jails
+            .lock()
+            .await
+            .remove(&TabJailKey::new(session_id, terminal_id));
+        match removed {
+            Some(state) => {
+                state.stop();
+                true
+            }
+            None => false,
+        }
     }
 
     /// Stop every tab jail of `session_id` and forget them; the terminal ids stopped, sorted. Every
     /// other session's jails are left running.
     pub async fn stop_session(&self, session_id: &str) -> Vec<String> {
-        // TODO(sandbox-shell-tab): implement
-        let _ = session_id;
-        todo!("stop a session's tab jails")
+        let mut stopped: Vec<(TabJailKey, Arc<SandboxSessionState>)> = Vec::new();
+        {
+            let mut jails = self.jails.lock().await;
+            let keys: Vec<TabJailKey> = jails
+                .keys()
+                .filter(|key| key.session_id == session_id)
+                .cloned()
+                .collect();
+            for key in keys {
+                if let Some(state) = jails.remove(&key) {
+                    stopped.push((key, state));
+                }
+            }
+        }
+        stopped.sort_by(|(left, _), (right, _)| left.cmp(right));
+        stopped
+            .into_iter()
+            .map(|(key, state)| {
+                state.stop();
+                key.terminal_id
+            })
+            .collect()
     }
 
     /// Stop every tab jail this daemon runs and forget them — a daemon shutting down leaves none
     /// behind; the tabs stopped, sorted.
     pub async fn stop_all(&self) -> Vec<TabJailKey> {
-        // TODO(sandbox-shell-tab): implement
-        todo!("stop every tab jail")
+        let mut drained: Vec<_> = self.jails.lock().await.drain().collect();
+        drained.sort_by(|(left, _), (right, _)| left.cmp(right));
+        drained
+            .into_iter()
+            .map(|(key, state)| {
+                state.stop();
+                key
+            })
+            .collect()
     }
 
     /// The terminal ids of `session_id` whose jail's runner is running now.
     pub async fn live(&self, session_id: &str) -> BTreeSet<String> {
-        // TODO(sandbox-shell-tab): implement
-        let _ = session_id;
-        todo!("the live tab jails of a session")
+        self.jails
+            .lock()
+            .await
+            .iter()
+            .filter(|(key, state)| key.session_id == session_id && state.is_running())
+            .map(|(key, _)| key.terminal_id.clone())
+            .collect()
+    }
+
+    /// Poll `state` until its runner exits; a jail still registered under `key` and still the same
+    /// one is then forgotten and announced. A jail stopped through the registry is gone from it, so
+    /// it is never announced.
+    fn watch_for_death(&self, key: TabJailKey, state: Arc<SandboxSessionState>) {
+        let jails = Arc::downgrade(&self.jails);
+        let ended = self.ended.clone();
+        tokio::spawn(async move {
+            while state.is_running() {
+                tokio::time::sleep(DEATH_POLL).await;
+            }
+            let Some(jails) = jails.upgrade() else { return };
+            let mut jails = jails.lock().await;
+            let still_registered = jails
+                .get(&key)
+                .is_some_and(|registered| Arc::ptr_eq(registered, &state));
+            if still_registered {
+                jails.remove(&key);
+                drop(jails);
+                // No subscriber is not an error: nobody is waiting for the end.
+                let _ = ended.send(key);
+            }
+        });
     }
 
     /// The death watch: every tab whose jail's runner exited on its own from now on, once each.

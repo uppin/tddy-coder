@@ -188,9 +188,20 @@ impl TerminalKind {
         tmux_session: &str,
         inner: &[crate::proto::terminal_session::LaunchNode],
     ) -> Result<TerminalKind, Status> {
-        // TODO(sandbox-shell-tab): implement
-        let _ = (kind, tmux_session, inner);
-        todo!("a sandbox-wrapped terminal kind")
+        if let Some(refused) = inner.first() {
+            return Err(Status::invalid_argument(format!(
+                "a terminal cannot be wrapped in {:?} inside {SANDBOX_WRAPPER_KIND:?}: a sandbox \
+                 wraps the login shell alone",
+                refused.kind
+            )));
+        }
+        match Self::from_request(kind, tmux_session)? {
+            TerminalKind::Bash => Ok(TerminalKind::SandboxedShell),
+            _ => Err(Status::invalid_argument(format!(
+                "only the login shell can be wrapped in {SANDBOX_WRAPPER_KIND:?} here, not {:?}",
+                kind.trim()
+            ))),
+        }
     }
 }
 

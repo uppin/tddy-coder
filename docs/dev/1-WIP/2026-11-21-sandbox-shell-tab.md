@@ -69,7 +69,7 @@ The first push publishes `TabJails` and `TabJailSpawn` with `todo!()` bodies, `S
 ## Green wave
 
 **Wave:** 4 of 5
-**Greenable independently:** yes, once n4 is in — tests drive the fake `TabJailSpawn`; the real-jail Linux test needs the prerequisite CI PR
+**Greenable independently:** yes, once n4 is in — tests drive the fake `TabJailSpawn`; the real-jail Linux test cannot run without a VM and self-skips (see Prerequisites)
 **Concurrent with:** `target-shell-tab` (n6)
 **Blocks:** `sandbox-agent-tab` (n7)
 
@@ -77,9 +77,9 @@ Real dependency edges: `n4 → n5, n6      n5 → n7      n6 → n8`
 
 ## Prerequisites
 
-### ⛔ BLOCKING (real-jail test only) — [2026-11-02-ci-runs-no-linux-jail.md](../todo/2026-11-02-ci-runs-no-linux-jail.md)
+### ⚠ NOTE (real-jail test only) — [2026-11-02-ci-runs-no-linux-jail.md](../todo/2026-11-02-ci-runs-no-linux-jail.md)
 
-A prerequisite PR off `master`, outside the stack (developer decision 2026-11-21), enables the Linux jail suites in CI. Until it lands, `sandbox_shell_tab_jail_linux.rs` self-skips there like every jail suite. The behaviour tests do not depend on it.
+The jail is not testable without a VM (developer decision 2026-11-21), so there is no prerequisite CI PR. `sandbox_shell_tab_jail_linux.rs` stays as written and self-skips until VM-backed testing exists; it can run on neither a Mac nor CI. `docs/dev/todo/2026-11-02-ci-runs-no-linux-jail.md` stays open. The behaviour tests do not depend on it.
 
 ### ✅ RESOLVED HERE (part 1, and part 2 for tab jails) — [2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md](../todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md)
 
@@ -165,7 +165,7 @@ Written (pass 2): `tddy-terminal-rpc/tests/terminal_kind_sandbox_wrapper_unit.rs
 - **Jail terminals keep the main's limits** — no resize, no control lease (developer decision).
 - **An exited tab jail stays in the roster** (developer ruling, 2026-11-21), like a host tab: unlisted, still recorded `[sandbox, shell]`, reopened by Resume.
 - **Shutdown stops every jail**, main ones included (developer decision) — resolves part 1 of the 2026-09-15 entry.
-- **Real-jail coverage via a prerequisite CI PR** (developer decision), not inside this node.
+- **No prerequisite CI PR** (developer decision 2026-11-21): the jail is not testable without a VM, so the real-jail Linux test stays as written and self-skips until VM-backed testing exists.
 
 ## TODO
 

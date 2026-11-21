@@ -31,6 +31,9 @@ interface SessionTerminalTabsProps {
    * offered: the daemon refuses a kind it does not run, and that refusal is shown.
    */
   sessionType?: string;
+  /** Whether the session runs sandboxed (`SessionEntry.sandbox`): its "+" menu offers its shell "In
+   *  sandbox" or "On host". */
+  sandboxed?: boolean;
   /** Spawned child conversations of this session, rendered as tabs after the terminal tabs. */
   childSessions?: readonly ChildSession[];
   /** The selected child conversation's session id, or `null` when a terminal tab is active. */
@@ -110,6 +113,7 @@ export function SessionTerminalTabs({
   sessionId,
   onClose,
   sessionType,
+  sandboxed,
   childSessions = [],
   activeChildSessionId = null,
   onSelectChild,
@@ -233,6 +237,7 @@ export function SessionTerminalTabs({
         <div className="sticky right-0 flex-shrink-0 bg-background">
           <NewTerminalMenu
             sessionType={sessionType}
+            sandboxed={sandboxed}
             onOpen={onOpen}
             sessionId={sessionId}
             tmux={tmux}

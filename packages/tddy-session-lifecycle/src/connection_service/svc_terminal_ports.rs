@@ -358,7 +358,8 @@ impl TerminalRoster for CliManagerTerminalRoster {
     }
 
     async fn list(&self, session_id: &str) -> Vec<TerminalDescriptor> {
-        self.manager
+        let mut terminals: Vec<TerminalDescriptor> = self
+            .manager
             .list_terminals(session_id)
             .await
             .iter()
@@ -368,7 +369,9 @@ impl TerminalRoster for CliManagerTerminalRoster {
                 pid: handle.pid,
                 tmux_session: handle.tmux_session.clone(),
             })
-            .collect()
+            .collect();
+        terminals.extend(self.listed_jailed_tabs(session_id).await);
+        terminals
     }
 
     async fn launch_chains(
