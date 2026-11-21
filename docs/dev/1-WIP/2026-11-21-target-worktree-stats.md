@@ -65,7 +65,7 @@ New code in its own module; neither file grows.
 
 ## Scope
 
-- [ ] Target rows in the stream and the calculator
+- [x] Target rows in the stream and the calculator
 - [ ] Feature docs `session-worktree-inspector.md`, `worktree-disk-usage-streaming.md` updated through the wrap
 
 ## Technical Changes
@@ -81,10 +81,10 @@ The stream holds the target session's row, measured on the target, after the loc
 ## Acceptance Tests
 
 `packages/tddy-worktree-service/tests/target_worktree_stats_acceptance.rs` (`StandInSshTarget` through n2's port; its setup is duplicated from n2's `target_worktree_actions_acceptance.rs` — for the sweep node to share):
-- [ ] `the_stream_holds_a_target_sessions_worktree_with_its_branch_diff_and_size`
+- [x] `the_stream_holds_a_target_sessions_worktree_with_its_branch_diff_and_size`
 - [x] `the_local_snapshot_is_sent_before_the_target_answers` — a **guard** (a target that takes 5 s a command): green today, must stay green once target rows are measured
-- [ ] `an_unreachable_targets_row_is_stale_without_numbers`
-- [ ] `calculating_a_target_worktrees_size_measures_it_on_the_target`
+- [x] `an_unreachable_targets_row_is_stale_without_numbers`
+- [x] `calculating_a_target_worktrees_size_measures_it_on_the_target`
 
 ## TODO
 
@@ -96,7 +96,7 @@ The stream holds the target session's row, measured on the target, after the loc
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (delegated: the user said "finish the rest without approval")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
