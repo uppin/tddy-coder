@@ -11,10 +11,12 @@ mod support;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tddy_cli_sessions::cli_session_manager::{ReattachFinished, ReattachOutcome, ReattachSkip};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{
-    ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+    ListSessionsRequest, ResumeSessionRequest, SessionService as SessionServiceTrait,
+    StartSessionRequest,
 };
 use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
@@ -38,6 +40,46 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
+
+/// The daemon a restart brings up: its host, and the manager whose re-attach outcomes are awaited.
+struct RestartedDaemon {
+    host: Arc<DaemonSessionHost>,
+    manager: Arc<CliSessionManager>,
+}
+
+impl std::ops::Deref for RestartedDaemon {
+    type Target = DaemonSessionHost;
+    fn deref(&self) -> &DaemonSessionHost {
+        &self.host
+    }
+}
+
+impl RestartedDaemon {
+    /// Subscribe before the action that triggers a re-attach, so its outcome cannot be missed.
+    fn watching_reattaches(&self) -> tokio::sync::broadcast::Receiver<ReattachFinished> {
+        self.manager.reattach_finished()
+    }
+}
+
+/// The outcome of `session_id`'s re-attach, awaited on the manager's own announcement — not on its
+/// effects — within [`OBSERVE`].
+async fn the_reattach_of(
+    finished: &mut tokio::sync::broadcast::Receiver<ReattachFinished>,
+    session_id: &str,
+) -> ReattachOutcome {
+    let waiting = async {
+        loop {
+            match finished.recv().await {
+                Ok(done) if done.session_id == session_id => return done.outcome,
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(closed) => panic!("the re-attach announcements ended: {closed}"),
+            }
+        }
+    };
+    tokio::time::timeout(OBSERVE, waiting)
+        .await
+        .unwrap_or_else(|_| panic!("no re-attach of {session_id} finished within {OBSERVE:?}"))
+}
 
 /// A daemon whose `claude` is a stub that records what it was launched with, then holds its pane.
 struct TmuxAgentDaemon {
@@ -231,14 +273,16 @@ fn a_process_is_alive(pid: u32) -> bool {
 
 impl TmuxAgentDaemon {
     /// A daemon restarted over the same sessions directory: no terminals registered, same tmux.
-    fn restarted(&self) -> Arc<DaemonSessionHost> {
+    fn restarted(&self) -> RestartedDaemon {
         // The daemon that restarts is gone: nothing of it still listens on its agent-tool sockets.
         self.host.agent_tool_sockets().stop_serving();
-        a_session_host(
+        let manager = Arc::new(CliSessionManager::new());
+        let host = a_session_host(
             self.config.clone(),
             self.sessions_base.clone(),
-            Arc::new(CliSessionManager::new()),
-        )
+            Arc::clone(&manager),
+        );
+        RestartedDaemon { host, manager }
     }
 
     /// How many times the stub agent has been launched.
@@ -322,6 +366,7 @@ async fn a_fresh_daemon_reattaches_the_main_terminal_on_first_stream_without_res
     let name = daemon.tmux_session_of(&session_id);
     daemon.host.shut_down_children().await;
     let fresh = daemon.restarted();
+    let mut finished = fresh.watching_reattaches();
 
     // When a client first streams the session's main terminal from the fresh daemon
     let streamed = fresh
@@ -338,7 +383,12 @@ async fn a_fresh_daemon_reattaches_the_main_terminal_on_first_stream_without_res
         }))
         .await;
 
-    // Then a client is attached to the same tmux session and the agent was not relaunched
+    // Then the re-attach finished, a client is attached to the same tmux session and the agent was
+    // not relaunched
+    assert_eq!(
+        the_reattach_of(&mut finished, &session_id).await,
+        ReattachOutcome::Reattached
+    );
     assert!(
         streamed.is_ok(),
         "the first stream re-attaches the main terminal"
@@ -412,6 +462,7 @@ async fn resume_of_a_live_tmux_run_session_reattaches_instead_of_relaunching() {
     let name = daemon.tmux_session_of(&session_id);
     daemon.host.shut_down_children().await;
     let fresh = daemon.restarted();
+    let mut finished = fresh.watching_reattaches();
 
     // When it is resumed
     fresh
@@ -422,7 +473,12 @@ async fn resume_of_a_live_tmux_run_session_reattaches_instead_of_relaunching() {
         .await
         .expect("ResumeSession");
 
-    // Then the same tmux session has a client again, and claude was not launched a second time
+    // Then the resume announced a re-attach, the same tmux session has a client again, and claude
+    // was not launched a second time
+    assert_eq!(
+        the_reattach_of(&mut finished, &session_id).await,
+        ReattachOutcome::Reattached
+    );
     until_attached(&daemon.tmux, &name, 1).await;
     assert_eq!(daemon.tmux_session_of(&session_id), name);
     assert_eq!(daemon.launch_count(), 1, "claude was not relaunched");
@@ -664,8 +720,10 @@ async fn a_daemon_restart_reattaches_a_tmux_claude_cli_session_from_the_installe
     let fresh = daemon.restarted();
     daemon.has_a_tools_dir_that_no_longer_loads();
 
+    let mut finished = fresh.watching_reattaches();
     // When a client first streams the session's main terminal from the fresh daemon
     let streamed = first_stream_of_the_main_terminal(&fresh, &session_id).await;
+    let reattach = the_reattach_of(&mut finished, &session_id).await;
 
     // Then the main is re-attached from the installed agents — `<tddyhome>/tools` is not read —
     // and the agent was not relaunched
@@ -678,6 +736,7 @@ async fn a_daemon_restart_reattaches_a_tmux_claude_cli_session_from_the_installe
         ),
         (Ok(()), true, 1, Some(agent_pid))
     );
+    assert_eq!(reattach, ReattachOutcome::Reattached);
     until_attached(&daemon.tmux, &name, 1).await;
 }
 
@@ -691,16 +750,88 @@ async fn a_recorded_session_without_a_session_type_is_not_reattached() {
     daemon.host.shut_down_children().await;
     daemon.forgets_the_session_type_of(&session_id);
     let fresh = daemon.restarted();
+    let mut finished = fresh.watching_reattaches();
 
     // When a client first streams the session's main terminal from the fresh daemon
     let _refused = first_stream_of_the_main_terminal(&fresh, &session_id).await;
 
-    // Then nothing is re-attached as a default agent, and nothing is relaunched
+    // Then the re-attach finished skipped for the missing session type — nothing is re-attached as
+    // a default agent — and nothing is relaunched
     assert_eq!(
         (
+            the_reattach_of(&mut finished, &session_id).await,
             has_a_main_terminal(&fresh, &session_id).await,
             daemon.launch_count(),
         ),
-        (false, 1)
+        (
+            ReattachOutcome::Skipped(ReattachSkip::NoSessionType),
+            false,
+            1
+        )
     );
+}
+
+/// Whether `host` lists `session_id` as active.
+async fn is_listed_active_on(host: &DaemonSessionHost, session_id: &str) -> bool {
+    host.list_sessions(Request::direct(ListSessionsRequest {
+        session_token: VALID_TOKEN.to_string(),
+    }))
+    .await
+    .expect("ListSessions must succeed")
+    .into_inner()
+    .sessions
+    .into_iter()
+    .find(|s| s.session_id == session_id)
+    .expect("the session is listed")
+    .is_active
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_tmux_run_agent_that_outlived_its_daemon_lists_inactive_until_its_main_is_reattached() {
+    // Given a tmux-run session whose agent outlived its daemon — its recorded pane pid still alive
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, agent_pid) = daemon.is_running_in_tmux().await;
+    daemon.host.shut_down_children().await;
+    let fresh = daemon.restarted();
+    assert!(
+        a_process_is_alive(agent_pid),
+        "the agent survives the restart"
+    );
+
+    // When the fresh daemon lists it, before and after a client re-attaches its main terminal
+    let before = is_listed_active_on(&fresh, &session_id).await;
+    first_stream_of_the_main_terminal(&fresh, &session_id)
+        .await
+        .expect("the first stream re-attaches the main terminal");
+    let after = is_listed_active_on(&fresh, &session_id).await;
+
+    // Then it is inactive until the fresh daemon holds it, and active once it does
+    assert_eq!(
+        (before, after),
+        (false, true),
+        "liveness is what this daemon holds, not the recorded pane pid"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_tmux_run_agent_whose_client_detached_lists_active_while_the_daemon_watches_it() {
+    // Given a running tmux-run session whose client detaches while its agent keeps running
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _) = daemon.is_running_in_tmux().await;
+    let name = daemon.tmux_session_of(&session_id);
+    until_attached(&daemon.tmux, &name, 1).await;
+    assert!(daemon
+        .tmux
+        .tmux(&["detach-client", "-s", &name])
+        .status
+        .success());
+    daemon.until_the_main_left_the_registry(&session_id).await;
+
+    // When the sessions are listed
+    let active = is_listed_active_on(&daemon.host, &session_id).await;
+
+    // Then it is active: the daemon still watches its agent's tmux session
+    assert!(active, "a watched detached agent is a live agent");
 }

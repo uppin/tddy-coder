@@ -191,6 +191,10 @@ async fn reattach_running_harness(
     if let Some(on_exit) = on_exit {
         manager.run_exit_hook_on_agent_exit(session_id, os_user, &name, on_exit);
     }
+    manager.announce_reattach(
+        session_id,
+        tddy_cli_sessions::cli_session_manager::ReattachOutcome::Reattached,
+    );
     Ok(TmuxLaunched {
         handle,
         pane_pid: pid,

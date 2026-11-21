@@ -127,6 +127,8 @@ pub struct CliSessionManager {
     exit_hook_watched: tmux_exit_hook::ExitHookWatched,
     /// Where agent ends are announced — [`Self::agent_ends`].
     agent_end_tx: agent_end::AgentEndSender,
+    /// Where finished re-attach attempts are announced — [`Self::reattach_finished`].
+    reattach_tx: reattach_outcome::ReattachSender,
 }
 
 impl Default for CliSessionManager {
@@ -159,6 +161,7 @@ impl CliSessionManager {
             detached_watchers: tmux_reattach::DetachedWatchers::default(),
             exit_hook_watched: tmux_exit_hook::ExitHookWatched::default(),
             agent_end_tx: agent_end::agent_end_channel(),
+            reattach_tx: reattach_outcome::reattach_channel(),
         }
     }
 
@@ -173,11 +176,17 @@ impl CliSessionManager {
 mod agent_end;
 pub use agent_end::{AgentEnd, AGENT_END_CAPACITY};
 
+mod reattach_outcome;
+pub use reattach_outcome::{ReattachFinished, ReattachOutcome, ReattachSkip, REATTACH_CAPACITY};
+
 mod exposed_terminals;
 
 mod control_lease;
 
 mod terminals;
+
+#[cfg(test)]
+mod live_agent_sessions_tests;
 
 mod tmux_main;
 

@@ -13,6 +13,7 @@ use std::path::Path;
 
 use tddy_projects::project_storage::{self, ProjectLifecycle};
 use tddy_service::proto::project::ProjectEntry;
+use tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore;
 
 use super::project_sessions::stop_project_home_sessions;
 
@@ -36,7 +37,8 @@ pub(super) fn local_listing(rows: Vec<ProjectEntry>, include_deleted: bool) -> V
 /// Reconcile a merged listing as the module docs say. `local_id` names this host's rows, whose
 /// registry is `projects_dir` and whose sessions live under `sessions_base`. A failure to heal this
 /// host's row is logged, never fatal: the listing still answers with the reconciled state.
-pub(super) fn reconciled_listing(
+pub(super) async fn reconciled_listing(
+    terminals: &DaemonTerminalSessionStore,
     rows: Vec<ProjectEntry>,
     include_deleted: bool,
     local_id: &str,
@@ -59,7 +61,14 @@ pub(super) fn reconciled_listing(
     for mut row in rows {
         let winner = &winners[&row.project_id];
         if row.daemon_instance_id == local_id && lifecycle_of(&row) != *winner {
-            heal_local_row(&row.project_id, winner, projects_dir, sessions_base);
+            heal_local_row(
+                terminals,
+                &row.project_id,
+                winner,
+                projects_dir,
+                sessions_base,
+            )
+            .await;
         }
         stamp(&mut row, winner);
         if include_deleted || !winner.is_deleted() {
@@ -69,7 +78,8 @@ pub(super) fn reconciled_listing(
     listed
 }
 
-fn heal_local_row(
+async fn heal_local_row(
+    terminals: &DaemonTerminalSessionStore,
     project_id: &str,
     winner: &ProjectLifecycle,
     projects_dir: &Path,
@@ -77,7 +87,9 @@ fn heal_local_row(
 ) {
     match project_storage::adopt_project_lifecycle(projects_dir, project_id, winner) {
         Ok(true) if winner.is_deleted() => {
-            if let Err(status) = stop_project_home_sessions(sessions_base, project_id) {
+            if let Err(status) =
+                stop_project_home_sessions(terminals, sessions_base, project_id).await
+            {
                 log::warn!(
                     "ListProjects: adopted a delete of {project_id} but could not stop its main: {}",
                     status.message

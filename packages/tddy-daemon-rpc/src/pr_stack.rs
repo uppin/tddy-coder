@@ -31,6 +31,8 @@ pub struct PrStackRpcHandler {
     github_cli: tddy_host_service::GithubCli,
     rpc_activity: RpcActivity,
     peer_routing: PeerRouting,
+    /// The terminals and jails this daemon holds, which say which sessions are live.
+    terminals: tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore,
 }
 
 impl PrStackRpcHandler {
@@ -45,6 +47,7 @@ impl PrStackRpcHandler {
             github_cli: host.github_cli(),
             rpc_activity: host.rpc_activity(),
             peer_routing: host.peer_routing(),
+            terminals: host.terminal_sessions(),
         }
     }
 }

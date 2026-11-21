@@ -254,6 +254,12 @@ impl DaemonSessionHost {
 }
 
 impl DaemonSessionHost {
+    /// The sessions this daemon holds a live agent for, for a listing outside this crate to read
+    /// (`tddy_session_activity::session_reader::list_sessions_in_dir`).
+    pub async fn live_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
+        self.terminal_sessions().live_sessions().await
+    }
+
     /// Stop every running project-home session idle for at least `project_home.idle_stop_secs`
     /// at `now`; the ids stopped. The daemon runtime calls this periodically (`#project-home` 6/7).
     pub async fn reap_idle_project_home_sessions(&self, now: std::time::SystemTime) -> Vec<String> {

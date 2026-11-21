@@ -176,9 +176,50 @@ pub struct DaemonTerminalSessionStore {
     sandboxes: Arc<SandboxSessionManager>,
 }
 
+#[async_trait]
+impl tddy_daemon_kernel::live_sessions::HeldSessions for DaemonTerminalSessionStore {
+    async fn live_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
+        DaemonTerminalSessionStore::live_sessions(self).await
+    }
+
+    async fn stop_session(&self, session_id: &str) {
+        self.manager.stop_session(session_id).await;
+        if let Some(sandbox) = self.sandboxes.get(session_id).await {
+            sandbox.stop();
+        }
+    }
+}
+
 impl DaemonTerminalSessionStore {
     pub fn new(manager: Arc<CliSessionManager>, sandboxes: Arc<SandboxSessionManager>) -> Self {
         DaemonTerminalSessionStore { manager, sandboxes }
+    }
+
+    /// Signals the main agent this daemon holds for the session in `session_dir`; refused, with
+    /// nothing signalled, when none is held (`tddy_agent_launch::svc_signal_delete_session`).
+    pub async fn signal_session_dir(
+        &self,
+        session_dir: &std::path::Path,
+        session_id: &str,
+        signal: i32,
+    ) -> Result<String, tddy_rpc::Status> {
+        tddy_agent_launch::svc_signal_delete_session::signal_held_session(
+            &self.manager,
+            &self.sandboxes,
+            session_dir,
+            session_id,
+            signal,
+        )
+        .await
+    }
+
+    /// The sessions this daemon holds a live agent for: its terminals' and its sandboxed runners'.
+    /// The live set every session listing reads (`list_sessions_in_dir`).
+    pub async fn live_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
+        self.manager
+            .live_agent_sessions()
+            .await
+            .union(self.sandboxes.live_sessions().await)
     }
 }
 

@@ -6,7 +6,6 @@ use crate::exec_tool::project_home_start_options::{describe_start_options, Start
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tddy_agent_launch::svc_signal_delete_session::signal_session_dir;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{ListSessionsRequest, Signal};
@@ -259,13 +258,10 @@ impl ProjectHomePort for DaemonProjectHome {
     /// branch are left as they are.
     async fn terminate_session(&self, target: &SessionTarget) -> anyhow::Result<()> {
         let session_dir = unified_session_dir_path(&self.sessions_base, &target.session_id);
-        let session_id = target.session_id.clone();
-        tokio::task::spawn_blocking(move || {
-            signal_session_dir(&session_dir, &session_id, Signal::Sigterm as i32)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("terminating the session failed: {e}"))?
-        .map_err(status_error)?;
+        self.terminals
+            .signal_session_dir(&session_dir, &target.session_id, Signal::Sigterm as i32)
+            .await
+            .map_err(status_error)?;
         Ok(())
     }
 

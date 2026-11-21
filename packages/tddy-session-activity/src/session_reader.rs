@@ -4,6 +4,7 @@ use std::path::Path;
 
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::{read_session_metadata, SessionMetadata};
+use tddy_daemon_kernel::live_sessions::LiveSessions;
 
 /// Session entry for listing (from .session.yaml).
 #[derive(Debug, Clone)]
@@ -62,8 +63,11 @@ pub(crate) fn is_pid_alive(_pid: u32) -> bool {
 
 /// List sessions under `{sessions_base}/sessions/`.
 /// Each subdir with `.session.yaml` is returned.
-/// is_active is true when pid is set and the process is alive.
-pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionEntry>> {
+/// `is_active` is true when `live` holds the session: the recorded pid is never consulted.
+pub fn list_sessions_in_dir(
+    sessions_base: &Path,
+    live: &LiveSessions,
+) -> anyhow::Result<Vec<SessionEntry>> {
     let mut result = Vec::new();
     let sessions_root = sessions_base.join(SESSIONS_SUBDIR);
     let entries = match std::fs::read_dir(&sessions_root) {
@@ -87,7 +91,7 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             Ok(m) => m,
             Err(_) => continue,
         };
-        let is_active = metadata.pid.map(is_pid_alive).unwrap_or(false);
+        let is_active = live.contains(&metadata.session_id);
         let reads_host_paths = tddy_core::reads_host_paths(&metadata);
         result.push(SessionEntry {
             session_id: metadata.session_id,
@@ -122,14 +126,23 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
 /// The branch-ownership rule lives with worktrees; what claims a branch is a session, which is this
 /// crate's. Implementing the port here rather than moving the reader is what keeps that boundary a
 /// boundary — see [`tddy_worktree_service::branch_owner`].
-pub struct DaemonSessionListing;
+pub struct DaemonSessionListing {
+    live: LiveSessions,
+}
+
+impl DaemonSessionListing {
+    /// A listing that reads sessions' activity off `live`, this daemon's live set.
+    pub fn new(live: LiveSessions) -> Self {
+        Self { live }
+    }
+}
 
 impl tddy_worktree_service::branch_owner::SessionListing for DaemonSessionListing {
     fn sessions_under(
         &self,
         sessions_base: &std::path::Path,
     ) -> anyhow::Result<Vec<tddy_worktree_service::branch_owner::SessionClaim>> {
-        Ok(list_sessions_in_dir(sessions_base)?
+        Ok(list_sessions_in_dir(sessions_base, &self.live)?
             .into_iter()
             .map(|s| tddy_worktree_service::branch_owner::SessionClaim {
                 session_id: s.session_id,
@@ -147,6 +160,55 @@ mod tests {
     use std::fs;
     use tddy_core::output::SESSIONS_SUBDIR;
     use tddy_core::{write_session_metadata, SessionMetadata};
+    use tddy_daemon_kernel::live_sessions::LiveSessions;
+    use tddy_testing_commons::a_session_metadata;
+
+    /// Records `session_id` under `sessions_base`, with `pid` as its recorded pid.
+    fn a_recorded_session(sessions_base: &std::path::Path, session_id: &str, pid: Option<u32>) {
+        let dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+        fs::create_dir_all(&dir).unwrap();
+        let builder = a_session_metadata().with_session_id(session_id);
+        let metadata = match pid {
+            Some(pid) => builder.with_pid(pid).build(),
+            None => builder.without_pid().build(),
+        };
+        write_session_metadata(&dir, &metadata).unwrap();
+    }
+
+    fn is_active_in(entries: &[SessionEntry], session_id: &str) -> bool {
+        entries
+            .iter()
+            .find(|e| e.session_id == session_id)
+            .expect("the session is listed")
+            .is_active
+    }
+
+    #[test]
+    fn a_session_whose_recorded_pid_is_a_running_process_but_not_live_lists_inactive() {
+        // Given a session recording this very process's pid — alive by definition
+        let temp = tempfile::tempdir().unwrap();
+        a_recorded_session(temp.path(), "recycled-pid", Some(std::process::id()));
+
+        // When
+        let entries = list_sessions_in_dir(temp.path(), &LiveSessions::none()).unwrap();
+
+        // Then
+        assert!(!is_active_in(&entries, "recycled-pid"));
+    }
+
+    #[test]
+    fn a_live_session_lists_active_without_a_recorded_pid() {
+        // Given
+        let temp = tempfile::tempdir().unwrap();
+        a_recorded_session(temp.path(), "live-session", None);
+
+        // When
+        let entries =
+            list_sessions_in_dir(temp.path(), &LiveSessions::of(["live-session"])).unwrap();
+
+        // Then
+        assert!(is_active_in(&entries, "live-session"));
+    }
 
     #[test]
     fn list_sessions_returns_new_metadata_fields() {
@@ -195,7 +257,7 @@ mod tests {
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
-        let entries = list_sessions_in_dir(temp.path()).unwrap();
+        let entries = list_sessions_in_dir(temp.path(), &LiveSessions::none()).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].tool, "tddy-coder");
         assert_eq!(entries[0].livekit_room, "room-abc");

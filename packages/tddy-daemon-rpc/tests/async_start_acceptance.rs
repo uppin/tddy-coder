@@ -174,11 +174,14 @@ impl Drop for World {
 }
 
 fn session_ids_on(host: &Host) -> Vec<String> {
-    tddy_session_activity::session_reader::list_sessions_in_dir(host.sessions.path())
-        .unwrap()
-        .into_iter()
-        .map(|entry| entry.session_id)
-        .collect()
+    tddy_session_activity::session_reader::list_sessions_in_dir(
+        host.sessions.path(),
+        &tddy_daemon_kernel::live_sessions::LiveSessions::none(),
+    )
+    .unwrap()
+    .into_iter()
+    .map(|entry| entry.session_id)
+    .collect()
 }
 
 fn result_of(response: &ExecuteToolResponse) -> serde_json::Value {

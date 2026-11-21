@@ -33,6 +33,15 @@ fn head_of(worktree: &Path) -> String {
     git(worktree, &["rev-parse", "HEAD"])
 }
 
+/// Stop a started home session the way a recycled pid leaves it: its agent's terminal ends, but
+/// `.session.yaml` still records a pid — now `pid`, an unrelated running process's.
+async fn stop_leaving_its_recorded_pid_naming(world: &World, session_id: &str, pid: u32) {
+    world.home.manager.stop_session(session_id).await;
+    let mut meta = world.metadata_of(session_id);
+    meta.pid = Some(pid);
+    world.rewrite_metadata_of(session_id, &meta);
+}
+
 /// Whether `worktree` is detached (on no branch).
 fn is_detached(worktree: &Path) -> bool {
     git(worktree, &["rev-parse", "--abbrev-ref", "HEAD"]) == "HEAD"
@@ -306,6 +315,28 @@ async fn ensuring_a_stopped_main_fast_forwards_and_resumes_the_same_conversation
         argv.contains(&format!("--resume {}", main.session_id)),
         "the agent resumes its own conversation; got: {argv:?}"
     );
+}
+
+#[tokio::test]
+async fn ensuring_a_main_whose_recorded_pid_names_an_unrelated_process_resumes_it() {
+    // Given main stopped, while the pid its `.session.yaml` records now names an unrelated running
+    // process
+    let world = a_daemon_with_a_project();
+    let main = world.a_running_main().await;
+    let mut unrelated = std::process::Command::new("sleep")
+        .arg("300")
+        .spawn()
+        .expect("sleep must start");
+    stop_leaving_its_recorded_pid_naming(&world, &main.session_id, unrelated.id()).await;
+
+    // When
+    let ensured = world.ensure().await.expect("ensure resumes");
+    let _ = unrelated.kill();
+    let _ = unrelated.wait();
+
+    // Then main is resumed, not reported running
+    assert_eq!(ensured.outcome, "resumed");
+    assert_eq!(ensured.session.unwrap().session_id, main.session_id);
 }
 
 #[tokio::test]

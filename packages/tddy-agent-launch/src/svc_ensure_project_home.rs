@@ -151,13 +151,13 @@ impl LaunchSessions {
         session_token: &str,
         scope: &HomeScope,
     ) -> Result<(String, EnsureOutcome), Status> {
-        let Some(main) = self.recorded_main(scope)? else {
+        let Some(main) = self.recorded_main(scope).await? else {
             return Err(Status::not_found(format!(
                 "project {} has no main session: set one up",
                 scope.project.project_id
             )));
         };
-        if self.is_running(&main).await {
+        if self.is_running(&main) {
             return Ok((main.session_id, EnsureOutcome::Running));
         }
         self.resume_stopped_home(session_token, scope, &main)
@@ -185,7 +185,7 @@ impl LaunchSessions {
         let start = on_home_worktree(spec, PROJECT_HOME_ROLE, &project.project_id, &home);
         self.refuse_a_claude_cli_start_up_front(&start)?;
 
-        let previous = self.recorded_main(scope)?;
+        let previous = self.recorded_main(scope).await?;
         if let Some(previous) = &previous {
             self.stop_previous_main(&scope.projects_dir, project, &home, previous)
                 .await?;
@@ -209,10 +209,9 @@ impl LaunchSessions {
     ) -> Result<(), Status> {
         // The worktree outlives the main it was made for; the new one starts at today's ref.
         fast_forward_home(projects_dir, home, project)?;
-        // TODO: a previous main whose pid is alive but whose terminal this daemon no longer
-        // serves (a daemon restart) is left running
-        // (docs/dev/todo/2026-10-23-project-home-running-heuristic.md).
-        if self.is_served(&previous.session_id).await {
+        // TODO: a previous main that outlived a daemon restart is held by nothing, so nothing here
+        // can stop it until it is re-attached (docs/dev/todo/2026-10-23-project-home-running-heuristic.md).
+        if previous.is_active {
             self.cli_manager.stop_session(&previous.session_id).await;
             log::info!(
                 "{ENSURE_RPC}: stopped main {} of project {} to replace it",
@@ -257,7 +256,7 @@ impl LaunchSessions {
 
     /// The session the project records as its main, if it still exists. A recorded session whose
     /// directory is gone (deleted) is cleared from the project, so the next ensure asks for setup.
-    fn recorded_main(
+    async fn recorded_main(
         &self,
         scope: &HomeScope,
     ) -> Result<Option<session_reader::SessionEntry>, Status> {
@@ -278,7 +277,8 @@ impl LaunchSessions {
             record_main(&scope.projects_dir, &project.project_id, None)?;
             return Ok(None);
         }
-        let sessions = session_reader::list_sessions_in_dir(&scope.sessions_base)
+        let live = self.live_sessions().await;
+        let sessions = session_reader::list_sessions_in_dir(&scope.sessions_base, &live)
             .map_err(|e| Status::internal(format!("listing sessions: {e}")))?;
         sessions
             .into_iter()
@@ -292,17 +292,10 @@ impl LaunchSessions {
             })
     }
 
-    /// Running: its recorded pid is alive, or this daemon still serves its terminal. A live pid
-    /// with no served terminal also reads as running
-    /// (docs/dev/todo/2026-10-23-project-home-running-heuristic.md).
-    async fn is_running(&self, main: &session_reader::SessionEntry) -> bool {
-        main.is_active || self.is_served(&main.session_id).await
-    }
-
-    /// Whether this daemon still serves `session_id`'s terminal; the handle is dropped when the
-    /// agent's process exits.
-    async fn is_served(&self, session_id: &str) -> bool {
-        self.cli_manager.get(session_id).await.is_some()
+    /// Running: this daemon holds a live agent for it (the listing's `is_active`, read off the
+    /// live set). A recorded pid is never consulted.
+    fn is_running(&self, main: &session_reader::SessionEntry) -> bool {
+        main.is_active
     }
 
     /// Fast-forward a stopped main's home worktree to the project's main branch ref, then resume

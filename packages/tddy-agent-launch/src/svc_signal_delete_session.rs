@@ -52,7 +52,9 @@ impl LaunchSessions {
             .map_err(|e| Status::invalid_argument(e.message()))?;
 
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-        let message = signal_session_dir(&session_dir, &req.session_id, req.signal)?;
+        let message = self
+            .signal_session_dir(&session_dir, &req.session_id, req.signal)
+            .await?;
         Ok(Response::new(SignalSessionResponse { ok: true, message }))
     }
 
@@ -191,6 +193,9 @@ impl LaunchSessions {
         // a token request naming it is refused from here on, and the daemon stops holding the
         // start's session token for it.
         self.host_session_sockets.registry().unregister(session_id);
+        // Every terminal of the session — its main agent and each tab — is stopped with it: the
+        // recorded pid is not signalled, since nothing guarantees it still names this session.
+        self.cli_manager.stop_session(session_id).await;
         if let Some(sandbox) = self.sandbox_manager.get(session_id).await {
             sandbox.stop();
         }
@@ -375,21 +380,81 @@ async fn kill_recorded_tmux_session(
     }
 }
 
-/// Sends `signal` (a `Signal` proto value) to the process the session in `session_dir` records, as
-/// `SignalSession` does: refused when the session records no PID or its process is not alive.
-/// The project-home `TerminateSession` delivers SIGTERM through the same path (`#start-parity` 7/9).
-pub fn signal_session_dir(
+impl LaunchSessions {
+    /// The sessions this daemon holds a live agent for: its terminals' and its sandboxed runners'.
+    /// The one live set every listing, the ensure-home check and the idle reaper read.
+    pub async fn live_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
+        self.cli_manager
+            .live_agent_sessions()
+            .await
+            .union(self.sandbox_manager.live_sessions().await)
+    }
+
+    /// Sends `signal` to the main agent this daemon holds for the session in `session_dir`; see
+    /// [`signal_held_session`].
+    pub async fn signal_session_dir(
+        &self,
+        session_dir: &Path,
+        session_id: &str,
+        signal: i32,
+    ) -> Result<String, Status> {
+        signal_held_session(
+            &self.cli_manager,
+            &self.sandbox_manager,
+            session_dir,
+            session_id,
+            signal,
+        )
+        .await
+    }
+}
+
+/// The pid of the main agent `cli` or `sandboxes` hold for `session_id`: its main terminal's
+/// process, or its sandbox runner's. `None` when no agent is held — nothing is read off the
+/// session's `.session.yaml`, whose recorded pid the OS may have reissued.
+async fn held_agent_pid(
+    cli: &tddy_cli_sessions::cli_session_manager::CliSessionManager,
+    sandboxes: &tddy_daemon_sandbox::sandbox_session::SandboxSessionManager,
+    session_id: &str,
+) -> Option<u32> {
+    if let Some(main) = cli.get(session_id).await {
+        return Some(main.pid);
+    }
+    sandboxes
+        .get(session_id)
+        .await
+        .and_then(|sandbox| sandbox.runner_pid())
+}
+
+/// Sends `signal` (a `Signal` proto value) to the main agent the daemon holds for the session in
+/// `session_dir`, as `SignalSession` does: refused with `FAILED_PRECONDITION`, and nothing
+/// signalled, when no agent is held. The project-home `TerminateSession` delivers SIGTERM through
+/// the same path (`#start-parity` 7/9).
+pub async fn signal_held_session(
+    cli: &tddy_cli_sessions::cli_session_manager::CliSessionManager,
+    sandboxes: &tddy_daemon_sandbox::sandbox_session::SandboxSessionManager,
     session_dir: &Path,
     session_id: &str,
     signal: i32,
 ) -> Result<String, Status> {
     let metadata =
         read_session_metadata(session_dir).map_err(|_| Status::not_found("session not found"))?;
+    // TODO(session-liveness 3/4): a `tool` session holds no process tab yet, so its recorded pid is
+    // still what is signalled; see docs/dev/todo/2026-11-19-tool-sessions-liveness-and-pid-signals.md.
+    let pid = if metadata.session_type.as_deref() == Some("tool") {
+        metadata
+            .pid
+            .ok_or_else(|| Status::failed_precondition("session has no PID"))?
+    } else {
+        held_agent_pid(cli, sandboxes, session_id)
+            .await
+            .ok_or_else(|| Status::failed_precondition("session has no running agent"))?
+    };
+    deliver_signal(pid, session_id, signal)
+}
 
-    let pid = metadata
-        .pid
-        .ok_or_else(|| Status::failed_precondition("session has no PID"))?;
-
+/// Delivers `signal` to `pid`, refused when that process is not alive.
+fn deliver_signal(pid: u32, session_id: &str, signal: i32) -> Result<String, Status> {
     log::debug!(
         "SignalSession: resolved pid={} for session={}",
         pid,

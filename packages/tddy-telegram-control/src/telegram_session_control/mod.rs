@@ -115,6 +115,13 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     /// Defaults to [`tddy_daemon_extensions::NoSessionStarter`], which refuses every start. `main`
     /// injects the daemon's late-bound one with [`Self::with_session_starter`].
     session_starter: Arc<dyn tddy_daemon_extensions::SessionStarter>,
+    /// The processes the daemon holds: which sessions are live (what a listing reads `is_active`
+    /// from) and what **Delete** stops.
+    ///
+    /// Defaults to [`tddy_daemon_kernel::live_sessions::NoHeldSessions`] — a harness built without
+    /// the daemon's managers holds nothing. `main` injects the daemon's own with
+    /// [`Self::with_held_sessions`].
+    held_sessions: Arc<dyn tddy_daemon_kernel::live_sessions::HeldSessions>,
 }
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
@@ -216,7 +223,18 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             session_rooms: Arc::new(tddy_daemon_extensions::NoSessionRooms),
             coding_agents: Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty()),
             session_starter: Arc::new(tddy_daemon_extensions::NoSessionStarter),
+            held_sessions: Arc::new(tddy_daemon_kernel::live_sessions::NoHeldSessions),
         }
+    }
+
+    /// Share the daemon's held processes (builder), so a listing reads a session as active only
+    /// while the daemon holds a live agent for it, and **Delete** stops what it holds.
+    pub fn with_held_sessions(
+        mut self,
+        held: Arc<dyn tddy_daemon_kernel::live_sessions::HeldSessions>,
+    ) -> Self {
+        self.held_sessions = held;
+        self
     }
 
     /// Share the host's coding agents (builder): the CLI agents a Telegram start offers and the

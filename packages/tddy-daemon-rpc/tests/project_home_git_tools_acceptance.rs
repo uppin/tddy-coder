@@ -169,14 +169,18 @@ async fn a_project_home_world() -> World {
 }
 
 impl World {
-    /// Make `session_id` active (its recorded process is alive) or stopped.
-    fn set_active(&self, session_id: &str, active: bool) {
+    /// Make `session_id` active (the daemon holds a live main agent for it) or stopped.
+    async fn set_active(&self, session_id: &str, active: bool) {
+        if active {
+            let _main = self.service.holds_a_main_agent(session_id).await;
+        } else {
+            self.service.stops_holding(session_id).await;
+        }
         let dir = tddy_core::session_lifecycle::unified_session_dir_path(
             self.sessions.path(),
             session_id,
         );
         let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
-        meta.pid = active.then(std::process::id);
         meta.status = if active { "active" } else { "inactive" }.to_string();
         tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
     }
@@ -210,7 +214,7 @@ fn assert_refused_as_active(response: &ExecuteToolResponse, session_id: &str) {
 async fn commit_and_push_work_on_an_active_target() {
     // Given an active sibling with an uncommitted file
     let world = a_project_home_world().await;
-    world.set_active(&world.sibling, true);
+    world.set_active(&world.sibling, true).await;
     let worktree = world.worktree_of(&world.sibling);
     std::fs::write(worktree.join("done.txt"), "done\n").unwrap();
 
@@ -249,7 +253,7 @@ async fn commit_and_push_work_on_an_active_target() {
 async fn rebase_on_an_active_target_is_refused_naming_the_session() {
     // Given
     let world = a_project_home_world().await;
-    world.set_active(&world.sibling, true);
+    world.set_active(&world.sibling, true).await;
 
     // When
     let rebase = world
@@ -267,7 +271,7 @@ async fn rebase_on_an_active_target_is_refused_naming_the_session() {
 async fn rebase_on_a_stopped_target_moves_its_branch_onto_the_base() {
     // Given a stopped sibling with one commit, and a main branch that moved on
     let world = a_project_home_world().await;
-    world.set_active(&world.sibling, false);
+    world.set_active(&world.sibling, false).await;
     let worktree = world.worktree_of(&world.sibling);
     a_commit_on(&worktree, "feature.txt", "feature\n");
     a_commit_on(world.origin(), "upstream.txt", "upstream\n");
@@ -295,7 +299,7 @@ async fn rebase_on_a_stopped_target_moves_its_branch_onto_the_base() {
 async fn a_conflicting_rebase_is_aborted_and_reports_the_paths() {
     // Given a stopped sibling and main both changing the same file differently
     let world = a_project_home_world().await;
-    world.set_active(&world.sibling, false);
+    world.set_active(&world.sibling, false).await;
     let worktree = world.worktree_of(&world.sibling);
     a_commit_on(&worktree, "shared.txt", "ours\n");
     let before = git(&worktree, &["rev-parse", "HEAD"]);
@@ -321,7 +325,7 @@ async fn a_conflicting_rebase_is_aborted_and_reports_the_paths() {
 async fn reset_stash_checkout_and_clean_are_refused_on_an_active_target() {
     // Given
     let world = a_project_home_world().await;
-    world.set_active(&world.sibling, true);
+    world.set_active(&world.sibling, true).await;
     let sid = world.sibling.clone();
 
     // When / Then
@@ -352,7 +356,7 @@ async fn reset_stash_checkout_and_clean_are_refused_on_an_active_target() {
 async fn reset_on_a_stopped_target_moves_its_head() {
     // Given a stopped sibling two commits ahead
     let world = a_project_home_world().await;
-    world.set_active(&world.sibling, false);
+    world.set_active(&world.sibling, false).await;
     let worktree = world.worktree_of(&world.sibling);
     a_commit_on(&worktree, "one.txt", "1\n");
     let first = git(&worktree, &["rev-parse", "HEAD"]);
@@ -376,7 +380,7 @@ async fn reset_on_a_stopped_target_moves_its_head() {
 async fn force_with_lease_push_is_refused_on_an_active_target() {
     // Given
     let world = a_project_home_world().await;
-    world.set_active(&world.sibling, true);
+    world.set_active(&world.sibling, true).await;
 
     // When
     let push = world

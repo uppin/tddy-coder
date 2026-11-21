@@ -12,6 +12,22 @@ use tddy_terminal_rpc::service::TMUX_KIND;
 
 use std::sync::Arc;
 
+#[async_trait::async_trait]
+impl tddy_daemon_kernel::live_sessions::HeldSessions for CliSessionManager {
+    async fn live_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
+        self.live_agent_sessions().await
+    }
+
+    async fn stop_session(&self, session_id: &str) {
+        CliSessionManager::stop_session(self, session_id).await;
+    }
+}
+
+/// Whether a terminal of this kind is a tool of the user's, not an agent.
+fn is_non_agent_kind(kind: &str) -> bool {
+    kind == "bash" || kind == TMUX_KIND
+}
+
 impl CliSessionManager {
     /// Look up the **main** (`claude`) terminal of a session by id.
     ///
@@ -128,6 +144,37 @@ impl CliSessionManager {
             }
         }
         out
+    }
+
+    /// Every session this manager holds a live **agent** for: a resolving terminal whose kind is an
+    /// agent's — the main terminal, an agent tab — or a tmux-run agent whose client ended while a
+    /// detach watcher still holds it. A shell (`"bash"`) or a tmux attach (`"tmux"`) is not an
+    /// agent and never makes its session live.
+    ///
+    /// A snapshot, for a listing to read off the async locks — see
+    /// [`tddy_daemon_kernel::live_sessions`].
+    pub async fn live_agent_sessions(&self) -> tddy_daemon_kernel::live_sessions::LiveSessions {
+        let candidates: Vec<(String, Vec<String>)> = self
+            .terminals
+            .read()
+            .await
+            .iter()
+            .map(|(session_id, tools)| (session_id.clone(), tools.keys().cloned().collect()))
+            .collect();
+        let mut live: Vec<String> = Vec::new();
+        for (session_id, terminal_ids) in candidates {
+            for terminal_id in terminal_ids {
+                let Some(handle) = self.resolve_pty_handle(&session_id, &terminal_id).await else {
+                    continue;
+                };
+                if terminal_id == MAIN_TERMINAL_ID || !is_non_agent_kind(&handle.kind) {
+                    live.push(session_id.clone());
+                    break;
+                }
+            }
+        }
+        live.extend(self.detached_watchers.read().await.watched_sessions());
+        tddy_daemon_kernel::live_sessions::LiveSessions::of(live)
     }
 
     /// Stop a started tool: cancel its task and remove it from the registry.

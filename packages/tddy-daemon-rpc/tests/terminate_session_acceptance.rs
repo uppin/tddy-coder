@@ -2,17 +2,15 @@
 //! process — and leaves its record, worktree and branch in place, on its own host or another
 //! (`#start-parity` 7/9).
 //!
-//! A session's process is stood in for by a `sleep` child whose pid is recorded in the session's
-//! `.session.yaml`, which is where `SignalSession` reads it from.
+//! A session's process is stood in for by the main agent the daemon holds for it, which is what
+//! `SignalSession` reaches.
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 //! Changeset: docs/dev/1-WIP/2026-10-25-start-parity-terminate.md
 
 mod support;
 
-use std::process::{Child, Command};
 use std::sync::Arc;
-use std::time::Duration;
 
 use support::{
     a_host, a_workspace_in, git_stdout, Host, InProcessPeers, HOST_A, HOST_B, OTHER_PROJECT,
@@ -50,53 +48,36 @@ async fn a_world() -> World {
     }
 }
 
-/// A process standing in for a session's; killed when dropped, so a failing test leaks none.
-struct StandIn(Child);
-
-impl Drop for StandIn {
-    fn drop(&mut self) {
-        self.0.kill().ok();
-        self.0.wait().ok();
-    }
+/// The main agent the daemon holds for a session, a stub that records the signal it receives.
+struct StandIn {
+    main: tddy_session_lifecycle::test_util::HeldMain,
+    host_daemon: Arc<tddy_daemon_rpc::test_util::TestDaemon>,
+    session_id: String,
 }
 
-impl std::ops::Deref for StandIn {
-    type Target = Child;
-    fn deref(&self) -> &Child {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for StandIn {
-    fn deref_mut(&mut self) -> &mut Child {
-        &mut self.0
-    }
-}
-
-/// A long-running process recorded as `session_id`'s on `host`.
-fn a_running_process_for(host: &Host, session_id: &str) -> StandIn {
-    let child = Command::new("sleep").arg("600").spawn().unwrap();
-    let dir =
-        tddy_core::session_lifecycle::unified_session_dir_path(host.sessions.path(), session_id);
-    let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
-    meta.pid = Some(child.id());
-    tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
-    StandIn(child)
-}
-
-/// How `child` exited, waiting a few seconds for it.
-fn exit_signal_of(child: &mut Child) -> Option<i32> {
-    use std::os::unix::process::ExitStatusExt;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        if let Some(status) = child.try_wait().unwrap() {
-            return status.signal();
+impl StandIn {
+    /// The signal the agent received, waiting a few seconds for it: `SIGTERM` for the `TERM` it
+    /// records, `None` when it received none.
+    async fn exit_signal(&self) -> Option<i32> {
+        match self.main.signal_received().await.as_deref() {
+            Some("TERM") => Some(libc::SIGTERM),
+            _ => None,
         }
-        if std::time::Instant::now() > deadline {
-            child.kill().ok();
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    /// Whether the daemon still holds the agent.
+    async fn is_held(&self) -> bool {
+        self.host_daemon.serves_a_main_for(&self.session_id).await
+    }
+}
+
+/// `session_id`'s main agent, held by `host`'s daemon: the session is running.
+async fn a_running_process_for(host: &Host, session_id: &str) -> StandIn {
+    let main = host.daemon.holds_a_main_agent(session_id).await;
+    StandIn {
+        main,
+        host_daemon: Arc::clone(&host.daemon),
+        session_id: session_id.to_string(),
     }
 }
 
@@ -122,7 +103,7 @@ impl World {
 async fn terminate_sends_sigterm_and_keeps_the_record_worktree_and_branch() {
     // Given a session of the project with a running process
     let world = a_world().await;
-    let mut process = a_running_process_for(&world.a, &world.on_a);
+    let process = a_running_process_for(&world.a, &world.on_a).await;
     let worktree = world.a.worktree_of(&world.on_a);
     let branch = git_stdout(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]);
 
@@ -136,7 +117,7 @@ async fn terminate_sends_sigterm_and_keeps_the_record_worktree_and_branch() {
 
     // Then its process got SIGTERM, and its record, worktree and branch are all still there
     assert!(!terminated.is_error, "{}", terminated.error_message);
-    assert_eq!(exit_signal_of(&mut process), Some(libc::SIGTERM));
+    assert_eq!(process.exit_signal().await, Some(libc::SIGTERM));
     assert!(tddy_core::session_lifecycle::unified_session_dir_path(
         world.a.sessions.path(),
         &world.on_a
@@ -153,9 +134,9 @@ async fn terminate_sends_sigterm_and_keeps_the_record_worktree_and_branch() {
 async fn terminating_a_session_whose_process_has_ended_is_an_error_saying_so() {
     // Given a session whose process has already ended
     let world = a_world().await;
-    let mut process = a_running_process_for(&world.a, &world.on_a);
-    process.kill().unwrap();
-    process.wait().unwrap();
+    let process = a_running_process_for(&world.a, &world.on_a).await;
+    world.a.daemon.stops_holding(&world.on_a).await;
+    drop(process);
 
     // When
     let refused = world
@@ -168,7 +149,7 @@ async fn terminating_a_session_whose_process_has_ended_is_an_error_saying_so() {
     // Then
     assert!(refused.is_error);
     assert!(
-        refused.error_message.contains("not alive"),
+        refused.error_message.contains("no running agent"),
         "{}",
         refused.error_message
     );
@@ -178,7 +159,7 @@ async fn terminating_a_session_whose_process_has_ended_is_an_error_saying_so() {
 async fn a_session_of_another_project_is_refused_and_left_running() {
     // Given a running session of another project
     let world = a_world().await;
-    let mut process = a_running_process_for(&world.a, &world.foreign_on_a);
+    let process = a_running_process_for(&world.a, &world.foreign_on_a).await;
 
     // When
     let refused = world
@@ -195,17 +176,14 @@ async fn a_session_of_another_project_is_refused_and_left_running() {
         "{}",
         refused.error_message
     );
-    assert!(
-        process.try_wait().unwrap().is_none(),
-        "the process still runs"
-    );
+    assert!(process.is_held().await, "the process still runs");
 }
 
 #[tokio::test]
 async fn terminate_stops_a_session_on_another_host() {
     // Given a running session of the project on host-b
     let world = a_world().await;
-    let mut process = a_running_process_for(&world.b, &world.on_b);
+    let process = a_running_process_for(&world.b, &world.on_b).await;
 
     // When the home session terminates it, naming host-b
     let terminated = world
@@ -217,5 +195,5 @@ async fn terminate_stops_a_session_on_another_host() {
 
     // Then host-b's process got SIGTERM
     assert!(!terminated.is_error, "{}", terminated.error_message);
-    assert_eq!(exit_signal_of(&mut process), Some(libc::SIGTERM));
+    assert_eq!(process.exit_signal().await, Some(libc::SIGTERM));
 }

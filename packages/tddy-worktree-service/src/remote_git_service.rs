@@ -59,6 +59,10 @@ pub struct PackExecutionContext {
     pub os_user: String,
     pub project_ref: String,
     pub local_repo_path: PathBuf,
+    /// The sessions this daemon holds a live agent for, read just before the resolver runs: the
+    /// resolver is synchronous, so the async holders are read for it. A resolver prefers a running
+    /// session to a recent one by it.
+    pub live_sessions: tddy_daemon_kernel::live_sessions::LiveSessions,
 }
 
 /// Maps an admitted open to [`PackExecution`]. Production wiring lists the OS user's sessions and
@@ -173,6 +177,7 @@ pub struct RemoteGitServiceImpl {
     projects_dir_resolver: ProjectsDirResolver,
     config: Arc<DaemonConfig>,
     pack_execution_resolver: PackExecutionResolver,
+    held_sessions: Arc<dyn tddy_daemon_kernel::live_sessions::HeldSessions>,
     stream_slots: GitStreamSlots,
 }
 
@@ -209,8 +214,19 @@ impl RemoteGitServiceImpl {
             projects_dir_resolver,
             config,
             pack_execution_resolver,
+            held_sessions: Arc::new(tddy_daemon_kernel::live_sessions::NoHeldSessions),
             stream_slots: GitStreamSlots::new(MAX_CONCURRENT_GIT_STREAMS),
         }
+    }
+
+    /// Tell the pack resolver which sessions hold a live agent (default: none do).
+    #[must_use]
+    pub fn with_held_sessions(
+        mut self,
+        held: Arc<dyn tddy_daemon_kernel::live_sessions::HeldSessions>,
+    ) -> Self {
+        self.held_sessions = held;
+        self
     }
 
     /// The complete admission decision for one `Serve` open, made **before** any process is
@@ -326,6 +342,7 @@ impl tddy_service::proto::remote_git::RemoteGitService for RemoteGitServiceImpl 
             os_user: request.os_user.clone(),
             project_ref: open.project_ref.clone(),
             local_repo_path: request.repo_path.clone(),
+            live_sessions: self.held_sessions.live_sessions().await,
         });
         let (relay, frames) = GitChildRelay::spawn_pack_verb(&execution, command.argv, command.env)
             .await

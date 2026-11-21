@@ -406,9 +406,12 @@ impl DaemonProjectHome {
         let sessions_base = self.sessions_base.clone();
         let tddy_data_dir = self.tddy_data_dir.clone();
         let os_user = self.os_user.clone();
-        tokio::task::spawn_blocking(move || session_rows(&sessions_base, &tddy_data_dir, &os_user))
-            .await
-            .map_err(|e| anyhow::anyhow!("reading the sessions failed: {e}"))?
+        let live = self.terminals.live_sessions().await;
+        tokio::task::spawn_blocking(move || {
+            session_rows(&sessions_base, &tddy_data_dir, &os_user, &live)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("reading the sessions failed: {e}"))?
     }
 }
 

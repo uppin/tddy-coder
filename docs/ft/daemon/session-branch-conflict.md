@@ -16,7 +16,8 @@ A conflict is **only** a branch that an existing session owns — a session whos
 suffixing behaviour, because there is no session to switch to and no second agent to add.
 
 Ownership resolution matches `QueryBranch`: scan the caller's sessions root, prefer an **active**
-session, tie-break on the most recent `updated_at`.
+session (one the daemon holds a live agent for — see [Session liveness](session-liveness.md)),
+tie-break on the most recent `updated_at`.
 
 ## API Surface
 

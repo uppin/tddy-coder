@@ -229,11 +229,12 @@ on the host: it shows in `tmux ls` and can be attached from any terminal over SS
   is `0700`, the user's too), and the pane sources it, deletes it and `exec`s Claude. No value —
   the provider token included — appears on any process's argv. A start that fails removes the file
   itself. Then the main terminal runs `tmux -T clipboard attach-session -t =<name>` as that user.
-- **pid.** The recorded `pid` is tmux's `#{pane_pid}` — the Claude process — not the client's. Liveness,
-  **SignalSession** and the delete's process teardown act on the agent.
+- **pid.** The recorded `pid` is tmux's `#{pane_pid}` — the Claude process — not the client's. It is a
+  record of what was started: liveness is the daemon's live set ([Session liveness](session-liveness.md)),
+  and **SignalSession** signals the held main terminal's process, never the recorded pid.
 - **Delete** kills the tmux session (as the session's OS user) **before** anything else of the session
-  is torn down, then terminates the recorded pane pid (SIGTERM, then SIGKILL), so an agent that ignores
-  SIGHUP is gone too. A recorded tmux session that cannot be killed refuses the delete with the session
+  is torn down, then stops the session's terminals the daemon holds; the recorded pane pid is not
+  signalled. A recorded tmux session that cannot be killed refuses the delete with the session
   intact. When `.session.yaml` cannot be read, the delete kills `tddy-<session id>` anyway — the name
   is authoritative — treating "no such session" as fine, and a tmux that cannot be run at all is
   logged without blocking the delete of the broken session.

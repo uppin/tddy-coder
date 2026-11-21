@@ -137,7 +137,7 @@ here.
 
 ### Stopped sessions
 
-A session whose agent is not running (`is_active == false`) keeps its tab strip. Its worktree is
+A session whose agent is not running (`is_active == false`: the daemon holds no live agent tab for it — see [Session liveness](../daemon/session-liveness.md)) keeps its tab strip. Its worktree is
 still on disk, so the operator can run the tests, read git state or ask another agent about it
 without resuming the agent first.
 

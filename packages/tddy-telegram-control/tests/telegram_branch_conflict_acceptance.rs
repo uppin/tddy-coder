@@ -118,6 +118,7 @@ fn register_project(projects_dir: &Path, repo_path: &Path) {
 fn build_harness(
     sessions_base: std::path::PathBuf,
     projects_dir: std::path::PathBuf,
+    manager: Arc<CliSessionManager>,
 ) -> (
     TelegramSessionControlHarness<InMemoryTelegramSender>,
     Arc<InMemoryTelegramSender>,
@@ -137,7 +138,7 @@ fn build_harness(
         elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
         elicitation_multi_select_meta: Arc::new(Mutex::new(HashMap::new())),
         pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
-        cli_manager: Arc::new(CliSessionManager::new()),
+        cli_manager: Arc::clone(&manager),
     });
     let tracked: SharedTelegramTrackedSessionCoordinator =
         Arc::new(Mutex::new(TelegramTrackedSessionCoordinator::new()));
@@ -152,12 +153,15 @@ fn build_harness(
     .with_coding_agents(Arc::new(
         tddy_coding_agent_specs::CodingAgentRegistry::builtin().expect("the built-in agents load"),
     ))
+    .with_held_sessions(manager)
     .with_session_starter(Arc::new(AStarterReportingTheBranchHeld));
     (harness, sender, tracked)
 }
 
-/// A live session that owns `branch`.
-fn a_session_owning(sessions_base: &Path, session_id: &str, branch: &str) {
+/// A live session that owns `branch`: its record, and a running main terminal the daemon holds —
+/// what makes it list as active.
+async fn a_session_owning(world: &World, session_id: &str, branch: &str) {
+    let sessions_base = world.sessions_tmp.path();
     let dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
     std::fs::create_dir_all(&dir).unwrap();
     tddy_core::write_changeset(
@@ -171,10 +175,24 @@ fn a_session_owning(sessions_base: &Path, session_id: &str, branch: &str) {
     let meta = a_session_metadata()
         .with_session_id(session_id)
         .with_status("active")
-        // The test process is the only pid guaranteed alive, so it is what makes `is_active` true.
-        .with_pid(std::process::id())
         .build();
     write_session_yaml(&dir, &meta);
+    world
+        .manager
+        .start_with_options(
+            session_id,
+            sessions_base.to_path_buf(),
+            "claude-opus-4-8",
+            vec!["/bin/cat".to_string()],
+            "claude-cli",
+            None,
+            None,
+            Vec::new(),
+            Vec::new(),
+            None,
+        )
+        .await
+        .expect("the main terminal must start");
 }
 
 /// Everything `/start-claude` needs, with the session already past the project pick.
@@ -186,6 +204,7 @@ struct World {
     sender: Arc<InMemoryTelegramSender>,
     tracked: SharedTelegramTrackedSessionCoordinator,
     session_id: String,
+    manager: Arc<CliSessionManager>,
 }
 
 impl World {
@@ -227,9 +246,11 @@ async fn a_world_at_the_branch_pick() -> World {
     let projects_tmp = tempfile::tempdir().unwrap();
     register_project(projects_tmp.path(), repo_dir.path());
 
+    let manager = Arc::new(CliSessionManager::new());
     let (mut harness, sender, tracked) = build_harness(
         sessions_tmp.path().to_path_buf(),
         projects_tmp.path().to_path_buf(),
+        Arc::clone(&manager),
     );
 
     let outcome = harness
@@ -255,6 +276,7 @@ async fn a_world_at_the_branch_pick() -> World {
         sender,
         tracked,
         session_id,
+        manager,
     }
 }
 
@@ -323,7 +345,7 @@ async fn telegram_model_pick_offers_three_conflict_choices_when_the_start_report
 {
     // Given
     let world = a_world_at_the_branch_pick().await;
-    a_session_owning(world.sessions_tmp.path(), OWNER_SESSION, DERIVED_BRANCH);
+    a_session_owning(&world, OWNER_SESSION, DERIVED_BRANCH).await;
 
     // When
     let sent = pick_default_base_and_first_model(&world).await;
@@ -351,7 +373,7 @@ async fn telegram_model_pick_offers_three_conflict_choices_when_the_start_report
 async fn telegram_branch_conflict_buttons_fit_the_callback_data_limit() {
     // Given
     let world = a_world_at_the_branch_pick().await;
-    a_session_owning(world.sessions_tmp.path(), OWNER_SESSION, DERIVED_BRANCH);
+    a_session_owning(&world, OWNER_SESSION, DERIVED_BRANCH).await;
 
     // When
     let sent = pick_default_base_and_first_model(&world).await;
@@ -414,7 +436,7 @@ async fn telegram_branch_pick_goes_straight_to_the_model_picker_when_no_session_
 async fn telegram_branch_conflict_creates_no_worktree_for_the_pending_session() {
     // Given
     let world = a_world_at_the_branch_pick().await;
-    a_session_owning(world.sessions_tmp.path(), OWNER_SESSION, DERIVED_BRANCH);
+    a_session_owning(&world, OWNER_SESSION, DERIVED_BRANCH).await;
 
     // When
     pick_default_base_and_first_model(&world).await;
@@ -436,7 +458,7 @@ async fn telegram_branch_conflict_creates_no_worktree_for_the_pending_session() 
 async fn telegram_branch_conflict_switch_binds_the_chat_to_the_owning_session() {
     // Given
     let world = a_world_at_the_branch_pick().await;
-    a_session_owning(world.sessions_tmp.path(), OWNER_SESSION, DERIVED_BRANCH);
+    a_session_owning(&world, OWNER_SESSION, DERIVED_BRANCH).await;
     let prompt = pick_default_base_and_first_model(&world).await;
 
     // When
@@ -454,7 +476,7 @@ async fn telegram_branch_conflict_switch_binds_the_chat_to_the_owning_session() 
 async fn telegram_branch_conflict_add_agent_rewrites_the_changeset_to_the_owned_branch() {
     // Given
     let world = a_world_at_the_branch_pick().await;
-    a_session_owning(world.sessions_tmp.path(), OWNER_SESSION, DERIVED_BRANCH);
+    a_session_owning(&world, OWNER_SESSION, DERIVED_BRANCH).await;
     let prompt = pick_default_base_and_first_model(&world).await;
 
     // When
@@ -475,7 +497,7 @@ async fn telegram_branch_conflict_add_agent_rewrites_the_changeset_to_the_owned_
 async fn telegram_branch_conflict_suggested_name_keeps_a_new_branch_under_the_suffixed_name() {
     // Given
     let world = a_world_at_the_branch_pick().await;
-    a_session_owning(world.sessions_tmp.path(), OWNER_SESSION, DERIVED_BRANCH);
+    a_session_owning(&world, OWNER_SESSION, DERIVED_BRANCH).await;
     let prompt = pick_default_base_and_first_model(&world).await;
 
     // When

@@ -457,9 +457,10 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     ) -> anyhow::Result<Option<tddy_session_lifecycle::branch_owner::SessionClaim>> {
         let sessions_base = self.sessions_base.clone();
         let branch = branch.to_string();
+        let live = self.held_sessions.live_sessions().await;
         tokio::task::spawn_blocking(move || {
             tddy_session_lifecycle::branch_owner::find_session_owning_branch(
-                &tddy_session_lifecycle::session_reader::DaemonSessionListing,
+                &tddy_session_lifecycle::session_reader::DaemonSessionListing::new(live),
                 &sessions_base,
                 &branch,
             )

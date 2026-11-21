@@ -34,6 +34,9 @@ pub struct ProjectRpcHandler {
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     clone_backend: CloneBackend,
     common_room_livekit_room: Option<CommonRoom>,
+    /// The terminals and jails this daemon holds: which sessions are live, and whose agent a
+    /// project delete stops.
+    terminals: tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore,
 }
 
 /// Where a clone runs: the backend this daemon was started with, and the forked worker that backend
@@ -57,6 +60,7 @@ impl ProjectRpcHandler {
                 worker: host.spawn_client(),
             },
             common_room_livekit_room: host.common_room_livekit_room(),
+            terminals: host.terminal_sessions(),
         }
     }
 }

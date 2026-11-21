@@ -160,11 +160,15 @@ fn no_handler_holds_the_session_host() {
 #[test]
 fn each_handler_holds_no_more_fields_than_its_budget() {
     // Given each handler's measured transitive field set
+    // `ProjectRpcHandler` and `PrStackRpcHandler` each gained one field in `#session-liveness` 1/4:
+    // `terminals`, the store whose live set says which sessions are active. Both read it (project
+    // listing and delete, PR-stack node and session checks); there is no existing field it could
+    // be folded into without hiding the dependency.
     let budgets = [
-        ("project.rs", "ProjectRpcHandler", 6),
+        ("project.rs", "ProjectRpcHandler", 7),
         ("catalog.rs", "CatalogRpcHandler", 5),
         ("exec_tool.rs", "ExecToolRpcHandler", 10),
-        ("pr_stack.rs", "PrStackRpcHandler", 7),
+        ("pr_stack.rs", "PrStackRpcHandler", 8),
     ];
     let src = package("tddy-daemon-rpc").join("src");
 
