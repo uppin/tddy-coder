@@ -26,9 +26,7 @@ use tddy_service::proto::activity::{
 };
 
 mod await_answer;
-pub mod question_decision;
 
-pub use await_answer::question_decision_json;
 use await_answer::{await_answer, await_question_decision};
 
 /// An orchestrator's answer to one question of an `AskUserQuestion` call, as the daemon hands it to

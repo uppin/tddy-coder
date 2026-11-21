@@ -205,6 +205,7 @@ impl ActivityHookSink {
                 os_user: self.os_user.clone(),
                 request_id,
                 permission_suggestions: line.payload.get("permission_suggestions").cloned(),
+                question_input: line.question_input(),
             },
         ));
     }

@@ -853,9 +853,15 @@ decision (`NO_ORCHESTRATOR`, `TIMED_OUT`, `cancelled`, a refused report) is an *
 ends the hook at once with no output, and Claude asks in its terminal. On Coder each answer costs one
 shell round trip (about 6–9 s) before the agent continues.
 
-The `PreToolUse` question matcher is not installed on a target, so Claude asks its questions in its
-terminal. The reporting `PreToolUse` hook is: its line carries no answer nonce, and the follower
-reports it as agent activity only. `.tddy/hooks.log` and `.tddy/answers/` are kept out of the checkout's git status
+The `PreToolUse` hook matched to `AskUserQuestion` is installed there the same way, as a waiting
+hook with the same command, wait and timeout. Its line is reported like a local question — the
+question becomes the session's pending question — and the follower holds for the orchestrator's
+`AnswerSessionQuestion`. The answer file then holds Claude's question decision:
+`permissionDecision: "allow"` with `updatedInput`, the call's own input plus an `answers` map
+(question text → the chosen labels joined with `", "`, then the free text), so Claude runs the tool as
+if the person had answered. No answer (no orchestrator, a timeout, answers that do not fit the call's
+questions) is an empty file, and Claude shows its own question dialog. The catch-all reporting
+`PreToolUse` hook carries no answer nonce, and the follower reports it as agent activity only. `.tddy/hooks.log` and `.tddy/answers/` are kept out of the checkout's git status
 (`info/exclude`) and both are removed when the session goes.
 
 ### The transcript holds what was said

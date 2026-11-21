@@ -2,11 +2,9 @@
 //! decision an `AskUserQuestion`'s answers become (`#home-inbox` 6/8, 8/9).
 
 use prost::Message as _;
-use tddy_service::proto::activity::{
-    AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse, AwaitQuestionOutcome,
-};
+use tddy_service::proto::activity::{AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse};
+use tddy_session_activity::hook_decision::question_decision_json;
 
-use super::question_decision::encode_question_decision;
 use super::{exchange, SessionHookArgs};
 
 /// Ask the daemon for the orchestrator's answers to the `AskUserQuestion` `request_id`, waiting at
@@ -46,18 +44,4 @@ pub(super) async fn await_answer(
     .await?;
     AwaitQuestionAnswerResponse::decode(&bytes[..])
         .map_err(|e| anyhow::anyhow!("decode AwaitQuestionAnswerResponse: {e}"))
-}
-
-/// How an orchestrator's answers to an `AskUserQuestion` reached the hook, as Claude's
-/// `PreToolUse` decision: the call's own `tool_input` with the answers handed over
-/// (`question_decision`). Nothing when the wait was not answered.
-#[must_use]
-pub fn question_decision_json(
-    answer: &AwaitQuestionAnswerResponse,
-    tool_input: &serde_json::Value,
-) -> Option<String> {
-    if AwaitQuestionOutcome::try_from(answer.outcome) != Ok(AwaitQuestionOutcome::Answered) {
-        return None;
-    }
-    encode_question_decision(tool_input, &answer.answers)
 }

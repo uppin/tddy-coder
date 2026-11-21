@@ -213,12 +213,9 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
         let awaits_an_answer = *event == "PermissionRequest"
             || (*event == "PreToolUse" && *matcher == "AskUserQuestion");
         let entry = match p.remote_log {
-            // On a target the permission hook waits for an answer file beside the hook log; the
-            // question hook is not installed there yet.
-            Some(log) if *event == "PermissionRequest" => {
-                remote_permission_entry(p, event, matcher, log)
-            }
-            Some(_) if awaits_an_answer => continue,
+            // On a target a waiting hook (permission, question) waits for an answer file beside
+            // the hook log.
+            Some(log) if awaits_an_answer => remote_permission_entry(p, event, matcher, log),
             _ => hook_entry_for_event(p, event, matcher, awaits_an_answer),
         };
         // An event's matcher groups accumulate in order: `PreToolUse` has the catch-all reporting
@@ -650,6 +647,41 @@ mod tests {
         assert!(
             cmd.starts_with(r"'/home/o'\''brien/bin/tddy-tools' "),
             "a single quote must be escaped for sh; got: {cmd}"
+        );
+    }
+
+    /// On a target the `AskUserQuestion` group of `PreToolUse` waits for its answer in the answer
+    /// file beside the hook log, as the permission hook does (`#target-parity` 6/7).
+    #[test]
+    fn a_target_waits_for_a_question_answer_beside_its_hook_log() {
+        // Given
+        let params = HookCommandParams {
+            remote_log: Some(".tddy/hooks.log"),
+            ..test_params()
+        };
+
+        // When
+        let value = build_claude_hooks_settings(&params);
+
+        // Then
+        let question = &value["hooks"]["PreToolUse"][1];
+        assert_eq!(
+            (
+                question["matcher"].as_str(),
+                question["hooks"][0]["command"].as_str().map(str::to_string),
+                question["hooks"][0]["timeout"].as_u64(),
+            ),
+            (
+                Some("AskUserQuestion"),
+                Some(crate::remote_hook_command::remote_answering_hook_command(
+                    "PreToolUse",
+                    "tok-xyz",
+                    ".tddy/hooks.log",
+                    ".tddy/answers",
+                    120 + AWAIT_CLIENT_MARGIN_SECS,
+                )),
+                Some(120 + CLAUDE_HOOK_TIMEOUT_MARGIN_SECS),
+            )
         );
     }
 }

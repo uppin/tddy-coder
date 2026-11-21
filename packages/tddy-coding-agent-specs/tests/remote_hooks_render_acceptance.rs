@@ -312,7 +312,8 @@ fn claude_code_on_a_target_waits_for_a_permission_answer_in_its_worktree() {
     let hooks = claude_hooks_for(&session);
 
     // Then the permission hook is installed on the target too, waiting — within the session's
-    // answer wait — for an answer file beside the hook log; the question hook is not installed yet
+    // answer wait — for an answer file beside the hook log; so is the question hook
+    // (`PreToolUse` on `AskUserQuestion`, `#target-parity` 6/7)
     let answers = Path::new(REMOTE_LOG)
         .parent()
         .expect("the hook log has a directory")
@@ -330,7 +331,7 @@ fn claude_code_on_a_target_waits_for_a_permission_answer_in_its_worktree() {
         )),
         Ok((
             events,
-            vec!["PermissionRequest".to_string()],
+            vec!["PermissionRequest".to_string(), "PreToolUse".to_string()],
             BTreeMap::from([(
                 "PermissionRequest".to_string(),
                 remote_answering_hook_command(

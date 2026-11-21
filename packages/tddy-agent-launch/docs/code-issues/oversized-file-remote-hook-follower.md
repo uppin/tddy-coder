@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-agent-launch/src/remote_hook_follower.rs`
 **Category:** oversized-file
 **Detected:** 2026-11-21 — `/pr-wrap` step 3.5 on `#target-parity` 1/7 (#969), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **516 production lines** · budget 500
-**Thresholds breached:** length 516 > 500
+**Metrics:** **517 production lines** · budget 500
+**Thresholds breached:** length 517 > 500
 **Restructure:** `move_item` — `/code-restructuring` territory
 **Status:** Open — unclaimed; **deferred to the `#target-parity` sweep node**: the file is stack-shared (n4 #972 and n6 #974 also modify it), and `/yolo-pr-stack` § Stage W forbids splitting a stack-shared file inside a node
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable
@@ -15,6 +15,7 @@
 |---|---:|---|
 | 2026-11-21 | 444 → 511 | first detection; **+67** in #969: `HookLine::answer_nonce` and its parsing, `HookReportDelivery::await_question_answer` and the `request_id` return, `ActivityHookSink::answering_through` and `answer_in_background`, the answers directory in the git exclude and in `remove_remote_hook_log`. The hold and the answer write themselves went to a new module, `remote_hook_answer.rs` (110). This PR pushed the file past 500 |
 | 2026-11-21 | 511 → 516 | **+5** in #972 (`#target-parity` 4/7): the `reports_a_status` gate in `ActivityHookSink::deliver`; the rule itself went to a new module, `remote_hook_report.rs` (13). Not split: stack-shared |
+| 2026-11-21 | 516 → 517 | **+1** in #974 (`#target-parity` 6/7): `question_input` on the held hook; its rule, `HookLine::question_input`, lives in `remote_hook_answer.rs`. Not split: stack-shared |
 
 ## What would close it
 
