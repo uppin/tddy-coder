@@ -341,12 +341,26 @@ an ordinary, still read-only session, and main is set up once more.
   toolchain's `tddy-tools`, is refused and starts nothing. The main's MCP config and role prompt are
   written into its session directory only when its agent is spawned, so a refused start leaves
   nothing on disk.
-- **Role prompt.** The main is launched with `--append-system-prompt-file` naming a short prompt in
-  its session directory: it is the project's main session on a read-only home worktree, it has no
-  shell and cannot edit files, and it sees and starts the project's sessions with
-  `ListProjectSessions` / `StartSession`, inspects them with `ReadSessionWorktree` /
-  `DiffSessionWorktree`, and manages their worktrees with the [git tools](#git-tools); to change code
-  it starts a session.
+- **Role prompt.** The main is launched with `--append-system-prompt-file` naming a prompt in its
+  session directory, written on every launch by `project_home_prompt(role)`. One prompt serves both
+  roles and opens with what the session is: "this project's main session" (`project-home`) or "one of
+  this project's orchestrators" (`orchestrator`). It then says the session sits on a read-only home
+  worktree with no shell and no file edits, and how it works:
+  - **All coding goes through tddy sessions** it starts (`StartSession`, `GetSessionStart`) and follows
+    with watches (`CreateSessionWatch`, `WaitSessionWatchEvents`), the transcript and the activity,
+    until its watch says it ended.
+  - **Every child is asked to report** its progress and status periodically over the back channel its
+    launch guidance names, and the orchestrator reads those reports before asking a child anything.
+  - **A child is messaged by its listed `delivery_route`** — native peer, inbox
+    (`PostSessionMessage` / `ReadSessionMessages`) or terminal (`SendSessionMessage`).
+  - **The base is checked first** (`CheckBaseFreshness`, `RefreshHome`) and `trunk_commit` activities are
+    read and passed on to affected children.
+  - **Anything out of reach** is a `RequestPathAccess`; session files are given with
+    `WriteSessionFile`; the `Lsp*` tools take an optional `root` managed by `AddLspRoot` /
+    `RemoveLspRoot` / `ListLspRoots`; a claimed terminal is released with `ReleaseSessionTerminal`.
+
+  The prompt then lists every tool the session is offered, grouped by purpose. A test pins that each
+  tool of the offered catalogue is named in it.
 - **Hosts.** A request whose `daemon_instance_id` names another daemon is forwarded to it (as
   `GetWorktreeSnapshot` is); empty or the local instance is answered locally. Each host has its own
   home session for a project.
