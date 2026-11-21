@@ -47,19 +47,11 @@ pub fn base_freshness_tool_defs() -> Vec<ToolDef> {
 #[async_trait]
 pub trait BaseFreshnessPort: Send + Sync {
     /// Fetch the trunk and report where `caller`'s home stands against it.
-    ///
-    /// The default refuses, so a port that serves no home need not name it.
-    async fn check_base_freshness(&self, caller: &HomeCaller) -> Result<BaseFreshness, String> {
-        let _ = caller;
-        Err("this host serves no home worktree".to_string())
-    }
+    async fn check_base_freshness(&self, caller: &HomeCaller) -> Result<BaseFreshness, String>;
 
     /// Fetch the trunk and fast-forward `caller`'s home to it. A diverged home is refused, naming
     /// where it stands.
-    async fn refresh_home(&self, caller: &HomeCaller) -> Result<BaseFreshness, String> {
-        let _ = caller;
-        Err("this host serves no home worktree".to_string())
-    }
+    async fn refresh_home(&self, caller: &HomeCaller) -> Result<BaseFreshness, String>;
 }
 
 /// Run a base-freshness tool for `caller`: the answer is the [`BaseFreshness`] as JSON, a refusal an

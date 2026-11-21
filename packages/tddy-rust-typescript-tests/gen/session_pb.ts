@@ -1657,7 +1657,7 @@ export type StartWorktreeReady = Message<"session.StartWorktreeReady"> & {
   /**
    * The commit the worktree was cut from, and how many commits it was behind its base's remote tip
    * when it was cut (`#orchestra` 4/9). Empty and 0 when the start cut it from no base (a session
-   * on an existing branch).
+   * on a checkout the client supplied).
    *
    * @generated from field: string base_commit = 3;
    */

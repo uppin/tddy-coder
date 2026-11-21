@@ -98,6 +98,24 @@ runs on a dedicated checkout, not a per-session branch worktree:
 - A ref is fetched only when its first segment names one of the repository's remotes
   (`origin/main` → `git fetch origin main`); a local branch has nothing to fetch.
 
+## Base freshness (`base_freshness.rs`)
+
+An orchestrator checks its home worktree against its project's trunk by tool, rather than relying on
+the fast-forward a start or resume runs. Nothing here runs on a timer.
+
+- `base_freshness(home, trunk_ref)` fetches the trunk ref's branch, then reports a `BaseFreshness`:
+  `trunk_ref`, `home_commit`, `remote_tip`, `ahead`, `behind` and `fetched_at_unix_ms`. `behind`
+  counts what landed on the remote since the home's commit, not since the last fetch.
+- `refresh_home(home, trunk_ref)` fetches and fast-forwards the home to the tip, answering where it
+  then stands. A home with commits of its own is `RefreshRefusal::Diverged` (carrying where it
+  stands) and is left untouched; a failing git command is `RefreshRefusal::Git`.
+- `CutBase { commit, behind }` is the commit a session's worktree was cut from and how many commits
+  its upstream has that it does not. `CutBase::of_worktree` reads it; a branch with no upstream has
+  no remote tip to be behind and reads zero, while an unreadable `HEAD` or count is an error.
+  `CUT_BASE_COMMIT_ARGS` and `CUT_BASE_BEHIND_ARGS` are the git invocations, shared by the local cut
+  (run here) and the remote cut (run through the target's shell). `branch_of_worktree` reads the
+  branch checked out.
+
 ## Session targets (`session_target.rs`)
 
 `resolve_session_target(records, home, target_session_id)` is the one resolver from a session id a

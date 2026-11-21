@@ -126,14 +126,23 @@ pub const CUT_BASE_BEHIND_ARGS: [&str; 3] = ["rev-list", "--count", "HEAD..@{ups
 
 impl CutBase {
     /// Read `worktree`'s cut base. A branch with no upstream has no remote tip to be behind, so
-    /// it is zero behind; a worktree whose `HEAD` cannot be read is an error.
+    /// it is zero behind; a worktree whose `HEAD` cannot be read, or an upstream count that is not
+    /// a number, is an error.
     pub fn of_worktree(worktree: &Path) -> Result<Self, String> {
         use crate::home_worktree::git;
         let commit = git(worktree, &CUT_BASE_COMMIT_ARGS).map_err(|e| e.to_string())?;
-        let behind = git(worktree, &CUT_BASE_BEHIND_ARGS)
-            .ok()
-            .and_then(|count| count.parse().ok())
-            .unwrap_or(0);
+        let behind = match git(worktree, &CUT_BASE_BEHIND_ARGS) {
+            Ok(count) => count
+                .parse()
+                .map_err(|_| format!("unreadable behind count: {count}"))?,
+            Err(_no_upstream) => 0,
+        };
         Ok(Self { commit, behind })
     }
+}
+
+/// The branch checked out in `worktree`.
+pub fn branch_of_worktree(worktree: &Path) -> Result<String, String> {
+    crate::home_worktree::git(worktree, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .map_err(|e| e.to_string())
 }
