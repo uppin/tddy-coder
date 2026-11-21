@@ -50,6 +50,11 @@ pub trait TerminalControl: Send + Sync {
     /// The screen holding the lease, or `None` when the session is uncontrolled.
     async fn holder_screen_id(&self, session_id: &str) -> Option<String>;
 
+    /// Give the lease up: `true` when `control_token` was the session's current lease and the
+    /// session is now uncontrolled, `false` when it was not — another screen took it since, or it
+    /// was never held — and nothing changed (`#orchestra` 7/9).
+    async fn release(&self, session_id: &str, control_token: &str) -> bool;
+
     /// Lease changes across all sessions; [`watch_terminal_control`] filters to its own.
     ///
     /// [`watch_terminal_control`]: TerminalSessionService::watch_terminal_control

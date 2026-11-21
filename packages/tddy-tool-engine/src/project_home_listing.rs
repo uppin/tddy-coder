@@ -16,6 +16,9 @@ pub struct ListedSession {
     /// `null` for an unnamed session. Defaulted so a peer that lists no names still answers.
     #[serde(default)]
     pub display_name: Option<String>,
+    /// How this session is best messaged (`#orchestra` 7/9); `null` from a peer that does not say.
+    #[serde(default)]
+    pub delivery_route: Option<crate::delivery_route::DeliveryRoute>,
 }
 
 /// What `ListProjectSessions` answers: the project's sessions on every eligible host, and the hosts

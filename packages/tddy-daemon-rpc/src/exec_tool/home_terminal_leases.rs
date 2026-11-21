@@ -44,10 +44,67 @@ impl HomeTerminalLeases {
         self.tokens().get(key).cloned()
     }
 
+    /// Forget `key`'s token, returning it: its home released the claim (`#orchestra` 7/9).
+    pub fn forget(&self, key: &HomeTerminalClaimKey) -> Option<String> {
+        // TODO(orchestrator-delivery): implement
+        let _ = key;
+        unimplemented!("HomeTerminalLeases::forget")
+    }
+
+    /// Forget every token held on `target_session_id`'s terminal: the session ended.
+    pub fn forget_target(&self, target_session_id: &str) {
+        // TODO(orchestrator-delivery): implement
+        let _ = target_session_id;
+        unimplemented!("HomeTerminalLeases::forget_target")
+    }
+
     /// The map, locked. Each method is one insert or one lookup, so a panic on another thread
     /// while it held the lock cannot leave the map half-updated: a poisoned lock is read through
     /// rather than turned into a panic of the daemon's own.
     fn tokens(&self) -> MutexGuard<'_, HashMap<HomeTerminalClaimKey, String>> {
         self.tokens.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+#[cfg(test)]
+mod release_tests {
+    use super::*;
+
+    fn a_claim(caller: &str, target: &str) -> HomeTerminalClaimKey {
+        HomeTerminalClaimKey {
+            caller_daemon_instance_id: "host-a".to_string(),
+            caller_session_id: caller.to_string(),
+            target_session_id: target.to_string(),
+        }
+    }
+
+    #[test]
+    fn forgetting_a_claim_returns_its_token_and_leaves_none() {
+        let leases = HomeTerminalLeases::default();
+        leases.remember(a_claim("home", "child"), "token-1".to_string());
+
+        let forgotten = leases.forget(&a_claim("home", "child"));
+
+        assert_eq!(forgotten.as_deref(), Some("token-1"));
+        assert_eq!(leases.token_of(&a_claim("home", "child")), None);
+    }
+
+    #[test]
+    fn an_ended_session_takes_every_claim_on_it_with_it() {
+        let leases = HomeTerminalLeases::default();
+        leases.remember(a_claim("home", "child"), "token-1".to_string());
+        leases.remember(a_claim("other-home", "child"), "token-2".to_string());
+        leases.remember(a_claim("home", "sibling"), "token-3".to_string());
+
+        leases.forget_target("child");
+
+        assert_eq!(
+            (
+                leases.token_of(&a_claim("home", "child")),
+                leases.token_of(&a_claim("other-home", "child")),
+                leases.token_of(&a_claim("home", "sibling")).as_deref(),
+            ),
+            (None, None, Some("token-3"))
+        );
     }
 }

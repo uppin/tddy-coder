@@ -343,6 +343,17 @@ impl tddy_terminal_rpc::TerminalControl for InMemoryControl {
             .map(|held| held.screen_id.clone())
     }
 
+    async fn release(&self, _session_id: &str, control_token: &str) -> bool {
+        let mut lease = self.lease.lock().await;
+        match lease.as_ref() {
+            Some(held) if held.control_token == control_token => {
+                *lease = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn subscribe(&self) -> broadcast::Receiver<tddy_terminal_rpc::ControlChange> {
         self.changes.subscribe()
     }

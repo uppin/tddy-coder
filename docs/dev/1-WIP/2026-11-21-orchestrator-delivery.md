@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — route choice per child, turn_input declared for two more agents, a new lease release RPC through three layers, lease cleanup on session end
+**PR**: [#985](https://github.com/uppin/tddy-coder/pull/985)
 **Stack**: `#orchestra` 7/9 — branch `feature/orchestra/orchestrator-delivery`, base `feature/orchestra/access-elicitation`
 
 ## Initial Discovery
@@ -14,7 +15,8 @@
 
 - **tddy-daemon-rpc**: `ListProjectSessions` reports each child's `delivery_route`; `ReleaseSessionTerminal`; `HomeTerminalLeases::forget`
 - **tddy-coding-agent-specs**: `turn_input: terminal_paste` for Cursor and Muse
-- **tddy-terminal-rpc**: `ReleaseTerminalControl` RPC
+- **tddy-terminal-rpc**: `TerminalControl::release` (port only; no new RPC)
+- **tddy-session-lifecycle**, **tddy-coder**: their `TerminalControl` implementations release
 - **tddy-cli-sessions**: `control_lease` release; leases dropped when the session ends
 - **tddy-tool-engine**: `ReleaseSessionTerminal` tool
 
@@ -49,7 +51,7 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: `DeliveryRoute`, `ReleaseTerminalControl` proto + `ControlLease::release`, `HomeTerminalLeases::forget`, `ReleaseSessionTerminal` definition; failing tests below.
+The first push of this PR, before its implementation: `DeliveryRoute` + `delivery_route_for`, `TerminalControl::release` + `CliSessionManager::{release_control, forget_control}`, `HomeTerminalLeases::{forget, forget_target}`, `ReleaseSessionTerminal`; failing tests below.
 
 ## Green wave
 
@@ -103,14 +105,35 @@ Every child has a route; Cursor/Muse take terminal turns; claims can be released
 
 ## Acceptance Tests
 
-`packages/tddy-daemon-rpc/tests/orchestrator_delivery_acceptance.rs`:
-- [ ] `a_local_claude_child_is_listed_with_the_native_route_and_its_peer_name`
-- [ ] `a_coder_child_is_listed_with_the_terminal_route_and_a_message_is_typed_into_its_tui`
-- [ ] `a_message_reaches_a_cursor_child_by_terminal_paste`
-- [ ] `a_message_reaches_a_muse_child_by_terminal_paste`
-- [ ] `a_released_terminal_can_be_claimed_by_the_web_screen_without_stealing`
-- [ ] `releasing_a_claim_the_caller_does_not_hold_is_refused`
-- [ ] `a_sessions_terminal_leases_are_forgotten_when_it_ends`
+`packages/tddy-daemon-rpc/tests/orchestrator_delivery_acceptance.rs` (real `ExecuteTool`, a live stand-in terminal):
+- [ ] `a_released_terminal_is_claimed_by_a_persons_screen_without_stealing`
+- [ ] `releasing_a_terminal_the_orchestrator_never_claimed_is_refused`
+- [ ] `every_listed_session_says_how_it_is_best_messaged`
+
+`packages/tddy-coding-agent-specs/tests/spec_turn_input_delivery_acceptance.rs`:
+- [ ] `cursor_takes_a_turn_as_a_terminal_paste_submitted_with_enter`
+- [ ] `muse_takes_a_turn_as_a_terminal_paste_submitted_with_enter`
+
+Unit — `packages/tddy-tool-engine/src/delivery_route.rs`:
+- [ ] `a_local_claude_child_of_a_claude_orchestrator_is_reached_natively_by_its_peer_name`
+- [ ] `a_child_on_a_target_is_reached_through_its_terminal_even_when_native_is_possible`
+- [ ] `a_local_cursor_child_is_reached_through_its_inbox`
+- [ ] `a_claude_child_of_an_orchestrator_without_native_messaging_is_reached_through_its_inbox`
+- [ ] `a_session_without_an_agent_is_reached_through_its_inbox`
+
+Unit — `packages/tddy-cli-sessions/src/cli_session_manager/control_lease.rs` (`release_tests`):
+- [ ] `the_holder_releases_and_the_session_is_uncontrolled`
+- [ ] `after_a_release_another_screen_claims_without_stealing`
+- [ ] `a_stale_token_releases_nothing`
+- [ ] `forgetting_an_ended_sessions_lease_leaves_it_uncontrolled`
+
+Unit — `packages/tddy-daemon-rpc/src/exec_tool/home_terminal_leases.rs` (`release_tests`):
+- [ ] `forgetting_a_claim_returns_its_token_and_leaves_none`
+- [ ] `an_ended_session_takes_every_claim_on_it_with_it`
+
+The surface they specify (bodies `TODO(orchestrator-delivery)`): `tddy_tool_engine::delivery_route::{DeliveryRoute, DeliveryInputs, delivery_route_for}`, `ListedSession.delivery_route`, `RELEASE_SESSION_TERMINAL` + `release_session_terminal_tool_def` + `ProjectHomeTerminalPort::release_terminal` (default refuses), `TerminalControl::release` (implemented by `CliManagerTerminalControl` → `CliSessionManager::release_control`, by the coder participant — which holds no lease, so always released — and by the two test doubles), `CliSessionManager::{release_control, forget_control}`, `HomeTerminalLeases::{forget, forget_target}`.
+
+**Contract-time decisions:** no `ReleaseTerminalControl` RPC — the orchestrator's release is daemon-internal, through the existing `TerminalControl` port, so no proto, TS or web change. `delivery_route_for` takes the session's peer name as an input (n2's `native_peer_name_of`, computed by the daemon), because `tddy-tool-engine` cannot depend on `tddy-agent-launch`; the two never disagree on the format.
 
 ## Decisions & Trade-offs
 
@@ -139,10 +162,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (delegated: the user said "Finish the remaining ones without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

@@ -9,6 +9,7 @@
 pub mod base_freshness_tools;
 pub mod catalog;
 pub(crate) mod contained_shell;
+pub mod delivery_route;
 pub(crate) mod edited_region;
 pub mod path_access_tools;
 pub mod project_home_answer_tools;

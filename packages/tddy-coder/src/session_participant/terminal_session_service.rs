@@ -210,6 +210,12 @@ impl TerminalControl for CoderTerminalControl {
         None
     }
 
+    /// Nothing is held here — the grant above is unconditional and names no holder — so there is
+    /// never a lease to give up, and the session is already uncontrolled.
+    async fn release(&self, _session_id: &str, _control_token: &str) -> bool {
+        true
+    }
+
     fn subscribe(&self) -> broadcast::Receiver<ControlChange> {
         self.changes.subscribe()
     }

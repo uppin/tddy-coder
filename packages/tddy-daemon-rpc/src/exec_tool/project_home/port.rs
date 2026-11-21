@@ -79,6 +79,8 @@ impl ProjectHomePort for DaemonProjectHome {
                 is_active: s.is_active,
                 pending_elicitation: s.pending_elicitation,
                 daemon_instance_id: self.daemon_instance_id.clone(),
+                // TODO(orchestrator-delivery): the session's route, from its agent and placement.
+                delivery_route: None,
             })
             .collect())
     }
