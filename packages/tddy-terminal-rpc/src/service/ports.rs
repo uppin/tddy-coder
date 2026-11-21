@@ -103,6 +103,13 @@ pub enum TerminalKind {
     /// session runs one; it writes nothing of the session's main on the target
     /// (`#session-liveness` 6/8).
     TargetShell,
+    /// A CLI harness, by its session type, on the session's **target** — found by its bare command on
+    /// the target login's own `PATH`, in the session's worktree there, in a conversation of its own
+    /// settled on the target — run through the session's remote shell as a local tab terminal: an
+    /// agent kind with `wrappers: [target]`. Only a target session runs one; the daemon's host needs
+    /// no copy of the agent, and nothing of the session's main is written on the target
+    /// (`#session-liveness` 8/8).
+    TargetAgent { agent: String },
 }
 
 /// The wrapper kind `StartTerminalSessionRequest.wrappers` names for a tmux-wrapped agent.
@@ -160,10 +167,10 @@ impl TerminalKind {
     /// a [`TerminalKind::TmuxWrappedAgent`]; a single [`SANDBOX_WRAPPER_KIND`] wrapper around the
     /// login shell is a [`TerminalKind::SandboxedShell`], and around an agent kind a
     /// [`TerminalKind::SandboxedAgent`]; a single [`TARGET_WRAPPER_KIND`] wrapper around the login
-    /// shell is a [`TerminalKind::TargetShell`]. Any other wrapper kind, a tmux wrapper around
-    /// something that is not an agent, a sandbox wrapper around something that is neither the login
-    /// shell nor an agent, or a target wrapper around something that is not the login shell, is
-    /// `INVALID_ARGUMENT` naming what was refused.
+    /// shell is a [`TerminalKind::TargetShell`], and around an agent kind a
+    /// [`TerminalKind::TargetAgent`]. Any other wrapper kind, a tmux wrapper around something that is
+    /// not an agent, or a sandbox or target wrapper around something that is neither the login shell
+    /// nor an agent, is `INVALID_ARGUMENT` naming what was refused.
     pub fn from_wrapped_request(
         kind: &str,
         tmux_session: &str,
@@ -180,6 +187,10 @@ impl TerminalKind {
             return Self::sandboxed(kind, tmux_session, inner);
         }
         if wrapper.kind == TARGET_WRAPPER_KIND {
+            // An agent on a target is `target-agent-tab`'s (`#session-liveness` 8/8).
+            if let Ok(TerminalKind::Agent(agent)) = Self::from_request(kind, tmux_session) {
+                return Self::on_target_agent(agent, inner);
+            }
             return Self::on_target(kind, tmux_session, inner);
         }
         if wrapper.kind != TMUX_WRAPPER_KIND {
@@ -247,8 +258,7 @@ impl TerminalKind {
     }
 
     /// What `kind` wrapped in a [`TARGET_WRAPPER_KIND`] wrapper (with `inner` wrappers inside it)
-    /// runs: the login shell only. An agent on a target is `target-agent-tab`'s (`#session-liveness`
-    /// 8/8), refused here naming it.
+    /// runs: the login shell only; an agent on a target is [`Self::on_target_agent`]'s.
     fn on_target(
         kind: &str,
         tmux_session: &str,
@@ -264,11 +274,27 @@ impl TerminalKind {
         match Self::from_request(kind, tmux_session)? {
             TerminalKind::Bash => Ok(TerminalKind::TargetShell),
             _ => Err(Status::invalid_argument(format!(
-                "only the login shell can be wrapped in {TARGET_WRAPPER_KIND:?} here, not {:?}: \
-                 an agent on a target is not started yet",
+                "only the login shell can be wrapped in {TARGET_WRAPPER_KIND:?} here, not {:?}",
                 kind.trim()
             ))),
         }
+    }
+
+    /// What the agent kind `agent` wrapped in a [`TARGET_WRAPPER_KIND`] wrapper (with `inner`
+    /// wrappers inside it) runs: the agent on the session's target. A wrapper inside the target is
+    /// `INVALID_ARGUMENT` naming it.
+    fn on_target_agent(
+        agent: String,
+        inner: &[crate::proto::terminal_session::LaunchNode],
+    ) -> Result<TerminalKind, Status> {
+        if let Some(refused) = inner.first() {
+            return Err(Status::invalid_argument(format!(
+                "a terminal cannot be wrapped in {:?} inside {TARGET_WRAPPER_KIND:?}: a target \
+                 wraps an agent alone",
+                refused.kind
+            )));
+        }
+        Ok(TerminalKind::TargetAgent { agent })
     }
 }
 

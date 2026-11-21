@@ -6,6 +6,9 @@
 //! Extended by `#session-liveness` 7/8: an agent tab recorded in a jail of its own is restored into a
 //! new jail, resuming its conversation where its harness can (PRD-2026-11-21-sandbox-agent-tab.md).
 //!
+//! Extended by `#session-liveness` 8/8: an agent tab recorded on the session's target is reopened on
+//! the target, resuming its conversation there (docs/ft/daemon/session-liveness.md, A target session's tabs).
+//!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-19-resume-restores-tab-roster.md (`#session-liveness` 4/4)
 //!
 //! Each roster is arranged as an earlier daemon run left it — written to `tabs.yaml`, or recorded by
@@ -39,7 +42,7 @@ use target_tab_support::fake_target_shells::{
     target_shells_reaching_a_machine, target_shells_reaching_an_unreachable_machine,
     target_shells_refusing, UNREACHABLE,
 };
-use target_tab_support::{where_the_login_shell_started, OWNER};
+use target_tab_support::{where_the_agent_ran, where_the_login_shell_started, OWNER};
 use tddy_agent_launch::tab_target_shell::TabTargetShell;
 use tddy_daemon_sandbox::tab_jails::TabJailSpawn;
 use tddy_rpc::Status;
@@ -67,6 +70,9 @@ const JAILED_OPENCODE_TAB: &str = "019b0000-0000-7000-8000-0000000a0c0d";
 const JAILED_OPENCODE_CONVERSATION: &str = "5f3c0000-0000-7000-8000-0000000a0c0d";
 /// A shell tab run on the session's target (`#session-liveness` 6/8).
 const TARGET_TAB: &str = "019b0000-0000-7000-8000-0000000a7a26";
+/// A Claude tab run on the session's target, and the conversation it holds (`#session-liveness` 8/8).
+const TARGET_CLAUDE_TAB: &str = "019b0000-0000-7000-8000-0000000ac1a7";
+const TARGET_CLAUDE_CONVERSATION: &str = "5f3c0000-0000-7000-8000-0000000ac1a7";
 /// Why the target of a Coder session cannot be resolved while its owner's vault is locked, as the
 /// daemon's target shells refuse it.
 const VAULT_LOCKED: &str =
@@ -129,6 +135,17 @@ fn a_jailed_opencode_tab() -> TabEntry {
 /// A shell tab recorded on the session's target.
 fn a_target_shell_tab() -> TabEntry {
     TabEntry::new(TARGET_TAB, vec![LaunchNode::target(), LaunchNode::shell()])
+}
+
+/// A Claude tab recorded on the session's target, in a conversation its harness can resume.
+fn a_target_claude_tab() -> TabEntry {
+    TabEntry::new(
+        TARGET_CLAUDE_TAB,
+        vec![
+            LaunchNode::target(),
+            agent_launch_node("claude-cli", TARGET_CLAUDE_CONVERSATION, true),
+        ],
+    )
 }
 
 fn restored(terminal_id: &str) -> RestoredTab {
@@ -658,4 +675,58 @@ async fn a_coder_target_tab_with_a_locked_vault_is_dropped_with_its_reason() {
     );
     assert!(!daemon.listed_terminal_ids().await.contains(TARGET_TAB));
     assert!(!daemon.roster_records(TARGET_TAB));
+}
+
+// ---------------------------------------------------------------------------
+// Agent tabs on the session's target (`#session-liveness` 8/8)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_target_claude_tab_is_reopened_on_the_target_resuming_its_conversation() {
+    // Given a stopped session whose roster holds a Claude tab recorded on its target, a reachable
+    // machine with Claude Code installed
+    let (target_shells, machine) = target_shells_reaching_a_machine();
+    machine.installs_the_agent("claude");
+    let daemon = a_stopped_session_whose_target_shells_resolve_through(
+        target_shells.clone() as Arc<dyn TabTargetShell>
+    );
+    daemon.has_recorded_tabs(vec![the_main_tab(), a_target_claude_tab()]);
+
+    // When it is resumed
+    let response = daemon.resumes().await;
+
+    // Then the session's target was resolved as the resume's caller, and the target's Claude runs in
+    // the session's worktree there, resuming the tab's own conversation ...
+    assert_eq!(
+        target_shells.asked(),
+        vec![(daemon.session_dir(), OWNER.to_string())]
+    );
+    assert_eq!(
+        where_the_agent_ran(&machine, "claude").await,
+        (
+            machine.worktree(),
+            vec![
+                "--resume".to_string(),
+                TARGET_CLAUDE_CONVERSATION.to_string(),
+                "--permission-mode".to_string(),
+                "auto".to_string(),
+            ]
+        )
+    );
+    // ... never on this host, and the tab is back under its id, still recorded on the target, and
+    // reported restored
+    assert_eq!(
+        daemon.claude.launches_carrying(TARGET_CLAUDE_CONVERSATION),
+        0
+    );
+    assert!(daemon
+        .listed_terminal_ids()
+        .await
+        .contains(TARGET_CLAUDE_TAB));
+    assert_eq!(
+        daemon.roster_entry(TARGET_CLAUDE_TAB).launch,
+        a_target_claude_tab().launch
+    );
+    assert_eq!(response.restored_tabs, vec![restored(TARGET_CLAUDE_TAB)]);
 }

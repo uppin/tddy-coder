@@ -36,6 +36,10 @@ shell tabs through the daemon's own terminal RPCs and roster, with an in-memory 
 behind a stand-in ssh whose login shell records where it started, so the worktree a tab runs in, the recorded
 chain, the owner the target was resolved as and Resume's reopen-or-drop are observed on real processes. The
 transport itself (`ssh`, `coder ssh`) is `tddy-agent-launch`'s `target_shell_tab_acceptance`.
+`target_agent_tab_acceptance` (`#session-liveness` 8/8) opens an agent "On target" through the same roster and
+asserts the `[target, agent]` record; the target-agent case of `resume_tab_roster_acceptance` reopens a recorded
+claude tab on the target resuming its conversation. The agent's own run on the target (worktree, no host copy of
+the agent, the chat minted there, no host path handed over) is `tddy-agent-launch`'s `target_agent_tab_acceptance`.
 
 ## Writing one
 

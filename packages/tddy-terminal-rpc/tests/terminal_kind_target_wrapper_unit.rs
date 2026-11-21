@@ -1,6 +1,6 @@
 //! `TerminalKind::from_wrapped_request` with a `target` wrapper: the login shell run on the session's
-//! target is accepted, and nothing else is — an agent on a target is `target-agent-tab`'s, and a
-//! target wraps no other wrapper.
+//! target is accepted, and a target wraps no other wrapper. An agent on a target is
+//! `target-agent-tab`'s (`terminal_kind_target_agent_unit.rs`).
 //!
 //! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs) (`#session-liveness` 6/8)
 
@@ -36,22 +36,6 @@ fn an_empty_kind_wrapped_in_target_is_a_target_shell() {
 
     // Then
     assert_eq!(kind, TerminalKind::TargetShell);
-}
-
-#[test]
-fn an_agent_wrapped_in_target_is_refused_naming_the_agent() {
-    // When
-    let refusal =
-        TerminalKind::from_wrapped_request("claude-cli", "", &[a_wrapper(TARGET_WRAPPER_KIND)])
-            .unwrap_err();
-
-    // Then
-    assert_eq!(refusal.code(), Code::InvalidArgument);
-    assert!(
-        refusal.message().contains("\"claude-cli\""),
-        "the refusal names the agent: {}",
-        refusal.message()
-    );
 }
 
 #[test]

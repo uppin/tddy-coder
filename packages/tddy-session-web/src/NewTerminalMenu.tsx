@@ -33,7 +33,9 @@ interface NewTerminalMenuProps {
    *  "In sandbox" too, each opening with `wrappers: [sandbox]` (`#session-liveness` 7/8). */
   sandboxed?: boolean;
   /** Whether the session runs on a target (`SessionEntry.target` is set): its shell opens "On
-   *  target" — on that machine, in the session's worktree there — by default, or "On this host". */
+   *  target" — on that machine, in the session's worktree there — by default, or "On this host".
+   *  Its agent kinds are listed under "On target" too, each opening with `wrappers: [target]`
+   *  (`#session-liveness` 8/8). */
   onTarget?: boolean;
 }
 
@@ -217,14 +219,17 @@ export function NewTerminalMenu({
               ) : offersTarget ? (
                 <>
                   <ul role="group" aria-label="On target" data-testid="sessions-terminal-tab-new-menu">
-                    <MenuKindItem
-                      kind={BASH_KIND}
-                      testId={`sessions-terminal-tab-new-on-target-${BASH_KIND}`}
-                      onChoose={() => {
-                        setMenuOpen(false);
-                        onOpen(BASH_KIND, undefined, [TARGET_WRAPPER_KIND]);
-                      }}
-                    />
+                    {menuKinds.map((kind) => (
+                      <MenuKindItem
+                        key={kind}
+                        kind={kind}
+                        testId={`sessions-terminal-tab-new-on-target-${kind}`}
+                        onChoose={() => {
+                          setMenuOpen(false);
+                          onOpen(kind, undefined, [TARGET_WRAPPER_KIND]);
+                        }}
+                      />
+                    ))}
                   </ul>
                   <ul role="group" aria-label="On this host" className="mt-1 border-t border-border pt-1">
                     {menuKinds.map((kind) => (

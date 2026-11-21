@@ -233,6 +233,20 @@ impl TargetTabDaemon {
     }
 }
 
+/// Where `machine`'s agent `command` started and the arguments it was given, once it has run
+/// (`#session-liveness` 8/8).
+pub async fn where_the_agent_ran(
+    machine: &fake_target_shells::AStandInTarget,
+    command: &str,
+) -> (PathBuf, Vec<String>) {
+    eventually("the target's agent to start", OBSERVE, || {
+        machine
+            .agent_run(command)
+            .ok_or_else(|| format!("the target's {command} has not started yet"))
+    })
+    .await
+}
+
 /// Where `machine`'s login shell started, once it has.
 pub async fn where_the_login_shell_started(
     machine: &fake_target_shells::AStandInTarget,

@@ -1,6 +1,8 @@
 # 2026-11-19 — A start on a target still requires the agent's binary on the daemon's host
 
 **Category:** Design question (product decision, not a defect)
+**Status:** Open — partially fixed: the **new-tab half** is resolved by #967 (`#session-liveness` 8/8); the
+**session-start half** below stays open.
 **Source:** the `#coder-start` stack's `[F]` stage on #948 (commit `4df6979e2`), raised to the user by
 the `#coder-start` sweep (10/10). No code was changed for it.
 
@@ -24,6 +26,14 @@ call. #948's `[F]` stage met exactly this on CI (no `claude` on the runner): two
 `async_start_acceptance` tests passed only on a machine with `claude` installed, and were made
 hermetic by resolving `claude` to a stub on the test host
 (`a_host_as_current_user_with_operator_home_running_claude_as`), not by changing the behaviour.
+
+## Resolved in #967: a new agent tab on a target
+
+An agent tab opened "On target" no longer resolves the agent on the daemon's host: it runs the spec's bare command
+found on the target's login `PATH`, mints its chat on the target and starts from a daemon host with no copy of the
+agent (`target_agent_tab` / `new_target_agent_tab`; pinned by `a_target_agent_tab_starts_when_the_daemon_host_has_no_agent`).
+Everything below now concerns **only a session start** on a target (`resolve_session_agent`,
+`CliSessionStart.agent`); the options are unchanged, and option 2 now has a precedent in the tab.
 
 ## Why it exists
 

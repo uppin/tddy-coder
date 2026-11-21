@@ -103,9 +103,9 @@ keeps the meaning above — agent local, tools remote — and the two fields are
 on a start. Session targets are specified in
 [claude-cli-session.md](claude-cli-session.md#the-generic-cli-spec-launch-serves-claudes-needs).
 
-A target session's **secondary shell tabs** open on the target as well: a tab "On target" runs the target
-user's login shell in the session's worktree there, through the same remote shell, and is recorded and
-restored as such — see [Session liveness § A target session's tabs](session-liveness.md#a-target-sessions-tabs).
+A target session's **secondary tabs** open on the target as well: a shell tab "On target" runs the target
+user's login shell in the session's worktree there, and an agent tab "On target" runs the agent there by its
+bare command, through the same remote shell; each is recorded and restored as such — see [Session liveness § A target session's tabs](session-liveness.md#a-target-sessions-tabs).
 
 ### Split: SSH Host alias (`ssh_config_host`)
 

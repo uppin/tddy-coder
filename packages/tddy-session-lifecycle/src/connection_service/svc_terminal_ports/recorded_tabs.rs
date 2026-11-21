@@ -68,6 +68,10 @@ impl CliManagerTerminalRoster {
             TerminalKind::TargetShell => Err(Status::internal(
                 "a target shell starts on the session's target, not in a worktree on this host",
             )),
+            // An agent on a target runs there too: `TerminalRoster::start` hands it to its transport.
+            TerminalKind::TargetAgent { .. } => Err(Status::internal(
+                "an agent on a target starts on the session's target, not in a worktree on this host",
+            )),
         }
     }
 

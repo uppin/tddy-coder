@@ -10,6 +10,7 @@
 //! PRD: docs/ft/daemon/session-liveness.md
 
 mod new_tab;
+mod new_target_tab;
 mod on_resume;
 mod plan;
 mod roster;
@@ -17,6 +18,7 @@ mod roster;
 pub use new_tab::{
     agent_launch_node, agent_tab_argv, new_agent_tab, tab_conversation_is_resumable, NewAgentTab,
 };
+pub use new_target_tab::{new_target_agent_tab, target_agent_tab, NewTargetAgentTab};
 pub use plan::{restore_plan, LiveTabs, TabRestore, RESUMABLE_PROPERTY};
 pub use roster::{restore_tab_roster, RosterRestore};
 
@@ -35,3 +37,7 @@ mod sandbox_agent_tests;
 #[cfg(test)]
 #[path = "restore_tabs_target_tests.rs"]
 mod target_tests;
+
+#[cfg(test)]
+#[path = "restore_tabs_target_agent_tests.rs"]
+mod target_agent_tests;

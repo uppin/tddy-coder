@@ -1,7 +1,10 @@
 //! An in-memory [`TabTargetShell`] and the machine it reaches: a directory on this host standing for
 //! the target, holding the session's worktree there, whose shell runs commands with this machine's
 //! `/bin/sh` under a login shell of the target's own. Run as `-l` — as a shell tab runs it — that
-//! login shell records the directory it started in, prints [`ON_TARGET_BANNER`] and stays up.
+//! login shell records the directory it started in, prints [`ON_TARGET_BANNER`] and stays up. Run as
+//! `-lc <command>` — as an agent tab's launch runs it — it runs the command with the target's own
+//! agents directory first on its `PATH`, where [`AStandInTarget::installs_the_agent`] puts an agent
+//! (`#session-liveness` 8/8).
 //!
 //! What the daemon owns of a target tab is which target it asks for, the command it runs there and
 //! the tab's lifetime and record — which a real local process shows — not the transport, which the
@@ -40,12 +43,16 @@ impl AStandInTarget {
         let root = std::fs::canonicalize(dir.path()).expect("the target's directory resolves");
         std::fs::create_dir_all(root.join("home/dev/repo/.worktrees/target-tab"))
             .expect("the session's worktree on the target");
+        std::fs::create_dir_all(root.join("opt/agents")).expect("the target's agents directory");
         write_executable(
             &root.join("login-shell"),
             &format!(
-                "#!/bin/sh\n[ \"$1\" = -l ] || exit 64\n/bin/pwd -P > '{started_in}.part' && mv '{started_in}.part' '{started_in}'\n\
+                "#!/bin/sh\n\
+                 if [ \"$1\" = -lc ]; then PATH='{agents}':\"$PATH\"; export PATH; exec /bin/sh -c \"$2\"; fi\n\
+                 [ \"$1\" = -l ] || exit 64\n/bin/pwd -P > '{started_in}.part' && mv '{started_in}.part' '{started_in}'\n\
                  printf '{ON_TARGET_BANNER}'\nexec /bin/sh\n",
-                started_in = root.join("login-shell-started-in").display()
+                started_in = root.join("login-shell-started-in").display(),
+                agents = root.join("opt/agents").display()
             ),
         );
         Arc::new(Self {
@@ -66,6 +73,32 @@ impl AStandInTarget {
         std::fs::read_to_string(self.root.join("login-shell-started-in"))
             .ok()
             .map(|cwd| PathBuf::from(cwd.trim_end()))
+    }
+
+    /// Install the agent `command` on the target, first on its login shell's `PATH`: run, it records
+    /// the directory it started in and its arguments, then stays up on its terminal.
+    pub fn installs_the_agent(&self, command: &str) {
+        write_executable(
+            &self.root.join("opt/agents").join(command),
+            &format!(
+                "#!/bin/sh\n{{ /bin/pwd -P; printf '%s\\n' \"$@\"; }} > '{record}.part'\n\
+                 /bin/mv '{record}.part' '{record}'\nexec /bin/sh\n",
+                record = self.agent_record(command).display()
+            ),
+        );
+    }
+
+    /// The directory the target's agent `command` started in and the arguments it was given, once it
+    /// has run.
+    pub fn agent_run(&self, command: &str) -> Option<(PathBuf, Vec<String>)> {
+        let recorded = std::fs::read_to_string(self.agent_record(command)).ok()?;
+        let mut lines = recorded.lines();
+        let cwd = PathBuf::from(lines.next()?);
+        Some((cwd, lines.map(str::to_string).collect()))
+    }
+
+    fn agent_record(&self, command: &str) -> PathBuf {
+        self.root.join(format!("{command}-ran-on-the-target"))
     }
 
     /// Every command a terminal was opened on, oldest first.
