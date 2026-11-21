@@ -113,12 +113,41 @@ fn an_ask_user_question_reports_waiting_with_every_question_as_the_tool_input() 
     })
     .to_string();
 
-    // When
-    let request = session_status_request(&the_hook(), &stdin).expect("a status report");
+    // When the hook that waits for the answer reports it
+    let waiting = SessionHookArgs {
+        await_answer: true,
+        ..the_hook()
+    };
+    let request = session_status_request(&waiting, &stdin).expect("a status report");
 
     // Then it reports waiting, naming the event, the tool and the whole input
     assert_eq!(request.status, "WaitingForInput");
     assert_eq!(request.hook_event_name, "PreToolUse");
     assert_eq!(request.tool_name, "AskUserQuestion");
     assert_eq!(json_of(&request.tool_input_json), input);
+}
+
+// ---------------------------------------------------------------------------
+// The catch-all `PreToolUse` hook reports the tool call, never a status (`#target-parity` 4/7)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_pre_tool_use_that_does_not_wait_reports_no_status() {
+    // Given the catch-all PreToolUse hook (it does not wait), before a shell command and before a
+    // question
+    let before_bash = r#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01","tool_input":{"command":"ls"}}"#;
+    let before_a_question = r#"{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[]}}"#;
+
+    // When
+    let reports = (
+        session_status_request(&the_hook(), before_bash),
+        session_status_request(&the_hook(), before_a_question),
+    );
+
+    // Then neither reports a status: the call is reported as agent activity, and the question by
+    // the hook that waits for its answer
+    assert!(
+        reports.0.is_none() && reports.1.is_none(),
+        "a reporting PreToolUse sent a status: {reports:?}"
+    );
 }

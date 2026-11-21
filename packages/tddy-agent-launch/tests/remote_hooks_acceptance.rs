@@ -666,3 +666,44 @@ async fn ending_a_target_session_removes_its_answers_on_the_target() {
         (Ok(()), false, false)
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Every tool call is reported before it runs (`#target-parity` 4/7)
+// ---------------------------------------------------------------------------------------------
+
+/// What Claude Code hands its `PreToolUse` hook before it runs a shell command.
+const PRE_TOOL_USE_PAYLOAD: &str = r#"{"hook_event_name":"PreToolUse","session_id":"c-41","tool_name":"Bash","tool_use_id":"toolu_01","tool_input":{"command":"pwd && ls"}}"#;
+
+/// Reproduces gap 2 of the 2026-11-21 Coder probe: an agent's tool call never shows as running,
+/// because no `PreToolUse` hook fires for an ordinary tool. A target's settings install none at
+/// all (the only `PreToolUse` entry, matched to `AskUserQuestion`, waits for an answer and is left
+/// out, `claude_hooks.rs:181`), and a local session's covers that one tool alone
+/// (`claude_hooks.rs:90`), so every activity row is written by `PostToolUse` with
+/// `started_unix_ms: 0`.
+#[tokio::test]
+async fn a_tool_call_of_an_agent_on_a_target_is_reported_before_it_runs() {
+    // Given a target session whose hooks are installed in its worktree on the target
+    let target = a_reachable_target();
+    let daemon = a_daemon();
+    let hooks = daemon.installs_the_sessions_hooks_on(&target).await;
+    let hook = target
+        .installed_hook_for_tool("PreToolUse", "Bash")
+        .expect("the hooks file on the target installs a PreToolUse hook for Bash");
+    // And an agent there that is about to run a shell command as it starts
+    let agent = an_agent_that_fires_as_it_starts_with(&target, &hook, PRE_TOOL_USE_PAYLOAD);
+
+    // When
+    let session = daemon.launches(&agent, &target, &hooks).await;
+    let delivered = daemon.hooks_once_delivered("PreToolUse").await;
+
+    // Then the daemon is told which call is starting, under the agent's own id for it
+    let started = delivered
+        .iter()
+        .find(|(event, _)| event == "PreToolUse")
+        .map(|(_, payload)| (payload["tool_name"].clone(), payload["tool_use_id"].clone()));
+    assert_eq!(
+        started,
+        Some((serde_json::json!("Bash"), serde_json::json!("toolu_01")))
+    );
+    session.follower.stop().await;
+}

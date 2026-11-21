@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — three crates (agent-backend, tools, session-activity / agent-launch follower), the hook-matcher contract changes for local and target sessions
-**Stack**: `#target-parity` 4/7 — branch `feature/target-parity/running-tool-calls`, base `feature/target-parity/transcript-text`
+**Stack**: `#target-parity` 4/7 — branch `feature/target-parity/running-tool-calls`, base `feature/target-parity/transcript-text` — PR [#972](https://github.com/uppin/tddy-coder/pull/972)
 
 ## Initial Discovery
 
@@ -78,14 +78,26 @@ Every tool call gets a `running` row with its start time, completed by its `Post
 ## Acceptance Tests
 
 `packages/tddy-agent-launch/tests/remote_hooks_acceptance.rs`:
-- [ ] `a_tool_call_of_an_agent_on_a_target_is_reported_before_it_runs` (reproduction, exists)
+- [ ] `a_tool_call_of_an_agent_on_a_target_is_reported_before_it_runs` (the reproduction)
 
-`packages/tddy-session-activity/tests/` (real handler, real session directory):
-- [ ] `a_tool_call_is_running_with_its_start_time_until_its_result_completes_it`
-- [ ] `a_question_tools_reporting_pre_tool_use_records_no_question_and_no_call`
+`packages/tddy-coding-agent-specs/tests/remote_hooks_render_acceptance.rs`:
+- [ ] `claude_code_on_a_target_reports_every_tool_before_it_runs`
+- The harness now reads every matcher group of an event (an event's command is its first group's; it waits when any group waits), and n1's `claude_code_on_a_target_waits_for_a_permission_answer_in_its_worktree` expects `PreToolUse` among the target's events.
 
-`packages/tddy-agent-backend/src/claude_hooks.rs` (unit):
-- [ ] `every_session_reports_every_tool_before_it_runs` (local and target settings)
+`packages/tddy-tools/tests/session_hook_pending_question.rs`:
+- [ ] `a_pre_tool_use_that_does_not_wait_reports_no_status`
+- `an_ask_user_question_reports_waiting_with_every_question_as_the_tool_input` now reports through the waiting hook (`await_answer: true`), the only one installed for that tool.
+
+`packages/tddy-agent-backend/src/claude_hooks.rs` (unit; replace `the_pre_tool_use_hook_matches_ask_user_question_only` and `each_event_has_one_matcher_group_with_one_command_hook`):
+- [ ] `pre_tool_use_reports_every_tool_and_waits_on_ask_user_question`
+- [ ] `the_catch_all_pre_tool_use_hook_only_reports`
+- [ ] `a_target_reports_every_tool_before_it_runs_through_its_hook_log`
+- [x] `each_matcher_group_has_one_command_hook` (shape guard, green)
+
+`packages/tddy-agent-launch/src/remote_hook_follower.rs` (unit):
+- [ ] `a_reporting_pre_tool_use_line_reports_the_call_and_no_status`
+
+The running row itself (`PreToolUse` then `PostToolUse` paired by `tool_use_id`) is already served by `report_agent_activity_impl`; this node only makes the hooks fire.
 
 ## Decisions & Trade-offs
 
@@ -98,10 +110,10 @@ Every tool call gets a `running` row with its start time, completed by its `Post
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (delegated: the user said "finish the rest without approval")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
