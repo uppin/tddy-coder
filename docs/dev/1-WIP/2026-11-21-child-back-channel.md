@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — guidance rendered per (agent, placement), a new hook-log event parsed by a stack-shared follower, a native-peer naming risk to verify
+**PR**: [#980](https://github.com/uppin/tddy-coder/pull/980)
 **Stack**: `#orchestra` 2/9 — branch `feature/orchestra/child-back-channel`, base `feature/orchestra/path-reach`
 
 ## Initial Discovery
@@ -43,7 +44,7 @@ None inside `#orchestra`. It builds on its base, `#target-parity` 7/7 (#975), an
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: `BackChannel` (enum Native/ToolsSend/HookLog) + `back_channel_for(...)`, `remote_message_command`, `HookEvent::Message`, `SessionRecord.native_peer_name`; failing tests below.
+The first push of this PR, before its implementation: `BackChannel` (enum Native/ToolsSend/HookLog) + `back_channel_for(...)`, `remote_message_command`, `HookEvent::Message`, `native_peer_name_of(session_id)`; failing tests below.
 
 ## Green wave
 
@@ -74,9 +75,9 @@ Deferred to `#target-parity`'s sweep (stack-shared). The `message` mapping goes 
 
 L3/L4 (notify wiring on a target) is the same gap from the other side. This node gives targets a report line, not `notify`; L3/L4 stay open.
 
-### Risk — native peer naming
+### ✅ Resolved at contract time — native peer naming
 
-Whether a Claude child's peer name can be pinned at launch is unverified. If it cannot, this node stops and asks the developer before falling back to `tddy-tools send` for that pair.
+Claude Code 2.1.323 takes `-n, --name <name>`, the name same-host peer messaging addresses a session by. The name is derived from the session id (`native_peer_name_of`), so nothing new is recorded on the session.
 
 ## Scope
 
@@ -98,12 +99,27 @@ Each child knows its orchestrator and channel; target reports arrive as message 
 ## Acceptance Tests
 
 `packages/tddy-agent-launch/tests/child_back_channel_acceptance.rs`:
-- [ ] `a_local_codex_child_is_told_to_report_with_tddy_tools_send_to_its_orchestrator`
-- [ ] `a_local_claude_child_is_told_its_orchestrators_peer_name_and_is_launched_under_its_own`
-- [ ] `a_target_child_is_told_the_hooks_log_message_line`
-- [ ] `a_message_line_on_a_target_reaches_the_orchestrators_inbox`
-- [ ] `a_message_line_from_a_session_without_an_orchestrator_is_dropped`
-- [ ] `a_session_without_an_orchestrator_gets_no_back_channel_guidance`
+- [ ] `a_local_codex_child_of_an_orchestrator_reports_with_tddy_tools_send`
+- [ ] `a_local_claude_child_of_a_claude_orchestrator_reports_natively_to_its_peer_name`
+- [ ] `a_claude_child_on_a_target_reports_through_its_hook_log_not_natively`
+- [ ] `every_channels_guidance_asks_for_periodic_progress_and_status_reports`
+- [ ] `a_message_line_is_a_hook_the_follower_accepts`
+- [ ] `a_followed_message_line_is_posted_to_the_orchestrator`
+- [ ] `a_message_line_without_text_is_not_posted`
+- [ ] `a_native_peer_name_is_stable_and_names_the_session`
+
+`packages/tddy-session-lifecycle/tests/child_back_channel_launch_acceptance.rs` (real `StartSession`, stub `claude` echoing its argv; needs a built `target/debug/tddy-tools`, as `./test` provides):
+- [ ] `an_orchestrator_is_launched_under_its_native_peer_name`
+- [ ] `a_claude_child_is_launched_under_its_peer_name_and_told_to_report_to_its_orchestrator`
+- [x] `a_session_without_an_orchestrator_is_launched_unnamed_and_told_of_none` — regression guard
+
+`packages/tddy-coding-agent-specs/tests/spec_peer_name_acceptance.rs`:
+- [ ] `claude_declares_its_peer_name_flag`
+- [x] `an_agent_without_native_peer_messaging_declares_no_peer_name` — regression guard
+
+The surface they specify (bodies `TODO(child-back-channel)`): `tddy_core::REMOTE_MESSAGE_EVENT`, `coding_agent.peer_name` (`PeerNameSlot`, `CodingAgentSpec::peer_name`), `tddy_agent_launch::back_channel::{BackChannel, BackChannelInputs, ChildPlacement, RemoteMessage, back_channel_for, back_channel_guidance, native_peer_name_of}`, `HookReportDelivery::post_message_to_orchestrator` (default refuses; the session host's `ActivityHookDelivery` overrides it in the implementation).
+
+Verified: Claude Code 2.1.323 has `-n, --name <name>`, the name same-host peer messaging addresses a session by — the planning-time risk is resolved, and the native route stays.
 
 ## Decisions & Trade-offs
 
@@ -132,10 +148,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

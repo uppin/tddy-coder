@@ -56,8 +56,8 @@ pub use session::{
     NO_AGENT_SESSION_TYPE, SESSION_EXTENSION,
 };
 pub use spec::{
-    AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec, SpecError,
-    VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
+    AgentVariant, CodingAgentExtension, CodingAgentSection, CodingAgentSpec, PeerNameSlot,
+    SpecError, VariantError, CODING_AGENT_EXTENSION, DEFAULT_ANSWER_WAIT_SECS, HOST_AGENT_VARIANT,
 };
 
 /// `specs/cursor.yaml` (`#agent-tools 7/12`), embedded.
