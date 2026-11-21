@@ -49,4 +49,11 @@ impl tddy_agent_launch::remote_hook_follower::HookReportDelivery for ActivityHoo
             .map(|_| ())
             .map_err(|status| status.message().to_string())
     }
+
+    async fn post_message_to_orchestrator(
+        &self,
+        message: tddy_agent_launch::back_channel::RemoteMessage,
+    ) -> Result<(), String> {
+        self.host.post_remote_message_to_orchestrator(message).await
+    }
 }

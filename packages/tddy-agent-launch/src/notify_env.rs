@@ -86,6 +86,15 @@ pub struct AgentNotifyWiring {
 
 /// What a starting claude-cli agent is given so it can notify its operator.
 pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyWiring, Status> {
+    agent_notify_launch_reporting(launch, None)
+}
+
+/// [`agent_notify_launch`], with `back_channel_guidance` — how the agent reports to the orchestrator
+/// that started it (`#orchestra` 2/9) — appended to the system prompt after the notify guidance.
+pub fn agent_notify_launch_reporting(
+    launch: AgentNotifyLaunch<'_>,
+    back_channel_guidance: Option<&str>,
+) -> Result<AgentNotifyWiring, Status> {
     let AgentNotifyLaunch {
         config,
         agent_tool_socket,
@@ -104,7 +113,11 @@ pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyW
         Some(agent_tool_socket),
     );
     let prompt_file = session_dir.join(NOTIFY_SYSTEM_PROMPT_FILE);
-    std::fs::write(&prompt_file, composed_system_prompt(managed_prompt_file)?).map_err(|e| {
+    std::fs::write(
+        &prompt_file,
+        composed_system_prompt(managed_prompt_file, back_channel_guidance)?,
+    )
+    .map_err(|e| {
         Status::internal(format!(
             "failed to write the system prompt {}: {e}",
             prompt_file.display()
@@ -116,11 +129,22 @@ pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyW
     })
 }
 
-/// The notify guidance, followed by the managed recipe's prompt read from `managed_prompt_file`.
-fn composed_system_prompt(managed_prompt_file: Option<&Path>) -> Result<String, Status> {
-    let guidance = AGENT_NOTIFY_GUIDANCE.trim_end();
+/// The notify guidance, then the back-channel guidance when there is one, followed by the managed
+/// recipe's prompt read from `managed_prompt_file`.
+fn composed_system_prompt(
+    managed_prompt_file: Option<&Path>,
+    back_channel_guidance: Option<&str>,
+) -> Result<String, Status> {
+    let guidance = match back_channel_guidance {
+        Some(back_channel) => format!(
+            "{}\n\n{}",
+            AGENT_NOTIFY_GUIDANCE.trim_end(),
+            back_channel.trim_end()
+        ),
+        None => AGENT_NOTIFY_GUIDANCE.trim_end().to_string(),
+    };
     let Some(file) = managed_prompt_file else {
-        return Ok(guidance.to_string());
+        return Ok(guidance);
     };
     let recipe_prompt = std::fs::read_to_string(file).map_err(|e| {
         Status::internal(format!(
@@ -137,12 +161,13 @@ fn composed_system_prompt(managed_prompt_file: Option<&Path>) -> Result<String, 
 pub fn agent_notify_unless_role(
     role_name: &str,
     launch: AgentNotifyLaunch<'_>,
+    back_channel_guidance: Option<&str>,
     env_extra: &mut Vec<(String, String)>,
 ) -> Result<Option<PathBuf>, Status> {
     if !role_name.is_empty() {
         return Ok(launch.managed_prompt_file.map(Path::to_path_buf));
     }
-    let notify = agent_notify_launch(launch)?;
+    let notify = agent_notify_launch_reporting(launch, back_channel_guidance)?;
     env_extra.extend(notify.env);
     Ok(notify.append_system_prompt_file)
 }
@@ -158,19 +183,44 @@ pub fn resumed_agent_notify_launch(
     meta: &tddy_core::SessionMetadata,
     managed_prompt_file: Option<&Path>,
 ) -> Result<AgentNotifyWiring, Status> {
+    resumed_agent_notify_launch_reporting(
+        config,
+        agent_tool_socket,
+        os_user,
+        session_dir,
+        meta,
+        managed_prompt_file,
+        None,
+    )
+}
+
+/// [`resumed_agent_notify_launch`], with the `back_channel_guidance` the session's start gave it
+/// (`#orchestra` 2/9) appended again.
+pub fn resumed_agent_notify_launch_reporting(
+    config: &DaemonConfig,
+    agent_tool_socket: &Path,
+    os_user: &str,
+    session_dir: &Path,
+    meta: &tddy_core::SessionMetadata,
+    managed_prompt_file: Option<&Path>,
+    back_channel_guidance: Option<&str>,
+) -> Result<AgentNotifyWiring, Status> {
     if !meta.session_role.as_deref().unwrap_or("").is_empty() {
         return Ok(AgentNotifyWiring::default());
     }
     let Some(hook_token) = meta.hook_token.as_deref().filter(|token| !token.is_empty()) else {
         return Ok(AgentNotifyWiring::default());
     };
-    agent_notify_launch(AgentNotifyLaunch {
-        config,
-        agent_tool_socket,
-        os_user,
-        session_id: &meta.session_id,
-        hook_token,
-        session_dir,
-        managed_prompt_file,
-    })
+    agent_notify_launch_reporting(
+        AgentNotifyLaunch {
+            config,
+            agent_tool_socket,
+            os_user,
+            session_id: &meta.session_id,
+            hook_token,
+            session_dir,
+            managed_prompt_file,
+        },
+        back_channel_guidance,
+    )
 }

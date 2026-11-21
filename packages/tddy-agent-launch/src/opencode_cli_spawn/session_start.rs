@@ -42,6 +42,9 @@ pub(crate) struct CliSessionStart<'a> {
     /// The orchestrator that started the session, recorded in its first changeset. Absent, the
     /// stack parent (if any) is the orchestrator recorded.
     pub orchestrator: Option<OrchestratorLink>,
+    /// The orchestrator the request named, on this host, with its agent when known: the session is
+    /// launched under its native peer name and told how to report back (`#orchestra` 2/9).
+    pub reports_to: Option<crate::back_channel::ReportsTo<'a>>,
     pub initial_prompt: &'a str,
     /// The session's starting agent roster, already resolved by the caller.
     pub agents: &'a mut [tddy_core::SessionAgentRecord],
