@@ -82,6 +82,9 @@ beforeAll(async () => {
 
   serverProcess = spawn(binaryPath, [
     "--daemon",
+    // A kernel-picked gRPC port: without `--grpc` the daemon binds the fixed 0.0.0.0:50051, which
+    // any other socket on the host may hold — the daemon then exits 1 with "bind gRPC port".
+    "--grpc", "0",
     "--web-port", String(PORT),
     "--web-host", "127.0.0.1",
     "--web-bundle-path", webBundlePath,
