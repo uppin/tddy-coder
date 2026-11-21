@@ -86,6 +86,38 @@ impl ProjectHomeTerminalPort for DaemonProjectHome {
         terminal.send_input(bytes.into(), 0);
         Ok(())
     }
+
+    /// Give back the lease this caller's remembered token holds on `target`, forgetting the token.
+    /// Refused, with nothing changed, when this caller never claimed it, or another screen has taken
+    /// it since (`#orchestra` 7/9).
+    async fn release_terminal(
+        &self,
+        target: &SessionTarget,
+        screen_id: &str,
+    ) -> Result<(), String> {
+        let session_id = target.session_id.as_str();
+        let key = self.claim_key(session_id);
+        let Some(token) = self.leases.token_of(&key) else {
+            return Err(format!(
+                "session {session_id}'s terminal was never claimed by {screen_id}; claim it with ClaimSessionTerminal before releasing it"
+            ));
+        };
+        if self.terminal_control.release(session_id, &token).await {
+            self.leases.forget(&key);
+            return Ok(());
+        }
+        // The token is stale: another screen took the lease, or it ended. There is nothing to keep.
+        self.leases.forget(&key);
+        let holder = self.terminal_control.holder_screen_id(session_id).await;
+        Err(match holder {
+            Some(holder) => format!(
+                "control of session {session_id} is held by `{holder}`, not by this session's claim, so nothing was released"
+            ),
+            None => format!(
+                "this session's claim on session {session_id}'s terminal is no longer held, so nothing was released"
+            ),
+        })
+    }
 }
 
 /// Why a send to `session_id` is refused for want of control: another screen holds it, naming that

@@ -146,7 +146,9 @@ impl ExecToolRpcHandler {
                 provider_accounts: Arc::new(OnceLock::new()),
                 terminals: host.terminal_sessions(),
                 terminal_control: host.terminal_control(),
-                leases: Arc::new(home_terminal_leases::HomeTerminalLeases::default()),
+                leases: Arc::new(home_terminal_leases::HomeTerminalLeases::following(
+                    host.agent_ends(),
+                )),
                 pending_answers: host.pending_answers(),
                 path_access: host.path_access_requests(),
                 notification_log: host.project_notification_log(),

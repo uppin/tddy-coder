@@ -170,6 +170,7 @@ mod tests {
                 "ReadSessionTerminal",
                 "ClaimSessionTerminal",
                 "SendSessionKeys",
+                "ReleaseSessionTerminal",
                 "AnswerSessionPermission",
                 "AnswerSessionQuestion",
                 "WaitProjectNotifications",

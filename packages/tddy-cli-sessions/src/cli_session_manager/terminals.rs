@@ -198,6 +198,7 @@ impl CliSessionManager {
     /// terminal: its holder is asked to stop the child, and the tab leaves with the child's reported end.
     pub async fn stop_session(&self, session_id: &str) {
         self.stop_process_tab(session_id).await;
+        self.forget_control(session_id).await;
         let task_ids: Vec<TaskId> = {
             let mut reg = self.terminals.write().await;
             reg.remove(session_id)

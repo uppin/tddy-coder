@@ -64,7 +64,7 @@ type ExitSettlements =
     Arc<RwLock<HashMap<(String, String), (TaskId, tokio::sync::watch::Receiver<bool>)>>>;
 
 /// Per-session control leases: `session_id → ControlLeaseInfo`.
-type ControlRegistry = Arc<RwLock<HashMap<String, ControlLeaseInfo>>>;
+pub(crate) type ControlRegistry = Arc<RwLock<HashMap<String, ControlLeaseInfo>>>;
 
 /// Per-session managed-workflow wiring (kept alive for the session's lifetime): `session_id → ManagedWorkflow`.
 type ManagedWorkflowRegistry =

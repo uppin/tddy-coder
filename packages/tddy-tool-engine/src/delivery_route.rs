@@ -38,9 +38,18 @@ pub struct DeliveryInputs<'a> {
 
 /// The route an orchestrator best reaches the session described by `inputs` by.
 pub fn delivery_route_for(inputs: &DeliveryInputs<'_>) -> DeliveryRoute {
-    // TODO(orchestrator-delivery): implement
-    let _ = inputs;
-    unimplemented!("delivery_route_for")
+    if inputs.on_target {
+        return DeliveryRoute::Terminal;
+    }
+    let child_has_peer_name = inputs
+        .agent
+        .is_some_and(|agent| agent.peer_name().is_some());
+    if child_has_peer_name && inputs.orchestrator_is_native_peer {
+        return DeliveryRoute::Native {
+            peer_name: inputs.peer_name.to_string(),
+        };
+    }
+    DeliveryRoute::Inbox
 }
 
 #[cfg(test)]

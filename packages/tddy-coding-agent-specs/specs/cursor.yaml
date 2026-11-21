@@ -66,6 +66,9 @@ extensions:
     # The chat id `agent create-chat` prints, minted before the first start (bounded: 30 s) and passed as `--resume`.
     conversation: { kind: minted, adapter: cursor-create-chat }
     capabilities: [hooks, managed_workflow, requires_model, keep_worktree_on_delete, operator_notify]
+    # How a new turn reaches a running session (`SendSessionMessage`, `#orchestra` 7/9): pasted into
+    # the TUI, then submitted with Enter, as an operator would.
+    turn_input: { kind: terminal_paste, submit_key: Enter }
     models:
       default: composer-2.5
       curated:
