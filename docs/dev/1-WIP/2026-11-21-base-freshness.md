@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 3 — two tools over existing git helpers, one new field through the start ledger
+**PR**: [#982](https://github.com/uppin/tddy-coder/pull/982)
 **Stack**: `#orchestra` 4/9 — branch `feature/orchestra/base-freshness`, base `feature/orchestra/session-files`
 
 ## Initial Discovery
@@ -15,6 +16,8 @@
 - **tddy-worktree-service**: `base_freshness` (fetch + ahead/behind of the home worktree vs the project's trunk tip) and `refresh_home` (`fast_forward_home_worktree`)
 - **tddy-tool-engine**: `CheckBaseFreshness`, `RefreshHome` tools; start ledger records `base_commit` and `base_behind`
 - **tddy-daemon-rpc**: role guard + serving
+- **tddy-service**: `StartWorktreeReady.base_commit` / `base_behind` (fields 3, 4); TS regenerated in `tddy-client-web`, `tddy-rust-typescript-tests`
+- **tddy-session-files**: `worktree_ready` carries the base
 
 ## Related Feature Documentation
 
@@ -40,7 +43,7 @@ None inside `#orchestra`. It builds on its base, `#target-parity` 7/7 (#975), an
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: `BaseFreshness`, `worktree_service::{base_freshness, refresh_home}`, the two tool definitions, `StartLedgerEntry.{base_commit, base_behind}`; failing tests below.
+The first push of this PR, before its implementation: `BaseFreshness`, `worktree_service::{base_freshness, refresh_home}`, the two tool definitions, `StartLedgerRecord.{base_commit, base_behind}`, proto `StartWorktreeReady.{base_commit, base_behind}`; failing tests below.
 
 ## Green wave
 
@@ -89,11 +92,24 @@ The orchestrator checks and refreshes on demand; starts record their base.
 
 ## Acceptance Tests
 
-`packages/tddy-daemon-rpc/tests/orchestrator_base_freshness_acceptance.rs`:
-- [ ] `check_base_freshness_reports_the_home_behind_after_the_remote_trunk_moves`
-- [ ] `refresh_home_fast_forwards_the_home_to_the_remote_tip`
-- [ ] `refresh_home_refuses_a_diverged_home_and_leaves_it_untouched`
-- [ ] `a_started_session_reports_the_base_commit_it_was_cut_from`
+`packages/tddy-daemon-rpc/tests/orchestrator_base_freshness_acceptance.rs` (real `ExecuteTool`):
+- [ ] `check_base_freshness_reports_the_orchestrators_home_behind_after_the_trunk_moves`
+- [ ] `refresh_home_brings_the_orchestrators_home_to_the_tip`
+- [x] `a_worker_session_is_refused_the_freshness_tools` — regression guard
+
+`packages/tddy-worktree-service/tests/base_freshness_acceptance.rs` (real git: bare origin, pusher clone, detached home):
+- [ ] `a_current_home_is_zero_behind`
+- [ ] `freshness_reports_the_home_behind_after_the_remote_trunk_moves`
+- [ ] `refresh_fast_forwards_the_home_to_the_remote_tip`
+- [ ] `refresh_refuses_a_diverged_home_and_leaves_it_untouched`
+
+`packages/tddy-tool-engine/tests/start_ledger_base.rs`:
+- [ ] `a_started_session_records_the_base_commit_it_was_cut_from`
+
+Unit — `packages/tddy-tool-engine/src/base_freshness_tools.rs`:
+- [ ] `both_tools_are_defined_with_their_names_and_take_no_arguments`
+
+The surface they specify (bodies `TODO(base-freshness)`): `tddy_worktree_service::base_freshness::{BaseFreshness, RefreshRefusal, base_freshness, refresh_home}`, `tddy_tool_engine::base_freshness_tools::{CHECK_BASE_FRESHNESS, REFRESH_HOME, is_base_freshness_tool, base_freshness_tool_defs, BaseFreshnessPort, execute_base_freshness_tool}`, `StartLedgerRecord.{base_commit, base_behind}`, and proto `StartWorktreeReady.base_commit` (3) / `base_behind` (4), with the committed TypeScript in `tddy-client-web` and `tddy-rust-typescript-tests` regenerated. `attachment_progress.rs`'s `worktree_ready` sends them empty until the implementation fills them (`TODO(base-freshness)`).
 
 ## Decisions & Trade-offs
 
@@ -121,10 +137,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (delegated: the user said "Finish the remaining ones without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

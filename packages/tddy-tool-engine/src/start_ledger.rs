@@ -103,6 +103,14 @@ pub struct StartLedgerRecord {
     /// record written before the log existed still reads.
     #[serde(default)]
     pub remote_calls: Vec<RemoteCallRecord>,
+    /// The commit the started session's worktree was cut from, set with `session_id`
+    /// (`#orchestra` 4/9). Defaulted, so a record written before it existed still reads.
+    #[serde(default)]
+    pub base_commit: Option<String>,
+    /// How many commits `base_commit` was behind its remote tip when the worktree was cut, set with
+    /// `base_commit`.
+    #[serde(default)]
+    pub base_behind: Option<u32>,
 }
 
 /// A started session as the host running it lists it: what its record carries beside its id.
@@ -286,6 +294,8 @@ where
         updated_at_unix_ms: now_unix_ms(),
         display_name: None,
         remote_calls: Vec::new(),
+        base_commit: None,
+        base_behind: None,
     };
     ledger
         .persist(&record)
