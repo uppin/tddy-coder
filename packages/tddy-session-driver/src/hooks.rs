@@ -209,6 +209,8 @@ pub struct SessionHooks {
     log_path: String,
     recorder: Arc<HookRecorder>,
     followers: RemoteHookFollowers,
+    /// How long the session's waiting hooks wait for an answer: its spec's `answer_wait_secs`.
+    answer_wait_secs: u64,
 }
 
 impl SessionHooks {
@@ -233,6 +235,7 @@ impl SessionHooks {
             log_path,
             recorder: Arc::new(HookRecorder::default()),
             followers: RemoteHookFollowers::new(),
+            answer_wait_secs: spec.answer_wait_secs(),
         }))
     }
 
@@ -270,7 +273,11 @@ impl SessionHooks {
                 &self.hook_token,
                 &self.os_user,
             )
-            .answering_through(Arc::clone(&self.shell), worktree),
+            .answering_through(
+                Arc::clone(&self.shell),
+                worktree,
+                self.answer_wait_secs,
+            ),
         });
         let follower = RemoteHookFollower::start(
             Arc::clone(&self.shell),
