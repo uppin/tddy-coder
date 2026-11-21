@@ -220,7 +220,8 @@ pub fn seq_by_tool_call(frames: &[AcpAgentMessage]) -> HashMap<String, u64> {
 }
 
 /// Relay task for `StreamAcpReplay`: forwards live agent-activity records for one session (the
-/// broadcast is already session-scoped) as enriched ACP `tool_call` replay frames into `tx` until
+/// broadcast is already session-scoped) as enriched ACP `tool_call` replay frames, merged with the
+/// message frames (a claude-cli session's prompt and reply) published beside them, into `tx` until
 /// the client disconnects.
 ///
 /// `next_seq` is the resolved transcript's length at subscribe time, so the live tail continues the
@@ -233,35 +234,75 @@ pub fn seq_by_tool_call(frames: &[AcpAgentMessage]) -> HashMap<String, u64> {
 /// and is pre-seeded from the snapshot ([`seq_by_tool_call`]), so a call straddling the subscribe
 /// boundary refines the entry the snapshot already placed.
 pub async fn relay_acp_replay(
-    mut broadcast_rx: Receiver<AgentActivityRecord>,
+    mut records_rx: Receiver<AgentActivityRecord>,
+    mut frames_rx: Receiver<AcpAgentMessage>,
     tx: UnboundedSender<AcpReplayFrame>,
     mut next_seq: u64,
     mut seq_by_tool_call: HashMap<String, u64>,
 ) {
     loop {
-        match broadcast_rx.recv().await {
-            Ok(record) => {
-                let frame = tddy_service::acp_replay::frame_for_agent_activity(&record);
-                let seq = match tddy_service::acp_replay::tool_call_id_of(&frame) {
-                    Some(id) => *seq_by_tool_call.entry(id.to_string()).or_insert_with(|| {
-                        let seq = next_seq;
-                        next_seq += 1;
-                        seq
-                    }),
-                    None => {
-                        let seq = next_seq;
-                        next_seq += 1;
-                        seq
-                    }
-                };
-                if tx.send(acp_replay_frame(&frame, seq)).is_err() {
-                    break;
+        // Wait for either feed, then take everything both already hold, so what arrived together
+        // is ordered by its recorded timestamp — the order a later re-read gives it — rather than
+        // by which receiver the scheduler polled first. A message frame wins a tie, as it does in
+        // `read_session_transcript`.
+        let mut batch: Vec<(i64, bool, AcpAgentMessage)> = Vec::new();
+        tokio::select! {
+            received = records_rx.recv() => match received {
+                Ok(record) => batch.push(record_entry(&record)),
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => break,
+            },
+            received = frames_rx.recv() => match received {
+                Ok(frame) => batch.push(frame_entry(frame)),
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => break,
+            },
+        }
+        while let Ok(record) = records_rx.try_recv() {
+            batch.push(record_entry(&record));
+        }
+        while let Ok(frame) = frames_rx.try_recv() {
+            batch.push(frame_entry(frame));
+        }
+        batch.sort_by_key(|(at, is_record, _)| (*at, *is_record));
+
+        for (_, _, frame) in batch {
+            let seq = match tddy_service::acp_replay::tool_call_id_of(&frame) {
+                Some(id) => *seq_by_tool_call.entry(id.to_string()).or_insert_with(|| {
+                    let seq = next_seq;
+                    next_seq += 1;
+                    seq
+                }),
+                None => {
+                    let seq = next_seq;
+                    next_seq += 1;
+                    seq
                 }
+            };
+            if tx.send(acp_replay_frame(&frame, seq)).is_err() {
+                return;
             }
-            Err(RecvError::Lagged(_)) => {}
-            Err(RecvError::Closed) => break,
         }
     }
+}
+
+/// A hub record as a batch entry: its replay frame, flagged as a record.
+fn record_entry(record: &AgentActivityRecord) -> (i64, bool, AcpAgentMessage) {
+    let frame = tddy_service::acp_replay::frame_for_agent_activity(record);
+    (
+        tddy_service::acp_replay::frame_timestamp(&frame),
+        true,
+        frame,
+    )
+}
+
+/// A published message frame as a batch entry.
+fn frame_entry(frame: AcpAgentMessage) -> (i64, bool, AcpAgentMessage) {
+    (
+        tddy_service::acp_replay::frame_timestamp(&frame),
+        false,
+        frame,
+    )
 }
 
 /// Count-only relay task for `StreamAcpReplay`'s `CountThenLive` mode: each **newly-seen** tool

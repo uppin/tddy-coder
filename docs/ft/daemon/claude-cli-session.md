@@ -878,8 +878,10 @@ tool calls. This holds for local and target sessions alike, since both reach the
   not the session's transcript.
 - The texts are the hook payload's, not Claude's own transcript file: thoughts and intermediate text
   stay out, and no file is read over a target's shell.
-- A live `StreamAcpReplay` tail follows tool calls only; the two messages appear on the next read.
-  Recorded in `docs/dev/todo/2026-11-21-transcript-text-has-no-live-tail.md`.
+- A live `StreamAcpReplay` tail delivers the two messages as they are reported: the status report
+  publishes the frame it appended on the hub's frame channel, and the relay merges it with the tool
+  calls by recorded timestamp (a message wins a tie), so its live position is the one a re-read gives.
+  The wire shape is unchanged.
 
 ### Hook wiring
 

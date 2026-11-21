@@ -8,7 +8,7 @@ Feature: [claude-cli-session.md § The transcript holds what was said](../../ft/
 `record_spoken_message` appends the prompt and the reply to `acp-transcript.jsonl`, but a live
 `StreamAcpReplay` follows `AgentActivityHub`, which broadcasts `AgentActivityRecord` only. A client
 following live sees the text on its next re-read, not as it happens.
-(`docs/dev/todo/2026-11-21-transcript-text-has-no-live-tail.md`)
+(todo `2026-11-21-transcript-text-has-no-live-tail.md`, resolved here and deleted)
 
 ## State B
 

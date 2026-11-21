@@ -327,8 +327,10 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         }
 
         let broadcast_rx = self.ports.activity.subscribe(&req.session_id);
+        let frames_rx = self.ports.activity.subscribe_frames(&req.session_id);
         tokio::spawn(relay_acp_replay(
             broadcast_rx,
+            frames_rx,
             tx,
             snapshot.len() as u64,
             seq_by_tool_call(&snapshot),

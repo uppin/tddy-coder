@@ -49,6 +49,9 @@ impl ActivityServiceImpl {
         let at = i64::try_from(tddy_daemon_kernel::now_unix_ms()).unwrap_or(i64::MAX);
         let frame = session_update_frame(chunk_of(text.clone()), at);
         append_acp_frame(session_dir, &frame)
-            .map_err(|e| Status::internal(format!("failed to append to the transcript: {e}")))
+            .map_err(|e| Status::internal(format!("failed to append to the transcript: {e}")))?;
+        // A live `StreamAcpReplay` tail follows the hub, not the file.
+        self.ports.activity.publish_frame(&req.session_id, frame);
+        Ok(())
     }
 }
