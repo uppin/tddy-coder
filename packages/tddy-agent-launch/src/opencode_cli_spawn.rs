@@ -304,9 +304,11 @@ pub(crate) async fn start_cli_harness_session(
     let carried_effort = effort_launch(spec, effort);
     slots.argv_extra.extend(role_args);
     // An orchestrator and its children on this host message each other by peer name.
-    if target.is_none()
-        && (reports_to.is_some() || tddy_core::session_metadata::is_orchestrator_role(role_name))
-    {
+    if crate::back_channel::launches_under_peer_name(
+        target.is_some(),
+        reports_to.is_some(),
+        role_name,
+    ) {
         slots
             .argv_extra
             .extend(crate::back_channel::peer_name_args(spec, session_id));

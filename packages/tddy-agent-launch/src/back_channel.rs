@@ -51,6 +51,34 @@ pub enum ChildPlacement<'a> {
     },
 }
 
+impl<'a> ChildPlacement<'a> {
+    /// Where a child runs: on a target when `on_target`, reporting over the hook log its
+    /// `hook_token` authenticates; `None` for a target child with no hook token, whose log nobody
+    /// follows and which therefore has no channel.
+    pub fn of(on_target: bool, hook_token: Option<&'a str>) -> Option<Self> {
+        if !on_target {
+            return Some(Self::Local);
+        }
+        hook_token
+            .filter(|token| !token.is_empty())
+            .map(|hook_token| Self::Target {
+                hook_token,
+                hook_log_path: tddy_core::REMOTE_HOOK_LOG,
+            })
+    }
+}
+
+/// Whether a session is launched under its native peer name: an orchestrator (`role`), or a child
+/// that reports to one, running on the orchestrator's host.
+pub fn launches_under_peer_name(
+    on_target: bool,
+    reports_to_an_orchestrator: bool,
+    role: &str,
+) -> bool {
+    !on_target
+        && (reports_to_an_orchestrator || tddy_core::session_metadata::is_orchestrator_role(role))
+}
+
 /// What [`back_channel_for`] decides from.
 #[derive(Debug, Clone)]
 pub struct BackChannelInputs<'a> {
@@ -96,7 +124,8 @@ fn hook_log_channel(hook_token: &str, hook_log_path: &str) -> BackChannel {
     }
 }
 
-/// The guidance appended to a child's system prompt: who its orchestrator is, to report progress
+/// The guidance a child is given — in its system prompt, or ahead of its first prompt when its agent
+/// has no system-prompt slot ([`first_prompt_with`]): who its orchestrator is, to report progress
 /// and status to it periodically, and the exact way to do so over `channel`.
 pub fn back_channel_guidance(orchestrator_session_id: &str, channel: &BackChannel) -> String {
     let how = match channel {

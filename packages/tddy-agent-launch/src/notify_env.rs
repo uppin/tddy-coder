@@ -72,6 +72,9 @@ pub struct AgentNotifyLaunch<'a> {
     /// A managed recipe's orchestration prompt, when the session has one: the guidance is
     /// composed with it, because `claude` takes one `--append-system-prompt-file`.
     pub managed_prompt_file: Option<&'a Path>,
+    /// How the agent reports to the orchestrator that started it (`#orchestra` 2/9), when one did:
+    /// appended to the system prompt after the notify guidance.
+    pub back_channel_guidance: Option<&'a str>,
 }
 
 /// The notify environment and the system-prompt file a claude-cli agent is launched with.
@@ -86,15 +89,6 @@ pub struct AgentNotifyWiring {
 
 /// What a starting claude-cli agent is given so it can notify its operator.
 pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyWiring, Status> {
-    agent_notify_launch_reporting(launch, None)
-}
-
-/// [`agent_notify_launch`], with `back_channel_guidance` — how the agent reports to the orchestrator
-/// that started it (`#orchestra` 2/9) — appended to the system prompt after the notify guidance.
-pub fn agent_notify_launch_reporting(
-    launch: AgentNotifyLaunch<'_>,
-    back_channel_guidance: Option<&str>,
-) -> Result<AgentNotifyWiring, Status> {
     let AgentNotifyLaunch {
         config,
         agent_tool_socket,
@@ -103,6 +97,7 @@ pub fn agent_notify_launch_reporting(
         hook_token,
         session_dir,
         managed_prompt_file,
+        back_channel_guidance,
     } = launch;
     let daemon_url = daemon_hook_urls::advertise_daemon_url(config);
     let env = notify_env_pairs(
@@ -161,42 +156,21 @@ fn composed_system_prompt(
 pub fn agent_notify_unless_role(
     role_name: &str,
     launch: AgentNotifyLaunch<'_>,
-    back_channel_guidance: Option<&str>,
     env_extra: &mut Vec<(String, String)>,
 ) -> Result<Option<PathBuf>, Status> {
     if !role_name.is_empty() {
         return Ok(launch.managed_prompt_file.map(Path::to_path_buf));
     }
-    let notify = agent_notify_launch_reporting(launch, back_channel_guidance)?;
+    let notify = agent_notify_launch(launch)?;
     env_extra.extend(notify.env);
     Ok(notify.append_system_prompt_file)
 }
 
 /// What a resumed claude-cli agent is given again: the same wiring as at its start, built from the
 /// hook token its `.session.yaml` recorded. A session that recorded none — a sandboxed one has no
-/// hooks — and a session with a standing role are given nothing.
+/// hooks — and a session with a standing role are given nothing. `back_channel_guidance` is the
+/// guidance the session's start gave it (`#orchestra` 2/9), appended again.
 pub fn resumed_agent_notify_launch(
-    config: &DaemonConfig,
-    agent_tool_socket: &Path,
-    os_user: &str,
-    session_dir: &Path,
-    meta: &tddy_core::SessionMetadata,
-    managed_prompt_file: Option<&Path>,
-) -> Result<AgentNotifyWiring, Status> {
-    resumed_agent_notify_launch_reporting(
-        config,
-        agent_tool_socket,
-        os_user,
-        session_dir,
-        meta,
-        managed_prompt_file,
-        None,
-    )
-}
-
-/// [`resumed_agent_notify_launch`], with the `back_channel_guidance` the session's start gave it
-/// (`#orchestra` 2/9) appended again.
-pub fn resumed_agent_notify_launch_reporting(
     config: &DaemonConfig,
     agent_tool_socket: &Path,
     os_user: &str,
@@ -211,16 +185,14 @@ pub fn resumed_agent_notify_launch_reporting(
     let Some(hook_token) = meta.hook_token.as_deref().filter(|token| !token.is_empty()) else {
         return Ok(AgentNotifyWiring::default());
     };
-    agent_notify_launch_reporting(
-        AgentNotifyLaunch {
-            config,
-            agent_tool_socket,
-            os_user,
-            session_id: &meta.session_id,
-            hook_token,
-            session_dir,
-            managed_prompt_file,
-        },
+    agent_notify_launch(AgentNotifyLaunch {
+        config,
+        agent_tool_socket,
+        os_user,
+        session_id: &meta.session_id,
+        hook_token,
+        session_dir,
+        managed_prompt_file,
         back_channel_guidance,
-    )
+    })
 }
