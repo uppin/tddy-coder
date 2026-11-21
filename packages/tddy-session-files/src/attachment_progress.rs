@@ -126,6 +126,9 @@ impl AttachmentProgressSink {
                 tddy_service::proto::session::StartWorktreeReady {
                     branch: branch.to_string(),
                     worktree: worktree.to_string(),
+                    // TODO(base-freshness): carry the base commit the worktree was cut from and how
+                    // far it was behind its remote tip.
+                    ..Default::default()
                 },
             )),
         }));

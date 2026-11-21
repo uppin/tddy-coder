@@ -603,6 +603,11 @@ message StartRemoteCall {
 message StartWorktreeReady {
   string branch = 1;
   string worktree = 2;
+  // The commit the worktree was cut from, and how many commits it was behind its base's remote tip
+  // when it was cut (`#orchestra` 4/9). Empty and 0 when the start cut it from no base (a session
+  // on an existing branch).
+  string base_commit = 3;
+  uint32 base_behind = 4;
 }
 
 // Git's own progress for the clone a start runs (STEP_CLONE), parsed from `git clone --progress`.

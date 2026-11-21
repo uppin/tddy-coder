@@ -5,6 +5,7 @@
 //! routes to a peer: a worktree is a directory on the daemon that holds it, and there is no
 //! `daemon_instance_id` on any request here to route by.
 
+pub mod base_freshness;
 pub mod base_sync_cache;
 pub mod branch_intent;
 pub mod branch_owner;
