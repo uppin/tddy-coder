@@ -63,8 +63,21 @@ pub async fn launch_tab_on_target(
     terminal_id: &str,
     tab: TargetTab<'_>,
 ) -> Result<Arc<PtyHandle>, RemoteLaunchError> {
-    // Reach the target first, in the worktree: an unreachable target (or a worktree it lacks) fails
-    // the tab here, with the transport's words, before any terminal is registered.
+    reach_the_worktree(&tab).await?;
+    spawn_tab_client(
+        manager,
+        session_id,
+        terminal_id,
+        &tab,
+        "bash",
+        &target_shell_tab_command(tab.worktree),
+    )
+    .await
+}
+
+/// Reach the target first, in the worktree: an unreachable target (or a worktree it lacks) fails the
+/// tab, with the transport's words, before any terminal is registered.
+pub(super) async fn reach_the_worktree(tab: &TargetTab<'_>) -> Result<(), RemoteLaunchError> {
     tab.shell
         .exec(ExecRequest::new(format!(
             "cd {}",
@@ -74,15 +87,27 @@ pub async fn launch_tab_on_target(
         .map_err(RemoteLaunchError::Shell)?
         .success_or_exited()
         .map_err(RemoteLaunchError::Shell)?;
+    Ok(())
+}
 
-    let client = transport_client(tab.shell.as_ref(), &target_shell_tab_command(tab.worktree));
+/// Register the local PTY that runs the transport's client over `command` as the tab `terminal_id`
+/// of kind `kind` (`CliSessionManager::spawn_rendered_client_tab`), in `tab.session_dir`.
+pub(super) async fn spawn_tab_client(
+    manager: &CliSessionManager,
+    session_id: &str,
+    terminal_id: &str,
+    tab: &TargetTab<'_>,
+    kind: &str,
+    command: &str,
+) -> Result<Arc<PtyHandle>, RemoteLaunchError> {
+    let client = transport_client(tab.shell.as_ref(), command);
     manager
         .spawn_rendered_client_tab(
             session_id,
             terminal_id,
             tab.session_dir.to_path_buf(),
             ClientTab {
-                kind: "bash".to_string(),
+                kind: kind.to_string(),
                 argv: client.argv,
                 env: client.env,
                 exit_code_in_output: client.exit_code_in_output,

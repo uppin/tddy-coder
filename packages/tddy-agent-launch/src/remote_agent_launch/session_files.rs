@@ -54,6 +54,17 @@ pub(super) struct SessionFilesPlace<'a> {
     pub session_dir: &'a Path,
 }
 
+impl<'a> SessionFilesPlace<'a> {
+    /// The place of a main's launch: its target, its worktree and its session directory.
+    pub(super) fn of(remote: &'a RemoteLaunch<'_>) -> Self {
+        Self {
+            shell: remote.shell.as_ref(),
+            worktree: remote.worktree,
+            session_dir: remote.session_dir,
+        }
+    }
+}
+
 /// Write every file the plan's argv names under this host's session directory
 /// (`place.session_dir`) onto the target, and return the plan with those arguments rewritten to
 /// the target's copies.

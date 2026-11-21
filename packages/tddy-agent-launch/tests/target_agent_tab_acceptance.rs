@@ -10,7 +10,7 @@
 //! it started in and its arguments, then stays up on its terminal. The daemon's coding agents are
 //! the built-in specs, over a host that holds either a stand-in of the agent or none at all.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-target-agent-tab.md
+//! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs)
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

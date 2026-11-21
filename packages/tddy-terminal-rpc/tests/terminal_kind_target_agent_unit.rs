@@ -2,7 +2,7 @@
 //! runs on the session's target — a `TargetAgent` naming the harness — and a wrapper inside the
 //! target is still refused.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-target-agent-tab.md (`#session-liveness` 8/8)
+//! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs) (`#session-liveness` 8/8)
 
 use std::collections::HashMap;
 

@@ -7,7 +7,7 @@
 //! new jail, resuming its conversation where its harness can (PRD-2026-11-21-sandbox-agent-tab.md).
 //!
 //! Extended by `#session-liveness` 8/8: an agent tab recorded on the session's target is reopened on
-//! the target, resuming its conversation there (PRD-2026-11-21-target-agent-tab.md).
+//! the target, resuming its conversation there (docs/ft/daemon/session-liveness.md, A target session's tabs).
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-19-resume-restores-tab-roster.md (`#session-liveness` 4/4)
 //!

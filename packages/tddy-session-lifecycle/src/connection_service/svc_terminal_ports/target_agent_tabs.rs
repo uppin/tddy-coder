@@ -7,7 +7,7 @@
 //! and recorded `[target, agent]` in the session's roster. A target that cannot be resolved or
 //! reached fails the start with why, and nothing is recorded.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-target-agent-tab.md
+//! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs)
 
 use tddy_agent_launch::remote_agent_launch::{launch_agent_tab_on_target, TargetTab};
 use tddy_agent_launch::restore_tabs::{agent_launch_node, new_target_agent_tab, NewTargetAgentTab};

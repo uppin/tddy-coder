@@ -3,7 +3,7 @@
 //! login `PATH`, in the session's worktree there, in a conversation of its own — is listed under its
 //! harness, and is recorded `[target, agent]` (`#session-liveness` 8/8).
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-target-agent-tab.md
+//! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs)
 //!
 //! The session's target resolves through an in-memory `TabTargetShell`
 //! (`target_tab_support::fake_target_shells`), injected with

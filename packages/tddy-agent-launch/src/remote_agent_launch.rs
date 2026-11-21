@@ -253,12 +253,8 @@ pub async fn launch_on_target(
     // A file the launch rendered into this session's directory on this host (its appended system
     // prompt) is copied into the worktree's `.tddy/` on the target and its argument rewritten to
     // that copy: the target need not have this host's directory, so no host path reaches it.
-    let place = SessionFilesPlace {
-        shell: remote.shell.as_ref(),
-        worktree: remote.worktree,
-        session_dir: remote.session_dir,
-    };
-    let plan = write_rendered_session_files(&place, slot_files, plan).await?;
+    let plan =
+        write_rendered_session_files(&SessionFilesPlace::of(&remote), slot_files, plan).await?;
     pre_trust_a_claude_clone(agent, &remote).await?;
 
     let client = client_argv_and_env(agent, &remote, &session, plan);

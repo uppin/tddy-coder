@@ -9,17 +9,17 @@
 //! found by its bare command on the target login's own `PATH`, under `env -i` with exactly the tab's
 //! environment ([`super::target_login_exec`]).
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-target-agent-tab.md
+//! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs)
 
 use std::sync::Arc;
 
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
-use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ClientTab};
+use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_core::ssh_exec::shell_single_quote;
-use tddy_remote_shell::ExecRequest;
 
 use super::session_files::{write_rendered_session_files, SessionFilesPlace};
-use super::{target_login_exec, transport_client, RemoteLaunchError, TargetTab};
+use super::target_tab::{reach_the_worktree, spawn_tab_client};
+use super::{target_login_exec, RemoteLaunchError, TargetTab};
 use crate::spec_launch::HostPtyPlan;
 
 /// What an agent tab runs on a target.
@@ -57,17 +57,7 @@ pub async fn launch_agent_tab_on_target(
     tab: TargetTab<'_>,
     agent: &TargetAgentTab,
 ) -> Result<Arc<PtyHandle>, RemoteLaunchError> {
-    // Reach the target first, in the worktree: an unreachable target (or a worktree it lacks) fails
-    // the tab here, with the transport's words, before any terminal is registered.
-    tab.shell
-        .exec(ExecRequest::new(format!(
-            "cd {}",
-            shell_single_quote(&tab.worktree.to_string_lossy())
-        )))
-        .await
-        .map_err(RemoteLaunchError::Shell)?
-        .success_or_exited()
-        .map_err(RemoteLaunchError::Shell)?;
+    reach_the_worktree(&tab).await?;
 
     // A file the tab's argv names in this session's directory goes to the worktree's `.tddy/` on the
     // target, its argument rewritten: no host path reaches the target.
@@ -91,19 +81,13 @@ pub async fn launch_agent_tab_on_target(
         shell_single_quote(&tab.worktree.to_string_lossy()),
         target_login_exec(&plan.argv, &plan.env)
     );
-    let client = transport_client(tab.shell.as_ref(), &command);
-    manager
-        .spawn_rendered_client_tab(
-            session_id,
-            terminal_id,
-            tab.session_dir.to_path_buf(),
-            ClientTab {
-                kind: agent.kind.clone(),
-                argv: client.argv,
-                env: client.env,
-                exit_code_in_output: client.exit_code_in_output,
-            },
-        )
-        .await
-        .map_err(|error| RemoteLaunchError::Spawn(error.to_string()))
+    spawn_tab_client(
+        manager,
+        session_id,
+        terminal_id,
+        &tab,
+        &agent.kind,
+        &command,
+    )
+    .await
 }

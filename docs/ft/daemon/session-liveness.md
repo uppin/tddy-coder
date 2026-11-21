@@ -222,13 +222,24 @@ in one session.
 ## A target session's tabs
 
 A target (ssh or Coder) session's main runs on its target, reached through its remote shell. A secondary
-**shell** tab of that session is opened where the person picks it, in the web's new-tab menu: **On target**
-(the default) or **On this host**. Both can coexist in one session.
+tab of that session — a **shell** or an **agent** — is opened where the person picks it, in the web's new-tab
+menu: **On target** (the default) or **On this host**. Both can coexist in one session.
 
 - **On target.** The tab runs `cd '<worktree>' && exec "${SHELL:-/bin/sh}" -l` on the target: the target user's
   own login shell, with the target login's own environment — a person's shell, not the `env -i` launch of an
   agent — through the session's remote shell, as a local tab terminal (one interactive `ssh -tt` or `coder ssh`
   client per tab, in the session's directory on this host).
+- **An agent on the target.** An agent kind opened "On target" runs the agent on the target, in the session's
+  worktree there, through the same remote shell and as the same kind of local tab terminal. The target
+  resolves the agent: the tab runs its spec's **bare command** (`claude`, `agent`) found on the target
+  login's own `PATH`, so a daemon host with no copy of the agent opens one. A conversation the agent mints
+  itself (Cursor's chat) is minted on the target, in the worktree there; one the daemon names (Claude's
+  `--session-id`) is a fresh id. A remote shell forwards no environment, so what the agent needs travels in
+  its command, as a target start's does: the spec's `run.env` and the `pass_env` values the daemon holds,
+  under the target login's own base (`HOME`, `PATH`, `TMPDIR`). A file the agent's argument names in the
+  session's directory here is written into the worktree's `.tddy/` on the target and its argument rewritten
+  to that copy, so **no path of this host reaches the target**. The agent's failure, and its exit, end only
+  its tab.
 - **A tab is not a main.** Opening it writes no pid file on the target, places or rewrites no session pointer,
   applies no startup window, and never stops the session: its failure, and its exit, end only the tab.
 - **Whose target.** The session's `.session.yaml` `target` and `repo_path` name the machine and the worktree;
@@ -240,16 +251,20 @@ A target (ssh or Coder) session's main runs on its target, reached through its r
   worktree cannot be entered — fails the start with the transport's own words, `UNAVAILABLE`, and records
   nothing. A target that could not be *resolved* (a locked vault, a missing account, no recorded target or
   worktree) stays `FAILED_PRECONDITION`: the caller can meet it.
-- **Recorded `[target, shell]`.** A `target` wrapper around an agent, or around another wrapper, is
-  `INVALID_ARGUMENT`; an agent on a target is a later node's. A tddy-coder participant, which reaches no
-  target, refuses it.
+- **Recorded `[target, shell]` or `[target, agent]`.** A `target` wrapper around anything that is neither the
+  login shell nor an agent, or around an agent that wraps another wrapper, is `INVALID_ARGUMENT`. A
+  tddy-coder participant, which reaches no target, refuses both (`FAILED_PRECONDITION`).
 - **On this host.** A tab "On this host" of a target session is a plain shell in the session's own directory
   on this host, where its main's client runs: the recorded worktree exists only on the target. It is
   reachable whether or not the session's main runs.
-- **Resume.** The roster restore reopens a `[target, shell]` tab on the target under its recorded id, as the
-  caller of the resume; it is dropped, with the reason, when the target cannot be reached or the vault is
-  locked.
-- **Liveness.** A shell tab never counts as a live agent, on a target as anywhere.
+- **Resume.** The roster restore reopens a `[target, shell]` or `[target, agent]` tab on the target under its
+  recorded id, as the caller of the resume; it is dropped, with the reason, when the target cannot be reached
+  or the vault is locked. An agent tab resumes its conversation on the target where its harness can (claude
+  `--resume <id>`, cursor `--resume <chat id>`) and reopens fresh, with the reason, where it cannot or the
+  record holds no conversation.
+- **Liveness.** A shell tab never counts as a live agent, on a target as anywhere. An agent tab on a target
+  is an agent terminal tab like any other: it counts while its terminal — the local client of the
+  transport — resolves, and that client exits with the remote agent.
 
 ## What acts on held processes
 
@@ -287,6 +302,14 @@ agent for), and Telegram's list, branch-owner scan and delete.
 - **An agent tab on a target is not restored.** An agent tab never starts on a target, so a `target` chain
   around an agent is dropped with a reason; **target agent tab** is a further stack node. `restore_plan`
   dispatches per node kind, so it adds a kind.
+- **Only the tab shapes this daemon starts are restored.** `restore_plan` dispatches per node kind and a
+  chain holding a kind it does not know — or a known one around something it cannot carry (a `target`
+  around an agent that wraps another node) — is dropped with a reason.
+- **A target's agent must be on the target's login `PATH`.** A target agent tab runs the spec's bare command,
+  so an agent the target cannot find exits `127` inside its tab, with the transport's output visible there;
+  nothing probes for it beforehand. The session-**start** half — a start on a target still resolves the
+  agent on the daemon's host first — is a separate decision:
+  [a start on a target requires the agent on the daemon's host](../../dev/todo/2026-11-19-a-target-start-requires-the-agent-on-the-daemon-host.md).
 - opencode, muse and warp tabs reopen fresh, not in their conversation (`TODO(opencode-cli)`,
   `TODO(muse-cli)`, `TODO(warp-cli)` on `tab_conversation_is_resumable`).
 - The sandboxed resume path calls the same restore but has no test of its own: its jail harness is the
