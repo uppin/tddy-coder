@@ -244,6 +244,8 @@ impl OperatorChannel for TelegramDaemonHooks {
                 SessionNotificationSource::SessionEnded => false,
                 // A message between sessions is for its recipient's inbox (`#activity-wake` 5/5).
                 SessionNotificationSource::Message => false,
+                // A trunk commit is its orchestrator's own activity (`#orchestra` 5/9).
+                SessionNotificationSource::TrunkCommit => false,
                 SessionNotificationSource::AgentToolCall | SessionNotificationSource::Presenter => {
                     false
                 }
