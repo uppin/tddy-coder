@@ -64,7 +64,16 @@ pub struct TargetSession {
 /// agent runs on this host (or that records no worktree).
 #[must_use]
 pub fn target_session_in(session_dir: &Path) -> Option<TargetSession> {
-    let metadata = tddy_core::read_session_metadata(session_dir).ok()?;
+    target_session_from(
+        session_dir,
+        tddy_core::read_session_metadata(session_dir).ok()?,
+    )
+}
+
+fn target_session_from(
+    session_dir: &Path,
+    metadata: tddy_core::SessionMetadata,
+) -> Option<TargetSession> {
     Some(TargetSession {
         session_dir: session_dir.to_path_buf(),
         target: metadata.target?,
@@ -84,12 +93,14 @@ pub fn target_session_of_worktree(
     std::fs::read_dir(sessions_dir)
         .ok()?
         .filter_map(Result::ok)
-        .filter(|entry| entry.path().is_dir())
-        .filter(|entry| {
-            tddy_core::read_session_metadata(&entry.path())
-                .is_ok_and(|metadata| metadata.project_id == project_id)
+        .map(|entry| entry.path())
+        .filter(|dir| dir.is_dir())
+        .filter_map(|dir| {
+            let metadata = tddy_core::read_session_metadata(&dir).ok()?;
+            (metadata.project_id == project_id)
+                .then(|| target_session_from(&dir, metadata))
+                .flatten()
         })
-        .filter_map(|entry| target_session_in(&entry.path()))
         .find(|session| session.worktree == worktree)
 }
 
@@ -104,31 +115,44 @@ pub fn target_checkout_root_of(worktree: &str) -> Option<String> {
         .map(|root| root.to_string_lossy().into_owned())
 }
 
+/// [`target_checkout_root_of`], refusing a path outside a clone's `.worktrees` directory.
+fn checkout_root_of(worktree: &str) -> Result<String, Status> {
+    target_checkout_root_of(worktree).ok_or_else(|| {
+        Status::invalid_argument(format!(
+            "the target worktree {worktree} is not under a clone's .worktrees directory"
+        ))
+    })
+}
+
 fn quoted(text: &str) -> String {
     tddy_core::ssh_exec::shell_single_quote(text)
 }
 
-/// Run `command` on the target; a non-zero exit is an `internal` error carrying its output.
-async fn run_on_target(shell: &dyn RemoteShell, command: String) -> Result<Vec<u8>, Status> {
+/// Whether `command` exits zero on the target. Only a failure to run it at all is an error.
+async fn succeeds_on_target(shell: &dyn RemoteShell, command: String) -> Result<bool, Status> {
     let output = shell
         .exec(tddy_remote_shell::ExecRequest::new(command))
         .await
         .map_err(|e| Status::internal(e.to_string()))?;
-    let output = output
+    Ok(output.status == 0)
+}
+
+/// Run `command` on the target; a non-zero exit is an `internal` error carrying its output.
+async fn run_on_target(shell: &dyn RemoteShell, command: String) -> Result<(), Status> {
+    shell
+        .exec(tddy_remote_shell::ExecRequest::new(command))
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
         .success_or_exited()
         .map_err(|e| Status::internal(e.to_string()))?;
-    Ok(output.stdout)
+    Ok(())
 }
 
 /// Remove a target session's worktree on its target, through `shell`: the worktree, the pointer
 /// inside it, and the clone's registration of it (`git worktree remove`, then `prune`), so the
 /// clone does not keep a dangling entry.
 pub async fn remove_target_worktree(shell: &dyn RemoteShell, worktree: &str) -> Result<(), Status> {
-    let root = target_checkout_root_of(worktree).ok_or_else(|| {
-        Status::invalid_argument(format!(
-            "the target worktree {worktree} is not under a clone's .worktrees directory"
-        ))
-    })?;
+    let root = checkout_root_of(worktree)?;
     for command in [
         format!(
             "git -C {} worktree remove --force {}",
@@ -144,9 +168,12 @@ pub async fn remove_target_worktree(shell: &dyn RemoteShell, worktree: &str) -> 
 
 /// Clean a target session's worktree on its target: untracked and ignored files go.
 pub async fn clean_target_worktree(shell: &dyn RemoteShell, worktree: &str) -> Result<(), Status> {
-    run_on_target(shell, format!("git -C {} clean -fdx", quoted(worktree)))
-        .await
-        .map(|_| ())
+    run_on_target(shell, format!("git -C {} clean -fdx", quoted(worktree))).await
+}
+
+/// A recorded, non-blank changeset field.
+fn recorded(field: Option<&str>) -> Option<&str> {
+    field.map(str::trim).filter(|value| !value.is_empty())
 }
 
 /// Re-create a target session's worktree on its target at the recorded path, and answer that path.
@@ -159,71 +186,57 @@ pub async fn restore_target_worktree(
     session: &TargetSession,
 ) -> Result<String, Status> {
     let worktree = session.worktree.as_str();
-    let root = target_checkout_root_of(worktree).ok_or_else(|| {
-        Status::invalid_argument(format!(
-            "the target worktree {worktree} is not under a clone's .worktrees directory"
-        ))
-    })?;
+    let root = checkout_root_of(worktree)?;
     let changeset = tddy_core::read_changeset(&session.session_dir)
         .map_err(|e| Status::internal(format!("the session's changeset does not read: {e}")))?;
-    let branch = changeset
-        .branch
-        .as_deref()
-        .map(str::trim)
-        .filter(|branch| !branch.is_empty())
+    let branch = recorded(changeset.branch.as_deref())
         .ok_or_else(|| Status::failed_precondition("the session records no branch to restore"))?;
 
-    let present = shell
-        .exec(tddy_remote_shell::ExecRequest::new(format!(
-            "test -d {}",
-            quoted(worktree)
-        )))
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
-    if present.status == 0 {
+    if succeeds_on_target(shell, format!("test -d {}", quoted(worktree))).await? {
         return Ok(worktree.to_string());
     }
-
     run_on_target(shell, format!("git -C {} worktree prune", quoted(&root))).await?;
-    let has_branch = shell
-        .exec(tddy_remote_shell::ExecRequest::new(format!(
-            "git -C {} rev-parse --verify --quiet {}",
-            quoted(&root),
-            quoted(&format!("refs/heads/{branch}"))
-        )))
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?
-        .status
-        == 0;
-    let add = if has_branch {
-        format!(
-            "git -C {} worktree add {} {}",
-            quoted(&root),
-            quoted(worktree),
-            quoted(branch)
-        )
-    } else {
-        let base = changeset
-            .effective_worktree_integration_base_ref
-            .as_deref()
-            .map(str::trim)
-            .filter(|base| !base.is_empty())
-            .ok_or_else(|| {
-                Status::failed_precondition(
-                    "the session's branch is gone on its target and no integration base is recorded",
-                )
-            })?;
-        run_on_target(shell, format!("git -C {} fetch --all", quoted(&root))).await?;
-        format!(
-            "git -C {} worktree add -b {} {} {}",
-            quoted(&root),
-            quoted(branch),
-            quoted(worktree),
-            quoted(base)
-        )
-    };
+    let base = recorded(changeset.effective_worktree_integration_base_ref.as_deref());
+    let add = worktree_add_command(shell, &root, worktree, branch, base).await?;
     run_on_target(shell, add).await?;
     Ok(worktree.to_string())
+}
+
+/// The `git worktree add` that re-creates `worktree` on `branch`: checked out again when the clone
+/// still has the branch, otherwise cut from `base` after a fetch.
+async fn worktree_add_command(
+    shell: &dyn RemoteShell,
+    root: &str,
+    worktree: &str,
+    branch: &str,
+    base: Option<&str>,
+) -> Result<String, Status> {
+    let has_branch = format!(
+        "git -C {} rev-parse --verify --quiet {}",
+        quoted(root),
+        quoted(&format!("refs/heads/{branch}"))
+    );
+    if succeeds_on_target(shell, has_branch).await? {
+        return Ok(format!(
+            "git -C {} worktree add {} {}",
+            quoted(root),
+            quoted(worktree),
+            quoted(branch)
+        ));
+    }
+    let base = base.ok_or_else(|| {
+        Status::failed_precondition(
+            "the session's branch is gone on its target and no integration base is recorded",
+        )
+    })?;
+    run_on_target(shell, format!("git -C {} fetch --all", quoted(root))).await?;
+    Ok(format!(
+        "git -C {} worktree add -b {} {} {}",
+        quoted(root),
+        quoted(branch),
+        quoted(worktree),
+        quoted(base)
+    ))
 }
 
 #[cfg(test)]

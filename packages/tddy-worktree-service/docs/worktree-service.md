@@ -111,6 +111,31 @@ half (`CodebaseHalf`: the daemon and workspace session holding the checkout), wh
 builds from the record's `codebase_*` fields. The project-home read and git tools resolve every target through it; see
 [project-home tools](../../../docs/ft/daemon/project-concept.md#project-home-tools).
 
+## Target sessions' worktrees (`target_worktrees.rs`)
+
+A session whose agent runs on a target records `target` and `repo_path` (the worktree **on the
+target**) in its `.session.yaml`. `CleanWorktree`, `RemoveWorktree` and `RestoreSessionWorktree`
+route such a session to its target before resolving anything against the host's clone:
+
+- `target_session_in(session_dir)` (Restore) and `target_session_of_worktree(sessions_dir,
+  project_id, worktree)` (Clean, Remove) find the `TargetSession` — `None` means a local worktree,
+  and the existing path runs unchanged.
+- The shell comes through the **`TargetShells`** port, `shell_for(target, subject)`, where `subject`
+  is the caller the session token resolves to. The default is `NoTargetShells`
+  (`FAILED_PRECONDITION`, "this daemon reaches no session target"); the daemon installs
+  `tddy_agent_launch::target_shells::SessionTargetShells` with
+  `WorktreeServiceImpl::with_target_shells`. It is a port because the code that builds a target
+  shell lives in `tddy-agent-launch`, which depends on this crate.
+- `clean_target_worktree` (`git clean -fdx`), `remove_target_worktree` (`git worktree remove
+  --force`, then `prune`, in `target_checkout_root_of(worktree)` — `<root>/.worktrees/<id>` →
+  `<root>`; `DeleteSession` uses it too) and `restore_target_worktree` (present → unchanged;
+  otherwise `prune`, then `worktree add` of the recorded branch, or `fetch --all` and `worktree add
+  -b` from the recorded integration base; neither recorded → `FAILED_PRECONDITION`). A non-zero exit
+  is `INTERNAL` with its output. Restore never rewrites the changeset.
+
+`tests/target_worktree_actions_acceptance.rs` drives the three RPCs against a stand-in ssh target
+(real git on both sides) through the port.
+
 ## Session git operations (`session_git_ops.rs`)
 
 The [project-home git tools](../../../docs/ft/daemon/project-concept.md#git-tools) run here, on a

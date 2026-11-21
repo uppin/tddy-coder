@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-worktree-service/src/service.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-24 — `/pr-wrap` step 3.5 file-length gate on #509 (`#keyring` 2/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **808 production lines** (2026-10-25, #752; 772 at 2026-10-18, #625; 777 at 2026-10-04, #571; `awk '/#\[cfg\(test\)\]/{exit} {n++} END{print n}'`; 752 at 2026-09-24) — originally **752 production lines** of 752 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.62× over**
-**Thresholds breached:** length 772 > 500
+**Metrics:** **883 production lines** (2026-11-21, #970; 808 at 2026-10-25, #752; 772 at 2026-10-18, #625; 777 at 2026-10-04, #571; `awk '/#\[cfg\(test\)\]/{exit} {n++} END{print n}'`; 752 at 2026-09-24) — originally **752 production lines** of 752 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.77× over**
+**Thresholds breached:** length 883 > 500
 **Restructure:** not designed
-**Status:** Open — regressed 2026-10-25 (+36 from #752; 1.62× over) — **unclaimed**
+**Status:** Open — regressed 2026-11-21 (+75 from #970; 1.77× over) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
 ## Measurement history
@@ -17,6 +17,7 @@
 | 2026-10-04 | 777 | 752 at the base `c3567fde` → 777 after #571 (`#live-plan` 12/15): +25 lines, the session-ownership helper `session_dir_for` / `resolve_owned_session_dir`. Grown; the split is deferred because dependent #572 touches this file (the stack rule). Not claimed by any PR. The seam line ranges above predate this growth and must be re-derived |
 | 2026-10-18 | 772 | 777 at the base → 772 after #625 (`#satellite` 3/13): −5 lines. The local `WorktreeRoomCloser` trait and `NoSessionRooms` became re-exports of the `SessionRooms` port. Improved, not clean; the split is still deferred (dependents of the `#keyring` stack touch this file) |
 | 2026-10-25 | 808 | **regressed by #752** (`#start-parity` 3/9): 772 → 808 (+36) — `resolve_main_repo`'s body became the public `project_main_repo_on_host` (the project-home worktree tools resolve the same main repo), the `worktree_size_calculator()` accessor, and `stream_worktree_stats` reading its first frame through `worktrees::project_worktree_snapshot`. **Split deferred by developer instruction**: later `#start-parity` nodes (8/9 `disk-refresh`, 9/9) import `project_main_repo_on_host` from this module, so a move here breaks each of them on rebase. Seam ranges above need re-deriving |
+| 2026-11-21 | 883 | **regressed by #970** (`#target-parity` 2/7): 808 → 883 (+75) — the `target_shells` field and `with_target_shells` builder, `shell_of_target` / `target_session_of`, and the target dispatch at the head of `remove_worktree`, `clean_worktree` and `restore_session_worktree`; the work itself is in the new `target_worktrees.rs`. **Split not done here**: the file is stack-shared with `#target-parity` 7/7 (#975), so it is recorded, not split, under the stack rule |
 
 ## What would close it — candidate seams (not proven)
 

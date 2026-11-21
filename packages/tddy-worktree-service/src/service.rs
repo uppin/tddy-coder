@@ -180,7 +180,8 @@ impl WorktreeServiceImpl {
         session_token: &str,
         session: &crate::target_worktrees::TargetSession,
     ) -> Result<Arc<dyn tddy_remote_shell::RemoteShell>, Status> {
-        let subject = (self.user_resolver)(session_token).unwrap_or_default();
+        let subject = (self.user_resolver)(session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         self.target_shells
             .shell_for(&session.target, &subject)
             .await
