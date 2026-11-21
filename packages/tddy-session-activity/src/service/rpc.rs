@@ -69,10 +69,33 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         request: Request<tddy_service::proto::activity::ListPathAccessRequestsRequest>,
     ) -> Result<Response<tddy_service::proto::activity::ListPathAccessRequestsResponse>, Status>
     {
-        // TODO(access-elicitation): implement
-        let _ = request;
-        Err(Status::unimplemented(
-            "ListPathAccessRequests is not served yet",
+        let req = request.into_inner();
+        // Resolved under the caller's own OS user: a token that is not this session's owner's
+        // finds no session directory, and so no requests.
+        self.session_dir(&req.session_token, &req.session_id)?;
+        Ok(Response::new(
+            tddy_service::proto::activity::ListPathAccessRequestsResponse {
+                requests: self
+                    .path_access
+                    .pending(&req.session_id)
+                    .into_iter()
+                    .map(|pending| tddy_service::proto::activity::PathAccessRequest {
+                        request_id: pending.request_id,
+                        paths: pending
+                            .paths
+                            .iter()
+                            .map(|p| p.display().to_string())
+                            .collect(),
+                        mode: match pending.mode {
+                            crate::path_grants::PathGrantMode::Read => "read",
+                            crate::path_grants::PathGrantMode::Write => "write",
+                        }
+                        .to_string(),
+                        reason: pending.reason,
+                        requested_at_unix_ms: pending.requested_at_unix_ms,
+                    })
+                    .collect(),
+            },
         ))
     }
 
@@ -81,9 +104,23 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         &self,
         request: Request<tddy_service::proto::activity::AnswerPathAccessRequest>,
     ) -> Result<Response<tddy_service::proto::activity::AnswerPathAccessResponse>, Status> {
-        // TODO(access-elicitation): implement
-        let _ = request;
-        Err(Status::unimplemented("AnswerPathAccess is not served yet"))
+        let req = request.into_inner();
+        self.session_dir(&req.session_token, &req.session_id)?;
+        self.path_access
+            .answer(&req.session_id, &req.request_id, req.allow)
+            .map_err(|e| match e {
+                crate::path_access::PathAccessAnswerError::NotPending { request_id } => {
+                    Status::not_found(format!(
+                        "access request {request_id} is not waiting for an answer"
+                    ))
+                }
+                crate::path_access::PathAccessAnswerError::GrantNotWritten(e) => {
+                    Status::internal(format!("the grant could not be written: {e}"))
+                }
+            })?;
+        Ok(Response::new(
+            tddy_service::proto::activity::AnswerPathAccessResponse {},
+        ))
     }
 
     /// An orchestrated session's `PermissionRequest` hook waiting for its orchestrator's answer —

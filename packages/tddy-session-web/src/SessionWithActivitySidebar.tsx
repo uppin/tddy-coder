@@ -3,6 +3,8 @@ import type { Client } from "@connectrpc/connect";
 import { useIsNarrowViewport, Button } from "tddy-ui-web";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
+import { PathAccessRequests } from "./PathAccessRequests";
+import { ORCHESTRATOR_ROLE, PROJECT_HOME_ROLE } from "./utils/projectHomeGroups";
 import { SessionActivitySidebar } from "./SessionActivitySidebar";
 import { defaultActivitySidebarOpen } from "./activitySidebarState";
 import { useHttpClient } from "tddy-client-web";
@@ -142,6 +144,9 @@ export function SessionWithActivitySidebar(props: {
   return (
     <div style={ROOT_STYLE}>
       {toolbar(toggle)}
+      {(session.sessionRole === ORCHESTRATOR_ROLE || session.sessionRole === PROJECT_HOME_ROLE) && (
+        <PathAccessRequests sessionId={sessionId} sessionToken={sessionToken} client={client} />
+      )}
       <div style={ROW_STYLE}>
         <div style={COLUMN_STYLE}>{children}</div>
         {shown && (

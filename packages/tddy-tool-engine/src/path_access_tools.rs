@@ -6,6 +6,8 @@
 //! succeed there; denied or unanswered ones stay out of reach. Feature doc:
 //! docs/ft/daemon/project-concept.md § Orchestrator sessions.
 
+use std::path::Path;
+
 use async_trait::async_trait;
 use serde::Deserialize;
 use tddy_worktree_service::session_target::HomeCaller;
@@ -21,8 +23,39 @@ pub fn is_path_access_tool(name: &str) -> bool {
 
 /// [`REQUEST_PATH_ACCESS_TOOL`]'s definition.
 pub fn request_path_access_tool_def() -> ToolDef {
-    // TODO(access-elicitation): implement
-    unimplemented!("request_path_access_tool_def")
+    ToolDef {
+        name: REQUEST_PATH_ACCESS_TOOL.to_string(),
+        description: "Ask the operator for access to paths outside your reach. Name each path in \
+                      full (absolute), the mode (`read`, or `write` for read and write) and why; \
+                      the call waits for the operator's answer. An allowed path is yours for the \
+                      rest of the session, together with everything under it: `Read`, `Grep` and \
+                      `Glob` reach it and, for `write`, `Write`, `StrReplace` and `Delete` act \
+                      there. A denied or unanswered request leaves the paths out of reach."
+            .to_string(),
+        input_schema_json: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "paths": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "minItems": 1,
+                    "description": "Absolute paths; each grant covers the path and everything under it."
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["read", "write"],
+                    "description": "`write` includes read."
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Why you need them, in your own words; the operator decides on it."
+                }
+            },
+            "required": ["paths", "mode", "reason"],
+            "additionalProperties": false
+        })
+        .to_string(),
+    }
 }
 
 /// What access is asked for.
@@ -78,9 +111,39 @@ pub async fn execute_path_access_tool(
     caller: &HomeCaller,
     args_json: &str,
 ) -> ToolOutcome {
-    // TODO(access-elicitation): implement
-    let _ = (port, caller, args_json);
-    unimplemented!("execute_path_access_tool")
+    let args: RequestPathAccessArgs = match serde_json::from_str(args_json) {
+        Ok(args) => args,
+        Err(e) => {
+            return ToolOutcome::err(format!("{REQUEST_PATH_ACCESS_TOOL}: invalid args: {e}"))
+        }
+    };
+    if args.paths.is_empty() {
+        return ToolOutcome::err(format!(
+            "{REQUEST_PATH_ACCESS_TOOL}: name at least one path"
+        ));
+    }
+    if let Some(relative) = args.paths.iter().find(|p| !Path::new(p).is_absolute()) {
+        return ToolOutcome::err(format!(
+            "{REQUEST_PATH_ACCESS_TOOL}: {relative} is not an absolute path; name every path in full"
+        ));
+    }
+    if args.reason.trim().is_empty() {
+        return ToolOutcome::err(format!(
+            "{REQUEST_PATH_ACCESS_TOOL}: say why you need the access; the operator decides on it"
+        ));
+    }
+    let paths = args.paths.clone();
+    match port.request_path_access(caller, args).await {
+        Ok(answer) => {
+            let answer = match answer {
+                PathAccessAnswer::Allowed => "allowed",
+                PathAccessAnswer::Denied => "denied",
+                PathAccessAnswer::Unanswered => "unanswered",
+            };
+            ToolOutcome::ok(serde_json::json!({ "answer": answer, "paths": paths }).to_string())
+        }
+        Err(e) => ToolOutcome::err(format!("{REQUEST_PATH_ACCESS_TOOL}: {e}")),
+    }
 }
 
 #[cfg(test)]

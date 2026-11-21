@@ -65,7 +65,7 @@ impl BaseFreshnessPort for DaemonBaseFreshness {
 
 /// The calling session and its project, when its record names an orchestrator role; anything else
 /// is refused.
-fn orchestrator_caller(
+pub(super) fn orchestrator_caller(
     sessions_base: &Path,
     session_id: &str,
     tool_name: &str,

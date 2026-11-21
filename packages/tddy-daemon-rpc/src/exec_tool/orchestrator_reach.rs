@@ -23,11 +23,57 @@ use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::user_paths::{home_dir_for_user, projects_path_for_user};
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
-use tddy_session_activity::path_grants::PathGrantStore;
+use tddy_session_activity::path_grants::{PathGrantMode, PathGrantStore};
 use tddy_tool_engine::reach::{execute_in_reach, is_reach_tool, ReadReach};
 
 use super::project_home::caller::record_call;
 use super::ExecToolRpcHandler;
+
+/// The tools an orchestrator may run inside a write grant, and nowhere else.
+pub(super) fn is_granted_write_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "Write" | "StrReplace" | "Delete")
+}
+
+/// A write that lies inside one of a session's write grants (`#orchestra` 6/9).
+pub(super) struct GrantedWrite {
+    /// The grant the path is inside, symlinks resolved: where the write is confined.
+    pub(super) root: PathBuf,
+    /// The path to write, absolute and resolved like a read's.
+    pub(super) path: PathBuf,
+}
+
+/// The write grant `args_json`'s `path` lies inside, for the session whose directory is
+/// `session_dir`: `None` for a relative path (the home worktree is never writable), a path outside
+/// every write grant, and a read-only grant. The path is resolved the way a read's is
+/// ([`ReadReach::resolve`]): symlinks followed, `..` refused, a path not yet created judged by the
+/// directory it would be created in.
+pub(super) fn granted_write(session_dir: &Path, args_json: &str) -> Option<GrantedWrite> {
+    let args: serde_json::Value = serde_json::from_str(args_json).ok()?;
+    let path = args.get("path")?.as_str()?;
+    if !Path::new(path).is_absolute() {
+        return None;
+    }
+    let roots: Vec<PathBuf> = PathGrantStore::open(session_dir)
+        .grants()
+        .ok()?
+        .into_iter()
+        .filter(|grant| grant.mode == PathGrantMode::Write)
+        .map(|grant| grant.path)
+        .collect();
+    // The session directory stands in for the home, which the reach always contains: the check
+    // that decides is the write roots below, never the reach.
+    let reach = ReadReach::new(session_dir.to_path_buf(), roots);
+    let resolved = reach.resolve(path).ok()?;
+    let root = reach
+        .roots()
+        .iter()
+        .find(|root| resolved.starts_with(root))?
+        .clone();
+    Some(GrantedWrite {
+        root,
+        path: resolved,
+    })
+}
 
 /// One coding agent's contribution to a reach: its declared directories, and the home they are
 /// relative to besides the OS user's.
@@ -91,6 +137,45 @@ impl ExecToolRpcHandler {
             job_id: outcome.job_id,
             job_running: outcome.job_running,
         };
+        record_call(sessions_base, req, &response);
+        Ok(Some(response))
+    }
+
+    /// Run an orchestrator's `Write`, `StrReplace` or `Delete` that lies inside one of its write
+    /// grants, confined to that grant; `None` when the call is not that (another role, another
+    /// tool, a subagent conversation, or a path outside every write grant), which the role guard
+    /// has refused for an orchestrator already.
+    pub(super) async fn run_granted_write(
+        &self,
+        req: &ExecuteToolRequest,
+        sessions_base: &Path,
+    ) -> Result<Option<ExecuteToolResponse>, Status> {
+        if !is_granted_write_tool(&req.tool_name) || !req.conversation_id.is_empty() {
+            return Ok(None);
+        }
+        let session_dir = unified_session_dir_path(sessions_base, &req.session_id);
+        let is_orchestrator = tddy_core::read_session_metadata(&session_dir)
+            .ok()
+            .and_then(|metadata| metadata.session_role)
+            .as_deref()
+            .is_some_and(is_orchestrator_role);
+        if !is_orchestrator {
+            return Ok(None);
+        }
+        let Some(granted) = granted_write(&session_dir, &req.args_json) else {
+            return Ok(None);
+        };
+        let mut args: serde_json::Value = serde_json::from_str(&req.args_json)
+            .map_err(|e| Status::invalid_argument(format!("invalid args_json: {e}")))?;
+        args["path"] = serde_json::Value::String(granted.path.display().to_string());
+        let confined = ExecuteToolRequest {
+            args_json: args.to_string(),
+            ..req.clone()
+        };
+        let response = self
+            .local_exec_tools
+            .run_exec_tool_locally(&confined, sessions_base, &granted.root)
+            .await;
         record_call(sessions_base, req, &response);
         Ok(Some(response))
     }

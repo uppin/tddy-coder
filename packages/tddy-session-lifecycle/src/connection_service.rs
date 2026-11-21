@@ -153,6 +153,9 @@ pub struct DaemonSessionHost {
     /// The permission prompts claude-cli hooks hold open for an orchestrator's answer: what
     /// `AwaitQuestionAnswer` waits in and `AnswerSessionPermission` delivers to (`#home-inbox` 6/8).
     pending_answers: Arc<tddy_session_activity::pending_answers::PendingAnswers>,
+    /// An orchestrator's access requests waiting for the operator (`#orchestra` 6/9), shared by the
+    /// tool that records them and the activity service that lists and answers them.
+    path_access_requests: tddy_session_activity::path_access::PathAccessRequests,
     /// The worktree size calculator the Worktrees screen streams from and the project-home worktree
     /// tools list from. One instance per daemon: a listing that reads another calculator would not
     /// see the calculations in flight. Replaced by [`Self::with_worktree_size_calculator`] with the

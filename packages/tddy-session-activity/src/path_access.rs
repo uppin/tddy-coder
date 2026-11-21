@@ -8,10 +8,14 @@
 //! store (`crate::path_grants`), so the read or write that follows is inside its reach. A request
 //! nobody answers within its wait times out as denied.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::path_grants::PathGrantMode;
+use tokio::sync::oneshot;
+
+use crate::path_grants::{PathGrant, PathGrantMode, PathGrantStore};
 
 /// The pending-question kind an access request is announced as.
 pub const PATH_ACCESS_QUESTION_KIND: &str = "path_access";
@@ -47,15 +51,36 @@ pub enum PathAccessAnswerError {
     GrantNotWritten(String),
 }
 
+/// One request in flight: its record, where its grants go, and how to wake its waiter.
+#[derive(Debug)]
+struct Waiting {
+    pending: PendingPathAccess,
+    session_dir: PathBuf,
+    wake: Option<oneshot::Sender<PathAccessOutcome>>,
+}
+
+#[derive(Debug, Default)]
+struct Held {
+    /// Oldest first.
+    waiting: Vec<Waiting>,
+    /// The receiving end of each request's wake-up, taken by [`PathAccessRequests::wait`].
+    waiters: HashMap<String, oneshot::Receiver<PathAccessOutcome>>,
+}
+
 /// Every session's pending access requests on this host. Cheap to clone; clones share the requests.
 #[derive(Debug, Clone, Default)]
 pub struct PathAccessRequests {
-    // TODO(access-elicitation): the pending requests and their waiters.
+    held: Arc<Mutex<Held>>,
 }
 
 impl PathAccessRequests {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn held(&self) -> std::sync::MutexGuard<'_, Held> {
+        // A poisoned lock only means another thread panicked mid-update; the data stays usable.
+        self.held.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Record a request of the session whose directory is `session_dir`, returning it with its new
@@ -68,16 +93,42 @@ impl PathAccessRequests {
         mode: PathGrantMode,
         reason: String,
     ) -> Result<PendingPathAccess, String> {
-        // TODO(access-elicitation): implement
-        let _ = (session_dir, session_id, paths, mode, reason);
-        unimplemented!("PathAccessRequests::request")
+        if paths.is_empty() {
+            return Err("a request names at least one path".to_string());
+        }
+        if let Some(relative) = paths.iter().find(|p| !p.is_absolute()) {
+            return Err(format!(
+                "{} is not an absolute path; name every path in full",
+                relative.display()
+            ));
+        }
+        let pending = PendingPathAccess {
+            request_id: format!("access-{}", uuid::Uuid::new_v4()),
+            session_id: session_id.to_string(),
+            paths,
+            mode,
+            reason,
+            requested_at_unix_ms: tddy_daemon_kernel::now_unix_ms(),
+        };
+        let (wake, waiter) = oneshot::channel();
+        let mut held = self.held();
+        held.waiters.insert(pending.request_id.clone(), waiter);
+        held.waiting.push(Waiting {
+            pending: pending.clone(),
+            session_dir: session_dir.to_path_buf(),
+            wake: Some(wake),
+        });
+        Ok(pending)
     }
 
     /// The session's waiting requests, oldest first.
     pub fn pending(&self, session_id: &str) -> Vec<PendingPathAccess> {
-        // TODO(access-elicitation): implement
-        let _ = session_id;
-        unimplemented!("PathAccessRequests::pending")
+        self.held()
+            .waiting
+            .iter()
+            .filter(|w| w.pending.session_id == session_id)
+            .map(|w| w.pending.clone())
+            .collect()
     }
 
     /// Answer one of the session's requests. Allowing writes a grant per path, then wakes the
@@ -88,17 +139,68 @@ impl PathAccessRequests {
         request_id: &str,
         allow: bool,
     ) -> Result<PathAccessOutcome, PathAccessAnswerError> {
-        // TODO(access-elicitation): implement
-        let _ = (session_id, request_id, allow);
-        unimplemented!("PathAccessRequests::answer")
+        let mut held = self.held();
+        let index = held
+            .waiting
+            .iter()
+            .position(|w| w.pending.session_id == session_id && w.pending.request_id == request_id)
+            .ok_or_else(|| PathAccessAnswerError::NotPending {
+                request_id: request_id.to_string(),
+            })?;
+        if allow {
+            let waiting = &held.waiting[index];
+            let store = PathGrantStore::open(&waiting.session_dir);
+            let granted_at_unix_ms = tddy_daemon_kernel::now_unix_ms();
+            for path in &waiting.pending.paths {
+                store
+                    .add(PathGrant {
+                        path: path.clone(),
+                        mode: waiting.pending.mode,
+                        granted_at_unix_ms,
+                        reason: waiting.pending.reason.clone(),
+                    })
+                    .map_err(|e| PathAccessAnswerError::GrantNotWritten(e.to_string()))?;
+            }
+        }
+        let outcome = if allow {
+            PathAccessOutcome::Allowed
+        } else {
+            PathAccessOutcome::Denied
+        };
+        let mut waiting = held.waiting.remove(index);
+        if let Some(wake) = waiting.wake.take() {
+            // A waiter that already gave up has dropped its end; the grant stands regardless.
+            let _ = wake.send(outcome);
+        }
+        Ok(outcome)
+    }
+
+    /// Withdraw a request nobody will wait for any longer (its caller went away). A no-op for a
+    /// request that was answered or withdrawn already.
+    pub fn withdraw(&self, request_id: &str) {
+        let mut held = self.held();
+        held.waiting.retain(|w| w.pending.request_id != request_id);
+        held.waiters.remove(request_id);
     }
 
     /// Wait for a request's answer, at most `wait`: no answer by then is [`PathAccessOutcome::TimedOut`]
     /// and the request is withdrawn.
     pub async fn wait(&self, request_id: &str, wait: Duration) -> PathAccessOutcome {
-        // TODO(access-elicitation): implement
-        let _ = (request_id, wait);
-        unimplemented!("PathAccessRequests::wait")
+        let Some(mut waiter) = self.held().waiters.remove(request_id) else {
+            return PathAccessOutcome::TimedOut;
+        };
+        match tokio::time::timeout(wait, &mut waiter).await {
+            Ok(Ok(outcome)) => outcome,
+            // The request was dropped without an answer.
+            Ok(Err(_)) => PathAccessOutcome::TimedOut,
+            Err(_elapsed) => {
+                self.held()
+                    .waiting
+                    .retain(|w| w.pending.request_id != request_id);
+                // An answer that landed between the deadline and the withdrawal still counts.
+                waiter.try_recv().unwrap_or(PathAccessOutcome::TimedOut)
+            }
+        }
     }
 }
 

@@ -95,6 +95,7 @@ impl DaemonSessionHost {
                 tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
             ),
             pending_answers: Arc::new(tddy_session_activity::pending_answers::PendingAnswers::new()),
+            path_access_requests: tddy_session_activity::path_access::PathAccessRequests::new(),
             worktree_size_calculator,
             session_agent_inference: Arc::new(
                 crate::session_agent_inference::SessionAgentInferenceStore::new(),
@@ -344,6 +345,12 @@ impl DaemonSessionHost {
         &self,
     ) -> Arc<tddy_daemon_kernel::conversation_frames::ConversationFrames> {
         Arc::clone(&self.agent_conversation_frames)
+    }
+
+    /// The orchestrators' access requests waiting for the operator, shared by `RequestPathAccess`
+    /// and the activity service's `ListPathAccessRequests` / `AnswerPathAccess` (`#orchestra` 6/9).
+    pub fn path_access_requests(&self) -> tddy_session_activity::path_access::PathAccessRequests {
+        self.path_access_requests.clone()
     }
 
     /// The permission prompts this daemon's claude-cli hooks hold open, shared by
