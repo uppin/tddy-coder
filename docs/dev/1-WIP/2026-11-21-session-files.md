@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 2 — one write tool into an existing store layout, one new attachment source on an existing start path
+**PR**: [#981](https://github.com/uppin/tddy-coder/pull/981)
 **Stack**: `#orchestra` 3/9 — branch `feature/orchestra/session-files`, base `feature/orchestra/child-back-channel`
 
 ## Initial Discovery
@@ -40,7 +41,7 @@ None inside `#orchestra`. It builds on its base, `#target-parity` 7/7 (#975), an
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: `SessionFileStore::{write, list}`, the two tool definitions, `AttachmentSource::SessionFile`; failing tests below.
+The first push of this PR, before its implementation: `SessionFileStore::{write, list}`, the two tools with their port, and `attachment_for` (the existing `SESSION_ARTIFACT` attachment for a session file); failing tests below.
 
 ## Green wave
 
@@ -74,7 +75,7 @@ Browser attach UI; not touched.
 ## Scope
 
 - [ ] `WriteSessionFile` / `ListSessionFiles` for orchestrator roles
-- [ ] `session_file` attachment source on `StartSession`
+- [ ] `WriteSessionFile` answers with the `SESSION_ARTIFACT` attachment that hands the file to a child
 - [ ] Feature doc `docs/ft/coder/session-attachments.md` updated through the wrap
 
 ## Technical Changes
@@ -89,11 +90,28 @@ An orchestrator writes files into its session and attaches them to children.
 
 ## Acceptance Tests
 
-`packages/tddy-daemon-rpc/tests/orchestrator_session_files_acceptance.rs`:
-- [ ] `an_orchestrator_writes_a_session_file_and_lists_it`
+`packages/tddy-daemon-rpc/tests/orchestrator_session_files_acceptance.rs` (real `ExecuteTool`):
+- [ ] `an_orchestrator_writes_a_session_file_into_its_own_session`
+- [ ] `a_written_session_file_answers_with_the_attachment_that_hands_it_to_a_child`
+- [ ] `an_orchestrator_lists_its_session_files`
 - [ ] `a_session_file_name_with_a_path_separator_is_refused`
-- [ ] `a_started_session_receives_the_orchestrators_file_as_an_attachment`
-- [ ] `a_worker_session_is_refused_write_session_file`
+- [x] `a_worker_session_cannot_write_a_session_file` — regression guard
+
+Unit — `packages/tddy-session-files/src/session_files.rs`:
+- [ ] `a_written_file_is_listed_with_its_size`
+- [ ] `writing_a_name_again_replaces_the_file`
+- [ ] `names_that_are_not_one_flat_file_name_are_refused`
+- [ ] `content_over_the_limit_is_refused`
+- [ ] `a_session_without_files_lists_none`
+
+Unit — `packages/tddy-tool-engine/src/session_file_tools.rs`:
+- [ ] `a_session_files_attachment_is_its_session_artifact_under_files`
+- [ ] `the_attachment_parses_as_a_start_session_attachment`
+- [ ] `both_tools_are_defined_with_their_names`
+
+The surface they specify (bodies `TODO(session-files)`): `tddy_session_files::session_files::{SessionFileStore, SessionFile, SessionFileError, SESSION_FILES_DIR, SESSION_FILES_ARTIFACT_PREFIX, MAX_SESSION_FILE_NAME, MAX_SESSION_FILE_BYTES}`, `tddy_tool_engine::session_file_tools::{WRITE_SESSION_FILE, LIST_SESSION_FILES, is_session_file_tool, session_file_tool_defs, WriteSessionFileArgs, SessionFileEntry, SessionFilePort, attachment_for, execute_session_file_tool}`.
+
+**Contract-time change:** no new attachment source. A session file lives under the orchestrator's `SESSION_ARTIFACT` scope (`<session_dir>/artifacts/files/<name>`, resolved by `host_documents.rs:235`), so `StartSession` already attaches it by reference; `WriteSessionFile` answers with that exact `attachments[]` entry. `start_session_args/schema.rs` is not touched, which also keeps `schema_offering` from growing.
 
 ## Decisions & Trade-offs
 
@@ -121,10 +139,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (delegated: the user said "Finish the remaining ones without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
