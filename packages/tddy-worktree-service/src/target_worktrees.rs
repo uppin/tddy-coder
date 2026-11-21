@@ -10,7 +10,7 @@
 //! workspace reached with its owner's vault credentials) lives in `tddy-agent-launch`, which
 //! depends on this crate.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-11-21-target-worktree-actions.md.
+//! Feature: docs/ft/web/session-worktree-inspector.md § On a target session.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

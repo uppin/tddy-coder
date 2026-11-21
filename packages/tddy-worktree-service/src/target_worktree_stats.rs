@@ -7,7 +7,7 @@
 //! A target that cannot be reached, or does not answer within the request timeout, leaves the row
 //! `stale` with no numbers.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-11-21-target-worktree-stats.md.
+//! Feature: docs/ft/web/session-worktree-inspector.md § On a target session.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -178,6 +178,9 @@ pub(crate) fn add_target_rows(
     snapshot: &mut Vec<WorktreeRow>,
     tx: &UnboundedSender<WorktreeStatsEvent>,
 ) {
+    if sessions.is_empty() {
+        return;
+    }
     let mut published = service.target_row_bus().subscribe(project_id);
     let paths: Vec<String> = sessions.iter().map(|s| s.worktree.clone()).collect();
     let forward = tx.clone();

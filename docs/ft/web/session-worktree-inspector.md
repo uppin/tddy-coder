@@ -106,6 +106,14 @@ for Clear and Delete the caller's session of `project_id` whose recorded target 
 daemon with no Coder accounts — fails the action with its reason and changes nothing. The proto and
 the tab are unchanged; local sessions behave as above.
 
+The tab also **shows** a target session's worktree. `StreamWorktreeStats` adds one row per target
+session of the project, keyed by its path on the target, with branch, diff summary (`git diff
+--numstat HEAD`) and size (`du -sk`) measured **on the target**. The row is `CALCULATING` in the
+first snapshot — which therefore never waits on a target — and arrives measured as an update. A
+target that cannot be reached, or does not answer within the daemon's request timeout, leaves the
+row **stale with no numbers**, never missing. **Refresh** (`CalculateWorktreeSize` of the target
+path) measures it on the target again, and the new row reaches the project's open streams.
+
 ## Streaming design — no new streaming endpoint
 
 Unlike the [Usage tab](session-usage-inspector.md), worktree stats do **not** ride a server stream:
