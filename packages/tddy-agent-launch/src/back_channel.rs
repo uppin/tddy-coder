@@ -128,6 +128,16 @@ pub fn back_channel_guidance(orchestrator_session_id: &str, channel: &BackChanne
     )
 }
 
+/// The first prompt a child is started with: `guidance` — the back channel its system prompt could
+/// not carry — ahead of the `task` it was given; the task alone when there is no guidance.
+pub fn first_prompt_with(guidance: Option<&str>, task: &str) -> String {
+    match (guidance.map(str::trim_end), task.trim()) {
+        (None, _) => task.to_string(),
+        (Some(guidance), "") => guidance.to_string(),
+        (Some(guidance), _) => format!("{guidance}\n\n## Your task\n\n{task}"),
+    }
+}
+
 /// The orchestrator a starting session reports to.
 #[derive(Debug, Clone)]
 pub struct ReportsTo<'a> {

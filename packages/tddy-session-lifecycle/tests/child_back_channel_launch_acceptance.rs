@@ -10,7 +10,9 @@ mod ensure_project_home_world;
 #[allow(dead_code)]
 mod project_home_support;
 
-use ensure_project_home_world::{a_claude_cli_spec, a_daemon_with_a_project, World};
+use ensure_project_home_world::{
+    a_claude_cli_spec, a_daemon_with_a_project, a_daemon_with_a_project_and_coding_agents, World,
+};
 use project_home_support::{a_caller_token, PROJECT_ID};
 use tddy_agent_launch::back_channel::native_peer_name_of;
 use tddy_rpc::Request;
@@ -48,6 +50,17 @@ impl World {
             ..a_claude_cli_spec()
         })
         .await
+    }
+
+    /// What `session_id`'s terminal has shown once it shows `needle`.
+    async fn terminal_of(&self, session_id: &str, needle: &str) -> String {
+        let handle = self
+            .home
+            .manager
+            .get(session_id)
+            .await
+            .expect("the agent is running");
+        a_capture_showing(&handle.capture, needle, PTY_STUB_OUTPUT).await
     }
 
     /// The argv the stub `claude` echoed for `session_id`.
@@ -200,5 +213,39 @@ async fn a_resumed_claude_child_keeps_its_peer_name_and_back_channel_guidance() 
     assert!(
         prompt.contains(&native_peer_name_of(&orchestrator)) && prompt.contains("progress"),
         "prompt: {prompt}"
+    );
+}
+
+/// The task a Codex child is started with.
+const A_CHILDS_TASK: &str = "Fix the flaky retry test";
+
+#[tokio::test]
+async fn a_codex_child_is_told_in_its_first_prompt_to_report_to_its_orchestrator_with_tddy_tools_send(
+) {
+    // Given a running Claude orchestrator on a host with Codex installed
+    let world = a_daemon_with_a_project_and_coding_agents();
+    let orchestrator = world.a_running_orchestrator().await;
+
+    // When a Codex child of it — an agent with no system-prompt slot — starts with a task
+    let child = world
+        .a_person_starts(StartSessionRequest {
+            session_type: "codex-cli".to_string(),
+            model: "gpt-5.3-codex".to_string(),
+            orchestrator_session_id: orchestrator.clone(),
+            initial_prompt: A_CHILDS_TASK.to_string(),
+            ..Default::default()
+        })
+        .await;
+
+    // Then its first prompt tells it to report to its orchestrator with `tddy-tools send`, ahead
+    // of its task
+    let shown = world.terminal_of(&child, A_CHILDS_TASK).await;
+    let report = format!("tddy-tools send --to {orchestrator}");
+    let told = shown
+        .find(&report)
+        .unwrap_or_else(|| panic!("the first prompt names {report:?}: {shown}"));
+    assert!(
+        told < shown.find(A_CHILDS_TASK).expect("the task is shown"),
+        "the guidance comes before the task: {shown}"
     );
 }

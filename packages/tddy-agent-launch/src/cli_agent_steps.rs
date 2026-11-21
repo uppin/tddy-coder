@@ -95,6 +95,10 @@ pub(crate) struct SessionWiring {
     pub env: Vec<(String, String)>,
     /// Flags already rendered (a main's role prompt), placed after the slot flags.
     pub extra_args: Vec<String>,
+    /// The back-channel guidance (`#orchestra` 2/9) the agent's system prompt does not carry — an
+    /// agent with no operator-notify system prompt (Codex, Muse, …), or a session holding a role —
+    /// which its first prompt is prefixed with instead ([`crate::back_channel::first_prompt_with`]).
+    pub first_prompt_guidance: Option<String>,
     /// The tool server, the pre-approved tools and the withdrawn ones.
     pub toolset: AgentToolset,
     /// What a `tddy-tools` the agent runs from its shell finds its session by — the managed
@@ -130,11 +134,28 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         reports_to,
         on_target,
     } = inputs;
-    let hooks = (spec.has(Capability::Hooks) || spec.has(Capability::OperatorNotify))
-        .then(|| claude_cli_hooks(config, agent_tool_socket, spec, tddy_tools_path));
+    // A child on a target reports over its hook log, which is followed only for a session with a
+    // hook token: one is minted for it even when its agent installs no hooks.
+    let hooks = (spec.has(Capability::Hooks)
+        || spec.has(Capability::OperatorNotify)
+        || (on_target && reports_to.is_some()))
+    .then(|| claude_cli_hooks(config, agent_tool_socket, spec, tddy_tools_path));
     if let Some(hooks) = &hooks {
         record_hook_answer_wait(session_dir, hooks)?;
     }
+    let back_channel = reports_to.map(|reports_to| {
+        let placement = match (on_target, hooks.as_ref()) {
+            (true, Some(hooks)) => crate::back_channel::ChildPlacement::Target {
+                hook_token: &hooks.hook_token,
+                hook_log_path: tddy_core::REMOTE_HOOK_LOG,
+            },
+            _ => crate::back_channel::ChildPlacement::Local,
+        };
+        reports_to.guidance_for(spec, placement)
+    });
+    // The operator-notify system prompt carries it; a role's session, or an agent without one,
+    // is told in its first prompt.
+    let in_system_prompt = spec.has(Capability::OperatorNotify) && role.name.is_empty();
     let mut process_env: Vec<(String, String)> = Vec::new();
     if let Some(agent_session_token) = session_tool_token {
         process_env.extend(
@@ -175,17 +196,6 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         workflow = Some(launch.workflow);
     }
     if let (true, Some(hooks)) = (spec.has(Capability::OperatorNotify), hooks.as_ref()) {
-        let back_channel = reports_to.map(|reports_to| {
-            let placement = if on_target {
-                crate::back_channel::ChildPlacement::Target {
-                    hook_token: &hooks.hook_token,
-                    hook_log_path: tddy_core::REMOTE_HOOK_LOG,
-                }
-            } else {
-                crate::back_channel::ChildPlacement::Local
-            };
-            reports_to.guidance_for(spec, placement)
-        });
         system_prompt_file = crate::notify_env::agent_notify_unless_role(
             role.name,
             crate::notify_env::AgentNotifyLaunch {
@@ -218,6 +228,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         system_prompt_file,
         env: process_env,
         extra_args,
+        first_prompt_guidance: back_channel.filter(|_| !in_system_prompt),
         toolset,
         session_pointer,
     })

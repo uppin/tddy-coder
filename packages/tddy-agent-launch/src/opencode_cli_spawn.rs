@@ -285,6 +285,10 @@ pub(crate) async fn start_cli_harness_session(
     let remote_host = Some(checkout_alias).filter(|alias| !alias.is_empty());
     let toolset = std::mem::take(&mut wiring.toolset);
     let role_args = std::mem::take(&mut wiring.extra_args);
+    let first_prompt = crate::back_channel::first_prompt_with(
+        wiring.first_prompt_guidance.as_deref(),
+        initial_prompt,
+    );
     let hook_params = wiring.hook_params(spec, session_id, os_user, &route.plain_env);
     let mut slots = render_host_launch_slots(
         agent,
@@ -326,7 +330,7 @@ pub(crate) async fn start_cli_harness_session(
     let launcher = node_launcher_for(agent, &target_shell);
     let params = harness_template_params(&conversation.bound(HarnessLaunch {
         model: launch_model,
-        prompt: Some(initial_prompt),
+        prompt: Some(&first_prompt),
         permission_mode: Some(permission_mode),
         dangerously_skip_permissions,
         node_launcher: launcher.as_ref(),

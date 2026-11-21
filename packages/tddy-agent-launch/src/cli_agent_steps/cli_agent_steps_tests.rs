@@ -531,3 +531,100 @@ async fn a_local_checkouts_slot_files_are_left_for_the_local_write() {
     // Then
     assert_eq!((written, slots), (Ok(()), before));
 }
+
+/// `spec`'s session wiring as a child of `orchestrator`, on a target when `on_target`, with its
+/// session directory in `dir`.
+fn wired_as_a_child_of(
+    dir: &tempfile::TempDir,
+    spec: &CodingAgentSpec,
+    orchestrator: &str,
+    on_target: bool,
+) -> crate::cli_agent_steps::SessionWiring {
+    let reports_to = crate::back_channel::ReportsTo {
+        orchestrator_session_id: orchestrator,
+        orchestrator_agent: None,
+    };
+    crate::cli_agent_steps::wire_session_agent(crate::cli_agent_steps::SessionWiringInputs {
+        spec,
+        tddy_tools_path: "/usr/bin/tddy-tools",
+        config: &tddy_daemon_kernel::config::DaemonConfig::default(),
+        tddy_data_dir: dir.path(),
+        agent_tool_socket: &dir.path().join("agent-tools.sock"),
+        os_user: "dev",
+        session_id: "child-session",
+        session_dir: dir.path(),
+        worktree: dir.path(),
+        managed: None,
+        role: crate::project_home_launch::StartRole::ordinary(),
+        session_tool_token: None,
+        github_credential_handler: None,
+        reports_to: Some(&reports_to),
+        on_target,
+    })
+    .expect("the child is wired")
+}
+
+#[test]
+fn a_codex_child_on_a_target_is_told_its_hook_log_line_in_its_first_prompt() {
+    // Given Codex, which installs no hooks and has no system-prompt slot
+    let codex = the_builtin("codex");
+
+    // When it is wired as a child of an orchestrator on a target
+    let dir = tempfile::tempdir().unwrap();
+    let wiring = wired_as_a_child_of(&dir, &codex, "the-orchestrator", true);
+
+    // Then it is given a hook token, so its hook log is followed
+    let token = wiring
+        .hooks
+        .as_ref()
+        .map(|hooks| hooks.hook_token.clone())
+        .expect("a hook token is minted for the child's hook log");
+    // And its first prompt tells it to append the message line carrying that token to the log
+    let guidance = wiring
+        .first_prompt_guidance
+        .expect("the guidance rides the first prompt");
+    assert!(
+        guidance.contains("the-orchestrator")
+            && guidance.contains(tddy_core::REMOTE_MESSAGE_EVENT)
+            && guidance.contains(&token)
+            && guidance.contains(tddy_core::REMOTE_HOOK_LOG),
+        "guidance: {guidance}"
+    );
+}
+
+#[test]
+fn a_claude_childs_guidance_is_in_its_system_prompt_not_its_first_prompt() {
+    // Given Claude, whose operator-notify system prompt carries the guidance
+    let claude = the_builtin("claude");
+
+    // When it is wired as a child of an orchestrator on this host
+    let dir = tempfile::tempdir().unwrap();
+    let wiring = wired_as_a_child_of(&dir, &claude, "the-orchestrator", false);
+
+    // Then its first prompt is not prefixed
+    assert_eq!(wiring.first_prompt_guidance, None);
+    // And its system prompt names its orchestrator
+    let prompt = std::fs::read_to_string(
+        wiring
+            .system_prompt_file
+            .expect("an operator-notify system prompt"),
+    )
+    .unwrap();
+    assert!(prompt.contains("the-orchestrator"), "prompt: {prompt}");
+}
+
+#[test]
+fn a_first_prompt_is_the_guidance_ahead_of_the_task_or_either_alone() {
+    assert_eq!(
+        crate::back_channel::first_prompt_with(None, "Fix it"),
+        "Fix it"
+    );
+    assert_eq!(
+        crate::back_channel::first_prompt_with(Some("Report back.\n"), ""),
+        "Report back."
+    );
+    assert_eq!(
+        crate::back_channel::first_prompt_with(Some("Report back."), "Fix it"),
+        "Report back.\n\n## Your task\n\nFix it"
+    );
+}
