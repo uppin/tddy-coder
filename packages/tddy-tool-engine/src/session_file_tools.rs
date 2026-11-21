@@ -82,25 +82,17 @@ pub struct SessionFileEntry {
 #[async_trait]
 pub trait SessionFilePort: Send + Sync {
     /// Write `args` into `caller`'s session files. An error names why it was not written.
-    ///
-    /// The default refuses, so a port that keeps no session files need not name it.
     async fn write_session_file(
         &self,
         caller: &HomeCaller,
         args: WriteSessionFileArgs,
-    ) -> Result<SessionFileEntry, String> {
-        let _ = (caller, args);
-        Err("this host keeps no session files".to_string())
-    }
+    ) -> Result<SessionFileEntry, String>;
 
     /// `caller`'s session files, by name.
     async fn list_session_files(
         &self,
         caller: &HomeCaller,
-    ) -> Result<Vec<SessionFileEntry>, String> {
-        let _ = caller;
-        Err("this host keeps no session files".to_string())
-    }
+    ) -> Result<Vec<SessionFileEntry>, String>;
 }
 
 /// The `StartSession` `attachments[]` entry that attaches `caller`'s session file `name`.
@@ -137,7 +129,7 @@ pub async fn execute_session_file_tool(
             };
             match port.write_session_file(caller, args).await {
                 Ok(entry) => {
-                    let mut answer = entry_json(caller, &entry);
+                    let mut answer = entry_json(&entry);
                     answer["attachment"] = attachment_for(caller, &entry.name);
                     ToolOutcome::ok(answer.to_string())
                 }
@@ -149,7 +141,7 @@ pub async fn execute_session_file_tool(
                 let files: Vec<Value> = entries
                     .iter()
                     .map(|entry| {
-                        let mut file = entry_json(caller, entry);
+                        let mut file = entry_json(entry);
                         file["attachment"] = attachment_for(caller, &entry.name);
                         file
                     })
@@ -162,7 +154,7 @@ pub async fn execute_session_file_tool(
     }
 }
 
-fn entry_json(_caller: &HomeCaller, entry: &SessionFileEntry) -> Value {
+fn entry_json(entry: &SessionFileEntry) -> Value {
     json!({
         "name": entry.name,
         "size_bytes": entry.size_bytes,
