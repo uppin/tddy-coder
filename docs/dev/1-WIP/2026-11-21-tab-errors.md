@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — two crates (agent-launch, session-lifecycle) plus an I/O seam (a remote probe through RemoteShell), error-contract change across tab kinds
 **Stack**: `#tab-hardening` 1/4 — branch `feature/tab-hardening/tab-errors`, base `master`
+**PR**: #989 https://github.com/uppin/tddy-coder/pull/989
 
 ## Initial Discovery
 
@@ -68,8 +69,8 @@ The probe is tested on the stand-in target only; the extra round trip on a real 
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests / run them (verify they fail) / USER REVIEW
-- [ ] TDD Red — failing unit/integration tests
+- [x] Create failing acceptance tests / run them (verify they fail) / USER REVIEW
+- [x] TDD Red — failing unit/integration tests
 - [ ] Implementation
 - [ ] Package documentation, scoped clippy, single-spec Cypress
 
@@ -86,16 +87,16 @@ One mapper for both kinds; a probe before an agent tab spawns; full cursor argv 
 ## Acceptance Tests
 
 `packages/tddy-agent-launch/tests/target_agent_tab_acceptance.rs` (extended):
-- [ ] `an_agent_tab_whose_agent_is_missing_on_the_target_fails_before_its_terminal_starts`
-- [ ] `an_agent_tab_on_an_unreachable_target_fails_unavailable`
+- [x] `an_agent_tab_whose_agent_is_missing_on_the_target_fails_before_its_terminal_starts`
+- [x] `an_agent_tab_on_an_unreachable_target_fails_unavailable`
 
 `packages/tddy-session-lifecycle/tests/target_agent_tab_acceptance.rs` (extended):
-- [ ] `an_agent_tab_on_an_unreachable_target_is_refused_unavailable`
-- [ ] `an_agent_tab_whose_agent_is_missing_on_the_target_is_refused_naming_it`
-- [ ] `a_tab_whose_terminal_cannot_spawn_is_refused_internal`
+- [x] `an_agent_tab_on_an_unreachable_target_is_refused_unavailable`
+- [x] `an_agent_tab_whose_agent_is_missing_on_the_target_is_refused_naming_it`
+- [x] `a_tab_whose_terminal_cannot_spawn_is_refused_internal`
 
 `packages/tddy-session-lifecycle/tests/resume_tab_roster_acceptance.rs` (extended):
-- [ ] `a_target_agent_tab_whose_agent_is_missing_is_dropped_naming_it_on_resume`
+- [x] `a_target_agent_tab_whose_agent_is_missing_is_dropped_naming_it_on_resume`
 
 ## Unit Tests
 
@@ -103,10 +104,35 @@ One mapper for both kinds; a probe before an agent tab spawns; full cursor argv 
 - `probe_agent_on_target`: the command string is single-quoted and runs through the login shell.
 - `a_target_cursor_tab_resumes_its_chat_by_the_bare_command`: full argv incl. `--trust`.
 
+### Draft PR contract — what the contract commit carries
+
+- `probe_agent_on_target` (`remote_agent_launch/agent_probe.rs`) and `tab_launch_status`
+  (`remote_agent_launch/tab_launch_status.rs`) are `todo!()`; `RemoteLaunchError::AgentNotOnTarget`
+  and its message are real.
+- Both call sites are wired already: `launch_agent_tab_on_target` probes after `reach_the_worktree`,
+  and the lifecycle's shell and agent tabs map their launch error through `tab_launch_status`
+  (`reach_failure` is gone). So **every** existing target agent tab test, and every target tab error
+  test, panics on a `todo!()` until green — expected red, not a regression.
+- Test fixtures: the stand-in targets' login `PATH` used to end in this host's `PATH`, so a host with
+  `claude` installed made "the agent is missing on the target" untestable.
+  `StandInSshTarget::behind_ssh_with_only_the_system_path()` (testing-commons) and the lifecycle fake
+  (`target_tab_support/fake_target_shells.rs`: `-lc` `PATH` is its agents dir plus `/usr/bin:/bin`,
+  `$SHELL` set on `exec` too) close that gap. The lifecycle fake also gains
+  `target_shells_whose_client_this_host_lacks()` — the PTY spawn-failure seam (a nonexistent
+  transport client on the interactive argv; ENOENT at spawn, verified on master to reach
+  `RemoteLaunchError::Spawn`).
+
 ## Decisions & Trade-offs
+
+- **An unreachable target is UNAVAILABLE at every step** (developer decision 2026-11-21), including `Trust(TargetTrustError::Shell)` during a main start's clone pre-trust; `Trust(Malformed)` stays FAILED_PRECONDITION.
 
 - **Probe every agent tab, new and restored** (developer decision): one extra round trip per tab.
 - **Spawn failure is INTERNAL**: a local resource problem, not the user's precondition.
+- **The mapper keeps every other variant `FAILED_PRECONDITION`** (`Plan`, `Trust`, and the main-only
+  startup variants), as today. "Vault/account → FAILED_PRECONDITION" is not a `RemoteLaunchError`:
+  the `TabTargetShell` port refuses those with a `Status` before any launch, unchanged.
+- **The probe reads only the exit status**: non-zero is `AgentNotOnTarget`. A worktree the target
+  lacks is caught before it by `reach_the_worktree` (tabs) or the worktree cut (the 4/4 start).
 
 ## TODO
 
@@ -114,10 +140,10 @@ One mapper for both kinds; a probe before an agent tab spawns; full cursor argv 
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

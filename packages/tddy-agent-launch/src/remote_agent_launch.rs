@@ -9,8 +9,10 @@
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-15-remote-shell-ssh-agent-launch.md.
 
+mod agent_probe;
 mod session_files;
 mod startup;
+mod tab_launch_status;
 mod target;
 mod target_agent_tab;
 mod target_tab;
@@ -42,9 +44,11 @@ use crate::spec_launch::{HostAgent, HostPtySession, SpecLaunchError};
 /// Where the remote command records a session's agent's pid, relative to the session's worktree on
 /// the target: what a caller that stops the agent there reads.
 pub use crate::cli_session_pointer::remote_agent_pid_file;
+pub use crate::remote_agent_launch::agent_probe::probe_agent_on_target;
 use crate::remote_agent_launch::session_files::plan_the_launch;
 use crate::remote_agent_launch::session_files::write_rendered_session_files;
 use crate::remote_agent_launch::session_files::SessionFilesPlace;
+pub use crate::remote_agent_launch::tab_launch_status::tab_launch_status;
 pub(crate) use crate::remote_agent_launch::target::target_config_host;
 pub use crate::remote_agent_launch::target::{
     proto_of_session_target, session_target_of_proto, shell_for_target, TargetError,
@@ -194,6 +198,9 @@ pub enum RemoteLaunchError {
     /// (the startup window plus the start timeout, from the pid's recording) while its terminal
     /// kept running: the target went silent, and the agent can be judged neither up nor down.
     AgentNeverAnswered { after: Duration },
+    /// The target's login shell does not find the agent's bare `command` on its `PATH`
+    /// ([`probe_agent_on_target`]): the agent is not installed there, and nothing was started.
+    AgentNotOnTarget { command: String },
 }
 
 impl fmt::Display for RemoteLaunchError {
@@ -226,6 +233,10 @@ impl fmt::Display for RemoteLaunchError {
             Self::AgentNeverAnswered { after } => write!(
                 f,
                 "the target did not answer a liveness probe of the agent within {after:?}: its terminal is still running, but the agent can not be confirmed alive"
+            ),
+            Self::AgentNotOnTarget { command } => write!(
+                f,
+                "the agent `{command}` is not installed on the target: its login shell finds no `{command}` on its PATH"
             ),
         }
     }

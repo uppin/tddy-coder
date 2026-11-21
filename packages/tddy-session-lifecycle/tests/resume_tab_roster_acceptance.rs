@@ -9,6 +9,10 @@
 //! Extended by `#session-liveness` 8/8: an agent tab recorded on the session's target is reopened on
 //! the target, resuming its conversation there (docs/ft/daemon/session-liveness.md, A target session's tabs).
 //!
+//! Extended by `#tab-hardening` 1/4: an agent tab recorded on a target that no longer has its agent
+//! is dropped on resume, naming the agent, before any terminal is opened there
+//! (PRD-2026-11-21-tab-errors.md).
+//!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-19-resume-restores-tab-roster.md (`#session-liveness` 4/4)
 //!
 //! Each roster is arranged as an earlier daemon run left it — written to `tabs.yaml`, or recorded by
@@ -25,6 +29,7 @@ mod target_tab_support;
 use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
+use tddy_agent_launch::remote_agent_launch::RemoteLaunchError;
 use tddy_agent_launch::restore_tabs::{agent_launch_node, RESUMABLE_PROPERTY};
 use tddy_core::tab_roster::{
     LaunchNode, TabEntry, CONVERSATION_ID_PROPERTY, SESSION_PROPERTY, TMUX_KIND,
@@ -729,4 +734,39 @@ async fn a_target_claude_tab_is_reopened_on_the_target_resuming_its_conversation
         a_target_claude_tab().launch
     );
     assert_eq!(response.restored_tabs, vec![restored(TARGET_CLAUDE_TAB)]);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_target_agent_tab_whose_agent_is_missing_is_dropped_naming_it_on_resume() {
+    // Given a stopped session whose roster holds a Claude tab recorded on its target, a reachable
+    // machine that no longer has Claude Code installed
+    let (target_shells, machine) = target_shells_reaching_a_machine();
+    let daemon = a_stopped_session_whose_target_shells_resolve_through(
+        target_shells as Arc<dyn TabTargetShell>,
+    );
+    daemon.has_recorded_tabs(vec![the_main_tab(), a_target_claude_tab()]);
+
+    // When it is resumed
+    let response = daemon.resumes().await;
+
+    // Then the resume succeeds without the tab, which is reported dropped naming the agent the
+    // target lacks, is gone from the roster, and opened no terminal on the target
+    assert_eq!(
+        response.restored_tabs,
+        vec![RestoredTab {
+            terminal_id: TARGET_CLAUDE_TAB.to_string(),
+            outcome: RestoredTabOutcome::Dropped as i32,
+            reason: RemoteLaunchError::AgentNotOnTarget {
+                command: "claude".to_string()
+            }
+            .to_string(),
+        }]
+    );
+    assert!(!daemon
+        .listed_terminal_ids()
+        .await
+        .contains(TARGET_CLAUDE_TAB));
+    assert!(!daemon.roster_records(TARGET_CLAUDE_TAB));
+    assert_eq!(machine.interactive_commands(), Vec::<String>::new());
 }
