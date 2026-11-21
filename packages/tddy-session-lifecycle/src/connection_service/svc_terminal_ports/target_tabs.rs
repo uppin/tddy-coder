@@ -11,7 +11,9 @@
 
 use std::path::{Path, PathBuf};
 
+use tddy_agent_launch::remote_agent_launch::{launch_tab_on_target, TargetTab};
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+use tddy_core::tab_roster::{LaunchNode, TabEntry};
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::TerminalLaunch;
 
@@ -25,9 +27,40 @@ impl CliManagerTerminalRoster {
         session_id: &str,
         launch: &TerminalLaunch,
     ) -> Result<String, Status> {
-        // TODO(target-shell-tab): implement
-        let _ = (&self.target_shell, session_id, launch);
-        todo!("start a shell tab on the session's target")
+        let Some(shells) = &self.target_shell else {
+            return Err(Status::failed_precondition(
+                "this daemon starts no tabs on a target",
+            ));
+        };
+        let session_dir = self.session_dir(session_id)?;
+        let target = shells.target_of(&session_dir, &launch.subject)?;
+        let terminal_id = uuid::Uuid::now_v7().to_string();
+        launch_tab_on_target(
+            &self.manager,
+            session_id,
+            &terminal_id,
+            TargetTab {
+                shell: target.shell,
+                worktree: &target.worktree,
+                session_dir: &session_dir,
+            },
+        )
+        .await
+        .map_err(|error| Status::failed_precondition(error.to_string()))?;
+        let chain = vec![LaunchNode::target(), LaunchNode::shell()];
+        if let Err(error) = self
+            .manager
+            .tab_rosters()
+            .record(&session_dir, TabEntry::new(&terminal_id, chain))
+            .await
+        {
+            // An unrecorded tab could not be restored, and nothing would know to end it.
+            self.manager.stop_terminal(session_id, &terminal_id).await;
+            return Err(Status::internal(format!(
+                "failed to record the tab: {error}"
+            )));
+        }
+        Ok(terminal_id)
     }
 
     /// Where a tab "On this host" of the target session `session_id` runs: the session's directory
@@ -36,9 +69,7 @@ impl CliManagerTerminalRoster {
         &self,
         session_id: &str,
     ) -> Result<PathBuf, Status> {
-        // TODO(target-shell-tab): implement
-        let _ = session_id;
-        todo!("the host directory of a target session's tab")
+        self.session_dir(session_id)
     }
 }
 

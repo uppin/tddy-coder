@@ -23,6 +23,7 @@ use tddy_service::proto::session::{RestoredTab, RestoredTabOutcome};
 
 use super::new_tab::agent_tab_argv;
 use super::plan::{restore_plan, tmux_names, LiveTabs, TabRestore};
+use crate::remote_agent_launch::{launch_tab_on_target, TargetTab};
 use crate::spec_launch::HostCodingAgents;
 use crate::tab_target_shell::TabTargetShell;
 
@@ -256,9 +257,22 @@ async fn restore_jailed_shell(restore: &RosterRestore<'_>, tab: &TabEntry) -> an
 /// session's worktree there ([`crate::remote_agent_launch::launch_tab_on_target`]). A target that
 /// cannot be resolved (a locked vault) or reached fails the tab with the reason.
 async fn restore_target_shell(restore: &RosterRestore<'_>, tab: &TabEntry) -> anyhow::Result<()> {
-    // TODO(target-shell-tab): implement
-    let _ = (restore.tab_target_shell, restore.subject, tab);
-    todo!("restore a shell tab on the session's target")
+    let target = restore
+        .tab_target_shell
+        .target_of(restore.session_dir, restore.subject)
+        .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))?;
+    launch_tab_on_target(
+        restore.cli_manager,
+        restore.session_id,
+        &tab.terminal_id,
+        TargetTab {
+            shell: target.shell,
+            worktree: &target.worktree,
+            session_dir: restore.session_dir,
+        },
+    )
+    .await?;
+    Ok(())
 }
 
 /// Start `terminal` under the tab's recorded id.

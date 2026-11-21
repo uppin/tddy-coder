@@ -226,9 +226,21 @@ impl TerminalKind {
         tmux_session: &str,
         inner: &[crate::proto::terminal_session::LaunchNode],
     ) -> Result<TerminalKind, Status> {
-        // TODO(target-shell-tab): implement
-        let _ = (kind, tmux_session, inner);
-        todo!("a target-wrapped terminal kind")
+        if let Some(refused) = inner.first() {
+            return Err(Status::invalid_argument(format!(
+                "a terminal cannot be wrapped in {:?} inside {TARGET_WRAPPER_KIND:?}: a target \
+                 wraps the login shell alone",
+                refused.kind
+            )));
+        }
+        match Self::from_request(kind, tmux_session)? {
+            TerminalKind::Bash => Ok(TerminalKind::TargetShell),
+            _ => Err(Status::invalid_argument(format!(
+                "only the login shell can be wrapped in {TARGET_WRAPPER_KIND:?} here, not {:?}: \
+                 an agent on a target is not started yet",
+                kind.trim()
+            ))),
+        }
     }
 }
 

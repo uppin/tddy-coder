@@ -359,7 +359,12 @@ fn remote_command(
 }
 
 fn client_command(remote: &RemoteLaunch<'_>, command: String) -> TransportClient {
-    let interactive = remote.shell.interactive(&command);
+    transport_client(remote.shell.as_ref(), &command)
+}
+
+/// The transport client of `shell` that runs `command` on its target, as a local process.
+fn transport_client(shell: &dyn RemoteShell, command: &str) -> TransportClient {
+    let interactive = shell.interactive(command);
     let argv: Vec<String> = interactive
         .argv
         .iter()

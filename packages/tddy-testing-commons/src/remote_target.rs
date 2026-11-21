@@ -48,7 +48,7 @@ pub fn write_executable(path: &Path, script: &str) {
 /// directory it started in beside itself ([`LOGIN_SHELL_STARTED_IN`]) and becomes an interactive
 /// `/bin/sh` on its terminal.
 const A_TARGET_LOGIN_SHELL: &str = "#!/bin/sh\n\
-     if [ \"$1\" = -l ]; then /bin/pwd -P > \"$(dirname \"$0\")/login-shell-started-in\"; exec /bin/sh; fi\n\
+     if [ \"$1\" = -l ]; then here=\"$(dirname \"$0\")\"; /bin/pwd -P > \"$here/login-shell-started-in.part\" && mv \"$here/login-shell-started-in.part\" \"$here/login-shell-started-in\"; exec /bin/sh; fi\n\
      [ \"$1\" = -lc ] || exit 64\nexec /bin/sh -c \"$2\"\n";
 
 /// The file beside a stand-in machine's login shell that its `-l` run records the directory it

@@ -105,7 +105,7 @@ Agent tabs only; n8 claims the tab half.
 - [x] Create changeset
 - [x] Create failing acceptance tests / run them (verify they fail) / USER REVIEW
 - [x] TDD Red — failing unit/integration tests
-- [ ] Implementation
+- [x] Implementation
 - [ ] Package documentation, scoped clippy, single-spec Cypress
 
 ## Technical Changes
@@ -163,7 +163,7 @@ A target session's tab is a host shell in `recorded_worktree` — a path that ex
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)

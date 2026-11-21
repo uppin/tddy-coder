@@ -43,9 +43,9 @@ impl AStandInTarget {
         write_executable(
             &root.join("login-shell"),
             &format!(
-                "#!/bin/sh\n[ \"$1\" = -l ] || exit 64\n/bin/pwd -P > '{}'\n\
+                "#!/bin/sh\n[ \"$1\" = -l ] || exit 64\n/bin/pwd -P > '{started_in}.part' && mv '{started_in}.part' '{started_in}'\n\
                  printf '{ON_TARGET_BANNER}'\nexec /bin/sh\n",
-                root.join("login-shell-started-in").display()
+                started_in = root.join("login-shell-started-in").display()
             ),
         );
         Arc::new(Self {

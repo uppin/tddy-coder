@@ -245,9 +245,14 @@ fn sandbox_plan(entry: &TabEntry) -> TabRestore {
 /// A `target`-wrapped tab: a shell is reopened on the session's target; anything else on a target is
 /// dropped naming why (an agent on a target is `target-agent-tab`'s).
 fn target_plan(entry: &TabEntry) -> TabRestore {
-    // TODO(target-shell-tab): implement
-    let _ = entry;
-    todo!("the restore of a target-wrapped tab")
+    match entry.launch.get(1) {
+        None => drop_because("its target launch node records nothing run on the target"),
+        Some(inner) if inner.kind == SHELL_KIND => TabRestore::TargetShell,
+        Some(inner) => drop_because(format!(
+            "a {:?} run on a target is not one this daemon can restore",
+            inner.kind
+        )),
+    }
 }
 
 /// The tmux session name and OS user a `tmux` or `tmux-attach` node records.

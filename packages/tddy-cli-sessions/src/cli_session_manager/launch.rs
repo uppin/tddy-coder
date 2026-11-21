@@ -120,9 +120,27 @@ impl CliSessionManager {
         worktree_path: PathBuf,
         client: ClientTab,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        // TODO(target-shell-tab): implement
-        let _ = (session_id, terminal_id, worktree_path, client);
-        todo!("spawn a transport client as a tab")
+        if terminal_id == MAIN_TERMINAL_ID {
+            anyhow::bail!("the {MAIN_TERMINAL_ID} terminal is the session's main, not a tab");
+        }
+        if self.get_terminal(session_id, terminal_id).await.is_some() {
+            anyhow::bail!("terminal {terminal_id} of session {session_id} is already running");
+        }
+        self.spawn_tool_on(
+            session_id,
+            terminal_id,
+            &client.kind,
+            worktree_path,
+            "",
+            client.argv,
+            client.env,
+            tddy_pty::PtyEnvBase::Cleared,
+            client.exit_code_in_output,
+            None,
+            None,
+            None,
+        )
+        .await
     }
 
     /// Spawn a new CLI process for `session_id` in `worktree_path` from an argv the caller

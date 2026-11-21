@@ -303,7 +303,6 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         request: Request<StartTerminalSessionRequest>,
     ) -> Result<Response<StartTerminalSessionResponse>, Status> {
         let req = request.into_inner();
-        let subject = self.github_user(&req.session_token)?;
         let os_user = self.os_user(&req.session_token)?;
         let subject = self.github_user(&req.session_token)?;
         let session_id = keyed_session_id(&req.session_id);

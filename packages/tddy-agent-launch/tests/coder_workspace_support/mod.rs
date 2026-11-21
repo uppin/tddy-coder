@@ -104,11 +104,11 @@ exec /bin/sh -c "$last"
         &workspace.root.join("bin/login-shell"),
         &format!(
             "#!/bin/sh\nHOME='{}'\nPATH='{}:/usr/bin:/bin'\nexport HOME PATH\n\
-             if [ \"$1\" = -l ]; then /bin/pwd -P > '{}'; exec /bin/sh; fi\n\
+             if [ \"$1\" = -l ]; then /bin/pwd -P > '{started_in}.part' && mv '{started_in}.part' '{started_in}'; exec /bin/sh; fi\n\
              [ \"$1\" = -lc ] || exit 64\nexec /bin/sh -c \"$2\"\n",
             workspace.home().display(),
             workspace.agents_dir().display(),
-            workspace.login_shell_started_in().display()
+            started_in = workspace.login_shell_started_in().display()
         ),
     );
     workspace

@@ -12,11 +12,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tddy_core::read_session_metadata;
 use tddy_host_service::coder_workspaces::CoderCredentialSource;
 use tddy_remote_shell::RemoteShell;
-use tddy_rpc::Status;
+use tddy_rpc::{Code, Status};
 
 use crate::launch_ports::LaunchSessions;
+use crate::opencode_cli_spawn::session_start::shell_for_session_target;
 
 /// A target session's target, as a tab runs on it.
 pub struct TabTarget {
@@ -55,10 +57,39 @@ impl SessionTargetShells {
 
 impl TabTargetShell for SessionTargetShells {
     fn target_of(&self, session_dir: &Path, subject: &str) -> Result<TabTarget, Status> {
-        // TODO(target-shell-tab): implement
-        let _ = (&self.coder_credentials, session_dir, subject);
-        todo!("resolve a session's target for its tab")
+        let session = session_dir
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let metadata = read_session_metadata(session_dir).map_err(|error| {
+            Status::failed_precondition(format!(
+                "the record of session {session} could not be read: {error}"
+            ))
+        })?;
+        let target = metadata.target.ok_or_else(|| {
+            Status::failed_precondition(format!("session {session} records no target"))
+        })?;
+        let worktree = metadata.repo_path.ok_or_else(|| {
+            Status::failed_precondition(format!(
+                "session {session} records no worktree on its target"
+            ))
+        })?;
+        let shell = shell_for_session_target(&target, subject, self.coder_credentials.as_ref())
+            .map_err(failed_precondition_of)?;
+        Ok(TabTarget {
+            shell,
+            worktree: PathBuf::from(worktree),
+        })
     }
+}
+
+/// A target a tab cannot reach — its vault locked, its account missing — is a failed precondition
+/// of the tab, whatever way [`shell_for_session_target`] classes the other refusals of a start.
+fn failed_precondition_of(refusal: Status) -> Status {
+    if refusal.code() == Code::FailedPrecondition {
+        return refusal;
+    }
+    Status::failed_precondition(refusal.message().to_string())
 }
 
 impl LaunchSessions {
