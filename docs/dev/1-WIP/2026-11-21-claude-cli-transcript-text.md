@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 3 — one crate (session-activity), integration tests over a real session directory, the persisted transcript seam
-**Stack**: `#target-parity` 3/7 — branch `feature/target-parity/transcript-text`, base `feature/target-parity/target-worktree-actions`
+**Stack**: `#target-parity` 3/7 — branch `feature/target-parity/transcript-text`, base `feature/target-parity/target-worktree-actions` — PR [#971](https://github.com/uppin/tddy-coder/pull/971)
 
 ## Initial Discovery
 
@@ -87,10 +87,10 @@ Both are appended as `user_message_chunk` / `agent_message_chunk` frames and rep
 ## Acceptance Tests
 
 `packages/tddy-session-activity/tests/claude_cli_transcript_messages.rs`:
-- [ ] `the_prompt_and_the_agents_reply_reach_the_transcript` (reproduction, exists)
+- [ ] `the_prompt_and_the_agents_reply_reach_the_transcript` (the reproduction)
 - [ ] `a_tool_call_keeps_its_place_between_the_prompt_and_the_reply`
 - [ ] `a_stop_with_no_reply_text_adds_no_agent_message`
-- [ ] `a_prompt_from_another_conversation_is_not_added`
+- [x] `a_prompt_from_another_conversation_is_not_added` — a **guard**: green today, must stay green. "The session's own conversation" is the last `agent_conversations` entry's id, or the session id when none is recorded (Claude runs with `--session-id` = the session id)
 
 ## Decisions & Trade-offs
 
@@ -102,10 +102,10 @@ Both are appended as `user_message_chunk` / `agent_message_chunk` frames and rep
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
