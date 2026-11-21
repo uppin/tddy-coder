@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — new reach resolver across three crates, a persisted per-session grant store, a containment rule changed on a security boundary, agent YAML slot
+**PR**: [#979](https://github.com/uppin/tddy-coder/pull/979)
 **Stack**: `#orchestra` 1/9 — branch `feature/orchestra/path-reach`, base `feature/target-parity/target-worktree-stats`
 
 ## Initial Discovery
@@ -94,16 +95,34 @@ Orchestrator-role reads are checked against `OrchestratorReach`; grants persist 
 
 ## Acceptance Tests
 
-`packages/tddy-daemon-rpc/tests/orchestrator_reach_acceptance.rs`:
+`packages/tddy-daemon-rpc/tests/orchestrator_reach_acceptance.rs` (real `ExecuteTool`, two projects on one host):
 - [ ] `an_orchestrator_reads_a_file_in_another_projects_worktree_by_absolute_path`
 - [ ] `an_orchestrator_greps_across_a_sibling_sessions_worktree`
 - [ ] `an_orchestrator_reads_a_file_under_an_agents_declared_home_dir`
 - [ ] `a_path_outside_reach_is_refused_naming_request_path_access`
-- [ ] `a_granted_path_is_readable_and_the_grant_survives_a_resume`
-- [ ] `a_worker_sessions_reads_stay_confined_to_its_worktree`
+- [ ] `a_granted_path_is_readable`
+- [x] `a_worker_sessions_reads_stay_confined_to_its_worktree` — regression guard; passes today and must keep passing
 
-`packages/tddy-coding-agent-specs/src (unit)`:
+`packages/tddy-coding-agent-specs/tests/spec_home_dirs_acceptance.rs`:
 - [ ] `every_shipped_agent_declares_its_home_dirs`
+- [ ] `claudes_home_dirs_hold_its_chat_transcripts`
+- [ ] `an_absolute_home_dir_is_refused_at_load`
+- [ ] `a_home_dir_that_climbs_out_of_the_home_is_refused_at_load`
+
+Unit — `packages/tddy-session-activity/src/path_grants.rs`:
+- [ ] `a_session_with_no_grants_file_has_no_grants`
+- [ ] `an_added_grant_is_listed_after_the_earlier_ones`
+- [ ] `grants_survive_reopening_the_store`
+
+Unit — `packages/tddy-tool-engine/src/reach.rs`:
+- [ ] `a_relative_path_resolves_under_the_home`
+- [ ] `an_absolute_path_inside_a_root_resolves`
+- [ ] `an_absolute_path_outside_reach_is_refused_naming_request_path_access`
+- [ ] `a_symlink_inside_reach_pointing_outside_it_is_refused`
+- [ ] `contains_is_false_for_a_sibling_whose_name_extends_a_root`
+- [ ] `read_in_reach_returns_a_roots_file`
+
+The surface they specify (bodies `TODO(path-reach)`): `CodingAgentSection.home_dirs` + `CodingAgentSpec::home_dirs`, `tddy_session_activity::path_grants::{PathGrantStore, PathGrant, PathGrantMode, PATH_GRANTS_FILE}`, `tddy_tool_engine::reach::{ReadReach, execute_in_reach, is_reach_tool, REQUEST_PATH_ACCESS_TOOL}`. The daemon-side wiring (building a `ReadReach` per call in `exec_tool`) is implementation, not contract.
 
 ## Decisions & Trade-offs
 
@@ -132,10 +151,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

@@ -296,6 +296,12 @@ pub struct CodingAgentSection {
     /// [`CodingAgentSpec::turn_input`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_input: Option<TurnInputSlot>,
+    /// The directories under the agent's home that hold its settings and chat files
+    /// (`#orchestra` 1/9), each relative to that home: an orchestrator's read reach includes them
+    /// under the OS user's home and under the agent's persistent tddy home. Read through
+    /// [`CodingAgentSpec::home_dirs`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub home_dirs: Vec<String>,
 }
 
 /// How long an orchestrated session's permission hook waits for its orchestrator's answer when the
@@ -347,6 +353,12 @@ impl CodingAgentSpec {
     /// for an agent that takes no effort.
     pub fn effort(&self) -> Option<&EffortSlot> {
         self.agent.effort.as_ref()
+    }
+
+    /// `coding_agent.home_dirs`: the directories under the agent's home holding its settings and
+    /// chat files, relative to that home; empty when the agent declares none.
+    pub fn home_dirs(&self) -> &[String] {
+        &self.agent.home_dirs
     }
 
     /// `coding_agent.turn_input`: how a new turn reaches a running session of the agent; `None`
