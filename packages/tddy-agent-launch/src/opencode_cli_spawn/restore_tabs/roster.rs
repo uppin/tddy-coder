@@ -18,7 +18,7 @@ use tddy_core::tab_roster::{
     TMUX_ATTACH_KIND, TMUX_KIND,
 };
 use tddy_daemon_kernel::privilege_drop::EffectiveIdentity;
-use tddy_daemon_sandbox::tab_jails::{TabJailLaunch, TabJailSpawn, TabJails};
+use tddy_daemon_sandbox::tab_jails::{TabJailLaunch, TabJailOwner, TabJailSpawn, TabJails};
 use tddy_service::proto::session::{RestoredTab, RestoredTabOutcome};
 
 use super::new_tab::agent_tab_argv;
@@ -34,6 +34,9 @@ pub struct RosterRestore<'a> {
     pub worktree: &'a Path,
     /// The session's OS user, as main was resumed as.
     pub os_user: &'a str,
+    /// The GitHub user the resume's session token resolves to: whose vault a restored jailed tab's
+    /// provider route is resolved from.
+    pub subject: &'a str,
     pub cli_manager: &'a Arc<CliSessionManager>,
     pub coding_agents: &'a HostCodingAgents,
     /// The roster's single writer: a dropped tab is forgotten through it.
@@ -220,11 +223,17 @@ async fn carry_out(
 /// Start the session user's login shell under the tab's recorded id, in a new jail of its own over
 /// the session's worktree and grants. A jail that cannot start fails the tab with the reason.
 async fn restore_jailed_shell(restore: &RosterRestore<'_>, tab: &TabEntry) -> anyhow::Result<()> {
+    let login_shell = tddy_terminal_rpc::login_shell_for(restore.os_user);
     let launch = TabJailLaunch::for_tab(
         restore.session_id,
         &tab.terminal_id,
         restore.session_dir,
         restore.worktree,
+        TabJailOwner {
+            os_user: restore.os_user,
+            login_shell: &login_shell,
+            subject: restore.subject,
+        },
     )
     .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))?;
     restore

@@ -10,7 +10,8 @@ mod support;
 
 use support::{
     a_history_request, a_start_request, a_start_request_for, a_watch_request, an_input,
-    an_output_request, TerminalServiceHost, OS_USER, SCREEN_ID, SESSION_ID, SESSION_TOKEN,
+    an_output_request, TerminalServiceHost, GITHUB_USER, OS_USER, SCREEN_ID, SESSION_ID,
+    SESSION_TOKEN,
 };
 use tddy_terminal_rpc::proto::terminal_session::{
     ClaimTerminalControlRequest, ClaimTerminalControlResponse, ListTerminalSessionsRequest,
@@ -231,6 +232,7 @@ async fn start_terminal_session_hands_the_roster_the_requested_agent_kind() {
             kind: TerminalKind::Agent("warp-cli".to_string()),
             login_shell: login_shell_for(OS_USER),
             os_user: OS_USER.to_string(),
+            subject: GITHUB_USER.to_string(),
         }]
     );
 }
@@ -251,6 +253,7 @@ async fn a_start_without_a_kind_hands_the_roster_the_login_shell() {
             kind: TerminalKind::Bash,
             login_shell: login_shell_for(OS_USER),
             os_user: OS_USER.to_string(),
+            subject: GITHUB_USER.to_string(),
         }]
     );
 }
@@ -272,6 +275,7 @@ async fn a_start_naming_bash_hands_the_roster_the_login_shell() {
             kind: TerminalKind::Bash,
             login_shell: login_shell_for(OS_USER),
             os_user: OS_USER.to_string(),
+            subject: GITHUB_USER.to_string(),
         }]
     );
 }

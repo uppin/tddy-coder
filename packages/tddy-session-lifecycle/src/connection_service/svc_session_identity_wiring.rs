@@ -41,6 +41,12 @@ impl super::DaemonSessionHost {
         .with_github_cli(self.github_cli.clone())
     }
 
+    /// What reads the vault of `subject`, the GitHub user a session token resolved to.
+    pub(crate) fn subject_account_access(&self, subject: &str) -> SessionAccountAccess {
+        SessionAccountAccess::for_subject(self.credential_vaults(), subject)
+            .with_github_cli(self.github_cli.clone())
+    }
+
     /// The identity a session of `project_id` is launched with: its commit pairs and the handler
     /// that answers its tools' `github-token`, from the source the session was started with (its
     /// recorded `github-source.yaml`) or, with none, this host's row of the project as it stands

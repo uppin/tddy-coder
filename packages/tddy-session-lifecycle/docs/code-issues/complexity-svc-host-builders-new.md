@@ -18,6 +18,7 @@ Deferred by the user, 2026-11-10 (#876 sweep): the restructure engine refused th
 | 2026-11-16 | 97 → 99 | 1 | #920 (`#remote-shell` 6/7): the host gains its remote-hook followers registry. Touched, not closed — the file is also modified by successor PR #921, so no extract is attempted here (`/pr-wrap` step 3.5, stack-branch rule) |
 | 2026-11-16 | 99 → 100 | #921 (`#remote-shell` 7/7): the host's `coder_credentials` field defaults to `NoCoderAccounts` in `new`. Touched, not closed — left for the sweep after the stack lands |
 | 2026-11-16 | 100 → 100 | 1 | #924 (`#remote-shell` 8/11) sweep: **not restored** (target ≤ 97). The engine offers no extract-into-function assist for the fields of the `Self { … }` literal; the refusal is recorded in the changeset's Deferred work for the stack's TODO gate. Touched, not closed |
+| 2026-11-21 | 101 → 97 | 1 | #964 (`#session-liveness` 5/8): the host gains its tab-jail registry and spawn override (+2); `default_session_agent_rosters` (in `stores.rs`) takes the roster store's seven-line literal (−6). Better by 4 than the merge base (fn line to closing brace on master and HEAD), still over 60; the engine still offers no extract for the `Self { … }` literal's fields. Touched, not closed |
 
 ## What would close it
 

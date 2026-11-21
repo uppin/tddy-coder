@@ -2,7 +2,7 @@
 //! jail, which it used to leave running, and every jailed shell tab's
 //! (`docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md`, part 1).
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-sandbox-shell-tab.md (`#session-liveness` 5/8)
+//! PRD: docs/ft/daemon/session-liveness.md (A sandboxed session's tabs) (`#session-liveness` 5/8)
 //!
 //! The main jail is a stand-in runner registered where the daemon resolves jails; the tab's jail
 //! starts through the in-memory `TabJailSpawn` (`sandbox_tab_support`).

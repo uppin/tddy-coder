@@ -215,6 +215,9 @@ pub struct TerminalLaunch {
     /// The OS user the request's token maps to — who a [`TerminalKind::Tmux`] terminal runs as, so
     /// it reaches that user's own tmux server.
     pub os_user: String,
+    /// The GitHub user the request's session token resolves to — whose vault a tab that must act for
+    /// the session's owner (a jailed shell's provider route, `#session-liveness` 5/8) reads.
+    pub subject: String,
 }
 
 /// One tmux session on a host's tmux server.

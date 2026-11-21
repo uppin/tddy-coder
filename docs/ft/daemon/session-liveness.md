@@ -1,6 +1,6 @@
 # Session liveness
 
-**Status:** ✅ Shipped (`#session-liveness` 1/4 PR #958, 2/4 PR #959, 3/4 PR #960, 4/4 PR #961)
+**Status:** ✅ Shipped (`#session-liveness` 1/8 PR #958, 2/8 PR #959, 3/8 PR #960, 4/8 PR #961, 5/8 PR #964)
 
 ## Summary
 
@@ -84,6 +84,7 @@ tabs:
 | `shell` | — | the session user's login shell |
 | `tmux` | `session`, `os_user` | a tmux session the daemon created to wrap a tab |
 | `tmux-attach` | `session`, `os_user` | a client on the user's own tmux session — attached to an existing one, or started as a new one |
+| `sandbox` | — | a jail of the tab's own, around the node it wraps (see [A sandboxed session's tabs](#a-sandboxed-sessions-tabs)) |
 
 - **One writer.** The roster is a file of its own, written only by the daemon's terminal roster under
   one lock per session, atomically. `.session.yaml` is read-modify-written by hook and status updates
@@ -145,6 +146,7 @@ host, sandboxed and target sessions alike — and a main that fails still fails 
 | `agent` (`resumable: false`) | started **fresh** under its id, reported `FRESH` |
 | `tmux` → `agent` | its tmux session alive: a client is **re-attached**, the agent untouched. Gone: the agent is relaunched in a new tmux session of the same name and resumes its conversation (fresh when not resumable) |
 | `shell` | the session user's login shell, fresh |
+| `sandbox` → `shell` | the session user's login shell, fresh, in a **new jail** of its own; dropped with the jail's reason when it cannot start |
 | `tmux-attach` | re-attached while the user's tmux session exists; otherwise **dropped** |
 
 - **Resumable conversations.** A tab resumes *its own* conversation only for a harness whose conversation
@@ -162,6 +164,45 @@ host, sandboxed and target sessions alike — and a main that fails still fails 
 - **Web.** The stopped strip is replaced by the live one with the restored tabs under their ids, and the
   tab that was active stays selected (an id the daemon no longer lists falls back to the Agent tab). A tab
   reopened fresh or dropped is named, with the daemon's reason, in a notice over the pane.
+
+## A sandboxed session's tabs
+
+A sandboxed session's main runs in a jail. A secondary **shell** tab of that session is opened where the
+person picks it, in the web's new-tab menu: **In sandbox** (the default) or **On host**. Both can coexist
+in one session.
+
+- **Jail per tab.** An *In sandbox* tab runs in a jail **of its own** — a second `tddy-sandbox-runner`
+  over the session's worktree, mounted writable and the shell's working directory, lowered from the
+  session's own sandbox grants exactly as its main's jail is (the same tool closure, egress policy and
+  host relay). A tab's crash or exit never takes the main's jail with it, and the main's never takes a
+  tab's. The cost is one runner per tab.
+- **Whose shell.** The jail's runner execs the session's OS user's login shell, resolved as a host tab's is
+  (`passwd`'s shell, else the serving process's `$SHELL`). The jail itself is spawned as the main's is, by
+  the daemon, under the daemon's identity: there is no uid switch for either.
+- **Provider route.** The grants are lowered on the session's provider route, re-resolved from the owner's
+  vault as a resume re-resolves it: the route's host joins the shell's egress, and `when: unrouted` grants
+  are dropped. A session whose account was removed, or whose vault is locked, is refused the tab, as it is
+  refused the resume — a shell on the vendor's egress would be a wider jail than the session's own. The
+  route's credentials are the agent's: the shell is given none of them.
+- **Files of its own.** Each tab's jail keeps its files under `<session dir>/sandbox/tabs/<terminal_id>/`
+  — IPC socket (hashed from the session and terminal ids, inside the `AF_UNIX` path limit), ready marker,
+  exec plan, profile, egress log and scratch — so two tabs, and the main, never share one.
+- **Records are the main's alone.** A tab jail writes no usage context and no capture recording: the
+  session's usage is its agent's, and its capture is its agent's terminal.
+- **Recorded `[sandbox, shell]`.** The roster records the chain as a `sandbox` node around a `shell`
+  node; a jail that cannot start fails the tab's start with why, and records nothing. A `sandbox` wrapper
+  around an agent, nested in `tmux`, or on a session that is not sandboxed is refused
+  (`INVALID_ARGUMENT` / `FAILED_PRECONDITION`) and nothing is launched.
+- **Streaming and listing.** A jailed tab streams, is listed as a shell run in a sandbox, and is served
+  by its own jail through the terminal store; jail terminals keep the main's limits (no resize, no control
+  lease). An *On host* tab of a sandboxed session is now reachable the same way: the store resolves any
+  non-main id by its owner, a tab jail or the terminal manager.
+- **Death.** A watch polls each tab jail's runner; one that exits is forgotten and its tab is unlisted. The
+  tab **stays in the roster**, like a host tab that exited on its own, so Resume reopens it.
+- **Teardown.** Closing the tab stops its jail; deleting the session, stopping it, and resuming it stop
+  every jail of the session (Resume then opens new ones); **daemon shutdown stops every tab jail and every
+  session's main jail**, which it left running before.
+- **Liveness.** A shell tab's jail never counts as a live agent, like any shell.
 
 ## What acts on held processes
 
@@ -196,18 +237,24 @@ agent for), and Telegram's list, branch-owner scan and delete.
   serve; until then a replace cannot stop it.
 - What a detached tmux-run agent prints while nobody is attached is not recorded, for a main and for a
   wrapped tab alike: history serves the recording up to the client's end.
-- **Only host-side tabs are restored.** Nothing starts a secondary tab inside a running jail or on a
-  target today — a sandboxed or target session's tabs start host-side — so every recorded chain is host-side
-  and so is its restore. Two further stack nodes are planned: **sandbox tab restore** (a jail-side tab spawn
-  plus a per-tab `sandbox` wrapper node in `tabs.yaml`; sandboxed and non-sandboxed tabs can then coexist in
-  one session) and **target tab restore** (a target tab launch plus a target wrapper node, restoring through
-  the session's `RemoteShell`). `restore_plan` dispatches per node kind, so each adds a kind. Until then a
-  chain holding such a kind is dropped with a reason, and a target session's host-recorded shell tab is
-  probably dropped on resume.
+- **Only host-side and sandbox shell tabs are restored.** An agent tab never starts in a jail, and
+  nothing starts a secondary tab on a target, so every other recorded chain is host-side and so is its
+  restore. Three further stack nodes are planned: **target shell tab** (a target tab launch plus a target
+  wrapper node, restoring through the session's `RemoteShell`), **sandbox agent tab** and **target agent
+  tab**. `restore_plan` dispatches per node kind, so each adds a kind. Until then a chain holding such a
+  kind is dropped with a reason, and a target session's host-recorded shell tab is probably dropped on
+  resume.
 - opencode, muse and warp tabs reopen fresh, not in their conversation (`TODO(opencode-cli)`,
   `TODO(muse-cli)`, `TODO(warp-cli)` on `tab_conversation_is_resumable`).
 - The sandboxed resume path calls the same restore but has no test of its own: its jail harness is the
   macOS-only one, which already fails on `master`.
+- **The kernel sandbox of a tab jail is not tested by CI.** Every behaviour above is pinned against an
+  in-memory `TabJailSpawn` over a real process; the real-jail test
+  (`sandbox_shell_tab_jail_linux`) self-skips off Linux and needs a VM, which waits for VM-backed testing
+  ([`2026-11-02-ci-runs-no-linux-jail`](../../dev/todo/2026-11-02-ci-runs-no-linux-jail.md)).
+- **A main jail's death is still not watched** (tab jails' is): the daemon notices a dead main runner only
+  when something asks. See
+  [the shutdown todo](../../dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md).
 - A tab started as **New tmux session…** is recorded as `tmux-attach`, like one attached to an existing
   session; only the wrapper the daemon creates around an agent is a `tmux` node.
 

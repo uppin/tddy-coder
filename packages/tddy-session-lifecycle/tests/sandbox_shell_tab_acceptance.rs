@@ -4,7 +4,7 @@
 //! deleted; a jail that exits ends its tab, which stays recorded for Resume. An "On host" tab of a sandboxed session is reachable, and a `sandbox` wrapper is refused
 //! around an agent and on a session that is not sandboxed.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-sandbox-shell-tab.md (`#session-liveness` 5/8)
+//! PRD: docs/ft/daemon/session-liveness.md (A sandboxed session's tabs) (`#session-liveness` 5/8)
 //!
 //! Tab jails start through an in-memory `TabJailSpawn` (`sandbox_tab_support::fake_tab_jails`),
 //! injected with `DaemonSessionHost::with_tab_jail_spawn`; the session's main jail is a stand-in
@@ -21,6 +21,8 @@ use tddy_core::tab_roster::LaunchNode;
 use tddy_rpc::Code;
 
 use sandbox_tab_support::fake_tab_jails::jailed_shell_banner;
+use support::this_os_user;
+
 use sandbox_tab_support::{
     a_sandboxed_session, an_unsandboxed_session, wire_kinds_of, JAILED_SESSION_ID,
 };
@@ -59,6 +61,31 @@ async fn a_shell_tab_opened_in_sandbox_starts_a_jail_of_its_own_over_the_session
     );
     assert_eq!(daemon.jails.running_jails(), ids(&[&tab]));
     assert!(daemon.main_jail_runs(), "the main's jail is not the tab's");
+}
+
+#[tokio::test]
+async fn a_jailed_shell_tab_runs_the_session_users_login_shell_as_a_host_tab_does() {
+    // Given a sandboxed session, opened by a person the daemon maps to an OS user
+    let daemon = a_sandboxed_session().await;
+
+    // When a shell tab is opened "In sandbox"
+    let tab = daemon.opens_a_jailed_shell().await;
+
+    // Then its jail is asked to run that user's own login shell, for that user, and to resolve the
+    // session's provider route from the vault of the person who opened the tab
+    let launch = daemon.jails.launch_of(&tab);
+    assert_eq!(
+        (
+            launch.os_user.clone(),
+            launch.login_shell.clone(),
+            launch.subject.clone()
+        ),
+        (
+            this_os_user(),
+            tddy_terminal_rpc::login_shell_for(&this_os_user()),
+            "testuser".to_string(),
+        )
+    );
 }
 
 #[tokio::test]

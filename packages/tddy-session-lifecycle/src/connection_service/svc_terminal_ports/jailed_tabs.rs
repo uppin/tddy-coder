@@ -4,10 +4,10 @@
 //! `(session_id, terminal_id)`, and recorded `[sandbox, shell]` in the session's roster. A session
 //! that is not sandboxed refuses one `FAILED_PRECONDITION`.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-sandbox-shell-tab.md
+//! PRD: docs/ft/daemon/session-liveness.md (A sandboxed session's tabs)
 
 use tddy_core::tab_roster::{LaunchNode, TabEntry};
-use tddy_daemon_sandbox::tab_jails::TabJailLaunch;
+use tddy_daemon_sandbox::tab_jails::{TabJailLaunch, TabJailOwner};
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::{TerminalDescriptor, TerminalLaunch};
 
@@ -35,12 +35,12 @@ impl CliManagerTerminalRoster {
     }
 
     /// Start a shell tab of `session_id` in a jail of its own over the session's worktree and
-    /// grants, record it `[sandbox, shell]`, and return its fresh terminal id. A jail that cannot
+    /// grants, run for the session's OS user and its login shell, record it `[sandbox, shell]`, and return its fresh terminal id. A jail that cannot
     /// start fails the start with why, and nothing is recorded.
     pub(super) async fn start_jailed_shell_tab(
         &self,
         session_id: &str,
-        _launch: &TerminalLaunch,
+        launch: &TerminalLaunch,
     ) -> Result<String, Status> {
         let Some(tabs) = &self.tab_jails else {
             return Err(Status::failed_precondition(
@@ -60,7 +60,17 @@ impl CliManagerTerminalRoster {
         }
         let worktree = recorded_worktree(&self.tddy_data_dir, session_id)?;
         let terminal_id = uuid::Uuid::now_v7().to_string();
-        let jail = TabJailLaunch::for_tab(session_id, &terminal_id, &session_dir, &worktree)?;
+        let jail = TabJailLaunch::for_tab(
+            session_id,
+            &terminal_id,
+            &session_dir,
+            &worktree,
+            TabJailOwner {
+                os_user: &launch.os_user,
+                login_shell: &launch.login_shell,
+                subject: &launch.subject,
+            },
+        )?;
         tabs.jails.start(&*tabs.spawn, jail).await?;
         let chain = vec![LaunchNode::sandbox(), LaunchNode::shell()];
         if let Err(error) = self

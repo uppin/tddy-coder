@@ -11,6 +11,18 @@ pub(super) fn default_agent_tool_sockets(
     )
 }
 
+/// The roster store of a host that has installed no coding agents yet, over the checkouts
+/// `session_agent_clones` holds: an installed registry replaces it (`with_coding_agents`).
+pub(super) fn default_session_agent_rosters(
+    session_agent_clones: &Arc<tddy_session_agents::session_agent_clone::SessionAgentCloneStore>,
+) -> Arc<crate::session_agent_roster::SessionAgentRosterStore> {
+    Arc::new(crate::session_agent_roster::SessionAgentRosterStore::new(
+        Arc::clone(session_agent_clones),
+        Arc::new(crate::session_agent_status::SessionAgentActivityStore::new()),
+        tddy_agent_launch::host_coding_agents::no_coding_agents().agents_shared(),
+    ))
+}
+
 pub(super) struct HostStores {
     pub(super) workspace_sandbox_provisioner:
         tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,

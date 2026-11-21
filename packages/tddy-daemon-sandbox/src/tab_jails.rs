@@ -10,7 +10,7 @@
 //! a test's is an in-memory double — and **watches each for death**: a jail whose runner exits is
 //! forgotten and announced on [`TabJails::subscribe_ended`], so the tab it served ends with it.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-sandbox-shell-tab.md
+//! PRD: docs/ft/daemon/session-liveness.md (A sandboxed session's tabs)
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -58,17 +58,34 @@ pub struct TabJailLaunch {
     pub worktree: PathBuf,
     /// The jail's own files, distinct from the main jail's and every other tab's.
     pub paths: TabJailPaths,
+    /// The session's OS user: whose shell the jail runs, as a host tab does.
+    pub os_user: String,
+    /// That user's login shell — what the jail's runner execs, resolved as a host tab's is.
+    pub login_shell: String,
+    /// The session owner (the GitHub user their session token resolves to): whose vault the jail's
+    /// provider route is resolved from, so its grants are lowered as the main jail's are.
+    pub subject: String,
+}
+
+/// Who a tab's jail runs for: the session's OS user, that user's login shell, and the session owner
+/// (what [`TabJailLaunch::subject`] holds).
+#[derive(Debug, Clone, Copy)]
+pub struct TabJailOwner<'a> {
+    pub os_user: &'a str,
+    pub login_shell: &'a str,
+    pub subject: &'a str,
 }
 
 impl TabJailLaunch {
     /// The launch of the jail of tab `terminal_id` of session `session_id`, whose directory is
-    /// `session_dir` and whose worktree is `worktree`; `INVALID_ARGUMENT` when the terminal id cannot
-    /// name a directory of the session ([`TabJailPaths::for_tab`]).
+    /// `session_dir` and whose worktree is `worktree`, run for `owner`; `INVALID_ARGUMENT` when the
+    /// terminal id cannot name a directory of the session ([`TabJailPaths::for_tab`]).
     pub fn for_tab(
         session_id: &str,
         terminal_id: &str,
         session_dir: &Path,
         worktree: &Path,
+        owner: TabJailOwner<'_>,
     ) -> Result<TabJailLaunch, Status> {
         Ok(TabJailLaunch {
             session_id: session_id.to_string(),
@@ -76,6 +93,9 @@ impl TabJailLaunch {
             session_dir: session_dir.to_path_buf(),
             worktree: worktree.to_path_buf(),
             paths: TabJailPaths::for_tab(session_dir, session_id, terminal_id)?,
+            os_user: owner.os_user.to_string(),
+            login_shell: owner.login_shell.to_string(),
+            subject: owner.subject.to_string(),
         })
     }
 

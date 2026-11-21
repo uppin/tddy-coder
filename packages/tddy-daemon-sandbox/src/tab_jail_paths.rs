@@ -7,7 +7,7 @@
 //! of its own, under `<session>/sandbox/tabs/<terminal_id>/`, and a socket hashing the session *and*
 //! the terminal id.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-sandbox-shell-tab.md
+//! PRD: docs/ft/daemon/session-liveness.md (A sandboxed session's tabs)
 
 use std::path::{Path, PathBuf};
 

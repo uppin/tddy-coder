@@ -64,6 +64,11 @@ pub trait LaunchHost: Send + Sync {
     /// its owner, and the token the session was started with.
     fn session_account_access(&self, session_token: &str) -> SessionAccountAccess;
 
+    /// What reads the vault of `subject` — the GitHub user a session token resolved to — for a
+    /// start the daemon makes on that person's behalf with no token in hand (a jailed shell tab's
+    /// provider route).
+    fn subject_account_access(&self, subject: &str) -> SessionAccountAccess;
+
     /// The identity a session of `project_id` is launched with — its commit pairs and the handler
     /// that answers its tools' `github-token` — over the project's assignments as they stand now.
     /// Neither when the project cannot be read (logged by the host).

@@ -71,6 +71,19 @@ fn recorded_managed_recipe(
 }
 
 impl LaunchSessions {
+    /// Stop what the run being resumed left: its main jail — or, when this daemon holds none, the
+    /// runner `recorded_pid` names — and the jails of its shell tabs, which the roster restore replaces
+    /// with new ones. Returns once the runners have had a moment to exit.
+    async fn stop_previous_run(&self, session_id: &str, recorded_pid: Option<u32>) {
+        if let Some(state) = self.sandbox_manager.remove(session_id).await {
+            state.stop();
+        } else if let Some(pid) = recorded_pid {
+            tddy_daemon_sandbox::sandbox_session::terminate_sandbox_process(pid);
+        }
+        self.tab_jails.stop_session(session_id).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
     /// Handle `ResumeSession` for a sandboxed CLI coding agent session.
     pub(crate) async fn resume_sandboxed_cli_harness(
         &self,
@@ -82,14 +95,7 @@ impl LaunchSessions {
     ) -> Result<Response<ResumeSessionResponse>, Status> {
         // Resolved before the running jail is stopped: a resume the host cannot launch leaves it running.
         let session_agent = resolve_session_agent(&self.coding_agents, kind.clone())?;
-        if let Some(state) = self.sandbox_manager.remove(&req.session_id).await {
-            state.stop();
-        } else if let Some(pid) = metadata.pid {
-            tddy_daemon_sandbox::sandbox_session::terminate_sandbox_process(pid);
-        }
-        // The jails of the stopped run's shell tabs go with it; the roster restore opens new ones.
-        self.tab_jails.stop_session(&req.session_id).await;
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        self.stop_previous_run(&req.session_id, metadata.pid).await;
 
         let worktree_path = metadata
             .repo_path
@@ -146,7 +152,7 @@ impl LaunchSessions {
         Ok(Response::new(ResumeSessionResponse {
             session_id: req.session_id.clone(),
             restored_tabs: self
-                .restore_roster_on_resume(os_user, &req.session_id, session_dir, &worktree_path)
+                .restore_roster_on_resume(os_user, req, session_dir, &worktree_path)
                 .await,
             ..Default::default()
         }))

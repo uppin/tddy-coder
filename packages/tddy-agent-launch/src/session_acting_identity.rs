@@ -124,6 +124,9 @@ pub struct SessionAccountAccess {
     vaults: Option<Arc<SessionVaults>>,
     subject_of: SessionSubjectResolver,
     session_token: String,
+    /// What the vault is looked up by, through `subject_of`: the session token, or — for access
+    /// built [`Self::for_subject`] — the subject itself. Empty means there is nothing to look up by.
+    vault_key: String,
     /// The `gh` a Local gh project's identity is asked of; the one on a spawned child's `PATH`
     /// unless [`Self::with_github_cli`] names another.
     github_cli: GithubCli,
@@ -139,7 +142,19 @@ impl SessionAccountAccess {
             vaults,
             subject_of,
             session_token: session_token.to_string(),
+            vault_key: session_token.to_string(),
             github_cli: GithubCli::on_spawn_child_path(),
+        }
+    }
+
+    /// Access to the vault of the signed-in person `subject` names, for a start the daemon makes on
+    /// their behalf with no session token in hand: the vault is found by the subject directly, and
+    /// [`Self::session_token`] stays empty, as it is for [`Self::none`].
+    pub fn for_subject(vaults: Option<Arc<SessionVaults>>, subject: &str) -> Self {
+        let owner = subject.to_string();
+        Self {
+            vault_key: subject.to_string(),
+            ..Self::new(vaults, Arc::new(move |_| Some(owner.clone())), "")
         }
     }
 
@@ -204,10 +219,10 @@ impl SessionAccountAccess {
         let vaults = self
             .vaults
             .as_ref()
-            .filter(|_| !self.session_token.is_empty())
+            .filter(|_| !self.vault_key.is_empty())
             .ok_or(SessionIdentityRefusal::NoVaultsConfigured)?;
         SessionVaultAccountStore::new(Arc::clone(vaults), Arc::clone(&self.subject_of))
-            .list(&self.session_token)
+            .list(&self.vault_key)
             .map_err(SessionIdentityRefusal::Vault)
     }
 }

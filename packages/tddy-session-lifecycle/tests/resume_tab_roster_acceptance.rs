@@ -345,6 +345,19 @@ async fn a_jailed_shell_tab_is_restored_into_a_new_jail_on_resume() {
         (launch.session_id.as_str(), launch.worktree.clone()),
         (RESUMED_SESSION_ID, daemon.worktree.clone())
     );
+    // ... for the session's OS user and its login shell, with the resuming person as the owner of the route's vault
+    assert_eq!(
+        (
+            launch.os_user.clone(),
+            launch.login_shell.clone(),
+            launch.subject.clone()
+        ),
+        (
+            this_os_user(),
+            tddy_terminal_rpc::login_shell_for(&this_os_user()),
+            "testuser".to_string(),
+        )
+    );
     assert!(jails.jail_runs(JAILED_TAB));
     assert!(daemon.listed_terminal_ids().await.contains(JAILED_TAB));
     assert_eq!(

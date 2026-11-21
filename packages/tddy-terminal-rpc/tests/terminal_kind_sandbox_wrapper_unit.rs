@@ -2,7 +2,7 @@
 //! its own is accepted, and nothing else is — an agent in a jail is a later node's, and a sandbox
 //! wraps no other wrapper.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-sandbox-shell-tab.md (`#session-liveness` 5/8)
+//! PRD: docs/ft/daemon/session-liveness.md (A sandboxed session's tabs) (`#session-liveness` 5/8)
 
 use std::collections::HashMap;
 

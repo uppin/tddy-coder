@@ -2,7 +2,7 @@
 //! a second `tddy-sandbox-runner` over the session's worktree — that works in the worktree and
 //! cannot write outside the session's grants.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-sandbox-shell-tab.md (`#session-liveness` 5/8)
+//! PRD: docs/ft/daemon/session-liveness.md (A sandboxed session's tabs) (`#session-liveness` 5/8)
 //!
 //! **Linux only**: the test runs where the jail is a user-namespace jail, and self-skips where
 //! unprivileged user namespaces are unavailable, as every Linux jail suite does. CI runs none of

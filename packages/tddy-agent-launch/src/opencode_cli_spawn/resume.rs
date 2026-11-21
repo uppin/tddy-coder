@@ -116,7 +116,7 @@ impl crate::launch_ports::LaunchSessions {
         .await?;
         let mut resumed = resumed.into_inner();
         resumed.restored_tabs = self
-            .restore_roster_on_resume(os_user, &req.session_id, session_dir, &tab_worktree)
+            .restore_roster_on_resume(os_user, req, session_dir, &tab_worktree)
             .await;
         Ok(Response::new(resumed))
     }
