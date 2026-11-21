@@ -344,7 +344,10 @@ fn cli_session_spec<'a>(
 }
 
 /// A CLI session's coding agent as this host satisfies it: the session type, the agent resolved from
-/// the installed coding agents, and those agents (a jail reads their registry and host).
+/// the installed coding agents, and those agents (a jail reads their registry and host). For a
+/// session on a target the agent is the target's own
+/// ([`crate::target_start_agent::resolve_session_agent_for_target`]): its tool's `binary` is the
+/// spec's bare command, never a path of this host; its deps are still this host's.
 pub(crate) struct CliSessionAgent {
     pub kind: CliSessionType,
     pub agent: HostAgent,

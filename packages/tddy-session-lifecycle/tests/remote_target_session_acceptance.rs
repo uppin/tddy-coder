@@ -34,7 +34,8 @@ mod agent_run_support;
 mod cli_harness_support;
 use agent_registry_support::{builtin_yaml_as, AJailGuard};
 use cli_harness_support::{
-    a_daemon_config, create_test_repo_with_origin, register_project, session_host, VALID_TOKEN,
+    a_daemon_config, coding_agents_over, create_test_repo_with_origin, register_project,
+    session_host, VALID_TOKEN,
 };
 
 const TEST_PROJECT_ID: &str = "remote-target-project";
@@ -81,7 +82,27 @@ struct ADaemonWithATarget {
 }
 
 fn a_daemon_with_a_reachable_target() -> ADaemonWithATarget {
-    let target = StandInSshTarget::behind_ssh();
+    let daemon = a_daemon_reaching(StandInSshTarget::behind_ssh());
+    daemon.the_target_installs_the_agent();
+    daemon
+}
+
+/// A daemon whose host has no copy of the agent, with a target whose login `PATH` has it.
+fn a_daemon_without_the_agent_reaching_a_target_with_it() -> ADaemonWithATarget {
+    let daemon = a_daemon_with_a_reachable_target();
+    daemon.this_host_has_no_agent();
+    daemon
+}
+
+/// A daemon whose host has the agent, with a target whose login `PATH` — its agents directory and
+/// the system's own directories only — has none.
+fn a_daemon_reaching_a_target_without_the_agent() -> ADaemonWithATarget {
+    a_daemon_reaching(StandInSshTarget::behind_ssh_with_only_the_system_path())
+}
+
+/// A daemon with one registered project and the `acme` agent installed on its host, reaching
+/// `target`, which has nothing installed yet.
+fn a_daemon_reaching(target: StandInSshTarget) -> ADaemonWithATarget {
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
     let sessions_dir = tempfile::tempdir().unwrap();
@@ -100,8 +121,6 @@ fn a_daemon_with_a_reachable_target() -> ADaemonWithATarget {
     let runs = stub_bin.join("runs");
     let stub = stub_bin.join(AGENT_ID);
     write_executable(&stub, &a_stub_agent(&runs));
-    // A target start runs the agent's bare command, found on the target's own `PATH`.
-    write_executable(&target.agents_dir().join(AGENT_ID), &a_stub_agent(&runs));
 
     let manager = Arc::new(CliSessionManager::new());
     let service = Arc::new(session_host(
@@ -149,6 +168,40 @@ fn a_start_on_the_target() -> StartSessionRequest {
 }
 
 impl ADaemonWithATarget {
+    /// Install the agent on the target: a start there runs the agent's bare command, found on the
+    /// target's own `PATH`.
+    fn the_target_installs_the_agent(&self) {
+        write_executable(
+            &self.target.agents_dir().join(AGENT_ID),
+            &a_stub_agent(&self.runs),
+        );
+    }
+
+    /// Take the agent off this daemon's host: its `PATH` keeps `tddy-tools` and nothing else.
+    fn this_host_has_no_agent(&self) {
+        let command = SESSION_TYPE.strip_suffix("-cli").unwrap_or(SESSION_TYPE);
+        std::fs::remove_file(self.sessions_base.join("tool-bin").join(command))
+            .expect("the agent installed on the host is removed");
+        assert!(
+            coding_agents_over(&self.sessions_base)
+                .resolve(AGENT_ID, None)
+                .is_err(),
+            "the daemon's host must not resolve the agent for this test"
+        );
+    }
+
+    /// The sessions recorded on this host: one directory each under its sessions base.
+    fn recorded_sessions(&self) -> Vec<String> {
+        std::fs::read_dir(self.sessions_base.join("sessions"))
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     async fn start(&self, req: StartSessionRequest) -> Result<String, tddy_rpc::Status> {
         self.service
             .start_session(Request::direct(req))
@@ -605,4 +658,84 @@ async fn a_resume_restores_the_roster_of_a_target_session_by_each_tabs_own_chain
         tddy_service::proto::session::RestoredTabOutcome::Dropped as i32
     );
     assert!(tabs[1].reason.contains("ssh"), "{}", tabs[1].reason);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_target_session_starts_when_the_daemon_host_has_no_agent() {
+    // Given a target whose login `PATH` has the agent, and a daemon host with no copy of it
+    let daemon = a_daemon_without_the_agent_reaching_a_target_with_it();
+
+    // When
+    let started = daemon.start(a_start_on_the_target()).await;
+
+    // Then it starts, and the target's own agent runs in the session's worktree there
+    let session_id = started.expect("a start on a target needs no agent on the daemon's host");
+    let agent = daemon.the_agent_on_the_target(&session_id).await;
+    assert_eq!(agent.cwd, daemon.target.worktree_of(&session_id));
+
+    // And the session records the target it runs on
+    assert_eq!(
+        read_session_metadata(&daemon.session_dir(&session_id))
+            .expect(".session.yaml is written")
+            .target,
+        Some(tddy_core::SessionTarget::ssh(TARGET_ALIAS))
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_target_whose_agent_is_missing_fails_the_start_before_any_worktree_is_cut() {
+    // Given a target whose login `PATH` has no agent — though this daemon's host has one
+    let daemon = a_daemon_reaching_a_target_without_the_agent();
+
+    // When
+    let refused = daemon.refusal_of(a_start_on_the_target()).await;
+
+    // Then the start is refused, naming the command the target does not have
+    assert_eq!(
+        refused.map_err(|(code, message)| (
+            code,
+            message.contains("the agent `acme` is not installed on the target")
+        )),
+        Err((Code::FailedPrecondition, true))
+    );
+
+    // And nothing was cloned or cut on the target, no agent ran anywhere, and no session is
+    // recorded here
+    assert_eq!(
+        (
+            daemon.target.root.join(".tddy/repos").exists(),
+            daemon.agent_runs(),
+            daemon.recorded_sessions(),
+        ),
+        (false, Vec::new(), Vec::<String>::new())
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_target_session_resumes_without_the_agent_on_the_daemon_host() {
+    // Given a session on the target whose agent was stopped, and a daemon host with no copy of the
+    // agent
+    let daemon = a_daemon_without_the_agent_reaching_a_target_with_it();
+    let session_id = daemon.a_session_on_the_target().await;
+    let first = daemon.the_agent_on_the_target(&session_id).await;
+    daemon.stop(&session_id).await;
+    the_agent_has_ended(&first).await;
+
+    // When
+    let resumed = daemon.resume(&session_id).await;
+
+    // Then the resume succeeds, and the target's agent ran in its worktree twice: started, then
+    // resumed
+    assert_eq!(
+        resumed.map_err(|status| (status.code(), status.message().to_string())),
+        Ok(())
+    );
+    let runs = daemon.runs_on_the_target(&session_id, 2).await;
+    assert_eq!(
+        runs.iter().map(AnAgentRun::is_a_resume).collect::<Vec<_>>(),
+        vec![false, true]
+    );
 }

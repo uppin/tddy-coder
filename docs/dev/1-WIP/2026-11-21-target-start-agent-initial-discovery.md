@@ -31,3 +31,40 @@ Scope: functionality + DRY only (no size/length refactors). Five nodes, all wave
 - n3 jail-death-watch: watch the main jail runner's exit; end the main terminal (pty_done, exit status recorded), remove the jail from the registry, session becomes inactive and resumable; tab jails left as they are. Resolves the open half of todo 2026-09-15.
 - n4 jail-uid: jails (main + tab) run as the session's OS user through the root supervisor (it already brokers setuid for tool sessions); user/desktop mode without a supervisor keeps the daemon's uid, documented.
 - n5 target-start-agent: a target session's start resolves the agent on the target (bare command via the target's login PATH, chat minted on the target, a probe first with a clear error), like n8's tabs; host spec still renders argv/env. Resolves the session-start half of todo 2026-11-19-a-target-start-requires-the-agent-on-the-daemon-host.
+
+## Exploration 2 — the draft-PR contract (pass 2)
+
+- **One entry point for every target start.** `claude-cli` and every other spec-launched CLI agent
+  reach `LaunchSessions::start_cli_harness` (`svc_start_session_core.rs:443`,
+  `SessionLaunch::AgentCli`), and every target resume reaches `resume_cli_harness`
+  (`opencode_cli_spawn/resume.rs`). There is no separate claude-cli target start.
+- **Callers that never run on a target need nothing.** `start_spawned_cli_child` always passes
+  `target: None` (a conversation or pr-stack child runs on this host); the sandboxed start and resume
+  and `tab_jail_launch` are jails, and `refuse_a_target_combination` refuses target + sandbox. They
+  keep `resolve_session_agent`.
+- **What a target start reads off the host-resolved agent** (`opencode_cli_spawn.rs`): `agent.spec`;
+  `agent_tddy_tools(agent)` (the `tddy-tools` dep, so deps stay host-resolved); `start_conversation`
+  takes `binary` but on a target uses `ConversationTarget.command`; `node_launcher_for` is `None` on
+  a target; `launch_on_target` swaps the binary for the spec's bare command. So a target agent whose
+  `tool.binary` is the bare command needs no reshaping of `CliSessionAgent`.
+- **Where the probe can run before the cut.** `probe_agent_on_target` `cd`s into a directory first.
+  Before the cut nothing of the session exists on the target (`setup_remote_worktree` probes `$HOME`
+  and clones under `~/.tddy/repos`), and a resume's worktree may be gone (a failed `cd` exits non-zero,
+  which the probe reads as `AgentNotOnTarget`). So both pass `.` — the login's own directory.
+- **A stopped Coder workspace is not misread.** `CoderShell::exec` reports a workspace that is not
+  running as `RemoteShellError::Unreachable` with the CLI's words, so the probe answers `Shell`, which
+  `tab_launch_status` maps to `UNAVAILABLE` in those words —
+  `a_stopped_workspace_is_refused_as_a_target_with_that_reason` keeps passing once 1/4 is green.
+- **Order in `start_cli_harness`**: `refuse_a_target_combination` first (it needs no agent), then the
+  start's target shell (`start_target_shell`, no remote call), then the agent where it runs (host
+  resolve, or target resolve + probe), then the other refusals and the prelude. The refusal tests
+  (`a_target_with_*_is_refused`) stay green on the contract because they return before the todo.
+- **A "daemon host has no agent" fixture** in the session-lifecycle suites: `session_host` symlinks the
+  stub into `<tddyhome>/tool-bin/<command>`. Removing that link leaves the host's `PATH` holding only
+  `tddy-tools`, and `coding_agents_over(&sessions_base).resolve(AGENT_ID, None)` then fails, which the
+  tests assert as a precondition. `tddy-test-hosts::a_tool_host()` (2/4) is still a todo, so it is
+  not used.
+- **Complexity issues** stay level: `start_cli_harness_from_request` and `start_cli_harness_session`
+  are untouched; `resume_cli_harness` swaps one statement for another, which rustfmt lays out over
+  three lines (+2 — `complexity-opencode-cli-spawn-resume-resume-cli-harness`, to be recorded at wrap
+  or recovered by `/green`).
