@@ -173,6 +173,11 @@ pub struct AgentActivityHub {
             tokio::sync::broadcast::Sender<tddy_core::agent_activity::AgentActivityRecord>,
         >,
     >,
+    /// Per-session live broadcast of ACP transcript frames that are not tool calls — what a
+    /// hook-driven agent said — created lazily on first subscribe like [`Self::senders`].
+    frame_senders: StdMutex<
+        HashMap<String, tokio::sync::broadcast::Sender<tddy_service::proto::acp::AcpAgentMessage>>,
+    >,
     /// Per-session stack of in-flight `call_id`s awaiting their terminal row.
     pending: StdMutex<HashMap<String, Vec<String>>>,
 }
@@ -217,6 +222,38 @@ impl AgentActivityHub {
         if let Some(sender) = sender {
             // `Err` means no live receivers; the durable log still holds the record.
             let _ = sender.send(record);
+        }
+    }
+
+    /// Subscribe to the transcript frames published for a session (a prompt or a reply), creating
+    /// the sender on first use. A live `StreamAcpReplay` merges this with [`Self::subscribe`].
+    pub fn subscribe_frames(
+        &self,
+        session_id: &str,
+    ) -> tokio::sync::broadcast::Receiver<tddy_service::proto::acp::AcpAgentMessage> {
+        self.frame_senders
+            .lock()
+            .expect("agent activity hub mutex poisoned")
+            .entry(session_id.to_string())
+            .or_insert_with(|| tokio::sync::broadcast::channel(Self::CAPACITY).0)
+            .subscribe()
+    }
+
+    /// Publish a transcript frame to a session's frame subscribers. A no-op when nobody has
+    /// subscribed: the frame is already durable in `acp-transcript.jsonl`.
+    pub fn publish_frame(
+        &self,
+        session_id: &str,
+        frame: tddy_service::proto::acp::AcpAgentMessage,
+    ) {
+        let sender = self
+            .frame_senders
+            .lock()
+            .expect("agent activity hub mutex poisoned")
+            .get(session_id)
+            .cloned();
+        if let Some(sender) = sender {
+            let _ = sender.send(frame);
         }
     }
 
@@ -353,6 +390,26 @@ mod tests {
         // Then
         let seen = listener.try_recv().expect("the subscriber sees the record");
         assert_eq!(seen.tool_name, "Read");
+    }
+
+    #[test]
+    fn delivers_a_published_frame_only_to_a_frame_subscriber_of_the_same_session() {
+        // Given
+        let hub = AgentActivityHub::default();
+        let mut same = hub.subscribe_frames("session-a");
+        let mut other = hub.subscribe_frames("session-b");
+        let mut records = hub.subscribe("session-a");
+
+        // When
+        hub.publish_frame(
+            "session-a",
+            tddy_service::acp_replay::agent_text_frame("hello", 1),
+        );
+
+        // Then
+        assert!(same.try_recv().is_ok(), "the session's subscriber sees it");
+        assert!(other.try_recv().is_err(), "another session's does not");
+        assert!(records.try_recv().is_err(), "a record subscriber does not");
     }
 
     #[test]
