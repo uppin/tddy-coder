@@ -47,7 +47,9 @@ impl SandboxSessionManager {
     /// [`RECORDING_INTERVAL`].
     #[must_use]
     pub fn with_recording_interval(mut self, interval: Duration) -> Self {
-        self.recorder.interval = interval;
+        Arc::get_mut(&mut self.recorder)
+            .expect("a manager is configured before it is shared")
+            .interval = interval;
         self
     }
 

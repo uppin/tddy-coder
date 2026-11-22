@@ -36,9 +36,9 @@ processes.
   daemon's detach watcher holds its tmux session, and for the moment between the client's end and the
   watcher taking over: a listing never finds the session held by neither. Watchers are per terminal,
   so a main and each wrapped tab are watched on their own.
-- A sandboxed session's entry outlives its runner until resume, relaunch or delete replaces it, so
-  its liveness is read off the runner process the entry owns, never off the entry's presence or the
-  recorded pid.
+- A sandboxed session's liveness is read off the runner process its entry owns, never off the recorded
+  pid. A main jail that dies on its own leaves the registry (see
+  [A dead main jail](#a-dead-main-jail)), so the entry never outlives its runner.
 
 ## A daemon restart
 
@@ -247,6 +247,28 @@ in one session.
   moment the runner exits or the tab is closed. Stopping or deleting the session stops its jailed agent tabs
   with the rest of its tab jails.
 
+## A dead main jail
+
+A sandboxed session's **main** jail is watched from the moment it is registered. The watch waits on the jail's
+runner **without reaping it** (`waitid` with `WNOWAIT`, on a blocking task, holding no lock), so the exit status
+is never lost to a liveness poll that asks first. A runner that exits **on its own**:
+
+- **ends the main terminal**: its status is recorded on the jail's state and its `pty_done` fires, so a stream
+  of the terminal ends where it used to hang open;
+- **leaves the registry**, when it is still the jail registered for its session, and the jail's capture
+  recording is finished;
+- **lists the session inactive** — the live set reads the jail's runner, and it has none — while the session
+  stays resumable;
+- is announced once as a `JailEnded { session_id, exit }` (`SandboxSessionManager::subscribe_ended`).
+
+A jail **stopped by request** (delete, resume, relaunch, daemon shutdown) is not announced as `JailEnded`: the stop
+is marked before the kill, so the watch finds the stop already recorded. It does end the terminal's `pty_done`,
+with the status the stop reaped. The session's **tab jails are untouched**: they keep their own watch, and a
+jailed agent tab keeps the session live after its main's jail died.
+
+A jail's stdio endpoint, host relay and terminal-event forwarder tasks are kept with it and aborted when it is
+stopped.
+
 ## A target session's tabs
 
 A target (ssh or Coder) session's main runs on its target, reached through its remote shell. A secondary
@@ -362,9 +384,12 @@ agent for), and Telegram's list, branch-owner scan and delete.
   in-memory `TabJailSpawn` over a real process; the real-jail test
   (`sandbox_shell_tab_jail_linux`) self-skips off Linux and needs a VM, which waits for VM-backed testing
   ([`2026-11-02-ci-runs-no-linux-jail`](../../dev/todo/2026-11-02-ci-runs-no-linux-jail.md)).
-- **A main jail's death is still not watched** (tab jails' is): the daemon notices a dead main runner only
-  when something asks. See
-  [the shutdown todo](../../dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md).
+- **A main jail's death is watched; a restart policy is not.** A dead main jail ends its terminal and leaves the
+  session inactive for the person to resume; nothing restarts it, and the workspace and claude-cli jails keep
+  the per-call discovery the
+  [shutdown todo](../../dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md) describes.
+- **Jails run as the daemon's uid.** Running a session's jails as its OS user, through the root supervisor, is
+  [recorded](../../dev/todo/2026-11-21-jails-run-as-the-daemons-uid.md); it is testable only with a VM for now.
 - A tab started as **New tmux session…** is recorded as `tmux-attach`, like one attached to an existing
   session; only the wrapper the daemon creates around an agent is a `tmux` node.
 

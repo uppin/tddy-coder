@@ -2,53 +2,19 @@
 //! which it used to leave running
 //! (`docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md`, part 1).
 
-use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
-use tddy_task::TerminalCapture;
-use tokio::sync::{broadcast, mpsc};
 
-use crate::sandbox_session::{SandboxSessionManager, SandboxSessionState, SandboxSessionStateInit};
-
-/// A registered main jail whose runner is a `sleep`.
-fn a_main_jail_running() -> (Arc<SandboxSessionState>, tempfile::TempDir) {
-    let tmp = tempfile::tempdir().unwrap();
-    let child = Command::new("sleep")
-        .arg("300")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("the stand-in runner starts");
-    let pid = child.id();
-    let handle = tddy_sandbox::SandboxHandle::new(
-        child,
-        tmp.path().join("profile.sb"),
-        tmp.path().join("unused.sock"),
-        tmp.path().join("sandbox.ready"),
-    );
-    let (stdout_tx, _) = broadcast::channel(4);
-    let (stdin_tx, _) = mpsc::unbounded_channel();
-    let state = SandboxSessionState::new(SandboxSessionStateInit {
-        pid,
-        worktree_path: tmp.path().to_path_buf(),
-        stdout_tx,
-        capture: Arc::new(StdMutex::new(TerminalCapture::new())),
-        stdin_tx,
-        ready_marker: tmp.path().join("sandbox.ready"),
-        handle,
-        managed_workflow: None,
-    });
-    (Arc::new(state), tmp)
-}
+use crate::jail_test_support::{a_jail_running, SLEEPS};
+use crate::sandbox_session::SandboxSessionManager;
 
 #[tokio::test]
 async fn stop_all_stops_every_main_jail_and_forgets_it() {
     // Given two sessions' main jails
     let manager = SandboxSessionManager::new();
-    let (first, _first_dir) = a_main_jail_running();
-    let (second, _second_dir) = a_main_jail_running();
+    let (first, _first_dir) = a_jail_running(SLEEPS);
+    let (second, _second_dir) = a_jail_running(SLEEPS);
     manager
         .insert("session-b".to_string(), Arc::clone(&second))
         .await;

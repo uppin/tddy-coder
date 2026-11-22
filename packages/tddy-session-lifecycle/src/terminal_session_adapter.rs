@@ -80,10 +80,9 @@ impl tddy_terminal_rpc::session::TerminalSession for DaemonTerminalSession {
 ///   no ACK source either. `input_offset` is likewise dropped rather than acked back.
 /// - **There is no SIGWINCH.** Nothing in `tddy-daemon-sandbox` holds the jail's PTY master, so
 ///   [`Self::resize`] is a no-op, as the old sandbox path was.
-/// - **There is no process-exit watch.** What ended the old sandbox stream was the stdout broadcast
-///   closing when the jail died, so [`Self::subscribe_pty_done`] derives the watch from exactly
-///   that: a probe task fires it once the broadcast closes, and stands down when the stream that
-///   asked for it is gone.
+/// - **The process-exit watch is the jail's.** [`Self::subscribe_pty_done`] follows the exit the
+///   state records when its runner dies (`#tab-hardening` 3/4); a follower task fires it, and stands
+///   down when the stream that asked for it is gone.
 /// - **There is no control token.** The in-jail bridge that drives this PTY sends none
 ///   (`tddy-sandbox-app`'s `daemon_client`), and has no way to claim one, so
 ///   [`Self::requires_control`] answers `false` — as the old sandbox path did by forwarding to
@@ -108,29 +107,28 @@ impl tddy_terminal_rpc::session::TerminalSession for SandboxTerminalSession {
         self.state.stdout_tx.subscribe()
     }
 
-    /// A watch fired by the stdout broadcast closing — the jail's death, and what ended this
-    /// stream before it went through the bridge.
+    /// A watch fired by the jail's exit — a runner that died on its own, or was stopped — which the
+    /// state records ([`SandboxSessionState::subscribe_exit`]). The state holds `stdout_tx`, so the
+    /// stdout broadcast never closes while the state lives and cannot be what ends a stream.
     ///
     /// The sender must outlive the receiver: the bridge's live loop `break`s on *either* outcome of
     /// `pty_done.changed()`, so a dropped sender would end every sandbox stream the instant it
-    /// opened. The probe task owns it, and stands down when the last receiver goes away so a
-    /// session reconnected to many times does not accumulate probes.
+    /// opened. The follower task owns it, and stands down when the last receiver goes away so a
+    /// session reconnected to many times does not accumulate followers.
     fn subscribe_pty_done(&self) -> watch::Receiver<bool> {
-        let (pty_done_tx, pty_done_rx) = watch::channel(false);
-        let mut stdout_rx = self.state.stdout_tx.subscribe();
+        let mut exit_rx = self.state.subscribe_exit();
+        let (pty_done_tx, pty_done_rx) = watch::channel(exit_rx.borrow().is_some());
         tokio::spawn(async move {
-            use tokio::sync::broadcast::error::RecvError;
             loop {
+                if exit_rx.borrow_and_update().is_some() {
+                    let _ = pty_done_tx.send(true);
+                    return;
+                }
                 tokio::select! {
                     _ = pty_done_tx.closed() => return,
-                    received = stdout_rx.recv() => match received {
-                        Ok(_) => {}
-                        Err(RecvError::Lagged(_)) => {}
-                        Err(RecvError::Closed) => break,
-                    },
+                    changed = exit_rx.changed() => if changed.is_err() { return },
                 }
             }
-            let _ = pty_done_tx.send(true);
         });
         pty_done_rx
     }

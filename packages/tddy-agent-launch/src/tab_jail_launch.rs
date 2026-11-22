@@ -409,7 +409,7 @@ impl LaunchSessions {
         let (stdout_tx, _) = tokio::sync::broadcast::channel(256);
         let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
         let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
-        dial_and_bridge_with_egress(
+        let bridge = dial_and_bridge_with_egress(
             session_id,
             launch.worktree.clone(),
             &mut handle,
@@ -430,8 +430,8 @@ impl LaunchSessions {
             Status::internal(format!("dial the tab jail's SessionChannel: {e}\n{logs}"))
         })?;
         let pid = handle.pid();
-        Ok(Arc::new(SandboxSessionState::new(
-            SandboxSessionStateInit {
+        Ok(Arc::new(
+            SandboxSessionState::new(SandboxSessionStateInit {
                 pid,
                 worktree_path: launch.worktree.clone(),
                 stdout_tx,
@@ -440,8 +440,9 @@ impl LaunchSessions {
                 ready_marker,
                 handle,
                 managed_workflow: None,
-            },
-        )))
+            })
+            .with_bridge(bridge),
+        ))
     }
 }
 

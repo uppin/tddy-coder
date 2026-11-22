@@ -20,6 +20,8 @@ can have, because nothing in the crate shows it.
 
 ### Tab jails (`#session-liveness` 5/8, 7/8)
 
+`sandbox_terminal_parity_acceptance` also pins a main jail's death (`#tab-hardening` 3/4): its stand-in runner is a running `sleep` (`a_stand_in_runner`), killed to end the terminal and list the session inactive with its tab jails kept.
+
 `sandbox_shell_tab_acceptance`, `sandbox_agent_tab_acceptance` (a jailed agent tab: its own jail and conversation, liveness, the main's records untouched, teardown), `sandbox_shutdown_acceptance` and the jailed-tab cases of
 `resume_tab_roster_acceptance` drive a sandboxed session's shell tabs through the daemon's own terminal RPCs,
 roster and store, with an in-memory `TabJailSpawn` injected by `DaemonSessionHost::with_tab_jail_spawn`

@@ -1,4 +1,4 @@
-# 2026-09-15 — The daemon never notices a sandboxed main runner that died (shutdown no longer orphans them)
+# 2026-09-15 — The workspace and claude-cli jails are discovered dead per call, with no restart policy (shutdown no longer orphans them)
 
 **Category:** Defect
 **Source:** `2026-09-15-warm-code-intelligence-daemon` changeset — planning discovery of the
@@ -103,3 +103,19 @@ are unit-tested against a real child process.
   (`TabJails::watch_for_death`, 100 ms), not the `tddy-lsp` / `tddy-supervisor` pattern, and nothing yet
   shares it with the main's.
 - **The workspace-jail and claude-cli-jail items above** are as the 2026-09-26 narrowing left them.
+
+## Narrowed — 2026-11-22, by `#tab-hardening` 3/4 (PR #991)
+
+**The main jail's death watch is resolved.** `watch_jail_exit` (`tddy-daemon-sandbox::jail_exit_watch`) waits on a
+registered main runner without reaping it, records its `ChildExit`, ends its terminal (`pty_done`), removes the
+jail from the registry and announces a `JailEnded`; a stop by request is silent. The relay and endpoint
+`JoinHandle`s §2 names are kept in a `JailBridge` and aborted on stop. Pinned by
+`a_main_jail_that_exits_is_announced_ended_with_its_status` and
+`a_sandboxed_sessions_terminal_ends_when_its_jail_dies`. Feature: `docs/ft/daemon/session-liveness.md` § A dead main jail.
+
+**What is still open, and why this entry is not deleted:**
+
+- **The workspace jail** is still discovered dead per call (the 2026-09-26 retry), not watched.
+- **No restart policy or backoff** for any jail (`Starting → Running → Backoff → GaveUp`, as `tddy-supervisor`
+  has): a dead main jail ends its session for the person to resume.
+- The tab-jail watch is still its own 100 ms poll (`TabJails::watch_for_death`), not the main's `waitid` watch.

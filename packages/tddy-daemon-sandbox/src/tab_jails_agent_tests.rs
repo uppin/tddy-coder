@@ -13,8 +13,9 @@ use pretty_assertions::assert_eq;
 use tddy_daemon_kernel::live_sessions::LiveSessions;
 use tddy_rpc::{Code, Status};
 
-use super::test_support::{a_launch, a_sleeping_jail};
+use super::test_support::a_launch;
 use super::{TabJailAgent, TabJailKey, TabJailLaunch, TabJailSpawn, TabJails};
+use crate::jail_test_support::{a_jail_running_in, SLEEPS};
 use crate::sandbox_session::SandboxSessionState;
 
 const SESSION: &str = "jailed-agent-session";
@@ -65,11 +66,11 @@ impl StandInSpawn {
         self.asked.lock().unwrap().clone()
     }
 
-    fn a_stand_in_jail(&self, launch: &TabJailLaunch) -> Result<Arc<SandboxSessionState>, Status> {
+    fn a_stand_in_jail(&self) -> Result<Arc<SandboxSessionState>, Status> {
         if let Some(reason) = &self.refusal {
             return Err(Status::failed_precondition(reason.clone()));
         }
-        Ok(a_sleeping_jail(self.dir.path(), launch))
+        Ok(a_jail_running_in(self.dir.path(), SLEEPS))
     }
 }
 
@@ -82,7 +83,7 @@ impl TabJailSpawn for StandInSpawn {
         self.asked.lock().unwrap().push(Asked::Shell {
             terminal_id: launch.terminal_id.clone(),
         });
-        self.a_stand_in_jail(launch)
+        self.a_stand_in_jail()
     }
 
     async fn spawn_agent(
@@ -94,7 +95,7 @@ impl TabJailSpawn for StandInSpawn {
             terminal_id: launch.terminal_id.clone(),
             agent: agent.clone(),
         });
-        self.a_stand_in_jail(launch)
+        self.a_stand_in_jail()
     }
 }
 
