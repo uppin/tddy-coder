@@ -10,10 +10,14 @@ use bytes::Bytes;
 use tddy_rpc::Status;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
+use crate::jail_exit_watch::{watch_jail_exit, JailBridge, JailEnded, JailProcess};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tddy_sandbox::{MountSpec, SandboxContextDir, SandboxError, SandboxPlan};
 use tddy_service::proto::exec_tools::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
+use tddy_task::ChildExit;
 use tddy_task::TerminalCapture;
+use tokio::sync::watch;
 
 /// A resource whose lifetime is tied to a sandbox session and whose cleanup happens on `Drop`.
 ///
@@ -37,7 +41,13 @@ pub struct SandboxSessionState {
     pub stdin_tx: mpsc::UnboundedSender<Bytes>,
     pub ready_marker: PathBuf,
     /// Kept so delete/resume can SIGKILL the sandbox-exec tree reliably.
-    handle: StdMutex<Option<tddy_sandbox::SandboxHandle>>,
+    process: StdMutex<Option<JailProcess>>,
+    /// Set by [`Self::stop`] before it kills: a runner that ends after this was stopped by request.
+    stopped: AtomicBool,
+    /// How the runner ended, once known (`#tab-hardening` 3/4).
+    pub(crate) exit_tx: watch::Sender<Option<ChildExit>>,
+    /// The stdio endpoint, relay and forwarder tasks, aborted on stop.
+    pub(crate) bridge: StdMutex<Option<JailBridge>>,
     /// Managed-workflow wiring (per-session toolcall listener + controller) when this is a managed
     /// session; kept here so its lifetime is tied to the session and its socket is cleaned up on drop.
     ///
@@ -67,51 +77,92 @@ impl SandboxSessionState {
             capture: init.capture,
             stdin_tx: init.stdin_tx,
             ready_marker: init.ready_marker,
-            handle: StdMutex::new(Some(init.handle)),
+            process: StdMutex::new(Some(init.handle.into())),
+            stopped: AtomicBool::new(false),
+            exit_tx: watch::channel(None).0,
+            bridge: StdMutex::new(None),
             _managed_workflow: init.managed_workflow,
         }
     }
 
-    /// Whether the jail's runner is still running, read from the `Child` this state owns — never
-    /// from [`Self::pid`], which the OS may have reissued once the runner was reaped.
+    /// Whether the jail's runner is still running, read from the process this state owns — never
+    /// from [`Self::pid`], which the OS may have reissued once the runner was reaped. Reads without
+    /// reaping, so the exit status stays for the watch.
     pub fn is_running(&self) -> bool {
-        let mut handle = self
-            .handle
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        match handle.as_mut() {
-            Some(handle) => matches!(handle.child_mut().try_wait(), Ok(None)),
-            // `stop` took the handle: the runner was killed and reaped.
-            None => false,
-        }
+        self.runner_pid().is_some()
     }
 
     /// The pid of the runner this state owns while it is running; `None` once it has exited or been
-    /// stopped. Read off the owned `Child`, so it can never name a reissued pid.
+    /// stopped. Read off the owned process, so it can never name a reissued pid.
     pub fn runner_pid(&self) -> Option<u32> {
-        let mut handle = self
-            .handle
+        if self.exit().is_some() {
+            return None;
+        }
+        let mut process = self.lock_process();
+        let process = process.as_mut()?;
+        process.try_exit().is_none().then(|| process.pid())
+    }
+
+    /// The runner's pid while it is unreaped (running or dead and not yet reaped), for the watch.
+    pub(crate) fn runner_pid_unreaped(&self) -> Option<u32> {
+        if self.stopped.load(Ordering::SeqCst) || self.exit().is_some() {
+            return None;
+        }
+        self.lock_process().as_ref().map(JailProcess::pid)
+    }
+
+    /// The runner ended on its own with `exit`: reap it, record the exit. `None` when the jail was
+    /// stopped by request meanwhile.
+    pub(crate) fn record_death(&self, exit: ChildExit) -> Option<ChildExit> {
+        if self.stopped.load(Ordering::SeqCst) {
+            return None;
+        }
+        if let Some(mut process) = self.lock_process().take() {
+            process.kill_and_reap();
+        }
+        self.exit_tx.send_if_modified(|current| {
+            current.is_none() && {
+                *current = Some(exit);
+                true
+            }
+        });
+        Some(exit)
+    }
+
+    fn lock_process(&self) -> std::sync::MutexGuard<'_, Option<JailProcess>> {
+        self.process
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let handle = handle.as_mut()?;
-        matches!(handle.child_mut().try_wait(), Ok(None)).then(|| handle.pid())
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub fn stop(&self) {
+        // Marked before the kill: a watch that sees the runner end must find the stop already
+        // recorded, or it would announce a death nobody suffered.
+        self.stopped.store(true, Ordering::SeqCst);
         // A poisoned lock is a thread that panicked while holding the handle, not a reason to
         // leave the jail running: `stop` is reached from `Drop`, and panicking here would orphan a
         // `tddy-sandbox-runner` onto the host — the very thing this method exists to prevent.
-        let taken = self
-            .handle
+        let taken = self.lock_process().take();
+        // Only the owned process is ever signalled: once it is gone, `self.pid` may name an
+        // unrelated process the OS reissued.
+        let exit = taken.and_then(|mut process| process.kill_and_reap());
+        if let Some(bridge) = self
+            .bridge
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .take();
-        // Only the owned `Child` is ever signalled: once the handle is gone, `self.pid` may name an
-        // unrelated process the OS reissued.
-        if let Some(mut handle) = taken {
-            let _ = handle.child_mut().kill();
-            let _ = handle.child_mut().wait();
+            .take()
+        {
+            bridge.abort();
         }
+        self.exit_tx.send_if_modified(|current| {
+            current.is_none() && {
+                *current = Some(exit.unwrap_or(ChildExit {
+                    code: None,
+                    signal: None,
+                }));
+                true
+            }
+        });
     }
 }
 
@@ -131,10 +182,20 @@ impl Drop for SandboxSessionState {
 }
 
 /// Registry of sandbox sessions keyed by session_id.
-#[derive(Default)]
 pub struct SandboxSessionManager {
-    inner: Mutex<HashMap<String, Arc<SandboxSessionState>>>,
-    pub(crate) recorder: crate::main_recording::JailRecorder,
+    inner: Arc<Mutex<HashMap<String, Arc<SandboxSessionState>>>>,
+    pub(crate) recorder: Arc<crate::main_recording::JailRecorder>,
+    pub(crate) ended_tx: broadcast::Sender<JailEnded>,
+}
+
+impl Default for SandboxSessionManager {
+    fn default() -> Self {
+        Self {
+            inner: Arc::default(),
+            recorder: Arc::default(),
+            ended_tx: broadcast::channel(64).0,
+        }
+    }
 }
 
 impl SandboxSessionManager {
@@ -143,9 +204,40 @@ impl SandboxSessionManager {
     }
 
     pub async fn insert(&self, session_id: String, state: Arc<SandboxSessionState>) {
-        // TODO(jail-death-watch): watch the jail (`jail_exit_watch::watch_jail_exit`); one that
-        // exits on its own leaves the registry and is announced on `subscribe_ended`.
-        self.inner.lock().await.insert(session_id, state);
+        self.inner
+            .lock()
+            .await
+            .insert(session_id.clone(), Arc::clone(&state));
+        self.watch_for_death(session_id, state);
+    }
+
+    /// A jail that exits on its own leaves the registry (when still the one registered) and is
+    /// announced on [`Self::subscribe_ended`]; one stopped by request is neither.
+    fn watch_for_death(&self, session_id: String, state: Arc<SandboxSessionState>) {
+        // Held weakly: the watch waits as long as the jail lives, and must not keep a dropped
+        // registry (and the states in it) alive.
+        let inner = Arc::downgrade(&self.inner);
+        let recorder = Arc::clone(&self.recorder);
+        let ended_tx = self.ended_tx.clone();
+        let registered = Arc::downgrade(&state);
+        tokio::spawn(async move {
+            let Some(exit) = watch_jail_exit(state).await else {
+                return;
+            };
+            let Some(inner) = inner.upgrade() else {
+                return;
+            };
+            let mut inner = inner.lock().await;
+            let still_registered = inner
+                .get(&session_id)
+                .is_some_and(|current| std::ptr::eq(Arc::as_ptr(current), registered.as_ptr()));
+            if still_registered {
+                inner.remove(&session_id);
+                drop(inner);
+                recorder.finish(&session_id).await;
+            }
+            let _ = ended_tx.send(JailEnded { session_id, exit });
+        });
     }
 
     pub async fn get(&self, session_id: &str) -> Option<Arc<SandboxSessionState>> {

@@ -253,9 +253,7 @@ impl LaunchSessions {
         let (stdout_tx, _) = tokio::sync::broadcast::channel(256);
         let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
         let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
-        // TODO(jail-death-watch): hand the bridge to the state (`SandboxSessionState::with_bridge`)
-        // so the jail's stop stops its tasks.
-        let _bridge = dial_and_bridge_with_egress(
+        let bridge = dial_and_bridge_with_egress(
             session_id,
             worktree_path.to_path_buf(),
             &mut handle,
@@ -275,19 +273,22 @@ impl LaunchSessions {
             Status::internal(format!("dial sandbox SessionChannel: {e}\n{logs}"))
         })?;
         let pid = handle.pid();
-        let state = Arc::new(SandboxSessionState::new(SandboxSessionStateInit {
-            pid,
-            worktree_path: worktree_path.to_path_buf(),
-            stdout_tx,
-            capture,
-            stdin_tx,
-            ready_marker,
-            handle,
-            managed_workflow: session.managed.map(|workflow| {
-                Box::new(workflow)
-                    as Box<dyn tddy_daemon_sandbox::sandbox_session::SessionScopedResource>
-            }),
-        }));
+        let state = Arc::new(
+            SandboxSessionState::new(SandboxSessionStateInit {
+                pid,
+                worktree_path: worktree_path.to_path_buf(),
+                stdout_tx,
+                capture,
+                stdin_tx,
+                ready_marker,
+                handle,
+                managed_workflow: session.managed.map(|workflow| {
+                    Box::new(workflow)
+                        as Box<dyn tddy_daemon_sandbox::sandbox_session::SessionScopedResource>
+                }),
+            })
+            .with_bridge(bridge),
+        );
         self.sandbox_manager
             .insert(session_id.to_string(), state)
             .await;
