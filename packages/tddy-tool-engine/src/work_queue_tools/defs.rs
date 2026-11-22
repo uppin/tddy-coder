@@ -131,6 +131,8 @@ pub fn stack_tool_defs() -> Vec<ToolDef> {
     ];
     // `#workqueue` 6/14: the four link tools follow the plan tools; the owner has them.
     defs.extend(crate::work_item_link_tools::work_item_link_tool_defs());
+    // `#workqueue` 7/14: then the three annotation tools.
+    defs.extend(crate::work_item_annotation_tools::work_item_annotation_tool_defs());
     defs
 }
 

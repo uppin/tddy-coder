@@ -10,20 +10,9 @@ pub const MAX_LABEL_LEN: usize = 40;
 pub const MAX_BADGES_PER_ITEM: usize = 8;
 pub const MAX_BADGE_TEXT_LEN: usize = 60;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BadgeTone {
-    Info,
-    Success,
-    Warning,
-    Danger,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkItemBadge {
-    pub key: String,
-    pub text: String,
-    pub tone: BadgeTone,
-}
+// The annotations live on the item, so their records are the changeset's types; re-exported as this
+// module's published surface.
+pub use tddy_core::changeset::{BadgeTone, WorkItemBadge};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnnotationError {
@@ -38,15 +27,42 @@ pub enum AnnotationError {
     },
 }
 
+fn item_mut<'q>(
+    queue: &'q mut WorkQueue,
+    item_id: &str,
+) -> Result<&'q mut WorkItem, AnnotationError> {
+    queue
+        .nodes
+        .iter_mut()
+        .find(|item| item.node_id == item_id)
+        .ok_or_else(|| AnnotationError::NoSuchItem(item_id.to_string()))
+}
+
 /// Replace `item_id`'s labels with `labels` (deduplicated, in the given order).
 pub fn set_labels(
     queue: &mut WorkQueue,
     item_id: &str,
     labels: Vec<String>,
 ) -> Result<(), AnnotationError> {
-    // TODO(n7 badges-labels): implement
-    let _ = (queue, item_id, labels);
-    todo!("TODO(n7): implement set_labels")
+    let item = item_mut(queue, item_id)?;
+    let mut unique: Vec<String> = Vec::with_capacity(labels.len());
+    for label in labels {
+        if label.chars().count() > MAX_LABEL_LEN {
+            return Err(AnnotationError::TooLong {
+                limit: MAX_LABEL_LEN,
+            });
+        }
+        if !unique.contains(&label) {
+            unique.push(label);
+        }
+    }
+    if unique.len() > MAX_LABELS_PER_ITEM {
+        return Err(AnnotationError::TooMany {
+            limit: MAX_LABELS_PER_ITEM,
+        });
+    }
+    item.labels = unique;
+    Ok(())
 }
 
 /// Set `badge` on `item_id`, replacing a badge with the same key.
@@ -55,26 +71,42 @@ pub fn set_badge(
     item_id: &str,
     badge: WorkItemBadge,
 ) -> Result<(), AnnotationError> {
-    // TODO(n7 badges-labels): implement
-    let _ = (queue, item_id, badge);
-    todo!("TODO(n7): implement set_badge")
+    let item = item_mut(queue, item_id)?;
+    if badge.text.chars().count() > MAX_BADGE_TEXT_LEN {
+        return Err(AnnotationError::TooLong {
+            limit: MAX_BADGE_TEXT_LEN,
+        });
+    }
+    if let Some(existing) = item.badges.iter_mut().find(|b| b.key == badge.key) {
+        *existing = badge;
+    } else if item.badges.len() >= MAX_BADGES_PER_ITEM {
+        return Err(AnnotationError::TooMany {
+            limit: MAX_BADGES_PER_ITEM,
+        });
+    } else {
+        item.badges.push(badge);
+    }
+    Ok(())
 }
 
 /// Remove `item_id`'s badge `key` (a missing key changes nothing).
 pub fn clear_badge(queue: &mut WorkQueue, item_id: &str, key: &str) -> Result<(), AnnotationError> {
-    // TODO(n7 badges-labels): implement
-    let _ = (queue, item_id, key);
-    todo!("TODO(n7): implement clear_badge")
+    item_mut(queue, item_id)?.badges.retain(|b| b.key != key);
+    Ok(())
+}
+
+fn item_of<'q>(queue: &'q WorkQueue, item_id: &str) -> Option<&'q WorkItem> {
+    queue.nodes.iter().find(|item| item.node_id == item_id)
 }
 
 pub fn labels_of(queue: &WorkQueue, item_id: &str) -> Vec<String> {
-    // TODO(n7 badges-labels): implement
-    let _ = (queue, item_id);
-    todo!("TODO(n7): implement labels_of")
+    item_of(queue, item_id)
+        .map(|item| item.labels.clone())
+        .unwrap_or_default()
 }
 
 pub fn badges_of(queue: &WorkQueue, item_id: &str) -> Vec<WorkItemBadge> {
-    // TODO(n7 badges-labels): implement
-    let _ = (queue, item_id);
-    todo!("TODO(n7): implement badges_of")
+    item_of(queue, item_id)
+        .map(|item| item.badges.clone())
+        .unwrap_or_default()
 }

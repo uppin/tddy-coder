@@ -22,7 +22,7 @@ use tddy_service::proto::work_queue::{
 };
 use tddy_service::proto::work_queue::{
     AssignWorkItemPrRequest, LinkWorkItemSessionRequest, UnassignWorkItemPrRequest,
-    UnlinkWorkItemSessionRequest, WorkItemLinksResponse,
+    UnlinkWorkItemSessionRequest, WorkItemLinksResponse, ClearWorkItemBadgeRequest, SetWorkItemBadgeRequest, SetWorkItemLabelsRequest,
 };
 use tddy_session_lifecycle::connection_service::{
     local_gh_github_token, project_github_token, resolve_os_user, spawn_blocking_with_timeout,
@@ -663,6 +663,27 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         request: Request<UnlinkWorkItemSessionRequest>,
     ) -> Result<Response<WorkItemLinksResponse>, Status> {
         self.unlink_work_item_session_rpc(request).await
+    }
+
+    async fn set_work_item_labels(
+        &self,
+        request: Request<SetWorkItemLabelsRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.set_work_item_labels_rpc(request).await
+    }
+
+    async fn set_work_item_badge(
+        &self,
+        request: Request<SetWorkItemBadgeRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.set_work_item_badge_rpc(request).await
+    }
+
+    async fn clear_work_item_badge(
+        &self,
+        request: Request<ClearWorkItemBadgeRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.clear_work_item_badge_rpc(request).await
     }
 
     /// Take a base branch's commits into a planned node's branch, inside that node's own worktree,

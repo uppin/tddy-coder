@@ -64,6 +64,8 @@ fn wire_same_anyhow<Src: Message, Dst: Message + Default>(src: &Src) -> anyhow::
 #[cfg(test)]
 mod add_work_item_unit_tests;
 
+mod annotations;
+pub use annotations::parse_tone;
 mod links;
 #[cfg(test)]
 mod repoint_github_token_unit_tests;

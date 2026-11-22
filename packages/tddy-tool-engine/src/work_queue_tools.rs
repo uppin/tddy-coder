@@ -36,6 +36,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tddy_core::work_queue_store::WorkQueueRecord;
 
+use crate::work_item_annotation_tools::{
+    WORK_ITEM_CLEAR_BADGE, WORK_ITEM_SET_BADGE, WORK_ITEM_SET_LABELS,
+};
 use crate::work_item_link_tools::{
     WORK_ITEM_ASSIGN_PR, WORK_ITEM_LINK_SESSION, WORK_ITEM_UNASSIGN_PR, WORK_ITEM_UNLINK_SESSION,
 };
@@ -74,6 +77,7 @@ pub const WORK_QUEUE_TOOL_NAMES: [&str; 10] = [
 pub fn is_stack_tool(name: &str) -> bool {
     WORK_QUEUE_TOOL_NAMES.contains(&name)
         || crate::work_item_link_tools::WORK_ITEM_LINK_TOOL_NAMES.contains(&name)
+        || crate::work_item_annotation_tools::WORK_ITEM_ANNOTATION_TOOL_NAMES.contains(&name)
 }
 
 /// Whether `name` is one of the two tools a node of a stack is offered for its own stack:
@@ -197,6 +201,23 @@ pub enum WorkQueueOp {
         item_id: String,
         session_id: String,
     },
+    /// `work_item_set_labels` (`#workqueue` 7/14).
+    SetLabels {
+        item_id: String,
+        labels: Vec<String>,
+    },
+    /// `work_item_set_badge`.
+    SetBadge {
+        item_id: String,
+        key: String,
+        text: String,
+        tone: String,
+    },
+    /// `work_item_clear_badge`.
+    ClearBadge {
+        item_id: String,
+        key: String,
+    },
 }
 
 /// What the tools need from the daemon: this host's stacks of a project, and the operations on one.
@@ -253,6 +274,10 @@ struct StackToolArgs {
     node_id: Option<String>,
     item_id: Option<String>,
     session_id: Option<String>,
+    labels: Vec<String>,
+    key: Option<String>,
+    text: Option<String>,
+    tone: Option<String>,
     pull_number: Option<u64>,
     include_files: bool,
     query: Option<String>,
@@ -349,6 +374,20 @@ fn work_queue_op_of(tool_name: &str, args: StackToolArgs) -> Result<WorkQueueOp,
         WORK_ITEM_UNLINK_SESSION => WorkQueueOp::UnlinkSession {
             item_id: required(tool_name, args.item_id, "item_id")?,
             session_id: required(tool_name, args.session_id, "session_id")?,
+        },
+        WORK_ITEM_SET_LABELS => WorkQueueOp::SetLabels {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+            labels: args.labels,
+        },
+        WORK_ITEM_SET_BADGE => WorkQueueOp::SetBadge {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+            key: required(tool_name, args.key, "key")?,
+            text: required(tool_name, args.text, "text")?,
+            tone: required(tool_name, args.tone, "tone")?,
+        },
+        WORK_ITEM_CLEAR_BADGE => WorkQueueOp::ClearBadge {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+            key: required(tool_name, args.key, "key")?,
         },
         other => return Err(format!("unknown stack tool: {other}")),
     })

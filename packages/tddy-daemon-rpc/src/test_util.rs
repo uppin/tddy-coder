@@ -552,30 +552,30 @@ impl WorkQueueService for TestDaemon {
 
     async fn set_work_item_labels(
         &self,
-        request: Request<tddy_service::proto::pr_stack::SetWorkItemLabelsRequest>,
-    ) -> Result<Response<tddy_service::proto::pr_stack::WorkItemLinksResponse>, Status> {
+        request: Request<tddy_service::proto::work_queue::SetWorkItemLabelsRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
         self.handlers
-            .pr_stack_service()
+            .work_queue_service()
             .set_work_item_labels(request)
             .await
     }
 
     async fn set_work_item_badge(
         &self,
-        request: Request<tddy_service::proto::pr_stack::SetWorkItemBadgeRequest>,
-    ) -> Result<Response<tddy_service::proto::pr_stack::WorkItemLinksResponse>, Status> {
+        request: Request<tddy_service::proto::work_queue::SetWorkItemBadgeRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
         self.handlers
-            .pr_stack_service()
+            .work_queue_service()
             .set_work_item_badge(request)
             .await
     }
 
     async fn clear_work_item_badge(
         &self,
-        request: Request<tddy_service::proto::pr_stack::ClearWorkItemBadgeRequest>,
-    ) -> Result<Response<tddy_service::proto::pr_stack::WorkItemLinksResponse>, Status> {
+        request: Request<tddy_service::proto::work_queue::ClearWorkItemBadgeRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
         self.handlers
-            .pr_stack_service()
+            .work_queue_service()
             .clear_work_item_badge(request)
             .await
     }
