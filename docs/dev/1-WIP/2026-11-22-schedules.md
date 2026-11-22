@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — more than one crate, proto additions, a condition evaluator over inputs from four earlier nodes, a live panel
 **Stack**: `#workqueue` 13/14 — branch `feature/workqueue/schedules`, base `feature/workqueue/leak-linearity`
+**PR**: [#1014](https://github.com/uppin/tddy-coder/pull/1014)
 
 ## Initial Discovery
 
@@ -63,8 +64,17 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: `Schedule` types, the evaluator's signature and
-`Condition` model, four tool and RPC definitions, panel test ids, and the failing tests below.
+Published (pass 2, commit 2):
+
+- `tddy_pr_stack::schedule::{Schedule, ScheduleKind, Condition, ConditionState, ScheduleView,
+  ScheduleSnapshot, ChecksVerdict, ReviewVerdict, WorktreeVerdict, evaluate, schedule_wave}` — pure over a
+  snapshot of the item's facts (gathering them from n2/n4/n9/n11 is `/green`'s)
+- `tddy_tool_engine::work_queue_schedule_tools::{WORK_ITEM_SCHEDULE, WORK_QUEUE_SCHEDULE_WAVE,
+  WORK_ITEM_UNSCHEDULE, WORK_QUEUE_SCHEDULES, WORK_QUEUE_SCHEDULE_TOOL_NAMES, work_queue_schedule_tool_defs}`
+- `tddy-prstack-web`: `SchedulesPanel` (shell, props-driven)
+- The failing tests below. Stored schedules, the RPCs and the stream payload are `/green`'s.
+
+**The `threads` condition is a TODO, accepted by the operator (2026-11-22)** — GraphQL later.
 
 ## Green wave
 
@@ -137,21 +147,24 @@ Unit tests for the evaluator over hand-built snapshots (one per condition and st
 
 ## Acceptance Tests
 
-`packages/tddy-work-queue/tests/schedule_unit.rs`:
-- [ ] `a_merge_on_an_item_based_on_an_open_item_waits_on_order`
-- [ ] `a_clean_inbox_entry_makes_current_wait_and_a_predicted_conflict_blocks_it`
-- [ ] `a_propagations_checks_condition_reads_the_bases_ci`
-- [ ] `a_change_request_blocks_review_even_with_skip_review`
-- [ ] `a_dirty_or_unpushed_worktree_blocks_propagation`
-- [ ] `the_status_is_the_worst_condition_and_held_up_on_prefers_blocked`
+`packages/tddy-pr-stack/tests/schedule_unit.rs` (crate renamed by n3):
+- [x] `a_merge_on_an_item_based_on_an_open_item_waits_on_order`
+- [x] `a_clean_inbox_entry_makes_current_wait_and_a_predicted_conflict_blocks_it`
+- [x] `a_propagations_checks_condition_reads_the_bases_ci`
+- [x] `a_change_request_blocks_review_even_with_skip_review`
+- [x] `a_dirty_or_unpushed_worktree_blocks_propagation`
+- [x] `the_status_is_the_worst_condition_and_held_up_on_prefers_blocked`
+- [x] `a_fully_met_merge_is_ready_with_its_conditions_in_render_order`
+- [x] `arming_a_wave_arms_a_merge_for_each_open_prd_item_bottom_up`
 
-`packages/tddy-daemon-rpc/tests/work_queue_schedules_acceptance.rs`:
-- [ ] `arming_a_wave_arms_a_merge_for_each_open_prd_item_bottom_up`
-- [ ] `unscheduling_removes_only_the_named_schedule`
+`packages/tddy-tool-engine/tests/work_queue_schedule_tools.rs`:
+- [x] `the_schedule_tools_are_defined_and_an_item_is_armed_to_merge_or_propagate`
+
+Unscheduling and storage are proved by `/green` in the daemon-rpc stack suite.
 
 `packages/tddy-workqueue-web/cypress/component/WorkQueueSchedulesAcceptance.cy.tsx`:
-- [ ] `the panel lists each schedule's conditions with their state and detail`
-- [ ] `a condition turning met updates the panel without a reload`
+- [x] `the panel lists each schedule's conditions with their state and detail`
+- [x] `a condition turning met updates the panel without a reload`
 
 ## Decisions & Trade-offs
 
@@ -179,10 +192,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

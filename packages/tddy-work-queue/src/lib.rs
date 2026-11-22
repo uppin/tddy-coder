@@ -22,6 +22,7 @@ pub mod merge_repoint;
 pub mod op_journal;
 pub mod pr_insight;
 pub mod rpc;
+pub mod schedule;
 pub mod waves;
 
 pub use rpc::WORK_QUEUE_SERVICE;

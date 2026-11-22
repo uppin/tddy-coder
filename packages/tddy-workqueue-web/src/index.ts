@@ -19,3 +19,4 @@ export {
   type ItemChainHealth,
   type WorkItemChainHealthProps,
 } from "./WorkItemChainHealth";
+export { SchedulesPanel, type ScheduleViewModel, type ScheduleConditionView } from "./SchedulesPanel";
