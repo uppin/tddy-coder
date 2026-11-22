@@ -93,3 +93,123 @@ fn publish(
         actor,
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tddy_core::changeset::WorkItem;
+    use tddy_session_activity::session_notifications::{
+        RecordingSessionNotificationSubscriber, SessionNotificationKind,
+    };
+
+    const OWNER: &str = "sess-owner";
+
+    fn a_queue_of(order: &[&str]) -> WorkQueue {
+        WorkQueue {
+            version: 1,
+            nodes: order
+                .iter()
+                .enumerate()
+                .map(|(index, id)| WorkItem {
+                    node_id: (*id).to_string(),
+                    title: format!("Title of {id}"),
+                    display_order: Some(index as u32),
+                    ..WorkItem::default()
+                })
+                .collect(),
+        }
+    }
+
+    fn published(
+        run: impl FnOnce(Option<&Arc<SessionNotificationBus>>, &MovedQueue<'_>),
+    ) -> Vec<(SessionNotificationKind, String, String)> {
+        let recorded = Arc::new(RecordingSessionNotificationSubscriber::new());
+        let bus = Arc::new(SessionNotificationBus::new().with_subscriber(Arc::clone(&recorded)));
+        run(
+            Some(&bus),
+            &MovedQueue {
+                queue_session_id: OWNER,
+                project_id: "proj-1",
+                os_user: "dev",
+            },
+        );
+        recorded
+            .received()
+            .into_iter()
+            .map(|n| (n.kind, n.session_id, n.text))
+            .collect()
+    }
+
+    #[test]
+    fn a_reorder_by_the_user_wakes_the_queues_owner() {
+        let moved = published(|bus, queue| {
+            publish_reorder(
+                bus,
+                queue,
+                "n3",
+                &a_queue_of(&["n1", "n2", "n3"]),
+                &a_queue_of(&["n1", "n3", "n2"]),
+                Actor::User {
+                    login: "octocat".to_string(),
+                },
+            )
+        });
+
+        assert_eq!(moved.len(), 1, "{moved:?}");
+        let (kind, session, text) = &moved[0];
+        assert_eq!(
+            (*kind, session.as_str()),
+            (SessionNotificationKind::AttentionRequired, OWNER)
+        );
+        assert!(
+            text.contains("Title of n3") && text.contains("octocat"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_move_that_changed_nothing_publishes_nothing() {
+        let moved = published(|bus, queue| {
+            let same = a_queue_of(&["n1", "n2"]);
+            publish_reorder(
+                bus,
+                queue,
+                "n1",
+                &same,
+                &same,
+                Actor::User { login: "x".into() },
+            );
+            publish_parents_changed(
+                bus,
+                queue,
+                "n2",
+                (vec!["n1".to_string()], vec!["n1".to_string()]),
+                &same,
+                Actor::Agent {
+                    session_id: "other".to_string(),
+                },
+            );
+        });
+
+        assert_eq!(moved, vec![]);
+    }
+
+    #[test]
+    fn the_owners_own_agent_changing_parents_is_recorded_without_waking_it() {
+        let moved = published(|bus, queue| {
+            publish_parents_changed(
+                bus,
+                queue,
+                "n2",
+                (vec![], vec!["n1".to_string()]),
+                &a_queue_of(&["n1", "n2"]),
+                Actor::Agent {
+                    session_id: OWNER.to_string(),
+                },
+            )
+        });
+
+        assert_eq!(moved.len(), 1, "{moved:?}");
+        assert_eq!(moved[0].0, SessionNotificationKind::Activity);
+    }
+}
