@@ -756,7 +756,7 @@ fn an_orchestrator_that_planned(
 ) {
     let session_dir = sessions_base.join("sessions").join(ORCHESTRATOR_SESSION_ID);
     std::fs::create_dir_all(&session_dir).expect("create the orchestrator's session dir");
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
+    write_stacked_changeset(
         &session_dir,
         (
             tddy_core::changeset::Changeset {
@@ -831,4 +831,15 @@ async fn a_cursor_cli_child_records_its_branch_on_the_planned_node_it_materializ
         (node.branch, node.session_id),
         (Some(child_branch), Some(started.session_id))
     );
+}
+
+/// Write `changeset` as the manifest of the session at `dir`, which owns `stack` as its work queue.
+fn write_stacked_changeset(
+    dir: &std::path::Path,
+    (changeset, stack): (
+        tddy_core::changeset::Changeset,
+        Option<tddy_core::changeset::WorkQueue>,
+    ),
+) {
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(dir, changeset, stack);
 }

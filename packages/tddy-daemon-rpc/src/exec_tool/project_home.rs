@@ -70,7 +70,7 @@ use tddy_tool_engine::project_home_terminal_tools::{
     execute_project_home_terminal_tool, is_project_home_terminal_tool,
 };
 use tddy_tool_engine::project_home_tools::{
-    execute_project_home_tool, is_project_home_tool, session_offered_catalog_for, SessionToolRole,
+    execute_project_home_tool, is_project_home_tool, session_offered_catalog_for,
 };
 use tddy_tool_engine::project_home_turn_tools::{
     execute_project_home_turn_tool, is_project_home_turn_tool,
@@ -305,14 +305,16 @@ impl ExecToolRpcHandler {
                     .unwrap_or_else(|| empty_coding_agents()),
             ),
         );
-        // A project-home session's catalogue already carries the work tools; any other session is
-        // offered them by the queue it owns or is addressed by, which only its own records can tell.
-        if session_tool_role(&metadata) != SessionToolRole::ProjectHome {
-            let caller = work_queue_caller_of(&sessions_base, session_id)?;
-            tools.extend(stack_and_git_tools_offered_to(
-                caller.map(|(_, access)| access),
-            ));
-        }
+        // The work tools are offered by the queue a session owns or is addressed by, never by its
+        // role: a project-home session's catalogue lists them, and keeps only those its queue gives it.
+        tools.retain(|tool| {
+            !tddy_tool_engine::work_queue_tools::is_stack_tool(&tool.name)
+                && !tddy_tool_engine::work_item_git_tools::is_stack_git_tool(&tool.name)
+        });
+        let caller = work_queue_caller_of(&sessions_base, session_id)?;
+        tools.extend(stack_and_git_tools_offered_to(
+            caller.map(|(_, access)| access),
+        ));
         Ok(tools)
     }
 

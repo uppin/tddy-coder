@@ -14,7 +14,7 @@ import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_p
 import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { THE_STACK, openProjectStackViewOf } from "../support/rpc/openProjectStackView";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { aPlannedNode, aWorkQueueJson, type WorkItemFixture } from "../support/rpc/prStackFixtures";
 
@@ -136,7 +136,7 @@ it("names the row and the direction it is being moved", () => {
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(WorkQueueService.method.reorderWorkItem);
     expect(calls).to.have.length(1);
-    expect(calls[0].stack?.queueId).to.equal(THE_STACK.queueId);
+    expect(calls[0].stack?.queueId).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].itemId).to.equal("n2");
     expect(calls[0].direction).to.equal("down");
   });

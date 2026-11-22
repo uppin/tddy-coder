@@ -11,7 +11,7 @@ import { Code } from "@connectrpc/connect";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { THE_STACK, openProjectStackViewOf } from "../support/rpc/openProjectStackView";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
@@ -121,7 +121,7 @@ it("calls AddWorkItem with the entered title and no parents when no ancestor is 
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(WorkQueueService.method.addWorkItem);
     expect(calls).to.have.length(1);
-    expect(calls[0].stack?.queueId).to.equal(THE_STACK.queueId);
+    expect(calls[0].stack?.queueId).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].title).to.equal("Add auth middleware");
     expect(calls[0].parents).to.deep.equal([]);
   });

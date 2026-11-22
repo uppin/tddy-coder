@@ -861,8 +861,9 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
 
 /// The session's stack as `work_queue_json`, through the serializer `ListSessions` enrichment uses.
 fn work_queue_json_of(dir: &std::path::Path) -> Result<String, Status> {
-    let changeset = tddy_core::read_changeset(dir).map_err(|e| Status::internal(e.to_string()))?;
+    // The queue is the session's own (`work-queue.yaml`); the session need have no changeset.
     Ok(session_list_enrichment::work_queue_json_for_changeset(
-        dir, &changeset,
+        dir,
+        &tddy_core::changeset::Changeset::default(),
     ))
 }

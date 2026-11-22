@@ -9,7 +9,10 @@ import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { VncService } from "tddy-client-web/gen/vnc_pb";
 import { ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
-import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
+import type { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
+import type { ProjectService, ProjectEntry } from "tddy-client-web/gen/project_pb";
+import type { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import type { TaskService } from "tddy-client-web/gen/tasks_pb";
 import { WorkQueueView } from "tddy-workqueue-web";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import {
@@ -68,6 +71,17 @@ interface SessionInspectorDrawerProps {
    * deletes a session's uploads through.
    */
   sessionFilesClient?: Client<typeof SessionFilesService>;
+  /** The Work queue tab's Start-session dialog reads the project registry, the catalog and the start's
+   *  task through these, on the same host as `client`. The dialog is offered only with all of them. */
+  projectClient?: Client<typeof ProjectService>;
+  catalogClient?: Client<typeof CatalogService>;
+  taskClient?: Client<typeof TaskService>;
+  /** The projects the drawer lists — the Work queue tab reads its project's default branch from them. */
+  projects?: ProjectEntry[];
+  /** `work_queue.WorkQueueService` on the selected daemon — the Work queue tab's queue is read and edited through it. */
+  workQueueClient?: Client<typeof WorkQueueService>;
+  sessionMetadataBySessionId?: React.ComponentProps<typeof WorkQueueView>["sessionMetadataBySessionId"];
+  onChildSessionStarted?: React.ComponentProps<typeof WorkQueueView>["onChildSessionStarted"];
   sessionToken?: string;
   /**
    * The connection to the host that owns this session, or `null` when nothing can reach it.
@@ -124,6 +138,13 @@ export function SessionInspectorDrawer({
   execToolClient,
   worktreeClient,
   sessionFilesClient,
+  projectClient,
+  catalogClient,
+  taskClient,
+  projects = [],
+  workQueueClient,
+  sessionMetadataBySessionId,
+  onChildSessionStarted,
   sessionToken,
   hostConnection,
   room = null,
@@ -197,7 +218,6 @@ export function SessionInspectorDrawer({
           requestSessionsRefresh();
         }
       : undefined;
-  const workQueueClient = useHttpClient(WorkQueueService);
   const vncClient = useHttpClient(VncService);
   const screenSharingClient = useHttpClient(ScreenSharingService);
 
@@ -322,7 +342,18 @@ export function SessionInspectorDrawer({
               workQueueClient={workQueueClient}
               sessionToken={sessionToken ?? ""}
               sessions={sessions}
+              defaultBranch={
+                projects.find((project) => project.projectId === session.projectId)?.mainBranchRef ?? ""
+              }
               onOpenSession={onSwitchPeer}
+              sessionMetadataBySessionId={sessionMetadataBySessionId}
+              onChildSessionStarted={onChildSessionStarted}
+              client={client}
+              projectClient={projectClient}
+              catalogClient={catalogClient}
+              sessionFilesClient={sessionFilesClient}
+              worktreeClient={worktreeClient}
+              taskClient={taskClient}
             />
           </ScrollArea>
         ) : tab === "pr" ? (

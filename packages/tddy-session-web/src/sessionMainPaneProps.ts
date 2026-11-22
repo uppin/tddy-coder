@@ -36,6 +36,11 @@ type TerminalClient = Client<typeof TerminalSessionService>;
 type WorktreeClient = Client<typeof WorktreeService>;
 type CodeNavigationClient = Client<typeof CodeNavigationService>;
 
+import type { StackChildMetadata } from "tddy-workqueue-web";
+import type { Client as WorkQueueClient_ } from "@connectrpc/connect";
+import type { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
+type WorkQueueClient = WorkQueueClient_<typeof WorkQueueService>;
+
 export interface SessionMainPaneProps {
   selectedSession: SessionEntry | null;
   attachment: SessionAttachmentState;
@@ -129,6 +134,13 @@ export interface SessionMainPaneProps {
   traffic?: { bytesIn: number; bytesOut: number; lastDataReceivedAt: number | null } | null;
   /** Project registry — used to resolve an unscoped session's project (empty `projectId`) from its
    *  `repoPath` before the worktree Code pane's RPCs, which require a non-empty `project_id`. */
+  /** The `session` metadata each live participant publishes, keyed by session id — the Work queue tab
+   *  marks an item in progress from it (D37, D38). */
+  /** `work_queue.WorkQueueService` on the selected daemon — the inspector's Work queue tab reads and edits its queue through it. */
+  workQueueClient?: WorkQueueClient;
+  sessionMetadataBySessionId?: ReadonlyMap<string, StackChildMetadata>;
+  /** Fired after a child session is spawned from the Work queue tab, so the drawer can list it at once. */
+  onChildSessionStarted?: (entry: { sessionId: string; recipe: string; projectId: string }) => void;
   projects?: ReadonlyArray<ProjectEntry>;
   /** Attached runtimes — one mounted terminal per entry (focused visible, others hidden). */
   runtimes?: ReadonlyArray<SessionRuntimeState>;

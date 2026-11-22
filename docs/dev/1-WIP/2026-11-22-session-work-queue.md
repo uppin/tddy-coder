@@ -148,12 +148,12 @@ Different surface; untouched.
 
 ## Scope
 
-- [ ] Session-keyed store; queue created at start (option, or orchestrator start)
-- [ ] Access by ownership/addressing for listing, tools and RPCs; no role in access
-- [ ] "No queue" refusal with the hint
-- [ ] Work queue inspector tab, default precedence, drawer row to the owning session
-- [ ] Old stack records deleted on upgrade; migration sweep, legacy fields and fallbacks removed
-- [ ] `CreateWorkQueue` / `work_queue_create` / `/queue/:id` route removed
+- [x] Session-keyed store; queue created at start (option, or orchestrator start)
+- [x] Access by ownership/addressing for listing, tools and RPCs; no role in access
+- [x] "No queue" refusal with the hint
+- [x] Work queue inspector tab, default precedence, drawer row to the owning session
+- [x] Old stack records deleted on upgrade; migration sweep, legacy fields and fallbacks removed
+- [x] `CreateWorkQueue` / `work_queue_create` / `/queue/:id` route removed
 - [ ] Docs updated through the wrap
 
 ## Technical Changes
@@ -258,7 +258,23 @@ is `/green`'s to prove by extending `stack_plan_tools_acceptance.rs` / `stack_gi
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+Green deviations from the plan, each deliberate:
+
+- **`WorkQueueAddress` keeps `{ project_id, queue_id, daemon_instance_id }`.** `queue_id` is the owning
+  session's id (documented in `work_queue.proto`); the planned `{ session_id, … }` reshape would have
+  changed every RPC request and the generated clients for no behavioural gain. Access is still decided from
+  the queue held on the addressed host.
+- **`WorkQueueStore` stays as a read/update/list view over `SessionWorkQueues`** (no create), so the RPC
+  handlers, tool ops and the session listing keep their `(project_id, queue_id)` call shape. Its constructor
+  takes the sessions base, not the projects directory.
+- **A call acting on no queue** (`work_queue_list`, `work_pr_search`, a read by pull number) is gated by the
+  caller's own host on what its own records offer (owner: every tool; addressed: the two reads); a call that
+  acts on a queue is gated on the host holding it, by that queue (`access_to`).
+- **The project-home session's tool catalogue still lists the work tools statically**; executing them is
+  gated by queue ownership, so a project-home session that owns no queue is refused with the hint.
+- **`session_participant_metadata_acceptance` (3 tests) fails on this node's base too** — #workqueue 3/14's
+  scripted rename changed the test's expected key to `work_item_id` while the serde wire key stayed
+  `stack_node_id`. Not touched here.
 
 ## Refactoring Needed
 

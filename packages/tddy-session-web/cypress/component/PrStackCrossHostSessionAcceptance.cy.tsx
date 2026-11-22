@@ -140,6 +140,7 @@ function openPrStackScreen(
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
   serveProjectStack(backend, orchestrator.workQueueJson ?? "", ORCHESTRATOR_SESSION_ID);
+  window.location.hash = "#/sessions";
 
   mountWithRecordingLiveKitRpc(
     withSelectedDaemonRoom(
@@ -149,6 +150,8 @@ function openPrStackScreen(
     ),
     backend,
   );
+  // Open the orchestrator's inspector on its Work queue tab.
+  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
 }
 
 // ---------------------------------------------------------------------------

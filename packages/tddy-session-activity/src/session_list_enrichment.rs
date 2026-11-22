@@ -2061,7 +2061,7 @@ state:
         let session_dir = dir.path().join("sessions").join("orch-sess-stack-1");
         let session_dir = session_dir.as_path();
         fs::create_dir_all(session_dir).unwrap();
-        let record = a_queue_owned_by(
+        let _queue = a_queue_owned_by(
             dir.path(),
             "proj-stack-json",
             "orch-sess-stack-1",
@@ -2288,7 +2288,7 @@ state:
         let session_dir = dir.path().join("sessions").join("orch-proto-stack-sess");
         let session_dir = session_dir.as_path();
         fs::create_dir_all(session_dir).unwrap();
-        let record = a_queue_owned_by(
+        let _queue = a_queue_owned_by(
             dir.path(),
             "proj-proto-stack",
             "orch-proto-stack-sess",

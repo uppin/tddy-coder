@@ -31,6 +31,7 @@ export function sessionPaneClients(
     sessionAgentClient: pick(drawer.sessionAgentClient, owning.activeSessionAgentClient),
     activityClient: pick(drawer.activityClient, owning.activeActivityClient),
     accountsClient: drawer.accountsClient ?? undefined,
+    workQueueClient: drawer.workQueueClient ?? undefined,
     catalogClient: pick(drawer.catalogClient, owning.activeCatalogClient),
     execToolClient: pick(drawer.execToolClient, owning.activeExecToolClient),
   };

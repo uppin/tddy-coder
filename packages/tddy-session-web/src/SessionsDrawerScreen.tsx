@@ -313,6 +313,7 @@ export function SessionsDrawerScreen({
     handleCreateSession,
     handleNewOrchestrator,
     handleOpenProjectStack,
+    handleChildSessionStarted,
     handleCancelCreate,
     handleSessionCreated,
     openProjectHomeSetup,
@@ -447,6 +448,10 @@ export function SessionsDrawerScreen({
               onSwitchPeer={handleSelectSession}
               traffic={selectedTraffic}
               projects={projects}
+              sessionMetadataBySessionId={sessionMetadataBySessionId}
+              onChildSessionStarted={(entry) =>
+                handleChildSessionStarted({ ...entry, orchestratorSessionId: "" })
+              }
               runtimes={runtimes}
               sessions={sortedSessions}
               focusedRuntimeId={runtimeRegistry.focusedSessionId}
