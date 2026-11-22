@@ -5,7 +5,7 @@
  * explicit `?inspector=` still wins. The PR tab streams `WorktreeService.StreamSessionPullRequest` — the
  * daemon reads GitHub through its inbox; the browser never does.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-22-session-pr-tabs.md
+ * Feature: docs/ft/web/session-pr-inspector.md
  */
 
 import React from "react";

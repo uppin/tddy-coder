@@ -5,7 +5,7 @@
  * Test ids: `session-worktree-sync-status`, `session-worktree-dirty-file-<path>`,
  * `session-worktree-unpushed-<sha>`, `session-worktree-pull`, `session-worktree-push`.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-22-session-pr-tabs.md
+ * Feature: docs/ft/web/session-worktree-inspector.md
  */
 
 import React from "react";
