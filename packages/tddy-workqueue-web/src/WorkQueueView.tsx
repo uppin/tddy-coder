@@ -10,6 +10,7 @@ import type { TaskService } from "tddy-client-web/gen/tasks_pb";
 import { Button } from "tddy-ui-web";
 import { WorkItemList } from "./WorkItemList";
 import { WorkQueueGraphPanel } from "./WorkQueueGraphPanel";
+import { SchedulesPanel, type ScheduleViewModel } from "./SchedulesPanel";
 import { AddWorkItemForm, type AddWorkItemFormSubmission } from "./AddWorkItemForm";
 import { parseWorkQueue, type WorkItem } from "./workQueue";
 import { hydrateWorkItems } from "./hydrateWorkItems";
@@ -227,6 +228,8 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
 
   // `#workqueue` 12/14: leaks and line state ride on the same stream.
   const [chainHealth, setChainHealth] = useState<ReadonlyMap<string, ItemChainHealth>>(new Map());
+  // `#workqueue` 13/14: armed merges and propagations, re-evaluated by the daemon on every update.
+  const [schedules, setSchedules] = useState<ScheduleViewModel[]>([]);
   // `#workqueue` 6/14: a row's PR and session links, and its live check counts.
   const workItemLinks = useWorkItemLinksState({
     workQueueClient,
@@ -235,6 +238,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     sessions,
     onWorkQueueJson: setWorkQueueJson,
     onChainHealth: setChainHealth,
+    onSchedules: setSchedules,
   });
 
   const handleReorder = async (itemId: string, direction: "up" | "down") => {
@@ -450,6 +454,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
       </WorkItemChainHealthContext.Provider>
       </WorkItemCommitCountsContext.Provider>
       </WorkItemLinksContext.Provider>
+      {schedules.length > 0 && <SchedulesPanel schedules={schedules} />}
       <WorkQueueGraphPanel
         workQueueClient={workQueueClient}
         sessionToken={sessionToken}

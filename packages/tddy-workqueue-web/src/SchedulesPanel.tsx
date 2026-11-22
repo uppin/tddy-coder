@@ -19,6 +19,30 @@ export interface ScheduleViewModel {
   conditions: ScheduleConditionView[];
 }
 
+type StateName = ScheduleConditionView["state"];
+
+function stateOf(state: string): StateName {
+  // An unknown state is shown blocked: never optimistic about a condition the panel cannot read.
+  return state === "met" || state === "waiting" ? state : "blocked";
+}
+
+/** The wire's `ScheduleStatusView` (from the status stream), as the panel shows it. */
+export function toScheduleViewModel(view: {
+  itemId: string;
+  kind: string;
+  status: string;
+  heldUpOn: string;
+  conditions: { name: string; state: string; detail: string }[];
+}): ScheduleViewModel {
+  return {
+    itemId: view.itemId,
+    kind: view.kind === "propagate" ? "propagate" : "merge",
+    status: stateOf(view.status),
+    heldUpOn: view.heldUpOn || undefined,
+    conditions: view.conditions.map((c) => ({ name: c.name, state: stateOf(c.state), detail: c.detail })),
+  };
+}
+
 function ConditionRow({ itemId, condition }: { itemId: string; condition: ScheduleConditionView }) {
   return (
     <li

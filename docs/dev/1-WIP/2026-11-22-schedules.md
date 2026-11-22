@@ -116,9 +116,9 @@ reserved and planned after the pipelines drain.
 
 ## Scope
 
-- [ ] Stored schedules + four operations
-- [ ] Condition evaluator (merge, propagate) and `schedule_wave`
-- [ ] Panel, live
+- [x] Stored schedules + four operations
+- [x] Condition evaluator (merge, propagate) and `schedule_wave`
+- [x] Panel, live
 - [ ] Docs updated through the wrap
 
 ## Technical Changes
@@ -141,10 +141,10 @@ As listed under Affected Packages.
 
 ## Implementation Milestones
 
-- [ ] Storage + operations
-- [ ] Evaluator with unit tests per condition
-- [ ] Tools + RPCs + stream payload
-- [ ] Panel
+- [x] Storage + operations (`WorkQueue.schedules`; `schedule::{arm, disarm, arm_wave}`)
+- [x] Evaluator with unit tests per condition
+- [x] Tools + RPCs + stream payload (`schedules` on `WorkQueueStatusView`)
+- [x] Panel (mounted in `WorkQueueView`, fed by the status stream)
 
 ## Testing Plan
 
@@ -166,7 +166,10 @@ Unit tests for the evaluator over hand-built snapshots (one per condition and st
 `packages/tddy-tool-engine/tests/work_queue_schedule_tools.rs`:
 - [x] `the_schedule_tools_are_defined_and_an_item_is_armed_to_merge_or_propagate`
 
-Unscheduling and storage are proved by `/green` in the daemon-rpc stack suite.
+Added in green — `packages/tddy-work-queue/tests/schedule_ops_unit.rs` (arming replaces, refusals, wave
+arming, check and review verdicts, ISO stamp) and
+`packages/tddy-daemon-rpc/tests/work_queue_schedules_rpc_acceptance.rs` (arm, replace, disarm, refusals,
+wave without GitHub); `packages/tddy-workqueue-web/src/toScheduleViewModel.test.ts`.
 
 `packages/tddy-workqueue-web/cypress/component/WorkQueueSchedulesAcceptance.cy.tsx`:
 - [x] `the panel lists each schedule's conditions with their state and detail`
@@ -179,6 +182,13 @@ Unscheduling and storage are proved by `/green` in the daemon-rpc stack suite.
 - **A propagation is gated on the base's CI**, because it replays the base's commits.
 - **`skip_review` stands in for an absent approval, never a withheld one.**
 - **No `threads` condition** until a GraphQL read exists (recorded TODO).
+- **An unreadable fact is never met.** When GitHub, the inbox, the item's PR or its worktree cannot be
+  read, the schedule is shown `waiting` on a `facts` condition carrying the reason.
+- **A propagation's `checks` reads the base item's PR checks**; a trunk or external base has no CI of
+  ours (`NotOurs`, met). `skipped` and `neutral` runs pass; no runs at all is pending.
+- **Wave arming refuses when GitHub cannot say which items have an open PR**, rather than guessing.
+- **No view-level stream test:** the connect testkit stubs no server streams; the panel is covered by
+  its Cypress contract and the mapping by a unit test.
 
 ## Technical Debt & Production Readiness
 
