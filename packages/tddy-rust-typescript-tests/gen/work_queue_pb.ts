@@ -1373,6 +1373,13 @@ export type WorkQueueStatusView = Message<"work_queue.WorkQueueStatusView"> & {
    * @generated from field: string unavailable_reason = 2;
    */
   unavailableReason: string;
+
+  /**
+   * `#workqueue` 13/14: the armed schedules with their conditions, re-evaluated on every update.
+   *
+   * @generated from field: repeated work_queue.ScheduleStatusView schedules = 3;
+   */
+  schedules: ScheduleStatusView[];
 };
 
 /**
@@ -2158,6 +2165,262 @@ export const WorkQueueCommitCountsResponseSchema: GenMessage<WorkQueueCommitCoun
   messageDesc(file_work_queue, 59);
 
 /**
+ * `#workqueue` 13/14 — armed merges and propagations.
+ *
+ * @generated from message work_queue.ScheduleWorkItemRequest
+ */
+export type ScheduleWorkItemRequest = Message<"work_queue.ScheduleWorkItemRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: work_queue.WorkQueueAddress queue = 2;
+   */
+  queue?: WorkQueueAddress;
+
+  /**
+   * @generated from field: string item_id = 3;
+   */
+  itemId: string;
+
+  /**
+   * "merge" or "propagate".
+   *
+   * @generated from field: string kind = 4;
+   */
+  kind: string;
+
+  /**
+   * Merge only: go once CI is green without an approval — never past a change request.
+   *
+   * @generated from field: bool skip_review = 5;
+   */
+  skipReview: boolean;
+};
+
+/**
+ * Describes the message work_queue.ScheduleWorkItemRequest.
+ * Use `create(ScheduleWorkItemRequestSchema)` to create a new message.
+ */
+export const ScheduleWorkItemRequestSchema: GenMessage<ScheduleWorkItemRequest> = /*@__PURE__*/
+  messageDesc(file_work_queue, 54);
+
+/**
+ * @generated from message work_queue.ScheduleWorkQueueWaveRequest
+ */
+export type ScheduleWorkQueueWaveRequest = Message<"work_queue.ScheduleWorkQueueWaveRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: work_queue.WorkQueueAddress queue = 2;
+   */
+  queue?: WorkQueueAddress;
+
+  /**
+   * 1-based, as `GetWorkQueueWaves` numbers them.
+   *
+   * @generated from field: uint32 wave = 3;
+   */
+  wave: number;
+
+  /**
+   * @generated from field: bool skip_review = 4;
+   */
+  skipReview: boolean;
+};
+
+/**
+ * Describes the message work_queue.ScheduleWorkQueueWaveRequest.
+ * Use `create(ScheduleWorkQueueWaveRequestSchema)` to create a new message.
+ */
+export const ScheduleWorkQueueWaveRequestSchema: GenMessage<ScheduleWorkQueueWaveRequest> = /*@__PURE__*/
+  messageDesc(file_work_queue, 55);
+
+/**
+ * @generated from message work_queue.UnscheduleWorkItemRequest
+ */
+export type UnscheduleWorkItemRequest = Message<"work_queue.UnscheduleWorkItemRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: work_queue.WorkQueueAddress queue = 2;
+   */
+  queue?: WorkQueueAddress;
+
+  /**
+   * @generated from field: string item_id = 3;
+   */
+  itemId: string;
+};
+
+/**
+ * Describes the message work_queue.UnscheduleWorkItemRequest.
+ * Use `create(UnscheduleWorkItemRequestSchema)` to create a new message.
+ */
+export const UnscheduleWorkItemRequestSchema: GenMessage<UnscheduleWorkItemRequest> = /*@__PURE__*/
+  messageDesc(file_work_queue, 56);
+
+/**
+ * @generated from message work_queue.ListWorkQueueSchedulesRequest
+ */
+export type ListWorkQueueSchedulesRequest = Message<"work_queue.ListWorkQueueSchedulesRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: work_queue.WorkQueueAddress queue = 2;
+   */
+  queue?: WorkQueueAddress;
+};
+
+/**
+ * Describes the message work_queue.ListWorkQueueSchedulesRequest.
+ * Use `create(ListWorkQueueSchedulesRequestSchema)` to create a new message.
+ */
+export const ListWorkQueueSchedulesRequestSchema: GenMessage<ListWorkQueueSchedulesRequest> = /*@__PURE__*/
+  messageDesc(file_work_queue, 57);
+
+/**
+ * One condition of an armed schedule.
+ *
+ * @generated from message work_queue.ScheduleConditionView
+ */
+export type ScheduleConditionView = Message<"work_queue.ScheduleConditionView"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * "met" | "waiting" | "blocked".
+   *
+   * @generated from field: string state = 2;
+   */
+  state: string;
+
+  /**
+   * @generated from field: string detail = 3;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message work_queue.ScheduleConditionView.
+ * Use `create(ScheduleConditionViewSchema)` to create a new message.
+ */
+export const ScheduleConditionViewSchema: GenMessage<ScheduleConditionView> = /*@__PURE__*/
+  messageDesc(file_work_queue, 58);
+
+/**
+ * @generated from message work_queue.ScheduleStatusView
+ */
+export type ScheduleStatusView = Message<"work_queue.ScheduleStatusView"> & {
+  /**
+   * @generated from field: string item_id = 1;
+   */
+  itemId: string;
+
+  /**
+   * "merge" | "propagate".
+   *
+   * @generated from field: string kind = 2;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: bool skip_review = 3;
+   */
+  skipReview: boolean;
+
+  /**
+   * @generated from field: string armed_at = 4;
+   */
+  armedAt: string;
+
+  /**
+   * @generated from field: string armed_by = 5;
+   */
+  armedBy: string;
+
+  /**
+   * The worst condition's state: "met" | "waiting" | "blocked".
+   *
+   * @generated from field: string status = 6;
+   */
+  status: string;
+
+  /**
+   * The first blocked condition's name, else the first waiting one's; empty when all are met.
+   *
+   * @generated from field: string held_up_on = 7;
+   */
+  heldUpOn: string;
+
+  /**
+   * @generated from field: repeated work_queue.ScheduleConditionView conditions = 8;
+   */
+  conditions: ScheduleConditionView[];
+};
+
+/**
+ * Describes the message work_queue.ScheduleStatusView.
+ * Use `create(ScheduleStatusViewSchema)` to create a new message.
+ */
+export const ScheduleStatusViewSchema: GenMessage<ScheduleStatusView> = /*@__PURE__*/
+  messageDesc(file_work_queue, 59);
+
+/**
+ * @generated from message work_queue.ScheduleWorkItemResponse
+ */
+export type ScheduleWorkItemResponse = Message<"work_queue.ScheduleWorkItemResponse"> & {
+  /**
+   * @generated from field: work_queue.ScheduleStatusView schedule = 1;
+   */
+  schedule?: ScheduleStatusView;
+};
+
+/**
+ * Describes the message work_queue.ScheduleWorkItemResponse.
+ * Use `create(ScheduleWorkItemResponseSchema)` to create a new message.
+ */
+export const ScheduleWorkItemResponseSchema: GenMessage<ScheduleWorkItemResponse> = /*@__PURE__*/
+  messageDesc(file_work_queue, 60);
+
+/**
+ * @generated from message work_queue.ListWorkQueueSchedulesResponse
+ */
+export type ListWorkQueueSchedulesResponse = Message<"work_queue.ListWorkQueueSchedulesResponse"> & {
+  /**
+   * @generated from field: repeated work_queue.ScheduleStatusView schedules = 1;
+   */
+  schedules: ScheduleStatusView[];
+
+  /**
+   * Non-empty when the facts could not all be read (the conditions that needed them are `waiting`).
+   *
+   * @generated from field: string unavailable_reason = 2;
+   */
+  unavailableReason: string;
+};
+
+/**
+ * Describes the message work_queue.ListWorkQueueSchedulesResponse.
+ * Use `create(ListWorkQueueSchedulesResponseSchema)` to create a new message.
+ */
+export const ListWorkQueueSchedulesResponseSchema: GenMessage<ListWorkQueueSchedulesResponse> = /*@__PURE__*/
+  messageDesc(file_work_queue, 61);
+
+/**
  * @generated from service work_queue.WorkQueueService
  */
 export const WorkQueueService: GenService<{
@@ -2426,6 +2689,42 @@ export const WorkQueueService: GenService<{
     methodKind: "unary";
     input: typeof GetWorkQueueGraphRequestSchema;
     output: typeof WorkQueueCommitCountsResponseSchema;
+  },
+  /**
+   * `#workqueue` 13/14: arm a merge or a propagation on an item (replacing what was armed), arm a wave's
+   * merges bottom-up, disarm, and list with every condition evaluated live. Nothing here fires a
+   * schedule (`#workqueue` 14/14).
+   *
+   * @generated from rpc work_queue.WorkQueueService.ScheduleWorkItem
+   */
+  scheduleWorkItem: {
+    methodKind: "unary";
+    input: typeof ScheduleWorkItemRequestSchema;
+    output: typeof ScheduleWorkItemResponseSchema;
+  },
+  /**
+   * @generated from rpc work_queue.WorkQueueService.ScheduleWorkQueueWave
+   */
+  scheduleWorkQueueWave: {
+    methodKind: "unary";
+    input: typeof ScheduleWorkQueueWaveRequestSchema;
+    output: typeof ListWorkQueueSchedulesResponseSchema;
+  },
+  /**
+   * @generated from rpc work_queue.WorkQueueService.UnscheduleWorkItem
+   */
+  unscheduleWorkItem: {
+    methodKind: "unary";
+    input: typeof UnscheduleWorkItemRequestSchema;
+    output: typeof ListWorkQueueSchedulesResponseSchema;
+  },
+  /**
+   * @generated from rpc work_queue.WorkQueueService.ListWorkQueueSchedules
+   */
+  listWorkQueueSchedules: {
+    methodKind: "unary";
+    input: typeof ListWorkQueueSchedulesRequestSchema;
+    output: typeof ListWorkQueueSchedulesResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_work_queue, 0);

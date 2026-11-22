@@ -138,6 +138,7 @@ fn resolve_chain_base_ref_returns_stack_node_base_for_pr_stack_orchestrator_pare
                     a_materialized_node("bottom", parent_branch, &[]),
                     a_planned_child_node("child", child_branch, &["bottom"]),
                 ],
+                ..Default::default()
             }),
         ),
     );
@@ -183,6 +184,7 @@ fn resolve_chain_base_ref_returns_none_for_branchless_pr_stack_orchestrator() {
             Some(WorkQueue {
                 version: 1,
                 nodes: vec![],
+                ..Default::default()
             }),
         ),
     );
@@ -341,6 +343,7 @@ fn spawn_work_queue_parent_takes_precedence_over_persisted_field() {
                     a_materialized_node("bottom", parent_branch, &[]),
                     a_planned_child_node("child", child_branch, &["bottom"]),
                 ],
+                ..Default::default()
             }),
         ),
     );
@@ -396,6 +399,7 @@ fn bases_a_child_on_the_node_named_by_id_when_the_operator_renamed_its_branch() 
                     a_materialized_node("bottom", parent_branch, &[]),
                     a_planned_child_node("child", "feature/stack/child", &["bottom"]),
                 ],
+                ..Default::default()
             }),
         ),
     );
@@ -446,6 +450,7 @@ fn bases_a_child_on_the_node_named_by_id_when_the_branch_still_matches_it() {
                     a_materialized_node("bottom", parent_branch, &[]),
                     a_planned_child_node("child", child_branch, &["bottom"]),
                 ],
+                ..Default::default()
             }),
         ),
     );
@@ -497,6 +502,7 @@ fn resolves_no_base_for_a_node_id_the_plan_does_not_hold() {
                     a_materialized_node("bottom", parent_branch, &[]),
                     a_planned_child_node("child", child_branch, &["bottom"]),
                 ],
+                ..Default::default()
             }),
         ),
     );

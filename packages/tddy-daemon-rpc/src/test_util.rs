@@ -640,4 +640,47 @@ impl WorkQueueService for TestDaemon {
             .get_work_queue_commit_counts(request)
             .await
     }
+
+    async fn schedule_work_item(
+        &self,
+        request: Request<tddy_service::proto::work_queue::ScheduleWorkItemRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::ScheduleWorkItemResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .schedule_work_item(request)
+            .await
+    }
+
+    async fn schedule_work_queue_wave(
+        &self,
+        request: Request<tddy_service::proto::work_queue::ScheduleWorkQueueWaveRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::ListWorkQueueSchedulesResponse>, Status>
+    {
+        self.handlers
+            .work_queue_service()
+            .schedule_work_queue_wave(request)
+            .await
+    }
+
+    async fn unschedule_work_item(
+        &self,
+        request: Request<tddy_service::proto::work_queue::UnscheduleWorkItemRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::ListWorkQueueSchedulesResponse>, Status>
+    {
+        self.handlers
+            .work_queue_service()
+            .unschedule_work_item(request)
+            .await
+    }
+
+    async fn list_work_queue_schedules(
+        &self,
+        request: Request<tddy_service::proto::work_queue::ListWorkQueueSchedulesRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::ListWorkQueueSchedulesResponse>, Status>
+    {
+        self.handlers
+            .work_queue_service()
+            .list_work_queue_schedules(request)
+            .await
+    }
 }

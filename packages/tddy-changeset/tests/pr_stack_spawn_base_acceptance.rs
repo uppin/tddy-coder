@@ -64,7 +64,11 @@ fn a_child_of(node_id: &str, parents: &[&str]) -> WorkItem {
 }
 
 fn a_stack(nodes: Vec<WorkItem>) -> WorkQueue {
-    WorkQueue { version: 1, nodes }
+    WorkQueue {
+        version: 1,
+        nodes,
+        ..Default::default()
+    }
 }
 
 // --- assertions -------------------------------------------------------------

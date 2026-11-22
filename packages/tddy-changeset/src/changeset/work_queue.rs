@@ -502,6 +502,7 @@ mod stack_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         let refs = stack.effective_base_refs("n2", "origin/master");
         assert_eq!(refs, vec!["origin/master".to_string()]);
@@ -563,6 +564,7 @@ mod stack_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         let refs = stack.effective_base_refs("n3", "origin/master");
         assert_eq!(
@@ -629,6 +631,7 @@ mod stack_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         let refs = stack.effective_base_refs("n3", "origin/master");
         assert_eq!(refs, vec!["origin/master".to_string()]);
@@ -682,6 +685,7 @@ mod stack_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         let order = stack.topo_order().unwrap();
         assert_eq!(
@@ -724,6 +728,7 @@ mod stack_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         let result = stack.topo_order();
         assert!(result.is_err(), "expected Err for cycle, got Ok");
@@ -749,7 +754,11 @@ mod stack_tests {
     }
 
     fn a_stack(nodes: Vec<WorkItem>) -> WorkQueue {
-        WorkQueue { version: 1, nodes }
+        WorkQueue {
+            version: 1,
+            nodes,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -850,6 +859,7 @@ mod stack_tests {
             WorkQueue {
                 version: 1,
                 nodes: vec![],
+                ..Default::default()
             },
         );
 
@@ -887,6 +897,7 @@ mod stack_tests {
             WorkQueue {
                 version: 1,
                 nodes: vec![a_plain_node("n1")],
+                ..Default::default()
             },
         );
 
@@ -913,6 +924,7 @@ mod stack_tests {
             WorkQueue {
                 version: 1,
                 nodes: vec![a_plain_node("n1")],
+                ..Default::default()
             },
         );
 
@@ -952,6 +964,7 @@ mod stack_tests {
                     session_id: Some(child_id.to_string()),
                     ..a_plain_node("n1")
                 }],
+                ..Default::default()
             },
         );
 

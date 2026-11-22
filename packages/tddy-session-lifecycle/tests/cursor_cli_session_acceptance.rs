@@ -781,6 +781,7 @@ fn an_orchestrator_that_planned(
                     display_order: None,
                     ..Default::default()
                 }],
+                ..Default::default()
             }),
         ),
     );

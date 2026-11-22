@@ -83,6 +83,7 @@ pub fn is_stack_tool(name: &str) -> bool {
         || crate::work_queue_lineage_tools::WORK_QUEUE_LINEAGE_TOOL_NAMES.contains(&name)
         || crate::work_queue_waves_tools::WORK_QUEUE_WAVES_TOOL_NAMES.contains(&name)
         || crate::work_item_commit_flow_tools::WORK_ITEM_COMMIT_FLOW_TOOL_NAMES.contains(&name)
+        || crate::work_queue_schedule_tools::WORK_QUEUE_SCHEDULE_TOOL_NAMES.contains(&name)
 }
 
 /// Whether `name` is one of the two tools a node of a stack is offered for its own stack:
@@ -241,6 +242,24 @@ pub enum WorkQueueOp {
     Outbox {
         item_id: String,
     },
+    /// `work_item_schedule` (`#workqueue` 13/14): arm a merge or a propagation on an item.
+    Schedule {
+        item_id: String,
+        /// `merge` or `propagate`.
+        kind: String,
+        skip_review: bool,
+    },
+    /// `work_queue_schedule_wave` (`#workqueue` 13/14): arm a merge on each open-PR item of a wave.
+    ScheduleWave {
+        wave: u32,
+        skip_review: bool,
+    },
+    /// `work_item_unschedule` (`#workqueue` 13/14).
+    Unschedule {
+        item_id: String,
+    },
+    /// `work_queue_schedules` (`#workqueue` 13/14): the armed schedules with live conditions.
+    Schedules,
 }
 
 /// What the tools need from the daemon: this host's stacks of a project, and the operations on one.
@@ -316,6 +335,8 @@ struct StackToolArgs {
     sync_pr: bool,
     kind: Option<String>,
     note: Option<String>,
+    wave: Option<u32>,
+    skip_review: bool,
 }
 
 /// The state a `work_pr_search` that expressed no preference is run with: the PRs still in play.
@@ -425,6 +446,19 @@ fn work_queue_op_of(tool_name: &str, args: StackToolArgs) -> Result<WorkQueueOp,
         crate::work_item_commit_flow_tools::WORK_ITEM_OUTBOX => WorkQueueOp::Outbox {
             item_id: required(tool_name, args.item_id, "item_id")?,
         },
+        crate::work_queue_schedule_tools::WORK_ITEM_SCHEDULE => WorkQueueOp::Schedule {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+            kind: required(tool_name, args.kind, "kind")?,
+            skip_review: args.skip_review,
+        },
+        crate::work_queue_schedule_tools::WORK_QUEUE_SCHEDULE_WAVE => WorkQueueOp::ScheduleWave {
+            wave: required(tool_name, args.wave, "wave")?,
+            skip_review: args.skip_review,
+        },
+        crate::work_queue_schedule_tools::WORK_ITEM_UNSCHEDULE => WorkQueueOp::Unschedule {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+        },
+        crate::work_queue_schedule_tools::WORK_QUEUE_SCHEDULES => WorkQueueOp::Schedules,
         other => return Err(format!("unknown stack tool: {other}")),
     })
 }
@@ -669,6 +703,7 @@ mod tests {
                         ..Default::default()
                     })
                     .collect(),
+                ..Default::default()
             },
         }
     }

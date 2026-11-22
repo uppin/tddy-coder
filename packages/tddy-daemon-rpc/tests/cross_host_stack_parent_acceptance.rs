@@ -251,6 +251,7 @@ fn a_host_that_owns_the_orchestrator() -> ADaemonInTheCommonRoom {
                         a_materialized_node("token-store", PARENT_NODE_BRANCH),
                         a_planned_node("middleware", CHILD_BRANCH, &["token-store"]),
                     ],
+                    ..Default::default()
                 }),
             ),
         );
@@ -292,6 +293,7 @@ fn a_host_whose_orchestrator_planned_no_such_branch() -> ADaemonInTheCommonRoom 
                 Some(WorkQueue {
                     version: 1,
                     nodes: vec![a_materialized_node("token-store", PARENT_NODE_BRANCH)],
+                    ..Default::default()
                 }),
             ),
         );

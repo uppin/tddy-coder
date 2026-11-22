@@ -194,6 +194,7 @@ impl AnOrchestrator {
                     branch_suggestion: Some("feature/token-store".to_string()),
                     ..Default::default()
                 }],
+                ..Default::default()
             }),
         );
     }

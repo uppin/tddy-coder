@@ -210,6 +210,7 @@ mod tests {
                     session_id: Some("child".to_string()),
                     ..WorkItem::default()
                 }],
+                ..Default::default()
             },
         );
         let mut meta = tddy_core::read_session_metadata(&orch).unwrap();

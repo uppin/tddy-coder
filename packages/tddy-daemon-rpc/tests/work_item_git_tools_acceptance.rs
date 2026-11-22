@@ -398,6 +398,7 @@ impl Host {
                 *queue = WorkQueue {
                     version: 1,
                     nodes: planned,
+                    ..Default::default()
                 }
             })
             .unwrap();

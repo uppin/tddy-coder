@@ -85,7 +85,11 @@ fn init_orchestrator_with_stack(session_dir: &std::path::Path, nodes: Vec<WorkIt
     let cs = Changeset {
         ..Default::default()
     };
-    let cs_stack = Some(WorkQueue { version: 1, nodes });
+    let cs_stack = Some(WorkQueue {
+        version: 1,
+        nodes,
+        ..Default::default()
+    });
     tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         session_dir,
         cs,

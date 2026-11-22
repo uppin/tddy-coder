@@ -3,8 +3,8 @@
 use pretty_assertions::assert_eq;
 use tddy_core::changeset::{WorkItem, WorkQueue};
 use tddy_work_queue::schedule::{
-    arm, arm_wave, checks_verdict, disarm, review_verdict, ChecksVerdict, ReviewVerdict,
-    RunOutcome, ScheduleError, ScheduleKind,
+    arm, arm_wave, checks_verdict, disarm, iso8601_utc, review_verdict, ChecksVerdict,
+    ReviewVerdict, RunOutcome, ScheduleError, ScheduleKind,
 };
 
 fn a_queue_of(ids: &[&str]) -> WorkQueue {
@@ -110,6 +110,22 @@ fn a_reviewers_latest_verdict_counts_and_a_dismissal_withdraws_it() {
             ReviewVerdict::ChangesRequested,
             ReviewVerdict::Pending,
             ReviewVerdict::Pending
+        )
+    );
+}
+
+#[test]
+fn a_unix_time_is_stamped_as_iso_8601_utc() {
+    assert_eq!(
+        (
+            iso8601_utc(0),
+            iso8601_utc(1_795_392_000),
+            iso8601_utc(951_782_400)
+        ),
+        (
+            "1970-01-01T00:00:00Z".to_string(),
+            "2026-11-23T00:00:00Z".to_string(),
+            "2000-02-29T00:00:00Z".to_string()
         )
     );
 }

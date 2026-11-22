@@ -153,7 +153,11 @@ fn write_stack(dir: &Path, nodes: Vec<WorkItem>) {
     let cs = Changeset {
         ..Changeset::default()
     };
-    let cs_stack = Some(WorkQueue { version: 1, nodes });
+    let cs_stack = Some(WorkQueue {
+        version: 1,
+        nodes,
+        ..Default::default()
+    });
     tddy_changeset::work_queue_fixtures::write_changeset_with_stack(dir, cs, cs_stack.clone());
 }
 

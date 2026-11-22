@@ -150,6 +150,7 @@ mod tests {
                 session_id: child.map(str::to_string),
                 ..WorkItem::default()
             }],
+            ..Default::default()
         }
     }
 
@@ -288,6 +289,7 @@ mod tests {
             .chain(crate::work_queue_lineage_tools::WORK_QUEUE_LINEAGE_TOOL_NAMES.iter())
             .chain(crate::work_queue_waves_tools::WORK_QUEUE_WAVES_TOOL_NAMES.iter())
             .chain(crate::work_item_commit_flow_tools::WORK_ITEM_COMMIT_FLOW_TOOL_NAMES.iter())
+            .chain(crate::work_queue_schedule_tools::WORK_QUEUE_SCHEDULE_TOOL_NAMES.iter())
             .chain(WORK_ITEM_GIT_TOOL_NAMES.iter())
             .map(|name| name.to_string())
             .collect();

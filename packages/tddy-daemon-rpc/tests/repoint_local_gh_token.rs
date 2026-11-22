@@ -109,6 +109,7 @@ fn a_repoint_of_a_started_node_in_a_project(local_gh: bool) -> World {
                 session_id: Some("session-for-n1".to_string()),
                 ..WorkItem::default()
             }],
+            ..Default::default()
         }),
     );
 

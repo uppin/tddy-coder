@@ -232,7 +232,8 @@ fn pr_state_label(state: PrState) -> &'static str {
     }
 }
 
-fn inbox_error_reason(error: &InboxError) -> String {
+/// What an operator reads when the inbox could not produce a row.
+pub fn inbox_error_reason(error: &InboxError) -> String {
     match error {
         InboxError::Unavailable(reason) => reason.clone(),
         InboxError::RateLimited { reset_at_unix_s } => {

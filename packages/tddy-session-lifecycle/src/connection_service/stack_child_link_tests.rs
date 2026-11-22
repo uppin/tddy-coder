@@ -37,6 +37,7 @@ fn an_orchestrator_with_a_two_node_stack(sessions_base: &std::path::Path) -> Pat
                 a_planned_node("bottom", "feature/bottom", &[]),
                 a_planned_node("top", "feature/top", &["bottom"]),
             ],
+            ..Default::default()
         }),
     );
     dir
@@ -61,6 +62,7 @@ fn an_orchestrator_with_a_renamed_bottom_branch(sessions_base: &std::path::Path)
                 },
                 a_planned_node("top", "feature/top", &["bottom"]),
             ],
+            ..Default::default()
         }),
     );
     dir
@@ -90,6 +92,7 @@ fn an_orchestrator_whose_bottom_node_lost_its_child_session(
                 },
                 a_planned_node("top", "feature/top", &["bottom"]),
             ],
+            ..Default::default()
         }),
     );
     dir
@@ -128,6 +131,7 @@ fn an_orchestrator_whose_bottom_branch_only_its_session_knows(
                 },
                 a_planned_node("top", "feature/top", &["bottom"]),
             ],
+            ..Default::default()
         }),
     );
     dir

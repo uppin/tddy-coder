@@ -730,6 +730,37 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         self.get_work_queue_commit_counts_rpc(request).await
     }
 
+    async fn schedule_work_item(
+        &self,
+        request: Request<tddy_service::proto::work_queue::ScheduleWorkItemRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::ScheduleWorkItemResponse>, Status> {
+        self.schedule_work_item_rpc(request).await
+    }
+
+    async fn schedule_work_queue_wave(
+        &self,
+        request: Request<tddy_service::proto::work_queue::ScheduleWorkQueueWaveRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::ListWorkQueueSchedulesResponse>, Status>
+    {
+        self.schedule_work_queue_wave_rpc(request).await
+    }
+
+    async fn unschedule_work_item(
+        &self,
+        request: Request<tddy_service::proto::work_queue::UnscheduleWorkItemRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::ListWorkQueueSchedulesResponse>, Status>
+    {
+        self.unschedule_work_item_rpc(request).await
+    }
+
+    async fn list_work_queue_schedules(
+        &self,
+        request: Request<tddy_service::proto::work_queue::ListWorkQueueSchedulesRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::ListWorkQueueSchedulesResponse>, Status>
+    {
+        self.list_work_queue_schedules_rpc(request).await
+    }
+
     /// Take a base branch's commits into a planned node's branch, inside that node's own worktree,
     /// and push the result.
     ///

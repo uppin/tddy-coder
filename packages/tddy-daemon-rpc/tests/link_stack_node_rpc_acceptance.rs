@@ -113,6 +113,7 @@ fn an_orchestrator_with_an_unlinked_node(sessions_base: &Path) {
             Some(WorkQueue {
                 version: 1,
                 nodes: vec![a_planned_node("n1")],
+                ..Default::default()
             }),
         ),
     );
