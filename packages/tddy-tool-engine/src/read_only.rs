@@ -30,6 +30,7 @@ pub fn is_project_home_allowed_tool(name: &str) -> bool {
         || crate::session_message_tools::is_session_message_tool(name)
         || crate::session_file_tools::is_session_file_tool(name)
         || crate::base_freshness_tools::is_base_freshness_tool(name)
+        || crate::path_access_tools::is_path_access_tool(name)
 }
 
 /// The prefix `claude` gives a tool served by the `tddy-tools` MCP server.
@@ -170,6 +171,7 @@ mod tests {
                 "mcp__tddy-tools__ListSessionFiles",
                 "mcp__tddy-tools__CheckBaseFreshness",
                 "mcp__tddy-tools__RefreshHome",
+                "mcp__tddy-tools__RequestPathAccess",
             ]
         );
     }

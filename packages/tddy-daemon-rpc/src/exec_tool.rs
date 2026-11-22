@@ -3,6 +3,7 @@
 mod base_freshness;
 pub mod home_terminal_leases;
 mod orchestrator_reach;
+mod path_access;
 mod path_guard;
 mod ports;
 mod project_home;
@@ -97,6 +98,9 @@ pub(crate) struct ProjectHomeHost {
     /// The permission prompts this host's claude-cli hooks hold open, the registry
     /// `AnswerSessionPermission` delivers into (`#home-inbox` 6/8).
     pub(crate) pending_answers: Arc<tddy_session_activity::pending_answers::PendingAnswers>,
+    /// The access requests `RequestPathAccess` records and the activity service lists and answers
+    /// (`#orchestra` 6/9).
+    pub(crate) path_access: tddy_session_activity::path_access::PathAccessRequests,
     /// The project notification log the daemon registered on its bus, which
     /// `WaitProjectNotifications` and `ReadProjectNotifications` read (`#home-inbox` 7/8). `None`
     /// on a host with none installed.
@@ -144,6 +148,7 @@ impl ExecToolRpcHandler {
                 terminal_control: host.terminal_control(),
                 leases: Arc::new(home_terminal_leases::HomeTerminalLeases::default()),
                 pending_answers: host.pending_answers(),
+                path_access: host.path_access_requests(),
                 notification_log: host.project_notification_log(),
                 notification_bus: host.session_notification_bus(),
                 session_watches: host.session_watches(),

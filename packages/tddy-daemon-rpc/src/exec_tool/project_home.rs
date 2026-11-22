@@ -51,6 +51,7 @@ use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
 use tddy_terminal_rpc::TerminalControl;
 use tddy_tool_engine::base_freshness_tools::is_base_freshness_tool;
 use tddy_tool_engine::catalog::ToolDef;
+use tddy_tool_engine::path_access_tools::is_path_access_tool;
 use tddy_tool_engine::project_home_answer_tools::{
     execute_project_home_answer_tool, is_project_home_answer_tool,
 };
@@ -135,6 +136,11 @@ impl ExecToolRpcHandler {
         if is_stack_tool(&req.tool_name) {
             return self.run_stack_tool(req, sessions_base).await;
         }
+        if is_path_access_tool(&req.tool_name) {
+            return self
+                .run_path_access_tool(req, sessions_base, worktree_root)
+                .await;
+        }
         if is_base_freshness_tool(&req.tool_name) {
             return self.run_base_freshness_tool(req, sessions_base).await;
         }
@@ -145,6 +151,9 @@ impl ExecToolRpcHandler {
             .run_in_orchestrator_reach(req, sessions_base, worktree_root)
             .await?
         {
+            return Ok(answered);
+        }
+        if let Some(answered) = self.run_granted_write(req, sessions_base).await? {
             return Ok(answered);
         }
         if is_session_file_tool(&req.tool_name) {

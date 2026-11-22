@@ -62,6 +62,53 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         self.rename_own_session_impl(request.into_inner()).await
     }
 
+    /// An orchestrator's access requests waiting for the operator (`#orchestra` 6/9) — see
+    /// `crate::path_access`.
+    async fn list_path_access_requests(
+        &self,
+        request: Request<tddy_service::proto::activity::ListPathAccessRequestsRequest>,
+    ) -> Result<Response<tddy_service::proto::activity::ListPathAccessRequestsResponse>, Status>
+    {
+        let req = request.into_inner();
+        // Resolved under the caller's own OS user: a token that is not this session's owner's
+        // finds no session directory, and so no requests.
+        self.session_dir(&req.session_token, &req.session_id)?;
+        Ok(Response::new(
+            tddy_service::proto::activity::ListPathAccessRequestsResponse {
+                requests: self
+                    .path_access
+                    .pending(&req.session_id)
+                    .into_iter()
+                    .map(crate::path_access::PendingPathAccess::into_proto)
+                    .collect(),
+            },
+        ))
+    }
+
+    /// The operator's answer to one of an orchestrator's access requests (`#orchestra` 6/9).
+    async fn answer_path_access(
+        &self,
+        request: Request<tddy_service::proto::activity::AnswerPathAccessRequest>,
+    ) -> Result<Response<tddy_service::proto::activity::AnswerPathAccessResponse>, Status> {
+        let req = request.into_inner();
+        self.session_dir(&req.session_token, &req.session_id)?;
+        self.path_access
+            .answer(&req.session_id, &req.request_id, req.allow)
+            .map_err(|e| match e {
+                crate::path_access::PathAccessAnswerError::NotPending { request_id } => {
+                    Status::not_found(format!(
+                        "access request {request_id} is not waiting for an answer"
+                    ))
+                }
+                crate::path_access::PathAccessAnswerError::GrantNotWritten(e) => {
+                    Status::internal(format!("the grant could not be written: {e}"))
+                }
+            })?;
+        Ok(Response::new(
+            tddy_service::proto::activity::AnswerPathAccessResponse {},
+        ))
+    }
+
     /// An orchestrated session's `PermissionRequest` hook waiting for its orchestrator's answer —
     /// see `question_answers`.
     async fn await_question_answer(

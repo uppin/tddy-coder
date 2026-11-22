@@ -23,7 +23,16 @@ pub(super) fn reject_refused_local_exec_tool(
     req: &ExecuteToolRequest,
 ) -> Result<(), Status> {
     reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
-    reject_non_read_only_tool_for_project_home(sessions_base, &req.session_id, &req.tool_name)
+    reject_non_read_only_tool_for_project_home(sessions_base, req)
+}
+
+/// Whether `req` is an orchestrator's own `Write`, `StrReplace` or `Delete` of a path inside one of
+/// its write grants (`#orchestra` 6/9) — the one write a read-only session may make. A subagent
+/// conversation's call is never one: its worktree is not the orchestrator's.
+fn is_write_inside_a_grant(session_dir: &Path, req: &ExecuteToolRequest) -> bool {
+    req.conversation_id.is_empty()
+        && super::orchestrator_reach::is_granted_write_tool(&req.tool_name)
+        && super::orchestrator_reach::granted_write(session_dir, &req.args_json).is_some()
 }
 
 /// Refuse `tool_name` with `PermissionDenied` when `session_id` is a project-home session and the
@@ -32,9 +41,9 @@ pub(super) fn reject_refused_local_exec_tool(
 /// cannot be known, so the read-only rule cannot be ruled out.
 fn reject_non_read_only_tool_for_project_home(
     sessions_base: &Path,
-    session_id: &str,
-    tool_name: &str,
+    req: &ExecuteToolRequest,
 ) -> Result<(), Status> {
+    let (session_id, tool_name) = (&req.session_id, &req.tool_name);
     let session_dir = unified_session_dir_path(sessions_base, session_id);
     let metadata = tddy_core::read_session_metadata(&session_dir).map_err(|e| {
         Status::failed_precondition(format!(
@@ -46,6 +55,7 @@ fn reject_non_read_only_tool_for_project_home(
         .as_deref()
         .is_some_and(is_orchestrator_role)
         && !is_project_home_allowed_tool(tool_name)
+        && !is_write_inside_a_grant(&session_dir, req)
     {
         return Err(Status::permission_denied(format!(
             "tool {tool_name} is refused: a project-home session is read-only"

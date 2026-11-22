@@ -61,6 +61,8 @@ pub struct ActivityServiceImpl {
     agents: Arc<CodingAgentRegistry>,
     /// The per-session pollers `StreamSessionUsage` shares between a session's subscribers.
     usage_pollers: usage_pollers::UsagePollers,
+    /// An orchestrator's access requests waiting for the operator (`#orchestra` 6/9).
+    path_access: crate::path_access::PathAccessRequests,
 }
 
 impl ActivityServiceImpl {
@@ -73,7 +75,16 @@ impl ActivityServiceImpl {
             answers: AnswerWaitPorts::default(),
             agents: Arc::new(CodingAgentRegistry::empty()),
             usage_pollers: usage_pollers::UsagePollers::default(),
+            path_access: crate::path_access::PathAccessRequests::new(),
         }
+    }
+
+    /// Serve the access requests held in `requests` (builder): the host's one store, shared with
+    /// the tool that records them.
+    #[must_use]
+    pub fn with_path_access(mut self, requests: crate::path_access::PathAccessRequests) -> Self {
+        self.path_access = requests;
+        self
     }
 
     /// Gate the hook-driven RPCs on the capabilities `agents` declare (builder).

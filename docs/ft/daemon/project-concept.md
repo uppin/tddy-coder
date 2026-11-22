@@ -376,14 +376,45 @@ call is in it at once:
   home). Read as-is. They enter reach only when the daemon has its session-launch registry attached.
 - **The session's grants** — `<session_dir>/path-grants.json` (`PathGrantStore`), each a path, a
   mode (`read` / `write`), when it was granted and the agent's reason. A grant lives as long as the
-  session and survives a resume. Read as-is. Nothing writes grants yet; the access-request tool
-  (`#orchestra` 6/9) will.
+  session and survives a resume. Read as-is. The operator writes them by allowing a
+  `RequestPathAccess` (below).
 
 Containment is by path component after symlinks are resolved, so a sibling whose name extends a root
 is outside it and a symlink inside reach that points out of it is refused; `..` is refused. A path
 outside reach is refused with a message listing the reach and naming `RequestPathAccess`; `Glob` with
-an absolute pattern outside reach gets the same refusal. Writes stay refused for orchestrator roles,
-and a non-orchestrator session's reads stay confined to its own worktree.
+an absolute pattern outside reach gets the same refusal. Writes stay refused for orchestrator roles
+everywhere but inside a write grant, and a non-orchestrator session's reads stay confined to its own
+worktree.
+
+#### Access requests
+
+An orchestrator that needs paths outside its reach asks for them with **`RequestPathAccess { paths,
+mode, reason }`**: absolute paths (each grant covers the path and everything under it), `read` or
+`write` (write includes read), and why, in its own words. A relative path, an empty list or an empty
+reason is refused before anything is asked.
+
+- **Already usable paths are not asked for.** A path the session can already use at that mode — in
+  its read reach for `read`, inside a write grant it holds for `write` — is answered at once; only the
+  rest go to the operator. A read grant does not answer a write request. The answer is `{ answer,
+  paths, in_reach }`: `answer` is `in_reach` when nothing needed asking, otherwise `allowed`, `denied`
+  or `unanswered`; `paths` are the ones asked for; `in_reach` the ones that were usable already.
+- **The operator is told.** The request is announced as an attention notification — a pending
+  question of kind `path_access` — so the drawer, the desktop and Telegram say which session asks, for
+  what and why.
+- **It is answered in the orchestrator's session pane.** The pane lists the session's waiting
+  requests (`ActivityService.ListPathAccessRequests`) with the paths, the mode and the reason, and
+  **Allow** / **Deny** (`AnswerPathAccess`). Allow writes a grant per path into the session's grant
+  store before the waiting call returns, so the read or write that follows is in reach.
+- **The call waits** up to ten minutes. Nobody answering is `unanswered`, and the request leaves the
+  list; a call whose caller goes away withdraws its request.
+- **Grants are the session's.** They last as long as the session and survive a resume; there are no
+  project-wide grants.
+- **Writes inside a write grant.** An orchestrator's own `Write`, `StrReplace` and `Delete` (not a
+  conversation's) of an absolute path inside one of its write grants is admitted and runs confined to
+  that grant, resolved as a read is (symlinks followed, `..` refused). Every other write stays refused,
+  the home worktree included.
+- Requests are held in memory by the daemon that runs the orchestrator, which is the one serving its
+  pane; the two RPCs are not routed to a peer.
 
 ### Project-home tools
 
