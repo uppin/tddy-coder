@@ -4,3 +4,5 @@ export { WorkQueueView, type WorkQueueViewProps, type WorkQueueAddress } from ".
 export { WorkflowChatScreen, type WorkflowChatScreenProps } from "./WorkflowChatScreen";
 export type { StackChildMetadata } from "./workItemSessions";
 export { WorkItemChecksSummary, type WorkItemChecksSummaryProps } from "./WorkItemChecksSummary";
+export { WorkItemLinkControls } from "./WorkItemLinkControls";
+export { WorkItemLinksContext, type WorkItemLinks, type LinkableSession, type ItemChecks } from "./workItemLinks";

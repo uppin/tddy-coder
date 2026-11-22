@@ -39,6 +39,22 @@ export interface WorkItem {
    * see `orderWorkItems`.
    */
   displayOrder: number | null;
+  /** The existing PR assigned to this item (`#workqueue` 6/14); its head branch is the item's branch. */
+  pr: AssignedPr | null;
+  /** The tddy sessions linked to this item, in link order (`#workqueue` 6/14). */
+  linkedSessions: LinkedSession[];
+}
+
+export interface AssignedPr {
+  number: number;
+  url: string;
+  headBranch: string;
+}
+
+export interface LinkedSession {
+  sessionId: string;
+  /** The daemon holding the session; empty for the queue's own host. */
+  daemonInstanceId: string;
 }
 
 export interface Stack {
@@ -59,6 +75,8 @@ interface WireStackNode {
   child_recipe?: string | null;
   internal_status?: PrInternalStatus | null;
   display_order?: number | null;
+  pr?: { number: number; url: string; head_branch: string } | null;
+  linked_sessions?: { session_id: string; daemon_instance_id?: string }[];
 }
 
 interface WireStack {
@@ -90,6 +108,11 @@ export function parseWorkQueue(workQueueJson: string | undefined | null): Stack 
     // Position 0 is a real position, so an absent field is distinguished by type rather than by
     // falsiness: `?? null` would read the first row's own position as "this node has no position".
     displayOrder: typeof n.display_order === "number" ? n.display_order : null,
+    pr: n.pr ? { number: n.pr.number, url: n.pr.url, headBranch: n.pr.head_branch } : null,
+    linkedSessions: (n.linked_sessions ?? []).map((linked) => ({
+      sessionId: linked.session_id,
+      daemonInstanceId: linked.daemon_instance_id ?? "",
+    })),
   }));
   return { version: parsed.version ?? 0, nodes };
 }
