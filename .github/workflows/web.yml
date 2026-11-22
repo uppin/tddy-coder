@@ -220,6 +220,10 @@ jobs:
           # timeout. This prints each phase of the testkit start so a failing run names the stalled one.
           # Remove once the hang is understood and fixed.
           DEBUG: ${{ steps.plan.outputs.needs-echo-server == 'true' && 'tddy:livekit-web:*' || '' }}
+          # scripts/vite-prebundle.ts' prebundleDiagnostics() writes every dependency the component dev
+          # server meets that the up-front pre-bundle missed here, one file per package, and to this
+          # step's log as `[vite-prebundle] <package>: dependency discovered mid-run: <name>`.
+          VITE_PREBUNDLE_LOG_DIR: ${{ github.workspace }}/reports/vite-prebundle
         run: |
           mkdir -p reports/junit
           ./dev bun scripts/web-ci.ts run --plan web-shard-plan.json
@@ -246,6 +250,15 @@ jobs:
         with:
           name: junit-web-shard-${{ matrix.shard }}
           path: reports/junit
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload Vite pre-bundle diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vite-prebundle-web-shard-${{ matrix.shard }}
+          path: reports/vite-prebundle
           if-no-files-found: ignore
           retention-days: 14
 
