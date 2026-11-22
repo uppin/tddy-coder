@@ -5,6 +5,9 @@ use crate::catalog::ToolDef;
 
 pub const WORK_QUEUE_WAVES: &str = "work_queue_waves";
 
+/// The waves tool's name, as a list the registries chain with the other tool-name lists.
+pub const WORK_QUEUE_WAVES_TOOL_NAMES: [&str; 1] = [WORK_QUEUE_WAVES];
+
 /// `work_queue_waves {}`: read-only, takes no argument (the session's own queue).
 pub fn work_queue_waves_tool_def() -> ToolDef {
     ToolDef {

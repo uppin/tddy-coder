@@ -88,6 +88,9 @@ service WorkQueueService {
   // `#workqueue` 9/14: the queue's lineage — each item's line edge (read from its PR's base through the
   // daemon's GitHub inbox, else its planned base) and the stored dependency edges.
   rpc GetWorkQueueGraph(GetWorkQueueGraphRequest) returns (WorkQueueGraphResponse);
+  // `#workqueue` 10/14: the queue's waves, derived line and each item's readiness — computed from the
+  // stored dependency edges; nothing is stored. A cycle is refused (`failed_precondition`, naming it).
+  rpc GetWorkQueueWaves(GetWorkQueueWavesRequest) returns (WorkQueueWavesResponse);
 }
 
 // Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
@@ -519,6 +522,10 @@ message WorkItemStatus {
   // Each check run at the PR's head, for the row's expanded list — the shape of
   // `worktree.PullRequestCheck`, so the web renders it with the session PR tab's `CheckRow`.
   repeated WorkItemCheck checks = 7;
+  // `#workqueue` 10/14: the item's wave (1 = needs nothing); 0 when the queue's edges close a cycle.
+  uint32 wave = 8;
+  // The unmet needs in the wave immediately below the item; empty when it is ready.
+  repeated string binding_needs = 9;
 }
 
 // One check run at a PR's head.
@@ -592,4 +599,32 @@ message WorkQueueGraphResponse {
   // The branches of the GitHub stack the queue's items sit in, bottom first; empty when the
   // `gh stack` extension is missing or no item is in a stack.
   repeated string gh_stack_branches = 4;
+}
+
+// `#workqueue` 10/14 — waves.
+message GetWorkQueueWavesRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+}
+
+message WaveView {
+  // 1-based.
+  uint32 wave = 1;
+  // The wave's items, blockers first, ties in queue order.
+  repeated string item_ids = 2;
+}
+
+message ItemReadinessView {
+  string item_id = 1;
+  // The unmet needs in the wave immediately below the item; empty when it is ready.
+  repeated string waits_on = 2;
+}
+
+message WorkQueueWavesResponse {
+  repeated WaveView waves = 1;
+  // The waves concatenated.
+  repeated string derived_line = 2;
+  repeated ItemReadinessView readiness = 3;
+  // The first item that steps back a wave in the queue's current order; empty when in order.
+  string out_of_order_at = 4;
 }

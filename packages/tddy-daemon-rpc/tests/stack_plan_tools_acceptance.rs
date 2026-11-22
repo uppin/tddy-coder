@@ -480,7 +480,7 @@ fn pair(node_id: &str, title: &str) -> (String, String) {
     (node_id.to_string(), title.to_string())
 }
 
-const EVERY_STACK_TOOL: [&str; 19] = [
+const EVERY_STACK_TOOL: [&str; 20] = [
     "work_queue_list",
     "work_queue_status",
     "work_pr_read",
@@ -500,6 +500,7 @@ const EVERY_STACK_TOOL: [&str; 19] = [
     "work_item_clear_badge",
     "work_queue_set_dependencies",
     "work_queue_graph",
+    "work_queue_waves",
 ];
 
 fn names(names: &[&str]) -> Vec<String> {
@@ -564,6 +565,52 @@ async fn main_plans_on_its_own_queue_and_reads_its_status_from_a_read_only_sessi
             .collect::<Vec<_>>(),
         vec![(json!(queue_id), json!(world.main))]
     );
+}
+
+#[tokio::test]
+async fn status_carries_each_items_wave_and_binding_needs_and_the_waves_tool_answers_them() {
+    // Given main's queue of three items, n2 and n3 each needing the one before
+    let world = a_world().await;
+    let a = &world.a;
+    a.holds_a_stack(&world.main, &["Store", "Tools", "Web"]);
+    a.answer_to(
+        &world.main,
+        "work_queue_set_dependencies",
+        json!({ "item_id": "n2", "needs": ["n1"] }),
+    )
+    .await;
+    a.answer_to(
+        &world.main,
+        "work_queue_set_dependencies",
+        json!({ "item_id": "n3", "needs": ["n2"] }),
+    )
+    .await;
+
+    // When it reads the status and the waves
+    let status = a
+        .answer_to(&world.main, "work_queue_status", json!({}))
+        .await;
+    let waves = a
+        .answer_to(&world.main, "work_queue_waves", json!({}))
+        .await;
+
+    // Then each item carries its wave and what it waits on, and the waves tool agrees
+    let carried: Vec<(Value, Value)> = status["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .map(|n| (n["wave"].clone(), n["binding_needs"].clone()))
+        .collect();
+    assert_eq!(
+        carried,
+        vec![
+            (json!(1), json!([])),
+            (json!(2), json!(["n1"])),
+            (json!(3), json!(["n2"])),
+        ]
+    );
+    assert_eq!(waves["derived_line"], json!(["n1", "n2", "n3"]));
+    assert_eq!(waves["out_of_order_at"], Value::Null);
 }
 
 #[tokio::test]

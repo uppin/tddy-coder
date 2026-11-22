@@ -599,4 +599,14 @@ impl WorkQueueService for TestDaemon {
             .get_work_queue_graph(request)
             .await
     }
+
+    async fn get_work_queue_waves(
+        &self,
+        request: Request<tddy_service::proto::work_queue::GetWorkQueueWavesRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkQueueWavesResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .get_work_queue_waves(request)
+            .await
+    }
 }

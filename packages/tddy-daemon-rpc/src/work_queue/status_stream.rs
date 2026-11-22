@@ -9,6 +9,7 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{StreamWorkQueueStatusRequest, WorkQueueStatusView};
 use tddy_work_queue::inbox_reads::work_queue_status_view;
 use tddy_work_queue::rpc::WorkQueueStatusStream;
+use tddy_work_queue::waves::queue_waves;
 
 impl WorkQueueRpcHandler {
     pub(super) async fn stream_work_queue_status_rpc(

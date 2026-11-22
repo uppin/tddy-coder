@@ -77,4 +77,5 @@ mod links;
 #[cfg(test)]
 mod repoint_github_token_unit_tests;
 mod status_stream;
+mod waves;
 mod work_queue_queries;

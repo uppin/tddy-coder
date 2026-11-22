@@ -80,6 +80,7 @@ fn the_owner_is_offered_every_work_tool_except_creation() {
         .chain(WORK_ITEM_LINK_TOOL_NAMES.iter())
         .chain(WORK_ITEM_ANNOTATION_TOOL_NAMES.iter())
         .chain(tddy_tool_engine::work_queue_lineage_tools::WORK_QUEUE_LINEAGE_TOOL_NAMES.iter())
+        .chain(tddy_tool_engine::work_queue_waves_tools::WORK_QUEUE_WAVES_TOOL_NAMES.iter())
         .chain(WORK_ITEM_GIT_TOOL_NAMES.iter())
         .map(|name| name.to_string())
         .collect();

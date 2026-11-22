@@ -2,8 +2,8 @@
 //! own example: n1 → n2, n3, n4, n5; n2 → n4; n5 → n6, n7, n8 (`a → b`: b needs a).
 
 use pretty_assertions::assert_eq;
-use tddy_pr_stack::lineage::{DependencyEdge, LineageError};
-use tddy_pr_stack::waves::{
+use tddy_work_queue::lineage::{DependencyEdge, LineageError};
+use tddy_work_queue::waves::{
     derive_line, line_check, readiness, transitive_dependents, waves, LineCheck,
 };
 

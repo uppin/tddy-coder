@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use crate::lineage::{DependencyEdge, LineageError};
+use crate::lineage::{detect_cycle, DependencyEdge, LineageError};
 
 /// Whether a line keeps the waves non-decreasing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +48,17 @@ pub fn waves(items: &[String], edges: &[DependencyEdge]) -> Result<Vec<Vec<Strin
                 .is_none_or(|from| from.iter().all(|need| placed.contains(need)))
         });
         if ready.is_empty() {
-            return Err(LineageError::Cycle(cycle_among(&blocked, &needs)));
+            // Nothing could be placed, so the edges among this queue's items close a cycle.
+            let in_queue: Vec<DependencyEdge> = edges
+                .iter()
+                .filter(|edge| {
+                    known.contains(edge.from.as_str()) && known.contains(edge.to.as_str())
+                })
+                .cloned()
+                .collect();
+            let cycle = detect_cycle(&in_queue)
+                .expect("an unplaceable remainder of a finite queue holds a cycle");
+            return Err(LineageError::Cycle(cycle));
         }
         placed.extend(ready.iter().copied());
         result.push(ready.into_iter().map(str::to_string).collect());
@@ -57,28 +67,37 @@ pub fn waves(items: &[String], edges: &[DependencyEdge]) -> Result<Vec<Vec<Strin
     Ok(result)
 }
 
-/// A cycle among `stuck` items (none of which could be placed): walk needs that are themselves stuck
-/// until an item repeats. Returned first repeated last, like `LineageError::Cycle`.
-// TODO(n9 lineage-graph): the queue's own cycle check, `lineage::detect_cycle`, is n9's; reach it
-// through that once it lands. This only names what stopped the placement.
-fn cycle_among(stuck: &[&str], needs: &HashMap<&str, Vec<&str>>) -> Vec<String> {
-    let stuck_set: HashSet<&str> = stuck.iter().copied().collect();
-    let mut path: Vec<&str> = Vec::new();
-    let mut current = stuck[0];
-    loop {
-        if let Some(at) = path.iter().position(|seen| *seen == current) {
-            let mut cycle: Vec<String> = path[at..].iter().map(|s| s.to_string()).collect();
-            cycle.push(current.to_string());
-            return cycle;
-        }
-        path.push(current);
-        // Every stuck item has at least one stuck need, or it would have been placed.
-        current = needs
-            .get(current)
-            .and_then(|from| from.iter().find(|need| stuck_set.contains(*need)))
-            .copied()
-            .expect("a stuck item has a stuck need");
-    }
+/// Everything the queue's dependency edges say about its order, derived in one pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueWaves {
+    pub waves: Vec<Vec<String>>,
+    pub derived_line: Vec<String>,
+    /// Each item (queue order) with its binding needs.
+    pub readiness: Vec<(String, Vec<String>)>,
+    /// The first item that steps back a wave in the queue's own order.
+    pub out_of_order_at: Option<String>,
+}
+
+/// [`waves`], [`derive_line`], every item's [`readiness`] and the [`line_check`] of the queue's own
+/// order (`items`), for what `GetWorkQueueWaves`, `work_queue_waves` and the status share.
+///
+/// No item is treated as done: readiness is structural — what each item needs from the wave below.
+pub fn queue_waves(items: &[String], edges: &[DependencyEdge]) -> Result<QueueWaves, LineageError> {
+    let layers = waves(items, edges)?;
+    let readiness = items
+        .iter()
+        .map(|item| Ok((item.clone(), readiness(items, edges, item, &[])?)))
+        .collect::<Result<Vec<_>, LineageError>>()?;
+    let out_of_order_at = match line_check(items, edges, items)? {
+        LineCheck::InOrder => None,
+        LineCheck::OutOfOrder { first } => Some(first),
+    };
+    Ok(QueueWaves {
+        waves: layers,
+        derived_line: derive_line(items, edges)?,
+        readiness,
+        out_of_order_at,
+    })
 }
 
 /// The derived line: waves concatenated, blockers first inside each wave, ties in queue order.

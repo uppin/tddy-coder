@@ -12,7 +12,8 @@ use tddy_core::changeset::{WorkItem, WorkQueue};
 use tddy_core::session_work_queue::SessionWorkQueues;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::work_queue::{
-    GetWorkQueueGraphRequest, SetWorkQueueDependenciesRequest, WorkQueueAddress, WorkQueueService,
+    GetWorkQueueGraphRequest, GetWorkQueueWavesRequest, SetWorkQueueDependenciesRequest,
+    WorkQueueAddress, WorkQueueService,
 };
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
@@ -156,4 +157,42 @@ async fn the_graph_of_an_unknown_queue_is_not_found() {
 
     // Then
     assert_eq!(refused.code(), Code::NotFound);
+}
+
+#[tokio::test]
+async fn the_waves_of_a_queue_follow_its_stored_dependencies() {
+    // Given — n2 needs n1
+    let (host, address) = a_host_holding_a_two_item_queue();
+    set_needs(&host, &address, "n2", &["n1"])
+        .await
+        .expect("set");
+
+    // When
+    let waves = host
+        .daemon
+        .get_work_queue_waves(Request::direct(GetWorkQueueWavesRequest {
+            session_token: TEST_TOKEN.to_string(),
+            queue: Some(address),
+        }))
+        .await
+        .expect("waves")
+        .into_inner();
+
+    // Then
+    assert_eq!(
+        (
+            waves
+                .waves
+                .iter()
+                .map(|w| (w.wave, w.item_ids.clone()))
+                .collect::<Vec<_>>(),
+            waves.derived_line,
+            waves.out_of_order_at
+        ),
+        (
+            vec![(1, vec!["n1".to_string()]), (2, vec!["n2".to_string()])],
+            vec!["n1".to_string(), "n2".to_string()],
+            String::new()
+        )
+    );
 }

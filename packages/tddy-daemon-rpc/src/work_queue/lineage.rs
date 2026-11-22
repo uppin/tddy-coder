@@ -15,7 +15,7 @@ use tddy_service::proto::work_queue::{
 };
 use tddy_work_queue::lineage::{self, LineageError, QueueGraph};
 
-fn lineage_refusal(error: LineageError) -> Status {
+pub(super) fn lineage_refusal(error: LineageError) -> Status {
     match error {
         LineageError::NoSuchItem(_) => Status::not_found(error.to_string()),
         LineageError::Cycle(_) => Status::failed_precondition(error.to_string()),

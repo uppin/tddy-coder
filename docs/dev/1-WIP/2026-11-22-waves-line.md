@@ -33,6 +33,13 @@ Derived waves, blockers-first line, binding readiness and a line check over n9's
 Exploration 3 §4B.5: waves exist only in `tddy-build/src/graph.rs::waves` (not reusable across crates
 as-is); the queue has `topo_order`, `display_order`, `assess::decide_next_action`.
 
+## Stack note (temporary)
+
+This branch skips n7 and n8: it sits on n9's green (`a3c8b3491`), which is itself cut from n6's green,
+because n10's real dependency is n9. In the line it sits on n8 and n7, whose implementations are not done;
+their contract commits are not carried here. The branch is rebased onto n8 before n10's [W]. Remove this
+note then.
+
 ## Responsibility
 
 - The `waves` module and its five functions.
@@ -58,7 +65,7 @@ implementing one here collides with the PR that owns it.
 
 Published (pass 2, commit 2):
 
-- `tddy_pr_stack::waves::{waves, derive_line, transitive_dependents, readiness, line_check, LineCheck}`
+- `tddy_work_queue::waves::{waves, derive_line, transitive_dependents, readiness, line_check, LineCheck}`
   — pure over `(items in queue order, &[DependencyEdge])`, so the tests use only n9's types, not its
   behaviour (`wave_of` is a lookup in `waves`' result)
 - `tddy_tool_engine::work_queue_waves_tools::{WORK_QUEUE_WAVES, work_queue_waves_tool_def}`
@@ -91,20 +98,18 @@ blockers lead: n1 (12 transitive dependents) before n2 (8); n3 (10) before n4 (3
 and n8 (0 each); n10 and n11 (2 each — tie, kept in plan order) before n12 (0). The sweep node is
 reserved and planned after the pipelines drain.
 
-## Green progress (paused at G:resume)
+## Green progress
 
-Done and pushed: the `waves` module (6 unit tests), the `work_queue_waves` tool definition (1 test),
-`WaveLanes` (2 Cypress tests).
-
-Remains, and stays in this node: the `GetWorkQueueWaves` RPC, `WorkItemStatus.{wave, binding_needs}`,
-the proto and closed lists, the daemon-rpc handler, the tool-path wiring, and routing
-`waves::cycle_among` through n9's `detect_cycle` (`TODO(n9)`). It waits for n9's green
-(`lineage::dependencies_of` and `detect_cycle` are still stubs); resume then: rebase onto n9, finish.
+Done: the `waves` module (6 unit tests, with `queue_waves` for what the RPC, the tool and the status share;
+a cycle is reported through n9's `lineage::detect_cycle`), the `work_queue_waves` tool (definition, op,
+answer; in the closed tool lists), `GetWorkQueueWaves` and `WorkItemStatus.{wave, binding_needs}` (proto,
+handler, status stream, regenerated bindings), `WaveLanes` (2 Cypress tests). `work_queue_status` carries
+each node's `wave` and `binding_needs` too. Readiness is structural: no item is treated as done.
 
 ## Scope
 
 - [x] `waves` module
-- [ ] Tool, RPC, status fields
+- [x] Tool, RPC, status fields
 - [x] Wave lanes, readiness, line-check banner
 - [ ] Docs updated through the wrap
 
@@ -126,7 +131,7 @@ As listed under Affected Packages.
 ## Implementation Milestones
 
 - [x] `waves` module with unit tests
-- [ ] Tool + RPC + status
+- [x] Tool + RPC + status
 - [x] Web lanes
 
 ## Testing Plan
@@ -136,7 +141,7 @@ fixtures); one daemon integration test for the tool; a Cypress component spec fo
 
 ## Acceptance Tests
 
-`packages/tddy-pr-stack/tests/waves_unit.rs` (crate renamed `tddy-work-queue` by n3):
+`packages/tddy-work-queue/tests/waves_unit.rs`:
 - [x] `an_item_with_no_needs_is_wave_one_wherever_it_sits`
 - [x] `inside_a_wave_the_item_with_most_transitive_dependents_leads`
 - [x] `ties_keep_the_queues_order`
@@ -147,7 +152,9 @@ fixtures); one daemon integration test for the tool; a Cypress component spec fo
 `packages/tddy-tool-engine/tests/work_queue_waves_tools.rs`:
 - [x] `work_queue_waves_is_defined_and_needs_no_argument`
 
-Status carrying each item's wave and binding needs is proved in the daemon-rpc stack suite by `/green`.
+Status carrying each item's wave and binding needs is proved in the daemon-rpc stack suite
+(`stack_plan_tools_acceptance`: `status_carries_each_items_wave_and_binding_needs_and_the_waves_tool_answers_them`),
+and `GetWorkQueueWaves` in `work_queue_lineage_rpc_acceptance`.
 
 `packages/tddy-workqueue-web/cypress/component/WorkQueueWavesAcceptance.cy.tsx`:
 - [x] `items are drawn in wave lanes with their readiness`
@@ -183,7 +190,7 @@ _(populated by validation)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code (partial, see Green progress)
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
