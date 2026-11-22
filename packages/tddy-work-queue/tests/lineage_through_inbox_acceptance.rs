@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
-use tddy_core::changeset::{Stack, StackNode};
+use tddy_core::changeset::{WorkQueue, WorkItem};
 use tddy_github::conditional::{ConditionalAnswer, ConditionalRead, GithubReadError};
 use tddy_github_inbox::{paths, EventKind, GithubInbox, InboxError, RepoReaders, RepoSlug};
 use tddy_work_queue::lineage::{line_edges_through_inbox, LineEndpoint};
@@ -104,19 +104,19 @@ async fn retargeting_a_pr_on_github_moves_its_line_edge_without_a_queue_write() 
     );
     let inbox = GithubInbox::new(Arc::new(ReadsThrough(github.clone())));
     let _watching = inbox.subscribe(&repo, &[EventKind::Pr]);
-    let queue = Stack {
+    let queue = WorkQueue {
         version: 1,
         nodes: vec![
-            StackNode {
+            WorkItem {
                 node_id: "n1".into(),
                 branch: Some("feat/one".into()),
-                ..StackNode::default()
+                ..WorkItem::default()
             },
-            StackNode {
+            WorkItem {
                 node_id: "n2".into(),
                 branch: Some("feat/two".into()),
                 parents: vec!["n1".into()],
-                ..StackNode::default()
+                ..WorkItem::default()
             },
         ],
     };

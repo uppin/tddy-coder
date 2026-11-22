@@ -8,7 +8,10 @@
 //!
 //! `parents` keeps its git meaning (where to cut and rebase); it is not migrated into dependencies.
 
-use tddy_core::changeset::Stack;
+use std::collections::{BTreeMap, BTreeSet};
+
+use tddy_core::changeset::WorkQueue;
+use tddy_github::pr_api::PrState;
 use tddy_github_inbox::{GithubInbox, RepoSlug};
 
 /// `to` needs `from`'s behaviour.
@@ -37,56 +40,158 @@ pub enum LineageError {
 }
 
 /// Which endpoint a PR based on `base_branch` hangs from, in `queue` with trunk `trunk`.
-pub fn line_endpoint_of_base(queue: &Stack, base_branch: &str, trunk: &str) -> LineEndpoint {
-    // TODO(n9 lineage-graph): implement
-    let _ = (queue, base_branch, trunk);
-    todo!("TODO(n9): implement line_endpoint_of_base")
+pub fn line_endpoint_of_base(queue: &WorkQueue, base_branch: &str, trunk: &str) -> LineEndpoint {
+    if base_branch == trunk {
+        return LineEndpoint::Trunk(trunk.to_string());
+    }
+    match queue
+        .nodes
+        .iter()
+        .find(|item| item.branch.as_deref() == Some(base_branch))
+    {
+        Some(item) => LineEndpoint::Item(item.node_id.clone()),
+        None => LineEndpoint::External(base_branch.to_string()),
+    }
 }
 
 /// An item without a PR: its planned base (first parent), or the trunk for a root.
 pub fn planned_line_parent(
-    queue: &Stack,
+    queue: &WorkQueue,
     item_id: &str,
     trunk: &str,
 ) -> Result<LineEndpoint, LineageError> {
-    // TODO(n9 lineage-graph): implement
-    let _ = (queue, item_id, trunk);
-    todo!("TODO(n9): implement planned_line_parent")
+    let item = queue
+        .node(item_id)
+        .ok_or_else(|| LineageError::NoSuchItem(item_id.to_string()))?;
+    match item.parents.first() {
+        None => Ok(LineEndpoint::Trunk(trunk.to_string())),
+        Some(parent) if queue.node(parent).is_some() => Ok(LineEndpoint::Item(parent.clone())),
+        Some(parent) => Err(LineageError::NoSuchItem(parent.clone())),
+    }
 }
 
 /// Every item's line endpoint: its PR's base read through the inbox, else its planned base.
+///
+/// An item whose planned base names an unknown item is left out (there is no endpoint to draw).
 pub async fn line_edges_through_inbox(
     inbox: &GithubInbox,
     repo: &RepoSlug,
-    queue: &Stack,
+    queue: &WorkQueue,
     trunk: &str,
 ) -> Vec<(String, LineEndpoint)> {
-    // TODO(n9 lineage-graph): implement
-    let _ = (inbox, repo, queue, trunk);
-    todo!("TODO(n9): implement line_edges_through_inbox")
+    let mut edges = Vec::with_capacity(queue.nodes.len());
+    for item in &queue.nodes {
+        let from_pr = match item.branch.as_deref().filter(|b| !b.is_empty()) {
+            Some(branch) => match inbox.pr_for_head(repo, branch).await {
+                Ok(cached) => cached
+                    .value
+                    .filter(|pr| matches!(pr.state, PrState::Open | PrState::Draft))
+                    .map(|pr| line_endpoint_of_base(queue, &pr.base_branch, trunk)),
+                // An unread PR is not "no PR": the planned base stands until the inbox answers.
+                Err(error) => {
+                    log::debug!("lineage: PR of {branch} unreadable: {error:?}");
+                    None
+                }
+            },
+            None => None,
+        };
+        let endpoint = from_pr.or_else(|| planned_line_parent(queue, &item.node_id, trunk).ok());
+        if let Some(endpoint) = endpoint {
+            edges.push((item.node_id.clone(), endpoint));
+        }
+    }
+    edges
 }
 
 /// Replace what `item_id` needs; refused when an item is unknown or the edges would close a cycle.
+/// On refusal the queue is unchanged.
 pub fn set_dependencies(
-    queue: &mut Stack,
+    queue: &mut WorkQueue,
     item_id: &str,
     needs: Vec<String>,
 ) -> Result<(), LineageError> {
-    // TODO(n9 lineage-graph): implement
-    let _ = (queue, item_id, needs);
-    todo!("TODO(n9): implement set_dependencies")
+    if queue.node(item_id).is_none() {
+        return Err(LineageError::NoSuchItem(item_id.to_string()));
+    }
+    if let Some(unknown) = needs.iter().find(|need| queue.node(need).is_none()) {
+        return Err(LineageError::NoSuchItem(unknown.clone()));
+    }
+    let mut needs = needs;
+    needs.dedup();
+    let mut candidate = queue.clone();
+    if let Some(item) = candidate.nodes.iter_mut().find(|n| n.node_id == item_id) {
+        item.needs = needs;
+    }
+    if let Some(cycle) = detect_cycle(&dependencies_of(&candidate)) {
+        return Err(LineageError::Cycle(cycle));
+    }
+    *queue = candidate;
+    Ok(())
 }
 
 /// The queue's stored dependency edges, sorted.
-pub fn dependencies_of(queue: &Stack) -> Vec<DependencyEdge> {
-    // TODO(n9 lineage-graph): implement
-    let _ = queue;
-    todo!("TODO(n9): implement dependencies_of")
+pub fn dependencies_of(queue: &WorkQueue) -> Vec<DependencyEdge> {
+    let mut edges: Vec<DependencyEdge> = queue
+        .nodes
+        .iter()
+        .flat_map(|item| {
+            item.needs.iter().map(|need| DependencyEdge {
+                from: need.clone(),
+                to: item.node_id.clone(),
+            })
+        })
+        .collect();
+    edges.sort();
+    edges.dedup();
+    edges
 }
 
-/// The cycle `edges` close, as the path that closes it; `None` when acyclic.
+/// The cycle `edges` close, as the path that closes it (first node repeated last); `None` when
+/// acyclic. Deterministic: nodes and successors are visited in sorted order.
 pub fn detect_cycle(edges: &[DependencyEdge]) -> Option<Vec<String>> {
-    // TODO(n9 lineage-graph): implement
-    let _ = edges;
-    todo!("TODO(n9): implement detect_cycle")
+    let mut successors: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for edge in edges {
+        successors
+            .entry(edge.from.as_str())
+            .or_default()
+            .push(edge.to.as_str());
+        successors.entry(edge.to.as_str()).or_default();
+    }
+    for targets in successors.values_mut() {
+        targets.sort_unstable();
+        targets.dedup();
+    }
+    let mut done: BTreeSet<&str> = BTreeSet::new();
+    for &start in successors.keys() {
+        if done.contains(start) {
+            continue;
+        }
+        let mut path: Vec<&str> = vec![start];
+        let mut next_child: Vec<usize> = vec![0];
+        while let Some(&node) = path.last() {
+            let depth = path.len() - 1;
+            let child = successors[node].get(next_child[depth]).copied();
+            match child {
+                None => {
+                    done.insert(node);
+                    path.pop();
+                    next_child.pop();
+                }
+                Some(child) => {
+                    next_child[depth] += 1;
+                    if let Some(at) = path.iter().position(|&p| p == child) {
+                        let mut cycle: Vec<String> =
+                            path[at..].iter().map(|s| s.to_string()).collect();
+                        cycle.push(child.to_string());
+                        return Some(cycle);
+                    }
+                    if !done.contains(child) {
+                        path.push(child);
+                        next_child.push(0);
+                    }
+                }
+            }
+        }
+    }
+    None
 }

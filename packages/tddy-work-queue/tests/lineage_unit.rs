@@ -2,7 +2,7 @@
 //! dependency edges, cycles refused.
 
 use pretty_assertions::assert_eq;
-use tddy_core::changeset::{Stack, StackNode};
+use tddy_core::changeset::{WorkQueue, WorkItem};
 use tddy_work_queue::lineage::{
     dependencies_of, line_endpoint_of_base, planned_line_parent, set_dependencies, DependencyEdge,
     LineEndpoint, LineageError,
@@ -10,18 +10,18 @@ use tddy_work_queue::lineage::{
 
 const TRUNK: &str = "master";
 
-fn an_item(id: &str, branch: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn an_item(id: &str, branch: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         node_id: id.to_string(),
         branch: Some(branch.to_string()),
         parents: parents.iter().map(|p| p.to_string()).collect(),
-        ..StackNode::default()
+        ..WorkItem::default()
     }
 }
 
 /// n1 (feat/one) ← n2 (feat/two) ← n3 (feat/three), planned as a line.
-fn a_queue() -> Stack {
-    Stack {
+fn a_queue() -> WorkQueue {
+    WorkQueue {
         version: 1,
         nodes: vec![
             an_item("n1", "feat/one", &[]),
