@@ -400,6 +400,69 @@ impl DaemonStackTools {
         }
     }
 
+    /// What holds each item's merge up, judged as an armed merge would be (`#workqueue` 14/14):
+    /// `item -> (condition, detail)` for every item with a branch whose merge conditions are not all
+    /// met. Nothing is armed or stored — the schedules are evaluated and dropped.
+    pub(super) async fn merge_holdups(
+        &self,
+        project_id: &str,
+        queue_id: &str,
+    ) -> Result<std::collections::HashMap<String, (String, String)>, String> {
+        use crate::work_queue::schedules::ScheduleCtx;
+        use tddy_work_queue::schedule::{Schedule, ScheduleKind};
+        let github = GithubSource {
+            projects_dir: self.store.projects_dir().to_path_buf(),
+            project_id: project_id.to_string(),
+            os_user: self.os_user.clone(),
+            identity: self.identity.clone(),
+            github_cli: self.github_cli.clone(),
+            clients: Arc::clone(&self.github),
+        };
+        let trunk_ref = tokio::task::spawn_blocking(move || github.default_branch())
+            .await
+            .map_err(|e| format!("the merge conditions failed to be read: {e}"))??;
+        let trunk = tddy_work_queue::lineage::trunk_branch_of(&trunk_ref);
+        let mut queue = self
+            .store
+            .read(project_id, queue_id)
+            .map(|record| record.stack)
+            .map_err(|e| e.to_string())?;
+        queue.schedules = queue
+            .nodes
+            .iter()
+            .filter(|item| item.branch.is_some())
+            .map(|item| Schedule {
+                item_id: item.node_id.clone(),
+                kind: ScheduleKind::Merge { skip_review: false },
+                armed_at: String::new(),
+                armed_by: self.os_user.clone(),
+            })
+            .collect();
+        let ctx = ScheduleCtx {
+            store: &self.store,
+            pull_requests: self.pull_requests.as_ref(),
+            os_user: &self.os_user,
+            sessions_base: &self.sessions_base,
+            project_id,
+            queue_id,
+            caller_session_id: &self.caller_session_id,
+            session_token: &self.session_token,
+            trunk,
+            armed_by: &self.os_user,
+        };
+        let (views, _) = ctx.evaluate(&queue).await;
+        Ok(views
+            .into_iter()
+            .filter(|view| view.status != "met")
+            .filter_map(|view| {
+                let held = ["blocked", "waiting"].into_iter().find_map(|state| {
+                    view.conditions.iter().find(|c| c.state == state).cloned()
+                })?;
+                Some((view.item_id, (held.name, held.detail)))
+            })
+            .collect())
+    }
+
     /// `work_item_schedule`, `work_queue_schedule_wave`, `work_item_unschedule` and
     /// `work_queue_schedules`: armed merges and propagations, their conditions read through the inbox.
     async fn schedules_through_inbox(

@@ -221,3 +221,13 @@ pub async fn land(git: &dyn QueueGit, gh: &dyn QueueGithub, line: &[LandItem]) -
     }
     report
 }
+
+/// What holds `view`'s schedule up, as `(condition, detail)`: the first blocked condition, else the
+/// first waiting one; `None` when every condition is met.
+pub fn held_up_on(view: &crate::schedule::ScheduleView) -> Option<(String, String)> {
+    use crate::schedule::ConditionState;
+    [ConditionState::Blocked, ConditionState::Waiting]
+        .into_iter()
+        .find_map(|state| view.conditions.iter().find(|c| c.state == state))
+        .map(|c| (c.name.to_string(), c.detail.clone()))
+}

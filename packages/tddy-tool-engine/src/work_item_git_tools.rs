@@ -27,6 +27,7 @@ use serde_json::{json, Value};
 use crate::catalog::ToolDef;
 use crate::project_home_tools::{tool_def, TARGET_DAEMON_INSTANCE_ID};
 use crate::work_queue_access::WorkQueueAccess;
+use crate::work_queue_land_tools::{work_queue_land_tool_defs, WORK_ITEM_PROPAGATE, WORK_QUEUE_LAND};
 use crate::work_queue_tools::{WorkQueueCaller, STACK_ID};
 use crate::ToolOutcome;
 
@@ -37,17 +38,19 @@ pub const PR_SET_PARENTS: &str = "work_item_set_parents";
 pub const PR_RESOLVE_CONFLICTS: &str = "work_item_resolve_conflicts";
 pub const PR_SPAWN_CHILD: &str = "work_item_spawn_session";
 
-/// The six tools, in the order they are advertised.
-pub const WORK_ITEM_GIT_TOOL_NAMES: [&str; 6] = [
+/// The eight tools, in the order they are advertised.
+pub const WORK_ITEM_GIT_TOOL_NAMES: [&str; 8] = [
     PR_MERGE,
     PR_CLOSE,
     PR_REPOINT,
     PR_SET_PARENTS,
     PR_RESOLVE_CONFLICTS,
     PR_SPAWN_CHILD,
+    WORK_ITEM_PROPAGATE,
+    WORK_QUEUE_LAND,
 ];
 
-/// Whether `name` is one of the six stack git tools.
+/// Whether `name` is one of the eight stack git tools.
 pub fn is_stack_git_tool(name: &str) -> bool {
     WORK_ITEM_GIT_TOOL_NAMES.contains(&name)
 }
@@ -89,6 +92,12 @@ pub enum WorkItemGitOp {
         session_type: Option<String>,
         model: Option<String>,
     },
+    /// `work_item_propagate` (`#workqueue` 14/14): rebase the item onto its line parent's tip and push
+    /// with lease. `force` skips a predicted conflict only — never the local-branch gate.
+    Propagate { item_id: String, force: bool },
+    /// `work_queue_land` (`#workqueue` 14/14): land waves `from_wave..=to_wave` in derived line order,
+    /// propagating each landed item's successors before the next.
+    Land { from_wave: u32, to_wave: u32 },
 }
 
 /// What the git tools need from the daemon: one operation on a node of one of this host's stacks.
@@ -179,6 +188,9 @@ pub fn stack_git_tool_defs() -> Vec<ToolDef> {
             ),
         ),
     ]
+    .into_iter()
+    .chain(work_queue_land_tool_defs())
+    .collect()
 }
 
 /// A tool schema of `properties` plus the stack and the host arguments.
@@ -223,6 +235,10 @@ struct StackGitToolArgs {
     delegate: bool,
     session_type: Option<String>,
     model: Option<String>,
+    item_id: Option<String>,
+    force: bool,
+    from_wave: Option<u32>,
+    to_wave: Option<u32>,
 }
 
 fn required<T>(tool_name: &str, value: Option<T>, argument: &str) -> Result<T, String> {
@@ -230,6 +246,25 @@ fn required<T>(tool_name: &str, value: Option<T>, argument: &str) -> Result<T, S
 }
 
 fn work_item_git_op_of(tool_name: &str, args: StackGitToolArgs) -> Result<WorkItemGitOp, String> {
+    match tool_name {
+        WORK_ITEM_PROPAGATE => {
+            return Ok(WorkItemGitOp::Propagate {
+                item_id: required(tool_name, args.item_id, "item_id")?,
+                force: args.force,
+            })
+        }
+        WORK_QUEUE_LAND => {
+            let from_wave = required(tool_name, args.from_wave, "from_wave")?;
+            let to_wave = required(tool_name, args.to_wave, "to_wave")?;
+            if from_wave == 0 || to_wave < from_wave {
+                return Err(format!(
+                    "{tool_name}: waves are numbered from 1 and from_wave must not exceed to_wave"
+                ));
+            }
+            return Ok(WorkItemGitOp::Land { from_wave, to_wave });
+        }
+        _ => {}
+    }
     let node_id = required(tool_name, args.node_id, "node_id")?;
     Ok(match tool_name {
         PR_MERGE => WorkItemGitOp::Merge { node_id },
@@ -344,19 +379,25 @@ mod tests {
         // When the definitions are read
         let defs = stack_git_tool_defs();
 
-        // Then each of the six requires node_id and accepts queue_id and daemon_instance_id
+        // Then each requires the item it acts on (node_id; item_id for propagate; the wave range for
+        // land) and accepts queue_id and daemon_instance_id
         assert_eq!(
             defs.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
             WORK_ITEM_GIT_TOOL_NAMES.to_vec()
         );
         for def in &defs {
             let schema: Value = serde_json::from_str(&def.input_schema_json).unwrap();
+            let names = match def.name.as_str() {
+                WORK_ITEM_PROPAGATE => "item_id",
+                WORK_QUEUE_LAND => "from_wave",
+                _ => "node_id",
+            };
             assert!(
                 schema["required"]
                     .as_array()
                     .unwrap()
-                    .contains(&json!("node_id")),
-                "{} requires node_id",
+                    .contains(&json!(names)),
+                "{} requires {names}",
                 def.name
             );
             for property in [STACK_ID, TARGET_DAEMON_INSTANCE_ID] {

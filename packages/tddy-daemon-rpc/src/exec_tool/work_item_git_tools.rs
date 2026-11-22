@@ -476,6 +476,26 @@ impl WorkItemGitToolPort for DaemonStackGitTools {
                 )
                 .await
             }
+            WorkItemGitOp::Propagate { item_id, force } => {
+                self.run_blocking(caller, queue_id, git_work::GitWork::Propagate { item_id, force })
+                    .await
+            }
+            WorkItemGitOp::Land { from_wave, to_wave } => {
+                let held_up = self
+                    .stacks
+                    .merge_holdups(&caller.project_id, queue_id)
+                    .await?;
+                self.run_blocking(
+                    caller,
+                    queue_id,
+                    git_work::GitWork::Land {
+                        from_wave,
+                        to_wave,
+                        held_up,
+                    },
+                )
+                .await
+            }
             WorkItemGitOp::SetParents { node_id, parents } => {
                 let before = self.store.read(&caller.project_id, queue_id).ok();
                 let answer = self
