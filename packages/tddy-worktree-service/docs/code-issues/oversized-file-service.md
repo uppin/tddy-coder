@@ -21,6 +21,7 @@
 | 2026-11-21 | 831 | **improved by #975** (`#target-parity` 7/7): 883 → 831 (−52). Seam A — `blocking_within`, `proto_worktree_size_status`, `worktree_row_from_diff`, `map_remove_worktree_error`, `map_clean_worktree_error` — moved to `service_helpers.rs`; n7's target-row code lives in `target_worktree_stats.rs`, with two call sites, `sessions_dir_of` and one bus accessor here |
 
 | 2026-11-21 | 831 | unchanged by the `#target-parity` sweep: **split attempted and refused by the engine** — see below |
+| 2026-11-22 | 897 | **regressed by #1005** (`#workqueue` 4/14): 831 → 897 (+66). This PR's four inspector RPCs had taken the file to 986; their bodies (`session_sync` and the PR stream, 115 lines) now live in the child module `service/inspector.rs`. What stays here: the four delegating trait methods and the stream's associated type, the `pull_requests` field and `attach_pull_requests`, and imports. The pre-existing seams are untouched, because they wait on the engine (status above) |
 
 ## Engine refusal (2026-11-21)
 
