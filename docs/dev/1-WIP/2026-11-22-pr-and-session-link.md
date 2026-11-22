@@ -43,8 +43,8 @@ Exploration 3 §4A.4: one `session_id` per item, no PR number, PR recovered from
 - Counting linked sessions in n5's `Addressed` access.
 - **Moved here from n2 by the operator (2026-11-22):**
   - `pr_status_for_caller` (daemon-rpc; login-keyed token, `repo_root` only) reads PR status through the
-    inbox — `tddy_pr_stack::inbox_reads::pr_status_view_through_inbox` — which needs repo → project
-    credential plumbing into the queue RPC handler (`PrStackRpcHandler`; the inbox's `RepoReaders`
+    inbox — `tddy_work_queue::inbox_reads::pr_status_view_through_inbox` — which needs repo → project
+    credential plumbing into the queue RPC handler (`WorkQueueRpcHandler`; the inbox's `RepoReaders`
     registered per project the way the trunk watch's `HostRepoReaders` is).
   - The queue status path (`work_queue_status` / `pr_stack_status` → `assess::assemble_views` over the
     synchronous `GithubPrApi`) reads through the inbox — `inbox_reads::assemble_views_through_inbox`, an
@@ -66,7 +66,7 @@ implementing one here collides with the PR that owns it.
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
 | `n2` github-event-inbox (#1003) | `GithubInbox::{subscribe, pr, checks_at}`, `EventKind::{Pr, Checks}` | the status stream subscribes and reads | call GitHub directly or cache anything itself |
-| `n4` session-pr-tabs (#1005) | `CheckRow` (web, in `tddy-workspace-web`) | reused for expanded checks (`tddy-prstack-web` adds a dependency on `tddy-workspace-web`) | change it |
+| `n4` session-pr-tabs (#1005) | `CheckRow` (web, in `tddy-workspace-web`) | reused for expanded checks (`tddy-workqueue-web` adds a dependency on `tddy-workspace-web`) | change it |
 | `n5` session-work-queue (#1006) | session-keyed queue, `WorkQueueAccess`, addressing by session | new ops follow n5's access; linked sessions join `Addressed` | change the store key, creation or the refusal |
 
 **Sequencing (pass 2):** `inbox_reads_acceptance.rs` keeps n2's real inbox (reading through it is the
@@ -77,16 +77,16 @@ point; n2 is green). `a_session_linked_to_an_item_is_addressed_by_its_queue` cal
 
 Published (pass 2, commit 2):
 
-- Proto (`pr_stack.proto`, renamed by n3): `AssignWorkItemPr`, `UnassignWorkItemPr`, `LinkWorkItemSession`,
-  `UnlinkWorkItemSession` (→ `WorkItemLinksResponse`); `PrStackHandler` gains them with default bodies
+- Proto (`work_queue.proto`): `AssignWorkItemPr`, `UnassignWorkItemPr`, `LinkWorkItemSession`,
+  `UnlinkWorkItemSession` (→ `WorkItemLinksResponse`); `WorkQueueHandler` gains them with default bodies
   answering `unimplemented`, the service adapter and the test daemon forward them; TS regenerated.
-- `tddy_pr_stack::stack_ops::item_links::{AssignedPr, LinkedSession, ItemLinkError, assign_pr, unassign_pr,
+- `tddy_work_queue::item_ops::item_links::{AssignedPr, LinkedSession, ItemLinkError, assign_pr, unassign_pr,
   link_session, unlink_session, assigned_pr_of, linked_sessions_of}` — pure operations on a queue.
-- `tddy_pr_stack::inbox_reads::{pr_status_view_through_inbox, assemble_views_through_inbox,
+- `tddy_work_queue::inbox_reads::{pr_status_view_through_inbox, assemble_views_through_inbox,
   item_check_summaries, ItemCheckSummary}`.
 - `tddy_tool_engine::work_item_link_tools::{WORK_ITEM_ASSIGN_PR, WORK_ITEM_UNASSIGN_PR,
   WORK_ITEM_LINK_SESSION, WORK_ITEM_UNLINK_SESSION, WORK_ITEM_LINK_TOOL_NAMES, work_item_link_tool_defs}`.
-- `tddy-prstack-web`: `WorkItemChecksSummary` (shell).
+- `tddy-workqueue-web`: `WorkItemChecksSummary` (shell).
 - The failing tests below.
 
 Not in the contract, `/green`'s: the item fields themselves (~80 struct literals across ~30 files
@@ -133,9 +133,10 @@ The new handlers go in their own module beside `work_queue/ports.rs`, which must
 
 ## Scope
 
-- [ ] Item fields + four ops (tools, RPCs, UI)
-- [ ] Live check summary over the inbox
-- [ ] Linked sessions are addressed for access
+- [x] Item fields + four ops (tools, RPCs, UI)
+- [x] Live check summary over the inbox (`StreamWorkQueueStatus` → row)
+- [x] Linked sessions are addressed for access
+- [x] `pr_status_for_caller` and the queue status path read through the inbox (moved from n2)
 - [ ] Docs updated through the wrap
 
 ## Technical Changes
@@ -156,10 +157,10 @@ As listed under Affected Packages.
 
 ## Implementation Milestones
 
-- [ ] Item fields + ops + validation (branch mismatch)
-- [ ] Tools + RPCs + access
-- [ ] Status stream over the inbox
-- [ ] Web controls + checks summary
+- [x] Item fields + ops + validation (branch mismatch)
+- [x] Tools + RPCs + access
+- [x] Status stream over the inbox
+- [x] Web controls + checks summary
 
 ## Testing Plan
 
@@ -168,7 +169,7 @@ by a scripted GitHub; Cypress component specs for the row.
 
 ## Acceptance Tests
 
-`packages/tddy-pr-stack/tests/item_links_unit.rs`:
+`packages/tddy-work-queue/tests/item_links_unit.rs`:
 - [x] `assigning_an_existing_pr_records_it_and_its_branch_on_the_item`
 - [x] `assigning_a_pr_on_another_branch_than_the_items_is_refused_naming_both`
 - [x] `unassigning_removes_the_pr_and_keeps_the_branch`
@@ -176,7 +177,7 @@ by a scripted GitHub; Cypress component specs for the row.
 - [x] `unlinking_removes_only_the_named_session`
 - [x] `a_link_on_an_unknown_item_is_refused`
 
-`packages/tddy-pr-stack/tests/inbox_reads_acceptance.rs` (a real inbox over a scripted GitHub that counts requests):
+`packages/tddy-work-queue/tests/inbox_reads_acceptance.rs` (a real inbox over a scripted GitHub that counts requests):
 - [x] `a_second_reader_of_a_branchs_pr_status_makes_no_github_request` — pins the `pr_status_for_caller` migration
 - [x] `the_queue_status_reads_each_items_pr_through_the_inbox_once` — pins the status-path migration
 - [x] `a_prd_item_summarises_its_running_failed_and_succeeded_checks`
@@ -239,3 +240,26 @@ _(populated by validation)_
 - [ ] Final validation (/validate-changes)
 - [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+
+
+## Green notes (`/green`, 2026-11-22)
+
+- **Item fields**: `WorkItem.pr: Option<AssignedPr>` and `WorkItem.linked_sessions` (both `serde(default)`,
+  skipped when empty); the two record types live in `tddy-changeset` and are re-exported by
+  `item_ops::item_links`. ~90 item literals gained `..Default::default()` (scripted).
+- **Credential plumbing (a)**: `WorkQueueRpcHandler` and the exec-tool host hold the host's
+  `SessionPullRequests` (the inbox + `HostRepoReaders`, one project credential per repository). That is
+  n2's TODO `github-inbox-reads-a-repository-with-one-projects-credential`: it did **not** fall out
+  here — the registry is still keyed by repository and the last project to subscribe wins — so it stays open.
+- **Status path (b)**: `work_queue_status` runs async (`DaemonStackTools::status_through_inbox`),
+  assembling views through `inbox_reads::assemble_views_through_inbox`; the sync `GithubPrApi` is no
+  longer used for status. A queue held by another host is not streamed (`StreamWorkQueueStatus` is local
+  only) — TODO noted in `status_stream.rs`.
+- **Tools**: the four link tools join `stack_tool_defs()` after the plan tools; the owner has them, an
+  addressed session does not. `WORK_QUEUE_TOOL_NAMES` stays at ten; closed lists (admission, read-only,
+  prompt, three acceptance lists, `unbundle_service_split`) name the four.
+- `ports.rs` shrank (869 → ~860): the `ReorderWorkItem` body moved to `work_queue_queries.rs` to offset
+  the four delegating methods.
+- Not mine, seen red: `work_item_git_tools_acceptance::the_six_tools_act_on_a_stack_owned_by_another_host`
+  (fails on n5's head too) and `tddy-changeset` `session_participant_metadata_acceptance` (3 tests expect
+  `work_item_id` in the session block — a n3 rename leftover).
