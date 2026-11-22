@@ -12,74 +12,14 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file work_queue.proto.
  */
 export const file_work_queue: GenFile = /*@__PURE__*/
-  fileDesc("ChB3b3JrX3F1ZXVlLnByb3RvEgp3b3JrX3F1ZXVlIm4KFkNyZWF0ZVdvcmtRdWV1ZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEg0KBXRpdGxlGAMgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgEIAEoCSJGChdDcmVhdGVXb3JrUXVldWVSZXNwb25zZRIrCgVzdGFjaxgBIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcyJUChBXb3JrUXVldWVBZGRyZXNzEhIKCnByb2plY3RfaWQYASABKAkSEAoIcXVldWVfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJItIBChJBZGRXb3JrSXRlbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg0KBXRpdGxlGAMgASgJEhMKC2Rlc2NyaXB0aW9uGAQgASgJEhkKEWJyYW5jaF9zdWdnZXN0aW9uGAUgASgJEg8KB3BhcmVudHMYBiADKAkSFAoMY2hpbGRfcmVjaXBlGAcgASgJEisKBXN0YWNrGAggASgLMhwud29ya19xdWV1ZS5Xb3JrUXVldWVBZGRyZXNzIj8KE0FkZFdvcmtJdGVtUmVzcG9uc2USFwoPd29ya19xdWV1ZV9qc29uGAEgASgJEg8KB2l0ZW1faWQYAiABKAki1gEKDkJyYW5jaEJhc2VTeW5jEhMKC2Jhc2VfYnJhbmNoGAEgASgJEhQKDGJlaGluZF9jb3VudBgCIAEoDRITCgthaGVhZF9jb3VudBgDIAEoDRIVCg1oYXNfY29uZmxpY3RzGAQgASgIEhgKEGNvbmZsaWN0ZWRfcGF0aHMYBSADKAkSEwoLdW5hdmFpbGFibGUYBiABKAgSGgoSdW5hdmFpbGFibGVfcmVhc29uGAcgASgJEhAKCGJhc2VfcmVmGAggASgJEhAKCGhlYWRfcmVmGAkgASgJIisKDEJyYW5jaFJlbW90ZRIOCgZleGlzdHMYASABKAgSCwoDc2hhGAIgASgJIvYBChBCcmFuY2hSZXNvbHV0aW9uEg4KBmJyYW5jaBgBIAEoCRIlCgdzZXNzaW9uGAIgASgLMhQudHlwZXMuQnJhbmNoU2Vzc2lvbhIsCgh3b3JrdHJlZRgDIAEoCzIaLndvcmtfcXVldWUuQnJhbmNoV29ya3RyZWUSJAoCcHIYBCABKAsyGC53b3JrX3F1ZXVlLlByU3RhdHVzVmlldxIoCgZyZW1vdGUYBSABKAsyGC53b3JrX3F1ZXVlLkJyYW5jaFJlbW90ZRItCgliYXNlX3N5bmMYBiABKAsyGi53b3JrX3F1ZXVlLkJyYW5jaEJhc2VTeW5jIlIKDkJyYW5jaFdvcmt0cmVlEg4KBmV4aXN0cxgBIAEoCBIMCgRwYXRoGAIgASgJEg0KBWRpcnR5GAMgASgIEhMKC2RpcnR5X3BhdGhzGAQgAygJInwKEkdldFByU3RhdHVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGYnJhbmNoGAMgASgJEisKBXN0YWNrGAQgASgLMhwud29ya19xdWV1ZS5Xb3JrUXVldWVBZGRyZXNzIj8KE0dldFByU3RhdHVzUmVzcG9uc2USKAoGc3RhdHVzGAEgASgLMhgud29ya19xdWV1ZS5QclN0YXR1c1ZpZXcipAEKE0xpbmtXb3JrSXRlbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSHwoXb3JjaGVzdHJhdG9yX3Nlc3Npb25faWQYAyABKAkSDwoHaXRlbV9pZBgEIAEoCRIYChBjaGlsZF9zZXNzaW9uX2lkGAUgASgJEg4KBmJyYW5jaBgGIAEoCSIvChRMaW5rV29ya0l0ZW1SZXNwb25zZRIXCg93b3JrX3F1ZXVlX2pzb24YASABKAkiewoMUHJTdGF0dXNWaWV3Eg4KBmV4aXN0cxgBIAEoCBIOCgZudW1iZXIYAiABKAQSCwoDdXJsGAMgASgJEg0KBXN0YXRlGAQgASgJEhMKC3VuYXZhaWxhYmxlGAUgASgIEhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgGIAEoCSLiAQoZUHVsbEJhc2VJbnRvQnJhbmNoUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDwoHaXRlbV9pZBgDIAEoCRITCgtiYXNlX2JyYW5jaBgEIAEoCRIQCghzdHJhdGVneRgFIAEoCRIdChVkaXJ0eV93b3JrdHJlZV9hY3Rpb24YBiABKAkSFgoOY29tbWl0X21lc3NhZ2UYByABKAkSKwoFc3RhY2sYCCABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MilQEKGlB1bGxCYXNlSW50b0JyYW5jaFJlc3BvbnNlEjAKCnJlc29sdXRpb24YASABKAsyHC53b3JrX3F1ZXVlLkJyYW5jaFJlc29sdXRpb24SEAoIc3RyYXRlZ3kYAiABKAkSDwoHY2hhbmdlZBgDIAEoCBIOCgZwdXNoZWQYBCABKAgSEgoKcHVzaF9lcnJvchgFIAEoCSKRAQoSUXVlcnlCcmFuY2hSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIOCgZicmFuY2gYAyABKAkSEwoLYmFzZV9icmFuY2gYBCABKAkSKwoFc3RhY2sYBSABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MiRwoTUXVlcnlCcmFuY2hSZXNwb25zZRIwCgpyZXNvbHV0aW9uGAEgASgLMhwud29ya19xdWV1ZS5CcmFuY2hSZXNvbHV0aW9uIpQBChZSZW9yZGVyV29ya0l0ZW1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIPCgdpdGVtX2lkGAMgASgJEhEKCWRpcmVjdGlvbhgEIAEoCRIrCgVzdGFjaxgFIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcyIyChdSZW9yZGVyV29ya0l0ZW1SZXNwb25zZRIXCg93b3JrX3F1ZXVlX2pzb24YASABKAkinQEKFlJlcG9pbnRXb3JrSXRlbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg8KB2l0ZW1faWQYAyABKAkSGgoSdGFyZ2V0X2Jhc2VfYnJhbmNoGAQgASgJEisKBXN0YWNrGAUgASgLMhwud29ya19xdWV1ZS5Xb3JrUXVldWVBZGRyZXNzIjIKF1JlcG9pbnRXb3JrSXRlbVJlc3BvbnNlEhcKD3dvcmtfcXVldWVfanNvbhgBIAEoCSKtAQoaUmVzb2x2ZVdvcmtJdGVtQmFzZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSGQoRd29ya19xdWV1ZV9wYXJlbnQYAyABKAkSEgoKcHJvamVjdF9pZBgEIAEoCRIXCg9uZXdfYnJhbmNoX25hbWUYBSABKAkSFAoMd29ya19pdGVtX2lkGAYgASgJIi8KG1Jlc29sdmVXb3JrSXRlbUJhc2VSZXNwb25zZRIQCghiYXNlX3JlZhgBIAEoCSJhChxMaXN0UHJvamVjdFdvcmtRdWV1ZXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIWCg50aGlzX2hvc3Rfb25seRgDIAEoCCJACg5Xb3JrSXRlbUNvdW50cxINCgV0b3RhbBgBIAEoDRIPCgdzdGFydGVkGAIgASgNEg4KBm1lcmdlZBgDIAEoDSLdAQoQV29ya1F1ZXVlU3VtbWFyeRItCgdhZGRyZXNzGAEgASgLMhwud29ya19xdWV1ZS5Xb3JrUXVldWVBZGRyZXNzEg0KBXRpdGxlGAIgASgJEi8KC25vZGVfY291bnRzGAMgASgLMhoud29ya19xdWV1ZS5Xb3JrSXRlbUNvdW50cxIfChdyZWZlcmVuY2luZ19zZXNzaW9uX2lkcxgEIAMoCRIdChVjcmVhdGVkX2J5X3Nlc3Npb25faWQYBSABKAkSGgoSY3JlYXRlZF9hdF91bml4X21zGAYgASgEIkYKGFVucmVhY2hhYmxlV29ya1F1ZXVlSG9zdBIaChJkYWVtb25faW5zdGFuY2VfaWQYASABKAkSDgoGcmVhc29uGAIgASgJIo4BCh1MaXN0UHJvamVjdFdvcmtRdWV1ZXNSZXNwb25zZRIsCgZzdGFja3MYASADKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZVN1bW1hcnkSPwoRdW5yZWFjaGFibGVfaG9zdHMYAiADKAsyJC53b3JrX3F1ZXVlLlVucmVhY2hhYmxlV29ya1F1ZXVlSG9zdCJZChNHZXRXb3JrUXVldWVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSKwoFc3RhY2sYAiABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MiXgoUR2V0V29ya1F1ZXVlUmVzcG9uc2USLQoHc3VtbWFyeRgBIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlU3VtbWFyeRIXCg93b3JrX3F1ZXVlX2pzb24YAiABKAky9wcKEFdvcmtRdWV1ZVNlcnZpY2USTgoLQWRkV29ya0l0ZW0SHi53b3JrX3F1ZXVlLkFkZFdvcmtJdGVtUmVxdWVzdBofLndvcmtfcXVldWUuQWRkV29ya0l0ZW1SZXNwb25zZRJOCgtHZXRQclN0YXR1cxIeLndvcmtfcXVldWUuR2V0UHJTdGF0dXNSZXF1ZXN0Gh8ud29ya19xdWV1ZS5HZXRQclN0YXR1c1Jlc3BvbnNlEloKD1JlcG9pbnRXb3JrSXRlbRIiLndvcmtfcXVldWUuUmVwb2ludFdvcmtJdGVtUmVxdWVzdBojLndvcmtfcXVldWUuUmVwb2ludFdvcmtJdGVtUmVzcG9uc2USWgoPUmVvcmRlcldvcmtJdGVtEiIud29ya19xdWV1ZS5SZW9yZGVyV29ya0l0ZW1SZXF1ZXN0GiMud29ya19xdWV1ZS5SZW9yZGVyV29ya0l0ZW1SZXNwb25zZRJjChJQdWxsQmFzZUludG9CcmFuY2gSJS53b3JrX3F1ZXVlLlB1bGxCYXNlSW50b0JyYW5jaFJlcXVlc3QaJi53b3JrX3F1ZXVlLlB1bGxCYXNlSW50b0JyYW5jaFJlc3BvbnNlEk4KC1F1ZXJ5QnJhbmNoEh4ud29ya19xdWV1ZS5RdWVyeUJyYW5jaFJlcXVlc3QaHy53b3JrX3F1ZXVlLlF1ZXJ5QnJhbmNoUmVzcG9uc2USZgoTUmVzb2x2ZVdvcmtJdGVtQmFzZRImLndvcmtfcXVldWUuUmVzb2x2ZVdvcmtJdGVtQmFzZVJlcXVlc3QaJy53b3JrX3F1ZXVlLlJlc29sdmVXb3JrSXRlbUJhc2VSZXNwb25zZRJRCgxMaW5rV29ya0l0ZW0SHy53b3JrX3F1ZXVlLkxpbmtXb3JrSXRlbVJlcXVlc3QaIC53b3JrX3F1ZXVlLkxpbmtXb3JrSXRlbVJlc3BvbnNlEmwKFUxpc3RQcm9qZWN0V29ya1F1ZXVlcxIoLndvcmtfcXVldWUuTGlzdFByb2plY3RXb3JrUXVldWVzUmVxdWVzdBopLndvcmtfcXVldWUuTGlzdFByb2plY3RXb3JrUXVldWVzUmVzcG9uc2USUQoMR2V0V29ya1F1ZXVlEh8ud29ya19xdWV1ZS5HZXRXb3JrUXVldWVSZXF1ZXN0GiAud29ya19xdWV1ZS5HZXRXb3JrUXVldWVSZXNwb25zZRJaCg9DcmVhdGVXb3JrUXVldWUSIi53b3JrX3F1ZXVlLkNyZWF0ZVdvcmtRdWV1ZVJlcXVlc3QaIy53b3JrX3F1ZXVlLkNyZWF0ZVdvcmtRdWV1ZVJlc3BvbnNlYgZwcm90bzM", [file_types]);
+  fileDesc("ChB3b3JrX3F1ZXVlLnByb3RvEgp3b3JrX3F1ZXVlIlQKEFdvcmtRdWV1ZUFkZHJlc3MSEgoKcHJvamVjdF9pZBgBIAEoCRIQCghxdWV1ZV9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAki0gEKEkFkZFdvcmtJdGVtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDQoFdGl0bGUYAyABKAkSEwoLZGVzY3JpcHRpb24YBCABKAkSGQoRYnJhbmNoX3N1Z2dlc3Rpb24YBSABKAkSDwoHcGFyZW50cxgGIAMoCRIUCgxjaGlsZF9yZWNpcGUYByABKAkSKwoFc3RhY2sYCCABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MiPwoTQWRkV29ya0l0ZW1SZXNwb25zZRIXCg93b3JrX3F1ZXVlX2pzb24YASABKAkSDwoHaXRlbV9pZBgCIAEoCSLWAQoOQnJhbmNoQmFzZVN5bmMSEwoLYmFzZV9icmFuY2gYASABKAkSFAoMYmVoaW5kX2NvdW50GAIgASgNEhMKC2FoZWFkX2NvdW50GAMgASgNEhUKDWhhc19jb25mbGljdHMYBCABKAgSGAoQY29uZmxpY3RlZF9wYXRocxgFIAMoCRITCgt1bmF2YWlsYWJsZRgGIAEoCBIaChJ1bmF2YWlsYWJsZV9yZWFzb24YByABKAkSEAoIYmFzZV9yZWYYCCABKAkSEAoIaGVhZF9yZWYYCSABKAkiKwoMQnJhbmNoUmVtb3RlEg4KBmV4aXN0cxgBIAEoCBILCgNzaGEYAiABKAki9gEKEEJyYW5jaFJlc29sdXRpb24SDgoGYnJhbmNoGAEgASgJEiUKB3Nlc3Npb24YAiABKAsyFC50eXBlcy5CcmFuY2hTZXNzaW9uEiwKCHdvcmt0cmVlGAMgASgLMhoud29ya19xdWV1ZS5CcmFuY2hXb3JrdHJlZRIkCgJwchgEIAEoCzIYLndvcmtfcXVldWUuUHJTdGF0dXNWaWV3EigKBnJlbW90ZRgFIAEoCzIYLndvcmtfcXVldWUuQnJhbmNoUmVtb3RlEi0KCWJhc2Vfc3luYxgGIAEoCzIaLndvcmtfcXVldWUuQnJhbmNoQmFzZVN5bmMiUgoOQnJhbmNoV29ya3RyZWUSDgoGZXhpc3RzGAEgASgIEgwKBHBhdGgYAiABKAkSDQoFZGlydHkYAyABKAgSEwoLZGlydHlfcGF0aHMYBCADKAkifAoSR2V0UHJTdGF0dXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIOCgZicmFuY2gYAyABKAkSKwoFc3RhY2sYBCABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MiPwoTR2V0UHJTdGF0dXNSZXNwb25zZRIoCgZzdGF0dXMYASABKAsyGC53b3JrX3F1ZXVlLlByU3RhdHVzVmlldyKkAQoTTGlua1dvcmtJdGVtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIfChdvcmNoZXN0cmF0b3Jfc2Vzc2lvbl9pZBgDIAEoCRIPCgdpdGVtX2lkGAQgASgJEhgKEGNoaWxkX3Nlc3Npb25faWQYBSABKAkSDgoGYnJhbmNoGAYgASgJIi8KFExpbmtXb3JrSXRlbVJlc3BvbnNlEhcKD3dvcmtfcXVldWVfanNvbhgBIAEoCSJ7CgxQclN0YXR1c1ZpZXcSDgoGZXhpc3RzGAEgASgIEg4KBm51bWJlchgCIAEoBBILCgN1cmwYAyABKAkSDQoFc3RhdGUYBCABKAkSEwoLdW5hdmFpbGFibGUYBSABKAgSGgoSdW5hdmFpbGFibGVfcmVhc29uGAYgASgJIuIBChlQdWxsQmFzZUludG9CcmFuY2hSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIPCgdpdGVtX2lkGAMgASgJEhMKC2Jhc2VfYnJhbmNoGAQgASgJEhAKCHN0cmF0ZWd5GAUgASgJEh0KFWRpcnR5X3dvcmt0cmVlX2FjdGlvbhgGIAEoCRIWCg5jb21taXRfbWVzc2FnZRgHIAEoCRIrCgVzdGFjaxgIIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcyKVAQoaUHVsbEJhc2VJbnRvQnJhbmNoUmVzcG9uc2USMAoKcmVzb2x1dGlvbhgBIAEoCzIcLndvcmtfcXVldWUuQnJhbmNoUmVzb2x1dGlvbhIQCghzdHJhdGVneRgCIAEoCRIPCgdjaGFuZ2VkGAMgASgIEg4KBnB1c2hlZBgEIAEoCBISCgpwdXNoX2Vycm9yGAUgASgJIpEBChJRdWVyeUJyYW5jaFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBmJyYW5jaBgDIAEoCRITCgtiYXNlX2JyYW5jaBgEIAEoCRIrCgVzdGFjaxgFIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcyJHChNRdWVyeUJyYW5jaFJlc3BvbnNlEjAKCnJlc29sdXRpb24YASABKAsyHC53b3JrX3F1ZXVlLkJyYW5jaFJlc29sdXRpb24ilAEKFlJlb3JkZXJXb3JrSXRlbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg8KB2l0ZW1faWQYAyABKAkSEQoJZGlyZWN0aW9uGAQgASgJEisKBXN0YWNrGAUgASgLMhwud29ya19xdWV1ZS5Xb3JrUXVldWVBZGRyZXNzIjIKF1Jlb3JkZXJXb3JrSXRlbVJlc3BvbnNlEhcKD3dvcmtfcXVldWVfanNvbhgBIAEoCSKdAQoWUmVwb2ludFdvcmtJdGVtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDwoHaXRlbV9pZBgDIAEoCRIaChJ0YXJnZXRfYmFzZV9icmFuY2gYBCABKAkSKwoFc3RhY2sYBSABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MiMgoXUmVwb2ludFdvcmtJdGVtUmVzcG9uc2USFwoPd29ya19xdWV1ZV9qc29uGAEgASgJIq0BChpSZXNvbHZlV29ya0l0ZW1CYXNlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIZChF3b3JrX3F1ZXVlX3BhcmVudBgDIAEoCRISCgpwcm9qZWN0X2lkGAQgASgJEhcKD25ld19icmFuY2hfbmFtZRgFIAEoCRIUCgx3b3JrX2l0ZW1faWQYBiABKAkiLwobUmVzb2x2ZVdvcmtJdGVtQmFzZVJlc3BvbnNlEhAKCGJhc2VfcmVmGAEgASgJImEKHExpc3RQcm9qZWN0V29ya1F1ZXVlc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhYKDnRoaXNfaG9zdF9vbmx5GAMgASgIIkAKDldvcmtJdGVtQ291bnRzEg0KBXRvdGFsGAEgASgNEg8KB3N0YXJ0ZWQYAiABKA0SDgoGbWVyZ2VkGAMgASgNIt0BChBXb3JrUXVldWVTdW1tYXJ5Ei0KB2FkZHJlc3MYASABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MSDQoFdGl0bGUYAiABKAkSLwoLbm9kZV9jb3VudHMYAyABKAsyGi53b3JrX3F1ZXVlLldvcmtJdGVtQ291bnRzEh8KF3JlZmVyZW5jaW5nX3Nlc3Npb25faWRzGAQgAygJEh0KFWNyZWF0ZWRfYnlfc2Vzc2lvbl9pZBgFIAEoCRIaChJjcmVhdGVkX2F0X3VuaXhfbXMYBiABKAQiRgoYVW5yZWFjaGFibGVXb3JrUXVldWVIb3N0EhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgBIAEoCRIOCgZyZWFzb24YAiABKAkijgEKHUxpc3RQcm9qZWN0V29ya1F1ZXVlc1Jlc3BvbnNlEiwKBnN0YWNrcxgBIAMoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlU3VtbWFyeRI/ChF1bnJlYWNoYWJsZV9ob3N0cxgCIAMoCzIkLndvcmtfcXVldWUuVW5yZWFjaGFibGVXb3JrUXVldWVIb3N0IlkKE0dldFdvcmtRdWV1ZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIrCgVzdGFjaxgCIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcyJeChRHZXRXb3JrUXVldWVSZXNwb25zZRItCgdzdW1tYXJ5GAEgASgLMhwud29ya19xdWV1ZS5Xb3JrUXVldWVTdW1tYXJ5EhcKD3dvcmtfcXVldWVfanNvbhgCIAEoCTKbBwoQV29ya1F1ZXVlU2VydmljZRJOCgtBZGRXb3JrSXRlbRIeLndvcmtfcXVldWUuQWRkV29ya0l0ZW1SZXF1ZXN0Gh8ud29ya19xdWV1ZS5BZGRXb3JrSXRlbVJlc3BvbnNlEk4KC0dldFByU3RhdHVzEh4ud29ya19xdWV1ZS5HZXRQclN0YXR1c1JlcXVlc3QaHy53b3JrX3F1ZXVlLkdldFByU3RhdHVzUmVzcG9uc2USWgoPUmVwb2ludFdvcmtJdGVtEiIud29ya19xdWV1ZS5SZXBvaW50V29ya0l0ZW1SZXF1ZXN0GiMud29ya19xdWV1ZS5SZXBvaW50V29ya0l0ZW1SZXNwb25zZRJaCg9SZW9yZGVyV29ya0l0ZW0SIi53b3JrX3F1ZXVlLlJlb3JkZXJXb3JrSXRlbVJlcXVlc3QaIy53b3JrX3F1ZXVlLlJlb3JkZXJXb3JrSXRlbVJlc3BvbnNlEmMKElB1bGxCYXNlSW50b0JyYW5jaBIlLndvcmtfcXVldWUuUHVsbEJhc2VJbnRvQnJhbmNoUmVxdWVzdBomLndvcmtfcXVldWUuUHVsbEJhc2VJbnRvQnJhbmNoUmVzcG9uc2USTgoLUXVlcnlCcmFuY2gSHi53b3JrX3F1ZXVlLlF1ZXJ5QnJhbmNoUmVxdWVzdBofLndvcmtfcXVldWUuUXVlcnlCcmFuY2hSZXNwb25zZRJmChNSZXNvbHZlV29ya0l0ZW1CYXNlEiYud29ya19xdWV1ZS5SZXNvbHZlV29ya0l0ZW1CYXNlUmVxdWVzdBonLndvcmtfcXVldWUuUmVzb2x2ZVdvcmtJdGVtQmFzZVJlc3BvbnNlElEKDExpbmtXb3JrSXRlbRIfLndvcmtfcXVldWUuTGlua1dvcmtJdGVtUmVxdWVzdBogLndvcmtfcXVldWUuTGlua1dvcmtJdGVtUmVzcG9uc2USbAoVTGlzdFByb2plY3RXb3JrUXVldWVzEigud29ya19xdWV1ZS5MaXN0UHJvamVjdFdvcmtRdWV1ZXNSZXF1ZXN0Gikud29ya19xdWV1ZS5MaXN0UHJvamVjdFdvcmtRdWV1ZXNSZXNwb25zZRJRCgxHZXRXb3JrUXVldWUSHy53b3JrX3F1ZXVlLkdldFdvcmtRdWV1ZVJlcXVlc3QaIC53b3JrX3F1ZXVlLkdldFdvcmtRdWV1ZVJlc3BvbnNlYgZwcm90bzM", [file_types]);
 
 /**
- * @generated from message work_queue.CreateWorkQueueRequest
- */
-export type CreateWorkQueueRequest = Message<"work_queue.CreateWorkQueueRequest"> & {
-  /**
-   * @generated from field: string session_token = 1;
-   */
-  sessionToken: string;
-
-  /**
-   * The logical project the new stack belongs to.
-   *
-   * @generated from field: string project_id = 2;
-   */
-  projectId: string;
-
-  /**
-   * Optional title for the stack; empty = untitled.
-   *
-   * @generated from field: string title = 3;
-   */
-  title: string;
-
-  /**
-   * The daemon whose store holds the project. Empty or this daemon's own id = the daemon the
-   * call arrived on; a peer's id = the call is forwarded there.
-   *
-   * @generated from field: string daemon_instance_id = 4;
-   */
-  daemonInstanceId: string;
-};
-
-/**
- * Describes the message work_queue.CreateWorkQueueRequest.
- * Use `create(CreateWorkQueueRequestSchema)` to create a new message.
- */
-export const CreateWorkQueueRequestSchema: GenMessage<CreateWorkQueueRequest> = /*@__PURE__*/
-  messageDesc(file_work_queue, 0);
-
-/**
- * @generated from message work_queue.CreateWorkQueueResponse
- */
-export type CreateWorkQueueResponse = Message<"work_queue.CreateWorkQueueResponse"> & {
-  /**
-   * Where the new stack lives — the address every later request about it carries.
-   *
-   * @generated from field: work_queue.WorkQueueAddress stack = 1;
-   */
-  stack?: WorkQueueAddress;
-};
-
-/**
- * Describes the message work_queue.CreateWorkQueueResponse.
- * Use `create(CreateWorkQueueResponseSchema)` to create a new message.
- */
-export const CreateWorkQueueResponseSchema: GenMessage<CreateWorkQueueResponse> = /*@__PURE__*/
-  messageDesc(file_work_queue, 1);
-
-/**
- * Where a PR stack lives (`#orchestrators` 9/11): the project that holds it, its id in that
- * project's stack store, and the daemon whose store holds it.
+ * Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
+ * (`#workqueue` 5/14) — and the daemon that holds that session.
  *
- * Carried by every request that reads or edits one stack, beside the orchestrator `session_id` those
- * requests were addressed by before stacks became project records. One of the two is required, and
- * the address wins when both are set: a `session_id` is resolved through the stack its changeset
- * names (`Changeset.queue_id`), which is a lookup a caller holding the address does not need.
+ * Carried by every request that reads or edits one queue, beside the owning `session_id` those
+ * requests may name instead. One of the two is required, and the address wins when both are set.
  *
  * @generated from message work_queue.WorkQueueAddress
  */
@@ -92,7 +32,7 @@ export type WorkQueueAddress = Message<"work_queue.WorkQueueAddress"> & {
   projectId: string;
 
   /**
-   * The stack's id in that project's store (`WorkQueueStore`), a UUIDv7.
+   * The owning session's id: a queue belongs to the session it was started with.
    *
    * @generated from field: string queue_id = 2;
    */
@@ -112,7 +52,7 @@ export type WorkQueueAddress = Message<"work_queue.WorkQueueAddress"> & {
  * Use `create(WorkQueueAddressSchema)` to create a new message.
  */
 export const WorkQueueAddressSchema: GenMessage<WorkQueueAddress> = /*@__PURE__*/
-  messageDesc(file_work_queue, 2);
+  messageDesc(file_work_queue, 0);
 
 /**
  * @generated from message work_queue.AddWorkItemRequest
@@ -124,7 +64,7 @@ export type AddWorkItemRequest = Message<"work_queue.AddWorkItemRequest"> & {
   sessionToken: string;
 
   /**
-   * The "pr-stack" orchestrator session whose Changeset.stack the new node is appended to.
+   * The session whose work queue the new item is appended to. A session that owns no queue is refused.
    *
    * @generated from field: string session_id = 2;
    */
@@ -176,7 +116,7 @@ export type AddWorkItemRequest = Message<"work_queue.AddWorkItemRequest"> & {
  * Use `create(AddWorkItemRequestSchema)` to create a new message.
  */
 export const AddWorkItemRequestSchema: GenMessage<AddWorkItemRequest> = /*@__PURE__*/
-  messageDesc(file_work_queue, 3);
+  messageDesc(file_work_queue, 1);
 
 /**
  * @generated from message work_queue.AddWorkItemResponse
@@ -207,7 +147,7 @@ export type AddWorkItemResponse = Message<"work_queue.AddWorkItemResponse"> & {
  * Use `create(AddWorkItemResponseSchema)` to create a new message.
  */
 export const AddWorkItemResponseSchema: GenMessage<AddWorkItemResponse> = /*@__PURE__*/
-  messageDesc(file_work_queue, 4);
+  messageDesc(file_work_queue, 2);
 
 /**
  * How a branch stands against its base: how far behind, how far ahead, and whether taking the
@@ -296,7 +236,7 @@ export type BranchBaseSync = Message<"work_queue.BranchBaseSync"> & {
  * Use `create(BranchBaseSyncSchema)` to create a new message.
  */
 export const BranchBaseSyncSchema: GenMessage<BranchBaseSync> = /*@__PURE__*/
-  messageDesc(file_work_queue, 5);
+  messageDesc(file_work_queue, 3);
 
 /**
  * The remote-tracking state of a branch on `origin`.
@@ -324,7 +264,7 @@ export type BranchRemote = Message<"work_queue.BranchRemote"> & {
  * Use `create(BranchRemoteSchema)` to create a new message.
  */
 export const BranchRemoteSchema: GenMessage<BranchRemote> = /*@__PURE__*/
-  messageDesc(file_work_queue, 6);
+  messageDesc(file_work_queue, 4);
 
 /**
  * Everything the PR-Stack view needs about one branch, resolved server-side by branch name.
@@ -382,7 +322,7 @@ export type BranchResolution = Message<"work_queue.BranchResolution"> & {
  * Use `create(BranchResolutionSchema)` to create a new message.
  */
 export const BranchResolutionSchema: GenMessage<BranchResolution> = /*@__PURE__*/
-  messageDesc(file_work_queue, 7);
+  messageDesc(file_work_queue, 5);
 
 /**
  * @generated from message work_queue.BranchWorktree
@@ -424,7 +364,7 @@ export type BranchWorktree = Message<"work_queue.BranchWorktree"> & {
  * Use `create(BranchWorktreeSchema)` to create a new message.
  */
 export const BranchWorktreeSchema: GenMessage<BranchWorktree> = /*@__PURE__*/
-  messageDesc(file_work_queue, 8);
+  messageDesc(file_work_queue, 6);
 
 /**
  * @generated from message work_queue.GetPrStatusRequest
@@ -463,7 +403,7 @@ export type GetPrStatusRequest = Message<"work_queue.GetPrStatusRequest"> & {
  * Use `create(GetPrStatusRequestSchema)` to create a new message.
  */
 export const GetPrStatusRequestSchema: GenMessage<GetPrStatusRequest> = /*@__PURE__*/
-  messageDesc(file_work_queue, 9);
+  messageDesc(file_work_queue, 7);
 
 /**
  * @generated from message work_queue.GetPrStatusResponse
@@ -480,7 +420,7 @@ export type GetPrStatusResponse = Message<"work_queue.GetPrStatusResponse"> & {
  * Use `create(GetPrStatusResponseSchema)` to create a new message.
  */
 export const GetPrStatusResponseSchema: GenMessage<GetPrStatusResponse> = /*@__PURE__*/
-  messageDesc(file_work_queue, 10);
+  messageDesc(file_work_queue, 8);
 
 /**
  * Record a child session and its branch on a planned node of a pr-stack orchestrator, on the daemon
@@ -537,7 +477,7 @@ export type LinkWorkItemRequest = Message<"work_queue.LinkWorkItemRequest"> & {
  * Use `create(LinkWorkItemRequestSchema)` to create a new message.
  */
 export const LinkWorkItemRequestSchema: GenMessage<LinkWorkItemRequest> = /*@__PURE__*/
-  messageDesc(file_work_queue, 11);
+  messageDesc(file_work_queue, 9);
 
 /**
  * @generated from message work_queue.LinkWorkItemResponse
@@ -556,7 +496,7 @@ export type LinkWorkItemResponse = Message<"work_queue.LinkWorkItemResponse"> & 
  * Use `create(LinkWorkItemResponseSchema)` to create a new message.
  */
 export const LinkWorkItemResponseSchema: GenMessage<LinkWorkItemResponse> = /*@__PURE__*/
-  messageDesc(file_work_queue, 12);
+  messageDesc(file_work_queue, 10);
 
 /**
  * Live GitHub PR status for one head branch.
@@ -609,7 +549,7 @@ export type PrStatusView = Message<"work_queue.PrStatusView"> & {
  * Use `create(PrStatusViewSchema)` to create a new message.
  */
 export const PrStatusViewSchema: GenMessage<PrStatusView> = /*@__PURE__*/
-  messageDesc(file_work_queue, 13);
+  messageDesc(file_work_queue, 11);
 
 /**
  * @generated from message work_queue.PullBaseIntoBranchRequest
@@ -680,7 +620,7 @@ export type PullBaseIntoBranchRequest = Message<"work_queue.PullBaseIntoBranchRe
  * Use `create(PullBaseIntoBranchRequestSchema)` to create a new message.
  */
 export const PullBaseIntoBranchRequestSchema: GenMessage<PullBaseIntoBranchRequest> = /*@__PURE__*/
-  messageDesc(file_work_queue, 14);
+  messageDesc(file_work_queue, 12);
 
 /**
  * @generated from message work_queue.PullBaseIntoBranchResponse
@@ -730,7 +670,7 @@ export type PullBaseIntoBranchResponse = Message<"work_queue.PullBaseIntoBranchR
  * Use `create(PullBaseIntoBranchResponseSchema)` to create a new message.
  */
 export const PullBaseIntoBranchResponseSchema: GenMessage<PullBaseIntoBranchResponse> = /*@__PURE__*/
-  messageDesc(file_work_queue, 15);
+  messageDesc(file_work_queue, 13);
 
 /**
  * @generated from message work_queue.QueryBranchRequest
@@ -782,7 +722,7 @@ export type QueryBranchRequest = Message<"work_queue.QueryBranchRequest"> & {
  * Use `create(QueryBranchRequestSchema)` to create a new message.
  */
 export const QueryBranchRequestSchema: GenMessage<QueryBranchRequest> = /*@__PURE__*/
-  messageDesc(file_work_queue, 16);
+  messageDesc(file_work_queue, 14);
 
 /**
  * @generated from message work_queue.QueryBranchResponse
@@ -799,7 +739,7 @@ export type QueryBranchResponse = Message<"work_queue.QueryBranchResponse"> & {
  * Use `create(QueryBranchResponseSchema)` to create a new message.
  */
 export const QueryBranchResponseSchema: GenMessage<QueryBranchResponse> = /*@__PURE__*/
-  messageDesc(file_work_queue, 17);
+  messageDesc(file_work_queue, 15);
 
 /**
  * @generated from message work_queue.ReorderWorkItemRequest
@@ -846,7 +786,7 @@ export type ReorderWorkItemRequest = Message<"work_queue.ReorderWorkItemRequest"
  * Use `create(ReorderWorkItemRequestSchema)` to create a new message.
  */
 export const ReorderWorkItemRequestSchema: GenMessage<ReorderWorkItemRequest> = /*@__PURE__*/
-  messageDesc(file_work_queue, 18);
+  messageDesc(file_work_queue, 16);
 
 /**
  * @generated from message work_queue.ReorderWorkItemResponse
@@ -865,7 +805,7 @@ export type ReorderWorkItemResponse = Message<"work_queue.ReorderWorkItemRespons
  * Use `create(ReorderWorkItemResponseSchema)` to create a new message.
  */
 export const ReorderWorkItemResponseSchema: GenMessage<ReorderWorkItemResponse> = /*@__PURE__*/
-  messageDesc(file_work_queue, 19);
+  messageDesc(file_work_queue, 17);
 
 /**
  * @generated from message work_queue.RepointWorkItemRequest
@@ -915,7 +855,7 @@ export type RepointWorkItemRequest = Message<"work_queue.RepointWorkItemRequest"
  * Use `create(RepointWorkItemRequestSchema)` to create a new message.
  */
 export const RepointWorkItemRequestSchema: GenMessage<RepointWorkItemRequest> = /*@__PURE__*/
-  messageDesc(file_work_queue, 20);
+  messageDesc(file_work_queue, 18);
 
 /**
  * @generated from message work_queue.RepointWorkItemResponse
@@ -934,7 +874,7 @@ export type RepointWorkItemResponse = Message<"work_queue.RepointWorkItemRespons
  * Use `create(RepointWorkItemResponseSchema)` to create a new message.
  */
 export const RepointWorkItemResponseSchema: GenMessage<RepointWorkItemResponse> = /*@__PURE__*/
-  messageDesc(file_work_queue, 21);
+  messageDesc(file_work_queue, 19);
 
 /**
  * What a child spawn's branch bases off, asked of the daemon that owns the stack parent.
@@ -1001,7 +941,7 @@ export type ResolveWorkItemBaseRequest = Message<"work_queue.ResolveWorkItemBase
  * Use `create(ResolveWorkItemBaseRequestSchema)` to create a new message.
  */
 export const ResolveWorkItemBaseRequestSchema: GenMessage<ResolveWorkItemBaseRequest> = /*@__PURE__*/
-  messageDesc(file_work_queue, 22);
+  messageDesc(file_work_queue, 20);
 
 /**
  * @generated from message work_queue.ResolveWorkItemBaseResponse
@@ -1024,7 +964,7 @@ export type ResolveWorkItemBaseResponse = Message<"work_queue.ResolveWorkItemBas
  * Use `create(ResolveWorkItemBaseResponseSchema)` to create a new message.
  */
 export const ResolveWorkItemBaseResponseSchema: GenMessage<ResolveWorkItemBaseResponse> = /*@__PURE__*/
-  messageDesc(file_work_queue, 23);
+  messageDesc(file_work_queue, 21);
 
 /**
  * @generated from message work_queue.ListProjectWorkQueuesRequest
@@ -1056,7 +996,7 @@ export type ListProjectWorkQueuesRequest = Message<"work_queue.ListProjectWorkQu
  * Use `create(ListProjectWorkQueuesRequestSchema)` to create a new message.
  */
 export const ListProjectWorkQueuesRequestSchema: GenMessage<ListProjectWorkQueuesRequest> = /*@__PURE__*/
-  messageDesc(file_work_queue, 24);
+  messageDesc(file_work_queue, 22);
 
 /**
  * How far one stack has come, counted over its planned nodes.
@@ -1091,7 +1031,7 @@ export type WorkItemCounts = Message<"work_queue.WorkItemCounts"> & {
  * Use `create(WorkItemCountsSchema)` to create a new message.
  */
 export const WorkItemCountsSchema: GenMessage<WorkItemCounts> = /*@__PURE__*/
-  messageDesc(file_work_queue, 25);
+  messageDesc(file_work_queue, 23);
 
 /**
  * One stack of a project, as the drawer lists it.
@@ -1143,7 +1083,7 @@ export type WorkQueueSummary = Message<"work_queue.WorkQueueSummary"> & {
  * Use `create(WorkQueueSummarySchema)` to create a new message.
  */
 export const WorkQueueSummarySchema: GenMessage<WorkQueueSummary> = /*@__PURE__*/
-  messageDesc(file_work_queue, 26);
+  messageDesc(file_work_queue, 24);
 
 /**
  * A host the listing asked and got no answer from.
@@ -1169,7 +1109,7 @@ export type UnreachableWorkQueueHost = Message<"work_queue.UnreachableWorkQueueH
  * Use `create(UnreachableWorkQueueHostSchema)` to create a new message.
  */
 export const UnreachableWorkQueueHostSchema: GenMessage<UnreachableWorkQueueHost> = /*@__PURE__*/
-  messageDesc(file_work_queue, 27);
+  messageDesc(file_work_queue, 25);
 
 /**
  * @generated from message work_queue.ListProjectWorkQueuesResponse
@@ -1196,7 +1136,7 @@ export type ListProjectWorkQueuesResponse = Message<"work_queue.ListProjectWorkQ
  * Use `create(ListProjectWorkQueuesResponseSchema)` to create a new message.
  */
 export const ListProjectWorkQueuesResponseSchema: GenMessage<ListProjectWorkQueuesResponse> = /*@__PURE__*/
-  messageDesc(file_work_queue, 28);
+  messageDesc(file_work_queue, 26);
 
 /**
  * @generated from message work_queue.GetWorkQueueRequest
@@ -1220,7 +1160,7 @@ export type GetWorkQueueRequest = Message<"work_queue.GetWorkQueueRequest"> & {
  * Use `create(GetWorkQueueRequestSchema)` to create a new message.
  */
 export const GetWorkQueueRequestSchema: GenMessage<GetWorkQueueRequest> = /*@__PURE__*/
-  messageDesc(file_work_queue, 29);
+  messageDesc(file_work_queue, 27);
 
 /**
  * @generated from message work_queue.GetWorkQueueResponse
@@ -1245,7 +1185,7 @@ export type GetWorkQueueResponse = Message<"work_queue.GetWorkQueueResponse"> & 
  * Use `create(GetWorkQueueResponseSchema)` to create a new message.
  */
 export const GetWorkQueueResponseSchema: GenMessage<GetWorkQueueResponse> = /*@__PURE__*/
-  messageDesc(file_work_queue, 30);
+  messageDesc(file_work_queue, 28);
 
 /**
  * @generated from service work_queue.WorkQueueService
@@ -1382,19 +1322,6 @@ export const WorkQueueService: GenService<{
     methodKind: "unary";
     input: typeof GetWorkQueueRequestSchema;
     output: typeof GetWorkQueueResponseSchema;
-  },
-  /**
-   * Create a new, empty project stack in the store of the daemon that owns the project
-   * (`#orchestrators` 12/12, B9). The web's "New stack" action: a stack is made here, by address,
-   * never as a side effect of a session's first planned-PR write. Forwarded to
-   * `daemon_instance_id` when that names a peer. Answers the new stack's address.
-   *
-   * @generated from rpc work_queue.WorkQueueService.CreateWorkQueue
-   */
-  createWorkQueue: {
-    methodKind: "unary";
-    input: typeof CreateWorkQueueRequestSchema;
-    output: typeof CreateWorkQueueResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_work_queue, 0);
