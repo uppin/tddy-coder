@@ -111,7 +111,7 @@ defines (`rpc_families.rs`, re-exported as `tddy_session_lifecycle::DaemonRpcFam
 
 | Method | Used by |
 |---|---|
-| `pr_stack_handler() -> Arc<dyn PrStackHandler>` | session start, when its stack parent is owned by a peer (`resolve_chain_base_ref_status` → `resolve_stack_base`) or it names a stack node (`record_spawn_on_stack_node` → `link_stack_node`) — the same path, peer routing and refusals included, as a client's `ResolveStackBase` / `LinkStackNode` |
+| `work_queue_handler() -> Arc<dyn WorkQueueHandler>` | session start, when its stack parent is owned by a peer (`resolve_chain_base_ref_status` → `resolve_work_item_base`) or it names a stack node (`record_spawn_on_stack_node` → `link_work_item`) — the same path, peer routing and refusals included, as a client's `ResolveWorkItemBase` / `LinkWorkItem` |
 | `service_entries() -> Vec<ServiceEntry>` | `session_room_roster()`, which serves them beside this crate's own six family entries in every session room |
 | `attach_session_start(LaunchSessions)` (default: nothing) | called once by `with_rpc_families` with a launch snapshot of the host, for a family that answers a session start (the project-home tools). The snapshot holds its families through `WeakRpcFamilies`, a `Weak` forwarder, so families → snapshot → families forms no `Arc` cycle |
 
@@ -143,7 +143,7 @@ defines (`rpc_families.rs`, re-exported as `tddy_session_lifecycle::DaemonRpcFam
 | `expose_terminal(session_id)` | `expose_session_terminal` (`terminal_bridge_impl.rs`): hands the session's PTY to the host's `TerminalExposure` port, putting the participant that serves the session's terminal into the lobby. |
 
 `test_util::RpcFamiliesNotUnderTest` is the fixture for a suite that opens a session room without
-exercising any of the four families: its room serves none of them, and its `pr_stack_handler`
+exercising any of the four families: its room serves none of them, and its `work_queue_handler`
 panics with a message sending the suite to `tddy-daemon-rpc`.
 
 ### Shared components
@@ -208,8 +208,8 @@ private `local_agent_codebase_access`); nothing proves a real `tddy-sandbox-runn
 because the real-jail suite runs on no CI machine
 ([`2026-09-12`](../../../docs/dev/todo/2026-09-12-the-in-jail-conversation-suite-runs-nowhere.md)).
 
-`pr_stack_rpc` is a facade re-exporting `PrStackHandler`, `PrStackServiceImpl` and
-`build_pr_stack_entry` from [`tddy_pr_stack::rpc`](../../tddy-pr-stack/docs/architecture.md#rpcrs--the-pr-stack-rpc-family),
+`work_queue_rpc` is a facade re-exporting `WorkQueueHandler`, `WorkQueueServiceImpl` and
+`build_pr_stack_entry` from [`tddy_work_queue::rpc`](../../tddy-work-queue/docs/architecture.md#rpcrs--the-pr-stack-rpc-family),
 also re-exported at the crate root. `family_proto_bridge::wire_same` and
 `await_supervised_with_timeout` / `spawn_blocking_with_timeout` are `pub` for the handlers.
 

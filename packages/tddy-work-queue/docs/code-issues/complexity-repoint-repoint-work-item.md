@@ -1,7 +1,8 @@
 # complexity: repoint_work_item
 
 **Location:** `packages/tddy-work-queue/src/item_ops/repoint.rs:41` — `repoint_work_item`
-**Moved:** 2026-09-22 by #496 (`#carve` 10/11) from `packages/tddy-workflow-recipes/src/work_queue/mod.rs` — verbatim apart from `tddy_core::worktree::` → `tddy_git::` path rewrites; the finding moved with the code, it did not close
+**Moved:** 2026-11-22 by #1004 (`#workqueue` 3/14) from `packages/tddy-pr-stack/src/stack_ops/repoint.rs` (`repoint_planned_pr_node`) — crate, module and function renamed; body unchanged
+**Moved:** 2026-09-22 by #496 (`#carve` 10/11) from `packages/tddy-workflow-recipes/src/pr_stack/mod.rs` — verbatim apart from `tddy_core::worktree::` → `tddy_git::` path rewrites; the finding moved with the code, it did not close
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **79 lines** · **nesting depth 3** · 6 parameters · 3 branch/match lines · 3 early exits
@@ -15,15 +16,16 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 79 | 3 | 3 | 3 | first detection |
-| 2026-09-22 | 79 | 3 | 3 | 3 | moved to `tddy-work-queue` by #496 — unchanged |
+| 2026-09-22 | 79 | 3 | 3 | 3 | moved to `tddy-pr-stack` by #496 — unchanged |
 | 2026-11-12 | 78 | 3 | 3 | 3 | touched by #879 (`#orchestrators` 2/11): the stack is read through `read_session_stack` (−1 line); no logic change |
+| 2026-11-22 | unchanged | Renamed and moved by #1004 (`#workqueue` 3/14); same line (41), same body |
 
 ## What the tool found
 
 The body is **79 lines**, 1.3x the 60-line ceiling at which `/analyze-clean-code` says a function must be refactored.
 
 The function carries **3 branch or match lines** and **3 early exits**
-(`return` / `?`). At detection its file (`work_queue/mod.rs`) was 3231 lines total, 1968 of them production, across 26 functions; since #496 its home `item_ops/repoint.rs` is 228 production lines.
+(`return` / `?`). At detection its file (`pr_stack/mod.rs`) was 3231 lines total, 1968 of them production, across 26 functions; since #496 its home `stack_ops/repoint.rs` is 228 production lines.
 
 **How this was found.** `/jev-restructuring` ranked it 94 of 3,503 production units by
 semantic shape (Jev classified it `none`). That ranking is **targeting only** and appears

@@ -3,7 +3,7 @@ import type { Client } from "@connectrpc/connect";
 import type { SessionEntry, SessionService } from "tddy-client-web/gen/session_pb";
 import type { ProjectService } from "tddy-client-web/gen/project_pb";
 import type { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import type { WorkQueueService, WorkQueueAddress } from "tddy-client-web/gen/work_queue_pb";
+import type { WorkQueueService, WorkQueueAddress as WireWorkQueueAddress } from "tddy-client-web/gen/work_queue_pb";
 import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { TaskService } from "tddy-client-web/gen/tasks_pb";
@@ -23,7 +23,7 @@ import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
 import { baseBranchChoice } from "./baseBranchChoice";
 
 /** The fields of a `work_queue.WorkQueueAddress` the view is opened on. */
-export type WorkQueueAddress = Pick<WorkQueueAddress, "projectId" | "queueId" | "daemonInstanceId">;
+export type WorkQueueAddress = Pick<WireWorkQueueAddress, "projectId" | "queueId" | "daemonInstanceId">;
 
 export interface WorkQueueViewProps {
   /**

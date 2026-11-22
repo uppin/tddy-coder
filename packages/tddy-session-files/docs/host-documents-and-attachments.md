@@ -161,7 +161,7 @@ classified `Manifest` rather than `Attachment`: the docs pass authored them, no 
 them.
 
 `stack_doc_attachments` builds the list a planned PR's child session is spawned with. One helper feeds
-both spawn paths — the agent's `pr_spawn_child` and the web Start-session dialog — because a child
+both spawn paths — the agent's `work_item_spawn_session` and the web Start-session dialog — because a child
 that differs by how it was started is a bug the operator cannot see. Every document is attached **by
 reference**: a `HostDocumentRef` naming the orchestrator's own session and host, which the
 materialiser fetches, streaming if that host is not the one starting the session. Nothing is copied up

@@ -68,10 +68,10 @@ PR-stack handlers from the host's state and installs them on it as its `DaemonRp
 host's `Arc`s, so a `with_*` applied afterwards would leave them holding the value it replaced (the
 lifecycle crate `debug_assert`s this). The four families' local-socket services
 (`rpc_handlers.project_service()`, `catalog_service()`, `exec_tool_service()`,
-`pr_stack_service()`) and their transport entries (`rpc_handlers.entries()`) come from the returned
+`work_queue_service()`) and their transport entries (`rpc_handlers.entries()`) come from the returned
 handlers, and `BinaryLocalSocketServices` names `ProjectServiceImpl<ProjectRpcHandler>`,
 `CatalogServiceImpl<CatalogRpcHandler>`, `ExecToolServiceImpl<ExecToolRpcHandler>` and
-`PrStackServiceImpl<PrStackRpcHandler>`. See
+`WorkQueueServiceImpl<WorkQueueRpcHandler>`. See
 [tddy-daemon-rpc](../../tddy-daemon-rpc/docs/architecture.md).
 
 **The credential vaults** are one of those `with_*`. `AuthBuildResult::credential_vaults` — the
@@ -316,7 +316,7 @@ See [host sockets](../../tddy-supervisor/docs/host-sockets.md) for the superviso
 | `exec_tools.ExecToolService` | [tddy-tool-engine](../../tddy-tool-engine/README.md) (trait, adapter); handler [tddy-daemon-rpc](../../tddy-daemon-rpc/docs/architecture.md) |
 | `demo_vm.DemoVmService` | [tddy-vm](../../tddy-vm/README.md) |
 | `local_token.LocalTokenService` | [tddy-daemon-auth](../../tddy-daemon-auth/README.md) |
-| `pr_stack.PrStackService` | [pr-stack-service.md](./pr-stack-service.md) |
+| `work_queue.WorkQueueService` | [pr-stack-service.md](./pr-stack-service.md) |
 | Host, worktree, … | Each crate's own service doc (see sibling packages) |
 
 There is **no** `connection.ConnectionService` and no `connection.proto`.

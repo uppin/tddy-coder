@@ -74,7 +74,7 @@ They say what a reader needs before opening the file: the scope and cost of the 
 touches, how slow it is, what a failure implicates. That is real information about the test, and
 unlike a phase it stays true for the file's whole life. Keep them.
 
-`session_store_unit_tests.rs`, `pr_stack_integration.rs`, `login_flow_e2e.rs` are all fine names.
+`session_store_unit_tests.rs`, `work_queue_integration.rs`, `login_flow_e2e.rs` are all fine names.
 
 ### `acceptance` is not one of them
 

@@ -1,17 +1,17 @@
-# tddy-prstack-web documentation
+# tddy-workqueue-web documentation
 
 The project stack's screens:
 
-- **`ProjectStackView`** — one project stack, loaded by address through `GetProjectStack`: the
-  planned-PR list (`PlannedPrList`, the row, badges and details, `AddPlannedPrForm`,
+- **`WorkQueueView`** — one project stack, loaded by address through `GetWorkQueue`: the
+  planned-PR list (`WorkItemList`, the row, badges and details, `AddWorkItemForm`,
   `DirtyWorktreeDialog`), "New stack", reorder and repoint, and the Start-session flow, which opens
   `tddy-session-create-web`'s dialog pre-filled from the node. `StartPassphraseProvider` is the host
   application's to mount (as for `CreateSessionPane`).
-- **Live status** — `useQueryBranch`, `branchQueries`, `baseSyncStatus`, `orderStackNodes`,
+- **Live status** — `useQueryBranch`, `branchQueries`, `baseSyncStatus`, `orderWorkItems`,
   `parentTitles`, `boundChildSession`, `nodeChildSession`, `isNodeOrphaned`, `resolveNodeSession`,
-  `stackChildSessions` (joins children through `StackChildMetadata`, the three fields it reads),
+  `workItemSessions` (joins children through `StackChildMetadata`, the three fields it reads),
   `startBlockers`, `deriveStackBaseBranch`, `baseBranchChoice`, `prioritiseBaseBranchOptions`,
-  `hydrateStackNodes`, `stackPlan`.
+  `hydrateWorkItems`, `stackPlan`.
 - **Workflow chat** — `WorkflowChatScreen`, every tddy-coder workflow session's main pane, which opens
   its own presenter room through `MediaPort.usePresenterRoom` and renders `tddy-chat-web`'s `AgentChat`.
 
@@ -19,7 +19,7 @@ The package imports nothing from `tddy-web` and nothing from LiveKit (`src/packa
 
 Product behaviour: [docs/ft/coder/pr-stacking.md](../../../docs/ft/coder/pr-stacking.md),
 [docs/ft/coder/pr-stack-live-status.md](../../../docs/ft/coder/pr-stack-live-status.md),
-[docs/ft/web/session-drawer.md § Project stack view](../../../docs/ft/web/session-drawer.md#project-stack-view).
+[docs/ft/web/session-drawer.md § Project stack view](../../../docs/ft/web/session-drawer.md#work-queue-view).
 
 - **Changeset history**: [changesets/](changesets/)
 

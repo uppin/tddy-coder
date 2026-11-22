@@ -152,7 +152,7 @@ commonly `user@host`, and does not know which file an identity came from. `finge
 cannot reach: [host-tooling-probe.md § The ssh-agent](host-tooling-probe.md#the-ssh-agent).
 
 **Routing precedes authentication.** `rpc_served_by_peer` runs before the `session_token` is
-resolved, as it does for the roster RPCs and `ResolveStackBase`. Two reasons, and both matter:
+resolved, as it does for the roster RPCs and `ResolveWorkItemBase`. Two reasons, and both matter:
 
 - *A relay must not judge a peer's user mapping.* The token is verified by the daemon that **serves**
   the call. Authenticating first would refuse an operator whose GitHub user maps to an OS user on the

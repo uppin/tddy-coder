@@ -54,7 +54,7 @@
   data dir leaves it migrated.
 - `pr_stack/ports.rs` re-reads `stack_plan_json` through one `stack_plan_json_of` helper:
   819 → 818 production lines (open record
-  [oversized-file-pr-stack-ports](../../../packages/tddy-daemon-rpc/docs/code-issues/oversized-file-pr-stack-ports.md)).
+  [oversized-file-pr-stack-ports](../../../packages/tddy-daemon-rpc/docs/code-issues/oversized-file-work-queue-ports.md)).
 - `runtime/mount_host.rs`: 489 → 499 production lines (under the 500 budget);
   `build_session_host` 74 → 73 lines (open record
   [complexity-mount-host-build-session-host](../../../packages/tddy-daemon/docs/code-issues/complexity-mount-host-build-session-host.md)).

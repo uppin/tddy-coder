@@ -24,9 +24,9 @@
   LiveKit room, so it creates no participant to advertise on: "every claude-cli session now publishes
   the block" holds for the interactive path only, and a planned PR's child started sandboxed is still
   invisible to a PR-Stack view on another host. The association it would carry is written on the
-  orchestrator's node by `LinkStackNode` regardless, so the same-host join is unaffected.
+  orchestrator's node by `LinkWorkItem` regardless, so the same-host join is unaffected.
 - **A sandboxed cursor-cli session still records nothing on its planned node.**
-  `start_sandboxed_cursor_cli_session` now receives `stack_node_id`, so its *base* gate resolves
+  `start_sandboxed_cursor_cli_session` now receives `work_item_id`, so its *base* gate resolves
   correctly, but it makes no `link_spawned_branch` call at all — the same gap the interactive
   cursor-cli path had before this changeset closed it. A planned PR started that way leaves the node
   branchless and childless, which keeps `Stack::base_ref_for_spawn` refusing every descendant.

@@ -20,8 +20,8 @@ plan to a fresh agent that starts on a new branch/worktree — surfaced to the u
 ### Design Rationale
 
 The daemon materializes "a new worktree + a new agent conversation tagged with a parent"
-through `LaunchSessions::start_spawned_cli_child(stack_parent = Some(...))`. A stack's
-`pr_spawn_child` resolves a *planned-PR node* from a project stack, which a grill-me session does
+through `LaunchSessions::start_spawned_cli_child(work_queue_parent = Some(...))`. A stack's
+`work_item_spawn_session` resolves a *planned-PR node* from a project stack, which a grill-me session does
 not have, so a grill-me session gets a **parallel,
 additive** capability: a generic `spawn_conversation` tool + `ConversationSpawnHandler` that takes an
 explicit **prompt** (and optional **branch**/**base_ref**) instead of a node id, reusing the same
@@ -120,7 +120,7 @@ started through `StartSession` are started sessions, not spawned conversations.
 - **Whatever the arguments say**: session type, host, agent, recipe, model, branch intent and names —
   every `StartSession` option. Nothing is inherited from the orchestrator: a `claude-cli` conversation
   names its own `model`, and the link to the orchestrator is `orchestrator_session_id` (not
-  `stack_parent`).
+  `work_queue_parent`).
 - **Seed prompt**: `initial_prompt`. The grill-me **Create plan** prompt composes one that points at
   the plan (absolute session-artifact brief path + the committed `plans/<slug>.md`) and asks for a
   `claude-cli` conversation on `new_branch_from_base` with this session's own model id.
@@ -219,6 +219,6 @@ not a gap in the shipped grill-me→child flow, which works over the stdio relay
 ## Related Documentation
 
 - [Session Participant RPC & Metadata](session-participant-rpc.md) — session-scoped RPC + terminals.
-- [PR Stacking](pr-stacking.md) — `pr_spawn_child`, the stack's own way of starting a child.
+- [PR Stacking](pr-stacking.md) — `work_item_spawn_session`, the stack's own way of starting a child.
 - [Session Terminal Tabs](../web/session-terminal-tabs.md) — the tab bar this extends.
 - [Workflow Recipes](workflow-recipes.md) — grill-me and the managed-workflow model.

@@ -8,13 +8,13 @@ session started for that PR can receive them as attachments:
 | `PRD.md` | What this PR delivers — behaviour, API surface, acceptance criteria |
 | `changeset.md` | How, and **where the edges are** — responsibility, boundaries, what each dependency delivers, and the draft-PR contract |
 
-The shared stack-level document is `pr-stack-plan.md` (`tddy_pr_stack::docs::PR_STACK_PLAN_MD_BASENAME`),
+The shared stack-level document is `pr-stack-plan.md` (`tddy_work_queue::docs::PR_STACK_PLAN_MD_BASENAME`),
 beside them under the orchestrator session's `artifacts/`.
 
 **What is shipped and what is not.** The layout, the listing, the attachment builder
 (`tddy_session_files::stack_doc_attachments::stack_doc_attachments`) and the daemon's prompt rule are
 shipped. No workflow goal authors the documents, and neither the stack view's Start-session dialog nor
-`pr_spawn_child` attaches them on its own: a child receives them when its start names them as
+`work_item_spawn_session` attaches them on its own: a child receives them when its start names them as
 attachments. Wiring an attaching spawn path is a backlog item.
 
 ## Why boundaries belong in a per-PR document
@@ -40,7 +40,7 @@ This is a **content contract, not automation**. `GithubPrApi::create_pr(head, ba
 (`tddy-github/src/pr_api.rs:97`) has no `draft` parameter and gains none here. Draft PRs are
 already *read* correctly — `pr_state_from_github` maps them to `PrState::Draft` (`pr_api.rs:68`)
 and `pr_status.phase` deliberately records a draft as `open`
-(`tddy-pr-stack/src/stack_ops/adopt.rs:180`). Opening a PR as a draft stays a human act; the
+(`tddy-work-queue/src/item_ops/adopt.rs:180`). Opening a PR as a draft stays a human act; the
 document says what should be in it.
 
 ## On-disk layout
@@ -70,16 +70,16 @@ canonicalize-and-contain guard on the parent (`:223-229`); `validate_relative_pa
 (`:200-204`). No new read path is required — the narrower wording at `connection.proto:2119` ("the
 basename of a `SessionContextDoc`") describes intent, not the implementation.
 
-**Paths are derived from `node_id` by convention**, not recorded on the node. `StackNode` gains no
-field, and neither do `PlannedPr`, `AddPlannedPrRequest`, `PrAddPlannedInput` or the web wire type.
-The precedent against widening that surface speculatively is `AddPlannedPrInput.child_recipe`, which
-is accepted and silently dropped because `StackNode` has nowhere to put it
-(`tddy-pr-stack/src/stack_ops/nodes.rs:20-25`). A helper resolves the pair of paths and reports
+**Paths are derived from `node_id` by convention**, not recorded on the node. `WorkItem` gains no
+field, and neither do `WorkItem`, `AddWorkItemRequest`, `PrAddPlannedInput` or the web wire type.
+The precedent against widening that surface speculatively is `AddWorkItemInput.child_recipe`, which
+is accepted and silently dropped because `WorkItem` has nowhere to put it
+(`tddy-work-queue/src/item_ops/nodes.rs:20-25`). A helper resolves the pair of paths and reports
 which exist; if a node ever needs to point somewhere else, the field is additive then.
 
 ## Required headings in `changeset.md`
 
-Every per-PR changeset carries four headings (`tddy_pr_stack::docs`):
+Every per-PR changeset carries four headings (`tddy_work_queue::docs`):
 
 ```
 ## Responsibility        what this PR owns

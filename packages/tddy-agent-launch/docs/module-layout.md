@@ -67,14 +67,14 @@ outside an inline `#[cfg(test)] mod x { … }` block, excluding `*_tests.rs`.
 `workspace_sandboxes`, `rpc_activity`, `session_agent_inference`, `session_rooms`, `hosted_agent_clones`,
 `session_admissions`, `worktree_observer`, `session_reach`, `reachable_sessions`, `host_session_sockets`, `agent_tool_sockets`, and the agent topic's `AgentRoster` and
 the split topic's `SplitSessions` handles), and `trait LaunchHost`, the four callbacks the host implements:
-`sandbox_rpc_handler` (the dispatch a jail relays family B to, bound to a session), `pr_stack` (the PR-stack
+`sandbox_rpc_handler` (the dispatch a jail relays family B to, bound to a session), `work_queue` (the PR-stack
 handler, or `FAILED_PRECONDITION` when the host has no RPC families), `session_account_access` (what a
 session's vault reads go through) and `session_identity` (the commit pairs and the `github-token` handler a
 session is launched with). The seed-clone claimant is not a callback: it holds the roster handle.
 
 The launch methods are `impl LaunchSessions` in the files they are declared in. A task a method spawns
 clones the handle, as do the child-spawn handler, the conversation-spawn handler and the host-session
-socket. `impl StackParentHost` is on the handle.
+socket. `impl WorkQueueParentHost` is on the handle.
 
 ## Session start
 
@@ -293,7 +293,7 @@ Coverage: `tddy-session-lifecycle`'s `sandboxed_claude_launch_baseline` and
   otherwise, for a Local gh identity, only `GH_CONFIG_DIR=<empty dir under the data dir>`, so `gh` in
   the relay's commands is logged out instead of acting as another user's login.
 - `local_gh_github_token(&GithubCli, os_user, git_url)` is what daemon-side operations use
-  (`RepointPlannedPr`): the host's `gh` token as the session's OS user, refused in `gh`'s or the
+  (`RepointWorkItem`): the host's `gh` token as the session's OS user, refused in `gh`'s or the
   resolver's words.
 
 `start_request_checks.rs` holds the forwarding half: `forwarded_start_request(req, local_row)` fills an
@@ -452,10 +452,10 @@ forwards a start with `tddy_daemon_kernel::peer_calls`, and measures a checkout 
 
 | Module | Holds |
 |---|---|
-| `stack_parent.rs` | `StackParentHost` on the handle |
+| `work_queue_parent.rs` | `WorkQueueParentHost` on the handle |
 | `conversation_spawn.rs`, `conversation_spawn_handler.rs` | `recipe_enables_conversation_spawn`, `session_tool_role` (a session's project-home tool entitlement: project-home, conversation spawner, ordinary), `conversation_branch_slug`, `GrillMeConversationSpawnHandler`, and its `impl` (the universal start: `start_conversation` / `conversation_start_status` / `cancel_conversation_start` over the orchestrator's start ledger) |
 | `conversation_start.rs` | `LaunchSessions::begin_recorded_start` (refuse-before-begin, the streamed start, recorded in a start ledger) and `cancel_recorded_start` (local task or the peer's `CancelTask`), and `StartedSessionListings` — shared by the project-home `StartSession` tools and the conversation-spawn handler |
-| `svc_pr_status_for_caller.rs` | the managed-workflow helpers and the stack-link half (`resolve_chain_base_ref_status`, `link_stack_node_to_spawned_branch`, `record_spawn_on_stack_node`) |
+| `svc_pr_status_for_caller.rs` | the managed-workflow helpers and the stack-link half (`resolve_chain_base_ref_status`, `link_work_item_to_spawned_branch`, `record_spawn_on_stack_node`) |
 | `managed_launch.rs`, `worktree_source.rs` | `ManagedLaunch`, `prepare_managed_workflow_inner`; `WorktreeSource` |
 | `conversation_worktree_op.rs`, `family_proto_bridge.rs` | the conversation-worktree operation a jail relays; the family proto bridge |
 | `session_acting_identity.rs` | `SessionAccountAccess::session_identity`, `SessionIdentity`, `SessionGithubCredential` (pinned to the start's outcome) and `project_github_token`; see [session identity](../../tddy-session-lifecycle/docs/session-identity.md) |

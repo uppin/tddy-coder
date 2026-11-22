@@ -121,7 +121,7 @@ silently drops — stays representable and therefore refusable.
 | `context_files_acceptance.rs`, `context_file_frames_unit.rs` | this crate | the allow-list gate, the caps, byte-exactness, the batch, and the framing against the chunk budget |
 | `context_read_deadline_acceptance.rs` | this crate | a stalled read is refused with `DEADLINE_EXCEEDED` rather than hanging the RPC |
 | `staged_attachment_path_validation.rs` | this crate | the basename and containment guards |
-| `pr_stack_child_doc_attachment_acceptance.rs`, `pr_stack_context_docs_acceptance.rs` | this crate | the documents a planned PR's child is spawned with |
+| `work_queue_child_doc_attachment_acceptance.rs`, `work_queue_context_docs_acceptance.rs` | this crate | the documents a planned PR's child is spawned with |
 | `session_files_service_acceptance.rs` | `tddy-daemon` | the registered coordinate serves, and a request naming another daemon forwards rather than being served locally |
 | `context_sync_acceptance.rs`, `staging_rpc_acceptance.rs`, `session_workflow_files_rpc.rs`, `session_file_upload_rpc.rs`, `session_uploads_rpc.rs`, `staging_forwarding_acceptance.rs`, `session_attach_staging_scope_acceptance.rs`, `session_attach_cross_host_acceptance.rs`, `session_room_acceptance.rs` | `tddy-daemon` | the behaviours that need a daemon — the split-context directory builder, the routing fork, the test service and its token |
 
