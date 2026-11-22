@@ -18,7 +18,7 @@ use crate::spec_launch::{HostAgent, HostCodingAgents};
 
 /// What the probe of `claude` runs on the target, from its login's own directory.
 const PROBE_OF_CLAUDE: &str =
-    r#"cd '.' && exec "${SHELL:-/bin/sh}" -lc 'command -v '\''claude'\'''"#;
+    r#"cd '.' && exec "${SHELL:-/bin/sh}" -lc 'command -v '"'"'claude'"'"''"#;
 
 /// A daemon host whose `PATH` is one directory holding exactly the commands it was given, and whose
 /// `$HOME` is an empty directory: nothing of the real machine reaches resolution.
