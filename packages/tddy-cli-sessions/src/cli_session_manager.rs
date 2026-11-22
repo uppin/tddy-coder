@@ -133,6 +133,8 @@ pub struct CliSessionManager {
     tab_rosters: crate::tab_roster_store::TabRosterStore,
     /// The PTY-less `main` tab of each tool session — [`Self::register_process_tab`].
     process_tabs: process_tab::ProcessTabs,
+    /// The sessions whose `main` is being (re)launched — [`Self::claim_main_launch`].
+    main_launches: main_launch_claim::MainLaunches,
 }
 
 impl Default for CliSessionManager {
@@ -168,6 +170,7 @@ impl CliSessionManager {
             reattach_tx: reattach_outcome::reattach_channel(),
             tab_rosters: crate::tab_roster_store::TabRosterStore::new(),
             process_tabs: process_tab::ProcessTabs::default(),
+            main_launches: main_launch_claim::MainLaunches::default(),
         }
     }
 
@@ -205,6 +208,9 @@ pub use process_tab::{ProcessTab, ProcessTabHolder, SignalRefused, TDDY_CODER_KI
 
 #[cfg(test)]
 mod process_tab_tests;
+
+mod main_launch_claim;
+pub use main_launch_claim::{MainLaunchClaim, MainLaunchRefusal};
 
 mod tmux_main;
 

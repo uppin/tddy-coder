@@ -1,6 +1,7 @@
 //! Resuming a CLI harness session: its re-derived wiring, its worktree and the agent restarted on
 //! it.
 
+use super::resume_guard::{claim_the_main_launch, log_resumed, log_resuming};
 use crate::cli_agent_steps::conversation::resumed_or_adopted_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::conversation::ConversationTarget;
@@ -41,6 +42,9 @@ impl crate::launch_ports::LaunchSessions {
         session_dir: &Path,
         mut metadata: SessionMetadata,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
+        // Held until this returns, either way (see `resume_guard`).
+        let _claim = claim_the_main_launch(&self.cli_manager, &req.session_id).await?;
+        log_resuming(kind.name, &req.session_id, remote_host_of(&metadata));
         let split = self
             .resumed_split_wiring(os_user, req, sessions_base, session_dir, &metadata)
             .await?;
@@ -379,9 +383,11 @@ async fn resume_cli_harness_session(
     }
     crate::claude_cli_spawn::record_main_terminal(cli_manager, tddy_data_dir, session_id).await;
 
+    let (pid, host) = (launched.pid, remote_host.map(str::to_owned));
     record_the_resumed_session(session_dir, meta, conversation, launched)?;
     // Armed only once the metadata is on disk, for the same reason as the start.
     token_arm.arm();
+    log_resumed(kind.name, session_id, host.as_deref(), pid);
 
     resumed_session_response(session_id)
 }

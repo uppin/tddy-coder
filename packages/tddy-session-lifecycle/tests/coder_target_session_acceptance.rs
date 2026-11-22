@@ -589,3 +589,65 @@ async fn a_resume_with_a_locked_vault_is_refused_and_the_session_is_kept() {
         )
     );
 }
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_second_resume_while_the_first_is_still_launching_is_refused_and_one_agent_runs() {
+    // Given a stopped session in the workspace — whose resume takes a while over the target, so
+    // an operator who sees nothing happen clicks Resume again
+    let daemon = a_daemon_reaching_a_running_workspace();
+    let session_id = daemon.a_session_in_the_workspace().await;
+    daemon.runs_in_the_workspace(&session_id, 1).await;
+    daemon.stop(&session_id).await;
+
+    // When two resumes of it are in flight at once
+    let (first, second) = tokio::join!(daemon.resume(&session_id), daemon.resume(&session_id));
+
+    // Then the first resumes the session and the second is refused, saying one is in progress
+    assert_eq!(
+        (first, second),
+        (
+            Ok(()),
+            Err((
+                Code::FailedPrecondition,
+                format!(
+                    "session {session_id} is already being resumed: wait for that resume to finish"
+                )
+            ))
+        )
+    );
+
+    // And the agent was resumed once — never two agents on one worktree, one of them untracked
+    let runs = daemon.runs_in_the_workspace(&session_id, 2).await;
+    assert_eq!(
+        runs.iter().map(AnAgentRun::is_a_resume).collect::<Vec<_>>(),
+        vec![false, true]
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_resume_of_a_session_whose_agent_is_still_running_is_refused() {
+    // Given a session in the workspace whose agent is still running
+    let daemon = a_daemon_reaching_a_running_workspace();
+    let session_id = daemon.a_session_in_the_workspace().await;
+    let started = daemon.runs_in_the_workspace(&session_id, 1).await;
+
+    // When it is resumed
+    let refused = daemon.resume(&session_id).await;
+
+    // Then the resume is refused, saying the session is running
+    assert_eq!(
+        refused,
+        Err((
+            Code::FailedPrecondition,
+            format!("session {session_id} is already running: stop it before resuming it")
+        ))
+    );
+
+    // And its agent is the one the start launched, still up, and no other was run
+    assert_eq!(
+        (daemon.agent_runs(), started[0].is_alive()),
+        (started.clone(), true)
+    );
+}

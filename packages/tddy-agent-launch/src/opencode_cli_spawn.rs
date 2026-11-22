@@ -18,6 +18,7 @@
 mod harness_launch;
 pub mod restore_tabs;
 mod resume;
+mod resume_guard;
 pub(crate) mod session_start;
 mod start_steps;
 

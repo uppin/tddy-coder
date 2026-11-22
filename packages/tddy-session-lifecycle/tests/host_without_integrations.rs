@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_rpc::{Request, RequestMetadata, RequestTransport};
@@ -11,12 +12,17 @@ use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, ResumeSessionRequest,
     SessionService as SessionServiceTrait, StartSessionRequest,
 };
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
+use tddy_testing_commons::wait::eventually_awaiting;
 
 const PROJECT_ID: &str = "host-without-integrations";
+/// A safety net for the stub agent's terminal to be seen gone, not a prediction of how long it
+/// takes.
+const OBSERVE: Duration = Duration::from_secs(20);
 
 fn os_user() -> String {
     std::env::var("USER").expect("USER must be set to resolve the session's OS user")
@@ -52,6 +58,7 @@ fn a_repository_with_origin(dir: &Path) {
 /// exposure, no peers.
 struct AHostWithNothingWired {
     host: DaemonSessionHost,
+    manager: Arc<CliSessionManager>,
     sessions_base: PathBuf,
     _sessions: tempfile::TempDir,
     _repo: tempfile::TempDir,
@@ -98,6 +105,7 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
     )
     .unwrap();
     let base = sessions.path().to_path_buf();
+    let manager = Arc::new(CliSessionManager::new());
     let host = DaemonSessionHost::new(
         config.clone(),
         Arc::new(move |_| Some(base.clone())),
@@ -107,7 +115,7 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        Arc::new(tddy_session_lifecycle::claude_cli_session::CliSessionManager::new()),
+        Arc::clone(&manager),
         tddy_session_lifecycle::test_util::coding_agents_with_binaries(&[(
             "claude",
             claude.as_path(),
@@ -115,11 +123,31 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
     );
     AHostWithNothingWired {
         host,
+        manager,
         sessions_base: sessions.path().to_path_buf(),
         _sessions: sessions,
         _repo: repo,
         _stubs: stubs,
         _config: config_dir,
+    }
+}
+
+impl AHostWithNothingWired {
+    /// Wait for `session_id`'s agent to have ended: its terminal gone and its exit hook finished.
+    /// A resume of a session whose agent is still running is refused.
+    async fn agent_has_ended(&self, session_id: &str) {
+        eventually_awaiting(
+            &format!("session {session_id}'s agent to end"),
+            OBSERVE,
+            || async {
+                match self.manager.get(session_id).await {
+                    None => Ok(()),
+                    Some(_) => Err("its terminal is still registered".to_string()),
+                }
+            },
+        )
+        .await;
+        self.manager.exit_hook_settled(session_id).await;
     }
 }
 
@@ -159,7 +187,9 @@ async fn a_host_built_with_nothing_wired_serves_a_local_session() {
         .into_inner();
     assert_eq!(connected, ConnectSessionResponse::default());
 
-    // And it resumes on the same host
+    // And once its agent has ended — the stub prints its argv and exits — it resumes on the same
+    // host
+    daemon.agent_has_ended(&started.session_id).await;
     let resumed = daemon
         .host
         .resume_session(Request::direct(ResumeSessionRequest {
