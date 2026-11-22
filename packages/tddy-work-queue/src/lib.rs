@@ -19,7 +19,6 @@ pub mod inbox_reads;
 pub mod internal_status;
 pub mod item_ops;
 pub mod lineage;
-pub mod merge_repoint;
 pub mod op_journal;
 pub mod pr_insight;
 pub mod rpc;

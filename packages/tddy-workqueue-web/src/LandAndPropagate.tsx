@@ -3,14 +3,14 @@
  * that fix it (`#workqueue` 14/14).
  *
  * Test ids: `work-queue-land-btn`, `work-queue-land-from`, `work-queue-land-to`, `work-queue-land-submit`,
- * `work-queue-land-result-${itemId}` (`data-outcome`: landed | stopped | skipped),
+ * `work-queue-land-result-${itemId}` (`data-outcome`: landed | propagated | stopped | skipped),
  * `work-item-propagation-refusal-${itemId}` (state and actions as text).
  */
 import React, { useState } from "react";
 
 export interface LandResultView {
   itemId: string;
-  outcome: "landed" | "stopped" | "skipped";
+  outcome: "landed" | "propagated" | "stopped" | "skipped";
   detail: string;
 }
 
@@ -48,7 +48,7 @@ export function LandWaves(props: {
       )}
       <ul>
         {props.results.map((r) => (
-          <li key={r.itemId} data-testid={`work-queue-land-result-${r.itemId}`} data-outcome={r.outcome}>
+          <li key={`${r.itemId}-${r.outcome}`} data-testid={`work-queue-land-result-${r.itemId}`} data-outcome={r.outcome}>
             {r.itemId}: {r.outcome} — {r.detail}
           </li>
         ))}

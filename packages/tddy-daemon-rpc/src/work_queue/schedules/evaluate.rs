@@ -156,6 +156,15 @@ impl ScheduleCtx<'_> {
     /// Every armed schedule of `queue`, evaluated now, in the order armed; and why GitHub or the
     /// checkout could not be read at all (empty when they could).
     pub(crate) async fn evaluate(&self, queue: &WorkQueue) -> (Vec<ScheduleStatusView>, String) {
+        let (views, reason) = self.evaluate_views(queue).await;
+        (views.into_iter().map(status_view).collect(), reason)
+    }
+
+    /// [`Self::evaluate`] before it is put on the wire: what the schedule runner is fed.
+    pub(crate) async fn evaluate_views(
+        &self,
+        queue: &WorkQueue,
+    ) -> (Vec<schedule::ScheduleView>, String) {
         if queue.schedules.is_empty() {
             return (Vec::new(), String::new());
         }
@@ -212,7 +221,7 @@ impl ScheduleCtx<'_> {
             (_, Err(reason)) => reason.clone(),
             _ => String::new(),
         };
-        (views.into_iter().map(status_view).collect(), reason)
+        (views, reason)
     }
 
     /// What holds each item's merge up, judged as an armed merge would be (`#workqueue` 14/14):

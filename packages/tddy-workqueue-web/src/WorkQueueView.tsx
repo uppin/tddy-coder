@@ -24,6 +24,7 @@ import { CreateSessionDialog, remoteTrackingName, type CreateSessionInitialValue
 import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
 import { baseBranchChoice } from "./baseBranchChoice";
 import { WorkItemChainHealthContext, type ItemChainHealth } from "./WorkItemChainHealth";
+import { LandPropagateContext, LandWaves, useLandPropagate } from "./landPropagate";
 import { WorkItemCommitCountsContext, useWorkQueueCommitCounts } from "./workItemCommitCounts";
 import { WorkItemLinksContext } from "./workItemLinks";
 import { useWorkItemLinksState } from "./useWorkItemLinksState";
@@ -230,6 +231,16 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
   const [chainHealth, setChainHealth] = useState<ReadonlyMap<string, ItemChainHealth>>(new Map());
   // `#workqueue` 13/14: armed merges and propagations, re-evaluated by the daemon on every update.
   const [schedules, setSchedules] = useState<ScheduleViewModel[]>([]);
+  // `#workqueue` 14/14: the waves the daemon derives (read off the status stream), land and propagate.
+  const [waveCount, setWaveCount] = useState(0);
+  const landPropagate = useLandPropagate(workQueueClient, sessionToken, address, () => {
+    workQueueClient
+      ?.getWorkQueue({ sessionToken, stack: address })
+      .then((res) => setWorkQueueJson(res.workQueueJson))
+      .catch(() => {
+        // Keep what is shown; the next status update brings the change.
+      });
+  });
   // `#workqueue` 6/14: a row's PR and session links, and its live check counts.
   const workItemLinks = useWorkItemLinksState({
     workQueueClient,
@@ -239,6 +250,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     onWorkQueueJson: setWorkQueueJson,
     onChainHealth: setChainHealth,
     onSchedules: setSchedules,
+    onWaveCount: setWaveCount,
   });
 
   const handleReorder = async (itemId: string, direction: "up" | "down") => {
@@ -431,6 +443,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
       <WorkItemLinksContext.Provider value={workItemLinks}>
       <WorkItemCommitCountsContext.Provider value={commitCounts}>
       <WorkItemChainHealthContext.Provider value={chainHealth}>
+      <LandPropagateContext.Provider value={landPropagate.canPropagate ? landPropagate.context : null}>
       <WorkItemList
         nodes={shownNodes}
         onStartSession={handleStartSession}
@@ -451,9 +464,13 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         orchestratorSessionId={createdBySessionId}
         branchQueries={branchQueries}
       />
+      </LandPropagateContext.Provider>
       </WorkItemChainHealthContext.Provider>
       </WorkItemCommitCountsContext.Provider>
       </WorkItemLinksContext.Provider>
+      {landPropagate.canLand && waveCount > 0 && (
+        <LandWaves waveCount={waveCount} onLand={landPropagate.land} results={landPropagate.results} />
+      )}
       {schedules.length > 0 && <SchedulesPanel schedules={schedules} />}
       <WorkQueueGraphPanel
         workQueueClient={workQueueClient}

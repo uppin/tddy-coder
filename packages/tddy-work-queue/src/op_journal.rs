@@ -8,7 +8,6 @@ use std::path::Path;
 pub enum MergePhase {
     Planned,
     PrMerged { sha: String },
-    RepointingDependent { idx: usize },
     Done,
 }
 
@@ -45,8 +44,7 @@ pub fn write_stack_op_journal(
 
 /// Read the in-flight journal from `parent_dir/.workflow/stack-op.json` (if present).
 /// Returns `Ok(None)` when no journal exists or when phase is `Done`.
-/// When phase is `PrMerged`, advances to `RepointingDependent { idx: 0 }` and writes the
-/// updated journal before returning so recovery is idempotent on restart.
+/// A journal at `PrMerged` is returned as it is: the dependents it lists still have to be propagated.
 pub fn recover_in_flight_stack_op(
     parent_dir: &Path,
 ) -> Result<Option<WorkQueueOpJournal>, tddy_core::WorkflowError> {
@@ -56,15 +54,10 @@ pub fn recover_in_flight_stack_op(
     }
     let content = std::fs::read_to_string(&path)
         .map_err(|e| tddy_core::WorkflowError::ChangesetInvalid(e.to_string()))?;
-    let mut journal: WorkQueueOpJournal = serde_json::from_str(&content)
+    let journal: WorkQueueOpJournal = serde_json::from_str(&content)
         .map_err(|e| tddy_core::WorkflowError::ChangesetInvalid(e.to_string()))?;
     match &journal.merge_phase {
         MergePhase::Done => Ok(None),
-        MergePhase::PrMerged { .. } => {
-            journal.merge_phase = MergePhase::RepointingDependent { idx: 0 };
-            write_stack_op_journal(parent_dir, &journal)?;
-            Ok(Some(journal))
-        }
         _ => Ok(Some(journal)),
     }
 }
@@ -113,7 +106,7 @@ mod tests {
     }
 
     #[test]
-    fn recover_in_flight_stack_op_advances_pr_merged_phase() {
+    fn recover_in_flight_stack_op_returns_a_merged_journal_as_it_is() {
         let tmp = tempfile::tempdir().unwrap();
         let journal = WorkQueueOpJournal {
             op_id: "op-1".to_string(),
@@ -126,10 +119,12 @@ mod tests {
         write_stack_op_journal(tmp.path(), &journal).unwrap();
         let recovered = recover_in_flight_stack_op(tmp.path()).unwrap().unwrap();
         assert_eq!(recovered.merged_node_id, "n1");
-        assert!(matches!(
+        assert_eq!(
             recovered.merge_phase,
-            MergePhase::RepointingDependent { idx: 0 }
-        ));
+            MergePhase::PrMerged {
+                sha: "abc".to_string()
+            }
+        );
     }
 
     #[test]
