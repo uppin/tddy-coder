@@ -5,15 +5,16 @@
  * Test ids are final (`#workqueue` 3/14's `work-item-…`); the view and its RPCs are mounted under
  * today's names, which `/green` follows through n3's rename.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-pr-and-session-link.md
+ * Feature doc: docs/ft/coder/pr-stacking.md § An item's assigned PR and linked sessions
  */
 
 import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
-import { WorkQueueView, WorkItemChecksSummary } from "../../src";
+import { WorkItemCheckSchema, WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
+import { WorkQueueView, WorkItemChecksSummary, WorkItemLinkControls, WorkItemLinksContext, type WorkItemLinks } from "../../src";
+import { parseWorkQueue } from "../../src/workQueue";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
@@ -100,4 +101,41 @@ it("a PR'ed item shows running, failed and succeeded check counts", () => {
   byTestId("work-item-checks-running-n1").should("have.text", "1");
   byTestId("work-item-checks-failed-n1").should("have.text", "2");
   byTestId("work-item-checks-succeeded-n1").should("have.text", "3");
+});
+
+it("a PR'ed item lists each of its checks when the user expands them", () => {
+  // Given — item n1 has PR #7, whose head has a failed lint run and a passed test run
+  const [item] = parseWorkQueue(aWorkQueueJson(1, [AN_ITEM])).nodes;
+  const withPr = { ...item, pr: { number: 7, url: "https://github.com/acme/app/pull/7", headBranch: "feat/one" } };
+  const aRun = (name: string, conclusion: string) =>
+    create(WorkItemCheckSchema, {
+      name,
+      status: "completed",
+      conclusion,
+      startedAt: "2026-11-22T10:00:00Z",
+      completedAt: "2026-11-22T10:01:00Z",
+      detailsUrl: "",
+    });
+  const links: WorkItemLinks = {
+    sessions: [],
+    checksByItemId: { n1: { running: 0, failed: 1, succeeded: 1, runs: [aRun("lint", "failure"), aRun("test", "success")] } },
+    errorByItemId: {},
+    onAssignPr: () => {},
+    onUnassignPr: () => {},
+    onLinkSession: () => {},
+    onUnlinkSession: () => {},
+  };
+  cy.mount(
+    <WorkItemLinksContext.Provider value={links}>
+      <WorkItemLinkControls node={withPr} />
+    </WorkItemLinksContext.Provider>,
+  );
+  cy.get('[data-testid="session-pr-check-lint"]').should("not.exist");
+
+  // When
+  byTestId("work-item-checks-toggle-n1").click();
+
+  // Then
+  byTestId("session-pr-check-lint").should("contain.text", "failure");
+  byTestId("session-pr-check-test").should("contain.text", "success");
 });

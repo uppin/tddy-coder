@@ -58,6 +58,7 @@ export function useWorkItemLinksState({
                 running: item.checksRunning,
                 failed: item.checksFailed,
                 succeeded: item.checksSucceeded,
+                runs: item.checks,
               };
             }
           }

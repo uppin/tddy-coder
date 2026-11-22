@@ -201,6 +201,7 @@
         "tddy-react-commons": "workspace:*",
         "tddy-session-create-web": "workspace:*",
         "tddy-ui-web": "workspace:*",
+        "tddy-workspace-web": "workspace:*",
       },
       "devDependencies": {
         "@tailwindcss/vite": "^4.2.2",

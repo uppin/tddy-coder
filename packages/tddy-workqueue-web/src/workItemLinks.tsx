@@ -1,4 +1,5 @@
 import { createContext, useContext } from "react";
+import type { WorkItemCheck } from "tddy-client-web/gen/work_queue_pb";
 
 /** One session a work item's link control can offer — the part of a `SessionEntry` it needs. */
 export interface LinkableSession {
@@ -8,11 +9,12 @@ export interface LinkableSession {
   daemonInstanceId: string;
 }
 
-/** Counts of an item's PR checks at its head, as the queue's status stream reports them. */
+/** An item's PR checks at its head, as the queue's status stream reports them: counts and each run. */
 export interface ItemChecks {
   running: number;
   failed: number;
   succeeded: number;
+  runs: WorkItemCheck[];
 }
 
 /**

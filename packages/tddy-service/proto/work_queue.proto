@@ -504,4 +504,18 @@ message WorkItemStatus {
   uint32 checks_running = 4;
   uint32 checks_failed = 5;
   uint32 checks_succeeded = 6;
+  // Each check run at the PR's head, for the row's expanded list — the shape of
+  // `worktree.PullRequestCheck`, so the web renders it with the session PR tab's `CheckRow`.
+  repeated WorkItemCheck checks = 7;
+}
+
+// One check run at a PR's head.
+message WorkItemCheck {
+  string name = 1;
+  // `queued` / `in_progress` / `completed`.
+  string status = 2;
+  string conclusion = 3;
+  string started_at = 4;
+  string completed_at = 5;
+  string details_url = 6;
 }

@@ -199,14 +199,29 @@ async fn a_prd_item_summarises_its_running_failed_and_succeeded_checks() {
     // When
     let summaries = item_check_summaries(&inbox, &repo, &queue).await;
 
-    // Then
+    // Then — counted, and each run kept for the row's expanded list
     assert_eq!(
-        summaries,
+        summaries
+            .iter()
+            .map(|s| ItemCheckSummary {
+                runs: Vec::new(),
+                ..s.clone()
+            })
+            .collect::<Vec<_>>(),
         vec![ItemCheckSummary {
             item_id: "n1".to_string(),
             running: 1,
             failed: 1,
             succeeded: 1,
+            runs: Vec::new(),
         }]
+    );
+    assert_eq!(
+        summaries[0]
+            .runs
+            .iter()
+            .map(|run| run.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["build", "lint", "test"]
     );
 }
