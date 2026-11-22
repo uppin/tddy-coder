@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use tddy_agent_launch::conversation_spawn::session_tool_role;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_session_files::session_files::{SessionFile, SessionFileStore};
@@ -22,6 +23,7 @@ use super::ExecToolRpcHandler;
 /// [`SessionFilePort`] over one session directory of this host.
 struct DaemonSessionFiles {
     sessions_base: PathBuf,
+    daemon_instance_id: String,
 }
 
 impl DaemonSessionFiles {
@@ -65,8 +67,7 @@ impl SessionFilePort for DaemonSessionFiles {
     }
 
     fn holding_daemon(&self) -> String {
-        // TODO(session-files-cross-host): implement — this daemon's instance id.
-        unimplemented!("DaemonSessionFiles::holding_daemon")
+        self.daemon_instance_id.clone()
     }
 }
 
@@ -80,6 +81,7 @@ impl ExecToolRpcHandler {
         let caller = orchestrator_caller(sessions_base, &req.session_id, &req.tool_name)?;
         let port = DaemonSessionFiles {
             sessions_base: sessions_base.to_path_buf(),
+            daemon_instance_id: local_instance_id_for_config(&self.config),
         };
         let outcome =
             execute_session_file_tool(&port, &caller, &req.tool_name, &req.args_json).await;

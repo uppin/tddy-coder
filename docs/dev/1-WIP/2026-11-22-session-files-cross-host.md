@@ -59,8 +59,8 @@ The developer chose to continue it at the stack's TODO gate (2026-11-22).
 
 ## Scope
 
-- [ ] The attachment names the holding daemon
-- [ ] Session-file tools served for a caller held elsewhere
+- [x] The attachment names the holding daemon
+- [x] Session-file tools served for a caller held elsewhere
 - [ ] Feature doc `docs/ft/coder/session-attachments.md` § Session files an orchestrator writes updated through the wrap
 
 ## Technical Changes
@@ -76,19 +76,20 @@ The attachment works from any host; a session-file call lands in the caller's ow
 ## Acceptance Tests
 
 `packages/tddy-daemon-rpc/tests/session_files_cross_host_acceptance.rs` (two in-memory daemons, `support::{a_host, InProcessPeers, HOST_A, HOST_B}`):
-- [ ] `the_written_files_attachment_names_the_orchestrators_daemon` — 🔴 red: `DaemonSessionFiles::holding_daemon` unimplemented
-- [ ] `a_session_file_call_sent_to_another_host_lands_in_the_orchestrators_own_session` — 🔴 red: host-b refuses with `FailedPrecondition: session not found` (the session-file tools are not on the caller-held-elsewhere route)
+- [x] `the_written_files_attachment_names_the_orchestrators_daemon`
+- [x] `a_session_file_call_sent_to_another_host_lands_in_the_orchestrators_own_session`
 - [x] `a_worker_sessions_session_file_call_is_refused_from_another_host` — guard, green before and after: host-b already refuses a session it does not hold; the new route must keep refusing a worker after confirming at its owner
 
 Unit — `packages/tddy-tool-engine/src/session_file_tools.rs`:
-- [ ] `a_session_files_attachment_names_the_daemon_that_holds_it` — 🔴 red: `attachment_for` unimplemented
-- [ ] `the_attachment_parses_as_a_start_session_attachment` (existing) — 🔴 red until `attachment_for` is implemented
+- [x] `a_session_files_attachment_names_the_daemon_that_holds_it`
+- [x] `the_attachment_parses_as_a_start_session_attachment` (existing)
 
 Contract surface: `attachment_for(caller, holding_daemon, name)` and `SessionFilePort::holding_daemon()`, both `TODO(session-files-cross-host)`.
 
 ## Decisions & Trade-offs
 
 - Continued at the stack's TODO gate (developer, 2026-11-22); the base-freshness tools' cross-host gap stays deferred.
+- The n3 test `a_written_session_file_answers_with_the_attachment_that_hands_it_to_a_child` (`orchestrator_session_files_acceptance.rs`) pinned the old attachment shape; its expected attachment gained `daemon_instance_id` (the orchestrator's red phase missed it; edited by the coordinator under the developer's pre-approval).
 
 ## Technical Debt & Production Readiness
 
@@ -112,13 +113,13 @@ _(populated by validation)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (pre-approved: "finish the remaining ones without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap

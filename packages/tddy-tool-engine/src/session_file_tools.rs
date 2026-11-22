@@ -103,9 +103,13 @@ pub trait SessionFilePort: Send + Sync {
 /// The `StartSession` `attachments[]` entry that attaches `caller`'s session file `name`, held by
 /// the daemon `holding_daemon` — named, so the entry works from a start on any host.
 pub fn attachment_for(caller: &HomeCaller, holding_daemon: &str, name: &str) -> Value {
-    // TODO(session-files-cross-host): implement — the entry names `holding_daemon`.
-    let _ = (caller, holding_daemon, name);
-    unimplemented!("attachment_for")
+    json!({
+        "basename": name,
+        "daemon_instance_id": holding_daemon,
+        "scope": "HOST_DOCUMENT_SCOPE_SESSION_ARTIFACT",
+        "session_id": caller.session_id,
+        "relative_path": format!("files/{name}"),
+    })
 }
 
 /// Run a session-file tool for `caller`. A refusal comes back as an `is_error` outcome naming it;

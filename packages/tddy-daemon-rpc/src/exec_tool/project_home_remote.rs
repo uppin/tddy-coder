@@ -33,6 +33,7 @@ use tddy_tool_engine::project_home_tools::{
     is_project_home_target_tool, is_project_home_tool, is_worktree_target_tool, retarget_args,
     target_daemon_instance_id, ListProjectSessionsResult, UnreachableHost,
 };
+use tddy_tool_engine::session_file_tools::is_session_file_tool;
 use tddy_tool_engine::stack_git_tools::is_stack_git_tool;
 use tddy_tool_engine::stack_tools::caller_records::{
     forwarded_stack_caller_role, stack_bound_to_session_here,
@@ -65,6 +66,7 @@ impl ExecToolRpcHandler {
             && !is_project_home_git_tool(&req.tool_name)
             && !is_stack_tool(&req.tool_name)
             && !is_stack_git_tool(&req.tool_name)
+            && !is_session_file_tool(&req.tool_name)
         {
             return Ok(None);
         }
@@ -149,6 +151,18 @@ impl ExecToolRpcHandler {
                  session {} is not one",
                 req.tool_name, req.session_id
             )));
+        }
+        if is_session_file_tool(&req.tool_name) {
+            // The file belongs in the orchestrator's own session, so the call is served by the
+            // daemon that holds it: this host never creates a session directory for it.
+            let addressed = ExecuteToolRequest {
+                daemon_instance_id: owner.clone(),
+                ..req.clone()
+            };
+            return self
+                .peer_routing
+                .rpc_served_by_peer(EXEC_TOOL_SERVICE, "ExecuteTool", &owner, &addressed)
+                .await;
         }
         let port = self.project_home_port(req, os_user, &sessions_base, None, owner)?;
         Ok(Some(port.execute(&home, req).await))
