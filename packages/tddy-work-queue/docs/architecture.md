@@ -97,6 +97,14 @@ in `tddy-tools` only resolve environment and serialize. `pr_number_from_status_u
 number out of a node's `pr_status.url` — the one identity a node's PR has — and
 `pull_number_for_node` applies it to a stack node.
 
+### `lineage.rs` — line edges and dependency edges *(added 2026-11-23)*
+
+`line_edges_through_inbox` / `queue_graph` read each item's open PR base through `GithubInbox` and resolve it
+with `line_endpoint_of_base` (`LineEndpoint::{Item, Trunk, External}`); `planned_line_parent` /
+`planned_line_edges` give the planned base when no PR is readable. `set_dependencies` replaces an item's
+`needs` (refusing unknown items and cycles, `LineageError`), `dependencies_of` flattens them to sorted
+`DependencyEdge`s, `detect_cycle` returns the closing path. Line edges are never stored.
+
 ### `rpc.rs` — the PR-stack RPC family
 
 The one transport-facing module: family P's handler trait, its service adapter and its transport

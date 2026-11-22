@@ -273,6 +273,34 @@ operations are RPCs on `work_queue.WorkQueueService` (`SetWorkItemLabels`, `SetW
 tone or an over-limit call *invalid argument*). An expanded row edits its labels (comma-separated, saved
 as the whole set) and clears a badge by key. A change to an annotation records no activity.
 
+### A queue's lineage: line edges and dependency edges *(added 2026-11-23)*
+
+A queue's structure has **two kinds of edge**, never conflated:
+
+- **Line edges** — the branch chain on GitHub. Each item's line endpoint is read from its open PR's base
+  branch through the daemon's GitHub inbox: another item's branch (`item`), the project's trunk
+  (`trunk`), or a branch outside the queue (`external`). They are **never stored** — retargeting a PR on
+  GitHub moves its line edge with no write to the queue. An item without a readable open PR shows its
+  planned base (`parents`' first entry, or the trunk for a root); when the project's GitHub cannot be read
+  at all the answer carries the planned bases and says why (`unavailable_reason`).
+- **Dependency edges** — what needs what *behaviour* (`from → to`: `to` needs `from`). Stored on the item
+  (`WorkItem.needs`, omitted when empty), set by the agent or the user, and **acyclic**: a set that would
+  close a cycle, or names an unknown item, is refused and writes nothing; the refusal names the cycle. A
+  need named twice is stored once. These are the only edges later analysis (waves, readiness) reads.
+
+`parents` keeps its git meaning (where a branch is cut and rebased); it is not migrated into dependencies.
+
+The owner's tools `work_queue_set_dependencies { item_id, needs }` and `work_queue_graph`
+(`tddy-tool-engine::work_queue_lineage_tools`) and the RPCs `SetWorkQueueDependencies` /
+`GetWorkQueueGraph` on `work_queue.WorkQueueService` serve them. Where the host's `gh` has the
+`gh stack` extension, the graph also carries the checked-out branch's stack membership
+(`gh_stack_branches`, read from local tracking); without it nothing else is missing.
+
+The Work queue tab draws both under the item list (`WorkQueueGraph`): line edges solid along the branch
+chain, dependency edges dashed, an external base as an endpoint outside the queue. The graph is read when
+the view opens and after each queue edit; a retarget on GitHub shows on the next read
+(`docs/dev/todo/2026-11-23-work-queue-graph-is-not-live.md`).
+
 ### GitHub API surface
 
 `GithubPrApi` trait (real implementation + mock transport for tests): `get_open_pr`, `merge_pr(number)`, `patch_pr_base(number, new_base)`, `create_pr(head, base, title, body)`, and `close_pr(number)`. Backed by shared curl helpers `curl_github_patch_json`, `curl_github_post_json`, and `curl_github_put_json` in `github_rest_common.rs`.
