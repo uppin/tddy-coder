@@ -1,6 +1,7 @@
 //! Resuming a CLI harness session: its re-derived wiring, its worktree and the agent restarted on
 //! it.
 
+use super::resume_guard::{claim_the_main_launch, log_resumed, log_resuming};
 use crate::cli_agent_steps::conversation::resumed_or_adopted_conversation;
 use crate::cli_agent_steps::conversation::ConversationStart;
 use crate::cli_agent_steps::conversation::ConversationTarget;
@@ -23,9 +24,7 @@ use crate::session_acting_identity::SessionAccountAccess;
 use crate::usage_context::{record_usage_context, UsageSubject};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tddy_cli_sessions::cli_session_manager::{
-    CliSessionManager, MainLaunchClaim, MainLaunchRefusal,
-};
+use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_core::{write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::user_paths::home_dir_for_user;
 use tddy_rpc::{Response, Status};
@@ -43,16 +42,9 @@ impl crate::launch_ports::LaunchSessions {
         session_dir: &Path,
         mut metadata: SessionMetadata,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
-        // Held until this returns, either way: a second resume in the meantime, or one of a
-        // session whose agent is up, would launch another agent on the same worktree, and its
-        // registration would orphan the first.
+        // Held until this returns, either way (see `resume_guard`).
         let _claim = claim_the_main_launch(&self.cli_manager, &req.session_id).await?;
-        log::info!(
-            "resuming {} session {} (target host: {})",
-            kind.name,
-            req.session_id,
-            remote_host_of(&metadata).unwrap_or("none"),
-        );
+        log_resuming(kind.name, &req.session_id, remote_host_of(&metadata));
         let split = self
             .resumed_split_wiring(os_user, req, sessions_base, session_dir, &metadata)
             .await?;
@@ -193,27 +185,6 @@ impl crate::launch_ports::LaunchSessions {
         }
         Ok(())
     }
-}
-
-/// Claim `session_id`'s main launch for a resume, refused when another resume of it is in flight
-/// or its agent is still running.
-async fn claim_the_main_launch(
-    cli_manager: &CliSessionManager,
-    session_id: &str,
-) -> Result<MainLaunchClaim, Status> {
-    cli_manager
-        .claim_main_launch(session_id)
-        .await
-        .map_err(|refusal| {
-            Status::failed_precondition(match refusal {
-                MainLaunchRefusal::Launching => format!(
-                    "session {session_id} is already being resumed: wait for that resume to finish"
-                ),
-                MainLaunchRefusal::Running => {
-                    format!("session {session_id} is already running: stop it before resuming it")
-                }
-            })
-        })
 }
 
 fn resumed_worktree(
@@ -412,16 +383,11 @@ async fn resume_cli_harness_session(
     }
     crate::claude_cli_spawn::record_main_terminal(cli_manager, tddy_data_dir, session_id).await;
 
-    let resumed_line = format!(
-        "resumed {} session {session_id} (target host: {}, pid {})",
-        kind.name,
-        remote_host.unwrap_or("none"),
-        launched.pid,
-    );
+    let (pid, host) = (launched.pid, remote_host.map(str::to_owned));
     record_the_resumed_session(session_dir, meta, conversation, launched)?;
     // Armed only once the metadata is on disk, for the same reason as the start.
     token_arm.arm();
-    log::info!("{resumed_line}");
+    log_resumed(kind.name, session_id, host.as_deref(), pid);
 
     resumed_session_response(session_id)
 }

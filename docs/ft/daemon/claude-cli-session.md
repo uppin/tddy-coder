@@ -52,6 +52,10 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
 13. The session row shows **Resume** in the session table (same as any inactive session).
 14. Clicking **Resume** issues `ResumeSession`. The daemon:
     - Reads `session_type`, `model`, and `repo_path` from `.session.yaml`.
+    - Refuses a second Resume while one is still in flight (`session <id> is already being resumed`)
+      and a Resume of a session whose agent is still running (`session <id> is already running`) —
+      both `FAILED_PRECONDITION` — so a session never has two agents on its worktree. A resume on a
+      Coder target takes minutes; the daemon logs `resuming …` and `resumed … pid <n>` around it.
     - Verifies the worktree still exists (errors with a clear message if not).
     - Spawns a new `claude --model <model>` PTY inside the existing worktree, at the effort the start
       recorded (`--effort <level>`, see [Effort](#effort)).
