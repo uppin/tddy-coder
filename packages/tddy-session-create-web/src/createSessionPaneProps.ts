@@ -41,16 +41,16 @@ export type CreateSessionInitialValues = Partial<{
   model: string;
   permissionMode: string;
   dangerouslySkipPermissions: boolean;
-  stackParent: string;
+  workQueueParent: string;
   /**
-   * The planned node in {@link stackParent}'s stack that this session materializes. Sent as
-   * `StartSessionRequest.stack_node_id` so the daemon links the node by identity instead of matching
+   * The planned node in {@link workQueueParent}'s stack that this session materializes. Sent as
+   * `StartSessionRequest.work_item_id` so the daemon links the node by identity instead of matching
    * on the branch the spawn creates (D34) — the operator can rename that branch in this very form
    * before confirming, and a daemon on another host than the orchestrator cannot read its stack to
    * derive anything from it. Empty for every other caller, which keeps the branch-derived local
    * lookup the agent's own `spawn-child` relies on.
    */
-  stackNodeId: string;
+  workItemId: string;
   branchIntent: BranchIntent;
   newBranchName: string;
   /**

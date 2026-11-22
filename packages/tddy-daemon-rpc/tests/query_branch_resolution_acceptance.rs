@@ -30,8 +30,8 @@ use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_rpc::Request;
-use tddy_service::proto::pr_stack::{
-    BranchBaseSync, BranchResolution, PrStackService, QueryBranchRequest,
+use tddy_service::proto::work_queue::{
+    BranchBaseSync, BranchResolution, QueryBranchRequest, WorkQueueService,
 };
 use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;

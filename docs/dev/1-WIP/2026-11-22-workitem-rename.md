@@ -153,12 +153,12 @@ they remain findable.
 
 ## Scope
 
-- [ ] Proto package, service, RPCs, messages and `session.proto` field names renamed; TS regenerated
-- [ ] Agent tools renamed; every closed list and the orchestrator prompt updated
-- [ ] Crate `tddy-work-queue` and package `tddy-workqueue-web`; Rust modules and types renamed
-- [ ] Web components, props, routes, test ids, page objects and specs renamed
-- [ ] On-disk spellings preserved; existing records load
-- [ ] Test counts equal before and after, per package
+- [x] Proto package, service, RPCs, messages and `session.proto` field names renamed; TS regenerated
+- [x] Agent tools renamed; every closed list and the orchestrator prompt updated
+- [x] Crate `tddy-work-queue` and package `tddy-workqueue-web`; Rust modules and types renamed
+- [x] Web components, props, routes, test ids, page objects and specs renamed
+- [x] On-disk spellings preserved; existing records load
+- [x] Test counts equal before and after, per package
 - [ ] Docs renamed and updated through the wrap
 
 ## Technical Changes
@@ -180,12 +180,12 @@ disk. Generated code regenerated; `schema-manifest.json` committed.
 
 ## Implementation Milestones
 
-- [ ] Before-baseline: `./test -p` counts for every touched Rust package; spec counts for touched web packages
-- [ ] Proto + codegen + Rust consumers
-- [ ] Tools + closed lists + prompt
-- [ ] Crate and package directory renames
-- [ ] Web rename (components, props, routes, test ids, page objects)
-- [ ] After-baseline equal; on-disk load test green
+- [x] Before-baseline: `./test -p` counts for every touched Rust package; spec counts for touched web packages
+- [x] Proto + codegen + Rust consumers
+- [x] Tools + closed lists + prompt
+- [x] Crate and package directory renames
+- [x] Web rename (components, props, routes, test ids, page objects)
+- [x] After-baseline equal; on-disk load test green
 
 ## Testing Plan
 
@@ -278,6 +278,16 @@ Old → new; field numbers never change. Anything not listed keeps its name.
 
 - **No aliases** (operator): daemon, web and tools ship together; an old name is an unknown tool/RPC.
 - **Crates, packages and proto file renamed too** (operator answer, 2026-11-22).
+- **Scripted, map-driven rename instead of the restructure engine** (operator-approved deviation, 2026-11-22).
+  `/code-restructuring` is the planned route, but this rename is ~700 distinct identifiers over ~250
+  files across Rust, TypeScript, proto and fixtures; a rust-analyzer rename covers Rust only, needs a
+  6–10 minute cold load of this workspace's crate graph, and the host's disk was too tight for that.
+  The script reads **this § Symbol map** (every row's old → new, plus the case variants of a CamelCase
+  row and the families the map states as `*PlannedPr*`-style patterns), matches **whole words** (the
+  right edge may continue only into a CamelCase or `_` suffix), leaves on-disk spellings alone (serde
+  keys, the `stacks` directory, the removed recipe names) and never touches names the map does not
+  list. Proof: before/after test counts per package, the vocabulary tests, and one scoped
+  `cargo check --all-targets` per touched package.
 - **On-disk spellings preserved** to keep this a no-behaviour change; n5 drops the old storage
   (operator answer: old stack records are deleted on upgrade), so no data rename is ever needed.
 - **PR- and branch-describing names keep "PR"** (`GetPrStatus`, `QueryBranch`, `PrStatusView`,
@@ -287,7 +297,27 @@ Old → new; field numbers never change. Anything not listed keeps its name.
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+**Test counts, before (n2's tip, `d8cae27aa`) and after the rename** — `cargo test -p <pkg> -- --list`, per
+package, built under `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0` and `cargo clean -p` after each:
+
+| Package | Before | After |
+|---|---|---|
+| tddy-daemon-rpc | 700 | 700 |
+| tddy-session-lifecycle | 1068 | 1068 |
+| tddy-changeset | 277 | 277 |
+| tddy-service | 177 | 177 |
+| tddy-tool-engine | 320 (pass-2, pre-rebase) | 317, all pass (incl. the 3 vocabulary tests) |
+| tddy-work-queue | 75 (pass-2, pre-rebase) | 81 |
+
+The pass-2 figures for the last two predate the rebase onto n1/n2 (n1 deleted tool-engine tests, n2 added
+work-queue tests); the `#[test]` / `#[tokio::test]` attribute counts at n2's tip and now are identical
+(tool-engine 317, work-queue 74, changeset 229, service 177), so no test was lost. Web: `it` counts equal
+(tddy-workqueue-web 7 in 4 specs; tddy-session-web 830 in 144 specs). Gates run: `cargo check --all-targets`
+and `cargo clippy -- -D warnings` on every touched Rust package, `cargo fmt --check`, `bun test src` on six
+web packages, Cypress on tddy-workqueue-web (all) and six tddy-session-web specs.
+
+Names the map does not list keep their old spelling (test helpers, `data-stack-id`, `parseSessionsProjectStack`);
+package prose under `packages/*/docs` is updated at the wrap.
 
 ## Refactoring Needed
 

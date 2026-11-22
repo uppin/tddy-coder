@@ -84,8 +84,8 @@ fn local_socket_services(m: &Mounted) -> BinaryLocalSocketServices {
         exec_tools: tddy_service::proto::exec_tools::ExecToolServiceTonicAdapter::new(Arc::new(
             rpc_handlers.exec_tool_service(),
         )),
-        pr_stack: tddy_service::proto::pr_stack::PrStackServiceTonicAdapter::new(Arc::new(
-            rpc_handlers.pr_stack_service(),
+        work_queue: tddy_service::proto::work_queue::WorkQueueServiceTonicAdapter::new(Arc::new(
+            rpc_handlers.work_queue_service(),
         )),
     }
 }

@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
 
-use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
+use tddy_core::changeset::{Changeset, GithubPrStatus, WorkItem, WorkQueue};
 use tddy_github::pr_api::{
     CheckRun, GithubPrApi, GithubPrInsightApi, PrDetail, PrFile, PrIssueComment, PrLookupOutcome,
     PrRef, PrReview, PrReviewComment, PrSearchHit, PrSearchQuery, PrState, PrView,
@@ -26,8 +26,8 @@ pub const DEFAULT_BRANCH: &str = "master";
 // --- stack builders ---------------------------------------------------------
 
 /// A node that owns a branch and a child session and whose PR is recorded as open at `pull_number`.
-pub fn an_open_node(node_id: &str, branch: &str, pull_number: u64, parents: &[&str]) -> StackNode {
-    StackNode {
+pub fn an_open_node(node_id: &str, branch: &str, pull_number: u64, parents: &[&str]) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: format!("{node_id} title"),
         description: format!("{node_id} description"),
@@ -47,8 +47,8 @@ pub fn an_open_node(node_id: &str, branch: &str, pull_number: u64, parents: &[&s
 }
 
 /// A node whose PR is recorded as merged.
-pub fn a_merged_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+pub fn a_merged_node(node_id: &str, branch: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         pr_status: Some(GithubPrStatus {
             phase: "merged".to_string(),
             url: None,
@@ -59,8 +59,8 @@ pub fn a_merged_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNode
 }
 
 /// A node that was never started: a suggested branch name, no branch, no session, no PR.
-pub fn a_planned_node(node_id: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+pub fn a_planned_node(node_id: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         branch: None,
         session_id: None,
         pr_status: None,
@@ -71,18 +71,18 @@ pub fn a_planned_node(node_id: &str, parents: &[&str]) -> StackNode {
 
 /// `dir` (a session directory in the project layout, see `a_stack_session_dir`) is a pr-stack
 /// orchestrator whose project holds `nodes`.
-pub fn write_stack(dir: &Path, nodes: Vec<StackNode>) {
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(
+pub fn write_stack(dir: &Path, nodes: Vec<WorkItem>) {
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         dir,
         Changeset {
-            stack: Some(Stack { version: 1, nodes }),
+            stack: Some(WorkQueue { version: 1, nodes }),
             ..Changeset::default()
         },
     );
 }
 
-pub fn stack_of(dir: &Path) -> Stack {
-    tddy_changeset::stack_fixtures::stack_on_disk(dir)
+pub fn stack_of(dir: &Path) -> WorkQueue {
+    tddy_changeset::work_queue_fixtures::stack_on_disk(dir)
 }
 
 pub fn node_ids(dir: &Path) -> Vec<String> {

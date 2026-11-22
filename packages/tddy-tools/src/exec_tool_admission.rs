@@ -28,8 +28,8 @@ use tddy_tool_engine::project_home_git_tools::project_home_git_tool_defs;
 use tddy_tool_engine::project_home_tools::project_home_tool_defs;
 use tddy_tool_engine::session_file_tools::session_file_tool_defs;
 use tddy_tool_engine::session_message_tools::session_message_tool_defs;
-use tddy_tool_engine::stack_git_tools::stack_git_tool_defs;
-use tddy_tool_engine::stack_tools::stack_tool_defs;
+use tddy_tool_engine::work_item_git_tools::stack_git_tool_defs;
+use tddy_tool_engine::work_queue_tools::stack_tool_defs;
 
 use crate::mcp_primitives::RemoteToolDef;
 
@@ -208,23 +208,23 @@ mod tests {
                 "CleanSessionWorktree",
                 "RefreshWorktreeDiskUsage",
                 "NotifyOperator",
-                "pr_stack_list",
-                "pr_stack_create",
-                "pr_stack_status",
-                "pr_read",
-                "pr_search",
-                "pr_comments",
-                "pr_add_planned",
-                "pr_update_planned",
-                "pr_delete_planned",
-                "pr_set_status",
-                "pr_adopt",
-                "pr_merge",
-                "pr_close",
-                "pr_repoint",
-                "pr_set_parents",
-                "pr_resolve_conflicts",
-                "pr_spawn_child",
+                "work_queue_list",
+                "work_queue_create",
+                "work_queue_status",
+                "work_pr_read",
+                "work_pr_search",
+                "work_pr_comments",
+                "work_item_add",
+                "work_item_update",
+                "work_item_delete",
+                "work_item_set_status",
+                "work_item_adopt",
+                "work_item_merge",
+                "work_item_close",
+                "work_item_repoint",
+                "work_item_set_parents",
+                "work_item_resolve_conflicts",
+                "work_item_spawn_session",
                 "PostSessionMessage",
                 "ReadSessionMessages",
                 "WriteSessionFile",

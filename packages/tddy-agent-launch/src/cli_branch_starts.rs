@@ -1,4 +1,4 @@
-use crate::stack_parent;
+use crate::work_queue_parent;
 
 use crate::harness_from_spec::child_session_type;
 
@@ -209,7 +209,7 @@ impl LaunchSessions {
                 new_branch_name: req.new_branch_name.trim(),
                 selected_integration_base_ref: req.selected_integration_base_ref.trim(),
                 selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
-                stack_parent: self.spawn_stack_parent_of(req),
+                work_queue_parent: self.spawn_work_queue_parent_of(req),
                 orchestrator: orchestrator.clone(),
                 reports_to,
                 initial_prompt: &start.initial_prompt,
@@ -279,7 +279,7 @@ pub(crate) struct SpawnedChild<'a> {
     pub selected_integration_base_ref: &'a str,
     pub initial_prompt: &'a str,
     /// The orchestrator the child descends from.
-    pub stack_parent: stack_parent::SpawnStackParent<'a>,
+    pub work_queue_parent: work_queue_parent::SpawnWorkQueueParent<'a>,
     /// The orchestrator's recorded session type, whose agent the child runs.
     pub parent_session_type: Option<&'a str>,
     /// The owner's vault the child resolves its project's account over.
@@ -325,7 +325,7 @@ impl LaunchSessions {
                 new_branch_name: child.new_branch_name,
                 selected_integration_base_ref: child.selected_integration_base_ref,
                 selected_branch_to_work_on: "",
-                stack_parent: child.stack_parent,
+                work_queue_parent: child.work_queue_parent,
                 orchestrator: None,
                 reports_to: None,
                 initial_prompt: child.initial_prompt,
@@ -366,19 +366,19 @@ impl LaunchSessions {
 
 impl LaunchSessions {
     /// The stack parent `req` names, resolved through this daemon; none when it names none.
-    fn spawn_stack_parent_of<'a>(
+    fn spawn_work_queue_parent_of<'a>(
         &'a self,
         req: &'a StartSessionRequest,
-    ) -> stack_parent::SpawnStackParent<'a> {
-        match Some(req.stack_parent.trim()).filter(|s| !s.is_empty()) {
-            Some(session_id) => stack_parent::SpawnStackParent::OwnedBy {
+    ) -> work_queue_parent::SpawnWorkQueueParent<'a> {
+        match Some(req.work_queue_parent.trim()).filter(|s| !s.is_empty()) {
+            Some(session_id) => work_queue_parent::SpawnWorkQueueParent::OwnedBy {
                 session_id,
-                daemon_instance_id: req.stack_parent_daemon_instance_id.trim(),
-                stack_node_id: req.stack_node_id.trim(),
+                daemon_instance_id: req.work_queue_parent_daemon_instance_id.trim(),
+                work_item_id: req.work_item_id.trim(),
                 session_token: &req.session_token,
                 host: self,
             },
-            None => stack_parent::SpawnStackParent::NoParent,
+            None => work_queue_parent::SpawnWorkQueueParent::NoParent,
         }
     }
 }

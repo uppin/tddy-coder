@@ -28,8 +28,8 @@ uuid = { version = "1", features = ["v7"] }
 
 [dev-dependencies]
 # The suites that exercise the stack operations and the merge journal over a session's stack.
-tddy-pr-stack = { path = "../tddy-pr-stack" }
-# `stack_fixtures`: the sessions layout a PR stack lives in.
+tddy-work-queue = { path = "../tddy-work-queue" }
+# `work_queue_fixtures`: the sessions layout a PR stack lives in.
 tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 serial_test = "3"
 # Only the tests build worktrees and session dirs on disk now that github_pr.rs, which staged the

@@ -19,8 +19,8 @@ use tddy_discovery::roster::seed_subagents_or_report;
 use tddy_discovery::subagent::{
     resolve_replaced_tools_for_defs, TurnRequest, SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS,
 };
-use tddy_tool_engine::stack_git_tools::is_stack_git_tool;
-use tddy_tool_engine::stack_tools::is_stack_tool;
+use tddy_tool_engine::work_item_git_tools::is_stack_git_tool;
+use tddy_tool_engine::work_queue_tools::is_stack_tool;
 // The conversation runtime the seven `subagent_*` tools drive: the table of open conversations, the
 // turns that outlived the calls that started them, and the accounting of both. It moved to
 // `tddy-discovery` with the roster at `#unbundle` node 5 — it is logic over that crate's own
@@ -140,7 +140,7 @@ pub(crate) fn conversation_start_request_json(verb: &str, start_id: &str) -> ser
 /// How [`PermissionServer::call_tool_by_name`] rejects a name it holds no dispatch arm for.
 ///
 /// Public because "is this tool reachable by name" is a contract other crates' tests own — the
-/// PR-stack agreement test in `tests/pr_stack_tool_dispatch_acceptance.rs` tells an unregistered name
+/// PR-stack agreement test in `tests/work_queue_tool_dispatch_acceptance.rs` tells an unregistered name
 /// apart from a registered tool's own refusal by exactly this rejection. Named rather than matched as
 /// a free-text substring so rewording the message cannot silently turn that test into one that always
 /// passes.
@@ -2553,16 +2553,16 @@ mod tests {
     async fn call_tool_by_name_dispatches_mcp_tool_and_rejects_unknown() {
         let server = PermissionServer::new();
 
-        // pr_stack_status is forwarded to the daemon; with no daemon configured the session-tool
+        // work_queue_status is forwarded to the daemon; with no daemon configured the session-tool
         // client answers with its own error JSON (a real result string), proving the dispatch
         // reached the forwarding path.
         let out = server
-            .call_tool_by_name("pr_stack_status", serde_json::json!({}))
+            .call_tool_by_name("work_queue_status", serde_json::json!({}))
             .await
             .expect("known tool dispatches");
         assert!(
             serde_json::from_str::<serde_json::Value>(&out).is_ok(),
-            "pr_stack_status must return JSON, got: {out}"
+            "work_queue_status must return JSON, got: {out}"
         );
 
         let err = server

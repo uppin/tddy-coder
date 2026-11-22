@@ -25,14 +25,14 @@ use tddy_projects::project_storage::{write_projects, ProjectData};
 use tddy_rpc::{Request, RequestMetadata, RequestTransport, Status};
 use tddy_service::proto::activity::{ActivityService as _, IsSessionTerminalServedRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
-use tddy_service::proto::pr_stack::{
-    AddPlannedPrRequest, CreateProjectStackRequest, GetProjectStackRequest,
-    ListProjectStacksRequest, PrStackService,
-};
 use tddy_service::proto::session::{
     ListSessionsRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
 use tddy_service::proto::tasks::{CancelTaskRequest, CancelTaskResponse};
+use tddy_service::proto::work_queue::{
+    AddWorkItemRequest, CreateWorkQueueRequest, GetWorkQueueRequest, ListProjectWorkQueuesRequest,
+    WorkQueueService,
+};
 use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_activity::session_notifications::{
     RecordingSessionNotificationSubscriber, SessionNotificationBus,
@@ -53,7 +53,7 @@ pub const SILENT_HOST: &str = "host-c";
 pub const SESSION_SERVICE: &str = "session.SessionService";
 pub const TASKS_SERVICE: &str = "tasks.TaskService";
 pub const ACTIVITY_SERVICE: &str = tddy_service::session_activity::ACTIVITY_SERVICE;
-pub const PR_STACK_SERVICE: &str = "pr_stack.PrStackService";
+pub const WORK_QUEUE_SERVICE: &str = "work_queue.WorkQueueService";
 
 // ── the hosts ────────────────────────────────────────────────────────────────────────────────
 
@@ -182,31 +182,31 @@ impl PeerForwarder for InProcessPeers {
                     .map(|r| r.encode_to_vec())
             }
             // A project's stacks, and one stack by its address (`#orchestrators` 9/11).
-            (PR_STACK_SERVICE, "ListProjectStacks") => {
-                let req = ListProjectStacksRequest::decode(body.as_slice()).unwrap();
+            (WORK_QUEUE_SERVICE, "ListProjectWorkQueues") => {
+                let req = ListProjectWorkQueuesRequest::decode(body.as_slice()).unwrap();
                 daemon
-                    .list_project_stacks(arriving_from_a_peer(req))
+                    .list_project_work_queues(arriving_from_a_peer(req))
                     .await
                     .map(|r| r.into_inner().encode_to_vec())
             }
-            (PR_STACK_SERVICE, "GetProjectStack") => {
-                let req = GetProjectStackRequest::decode(body.as_slice()).unwrap();
+            (WORK_QUEUE_SERVICE, "GetWorkQueue") => {
+                let req = GetWorkQueueRequest::decode(body.as_slice()).unwrap();
                 daemon
-                    .get_project_stack(arriving_from_a_peer(req))
+                    .get_work_queue(arriving_from_a_peer(req))
                     .await
                     .map(|r| r.into_inner().encode_to_vec())
             }
-            (PR_STACK_SERVICE, "CreateProjectStack") => {
-                let req = CreateProjectStackRequest::decode(body.as_slice()).unwrap();
+            (WORK_QUEUE_SERVICE, "CreateWorkQueue") => {
+                let req = CreateWorkQueueRequest::decode(body.as_slice()).unwrap();
                 daemon
-                    .create_project_stack(arriving_from_a_peer(req))
+                    .create_work_queue(arriving_from_a_peer(req))
                     .await
                     .map(|r| r.into_inner().encode_to_vec())
             }
-            (PR_STACK_SERVICE, "AddPlannedPr") => {
-                let req = AddPlannedPrRequest::decode(body.as_slice()).unwrap();
+            (WORK_QUEUE_SERVICE, "AddWorkItem") => {
+                let req = AddWorkItemRequest::decode(body.as_slice()).unwrap();
                 daemon
-                    .add_planned_pr(arriving_from_a_peer(req))
+                    .add_work_item(arriving_from_a_peer(req))
                     .await
                     .map(|r| r.into_inner().encode_to_vec())
             }

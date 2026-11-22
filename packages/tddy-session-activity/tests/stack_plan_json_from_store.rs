@@ -1,4 +1,4 @@
-//! PRD acceptance: the session list's `stack_plan_json` reads the stack from the project's stack
+//! PRD acceptance: the session list's `work_queue_json` reads the stack from the project's stack
 //! store, so the PR-stack screen lists the same planned PRs before and after the startup migration.
 //!
 //! Feature: docs/ft/coder/pr-stacking.md § Where a stack lives.
@@ -7,22 +7,22 @@ use std::path::{Path, PathBuf};
 
 use pretty_assertions::assert_eq;
 use tddy_coding_agent_specs::CodingAgentRegistry;
-use tddy_core::changeset::{write_changeset, Changeset, Stack, StackNode};
+use tddy_core::changeset::{write_changeset, Changeset, WorkItem, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::{
     write_initial_tool_session_metadata, InitialToolSessionMetadataOpts,
 };
-use tddy_pr_stack::stack_migration::migrate_session_stacks;
 use tddy_session_activity::session_list_enrichment::session_list_status_from_session_dir;
+use tddy_work_queue::queue_migration::migrate_session_stacks;
 
-fn a_node(node_id: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn a_node(node_id: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: format!("PR {node_id}"),
         branch_suggestion: Some(format!("feature/auth/{node_id}")),
         parents: parents.iter().map(|p| p.to_string()).collect(),
         display_order: Some(node_id[1..].parse().expect("numbered node id")),
-        ..StackNode::default()
+        ..WorkItem::default()
     }
 }
 
@@ -51,7 +51,7 @@ impl AHost {
         &self,
         session_id: &str,
         project_id: &str,
-        stack: Stack,
+        stack: WorkQueue,
     ) -> PathBuf {
         let dir = unified_session_dir_path(self.sessions_base(), session_id);
         std::fs::create_dir_all(&dir).expect("session dir");
@@ -77,11 +77,11 @@ impl AHost {
 fn the_listed_stack_plan_json(session_dir: &Path) -> String {
     session_list_status_from_session_dir(Some(CodingAgentRegistry::builtin_cached()), session_dir)
         .expect("enrich session row")
-        .stack_plan_json
+        .work_queue_json
 }
 
-fn a_legacy_stack() -> Stack {
-    Stack {
+fn a_legacy_stack() -> WorkQueue {
+    WorkQueue {
         version: 1,
         nodes: vec![
             a_node("n1", &[]),

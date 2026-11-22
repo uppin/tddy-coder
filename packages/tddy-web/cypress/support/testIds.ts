@@ -763,7 +763,7 @@ export const TEST_IDS = {
   screenSharingOverlayClose: "screen-sharing-overlay-close",
 
   // The planned-PR list (the project stack view)
-  prStackPlannedPrList: "pr-stack-planned-pr-list",
+  prStackPlannedPrList: "work-item-list",
 
   // Full-screen Workflow Chat Screen (per-workflow session view for every tool recipe)
   workflowChatScreen: "workflow-chat-screen",
@@ -828,28 +828,28 @@ export const TEST_IDS = {
   agentActivityDetailError: "agent-activity-detail-error",
 
   // PR-Stack Chat Screen — manually adding a planned PR (deterministic, non-chat path)
-  prStackAddPlannedPrBtn: "pr-stack-add-planned-pr-btn",
-  prStackAddPlannedPrForm: "pr-stack-add-planned-pr-form",
-  prStackAddPlannedPrTitleInput: "pr-stack-add-planned-pr-title-input",
-  prStackAddPlannedPrDescriptionInput: "pr-stack-add-planned-pr-description-input",
-  prStackAddPlannedPrBranchSuggestionInput: "pr-stack-add-planned-pr-branch-suggestion-input",
-  prStackAddPlannedPrSubmitBtn: "pr-stack-add-planned-pr-submit-btn",
+  prStackAddPlannedPrBtn: "work-item-add-btn",
+  prStackAddPlannedPrForm: "work-item-add-form",
+  prStackAddPlannedPrTitleInput: "work-item-add-title-input",
+  prStackAddPlannedPrDescriptionInput: "work-item-add-description-input",
+  prStackAddPlannedPrBranchSuggestionInput: "work-item-add-branch-suggestion-input",
+  prStackAddPlannedPrSubmitBtn: "work-item-add-submit-btn",
   /**
    * Adds the planned PR and immediately opens the Start-session dialog for it, instead of leaving
    * the operator to find the new row and click its own CTA.
    */
-  prStackAddPlannedPrStartBtn: "pr-stack-add-planned-pr-start-btn",
-  prStackAddPlannedPrCancelBtn: "pr-stack-add-planned-pr-cancel-btn",
-  prStackAddPlannedPrError: "pr-stack-add-planned-pr-error",
+  prStackAddPlannedPrStartBtn: "work-item-add-start-btn",
+  prStackAddPlannedPrCancelBtn: "work-item-add-cancel-btn",
+  prStackAddPlannedPrError: "work-item-add-error",
 
   // PR-Stack Chat Screen — the prompt shown when a pull targets a worktree with uncommitted work.
   // A dirty worktree is neither silently merged into nor a dead end: the operator is told what is
   // outstanding and can commit and push it before the pull proceeds.
-  prStackDirtyWorktreeDialog: "pr-stack-dirty-worktree-dialog",
-  prStackDirtyWorktreePaths: "pr-stack-dirty-worktree-paths",
-  prStackDirtyWorktreeCommitMessageInput: "pr-stack-dirty-worktree-commit-message-input",
-  prStackDirtyWorktreeCommitBtn: "pr-stack-dirty-worktree-commit-btn",
-  prStackDirtyWorktreeCancelBtn: "pr-stack-dirty-worktree-cancel-btn",
+  prStackDirtyWorktreeDialog: "work-item-dirty-worktree-dialog",
+  prStackDirtyWorktreePaths: "work-item-dirty-worktree-paths",
+  prStackDirtyWorktreeCommitMessageInput: "work-item-dirty-worktree-commit-message-input",
+  prStackDirtyWorktreeCommitBtn: "work-item-dirty-worktree-commit-btn",
+  prStackDirtyWorktreeCancelBtn: "work-item-dirty-worktree-cancel-btn",
 
   // Daemon selector (top-right strip on daemon-mode screens)
   daemonSelectorTrigger: "daemon-selector-trigger",
@@ -1352,133 +1352,133 @@ export const sessionsScreenSharingRemoveBtn = (targetId: string) =>
 // ---------------------------------------------------------------------------
 
 /** `[data-testid="pr-stack-planned-pr-row-<nodeId>"]` — a single planned-PR row */
-export const prStackPlannedPrRow = (nodeId: string) => `pr-stack-planned-pr-row-${nodeId}`;
+export const prStackPlannedPrRow = (nodeId: string) => `work-item-planned-pr-row-${nodeId}`;
 
 /** `[data-testid="pr-stack-start-session-<nodeId>"]` — "Start session" CTA for an unspawned node */
-export const prStackStartSessionBtn = (nodeId: string) => `pr-stack-start-session-${nodeId}`;
+export const prStackStartSessionBtn = (nodeId: string) => `work-item-start-session-${nodeId}`;
 
 /** `[data-testid="pr-stack-status-chip-<nodeId>"]` — status chip for an already-spawned node */
-export const prStackStatusChip = (nodeId: string) => `pr-stack-status-chip-${nodeId}`;
+export const prStackStatusChip = (nodeId: string) => `work-item-status-chip-${nodeId}`;
 
 /** `[data-testid="pr-stack-internal-status-badge-<nodeId>"]` — the action-needed internal-status badge */
 export const prStackInternalStatusBadge = (nodeId: string) =>
-  `pr-stack-internal-status-badge-${nodeId}`;
+  `work-item-internal-status-badge-${nodeId}`;
 
 /** `[data-testid="pr-stack-in-progress-<nodeId>"]` — in-progress indicator (a live session owns the branch) */
-export const prStackInProgressBadge = (nodeId: string) => `pr-stack-in-progress-${nodeId}`;
+export const prStackInProgressBadge = (nodeId: string) => `work-item-in-progress-${nodeId}`;
 
 /** `[data-testid="pr-stack-pr-link-<nodeId>"]` — the GitHub PR number rendered as a link to the PR */
-export const prStackPrLink = (nodeId: string) => `pr-stack-pr-link-${nodeId}`;
+export const prStackPrLink = (nodeId: string) => `work-item-pr-link-${nodeId}`;
 
 /** `[data-testid="pr-stack-pr-state-<nodeId>"]` — the GitHub PR state (open/merged/closed/draft) */
-export const prStackPrState = (nodeId: string) => `pr-stack-pr-state-${nodeId}`;
+export const prStackPrState = (nodeId: string) => `work-item-pr-state-${nodeId}`;
 
 /** `[data-testid="pr-stack-repoint-<nodeId>"]` — the Repoint control shown when a predecessor merged */
-export const prStackRepointBtn = (nodeId: string) => `pr-stack-repoint-${nodeId}`;
+export const prStackRepointBtn = (nodeId: string) => `work-item-repoint-${nodeId}`;
 
 /** `[data-testid="pr-stack-worktree-<nodeId>"]` — the on-disk worktree indicator (from QueryBranch) */
-export const prStackWorktree = (nodeId: string) => `pr-stack-worktree-${nodeId}`;
+export const prStackWorktree = (nodeId: string) => `work-item-worktree-${nodeId}`;
 
 /** `[data-testid="pr-stack-session-<nodeId>"]` — the control that opens the node's bound child
  *  session, wrapping the status chip. Present only when the node's recorded child session — or,
  *  failing that, the session that owns its branch — resolves to a session the drawer knows */
-export const prStackSession = (nodeId: string) => `pr-stack-session-${nodeId}`;
+export const prStackSession = (nodeId: string) => `work-item-session-${nodeId}`;
 
 /** `[data-testid="pr-stack-row-toggle-<nodeId>"]` — the row header that expands/collapses its detail */
-export const prStackRowToggle = (nodeId: string) => `pr-stack-row-toggle-${nodeId}`;
+export const prStackRowToggle = (nodeId: string) => `work-item-row-toggle-${nodeId}`;
 
 /** `[data-testid="pr-stack-row-details-<nodeId>"]` — the row's detail body. Always mounted and hidden
  *  when collapsed, so expansion, scroll position and the branch poll set survive a collapse */
-export const prStackRowDetails = (nodeId: string) => `pr-stack-row-details-${nodeId}`;
+export const prStackRowDetails = (nodeId: string) => `work-item-row-details-${nodeId}`;
 
 /** `[data-testid="pr-stack-node-id-<nodeId>"]` — the planner-assigned node id, in the row's detail */
-export const prStackNodeId = (nodeId: string) => `pr-stack-node-id-${nodeId}`;
+export const prStackNodeId = (nodeId: string) => `work-item-node-id-${nodeId}`;
 
 /** `[data-testid="pr-stack-parents-<nodeId>"]` — the titles of the nodes this one is stacked on */
-export const prStackParents = (nodeId: string) => `pr-stack-parents-${nodeId}`;
+export const prStackParents = (nodeId: string) => `work-item-parents-${nodeId}`;
 
 /** `[data-testid="pr-stack-child-recipe-<nodeId>"]` — the recipe the node's child session runs */
-export const prStackChildRecipe = (nodeId: string) => `pr-stack-child-recipe-${nodeId}`;
+export const prStackChildRecipe = (nodeId: string) => `work-item-child-recipe-${nodeId}`;
 
 /** `[data-testid="pr-stack-child-session-<nodeId>"]` — the bound child session's id, in the detail */
-export const prStackChildSession = (nodeId: string) => `pr-stack-child-session-${nodeId}`;
+export const prStackChildSession = (nodeId: string) => `work-item-child-session-${nodeId}`;
 
 /** `[data-testid="pr-stack-child-state-<nodeId>"]` — the coarse mirror of the child session's
  *  workflow state the orchestrator last recorded. Stale whenever the orchestrator agent is not
  *  running, which is why it is a detail line rather than a badge */
-export const prStackChildState = (nodeId: string) => `pr-stack-child-state-${nodeId}`;
+export const prStackChildState = (nodeId: string) => `work-item-child-state-${nodeId}`;
 
 /** `[data-testid="pr-stack-move-up-<nodeId>"]` — move the row one position earlier in the persisted order */
-export const prStackMoveUpBtn = (nodeId: string) => `pr-stack-move-up-${nodeId}`;
+export const prStackMoveUpBtn = (nodeId: string) => `work-item-move-up-${nodeId}`;
 
 /** `[data-testid="pr-stack-move-down-<nodeId>"]` — move the row one position later in the persisted order */
-export const prStackMoveDownBtn = (nodeId: string) => `pr-stack-move-down-${nodeId}`;
+export const prStackMoveDownBtn = (nodeId: string) => `work-item-move-down-${nodeId}`;
 
 /** `[data-testid="pr-stack-reorder-error-<nodeId>"]` — the daemon's reason for refusing or failing a
  *  reorder. Rendered outside the row's collapse boundary: a refused reorder moves nothing, which is
  *  indistinguishable from a swallowed click unless the row says why */
-export const prStackReorderError = (nodeId: string) => `pr-stack-reorder-error-${nodeId}`;
+export const prStackReorderError = (nodeId: string) => `work-item-reorder-error-${nodeId}`;
 
 /** `[data-testid="pr-stack-base-behind-<nodeId>"]` — how many commits the branch is behind its base */
-export const prStackBaseBehind = (nodeId: string) => `pr-stack-base-behind-${nodeId}`;
+export const prStackBaseBehind = (nodeId: string) => `work-item-base-behind-${nodeId}`;
 
 /** `[data-testid="pr-stack-base-in-sync-<nodeId>"]` — the branch contains every commit on its base.
  *  Rendered rather than staying silent: without it a clean row and a row whose comparison has not
  *  arrived would look identical, which is the conflation the unavailable discriminator exists to stop */
-export const prStackBaseInSync = (nodeId: string) => `pr-stack-base-in-sync-${nodeId}`;
+export const prStackBaseInSync = (nodeId: string) => `work-item-base-in-sync-${nodeId}`;
 
 /** `[data-testid="pr-stack-base-conflicts-<nodeId>"]` — merging the base into the branch would conflict */
-export const prStackBaseConflicts = (nodeId: string) => `pr-stack-base-conflicts-${nodeId}`;
+export const prStackBaseConflicts = (nodeId: string) => `work-item-base-conflicts-${nodeId}`;
 
 /** `[data-testid="pr-stack-base-sync-unavailable-<nodeId>"]` — the base comparison could not be made
  *  (no base named, a ref that resolves to nothing, a git failure). A failed comparison arrives
  *  byte-identical to a healthy one, so it must never render as "in sync" */
-export const prStackBaseSyncUnavailable = (nodeId: string) => `pr-stack-base-sync-unavailable-${nodeId}`;
+export const prStackBaseSyncUnavailable = (nodeId: string) => `work-item-base-sync-unavailable-${nodeId}`;
 
 /** `[data-testid="pr-stack-base-conflict-paths-<nodeId>"]` — the conflicting paths, in the row's detail */
-export const prStackBaseConflictPaths = (nodeId: string) => `pr-stack-base-conflict-paths-${nodeId}`;
+export const prStackBaseConflictPaths = (nodeId: string) => `work-item-base-conflict-paths-${nodeId}`;
 
 /** `[data-testid="pr-stack-sync-merge-<nodeId>"]` — pull the base in by merging it (the default) */
-export const prStackSyncMergeBtn = (nodeId: string) => `pr-stack-sync-merge-${nodeId}`;
+export const prStackSyncMergeBtn = (nodeId: string) => `work-item-sync-merge-${nodeId}`;
 
 /** `[data-testid="pr-stack-sync-rebase-<nodeId>"]` — pull the base in by rebasing onto it */
-export const prStackSyncRebaseBtn = (nodeId: string) => `pr-stack-sync-rebase-${nodeId}`;
+export const prStackSyncRebaseBtn = (nodeId: string) => `work-item-sync-rebase-${nodeId}`;
 
 /** `[data-testid="pr-stack-sync-error-<nodeId>"]` — the daemon's reason for refusing or failing a pull.
  *  Rendered outside the row's collapse boundary: a reason the operator must expand a row to find is
  *  the dead end the always-visible warning region exists to remove */
-export const prStackSyncError = (nodeId: string) => `pr-stack-sync-error-${nodeId}`;
+export const prStackSyncError = (nodeId: string) => `work-item-sync-error-${nodeId}`;
 
 /** `[data-testid="pr-stack-branch-<nodeId>"]` — the branch this planned PR owns (a branch that exists) */
-export const prStackBranch = (nodeId: string) => `pr-stack-branch-${nodeId}`;
+export const prStackBranch = (nodeId: string) => `work-item-branch-${nodeId}`;
 
 /** `[data-testid="pr-stack-planned-branch-<nodeId>"]` — the planned branch *name* (`branch_suggestion`),
  *  rendered distinctly from an owned branch because a suggestion names no ref yet */
-export const prStackPlannedBranch = (nodeId: string) => `pr-stack-planned-branch-${nodeId}`;
+export const prStackPlannedBranch = (nodeId: string) => `work-item-planned-branch-${nodeId}`;
 
 /** `[data-testid="pr-stack-base-branch-<nodeId>"]` — the branch this planned PR's child worktree would
  *  be based onto (its nearest usable ancestor's branch, or the project default) */
-export const prStackBaseBranch = (nodeId: string) => `pr-stack-base-branch-${nodeId}`;
+export const prStackBaseBranch = (nodeId: string) => `work-item-base-branch-${nodeId}`;
 
 /** `[data-testid="pr-stack-start-warning-<nodeId>"]` — the warning listing every reason the node cannot
  *  be started. The row's information and its Start-session CTA stay put beside it */
-export const prStackStartWarning = (nodeId: string) => `pr-stack-start-warning-${nodeId}`;
+export const prStackStartWarning = (nodeId: string) => `work-item-start-warning-${nodeId}`;
 
 /** `[data-testid="pr-stack-start-session-blocked-icon-<nodeId>"]` — the alert icon carried by a blocked
  *  node's Start-session button. The button stays pressable (a blocker is advice, not a refusal: three
  *  of `QueryBranch`'s legs cannot see another host), so the icon plus the warning colour is what tells
  *  the operator they are about to start something the view believes is blocked */
 export const prStackStartSessionBlockedIcon = (nodeId: string) =>
-  `pr-stack-start-session-blocked-icon-${nodeId}`;
+  `work-item-start-session-blocked-icon-${nodeId}`;
 
 /** `[data-testid="pr-stack-repoint-error-<nodeId>"]` — the daemon's reason for refusing a repoint. The
  *  RPC can reject (a stale target names no acceptable base), so failing silently would leave the row
  *  looking untouched with no explanation — the dead end this feature exists to remove */
-export const prStackRepointError = (nodeId: string) => `pr-stack-repoint-error-${nodeId}`;
+export const prStackRepointError = (nodeId: string) => `work-item-repoint-error-${nodeId}`;
 
 /** `[data-testid="pr-stack-pr-unavailable-<nodeId>"]` — shown when the GitHub PR lookup could not be
  *  performed (no credential, rate limit, transport error) — distinct from "this branch has no PR" */
-export const prStackPrUnavailable = (nodeId: string) => `pr-stack-pr-unavailable-${nodeId}`;
+export const prStackPrUnavailable = (nodeId: string) => `work-item-pr-unavailable-${nodeId}`;
 
 /** `[data-testid="agent-chat-message-<index>"]` — a single rendered chat bubble (reusable AgentChat) */
 export const agentChatMessage = (index: number) => `agent-chat-message-${index}`;
@@ -1500,9 +1500,9 @@ export const agentChatToolStatus = (index: number) => `agent-chat-tool-status-${
 /** `[data-testid="agent-activity-row-<callId>"]` — one one-line record row in the activity overlay */
 export const agentActivityRow = (callId: string) => `agent-activity-row-${callId}`;
 
-/** `[data-testid="pr-stack-add-planned-pr-ancestor-<nodeId>"]` — an ancestor checkbox in the "New planned PR" form */
+/** `[data-testid="work-item-add-ancestor-<nodeId>"]` — an ancestor checkbox in the "New planned PR" form */
 export const prStackAddPlannedPrAncestorCheckbox = (nodeId: string) =>
-  `pr-stack-add-planned-pr-ancestor-${nodeId}`;
+  `work-item-add-ancestor-${nodeId}`;
 
 // ---------------------------------------------------------------------------
 // Projects screen dynamic helpers

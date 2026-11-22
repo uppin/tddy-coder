@@ -2,7 +2,7 @@ use super::session_acting_identity::SessionAccountAccess;
 use super::*;
 use tddy_accounts::{META_SUBJECT, META_SUBJECT_ID, PROVIDER_GITHUB};
 use tddy_core::toolcall::ConversationSpawnHandler;
-use tddy_core::{Stack, StackNode};
+use tddy_core::{WorkItem, WorkQueue};
 use tddy_credentials::{
     AccountId, CredentialRecord, CredentialStore, ProviderId, SecretString, SessionVaults,
     FIRST_VERSION,
@@ -141,12 +141,12 @@ impl Orchestrator {
             ),
         )
         .expect("write orchestrator metadata");
-        tddy_changeset::stack_fixtures::write_changeset_with_stack(
+        tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
             &dir,
             Changeset {
-                stack: Some(Stack {
+                stack: Some(WorkQueue {
                     version: 1,
-                    nodes: vec![StackNode {
+                    nodes: vec![WorkItem {
                         node_id: NODE_ID.to_string(),
                         title: NODE_TITLE.to_string(),
                         description: NODE_DESCRIPTION.to_string(),
@@ -190,7 +190,7 @@ impl Orchestrator {
     fn conversation_spawn_handler(&self) -> GrillMeConversationSpawnHandler {
         GrillMeConversationSpawnHandler {
             service: self.service.launch_sessions(),
-            stack_parent_host: Arc::new(self.service.launch_sessions()),
+            work_queue_parent_host: Arc::new(self.service.launch_sessions()),
             config: self.config.clone(),
             tddy_data_dir: self.sessions_base().to_path_buf(),
             cli_manager: Arc::clone(&self.service.cli_manager),
@@ -263,7 +263,7 @@ impl Orchestrator {
             branch_worktree_intent: "new_branch_from_base".to_string(),
             new_branch_name: "feature/token-store".to_string(),
             initial_prompt: format!("{NODE_TITLE}\n\n{NODE_DESCRIPTION}"),
-            stack_parent: ORCHESTRATOR_SESSION_ID.to_string(),
+            work_queue_parent: ORCHESTRATOR_SESSION_ID.to_string(),
             attachments: crate::stack_doc_attachments::stack_doc_attachments(
                 &self.session_dir(ORCHESTRATOR_SESSION_ID),
                 ORCHESTRATOR_SESSION_ID,

@@ -18,7 +18,7 @@ import React from "react";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
@@ -27,10 +27,10 @@ import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { projectStacksPage } from "../support/pages/projectStacksPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -46,9 +46,9 @@ const RECORDED_CHILD_SESSION_ID = "child-session-recorded-by-the-plan";
 /** A different session that currently owns the branch — e.g. after a resume. */
 const BRANCH_OWNER_SESSION_ID = "child-session-that-owns-the-branch-now";
 
-function aSpawnedNode(sessionId: string): StackNodeFixture {
+function aSpawnedNode(sessionId: string): WorkItemFixture {
   return aPlannedNode({
-    nodeId: "n1",
+    itemId: "n1",
     title: "Session attachment storage",
     branch: OWNED_BRANCH,
     sessionId,
@@ -56,7 +56,7 @@ function aSpawnedNode(sessionId: string): StackNodeFixture {
   });
 }
 
-function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
+function anOrchestratorSession(workQueueJson: string): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-08-01T09:00:00Z",
@@ -65,7 +65,7 @@ function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
@@ -104,10 +104,10 @@ interface MountOptions {
 
 function openPrStackScreen(opts: MountOptions) {
   const backend = aSessionsDrawerBackend([
-    anOrchestratorSession(aStackPlanJson(1, [aSpawnedNode(opts.recordedSessionId)])),
+    anOrchestratorSession(aWorkQueueJson(1, [aSpawnedNode(opts.recordedSessionId)])),
     ...opts.childSessions,
   ])
-    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(WorkQueueService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(
         opts.resolutionByBranch?.[req.branch] ?? { branch: req.branch },
       ),

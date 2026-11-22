@@ -77,7 +77,7 @@ pub(crate) async fn start_cli_harness_session(
         new_branch_name,
         selected_integration_base_ref,
         selected_branch_to_work_on,
-        stack_parent,
+        work_queue_parent,
         orchestrator,
         reports_to,
         initial_prompt,
@@ -148,7 +148,7 @@ pub(crate) async fn start_cli_harness_session(
         None,
         &session_dir,
         orchestrator
-            .or_else(|| stack_parent.as_orchestrator_link())
+            .or_else(|| work_queue_parent.as_orchestrator_link())
             .as_ref(),
         managed.as_ref().map(|managed| managed.recipe.as_ref()),
     )?;
@@ -177,7 +177,7 @@ pub(crate) async fn start_cli_harness_session(
             ssh_alias: checkout_alias,
             shell: target_shell.clone(),
         },
-        &stack_parent,
+        &work_queue_parent,
         progress,
     )
     .await?;
@@ -419,7 +419,7 @@ pub(crate) async fn start_cli_harness_session(
                     recipe: recipe_name.as_deref().unwrap_or_default(),
                     worktree_path: &worktree_path,
                     branch: &branch,
-                    stack_parent: &stack_parent,
+                    work_queue_parent: &work_queue_parent,
                 },
             ),
         )

@@ -146,7 +146,7 @@ fn the_backend_module_no_longer_re_exports_the_workflow_vocabulary() {
 
 /// AC4/AC5 — `changeset.rs` becomes a directory, with the PR-stack model in its own module.
 ///
-/// The file held **two unrelated data models**: `Stack`/`StackNode` at 44–277 and `Changeset` from
+/// The file held **two unrelated data models**: `WorkQueue`/`WorkItem` at 44–277 and `Changeset` from
 /// 278. `#carve` 9/9 needs the first as its own module.
 #[test]
 fn the_changeset_splits_into_its_four_concerns() {

@@ -4,8 +4,8 @@
 //! builds on which, `parents`) and the reading order (how the operator wants the list laid out).
 //! Deriving the second from the first means every merge, repoint and re-parenting silently
 //! rewrites the operator's view — a row jumps under the cursor as a consequence of an event that
-//! has nothing to do with it. `StackNode.display_order` separates them: it is persisted, it is
-//! assigned once, and the only thing that changes it is [`move_planned_pr_node`].
+//! has nothing to do with it. `WorkItem.display_order` separates them: it is persisted, it is
+//! assigned once, and the only thing that changes it is [`move_work_item`].
 //!
 //! The rules pinned here are all *absences* as much as effects. Adding a node appends and renumbers
 //! nothing above it. Deleting a node leaves the survivors' numbers alone — a gap is harmless in a
@@ -25,10 +25,10 @@ mod common;
 use std::path::Path;
 
 use common::{a_planned_node, assert_rejected, node_ids, parents_of, stack_of, write_stack};
-use tddy_core::changeset::StackNode;
-use tddy_pr_stack::stack_ops::{
-    add_planned_pr_node, adopt_pr_as_stack_node, delete_planned_pr_node, move_planned_pr_node,
-    update_planned_pr_node, AddPlannedPrInput, AdoptedPrFacts, UpdatePlannedPrInput,
+use tddy_core::changeset::WorkItem;
+use tddy_work_queue::item_ops::{
+    add_work_item, adopt_pr_as_stack_node, delete_work_item, move_work_item, update_work_item,
+    AddWorkItemInput, AdoptedPrFacts, UpdateWorkItemInput,
 };
 
 const UP: &str = "up";
@@ -37,23 +37,23 @@ const DOWN: &str = "down";
 // --- builders ---------------------------------------------------------------
 
 /// The same node, at a stated position in the reading order.
-fn at_order(node: StackNode, display_order: u32) -> StackNode {
-    StackNode {
+fn at_order(node: WorkItem, display_order: u32) -> WorkItem {
+    WorkItem {
         display_order: Some(display_order),
         ..node
     }
 }
 
 /// The same node as a plan written before this feature existed recorded it: no position at all.
-fn unnumbered(node: StackNode) -> StackNode {
-    StackNode {
+fn unnumbered(node: WorkItem) -> WorkItem {
+    WorkItem {
         display_order: None,
         ..node
     }
 }
 
-fn an_added_pr(title: &str, parents: &[&str]) -> AddPlannedPrInput {
-    AddPlannedPrInput {
+fn an_added_pr(title: &str, parents: &[&str]) -> AddWorkItemInput {
+    AddWorkItemInput {
         title: title.to_string(),
         description: format!("{title} description"),
         branch_suggestion: Some(format!("feature/stack/{title}")),
@@ -99,7 +99,7 @@ fn order_of(dir: &Path, node_id: &str) -> Option<u32> {
 #[test]
 fn an_added_planned_pr_lands_at_the_bottom_of_the_order() {
     // Given — a two-row stack, numbered 0 and 1
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -110,7 +110,7 @@ fn an_added_planned_pr_lands_at_the_bottom_of_the_order() {
     );
 
     // When
-    let added = add_planned_pr_node(dir, an_added_pr("a third PR", &["n2"]))
+    let added = add_work_item(dir, an_added_pr("a third PR", &["n2"]))
         .expect("appending a planned PR should succeed");
 
     // Then — it reads below both, never between them
@@ -120,7 +120,7 @@ fn an_added_planned_pr_lands_at_the_bottom_of_the_order() {
 #[test]
 fn adding_a_planned_pr_never_renumbers_the_rows_above_it() {
     // Given — a stack whose numbering already has a gap in it, left by an earlier delete
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -131,7 +131,7 @@ fn adding_a_planned_pr_never_renumbers_the_rows_above_it() {
     );
 
     // When
-    let added = add_planned_pr_node(dir, an_added_pr("a third PR", &["n2"]))
+    let added = add_work_item(dir, an_added_pr("a third PR", &["n2"]))
         .expect("appending a planned PR should succeed");
 
     // Then — the new row takes one past the highest, and the gap above it is left exactly as it was
@@ -145,7 +145,7 @@ fn adding_a_planned_pr_never_renumbers_the_rows_above_it() {
 #[test]
 fn an_adopted_pr_lands_at_the_bottom_of_the_order() {
     // Given — a two-row stack, and a pull request the stack does not yet track
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -175,7 +175,7 @@ fn a_legacy_stack_is_numbered_on_the_next_write_in_topological_order() {
     // Given — a chain n1 <- n2 <- n3 written before display order existed, and stored in the `nodes`
     // array in reverse: the array has never been ordered by anything, so it must not be the source
     // the numbering is taken from.
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -187,9 +187,9 @@ fn a_legacy_stack_is_numbered_on_the_next_write_in_topological_order() {
     );
 
     // When — a write about something else entirely: an edit to one node's title
-    update_planned_pr_node(
+    update_work_item(
         dir,
-        UpdatePlannedPrInput {
+        UpdateWorkItemInput {
             node_id: "n2".to_string(),
             title: Some("a clearer title".to_string()),
             description: None,
@@ -214,7 +214,7 @@ fn a_legacy_stack_of_independent_rows_is_numbered_in_the_order_they_were_declare
     // them is ready at once, and the web places ready rows in declaration order — so `n1, n2, n10`
     // is the list the operator has been looking at all along. Sorted by node id it reads `n1, n10,
     // n2`, which is what a lexicographic tie-break would freeze into the numbers.
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -226,9 +226,9 @@ fn a_legacy_stack_of_independent_rows_is_numbered_in_the_order_they_were_declare
     );
 
     // When — a write about something else entirely
-    update_planned_pr_node(
+    update_work_item(
         dir,
-        UpdatePlannedPrInput {
+        UpdateWorkItemInput {
             node_id: "n2".to_string(),
             title: Some("a clearer title".to_string()),
             description: None,
@@ -249,7 +249,7 @@ fn a_legacy_stack_of_independent_rows_is_numbered_in_the_order_they_were_declare
 #[test]
 fn deleting_a_row_leaves_the_orders_of_the_survivors_alone() {
     // Given — three numbered rows
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -261,7 +261,7 @@ fn deleting_a_row_leaves_the_orders_of_the_survivors_alone() {
     );
 
     // When — the middle one is removed from the plan
-    delete_planned_pr_node(dir, "n2").expect("deleting a planned node should succeed");
+    delete_work_item(dir, "n2").expect("deleting a planned node should succeed");
 
     // Then — the survivors keep the positions they had. A gap is harmless in a sort key; closing it
     // would move a row the operator never touched.
@@ -272,7 +272,7 @@ fn deleting_a_row_leaves_the_orders_of_the_survivors_alone() {
 #[test]
 fn moving_a_row_up_swaps_it_with_the_row_above_it() {
     // Given
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -284,7 +284,7 @@ fn moving_a_row_up_swaps_it_with_the_row_above_it() {
     );
 
     // When
-    move_planned_pr_node(dir, "n3", UP).expect("moving a row up should succeed");
+    move_work_item(dir, "n3", UP).expect("moving a row up should succeed");
 
     // Then — exactly one pair swapped
     assert_eq!(
@@ -296,7 +296,7 @@ fn moving_a_row_up_swaps_it_with_the_row_above_it() {
 #[test]
 fn moving_a_row_down_swaps_it_with_the_row_below_it() {
     // Given
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -308,7 +308,7 @@ fn moving_a_row_down_swaps_it_with_the_row_below_it() {
     );
 
     // When
-    move_planned_pr_node(dir, "n1", DOWN).expect("moving a row down should succeed");
+    move_work_item(dir, "n1", DOWN).expect("moving a row down should succeed");
 
     // Then
     assert_eq!(
@@ -320,7 +320,7 @@ fn moving_a_row_down_swaps_it_with_the_row_below_it() {
 #[test]
 fn moving_the_first_row_up_changes_nothing() {
     // Given
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -331,7 +331,7 @@ fn moving_the_first_row_up_changes_nothing() {
     );
 
     // When — moving past the top edge is the control being inert, not the caller being wrong
-    move_planned_pr_node(dir, "n1", UP).expect("moving past the top edge should succeed");
+    move_work_item(dir, "n1", UP).expect("moving past the top edge should succeed");
 
     // Then
     assert_eq!(orders_of(dir, &["n1", "n2"]), vec![Some(0), Some(1)]);
@@ -340,7 +340,7 @@ fn moving_the_first_row_up_changes_nothing() {
 #[test]
 fn moving_the_last_row_down_changes_nothing() {
     // Given
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -351,7 +351,7 @@ fn moving_the_last_row_down_changes_nothing() {
     );
 
     // When
-    move_planned_pr_node(dir, "n2", DOWN).expect("moving past the bottom edge should succeed");
+    move_work_item(dir, "n2", DOWN).expect("moving past the bottom edge should succeed");
 
     // Then
     assert_eq!(orders_of(dir, &["n1", "n2"]), vec![Some(0), Some(1)]);
@@ -360,7 +360,7 @@ fn moving_the_last_row_down_changes_nothing() {
 #[test]
 fn moving_a_row_leaves_the_dependency_graph_untouched() {
     // Given — a chain, so a reordering that touched `parents` would be visible
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -372,7 +372,7 @@ fn moving_a_row_leaves_the_dependency_graph_untouched() {
     );
 
     // When — n3 is read above n2, while still building on it
-    move_planned_pr_node(dir, "n3", UP).expect("moving a row up should succeed");
+    move_work_item(dir, "n3", UP).expect("moving a row up should succeed");
 
     // Then — the reading order moved and the DAG did not. This is the whole reason the field exists:
     // where a row reads and what it builds on are independent facts.
@@ -388,7 +388,7 @@ fn moving_a_row_leaves_the_dependency_graph_untouched() {
 #[test]
 fn moving_a_row_in_a_direction_that_is_neither_up_nor_down_is_refused_without_writing() {
     // Given — a stack whose order a bad direction must not disturb
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -400,7 +400,7 @@ fn moving_a_row_in_a_direction_that_is_neither_up_nor_down_is_refused_without_wr
 
     // When — a direction no control on the panel sends: a stale client, or a caller that is not the
     // web at all
-    let result = move_planned_pr_node(dir, "n2", "sideways");
+    let result = move_work_item(dir, "n2", "sideways");
 
     // Then — refused by name rather than silently treated as one of the two real directions, which
     // would move a row in a direction nobody asked for
@@ -411,7 +411,7 @@ fn moving_a_row_in_a_direction_that_is_neither_up_nor_down_is_refused_without_wr
 #[test]
 fn moving_an_unknown_node_is_refused_without_writing() {
     // Given — a stack with no node called n9
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -422,7 +422,7 @@ fn moving_an_unknown_node_is_refused_without_writing() {
     );
 
     // When
-    let result = move_planned_pr_node(dir, "n9", UP);
+    let result = move_work_item(dir, "n9", UP);
 
     // Then — refused by name, and the order on disk is exactly what it was
     assert_rejected(result).with_reason_containing("n9");

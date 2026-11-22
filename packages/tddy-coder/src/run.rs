@@ -619,17 +619,17 @@ pub struct Args {
 
     /// Orchestrating session id when this session is a child in a PR stack.
     /// Sets orchestrator_session_id on the child's changeset.
-    pub stack_parent: Option<String>,
+    pub work_queue_parent: Option<String>,
 
     /// The orchestrator's planned node this session materializes, when the surface that started it
     /// knew which one (D34). Published in the participant's `session` metadata block, which is how
     /// a PR-Stack view on another host recognizes this session as that node's child at all.
-    pub stack_node_id: Option<String>,
+    pub work_item_id: Option<String>,
 
     /// Base-branch source session id for this stack child.
-    /// Defaults to stack_parent when omitted.
+    /// Defaults to work_queue_parent when omitted.
     /// Sets `previous_session_id`. TODO: wire worktree integration base via spawn_chain_child_worktree.
-    pub stack_base: Option<String>,
+    pub work_item_base: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -853,19 +853,19 @@ pub struct CoderArgs {
     /// Orchestrating session id when this session is a child in a PR stack.
     /// Sets orchestrator_session_id on the child's changeset.
     #[arg(long)]
-    pub stack_parent: Option<String>,
+    pub work_queue_parent: Option<String>,
 
     /// The orchestrator's planned node this session materializes (D34). Published in the
     /// participant's `session` metadata block, which is how a PR-Stack view on another host
     /// recognizes this session as that node's child.
     #[arg(long)]
-    pub stack_node_id: Option<String>,
+    pub work_item_id: Option<String>,
 
     /// Base-branch source session id for this stack child.
-    /// Defaults to stack_parent when omitted.
+    /// Defaults to work_queue_parent when omitted.
     /// Sets `previous_session_id`. TODO: wire worktree integration base via spawn_chain_child_worktree.
     #[arg(long)]
-    pub stack_base: Option<String>,
+    pub work_item_base: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -1104,9 +1104,9 @@ impl From<CoderArgs> for Args {
             remote_daemon_url: a.remote_daemon_url,
             remote_session_token: a.remote_session_token,
             remote_daemon_id: a.remote_daemon_id,
-            stack_parent: a.stack_parent,
-            stack_node_id: a.stack_node_id,
-            stack_base: a.stack_base,
+            work_queue_parent: a.work_queue_parent,
+            work_item_id: a.work_item_id,
+            work_item_base: a.work_item_base,
         }
     }
 }
@@ -1162,9 +1162,9 @@ impl From<DemoArgs> for Args {
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
-            stack_parent: None,
-            stack_node_id: None,
-            stack_base: None,
+            work_queue_parent: None,
+            work_item_id: None,
+            work_item_base: None,
         }
     }
 }
@@ -1498,7 +1498,7 @@ pub fn run_with_args(
                 .unwrap_or_else(|| crate::default_unspecified_workflow_recipe_cli_name())
                 .to_string(),
         ),
-        orchestrator_session_id: args.stack_parent.clone(),
+        orchestrator_session_id: args.work_queue_parent.clone(),
         ..tddy_core::changeset::Changeset::default()
     };
     tddy_core::changeset::write_changeset(&session_dir, &init_cs)
@@ -1511,7 +1511,7 @@ pub fn run_with_args(
             pid: Some(std::process::id()),
             tool: std::env::args().next(),
             livekit_room: None,
-            previous_session_id: args.stack_base.clone(),
+            previous_session_id: args.work_item_base.clone(),
             session_type: Some(declared_tool_session_type(args)?),
             model: None,
 
@@ -1787,7 +1787,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
                 pid: Some(std::process::id()),
                 tool: std::env::args().next(),
                 livekit_room: args.livekit_room.clone(),
-                previous_session_id: args.stack_base.clone(),
+                previous_session_id: args.work_item_base.clone(),
                 session_type: Some(declared_tool_session_type(args)?),
                 model: None,
 
@@ -2022,8 +2022,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
                 // PR-Stack view on another host joins this session's synthesized row onto its
                 // planned node with — presence is the only cross-host signal it has (D37).
                 session_id: args.session_id.clone().unwrap_or_default(),
-                orchestrator_session_id: args.stack_parent.clone().unwrap_or_default(),
-                stack_node_id: args.stack_node_id.clone().unwrap_or_default(),
+                orchestrator_session_id: args.work_queue_parent.clone().unwrap_or_default(),
+                work_item_id: args.work_item_id.clone().unwrap_or_default(),
                 // The branch is read from the changeset the session start just wrote rather than
                 // from git: it is the branch this session *owns*, which is the one a planned node
                 // records, and a detached or later-switched HEAD would answer a different question.
@@ -3786,7 +3786,7 @@ fn run_plan_bootstrap_in_session_dir(
                 .unwrap_or_else(|| crate::default_unspecified_workflow_recipe_cli_name())
                 .to_string(),
         ),
-        orchestrator_session_id: args.stack_parent.clone(),
+        orchestrator_session_id: args.work_queue_parent.clone(),
         ..tddy_core::changeset::Changeset::default()
     };
     tddy_core::changeset::write_changeset(session_dir, &init_cs)
@@ -3799,7 +3799,7 @@ fn run_plan_bootstrap_in_session_dir(
             pid: Some(std::process::id()),
             tool: std::env::args().next(),
             livekit_room: None,
-            previous_session_id: args.stack_base.clone(),
+            previous_session_id: args.work_item_base.clone(),
             session_type: Some(declared_tool_session_type(args)?),
             model: None,
 
@@ -4111,9 +4111,9 @@ mod resume_session_config_tests {
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
-            stack_parent: None,
-            stack_node_id: None,
-            stack_base: None,
+            work_queue_parent: None,
+            work_item_id: None,
+            work_item_base: None,
         };
 
         merge_session_coder_config_for_resume(&mut args, &tmp).expect("merge");
@@ -4185,9 +4185,9 @@ mod resume_session_identity_tests {
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
-            stack_parent: None,
-            stack_node_id: None,
-            stack_base: None,
+            work_queue_parent: None,
+            work_item_id: None,
+            work_item_base: None,
         };
 
         assign_default_session_id(&mut args);
@@ -4260,9 +4260,9 @@ mod session_dir_sync_tests {
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
-            stack_parent: None,
-            stack_node_id: None,
-            stack_base: None,
+            work_queue_parent: None,
+            work_item_id: None,
+            work_item_base: None,
         };
 
         sync_session_dir_from_args(&mut args, &tmp).expect("apply");
@@ -4351,9 +4351,9 @@ mod changeset_agent_resume_tests {
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
-            stack_parent: None,
-            stack_node_id: None,
-            stack_base: None,
+            work_queue_parent: None,
+            work_item_id: None,
+            work_item_base: None,
         };
 
         apply_agent_from_changeset_if_needed(&mut args).expect("apply");
@@ -4459,9 +4459,9 @@ mod post_tui_workflow_exit_tests {
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
-            stack_parent: None,
-            stack_node_id: None,
-            stack_base: None,
+            work_queue_parent: None,
+            work_item_id: None,
+            work_item_base: None,
         }
     }
 

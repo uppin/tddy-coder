@@ -67,7 +67,6 @@ pub mod session_worktree_observer;
 pub mod slot_files_over_shell;
 pub mod spec_launch;
 pub mod split_session_pointers;
-pub mod stack_parent;
 mod start_cut_branch;
 pub mod start_deadline;
 pub mod start_keepalive;
@@ -100,6 +99,7 @@ pub mod tool_session_route;
 pub mod tool_session_spawn;
 pub mod tool_spawn_plan;
 pub mod usage_context;
+pub mod work_queue_parent;
 pub mod workspace_branch_start;
 pub mod worktree_source;
 

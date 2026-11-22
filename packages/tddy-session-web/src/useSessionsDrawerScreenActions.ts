@@ -1,11 +1,11 @@
 import { create } from "@bufbuild/protobuf";
 import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
-import type { ProjectStackSummary } from "tddy-client-web/gen/pr_stack_pb";
+import type { WorkQueueSummary } from "tddy-client-web/gen/work_queue_pb";
 import {
   sessionsDrawerPathForSession,
   sessionsProjectNewPath,
   sessionsProjectSettingsPath,
-  sessionsProjectStackPath,
+  sessionsProjectQueuePath,
   SESSIONS_DRAWER_ROUTE,
   SESSIONS_NEW_ROUTE,
 } from "tddy-client-web";
@@ -14,7 +14,7 @@ import type { HostConnection } from "tddy-client-web/connections/types";
 import { requestSessionsRefresh } from "./lib/sessionsRefreshBridge";
 import { useEnsureProjectHome } from "./useEnsureProjectHome";
 import type { useProjectHomeSetup } from "./useProjectHomeSetup";
-import type { ProjectStackAddress } from "tddy-prstack-web";
+import type { WorkQueueAddress } from "tddy-workqueue-web";
 
 /**
  * The sessions drawer screen's actions (`#orchestrators` 12/12, B10): navigation and creation
@@ -24,7 +24,7 @@ export function useSessionsDrawerScreenActions(input: {
   navigate: (path: string) => void;
   isMobile: boolean;
   setSessionListOpen: (open: boolean) => void;
-  setStackAddress: (address: ProjectStackAddress) => void;
+  setStackAddress: (address: WorkQueueAddress) => void;
   setUnknownSession: (unknown: boolean) => void;
   addOptimisticSession: (entry: import("tddy-client-web/gen/session_pb").SessionEntry) => void;
   selectedInstanceId: string | null;
@@ -98,15 +98,15 @@ export function useSessionsDrawerScreenActions(input: {
     if (isMobile) setSessionListOpen(false);
     navigate(sessionsProjectNewPath(projectId));
   };
-  const handleOpenProjectStack = (summary: ProjectStackSummary) => {
+  const handleOpenProjectStack = (summary: WorkQueueSummary) => {
     if (!summary.address) return;
     setStackAddress({
       projectId: summary.address.projectId,
-      stackId: summary.address.stackId,
+      queueId: summary.address.queueId,
       daemonInstanceId: summary.address.daemonInstanceId,
     });
     if (isMobile) setSessionListOpen(false);
-    navigate(sessionsProjectStackPath(summary.address.projectId, summary.address.stackId));
+    navigate(sessionsProjectQueuePath(summary.address.projectId, summary.address.queueId));
   };
   const handleCancelCreate = () => navigate(SESSIONS_DRAWER_ROUTE);
   const handleSessionCreated = (sessionId: string) => {

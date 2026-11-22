@@ -19,17 +19,17 @@ import React from "react";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -51,8 +51,8 @@ const PROJECT: Partial<ProjectEntry> = {
 };
 
 /** A planned PR that owns no branch and records no session — the row this feature is about. */
-const A_BRANCHLESS_NODE: StackNodeFixture = aPlannedNode({
-  nodeId: "n1",
+const A_BRANCHLESS_NODE: WorkItemFixture = aPlannedNode({
+  itemId: "n1",
   title: "Start-session attachment proto",
   branchSuggestion: PLANNED_BRANCH,
 });
@@ -84,7 +84,7 @@ const A_PR_LOOKUP_THAT_FAILED: BranchResolutionFixture = {
   },
 };
 
-function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry> {
+function anOrchestratorSession(nodes: WorkItemFixture[]): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-08-30T09:00:00Z",
@@ -93,7 +93,7 @@ function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry>
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, nodes),
+    workQueueJson: aWorkQueueJson(1, nodes),
   };
 }
 
@@ -105,12 +105,12 @@ function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry>
  * twice — or a hook that stopped running — would read another scenario's calls as its own.
  */
 function openPrStackScreen(
-  nodes: StackNodeFixture[],
+  nodes: WorkItemFixture[],
   resolutionByBranch: Record<string, BranchResolutionFixture>,
 ): string[] {
   const queriedBranches: string[] = [];
   const backend = aSessionsDrawerBackend([anOrchestratorSession(nodes)])
-    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) => {
+    .onUnary(WorkQueueService.method.queryBranch, (req: { branch: string }) => {
       queriedBranches.push(req.branch);
       return aBranchResolutionResponse(resolutionByBranch[req.branch] ?? { branch: req.branch });
     })
@@ -192,7 +192,7 @@ it("keeps naming the branch as planned rather than owned when only a PR was foun
 it("does not let a PR on a planned name unblock a dependent node", () => {
   // Given — n2 waits on n1's branch; n1 has a PR on its planned name and no branch
   const dependent = aPlannedNode({
-    nodeId: "n2",
+    itemId: "n2",
     title: "Copy attachments during StartSession",
     branchSuggestion: "feature/attach-docs/attach-start",
     parents: ["n1"],
@@ -226,13 +226,13 @@ it("shows a PR found for an owned branch only on the node that owns it", () => {
   // Given — n1 created the branch; n2 is branchless and still plans that very name, so both rows
   // would read the same resolution if the row took whichever answer arrived under that name
   const owner = aPlannedNode({
-    nodeId: "n1",
+    itemId: "n1",
     title: "Start-session attachment proto",
     branch: PLANNED_BRANCH,
     sessionId: "child-n1",
   });
   const stillPlanningTheSameName = aPlannedNode({
-    nodeId: "n2",
+    itemId: "n2",
     title: "Copy attachments during StartSession",
     branchSuggestion: PLANNED_BRANCH,
   });

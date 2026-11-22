@@ -2,7 +2,7 @@
  * Acceptance tests: each planned-PR row states how its branch stands against its base.
  *
  * `has-conflicts` exists as an internal-status kind but is never derived — only an agent calling
- * `pr_resolve_conflicts` or `pr_set_status` ever sets it, so in the normal case (the orchestrator
+ * `work_item_resolve_conflicts` or `work_item_set_status` ever sets it, so in the normal case (the orchestrator
  * idle, the operator looking at the panel) the badge is absent or stale. The comparison is now
  * resolved server-side on the same branch poll, so it is live whether or not the agent is running.
  *
@@ -22,17 +22,17 @@ import React from "react";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -47,11 +47,11 @@ const ROOT_BRANCH = "feature/auth/token-store";
 const CHILD_BRANCH = "feature/auth/middleware";
 
 /** A root off the project default, and a node stacked on it. Both own branches. */
-function aTwoNodeStack(): StackNodeFixture[] {
+function aTwoNodeStack(): WorkItemFixture[] {
   return [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: ROOT_BRANCH }),
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: ROOT_BRANCH }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Add auth middleware",
       branch: CHILD_BRANCH,
       parents: ["n1"],
@@ -59,7 +59,7 @@ function aTwoNodeStack(): StackNodeFixture[] {
   ];
 }
 
-function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
+function anOrchestratorSession(workQueueJson: string): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-08-01T09:00:00Z",
@@ -68,7 +68,7 @@ function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
@@ -82,15 +82,15 @@ const PROJECT: Partial<ProjectEntry> = {
 };
 
 interface MountOptions {
-  nodes?: StackNodeFixture[];
+  nodes?: WorkItemFixture[];
   resolutionByBranch?: Record<string, BranchResolutionFixture>;
 }
 
 function aPrStackBackend(opts: MountOptions) {
   return aSessionsDrawerBackend([
-    anOrchestratorSession(aStackPlanJson(1, opts.nodes ?? aTwoNodeStack())),
+    anOrchestratorSession(aWorkQueueJson(1, opts.nodes ?? aTwoNodeStack())),
   ])
-    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(WorkQueueService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(
         opts.resolutionByBranch?.[req.branch] ?? { branch: req.branch },
       ),
@@ -108,9 +108,9 @@ function openPrStackScreen(opts: MountOptions = {}) {
 /** Open the screen with a `QueryBranch` that never answers — no comparison ever arrives. */
 function openPrStackScreenWithUnansweredResolution() {
   const backend = aSessionsDrawerBackend([
-    anOrchestratorSession(aStackPlanJson(1, aTwoNodeStack())),
+    anOrchestratorSession(aWorkQueueJson(1, aTwoNodeStack())),
   ])
-    .onUnary(PrStackService.method.queryBranch, () => new Promise<never>(() => undefined))
+    .onUnary(WorkQueueService.method.queryBranch, () => new Promise<never>(() => undefined))
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 
@@ -284,7 +284,7 @@ it("shows no base status while the branch resolution has not arrived", () => {
   openPrStackScreenWithUnansweredResolution();
 
   // Then — the row renders, and says nothing it does not know
-  prStackScreenPage.plannedPrRow("n2").should("exist");
+  prStackScreenPage.workItemRow("n2").should("exist");
   prStackScreenPage.baseInSync("n2").should("not.exist");
   prStackScreenPage.baseBehind("n2").should("not.exist");
   prStackScreenPage.baseConflicts("n2").should("not.exist");
@@ -337,7 +337,7 @@ it("asks QueryBranch to compare a stacked node's branch against its predecessor'
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(PrStackService.method.queryBranch);
+    const calls = b.callsTo(WorkQueueService.method.queryBranch);
     const forChild = calls.find((c: { branch: string }) => c.branch === CHILD_BRANCH);
     expect(forChild, `a QueryBranch call for ${CHILD_BRANCH}`).to.exist;
     expect(forChild.baseBranch).to.equal(ROOT_BRANCH);
@@ -351,7 +351,7 @@ it("asks QueryBranch to compare a root node's branch against the project's defau
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(PrStackService.method.queryBranch);
+    const calls = b.callsTo(WorkQueueService.method.queryBranch);
     const forRoot = calls.find((c: { branch: string }) => c.branch === ROOT_BRANCH);
     expect(forRoot, `a QueryBranch call for ${ROOT_BRANCH}`).to.exist;
     expect(forRoot.baseBranch).to.equal(DEFAULT_BRANCH);

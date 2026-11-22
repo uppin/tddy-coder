@@ -1,0 +1,363 @@
+//! The PR-stack plan and read tools ([`tddy_tool_engine::work_queue_tools`]) answered on this daemon
+//! (`#orchestrators` 7/11).
+//!
+//! A stack tool is routed here from `run_locally`, ahead of the local runner, as the project-home
+//! tools are. The caller is classified from its own records ([`work_queue_caller_of`]), by role alone:
+//! an orchestrator-role session (its changeset's `queue_id` being its own, default stack), or a
+//! session bound to a node of a stack. No recipe is read (developer, 2026-11-14). A
+//! session with none of those roles, or calling a tool its role is not offered, is refused as
+//! permission denied. A call whose `daemon_instance_id` names another host is forwarded whole to
+//! that host, which serves it for its own stacks once the caller's owner confirms the caller, one
+//! hop as the project-home tools are (`project_home_remote`).
+//!
+//! The work is [`DaemonStackTools`]: the host's [`WorkQueueStore`] (`<sessions base>/projects`),
+//! `tddy_work_queue`'s stack operations and PR reads over it, and GitHub reached as the **project's
+//! account** — the token the project row's assignment (or its Local gh) resolves, never the calling
+//! session's, which a read-only session does not have.
+//!
+//! Feature doc: docs/ft/coder/pr-stacking.md § PR-management tools.
+//! PRD: docs/ft/coder/1-WIP/PRD-2026-11-10-stack-plan-tools.md.
+
+mod github;
+mod ops;
+mod shape;
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use serde_json::Value;
+use tddy_core::changeset::WorkQueue;
+use tddy_core::work_queue_store::{WorkQueueRecord, WorkQueueStore};
+use tddy_github::pr_api::{GithubPrApi, GithubPrInsightApi, RealGithubPrApi};
+use tddy_host_service::GithubCli;
+use tddy_rpc::Status;
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
+use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
+use tddy_tool_engine::work_queue_tools::{
+    execute_stack_tool, is_stack_tool_offered_to, WorkQueueCaller, WorkQueueOp, WorkQueueScope,
+    WorkQueueToolPort,
+};
+use tddy_tool_engine::ToolOutcome;
+
+use super::project_home::caller::record_call;
+use super::ExecToolRpcHandler;
+use github::GithubSource;
+use ops::OpEnv;
+
+/// A GitHub client a stack tool calls through: the lifecycle operations and the reads, for one
+/// repository, authenticated as one account.
+pub trait WorkQueueGithub: GithubPrApi + GithubPrInsightApi {}
+
+impl<T: GithubPrApi + GithubPrInsightApi + ?Sized> WorkQueueGithub for T {}
+
+/// How the stack tools reach GitHub: a client for a project's repository, authenticated as the
+/// project account's token. The daemon's own is [`RealWorkQueueGithubClients`]; a suite attaches
+/// another with [`RpcHandlers::attach_stack_github`](crate::RpcHandlers::attach_stack_github).
+pub trait WorkQueueGithubClients: Send + Sync {
+    /// A client for `repo` (`owner/repo`) sending `token` — the project account's.
+    fn client_for(&self, repo: &str, token: &str) -> Box<dyn WorkQueueGithub>;
+}
+
+/// The GitHub REST API itself.
+pub struct RealWorkQueueGithubClients;
+
+impl WorkQueueGithubClients for RealWorkQueueGithubClients {
+    fn client_for(&self, repo: &str, token: &str) -> Box<dyn WorkQueueGithub> {
+        Box::new(RealGithubPrApi::with_token(repo, token))
+    }
+}
+
+/// The stack role of `session_id` on this host, read from its `.session.yaml` role, its changeset's
+/// `queue_id` and `orchestrator_session_id`, and —
+/// for a session that names an orchestrator — that orchestrator's stack record; `None` for a session
+/// offered no stack tool. A session whose records cannot be read is refused: its role cannot be
+/// known.
+pub(super) fn work_queue_caller_of(
+    sessions_base: &Path,
+    session_id: &str,
+) -> Result<Option<WorkQueueCaller>, Status> {
+    tddy_tool_engine::work_queue_tools::caller_records::work_queue_caller_from_records(
+        sessions_base,
+        session_id,
+    )
+    .map_err(|e| Status::permission_denied(format!("the stack tools are refused: {e}")))
+}
+
+impl ExecToolRpcHandler {
+    /// Serve `req`'s stack tool: classify the caller, refuse a caller its role does not entitle,
+    /// forward a call naming another host, else run it on this host's stacks and record the call.
+    pub(super) async fn run_stack_tool(
+        &self,
+        req: &ExecuteToolRequest,
+        sessions_base: &Path,
+    ) -> Result<ExecuteToolResponse, Status> {
+        let tool = &req.tool_name;
+        let caller = work_queue_caller_of(sessions_base, &req.session_id)?.ok_or_else(|| {
+            Status::permission_denied(format!(
+                "tool {tool} is served only to an orchestrator session, or a session bound to a \
+                 node of its orchestrator's stack"
+            ))
+        })?;
+        if !is_stack_tool_offered_to(&caller.role, tool) {
+            return Err(Status::permission_denied(format!(
+                "tool {tool} is not offered to a session bound to a node of a stack: it may read \
+                 its stack's status and its pull requests only"
+            )));
+        }
+        let response = match self.served_on_target_host(req).await? {
+            Some(answered) => answered,
+            None => {
+                let os_user = self.os_user_of(&req.session_token)?;
+                let port = self.work_queue_tool_port(req, os_user, sessions_base);
+                response_of(execute_stack_tool(&port, &caller, tool, &req.args_json).await)
+            }
+        };
+        record_call(sessions_base, req, &response);
+        Ok(response)
+    }
+
+    /// Serve a stack tool called by a session another host holds — forwarded here by that host,
+    /// which holds the stack's owner's side of the call — once the daemon that owns the session has
+    /// confirmed it holds an orchestrator role. Such a caller owns no stack here, so a call must name
+    /// the stack it acts on.
+    pub(super) async fn serve_stack_tool_for_caller_held_elsewhere(
+        &self,
+        req: &ExecuteToolRequest,
+        caller: WorkQueueCaller,
+        os_user: String,
+        sessions_base: &Path,
+    ) -> ExecuteToolResponse {
+        let port = self.work_queue_tool_port(req, os_user, sessions_base);
+        response_of(execute_stack_tool(&port, &caller, &req.tool_name, &req.args_json).await)
+    }
+
+    /// [`DaemonStackTools`] over this host for `req`'s caller, whose sessions are `os_user`'s in
+    /// `sessions_base`.
+    pub(super) fn work_queue_tool_port(
+        &self,
+        req: &ExecuteToolRequest,
+        os_user: String,
+        sessions_base: &Path,
+    ) -> DaemonStackTools {
+        DaemonStackTools {
+            store: WorkQueueStore::new(sessions_base.join("projects")),
+            sessions_base: sessions_base.to_path_buf(),
+            os_user,
+            daemon_instance_id: tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(
+                &self.config,
+            ),
+            identity: SessionAccountAccess::new(
+                self.project_home_host.credential_vaults.clone(),
+                self.user_resolver.clone(),
+                &req.session_token,
+            ),
+            github_cli: self.project_home_host.github_cli.clone(),
+            github: self
+                .project_home_host
+                .work_queue_github
+                .get()
+                .cloned()
+                .unwrap_or_else(|| Arc::new(RealWorkQueueGithubClients)),
+        }
+    }
+}
+
+/// The answer a tool's outcome is on the wire.
+fn response_of(outcome: ToolOutcome) -> ExecuteToolResponse {
+    ExecuteToolResponse {
+        result_json: outcome.result_json,
+        is_error: outcome.is_error,
+        error_message: outcome.error_message,
+        job_id: outcome.job_id,
+        job_running: outcome.job_running,
+    }
+}
+
+/// [`WorkQueueToolPort`] over this host's stacks, for one caller.
+pub(super) struct DaemonStackTools {
+    /// This host's stacks, `<sessions base>/projects/<project_id>/stacks/<queue_id>.yaml`.
+    store: WorkQueueStore,
+    /// The caller's sessions, where a node's child session is read.
+    sessions_base: PathBuf,
+    os_user: String,
+    /// This host, as the eligible-daemon roster names it.
+    daemon_instance_id: String,
+    /// The signed-in person's vault, which the project's assigned GitHub account is read from.
+    identity: SessionAccountAccess,
+    /// The `gh` a Local gh project's token is asked of.
+    github_cli: GithubCli,
+    github: Arc<dyn WorkQueueGithubClients>,
+}
+
+#[async_trait]
+impl WorkQueueToolPort for DaemonStackTools {
+    fn daemon_instance_id(&self) -> String {
+        self.daemon_instance_id.clone()
+    }
+
+    async fn list_stacks(&self, project_id: &str) -> Result<Vec<WorkQueueRecord>, String> {
+        self.store.list(project_id).map_err(|e| e.to_string())
+    }
+
+    async fn create_stack(
+        &self,
+        caller: &WorkQueueCaller,
+        title: Option<&str>,
+    ) -> Result<WorkQueueRecord, String> {
+        // Never the caller's own stack: its changeset is not touched.
+        self.store
+            .create_titled(
+                &caller.project_id,
+                &caller.session_id,
+                title.map(str::to_string),
+                WorkQueue {
+                    version: 1,
+                    nodes: Vec::new(),
+                },
+            )
+            .map_err(|e| e.to_string())
+    }
+
+    async fn run_stack_op(&self, scope: &WorkQueueScope, op: WorkQueueOp) -> Result<Value, String> {
+        let env = OpEnv {
+            store: self.store.clone(),
+            project_id: scope.project_id.clone(),
+            queue_id: scope.queue_id.clone(),
+            sessions_base: self.sessions_base.clone(),
+        };
+        let github = GithubSource {
+            projects_dir: self.store.projects_dir().to_path_buf(),
+            project_id: scope.project_id.clone(),
+            os_user: self.os_user.clone(),
+            identity: self.identity.clone(),
+            github_cli: self.github_cli.clone(),
+            clients: Arc::clone(&self.github),
+        };
+        // The store's locks, git and GitHub are all blocking.
+        tokio::task::spawn_blocking(move || ops::run(&env, &github, op))
+            .await
+            .map_err(|e| format!("the stack operation failed to finish: {e}"))?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use tddy_changeset::work_queue_fixtures::{a_stack_host, queue_id_of, A_PROJECT};
+    use tddy_core::changeset::{Changeset, WorkItem, WorkQueue};
+    use tddy_tool_engine::work_queue_tools::WorkQueueCallerRole;
+
+    use super::*;
+
+    fn a_stack_planning(child: Option<&str>) -> WorkQueue {
+        WorkQueue {
+            version: 1,
+            nodes: vec![WorkItem {
+                node_id: "n1".to_string(),
+                title: "Store".to_string(),
+                session_id: child.map(str::to_string),
+                ..WorkItem::default()
+            }],
+        }
+    }
+
+    fn with_role(dir: &Path, role: &str) {
+        let mut meta = tddy_core::read_session_metadata(dir).unwrap();
+        meta.session_role = Some(role.to_string());
+        tddy_core::session_metadata::write_session_metadata(dir, &meta).unwrap();
+    }
+
+    #[test]
+    fn an_orchestrator_role_session_is_classified_an_orchestrator_of_its_project() {
+        // Given main's session of a project
+        let host = a_stack_host();
+        let dir = host.session("main", Changeset::default());
+        with_role(&dir, "project-home");
+
+        // When it is classified
+        let caller = work_queue_caller_of(host.base(), "main").unwrap();
+
+        // Then it is an orchestrator of its project
+        assert_eq!(
+            caller,
+            Some(WorkQueueCaller {
+                session_id: "main".to_string(),
+                project_id: A_PROJECT.to_string(),
+                role: WorkQueueCallerRole::Orchestrator { own_stack_id: None },
+            })
+        );
+    }
+
+    #[test]
+    fn an_orchestrator_is_classified_owning_the_stack_its_changeset_names() {
+        // Given an orchestrator-role session whose stack the project's store holds
+        let host = a_stack_host();
+        let dir = host.orchestrator("orch", a_stack_planning(None));
+        with_role(&dir, "orchestrator");
+        let own = queue_id_of(&dir).expect("the changeset names its stack");
+
+        // When it is classified
+        let caller = work_queue_caller_of(host.base(), "orch").unwrap();
+
+        // Then it is an orchestrator owning that stack
+        assert_eq!(
+            caller.map(|c| c.role),
+            Some(WorkQueueCallerRole::Orchestrator {
+                own_stack_id: Some(own)
+            })
+        );
+    }
+
+    #[test]
+    fn a_pr_stack_session_with_no_orchestrator_role_is_classified_with_no_stack_role() {
+        // Given a pr-stack recipe session (no role) whose changeset names its stack
+        let host = a_stack_host();
+        host.orchestrator("orch", a_stack_planning(None));
+
+        // When it is classified
+        let caller = work_queue_caller_of(host.base(), "orch").unwrap();
+
+        // Then the recipe and the stack give it no stack role
+        assert_eq!(caller, None);
+    }
+
+    #[test]
+    fn a_session_its_orchestrators_stack_binds_is_classified_a_node_of_that_stack() {
+        // Given an orchestrator whose node n1 is bound to a child session naming it
+        let host = a_stack_host();
+        let orch = host.orchestrator("orch", a_stack_planning(Some("child")));
+        with_role(&orch, "orchestrator");
+        let queue_id = queue_id_of(&orch).unwrap();
+        host.session(
+            "child",
+            Changeset {
+                orchestrator_session_id: Some("orch".to_string()),
+                ..Changeset::default()
+            },
+        );
+
+        // When the child is classified
+        let caller = work_queue_caller_of(host.base(), "child").unwrap();
+
+        // Then it is a node of that stack
+        assert_eq!(
+            caller.map(|c| c.role),
+            Some(WorkQueueCallerRole::WorkItem { queue_id })
+        );
+    }
+
+    #[test]
+    fn a_session_with_no_record_is_refused_rather_than_classified_ordinary() {
+        // Given a session id with nothing on disk
+        let host = a_stack_host();
+
+        // When it is classified
+        let refusal =
+            work_queue_caller_of(host.base(), "ghost").expect_err("its role cannot be known");
+
+        // Then it is refused as permission denied, naming the session
+        assert_eq!(refusal.code(), tddy_rpc::Code::PermissionDenied);
+        assert!(refusal.message().contains("ghost"), "{}", refusal.message());
+    }
+}

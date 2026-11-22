@@ -33,7 +33,7 @@ fn a_stack_child_block() -> SessionParticipantMetadata {
         pending_elicitation: false,
         session_id: "dddddddd-0000-4000-8000-000000000004".to_string(),
         orchestrator_session_id: "pr-stack-session-1".to_string(),
-        stack_node_id: "n1".to_string(),
+        work_item_id: "n1".to_string(),
         branch: "feature/attach-docs/attach-store".to_string(),
     }
 }
@@ -94,7 +94,7 @@ fn the_session_block_names_the_planned_node_the_session_materializes() {
     let session = session_object_of(&session_metadata_json(&meta));
 
     // Then — the exact identity: it survives a branch rename and it survives the host boundary
-    assert_eq!(string_field(&session, "stack_node_id"), "n1");
+    assert_eq!(string_field(&session, "work_item_id"), "n1");
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn a_session_that_is_nobodys_stack_child_publishes_an_empty_association() {
 
     // Then
     assert_eq!(string_field(&session, "orchestrator_session_id"), "");
-    assert_eq!(string_field(&session, "stack_node_id"), "");
+    assert_eq!(string_field(&session, "work_item_id"), "");
     assert_eq!(string_field(&session, "branch"), "");
 }
 
@@ -171,7 +171,7 @@ fn the_daemon_can_publish_the_association_before_any_workflow_event_has_landed()
         repo_path: "/home/dev/pr-stack-project".to_string(),
         session_id: "dddddddd-0000-4000-8000-000000000004".to_string(),
         orchestrator_session_id: "pr-stack-session-1".to_string(),
-        stack_node_id: "n1".to_string(),
+        work_item_id: "n1".to_string(),
         branch: "feature/attach-docs/attach-store".to_string(),
         ..SessionParticipantMetadata::default()
     };
@@ -181,7 +181,7 @@ fn the_daemon_can_publish_the_association_before_any_workflow_event_has_landed()
 
     // Then — a partial `session` object would erase the other publisher's keys on the shallow merge,
     // so every key is emitted, empty where the publisher has nothing to say
-    assert_eq!(string_field(&session, "stack_node_id"), "n1");
+    assert_eq!(string_field(&session, "work_item_id"), "n1");
     assert_eq!(string_field(&session, "workflow_goal"), "");
     assert_eq!(string_field(&session, "workflow_state"), "");
     assert_eq!(string_field(&session, "activity_status"), "");

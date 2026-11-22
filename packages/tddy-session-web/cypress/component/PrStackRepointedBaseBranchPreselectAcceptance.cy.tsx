@@ -24,7 +24,7 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
-import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
+import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -65,30 +65,30 @@ function anAttachDocsOrchestratorWithRepointedUi(): Partial<SessionEntry> {
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, [
+    workQueueJson: aWorkQueueJson(1, [
       aPlannedNode({
-        nodeId: "attach-proto",
+        itemId: "attach-proto",
         title: "Start-session attachment proto",
         branch: ATTACH_PROTO_BRANCH,
         sessionId: "child-attach-proto",
         prStatus: { phase: "open" },
       }),
       aPlannedNode({
-        nodeId: "attach-store",
+        itemId: "attach-store",
         title: "Session attachment storage and context docs",
         branch: ATTACH_STORE_BRANCH,
         sessionId: "child-attach-store",
         prStatus: { phase: "open" },
       }),
       aPlannedNode({
-        nodeId: "attach-start",
+        itemId: "attach-start",
         title: "Copy attachments during StartSession",
         branchSuggestion: "feature/session-attach-docs/attach-start",
         parents: ["attach-proto", "attach-store"],
       }),
-      // Repointed onto master: `RepointPlannedPr` dropped the `attach-start` parent edge.
+      // Repointed onto master: `RepointWorkItem` dropped the `attach-start` parent edge.
       aPlannedNode({
-        nodeId: "attach-ui",
+        itemId: "attach-ui",
         title: "Create Session attach UI",
         branchSuggestion: "feature/session-attach-docs/attach-ui",
         parents: [],
@@ -175,7 +175,7 @@ it("sends the project default branch as selected_integration_base_ref for a repo
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
-    expect(calls[0].stackParent).to.equal(ORCHESTRATOR_SESSION_ID);
+    expect(calls[0].workQueueParent).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].selectedIntegrationBaseRef).to.equal(DEFAULT_BRANCH_REF);
   });
 });

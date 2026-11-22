@@ -1,8 +1,8 @@
 //! Acceptance tests: unified worktree base resolution across agent backends.
 //!
-//! These tests verify that a session spawned with a `stack_parent` pointing at a
+//! These tests verify that a session spawned with a `work_queue_parent` pointing at a
 //! pr-stack orchestrator bases its worktree off the planned node's parent branch
-//! (via `Stack::base_ref_for_spawn`), not `origin/master`. They cover both
+//! (via `WorkQueue::base_ref_for_spawn`), not `origin/master`. They cover both
 //! cursor-cli and claude-cli session types — the cursor-cli path was the
 //! regression (hardcoded `None` for the chain base).
 
@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
-use tddy_core::changeset::{GithubPrStatus, Stack, StackNode};
+use tddy_core::changeset::{GithubPrStatus, WorkItem, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::Changeset;
 use tddy_daemon_kernel::config::DaemonConfig;
@@ -175,8 +175,8 @@ fn push_branch_to_origin(repo: &std::path::Path, branch: &str) {
 }
 
 /// A planned stack node with a single parent and a materialized branch.
-fn a_materialized_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn a_materialized_node(node_id: &str, branch: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: node_id.to_string(),
         description: String::new(),
@@ -192,8 +192,8 @@ fn a_materialized_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNo
 }
 
 /// A planned (unmaterialized) child node that the spawn is about to create.
-fn a_planned_child_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn a_planned_child_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: node_id.to_string(),
         description: String::new(),
@@ -222,7 +222,7 @@ fn write_orchestrator_with_materialized_parent(
     let orchestrator_dir = unified_session_dir_path(sessions_base, ORCHESTRATOR_SESSION_ID);
     std::fs::create_dir_all(&orchestrator_dir).expect("create orchestrator session dir");
 
-    let stack = Stack {
+    let stack = WorkQueue {
         version: 1,
         nodes: vec![
             a_materialized_node("bottom", parent_branch, &[]),
@@ -235,12 +235,12 @@ fn write_orchestrator_with_materialized_parent(
         stack: Some(stack),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orchestrator_dir, cs);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orchestrator_dir, cs);
 }
 
 fn start_session_request(
     session_type: &str,
-    stack_parent: &str,
+    work_queue_parent: &str,
     new_branch_name: &str,
 ) -> StartSessionRequest {
     StartSessionRequest {
@@ -258,7 +258,7 @@ fn start_session_request(
         selected_branch_to_work_on: String::new(),
         initial_prompt: String::new(),
         permission_mode: String::new(),
-        stack_parent: stack_parent.to_string(),
+        work_queue_parent: work_queue_parent.to_string(),
         sandbox: false,
         managed_codebase: false,
         specialized_agents: vec![],
@@ -314,7 +314,7 @@ async fn cursor_cli_pr_stack_child_bases_off_planned_node_parent() {
             child_branch,
         )))
         .await
-        .expect("StartSession cursor-cli with stack_parent must succeed");
+        .expect("StartSession cursor-cli with work_queue_parent must succeed");
 
     // Then — the worktree bases off the parent node's branch, not origin/master.
     let session_id = resp.into_inner().session_id;
@@ -363,7 +363,7 @@ async fn claude_cli_pr_stack_child_bases_off_planned_node_parent() {
             child_branch,
         )))
         .await
-        .expect("StartSession claude-cli with stack_parent must succeed");
+        .expect("StartSession claude-cli with work_queue_parent must succeed");
 
     // Then
     let session_id = resp.into_inner().session_id;
@@ -376,7 +376,7 @@ async fn claude_cli_pr_stack_child_bases_off_planned_node_parent() {
 }
 
 /// **cursor_cli_session_without_stack_parent_uses_default_base** — Without a
-/// stack_parent, the session bases off the default integration base (origin/main),
+/// work_queue_parent, the session bases off the default integration base (origin/main),
 /// not an error. Regression guard.
 #[tokio::test]
 async fn cursor_cli_session_without_stack_parent_uses_default_base() {
@@ -396,7 +396,7 @@ async fn cursor_cli_session_without_stack_parent_uses_default_base() {
         sessions_tmp.path().to_path_buf(),
     );
 
-    // When — no stack_parent.
+    // When — no work_queue_parent.
     let resp = service
         .start_session(Request::direct(start_session_request(
             "cursor-cli",
@@ -404,21 +404,21 @@ async fn cursor_cli_session_without_stack_parent_uses_default_base() {
             "feature/no-stack/child",
         )))
         .await
-        .expect("StartSession cursor-cli without stack_parent must succeed");
+        .expect("StartSession cursor-cli without work_queue_parent must succeed");
 
     // Then — bases off origin/main (the default for this repo).
     let session_id = resp.into_inner().session_id;
     let effective_base = effective_base_for_session(sessions_tmp.path(), &session_id);
     assert_eq!(
         effective_base, "origin/main",
-        "cursor-cli without stack_parent must base off the default integration base"
+        "cursor-cli without work_queue_parent must base off the default integration base"
     );
 }
 
 // ---------------------------------------------------------------------------
 // An explicit base-branch override bypasses the stack ordering gate.
 //
-// The daemon's spawn gate (`Stack::base_ref_for_spawn`) refuses a child whose
+// The daemon's spawn gate (`WorkQueue::base_ref_for_spawn`) refuses a child whose
 // non-merged parent owns no branch. That is correct for the *default* path: the
 // resolver would otherwise silently cut the child from `origin/<default>` for a
 // parent that has not pushed yet. But the Start-session dialog also lets the
@@ -432,8 +432,8 @@ async fn cursor_cli_session_without_stack_parent_uses_default_base() {
 /// A parent node whose PR was merged **externally**: the branch is gone (`branch: None`) and the
 /// daemon never updated `pr_status.phase`, so it still reads `"open"`. This is the exact shape of
 /// `workspace-tool-sandbox` in the reported incident.
-fn an_externally_merged_parent_node(node_id: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn an_externally_merged_parent_node(node_id: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: node_id.to_string(),
         description: String::new(),
@@ -462,7 +462,7 @@ fn write_orchestrator_with_externally_merged_parent(
     let orchestrator_dir = unified_session_dir_path(sessions_base, ORCHESTRATOR_SESSION_ID);
     std::fs::create_dir_all(&orchestrator_dir).expect("create orchestrator session dir");
 
-    let stack = Stack {
+    let stack = WorkQueue {
         version: 1,
         nodes: vec![
             an_externally_merged_parent_node("bottom", &[]),
@@ -475,7 +475,7 @@ fn write_orchestrator_with_externally_merged_parent(
         stack: Some(stack),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orchestrator_dir, cs);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orchestrator_dir, cs);
 }
 
 /// **explicit_base_override_bypasses_the_gate_for_an_externally_merged_parent** — When the
@@ -523,7 +523,7 @@ async fn explicit_base_override_bypasses_the_gate_for_an_externally_merged_paren
             selected_branch_to_work_on: String::new(),
             initial_prompt: String::new(),
             permission_mode: String::new(),
-            stack_parent: ORCHESTRATOR_SESSION_ID.to_string(),
+            work_queue_parent: ORCHESTRATOR_SESSION_ID.to_string(),
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],
@@ -584,7 +584,7 @@ async fn empty_base_override_still_refuses_when_the_parent_is_branchless_and_non
             selected_branch_to_work_on: String::new(),
             initial_prompt: String::new(),
             permission_mode: String::new(),
-            stack_parent: ORCHESTRATOR_SESSION_ID.to_string(),
+            work_queue_parent: ORCHESTRATOR_SESSION_ID.to_string(),
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],

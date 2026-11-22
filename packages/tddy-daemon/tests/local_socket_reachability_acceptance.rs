@@ -45,7 +45,7 @@ fn the_socket_serves_every_service_the_stack_moved_onto_it() {
         // node 8
         "CatalogServiceServer",
         "ExecToolServiceServer",
-        "PrStackServiceServer",
+        "WorkQueueServiceServer",
     ] {
         assert!(
             server.contains(expected),
@@ -68,7 +68,7 @@ fn nodes_seven_and_eight_add_no_hand_written_adapter() {
         "activity_tonic_adapter.rs",
         "catalog_tonic_adapter.rs",
         "exec_tools_tonic_adapter.rs",
-        "pr_stack_tonic_adapter.rs",
+        "work_queue_tonic_adapter.rs",
     ] {
         assert!(
             !daemon_src().join(name).exists(),

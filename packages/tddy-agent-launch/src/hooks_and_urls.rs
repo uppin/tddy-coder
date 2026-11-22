@@ -1,4 +1,4 @@
-use crate::stack_parent;
+use crate::work_queue_parent;
 
 use std::path::Path;
 
@@ -8,7 +8,7 @@ use std::path::Path;
 /// A PR-stack node's link is keyed on this rather than on `new_branch_name`, which is **empty** for a
 /// resume. Recovering a planned PR whose child session was deleted means resuming the branch the node
 /// already owns (it exists, is pushed, has a worktree), and without the effective branch
-/// `pr_stack_node_for_spawn` matches nothing: the node would never re-link, so the row would stay
+/// `work_item_for_spawn` matches nothing: the node would never re-link, so the row would stay
 /// recovered and every click would spawn another unlinked session.
 ///
 /// A blank intent defaults to `new_branch_from_base` (`StartSessionRequest.branch_worktree_intent`),
@@ -39,7 +39,7 @@ pub fn effective_spawn_branch<'a>(
 /// daemon knows about it, and nothing it would have to ask anyone for.
 ///
 /// One value rather than six arguments because the association half of it is meaningless piecewise
-/// — a `stack_node_id` without the orchestrator that holds it names nothing — and because the whole
+/// — a `work_item_id` without the orchestrator that holds it names nothing — and because the whole
 /// point of naming this input is that what the participant advertises can be asserted.
 pub struct StartingClaudeCliSession<'a> {
     /// The id of the coding agent the session runs.
@@ -57,7 +57,7 @@ pub struct StartingClaudeCliSession<'a> {
     /// [`spawned_branch_of_session`].
     pub branch: &'a str,
     /// The pr-stack orchestrator this session was spawned under, if any.
-    pub stack_parent: &'a stack_parent::SpawnStackParent<'a>,
+    pub work_queue_parent: &'a work_queue_parent::SpawnWorkQueueParent<'a>,
 }
 
 /// The `session` block a claude-cli session's LiveKit participant publishes about itself.
@@ -88,13 +88,13 @@ pub fn claude_cli_participant_metadata(
         repo_path: session.worktree_path.to_string_lossy().to_string(),
         session_id: session.session_id.to_string(),
         orchestrator_session_id: session
-            .stack_parent
+            .work_queue_parent
             .session_id()
             .unwrap_or_default()
             .to_string(),
-        stack_node_id: session
-            .stack_parent
-            .stack_node_id()
+        work_item_id: session
+            .work_queue_parent
+            .work_item_id()
             .unwrap_or_default()
             .to_string(),
         branch: session.branch.to_string(),

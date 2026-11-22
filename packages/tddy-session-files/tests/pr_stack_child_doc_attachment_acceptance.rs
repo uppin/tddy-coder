@@ -49,7 +49,7 @@ impl OrchestratorSession {
     fn with_shared_documents(self) -> Self {
         fs::write(
             self.artifacts().join("pr-stack-plan.md"),
-            "# PR Stack Plan\n",
+            "# PR WorkQueue Plan\n",
         )
         .expect("write plan");
         fs::write(self.artifacts().join("exploration.md"), "# Exploration\n")
@@ -272,7 +272,7 @@ fn an_orchestrator_with_no_exploration_map_attaches_the_documents_it_has() {
     let session = an_orchestrator_session().with_documents_for("n1");
     fs::write(
         session.artifacts().join("pr-stack-plan.md"),
-        "# PR Stack Plan\n",
+        "# PR WorkQueue Plan\n",
     )
     .expect("write plan");
 

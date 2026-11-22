@@ -70,11 +70,11 @@ pub struct SpawnRequest {
     pub recipe: Option<String>,
     /// Back-reference to the orchestrating PR-stack session. Passed as `--stack-parent <id>`.
     #[serde(default)]
-    pub stack_parent: Option<String>,
+    pub work_queue_parent: Option<String>,
     /// The planned node of that orchestrator's stack the session materializes. Passed as
     /// `--stack-node-id <id>`.
     #[serde(default)]
-    pub stack_node_id: Option<String>,
+    pub work_item_id: Option<String>,
     /// Passed to spawned `tddy-coder` as `--model` when set (tool-session model selection).
     #[serde(default)]
     pub model: Option<String>,
@@ -257,8 +257,8 @@ fn spawn_options_of(req: &SpawnRequest) -> SpawnOptions<'_> {
         provider_route_json: req.provider_route_json.as_deref(),
         mouse: req.mouse,
         recipe: req.recipe.as_deref(),
-        stack_parent: req.stack_parent.as_deref(),
-        stack_node_id: req.stack_node_id.as_deref(),
+        work_queue_parent: req.work_queue_parent.as_deref(),
+        work_item_id: req.work_item_id.as_deref(),
         model: req.model.as_deref(),
         // The reverse `spawn_conversation` channel is a per-session unix socket whose path
         // crosses this fork boundary as a plain string (unlike stdio fds), so it works from the
@@ -357,8 +357,8 @@ pub fn build_spawn_request(
         common_room: livekit.common_room.clone(),
         daemon_instance_id: livekit.daemon_instance_id.clone(),
         recipe: opts.recipe.map(String::from),
-        stack_parent: opts.stack_parent.map(String::from),
-        stack_node_id: opts.stack_node_id.map(String::from),
+        work_queue_parent: opts.work_queue_parent.map(String::from),
+        work_item_id: opts.work_item_id.map(String::from),
         model: opts.model.map(String::from),
         host_session_socket: opts.host_session_socket.map(String::from),
         git_environment: opts.git_environment.to_vec(),

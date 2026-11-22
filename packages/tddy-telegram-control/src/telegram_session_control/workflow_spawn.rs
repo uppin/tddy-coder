@@ -343,8 +343,8 @@ fn telegram_spawn_options<'a>(
         provider_route_json: None,
         mouse: inputs.mouse,
         recipe: inputs.recipe.as_deref(),
-        stack_parent: None,
-        stack_node_id: None,
+        work_queue_parent: None,
+        work_item_id: None,
         model: None,
         // No host-session socket: the socket answers a session's `github_token` and
         // `spawn_conversation` from a registration the daemon's own session host makes at start

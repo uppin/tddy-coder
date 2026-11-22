@@ -1,7 +1,7 @@
 # tddy-daemon-rpc
 
 The daemon's RPC-family handlers for `project.ProjectService`, `catalog.CatalogService`,
-`exec_tools.ExecToolService` and `pr_stack.PrStackService` — one struct per family, each holding only
+`exec_tools.ExecToolService` and `work_queue.WorkQueueService` — one struct per family, each holding only
 the session-host state that family reads.
 
 ## Quick Start
@@ -67,8 +67,8 @@ conversation's worktree, and `resolve_exec_tool_worktree` refuses an unsafe id b
 ## Related Packages
 - [tddy-session-lifecycle](../tddy-session-lifecycle/docs/session-service.md) — the host these
   handlers are built from, and the `DaemonRpcFamilies` port
-- [tddy-pr-stack](../tddy-pr-stack/docs/architecture.md) — defines `PrStackHandler` and
-  `PrStackServiceImpl`
+- [tddy-work-queue](../tddy-work-queue/docs/architecture.md) — defines `WorkQueueHandler` and
+  `WorkQueueServiceImpl`
 - [tddy-projects](../tddy-projects/docs/project-service.md),
   [tddy-discovery](../tddy-discovery/docs/catalog-service.md),
   [tddy-tool-engine](../tddy-tool-engine/README.md) — the other three families' traits and service

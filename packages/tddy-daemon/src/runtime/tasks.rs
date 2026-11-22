@@ -135,7 +135,9 @@ pub(super) type BinaryLocalSocketServices = crate::local_socket_server::LocalSoc
     tddy_session_lifecycle::connection_service::PeerRoutedActivity,
     tddy_discovery::CatalogServiceImpl<tddy_daemon_rpc::CatalogRpcHandler>,
     tddy_tool_engine::ExecToolServiceImpl<tddy_daemon_rpc::ExecToolRpcHandler>,
-    tddy_session_lifecycle::pr_stack_rpc::PrStackServiceImpl<tddy_daemon_rpc::PrStackRpcHandler>,
+    tddy_session_lifecycle::work_queue_rpc::WorkQueueServiceImpl<
+        tddy_daemon_rpc::WorkQueueRpcHandler,
+    >,
 >;
 
 /// The local Unix-domain-socket `ConnectionService` transport (SO_PEERCRED peer-trust plus

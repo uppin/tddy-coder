@@ -11,10 +11,10 @@ use tddy_host_service::peer_routing::PeerRouting;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ListExecToolsRequest, ListExecToolsResponse, ToolDef};
 use tddy_tool_engine::project_home_tools::{session_offered_catalog_for, SessionToolRole};
-use tddy_tool_engine::stack_tools::caller_records::{
-    stack_and_git_tools_offered_to, stack_caller_from_records,
-};
 use tddy_tool_engine::start_session_args::{HostChoice, StartChoices};
+use tddy_tool_engine::work_queue_tools::caller_records::{
+    stack_and_git_tools_offered_to, work_queue_caller_from_records,
+};
 
 /// What `StartSession`'s schema offers on this daemon: every eligible host on `routing`'s roster,
 /// every workflow recipe this daemon supports, and every coding agent `agents` starts.
@@ -117,7 +117,7 @@ pub(crate) fn list_exec_tools_from_jail(
     if role != SessionToolRole::ProjectHome {
         if let Some(sessions_base) = bound.sessions_base() {
             let caller =
-                stack_caller_from_records(sessions_base, &bound.session_id).map_err(|e| {
+                work_queue_caller_from_records(sessions_base, &bound.session_id).map_err(|e| {
                     Status::permission_denied(format!("the stack tools are refused: {e}"))
                 })?;
             tools.extend(
@@ -137,8 +137,8 @@ pub(crate) fn list_exec_tools_from_jail(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tddy_changeset::stack_fixtures::a_stack_host;
-    use tddy_core::changeset::{Changeset, Stack, StackNode};
+    use tddy_changeset::work_queue_fixtures::a_stack_host;
+    use tddy_core::changeset::{Changeset, WorkItem, WorkQueue};
     use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 
     fn jail_of(session_id: &str, role: Option<&str>) -> (tempfile::TempDir, BoundJailSession) {
@@ -213,13 +213,13 @@ mod tests {
         let host = a_stack_host();
         let orch = host.orchestrator(
             "orch",
-            Stack {
+            WorkQueue {
                 version: 1,
-                nodes: vec![StackNode {
+                nodes: vec![WorkItem {
                     node_id: "n1".to_string(),
                     title: "Store".to_string(),
                     session_id: Some("child".to_string()),
-                    ..StackNode::default()
+                    ..WorkItem::default()
                 }],
             },
         );
@@ -242,12 +242,12 @@ mod tests {
         let names = names_answered(&bound, "child").expect("answered");
 
         // Then its stack tools are the two reads alone
-        let stack_tools: Vec<&str> = names
+        let work_queue_tools: Vec<&str> = names
             .iter()
             .map(String::as_str)
-            .filter(|name| tddy_tool_engine::stack_tools::is_stack_tool(name))
+            .filter(|name| tddy_tool_engine::work_queue_tools::is_stack_tool(name))
             .collect();
-        assert_eq!(stack_tools, vec!["pr_stack_status", "pr_read"]);
+        assert_eq!(work_queue_tools, vec!["work_queue_status", "work_pr_read"]);
     }
 
     #[test]

@@ -140,16 +140,16 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
         boolean("Skip every permission prompt (`--dangerously-skip-permissions`). Replaces `permission_mode`."),
     );
     offer(
-        "stack_parent",
+        "work_queue_parent",
         string("A pr-stack orchestrator session this session is a child of: its base is resolved from that session's stack and the child is recorded on it. Empty for none."),
     );
     offer(
-        "stack_parent_daemon_instance_id",
-        string("The host `stack_parent` runs on; empty for the host the session starts on."),
+        "work_queue_parent_daemon_instance_id",
+        string("The host `work_queue_parent` runs on; empty for the host the session starts on."),
     );
     offer(
-        "stack_node_id",
-        string("The planned pr-stack node this session materializes, on `stack_parent`'s stack. Empty derives it from the branch."),
+        "work_item_id",
+        string("The planned pr-stack node this session materializes, on `work_queue_parent`'s stack. Empty derives it from the branch."),
     );
     offer(
         "sandbox",

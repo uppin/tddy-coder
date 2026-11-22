@@ -10,7 +10,7 @@
 
 import React from "react";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackView } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
@@ -31,7 +31,7 @@ const ORCHESTRATOR_SESSION_ID = "pr-stack-session-4444-0000-0000-0000-0000000000
 const POLL_INTERVAL_MS = 5000;
 
 interface MountOptions {
-  /** The stack's plan, as `GetProjectStack` answers it. */
+  /** The stack's plan, as `GetWorkQueue` answers it. */
   plan: string;
   /** The sessions the drawer lists — the children a planned node resolves to. */
   sessions?: Partial<SessionEntry>[];
@@ -43,7 +43,7 @@ interface MountOptions {
 
 function openStackView(opts: MountOptions) {
   const backend = aSessionsDrawerBackend(opts.sessions ?? []).onUnary(
-    PrStackService.method.queryBranch,
+    WorkQueueService.method.queryBranch,
     (req: { branch: string }) => {
       const fx = opts.resolutionFactory
         ? opts.resolutionFactory(req.branch)
@@ -201,7 +201,7 @@ it("updates the resolution on the polling interval without user action", () => {
   // Then — the first poll has been answered, and shows no worktree. The row alone does not prove it:
   // the row renders from the stack before the poll starts, and the poll's interval is registered with
   // it, so a tick before the first poll would advance a clock nothing is scheduled on yet.
-  prStackScreenPage.plannedPrRow("n1").should("exist");
+  prStackScreenPage.workItemRow("n1").should("exist");
   cy.wrap(null).should(() => expect(polls, "QueryBranch polls answered").to.be.greaterThan(0));
   prStackScreenPage.worktree("n1").should("not.exist");
 

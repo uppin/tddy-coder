@@ -178,7 +178,7 @@ pub(super) fn compile_unbundled_families_5() -> Result<(), Box<dyn std::error::E
     for (proto, package) in [
         ("proto/catalog.proto", "catalog"),
         ("proto/exec_tools.proto", "exec_tools"),
-        ("proto/pr_stack.proto", "pr_stack"),
+        ("proto/work_queue.proto", "work_queue"),
     ] {
         prost_build::Config::new()
             .out_dir(std::env::var("OUT_DIR")?)
@@ -203,8 +203,8 @@ pub(super) fn compile_unbundled_families_5() -> Result<(), Box<dyn std::error::E
                 format!(".{package}"),
                 format!("crate::proto::{}", rust_module(package)),
             );
-        // `catalog` reaches `types.AgentKind` through `SubagentInfo`, `pr_stack` its own shared types.
-        if package == "pr_stack" || package == "catalog" {
+        // `catalog` reaches `types.AgentKind` through `SubagentInfo`, `work_queue` its own shared types.
+        if package == "work_queue" || package == "catalog" {
             tonic = tonic.extern_path(".types", "crate::proto::types");
         }
         tonic.compile_protos(&[proto], &["proto"])?;

@@ -5,7 +5,7 @@ edition = "2021"
 description = "The changeset manifest, the PR-stack model, the unified session directory and per-session metadata"
 
 [features]
-# `stack_fixtures`: the sessions layout a PR stack needs, for other crates' tests.
+# `work_queue_fixtures`: the sessions layout a PR stack needs, for other crates' tests.
 test-support = ["dep:tempfile"]
 
 [dependencies]
@@ -18,7 +18,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 thiserror = "2"
-# Only for `stack_fixtures` (feature `test-support`), and this crate's own tests.
+# Only for `work_queue_fixtures` (feature `test-support`), and this crate's own tests.
 tempfile = { version = "3", optional = true }
 # Stack ids are UUIDv7 (time-ordered), the version the rest of the workspace mints ids with.
 uuid = { version = "1", features = ["v7"] }

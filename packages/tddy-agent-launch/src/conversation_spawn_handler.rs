@@ -1,4 +1,4 @@
-use crate::stack_parent;
+use crate::work_queue_parent;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_tool_engine::start_ledger::StartLedger;
 use tddy_tool_engine::start_session_args::{StartContext, StartSessionArgs};
@@ -58,14 +58,14 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
                 initial_prompt: prompt,
                 // The orchestrator is a session of this daemon, so its stack is resolved off this
                 // daemon's own disk and no credential travels anywhere.
-                stack_parent: stack_parent::SpawnStackParent::OwnedBy {
+                work_queue_parent: work_queue_parent::SpawnWorkQueueParent::OwnedBy {
                     session_id: &self.orchestrator_session_id,
                     daemon_instance_id: &local_instance_id_for_config(&self.config),
                     // The orchestrator agent spawns by branch, in its own process on its own host,
                     // so the node is found from the branch here exactly as it always was (D34).
-                    stack_node_id: "",
+                    work_item_id: "",
                     session_token: "",
-                    host: self.stack_parent_host.as_ref(),
+                    host: self.work_queue_parent_host.as_ref(),
                 },
                 parent_session_type: meta.session_type.as_deref(),
                 // The orchestrator's owner's vault: a child is the same owner's, on the same project.

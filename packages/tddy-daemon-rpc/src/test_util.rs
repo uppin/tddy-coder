@@ -24,21 +24,21 @@ use tddy_service::proto::exec_tools::{
     ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
     ListSessionToolCallsResponse,
 };
-use tddy_service::proto::pr_stack::{
-    AddPlannedPrRequest, AddPlannedPrResponse, CreateProjectStackRequest,
-    CreateProjectStackResponse, GetPrStatusRequest, GetPrStatusResponse, GetProjectStackRequest,
-    GetProjectStackResponse, LinkStackNodeRequest, LinkStackNodeResponse, ListProjectStacksRequest,
-    ListProjectStacksResponse, PrStackService, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
-    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ResolveStackBaseRequest, ResolveStackBaseResponse,
-};
 use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
     ListProjectsResponse, ProjectService, SetProjectAccountsRequest, SetProjectAccountsResponse,
     SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
     SetProjectOrchestratorDefaultsRequest, SetProjectOrchestratorDefaultsResponse,
+};
+use tddy_service::proto::work_queue::{
+    AddWorkItemRequest, AddWorkItemResponse, CreateWorkQueueRequest, CreateWorkQueueResponse,
+    GetPrStatusRequest, GetPrStatusResponse, GetWorkQueueRequest, GetWorkQueueResponse,
+    LinkWorkItemRequest, LinkWorkItemResponse, ListProjectWorkQueuesRequest,
+    ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
+    RepointWorkItemRequest, RepointWorkItemResponse, ResolveWorkItemBaseRequest,
+    ResolveWorkItemBaseResponse, WorkQueueService,
 };
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_worktree_service::stream::MpscResultStream;
@@ -398,14 +398,14 @@ impl ExecToolService for TestDaemon {
 }
 
 #[async_trait]
-impl PrStackService for TestDaemon {
-    async fn add_planned_pr(
+impl WorkQueueService for TestDaemon {
+    async fn add_work_item(
         &self,
-        request: Request<AddPlannedPrRequest>,
-    ) -> Result<Response<AddPlannedPrResponse>, Status> {
+        request: Request<AddWorkItemRequest>,
+    ) -> Result<Response<AddWorkItemResponse>, Status> {
         self.handlers
-            .pr_stack_service()
-            .add_planned_pr(request)
+            .work_queue_service()
+            .add_work_item(request)
             .await
     }
 
@@ -414,7 +414,7 @@ impl PrStackService for TestDaemon {
         request: Request<GetPrStatusRequest>,
     ) -> Result<Response<GetPrStatusResponse>, Status> {
         self.handlers
-            .pr_stack_service()
+            .work_queue_service()
             .get_pr_status(request)
             .await
     }
@@ -423,46 +423,49 @@ impl PrStackService for TestDaemon {
         &self,
         request: Request<QueryBranchRequest>,
     ) -> Result<Response<QueryBranchResponse>, Status> {
-        self.handlers.pr_stack_service().query_branch(request).await
-    }
-
-    async fn resolve_stack_base(
-        &self,
-        request: Request<ResolveStackBaseRequest>,
-    ) -> Result<Response<ResolveStackBaseResponse>, Status> {
         self.handlers
-            .pr_stack_service()
-            .resolve_stack_base(request)
+            .work_queue_service()
+            .query_branch(request)
             .await
     }
 
-    async fn link_stack_node(
+    async fn resolve_work_item_base(
         &self,
-        request: Request<LinkStackNodeRequest>,
-    ) -> Result<Response<LinkStackNodeResponse>, Status> {
+        request: Request<ResolveWorkItemBaseRequest>,
+    ) -> Result<Response<ResolveWorkItemBaseResponse>, Status> {
         self.handlers
-            .pr_stack_service()
-            .link_stack_node(request)
+            .work_queue_service()
+            .resolve_work_item_base(request)
             .await
     }
 
-    async fn repoint_planned_pr(
+    async fn link_work_item(
         &self,
-        request: Request<RepointPlannedPrRequest>,
-    ) -> Result<Response<RepointPlannedPrResponse>, Status> {
+        request: Request<LinkWorkItemRequest>,
+    ) -> Result<Response<LinkWorkItemResponse>, Status> {
         self.handlers
-            .pr_stack_service()
-            .repoint_planned_pr(request)
+            .work_queue_service()
+            .link_work_item(request)
             .await
     }
 
-    async fn reorder_planned_pr(
+    async fn repoint_work_item(
         &self,
-        request: Request<ReorderPlannedPrRequest>,
-    ) -> Result<Response<ReorderPlannedPrResponse>, Status> {
+        request: Request<RepointWorkItemRequest>,
+    ) -> Result<Response<RepointWorkItemResponse>, Status> {
         self.handlers
-            .pr_stack_service()
-            .reorder_planned_pr(request)
+            .work_queue_service()
+            .repoint_work_item(request)
+            .await
+    }
+
+    async fn reorder_work_item(
+        &self,
+        request: Request<ReorderWorkItemRequest>,
+    ) -> Result<Response<ReorderWorkItemResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .reorder_work_item(request)
             .await
     }
 
@@ -471,38 +474,38 @@ impl PrStackService for TestDaemon {
         request: Request<PullBaseIntoBranchRequest>,
     ) -> Result<Response<PullBaseIntoBranchResponse>, Status> {
         self.handlers
-            .pr_stack_service()
+            .work_queue_service()
             .pull_base_into_branch(request)
             .await
     }
 
-    async fn list_project_stacks(
+    async fn list_project_work_queues(
         &self,
-        request: Request<ListProjectStacksRequest>,
-    ) -> Result<Response<ListProjectStacksResponse>, Status> {
+        request: Request<ListProjectWorkQueuesRequest>,
+    ) -> Result<Response<ListProjectWorkQueuesResponse>, Status> {
         self.handlers
-            .pr_stack_service()
-            .list_project_stacks(request)
+            .work_queue_service()
+            .list_project_work_queues(request)
             .await
     }
 
-    async fn get_project_stack(
+    async fn get_work_queue(
         &self,
-        request: Request<GetProjectStackRequest>,
-    ) -> Result<Response<GetProjectStackResponse>, Status> {
+        request: Request<GetWorkQueueRequest>,
+    ) -> Result<Response<GetWorkQueueResponse>, Status> {
         self.handlers
-            .pr_stack_service()
-            .get_project_stack(request)
+            .work_queue_service()
+            .get_work_queue(request)
             .await
     }
 
-    async fn create_project_stack(
+    async fn create_work_queue(
         &self,
-        request: Request<CreateProjectStackRequest>,
-    ) -> Result<Response<CreateProjectStackResponse>, Status> {
+        request: Request<CreateWorkQueueRequest>,
+    ) -> Result<Response<CreateWorkQueueResponse>, Status> {
         self.handlers
-            .pr_stack_service()
-            .create_project_stack(request)
+            .work_queue_service()
+            .create_work_queue(request)
             .await
     }
 }

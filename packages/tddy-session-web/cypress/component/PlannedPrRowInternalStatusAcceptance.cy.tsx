@@ -13,11 +13,11 @@ import React from "react";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
-import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
+import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
 const ORCHESTRATOR_SESSION_ID = "pr-stack-session-2222-0000-0000-0000-000000000020";
 
-function anOrchestratorSession(stackPlanJson: string) {
+function anOrchestratorSession(workQueueJson: string) {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-07-03T09:00:00Z",
@@ -31,7 +31,7 @@ function anOrchestratorSession(stackPlanJson: string) {
     pendingElicitation: false,
     orchestratorSessionId: "",
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
@@ -49,9 +49,9 @@ beforeEach(() => {
 
 it("renders a needs-repoint badge on a node whose parent has merged", () => {
   // Given
-  const plan = aStackPlanJson(1, [
+  const plan = aWorkQueueJson(1, [
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Login API",
       branch: "feature/auth/login-api",
       sessionId: "child-session-n2",
@@ -76,9 +76,9 @@ it("renders a needs-repoint badge on a node whose parent has merged", () => {
 
 it("renders a ready-to-merge badge on a node whose dependencies are all merged", () => {
   // Given
-  const plan = aStackPlanJson(1, [
+  const plan = aWorkQueueJson(1, [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Token store",
       branch: "feature/auth/token-store",
       sessionId: "child-session-n1",
@@ -99,9 +99,9 @@ it("renders a ready-to-merge badge on a node whose dependencies are all merged",
 
 it("shows no internal-status badge on a node that has no internal status yet", () => {
   // Given — a freshly planned node the developer has not acted on
-  const plan = aStackPlanJson(1, [
+  const plan = aWorkQueueJson(1, [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Token store",
       branch: "feature/auth/token-store",
       sessionId: "child-session-n1",

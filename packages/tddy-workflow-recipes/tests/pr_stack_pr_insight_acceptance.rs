@@ -1,6 +1,6 @@
 //! Acceptance: reading and searching pull requests from the orchestrator.
 //!
-//! Until now the orchestrator's only read was `pr_stack_status` — a per-node roll-up of phase plus
+//! Until now the orchestrator's only read was `work_queue_status` — a per-node roll-up of phase plus
 //! internal status, which also writes derived statuses back to the changeset. There was no way to
 //! read one PR's body, its review state, its checks or its changed files, and no way to find a PR the
 //! agent held no reference to. These three reads close that.
@@ -20,7 +20,7 @@ use common::{
     write_stack, written_at, REPO,
 };
 use tddy_github::pr_api::{PrFile, PrSearchQuery, PrState};
-use tddy_pr_stack::pr_insight::{
+use tddy_work_queue::pr_insight::{
     pull_number_for_node, read_pr, read_pr_comments, search_repository_prs, PrSearchInput,
     PrThreadComment, ReviewerState,
 };
@@ -49,7 +49,7 @@ fn a_thread_comment(author: &str, body: &str, created_at: &str) -> PrThreadComme
     }
 }
 
-// --- pr_read ----------------------------------------------------------------
+// --- work_pr_read ----------------------------------------------------------------
 
 #[test]
 fn reading_a_pr_returns_its_body_state_base_and_head() {
@@ -230,7 +230,7 @@ fn changed_files_are_returned_with_a_path_and_a_status_when_requested() {
 #[test]
 fn a_node_id_resolves_to_the_pull_number_recorded_in_its_pr_status_url() {
     // Given — n1 records PR #1234, so a number derived from anything else would show
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![an_open_node("n1", BRANCH_N1, 1234, &[])]);
 
@@ -244,7 +244,7 @@ fn a_node_id_resolves_to_the_pull_number_recorded_in_its_pr_status_url() {
 #[test]
 fn a_node_that_records_no_pr_url_cannot_be_addressed_and_says_so() {
     // Given — n1 was never started, so no PR url was ever recorded on it
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![a_planned_node("n1", &[])]);
 
@@ -259,7 +259,7 @@ fn a_node_that_records_no_pr_url_cannot_be_addressed_and_says_so() {
 fn a_node_whose_recorded_pr_status_carries_no_url_cannot_be_addressed_and_says_so() {
     // Given — n1's PR is recorded as merged, but no url was ever recorded with it: a pr_status is
     // present, and it still names no pull request
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![a_merged_node("n1", BRANCH_N1, &[])]);
 
@@ -273,7 +273,7 @@ fn a_node_whose_recorded_pr_status_carries_no_url_cannot_be_addressed_and_says_s
 #[test]
 fn an_unknown_node_id_cannot_be_addressed_and_says_so() {
     // Given
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![an_open_node("n1", BRANCH_N1, PR, &[])]);
 
@@ -284,7 +284,7 @@ fn an_unknown_node_id_cannot_be_addressed_and_says_so() {
     assert_rejected(result).with_reason_containing("n9");
 }
 
-// --- pr_search --------------------------------------------------------------
+// --- work_pr_search --------------------------------------------------------------
 
 #[test]
 fn a_search_asks_github_for_the_callers_repository_and_the_agents_own_text_state_and_limit() {
@@ -336,7 +336,7 @@ fn a_search_returns_at_most_the_requested_number_of_hits() {
     );
 }
 
-// --- pr_comments ------------------------------------------------------------
+// --- work_pr_comments ------------------------------------------------------------
 
 #[test]
 fn review_comments_are_grouped_into_one_thread_per_root_comment() {

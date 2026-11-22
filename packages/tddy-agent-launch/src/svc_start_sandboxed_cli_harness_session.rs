@@ -44,10 +44,10 @@ use crate::launch_ports::LaunchSessions;
 use crate::placement::managed_recipe_for;
 use crate::session_provider_route::{sandboxed_start_route, session_route_sources_with_default};
 use crate::spec_launch::HostAgent;
-use crate::stack_parent::SpawnStackParent;
 use crate::svc_start_sandboxed_claude_cli_session::JailSession;
 use crate::svc_start_session_core::CliStart;
 use crate::usage_context::UsageSubject;
+use crate::work_queue_parent::SpawnWorkQueueParent;
 use crate::worktree_source::sandbox_claude_passthrough_args;
 use std::path::Path;
 use tddy_daemon_kernel::config::DaemonConfig;
@@ -132,15 +132,15 @@ impl LaunchSessions {
         .await
         .map_err(|e| Status::failed_precondition(e.to_string()))?;
 
-        let stack_parent = match Some(req.stack_parent.trim()).filter(|s| !s.is_empty()) {
-            Some(parent) => SpawnStackParent::OwnedBy {
+        let work_queue_parent = match Some(req.work_queue_parent.trim()).filter(|s| !s.is_empty()) {
+            Some(parent) => SpawnWorkQueueParent::OwnedBy {
                 session_id: parent,
-                daemon_instance_id: req.stack_parent_daemon_instance_id.trim(),
-                stack_node_id: req.stack_node_id.trim(),
+                daemon_instance_id: req.work_queue_parent_daemon_instance_id.trim(),
+                work_item_id: req.work_item_id.trim(),
                 session_token,
                 host: self,
             },
-            None => SpawnStackParent::NoParent,
+            None => SpawnWorkQueueParent::NoParent,
         };
         let intent = tddy_session_split::service_util::write_initial_changeset(
             session_id,
@@ -154,7 +154,7 @@ impl LaunchSessions {
             None,
             &session_dir,
             self.orchestrator_link_of(req)
-                .or_else(|| stack_parent.as_orchestrator_link())
+                .or_else(|| work_queue_parent.as_orchestrator_link())
                 .as_ref(),
             managed_recipe.as_deref(),
         )?;
@@ -182,7 +182,7 @@ impl LaunchSessions {
                 ssh_alias: "",
                 shell: None,
             },
-            &stack_parent,
+            &work_queue_parent,
             progress,
         )
         .await?;

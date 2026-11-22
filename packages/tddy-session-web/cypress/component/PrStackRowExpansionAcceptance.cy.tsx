@@ -19,17 +19,17 @@ import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgen
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -45,16 +45,16 @@ const CHILD_BRANCH = "feature/attach-docs/attach-store";
 const CHILD_WORKTREE_PATH = "/home/dev/worktrees/attach-store";
 
 /** A two-node chain: a materialized root and the node stacked on it. */
-function aTwoNodeStack(): StackNodeFixture[] {
+function aTwoNodeStack(): WorkItemFixture[] {
   return [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Attachment staging proto",
       description: "Proto, daemon handler and tests for staging an attachment.",
       branch: ROOT_BRANCH,
     }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Session attachment storage",
       description: "The on-disk store behind the staging RPC.",
       branch: CHILD_BRANCH,
@@ -64,7 +64,7 @@ function aTwoNodeStack(): StackNodeFixture[] {
   ];
 }
 
-function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
+function anOrchestratorSession(workQueueJson: string): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-08-01T09:00:00Z",
@@ -73,7 +73,7 @@ function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
@@ -87,16 +87,16 @@ const PROJECT: Partial<ProjectEntry> = {
 };
 
 interface MountOptions {
-  nodes?: StackNodeFixture[];
+  nodes?: WorkItemFixture[];
   /** `QueryBranch` resolution per branch, consulted afresh on every poll. */
   resolutionByBranch?: Record<string, BranchResolutionFixture>;
 }
 
 function openPrStackScreen(opts: MountOptions = {}) {
   const backend = aSessionsDrawerBackend([
-    anOrchestratorSession(aStackPlanJson(1, opts.nodes ?? aTwoNodeStack())),
+    anOrchestratorSession(aWorkQueueJson(1, opts.nodes ?? aTwoNodeStack())),
   ])
-    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(WorkQueueService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(
         opts.resolutionByBranch?.[req.branch] ?? { branch: req.branch },
       ),
@@ -249,9 +249,9 @@ it("keeps a row expanded when its branch resolution changes on the poll interval
   cy.clock();
   let pollCount = 0;
   const backend = aSessionsDrawerBackend([
-    anOrchestratorSession(aStackPlanJson(1, aTwoNodeStack())),
+    anOrchestratorSession(aWorkQueueJson(1, aTwoNodeStack())),
   ])
-    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) => {
+    .onUnary(WorkQueueService.method.queryBranch, (req: { branch: string }) => {
       pollCount += 1;
       return aBranchResolutionResponse({
         branch: req.branch,

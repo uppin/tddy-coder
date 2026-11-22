@@ -178,7 +178,7 @@ fn start_cursor_cli_request() -> StartSessionRequest {
         selected_branch_to_work_on: String::new(),
         initial_prompt: String::new(),
         permission_mode: String::new(),
-        stack_parent: String::new(),
+        work_queue_parent: String::new(),
         sandbox: false,
         managed_codebase: false,
         specialized_agents: vec![],
@@ -403,25 +403,25 @@ async fn cursor_cli_session_enrichment_reads_from_metadata() {
 
 // ---------------------------------------------------------------------------
 // Peer-agent spawn ("Add agent") — reusing the orchestrator's worktree via
-// `repo_path` and recording the `stack_parent` link.
+// `repo_path` and recording the `work_queue_parent` link.
 //
 // These mirror the contract the claude-cli sandboxed path already honors
 // (`start_sandboxed_claude_cli_session` → `session_worktree_source` +
-// `orchestrator_session_id: stack_parent.map(...)`). The cursor-cli path must
+// `orchestrator_session_id: work_queue_parent.map(...)`). The cursor-cli path must
 // honor the same two fields so a peer cursor-cli child of a claude-cli (or
 // cursor-cli) orchestrator runs on the SAME worktree and is linked back to the
 // orchestrator, instead of becoming a standalone session on a fresh branch.
 // ---------------------------------------------------------------------------
 
 /// Build a peer-spawn `StartSessionRequest`: `session_type = "cursor-cli"`,
-/// `repo_path` set to the orchestrator's worktree, `stack_parent` set to the
+/// `repo_path` set to the orchestrator's worktree, `work_queue_parent` set to the
 /// orchestrator's session id, and `branch_worktree_intent` empty (the web
 /// `CreateSessionPane` peer mode sends exactly these — see
 /// `packages/tddy-web/src/components/sessions/CreateSessionPane.tsx`).
-fn peer_cursor_cli_request(repo_path: &str, stack_parent: &str) -> StartSessionRequest {
+fn peer_cursor_cli_request(repo_path: &str, work_queue_parent: &str) -> StartSessionRequest {
     let mut req = start_cursor_cli_request();
     req.repo_path = repo_path.to_string();
-    req.stack_parent = stack_parent.to_string();
+    req.work_queue_parent = work_queue_parent.to_string();
     req.branch_worktree_intent = String::new();
     req.new_branch_name = String::new();
     req.selected_branch_to_work_on = String::new();
@@ -486,7 +486,7 @@ async fn cursor_cli_peer_spawn_reuses_the_orchestrator_worktree_when_repo_path_i
     assert_eq!(
         cs.orchestrator_session_id.as_deref(),
         Some(orchestrator_session_id),
-        "peer cursor-cli must record orchestrator_session_id from stack_parent"
+        "peer cursor-cli must record orchestrator_session_id from work_queue_parent"
     );
 
     // And — no daemon-managed worktree was created under the project repo
@@ -501,11 +501,11 @@ async fn cursor_cli_peer_spawn_reuses_the_orchestrator_worktree_when_repo_path_i
     );
 }
 
-/// An orchestrating session on disk for a peer's `stack_parent` to name: a code session on `main`
+/// An orchestrating session on disk for a peer's `work_queue_parent` to name: a code session on `main`
 /// in the project repo the peer is spawned into.
 ///
 /// A peer that creates its own branch bases it off the parent's, which is read from the parent's
-/// changeset — so the parent has to exist. A `stack_parent` that resolves to nothing is refused
+/// changeset — so the parent has to exist. A `work_queue_parent` that resolves to nothing is refused
 /// (`FailedPrecondition`) rather than quietly based off the default branch, which is why this
 /// fixture writes a real one instead of the id alone.
 fn an_orchestrator_session(
@@ -544,15 +544,15 @@ async fn cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_p
         repo_dir.path(),
     );
 
-    // When — a cursor-cli spawn that carries only a stack_parent (no repo_path),
+    // When — a cursor-cli spawn that carries only a work_queue_parent (no repo_path),
     // creating its own worktree as before but still linked to the orchestrator
     let mut req = start_cursor_cli_request();
-    req.stack_parent = orchestrator_session_id.to_string();
+    req.work_queue_parent = orchestrator_session_id.to_string();
     req.branch_worktree_intent = "new_branch_from_base".to_string();
     let resp = service
         .start_session(Request::direct(req))
         .await
-        .expect("cursor-cli StartSession with stack_parent must succeed");
+        .expect("cursor-cli StartSession with work_queue_parent must succeed");
 
     // Then — the orchestrator link is recorded even though repo_path was empty
     let session_id = resp.into_inner().session_id;
@@ -561,7 +561,7 @@ async fn cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_p
     assert_eq!(
         cs.orchestrator_session_id.as_deref(),
         Some(orchestrator_session_id),
-        "cursor-cli must record orchestrator_session_id from stack_parent even without repo_path"
+        "cursor-cli must record orchestrator_session_id from work_queue_parent even without repo_path"
     );
 }
 
@@ -756,15 +756,15 @@ fn an_orchestrator_that_planned(
 ) {
     let session_dir = sessions_base.join("sessions").join(ORCHESTRATOR_SESSION_ID);
     std::fs::create_dir_all(&session_dir).expect("create the orchestrator's session dir");
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         &session_dir,
         tddy_core::changeset::Changeset {
             branch: Some("main".to_string()),
             repo_path: Some(repo.to_string_lossy().into_owned()),
             recipe: Some("pr-stack".to_string()),
-            stack: Some(tddy_core::changeset::Stack {
+            stack: Some(tddy_core::changeset::WorkQueue {
                 version: 1,
-                nodes: vec![tddy_core::changeset::StackNode {
+                nodes: vec![tddy_core::changeset::WorkItem {
                     node_id: node_id.to_string(),
                     title: node_id.to_string(),
                     description: String::new(),
@@ -794,9 +794,9 @@ async fn a_cursor_cli_child_records_its_branch_on_the_planned_node_it_materializ
     let service = minimal_service(config, &stub, sessions.path().to_path_buf());
     an_orchestrator_that_planned(sessions.path(), repo.path(), "attach-store");
     let mut request = start_cursor_cli_request();
-    request.stack_parent = ORCHESTRATOR_SESSION_ID.to_string();
+    request.work_queue_parent = ORCHESTRATOR_SESSION_ID.to_string();
     // The node is found from the branch the child creates, as for the orchestrator agent's own spawn
-    // (no `stack_node_id`): the planned branch names it.
+    // (no `work_item_id`): the planned branch names it.
     request.branch_worktree_intent = "new_branch_from_base".to_string();
     request.new_branch_name = PLANNED_BRANCH.to_string();
 
@@ -808,13 +808,13 @@ async fn a_cursor_cli_child_records_its_branch_on_the_planned_node_it_materializ
         .into_inner();
 
     // Then — the node owns the branch the child created: without this the node owns no branch on any
-    // host, and `Stack::base_ref_for_spawn` refuses every descendant of it forever
+    // host, and `WorkQueue::base_ref_for_spawn` refuses every descendant of it forever
     let child_branch =
         tddy_core::read_changeset(&sessions.path().join("sessions").join(&started.session_id))
             .expect("a started session writes a changeset")
             .branch
             .expect("a started session records the branch it created");
-    let orchestrator_stack = tddy_changeset::stack_fixtures::stack_on_disk(
+    let orchestrator_stack = tddy_changeset::work_queue_fixtures::stack_on_disk(
         &sessions
             .path()
             .join("sessions")

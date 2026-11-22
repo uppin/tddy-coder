@@ -91,7 +91,7 @@ pub fn read_session_metadata(
 
 /// This daemon in its capacity as the claimant of the clones a session's seeded agents read.
 ///
-/// A trait for the same reason [`StackParentHost`] is one: the co-located
+/// A trait for the same reason [`WorkQueueParentHost`] is one: the co-located
 /// cursor-cli spawn is a free function, and claiming a clone is the whole of `ConnectionService`'s
 /// peer-facing surface — naming that type there would drag it through every caller of a function
 /// that otherwise mentions nothing of the kind.

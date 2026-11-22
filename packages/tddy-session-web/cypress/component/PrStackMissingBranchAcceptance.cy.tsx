@@ -26,16 +26,16 @@
 
 import React from "react";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -48,22 +48,22 @@ const PROJECT_ID = "proj-pr-stack";
 const BASE_BRANCH = "feature/attach-docs/attach-proto";
 
 /** `n1` owns a created branch; `n2` depends on it and has not been started. */
-const A_SPAWNED_PREDECESSOR_AND_ITS_DEPENDENT: StackNodeFixture[] = [
+const A_SPAWNED_PREDECESSOR_AND_ITS_DEPENDENT: WorkItemFixture[] = [
   aPlannedNode({
-    nodeId: "n1",
+    itemId: "n1",
     title: "Start-session attachment proto",
     branch: BASE_BRANCH,
     sessionId: "child-n1",
   }),
   aPlannedNode({
-    nodeId: "n2",
+    itemId: "n2",
     title: "Copy attachments during StartSession",
     branchSuggestion: "feature/attach-docs/attach-start",
     parents: ["n1"],
   }),
 ];
 
-function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry> {
+function anOrchestratorSession(nodes: WorkItemFixture[]): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-07-26T09:50:00Z",
@@ -72,16 +72,16 @@ function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry>
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, nodes),
+    workQueueJson: aWorkQueueJson(1, nodes),
   };
 }
 
 function openPrStackScreen(
-  nodes: StackNodeFixture[],
+  nodes: WorkItemFixture[],
   resolutionByBranch: Record<string, BranchResolutionFixture>,
 ) {
   const backend = aSessionsDrawerBackend([anOrchestratorSession(nodes)]).onUnary(
-    PrStackService.method.queryBranch,
+    WorkQueueService.method.queryBranch,
     (req: { branch: string }) =>
       aBranchResolutionResponse(resolutionByBranch[req.branch] ?? { branch: req.branch }),
   );
@@ -89,9 +89,9 @@ function openPrStackScreen(
 }
 
 /** Open the screen with a `QueryBranch` call that never answers. */
-function openPrStackScreenWithUnansweredResolution(nodes: StackNodeFixture[]) {
+function openPrStackScreenWithUnansweredResolution(nodes: WorkItemFixture[]) {
   const backend = aSessionsDrawerBackend([anOrchestratorSession(nodes)]).onUnary(
-    PrStackService.method.queryBranch,
+    WorkQueueService.method.queryBranch,
     () => new Promise<never>(() => undefined),
   );
   openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
@@ -146,12 +146,12 @@ it("marks Start session when no ancestor owns a created branch yet", () => {
   // Given — n1 holds only a planned branch name, so there is no ref for n2 to be based onto
   const nodes = [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Start-session attachment proto",
       branchSuggestion: BASE_BRANCH,
     }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Copy attachments during StartSession",
       parents: ["n1"],
     }),
@@ -172,18 +172,18 @@ it("marks Start session when one of several parents owns no branch, naming that 
   // Given — n3 depends on both n1 (branch pushed) and n2 (planned only)
   const nodes = [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Start-session attachment proto",
       branch: BASE_BRANCH,
       sessionId: "child-n1",
     }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Session attachment storage",
       branchSuggestion: "feature/attach-docs/attach-store",
     }),
     aPlannedNode({
-      nodeId: "n3",
+      itemId: "n3",
       title: "Copy attachments during StartSession",
       parents: ["n1", "n2"],
     }),
@@ -211,7 +211,7 @@ it("marks Start session when one of several parents owns no branch, naming that 
 
 it("offers Start session for a root node, whose base is the project default branch", () => {
   // Given — a single root node with no parents and no branch of its own
-  const nodes = [aPlannedNode({ nodeId: "n1", title: "Start-session attachment proto" })];
+  const nodes = [aPlannedNode({ itemId: "n1", title: "Start-session attachment proto" })];
 
   // When
   openPrStackScreen(nodes, {});

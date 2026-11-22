@@ -29,7 +29,7 @@ import {
   SESSIONS_PROJECT_ROUTE,
   sessionsProjectNewPath,
   parseSessionsProjectNew,
-  sessionsProjectStackPath,
+  sessionsProjectQueuePath,
   parseSessionsProjectStack,
   sessionsProjectSettingsPath,
   parseSessionsProjectSettings,
@@ -441,28 +441,28 @@ describe("sessions project composer route (#orchestrators 8/11)", () => {
 describe("sessions project stack route (#orchestrators 9/11)", () => {
   it("the stack view path parses to its project and stack and is a drawer path", () => {
     // Given
-    const path = sessionsProjectStackPath("proj-beta", "0190b000-0000-7000-8000-0000000000aa");
+    const path = sessionsProjectQueuePath("proj-beta", "0190b000-0000-7000-8000-0000000000aa");
     // When
     const route = parseSessionsProjectStack(path);
     const isDrawerPath = isSessionsDrawerPath(path);
     // Then
-    expect(path).toBe("/sessions/project/proj-beta/stack/0190b000-0000-7000-8000-0000000000aa");
-    expect(route).toEqual({ projectId: "proj-beta", stackId: "0190b000-0000-7000-8000-0000000000aa" });
+    expect(path).toBe("/sessions/project/proj-beta/queue/0190b000-0000-7000-8000-0000000000aa");
+    expect(route).toEqual({ projectId: "proj-beta", queueId: "0190b000-0000-7000-8000-0000000000aa" });
     expect(isDrawerPath).toBe(true);
   });
 
   it("round-trips a project id and a stack id that need encoding", () => {
     // Given
-    const path = sessionsProjectStackPath("team/proj beta", "stack/1");
+    const path = sessionsProjectQueuePath("team/proj beta", "stack/1");
     // When
     const route = parseSessionsProjectStack(path);
     // Then
-    expect(route).toEqual({ projectId: "team/proj beta", stackId: "stack/1" });
+    expect(route).toEqual({ projectId: "team/proj beta", queueId: "stack/1" });
   });
 
   it("is read as neither a session id, the composer, nor main's setup pane", () => {
     // Given
-    const path = sessionsProjectStackPath("proj-beta", "s1");
+    const path = sessionsProjectQueuePath("proj-beta", "s1");
     // When
     const sessionId = parseSessionsDrawerSessionId(path);
     const composer = parseSessionsProjectNew(path);
@@ -476,9 +476,9 @@ describe("sessions project stack route (#orchestrators 9/11)", () => {
   it("names no stack without a stack id, without a project, or under another segment", () => {
     // When
     const withoutStackId = parseSessionsProjectStack(`${SESSIONS_PROJECT_ROUTE}/proj-beta/stack`);
-    const withoutProject = parseSessionsProjectStack(`${SESSIONS_PROJECT_ROUTE}/stack/s1`);
+    const withoutProject = parseSessionsProjectStack(`${SESSIONS_PROJECT_ROUTE}/queue/s1`);
     const composerPath = parseSessionsProjectStack(sessionsProjectNewPath("proj-beta"));
-    const extraSegment = parseSessionsProjectStack(`${SESSIONS_PROJECT_ROUTE}/proj-beta/stack/s1/more`);
+    const extraSegment = parseSessionsProjectStack(`${SESSIONS_PROJECT_ROUTE}/proj-beta/queue/s1/more`);
     // Then
     expect(withoutStackId).toBeNull();
     expect(withoutProject).toBeNull();

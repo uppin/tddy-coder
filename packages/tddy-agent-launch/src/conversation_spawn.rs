@@ -1,4 +1,4 @@
-use crate::stack_parent::StackParentHost;
+use crate::work_queue_parent::WorkQueueParentHost;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 
 use std::path::PathBuf;
@@ -76,7 +76,7 @@ pub struct GrillMeConversationSpawnHandler {
     pub service: crate::launch_ports::LaunchSessions,
     /// Resolves each spawned conversation's base off the orchestrator, which is a session of *this*
     /// daemon, so the resolution never leaves the host.
-    pub stack_parent_host: Arc<dyn StackParentHost>,
+    pub work_queue_parent_host: Arc<dyn WorkQueueParentHost>,
     pub config: DaemonConfig,
     pub tddy_data_dir: PathBuf,
     pub cli_manager: Arc<CliSessionManager>,

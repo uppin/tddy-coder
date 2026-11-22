@@ -1,6 +1,6 @@
 //! Acceptance: repointing a planned node that is stranded behind a base branch which no longer exists.
 //!
-//! `repoint_planned_pr_node` now takes an explicit `target_base_branch` — the branch the operator's
+//! `repoint_work_item` now takes an explicit `target_base_branch` — the branch the operator's
 //! "Repoint to <target>" control named — and applies one rule: **retain exactly the parents that own
 //! that branch, drop the rest**. A target no parent owns therefore means "detach", and the node's base
 //! collapses to the stack default. `None` keeps the original drop-merged-parents behaviour for callers
@@ -23,9 +23,9 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
+use tddy_core::changeset::{Changeset, GithubPrStatus, WorkItem, WorkQueue};
 use tddy_github::pr_api::{GithubPrApi, PrLookupOutcome, PrRef, PrState, PrView};
-use tddy_pr_stack::stack_ops::repoint_planned_pr_node;
+use tddy_work_queue::item_ops::repoint_work_item;
 
 const DEFAULT_BRANCH: &str = "master";
 /// The merged predecessor's branch — deleted from `origin` once its PR landed.
@@ -105,8 +105,8 @@ impl GithubPrApi for FakeGithub {
 // --- builders ---------------------------------------------------------------
 
 /// A node that owns a branch and whose PR is recorded as still open.
-fn an_open_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn an_open_node(node_id: &str, branch: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: node_id.to_string(),
         description: String::new(),
@@ -126,8 +126,8 @@ fn an_open_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNode {
 }
 
 /// A node whose PR is recorded as merged.
-fn a_merged_node(node_id: &str, branch: &str) -> StackNode {
-    StackNode {
+fn a_merged_node(node_id: &str, branch: &str) -> WorkItem {
+    WorkItem {
         pr_status: Some(GithubPrStatus {
             phase: "merged".to_string(),
             url: None,
@@ -138,8 +138,8 @@ fn a_merged_node(node_id: &str, branch: &str) -> StackNode {
 }
 
 /// A planned node that was never started: it holds a suggested branch name and owns no branch.
-fn a_planned_node(node_id: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn a_planned_node(node_id: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         branch: None,
         session_id: None,
         pr_status: None,
@@ -148,16 +148,16 @@ fn a_planned_node(node_id: &str, parents: &[&str]) -> StackNode {
     }
 }
 
-fn write_stack(dir: &Path, nodes: Vec<StackNode>) {
+fn write_stack(dir: &Path, nodes: Vec<WorkItem>) {
     let cs = Changeset {
-        stack: Some(Stack { version: 1, nodes }),
+        stack: Some(WorkQueue { version: 1, nodes }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(dir, cs);
 }
 
 fn parents_of(dir: &Path, node_id: &str) -> Vec<String> {
-    tddy_changeset::stack_fixtures::stack_on_disk(dir)
+    tddy_changeset::work_queue_fixtures::stack_on_disk(dir)
         .node(node_id)
         .unwrap()
         .parents
@@ -170,7 +170,7 @@ fn parents_of(dir: &Path, node_id: &str) -> Vec<String> {
 fn repointing_a_branchless_node_to_the_default_branch_drops_its_stranded_parent() {
     // Given — n1's PR merged on GitHub and its branch was deleted, but the plan still says "open";
     // n2 was never started, so it owns no branch
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -182,7 +182,7 @@ fn repointing_a_branchless_node_to_the_default_branch_drops_its_stranded_parent(
     let gh = FakeGithub::new();
 
     // When — the operator repoints n2 onto the default branch, which no parent owns
-    repoint_planned_pr_node(dir, dir, "n2", DEFAULT_BRANCH, Some(DEFAULT_BRANCH), &gh)
+    repoint_work_item(dir, dir, "n2", DEFAULT_BRANCH, Some(DEFAULT_BRANCH), &gh)
         .expect("repointing a branchless node should succeed");
 
     // Then — the stranded parent is gone, so n2's base collapses to the default branch
@@ -192,7 +192,7 @@ fn repointing_a_branchless_node_to_the_default_branch_drops_its_stranded_parent(
 #[test]
 fn repointing_a_branchless_node_makes_no_github_call() {
     // Given — the same stranded node, which owns no branch
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -204,7 +204,7 @@ fn repointing_a_branchless_node_makes_no_github_call() {
     let gh = FakeGithub::new();
 
     // When
-    repoint_planned_pr_node(dir, dir, "n2", DEFAULT_BRANCH, Some(DEFAULT_BRANCH), &gh)
+    repoint_work_item(dir, dir, "n2", DEFAULT_BRANCH, Some(DEFAULT_BRANCH), &gh)
         .expect("repointing a branchless node should succeed");
 
     // Then — a node with no branch has no PR of its own, so there is nothing to look up and nothing to
@@ -216,7 +216,7 @@ fn repointing_a_branchless_node_makes_no_github_call() {
 #[test]
 fn repointing_retains_the_parent_that_owns_the_target_base_branch() {
     // Given — n3 depends on n1 (branch deleted from origin, still recorded open) and n2 (open, pushed)
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -229,7 +229,7 @@ fn repointing_retains_the_parent_that_owns_the_target_base_branch() {
     let gh = FakeGithub::new();
 
     // When — the operator repoints onto the surviving predecessor's branch
-    repoint_planned_pr_node(dir, dir, "n3", DEFAULT_BRANCH, Some(LIVE_BASE_BRANCH), &gh)
+    repoint_work_item(dir, dir, "n3", DEFAULT_BRANCH, Some(LIVE_BASE_BRANCH), &gh)
         .expect("repointing onto a surviving parent should succeed");
 
     // Then — retain is the rule: only the parent that owns the target survives
@@ -240,7 +240,7 @@ fn repointing_retains_the_parent_that_owns_the_target_base_branch() {
 fn repointing_collapses_a_multi_parent_node_onto_the_single_target_parent() {
     // Given — n4 stacks on three predecessors, two of which are perfectly healthy: n2 owns the target
     // branch and n3 owns a different live one
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -254,7 +254,7 @@ fn repointing_collapses_a_multi_parent_node_onto_the_single_target_parent() {
     let gh = FakeGithub::new();
 
     // When
-    repoint_planned_pr_node(dir, dir, "n4", DEFAULT_BRANCH, Some(LIVE_BASE_BRANCH), &gh)
+    repoint_work_item(dir, dir, "n4", DEFAULT_BRANCH, Some(LIVE_BASE_BRANCH), &gh)
         .expect("repointing a multi-parent node should succeed");
 
     // Then — repointing is a decision to stack on one predecessor, so n3's healthy edge is dropped
@@ -267,7 +267,7 @@ fn repointing_collapses_a_multi_parent_node_onto_the_single_target_parent() {
 fn repointing_drops_a_parent_whose_pull_request_is_not_recorded_as_merged() {
     // Given — n1's plan status is "open" (the orchestrator agent never ran an assess pass) even though
     // its branch is gone; n2 owns a branch, so the git/PR half of the repoint also runs
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -279,7 +279,7 @@ fn repointing_drops_a_parent_whose_pull_request_is_not_recorded_as_merged() {
     let gh = FakeGithub::new();
 
     // When
-    repoint_planned_pr_node(dir, dir, "n2", DEFAULT_BRANCH, Some(DEFAULT_BRANCH), &gh)
+    repoint_work_item(dir, dir, "n2", DEFAULT_BRANCH, Some(DEFAULT_BRANCH), &gh)
         .expect("repointing should succeed");
 
     // Then — a stale "open" phase no longer protects a dead parent
@@ -289,7 +289,7 @@ fn repointing_drops_a_parent_whose_pull_request_is_not_recorded_as_merged() {
 #[test]
 fn repointing_onto_an_explicit_target_re_targets_the_nodes_own_open_pull_request() {
     // Given — n2 owns a branch and has an open PR of its own, so the git/PR half of the repoint runs
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -301,8 +301,8 @@ fn repointing_onto_an_explicit_target_re_targets_the_nodes_own_open_pull_request
     let gh = FakeGithub::new();
 
     // When — the operator names the default branch as the target (rather than the `None` mode, which
-    // `pr_stack_repoint_acceptance.rs` covers)
-    repoint_planned_pr_node(dir, dir, "n2", DEFAULT_BRANCH, Some(DEFAULT_BRANCH), &gh)
+    // `work_queue_repoint_acceptance.rs` covers)
+    repoint_work_item(dir, dir, "n2", DEFAULT_BRANCH, Some(DEFAULT_BRANCH), &gh)
         .expect("repointing should succeed");
 
     // Then — the PR on GitHub follows the new base, so it no longer diffs against a dead branch
@@ -312,7 +312,7 @@ fn repointing_onto_an_explicit_target_re_targets_the_nodes_own_open_pull_request
 #[test]
 fn repointing_without_a_target_drops_merged_parents_only() {
     // Given — n2 depends on n1 (merged) and n3 (still open)
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -325,7 +325,7 @@ fn repointing_without_a_target_drops_merged_parents_only() {
     let gh = FakeGithub::new();
 
     // When — no target is named, so the original rule applies
-    repoint_planned_pr_node(dir, dir, "n2", DEFAULT_BRANCH, None, &gh)
+    repoint_work_item(dir, dir, "n2", DEFAULT_BRANCH, None, &gh)
         .expect("repointing should succeed");
 
     // Then — the merged parent is dropped and the open one is kept, exactly as before

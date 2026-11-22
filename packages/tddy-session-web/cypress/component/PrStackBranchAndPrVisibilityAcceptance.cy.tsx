@@ -15,16 +15,16 @@
 
 import React from "react";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ const PROJECT_ID = "proj-pr-stack";
 const OWNED_BRANCH = "feature/attach-docs/attach-proto";
 const PLANNED_BRANCH = "feature/attach-docs/attach-start";
 
-function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry> {
+function anOrchestratorSession(nodes: WorkItemFixture[]): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-07-26T09:50:00Z",
@@ -45,16 +45,16 @@ function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry>
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, nodes),
+    workQueueJson: aWorkQueueJson(1, nodes),
   };
 }
 
 function openPrStackScreen(
-  nodes: StackNodeFixture[],
+  nodes: WorkItemFixture[],
   resolutionByBranch: Record<string, BranchResolutionFixture>,
 ) {
   const backend = aSessionsDrawerBackend([anOrchestratorSession(nodes)]).onUnary(
-    PrStackService.method.queryBranch,
+    WorkQueueService.method.queryBranch,
     (req: { branch: string }) =>
       aBranchResolutionResponse(resolutionByBranch[req.branch] ?? { branch: req.branch }),
   );
@@ -79,7 +79,7 @@ beforeEach(() => {
 it("renders the branch a planned PR owns", () => {
   // Given
   const nodes = [
-    aPlannedNode({ nodeId: "n1", title: "Attachment proto", branch: OWNED_BRANCH }),
+    aPlannedNode({ itemId: "n1", title: "Attachment proto", branch: OWNED_BRANCH }),
   ];
 
   // When
@@ -92,7 +92,7 @@ it("renders the branch a planned PR owns", () => {
 it("renders a planned branch name distinctly from a branch the node owns", () => {
   // Given — the node holds only a suggestion; no branch exists for it yet
   const nodes = [
-    aPlannedNode({ nodeId: "n1", title: "Copy attachments", branchSuggestion: PLANNED_BRANCH }),
+    aPlannedNode({ itemId: "n1", title: "Copy attachments", branchSuggestion: PLANNED_BRANCH }),
   ];
 
   // When
@@ -110,7 +110,7 @@ it("renders a planned branch name distinctly from a branch the node owns", () =>
 it("shows the PR number and its state for a branch that has a pull request", () => {
   // Given
   const nodes = [
-    aPlannedNode({ nodeId: "n1", title: "Attachment proto", branch: OWNED_BRANCH }),
+    aPlannedNode({ itemId: "n1", title: "Attachment proto", branch: OWNED_BRANCH }),
   ];
 
   // When
@@ -137,7 +137,7 @@ it("shows the PR number and its state for a branch that has a pull request", () 
 it("shows no PR indicator when the branch genuinely has no pull request", () => {
   // Given — the lookup succeeded and found nothing. This is also the stub/demo-login shape (D12).
   const nodes = [
-    aPlannedNode({ nodeId: "n1", title: "Attachment proto", branch: OWNED_BRANCH }),
+    aPlannedNode({ itemId: "n1", title: "Attachment proto", branch: OWNED_BRANCH }),
   ];
 
   // When
@@ -156,7 +156,7 @@ it("shows no PR indicator when the branch genuinely has no pull request", () => 
 it("reports PR status as unavailable when the lookup could not be performed", () => {
   // Given — a real credential that could not be used, distinct from "no PR exists"
   const nodes = [
-    aPlannedNode({ nodeId: "n1", title: "Attachment proto", branch: OWNED_BRANCH }),
+    aPlannedNode({ itemId: "n1", title: "Attachment proto", branch: OWNED_BRANCH }),
   ];
 
   // When
@@ -179,7 +179,7 @@ it("reports PR status as unavailable when the lookup could not be performed", ()
 it("carries the unavailability reason on the indicator", () => {
   // Given
   const nodes = [
-    aPlannedNode({ nodeId: "n1", title: "Attachment proto", branch: OWNED_BRANCH }),
+    aPlannedNode({ itemId: "n1", title: "Attachment proto", branch: OWNED_BRANCH }),
   ];
 
   // When

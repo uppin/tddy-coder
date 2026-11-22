@@ -34,12 +34,12 @@ use tddy_tool_engine::project_home_tools::{
     target_daemon_instance_id, ListProjectSessionsResult, UnreachableHost,
 };
 use tddy_tool_engine::session_file_tools::is_session_file_tool;
-use tddy_tool_engine::stack_git_tools::is_stack_git_tool;
-use tddy_tool_engine::stack_tools::caller_records::{
+use tddy_tool_engine::work_item_git_tools::is_stack_git_tool;
+use tddy_tool_engine::work_queue_tools::caller_records::{
     forwarded_stack_caller_role, stack_bound_to_session_here,
 };
-use tddy_tool_engine::stack_tools::{
-    is_stack_tool, is_stack_tool_offered_to, StackCaller, StackCallerRole,
+use tddy_tool_engine::work_queue_tools::{
+    is_stack_tool, is_stack_tool_offered_to, WorkQueueCaller, WorkQueueCallerRole,
 };
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
 use tddy_worktree_service::session_target::{CodebaseHalf, HomeCaller};
@@ -104,7 +104,7 @@ impl ExecToolRpcHandler {
                     req.tool_name, req.session_id
                 ))
                 })?;
-            let caller = StackCaller {
+            let caller = WorkQueueCaller {
                 session_id: home.session_id,
                 project_id: home.project_id,
                 role,
@@ -128,7 +128,7 @@ impl ExecToolRpcHandler {
                 ));
             }
             // The stack git tools still require an orchestrator role, forwarded or not.
-            if !matches!(caller.role, StackCallerRole::Orchestrator { .. }) {
+            if !matches!(caller.role, WorkQueueCallerRole::Orchestrator { .. }) {
                 return Err(Status::permission_denied(format!(
                     "tool {} is served only to an orchestrator session, and daemon {owner} \
                      reports session {} is not one",

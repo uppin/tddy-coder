@@ -25,7 +25,7 @@ use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
 use crate::connection_service::DaemonSessionHost;
 use crate::peer_routing::PeerRouting;
-use crate::{DaemonRpcFamilies, PrStackHandler};
+use crate::{DaemonRpcFamilies, WorkQueueHandler};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
 /// Token accepted by [`test_service`] as a valid session token.
@@ -324,7 +324,7 @@ impl TestDaemon {
 pub struct RpcFamiliesNotUnderTest;
 
 impl DaemonRpcFamilies for RpcFamiliesNotUnderTest {
-    fn pr_stack_handler(&self) -> Arc<dyn PrStackHandler> {
+    fn work_queue_handler(&self) -> Arc<dyn WorkQueueHandler> {
         panic!(
             "this suite routed into the PR-stack family through `DaemonRpcFamilies`, which it does \
              not exercise (`RpcFamiliesNotUnderTest`); a suite that does belongs in \

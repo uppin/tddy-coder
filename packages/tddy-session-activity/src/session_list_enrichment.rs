@@ -41,12 +41,12 @@ pub struct SessionListStatusDisplay {
     pub orchestrator_session_id: String,
     /// Active workflow recipe name (from `Changeset.recipe`). Empty string when absent.
     pub recipe: String,
-    /// JSON-serialized PR stack (the PR DAG) the session's `stack_id` names, present only on
+    /// JSON-serialized PR stack (the PR DAG) the session's `queue_id` names, present only on
     /// orchestrator sessions. Empty string when the session has none.
-    pub stack_plan_json: String,
-    /// The stack the session's changeset names (`Changeset.stack_id`, proto field 38). Empty when
+    pub work_queue_json: String,
+    /// The stack the session's changeset names (`Changeset.queue_id`, proto field 38). Empty when
     /// the session names none.
-    pub stack_id: String,
+    pub queue_id: String,
     /// The session's git branch (from `Changeset.branch`). Empty when the session has no branch
     /// yet. Lets the PR-Stack view resolve the in-progress child session for a planned node by
     /// branch.
@@ -65,25 +65,25 @@ impl SessionListStatusDisplay {
             activity_status: String::new(),
             orchestrator_session_id: String::new(),
             recipe: String::new(),
-            stack_plan_json: String::new(),
-            stack_id: String::new(),
+            work_queue_json: String::new(),
+            queue_id: String::new(),
             branch: String::new(),
         }
     }
 }
 
-/// Serialize a session's PR stack to JSON for the `stack_plan_json` proto field; empty string when
+/// Serialize a session's PR stack to JSON for the `work_queue_json` proto field; empty string when
 /// the session has none or on a read or serialization failure (logged, never propagated as an
 /// error — enrichment is best-effort display data).
 ///
-/// The stack is the project's record the changeset's `stack_id` names. A changeset still carrying
+/// The stack is the project's record the changeset's `queue_id` names. A changeset still carrying
 /// the pre-store `stack` and no id — a session the daemon's startup sweep has not reached — lists
 /// no stack: only the sweep reads that field.
 ///
 /// Public because `tddy-daemon-rpc`'s PR-stack family reuses it to serialize its responses'
-/// `stack_plan_json` in the exact wire shape `PrStackScreen` already knows how to parse.
-pub fn stack_plan_json_for_changeset(session_dir: &Path, changeset: &Changeset) -> String {
-    if changeset.stack_id.is_none() {
+/// `work_queue_json` in the exact wire shape `PrStackScreen` already knows how to parse.
+pub fn work_queue_json_for_changeset(session_dir: &Path, changeset: &Changeset) -> String {
+    if changeset.work_queue_id.is_none() {
         return String::new();
     }
     let stack = match tddy_core::changeset::read_stack_of(session_dir, changeset) {
@@ -92,7 +92,7 @@ pub fn stack_plan_json_for_changeset(session_dir: &Path, changeset: &Changeset) 
         Err(e) => {
             log::warn!(
                 target: "tddy_daemon::session_list_enrichment",
-                "stack_plan_json_for_changeset: failed to read the stack of {}: {e}",
+                "work_queue_json_for_changeset: failed to read the stack of {}: {e}",
                 session_dir.display()
             );
             return String::new();
@@ -101,7 +101,7 @@ pub fn stack_plan_json_for_changeset(session_dir: &Path, changeset: &Changeset) 
     serde_json::to_string(&stack).unwrap_or_else(|e| {
         log::warn!(
             target: "tddy_daemon::session_list_enrichment",
-            "stack_plan_json_for_changeset: failed to serialize stack: {e}"
+            "work_queue_json_for_changeset: failed to serialize stack: {e}"
         );
         String::new()
     })
@@ -264,8 +264,8 @@ fn state_only_row(
             .clone()
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
-        stack_plan_json: stack_plan_json_for_changeset(session_dir, changeset),
-        stack_id: changeset.stack_id.clone().unwrap_or_default(),
+        work_queue_json: work_queue_json_for_changeset(session_dir, changeset),
+        queue_id: changeset.work_queue_id.clone().unwrap_or_default(),
         branch: changeset.branch.clone().unwrap_or_default(),
     }
 }
@@ -304,8 +304,8 @@ fn workflow_row(
             .clone()
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
-        stack_plan_json: stack_plan_json_for_changeset(session_dir, changeset),
-        stack_id: changeset.stack_id.clone().unwrap_or_default(),
+        work_queue_json: work_queue_json_for_changeset(session_dir, changeset),
+        queue_id: changeset.work_queue_id.clone().unwrap_or_default(),
         branch: changeset.branch.clone().unwrap_or_default(),
     }
 }
@@ -330,10 +330,10 @@ fn cli_harness_row(
             .as_ref()
             .and_then(|c| c.recipe.clone())
             .unwrap_or_default(),
-        stack_plan_json: String::new(),
-        stack_id: changeset
+        work_queue_json: String::new(),
+        queue_id: changeset
             .as_ref()
-            .and_then(|c| c.stack_id.clone())
+            .and_then(|c| c.work_queue_id.clone())
             .unwrap_or_default(),
         branch: changeset.and_then(|c| c.branch).unwrap_or_default(),
     }
@@ -376,8 +376,8 @@ pub fn apply_session_list_status_to_proto(
     entry.model = status.model;
     entry.activity_status = status.activity_status;
     entry.orchestrator_session_id = status.orchestrator_session_id;
-    entry.stack_plan_json = status.stack_plan_json;
-    entry.stack_id = status.stack_id;
+    entry.work_queue_json = status.work_queue_json;
+    entry.work_queue_id = status.queue_id;
     entry.branch = status.branch;
     entry.pending_elicitation =
         crate::pending_elicitation::pending_elicitation_for_session_dir(session_dir);
@@ -591,7 +591,7 @@ state:
             previous_session_id: String::new(),
             orchestrator_session_id: String::new(),
             recipe: String::new(),
-            stack_plan_json: String::new(),
+            work_queue_json: String::new(),
             bytes_in: 0,
             bytes_out: 0,
             last_data_received_at: String::new(),
@@ -608,7 +608,7 @@ state:
             session_role: String::new(),
             reads_host_paths: false,
             orchestration_mark: None,
-            stack_id: String::new(),
+            work_queue_id: String::new(),
         };
         apply_session_list_status_to_proto(
             Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
@@ -1168,7 +1168,7 @@ sessions:
             previous_session_id: String::new(),
             orchestrator_session_id: String::new(),
             recipe: String::new(),
-            stack_plan_json: String::new(),
+            work_queue_json: String::new(),
             bytes_in: 0,
             bytes_out: 0,
             last_data_received_at: String::new(),
@@ -1185,7 +1185,7 @@ sessions:
             session_role: String::new(),
             reads_host_paths: false,
             orchestration_mark: None,
-            stack_id: String::new(),
+            work_queue_id: String::new(),
         };
         apply_session_list_status_to_proto(
             Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
@@ -2040,33 +2040,32 @@ state:
     }
 
     // ---------------------------------------------------------------------------
-    // Acceptance tests: stack_plan_json enrichment
+    // Acceptance tests: work_queue_json enrichment
     // ---------------------------------------------------------------------------
 
     /// `enrichment_surfaces_stack_plan_json_from_changeset` — when an orchestrator session's
     /// `changeset.yaml` contains a `stack` field, `session_list_status_from_session_dir` must
-    /// return its JSON serialization in `SessionListStatusDisplay.stack_plan_json`.
+    /// return its JSON serialization in `SessionListStatusDisplay.work_queue_json`.
     #[test]
     fn enrichment_surfaces_stack_plan_json_from_changeset() {
         let dir = tempdir().unwrap();
         let session_dir = dir.path().join("sessions").join("orch-sess-stack-1");
         let session_dir = session_dir.as_path();
         fs::create_dir_all(session_dir).unwrap();
-        let record =
-            tddy_core::project_stack_store::ProjectStackStore::new(dir.path().join("projects"))
-                .create(
-                    "proj-stack-json",
-                    "orch-sess-stack-1",
-                    tddy_core::changeset::Stack {
-                        version: 1,
-                        nodes: vec![tddy_core::changeset::StackNode {
-                            node_id: "n1".to_string(),
-                            title: "Add token store".to_string(),
-                            ..Default::default()
-                        }],
-                    },
-                )
-                .unwrap();
+        let record = tddy_core::work_queue_store::WorkQueueStore::new(dir.path().join("projects"))
+            .create(
+                "proj-stack-json",
+                "orch-sess-stack-1",
+                tddy_core::changeset::WorkQueue {
+                    version: 1,
+                    nodes: vec![tddy_core::changeset::WorkItem {
+                        node_id: "n1".to_string(),
+                        title: "Add token store".to_string(),
+                        ..Default::default()
+                    }],
+                },
+            )
+            .unwrap();
 
         fs::write(
             session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
@@ -2100,9 +2099,9 @@ state:
     - state: Green
       at: '2026-07-01T10:05:00Z'
 recipe: pr-stack
-stack_id: {}
+queue_id: {}
 ",
-                record.stack_id
+                record.queue_id
             ),
         )
         .unwrap();
@@ -2114,19 +2113,19 @@ stack_id: {}
         )
         .expect("enrichment must not error for orchestrator session with stack");
 
-        // Then — stack_plan_json is a JSON serialization of the Stack, not the raw YAML
+        // Then — work_queue_json is a JSON serialization of the WorkQueue, not the raw YAML
         assert!(
-            !got.stack_plan_json.is_empty(),
-            "stack_plan_json must not be empty"
+            !got.work_queue_json.is_empty(),
+            "work_queue_json must not be empty"
         );
         let parsed: serde_json::Value =
-            serde_json::from_str(&got.stack_plan_json).expect("stack_plan_json must be valid JSON");
+            serde_json::from_str(&got.work_queue_json).expect("work_queue_json must be valid JSON");
         assert_eq!(parsed["nodes"][0]["node_id"], "n1");
         assert_eq!(parsed["nodes"][0]["title"], "Add token store");
     }
 
     /// `enrichment_stack_plan_json_empty_when_stack_absent` — when `Changeset.stack` is `None`,
-    /// `stack_plan_json` must be an empty string (not `"null"` or an error).
+    /// `work_queue_json` must be an empty string (not `"null"` or an error).
     #[test]
     fn enrichment_stack_plan_json_empty_when_stack_absent() {
         let dir = tempdir().unwrap();
@@ -2175,17 +2174,17 @@ state:
 
         // Then
         assert_eq!(
-            got.stack_plan_json, "",
-            "stack_plan_json must be empty string when Changeset.stack is None"
+            got.work_queue_json, "",
+            "work_queue_json must be empty string when Changeset.stack is None"
         );
     }
 
     /// A session of project `proj-stack-id` in `<dir>/sessions/<session_id>`, whose changeset names
-    /// `stack_id` when one is given (`#orchestrators` 9/11).
+    /// `queue_id` when one is given (`#orchestrators` 9/11).
     fn a_session_naming_a_stack(
         dir: &Path,
         session_id: &str,
-        stack_id: Option<&str>,
+        queue_id: Option<&str>,
     ) -> std::path::PathBuf {
         let session_dir = dir.join("sessions").join(session_id);
         fs::create_dir_all(&session_dir).unwrap();
@@ -2199,7 +2198,7 @@ state:
         tddy_core::changeset::write_changeset(
             &session_dir,
             &tddy_core::changeset::Changeset {
-                stack_id: stack_id.map(str::to_string),
+                work_queue_id: queue_id.map(str::to_string),
                 ..tddy_core::changeset::Changeset::default()
             },
         )
@@ -2207,22 +2206,21 @@ state:
         session_dir
     }
 
-    /// `SessionEntry.stack_id` names the stack the session's changeset names — the half of the
+    /// `SessionEntry.queue_id` names the stack the session's changeset names — the half of the
     /// stack's address a `SessionEntry` did not carry (`#orchestrators` 9/11).
     #[test]
     fn apply_session_list_status_names_the_stack_the_changeset_references() {
         // Given
         let dir = tempdir().unwrap();
-        let record =
-            tddy_core::project_stack_store::ProjectStackStore::new(dir.path().join("projects"))
-                .create(
-                    "proj-stack-id",
-                    "orch-names-a-stack",
-                    tddy_core::changeset::Stack::default(),
-                )
-                .unwrap();
+        let record = tddy_core::work_queue_store::WorkQueueStore::new(dir.path().join("projects"))
+            .create(
+                "proj-stack-id",
+                "orch-names-a-stack",
+                tddy_core::changeset::WorkQueue::default(),
+            )
+            .unwrap();
         let session_dir =
-            a_session_naming_a_stack(dir.path(), "orch-names-a-stack", Some(&record.stack_id));
+            a_session_naming_a_stack(dir.path(), "orch-names-a-stack", Some(&record.queue_id));
         let mut entry = ProtoSessionEntry {
             session_id: "orch-names-a-stack".to_string(),
             ..ProtoSessionEntry::default()
@@ -2237,10 +2235,10 @@ state:
         .unwrap();
 
         // Then
-        assert_eq!(entry.stack_id, record.stack_id);
+        assert_eq!(entry.work_queue_id, record.queue_id);
     }
 
-    /// A session whose changeset names no stack lists an empty `stack_id`.
+    /// A session whose changeset names no stack lists an empty `queue_id`.
     #[test]
     fn apply_session_list_status_leaves_the_stack_id_empty_without_a_stack() {
         // Given
@@ -2248,7 +2246,7 @@ state:
         let session_dir = a_session_naming_a_stack(dir.path(), "plain-session", None);
         let mut entry = ProtoSessionEntry {
             session_id: "plain-session".to_string(),
-            stack_id: "left-over-from-a-previous-listing".to_string(),
+            work_queue_id: "left-over-from-a-previous-listing".to_string(),
             ..ProtoSessionEntry::default()
         };
 
@@ -2261,11 +2259,11 @@ state:
         .unwrap();
 
         // Then
-        assert_eq!(entry.stack_id, "");
+        assert_eq!(entry.work_queue_id, "");
     }
 
     /// `apply_stack_plan_json_to_proto_sets_field` — `apply_session_list_status_to_proto` must
-    /// copy `stack_plan_json` into proto `SessionEntry` field 23.
+    /// copy `work_queue_json` into proto `SessionEntry` field 23.
     #[test]
     fn apply_stack_plan_json_to_proto_sets_field() {
         use tddy_service::proto::session::SessionEntry as ProtoSessionEntry;
@@ -2274,21 +2272,20 @@ state:
         let session_dir = dir.path().join("sessions").join("orch-proto-stack-sess");
         let session_dir = session_dir.as_path();
         fs::create_dir_all(session_dir).unwrap();
-        let record =
-            tddy_core::project_stack_store::ProjectStackStore::new(dir.path().join("projects"))
-                .create(
-                    "proj-proto-stack",
-                    "orch-proto-stack-sess",
-                    tddy_core::changeset::Stack {
-                        version: 1,
-                        nodes: vec![tddy_core::changeset::StackNode {
-                            node_id: "n1".to_string(),
-                            title: "Root PR".to_string(),
-                            ..Default::default()
-                        }],
-                    },
-                )
-                .unwrap();
+        let record = tddy_core::work_queue_store::WorkQueueStore::new(dir.path().join("projects"))
+            .create(
+                "proj-proto-stack",
+                "orch-proto-stack-sess",
+                tddy_core::changeset::WorkQueue {
+                    version: 1,
+                    nodes: vec![tddy_core::changeset::WorkItem {
+                        node_id: "n1".to_string(),
+                        title: "Root PR".to_string(),
+                        ..Default::default()
+                    }],
+                },
+            )
+            .unwrap();
 
         fs::write(
             session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
@@ -2322,9 +2319,9 @@ state:
     - state: Green
       at: '2026-07-01T10:05:00Z'
 recipe: pr-stack
-stack_id: {}
+queue_id: {}
 ",
-                record.stack_id
+                record.queue_id
             ),
         )
         .unwrap();
@@ -2341,10 +2338,10 @@ stack_id: {}
         .expect("apply must not error");
 
         assert!(
-            !proto.stack_plan_json.is_empty(),
-            "stack_plan_json must be copied into proto SessionEntry field 23"
+            !proto.work_queue_json.is_empty(),
+            "work_queue_json must be copied into proto SessionEntry field 23"
         );
-        let parsed: serde_json::Value = serde_json::from_str(&proto.stack_plan_json).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&proto.work_queue_json).unwrap();
         assert_eq!(parsed["nodes"][0]["node_id"], "n1");
     }
 }

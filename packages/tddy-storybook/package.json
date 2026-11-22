@@ -22,7 +22,7 @@
     "tddy-connectrpc-testkit": "workspace:*",
     "tddy-hosts-web": "workspace:*",
     "tddy-livekit-web": "workspace:*",
-    "tddy-prstack-web": "workspace:*",
+    "tddy-workqueue-web": "workspace:*",
     "tddy-react-commons": "workspace:*",
     "tddy-rpc-playground-web": "workspace:*",
     "tddy-session-create-web": "workspace:*",

@@ -1,4 +1,4 @@
-//! Acceptance: the daemon's two planned-PR mutation RPCs — `ReorderPlannedPr` and
+//! Acceptance: the daemon's two planned-PR mutation RPCs — `ReorderWorkItem` and
 //! `PullBaseIntoBranch`.
 //!
 //! Both rewrite something on the operator's behalf — a plan on disk, or a child session's branch and
@@ -7,7 +7,7 @@
 //! - Neither touches a session that names no stack (`require_a_stack`, `#orchestrators` 12/12
 //!   B9). Without that guard any `session_id` belonging to the same user would have its
 //!   `changeset.yaml` rewritten with a stack it never had, which is why the refusal — naming
-//!   `pr_stack_create` — is pinned for both legs rather than once.
+//!   `work_queue_create` — is pinned for both legs rather than once.
 //! - A missing `node_id`, a missing `base_branch` and a `direction` that is neither `up` nor `down`
 //!   are `invalid_argument`: the caller sent something unusable, and guessing a node or a direction
 //!   would move a row the operator never pointed at.
@@ -32,14 +32,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use tddy_core::changeset::{Changeset, Stack, StackNode};
+use tddy_core::changeset::{Changeset, WorkItem, WorkQueue};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_rpc::{Code, Request, Status};
-use tddy_service::proto::pr_stack::{
-    BranchResolution, PrStackService, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    ReorderPlannedPrRequest, ReorderPlannedPrResponse,
+use tddy_service::proto::work_queue::{
+    BranchResolution, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    ReorderWorkItemRequest, ReorderWorkItemResponse, WorkQueueService,
 };
 use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
@@ -177,12 +177,12 @@ impl Orchestrator {
     fn record_the_plan(&self, repo_path: Option<PathBuf>) -> &Self {
         let dir = self.session_dir(ORCHESTRATOR);
         fs::create_dir_all(&dir).unwrap();
-        tddy_changeset::stack_fixtures::write_changeset_with_stack(
+        tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
             &dir,
             Changeset {
                 recipe: Some("pr-stack".to_string()),
                 repo_path: repo_path.map(|p| p.to_string_lossy().into_owned()),
-                stack: Some(Stack {
+                stack: Some(WorkQueue {
                     version: 1,
                     nodes: vec![
                         a_started_node(FIRST_NODE, FIRST_BRANCH, 0),
@@ -278,25 +278,25 @@ impl Orchestrator {
 }
 
 /// A node that owns a branch and a child session, at a stated position in the reading order.
-fn a_started_node(node_id: &str, branch: &str, display_order: u32) -> StackNode {
-    StackNode {
+fn a_started_node(node_id: &str, branch: &str, display_order: u32) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: format!("{node_id} title"),
         branch: Some(branch.to_string()),
         session_id: Some(format!("session-for-{node_id}")),
         display_order: Some(display_order),
-        ..StackNode::default()
+        ..WorkItem::default()
     }
 }
 
 /// A node that was never started: a suggested branch name, no branch and no session.
-fn a_planned_node(node_id: &str, display_order: u32) -> StackNode {
-    StackNode {
+fn a_planned_node(node_id: &str, display_order: u32) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: format!("{node_id} title"),
         branch_suggestion: Some(format!("feature/stack/{node_id}")),
         display_order: Some(display_order),
-        ..StackNode::default()
+        ..WorkItem::default()
     }
 }
 
@@ -307,12 +307,12 @@ async fn reorder(
     session_id: &str,
     node_id: &str,
     direction: &str,
-) -> Result<ReorderPlannedPrResponse, Status> {
+) -> Result<ReorderWorkItemResponse, Status> {
     service
-        .reorder_planned_pr(Request::direct(ReorderPlannedPrRequest {
+        .reorder_work_item(Request::direct(ReorderWorkItemRequest {
             session_token: TOKEN.to_string(),
             session_id: session_id.to_string(),
-            node_id: node_id.to_string(),
+            item_id: node_id.to_string(),
             direction: direction.to_string(),
             stack: None,
         }))
@@ -332,7 +332,7 @@ async fn pull(
         .pull_base_into_branch(Request::direct(PullBaseIntoBranchRequest {
             session_token: TOKEN.to_string(),
             session_id: session_id.to_string(),
-            node_id: node_id.to_string(),
+            item_id: node_id.to_string(),
             base_branch: base_branch.to_string(),
             strategy: String::new(),
             dirty_worktree_action: String::new(),
@@ -345,11 +345,11 @@ async fn pull(
 
 // --- reading the answers back -----------------------------------------------
 
-/// The persisted position of each named node in a `stack_plan_json` payload, in the order named — so
+/// The persisted position of each named node in a `work_queue_json` payload, in the order named — so
 /// an assertion states the whole reading order as one literal.
-fn positions_in(stack_plan_json: &str, node_ids: &[&str]) -> Vec<Option<u32>> {
-    let stack: Stack = serde_json::from_str(stack_plan_json).unwrap_or_else(|e| {
-        panic!("stack_plan_json is not a Stack: {e} — was '{stack_plan_json}'")
+fn positions_in(work_queue_json: &str, node_ids: &[&str]) -> Vec<Option<u32>> {
+    let stack: WorkQueue = serde_json::from_str(work_queue_json).unwrap_or_else(|e| {
+        panic!("work_queue_json is not a WorkQueue: {e} — was '{work_queue_json}'")
     });
     node_ids
         .iter()
@@ -404,7 +404,7 @@ impl Refusal {
     }
 }
 
-// --- ReorderPlannedPr -------------------------------------------------------
+// --- ReorderWorkItem -------------------------------------------------------
 
 #[tokio::test]
 async fn reordering_a_session_that_names_no_stack_is_refused() {
@@ -418,7 +418,7 @@ async fn reordering_a_session_that_names_no_stack_is_refused() {
     // Then — a session that names no stack must not be given one by a reorder
     assert_refused(result)
         .with_code(Code::FailedPrecondition)
-        .naming("pr_stack_create");
+        .naming("work_queue_create");
 }
 
 #[tokio::test]
@@ -462,7 +462,7 @@ async fn a_successful_reorder_answers_with_the_reordered_plan() {
     // Then — the answer carries the order the list must now render, so the row repaints without
     // waiting for the next poll tick
     assert_eq!(
-        positions_in(&response.stack_plan_json, &[FIRST_NODE, SECOND_NODE]),
+        positions_in(&response.work_queue_json, &[FIRST_NODE, SECOND_NODE]),
         vec![Some(1), Some(0)],
         "the response must carry the plan as it stands after the move"
     );
@@ -482,7 +482,7 @@ async fn pulling_into_a_session_that_names_no_stack_is_refused() {
     // Then — the pull reads a node out of a stack, and a session that names none has no branch to move
     assert_refused(result)
         .with_code(Code::FailedPrecondition)
-        .naming("pr_stack_create");
+        .naming("work_queue_create");
 }
 
 #[tokio::test]

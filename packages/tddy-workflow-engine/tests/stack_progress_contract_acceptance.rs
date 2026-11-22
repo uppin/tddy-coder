@@ -1,12 +1,12 @@
 //! PRD acceptance: stack progress contract — sync_stack_node_from_child mirrors child session
-//! state + PR status into orchestrator StackNode; update_stack_atomic applies mutations atomically.
+//! state + PR status into orchestrator WorkItem; update_stack_atomic applies mutations atomically.
 
 use std::fs;
 use std::path::PathBuf;
 
 use tddy_changeset::changeset::{
     sync_stack_node_from_child, update_stack_atomic, write_changeset, Changeset, ChangesetState,
-    ChangesetWorkflow, GithubPrStatus, Stack, StackNode,
+    ChangesetWorkflow, GithubPrStatus, WorkItem, WorkQueue,
 };
 use tddy_changeset::session_lifecycle::unified_session_dir_path;
 use tddy_workflow_engine::workflow::ids::WorkflowState;
@@ -58,9 +58,9 @@ fn sync_stack_node_reflects_child_state_and_pr_status() {
     // Orchestrator: n1 linked to child_id, child_state not yet mirrored
     let orch_cs = Changeset {
         name: Some("orchestrator".into()),
-        stack: Some(Stack {
+        stack: Some(WorkQueue {
             version: 1,
-            nodes: vec![StackNode {
+            nodes: vec![WorkItem {
                 node_id: "n1".into(),
                 title: "Feature PR".into(),
                 description: String::new(),
@@ -76,14 +76,14 @@ fn sync_stack_node_reflects_child_state_and_pr_status() {
         }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, orch_cs);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, orch_cs);
 
     // When
     sync_stack_node_from_child(&orch_dir, &sessions_home, "n1")
         .expect("sync_stack_node_from_child must succeed");
 
     // Then
-    let stack = tddy_changeset::stack_fixtures::stack_on_disk(&orch_dir);
+    let stack = tddy_changeset::work_queue_fixtures::stack_on_disk(&orch_dir);
     let _ = fs::remove_dir_all(&base);
     let n1 = stack.node("n1").expect("n1 must exist");
 
@@ -121,9 +121,9 @@ fn update_stack_atomic_applies_mutation_and_writes_back() {
 
     let cs = Changeset {
         name: Some("orch".into()),
-        stack: Some(Stack {
+        stack: Some(WorkQueue {
             version: 1,
-            nodes: vec![StackNode {
+            nodes: vec![WorkItem {
                 node_id: "n1".into(),
                 title: "PR 1".into(),
                 description: String::new(),
@@ -139,7 +139,7 @@ fn update_stack_atomic_applies_mutation_and_writes_back() {
         }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, cs);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, cs);
 
     // When — mutate the stack atomically
     update_stack_atomic(&orch_dir, |stack| {
@@ -151,7 +151,7 @@ fn update_stack_atomic_applies_mutation_and_writes_back() {
     .expect("update_stack_atomic must succeed");
 
     // Then
-    let stack = tddy_changeset::stack_fixtures::stack_on_disk(&orch_dir);
+    let stack = tddy_changeset::work_queue_fixtures::stack_on_disk(&orch_dir);
     let _ = fs::remove_dir_all(&base);
     assert_eq!(stack.version, 2, "stack.version must be updated atomically");
     let n1 = stack.node("n1").expect("n1");

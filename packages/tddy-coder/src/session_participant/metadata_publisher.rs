@@ -58,7 +58,7 @@ pub struct SessionMetadataSeed {
     /// The pr-stack orchestrator that spawned this session (`--stack-parent`), if any.
     pub orchestrator_session_id: String,
     /// The planned node this session materializes (`--stack-node-id`), if any.
-    pub stack_node_id: String,
+    pub work_item_id: String,
     /// The branch this session works on.
     pub branch: String,
 }
@@ -78,7 +78,7 @@ pub fn a_default_session_metadata(seed: &SessionMetadataSeed) -> SessionMetadata
         pending_elicitation: false,
         session_id: seed.session_id.clone(),
         orchestrator_session_id: seed.orchestrator_session_id.clone(),
-        stack_node_id: seed.stack_node_id.clone(),
+        work_item_id: seed.work_item_id.clone(),
         branch: seed.branch.clone(),
     }
 }

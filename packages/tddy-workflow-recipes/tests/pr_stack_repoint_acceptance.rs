@@ -1,21 +1,21 @@
 //! Acceptance: repointing a single planned node after a predecessor merged.
 //!
-//! `repoint_planned_pr_node` drops merged parents from the node, rebases the node's local branch
+//! `repoint_work_item` drops merged parents from the node, rebases the node's local branch
 //! onto the effective base (skipped when the branch isn't local), and re-targets the open GitHub
 //! PR's base — the same primitives `bridge::execute_stack_repoint` uses, applied to one node so
 //! the web Repoint control and the agent repoint converge.
 //!
 //! These cases pass `target_base_branch = None`, which selects that original drop-merged-parents rule.
-//! The explicit-target rule is covered by `pr_stack_repoint_dead_end_acceptance.rs`.
+//! The explicit-target rule is covered by `work_queue_repoint_dead_end_acceptance.rs`.
 //!
 //! PRD: docs/ft/coder/pr-stack-live-status.md § capability 4.
 
 use std::path::Path;
 use std::sync::Mutex;
 
-use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
+use tddy_core::changeset::{Changeset, GithubPrStatus, WorkItem, WorkQueue};
 use tddy_github::pr_api::{GithubPrApi, PrLookupOutcome, PrRef, PrState, PrView};
-use tddy_pr_stack::stack_ops::repoint_planned_pr_node;
+use tddy_work_queue::item_ops::repoint_work_item;
 
 // --- a fake GitHub PR API that records base re-targeting ---------------------
 
@@ -76,8 +76,8 @@ impl GithubPrApi for FakeGithub {
 
 // --- builders ---------------------------------------------------------------
 
-fn a_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn a_node(node_id: &str, branch: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: node_id.to_string(),
         description: String::new(),
@@ -96,8 +96,8 @@ fn a_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNode {
     }
 }
 
-fn a_merged_node(node_id: &str, branch: &str) -> StackNode {
-    StackNode {
+fn a_merged_node(node_id: &str, branch: &str) -> WorkItem {
+    WorkItem {
         pr_status: Some(GithubPrStatus {
             phase: "merged".to_string(),
             url: None,
@@ -107,21 +107,21 @@ fn a_merged_node(node_id: &str, branch: &str) -> StackNode {
     }
 }
 
-fn write_stack(dir: &Path, nodes: Vec<StackNode>) {
+fn write_stack(dir: &Path, nodes: Vec<WorkItem>) {
     let cs = Changeset {
-        stack: Some(Stack { version: 1, nodes }),
+        stack: Some(WorkQueue { version: 1, nodes }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(dir, cs);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(dir, cs);
 }
 
 // --- tests ------------------------------------------------------------------
 
 #[test]
-fn repoint_planned_pr_node_drops_a_merged_parent_from_the_node_parents() {
+fn repoint_work_item_drops_a_merged_parent_from_the_node_parents() {
     // Given — n2 depends on n1 (merged) and n3 (still open); its branch is remote-only here so the
     // git rebase is skipped and the test stays deterministic.
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -134,17 +134,17 @@ fn repoint_planned_pr_node_drops_a_merged_parent_from_the_node_parents() {
     let gh = FakeGithub::new();
 
     // When
-    repoint_planned_pr_node(dir, dir, "n2", "master", None, &gh).expect("repoint should succeed");
+    repoint_work_item(dir, dir, "n2", "master", None, &gh).expect("repoint should succeed");
 
     // Then — the merged parent n1 is gone; the open parent n3 remains
-    let loaded = tddy_changeset::stack_fixtures::stack_on_disk(dir);
+    let loaded = tddy_changeset::work_queue_fixtures::stack_on_disk(dir);
     assert_eq!(loaded.node("n2").unwrap().parents, vec!["n3".to_string()]);
 }
 
 #[test]
-fn repoint_planned_pr_node_retargets_the_open_pr_base_to_the_effective_base() {
+fn repoint_work_item_retargets_the_open_pr_base_to_the_effective_base() {
     // Given — n2's only parent n1 has merged, so its effective base becomes the stack default
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -156,7 +156,7 @@ fn repoint_planned_pr_node_retargets_the_open_pr_base_to_the_effective_base() {
     let gh = FakeGithub::new();
 
     // When
-    repoint_planned_pr_node(dir, dir, "n2", "master", None, &gh).expect("repoint should succeed");
+    repoint_work_item(dir, dir, "n2", "master", None, &gh).expect("repoint should succeed");
 
     // Then — the open PR (#42) is re-based onto the stack default branch on GitHub
     assert_eq!(

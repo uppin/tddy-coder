@@ -19,9 +19,9 @@ use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::runtime::{self, RuntimeOptions, RuntimeTaskHandles};
 use tddy_service::proto::tonic_catalog::catalog_service_client::CatalogServiceClient;
 use tddy_service::proto::tonic_exec_tools::exec_tool_service_client::ExecToolServiceClient;
-use tddy_service::proto::tonic_pr_stack::pr_stack_service_client::PrStackServiceClient;
 use tddy_service::proto::tonic_project::project_service_client::ProjectServiceClient;
 use tddy_service::proto::tonic_session::session_service_client::SessionServiceClient;
+use tddy_service::proto::tonic_work_queue::work_queue_service_client::WorkQueueServiceClient;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tonic::transport::{Channel, Endpoint};
@@ -174,9 +174,9 @@ async fn the_assembled_daemon_answers_every_family_on_its_local_socket() {
             })
             .await,
     );
-    let pr_stack = answered(
-        PrStackServiceClient::new(channel.clone())
-            .query_branch(tddy_service::proto::pr_stack::QueryBranchRequest {
+    let work_queue = answered(
+        WorkQueueServiceClient::new(channel.clone())
+            .query_branch(tddy_service::proto::work_queue::QueryBranchRequest {
                 session_token: A_TOKEN_NO_DAEMON_ISSUED.to_string(),
                 branch: "feature/widgets".to_string(),
                 ..Default::default()
@@ -192,14 +192,14 @@ async fn the_assembled_daemon_answers_every_family_on_its_local_socket() {
             ("project", project),
             ("catalog", catalog),
             ("exec_tools", exec_tools),
-            ("pr_stack", pr_stack),
+            ("work_queue", work_queue),
         ],
         [
             ("session", Code::Unauthenticated),
             ("project", Code::Unauthenticated),
             ("catalog", Code::Ok),
             ("exec_tools", Code::Unauthenticated),
-            ("pr_stack", Code::Unauthenticated),
+            ("work_queue", Code::Unauthenticated),
         ]
     );
 }

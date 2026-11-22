@@ -1,8 +1,8 @@
 //! Acceptance: a PR-stack parent is resolved on the host that **owns** it.
 //!
-//! `StartSessionRequest.stack_parent` is a bare session id, and the daemon that serves the spawn
+//! `StartSessionRequest.work_queue_parent` is a bare session id, and the daemon that serves the spawn
 //! resolves it against its own sessions tree
-//! (`resolve_chain_base_ref` → `unified_session_dir_path(sessions_base, stack_parent)`). The
+//! (`resolve_chain_base_ref` → `unified_session_dir_path(sessions_base, work_queue_parent)`). The
 //! new-session form's orchestrator picker is fed by a **fanned-out, all-host** `ListSessions`, so it
 //! routinely offers an orchestrator that lives on a different daemon than the one the child is
 //! started on — and the spawn is then refused with
@@ -12,9 +12,9 @@
 //! parent session not found under sessions tree: tmp/.tddy/sessions/01a04d4b-…
 //! ```
 //!
-//! for a session that exists, one host over. `stack_parent_daemon_instance_id` names the owner, on
+//! for a session that exists, one host over. `work_queue_parent_daemon_instance_id` names the owner, on
 //! exactly the routing shape `codebase_daemon_instance_id` and the roster RPCs already use, and
-//! `ResolveStackBase` is the question the spawning host asks it: *given this planned branch, what
+//! `ResolveWorkItemBase` is the question the spawning host asks it: *given this planned branch, what
 //! does my child's worktree base off?* The owner answers from its own stack, its own child
 //! sessions and its own checkout of the same logical project — the only place all three exist
 //! together.
@@ -31,15 +31,15 @@ use std::path::Path;
 use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
-use tddy_core::changeset::{Changeset, Stack, StackNode};
+use tddy_core::changeset::{Changeset, WorkItem, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::pr_stack::{PrStackService, ResolveStackBaseRequest};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_service::proto::work_queue::{ResolveWorkItemBaseRequest, WorkQueueService};
 use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
@@ -103,19 +103,19 @@ struct ADaemonInTheCommonRoom {
 
 impl ADaemonInTheCommonRoom {
     /// Ask this daemon what `CHILD_BRANCH` bases off, naming the host that owns the stack parent.
-    async fn resolve_stack_base_owned_by(
+    async fn resolve_work_item_base_owned_by(
         &self,
         owning_host: &str,
     ) -> Result<String, tddy_rpc::Status> {
         self.service
-            .resolve_stack_base(Request::direct(ResolveStackBaseRequest {
+            .resolve_work_item_base(Request::direct(ResolveWorkItemBaseRequest {
                 session_token: VALID_TOKEN.to_string(),
                 daemon_instance_id: owning_host.to_string(),
-                stack_parent: ORCHESTRATOR_SESSION.to_string(),
+                work_queue_parent: ORCHESTRATOR_SESSION.to_string(),
                 project_id: PROJECT.to_string(),
                 new_branch_name: CHILD_BRANCH.to_string(),
                 // This spawn names no planned node, so the branch-derived lookup applies.
-                stack_node_id: String::new(),
+                work_item_id: String::new(),
             }))
             .await
             .map(|r| r.into_inner().base_ref)
@@ -134,8 +134,8 @@ impl ADaemonInTheCommonRoom {
                 model: "anthropic/claude-haiku-4-5".to_string(),
                 branch_worktree_intent: "new_branch_from_base".to_string(),
                 new_branch_name: CHILD_BRANCH.to_string(),
-                stack_parent: ORCHESTRATOR_SESSION.to_string(),
-                stack_parent_daemon_instance_id: owning_host.to_string(),
+                work_queue_parent: ORCHESTRATOR_SESSION.to_string(),
+                work_queue_parent_daemon_instance_id: owning_host.to_string(),
                 ..Default::default()
             }))
             .await
@@ -242,7 +242,7 @@ fn a_host_that_owns_the_orchestrator() -> ADaemonInTheCommonRoom {
             Changeset {
                 recipe: Some("pr-stack".to_string()),
                 repo_path: Some(repo.display().to_string()),
-                stack: Some(Stack {
+                stack: Some(WorkQueue {
                     version: 1,
                     nodes: vec![
                         a_materialized_node("token-store", PARENT_NODE_BRANCH),
@@ -256,7 +256,7 @@ fn a_host_that_owns_the_orchestrator() -> ADaemonInTheCommonRoom {
 }
 
 /// A host that owns the parent as an ordinary **code session** on a branch — single-level chaining,
-/// the other shape `stack_parent` carries.
+/// the other shape `work_queue_parent` carries.
 fn a_host_that_owns_the_parent_code_session() -> ADaemonInTheCommonRoom {
     a_daemon_in_the_common_room(|data_dir, repo| {
         a_session(
@@ -281,7 +281,7 @@ fn a_host_whose_orchestrator_planned_no_such_branch() -> ADaemonInTheCommonRoom 
             Changeset {
                 recipe: Some("pr-stack".to_string()),
                 repo_path: Some(repo.display().to_string()),
-                stack: Some(Stack {
+                stack: Some(WorkQueue {
                     version: 1,
                     nodes: vec![a_materialized_node("token-store", PARENT_NODE_BRANCH)],
                 }),
@@ -292,30 +292,30 @@ fn a_host_whose_orchestrator_planned_no_such_branch() -> ADaemonInTheCommonRoom 
 }
 
 /// A node whose child worktree exists — it owns a real branch, so descendants can base onto it.
-fn a_materialized_node(node_id: &str, branch: &str) -> StackNode {
-    StackNode {
+fn a_materialized_node(node_id: &str, branch: &str) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: node_id.to_string(),
         branch_suggestion: Some(branch.to_string()),
         branch: Some(branch.to_string()),
-        ..StackNode::default()
+        ..WorkItem::default()
     }
 }
 
 /// A node the planner wrote and nothing has spawned yet: a suggested branch and no branch.
-fn a_planned_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn a_planned_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: node_id.to_string(),
         branch_suggestion: Some(branch_suggestion.to_string()),
         parents: parents.iter().map(|p| (*p).to_string()).collect(),
-        ..StackNode::default()
+        ..WorkItem::default()
     }
 }
 
 fn a_session(data_dir: &Path, session_id: &str, changeset: Changeset) {
     let dir = unified_session_dir_path(data_dir, session_id);
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(&dir, changeset);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&dir, changeset);
 }
 
 /// A repository with a real `origin/master` and `branch` pushed to it: the base resolver fetches the
@@ -422,7 +422,9 @@ async fn a_stack_parent_owned_by_another_host_is_resolved_there() {
     let daemon = a_host_that_owns_no_orchestrator();
 
     // When it is asked for a base, naming the host that owns the stack
-    let answer = daemon.resolve_stack_base_owned_by(ORCHESTRATOR_HOST).await;
+    let answer = daemon
+        .resolve_work_item_base_owned_by(ORCHESTRATOR_HOST)
+        .await;
 
     // Then it asks that host rather than reading a sessions tree that cannot hold the answer
     answer.assert_asked_the_owning_host();
@@ -434,7 +436,7 @@ async fn a_stack_parent_named_on_a_host_outside_the_common_room_is_refused() {
     let daemon = a_host_that_owns_no_orchestrator();
 
     // When
-    let answer = daemon.resolve_stack_base_owned_by(STRANGER_HOST).await;
+    let answer = daemon.resolve_work_item_base_owned_by(STRANGER_HOST).await;
 
     // Then the caller named a host that cannot serve the call — a bad request, not a base
     answer.assert_refused_as_unroutable(STRANGER_HOST);
@@ -446,7 +448,7 @@ async fn a_stack_parent_no_host_was_named_for_is_still_looked_for_on_this_one() 
     let daemon = a_host_that_owns_no_orchestrator();
 
     // When
-    let answer = daemon.resolve_stack_base_owned_by("").await;
+    let answer = daemon.resolve_work_item_base_owned_by("").await;
 
     // Then single-host deployments keep today's answer: this daemon's own sessions tree
     answer.assert_looked_on_this_hosts_disk();
@@ -463,7 +465,7 @@ async fn the_owning_host_answers_a_planned_nodes_base_from_its_own_stack() {
 
     // When it is asked, as the owner, what the planned `middleware` branch bases off
     let base = daemon
-        .resolve_stack_base_owned_by(THIS_HOST)
+        .resolve_work_item_base_owned_by(THIS_HOST)
         .await
         .expect("the host that owns the orchestrator must answer");
 
@@ -478,7 +480,7 @@ async fn the_owning_host_answers_a_code_session_parents_own_branch() {
 
     // When
     let base = daemon
-        .resolve_stack_base_owned_by(THIS_HOST)
+        .resolve_work_item_base_owned_by(THIS_HOST)
         .await
         .expect("the host that owns the parent session must answer");
 
@@ -493,7 +495,7 @@ async fn the_owning_host_answers_an_empty_base_when_its_stack_planned_no_such_br
 
     // When
     let base = daemon
-        .resolve_stack_base_owned_by(THIS_HOST)
+        .resolve_work_item_base_owned_by(THIS_HOST)
         .await
         .expect("an unplanned branch is not an error — it has no chain base");
 
@@ -517,6 +519,6 @@ async fn start_session_resolves_a_remote_stack_parent_on_the_host_that_owns_it()
         .await;
 
     // Then the spawn asks the owning host — every test above would still pass with
-    // `stack_parent_daemon_instance_id` dropped on the floor, and this is the one that would not
+    // `work_queue_parent_daemon_instance_id` dropped on the floor, and this is the one that would not
     started.assert_asked_the_owning_host();
 }

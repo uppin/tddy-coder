@@ -1,7 +1,7 @@
 # tddy-web
 
 The wiring package of the tddy web app. It holds no feature: it composes the component packages
-(`tddy-session-web`, `tddy-hosts-web`, `tddy-workspace-web`, `tddy-prstack-web`, `tddy-terminal-web`,
+(`tddy-session-web`, `tddy-hosts-web`, `tddy-workspace-web`, `tddy-workqueue-web`, `tddy-terminal-web`,
 `tddy-chat-web`, `tddy-session-create-web`, `tddy-rpc-playground-web`, `tddy-livekit-web`, over
 `tddy-client-web` and `tddy-ui-web`) into the page `tddy-daemon` serves and `tddy-desktop` embeds.
 

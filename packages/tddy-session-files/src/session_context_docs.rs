@@ -20,8 +20,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tddy_pr_stack::docs::{NODE_CHANGESET_BASENAME, NODE_DOCS_SUBDIR, NODE_PRD_BASENAME};
 use tddy_rpc::Status;
+use tddy_work_queue::docs::{NODE_CHANGESET_BASENAME, NODE_DOCS_SUBDIR, NODE_PRD_BASENAME};
 use tddy_workflow::{session_artifacts_root, SESSION_ATTACHMENTS_SUBDIR};
 use tddy_workflow_recipes::{workflow_recipe_and_manifest_from_cli_name, SessionArtifactManifest};
 

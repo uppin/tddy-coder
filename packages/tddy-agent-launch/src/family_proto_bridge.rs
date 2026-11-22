@@ -1,6 +1,6 @@
 //! Wire-identical protobuf messages split across packages share the same bytes on the wire.
 //!
-//! Node 8 moved families A, L and P to `catalog`, `exec_tools` and `pr_stack` while the daemon's
+//! Node 8 moved families A, L and P to `catalog`, `exec_tools` and `work_queue` while the daemon's
 //! routing helpers were written against `connection` types. Bridging through encode/decode keeps
 //! one implementation path until those helpers are retargeted at the served coordinates.
 

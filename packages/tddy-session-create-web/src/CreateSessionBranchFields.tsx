@@ -12,7 +12,7 @@ export interface CreateSessionBranchFieldsProps {
   setBranchIntent: (branchIntent: BranchIntent) => void;
   /** `initialValues.baseBranchLabel` — the concrete base named in the "New branch from base" option. */
   baseBranchLabel: string | undefined;
-  /** `initialValues.stackParent` — present only for a planned-PR child session. */
+  /** `initialValues.workQueueParent` — present only for a planned-PR child session. */
   initialStackParent: string | undefined;
   baseBranchOptions: BaseBranchOption[];
   selectedBaseBranch: string;

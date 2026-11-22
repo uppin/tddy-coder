@@ -15,7 +15,7 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_rpc::{
-    CatalogRpcHandler, ExecToolRpcHandler, PrStackRpcHandler, ProjectRpcHandler,
+    CatalogRpcHandler, ExecToolRpcHandler, ProjectRpcHandler, WorkQueueRpcHandler,
 };
 use tddy_discovery::CatalogServiceImpl;
 use tddy_projects::project_storage::{self, ProjectData};
@@ -23,12 +23,12 @@ use tddy_projects::ProjectServiceImpl;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::catalog::{CatalogService, ListToolsRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
-use tddy_service::proto::pr_stack::{PrStackService, QueryBranchRequest};
 use tddy_service::proto::project::{ListProjectsRequest, ProjectService};
+use tddy_service::proto::work_queue::{QueryBranchRequest, WorkQueueService};
 use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
-use tddy_session_lifecycle::PrStackServiceImpl;
+use tddy_session_lifecycle::WorkQueueServiceImpl;
 use tddy_tool_engine::ExecToolServiceImpl;
 
 const A_KNOWN_TOKEN: &str = "a-known-token";
@@ -164,8 +164,8 @@ impl ARunningDaemon {
         ExecToolServiceImpl::new(Arc::new(ExecToolRpcHandler::from_host(&self.host)))
     }
 
-    fn pr_stack_service(&self) -> PrStackServiceImpl<PrStackRpcHandler> {
-        PrStackServiceImpl::new(Arc::new(PrStackRpcHandler::from_host(&self.host)))
+    fn work_queue_service(&self) -> WorkQueueServiceImpl<WorkQueueRpcHandler> {
+        WorkQueueServiceImpl::new(Arc::new(WorkQueueRpcHandler::from_host(&self.host)))
     }
 }
 
@@ -320,7 +320,7 @@ async fn a_pr_stack_handler_refuses_a_caller_whose_session_token_is_unknown() {
 
     // When
     let refusal = daemon
-        .pr_stack_service()
+        .work_queue_service()
         .query_branch(Request::direct(QueryBranchRequest {
             session_token: AN_UNKNOWN_TOKEN.to_string(),
             branch: "feature/widgets".to_string(),

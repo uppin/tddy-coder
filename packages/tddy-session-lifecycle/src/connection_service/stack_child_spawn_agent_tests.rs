@@ -18,7 +18,7 @@ use tddy_test_hosts::a_tool_host;
 use super::session_acting_identity::SessionAccountAccess;
 use super::*;
 use tddy_core::toolcall::ConversationSpawnHandler;
-use tddy_core::{Stack, StackNode};
+use tddy_core::{WorkItem, WorkQueue};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_testing_commons::wait::eventually;
 
@@ -180,12 +180,12 @@ impl AnOrchestrator {
             ),
         )
         .expect("write orchestrator metadata");
-        tddy_changeset::stack_fixtures::write_changeset_with_stack(
+        tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
             &dir,
             Changeset {
-                stack: Some(Stack {
+                stack: Some(WorkQueue {
                     version: 1,
-                    nodes: vec![StackNode {
+                    nodes: vec![WorkItem {
                         node_id: NODE_ID.to_string(),
                         title: "Token store".to_string(),
                         description: "Adds the token store.".to_string(),
@@ -202,7 +202,7 @@ impl AnOrchestrator {
     fn conversation_spawn_handler(&self) -> GrillMeConversationSpawnHandler {
         GrillMeConversationSpawnHandler {
             service: self.service.launch_sessions(),
-            stack_parent_host: Arc::new(self.service.launch_sessions()),
+            work_queue_parent_host: Arc::new(self.service.launch_sessions()),
             config: self.config.clone(),
             tddy_data_dir: self.sessions_base().to_path_buf(),
             cli_manager: Arc::clone(&self.service.cli_manager),

@@ -78,7 +78,7 @@ enum SessionAgentStatus {
 }
 
 // Added by `#unbundle` node 8. `ListSessions` reaches this through the branch views it reports, and
-// `pr_stack.PrStackService.QueryBranch` reports it too. Third and last type to cross, and found the
+// `work_queue.WorkQueueService.QueryBranch` reports it too. Third and last type to cross, and found the
 // same way as the two above.
 
 message BranchSession {

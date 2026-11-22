@@ -10,9 +10,9 @@ import {
   type ProjectHomeInfo,
 } from "./utils/projectHomeGroups";
 import { SessionProjectGroup, projectGroupKey } from "./SessionProjectGroup";
-import { ProjectStacksRow } from "./ProjectStacksRow";
+import { ProjectWorkQueuesRow } from "./ProjectWorkQueuesRow";
 import type { Client } from "@connectrpc/connect";
-import type { PrStackService, ProjectStackSummary } from "tddy-client-web/gen/pr_stack_pb";
+import type { WorkQueueService, WorkQueueSummary } from "tddy-client-web/gen/work_queue_pb";
 import { ProjectHomeEntry } from "./ProjectHomeEntry";
 import { readCollapsedProjects, writeCollapsedProjects } from "./projectGroupCollapse";
 import { ScrollArea, cn } from "tddy-ui-web";
@@ -88,11 +88,11 @@ interface SessionDrawerProps {
    * with no main and no session; absent, no header shows a "+".
    */
   onNewOrchestrator?: (projectId: string) => void;
-  /** `pr_stack.PrStackService` on the selected daemon — each project group's Stacks row lists through it. */
-  prStackClient?: Client<typeof PrStackService> | null;
+  /** `work_queue.WorkQueueService` on the selected daemon — each project group's Stacks row lists through it. */
+  workQueueClient?: Client<typeof WorkQueueService> | null;
   sessionToken?: string;
   /** Open one of a project's stacks in the stack view, by the address its listing carried. */
-  onOpenProjectStack?: (summary: ProjectStackSummary) => void;
+  onOpenProjectStack?: (summary: WorkQueueSummary) => void;
   /**
    * Open a project's settings pane — the gear in each project header's actions slot
    * (`sessions-drawer-project-settings-<projectId>`, `#orchestrators` 11/11): main's setup and
@@ -129,7 +129,7 @@ export function SessionDrawer({
   onEnsureProjectHome,
   onSetUpProjectHome,
   onNewOrchestrator,
-  prStackClient,
+  workQueueClient,
   sessionToken = "",
   onOpenProjectStack,
   onOpenProjectSettings,
@@ -306,9 +306,9 @@ export function SessionDrawer({
                   />
                 )}
                 {group.projectId !== null && onOpenProjectStack && (
-                  <ProjectStacksRow
+                  <ProjectWorkQueuesRow
                     projectId={group.projectId}
-                    prStackClient={prStackClient}
+                    workQueueClient={workQueueClient}
                     sessionToken={sessionToken}
                     onOpenStack={onOpenProjectStack}
                   />

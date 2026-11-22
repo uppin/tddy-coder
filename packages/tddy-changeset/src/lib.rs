@@ -11,7 +11,6 @@ pub mod changeset;
 pub mod elapsed_format;
 pub mod orchestration_mark;
 pub mod pending_question;
-pub mod project_stack_store;
 pub mod session_activity;
 pub mod session_agent;
 pub mod session_context;
@@ -24,9 +23,10 @@ pub mod session_participant_metadata;
 pub mod session_provider_account;
 pub mod session_target;
 pub mod source_path;
-#[cfg(any(test, feature = "test-support"))]
-pub mod stack_fixtures;
 pub mod tab_roster;
+#[cfg(any(test, feature = "test-support"))]
+pub mod work_queue_fixtures;
+pub mod work_queue_store;
 
 // The storage layer these modules are built on, named at the `crate::` paths they used inside
 // `tddy-core`.
@@ -44,8 +44,8 @@ pub use changeset::{
     QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use changeset::{
-    link_stack_node_to_child_session, read_session_stack, read_stack_of,
-    sync_stack_node_from_child, update_stack_atomic, PrInternalStatus, Stack, StackNode,
+    link_work_item_to_session, read_session_stack, read_stack_of, sync_stack_node_from_child,
+    update_stack_atomic, PrInternalStatus, WorkItem, WorkQueue,
 };
 pub use elapsed_format::format_elapsed_compact;
 pub use orchestration_mark::{clear_a_paused_mark, OrchestrationMark, OrchestrationMarkKind};

@@ -395,7 +395,7 @@ fn process_cursor_stream_emits_tool_use_with_detail_for_display() {
 /// Schema: {"type":"tool_call","subtype":"started","tool_call":{"askUserQuestionToolCall":{"args":{"questions":[...]}}}}
 fn cursor_ask_question_ndjson() -> String {
     let line1 = r#"{"type":"system","subtype":"init","session_id":"s1"}"#;
-    let line2 = r#"{"type":"tool_call","subtype":"started","call_id":"t1","tool_call":{"askUserQuestionToolCall":{"args":{"questions":[{"question":"Which tech stack?","header":"Tech Stack","options":[{"label":"React","description":"React with hooks"},{"label":"Vanilla","description":"Vanilla JS"}],"multiSelect":false}]}}},"session_id":"s1"}"#;
+    let line2 = r#"{"type":"tool_call","subtype":"started","call_id":"t1","tool_call":{"askUserQuestionToolCall":{"args":{"questions":[{"question":"Which tech stack?","header":"Tech WorkQueue","options":[{"label":"React","description":"React with hooks"},{"label":"Vanilla","description":"Vanilla JS"}],"multiSelect":false}]}}},"session_id":"s1"}"#;
     let line3 = r#"{"type":"result","subtype":"success","result":"","session_id":"s1"}"#;
     format!("{}\n{}\n{}\n", line1, line2, line3)
 }
@@ -410,7 +410,7 @@ fn process_cursor_stream_extracts_ask_user_question_for_qa() {
 
     // Then
     assert_eq!(result.questions.len(), 1, "should extract 1 question");
-    assert_eq!(result.questions[0].header, "Tech Stack");
+    assert_eq!(result.questions[0].header, "Tech WorkQueue");
     assert_eq!(result.questions[0].question, "Which tech stack?");
     assert_eq!(result.questions[0].options.len(), 2);
     assert_eq!(result.questions[0].options[0].label, "React");

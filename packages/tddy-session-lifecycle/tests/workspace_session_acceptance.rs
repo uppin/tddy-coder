@@ -127,7 +127,7 @@ async fn workspace_session_creates_worktree_with_no_pty() {
             selected_branch_to_work_on: String::new(),
             initial_prompt: String::new(),
             permission_mode: String::new(),
-            stack_parent: String::new(),
+            work_queue_parent: String::new(),
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],

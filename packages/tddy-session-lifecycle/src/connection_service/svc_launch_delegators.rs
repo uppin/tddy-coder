@@ -17,17 +17,17 @@ impl DaemonSessionHost {
         self.launch_sessions().specialized_subagent_env(defs)
     }
 
-    /// [`LaunchSessions::link_stack_node_to_spawned_branch`].
+    /// [`LaunchSessions::link_work_item_to_spawned_branch`].
     #[cfg(test)]
-    pub(crate) fn link_stack_node_to_spawned_branch(
+    pub(crate) fn link_work_item_to_spawned_branch(
         sessions_base: &std::path::Path,
-        stack_parent: Option<&str>,
+        work_queue_parent: Option<&str>,
         new_branch_name: &str,
         child_session_id: &str,
     ) -> Result<(), tddy_rpc::Status> {
-        LaunchSessions::link_stack_node_to_spawned_branch(
+        LaunchSessions::link_work_item_to_spawned_branch(
             sessions_base,
-            stack_parent,
+            work_queue_parent,
             new_branch_name,
             child_session_id,
         )

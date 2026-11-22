@@ -1,16 +1,16 @@
 import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import type { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import { ProjectStackView, type ProjectStackAddress } from "tddy-prstack-web";
+import { WorkQueueView, type WorkQueueAddress } from "tddy-workqueue-web";
 import { OrchestratorComposer, ProjectSettingsPane } from "tddy-session-create-web";
 import { SessionsDrawerUnknownSession } from "./SessionsDrawerScreenParts";
 import { parseSessionsProjectNew, parseSessionsProjectSettings, parseSessionsProjectStack } from "tddy-client-web";
 import type { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { registerSessionTypeOptions, sessionTypeOptions, useSelectableAgents } from "tddy-session-create-web";
 
-type StackRoute = { projectId: string; stackId: string };
+type StackRoute = { projectId: string; queueId: string };
 /**
  * The sessions drawer's detail pane (`#orchestrators` 12/12, B10): the route cases beside the
  * session list — the project stack view, the orchestrator composer, the project settings pane,
@@ -20,17 +20,17 @@ type StackRoute = { projectId: string; stackId: string };
 export function SessionsDrawerDetailPane(props: {
   location: { path: string };
   setup: { projectId: string; replacing?: boolean } | null;
-  stackAddress: ProjectStackAddress | null;
-  setStackAddress: (address: ProjectStackAddress | null) => void;
-  prStackClient?: Client<typeof PrStackService> | null;
+  workQueueAddress: WorkQueueAddress | null;
+  setStackAddress: (address: WorkQueueAddress | null) => void;
+  workQueueClient?: Client<typeof WorkQueueService> | null;
   sessionToken: string;
   sortedSessions: SessionEntry[];
-  sessionMetadataBySessionId: React.ComponentProps<typeof ProjectStackView>["sessionMetadataBySessionId"];
+  sessionMetadataBySessionId: React.ComponentProps<typeof WorkQueueView>["sessionMetadataBySessionId"];
   projects: ProjectEntry[];
   onSelectSession: (sessionId: string) => void;
   onChildSessionStarted: (entry: { sessionId: string; recipe: string; orchestratorSessionId: string; projectId: string }) => void;
   viewClients: Pick<
-    React.ComponentProps<typeof ProjectStackView>,
+    React.ComponentProps<typeof WorkQueueView>,
     "client" | "projectClient" | "catalogClient" | "sessionFilesClient" | "worktreeClient" | "taskClient"
   >;
   selectedInstanceId: string;
@@ -46,9 +46,9 @@ export function SessionsDrawerDetailPane(props: {
   const {
     location,
     setup,
-    stackAddress,
+    workQueueAddress,
     setStackAddress,
-    prStackClient,
+    workQueueClient,
     sessionToken,
     sortedSessions,
     sessionMetadataBySessionId,
@@ -83,40 +83,40 @@ export function SessionsDrawerDetailPane(props: {
     settingsProjectId ? onStartMainFor(settingsProjectId, settingsHost, spec) : Promise.resolve();
 
   const stackRouteProjectId = stackRoute?.projectId;
-  const stackRouteStackId = stackRoute?.stackId;
+  const stackRouteStackId = stackRoute?.queueId;
   React.useEffect(() => {
     if (!stackRouteProjectId || !stackRouteStackId) {
       setStackAddress(null);
       return;
     }
     if (
-      stackAddress?.projectId === stackRouteProjectId &&
-      stackAddress?.stackId === stackRouteStackId &&
-      stackAddress?.daemonInstanceId
+      workQueueAddress?.projectId === stackRouteProjectId &&
+      workQueueAddress?.queueId === stackRouteStackId &&
+      workQueueAddress?.daemonInstanceId
     ) {
       return;
     }
-    const fallback: ProjectStackAddress = {
+    const fallback: WorkQueueAddress = {
       projectId: stackRouteProjectId,
-      stackId: stackRouteStackId,
+      queueId: stackRouteStackId,
       daemonInstanceId: "",
     };
-    const stacksClient = prStackClient;
+    const stacksClient = workQueueClient;
     if (!stacksClient) {
       setStackAddress(fallback);
       return;
     }
     let cancelled = false;
     stacksClient
-      .listProjectStacks({ sessionToken, projectId: stackRouteProjectId, thisHostOnly: false })
+      .listProjectWorkQueues({ sessionToken, projectId: stackRouteProjectId, thisHostOnly: false })
       .then((res) => {
         if (cancelled) return;
-        const summary = res.stacks.find((s) => s.address?.stackId === stackRouteStackId);
+        const summary = res.stacks.find((s) => s.address?.queueId === stackRouteStackId);
         setStackAddress(
           summary?.address
             ? {
                 projectId: summary.address.projectId,
-                stackId: summary.address.stackId,
+                queueId: summary.address.queueId,
                 daemonInstanceId: summary.address.daemonInstanceId,
               }
             : fallback,
@@ -129,16 +129,16 @@ export function SessionsDrawerDetailPane(props: {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stackRouteProjectId, stackRouteStackId, prStackClient, sessionToken]);
+  }, [stackRouteProjectId, stackRouteStackId, workQueueClient, sessionToken]);
 
 
   return (
     <>
           {stackRoute !== null ? (
-            stackAddress !== null ? (
-              <ProjectStackView
-                address={stackAddress}
-                prStackClient={prStackClient ?? undefined}
+            workQueueAddress !== null ? (
+              <WorkQueueView
+                address={workQueueAddress}
+                workQueueClient={workQueueClient ?? undefined}
                 sessionToken={sessionToken}
                 sessions={sortedSessions}
                 sessionMetadataBySessionId={sessionMetadataBySessionId}

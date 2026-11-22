@@ -4,8 +4,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use tddy_pr_stack::op_journal::{
-    recover_in_flight_stack_op, write_stack_op_journal, MergePhase, StackOpJournal,
+use tddy_work_queue::op_journal::{
+    recover_in_flight_stack_op, write_stack_op_journal, MergePhase, WorkQueueOpJournal,
 };
 
 fn scratch(label: &str) -> PathBuf {
@@ -24,7 +24,7 @@ fn recover_in_flight_stack_op_resumes_repointing_not_remerges() {
     // Given — a stack-op.json in PrMerged state (merge happened, repoint not yet done)
     let dir = scratch("resume-repoint");
     // write_stack_op_journal persists the journal (temp+rename)
-    let journal = StackOpJournal {
+    let journal = WorkQueueOpJournal {
         op_id: "op-001".into(),
         merged_node_id: "n1".into(),
         merge_phase: MergePhase::PrMerged {

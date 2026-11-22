@@ -1,13 +1,13 @@
 //! PRD acceptance: stack child linking — spawn_chain_child_worktree wires child worktree base,
-//! link_stack_node_to_child_session sets session_id + branch, orchestrator_session_id round-trips.
+//! link_work_item_to_session sets session_id + branch, orchestrator_session_id round-trips.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tddy_core::changeset::{
-    link_stack_node_to_child_session, read_changeset, write_changeset, Changeset, ChangesetState,
-    Stack, StackNode,
+    link_work_item_to_session, read_changeset, write_changeset, Changeset, ChangesetState,
+    WorkItem, WorkQueue,
 };
 use tddy_core::session_chain::spawn_chain_child_worktree;
 use tddy_core::session_lifecycle::unified_session_dir_path;
@@ -80,9 +80,9 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
             current: WorkflowState::new("StackPlanned"),
             ..Changeset::default().state
         },
-        stack: Some(Stack {
+        stack: Some(WorkQueue {
             version: 1,
-            nodes: vec![StackNode {
+            nodes: vec![WorkItem {
                 node_id: "n1".into(),
                 title: "Child PR".into(),
                 description: String::new(),
@@ -98,7 +98,7 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
         }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, orch_cs);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, orch_cs);
 
     let child_id = "018fbbbb-0002-7000-bbbb-000000000002";
     let child_dir = unified_session_dir_path(&sessions_home, child_id);
@@ -128,7 +128,7 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
 }
 
 #[test]
-fn link_stack_node_sets_session_id_and_branch() {
+fn link_work_item_sets_session_id_and_branch() {
     // Given — orchestrator changeset with an unlinked node
     let base = temp_dir("link-node");
     let orch_dir = base.join("sessions").join("orch");
@@ -136,9 +136,9 @@ fn link_stack_node_sets_session_id_and_branch() {
 
     let cs = Changeset {
         name: Some("orch".into()),
-        stack: Some(Stack {
+        stack: Some(WorkQueue {
             version: 1,
-            nodes: vec![StackNode {
+            nodes: vec![WorkItem {
                 node_id: "n1".into(),
                 title: "Task 1".into(),
                 description: String::new(),
@@ -154,19 +154,19 @@ fn link_stack_node_sets_session_id_and_branch() {
         }),
         ..Changeset::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(&orch_dir, cs);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, cs);
 
     // When
-    link_stack_node_to_child_session(
+    link_work_item_to_session(
         &orch_dir,
         "n1",
         "child-session-id-abc",
         Some("feature/task-1".into()),
     )
-    .expect("link_stack_node_to_child_session must succeed");
+    .expect("link_work_item_to_session must succeed");
 
     // Then
-    let stack = tddy_changeset::stack_fixtures::stack_on_disk(&orch_dir);
+    let stack = tddy_changeset::work_queue_fixtures::stack_on_disk(&orch_dir);
     let _ = fs::remove_dir_all(&base);
     let n1 = stack.node("n1").expect("n1 must exist");
     assert_eq!(

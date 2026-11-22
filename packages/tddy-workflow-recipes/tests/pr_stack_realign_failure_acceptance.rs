@@ -1,6 +1,6 @@
 //! Acceptance: what a move does when git refuses to follow it.
 //!
-//! `set_stack_node_parents` writes the new DAG and then makes reality match it: rebase the node's
+//! `set_work_item_parents` writes the new DAG and then makes reality match it: rebase the node's
 //! branch onto its new effective base, force-push it, re-target its pull request. The rebase is the
 //! half that can fail against the developer's own repository, and every other PR-stack acceptance file
 //! passes a bare tempdir as `repo_root` so `local_branch_exists` is false and the git half is skipped
@@ -20,7 +20,7 @@ use std::path::Path;
 use std::process::Command;
 
 use common::{a_stack_github, an_open_node, assert_rejected, parents_of, stack_of, write_stack};
-use tddy_pr_stack::stack_ops::set_stack_node_parents;
+use tddy_work_queue::item_ops::set_work_item_parents;
 
 const BRANCH_N2: &str = "feature/stack/n2";
 const BRANCH_N3: &str = "feature/stack/n3";
@@ -63,7 +63,7 @@ fn a_move_whose_rebase_conflicts_records_the_git_failure_on_the_node_and_leaves_
     // Given — n3 owns a real branch that cannot be rebased onto n2's, and an open PR #42
     let repo = tempfile::tempdir().unwrap();
     a_repo_whose_branches_conflict(repo.path());
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -75,7 +75,7 @@ fn a_move_whose_rebase_conflicts_records_the_git_failure_on_the_node_and_leaves_
     let gh = a_stack_github();
 
     // When — the operator moves n3 under n2
-    let result = set_stack_node_parents(
+    let result = set_work_item_parents(
         dir,
         repo.path(),
         "n3",
@@ -86,7 +86,7 @@ fn a_move_whose_rebase_conflicts_records_the_git_failure_on_the_node_and_leaves_
 
     // Then — the operator is told which operation failed and on which branch
     assert_rejected(result)
-        .with_reason_containing("set_stack_node_parents")
+        .with_reason_containing("set_work_item_parents")
         .with_reason_containing(&format!("rebase of {BRANCH_N3} onto {BRANCH_N2} failed"));
 
     // and the node carries git's own message, so the conflict is diagnosable from the plan alone.

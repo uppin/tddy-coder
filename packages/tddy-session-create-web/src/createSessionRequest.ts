@@ -69,9 +69,9 @@ export interface CreateSessionFormValues {
   toolPath: string;
   selectedAgentId: string;
   recipe: string;
-  stackParent: string;
-  stackNodeId: string;
-  stackParentDaemonInstanceId: string;
+  workQueueParent: string;
+  workItemId: string;
+  workQueueParentDaemonInstanceId: string;
   model: string;
   /**
    * The effort level the session starts at, one of the agent's served `effort_levels`; empty or
@@ -132,9 +132,9 @@ export function buildStartSessionRequest(
     toolPath,
     selectedAgentId,
     recipe,
-    stackParent,
-    stackNodeId,
-    stackParentDaemonInstanceId,
+    workQueueParent,
+    workItemId,
+    workQueueParentDaemonInstanceId,
     model,
     providerAccountId,
     providerBuiltIn,
@@ -176,12 +176,12 @@ export function buildStartSessionRequest(
       // only, and `daemonInstanceId` already carries the host beside it.
       agent: selectedAgentId,
       recipe,
-      stackParent,
-      stackNodeId,
+      workQueueParent,
+      workItemId,
       // No owning host: a tool session's chain base is resolved by the `tddy-coder` the daemon
       // spawns, against that process's own sessions tree, not by the daemon at start. Sending a
       // host here would name a routing the start never performs.
-      stackParentDaemonInstanceId: "",
+      workQueueParentDaemonInstanceId: "",
       // The session type the toggle chose: the daemon refuses an empty one rather than reading
       // it as a tool session.
       sessionType,
@@ -213,9 +213,9 @@ export function buildStartSessionRequest(
     // `recipe` to a non-empty value, so without this a split session would be created as a
     // request that cannot succeed.
     recipe: features.managedWorkflow && managedCodebase && !split ? recipe : "",
-    stackParent,
-    stackParentDaemonInstanceId,
-    stackNodeId,
+    workQueueParent,
+    workQueueParentDaemonInstanceId,
+    workItemId,
     ...cliAgentChoices(form, features),
     sandbox,
     runInTmux: runInTmuxChoice(form),

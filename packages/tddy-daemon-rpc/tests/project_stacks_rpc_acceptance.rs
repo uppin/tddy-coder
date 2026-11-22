@@ -1,9 +1,9 @@
 //! Acceptance: a project's PR stacks are listed across hosts and acted on by their address
 //! (`#orchestrators` 9/11).
 //!
-//! A stack is a record of its project's store on one host (`ProjectStackStore` under that host's
-//! `projects/`), so `ListProjectStacks` asks every host that may hold the project, and every other
-//! `PrStackService` request names the stack it acts on by `StackAddress` — served by the host the
+//! A stack is a record of its project's store on one host (`WorkQueueStore` under that host's
+//! `projects/`), so `ListProjectWorkQueues` asks every host that may hold the project, and every other
+//! `WorkQueueService` request names the stack it acts on by `WorkQueueAddress` — served by the host the
 //! address names, forwarded there by any other. An orchestrator `session_id` still works, resolved
 //! through the stack its changeset names.
 //!
@@ -20,20 +20,20 @@ use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
 use support::{
-    a_host, Host, InProcessPeers, HOST_A, HOST_B, OTHER_PROJECT, PR_STACK_SERVICE, SILENT_HOST,
-    THIS_PROJECT,
+    a_host, Host, InProcessPeers, HOST_A, HOST_B, OTHER_PROJECT, SILENT_HOST, THIS_PROJECT,
+    WORK_QUEUE_SERVICE,
 };
-use tddy_core::changeset::{write_changeset, Changeset, Stack, StackNode};
-use tddy_core::project_stack_store::{ProjectStackStore, StackRecord, StackStoreError};
+use tddy_core::changeset::{write_changeset, Changeset, WorkItem, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::{
     read_session_metadata, write_initial_tool_session_metadata, write_session_metadata,
     InitialToolSessionMetadataOpts,
 };
+use tddy_core::work_queue_store::{WorkQueueRecord, WorkQueueStore, WorkQueueStoreError};
 use tddy_rpc::{Request, Status};
-use tddy_service::proto::pr_stack::{
-    AddPlannedPrRequest, AddPlannedPrResponse, GetProjectStackRequest, ListProjectStacksRequest,
-    ListProjectStacksResponse, PrStackService, ProjectStackSummary, StackAddress,
+use tddy_service::proto::work_queue::{
+    AddWorkItemRequest, AddWorkItemResponse, GetWorkQueueRequest, ListProjectWorkQueuesRequest,
+    ListProjectWorkQueuesResponse, WorkQueueAddress, WorkQueueService, WorkQueueSummary,
 };
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
@@ -58,16 +58,16 @@ fn two_hosts_in_one_common_room() -> TwoHosts {
 }
 
 /// A stack whose nodes are titled `titles`, roots one after another.
-fn a_stack_of(titles: &[&str]) -> Stack {
-    Stack {
+fn a_stack_of(titles: &[&str]) -> WorkQueue {
+    WorkQueue {
         version: 1,
         nodes: titles
             .iter()
             .enumerate()
-            .map(|(i, title)| StackNode {
+            .map(|(i, title)| WorkItem {
                 node_id: format!("n{}", i + 1),
                 title: (*title).to_string(),
-                ..StackNode::default()
+                ..WorkItem::default()
             })
             .collect(),
     }
@@ -75,27 +75,27 @@ fn a_stack_of(titles: &[&str]) -> Stack {
 
 /// What a test reads and seeds on one host's own disk.
 trait HostStacks {
-    fn stack_store(&self) -> ProjectStackStore;
+    fn stack_store(&self) -> WorkQueueStore;
     /// A stack of `project_id` in this host's store, planned by a session nobody lists.
-    fn holding_a_stack(&self, project_id: &str, titles: &[&str]) -> StackRecord;
+    fn holding_a_stack(&self, project_id: &str, titles: &[&str]) -> WorkQueueRecord;
     /// An orchestrator-role session of `record`'s project whose changeset names `record` — and no
     /// `pr-stack` recipe, since nothing keys on a recipe any more.
-    fn with_an_orchestrator_naming(&self, session_id: &str, record: &StackRecord);
-    fn titles_of(&self, project_id: &str, stack_id: &str) -> Vec<String>;
+    fn with_an_orchestrator_naming(&self, session_id: &str, record: &WorkQueueRecord);
+    fn titles_of(&self, project_id: &str, queue_id: &str) -> Vec<String>;
 }
 
 impl HostStacks for Host {
-    fn stack_store(&self) -> ProjectStackStore {
-        ProjectStackStore::new(self.sessions.path().join("projects"))
+    fn stack_store(&self) -> WorkQueueStore {
+        WorkQueueStore::new(self.sessions.path().join("projects"))
     }
 
-    fn holding_a_stack(&self, project_id: &str, titles: &[&str]) -> StackRecord {
+    fn holding_a_stack(&self, project_id: &str, titles: &[&str]) -> WorkQueueRecord {
         self.stack_store()
             .create(project_id, "a-planner-nobody-lists", a_stack_of(titles))
             .expect("seed a stack in the host's store")
     }
 
-    fn with_an_orchestrator_naming(&self, session_id: &str, record: &StackRecord) {
+    fn with_an_orchestrator_naming(&self, session_id: &str, record: &WorkQueueRecord) {
         let dir = unified_session_dir_path(self.sessions.path(), session_id);
         std::fs::create_dir_all(&dir).expect("session dir");
         write_initial_tool_session_metadata(
@@ -112,16 +112,16 @@ impl HostStacks for Host {
         write_changeset(
             &dir,
             &Changeset {
-                stack_id: Some(record.stack_id.clone()),
+                work_queue_id: Some(record.queue_id.clone()),
                 ..Changeset::default()
             },
         )
         .expect("write changeset.yaml");
     }
 
-    fn titles_of(&self, project_id: &str, stack_id: &str) -> Vec<String> {
+    fn titles_of(&self, project_id: &str, queue_id: &str) -> Vec<String> {
         self.stack_store()
-            .read(project_id, stack_id)
+            .read(project_id, queue_id)
             .expect("the stack is in this host's store")
             .stack
             .nodes
@@ -132,22 +132,22 @@ impl HostStacks for Host {
 }
 
 /// The address of `record`, held by `host`.
-fn the_address_of(record: &StackRecord, host: &str) -> StackAddress {
-    StackAddress {
+fn the_address_of(record: &WorkQueueRecord, host: &str) -> WorkQueueAddress {
+    WorkQueueAddress {
         project_id: record.project_id.clone(),
-        stack_id: record.stack_id.clone(),
+        queue_id: record.queue_id.clone(),
         daemon_instance_id: host.to_string(),
     }
 }
 
 // ── the calls ────────────────────────────────────────────────────────────────────────────────
 
-async fn list_project_stacks(
+async fn list_project_work_queues(
     host: &Host,
     project_id: &str,
-) -> Result<ListProjectStacksResponse, Status> {
+) -> Result<ListProjectWorkQueuesResponse, Status> {
     host.daemon
-        .list_project_stacks(Request::direct(ListProjectStacksRequest {
+        .list_project_work_queues(Request::direct(ListProjectWorkQueuesRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: project_id.to_string(),
             this_host_only: false,
@@ -157,13 +157,13 @@ async fn list_project_stacks(
 }
 
 /// Append a planned PR titled `title` to the stack at `address`, asking `host`.
-async fn add_planned_pr_by_address(
+async fn add_work_item_by_address(
     host: &Host,
-    address: StackAddress,
+    address: WorkQueueAddress,
     title: &str,
-) -> Result<AddPlannedPrResponse, Status> {
+) -> Result<AddWorkItemResponse, Status> {
     host.daemon
-        .add_planned_pr(Request::direct(AddPlannedPrRequest {
+        .add_work_item(Request::direct(AddWorkItemRequest {
             session_token: TEST_TOKEN.to_string(),
             title: title.to_string(),
             stack: Some(address),
@@ -174,13 +174,13 @@ async fn add_planned_pr_by_address(
 }
 
 /// Append a planned PR titled `title` to the stack `session_id`'s changeset names, asking `host`.
-async fn add_planned_pr_by_session(
+async fn add_work_item_by_session(
     host: &Host,
     session_id: &str,
     title: &str,
-) -> Result<AddPlannedPrResponse, Status> {
+) -> Result<AddWorkItemResponse, Status> {
     host.daemon
-        .add_planned_pr(Request::direct(AddPlannedPrRequest {
+        .add_work_item(Request::direct(AddWorkItemRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
             title: title.to_string(),
@@ -191,21 +191,21 @@ async fn add_planned_pr_by_session(
 }
 
 /// The node titles of the stack at `address`, read by asking `host`.
-async fn titles_served_by(host: &Host, address: StackAddress) -> Result<Vec<String>, Status> {
+async fn titles_served_by(host: &Host, address: WorkQueueAddress) -> Result<Vec<String>, Status> {
     let answer = host
         .daemon
-        .get_project_stack(Request::direct(GetProjectStackRequest {
+        .get_work_queue(Request::direct(GetWorkQueueRequest {
             session_token: TEST_TOKEN.to_string(),
             stack: Some(address),
         }))
         .await?
         .into_inner();
-    Ok(titles_in_plan_json(&answer.stack_plan_json))
+    Ok(titles_in_plan_json(&answer.work_queue_json))
 }
 
-fn titles_in_plan_json(stack_plan_json: &str) -> Vec<String> {
+fn titles_in_plan_json(work_queue_json: &str) -> Vec<String> {
     let plan: serde_json::Value =
-        serde_json::from_str(stack_plan_json).expect("stack_plan_json is JSON");
+        serde_json::from_str(work_queue_json).expect("work_queue_json is JSON");
     plan["nodes"]
         .as_array()
         .expect("a plan lists its nodes")
@@ -217,13 +217,13 @@ fn titles_in_plan_json(stack_plan_json: &str) -> Vec<String> {
 // ── reading a listing ────────────────────────────────────────────────────────────────────────
 
 /// Every listed stack as `(host, stack id)`, sorted.
-fn listed_addresses(listing: &ListProjectStacksResponse) -> Vec<(String, String)> {
+fn listed_addresses(listing: &ListProjectWorkQueuesResponse) -> Vec<(String, String)> {
     let mut listed: Vec<(String, String)> = listing
         .stacks
         .iter()
         .map(|summary| {
             let address = summary.address.clone().unwrap_or_default();
-            (address.daemon_instance_id, address.stack_id)
+            (address.daemon_instance_id, address.queue_id)
         })
         .collect();
     listed.sort();
@@ -231,9 +231,9 @@ fn listed_addresses(listing: &ListProjectStacksResponse) -> Vec<(String, String)
 }
 
 fn the_summary_of<'a>(
-    listing: &'a ListProjectStacksResponse,
-    record: &StackRecord,
-) -> &'a ProjectStackSummary {
+    listing: &'a ListProjectWorkQueuesResponse,
+    record: &WorkQueueRecord,
+) -> &'a WorkQueueSummary {
     listing
         .stacks
         .iter()
@@ -241,12 +241,12 @@ fn the_summary_of<'a>(
             summary
                 .address
                 .as_ref()
-                .is_some_and(|a| a.stack_id == record.stack_id)
+                .is_some_and(|a| a.queue_id == record.queue_id)
         })
-        .unwrap_or_else(|| panic!("stack {} is not listed: {listing:?}", record.stack_id))
+        .unwrap_or_else(|| panic!("stack {} is not listed: {listing:?}", record.queue_id))
 }
 
-fn unreachable_hosts(listing: &ListProjectStacksResponse) -> Vec<String> {
+fn unreachable_hosts(listing: &ListProjectWorkQueuesResponse) -> Vec<String> {
     listing
         .unreachable_hosts
         .iter()
@@ -257,7 +257,7 @@ fn unreachable_hosts(listing: &ListProjectStacksResponse) -> Vec<String> {
 // ── the tests ────────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn list_project_stacks_lists_every_stack_of_the_project_on_every_host() {
+async fn list_project_work_queues_lists_every_stack_of_the_project_on_every_host() {
     // Given — a stack of the project on each host, an orchestrator on A naming A's, and a stack of
     // another project on A that must not be listed
     let world = two_hosts_in_one_common_room();
@@ -271,14 +271,14 @@ async fn list_project_stacks_lists_every_stack_of_the_project_on_every_host() {
         .with_an_orchestrator_naming(ORCHESTRATOR_ON_A, &on_a);
 
     // When
-    let listing = list_project_stacks(&world.a, THIS_PROJECT)
+    let listing = list_project_work_queues(&world.a, THIS_PROJECT)
         .await
-        .expect("ListProjectStacks answers");
+        .expect("ListProjectWorkQueues answers");
 
     // Then — each stack once, under the host that holds it
     let mut expected = vec![
-        (HOST_A.to_string(), on_a.stack_id.clone()),
-        (HOST_B.to_string(), on_b.stack_id.clone()),
+        (HOST_A.to_string(), on_a.queue_id.clone()),
+        (HOST_B.to_string(), on_b.queue_id.clone()),
     ];
     expected.sort();
     assert_eq!(listed_addresses(&listing), expected);
@@ -305,7 +305,7 @@ async fn an_unreachable_host_is_named_not_silently_dropped() {
     let on_b = world.b.holding_a_stack(THIS_PROJECT, &["Add login screen"]);
 
     // When
-    let listing = list_project_stacks(&world.a, THIS_PROJECT)
+    let listing = list_project_work_queues(&world.a, THIS_PROJECT)
         .await
         .expect("a host that does not answer fails the listing of none of the others");
 
@@ -320,8 +320,8 @@ async fn an_unreachable_host_is_named_not_silently_dropped() {
         "{HOST_B} answered and must not be named as unreachable: {unreachable:?}"
     );
     let listed = listed_addresses(&listing);
-    assert!(listed.contains(&(HOST_A.to_string(), on_a.stack_id.clone())));
-    assert!(listed.contains(&(HOST_B.to_string(), on_b.stack_id.clone())));
+    assert!(listed.contains(&(HOST_A.to_string(), on_a.queue_id.clone())));
+    assert!(listed.contains(&(HOST_B.to_string(), on_b.queue_id.clone())));
 }
 
 #[tokio::test]
@@ -331,22 +331,22 @@ async fn a_planned_pr_added_by_stack_address_lands_in_that_stack() {
     let on_a = world.a.holding_a_stack(THIS_PROJECT, &["Add token store"]);
 
     // When
-    let added = add_planned_pr_by_address(
+    let added = add_work_item_by_address(
         &world.a,
         the_address_of(&on_a, HOST_A),
         "Add auth middleware",
     )
     .await
-    .expect("AddPlannedPr by stack address answers");
+    .expect("AddWorkItem by stack address answers");
 
     // Then — the store holds the new node, and the answer names it and carries the plan
     assert_eq!(
-        world.a.titles_of(THIS_PROJECT, &on_a.stack_id),
+        world.a.titles_of(THIS_PROJECT, &on_a.queue_id),
         vec!["Add token store", "Add auth middleware"]
     );
-    assert!(!added.node_id.is_empty(), "the added node is named");
+    assert!(!added.item_id.is_empty(), "the added node is named");
     assert_eq!(
-        titles_in_plan_json(&added.stack_plan_json),
+        titles_in_plan_json(&added.work_queue_json),
         vec!["Add token store", "Add auth middleware"]
     );
 }
@@ -359,29 +359,29 @@ async fn a_stack_address_naming_another_host_is_served_there() {
     let address = the_address_of(&on_b, HOST_B);
 
     // When
-    add_planned_pr_by_address(&world.a, address.clone(), "Add logout")
+    add_work_item_by_address(&world.a, address.clone(), "Add logout")
         .await
-        .expect("AddPlannedPr addressed at B answers through A");
+        .expect("AddWorkItem addressed at B answers through A");
 
     // Then — B's store took the node, A's holds no such stack, and A forwarded rather than answered
     assert_eq!(
-        world.b.titles_of(THIS_PROJECT, &on_b.stack_id),
+        world.b.titles_of(THIS_PROJECT, &on_b.queue_id),
         vec!["Add login screen", "Add logout"]
     );
     assert!(matches!(
-        world.a.stack_store().read(THIS_PROJECT, &on_b.stack_id),
-        Err(StackStoreError::NotFound { .. })
+        world.a.stack_store().read(THIS_PROJECT, &on_b.queue_id),
+        Err(WorkQueueStoreError::NotFound { .. })
     ));
     assert_eq!(
         world
             .peers
-            .times_asked(HOST_B, PR_STACK_SERVICE, "AddPlannedPr"),
+            .times_asked(HOST_B, WORK_QUEUE_SERVICE, "AddWorkItem"),
         1
     );
     assert_eq!(
         titles_served_by(&world.a, address)
             .await
-            .expect("GetProjectStack addressed at B answers through A"),
+            .expect("GetWorkQueue addressed at B answers through A"),
         vec!["Add login screen", "Add logout"]
     );
 }
@@ -396,19 +396,19 @@ async fn a_session_id_address_still_resolves_through_its_stack_id() {
         .with_an_orchestrator_naming(ORCHESTRATOR_ON_A, &on_a);
 
     // When
-    add_planned_pr_by_session(&world.a, ORCHESTRATOR_ON_A, "Add auth middleware")
+    add_work_item_by_session(&world.a, ORCHESTRATOR_ON_A, "Add auth middleware")
         .await
-        .expect("AddPlannedPr by session id resolves the stack its changeset names");
+        .expect("AddWorkItem by session id resolves the stack its changeset names");
 
     // Then
     assert_eq!(
-        world.a.titles_of(THIS_PROJECT, &on_a.stack_id),
+        world.a.titles_of(THIS_PROJECT, &on_a.queue_id),
         vec!["Add token store", "Add auth middleware"]
     );
 }
 
 #[tokio::test]
-async fn create_project_stack_answers_an_address_that_then_takes_planned_prs() {
+async fn create_work_queue_answers_an_address_that_then_takes_planned_prs() {
     // Given — two hosts in one room
     let world = two_hosts_in_one_common_room();
 
@@ -416,8 +416,8 @@ async fn create_project_stack_answers_an_address_that_then_takes_planned_prs() {
     let created = world
         .a
         .daemon
-        .create_project_stack(Request::direct(
-            tddy_service::proto::pr_stack::CreateProjectStackRequest {
+        .create_work_queue(Request::direct(
+            tddy_service::proto::work_queue::CreateWorkQueueRequest {
                 session_token: TEST_TOKEN.to_string(),
                 project_id: THIS_PROJECT.to_string(),
                 title: "Auth stack".to_string(),
@@ -425,7 +425,7 @@ async fn create_project_stack_answers_an_address_that_then_takes_planned_prs() {
             },
         ))
         .await
-        .expect("CreateProjectStack on the owning host")
+        .expect("CreateWorkQueue on the owning host")
         .into_inner();
     let address = created.stack.expect("the answer names the new stack");
 
@@ -433,21 +433,21 @@ async fn create_project_stack_answers_an_address_that_then_takes_planned_prs() {
     let record = world
         .a
         .stack_store()
-        .read(THIS_PROJECT, &address.stack_id)
+        .read(THIS_PROJECT, &address.queue_id)
         .expect("the created stack is in the creating host's store");
     assert_eq!(record.title.as_deref(), Some("Auth stack"));
     assert!(record.stack.nodes.is_empty());
-    add_planned_pr_by_address(&world.a, address, "Add token store")
+    add_work_item_by_address(&world.a, address, "Add token store")
         .await
         .expect("a planned PR can be added to the created stack by address");
     assert_eq!(
-        world.a.titles_of(THIS_PROJECT, &record.stack_id),
+        world.a.titles_of(THIS_PROJECT, &record.queue_id),
         vec!["Add token store"]
     );
 }
 
 #[tokio::test]
-async fn create_project_stack_naming_another_host_is_created_there() {
+async fn create_work_queue_naming_another_host_is_created_there() {
     // Given — two hosts in one room
     let world = two_hosts_in_one_common_room();
 
@@ -455,8 +455,8 @@ async fn create_project_stack_naming_another_host_is_created_there() {
     let created = world
         .a
         .daemon
-        .create_project_stack(Request::direct(
-            tddy_service::proto::pr_stack::CreateProjectStackRequest {
+        .create_work_queue(Request::direct(
+            tddy_service::proto::work_queue::CreateWorkQueueRequest {
                 session_token: TEST_TOKEN.to_string(),
                 project_id: THIS_PROJECT.to_string(),
                 title: String::new(),
@@ -464,7 +464,7 @@ async fn create_project_stack_naming_another_host_is_created_there() {
             },
         ))
         .await
-        .expect("CreateProjectStack forwarded to the owning host")
+        .expect("CreateWorkQueue forwarded to the owning host")
         .into_inner();
     let address = created.stack.expect("the answer names the new stack");
 
@@ -473,7 +473,7 @@ async fn create_project_stack_naming_another_host_is_created_there() {
         world
             .b
             .stack_store()
-            .read(THIS_PROJECT, &address.stack_id)
+            .read(THIS_PROJECT, &address.queue_id)
             .is_ok(),
         "the created stack lives on the host the request named"
     );
@@ -481,7 +481,7 @@ async fn create_project_stack_naming_another_host_is_created_there() {
         world
             .a
             .stack_store()
-            .read(THIS_PROJECT, &address.stack_id)
+            .read(THIS_PROJECT, &address.queue_id)
             .is_err(),
         "the created stack does not also live on the asking host"
     );

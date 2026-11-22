@@ -28,7 +28,7 @@ fn sweep_headless_files(
 /// projects' store — idempotent, self-logging; a session it cannot move lists no stack plan.
 pub(super) fn sweep_what_the_last_run_left(config: &DaemonConfig, tddy_data_dir: &std::path::Path) {
     sweep_headless_files(config, tddy_data_dir);
-    tddy_pr_stack::stack_migration::migrate_session_stacks(
+    tddy_work_queue::queue_migration::migrate_session_stacks(
         tddy_data_dir,
         &tddy_data_dir.join("projects"),
     );

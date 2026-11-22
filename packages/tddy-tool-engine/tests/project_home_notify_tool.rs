@@ -47,13 +47,13 @@ fn notify_operator_is_the_notify_tool_and_requires_a_title_and_a_body() {
 fn a_title_and_body_with_no_level_or_sound_are_a_silent_info_notice() {
     // Given only a title and a body
     // When they are read
-    let notice = args("Stack green", "**3 of 4** merged").into_notice();
+    let notice = args("WorkQueue green", "**3 of 4** merged").into_notice();
 
     // Then it is an info notice, silent
     assert_eq!(
         notice,
         Ok(OperatorNotice {
-            title: "Stack green".to_string(),
+            title: "WorkQueue green".to_string(),
             body_markdown: "**3 of 4** merged".to_string(),
             level: NotificationLevel::Info,
             sound: false,

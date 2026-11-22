@@ -3,7 +3,7 @@
  *
  * A planned-PR row resolves its in-progress session by branch, shows the GitHub PR number (as a
  * link) and state carried by `QueryBranch`'s `pr` leg, and offers a Repoint control when a
- * predecessor has merged — wired to `RepointPlannedPr`.
+ * predecessor has merged — wired to `RepointWorkItem`.
  *
  * `QueryBranch` is the *only* PR lookup the screen makes. `GetPrStatus` resolves the same PR through
  * the same authenticated `GET /pulls` on the daemon, so polling both doubled the GitHub request rate
@@ -15,13 +15,13 @@
 
 import React from "react";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
 } from "../support/rpc/prStackFixtures";
@@ -36,7 +36,7 @@ const PROJECT_ID = "proj-pr-stack";
 /** The interval (ms) at which the PR-Stack view re-polls `QueryBranch`. */
 const POLL_INTERVAL_MS = 5000;
 
-function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
+function anOrchestratorSession(workQueueJson: string): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-07-01T09:00:00Z",
@@ -44,7 +44,7 @@ function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
     repoPath: "/home/dev/pr-stack-project",
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
@@ -70,22 +70,22 @@ interface MountOptions {
   resolutionByBranch?: Record<string, BranchResolutionFixture>;
   /** Dynamic `QueryBranch` resolution per branch, re-evaluated on every poll (polling tests). */
   resolutionFactory?: (branch: string) => BranchResolutionFixture;
-  /** `RepointPlannedPr` response stack JSON. */
+  /** `RepointWorkItem` response stack JSON. */
   repointResponseStackJson?: string;
 }
 
 function openPrStackScreen(opts: MountOptions) {
-  const repointSpy = cy.stub().as("repointPlannedPr");
+  const repointSpy = cy.stub().as("repointWorkItem");
   const backend = aSessionsDrawerBackend(opts.sessions)
-    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) => {
+    .onUnary(WorkQueueService.method.queryBranch, (req: { branch: string }) => {
       const fx = opts.resolutionFactory
         ? opts.resolutionFactory(req.branch)
         : (opts.resolutionByBranch?.[req.branch] ?? { branch: req.branch });
       return aBranchResolutionResponse(fx);
     })
-    .onUnary(PrStackService.method.repointPlannedPr, (req: { nodeId: string }) => {
+    .onUnary(WorkQueueService.method.repointWorkItem, (req: { itemId: string }) => {
       repointSpy(req);
-      return { stackPlanJson: opts.repointResponseStackJson ?? "" };
+      return { workQueueJson: opts.repointResponseStackJson ?? "" };
     });
   openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
 }
@@ -107,8 +107,8 @@ beforeEach(() => {
 
 it("marks a planned-PR row in progress when a live session owns its branch", () => {
   // Given — node n1 owns feature/x/n1, and a live child session works that same branch
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -125,8 +125,8 @@ it("marks a planned-PR row in progress when a live session owns its branch", () 
 
 it("shows no in-progress indicator when no session owns the node branch", () => {
   // Given — node n1 owns feature/x/n1, but the only other session works a different branch
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -147,8 +147,8 @@ it("shows no in-progress indicator when no session owns the node branch", () => 
 
 it("shows the GitHub PR number as a link to the PR for the node branch", () => {
   // Given
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -176,8 +176,8 @@ it("shows the GitHub PR number as a link to the PR for the node branch", () => {
 
 it("shows the GitHub PR state reported for the node branch", () => {
   // Given
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -203,8 +203,8 @@ it("shows the GitHub PR state reported for the node branch", () => {
 it("updates the PR status on the polling interval without user action", () => {
   // Given — the PR is open on the first poll and merged on every subsequent poll
   cy.clock();
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
   let polls = 0;
   openPrStackScreen({
@@ -239,15 +239,15 @@ it("updates the PR status on the polling interval without user action", () => {
 
 it("shows a Repoint control on a node whose predecessor has merged", () => {
   // Given — n1 has merged; n2 depends on n1
-  const plan = aStackPlanJson(1, [
+  const plan = aWorkQueueJson(1, [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Add token store",
       branch: "feature/x/n1",
       sessionId: "child-n1",
       prStatus: { phase: "merged" },
     }),
-    aPlannedNode({ nodeId: "n2", title: "Add middleware", branch: "feature/x/n2", parents: ["n1"] }),
+    aPlannedNode({ itemId: "n2", title: "Add middleware", branch: "feature/x/n2", parents: ["n1"] }),
   ]);
 
   // When
@@ -259,15 +259,15 @@ it("shows a Repoint control on a node whose predecessor has merged", () => {
 
 it("hides the Repoint control when no predecessor has merged", () => {
   // Given — n1 is still open; n2 depends on n1
-  const plan = aStackPlanJson(1, [
+  const plan = aWorkQueueJson(1, [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Add token store",
       branch: "feature/x/n1",
       sessionId: "child-n1",
       prStatus: { phase: "open" },
     }),
-    aPlannedNode({ nodeId: "n2", title: "Add middleware", branch: "feature/x/n2", parents: ["n1"] }),
+    aPlannedNode({ itemId: "n2", title: "Add middleware", branch: "feature/x/n2", parents: ["n1"] }),
   ]);
 
   // When
@@ -277,34 +277,34 @@ it("hides the Repoint control when no predecessor has merged", () => {
   prStackScreenPage.repointBtn("n2").should("not.exist");
 });
 
-it("repoints the node via RepointPlannedPr when the Repoint control is clicked", () => {
+it("repoints the node via RepointWorkItem when the Repoint control is clicked", () => {
   // Given — n1 merged, n2 depends on n1; after repoint n2 no longer depends on n1
-  const plan = aStackPlanJson(1, [
+  const plan = aWorkQueueJson(1, [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Add token store",
       branch: "feature/x/n1",
       sessionId: "child-n1",
       prStatus: { phase: "merged" },
     }),
-    aPlannedNode({ nodeId: "n2", title: "Add middleware", branch: "feature/x/n2", parents: ["n1"] }),
+    aPlannedNode({ itemId: "n2", title: "Add middleware", branch: "feature/x/n2", parents: ["n1"] }),
   ]);
-  const repointed = aStackPlanJson(1, [
+  const repointed = aWorkQueueJson(1, [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Add token store",
       branch: "feature/x/n1",
       sessionId: "child-n1",
       prStatus: { phase: "merged" },
     }),
-    aPlannedNode({ nodeId: "n2", title: "Add middleware", branch: "feature/x/n2", parents: [] }),
+    aPlannedNode({ itemId: "n2", title: "Add middleware", branch: "feature/x/n2", parents: [] }),
   ]);
 
   // When
   openPrStackScreen({ sessions: [anOrchestratorSession(plan)], repointResponseStackJson: repointed });
   prStackScreenPage.clickRepoint("n2");
 
-  // Then — RepointPlannedPr is called for n2 and the row's Repoint control clears from the response
-  cy.get("@repointPlannedPr").should("have.been.calledWithMatch", { nodeId: "n2" });
+  // Then — RepointWorkItem is called for n2 and the row's Repoint control clears from the response
+  cy.get("@repointWorkItem").should("have.been.calledWithMatch", { itemId: "n2" });
   prStackScreenPage.repointBtn("n2").should("not.exist");
 });

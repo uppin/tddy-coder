@@ -1,13 +1,13 @@
 /**
- * Fixture builder for `SessionEntry.stackPlanJson` — the JSON-serialized `Stack`
+ * Fixture builder for `SessionEntry.workQueueJson` — the JSON-serialized `Stack`
  * (`tddy_core::changeset::Stack`) a "pr-stack" orchestrator session carries once it has a plan.
  *
  * Field names are snake_case to match the Rust struct's default serde encoding
- * (no `rename_all` on `Stack`/`StackNode` — see `packages/tddy-core/src/changeset.rs`).
+ * (no `rename_all` on `Stack`/`WorkItem` — see `packages/tddy-core/src/changeset.rs`).
  */
 
-export interface StackNodeFixture {
-  nodeId: string;
+export interface WorkItemFixture {
+  itemId: string;
   title: string;
   description?: string;
   branchSuggestion?: string | null;
@@ -28,7 +28,7 @@ export interface StackNodeFixture {
 }
 
 /** A planned PR node with sensible defaults — override only what a scenario cares about. */
-export function aPlannedNode(overrides: Partial<StackNodeFixture> & { nodeId: string; title: string }): StackNodeFixture {
+export function aPlannedNode(overrides: Partial<WorkItemFixture> & { itemId: string; title: string }): WorkItemFixture {
   return {
     description: "",
     branchSuggestion: null,
@@ -157,12 +157,12 @@ export function aPullBaseIntoBranchResponse(fx: {
   };
 }
 
-/** Serialize a `Stack` fixture to the `stack_plan_json` wire format. */
-export function aStackPlanJson(version: number, nodes: StackNodeFixture[]): string {
+/** Serialize a `Stack` fixture to the `work_queue_json` wire format. */
+export function aWorkQueueJson(version: number, nodes: WorkItemFixture[]): string {
   return JSON.stringify({
     version,
     nodes: nodes.map((n) => ({
-      node_id: n.nodeId,
+      node_id: n.itemId,
       title: n.title,
       description: n.description ?? "",
       branch_suggestion: n.branchSuggestion ?? null,
@@ -182,7 +182,7 @@ export function aStackPlanJson(version: number, nodes: StackNodeFixture[]): stri
  * A live cross-host child session, as the common room presents it: the coder participant identity
  * its owning daemon joins under, plus the `session` metadata block it publishes.
  *
- * The stack association (`orchestrator_session_id`, `stack_node_id`, `branch`) is the whole point —
+ * The stack association (`orchestrator_session_id`, `work_item_id`, `branch`) is the whole point —
  * a session on another host reaches the web only as presence, so the metadata is the only place the
  * PR-Stack view can learn which planned PR the participant is working
  * (docs/ft/coder/pr-stack-live-status.md D37).
@@ -191,7 +191,7 @@ export function aStackChildParticipant(fx: {
   sessionId: string;
   daemonInstanceId: string;
   orchestratorSessionId: string;
-  stackNodeId: string;
+  workItemId: string;
   branch: string;
   recipe?: string;
   repoPath?: string;
@@ -211,7 +211,7 @@ export function aStackChildParticipant(fx: {
         pending_elicitation: false,
         session_id: fx.sessionId,
         orchestrator_session_id: fx.orchestratorSessionId,
-        stack_node_id: fx.stackNodeId,
+        work_item_id: fx.workItemId,
         branch: fx.branch,
       },
     }),

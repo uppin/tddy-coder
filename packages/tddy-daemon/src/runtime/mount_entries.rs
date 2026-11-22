@@ -59,7 +59,7 @@ impl BuildContext {
         // The families served from `tddy-daemon-rpc` — CatalogService (tools, agents, models and
         // subagents, `tddy-discovery`), ExecToolService (execute, stream, list tools and session
         // tool calls, `tddy-tool-engine`), ProjectService, family D (`tddy-projects`) and
-        // PrStackService (stack planning and branch resolution, `tddy-pr-stack`) — through the same
+        // WorkQueueService (stack planning and branch resolution, `tddy-work-queue`) — through the same
         // handlers the host's session rooms serve.
         self.identity.rpc_entries.extend(rpc_handlers.entries());
 

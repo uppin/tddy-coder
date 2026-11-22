@@ -60,9 +60,9 @@ workflow-recipes crate.
 `github_rest_common.rs` and `github_pr.rs` are kept here as one-line `pub use` facades, so
 `tddy_workflow_recipes::github_pr::…` keeps resolving. Write new code against `tddy_github` directly.
 
-## The PR-stack data model lives in `tddy-pr-stack`
+## The PR-stack data model lives in `tddy-work-queue`
 
 Every stack operation, the per-PR documents, the merge journal and the merge/repoint execution live
-in [`tddy-pr-stack`](../tddy-pr-stack/) — see its [architecture](../tddy-pr-stack/docs/architecture.md).
+in [`tddy-work-queue`](../tddy-work-queue/) — see its [architecture](../tddy-work-queue/docs/architecture.md).
 This crate holds no stack module (`tests/recipe_catalogue_acceptance.rs`); it depends on
-`tddy-pr-stack` only for its acceptance suites, which name `tddy_pr_stack` directly.
+`tddy-work-queue` only for its acceptance suites, which name `tddy_work_queue` directly.

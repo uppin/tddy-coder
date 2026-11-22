@@ -1,7 +1,7 @@
 /**
  * Acceptance: a project's PR stacks in the sessions drawer (`#orchestrators` 9/11). Under each project
- * header a **Stacks** row lists the project's stacks on every host (`ListProjectStacks`); opening one
- * shows the stack view at `#/sessions/project/<projectId>/stack/<stackId>`, read by the stack's
+ * header a **Stacks** row lists the project's stacks on every host (`ListProjectWorkQueues`); opening one
+ * shows the stack view at `#/sessions/project/<projectId>/queue/<queueId>`, read by the stack's
  * address from the host that holds it.
  *
  * The whole Sessions screen over the in-memory ConnectRPC backend (`mountWithRpc`), so the
@@ -14,23 +14,23 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import type { ProjectEntry } from "tddy-client-web/gen/project_pb";
-import { PrStackService, ProjectStackSummarySchema } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService, WorkQueueSummarySchema } from "tddy-client-web/gen/work_queue_pb";
 import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { projectStacksPage } from "../support/pages/projectStacksPage";
-import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
+import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
 const BETA = "proj-beta";
 /** A stack of beta held by the selected daemon, and one held by another host. */
-const AUTH_STACK = { projectId: BETA, stackId: "0190b000-0000-7000-8000-0000000000aa", daemonInstanceId: DEFAULT_TEST_DAEMON.instanceId };
-const BILLING_STACK = { projectId: BETA, stackId: "0190b000-0000-7000-8000-0000000000bb", daemonInstanceId: "host-b" };
+const AUTH_STACK = { projectId: BETA, queueId: "0190b000-0000-7000-8000-0000000000aa", daemonInstanceId: DEFAULT_TEST_DAEMON.instanceId };
+const BILLING_STACK = { projectId: BETA, queueId: "0190b000-0000-7000-8000-0000000000bb", daemonInstanceId: "host-b" };
 
-const BILLING_PLAN = aStackPlanJson(1, [
-  aPlannedNode({ nodeId: "n1", title: "Add invoices table", displayOrder: 0 }),
-  aPlannedNode({ nodeId: "n2", title: "Add billing page", displayOrder: 1 }),
+const BILLING_PLAN = aWorkQueueJson(1, [
+  aPlannedNode({ itemId: "n1", title: "Add invoices table", displayOrder: 0 }),
+  aPlannedNode({ itemId: "n2", title: "Add billing page", displayOrder: 1 }),
 ]);
 
 /** A project the selected daemon lists. */
@@ -39,7 +39,7 @@ function aListedProject(projectId: string, name: string): Partial<ProjectEntry> 
 }
 
 function aStackSummary(address: typeof AUTH_STACK, title: string, total: number) {
-  return create(ProjectStackSummarySchema, { address, title, nodeCounts: { total } });
+  return create(WorkQueueSummarySchema, { address, title, nodeCounts: { total } });
 }
 
 /** The Sessions screen over a daemon listing beta, whose stacks are `AUTH_STACK` and `BILLING_STACK`. */
@@ -48,18 +48,18 @@ function theSessionsScreenWithBetasStacks() {
     sessions: [{ sessionId: "b1", projectId: BETA }],
     projectsOverride: [aListedProject(BETA, "beta")],
   })
-    .onUnary(PrStackService.method.listProjectStacks, (req) =>
-      create(PrStackService.method.listProjectStacks.output, {
+    .onUnary(WorkQueueService.method.listProjectWorkQueues, (req) =>
+      create(WorkQueueService.method.listProjectWorkQueues.output, {
         stacks:
           req.projectId === BETA
             ? [aStackSummary(AUTH_STACK, "Auth rework", 3), aStackSummary(BILLING_STACK, "Billing", 2)]
             : [],
       }),
     )
-    .onUnary(PrStackService.method.getProjectStack, () =>
-      create(PrStackService.method.getProjectStack.output, {
+    .onUnary(WorkQueueService.method.getWorkQueue, () =>
+      create(WorkQueueService.method.getWorkQueue.output, {
         summary: aStackSummary(BILLING_STACK, "Billing", 2),
-        stackPlanJson: BILLING_PLAN,
+        workQueueJson: BILLING_PLAN,
       }),
     );
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -81,11 +81,11 @@ it("a project's stacks are listed under its header and open in the stack view", 
   projectStacksPage.stacksRow(BETA).should("contain", "Auth rework").and("contain", "Billing");
 
   // When
-  projectStacksPage.openStack(BILLING_STACK.stackId);
+  projectStacksPage.openStack(BILLING_STACK.queueId);
 
   // Then — the stack view, read from the host that holds the stack
-  projectStacksPage.assertAtStackView(BETA, BILLING_STACK.stackId);
+  projectStacksPage.assertAtStackView(BETA, BILLING_STACK.queueId);
   projectStacksPage.stackView().should("be.visible");
-  prStackScreenPage.plannedPrRowNodeIds().should("deep.equal", ["n1", "n2"]);
+  prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n1", "n2"]);
   projectStacksPage.assertStackReadAt(backend, BILLING_STACK);
 });

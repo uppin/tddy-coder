@@ -15,17 +15,17 @@ import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgen
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -48,14 +48,14 @@ const DELETED_CHILD_SESSION_ID = "child-session-since-deleted";
 /** A node that was spawned once: it owns a branch and still records its (now deleted) session. */
 function aSpawnedNode() {
   return aPlannedNode({
-    nodeId: "n1",
+    itemId: "n1",
     title: "Session attachment storage",
     branch: OWNED_BRANCH,
     sessionId: DELETED_CHILD_SESSION_ID,
   });
 }
 
-function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
+function anOrchestratorSession(workQueueJson: string): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-07-26T09:50:00Z",
@@ -64,7 +64,7 @@ function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
@@ -83,14 +83,14 @@ interface MountOptions {
   /** Branches `ListProjectBranches` offers for the "Work on existing branch" mode. */
   remoteBranches?: string[];
   /** The orchestrator's planned stack. Defaults to the single orphaned node above. */
-  nodes?: StackNodeFixture[];
+  nodes?: WorkItemFixture[];
 }
 
 function openPrStackScreen(opts: MountOptions) {
   const backend = aSessionsDrawerBackend([
-    anOrchestratorSession(aStackPlanJson(1, opts.nodes ?? [aSpawnedNode()])),
+    anOrchestratorSession(aWorkQueueJson(1, opts.nodes ?? [aSpawnedNode()])),
   ])
-    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(WorkQueueService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(opts.resolutionByBranch[req.branch] ?? { branch: req.branch }),
     )
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
@@ -111,9 +111,9 @@ function openPrStackScreen(opts: MountOptions) {
 /** Open the screen with a `QueryBranch` call that never answers — the resolution never arrives. */
 function openPrStackScreenWithUnansweredResolution() {
   const backend = aSessionsDrawerBackend([
-    anOrchestratorSession(aStackPlanJson(1, [aSpawnedNode()])),
+    anOrchestratorSession(aWorkQueueJson(1, [aSpawnedNode()])),
   ]).onUnary(
-    PrStackService.method.queryBranch,
+    WorkQueueService.method.queryBranch,
     () => new Promise<never>(() => undefined),
   );
 
@@ -212,12 +212,12 @@ it("offers Start session for an orphaned node whose base branch is missing from 
   // resolution entirely), so the base is irrelevant to whether this spawn can succeed.
   const nodes = [
     aPlannedNode({
-      nodeId: "n0",
+      itemId: "n0",
       title: "Start-session attachment proto",
       branchSuggestion: "feature/attach-docs/attach-proto",
     }),
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Session attachment storage",
       branch: OWNED_BRANCH,
       sessionId: DELETED_CHILD_SESSION_ID,

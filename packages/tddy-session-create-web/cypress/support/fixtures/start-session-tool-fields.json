@@ -35,10 +35,10 @@
     "session_type",
     "specialized_agents",
     "ssh_config_host",
-    "stack_node_id",
-    "stack_parent",
-    "stack_parent_daemon_instance_id",
     "target",
-    "tool_path"
+    "tool_path",
+    "work_item_id",
+    "work_queue_parent",
+    "work_queue_parent_daemon_instance_id"
   ]
 }

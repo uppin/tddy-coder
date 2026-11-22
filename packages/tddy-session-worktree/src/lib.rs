@@ -15,9 +15,9 @@ use tddy_session_store::error::WorkflowError;
 
 pub use session_chain::{
     classify_stack_parent_route, integrate_chain_base_into_session_worktree_bootstrap,
-    parent_is_pr_stack_orchestrator, pr_stack_node_for_spawn, resolve_chain_base_for_session_spawn,
-    resolve_chain_base_ref, resolve_chain_integration_base_ref_from_parent_session,
-    select_worktree_base_ref, spawn_chain_child_worktree, StackParentRoute,
+    parent_owns_a_work_queue, resolve_chain_base_for_session_spawn, resolve_chain_base_ref,
+    resolve_chain_integration_base_ref_from_parent_session, select_worktree_base_ref,
+    spawn_chain_child_worktree, work_item_for_spawn, WorkQueueParentRoute,
 };
 #[allow(deprecated)]
 pub use worktree::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF;

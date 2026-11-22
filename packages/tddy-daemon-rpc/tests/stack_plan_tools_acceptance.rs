@@ -1,4 +1,4 @@
-//! Acceptance: the PR-stack plan and read tools are daemon exec tools addressed by `stack_id`
+//! Acceptance: the PR-stack plan and read tools are daemon exec tools addressed by `queue_id`
 //! (`#orchestrators` 7/11). Main creates a titled stack, plans it and reads its status from its
 //! read-only session; an orchestrator's tools default to its own stack (the one its changeset
 //! names); a stack another host holds is
@@ -6,7 +6,7 @@
 //! alone; an ordinary session is offered none and refused; and a synced edit reaches GitHub as the
 //! project's account.
 //!
-//! Stacks are the project's records (`ProjectStackStore` under each host's `projects/`), read back
+//! Stacks are the project's records (`WorkQueueStore` under each host's `projects/`), read back
 //! here through the real store. GitHub is a recording stand-in attached to the daemon
 //! (`RpcHandlers::attach_stack_github`); the project is a Local gh one, so its account's token is
 //! what the host's `gh` stub answers. Cross-host calls go through `support`'s in-memory peer
@@ -34,11 +34,11 @@ use support::{
     a_host_as_current_user_with_gh_at, a_workspace_in, Host, InProcessPeers, HOST_A, HOST_B,
     THIS_PROJECT,
 };
-use tddy_core::changeset::{read_changeset, write_changeset, GithubPrStatus, Stack, StackNode};
-use tddy_core::project_stack_store::{ProjectStackStore, StackRecord};
+use tddy_core::changeset::{read_changeset, write_changeset, GithubPrStatus, WorkItem, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_core::work_queue_store::{WorkQueueRecord, WorkQueueStore};
 use tddy_core::WorkflowError;
-use tddy_daemon_rpc::exec_tool::stack_tools::{StackGithub, StackGithubClients};
+use tddy_daemon_rpc::exec_tool::work_queue_tools::{WorkQueueGithub, WorkQueueGithubClients};
 use tddy_github::pr_api::{
     CheckRun, GithubPrApi, GithubPrInsightApi, PrDetail, PrFile, PrIssueComment, PrLookupOutcome,
     PrRef, PrReview, PrReviewComment, PrSearchHit, PrSearchQuery,
@@ -52,7 +52,7 @@ use tddy_service::proto::exec_tools::{
 };
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_testing_commons::gh_cli::a_gh_cli;
-use tddy_tool_engine::stack_tools::is_stack_tool;
+use tddy_tool_engine::work_queue_tools::is_stack_tool;
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
 
 /// The token the project's account resolves to: what the host's `gh` stub answers.
@@ -84,8 +84,8 @@ impl RecordingGithub {
     }
 }
 
-impl StackGithubClients for RecordingGithub {
-    fn client_for(&self, repo: &str, token: &str) -> Box<dyn StackGithub> {
+impl WorkQueueGithubClients for RecordingGithub {
+    fn client_for(&self, repo: &str, token: &str) -> Box<dyn WorkQueueGithub> {
         self.0
             .lock()
             .unwrap()
@@ -214,8 +214,8 @@ impl Host {
     }
 
     /// This host's stack store — the one the daemon serves the tools over.
-    fn stacks(&self) -> ProjectStackStore {
-        ProjectStackStore::new(self.sessions.path().join("projects"))
+    fn stacks(&self) -> WorkQueueStore {
+        WorkQueueStore::new(self.sessions.path().join("projects"))
     }
 
     /// The project's row names the GitHub repository and acts as the host's `gh` login.
@@ -241,34 +241,34 @@ impl Host {
         self.stacks()
             .create(THIS_PROJECT, created_by, a_stack_of(titles))
             .unwrap()
-            .stack_id
+            .queue_id
     }
 
     /// An orchestrator of the project on this host whose own stack — the one its changeset names —
     /// has `titles` as its nodes. No recipe is involved. Answers the session and its stack.
     async fn an_orchestrator_owning_a_stack_of(&self, titles: &[&str]) -> (String, String) {
         let session_id = a_workspace_in(&self.daemon, THIS_PROJECT).await;
-        let stack_id = self.holds_a_stack(&session_id, titles);
+        let queue_id = self.holds_a_stack(&session_id, titles);
         let dir = self.session_dir(&session_id);
         let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
         meta.session_role = Some("orchestrator".to_string());
         tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
         let mut changeset = read_changeset(&dir).unwrap_or_default();
-        changeset.stack_id = Some(stack_id.clone());
+        changeset.work_queue_id = Some(queue_id.clone());
         write_changeset(&dir, &changeset).unwrap();
-        (session_id, stack_id)
+        (session_id, queue_id)
     }
 
     /// A session of the project on this host started by `orchestrator` for `node_id` of its stack:
     /// the node is bound to it, and its changeset names `orchestrator`.
-    async fn a_node_session_of(&self, orchestrator: &str, stack_id: &str, node_id: &str) -> String {
+    async fn a_node_session_of(&self, orchestrator: &str, queue_id: &str, node_id: &str) -> String {
         let session_id = a_workspace_in(&self.daemon, THIS_PROJECT).await;
         let dir = self.session_dir(&session_id);
         let mut changeset = read_changeset(&dir).unwrap_or_default();
         changeset.orchestrator_session_id = Some(orchestrator.to_string());
         write_changeset(&dir, &changeset).unwrap();
         self.stacks()
-            .update(THIS_PROJECT, stack_id, |stack| {
+            .update(THIS_PROJECT, queue_id, |stack| {
                 let node = stack
                     .nodes
                     .iter_mut()
@@ -280,10 +280,10 @@ impl Host {
         session_id
     }
 
-    /// `node_id` of `stack_id` records its open pull request, number `number`.
-    fn node_has_pull_request(&self, stack_id: &str, node_id: &str, number: u64) {
+    /// `node_id` of `queue_id` records its open pull request, number `number`.
+    fn node_has_pull_request(&self, queue_id: &str, node_id: &str, number: u64) {
         self.stacks()
-            .update(THIS_PROJECT, stack_id, |stack| {
+            .update(THIS_PROJECT, queue_id, |stack| {
                 let node = stack
                     .nodes
                     .iter_mut()
@@ -299,9 +299,9 @@ impl Host {
             .unwrap();
     }
 
-    /// The nodes of `stack_id` as this host's store holds them, as `(node_id, title, parents)`.
-    fn nodes_of(&self, stack_id: &str) -> Vec<(String, String, Vec<String>)> {
-        nodes_of(&self.stacks().read(THIS_PROJECT, stack_id).unwrap())
+    /// The nodes of `queue_id` as this host's store holds them, as `(node_id, title, parents)`.
+    fn nodes_of(&self, queue_id: &str) -> Vec<(String, String, Vec<String>)> {
+        nodes_of(&self.stacks().read(THIS_PROJECT, queue_id).unwrap())
     }
 
     /// Call `tool` as `session_id`, addressed at this host.
@@ -349,7 +349,7 @@ impl Host {
     /// The stack tools the jail built for `session_id` is listed by its `ListExecTools` bridge —
     /// the daemon's production `sandbox_rpc_handler`, relayed to as an in-jail agent's `tddy-tools`
     /// is, with no jail spawned — in the order listed.
-    async fn stack_tools_listed_in_the_jail_of(&self, session_id: &str) -> Vec<String> {
+    async fn work_queue_tools_listed_in_the_jail_of(&self, session_id: &str) -> Vec<String> {
         let service = self.daemon.as_arc();
         service.install_sandbox_rpc_bridge();
         let bridge = service.sandbox_rpc_handler(session_id, &self.session_dir(session_id));
@@ -384,7 +384,7 @@ impl Host {
     }
 
     /// The stack tools `ListExecTools` offers `session_id`, in the order offered.
-    async fn stack_tools_offered_to(&self, session_id: &str) -> Vec<String> {
+    async fn work_queue_tools_offered_to(&self, session_id: &str) -> Vec<String> {
         self.daemon
             .list_exec_tools(Request::direct(ListExecToolsRequest {
                 session_token: TEST_TOKEN.to_string(),
@@ -403,13 +403,13 @@ impl Host {
 }
 
 /// A session of the project held by `session_host`, started by `orchestrator` for `node_id` of
-/// `stack_id`, which `stack_host` holds: the node is bound to it in `stack_host`'s store, and its
+/// `queue_id`, which `stack_host` holds: the node is bound to it in `stack_host`'s store, and its
 /// changeset names `orchestrator`.
 async fn a_node_session_held_by(
     session_host: &Host,
     stack_host: &Host,
     orchestrator: &str,
-    stack_id: &str,
+    queue_id: &str,
     node_id: &str,
 ) -> String {
     let session_id = a_workspace_in(&session_host.daemon, THIS_PROJECT).await;
@@ -419,7 +419,7 @@ async fn a_node_session_held_by(
     write_changeset(&dir, &changeset).unwrap();
     stack_host
         .stacks()
-        .update(THIS_PROJECT, stack_id, |stack| {
+        .update(THIS_PROJECT, queue_id, |stack| {
             let node = stack
                 .nodes
                 .iter_mut()
@@ -431,22 +431,22 @@ async fn a_node_session_held_by(
     session_id
 }
 
-fn a_stack_of(titles: &[&str]) -> Stack {
-    Stack {
+fn a_stack_of(titles: &[&str]) -> WorkQueue {
+    WorkQueue {
         version: 1,
         nodes: titles
             .iter()
             .enumerate()
-            .map(|(i, title)| StackNode {
+            .map(|(i, title)| WorkItem {
                 node_id: format!("n{}", i + 1),
                 title: title.to_string(),
-                ..StackNode::default()
+                ..WorkItem::default()
             })
             .collect(),
     }
 }
 
-fn nodes_of(record: &StackRecord) -> Vec<(String, String, Vec<String>)> {
+fn nodes_of(record: &WorkQueueRecord) -> Vec<(String, String, Vec<String>)> {
     record
         .stack
         .nodes
@@ -455,7 +455,7 @@ fn nodes_of(record: &StackRecord) -> Vec<(String, String, Vec<String>)> {
         .collect()
 }
 
-/// The `(node_id, title)` of every node a `pr_stack_status` answer lists.
+/// The `(node_id, title)` of every node a `work_queue_status` answer lists.
 fn status_nodes(status: &Value) -> Vec<(String, String)> {
     status["nodes"]
         .as_array()
@@ -483,17 +483,17 @@ fn pair(node_id: &str, title: &str) -> (String, String) {
 }
 
 const EVERY_STACK_TOOL: [&str; 11] = [
-    "pr_stack_list",
-    "pr_stack_create",
-    "pr_stack_status",
-    "pr_read",
-    "pr_search",
-    "pr_comments",
-    "pr_add_planned",
-    "pr_update_planned",
-    "pr_delete_planned",
-    "pr_set_status",
-    "pr_adopt",
+    "work_queue_list",
+    "work_queue_create",
+    "work_queue_status",
+    "work_pr_read",
+    "work_pr_search",
+    "work_pr_comments",
+    "work_item_add",
+    "work_item_update",
+    "work_item_delete",
+    "work_item_set_status",
+    "work_item_adopt",
 ];
 
 fn names(names: &[&str]) -> Vec<String> {
@@ -512,27 +512,27 @@ async fn main_creates_a_stack_adds_planned_prs_and_reads_its_status_from_a_read_
     let created = a
         .answer_to(
             &world.main,
-            "pr_stack_create",
+            "work_queue_create",
             json!({ "title": "Orchestrator sessions" }),
         )
         .await;
-    let stack_id = created["stack_id"]
+    let queue_id = created["queue_id"]
         .as_str()
-        .expect("a stack_id")
+        .expect("a queue_id")
         .to_string();
     let first = a
         .answer_to(
             &world.main,
-            "pr_add_planned",
-            json!({ "stack_id": stack_id, "title": "Store", "description": "the store" }),
+            "work_item_add",
+            json!({ "queue_id": queue_id, "title": "Store", "description": "the store" }),
         )
         .await;
     let first_id = first["node_id"].as_str().expect("a node_id").to_string();
     a.answer_to(
         &world.main,
-        "pr_add_planned",
+        "work_item_add",
         json!({
-            "stack_id": stack_id,
+            "queue_id": queue_id,
             "title": "Tools",
             "description": "the tools",
             "parents": [first_id],
@@ -542,19 +542,19 @@ async fn main_creates_a_stack_adds_planned_prs_and_reads_its_status_from_a_read_
     let status = a
         .answer_to(
             &world.main,
-            "pr_stack_status",
-            json!({ "stack_id": stack_id }),
+            "work_queue_status",
+            json!({ "queue_id": queue_id }),
         )
         .await;
-    let listed = a.answer_to(&world.main, "pr_stack_list", json!({})).await;
+    let listed = a.answer_to(&world.main, "work_queue_list", json!({})).await;
 
     // Then main is offered every stack tool, the project's store holds the titled stack main
     // created with both planned PRs, the status lists them, and the list shows the title
     assert_eq!(
-        a.stack_tools_offered_to(&world.main).await,
+        a.work_queue_tools_offered_to(&world.main).await,
         names(&EVERY_STACK_TOOL)
     );
-    let record = a.stacks().read(THIS_PROJECT, &stack_id).unwrap();
+    let record = a.stacks().read(THIS_PROJECT, &queue_id).unwrap();
     assert_eq!(
         (
             record.created_by_session_id.as_str(),
@@ -575,9 +575,9 @@ async fn main_creates_a_stack_adds_planned_prs_and_reads_its_status_from_a_read_
             .as_array()
             .expect("a list answer lists stacks")
             .iter()
-            .map(|s| (s["stack_id"].clone(), s["title"].clone()))
+            .map(|s| (s["queue_id"].clone(), s["title"].clone()))
             .collect::<Vec<_>>(),
-        vec![(json!(stack_id), json!("Orchestrator sessions"))]
+        vec![(json!(queue_id), json!("Orchestrator sessions"))]
     );
 }
 
@@ -593,12 +593,12 @@ async fn a_session_acts_on_its_own_stack_without_naming_it() {
     // When it adds a planned PR and reads the status, naming no stack
     a.answer_to(
         &orchestrator,
-        "pr_add_planned",
+        "work_item_add",
         json!({ "title": "Tools", "description": "the tools", "parents": ["n1"] }),
     )
     .await;
     let status = a
-        .answer_to(&orchestrator, "pr_stack_status", json!({}))
+        .answer_to(&orchestrator, "work_queue_status", json!({}))
         .await;
 
     // Then both acted on its own stack, and the other stack is untouched
@@ -617,14 +617,14 @@ async fn a_session_acts_on_its_own_stack_without_naming_it() {
 async fn a_stack_owned_by_another_host_is_read_and_edited_through_forwarding() {
     // Given a stack of the project held by host-b, and main on host-a
     let world = a_world().await;
-    let stack_id = world.b.holds_a_stack(&world.main, &["Store"]);
+    let queue_id = world.b.holds_a_stack(&world.main, &["Store"]);
 
     // When main lists host-b's stacks, plans a PR on that stack and reads its status, naming host-b
     let listed = world
         .a
         .answer_to(
             &world.main,
-            "pr_stack_list",
+            "work_queue_list",
             json!({ "daemon_instance_id": HOST_B }),
         )
         .await;
@@ -632,9 +632,9 @@ async fn a_stack_owned_by_another_host_is_read_and_edited_through_forwarding() {
         .a
         .answer_to(
             &world.main,
-            "pr_add_planned",
+            "work_item_add",
             json!({
-                "stack_id": stack_id,
+                "queue_id": queue_id,
                 "daemon_instance_id": HOST_B,
                 "title": "Tools",
                 "description": "the tools",
@@ -646,8 +646,8 @@ async fn a_stack_owned_by_another_host_is_read_and_edited_through_forwarding() {
         .a
         .answer_to(
             &world.main,
-            "pr_stack_status",
-            json!({ "stack_id": stack_id, "daemon_instance_id": HOST_B }),
+            "work_queue_status",
+            json!({ "queue_id": queue_id, "daemon_instance_id": HOST_B }),
         )
         .await;
 
@@ -659,14 +659,14 @@ async fn a_stack_owned_by_another_host_is_read_and_edited_through_forwarding() {
         .iter()
         .map(|s| {
             (
-                s["stack_id"].as_str().unwrap().to_string(),
+                s["queue_id"].as_str().unwrap().to_string(),
                 s["daemon_instance_id"].as_str().unwrap().to_string(),
             )
         })
         .collect();
-    assert_eq!(listed_stacks, vec![(stack_id.clone(), HOST_B.to_string())]);
+    assert_eq!(listed_stacks, vec![(queue_id.clone(), HOST_B.to_string())]);
     assert_eq!(
-        world.b.nodes_of(&stack_id),
+        world.b.nodes_of(&queue_id),
         vec![node("n1", "Store", &[]), node("n2", "Tools", &["n1"])]
     );
     assert_eq!(
@@ -695,19 +695,19 @@ async fn a_stack_node_session_is_offered_only_status_and_read_for_its_own_stack(
     let other_stack = a.holds_a_stack(&world.main, &["Elsewhere"]);
 
     // When the node's session reads its stack's status, reads another stack's, and plans a PR
-    let status = a.answer_to(&child, "pr_stack_status", json!({})).await;
+    let status = a.answer_to(&child, "work_queue_status", json!({})).await;
     let other = a
         .call_as(
             &child,
-            "pr_stack_status",
-            json!({ "stack_id": other_stack }),
+            "work_queue_status",
+            json!({ "queue_id": other_stack }),
         )
         .await
         .expect("an addressing refusal is the tool's answer");
     let refusal = a
         .call_as(
             &child,
-            "pr_add_planned",
+            "work_item_add",
             json!({ "title": "More", "description": "more" }),
         )
         .await
@@ -716,8 +716,8 @@ async fn a_stack_node_session_is_offered_only_status_and_read_for_its_own_stack(
     // Then it is offered status and read only, reads its own stack, is refused the other stack by
     // name, and is refused the write as permission denied with nothing written
     assert_eq!(
-        a.stack_tools_offered_to(&child).await,
-        names(&["pr_stack_status", "pr_read"])
+        a.work_queue_tools_offered_to(&child).await,
+        names(&["work_queue_status", "work_pr_read"])
     );
     assert_eq!(
         status_nodes(&status),
@@ -742,18 +742,18 @@ async fn an_ordinary_session_is_offered_no_stack_tool_and_is_refused_one() {
     let world = a_world().await;
     let a = &world.a;
     let ordinary = a_workspace_in(&a.daemon, THIS_PROJECT).await;
-    let stack_id = a.holds_a_stack(&world.main, &["Store"]);
+    let queue_id = a.holds_a_stack(&world.main, &["Store"]);
 
     // When it lists the project's stacks and plans a PR on that stack
     let listing = a
-        .call_as(&ordinary, "pr_stack_list", json!({}))
+        .call_as(&ordinary, "work_queue_list", json!({}))
         .await
         .expect_err("an ordinary session is refused the stack tools");
     let planning = a
         .call_as(
             &ordinary,
-            "pr_add_planned",
-            json!({ "stack_id": stack_id, "title": "More", "description": "more" }),
+            "work_item_add",
+            json!({ "queue_id": queue_id, "title": "More", "description": "more" }),
         )
         .await
         .expect_err("an ordinary session is refused the stack tools");
@@ -761,7 +761,7 @@ async fn an_ordinary_session_is_offered_no_stack_tool_and_is_refused_one() {
     // Then it is offered no stack tool, both calls are refused as permission denied, and the stack
     // is untouched
     assert_eq!(
-        a.stack_tools_offered_to(&ordinary).await,
+        a.work_queue_tools_offered_to(&ordinary).await,
         Vec::<String>::new()
     );
     assert_eq!(
@@ -769,25 +769,25 @@ async fn an_ordinary_session_is_offered_no_stack_tool_and_is_refused_one() {
         (Code::PermissionDenied, Code::PermissionDenied),
         "{listing:?} / {planning:?}"
     );
-    assert_eq!(a.nodes_of(&stack_id), vec![node("n1", "Store", &[])]);
+    assert_eq!(a.nodes_of(&queue_id), vec![node("n1", "Store", &[])]);
 }
 
 #[tokio::test]
-async fn pr_update_planned_with_sync_pr_publishes_with_the_project_accounts_token() {
+async fn work_item_update_with_sync_pr_publishes_with_the_project_accounts_token() {
     // Given a stack whose node n1 has an open pull request, #42, and main — a read-only session,
     // which holds no GitHub credential of its own
     let world = a_world().await;
     let a = &world.a;
-    let stack_id = a.holds_a_stack(&world.main, &["Store"]);
-    a.node_has_pull_request(&stack_id, "n1", 42);
+    let queue_id = a.holds_a_stack(&world.main, &["Store"]);
+    a.node_has_pull_request(&queue_id, "n1", 42);
 
     // When main retitles n1 and syncs its pull request
     let updated = a
         .answer_to(
             &world.main,
-            "pr_update_planned",
+            "work_item_update",
             json!({
-                "stack_id": stack_id,
+                "queue_id": queue_id,
                 "node_id": "n1",
                 "title": "Project stack store",
                 "sync_pr": true,
@@ -799,7 +799,7 @@ async fn pr_update_planned_with_sync_pr_publishes_with_the_project_accounts_toke
     // the project's account
     assert_eq!(updated["pr_synced"], json!(42));
     assert_eq!(
-        a.nodes_of(&stack_id),
+        a.nodes_of(&queue_id),
         vec![node("n1", "Project stack store", &[])]
     );
     assert_eq!(
@@ -825,11 +825,11 @@ async fn a_stack_node_session_in_a_jail_is_listed_its_two_reads_as_the_daemon_li
     let child = a.a_node_session_of(&orchestrator, &own_stack, "n1").await;
 
     // When the jail's agent asks which tools its session is offered
-    let in_the_jail = a.stack_tools_listed_in_the_jail_of(&child).await;
+    let in_the_jail = a.work_queue_tools_listed_in_the_jail_of(&child).await;
 
     // Then the jail lists the node's two reads — exactly what the daemon lists it
-    assert_eq!(in_the_jail, names(&["pr_stack_status", "pr_read"]));
-    assert_eq!(in_the_jail, a.stack_tools_offered_to(&child).await);
+    assert_eq!(in_the_jail, names(&["work_queue_status", "work_pr_read"]));
+    assert_eq!(in_the_jail, a.work_queue_tools_offered_to(&child).await);
 }
 
 #[tokio::test]
@@ -840,11 +840,16 @@ async fn an_orchestrators_jail_is_listed_every_stack_tool_the_daemon_lists_it() 
     let (orchestrator, _own_stack) = a.an_orchestrator_owning_a_stack_of(&["Store"]).await;
 
     // When the jail's agent asks which tools its session is offered
-    let in_the_jail = a.stack_tools_listed_in_the_jail_of(&orchestrator).await;
+    let in_the_jail = a
+        .work_queue_tools_listed_in_the_jail_of(&orchestrator)
+        .await;
 
     // Then the jail lists all eleven stack tools — exactly what the daemon lists it
     assert_eq!(in_the_jail, names(&EVERY_STACK_TOOL));
-    assert_eq!(in_the_jail, a.stack_tools_offered_to(&orchestrator).await);
+    assert_eq!(
+        in_the_jail,
+        a.work_queue_tools_offered_to(&orchestrator).await
+    );
 }
 
 #[tokio::test]
@@ -860,7 +865,7 @@ async fn a_stack_node_session_on_another_host_reads_its_stack_where_the_stack_is
     // When the node's agent reads its stack's status and plans a PR, each call addressed at host-a
     let status = world
         .b
-        .call_addressed_at(HOST_A, &child, "pr_stack_status", json!({}))
+        .call_addressed_at(HOST_A, &child, "work_queue_status", json!({}))
         .await
         .expect("host-a serves a node bound to the caller its stack's status");
     let planning = world
@@ -868,8 +873,8 @@ async fn a_stack_node_session_on_another_host_reads_its_stack_where_the_stack_is
         .call_addressed_at(
             HOST_A,
             &child,
-            "pr_add_planned",
-            json!({ "stack_id": own_stack, "title": "More", "description": "more" }),
+            "work_item_add",
+            json!({ "queue_id": own_stack, "title": "More", "description": "more" }),
         )
         .await
         .expect_err("a node may not plan its stack");
@@ -903,8 +908,8 @@ async fn a_session_on_another_host_bound_to_no_node_there_is_refused_the_stack_r
         .call_addressed_at(
             HOST_A,
             &stranger,
-            "pr_stack_status",
-            json!({ "stack_id": own_stack }),
+            "work_queue_status",
+            json!({ "queue_id": own_stack }),
         )
         .await
         .expect_err("a session bound to no node of a stack is not served it");

@@ -111,17 +111,17 @@ pub fn resolve_chain_integration_base_ref_from_parent_session(
 }
 
 /// True when the parent session is a pr-stack orchestrator — a planning session carrying a
-/// planned stack, by `stack_id`, and therefore no git branch of its own.
-pub fn parent_is_pr_stack_orchestrator(sessions_base: &Path, parent_session_id: &str) -> bool {
+/// planned stack, by `queue_id`, and therefore no git branch of its own.
+pub fn parent_owns_a_work_queue(sessions_base: &Path, parent_session_id: &str) -> bool {
     let parent_dir = unified_session_dir_path(sessions_base, parent_session_id);
     match read_changeset(&parent_dir) {
-        Ok(cs) => cs.stack_id.is_some(),
+        Ok(cs) => cs.work_queue_id.is_some(),
         Err(_) => false,
     }
 }
 
-/// Locate the planned stack node a child spawn belongs to: the node `stack_node_id` names, or —
-/// when the spawn names none — the node in `stack_parent`'s stack that owns the branch the child is
+/// Locate the planned stack node a child spawn belongs to: the node `work_item_id` names, or —
+/// when the spawn names none — the node in `work_queue_parent`'s stack that owns the branch the child is
 /// about to create.
 ///
 /// The id wins because it is the one fact that is *exact* (D34). The branch-derived lookup matches
@@ -137,23 +137,24 @@ pub fn parent_is_pr_stack_orchestrator(sessions_base: &Path, parent_session_id: 
 ///
 /// A spawn that names no node keeps the branch-derived lookup unchanged — that is the orchestrator
 /// agent's own `spawn-child`, which always runs on the orchestrator's host.
-pub fn pr_stack_node_for_spawn(
+pub fn work_item_for_spawn(
     sessions_base: &Path,
-    stack_parent: &str,
-    stack_node_id: &str,
+    work_queue_parent: &str,
+    work_item_id: &str,
     new_branch_name: &str,
-) -> Option<(PathBuf, crate::changeset::Stack, String)> {
-    if !parent_is_pr_stack_orchestrator(sessions_base, stack_parent) {
+) -> Option<(PathBuf, crate::changeset::WorkQueue, String)> {
+    if !parent_owns_a_work_queue(sessions_base, work_queue_parent) {
         return None;
     }
-    let node_id = stack_node_id.trim();
+    let node_id = work_item_id.trim();
     let branch = new_branch_name.trim();
     if node_id.is_empty() && branch.is_empty() {
         return None;
     }
-    let parent_dir = unified_session_dir_path(sessions_base, stack_parent);
+    let parent_dir = unified_session_dir_path(sessions_base, work_queue_parent);
     let stack =
-        crate::changeset::read_stack_with_resolved_branches(sessions_base, stack_parent).ok()??;
+        crate::changeset::read_stack_with_resolved_branches(sessions_base, work_queue_parent)
+            .ok()??;
     if !node_id.is_empty() {
         let named = stack.node(node_id).map(|n| n.node_id.clone())?;
         return Some((parent_dir, stack, named));
@@ -172,32 +173,32 @@ pub fn pr_stack_node_for_spawn(
     Some((parent_dir, stack, node_id))
 }
 
-/// Resolve the integration base ref for a session spawned with an optional `stack_parent`.
+/// Resolve the integration base ref for a session spawned with an optional `work_queue_parent`.
 ///
 /// A pr-stack orchestrator parent bases the child off the planned node's effective base via
-/// [`crate::changeset::Stack::base_ref_for_spawn`]. A regular code-session parent bases off
-/// `origin/<parent-branch>`. When there is no `stack_parent`, returns `Ok(None)` so the caller
+/// [`crate::changeset::WorkQueue::base_ref_for_spawn`]. A regular code-session parent bases off
+/// `origin/<parent-branch>`. When there is no `work_queue_parent`, returns `Ok(None)` so the caller
 /// uses the default integration base.
 ///
-/// `stack_node_id` is how the spawn names the planned node it materializes, and it takes precedence
-/// over the branch (D34) — see [`pr_stack_node_for_spawn`]. It is load-bearing rather than a
+/// `work_item_id` is how the spawn names the planned node it materializes, and it takes precedence
+/// over the branch (D34) — see [`work_item_for_spawn`]. It is load-bearing rather than a
 /// convenience: with no node found this returns `Ok(None)`, the caller applies the project default,
 /// and the ordering gate `base_ref_for_spawn` performs never runs at all — so a renamed branch would
 /// cut the child's worktree from `origin/<default>` for a node whose non-merged parent owns no
 /// branch, and nothing would say so.
 pub fn resolve_chain_base_ref(
     sessions_base: &Path,
-    stack_parent: Option<&str>,
+    work_queue_parent: Option<&str>,
     repo_root: &Path,
-    stack_node_id: &str,
+    work_item_id: &str,
     new_branch_name: &str,
 ) -> Result<Option<String>, String> {
-    let Some(sp) = stack_parent else {
+    let Some(sp) = work_queue_parent else {
         return Ok(None);
     };
-    if parent_is_pr_stack_orchestrator(sessions_base, sp) {
+    if parent_owns_a_work_queue(sessions_base, sp) {
         let Some((_, stack, node_id)) =
-            pr_stack_node_for_spawn(sessions_base, sp, stack_node_id, new_branch_name)
+            work_item_for_spawn(sessions_base, sp, work_item_id, new_branch_name)
         else {
             return Ok(None);
         };
@@ -219,7 +220,7 @@ pub fn resolve_chain_base_ref(
 /// `changeset.yaml` — and nothing else. What a caller does with each is its own business: the
 /// daemon serves the first two itself and forwards the third.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StackParentRoute {
+pub enum WorkQueueParentRoute {
     /// There is no stack parent, so nothing is resolved and no host is asked.
     NoParent,
     /// This host's own sessions tree holds the parent.
@@ -228,9 +229,9 @@ pub enum StackParentRoute {
     OwnedByPeer { daemon_instance_id: String },
 }
 
-/// Decide which host resolves `stack_parent`, given the daemon that owns it.
+/// Decide which host resolves `work_queue_parent`, given the daemon that owns it.
 ///
-/// Every resolver behind a `stack_parent` reads
+/// Every resolver behind a `work_queue_parent` reads
 /// `unified_session_dir_path(sessions_base, parent_session_id)` on the **local** filesystem, so a
 /// parent that lives on another daemon is not "not yet planned" but simply absent — and the spawn
 /// is refused over a session that exists perfectly well, one host over. The owning host has to be
@@ -241,25 +242,25 @@ pub enum StackParentRoute {
 /// today's behaviour, unchanged. A host id equal to this one's means the same thing, which matters
 /// because a daemon that forwarded to itself would deadlock on its own RPC rather than answer.
 ///
-/// A blank `stack_parent` is [`StackParentRoute::NoParent`] whatever host is named: an empty id
+/// A blank `work_queue_parent` is [`WorkQueueParentRoute::NoParent`] whatever host is named: an empty id
 /// names no session, so there is nothing for any host to resolve.
 ///
 /// Deliberately a function over three strings — the rule about which host owns a parent is worth
 /// asserting without a live daemon, a common room or a LiveKit connection behind it.
 pub fn classify_stack_parent_route(
     local_daemon_instance_id: &str,
-    stack_parent: Option<&str>,
-    stack_parent_daemon_instance_id: &str,
-) -> StackParentRoute {
-    let names_a_parent = stack_parent.is_some_and(|p| !p.trim().is_empty());
+    work_queue_parent: Option<&str>,
+    work_queue_parent_daemon_instance_id: &str,
+) -> WorkQueueParentRoute {
+    let names_a_parent = work_queue_parent.is_some_and(|p| !p.trim().is_empty());
     if !names_a_parent {
-        return StackParentRoute::NoParent;
+        return WorkQueueParentRoute::NoParent;
     }
-    let owner = stack_parent_daemon_instance_id.trim();
+    let owner = work_queue_parent_daemon_instance_id.trim();
     if owner.is_empty() || owner == local_daemon_instance_id.trim() {
-        return StackParentRoute::Local;
+        return WorkQueueParentRoute::Local;
     }
-    StackParentRoute::OwnedByPeer {
+    WorkQueueParentRoute::OwnedByPeer {
         daemon_instance_id: owner.to_string(),
     }
 }
@@ -281,22 +282,22 @@ pub fn select_worktree_base_ref(
     }
 }
 
-/// Resolve the chain integration base for session spawn, honoring runtime `stack_parent` over a
+/// Resolve the chain integration base for session spawn, honoring runtime `work_queue_parent` over a
 /// persisted `worktree_integration_base_ref` when both are present.
 pub fn resolve_chain_base_for_session_spawn(
     sessions_base: &Path,
-    stack_parent: Option<&str>,
+    work_queue_parent: Option<&str>,
     repo_root: &Path,
-    stack_node_id: &str,
+    work_item_id: &str,
     new_branch_name: &str,
     persisted_worktree_integration_base_ref: Option<&str>,
 ) -> Result<Option<String>, String> {
-    if let Some(sp) = stack_parent {
+    if let Some(sp) = work_queue_parent {
         return resolve_chain_base_ref(
             sessions_base,
             Some(sp),
             repo_root,
-            stack_node_id,
+            work_item_id,
             new_branch_name,
         );
     }

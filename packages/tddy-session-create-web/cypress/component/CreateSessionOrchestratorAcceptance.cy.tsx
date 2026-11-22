@@ -112,14 +112,14 @@ describe("CreateSessionPane — Session orchestrator switch", () => {
         sandbox: request.sandbox,
         sandboxedCodebase: request.sandboxedCodebase,
         newBranchName: request.newBranchName,
-        stackParent: request.stackParent,
+        workQueueParent: request.workQueueParent,
       }).to.deep.equal({
         sessionType: "claude-cli",
         sessionRole: ORCHESTRATOR_ROLE,
         sandbox: false,
         sandboxedCodebase: false,
         newBranchName: "",
-        stackParent: "",
+        workQueueParent: "",
       });
     });
   });

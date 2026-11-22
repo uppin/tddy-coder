@@ -50,7 +50,7 @@ import {
 } from "../testIds";
 
 /** The fields the "New planned PR" form collects. Only `title` is required by the form itself. */
-export interface AddPlannedPrFormFields {
+export interface AddWorkItemFormFields {
   title: string;
   description?: string;
   branchSuggestion?: string;
@@ -63,17 +63,17 @@ export const prStackScreenPage = {
   // ---------------------------------------------------------------------------
 
   /** The list container for planned PRs. */
-  plannedPrList: (options?: Parameters<typeof cy.get>[1]) =>
+  workItemList: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.prStackPlannedPrList, { timeout: 5000, ...options }),
 
   /** A single planned-PR row for the given stack node id. */
-  plannedPrRow: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+  workItemRow: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(prStackPlannedPrRow(nodeId), { timeout: 5000, ...options }),
 
   /** The node ids of every rendered planned-PR row, in DOM order. */
-  plannedPrRowNodeIds: (): Cypress.Chainable<string[]> =>
+  workItemRowNodeIds: (): Cypress.Chainable<string[]> =>
     prStackScreenPage
-      .plannedPrList()
+      .workItemList()
       .find("[data-testid^='pr-stack-planned-pr-row-']")
       .then(($rows) =>
         [...$rows].map((el) => el.getAttribute("data-testid")!.replace("pr-stack-planned-pr-row-", "")),
@@ -317,39 +317,39 @@ export const prStackScreenPage = {
   // ---------------------------------------------------------------------------
 
   /** The "+ New planned PR" entry-point button that opens the add-planned-PR form. */
-  addPlannedPrBtn: (options?: Parameters<typeof cy.get>[1]) =>
+  addWorkItemBtn: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.prStackAddPlannedPrBtn, { timeout: 5000, ...options }),
 
   /** The add-planned-PR form root. */
-  addPlannedPrForm: (options?: Parameters<typeof cy.get>[1]) =>
+  addWorkItemForm: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.prStackAddPlannedPrForm, { timeout: 5000, ...options }),
 
   /** The new planned PR's title input. */
-  addPlannedPrTitleInput: (options?: Parameters<typeof cy.get>[1]) =>
+  addWorkItemTitleInput: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.prStackAddPlannedPrTitleInput, { timeout: 5000, ...options }),
 
   /** The new planned PR's description input. */
-  addPlannedPrDescriptionInput: (options?: Parameters<typeof cy.get>[1]) =>
+  addWorkItemDescriptionInput: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.prStackAddPlannedPrDescriptionInput, { timeout: 5000, ...options }),
 
   /** The new planned PR's optional branch-suggestion input. */
-  addPlannedPrBranchSuggestionInput: (options?: Parameters<typeof cy.get>[1]) =>
+  addWorkItemBranchSuggestionInput: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.prStackAddPlannedPrBranchSuggestionInput, { timeout: 5000, ...options }),
 
   /** An ancestor checkbox for the given existing planned-PR node id. */
-  addPlannedPrAncestorCheckbox: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+  addWorkItemAncestorCheckbox: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(prStackAddPlannedPrAncestorCheckbox(nodeId), { timeout: 5000, ...options }),
 
   /** Submit button for the add-planned-PR form. */
-  addPlannedPrSubmitBtn: (options?: Parameters<typeof cy.get>[1]) =>
+  addWorkItemSubmitBtn: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.prStackAddPlannedPrSubmitBtn, { timeout: 5000, ...options }),
 
   /** Cancel button for the add-planned-PR form. */
-  addPlannedPrCancelBtn: (options?: Parameters<typeof cy.get>[1]) =>
+  addWorkItemCancelBtn: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.prStackAddPlannedPrCancelBtn, { timeout: 5000, ...options }),
 
   /** Inline error banner shown when adding a planned PR fails. */
-  addPlannedPrError: (options?: Parameters<typeof cy.get>[1]) =>
+  addWorkItemError: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.prStackAddPlannedPrError, { timeout: 5000, ...options }),
 
   /** Open the "New planned PR" form. */
@@ -365,7 +365,7 @@ export const prStackScreenPage = {
    * The form has two terminal actions ("Add planned PR" and "Add & start session") that differ only
    * in the button they click, so the filling lives here once and each action is a thin wrapper.
    */
-  fillAddPlannedPrForm(options: AddPlannedPrFormFields) {
+  fillAddPlannedPrForm(options: AddWorkItemFormFields) {
     byTestId(TEST_IDS.prStackAddPlannedPrTitleInput).clear().type(options.title);
     if (options.description) {
       byTestId(TEST_IDS.prStackAddPlannedPrDescriptionInput).clear().type(options.description);
@@ -384,7 +384,7 @@ export const prStackScreenPage = {
    * Fill the "New planned PR" form and submit it through "Add planned PR", which appends the node and
    * leaves it planned for later.
    */
-  fillAndSubmitAddPlannedPrForm(options: AddPlannedPrFormFields) {
+  fillAndSubmitAddPlannedPrForm(options: AddWorkItemFormFields) {
     prStackScreenPage.fillAddPlannedPrForm(options);
     byTestId(TEST_IDS.prStackAddPlannedPrSubmitBtn).click();
   },
@@ -395,13 +395,13 @@ export const prStackScreenPage = {
    * `fillAndSubmitAddPlannedPrForm`, different terminal action — so a test picks the action it means
    * rather than passing a flag.
    */
-  fillAddPlannedPrFormAndStartSession(options: AddPlannedPrFormFields) {
+  fillAddPlannedPrFormAndStartSession(options: AddWorkItemFormFields) {
     prStackScreenPage.fillAddPlannedPrForm(options);
     byTestId(TEST_IDS.prStackAddPlannedPrStartBtn).click();
   },
 
   /** The "Add & start session" action on the add-planned-PR form. */
-  addPlannedPrStartBtn: (options?: Parameters<typeof cy.get>[1]) =>
+  addWorkItemStartBtn: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.prStackAddPlannedPrStartBtn, { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------

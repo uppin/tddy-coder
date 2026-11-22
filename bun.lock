@@ -189,8 +189,8 @@
         "react-dom": "^19.0.0",
       },
     },
-    "packages/tddy-prstack-web": {
-      "name": "tddy-prstack-web",
+    "packages/tddy-workqueue-web": {
+      "name": "tddy-workqueue-web",
       "version": "0.1.0",
       "dependencies": {
         "@bufbuild/protobuf": "^2.2.0",
@@ -343,7 +343,7 @@
         "tddy-chat-web": "workspace:*",
         "tddy-client-web": "workspace:*",
         "tddy-hosts-web": "workspace:*",
-        "tddy-prstack-web": "workspace:*",
+        "tddy-workqueue-web": "workspace:*",
         "tddy-react-commons": "workspace:*",
         "tddy-rpc-web": "workspace:*",
         "tddy-session-create-web": "workspace:*",
@@ -383,7 +383,7 @@
         "tddy-connectrpc-testkit": "workspace:*",
         "tddy-hosts-web": "workspace:*",
         "tddy-livekit-web": "workspace:*",
-        "tddy-prstack-web": "workspace:*",
+        "tddy-workqueue-web": "workspace:*",
         "tddy-react-commons": "workspace:*",
         "tddy-rpc-playground-web": "workspace:*",
         "tddy-session-create-web": "workspace:*",
@@ -511,7 +511,7 @@
         "tddy-client-web": "workspace:*",
         "tddy-hosts-web": "workspace:*",
         "tddy-livekit-web": "workspace:*",
-        "tddy-prstack-web": "workspace:*",
+        "tddy-workqueue-web": "workspace:*",
         "tddy-react-commons": "workspace:*",
         "tddy-rpc-playground-web": "workspace:*",
         "tddy-session-create-web": "workspace:*",
@@ -2533,7 +2533,7 @@
 
     "tddy-livekit-web": ["tddy-livekit-web@workspace:packages/tddy-livekit-web"],
 
-    "tddy-prstack-web": ["tddy-prstack-web@workspace:packages/tddy-prstack-web"],
+    "tddy-workqueue-web": ["tddy-workqueue-web@workspace:packages/tddy-workqueue-web"],
 
     "tddy-react-commons": ["tddy-react-commons@workspace:packages/tddy-react-commons"],
 

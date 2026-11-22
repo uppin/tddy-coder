@@ -1,7 +1,7 @@
 //! Acceptance: which branch a spawn is keyed on when linking it to a PR-stack node.
 //!
-//! `resolve_chain_base_ref` and `link_stack_node_to_spawned_branch` are both keyed on
-//! `new_branch_name`, which is **empty** in `work_on_selected_branch` mode. `pr_stack_node_for_spawn`
+//! `resolve_chain_base_ref` and `link_work_item_to_spawned_branch` are both keyed on
+//! `new_branch_name`, which is **empty** in `work_on_selected_branch` mode. `work_item_for_spawn`
 //! returns `None` for a blank branch, so resuming an existing branch never re-links the node: the row
 //! would stay in its recovered state and every click would spawn another unlinked session.
 //!

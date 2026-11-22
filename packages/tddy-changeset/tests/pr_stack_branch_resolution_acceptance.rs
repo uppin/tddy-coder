@@ -13,7 +13,7 @@
 use std::path::Path;
 use tddy_changeset::changeset::{
     read_stack_with_resolved_branches, resolve_stack_node_branch, update_stack_atomic, Changeset,
-    Stack, StackNode,
+    WorkItem, WorkQueue,
 };
 use tddy_changeset::session_lifecycle::unified_session_dir_path;
 use tddy_changeset::session_metadata::{
@@ -22,8 +22,8 @@ use tddy_changeset::session_metadata::{
 
 // --- builders ---------------------------------------------------------------
 
-fn a_planned_node(node_id: &str) -> StackNode {
-    StackNode {
+fn a_planned_node(node_id: &str) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: node_id.to_string(),
         description: String::new(),
@@ -38,22 +38,22 @@ fn a_planned_node(node_id: &str) -> StackNode {
     }
 }
 
-fn a_node_on_branch(node_id: &str, branch: &str) -> StackNode {
-    StackNode {
+fn a_node_on_branch(node_id: &str, branch: &str) -> WorkItem {
+    WorkItem {
         branch: Some(branch.to_string()),
         ..a_planned_node(node_id)
     }
 }
 
-fn a_node_linked_to_session(node_id: &str, session_id: &str) -> StackNode {
-    StackNode {
+fn a_node_linked_to_session(node_id: &str, session_id: &str) -> WorkItem {
+    WorkItem {
         session_id: Some(session_id.to_string()),
         ..a_planned_node(node_id)
     }
 }
 
-fn a_child_of(node_id: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn a_child_of(node_id: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         parents: parents.iter().map(|p| p.to_string()).collect(),
         ..a_planned_node(node_id)
     }
@@ -90,7 +90,7 @@ fn a_child_session(sessions_root: &Path, session_id: &str, changeset: Changeset)
 }
 
 /// A pr-stack orchestrator session whose project holds `stack`.
-fn an_orchestrator_with_stack(sessions_root: &Path, session_id: &str, nodes: Vec<StackNode>) {
+fn an_orchestrator_with_stack(sessions_root: &Path, session_id: &str, nodes: Vec<WorkItem>) {
     let dir = unified_session_dir_path(sessions_root, session_id);
     std::fs::create_dir_all(&dir).expect("create orchestrator session dir");
     write_initial_tool_session_metadata(
@@ -108,7 +108,7 @@ fn an_orchestrator_with_stack(sessions_root: &Path, session_id: &str, nodes: Vec
     };
     tddy_changeset::changeset::write_changeset(&dir, &changeset)
         .expect("write orchestrator changeset");
-    update_stack_atomic(&dir, |stack| *stack = Stack { version: 1, nodes })
+    update_stack_atomic(&dir, |stack| *stack = WorkQueue { version: 1, nodes })
         .expect("store the orchestrator's stack");
 }
 
@@ -150,7 +150,7 @@ fn prefers_the_branch_the_node_recorded_over_its_child_session_branch() {
     // Given — the node and its child session disagree about the branch
     let root = a_sessions_root();
     a_child_session_on_branch(root.path(), "child-1", "feature/x/from-session");
-    let node = StackNode {
+    let node = WorkItem {
         session_id: Some("child-1".to_string()),
         ..a_node_on_branch("n1", "feature/x/from-node")
     };
