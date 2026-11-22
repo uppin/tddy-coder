@@ -77,7 +77,10 @@ pub struct WorkItemLink<'a> {
 pub trait WorkQueueParentHost: Send + Sync {
     /// The ref the child's worktree is cut from, or `None` when the parent names no chain base and
     /// the project default applies.
-    async fn chain_base_ref(&self, lookup: &WorkItemBaseLookup<'_>) -> Result<Option<String>, Status>;
+    async fn chain_base_ref(
+        &self,
+        lookup: &WorkItemBaseLookup<'_>,
+    ) -> Result<Option<String>, Status>;
 
     /// Record the spawn's session and branch on the planned node it materializes, wherever that
     /// node's orchestrator lives.
@@ -256,7 +259,10 @@ impl<'a> SpawnWorkQueueParent<'a> {
 
 #[async_trait::async_trait]
 impl WorkQueueParentHost for LaunchSessions {
-    async fn chain_base_ref(&self, lookup: &WorkItemBaseLookup<'_>) -> Result<Option<String>, Status> {
+    async fn chain_base_ref(
+        &self,
+        lookup: &WorkItemBaseLookup<'_>,
+    ) -> Result<Option<String>, Status> {
         self.resolve_chain_base_ref_status(lookup).await
     }
 

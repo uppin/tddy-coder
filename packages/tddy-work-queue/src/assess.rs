@@ -571,7 +571,7 @@ mod tests {
     /// `child_phase == NotSpawned`, and the views must be in topological order.
     #[test]
     fn assemble_views_marks_notspawned_when_session_id_absent() {
-        use tddy_core::changeset::{WorkQueue, WorkItem};
+        use tddy_core::changeset::{WorkItem, WorkQueue};
 
         let tmp = tempfile::tempdir().unwrap();
         let parent_dir = tmp.path();
@@ -645,7 +645,7 @@ mod tests {
     /// `decide_next_action` doesn't re-issue the same spawn on the very next assess tick.
     #[test]
     fn assemble_views_marks_spawn_requested_when_a_pending_spawn_request_marker_file_exists() {
-        use tddy_core::changeset::{WorkQueue, WorkItem};
+        use tddy_core::changeset::{WorkItem, WorkQueue};
 
         let tmp = tempfile::tempdir().unwrap();
         let parent_dir = tmp.path();
@@ -693,7 +693,7 @@ mod tests {
     /// (closed, cleaned, restarted) while the branch and its PR stay.
     #[test]
     fn assemble_views_reports_the_pr_of_a_branch_whose_child_session_is_gone() {
-        use tddy_core::changeset::{WorkQueue, WorkItem};
+        use tddy_core::changeset::{WorkItem, WorkQueue};
 
         // Given — n1 owns a branch but no session points at it any more
         let tmp = tempfile::tempdir().unwrap();
@@ -736,7 +736,7 @@ mod tests {
     /// returns an open PR for a node's branch, `assemble_views` must map it to `PrLiveStatus::Open`.
     #[test]
     fn assemble_views_reports_propen_when_mock_returns_open_pr() {
-        use tddy_core::changeset::{write_changeset_atomic, Changeset, WorkQueue, WorkItem};
+        use tddy_core::changeset::{write_changeset_atomic, Changeset, WorkItem, WorkQueue};
         use tddy_core::session_lifecycle::unified_session_dir_path;
         use tddy_core::WorkflowState;
 
