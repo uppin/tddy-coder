@@ -12,6 +12,7 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::work_queue_store::{WorkQueueRecord, WorkQueueStore};
 use tddy_tool_engine::work_queue_tools::{PrAddress, WorkQueueOp};
 use tddy_work_queue::internal_status::{derive_internal_status, reconcile_internal_status};
+use tddy_work_queue::item_ops::item_links;
 use tddy_work_queue::item_ops::{
     add_work_item, adopt_pr_as_work_item, delete_work_item, sync_node_to_github_pr,
     update_work_item, AddWorkItemInput, StoredWorkQueue, UpdateWorkItemInput, WorkQueueHome,
@@ -175,7 +176,81 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
                 "pr_status": node.pr_status.as_ref().map(|s| s.phase.clone()),
             }))
         }
+        WorkQueueOp::AssignPr {
+            item_id,
+            pull_number,
+        } => {
+            // The PR is read as the project's account, so the item records the PR's own URL and head
+            // branch — never the agent's claim of them.
+            let gh = github.client()?;
+            let pr = gh
+                .get_pr(pull_number)
+                .map_err(|e| format!("read pull request #{pull_number}: {e}"))?;
+            let assigned = item_links::AssignedPr {
+                number: pr.number,
+                url: pr.url,
+                head_branch: pr.head_branch,
+            };
+            edit_links(env, &item_id, |queue| {
+                item_links::assign_pr(queue, &item_id, assigned)
+            })
+        }
+        WorkQueueOp::UnassignPr { item_id } => edit_links(env, &item_id, |queue| {
+            item_links::unassign_pr(queue, &item_id)
+        }),
+        WorkQueueOp::LinkSession {
+            item_id,
+            session_id,
+        } => edit_links(env, &item_id, |queue| {
+            item_links::link_session(
+                queue,
+                &item_id,
+                item_links::LinkedSession {
+                    session_id,
+                    daemon_instance_id: String::new(),
+                },
+            )
+        }),
+        WorkQueueOp::UnlinkSession {
+            item_id,
+            session_id,
+        } => edit_links(env, &item_id, |queue| {
+            item_links::unlink_session(queue, &item_id, &session_id)
+        }),
     }
+}
+
+/// Apply a link `edit` to the queue under its record lock; a refused edit writes nothing and is the
+/// error, and the answer is the item's links as stored.
+fn edit_links(
+    env: &OpEnv,
+    item_id: &str,
+    edit: impl FnOnce(&mut WorkQueue) -> Result<(), item_links::ItemLinkError>,
+) -> Result<Value, String> {
+    let mut refused = None;
+    env.home()?
+        .update_stack(|queue| {
+            let mut edited = queue.clone();
+            match edit(&mut edited) {
+                Ok(()) => *queue = edited,
+                Err(error) => refused = Some(error),
+            }
+        })
+        .map_err(|e| format!("link: {e}"))?;
+    if let Some(error) = refused {
+        return Err(format!("{error:?}"));
+    }
+    let stack = env.stack()?;
+    Ok(json!({
+        "item_id": item_id,
+        "pr": item_links::assigned_pr_of(&stack, item_id).map(|pr| json!({
+            "number": pr.number, "url": pr.url, "head_branch": pr.head_branch,
+        })),
+        "linked_sessions": item_links::linked_sessions_of(&stack, item_id)
+            .into_iter()
+            .map(|s| s.session_id)
+            .collect::<Vec<_>>(),
+    }))
 }
 
 /// Answer the node summaries of the stack as stored — read after the statuses were refreshed, so the

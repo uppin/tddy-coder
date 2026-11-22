@@ -36,6 +36,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tddy_core::work_queue_store::WorkQueueRecord;
 
+use crate::work_item_link_tools::{
+    WORK_ITEM_ASSIGN_PR, WORK_ITEM_LINK_SESSION, WORK_ITEM_UNASSIGN_PR, WORK_ITEM_UNLINK_SESSION,
+};
 use crate::work_queue_access::WorkQueueAccess;
 use crate::ToolOutcome;
 
@@ -70,6 +73,7 @@ pub const WORK_QUEUE_TOOL_NAMES: [&str; 10] = [
 /// Whether `name` is one of the eleven stack tools.
 pub fn is_stack_tool(name: &str) -> bool {
     WORK_QUEUE_TOOL_NAMES.contains(&name)
+        || crate::work_item_link_tools::WORK_ITEM_LINK_TOOL_NAMES.contains(&name)
 }
 
 /// Whether `name` is one of the two tools a node of a stack is offered for its own stack:
@@ -174,6 +178,25 @@ pub enum WorkQueueOp {
         pull_number: u64,
         parents: Vec<String>,
     },
+    /// `work_item_assign_pr` (`#workqueue` 6/14).
+    AssignPr {
+        item_id: String,
+        pull_number: u64,
+    },
+    /// `work_item_unassign_pr`.
+    UnassignPr {
+        item_id: String,
+    },
+    /// `work_item_link_session`.
+    LinkSession {
+        item_id: String,
+        session_id: String,
+    },
+    /// `work_item_unlink_session`.
+    UnlinkSession {
+        item_id: String,
+        session_id: String,
+    },
 }
 
 /// What the tools need from the daemon: this host's stacks of a project, and the operations on one.
@@ -228,6 +251,8 @@ pub async fn execute_stack_tool(
 struct StackToolArgs {
     queue_id: Option<String>,
     node_id: Option<String>,
+    item_id: Option<String>,
+    session_id: Option<String>,
     pull_number: Option<u64>,
     include_files: bool,
     query: Option<String>,
@@ -309,6 +334,21 @@ fn work_queue_op_of(tool_name: &str, args: StackToolArgs) -> Result<WorkQueueOp,
         PR_ADOPT => WorkQueueOp::Adopt {
             pull_number: required(tool_name, args.pull_number, "pull_number")?,
             parents: args.parents,
+        },
+        WORK_ITEM_ASSIGN_PR => WorkQueueOp::AssignPr {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+            pull_number: required(tool_name, args.pull_number, "pull_number")?,
+        },
+        WORK_ITEM_UNASSIGN_PR => WorkQueueOp::UnassignPr {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+        },
+        WORK_ITEM_LINK_SESSION => WorkQueueOp::LinkSession {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+            session_id: required(tool_name, args.session_id, "session_id")?,
+        },
+        WORK_ITEM_UNLINK_SESSION => WorkQueueOp::UnlinkSession {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+            session_id: required(tool_name, args.session_id, "session_id")?,
         },
         other => return Err(format!("unknown stack tool: {other}")),
     })

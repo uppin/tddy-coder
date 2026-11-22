@@ -24,6 +24,7 @@
 
 use serial_test::serial;
 use tddy_tool_engine::work_item_git_tools::WORK_ITEM_GIT_TOOL_NAMES;
+use tddy_tool_engine::work_item_link_tools::WORK_ITEM_LINK_TOOL_NAMES;
 use tddy_tool_engine::work_queue_tools::WORK_QUEUE_TOOL_NAMES;
 use tddy_tools::server::{PermissionServer, UNKNOWN_TOOL_REJECTION};
 
@@ -36,12 +37,15 @@ use tddy_tools::server::{PermissionServer, UNKNOWN_TOOL_REJECTION};
 fn registered_tool_names() -> Vec<String> {
     let names: Vec<String> = WORK_QUEUE_TOOL_NAMES
         .iter()
+        .chain(WORK_ITEM_LINK_TOOL_NAMES.iter())
         .chain(WORK_ITEM_GIT_TOOL_NAMES.iter())
         .map(|name| name.to_string())
         .collect();
     assert_eq!(
         names.len(),
-        WORK_QUEUE_TOOL_NAMES.len() + WORK_ITEM_GIT_TOOL_NAMES.len(),
+        WORK_QUEUE_TOOL_NAMES.len()
+            + WORK_ITEM_LINK_TOOL_NAMES.len()
+            + WORK_ITEM_GIT_TOOL_NAMES.len(),
         "every registered PR-stack name must be gathered, or these tests have nothing left to \
          check; registry: {names:?}"
     );
