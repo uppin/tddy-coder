@@ -12,4 +12,10 @@ export { WorkQueueGraph, type WorkQueueGraphProps, type GraphLineEndpoint } from
 export { WorkItemCommitCounts, WorkItemCommitCountsContext, type ItemCommitCounts } from "./workItemCommitCounts";
 export { WorkQueueGraphPanel, type WorkQueueGraphPanelProps } from "./WorkQueueGraphPanel";
 export { WaveLanes, type WaveLanesProps } from "./WaveLanes";
-export { WorkItemChainHealth, type WorkItemChainHealthProps } from "./WorkItemChainHealth";
+export {
+  WorkItemChainHealth,
+  WorkItemChainHealthChips,
+  WorkItemChainHealthContext,
+  type ItemChainHealth,
+  type WorkItemChainHealthProps,
+} from "./WorkItemChainHealth";

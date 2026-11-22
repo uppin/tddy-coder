@@ -234,12 +234,88 @@ impl DaemonStackTools {
         env: OpEnv,
         github: GithubSource,
     ) -> Result<Value, String> {
+        let project_id = env.project_id.clone();
+        let queue_id = env.queue_id.clone();
+        let sessions_base = env.sessions_base.clone();
+        // The trunk the line edges end at, asked before the refresh takes the source.
+        let (trunk_ref, github) = tokio::task::spawn_blocking(move || {
+            let trunk_ref = github.default_branch();
+            (trunk_ref, github)
+        })
+        .await
+        .map_err(|e| format!("the stack operation failed to finish: {e}"))?;
         let refresh = self.refresh_through_inbox(&env, github).await;
         let refresh_error = refresh.err();
         // The store's locks are blocking.
-        tokio::task::spawn_blocking(move || ops::status_answer(&env, refresh_error))
-            .await
-            .map_err(|e| format!("the stack operation failed to finish: {e}"))?
+        let (answer, stack) = tokio::task::spawn_blocking(move || {
+            let answer = ops::status_answer(&env, refresh_error);
+            let stack = env.stack();
+            (answer, stack)
+        })
+        .await
+        .map_err(|e| format!("the stack operation failed to finish: {e}"))?;
+        let mut answer = answer?;
+        if let (Ok(stack), Ok(trunk_ref)) = (stack, trunk_ref) {
+            self.add_chain_health(
+                &mut answer,
+                &stack,
+                tddy_work_queue::lineage::trunk_branch_of(&trunk_ref),
+                &project_id,
+                queue_id.as_deref().unwrap_or(&self.caller_session_id),
+                &sessions_base,
+            )
+            .await;
+        }
+        Ok(answer)
+    }
+
+    /// Each node's `chain_health` (`#workqueue` 12/14: its `leaks` and `line`), read through the inbox
+    /// and the owner's checkout. Optional input: a queue whose GitHub cannot be read answers its nodes
+    /// without it, the way the status never fails over one unreadable source.
+    async fn add_chain_health(
+        &self,
+        answer: &mut Value,
+        queue: &tddy_core::changeset::WorkQueue,
+        trunk: &str,
+        project_id: &str,
+        queue_id: &str,
+        sessions_base: &std::path::Path,
+    ) {
+        use crate::work_queue::chain_health as health;
+        let Ok(site) = self.pull_requests.site_for_session(
+            &self.os_user,
+            &self.caller_session_id,
+            project_id,
+            &self.session_token,
+        ) else {
+            return;
+        };
+        let line = tddy_work_queue::lineage::line_edges_through_inbox(
+            &site.inbox,
+            &site.repo,
+            queue,
+            trunk,
+        )
+        .await;
+        let repo_root = tddy_core::repo_root_for_session(
+            &tddy_core::session_lifecycle::unified_session_dir_path(sessions_base, queue_id),
+        );
+        let found = tddy_work_queue::chain_health_reads::queue_chain_health(
+            &site.inbox,
+            &site.repo,
+            queue,
+            &line,
+            repo_root,
+        )
+        .await;
+        if let Some(nodes) = answer.get_mut("nodes").and_then(Value::as_array_mut) {
+            for node in nodes {
+                let id = node.get("node_id").and_then(Value::as_str).unwrap_or("");
+                if let Some(h) = found.iter().find(|h| h.item_id == id) {
+                    node["chain_health"] = health::health_json(h);
+                }
+            }
+        }
     }
 
     /// `work_queue_graph`: each item's line edge read through the inbox (else its planned base) and

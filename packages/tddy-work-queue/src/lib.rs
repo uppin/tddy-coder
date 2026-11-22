@@ -10,6 +10,7 @@
 
 pub mod assess;
 pub mod chain_health;
+pub mod chain_health_reads;
 pub mod commit_flow;
 pub mod docs;
 pub mod git_ops;

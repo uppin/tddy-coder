@@ -532,6 +532,26 @@ message WorkItemStatus {
   uint32 wave = 8;
   // The unmet needs in the wave immediately below the item; empty when it is ready.
   repeated string binding_needs = 9;
+  // `#workqueue` 12/14: commits of the item's PR that belong to a line ancestor, each naming the
+  // nearest ancestor carrying it.
+  repeated LeakView leaks = 10;
+  // The item's PR against its line parent's tip; unset when the item owns no PR.
+  LineStateView line = 11;
+}
+
+// One commit leaked from an ancestor PR.
+message LeakView {
+  string sha = 1;
+  // The nearest line ancestor's branch whose PR carries the commit.
+  string ancestor = 2;
+}
+
+// Whether an item contains its line parent's tip.
+message LineStateView {
+  // `linear`, `behind`, `conflicting` or `unknown` (the parent merged or planned, or no reading).
+  string state = 1;
+  // How many parent commits the item lacks (`behind`, `conflicting`).
+  uint32 by = 2;
 }
 
 // One check run at a PR's head.

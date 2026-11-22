@@ -95,9 +95,9 @@ reserved and planned after the pipelines drain.
 
 ## Scope
 
-- [ ] `chain_health` checks
-- [ ] Status fields
-- [ ] Chips and leak detail
+- [x] `chain_health` checks
+- [x] Status fields
+- [x] Chips and leak detail
 - [ ] Docs updated through the wrap
 
 ## Technical Changes
@@ -116,9 +116,9 @@ As listed under Affected Packages.
 
 ## Implementation Milestones
 
-- [ ] Pure checks with unit tests
-- [ ] Status assembly
-- [ ] Chips
+- [x] Pure checks with unit tests
+- [x] Status assembly
+- [x] Chips
 
 ## Testing Plan
 
@@ -187,6 +187,14 @@ _(populated by validation)_
 - [ ] Final validation (/validate-changes)
 - [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+
+### As built
+
+- Reading lives in `tddy_work_queue::chain_health_reads::queue_chain_health` (PR commits and `mergeable`
+  through the inbox, behind count from remote tips with `tddy_session_worktree::base_sync::count_divergence`,
+  made `pub`); it fetches the owner's clone first. A merged or planned parent, or no checkout, gives `unknown`.
+- Wire: `WorkItemStatus.{leaks, line}` on `StreamWorkQueueStatus`; the `work_queue_status` tool adds
+  `chain_health: { leaks, line }` to each node. Rows show the chips from the status stream.
 
 ## Stack note (temporary)
 

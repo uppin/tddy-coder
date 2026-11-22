@@ -14899,6 +14899,7 @@ dependencies = [
  "tddy-github-inbox",
  "tddy-rpc",
  "tddy-service",
+ "tddy-session-worktree",
  "tddy-workflow",
  "tempfile",
  "tokio",
