@@ -714,7 +714,13 @@ async fn a_stack_node_session_is_offered_only_status_and_read_for_its_own_stack(
     let other_stack = a.holds_a_stack(&world.main, &["Elsewhere"]);
 
     // When the node's session reads its stack's status, reads another stack's, and plans a PR
-    let status = a.answer_to(&child, "work_queue_status", json!({})).await;
+    let status = a
+        .answer_to(
+            &child,
+            "work_queue_status",
+            json!({ "queue_id": own_stack }),
+        )
+        .await;
     let other = a
         .call_as(
             &child,
@@ -884,7 +890,12 @@ async fn a_stack_node_session_on_another_host_reads_its_stack_where_the_stack_is
     // When the node's agent reads its stack's status and plans a PR, each call addressed at host-a
     let status = world
         .b
-        .call_addressed_at(HOST_A, &child, "work_queue_status", json!({}))
+        .call_addressed_at(
+            HOST_A,
+            &child,
+            "work_queue_status",
+            json!({ "queue_id": own_stack }),
+        )
         .await
         .expect("host-a serves a node bound to the caller its stack's status");
     let planning = world

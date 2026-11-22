@@ -358,7 +358,7 @@ async fn run(
             );
             // A search or a read by pull number needs no queue; it is served to a session that owns one.
             let acts_on_no_queue = !reads_a_node
-                && named.as_deref().map_or(true, |id| id.trim().is_empty())
+                && named.as_deref().is_none_or(|id| id.trim().is_empty())
                 && matches!(tool_name, PR_SEARCH | PR_READ | PR_COMMENTS);
             // A call that acts on no queue was gated by the caller's own host, on what its own
             // records offer it; one that acts on a queue is gated here, by the queue.
