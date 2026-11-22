@@ -19,7 +19,7 @@
 - **tddy-session-activity**: `trunk_watch` takes commits from the inbox
 - **tddy-session-lifecycle**: `svc_trunk_watch_wiring.rs` builds the inbox's credential source instead of a per-project feed
 - **tddy-daemon**: runtime mounts the inbox (`runtime/mount.rs`)
-- **tddy-daemon-rpc**: `pr_stack/pr_status.rs` (QueryBranch / GetPrStatus PR leg) and `exec_tool/stack_tools/ops.rs` (`status`) read through the inbox
+- ~~**tddy-daemon-rpc**: `pr_stack/pr_status.rs` (QueryBranch / GetPrStatus PR leg) and `exec_tool/stack_tools/ops.rs` (`status`) read through the inbox~~ — moved to n6 (#1007) by the operator's decision: it needs repo→project credential plumbing into `PrStackRpcHandler` (the inbox reads with a project's registered credential, `pr_status_for_caller` has a login-keyed token and only `repo_root`) and a sync→async adapter for `GithubPrApi` in the `ports.rs` area
 
 ## Related Feature Documentation
 
@@ -43,7 +43,7 @@ curl everywhere else, response headers discarded; the stack view's 5 s `QueryBra
 - The `GithubInbox` service and its public read and subscribe API (below).
 - The conditional transport in `tddy-github` and the richer `CheckRun`.
 - Rate-limit aware pacing of the per-repo feed.
-- Migrating the trunk watch, `QueryBranch`/`GetPrStatus`'s PR leg and the stack `status` tool onto it.
+- Migrating the trunk watch onto it. (`QueryBranch`/`GetPrStatus`'s PR leg and the stack `status` tool: moved to n6 (#1007) by the operator's decision: it needs repo→project credential plumbing into `PrStackRpcHandler` (the inbox reads with a project's registered credential, `pr_status_for_caller` has a login-keyed token and only `repo_root`) and a sync→async adapter for `GithubPrApi` in the `ports.rs` area.)
 
 Owned surface (names final in the contract commit):
 
@@ -143,8 +143,8 @@ No new browser stream here; recorded for n4, which adds one.
 
 - [ ] `tddy-github-inbox` crate: feed task per repo, row cache with ETags, invalidations, single-flight, kind-filtered subscriptions, rate-limit pacing
 - [ ] Conditional transport over REST and `gh api -i`; richer `CheckRun`
-- [ ] Trunk watch on the inbox's branch-commits row
-- [ ] `QueryBranch`/`GetPrStatus` PR leg and stack `status` through the inbox
+- [x] Trunk watch on the inbox's branch-commits row
+- [ ] ~~`QueryBranch`/`GetPrStatus` PR leg and stack `status` through the inbox~~ — moved to n6 (#1007) by the operator's decision: it needs repo→project credential plumbing into `PrStackRpcHandler` (the inbox reads with a project's registered credential, `pr_status_for_caller` has a login-keyed token and only `repo_root`) and a sync→async adapter for `GithubPrApi` in the `ports.rs` area
 - [ ] Docs updated through the wrap
 
 ## Technical Changes
@@ -185,12 +185,12 @@ via the pending-check poll (the events feed does not carry them).
 
 ## Implementation Milestones
 
-- [ ] Conditional transport + rate-limit headers, both credential paths
-- [ ] Row cache with ETag revalidation and single-flight
-- [ ] Feed task: events, sweep, pending-check poll, pacing
-- [ ] Subscriptions by repo and kind
-- [ ] Trunk watch migrated (its six acceptance tests unchanged and green)
-- [ ] PR leg and stack status migrated
+- [x] Conditional transport + rate-limit headers, both credential paths
+- [x] Row cache with ETag revalidation and single-flight
+- [x] Feed task: events, sweep, pending-check poll, pacing
+- [x] Subscriptions by repo and kind
+- [x] Trunk watch migrated (its six acceptance tests unchanged and green)
+- [ ] ~~PR leg and stack status migrated~~ — moved to n6 (#1007)
 
 ## Testing Plan
 
@@ -265,7 +265,7 @@ _(populated by validation)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (n2's scope; the PR-leg and stack-status migrations moved to n6 #1007)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
