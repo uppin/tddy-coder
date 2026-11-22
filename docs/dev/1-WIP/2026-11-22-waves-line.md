@@ -97,7 +97,7 @@ Done: the `waves` module (6 unit tests, with `queue_waves` for what the RPC, the
 a cycle is reported through n9's `lineage::detect_cycle`), the `work_queue_waves` tool (definition, op,
 answer; in the closed tool lists), `GetWorkQueueWaves` and `WorkItemStatus.{wave, binding_needs}` (proto,
 handler, status stream, regenerated bindings), `WaveLanes` (2 Cypress tests). `work_queue_status` carries
-each node's `wave` and `binding_needs` too. Readiness is structural: no item is treated as done.
+each node's `wave` and `binding_needs` too. Waves and the line stay structural; readiness treats a merged item as a met need (stored `pr_status`/`internal_status` merged, plus the live PR state in the status stream) — added in validation, with 3 unit tests and one `GetWorkQueueWaves` acceptance test.
 
 ## Scope
 
@@ -159,6 +159,7 @@ and `GetWorkQueueWaves` in `work_queue_lineage_rpc_acceptance`.
   and graph type; the algorithm is small. Sharing it is a sweep-node candidate, not a prerequisite.
 - **Readiness names binding needs only** — deeper needs are met before the binding ones resolve, so
   naming them misreports what an item is blocked on.
+- **A merged need is met.** Readiness is not purely structural: `queue_waves` takes the landed items (`merged_items`, plus the inbox's live merged PRs in the status) so a merged item no longer shows as 'waits on'. The item keeps its wave.
 - **Nothing is stored** — the derived line changes whenever an edge does.
 
 ## Technical Debt & Production Readiness
@@ -167,11 +168,15 @@ _(populated during development)_
 
 ## Refactoring Needed
 
-_(populated by validation)_
+_(none outstanding)_
 
 ## Validation Results
 
-_(populated by validation)_
+- Stack gate: rebased onto `lineage-graph` (dd9e76f35); `origin/<base>..HEAD` holds only n10's commits.
+- Boundary: Responsibility delivered; no n9 symbol re-implemented (edges and cycle detection consumed from `lineage`); no n13 schedules.
+- Gap found and fixed: readiness ignored merged items → `merged_items` + `done` argument, tests added.
+- Scoped gates: `cargo check --all-targets` and `./dev cargo clippy -D warnings` clean on tddy-work-queue, tddy-daemon-rpc (+check on tool-engine, tools, service, agent-launch); waves_unit 9, lineage rpc 6, stack_plan 13, catalogue/access/dispatch green.
+- Risk: Critical 0, Warning 0, Info 1 (status stream reads each item's PR sequentially, as before).
 
 ## TODO
 
@@ -187,7 +192,7 @@ _(populated by validation)_
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
+- [x] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
