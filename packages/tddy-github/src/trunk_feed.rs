@@ -339,11 +339,11 @@ fn commits_path(repo: &RepoSlug, branch: &str) -> String {
     )
 }
 
-fn seconds_to_ms(seconds: &str) -> Option<u64> {
+pub(crate) fn seconds_to_ms(seconds: &str) -> Option<u64> {
     seconds.trim().parse::<u64>().ok().map(|s| s * 1000)
 }
 
-fn split_head_body(raw: &str) -> (&str, &str) {
+pub(crate) fn split_head_body(raw: &str) -> (&str, &str) {
     match (raw.find("\r\n\r\n"), raw.find("\n\n")) {
         (Some(i), _) => (&raw[..i], &raw[i + 4..]),
         (None, Some(i)) => (&raw[..i], &raw[i + 2..]),
@@ -352,7 +352,7 @@ fn split_head_body(raw: &str) -> (&str, &str) {
 }
 
 /// The commits array of `GET /repos/{o}/{r}/commits`, newest first as GitHub sends it.
-fn parse_commits(body: &str) -> Result<Vec<TrunkCommit>, TrunkReadError> {
+pub fn parse_commits(body: &str) -> Result<Vec<TrunkCommit>, TrunkReadError> {
     let json: serde_json::Value =
         serde_json::from_str(body).map_err(|e| TrunkReadError(format!("not JSON: {e}")))?;
     let items = json

@@ -4,6 +4,7 @@ pub mod conditional;
 pub mod github_pr;
 pub mod github_rest_common;
 pub mod pr_api;
+pub mod pr_json;
 pub mod provider;
 pub mod real;
 pub mod session_token_v2;

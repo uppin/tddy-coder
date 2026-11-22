@@ -11,15 +11,27 @@
 //!
 //! Time is injected (`step(now)`), never read from a clock, so the feed is tested without sleeping.
 
+mod feed;
+mod in_flight;
+mod pacing;
 pub mod paths;
+mod repo;
+mod rows;
+mod subscriptions;
 mod trunk;
 
 use std::sync::Arc;
+
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 use tddy_github::conditional::{ConditionalRead, RateLimit};
 use tddy_github::pr_api::{CheckRun, PrDetail, PrIssueComment, PrReview, PrReviewComment};
 pub use tddy_github::trunk_feed::{RepoSlug, TrunkCommit};
 use tokio::sync::mpsc;
+
+use repo::RepoInbox;
+use rows::{RowValue, Tally};
 
 pub use trunk::InboxTrunkFeed;
 
@@ -135,33 +147,88 @@ pub struct StepReport {
 /// The daemon's GitHub inbox. One per daemon; every repository it reads has its own feed inside.
 pub struct GithubInbox {
     readers: Arc<dyn RepoReaders>,
+    repos: Mutex<HashMap<RepoSlug, Arc<RepoInbox>>>,
+}
+
+/// Narrow a row to the value type its key promises.
+fn typed<T>(
+    cached: Cached<RowValue>,
+    pick: impl FnOnce(RowValue) -> Option<T>,
+) -> Result<Cached<T>, InboxError> {
+    let Cached {
+        value,
+        fetched_at_unix_ms,
+        etag,
+    } = cached;
+    let value = pick(value)
+        .ok_or_else(|| InboxError::Unavailable("a row held a value of another kind".to_string()))?;
+    Ok(Cached {
+        value,
+        fetched_at_unix_ms,
+        etag,
+    })
 }
 
 impl GithubInbox {
     pub fn new(readers: Arc<dyn RepoReaders>) -> Self {
-        Self { readers }
+        Self {
+            readers,
+            repos: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn repo(&self, repo: &RepoSlug) -> Arc<RepoInbox> {
+        self.repos
+            .lock()
+            .expect("repository table poisoned")
+            .entry(repo.clone())
+            .or_insert_with(|| Arc::new(RepoInbox::new(repo.clone(), self.readers.clone())))
+            .clone()
     }
 
     /// Hear about `kinds` of change in `repo`. The repository's feed starts with its first subscriber.
     pub fn subscribe(&self, repo: &RepoSlug, kinds: &[EventKind]) -> InboxSubscription {
-        // TODO(n2 github-event-inbox): implement
-        let _ = (&self.readers, repo, kinds);
-        todo!("TODO(n2): implement GithubInbox::subscribe")
+        self.repo(repo).state().subscribers.add(kinds)
     }
 
     /// Advance every repository's feed to `now_unix_ms`: events (conditional), the sweep, the
-    /// pending-check poll, pacing by `X-Poll-Interval` and the rate limit.
+    /// pending-check poll, pacing by `X-Poll-Interval` and the rate limit. A repository nobody
+    /// subscribes to is not read.
     pub async fn step(&self, now_unix_ms: u64) -> StepReport {
-        // TODO(n2 github-event-inbox): implement
-        let _ = now_unix_ms;
-        todo!("TODO(n2): implement GithubInbox::step")
+        let repos: Vec<Arc<RepoInbox>> = self
+            .repos
+            .lock()
+            .expect("repository table poisoned")
+            .values()
+            .cloned()
+            .collect();
+        let mut tally = Tally::default();
+        let mut next_step_at: Option<u64> = None;
+        for inbox in repos {
+            if !inbox.state().subscribers.any_listening() {
+                continue;
+            }
+            feed::step_repo(&inbox, now_unix_ms, &mut tally).await;
+            let state = inbox.state();
+            let due = state
+                .pacing
+                .next_due(!state.pending_check_rows().is_empty());
+            next_step_at = Some(next_step_at.map_or(due, |earliest| earliest.min(due)));
+        }
+        StepReport {
+            requests: tally.requests,
+            next_step_at_unix_ms: next_step_at,
+            rate_limit: tally.rate_limit,
+        }
     }
 
     /// A pull request by number.
     pub async fn pr(&self, repo: &RepoSlug, number: u64) -> Result<Cached<PrDetail>, InboxError> {
-        // TODO(n2 github-event-inbox): implement
-        let _ = (repo, number);
-        todo!("TODO(n2): implement GithubInbox::pr")
+        let row = self.repo(repo).read(&RowKey::Pr { number }).await?;
+        typed(row, |value| match value {
+            RowValue::Pr(pr) => Some(pr),
+            _ => None,
+        })
     }
 
     /// The pull request whose head is `branch` (open or not), `None` when there is none.
@@ -170,9 +237,13 @@ impl GithubInbox {
         repo: &RepoSlug,
         branch: &str,
     ) -> Result<Cached<Option<PrDetail>>, InboxError> {
-        // TODO(n2 github-event-inbox): implement
-        let _ = (repo, branch);
-        todo!("TODO(n2): implement GithubInbox::pr_for_head")
+        let key = RowKey::PrForHead {
+            branch: branch.to_string(),
+        };
+        typed(self.repo(repo).read(&key).await?, |value| match value {
+            RowValue::PrForHead(pr) => Some(pr),
+            _ => None,
+        })
     }
 
     /// What is cached for `branch`'s PR, without any request — for callers that must never wait on
@@ -182,9 +253,15 @@ impl GithubInbox {
         repo: &RepoSlug,
         branch: &str,
     ) -> Option<Cached<Option<PrDetail>>> {
-        // TODO(n2 github-event-inbox): implement
-        let _ = (repo, branch);
-        todo!("TODO(n2): implement GithubInbox::peek_pr_for_head")
+        let key = RowKey::PrForHead {
+            branch: branch.to_string(),
+        };
+        let row = self.repo(repo).peek(&key)?;
+        typed(row, |value| match value {
+            RowValue::PrForHead(pr) => Some(pr),
+            _ => None,
+        })
+        .ok()
     }
 
     /// The check runs at `sha`. A head with a queued or running run joins the pending-check poll.
@@ -193,9 +270,13 @@ impl GithubInbox {
         repo: &RepoSlug,
         sha: &str,
     ) -> Result<Cached<Vec<CheckRun>>, InboxError> {
-        // TODO(n2 github-event-inbox): implement
-        let _ = (repo, sha);
-        todo!("TODO(n2): implement GithubInbox::checks_at")
+        let key = RowKey::ChecksAt {
+            sha: sha.to_string(),
+        };
+        typed(self.repo(repo).read(&key).await?, |value| match value {
+            RowValue::Checks(runs) => Some(runs),
+            _ => None,
+        })
     }
 
     /// A PR's reviews (with state), review comments and conversation comments.
@@ -204,9 +285,11 @@ impl GithubInbox {
         repo: &RepoSlug,
         number: u64,
     ) -> Result<Cached<PrConversation>, InboxError> {
-        // TODO(n2 github-event-inbox): implement
-        let _ = (repo, number);
-        todo!("TODO(n2): implement GithubInbox::conversation")
+        let key = RowKey::Conversation { number };
+        typed(self.repo(repo).read(&key).await?, |value| match value {
+            RowValue::Conversation(conversation) => Some(conversation),
+            _ => None,
+        })
     }
 
     /// A PR's commits at `head_sha` — read once per head.
@@ -216,9 +299,14 @@ impl GithubInbox {
         number: u64,
         head_sha: &str,
     ) -> Result<Cached<Vec<PrCommit>>, InboxError> {
-        // TODO(n2 github-event-inbox): implement
-        let _ = (repo, number, head_sha);
-        todo!("TODO(n2): implement GithubInbox::pr_commits")
+        let key = RowKey::PrCommits {
+            number,
+            head_sha: head_sha.to_string(),
+        };
+        typed(self.repo(repo).read(&key).await?, |value| match value {
+            RowValue::PrCommits(commits) => Some(commits),
+            _ => None,
+        })
     }
 
     /// `branch`'s newest commits, newest first (the trunk watch's source).
@@ -227,8 +315,12 @@ impl GithubInbox {
         repo: &RepoSlug,
         branch: &str,
     ) -> Result<Cached<Vec<TrunkCommit>>, InboxError> {
-        // TODO(n2 github-event-inbox): implement
-        let _ = (repo, branch);
-        todo!("TODO(n2): implement GithubInbox::branch_commits")
+        let key = RowKey::BranchCommits {
+            branch: branch.to_string(),
+        };
+        typed(self.repo(repo).read(&key).await?, |value| match value {
+            RowValue::BranchCommits(commits) => Some(commits),
+            _ => None,
+        })
     }
 }

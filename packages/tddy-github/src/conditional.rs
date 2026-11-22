@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::trunk_feed::{GhApi, TokenSource};
+use crate::trunk_feed::{seconds_to_ms, split_head_body, GhApi, TokenSource};
 
 /// The REST API root the daemon reads (github.com only — see the trunk watch's recorded gap).
 pub const GITHUB_API_BASE: &str = "https://api.github.com";
@@ -82,10 +82,76 @@ pub trait ConditionalRead: Send + Sync {
     ) -> Result<ConditionalAnswer, GithubReadError>;
 }
 
+/// What every answer's headers carry, whatever its status.
+#[derive(Default)]
+struct AnswerHeaders {
+    etag: Option<String>,
+    poll_interval_ms: Option<u64>,
+    rate_limit: Option<RateLimit>,
+    retry_after_s: Option<u64>,
+}
+
+impl AnswerHeaders {
+    /// `header` looks a header up by lowercase name.
+    fn read(header: impl Fn(&str) -> Option<String>) -> Self {
+        let number = |name: &str| header(name).and_then(|v| v.trim().parse::<u64>().ok());
+        let rate_limit = match (number("x-ratelimit-remaining"), number("x-ratelimit-reset")) {
+            (Some(remaining), Some(reset_at_unix_s)) => Some(RateLimit {
+                remaining: u32::try_from(remaining).unwrap_or(u32::MAX),
+                reset_at_unix_s,
+            }),
+            _ => None,
+        };
+        Self {
+            etag: header("etag"),
+            poll_interval_ms: header("x-poll-interval").and_then(|v| seconds_to_ms(&v)),
+            rate_limit,
+            retry_after_s: number("retry-after"),
+        }
+    }
+
+    /// The answer for `status`: `304`, a `2xx` with `body`, or a [`GithubReadError`].
+    fn into_answer(
+        self,
+        status: u16,
+        body: impl FnOnce() -> String,
+        failure: impl FnOnce() -> String,
+    ) -> Result<ConditionalAnswer, GithubReadError> {
+        match status {
+            304 => Ok(ConditionalAnswer::NotModified {
+                poll_interval_ms: self.poll_interval_ms,
+                rate_limit: self.rate_limit,
+            }),
+            200..=299 => Ok(ConditionalAnswer::Modified {
+                body: body(),
+                etag: self.etag,
+                poll_interval_ms: self.poll_interval_ms,
+                rate_limit: self.rate_limit,
+            }),
+            other => Err(GithubReadError {
+                status: Some(other),
+                message: failure(),
+                retry_after_s: self.retry_after_s,
+                rate_limit: self.rate_limit,
+            }),
+        }
+    }
+}
+
+fn transport_error(message: impl Into<String>) -> GithubReadError {
+    GithubReadError {
+        status: None,
+        message: message.into(),
+        retry_after_s: None,
+        rate_limit: None,
+    }
+}
+
 /// [`ConditionalRead`] over REST with a token resolved on every read.
 pub struct RestConditionalRead {
     api_base: String,
     token: TokenSource,
+    client: reqwest::Client,
 }
 
 impl RestConditionalRead {
@@ -93,6 +159,7 @@ impl RestConditionalRead {
         Self {
             api_base: api_base.into(),
             token,
+            client: reqwest::Client::new(),
         }
     }
 }
@@ -104,10 +171,42 @@ impl ConditionalRead for RestConditionalRead {
         path: &str,
         if_none_match: Option<&str>,
     ) -> Result<ConditionalAnswer, GithubReadError> {
-        // TODO(n2 github-event-inbox): implement — reqwest GET `{api_base}/{path}` with the token,
-        // `If-None-Match`, the API version header; map 304/2xx/other and read every header above.
-        let _ = (&self.api_base, &self.token, path, if_none_match);
-        todo!("TODO(n2): implement RestConditionalRead::get")
+        let token = (self.token)().map_err(|e| transport_error(e.to_string()))?;
+        let mut request = self
+            .client
+            .get(format!("{}/{path}", self.api_base.trim_end_matches('/')))
+            .bearer_auth(token)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "tddy-github-inbox")
+            .header("X-GitHub-Api-Version", "2022-11-28");
+        if let Some(etag) = if_none_match {
+            request = request.header("If-None-Match", etag);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|e| transport_error(e.to_string()))?;
+        let status = response.status().as_u16();
+        let headers = AnswerHeaders::read(|name| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        });
+        let body = if status == 304 {
+            String::new()
+        } else {
+            response
+                .text()
+                .await
+                .map_err(|e| transport_error(e.to_string()))?
+        };
+        headers.into_answer(
+            status,
+            || body.clone(),
+            || format!("GitHub answered HTTP {status} for {path}: {body}"),
+        )
     }
 }
 
@@ -129,9 +228,41 @@ impl ConditionalRead for GhCliConditionalRead {
         path: &str,
         if_none_match: Option<&str>,
     ) -> Result<ConditionalAnswer, GithubReadError> {
-        // TODO(n2 github-event-inbox): implement — parse the status line and headers `gh api -i`
-        // prints; the status line decides, never the exit code (a 304 exits 1).
-        let _ = (&self.gh, path, if_none_match);
-        todo!("TODO(n2): implement GhCliConditionalRead::get")
+        let out = self
+            .gh
+            .api_with_headers(path, if_none_match)
+            .await
+            .map_err(|e| transport_error(e.to_string()))?;
+        let (head, body) = split_head_body(&out.stdout);
+        let mut lines = head.lines();
+        // `gh` exits non-zero for any non-2xx, a 304 included: the status line decides.
+        let status: u16 = lines
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|code| code.parse().ok())
+            .ok_or_else(|| {
+                transport_error(format!(
+                    "gh printed no HTTP status line for {path} (exit {})",
+                    out.exit_code
+                ))
+            })?;
+        let headers = AnswerHeaders::read(|name| {
+            head.lines().skip(1).find_map(|line| {
+                let (key, value) = line.split_once(':')?;
+                key.trim()
+                    .eq_ignore_ascii_case(name)
+                    .then(|| value.trim().to_string())
+            })
+        });
+        headers.into_answer(
+            status,
+            || body.to_string(),
+            || {
+                format!(
+                    "gh answered HTTP {status} for {path} (exit {}): {body}",
+                    out.exit_code
+                )
+            },
+        )
     }
 }

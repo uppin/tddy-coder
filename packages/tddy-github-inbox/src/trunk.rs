@@ -27,9 +27,21 @@ impl TrunkFeed for InboxTrunkFeed {
         branch: &str,
         etag: Option<&str>,
     ) -> Result<Conditional<Vec<TrunkCommit>>, TrunkReadError> {
-        // TODO(n2 github-event-inbox): implement — answer NotModified when the row's ETag equals
-        // `etag`, else Modified with the row.
-        let _ = (&self.inbox, repo, branch, etag);
-        todo!("TODO(n2): implement InboxTrunkFeed::newest_commits")
+        let row = self
+            .inbox
+            .branch_commits(repo, branch)
+            .await
+            .map_err(|e| TrunkReadError(format!("{e:?}")))?;
+        // The row is revalidated by the inbox; a caller already holding this ETag has nothing new.
+        if etag.is_some() && etag == row.etag.as_deref() {
+            return Ok(Conditional::NotModified {
+                poll_interval_ms: None,
+            });
+        }
+        Ok(Conditional::Modified {
+            value: row.value,
+            etag: row.etag,
+            poll_interval_ms: None,
+        })
     }
 }
