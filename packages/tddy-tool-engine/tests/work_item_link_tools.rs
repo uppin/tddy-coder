@@ -3,7 +3,7 @@
 
 use pretty_assertions::assert_eq;
 use serde_json::Value;
-use tddy_core::changeset::{WorkQueue, WorkItem};
+use tddy_core::changeset::{WorkItem, WorkQueue};
 use tddy_tool_engine::work_item_link_tools::{
     work_item_link_tool_defs, WORK_ITEM_ASSIGN_PR, WORK_ITEM_LINK_SESSION,
     WORK_ITEM_LINK_TOOL_NAMES, WORK_ITEM_UNASSIGN_PR, WORK_ITEM_UNLINK_SESSION,

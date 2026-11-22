@@ -2,7 +2,7 @@
 //! tddy sessions.
 
 use pretty_assertions::assert_eq;
-use tddy_core::changeset::{WorkQueue, WorkItem};
+use tddy_core::changeset::{WorkItem, WorkQueue};
 use tddy_work_queue::item_ops::item_links::{
     assign_pr, assigned_pr_of, link_session, linked_sessions_of, unassign_pr, unlink_session,
     AssignedPr, ItemLinkError, LinkedSession,

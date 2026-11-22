@@ -12,13 +12,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{
-    AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, GetPrStatusRequest, GetPrStatusResponse,
-    GetWorkQueueRequest, GetWorkQueueResponse, LinkWorkItemRequest, LinkWorkItemResponse,
-    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest,
-    ReorderWorkItemResponse, RepointWorkItemRequest, RepointWorkItemResponse,
-    ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse, UnassignWorkItemPrRequest,
-    UnlinkWorkItemSessionRequest, LinkWorkItemSessionRequest, WorkItemLinksResponse, WorkQueueService,
+    AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, GetPrStatusRequest,
+    GetPrStatusResponse, GetWorkQueueRequest, GetWorkQueueResponse, LinkWorkItemRequest,
+    LinkWorkItemResponse, LinkWorkItemSessionRequest, ListProjectWorkQueuesRequest,
+    ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
+    RepointWorkItemRequest, RepointWorkItemResponse, ResolveWorkItemBaseRequest,
+    ResolveWorkItemBaseResponse, UnassignWorkItemPrRequest, UnlinkWorkItemSessionRequest,
+    WorkItemLinksResponse, WorkQueueService,
 };
 
 /// The coordinate family P is served on — `work_queue.WorkQueueService`.

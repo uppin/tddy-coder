@@ -43,6 +43,7 @@ pub fn an_open_node(node_id: &str, branch: &str, pull_number: u64, parents: &[&s
         child_state: None,
         internal_status: None,
         display_order: None,
+        ..Default::default()
     }
 }
 

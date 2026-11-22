@@ -32,7 +32,13 @@ pub fn work_queue_access_of(
     queue
         .nodes
         .iter()
-        .any(|item| item.session_id.as_deref() == Some(caller))
+        .any(|item| {
+            item.session_id.as_deref() == Some(caller)
+                || item
+                    .linked_sessions
+                    .iter()
+                    .any(|linked| linked.session_id == caller)
+        })
         .then_some(WorkQueueAccess::Addressed)
 }
 

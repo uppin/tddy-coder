@@ -32,6 +32,7 @@ fn a_planned_node(node_id: &str) -> WorkItem {
         child_state: None,
         internal_status: None,
         display_order: None,
+        ..Default::default()
     }
 }
 

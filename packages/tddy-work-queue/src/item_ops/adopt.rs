@@ -98,6 +98,7 @@ pub fn adopt_pr_as_stack_node(
         // Chosen by `append_node_atomic` below, against the stack that is actually about to be
         // written.
         display_order: None,
+        ..Default::default()
     };
 
     let mut candidate_nodes = existing.nodes.clone();

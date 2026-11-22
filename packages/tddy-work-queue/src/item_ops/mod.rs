@@ -231,6 +231,7 @@ mod test_support {
             child_state: None,
             internal_status: None,
             display_order: None,
+            ..Default::default()
         }
     }
 

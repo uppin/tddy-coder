@@ -779,6 +779,7 @@ fn an_orchestrator_that_planned(
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 }],
             }),
         ),

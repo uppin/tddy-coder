@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
-use tddy_core::changeset::{WorkQueue, WorkItem};
+use tddy_core::changeset::{WorkItem, WorkQueue};
 use tddy_github::conditional::{ConditionalAnswer, ConditionalRead, GithubReadError};
 use tddy_github_inbox::{paths, GithubInbox, InboxError, RepoReaders, RepoSlug};
 use tddy_work_queue::assess::PrLiveStatus;
