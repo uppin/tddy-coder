@@ -22,15 +22,13 @@
 
 import React from "react";
 import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
@@ -152,8 +150,7 @@ function openPrStackScreen(
       livekitServerIdentity: "daemon",
     }));
 
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   return backend;
 }
 
@@ -235,26 +232,6 @@ it("opens the create-session dialog when a blocked node is started anyway", () =
 // ---------------------------------------------------------------------------
 // The daemon's gate decides, not the view's
 // ---------------------------------------------------------------------------
-
-it("sends no base branch of its own when a blocked node is started anyway", () => {
-  // Given — the view believes n2's base is unusable, and it derived that belief from a leg that
-  // cannot see another host
-  const backend = openPrStackScreen(A_SPAWNED_PREDECESSOR_AND_ITS_DEPENDENT, {
-    [BASE_BRANCH]: { branch: BASE_BRANCH, remote: { exists: false } },
-  });
-
-  // When the operator forces the start through
-  prStackScreenPage.startSessionBtn("n2").click();
-  prStackScreenPage.dialogSubmitBtn().click();
-
-  // Then — an explicit `selected_integration_base_ref` takes precedence over chain resolution on the
-  // daemon (`select_worktree_base_ref`), so sending one would cut the worktree from a base the view
-  // guessed and skip the daemon's own gate. Force start hands the decision to that gate (D42): the
-  // view must not pre-empt it with a base it could not resolve.
-  theSubmittedStart(backend, (call) => {
-    expect(call.selectedIntegrationBaseRef).to.equal("");
-  });
-});
 
 it("still offers every base branch for a blocked node to be pointed at deliberately", () => {
   // Given

@@ -2,11 +2,11 @@
  * Acceptance: starting a planned PR from the planned-PR list opens the create-session dialog
  * (`tddy-session-create-web`) pre-filled from the node, and starts nothing until the operator submits.
  *
- * The list reports the click and `PrStackScreen` owns the dialog, so the spec mounts the screen on
- * its own: one in-memory backend answers the dialog's own loads, with no drawer in the tree. The
- * drawer-driven twin is `PrStackStartSessionModalAcceptance`.
+ * The list reports the click and `ProjectStackView` owns the dialog, so the spec mounts the view on
+ * its own: one in-memory backend answers the stack and the dialog's own loads, with no drawer in the
+ * tree. The drawer-driven twin is `PrStackStartSessionModalAcceptance`.
  *
- * PRD: docs/ft/web/session-drawer.md § PR-Stack Chat Screen.
+ * PRD: docs/ft/web/1-WIP/PRD-2026-11-10-stack-web-by-id.md.
  */
 
 import React from "react";
@@ -16,11 +16,10 @@ import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
-import { SessionEntrySchema, SessionService } from "tddy-client-web/gen/session_pb";
+import { SessionService } from "tddy-client-web/gen/session_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { WorktreeService } from "tddy-client-web/gen/worktree_pb";
-import { PrStackScreen } from "../../src/PrStackScreen";
-import { mountWithPresenterRoom } from "../support/mountWorkflowChat";
+import { ProjectStackView } from "../../src";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
 
@@ -28,25 +27,32 @@ const NODE_TITLE = "Add token store";
 const NODE_DESCRIPTION = "Persist and retrieve auth tokens";
 const NODE_BRANCH = "feature/auth-stack/token-store";
 
-const ORCHESTRATOR = create(SessionEntrySchema, {
-  sessionId: "pr-stack-start-direct-0000-0000-0000-000000000001",
-  createdAt: "2026-07-02T09:00:00Z",
-  status: "idle",
-  repoPath: "/home/dev/pr-stack-project",
+const THE_STACK = {
   projectId: "proj-pr-stack",
-  recipe: "pr-stack",
-  stackPlanJson: aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: NODE_TITLE, description: NODE_DESCRIPTION, branchSuggestion: NODE_BRANCH }),
-  ]),
-});
+  stackId: "0190b000-0000-7000-8000-0000000000aa",
+  daemonInstanceId: "local",
+};
+
+const THE_PLAN = aStackPlanJson(1, [
+  aPlannedNode({ nodeId: "n1", title: NODE_TITLE, description: NODE_DESCRIPTION, branchSuggestion: NODE_BRANCH }),
+]);
 
 /** The backend answers what the dialog loads on mount; a StartSession is recorded, never expected here. */
 function aDaemon() {
   return anInMemoryRpcBackend()
+    .onUnary(PrStackService.method.getProjectStack, () =>
+      create(PrStackService.method.getProjectStack.output, { stackPlanJson: THE_PLAN }),
+    )
     .onUnary(ProjectService.method.listProjects, () => create(ProjectService.method.listProjects.output, {
       projects: [{ projectId: "proj-pr-stack", name: "pr-stack-project", mainRepoPath: "/home/dev/pr-stack-project", daemonInstanceId: "local" }],
     }))
-    .onUnary(CatalogService.method.listAgents, () => create(CatalogService.method.listAgents.output, { agents: [{ id: "claude", label: "Claude" }] }))
+    .onUnary(CatalogService.method.listAgents, () => create(CatalogService.method.listAgents.output, {
+      agents: [{ id: "claude", label: "Claude", sessionType: "claude-cli" }],
+      sessionTypes: [
+        { sessionType: "tool", label: "Tool", launch: "tddy_coder" },
+        { sessionType: "claude-cli", label: "Claude", launch: "agent_cli" },
+      ],
+    }))
     .onUnary(CatalogService.method.listAgentModels, () => create(CatalogService.method.listAgentModels.output, { models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }], defaultModel: "claude-opus-4-8" }))
     .onUnary(CatalogService.method.listTools, () => create(CatalogService.method.listTools.output, { tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }] }))
     .onUnary(CatalogService.method.listSubagents, () => create(CatalogService.method.listSubagents.output, { subagents: [] }))
@@ -56,15 +62,15 @@ function aDaemon() {
     );
 }
 
-function mountScreenOver(backend: ReturnType<typeof aDaemon>) {
+function mountViewOver(backend: ReturnType<typeof aDaemon>) {
   const transport = backend.transport();
-  mountWithPresenterRoom(
-    <PrStackScreen
-      session={ORCHESTRATOR}
+  cy.mountWithClients(
+    <ProjectStackView
+      address={THE_STACK}
+      prStackClient={createClient(PrStackService, transport)}
       client={createClient(SessionService, transport)}
       projectClient={createClient(ProjectService, transport)}
       catalogClient={createClient(CatalogService, transport)}
-      prStackClient={createClient(PrStackService, transport)}
       sessionFilesClient={createClient(SessionFilesService, transport)}
       worktreeClient={createClient(WorktreeService, transport)}
       sessionToken="fake-token"
@@ -80,7 +86,7 @@ beforeEach(() => {
 it("opens the create-session dialog when Start session is clicked, without starting a session yet", () => {
   // Given
   const backend = aDaemon();
-  mountScreenOver(backend);
+  mountViewOver(backend);
 
   // When
   prStackScreenPage.startSessionBtn("n1").click();
@@ -94,10 +100,11 @@ it("opens the create-session dialog when Start session is clicked, without start
 
 it("pre-fills the planned PR's branch and prompt in the dialog", () => {
   // Given
-  mountScreenOver(aDaemon());
+  mountViewOver(aDaemon());
 
-  // When
+  // When — the stack has no session whose type the child could follow, so the operator picks one
   prStackScreenPage.startSessionBtn("n1").click();
+  prStackScreenPage.dialogSwitchToClaudeCliSession();
 
   // Then
   prStackScreenPage.dialogNewBranchNameInput().should("have.value", NODE_BRANCH);

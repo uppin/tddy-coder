@@ -343,19 +343,6 @@ export const createSessionPage = {
   sandboxedCodebaseCaveat: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionSandboxedCodebaseCaveat, { timeout: 5000, ...options }),
 
-  // ---------------------------------------------------------------------------
-  // PR stack parent — the orchestrator a child session is stacked under
-  // ---------------------------------------------------------------------------
-
-  /** The "PR stack parent" `<select>`. Offered whenever the list holds an orchestrator. */
-  stackParentSelect: (options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(TEST_IDS.createSessionStackParentSelect, { timeout: 5000, ...options }),
-
-  /** Stack the session under `sessionId` — the empty value is "None (standalone session)". */
-  selectStackParent(sessionId: string) {
-    byTestId(TEST_IDS.createSessionStackParentSelect).select(sessionId);
-  },
-
   /** Switch the form to a Claude CLI session. */
   switchToClaudeCliSession() {
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();

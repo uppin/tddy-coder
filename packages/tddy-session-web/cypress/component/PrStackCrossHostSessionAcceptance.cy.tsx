@@ -34,6 +34,7 @@ import {
 import type { DaemonHost } from "tddy-client-web";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
+import { serveProjectStack } from "../support/rpc/openProjectStackView";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
@@ -131,12 +132,14 @@ function openPrStackScreen(
   participants: ReadonlyArray<{ identity: string; metadata: string }>,
   resolutionByBranch: Record<string, BranchResolutionFixture>,
 ) {
-  const backend = aSessionsDrawerBackend([anOrchestratorSession(nodes)])
+  const orchestrator = anOrchestratorSession(nodes);
+  const backend = aSessionsDrawerBackend([orchestrator])
     .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(resolutionByBranch[req.branch] ?? { branch: req.branch }),
     )
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
+  serveProjectStack(backend, orchestrator.stackPlanJson ?? "", ORCHESTRATOR_SESSION_ID);
 
   mountWithRecordingLiveKitRpc(
     withSelectedDaemonRoom(
@@ -146,7 +149,6 @@ function openPrStackScreen(
     ),
     backend,
   );
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
 }
 
 // ---------------------------------------------------------------------------

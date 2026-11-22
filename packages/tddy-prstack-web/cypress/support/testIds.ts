@@ -28,6 +28,7 @@ export const TEST_IDS = {
   createSessionPane: "create-session-pane",
   createSessionDialog: "create-session-dialog",
   createSessionInitialPromptInput: "create-session-initial-prompt-input",
+  createSessionTypeClaudeCliBtn: "create-session-type-claude-cli",
   createSessionBranchIntentSelect: "create-session-branch-intent-select",
   createSessionNewBranchNameInput: "create-session-new-branch-name-input",
   createSessionBranchToWorkOnSelect: "create-session-branch-to-work-on-select",

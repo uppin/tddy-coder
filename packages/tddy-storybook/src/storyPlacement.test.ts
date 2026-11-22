@@ -34,7 +34,6 @@ describe("story placement", () => {
       "tddy-chat-web",
       "tddy-hosts-web",
       "tddy-workspace-web",
-      "tddy-prstack-web",
       "tddy-session-web",
       "tddy-session-create-web",
       "tddy-rpc-playground-web",

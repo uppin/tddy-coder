@@ -10,7 +10,6 @@ import type { ProjectService, ProjectEntry } from "tddy-client-web/gen/project_p
 import type { AccountsService } from "tddy-client-web/gen/accounts_pb";
 import type { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import type { ExecToolService } from "tddy-client-web/gen/exec_tools_pb";
-import type { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
 import type { ActivityService } from "tddy-client-web/gen/activity_pb";
 import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import type { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
@@ -20,7 +19,6 @@ import type { TaskService } from "tddy-client-web/gen/tasks_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
 import type { HostConnection } from "tddy-client-web/connections/types";
-import type { SessionMetadata } from "./lib/sessionParticipantMetadata";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import type { ToolShortcutDef } from "tddy-terminal-web";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
@@ -30,7 +28,6 @@ type ProjectClient = Client<typeof ProjectService>;
 type CatalogClient = Client<typeof CatalogService>;
 type AccountsClient = Client<typeof AccountsService>;
 type ExecToolClient = Client<typeof ExecToolService>;
-type PrStackClient = Client<typeof PrStackService>;
 type TaskClient = Client<typeof TaskService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 import type { SessionAgentClient } from "./sessionRuntimeProps";
@@ -105,8 +102,6 @@ export interface SessionMainPaneProps {
   accountsClient?: AccountsClient;
   /** `exec_tools.ExecToolService` on the same host as `client` — inspector Tools tab. */
   execToolClient?: ExecToolClient;
-  /** `pr_stack.PrStackService` on the same host as `client` — PR-stack workflow view. */
-  prStackClient?: PrStackClient;
   /** The connection to the daemon that owns the selected session — a runtime attaches its spawned
    *  child conversations over it, and the inspector's media tabs are gated on it. `null` until a
    *  host is reachable.
@@ -126,13 +121,6 @@ export interface SessionMainPaneProps {
   room?: RoomHandle | null;
   /** Shortcut presets for the connected session — shown as the mobile shortcut overlay. */
   mobileShortcuts?: ToolShortcutDef[];
-  /** Fired when a custom workflow view (e.g. PrStackScreen) spawns a child session. */
-  onChildSessionStarted?: (entry: {
-    sessionId: string;
-    recipe: string;
-    orchestratorSessionId: string;
-    projectId: string;
-  }) => void;
   /** Fired when the operator clicks a subagent session's "Switch" in the Inspector's Agents tab —
    *  the parent selects that session in the drawer (focuses its runtime). No transport of its own. */
   onSwitchPeer?: (sessionId: string) => void;
@@ -166,8 +154,4 @@ export interface SessionMainPaneProps {
    *  families at their own coordinate since `#unbundle` node 7 — one builder could only return one
    *  service's client, and the transcript must come off the session's own process when it has one. */
   buildSessionActivityClient?: () => ActivityClient | null;
-  /** The `session` metadata block each live participant publishes, keyed by session id — passed to
-   *  the custom workflow view, where the PR-Stack screen joins planned nodes to cross-host child
-   *  sessions with it (D37, D38). */
-  sessionMetadataBySessionId?: ReadonlyMap<string, SessionMetadata>;
 }

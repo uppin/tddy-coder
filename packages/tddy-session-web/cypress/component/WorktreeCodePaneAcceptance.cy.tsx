@@ -27,7 +27,6 @@ import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgen
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { worktreeCodePanePage } from "../support/pages/worktreeCodePanePage";
 import { workflowChatScreenPage } from "../support/pages/workflowChatScreenPage";
-import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -63,12 +62,6 @@ const CHAT_SESSION = aSession({
   sessionId: "tool-session-0000-0000-0000-000000000002",
   sessionType: "tool",
   recipe: "tdd",
-});
-
-const PR_STACK_SESSION = aSession({
-  sessionId: "pr-stack-session-0000-0000-0000-000000000003",
-  sessionType: "tool",
-  recipe: "pr-stack",
 });
 
 // An "unscoped" session: `projectId` is empty (a real, supported case — see
@@ -229,20 +222,6 @@ it("opens the split Code pane for a tool workflow chat session without unmountin
   // Then — the chat base view stays mounted beside the Code pane.
   worktreeCodePanePage.pane().should("exist");
   workflowChatScreenPage.screen().should("exist");
-});
-
-it("opens the split Code pane for a pr-stack session without unmounting the PR-Stack screen", () => {
-  // Given
-  const backend = aWorktreeBackend([PR_STACK_SESSION]);
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
-
-  // When
-  worktreeCodePanePage.toggle().click();
-
-  // Then — the PR-Stack base view stays mounted beside the Code pane.
-  worktreeCodePanePage.pane().should("exist");
-  prStackScreenPage.screen().should("exist");
 });
 
 // ---------------------------------------------------------------------------

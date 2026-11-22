@@ -14,7 +14,7 @@ import {
  * (`SessionsDrawerScreen`).
  *
  * The rule worth pinning here is that a terminal feed ending must not release the claim of a
- * session whose main pane is a workflow view. A `pr-stack` session renders `PrStackScreen` over a
+ * session whose main pane is a workflow view. A tool workflow session renders the workflow chat over a
  * mounted-but-hidden runtime layer (`SessionMainPane`), so a LiveKit terminal attaches to a session
  * whose real surface is ACP chat and reports "remote session ended" almost immediately. Releasing
  * the claim on that signal hands the re-attach straight back to the liveness effect, which attaches
@@ -42,7 +42,7 @@ function aSession(overrides: Partial<AttachCandidate> = {}): AttachCandidate {
   };
 }
 
-/** A live `pr-stack` orchestrator: chat surface, no PTY of its own. */
+/** A live tool session recorded with the removed `pr-stack` recipe: chat surface, no PTY of its own. */
 function aPrStackSession(overrides: Partial<AttachCandidate> = {}): AttachCandidate {
   return aSession({
     sessionId: PR_STACK_SESSION,
@@ -60,18 +60,6 @@ describe("sessionPaneIsWorkflowView", () => {
   it("reports a pr-stack session as workflow-owned", () => {
     // Given a live pr-stack orchestrator
     const session = aPrStackSession();
-
-    // When the pane owner is resolved
-    const workflowOwned = sessionPaneIsWorkflowView(session);
-
-    // Then
-    expect(workflowOwned).toBe(true);
-  });
-
-  it("reports a pr-stack session as workflow-owned whatever its session type", () => {
-    // Given a pr-stack recipe recorded against a claude-cli session: PrStackScreen is keyed on the
-    // recipe alone, so the pane is still the two-pane screen and not a terminal.
-    const session = aSession({ sessionType: "claude-cli", recipe: "pr-stack" });
 
     // When the pane owner is resolved
     const workflowOwned = sessionPaneIsWorkflowView(session);

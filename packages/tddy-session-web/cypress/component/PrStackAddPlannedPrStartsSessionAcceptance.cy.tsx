@@ -20,13 +20,10 @@
  */
 
 import React from "react";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { THE_STACK, openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { createSessionPage } from "../support/pages/createSessionPage";
 import {
@@ -114,8 +111,7 @@ function openPrStackScreen(answer: AddPlannedPrAnswer = {}) {
     stackPlanJson: aStackPlanJson(1, nodes),
     nodeId,
   }));
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   return backend;
 }
 
@@ -177,7 +173,7 @@ it("still calls AddPlannedPr exactly once with the entered fields", () => {
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(PrStackService.method.addPlannedPr);
     expect(calls).to.have.length(1);
-    expect(calls[0].sessionId).to.equal(ORCHESTRATOR_SESSION_ID);
+    expect(calls[0].stack?.stackId).to.equal(THE_STACK.stackId);
     expect(calls[0].title).to.equal("Add auth middleware");
     expect(calls[0].branchSuggestion).to.equal(TYPED_BRANCH_SUGGESTION);
     expect(calls[0].parents).to.deep.equal(["n1"]);

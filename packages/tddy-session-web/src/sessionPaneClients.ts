@@ -33,6 +33,5 @@ export function sessionPaneClients(
     accountsClient: drawer.accountsClient ?? undefined,
     catalogClient: pick(drawer.catalogClient, owning.activeCatalogClient),
     execToolClient: pick(drawer.execToolClient, owning.activeExecToolClient),
-    prStackClient: pick(drawer.prStackClient, owning.activePrStackClient),
   };
 }

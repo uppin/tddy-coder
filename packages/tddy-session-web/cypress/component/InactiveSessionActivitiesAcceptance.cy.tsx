@@ -4,7 +4,7 @@
  * Selecting a dormant session used to open the Inspector over an empty pane whose only content was
  * "Select Resume to reconnect". It now shows the session's Agent tab (the greyed recorded output),
  * keeps the Inspector closed, and offers Resume from the pane's top bar — in the same position for
- * every inactive session, including the ones whose base view (PR-Stack, workflow chat) is
+ * every inactive session, including the ones whose base view (workflow chat) is
  * deliberately left alone. The recorded ACP transcript is the inspector's Activity tab.
  *
  * PRD: docs/ft/web/inactive-session-activities.md
@@ -50,7 +50,6 @@ import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import { agentChatPage } from "../support/pages/agentChatPage";
 import { appLocationPage } from "../support/pages/appLocationPage";
-import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { workflowChatScreenPage } from "../support/pages/workflowChatScreenPage";
 import { dormantAgentTabPage } from "../support/pages/dormantAgentTabPage";
 
@@ -81,14 +80,6 @@ const LIVE = {
   pid: 31000,
   isActive: true,
   workflowGoal: "Ongoing work",
-};
-
-const DORMANT_PR_STACK = {
-  ...DORMANT,
-  sessionId: "dormant-prstack-cccccccc-0000-0000-0000-000000000000",
-  recipe: "pr-stack",
-  sessionType: "tool",
-  workflowGoal: "Stack the parser PRs",
 };
 
 const DORMANT_WORKFLOW = {
@@ -497,32 +488,8 @@ describe("InactiveSessionActivities — workflow views keep precedence", () => {
     cy.viewport(1280, 800);
   });
 
-  it("keeps the planned-PR view for an inactive pr-stack session", () => {
-    // Given — a dormant PR-Stack orchestrator
-    const client = aReplayClient();
-
-    // When
-    mountWithRpc(
-      <SessionMainPane
-        // No host connection in scope: this spec is not about the inspector's media tabs,
-        // and `host` is required so that saying so is a choice rather than an omission.
-        host={null}
-        {...noopHandlers}
-        selectedSession={DORMANT_PR_STACK as unknown as SessionEntry}
-        attachment={{ status: "idle" } satisfies SessionAttachmentState}
-        inspectorState="closed"
-        activityClient={client}
-      />,
-      anInMemoryRpcBackend(),
-    );
-
-    // Then — the planned-PR control surface survives dormancy
-    prStackScreenPage.screen().should("exist");
-    sessionActivitiesPage.pane({ timeout: 1000 }).should("not.exist");
-  });
-
-  it("offers Resume for an inactive pr-stack session whose view is left alone", () => {
-    // Given — the same dormant orchestrator: Resume is keyed on liveness, not on the base view
+  it("offers Resume for an inactive workflow session whose view is left alone", () => {
+    // Given — a dormant workflow session: Resume is keyed on liveness, not on the base view
     const client = aReplayClient();
 
     // When
@@ -530,7 +497,7 @@ describe("InactiveSessionActivities — workflow views keep precedence", () => {
       <SessionMainPane
         host={null}
         {...noopHandlers}
-        selectedSession={DORMANT_PR_STACK as unknown as SessionEntry}
+        selectedSession={DORMANT_WORKFLOW as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
         inspectorState="closed"
         activityClient={client}
@@ -539,7 +506,7 @@ describe("InactiveSessionActivities — workflow views keep precedence", () => {
     );
 
     // Then — same top-bar position as a dormant terminal session gets
-    sessionActivitiesPage.resumeBtn(DORMANT_PR_STACK.sessionId).should("be.visible");
+    sessionActivitiesPage.resumeBtn(DORMANT_WORKFLOW.sessionId).should("be.visible");
   });
 
   it("keeps the workflow chat view for an inactive workflow session", () => {
@@ -599,27 +566,6 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
     // against a suppression that does not exist.
     agentChatPage.chatMessage(1).should("exist");
     agentActivityPage.button({ timeout: 1000 }).should("not.exist");
-  });
-
-  it("keeps the agent activity overlay icon for an inactive pr-stack session", () => {
-    // Given — a dormant session whose base view is NOT the activities view
-    const client = aReplayClient();
-
-    // When
-    mountWithRpc(
-      <SessionMainPane
-        host={null}
-        {...noopHandlers}
-        selectedSession={DORMANT_PR_STACK as unknown as SessionEntry}
-        attachment={{ status: "idle" } satisfies SessionAttachmentState}
-        inspectorState="closed"
-        activityClient={client}
-      />,
-      anInMemoryRpcBackend(),
-    );
-
-    // Then — the overlay is still the only way to read the transcript here
-    agentActivityPage.button().should("exist");
   });
 
   it("opens the tool call detail dialog from an entry in a stopped session's Activity tab", () => {

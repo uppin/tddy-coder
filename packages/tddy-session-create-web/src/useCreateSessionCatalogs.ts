@@ -23,7 +23,7 @@ export interface CreateSessionCatalogs {
   tools: ToolInfo[];
   sessions: SessionEntry[];
   /**
-   * Why each read failed, ready to render beside the picker it emptied — `null` while it has not.
+   * Why each read failed, ready to render beside the field it emptied — `null` while it has not.
    * Each is its own slot, so one failed read does not hide the others' results.
    */
   projectsError: string | null;
@@ -33,9 +33,9 @@ export interface CreateSessionCatalogs {
 
 /**
  * The three catalogs the new-session form opens against: the host's sessions (a failure costs the
- * stack pickers their options and nothing else), its projects and its tools. Each read fails on its
- * own and reports why in its own error slot, so a picker left empty by a failure says so instead of
- * reading as "there is nothing". The two auto-selections happen as each list lands — the form owns
+ * form the host of a stack parent and nothing else), its projects and its tools. Each read fails on
+ * its own and reports why in its own error slot, so a field left empty by a failure says so instead
+ * of reading as "there is nothing". The two auto-selections happen as each list lands — the form owns
  * those values, so they are handed back rather than held here.
  */
 export function useCreateSessionCatalogs({
@@ -58,7 +58,7 @@ export function useCreateSessionCatalogs({
     let cancelled = false;
 
     // Each read is fetched on its own so one failure doesn't block the rest of the form; a failure
-    // leaves the last good list in place and is reported beside the picker it emptied.
+    // leaves the last good list in place and is reported beside the field it emptied.
     client
       .listSessions({ sessionToken })
       .then((resp) => {
@@ -67,7 +67,7 @@ export function useCreateSessionCatalogs({
         setSessionsError(null);
       })
       .catch((err: unknown) => {
-        // Without the list the stack-parent and stack-base pickers have nothing to offer.
+        // Without the list the host that owns the stack parent a start names cannot be found.
         if (!cancelled) setSessionsError(rpcFailureText(err));
       });
 

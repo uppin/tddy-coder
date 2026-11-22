@@ -39,6 +39,17 @@ export type SessionEntryFixture = Partial<Omit<SessionEntry, "contextDocs">> & {
   contextDocs?: MessageInitShape<typeof SessionContextDocSchema>[];
 };
 
+const sessionsServed = new WeakMap<InMemoryRpcBackend, SessionEntryFixture[]>();
+
+/** The sessions a backend built by {@link aSessionsDrawerBackend} lists. */
+export function sessionsServedBy(backend: InMemoryRpcBackend): SessionEntryFixture[] {
+  const sessions = sessionsServed.get(backend);
+  if (sessions === undefined) {
+    throw new Error("the backend was not built by aSessionsDrawerBackend");
+  }
+  return sessions;
+}
+
 /**
  * Create an in-memory backend pre-seeded with all RPCs `SessionsDrawerScreen`
  * calls on startup.  Callers add VNC or other test-specific stubs on top.
@@ -46,7 +57,9 @@ export type SessionEntryFixture = Partial<Omit<SessionEntry, "contextDocs">> & {
 export function aSessionsDrawerBackend(
   sessions: SessionEntryFixture[],
 ): InMemoryRpcBackend {
-  return anInMemoryRpcBackend()
+  const backend = anInMemoryRpcBackend()
     .onUnary(AuthService.method.getAuthStatus, () => ({ authenticated: true, user: aGitHubUser() }))
     .onUnary(SessionService.method.listSessions, () => ({ sessions }));
+  sessionsServed.set(backend, sessions);
+  return backend;
 }

@@ -2,8 +2,7 @@
  * Acceptance: a project's PR stacks in the sessions drawer (`#orchestrators` 9/11). Under each project
  * header a **Stacks** row lists the project's stacks on every host (`ListProjectStacks`); opening one
  * shows the stack view at `#/sessions/project/<projectId>/stack/<stackId>`, read by the stack's
- * address from the host that holds it. A pr-stack orchestrator's chat screen keeps its Planned PRs
- * panel, now acting on its stack by the stack's id.
+ * address from the host that holds it.
  *
  * The whole Sessions screen over the in-memory ConnectRPC backend (`mountWithRpc`), so the
  * assertions read the typed requests the screen sent.
@@ -19,9 +18,7 @@ import { PrStackService, ProjectStackSummarySchema } from "tddy-client-web/gen/p
 import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
-import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { mountWithRpc } from "../support/rpc/inMemory";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { projectStacksPage } from "../support/pages/projectStacksPage";
 import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
@@ -69,46 +66,6 @@ function theSessionsScreenWithBetasStacks() {
   return backend;
 }
 
-const ORCHESTRATOR_SESSION_ID = "pr-stack-session-9999-0000-0000-0000-000000000090";
-const ORCHESTRATORS_STACK = { projectId: "proj-pr-stack", stackId: "0190b000-0000-7000-8000-0000000000cc" };
-const ORCHESTRATORS_PLAN = aStackPlanJson(1, [aPlannedNode({ nodeId: "n1", title: "Add token store" })]);
-
-/** The Sessions screen with a pr-stack orchestrator whose changeset names `ORCHESTRATORS_STACK`. */
-function theSessionsScreenWithAPrStackOrchestrator() {
-  const backend = aSessionsDrawerBackend([
-    {
-      sessionId: ORCHESTRATOR_SESSION_ID,
-      createdAt: "2026-11-14T09:00:00Z",
-      status: "idle",
-      repoPath: "/home/dev/pr-stack-project",
-      pid: 0,
-      isActive: false,
-      projectId: ORCHESTRATORS_STACK.projectId,
-      daemonInstanceId: "",
-      workflowGoal: "",
-      pendingElicitation: false,
-      orchestratorSessionId: "",
-      recipe: "pr-stack",
-      stackPlanJson: ORCHESTRATORS_PLAN,
-      stackId: ORCHESTRATORS_STACK.stackId,
-    },
-  ])
-    .onUnary(PrStackService.method.getProjectStack, () =>
-      create(PrStackService.method.getProjectStack.output, { stackPlanJson: ORCHESTRATORS_PLAN }),
-    )
-    .onUnary(PrStackService.method.addPlannedPr, () =>
-      create(PrStackService.method.addPlannedPr.output, {
-        stackPlanJson: aStackPlanJson(1, [
-          aPlannedNode({ nodeId: "n1", title: "Add token store" }),
-          aPlannedNode({ nodeId: "n2", title: "Add auth middleware" }),
-        ]),
-        nodeId: "n2",
-      }),
-    );
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  return backend;
-}
-
 beforeEach(() => {
   cy.viewport(1280, 800);
   cy.clearLocalStorage();
@@ -131,19 +88,4 @@ it("a project's stacks are listed under its header and open in the stack view", 
   projectStacksPage.stackView().should("be.visible");
   prStackScreenPage.plannedPrRowNodeIds().should("deep.equal", ["n1", "n2"]);
   projectStacksPage.assertStackReadAt(backend, BILLING_STACK);
-});
-
-it("a pr-stack orchestrator's chat screen shows its stack as before", () => {
-  // Given
-  const backend = theSessionsScreenWithAPrStackOrchestrator();
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
-  prStackScreenPage.plannedPrRow("n1").should("contain.text", "Add token store");
-
-  // When
-  prStackScreenPage.openAddPlannedPrForm();
-  prStackScreenPage.fillAndSubmitAddPlannedPrForm({ title: "Add auth middleware" });
-
-  // Then — the panel acts on the orchestrator's stack by its id, and shows the daemon's answer
-  projectStacksPage.assertPlannedPrAddedTo(backend, ORCHESTRATORS_STACK, "Add auth middleware");
-  prStackScreenPage.plannedPrRow("n2").should("contain.text", "Add auth middleware");
 });

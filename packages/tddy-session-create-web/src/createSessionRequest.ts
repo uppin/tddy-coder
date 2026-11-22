@@ -72,7 +72,6 @@ export interface CreateSessionFormValues {
   stackParent: string;
   stackNodeId: string;
   stackParentDaemonInstanceId: string;
-  prStackBaseSessionId: string;
   model: string;
   /**
    * The effort level the session starts at, one of the agent's served `effort_levels`; empty or
@@ -136,7 +135,6 @@ export function buildStartSessionRequest(
     stackParent,
     stackNodeId,
     stackParentDaemonInstanceId,
-    prStackBaseSessionId,
     model,
     providerAccountId,
     providerBuiltIn,
@@ -184,11 +182,6 @@ export function buildStartSessionRequest(
       // spawns, against that process's own sessions tree, not by the daemon at start. Sending a
       // host here would name a routing the start never performs.
       stackParentDaemonInstanceId: "",
-      // Only the tool branch can create an orchestrator, so only it can name a session to seed the
-      // orchestrator's stack from. Sent only for the recipe whose picker offered it — the daemon
-      // refuses a base session named beside any other recipe rather than dropping it silently, so a
-      // choice made before switching recipes must not leak into the request.
-      prStackBaseSessionId: recipe === "pr-stack" ? prStackBaseSessionId : "",
       // The session type the toggle chose: the daemon refuses an empty one rather than reading
       // it as a tool session.
       sessionType,

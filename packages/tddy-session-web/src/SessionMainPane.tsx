@@ -49,7 +49,6 @@ export function SessionMainPane({
   catalogClient,
   accountsClient,
   execToolClient,
-  prStackClient,
   host,
   sessionToken = "",
   callerLogin = null,
@@ -57,7 +56,6 @@ export function SessionMainPane({
   onSessionCreated,
   room = null,
   mobileShortcuts,
-  onChildSessionStarted,
   onSwitchPeer,
   traffic,
   projects = [],
@@ -70,7 +68,6 @@ export function SessionMainPane({
   onSessionBytes,
   buildSessionExecToolClient,
   buildSessionActivityClient,
-  sessionMetadataBySessionId,
 }: SessionMainPaneProps) {
   const isConnected = attachment.status === "connected";
 
@@ -109,47 +106,8 @@ export function SessionMainPane({
   // strip nor a stopped session's can end a conversation by going away. Only closing a tab does.
   const conversationHostFor = useConversationHosts();
 
-  // The selected session's project default branch, read from the registry the drawer already loaded
-  // rather than an RPC or a git probe (D20). Empty when the project is not in the list or stores no
-  // `main_branch_ref` (a legacy project): the PR-Stack view then labels the base "default branch" and
-  // the daemon resolves the real ref when it is asked to act.
-  const projectForSession = React.useMemo(
-    () => projects.find((p) => p.projectId === resolvedProjectId),
-    [projects, resolvedProjectId],
-  );
-  const defaultBranch = React.useMemo(
-    () => projectForSession?.mainBranchRef ?? "",
-    [projectForSession],
-  );
-  // The project's resolved default remote (`origin`, `upstream`, ...). Empty for a legacy project that
-  // stored none — the PR-Stack view falls back to `origin` (the daemon's own last resort) when lifting
-  // a stack node's local branch name into the `<remote>/<branch>` ref the daemon fetches.
-  const defaultRemote = React.useMemo(
-    () => projectForSession?.defaultRemote ?? "",
-    [projectForSession],
-  );
-
   const customView = !isCreating
-    ? resolveWorkflowView(selectedSession, {
-        client,
-        projectClient,
-        catalogClient,
-        prStackClient,
-        sessionFilesClient,
-        worktreeClient,
-        taskClient,
-        sessionToken,
-        attachmentHint,
-        sessions: [...sessions],
-        defaultBranch,
-        defaultRemote,
-        onChildSessionStarted,
-        // The peer switcher is `SessionsDrawerScreen`'s own `handleSelectSession` — select and
-        // attach, reusing the runtime registry — which is exactly what opening a planned PR's bound
-        // child session means, so the two share one handler rather than adding a second.
-        onOpenSession: onSwitchPeer,
-        sessionMetadataBySessionId,
-      })
+    ? resolveWorkflowView(selectedSession, { attachmentHint })
     : null;
 
   const hasRuntimes = runtimes.length > 0;

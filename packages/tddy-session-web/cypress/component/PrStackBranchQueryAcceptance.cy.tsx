@@ -9,13 +9,10 @@
  */
 
 import React from "react";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
-import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
+import { type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { openProjectStackView } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
@@ -29,33 +26,23 @@ import {
 // ---------------------------------------------------------------------------
 
 const ORCHESTRATOR_SESSION_ID = "pr-stack-session-4444-0000-0000-0000-000000000040";
-const PROJECT_ID = "proj-pr-stack";
 
 /** The interval (ms) at which the PR-Stack view re-polls branch resolution. */
 const POLL_INTERVAL_MS = 5000;
 
-function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
-  return {
-    sessionId: ORCHESTRATOR_SESSION_ID,
-    createdAt: "2026-07-05T09:00:00Z",
-    status: "idle",
-    repoPath: "/home/dev/pr-stack-project",
-    projectId: PROJECT_ID,
-    recipe: "pr-stack",
-    stackPlanJson,
-  };
-}
-
 interface MountOptions {
-  sessions: Partial<SessionEntry>[];
+  /** The stack's plan, as `GetProjectStack` answers it. */
+  plan: string;
+  /** The sessions the drawer lists — the children a planned node resolves to. */
+  sessions?: Partial<SessionEntry>[];
   /** Static `QueryBranch` resolution per branch. */
   resolutionByBranch?: Record<string, BranchResolutionFixture>;
   /** Dynamic `QueryBranch` resolution per branch, re-evaluated on every poll. */
   resolutionFactory?: (branch: string) => BranchResolutionFixture;
 }
 
-function openPrStackScreen(opts: MountOptions) {
-  const backend = aSessionsDrawerBackend(opts.sessions).onUnary(
+function openStackView(opts: MountOptions) {
+  const backend = aSessionsDrawerBackend(opts.sessions ?? []).onUnary(
     PrStackService.method.queryBranch,
     (req: { branch: string }) => {
       const fx = opts.resolutionFactory
@@ -64,8 +51,7 @@ function openPrStackScreen(opts: MountOptions) {
       return aBranchResolutionResponse(fx);
     },
   );
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackView(backend, opts.plan, ORCHESTRATOR_SESSION_ID);
 }
 
 // ---------------------------------------------------------------------------
@@ -90,8 +76,8 @@ it("shows the on-disk worktree path for a node whose branch has a worktree", () 
   ]);
 
   // When
-  openPrStackScreen({
-    sessions: [anOrchestratorSession(plan)],
+  openStackView({
+    plan,
     resolutionByBranch: {
       "feature/x/n1": {
         branch: "feature/x/n1",
@@ -113,8 +99,8 @@ it("shows no worktree indicator when the branch has no worktree on disk", () => 
   ]);
 
   // When
-  openPrStackScreen({
-    sessions: [anOrchestratorSession(plan)],
+  openStackView({
+    plan,
     resolutionByBranch: { "feature/x/n1": { branch: "feature/x/n1", worktree: { exists: false } } },
   });
 
@@ -133,8 +119,8 @@ it("marks a row in progress when QueryBranch resolves an active session for its 
   ]);
 
   // When
-  openPrStackScreen({
-    sessions: [anOrchestratorSession(plan)],
+  openStackView({
+    plan,
     resolutionByBranch: {
       "feature/x/n1": {
         branch: "feature/x/n1",
@@ -154,8 +140,8 @@ it("shows no in-progress indicator when QueryBranch resolves no session for the 
   ]);
 
   // When
-  openPrStackScreen({
-    sessions: [anOrchestratorSession(plan)],
+  openStackView({
+    plan,
     resolutionByBranch: { "feature/x/n1": { branch: "feature/x/n1", session: { exists: false } } },
   });
 
@@ -174,8 +160,8 @@ it("shows the GitHub PR number as a link resolved by QueryBranch", () => {
   ]);
 
   // When
-  openPrStackScreen({
-    sessions: [anOrchestratorSession(plan)],
+  openStackView({
+    plan,
     resolutionByBranch: {
       "feature/x/n1": {
         branch: "feature/x/n1",
@@ -198,8 +184,8 @@ it("updates the resolution on the polling interval without user action", () => {
     aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
   let polls = 0;
-  openPrStackScreen({
-    sessions: [anOrchestratorSession(plan)],
+  openStackView({
+    plan,
     resolutionFactory: (branch) => {
       polls += 1;
       return {
@@ -212,7 +198,8 @@ it("updates the resolution on the polling interval without user action", () => {
     },
   });
 
-  // Then — the first poll shows no worktree
+  // Then — the first poll shows no worktree (the row is there, so the poll has started)
+  prStackScreenPage.plannedPrRow("n1").should("exist");
   prStackScreenPage.worktree("n1").should("not.exist");
 
   // When — the poll interval elapses

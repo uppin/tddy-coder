@@ -1,5 +1,5 @@
 /**
- * Mount a view that opens the session's presenter room (`WorkflowChatScreen`, `PrStackScreen`) against
+ * Mount a view that opens the session's presenter room (`WorkflowChatScreen`) against
  * an in-memory backend.
  *
  * The view asks the media port for the presenter room its attachment hint names and talks to the

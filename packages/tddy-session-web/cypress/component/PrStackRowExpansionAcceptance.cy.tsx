@@ -9,23 +9,20 @@
  * Collapsing is not suppression. Every field stays in the row, one interaction away, and the states
  * that demand attention — the status chip, the call to action, blockers and refusals — stay in the
  * always-visible region. The detail is hidden rather than unmounted, so a row keeps its expansion
- * across a branch-resolution poll tick and across the panel closing and reopening.
+ * across a branch-resolution poll tick.
  *
  * PRD: docs/ft/coder/pr-stack-live-status.md § Panel UX (C1, D21–D22; AC 1–5).
  */
 
 import React from "react";
 import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
@@ -114,8 +111,7 @@ function openPrStackScreen(opts: MountOptions = {}) {
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
     .onUnary(ProjectService.method.listProjectBranches, () => ({ branches: [] }));
 
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
 }
 
 // ---------------------------------------------------------------------------
@@ -268,8 +264,7 @@ it("keeps a row expanded when its branch resolution changes on the poll interval
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.expandRow("n2");
 
   // When
@@ -279,23 +274,6 @@ it("keeps a row expanded when its branch resolution changes on the poll interval
   prStackScreenPage.worktree("n2").should("contain.text", CHILD_WORKTREE_PATH);
   prStackScreenPage.rowDetails("n2").should("be.visible");
 });
-
-it("keeps a row expanded after the Planned PRs panel is closed and reopened", () => {
-  // Given
-  openPrStackScreen();
-  prStackScreenPage.expandRow("n2");
-
-  // When
-  prStackScreenPage.togglePlannedPrPanel();
-  prStackScreenPage.togglePlannedPrPanel();
-
-  // Then — the panel hides rather than unmounts, and so does the row's detail
-  prStackScreenPage.rowDetails("n2").should("be.visible");
-});
-
-// ---------------------------------------------------------------------------
-// The call to action is not behind the toggle
-// ---------------------------------------------------------------------------
 
 it("starts a session from a collapsed row without expanding it", () => {
   // Given — the CTA sits beside the toggle, never nested inside it: a button within a button is

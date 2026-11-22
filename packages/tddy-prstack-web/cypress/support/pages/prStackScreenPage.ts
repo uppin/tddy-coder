@@ -615,6 +615,11 @@ export const prStackScreenPage = {
   dialogInitialPromptInput: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionInitialPromptInput, { timeout: 5000, ...options }),
 
+  /** Switch the dialog to a Claude CLI session — the type whose form carries the prompt and the remote-branch toggle. */
+  dialogSwitchToClaudeCliSession() {
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn, { timeout: 5000 }).click();
+  },
+
   /** The dialog's Create button. */
   dialogSubmitBtn: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionSubmitBtn, { timeout: 5000, ...options }),

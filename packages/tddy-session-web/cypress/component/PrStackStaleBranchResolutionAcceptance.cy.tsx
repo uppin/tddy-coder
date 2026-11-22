@@ -17,16 +17,13 @@
  */
 
 import React from "react";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
@@ -140,8 +137,7 @@ function aPrStackBackend(queryBranch: QueryBranchHandler) {
 }
 
 function openPrStackScreen(backend: ReturnType<typeof aPrStackBackend>) {
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
 }
 
 // ---------------------------------------------------------------------------

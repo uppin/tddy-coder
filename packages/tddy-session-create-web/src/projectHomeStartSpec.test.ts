@@ -36,7 +36,6 @@ function aCliForm(overrides: Partial<CreateSessionFormValues> = {}): CreateSessi
     stackParent: "parent-1",
     stackNodeId: "node-1",
     stackParentDaemonInstanceId: "host-1",
-    prStackBaseSessionId: "",
     model: "sonnet",
     providerAccountId: "acct-meta",
     providerBuiltIn: false,

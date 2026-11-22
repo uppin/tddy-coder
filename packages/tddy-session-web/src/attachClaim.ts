@@ -47,7 +47,6 @@ export type AttachAction = "attach" | "hold" | "release";
 export function sessionPaneIsWorkflowView(
   session: Pick<AttachCandidate, "sessionType" | "recipe">,
 ): boolean {
-  if (session.recipe === "pr-stack") return true;
   // A tddy-coder session — its type declared with the `tddy_coder` launch, as the daemons served it
   // (`knownSessionLaunch`) — owns a workflow view. So does a legacy record naming no session type:
   // tddy-coder wrote its own records without one until it began recording the declared type.
