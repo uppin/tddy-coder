@@ -104,6 +104,11 @@ service WorkQueueService {
   rpc ScheduleWorkQueueWave(ScheduleWorkQueueWaveRequest) returns (ListWorkQueueSchedulesResponse);
   rpc UnscheduleWorkItem(UnscheduleWorkItemRequest) returns (ListWorkQueueSchedulesResponse);
   rpc ListWorkQueueSchedules(ListWorkQueueSchedulesRequest) returns (ListWorkQueueSchedulesResponse);
+  // `#workqueue` 14/14: rebase an item onto its line parent's tip and push with lease (a refusal is an
+  // answer naming the state and the actions that fix it), and land a range of waves in line order,
+  // propagating what sits on each landed item before the next.
+  rpc PropagateWorkItem(PropagateWorkItemRequest) returns (PropagateWorkItemResponse);
+  rpc LandWorkQueue(LandWorkQueueRequest) returns (LandWorkQueueResponse);
 }
 
 // Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
@@ -779,4 +784,50 @@ message ListWorkQueueSchedulesResponse {
   repeated ScheduleStatusView schedules = 1;
   // Non-empty when the facts could not all be read (the conditions that needed them are `waiting`).
   string unavailable_reason = 2;
+}
+
+// `#workqueue` 14/14 — propagate and land.
+message PropagateWorkItemRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  // Rebase although a conflict is predicted. Never overrides a dirty, unpushed, unpulled or diverged
+  // local branch.
+  bool force = 4;
+}
+
+message PropagateWorkItemResponse {
+  bool propagated = 1;
+  // The branch rebased onto.
+  string onto = 2;
+  uint32 commits_taken = 3;
+  // Set when the propagation was refused: "local_branch" | "preflight" | "failed".
+  string refusal_kind = 4;
+  // "local_branch": the branch's state ("Dirty" | "Unpushed" | "Unpulled" | "Diverged" | "Unpublished").
+  string refusal_state = 5;
+  // "local_branch": what fixes it, in order ("commit", "pull", "push").
+  repeated string refusal_actions = 6;
+  // What a person reads, for every refusal.
+  string refusal_detail = 7;
+}
+
+message LandWorkQueueRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  // 1-based, as `GetWorkQueueWaves` numbers them.
+  uint32 from_wave = 3;
+  uint32 to_wave = 4;
+}
+
+// One step of a land: every landed item in line order, then every propagation, then where it stopped.
+message LandStepView {
+  string item_id = 1;
+  // "landed" | "propagated" | "stopped".
+  string outcome = 2;
+  // The merge commit, the branch rebased onto, or why the run stopped here.
+  string detail = 3;
+}
+
+message LandWorkQueueResponse {
+  repeated LandStepView steps = 1;
 }

@@ -442,6 +442,6 @@ pub(super) fn write_journal(
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
-mod land_ops;
+pub(crate) mod land_ops;
 mod node_ops;
 mod queue_ports;

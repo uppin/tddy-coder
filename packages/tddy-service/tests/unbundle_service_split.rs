@@ -553,8 +553,8 @@ const EXEC_TOOL_METHODS: [&str; 4] = [
 /// `#workqueue` 3/14: the stack service is the work-queue service. The list is closed; `#workqueue`
 /// 5/14 removed `CreateWorkQueue` — a queue is created at session start, never by an RPC. `#workqueue`
 /// 6/14 adds the four link RPCs and the status stream; 9/14 the two lineage RPCs; 10/14 `GetWorkQueueWaves`;
-/// 11/14 the commit inbox, outbox and counts; 13/14 the four schedule RPCs.
-const WORK_QUEUE_METHODS: [&str; 25] = [
+/// 11/14 the commit inbox, outbox and counts; 13/14 the four schedule RPCs; 14/14 propagate and land.
+const WORK_QUEUE_METHODS: [&str; 27] = [
     "AddWorkItem",
     "GetPrStatus",
     "RepointWorkItem",
@@ -580,6 +580,8 @@ const WORK_QUEUE_METHODS: [&str; 25] = [
     "ScheduleWorkQueueWave",
     "UnscheduleWorkItem",
     "ListWorkQueueSchedules",
+    "PropagateWorkItem",
+    "LandWorkQueue",
 ];
 
 /// Families C, D, O and Q — the deliberate endpoint of the whole stack.

@@ -232,20 +232,29 @@ fn items_in_waves(
         .collect())
 }
 
-/// `work_queue_land`: land waves `from..=to`. `held_up` names, per item, the merge condition that is
-/// not met (judged by the caller from the live facts); the run stops at the first of those.
-pub(crate) fn land_waves(
+/// Land waves `from..=to`. `held_up` names, per item, the merge condition that is not met (judged by
+/// the caller from the live facts); the run stops at the first of those.
+pub(crate) fn land_range(
     env: &GitEnv,
     from: u32,
     to: u32,
     held_up: &HashMap<String, (String, String)>,
-) -> Result<Value, String> {
+) -> Result<LandReport, String> {
     let world = DaemonQueueWorld::new(env)?;
     let trunk = env.default_branch(world.project());
     let mut line = Vec::new();
     for id in items_in_waves(&world, from, to)? {
         line.push(land_item_of(&world, &id, &trunk, held_up.get(&id))?);
     }
-    let report = run_land(env, &world, &line)?;
-    Ok(report_json(&report))
+    run_land(env, &world, &line)
+}
+
+/// `work_queue_land`: [`land_range`], answered as the tool's JSON.
+pub(crate) fn land_waves(
+    env: &GitEnv,
+    from: u32,
+    to: u32,
+    held_up: &HashMap<String, (String, String)>,
+) -> Result<Value, String> {
+    land_range(env, from, to, held_up).map(|report| report_json(&report))
 }

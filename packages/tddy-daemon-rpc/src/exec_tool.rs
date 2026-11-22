@@ -20,7 +20,7 @@ mod session_files;
 mod session_messages;
 mod watch_events;
 pub mod watch_wake;
-mod work_item_git_tools;
+pub(crate) mod work_item_git_tools;
 pub mod work_queue_tools;
 
 pub use result_frames::EXEC_TOOL_FRAME_BYTES;

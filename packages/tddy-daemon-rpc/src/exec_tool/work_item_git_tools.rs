@@ -516,4 +516,4 @@ impl WorkItemGitToolPort for DaemonStackGitTools {
     }
 }
 
-mod git_work;
+pub(crate) mod git_work;
