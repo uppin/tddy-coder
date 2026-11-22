@@ -119,6 +119,15 @@ pub(super) async fn exits_during_startup(
                                 .within(probe_left),
                         )
                         .await;
+                    log::debug!(
+                        target: "tddy_agent_launch::remote_agent_launch",
+                        "liveness probe of agent pid {pid} (bound {probe_left:?}) answered after {:?}: {}",
+                        now.elapsed(),
+                        match &answered {
+                            Ok(output) => format!("exit status {}", output.status),
+                            Err(error) => format!("no answer: {error}"),
+                        }
+                    );
                     if let Ok(output) = answered {
                         if output.status != 0 {
                             return StartupJudgement::Exited;

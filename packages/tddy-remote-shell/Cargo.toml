@@ -14,6 +14,8 @@ test-support = []
 
 [dependencies]
 async-trait = "0.1"
+# Debug-level timings of a one-shot: when its client exited and when each pipe ended.
+log = "0.4"
 # A Coder one-shot's stdin crosses the workspace's pty as base64 lines, which no tty acts on.
 base64 = "0.22"
 # `SecretString`: the Coder session token a `CoderShell` holds is redacted in `Debug` and wiped on

@@ -401,13 +401,21 @@ impl RemoteShell for CoderShell {
             .map_err(|error| self.spawn_error(error))?;
         let (mut stdin, mut stdout, mut stderr) = Self::take_pipes(&mut child)?;
         let coder_path = self.coder.clone();
-        let work = async move {
+        let head = crate::redact::command_head(&request.command);
+        let timings = OneShotTimings::started(child.id());
+        let work = async {
             let marker_arrived = tokio::sync::Notify::new();
             let outputs = async {
                 tokio::join!(
-                    child.wait(),
-                    read_noting_the_marker(&mut stdout, &marker_arrived),
-                    read_noting_the_marker(&mut stderr, &marker_arrived),
+                    timings.note(&timings.exited, child.wait()),
+                    timings.note(
+                        &timings.stdout_ended,
+                        read_noting_the_marker(&mut stdout, &marker_arrived)
+                    ),
+                    timings.note(
+                        &timings.stderr_ended,
+                        read_noting_the_marker(&mut stderr, &marker_arrived)
+                    ),
                 )
             };
             // The lines go only to a command that has turned its pty's echo off, which it has
@@ -426,7 +434,9 @@ impl RemoteShell for CoderShell {
                 () = feed => outputs.await,
             }
         };
-        let (status, stdout, stderr) = match tokio::time::timeout(deadline, work).await {
+        let finished = tokio::time::timeout(deadline, work).await;
+        timings.log(&head, finished.is_ok());
+        let (status, stdout, stderr) = match finished {
             Ok(result) => result,
             Err(_) => {
                 return Err(RemoteShellError::TimedOut {
@@ -600,6 +610,62 @@ mod tests {
             shown.contains("https://coder.example.com"),
             true,
             "got {shown}"
+        );
+    }
+}
+
+/// When a one-shot's `coder` client exited and when each of its pipes reached its end, logged at
+/// debug level once the call is over.
+///
+/// A call ends only when all three have: a pipe whose write end some other process still holds
+/// keeps it open after the client is gone, and the call then waits out its deadline. These
+/// timings are what tell that apart from a command that is slow.
+struct OneShotTimings {
+    pid: Option<u32>,
+    started: tokio::time::Instant,
+    exited: std::sync::Mutex<Option<std::time::Duration>>,
+    stdout_ended: std::sync::Mutex<Option<std::time::Duration>>,
+    stderr_ended: std::sync::Mutex<Option<std::time::Duration>>,
+}
+
+impl OneShotTimings {
+    fn started(pid: Option<u32>) -> Self {
+        Self {
+            pid,
+            started: tokio::time::Instant::now(),
+            exited: std::sync::Mutex::new(None),
+            stdout_ended: std::sync::Mutex::new(None),
+            stderr_ended: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// `work`, recording in `slot` how long after the start it finished.
+    async fn note<T>(
+        &self,
+        slot: &std::sync::Mutex<Option<std::time::Duration>>,
+        work: impl std::future::Future<Output = T>,
+    ) -> T {
+        let output = work.await;
+        *slot.lock().expect("one-shot timings") = Some(self.started.elapsed());
+        output
+    }
+
+    fn log(&self, command_head: &str, finished: bool) {
+        let at = |slot: &std::sync::Mutex<Option<std::time::Duration>>| {
+            match *slot.lock().expect("one-shot timings") {
+                Some(after) => format!("{after:?}"),
+                None => "never".to_string(),
+            }
+        };
+        log::debug!(
+            target: "tddy_remote_shell::coder",
+            "one-shot {command_head:?} (coder pid {:?}) {} after {:?}: client exited {}, stdout ended {}, stderr ended {}",
+            self.pid,
+            if finished { "finished" } else { "timed out" },
+            self.started.elapsed(),
+            at(&self.exited),
+            at(&self.stdout_ended),
+            at(&self.stderr_ended),
         );
     }
 }

@@ -98,7 +98,10 @@ const KILL_GRACE_SECONDS: u64 = 2;
 /// the watchdog holding the connection open). The watchdog starts when the command does, so it fires inside the caller's deadline by however long the connection took.
 /// The command's status is the wrapper's; a command ended by the watchdog is `143`. A job-control
 /// shell reports each job's end on its own stderr (bash as `sh` does, with `[1]+ Done`), so that
-/// is pointed at `/dev/null` and the command keeps the original stderr as fd 3.
+/// is pointed at `/dev/null` and the command keeps the original stderr as fd 3. The watchdog holds
+/// none of the three: a `TERM` that reaches its group while it is forking its `sleep` misses that
+/// `sleep`, and an output it still held would stay open — and the call with it — until the sleep
+/// ended at the deadline.
 fn bounded(command: &str, deadline: Duration) -> String {
     let seconds = (deadline.as_secs() + u64::from(deadline.subsec_nanos() > 0)).max(1);
     let quoted = crate::shell_single_quote(command);
@@ -107,7 +110,7 @@ fn bounded(command: &str, deadline: Duration) -> String {
          set -m; exec 3>&2 2>/dev/null; sh -c {quoted} 2>&3 3>&- & tddy_command=$!; \
          ( sleep {seconds}; kill -s TERM -- -$tddy_command 2>/dev/null; \
          sleep {KILL_GRACE_SECONDS}; kill -s KILL -- -$tddy_command 2>/dev/null ) \
-         >/dev/null 2>&1 & tddy_watchdog=$!; \
+         >/dev/null 2>&1 3>&- & tddy_watchdog=$!; \
          wait $tddy_command; tddy_status=$?; \
          kill -s TERM -- -$tddy_watchdog 2>/dev/null; exit $tddy_status"
     )
@@ -162,5 +165,48 @@ mod tests {
             "{wrapped}"
         );
         assert!(wrapped.contains("kill -s TERM -- -"), "{wrapped}");
+    }
+
+    /// A watchdog that outlives the command must not hold the call open. The wrapper ends the
+    /// watchdog's group when the command is done, but a `TERM` that lands while the watchdog is
+    /// forking its `sleep` misses the new child, which then sleeps out the whole deadline. Whatever
+    /// output it still holds stays open with it, and the caller — waiting for its pipes to end —
+    /// waits out its deadline (a 60 s `kill -0` liveness probe answered `AgentNeverAnswered`).
+    ///
+    /// The miss is a race; a wrapper started with `TERM` ignored makes the survival certain, so
+    /// what is asserted is only what a surviving watchdog holds: none of the command's output.
+    #[test]
+    fn a_watchdog_that_outlives_the_command_holds_none_of_its_output() {
+        use std::io::Read as _;
+
+        let deadline = Duration::from_secs(6);
+        let wrapped = bounded("true", deadline);
+        let mut wrapper = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!("trap '' TERM; {wrapped}"))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("the wrapper starts");
+        let started = std::time::Instant::now();
+        let mut stdout = wrapper.stdout.take().expect("stdout");
+        let mut stderr = wrapper.stderr.take().expect("stderr");
+        let stdout_reader = std::thread::spawn(move || stdout.read_to_end(&mut Vec::new()));
+        stderr
+            .read_to_end(&mut Vec::new())
+            .expect("the wrapper's stderr reads to its end");
+        stdout_reader
+            .join()
+            .expect("the stdout reader")
+            .expect("the wrapper's stdout reads to its end");
+        let ended_after = started.elapsed();
+        let _ = wrapper.wait();
+
+        assert!(
+            ended_after < Duration::from_secs(3),
+            "the command's output stayed open {ended_after:?} — held by the watchdog until its \
+             {deadline:?} sleep ended"
+        );
     }
 }
