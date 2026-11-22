@@ -6,7 +6,8 @@
 //! inbox slow down before the quota runs out.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
@@ -185,5 +186,146 @@ fn check_runs_carry_status_timing_and_details_url() {
                 details_url: "https://github.com/acme/app/runs/12".to_string(),
             },
         ]
+    );
+}
+
+/// A GitHub serving `repos/acme/app/commits` that records the `Authorization` header of every request.
+async fn a_github_recording_who_reads() -> (SocketAddr, Arc<Mutex<Vec<String>>>) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&seen);
+    let app = Router::new().route(
+        "/repos/acme/app/commits",
+        get(move |headers: HeaderMap| {
+            let recorded = Arc::clone(&recorded);
+            async move {
+                let authorization = headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
+                recorded.lock().unwrap().push(authorization);
+                (StatusCode::OK, "[]".to_string())
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (addr, seen)
+}
+
+#[tokio::test]
+async fn the_rest_reader_sends_the_account_token_resolved_afresh_on_every_read() {
+    // Given — a vault whose token is rotated between two reads
+    let (github, seen) = a_github_recording_who_reads().await;
+    let reads = Arc::new(AtomicUsize::new(0));
+    let vault = Arc::clone(&reads);
+    let reader = RestConditionalRead::new(
+        format!("http://{github}"),
+        Arc::new(move || {
+            Ok(format!(
+                "token-{}",
+                vault.fetch_add(1, Ordering::SeqCst) + 1
+            ))
+        }),
+    );
+
+    // When
+    for _ in 0..2 {
+        reader
+            .get("repos/acme/app/commits", None)
+            .await
+            .expect("a 200 is an answer");
+    }
+
+    // Then — each read carried the token the vault held at that moment
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec!["Bearer token-1".to_string(), "Bearer token-2".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn the_rest_reader_fails_a_read_whose_token_cannot_be_resolved() {
+    // Given — a project whose vault holds no usable token
+    let (github, seen) = a_github_recording_who_reads().await;
+    let reader = RestConditionalRead::new(
+        format!("http://{github}"),
+        Arc::new(|| {
+            Err(TrunkReadError(
+                "no token for the project's account".to_string(),
+            ))
+        }),
+    );
+
+    // When
+    let answer = reader.get("repos/acme/app/commits", None).await;
+
+    // Then — nothing reached GitHub, and the failure names why
+    let error = answer.expect_err("no token, no read");
+    assert!(error.message.contains("no token"), "{error:?}");
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+/// A `gh api -i` that prints `stdout` and exits `exit_code`, recording what it was asked.
+struct AGh {
+    stdout: String,
+    exit_code: i32,
+    asked: Mutex<Vec<(String, Option<String>)>>,
+}
+
+#[async_trait]
+impl GhApi for AGh {
+    async fn api_with_headers(
+        &self,
+        path: &str,
+        if_none_match: Option<&str>,
+    ) -> Result<GhApiOutput, TrunkReadError> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push((path.to_string(), if_none_match.map(str::to_string)));
+        Ok(GhApiOutput {
+            stdout: self.stdout.clone(),
+            exit_code: self.exit_code,
+        })
+    }
+}
+
+#[tokio::test]
+async fn gh_api_dash_i_200_answers_its_body_and_etag_and_is_sent_the_held_etag() {
+    // Given — gh prints a 200 with an ETag
+    let body = r#"[{"sha":"b"}]"#;
+    let gh = Arc::new(AGh {
+        stdout: format!("HTTP/2.0 200 OK\r\nEtag: \"e2\"\r\nX-Poll-Interval: 60\r\n\r\n{body}"),
+        exit_code: 0,
+        asked: Mutex::default(),
+    });
+
+    // When — it reads holding an older ETag
+    let answer = GhCliConditionalRead::new(Arc::clone(&gh) as Arc<dyn GhApi>)
+        .get(
+            "repos/acme/app/commits?sha=main&per_page=100",
+            Some("\"e1\""),
+        )
+        .await
+        .expect("a 200 is an answer");
+
+    // Then
+    assert_eq!(
+        answer,
+        ConditionalAnswer::Modified {
+            body: body.to_string(),
+            etag: Some("\"e2\"".to_string()),
+            poll_interval_ms: Some(60_000),
+            rate_limit: None,
+        }
+    );
+    assert_eq!(
+        *gh.asked.lock().unwrap(),
+        vec![(
+            "repos/acme/app/commits?sha=main&per_page=100".to_string(),
+            Some("\"e1\"".to_string())
+        )]
     );
 }

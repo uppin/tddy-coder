@@ -218,6 +218,7 @@ mod tests {
         // Given — one verdict, one two-comment thread anchored to a diff line, one PR-wide comment
         let view = pr_insight::PrCommentsView {
             reviews: vec![PrReview {
+                id: 1,
                 author: "alice".to_string(),
                 state: "CHANGES_REQUESTED".to_string(),
                 body: "Name the timeout.".to_string(),
@@ -241,6 +242,7 @@ mod tests {
                 ],
             }],
             conversation: vec![PrIssueComment {
+                id: 3,
                 author: "carol".to_string(),
                 body: "Rebased onto master.".to_string(),
                 created_at: "2026-07-30T10:03:00Z".to_string(),

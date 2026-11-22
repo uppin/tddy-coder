@@ -33,6 +33,7 @@ fn the_repo() -> RepoSlug {
 #[derive(Default)]
 struct AScriptedGithub {
     answers: Mutex<HashMap<String, VecDeque<ConditionalAnswer>>>,
+    failures: Mutex<HashMap<String, GithubReadError>>,
     requests: Mutex<Vec<(String, Option<String>)>>,
     latency: Option<Duration>,
 }
@@ -54,6 +55,11 @@ impl AScriptedGithub {
             .entry(path)
             .or_default()
             .push_back(answer);
+        self
+    }
+
+    fn failing(self, path: String, error: GithubReadError) -> Self {
+        self.failures.lock().unwrap().insert(path, error);
         self
     }
 
@@ -81,6 +87,9 @@ impl ConditionalRead for AScriptedGithub {
             .push((path.to_string(), if_none_match.map(str::to_string)));
         if let Some(latency) = self.latency {
             tokio::time::sleep(latency).await;
+        }
+        if let Some(error) = self.failures.lock().unwrap().get(path) {
+            return Err(error.clone());
         }
         let mut answers = self.answers.lock().unwrap();
         let queue = answers
@@ -146,6 +155,25 @@ fn an_issue_comment_event(number: u64) -> String {
     format!(
         r#"{{"id":"ev-comment-{number}","type":"IssueCommentEvent","payload":{{"action":"created","issue":{{"number":{number},"pull_request":{{}}}}}}}}"#
     )
+}
+
+fn a_push_event(branch: &str) -> String {
+    format!(
+        r#"{{"id":"ev-push-{branch}","type":"PushEvent","payload":{{"ref":"refs/heads/{branch}"}}}}"#
+    )
+}
+
+fn a_failure(
+    status: u16,
+    retry_after_s: Option<u64>,
+    rate_limit: Option<RateLimit>,
+) -> GithubReadError {
+    GithubReadError {
+        status: Some(status),
+        message: format!("HTTP {status}"),
+        retry_after_s,
+        rate_limit,
+    }
 }
 
 fn check_runs_json(status: &str, conclusion: Option<&str>) -> String {
@@ -458,6 +486,178 @@ async fn repeated_reads_of_an_unchanged_pr_for_head_row_make_no_further_requests
     );
 }
 
+#[tokio::test]
+async fn a_push_event_invalidates_the_branch_rows_and_a_push_subscriber_hears_it() {
+    // Given
+    let repo = the_repo();
+    let commits_path = paths::branch_commits(&repo, "feat/one");
+    let head_path = paths::pulls_for_head(&repo, "feat/one");
+    let github = Arc::new(
+        AScriptedGithub::new()
+            .answering(
+                commits_path.clone(),
+                modified(a_commits_json("c1", "c0", "first"), "b1"),
+            )
+            .answering(commits_path.clone(), not_modified())
+            .answering(
+                head_path.clone(),
+                modified(format!("[{}]", a_pull_json(1, "feat/one")), "h1"),
+            )
+            .answering(paths::events(&repo), modified("[]", "e1"))
+            .answering(
+                paths::events(&repo),
+                modified(events_json(&[a_push_event("feat/one")]), "e2"),
+            ),
+    );
+    let inbox = an_inbox_over(&github);
+    let mut watcher = inbox.subscribe(&repo, &[EventKind::Push]);
+    inbox
+        .branch_commits(&repo, "feat/one")
+        .await
+        .expect("commits");
+    inbox
+        .pr_for_head(&repo, "feat/one")
+        .await
+        .expect("pr for head");
+    inbox.step(T0).await;
+
+    // When
+    inbox.step(T0 + A_MINUTE).await;
+    inbox
+        .branch_commits(&repo, "feat/one")
+        .await
+        .expect("commits again");
+    inbox
+        .pr_for_head(&repo, "feat/one")
+        .await
+        .expect("pr for head again");
+
+    // Then — both rows were re-read with their stored ETags, and the push subscriber heard it
+    assert_eq!(
+        github.requests_to(&commits_path),
+        vec![None, Some("b1".to_string())]
+    );
+    assert_eq!(
+        github.requests_to(&head_path),
+        vec![None, Some("h1".to_string())]
+    );
+    assert_eq!(
+        drained(&mut watcher),
+        vec![InboxEvent {
+            repo: repo.clone(),
+            kind: EventKind::Push,
+            row: RowKey::BranchCommits {
+                branch: "feat/one".to_string()
+            },
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_modified_updated_pulls_sweep_invalidates_the_rows_of_the_pulls_it_lists_only() {
+    // Given — two cached PRs; the sweep, due a quarter of an hour after the first step, lists #1
+    let repo = the_repo();
+    let github = Arc::new(
+        AScriptedGithub::new()
+            .answering(
+                paths::pull(&repo, 1),
+                modified(a_pull_json(1, "feat/one"), "p1"),
+            )
+            .answering(paths::pull(&repo, 1), not_modified())
+            .answering(
+                paths::pull(&repo, 2),
+                modified(a_pull_json(2, "feat/two"), "p2"),
+            )
+            .answering(paths::events(&repo), modified("[]", "e1"))
+            .answering(
+                paths::updated_pulls(&repo),
+                modified(format!("[{}]", a_pull_json(1, "feat/one")), "s1"),
+            ),
+    );
+    let inbox = an_inbox_over(&github);
+    let _watcher = inbox.subscribe(&repo, &[EventKind::Pr]);
+    inbox.pr(&repo, 1).await.expect("pr 1");
+    inbox.pr(&repo, 2).await.expect("pr 2");
+    inbox.step(T0).await;
+    let before_the_sweep = github.requests_to(&paths::updated_pulls(&repo)).len();
+
+    // When
+    inbox.step(T0 + 15 * A_MINUTE).await;
+    inbox.pr(&repo, 1).await.expect("pr 1 again");
+    inbox.pr(&repo, 2).await.expect("pr 2 again");
+
+    // Then — #1 revalidated with its ETag; #2 was left alone
+    assert_eq!(
+        before_the_sweep, 0,
+        "the sweep is not due at the first step"
+    );
+    assert_eq!(github.requests_to(&paths::updated_pulls(&repo)), vec![None]);
+    assert_eq!(
+        github.requests_to(&paths::pull(&repo, 1)),
+        vec![None, Some("p1".to_string())]
+    );
+    assert_eq!(github.requests_to(&paths::pull(&repo, 2)), vec![None]);
+}
+
+#[tokio::test]
+async fn a_spent_quota_answer_to_an_uncached_read_is_rate_limited_with_its_reset() {
+    // Given
+    let repo = the_repo();
+    let spent = RateLimit {
+        remaining: 0,
+        reset_at_unix_s: T0 / 1000 + 3600,
+    };
+    let github = Arc::new(
+        AScriptedGithub::new().failing(paths::pull(&repo, 1), a_failure(403, None, Some(spent))),
+    );
+    let inbox = an_inbox_over(&github);
+
+    // When
+    let read = inbox.pr(&repo, 1).await;
+
+    // Then
+    assert_eq!(
+        read.map(|row| row.value.number),
+        Err(InboxError::RateLimited {
+            reset_at_unix_s: T0 / 1000 + 3600
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_429_with_retry_after_to_an_uncached_read_is_rate_limited() {
+    // Given
+    let repo = the_repo();
+    let github = Arc::new(
+        AScriptedGithub::new().failing(paths::pull(&repo, 1), a_failure(429, Some(120), None)),
+    );
+    let inbox = an_inbox_over(&github);
+
+    // When
+    let read = inbox.pr(&repo, 1).await;
+
+    // Then — no reset was named, so it is `Retry-After` from now
+    assert!(
+        matches!(read, Err(InboxError::RateLimited { reset_at_unix_s }) if reset_at_unix_s >= 120),
+        "{read:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_404_answer_to_an_uncached_read_is_not_found() {
+    // Given
+    let repo = the_repo();
+    let github =
+        Arc::new(AScriptedGithub::new().failing(paths::pull(&repo, 9), a_failure(404, None, None)));
+    let inbox = an_inbox_over(&github);
+
+    // When
+    let read = inbox.pr(&repo, 9).await;
+
+    // Then
+    assert_eq!(read.map(|row| row.value.number), Err(InboxError::NotFound));
+}
+
 // ---------------------------------------------------------------------------------------------
 // The trunk watch's source
 // ---------------------------------------------------------------------------------------------
@@ -507,5 +707,97 @@ async fn the_trunk_feed_reads_branch_commits_through_the_inbox_row() {
             .requests_to(&paths::branch_commits(&repo, "master"))
             .len(),
         1
+    );
+}
+
+#[tokio::test]
+async fn a_conversation_row_carries_githubs_id_of_every_review_and_comment() {
+    // Given — one review, one review comment and one conversation comment on PR 7
+    let repo = the_repo();
+    let github = Arc::new(
+        AScriptedGithub::new()
+            .answering(
+                paths::reviews(&repo, 7),
+                modified(
+                    r#"[{"id":701,"user":{"login":"alice"},"state":"APPROVED","body":"Ship it.","submitted_at":"2026-11-22T10:00:00Z"}]"#,
+                    "r7",
+                ),
+            )
+            .answering(
+                paths::review_comments(&repo, 7),
+                modified(
+                    r#"[{"id":702,"in_reply_to_id":null,"user":{"login":"bob"},"body":"Why 30?","path":"src/lib.rs","line":17,"diff_hunk":"@@","created_at":"2026-11-22T10:01:00Z"}]"#,
+                    "rc7",
+                ),
+            )
+            .answering(
+                paths::issue_comments(&repo, 7),
+                modified(
+                    r#"[{"id":703,"user":{"login":"carol"},"body":"Rebased.","created_at":"2026-11-22T10:02:00Z"}]"#,
+                    "ic7",
+                ),
+            ),
+    );
+    let inbox = an_inbox_over(&github);
+
+    // When
+    let conversation = inbox
+        .conversation(&repo, 7)
+        .await
+        .expect("conversation 7")
+        .value;
+
+    // Then — each item is addressable by the id GitHub gave it
+    assert_eq!(
+        conversation
+            .reviews
+            .iter()
+            .map(|r| r.id)
+            .collect::<Vec<_>>(),
+        vec![701]
+    );
+    assert_eq!(
+        conversation
+            .review_comments
+            .iter()
+            .map(|c| c.id)
+            .collect::<Vec<_>>(),
+        vec![702]
+    );
+    assert_eq!(
+        conversation
+            .issue_comments
+            .iter()
+            .map(|c| c.id)
+            .collect::<Vec<_>>(),
+        vec![703]
+    );
+}
+
+#[tokio::test]
+async fn a_conversation_item_without_an_id_is_refused_not_kept_unaddressable() {
+    // Given — a conversation comment GitHub answered without its id
+    let repo = the_repo();
+    let github = Arc::new(
+        AScriptedGithub::new()
+            .answering(paths::reviews(&repo, 8), modified("[]", "r8"))
+            .answering(paths::review_comments(&repo, 8), modified("[]", "rc8"))
+            .answering(
+                paths::issue_comments(&repo, 8),
+                modified(
+                    r#"[{"user":{"login":"carol"},"body":"Rebased.","created_at":"2026-11-22T10:02:00Z"}]"#,
+                    "ic8",
+                ),
+            ),
+    );
+    let inbox = an_inbox_over(&github);
+
+    // When
+    let read = inbox.conversation(&repo, 8).await;
+
+    // Then
+    assert!(
+        matches!(&read, Err(InboxError::Unavailable(why)) if why.contains("has no id")),
+        "expected an unavailable read naming the missing id, got {read:?}"
     );
 }

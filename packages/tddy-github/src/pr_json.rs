@@ -6,6 +6,8 @@ use serde_json::Value;
 
 use crate::pr_api::{pr_state_from_github, PrDetail, PrIssueComment, PrReview, PrReviewComment};
 
+/// A string field, or `""` when GitHub reports it as `null` (an empty PR body, a review with no
+/// text). Distinguishing "absent" from "empty" would not change any caller's decision.
 fn text(item: &Value, field: &str) -> String {
     item.get(field)
         .and_then(Value::as_str)
@@ -20,8 +22,17 @@ fn pointer_text(item: &Value, path: &str) -> String {
         .to_string()
 }
 
+/// The author login; `""` for an item whose author's account is gone (GitHub reports `null`).
 fn author(item: &Value) -> String {
     pointer_text(item, "/user/login")
+}
+
+/// GitHub's `id` of an item: every review and comment has one, and an item without it could not be
+/// addressed (replied to, reacted to, told apart from its neighbours) — so its absence is an error.
+fn required_id(item: &Value, what: &str) -> Result<u64, String> {
+    item.get("id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("{what} has no id: {item}"))
 }
 
 fn array(body: &str) -> Result<Vec<Value>, String> {
@@ -37,6 +48,8 @@ pub fn parse_pr_detail(pr: &Value) -> Result<PrDetail, String> {
         .get("number")
         .and_then(Value::as_u64)
         .ok_or_else(|| format!("a pull request has no number: {pr}"))?;
+    // No default: `state` decides what `pr_read` reports and what phase an adopted node is created
+    // at, so reading a missing field as "open" would present a merged or closed PR as in play.
     let state = pr
         .get("state")
         .and_then(Value::as_str)
@@ -75,15 +88,18 @@ pub fn parse_first_pr(body: &str) -> Result<Option<PrDetail>, String> {
 
 /// A `GET pulls/{n}/reviews` body.
 pub fn parse_reviews(body: &str) -> Result<Vec<PrReview>, String> {
-    Ok(array(body)?
+    array(body)?
         .iter()
-        .map(|review| PrReview {
-            author: author(review),
-            state: text(review, "state"),
-            body: text(review, "body"),
-            submitted_at: text(review, "submitted_at"),
+        .map(|review| {
+            Ok(PrReview {
+                id: required_id(review, "review")?,
+                author: author(review),
+                state: text(review, "state"),
+                body: text(review, "body"),
+                submitted_at: text(review, "submitted_at"),
+            })
         })
-        .collect())
+        .collect()
 }
 
 /// A `GET pulls/{n}/comments` body.
@@ -91,16 +107,14 @@ pub fn parse_review_comments(body: &str) -> Result<Vec<PrReviewComment>, String>
     array(body)?
         .iter()
         .map(|comment| {
-            let id = comment
-                .get("id")
-                .and_then(Value::as_u64)
-                .ok_or_else(|| format!("review comment has no id: {comment}"))?;
             Ok(PrReviewComment {
-                id,
+                // Without an id a comment cannot be placed in a thread and no reply could attach to it.
+                id: required_id(comment, "review comment")?,
                 in_reply_to_id: comment.get("in_reply_to_id").and_then(Value::as_u64),
                 author: author(comment),
                 body: text(comment, "body"),
                 path: text(comment, "path"),
+                // `null` once the diff position it was anchored to has gone stale.
                 line: comment.get("line").and_then(Value::as_u64),
                 diff_hunk: text(comment, "diff_hunk"),
                 created_at: text(comment, "created_at"),
@@ -111,12 +125,15 @@ pub fn parse_review_comments(body: &str) -> Result<Vec<PrReviewComment>, String>
 
 /// A `GET issues/{n}/comments` body.
 pub fn parse_issue_comments(body: &str) -> Result<Vec<PrIssueComment>, String> {
-    Ok(array(body)?
+    array(body)?
         .iter()
-        .map(|comment| PrIssueComment {
-            author: author(comment),
-            body: text(comment, "body"),
-            created_at: text(comment, "created_at"),
+        .map(|comment| {
+            Ok(PrIssueComment {
+                id: required_id(comment, "conversation comment")?,
+                author: author(comment),
+                body: text(comment, "body"),
+                created_at: text(comment, "created_at"),
+            })
         })
-        .collect())
+        .collect()
 }

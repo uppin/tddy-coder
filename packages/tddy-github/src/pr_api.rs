@@ -167,6 +167,8 @@ pub enum CheckStatus {
 /// One submitted review on a PR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrReview {
+    /// GitHub's review id — what a reply or a dismissal addresses.
+    pub id: u64,
     pub author: String,
     /// `APPROVED` / `CHANGES_REQUESTED` / `COMMENTED` / `DISMISSED`.
     pub state: String,
@@ -196,6 +198,8 @@ pub struct PrReviewComment {
 /// One conversation (issue-level) comment on a PR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrIssueComment {
+    /// GitHub's comment id — what an edit or a reaction addresses.
+    pub id: u64,
     pub author: String,
     pub body: String,
     pub created_at: String,
@@ -1104,43 +1108,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
             &[],
             &token,
         )?;
-        let pr: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| json_err(OP, format!("JSON parse error: {e}")))?;
-
-        let number = pr
-            .get("number")
-            .and_then(|n| n.as_u64())
-            .ok_or_else(|| json_err(OP, format!("missing number in response: {body}")))?;
-        // No default: `state` decides what `pr_read` reports and what phase an adopted node is
-        // created at, so reading a missing field as "open" would present a merged or closed PR as
-        // still in play.
-        let state = pr
-            .get("state")
-            .and_then(|s| s.as_str())
-            .ok_or_else(|| json_err(OP, format!("missing state in response: {body}")))?;
-        let merged_at = pr.get("merged_at").and_then(|s| s.as_str());
-        let draft = pr.get("draft").and_then(|d| d.as_bool()).unwrap_or(false);
-
-        Ok(PrDetail {
-            number,
-            url: json_str(&pr, "html_url"),
-            title: json_str(&pr, "title"),
-            body: json_str(&pr, "body"),
-            state: pr_state_from_github(state, merged_at, draft),
-            base_branch: json_pointer(&pr, "/base/ref"),
-            head_branch: json_pointer(&pr, "/head/ref"),
-            head_sha: json_pointer(&pr, "/head/sha"),
-            // `null` while GitHub is still computing mergeability — kept as `None` rather than
-            // collapsed to `false`, which would read as "conflicted".
-            mergeable: pr.get("mergeable").and_then(|m| m.as_bool()),
-            mergeable_state: json_str(&pr, "mergeable_state"),
-            additions: pr.get("additions").and_then(|n| n.as_u64()).unwrap_or(0),
-            deletions: pr.get("deletions").and_then(|n| n.as_u64()).unwrap_or(0),
-            changed_files: pr
-                .get("changed_files")
-                .and_then(|n| n.as_u64())
-                .unwrap_or(0),
-        })
+        crate::pr_json::parse_pr_body(&body).map_err(|e| json_err(OP, e))
     }
 
     fn list_pr_files(&self, number: u64) -> Result<Vec<PrFile>, tddy_core::WorkflowError> {
@@ -1172,22 +1140,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
             &[("per_page", PER_PAGE)],
             &token,
         )?;
-        let response: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| json_err(OP, format!("JSON parse error: {e}")))?;
-        // Unlike the other list endpoints, this one wraps its items in an object.
-        let runs = response
-            .get("check_runs")
-            .and_then(|r| r.as_array())
-            .ok_or_else(|| json_err(OP, format!("missing check_runs array in: {body}")))?;
-        Ok(runs
-            .iter()
-            .map(|run| CheckRun {
-                name: json_str(run, "name"),
-                // `null` while the run is still going: reported as empty, never as a failure.
-                conclusion: json_str(run, "conclusion"),
-                ..CheckRun::default()
-            })
-            .collect())
+        crate::check_runs::parse_check_runs(&body).map_err(|e| json_err(OP, e))
     }
 
     fn list_reviews(&self, number: u64) -> Result<Vec<PrReview>, tddy_core::WorkflowError> {
@@ -1200,15 +1153,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
             &[("per_page", PER_PAGE)],
             &token,
         )?;
-        Ok(json_array(OP, &body)?
-            .iter()
-            .map(|review| PrReview {
-                author: json_author(review),
-                state: json_str(review, "state"),
-                body: json_str(review, "body"),
-                submitted_at: json_str(review, "submitted_at"),
-            })
-            .collect())
+        crate::pr_json::parse_reviews(&body).map_err(|e| json_err(OP, e))
     }
 
     fn list_review_comments(
@@ -1224,28 +1169,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
             &[("per_page", PER_PAGE)],
             &token,
         )?;
-        let items = json_array(OP, &body)?;
-        let mut comments = Vec::with_capacity(items.len());
-        for comment in &items {
-            // Without an id, a comment cannot be placed in a thread and no reply could ever be
-            // attached to it — a silently id-less comment would break the grouping it belongs to.
-            let id = comment
-                .get("id")
-                .and_then(|n| n.as_u64())
-                .ok_or_else(|| json_err(OP, format!("review comment has no id: {comment}")))?;
-            comments.push(PrReviewComment {
-                id,
-                in_reply_to_id: comment.get("in_reply_to_id").and_then(|n| n.as_u64()),
-                author: json_author(comment),
-                body: json_str(comment, "body"),
-                path: json_str(comment, "path"),
-                // `null` once the diff position it was anchored to has gone stale.
-                line: comment.get("line").and_then(|n| n.as_u64()),
-                diff_hunk: json_str(comment, "diff_hunk"),
-                created_at: json_str(comment, "created_at"),
-            });
-        }
-        Ok(comments)
+        crate::pr_json::parse_review_comments(&body).map_err(|e| json_err(OP, e))
     }
 
     fn list_issue_comments(
@@ -1262,14 +1186,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
             &[("per_page", PER_PAGE)],
             &token,
         )?;
-        Ok(json_array(OP, &body)?
-            .iter()
-            .map(|comment| PrIssueComment {
-                author: json_author(comment),
-                body: json_str(comment, "body"),
-                created_at: json_str(comment, "created_at"),
-            })
-            .collect())
+        crate::pr_json::parse_issue_comments(&body).map_err(|e| json_err(OP, e))
     }
 
     fn search_prs(

@@ -20,6 +20,9 @@ pull requests.
 | `github_rest_common.rs` | shared REST constants (`Accept`, API version, user agents) and the token-taking `curl_github_*_with_token` entry points (the API root is a parameter) — a pure leaf; nothing reads a token from the environment |
 | `github_pr.rs` | the PR helpers `tddy-tools` exposes over MCP |
 | `pr_api.rs` | the `GithubPrApi` / `GithubPrInsightApi` traits and their DTOs — `PrState`, `PrDetail`, `PrFile`, `PrReview`, `CheckRun`, `PrLookupOutcome`, … — plus the live REST implementation |
+| `pr_json.rs`, `check_runs.rs` | parsing of GitHub's PR, review, comment and check-run JSON, shared by `pr_api` and the GitHub inbox |
+| `conditional.rs` | `ConditionalRead` — a `GET` answering `304`/`2xx` with ETag, poll interval and rate-limit headers, over REST (`RestConditionalRead`) or `gh api -i` (`GhCliConditionalRead`). See [docs/conditional-read.md](docs/conditional-read.md) |
+| `trunk_feed.rs` | `TrunkFeed` / `TrunkPoller`, the trunk watch's polling rule. See [docs/trunk-feed.md](docs/trunk-feed.md) |
 
 These three arrived from `tddy-workflow-recipes`, where 2,124 lines of GitHub REST sat inside a
 crate about workflow recipes while the crate named after the service had no PR surface at all.
@@ -49,5 +52,6 @@ here, so an edge back would make the pair mutually dependent.
 ## Documentation
 
 - [docs/rest-token.md](docs/rest-token.md) — how a REST call gets its token; no environment read
+- [docs/conditional-read.md](docs/conditional-read.md) — conditional reads under the GitHub inbox; [docs/trunk-feed.md](docs/trunk-feed.md) — the trunk poller
 - [docs/device-flow.md](docs/device-flow.md), [docs/session-token.md](docs/session-token.md)
 - [docs/changesets/](docs/changesets/) — change history; [docs/code-issues/](docs/code-issues/) — open findings

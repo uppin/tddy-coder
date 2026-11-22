@@ -9,7 +9,9 @@
 //! stored ETag. Concurrent reads of one stale row make **one** request. Subscribers register for a
 //! repository and the **event kinds** they want, and hear when a matching row changes.
 //!
-//! Time is injected (`step(now)`), never read from a clock, so the feed is tested without sleeping.
+//! The feed's schedule is driven by injected time (`step(now)`), so it is tested without sleeping.
+//! Reads use the system clock: a row's freshness while no subscriber's feed keeps it fresh, and the
+//! pause a spent quota puts on reads.
 
 mod feed;
 mod in_flight;

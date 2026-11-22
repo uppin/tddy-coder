@@ -144,6 +144,7 @@ pub fn a_pr(number: u64, head_branch: &str, base_branch: &str) -> PrDetail {
 
 pub fn a_review(author: &str, state: &str, submitted_at: &str) -> PrReview {
     PrReview {
+        id: 0,
         author: author.to_string(),
         state: state.to_string(),
         body: format!("{author} says {state}"),
@@ -186,6 +187,7 @@ pub fn written_at(comment: PrReviewComment, created_at: &str) -> PrReviewComment
 
 pub fn a_conversation_comment(author: &str, body: &str, created_at: &str) -> PrIssueComment {
     PrIssueComment {
+        id: 0,
         author: author.to_string(),
         body: body.to_string(),
         created_at: created_at.to_string(),

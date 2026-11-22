@@ -114,7 +114,7 @@ impl SubscriberLiveness for HostLiveness {
     }
 }
 
-/// `gh api -i` as an OS user, for [`GhCliTrunkFeed`].
+/// `gh api -i` as an OS user, for [`GhCliConditionalRead`].
 struct HostGh {
     cli: tddy_host_service::GithubCli,
     os_user: String,
