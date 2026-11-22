@@ -5,6 +5,8 @@
 **Type**: Feature
 **Complexity**: 5 — new crate plus three re-wired consumers across crates, concurrency (single-flight, shared per-repo task), an HTTP adapter seam, cache invalidation semantics
 **Stack**: `#workqueue` 2/14 — branch `feature/workqueue/github-event-inbox`, base `feature/workqueue/remove-pr-stack-recipe`
+**PR**: [#1003](https://github.com/uppin/tddy-coder/pull/1003)
+**Plan phase**: two commits (plan, then the operator's trunk-watch decision) — pass-2 rebases expect two plan commits above the parent, and the contract is the third
 
 ## Initial Discovery
 
@@ -47,12 +49,12 @@ Owned surface (names final in the contract commit):
 
 | Symbol | Kind |
 |---|---|
-| `GithubInbox::{subscribe, pr, pr_for_head, checks_at, comments, pr_commits, branch_commits}` | read + subscribe API |
-| `InboxSubscription`, `InboxEvent { repo, kind, row }`, `EventKind { Pr, Checks, Comments, Push }` | subscription types |
-| `RowKey`, `Cached<T> { value, fetched_at, etag }` | cache types |
-| `RepoCredential` port (vault account or local gh, resolved per read) | port |
-| `tddy_github::conditional::{ConditionalRead, Conditional<T>, RateLimit}` | transport |
-| `tddy_github::pr_api::CheckRun` new fields | data |
+| `GithubInbox::{new, subscribe, step, pr, pr_for_head, peek_pr_for_head, checks_at, conversation, pr_commits, branch_commits}`, `LOW_QUOTA_REMAINING` | read + subscribe API (`step(now)` drives the feeds) |
+| `InboxSubscription`, `InboxEvent { repo, kind, row }`, `EventKind { Pr, Checks, Comments, Push }`, `StepReport` | subscription types |
+| `RowKey`, `Cached<T> { value, fetched_at_unix_ms, etag }`, `PrConversation { reviews, review_comments, issue_comments }` (reviews carry their state — n13's review condition reads it), `PrCommit { sha, author_name, author_date, subject }` (n12's leak check reads it), `InboxError`, `paths::*` | cache types |
+| `RepoReaders` port (vault account or local gh, resolved per read); `InboxTrunkFeed` (a `TrunkFeed` over the branch-commits row) | ports |
+| `tddy_github::conditional::{ConditionalRead, ConditionalAnswer, RateLimit, GithubReadError, RestConditionalRead, GhCliConditionalRead, GITHUB_API_BASE}`, `tddy_github::check_runs::parse_check_runs` | transport |
+| `tddy_github::pr_api::CheckRun` new fields (`id`, `status: CheckStatus`, `started_at`, `completed_at`, `details_url`; `Default`) | data |
 
 ## Boundaries
 
@@ -70,10 +72,15 @@ does reads or changes what n1 removes.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: the `tddy-github-inbox` crate with
-`GithubInbox`'s public signatures, the subscription and cache types, the `ConditionalRead` port and
-`CheckRun` fields in `tddy-github`, and the failing tests below. `/green` implements the feed, cache
-and migrations in this PR.
+Published (pass 2, commit 3 — the plan phase is two commits): the `tddy-github-inbox` crate with
+`GithubInbox`'s public signatures (`todo!("TODO(n2): …")` bodies), the subscription and cache types,
+`InboxTrunkFeed`, `paths`; the `conditional` transport, `check_runs::parse_check_runs` and the richer
+`CheckRun` in `tddy-github` (its three struct-literal construction sites take `..Default::default()`);
+and the 14 failing tests below. `/green` implements the feed, cache and migrations in this PR.
+
+Children consume: n4 (`subscribe`, `pr_for_head`, `peek_pr_for_head`, `checks_at`, `conversation`,
+`pr_commits`, `CheckRun`), n6 (`subscribe`, `pr`, `checks_at`), n9 (`pr`), n12 (`pr_commits`, `pr`),
+n13 (`checks_at`, `conversation`).
 
 ## Green wave
 
@@ -187,7 +194,7 @@ via the pending-check poll (the events feed does not carry them).
 
 ## Testing Plan
 
-Integration tests against `wiremock` (already in the lockfile) for the transport and the feed's HTTP
+Integration tests against a local axum GitHub (the crate's existing stand-in) for the transport and the feed's HTTP
 behaviour; port doubles (a scripted `ConditionalRead`) for cache, single-flight and subscription
 semantics. Time is injected (the trunk poller's step-function pattern), never slept. Consumer
 migrations are proved by their existing suites (`trunk_watch_acceptance.rs` 6,
@@ -196,26 +203,28 @@ migrations are proved by their existing suites (`trunk_watch_acceptance.rs` 6,
 ## Acceptance Tests
 
 `packages/tddy-github-inbox/tests/inbox_feed_acceptance.rs`:
-- [ ] `two_subscribers_of_one_repository_share_one_feed`
-- [ ] `a_not_modified_feed_answer_changes_nothing_and_waits_out_the_poll_interval`
-- [ ] `a_pull_request_event_invalidates_only_that_pull_requests_rows`
-- [ ] `a_stale_row_is_revalidated_with_its_stored_etag`
-- [ ] `concurrent_reads_of_one_stale_row_make_one_request`
-- [ ] `a_checks_subscriber_hears_a_pending_check_complete_and_not_a_new_comment`
-- [ ] `checks_are_polled_only_while_some_head_has_pending_checks`
-- [ ] `a_low_remaining_quota_slows_the_feed_until_the_reset_and_reads_still_answer_from_cache`
+- [x] `two_subscribers_of_one_repository_share_one_feed`
+- [x] `a_not_modified_feed_answer_changes_nothing_and_waits_out_the_poll_interval`
+- [x] `a_pull_request_event_invalidates_only_that_pull_requests_rows`
+- [x] `a_stale_row_is_revalidated_with_its_stored_etag`
+- [x] `concurrent_reads_of_one_row_make_one_request`
+- [x] `a_checks_subscriber_hears_a_pending_check_complete_and_not_a_new_comment`
+- [x] `checks_are_polled_only_while_some_head_has_pending_checks`
+- [x] `a_low_remaining_quota_slows_the_feed_until_the_reset_and_reads_still_answer_from_cache`
 
 `packages/tddy-github/tests/conditional_read_over_http.rs`:
-- [ ] `a_304_is_not_modified_and_keeps_the_poll_interval`
-- [ ] `rate_limit_headers_are_read_from_every_answer`
-- [ ] `gh_api_dash_i_304_reads_as_not_modified_despite_its_exit_code`
-- [ ] `check_runs_carry_status_timing_and_details_url`
+- [x] `a_304_is_not_modified_and_keeps_the_poll_interval`
+- [x] `rate_limit_headers_are_read_from_every_answer`
+- [x] `gh_api_dash_i_304_reads_as_not_modified_despite_its_exit_code`
+- [x] `check_runs_carry_status_timing_and_details_url`
 
-`packages/tddy-session-activity/tests/trunk_watch_acceptance.rs` (existing, extended):
-- [ ] `the_trunk_watch_reads_its_commits_from_the_repository_inbox`
-
-`packages/tddy-daemon-rpc/tests/project_stacks_rpc_acceptance.rs` (existing, extended):
-- [ ] `many_branch_queries_for_one_branch_cost_one_github_read_per_poll_interval`
+`packages/tddy-github-inbox/tests/inbox_feed_acceptance.rs` (consumer seams):
+- [x] `the_trunk_feed_reads_branch_commits_through_the_inbox_row` — the trunk watch's `TrunkPoller` keeps
+  its semantics and reads through `InboxTrunkFeed`, so its existing six acceptance tests stay the
+  behaviour proof and only `svc_trunk_watch_wiring.rs` changes
+- [x] `repeated_reads_of_an_unchanged_pr_for_head_row_make_no_further_requests` — the property the
+  `QueryBranch` PR leg relies on (N open views of one branch cost one read); the leg's re-wiring is
+  proved by `project_stacks_rpc_acceptance.rs` staying green
 
 ## Decisions & Trade-offs
 
@@ -252,10 +261,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

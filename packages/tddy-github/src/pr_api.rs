@@ -137,12 +137,31 @@ pub struct PrFile {
 }
 
 /// One check run against a PR's head commit.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CheckRun {
+    /// GitHub's check-run id (`0` where a caller built one without it).
+    pub id: u64,
     pub name: String,
+    /// Whether the run is queued, running or done.
+    pub status: CheckStatus,
     /// `success` / `failure` / `neutral` / `cancelled` / `timed_out` / `action_required`, or
     /// empty while the run is still in progress.
     pub conclusion: String,
+    /// ISO-8601, once the run started.
+    pub started_at: Option<String>,
+    /// ISO-8601, once the run completed.
+    pub completed_at: Option<String>,
+    /// The run's page (logs and annotations).
+    pub details_url: String,
+}
+
+/// A check run's lifecycle, as GitHub's `status` field names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CheckStatus {
+    #[default]
+    Queued,
+    InProgress,
+    Completed,
 }
 
 /// One submitted review on a PR.
@@ -1166,6 +1185,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
                 name: json_str(run, "name"),
                 // `null` while the run is still going: reported as empty, never as a failure.
                 conclusion: json_str(run, "conclusion"),
+                ..CheckRun::default()
             })
             .collect())
     }

@@ -58,6 +58,7 @@ members = [
     "packages/tddy-git",
     "packages/tddy-git-clone",
     "packages/tddy-github",
+    "packages/tddy-github-inbox",
     "packages/tddy-daemon",
     "packages/tddy-daemon-kernel",
     "packages/tddy-daemon-extensions",

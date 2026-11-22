@@ -140,6 +140,7 @@ mod tests {
             checks: vec![CheckRun {
                 name: "build".to_string(),
                 conclusion: "success".to_string(),
+                ..CheckRun::default()
             }],
             files: None,
         }

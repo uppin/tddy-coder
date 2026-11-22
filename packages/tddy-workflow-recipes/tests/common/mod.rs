@@ -196,6 +196,7 @@ pub fn a_check_run(name: &str, conclusion: &str) -> CheckRun {
     CheckRun {
         name: name.to_string(),
         conclusion: conclusion.to_string(),
+        ..CheckRun::default()
     }
 }
 

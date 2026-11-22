@@ -1550,3 +1550,11 @@ Fixtures: `tddy-changeset/src/stack_fixtures.rs` (`a_stack_host`, `stack_id_of`,
   (:107), `a_not_modified_answer_reports_nothing_and_waits_out_the_poll_interval` (:142).
 - **Finding:** the step-function, injected-time style of `TrunkPoller` is the template for the inbox
   feed task; its scripted-answer doubles carry over.
+
+## Exploration 5 — pass 2: seams the contract builds on
+
+- `rg -n 'CheckRun \{' packages -g '*.rs'` → three struct-literal sites: `tddy-github/src/pr_api.rs:1165`
+  (parse), `tddy-workflow-recipes/tests/common/mod.rs:195`, `tddy-daemon-rpc/src/exec_tool/stack_tools/shape.rs:140`.
+- `tddy-github/src/trunk_feed.rs`: `RepoSlug`, `TrunkCommit`, `Conditional<T>`, `TrunkFeed`, `GhApi`,
+  `GhApiOutput`, `TokenSource` — reused by the conditional transport and `InboxTrunkFeed`.
+- `tddy-github/Cargo.toml` dev-deps: axum is the crate's local GitHub stand-in (`real_provider_over_http.rs`).

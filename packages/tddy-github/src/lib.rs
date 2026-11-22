@@ -1,4 +1,6 @@
 pub mod auth_service;
+pub mod check_runs;
+pub mod conditional;
 pub mod github_pr;
 pub mod github_rest_common;
 pub mod pr_api;
