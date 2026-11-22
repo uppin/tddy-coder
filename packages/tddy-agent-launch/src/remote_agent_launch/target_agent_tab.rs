@@ -17,6 +17,7 @@ use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_core::ssh_exec::shell_single_quote;
 
+use super::agent_probe::probe_agent_on_target;
 use super::session_files::{write_rendered_session_files, SessionFilesPlace};
 use super::target_tab::{reach_the_worktree, spawn_tab_client};
 use super::{target_login_exec, RemoteLaunchError, TargetTab};
@@ -42,10 +43,12 @@ pub struct TargetAgentTab {
 ///
 /// The target is reached first, through the port, with `tab.worktree` entered there: an unreachable
 /// target, or a worktree it does not hold, fails the tab with the shell's own reason
-/// ([`RemoteLaunchError::Shell`]) and registers nothing. A file `agent.argv` names in this host's
-/// session directory (`tab.session_dir`) is written into the worktree's `.tddy/` on the target and
-/// its argument rewritten to that copy, as a main's launch writes its rendered session files — so
-/// no path of this host reaches the target. Then the local PTY runs
+/// ([`RemoteLaunchError::Shell`]) and registers nothing. Then the target's login shell is asked for
+/// the agent's bare command ([`probe_agent_on_target`]): an agent it does not find fails the tab
+/// [`RemoteLaunchError::AgentNotOnTarget`], before any terminal is started. A file `agent.argv`
+/// names in this host's session directory (`tab.session_dir`) is written into the worktree's
+/// `.tddy/` on the target and its argument rewritten to that copy, as a main's launch writes its
+/// rendered session files — so no path of this host reaches the target. Then the local PTY runs
 /// [`RemoteShell::interactive`](tddy_remote_shell::RemoteShell::interactive) over
 /// `cd '<worktree>' && <target_login_exec(argv, env)>` in `tab.session_dir`, as a tab
 /// (`CliSessionManager::spawn_rendered_client_tab`), and the launch returns with it. Nothing of the
@@ -58,6 +61,9 @@ pub async fn launch_agent_tab_on_target(
     agent: &TargetAgentTab,
 ) -> Result<Arc<PtyHandle>, RemoteLaunchError> {
     reach_the_worktree(&tab).await?;
+    // An agent the target's login `PATH` lacks fails the tab naming it, before its terminal starts.
+    let command = agent.argv.first().map_or("", String::as_str);
+    probe_agent_on_target(tab.shell.as_ref(), tab.worktree, command).await?;
 
     // A file the tab's argv names in this session's directory goes to the worktree's `.tddy/` on the
     // target, its argument rewritten: no host path reaches the target.

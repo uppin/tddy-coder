@@ -3,8 +3,11 @@
 //! as the caller (their subject), the target user's login shell launched there in the session's worktree
 //! ([`tddy_agent_launch::remote_agent_launch::launch_tab_on_target`]) as a local tab terminal, and
 //! recorded `[target, shell]` in the session's roster. A target that cannot be resolved (a locked
-//! vault, a missing account) fails the start `FAILED_PRECONDITION`; one that resolves but cannot be
-//! reached fails it `UNAVAILABLE` with the transport's words; nothing is recorded either way. A tab
+//! vault, a missing account) fails the start `FAILED_PRECONDITION`; a failed launch is reported by
+//! the one mapping every target tab shares
+//! ([`tddy_agent_launch::remote_agent_launch::tab_launch_status`]: a target that resolves but cannot
+//! be reached is `UNAVAILABLE` with the transport's words, a local terminal that cannot spawn is
+//! `INTERNAL`); nothing is recorded either way. A tab
 //! "On this host" of a target session runs in the session's directory on this host — where its
 //! main's transport client runs — since its worktree is on the target.
 //!
@@ -12,25 +15,13 @@
 
 use std::path::{Path, PathBuf};
 
-use tddy_agent_launch::remote_agent_launch::{launch_tab_on_target, RemoteLaunchError, TargetTab};
+use tddy_agent_launch::remote_agent_launch::{launch_tab_on_target, tab_launch_status, TargetTab};
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_core::tab_roster::{LaunchNode, TabEntry};
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::TerminalLaunch;
 
 use super::CliManagerTerminalRoster;
-
-/// What a failed launch of the tab says to the caller. A target that resolved but could not be
-/// reached — its transport failed to connect, or `cd` into the worktree failed through the remote
-/// shell — is `UNAVAILABLE` carrying the transport's own words: the target, not the request, is at
-/// fault. Anything else the launch refuses stays a failed precondition. A target that could not be
-/// resolved (a locked vault, a missing account) never gets here: the port refused it first.
-fn reach_failure(error: RemoteLaunchError) -> Status {
-    match error {
-        RemoteLaunchError::Shell(_) => Status::unavailable(error.to_string()),
-        other => Status::failed_precondition(other.to_string()),
-    }
-}
 
 impl CliManagerTerminalRoster {
     /// Start a shell tab of `session_id` on the session's target, in its worktree there, record it
@@ -59,7 +50,7 @@ impl CliManagerTerminalRoster {
             },
         )
         .await
-        .map_err(reach_failure)?;
+        .map_err(|error| tab_launch_status(&error))?;
         let chain = vec![LaunchNode::target(), LaunchNode::shell()];
         if let Err(error) = self
             .manager

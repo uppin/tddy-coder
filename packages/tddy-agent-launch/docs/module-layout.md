@@ -25,6 +25,11 @@ reaches the worktree and registers the client through the two steps `target_tab.
 `.tddy/` on the target (`write_rendered_session_files`, over a `SessionFilesPlace`), and runs
 `cd '<wt>' && <target_login_exec(argv, env)>` — the agent's bare command under `env -i` with exactly the tab's
 environment.
+Before it spawns, the target's login shell is asked for the agent's bare command (`remote_agent_launch/agent_probe.rs`:
+`probe_agent_on_target(shell, worktree, command)`, one call, `command -v` quoted with `tddy_core::ssh_exec::shell_single_quote`;
+non-zero is `RemoteLaunchError::AgentNotOnTarget { command }`; `#tab-hardening` 1/4). Every target tab's failed launch
+maps to one status through `remote_agent_launch/tab_launch_status.rs` (`tab_launch_status`: `Shell` and `Trust(Shell)`
+`UNAVAILABLE`, `Spawn` `INTERNAL`, the rest `FAILED_PRECONDITION`).
 `launch_on_target` spawns the session's local PTY (the transport's client) on a cleared environment
 carrying the transport's credentials, `SSH_AUTH_SOCK` and the daemon's own `PATH`, so a bare `coder` or
 `ssh` resolves; the agent's environment still travels inside the remote command.

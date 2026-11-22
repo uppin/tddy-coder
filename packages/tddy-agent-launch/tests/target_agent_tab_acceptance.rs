@@ -10,6 +10,10 @@
 //! it started in and its arguments, then stays up on its terminal. The daemon's coding agents are
 //! the built-in specs, over a host that holds either a stand-in of the agent or none at all.
 //!
+//! Extended by `#tab-hardening` 1/4: before its terminal starts, an agent tab asks the target's login
+//! shell for its agent, and a target without it fails the tab naming the agent; an unreachable
+//! target fails it `UNAVAILABLE` (PRD-2026-11-21-tab-errors.md).
+//!
 //! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs)
 
 use std::collections::BTreeMap;
@@ -20,7 +24,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
 use tddy_actions::tool::ToolHost;
-use tddy_agent_launch::remote_agent_launch::{launch_agent_tab_on_target, TargetTab};
+use tddy_agent_launch::remote_agent_launch::{
+    launch_agent_tab_on_target, tab_launch_status, RemoteLaunchError, TargetTab,
+};
 use tddy_agent_launch::restore_tabs::{new_target_agent_tab, NewTargetAgentTab};
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_agent_launch::tab_target_shell::TabTarget;
@@ -30,6 +36,7 @@ use tddy_remote_shell::{
     ExecOutput, ExecRequest, FileMode, InteractiveCommand, RemoteShell, RemoteShellError,
     ShellAddress, SshShell, StreamedExec,
 };
+use tddy_rpc::Code;
 use tddy_testing_commons::remote_target::{write_executable, StandInSshTarget};
 use tddy_testing_commons::wait::eventually;
 
@@ -40,6 +47,10 @@ const TAB_ID: &str = "019d2c7e-51aa-7c40-8f0e-2b1d6a9c3e71";
 const TARGET_ALIAS: &str = "buildbox";
 /// The chat Cursor's `create-chat` prints on the target.
 const CHAT_MINTED_ON_THE_TARGET: &str = "chat-minted-on-the-target";
+
+/// What OpenSSH says of a host it cannot resolve.
+const SSH_COMPLAINT: &str =
+    "ssh: Could not resolve hostname buildbox: nodename nor servname provided, or not known";
 
 /// A safety net for a stand-in to report, not a prediction of how long it takes.
 const OBSERVE: Duration = Duration::from_secs(15);
@@ -179,6 +190,49 @@ fn a_target_holding_the_worktree() -> ATarget {
     let worktree = machine.worktree_of(SESSION_ID);
     std::fs::create_dir_all(&worktree).expect("the session's worktree on the target");
     ATarget { machine, worktree }
+}
+
+/// The stand-in ssh machine with the session's worktree on it, whose login `PATH` is its own agents
+/// directory — empty — and the system's directories: no agent is installed there, whatever this
+/// host has on its own `PATH`.
+fn a_target_without_any_agent() -> ATarget {
+    let machine = StandInSshTarget::behind_ssh_with_only_the_system_path();
+    let worktree = machine.worktree_of(SESSION_ID);
+    std::fs::create_dir_all(&worktree).expect("the session's worktree on the target");
+    ATarget { machine, worktree }
+}
+
+/// A target ssh cannot reach: its `ssh` fails as OpenSSH does — [`SSH_COMPLAINT`] on stderr, status
+/// 255 — and runs nothing.
+struct AnUnreachableTarget {
+    ssh: PathBuf,
+    worktree: PathBuf,
+    _dir: tempfile::TempDir,
+}
+
+fn an_unreachable_target() -> AnUnreachableTarget {
+    let dir = tempfile::tempdir().expect("a directory for the stand-in ssh");
+    let ssh = dir.path().join("ssh");
+    write_executable(
+        &ssh,
+        &format!("#!/bin/sh\necho '{SSH_COMPLAINT}' >&2\nexit 255\n"),
+    );
+    AnUnreachableTarget {
+        ssh,
+        worktree: PathBuf::from("/home/dev/repo/.worktrees").join(SESSION_ID),
+        _dir: dir,
+    }
+}
+
+impl AnUnreachableTarget {
+    /// The remote shell that tries to reach the target, recording what it is handed.
+    fn the_recording_shell(&self) -> Arc<ARecordingShell> {
+        Arc::new(ARecordingShell {
+            inner: SshShell::through(&self.ssh, TARGET_ALIAS),
+            interactive: StdMutex::new(Vec::new()),
+            written: StdMutex::new(Vec::new()),
+        })
+    }
 }
 
 impl ATarget {
@@ -339,6 +393,43 @@ impl ADaemon {
         .await
         .map_err(|error| error.to_string())?;
         Ok(AnOpenedTab { settled, terminal })
+    }
+
+    /// Launch the session's agent tab [`TAB_ID`] of `harness` on the target `shell` reaches, in
+    /// `worktree` there, its conversation settled first: the launch's own outcome.
+    async fn launches_an_agent_tab_on(
+        &self,
+        harness: &str,
+        shell: Arc<dyn RemoteShell>,
+        worktree: &Path,
+    ) -> Result<Arc<PtyHandle>, RemoteLaunchError> {
+        let target = TabTarget {
+            shell: Arc::clone(&shell),
+            worktree: worktree.to_path_buf(),
+        };
+        let settled = new_target_agent_tab(&self.coding_agents, harness, &target)
+            .await
+            .expect("the tab's conversation is settled without the target");
+        launch_agent_tab_on_target(
+            &self.manager,
+            SESSION_ID,
+            TAB_ID,
+            TargetTab {
+                shell,
+                worktree,
+                session_dir: &self.session_dir,
+            },
+            &settled.agent,
+        )
+        .await
+    }
+
+    /// Whether the tab [`TAB_ID`] is registered as a terminal of the session.
+    async fn has_the_tab(&self) -> bool {
+        self.manager
+            .get_terminal(SESSION_ID, TAB_ID)
+            .await
+            .is_some()
     }
 }
 
@@ -514,4 +605,66 @@ async fn a_target_agent_tab_hands_the_target_no_host_path() {
         .filter(|path| !path.starts_with(&on_the_target))
         .collect();
     assert_eq!(elsewhere, Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn an_agent_tab_whose_agent_is_missing_on_the_target_fails_before_its_terminal_starts() {
+    // Given a target whose login `PATH` holds no Claude Code, and a daemon host with none either
+    let _turn = ONE_SSH_MACHINE_AT_A_TIME.lock().await;
+    let target = a_target_without_any_agent();
+    let daemon = a_daemon_with(a_host_without_any_agent());
+    let shell = target.the_recording_shell();
+
+    // When a Claude tab is launched on the target
+    let failure = daemon
+        .launches_an_agent_tab_on(
+            "claude-cli",
+            Arc::clone(&shell) as Arc<dyn RemoteShell>,
+            &target.worktree,
+        )
+        .await
+        .err()
+        .expect("a tab whose agent the target lacks fails");
+
+    // Then it fails naming the agent the target lacks, no terminal carried a command to the target,
+    // and no tab is registered
+    assert_eq!(
+        failure,
+        RemoteLaunchError::AgentNotOnTarget {
+            command: "claude".to_string()
+        }
+    );
+    assert_eq!(shell.interactive_commands(), Vec::<String>::new());
+    assert!(!daemon.has_the_tab().await, "no tab is registered");
+}
+
+#[tokio::test]
+async fn an_agent_tab_on_an_unreachable_target_fails_unavailable() {
+    // Given a target ssh cannot reach, and a daemon host with no coding agent
+    let _turn = ONE_SSH_MACHINE_AT_A_TIME.lock().await;
+    let target = an_unreachable_target();
+    let daemon = a_daemon_with(a_host_without_any_agent());
+    let shell = target.the_recording_shell();
+
+    // When a Claude tab is launched on the target
+    let failure = daemon
+        .launches_an_agent_tab_on(
+            "claude-cli",
+            Arc::clone(&shell) as Arc<dyn RemoteShell>,
+            &target.worktree,
+        )
+        .await
+        .err()
+        .expect("a tab on an unreachable target fails");
+
+    // Then it is reported UNAVAILABLE in what ssh said, no terminal carried a command to the
+    // target, and no tab is registered
+    let status = tab_launch_status(&failure);
+    assert_eq!(
+        (status.code(), status.message().contains(SSH_COMPLAINT)),
+        (Code::Unavailable, true),
+        "the status: {status:?}"
+    );
+    assert_eq!(shell.interactive_commands(), Vec::<String>::new());
+    assert!(!daemon.has_the_tab().await, "no tab is registered");
 }

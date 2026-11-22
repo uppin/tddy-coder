@@ -4,12 +4,16 @@
 //! ([`tddy_agent_launch::restore_tabs::new_target_agent_tab`]: the agent's bare command, its
 //! conversation minted on the target), launched there in the session's worktree
 //! ([`tddy_agent_launch::remote_agent_launch::launch_agent_tab_on_target`]) as a local tab terminal,
-//! and recorded `[target, agent]` in the session's roster. A target that cannot be resolved or
-//! reached fails the start with why, and nothing is recorded.
+//! and recorded `[target, agent]` in the session's roster. A target that cannot be resolved fails the
+//! start `FAILED_PRECONDITION`; a failed launch — an unreachable target, an agent the target lacks, a
+//! local terminal that cannot spawn — is reported by the mapping every target tab shares
+//! ([`tddy_agent_launch::remote_agent_launch::tab_launch_status`]); nothing is recorded either way.
 //!
 //! PRD: docs/ft/daemon/session-liveness.md (A target session's tabs)
 
-use tddy_agent_launch::remote_agent_launch::{launch_agent_tab_on_target, TargetTab};
+use tddy_agent_launch::remote_agent_launch::{
+    launch_agent_tab_on_target, tab_launch_status, TargetTab,
+};
 use tddy_agent_launch::restore_tabs::{agent_launch_node, new_target_agent_tab, NewTargetAgentTab};
 use tddy_core::tab_roster::{LaunchNode, TabEntry};
 use tddy_rpc::Status;
@@ -51,7 +55,7 @@ impl CliManagerTerminalRoster {
             &tab,
         )
         .await
-        .map_err(|error| Status::failed_precondition(error.to_string()))?;
+        .map_err(|error| tab_launch_status(&error))?;
         let chain = vec![
             LaunchNode::target(),
             agent_launch_node(agent, &conversation_id, resumable),

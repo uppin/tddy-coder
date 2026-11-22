@@ -40,6 +40,10 @@ transport itself (`ssh`, `coder ssh`) is `tddy-agent-launch`'s `target_shell_tab
 asserts the `[target, agent]` record; the target-agent case of `resume_tab_roster_acceptance` reopens a recorded
 claude tab on the target resuming its conversation. The agent's own run on the target (worktree, no host copy of
 the agent, the chat minted there, no host path handed over) is `tddy-agent-launch`'s `target_agent_tab_acceptance`.
+`#tab-hardening` 1/4 extends it with the error contract: an unreachable target is `UNAVAILABLE`, an agent the target
+lacks is `FAILED_PRECONDITION` naming it (the fake's login `PATH` is its agents directory plus `/usr/bin:/bin`, so this
+host's copy never answers), and a terminal this host cannot spawn is `INTERNAL`
+(`target_shells_whose_client_this_host_lacks`); `resume_tab_roster_acceptance` drops such an agent tab on Resume with that reason.
 
 ## Writing one
 
