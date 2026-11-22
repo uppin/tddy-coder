@@ -128,6 +128,36 @@ impl HostCodingAgents {
         })
     }
 
+    /// Agent `id` as a session on a **target** runs it: its spec, its own tool as the spec's bare
+    /// command (`command` and `binary` alike — what the target's login `PATH` resolves, never a
+    /// path of this host) and the closure of its deps resolved on this host, since the daemon runs
+    /// those itself (`tddy-tools`). The agent's own binary is never looked up here.
+    pub fn resolve_for_target(&self, id: &str) -> Result<HostAgent, SpecLaunchError> {
+        let def = self
+            .registry
+            .get(id)
+            .ok_or_else(|| SpecLaunchError::UnknownAgent(id.to_string()))?;
+        let spec = CodingAgentSpec::of(def).map_err(SpecLaunchError::Spec)?;
+        let dep_ids: Vec<&str> = def.deps.iter().map(String::as_str).collect();
+        let deps = self
+            .registry
+            .resolve_closure(&dep_ids, self.host.as_ref())
+            .map_err(SpecLaunchError::Tool)?;
+        let command = def.binary.command.clone();
+        Ok(HostAgent {
+            spec,
+            tool: ResolvedTool {
+                id: def.id.clone(),
+                command: command.clone(),
+                binary: PathBuf::from(command),
+                reads: def.reads.clone(),
+                network: def.network.clone(),
+            },
+            deps,
+            env_base: self.agents.agent_env_base().clone(),
+        })
+    }
+
     /// `def` as the tool at `binary`, which must be an executable file on this host.
     fn overridden_tool(
         &self,

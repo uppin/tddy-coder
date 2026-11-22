@@ -12,6 +12,7 @@
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-21-target-start-agent.md
 
+use std::path::Path;
 use std::sync::Arc;
 
 use tddy_remote_shell::RemoteShell;
@@ -20,6 +21,7 @@ use tddy_service::proto::session::StartSessionRequest;
 
 use crate::harness_from_spec::{resolve_session_agent, CliSessionAgent, CliSessionType};
 use crate::launch_ports::LaunchSessions;
+use crate::remote_agent_launch::{probe_agent_on_target, tab_launch_status};
 use crate::spec_launch::HostCodingAgents;
 
 /// The coding agent a CLI session of `kind` runs on a target, read from `agents` without resolving
@@ -35,9 +37,15 @@ pub(crate) fn resolve_session_agent_for_target(
     agents: &Arc<HostCodingAgents>,
     kind: CliSessionType,
 ) -> Result<CliSessionAgent, Status> {
-    // TODO(target-start-agent): implement
-    let _ = (agents, kind);
-    todo!()
+    let agents = Arc::clone(agents);
+    let agent = agents
+        .resolve_for_target(kind.spec_id)
+        .map_err(|e| Status::failed_precondition(e.to_string()))?;
+    Ok(CliSessionAgent {
+        kind,
+        agent,
+        agents,
+    })
 }
 
 /// Ask the target `shell` reaches whether its login shell finds `session_agent`'s bare command —
@@ -52,9 +60,13 @@ pub(crate) async fn require_the_agent_on_the_target(
     shell: &dyn RemoteShell,
     session_agent: &CliSessionAgent,
 ) -> Result<(), Status> {
-    // TODO(target-start-agent): implement
-    let _ = (shell, session_agent);
-    todo!()
+    probe_agent_on_target(
+        shell,
+        Path::new("."),
+        &session_agent.agent.tool.binary.to_string_lossy(),
+    )
+    .await
+    .map_err(|e| tab_launch_status(&e))
 }
 
 impl LaunchSessions {
