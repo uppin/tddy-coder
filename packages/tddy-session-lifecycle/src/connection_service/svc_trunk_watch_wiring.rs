@@ -6,7 +6,7 @@
 //! holding a live agent for it — the watcher's liveness sweep drops it. One task
 //! ([`DaemonSessionHost::spawn_trunk_watch`]) drives the watcher on the deadline it returns.
 //!
-//! A project's trunk is read through the host's `gh` as the session's OS user when the project is
+//! A project's trunk is read through the daemon's GitHub inbox, by the host's `gh` as the session's OS user when the project is
 //! **Local gh**, and through the REST API with the project's GitHub account token otherwise.
 
 use std::collections::HashMap;
@@ -15,11 +15,14 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use tddy_daemon_kernel::live_sessions::LiveSessions;
+use tddy_github::conditional::{
+    ConditionalRead, GhCliConditionalRead, RestConditionalRead, GITHUB_API_BASE,
+};
 use tddy_github::pr_api::owner_repo_from_remote_url;
 use tddy_github::trunk_feed::{
-    GhApi, GhApiOutput, GhCliTrunkFeed, RepoSlug, RestTrunkFeed, TrunkFeed, TrunkPoller,
-    TrunkReadError,
+    GhApi, GhApiOutput, RepoSlug, TrunkFeed, TrunkPoller, TrunkReadError,
 };
+use tddy_github_inbox::{GithubInbox, InboxError, InboxTrunkFeed, RepoReaders};
 use tddy_session_activity::trunk_watch::{
     SubscriberLiveness, TrunkSource, TrunkSubscription, TrunkWatcher,
 };
@@ -35,10 +38,45 @@ const SHORTEST_STEP_WAIT: Duration = Duration::from_secs(1);
 /// How long a just-started session counts as live before the host's own snapshot must show it.
 const START_GRACE: Duration = Duration::from_secs(60);
 
-/// What the host keeps to watch trunks: the watcher and the sessions' liveness.
+/// What the host keeps to watch trunks: the watcher, the sessions' liveness, and the inbox the
+/// trunk is read through.
 pub(crate) struct TrunkWatching {
     watcher: Arc<TrunkWatcher>,
     liveness: Arc<HostLiveness>,
+    inbox: Arc<GithubInbox>,
+}
+
+/// The transport that reads each repository, registered as projects are subscribed. A repository
+/// is read with the credential of the project that most recently subscribed to it; the token
+/// itself is resolved on every read, so a rotated one is picked up without a re-subscribe.
+#[derive(Default)]
+struct HostRepoReaders {
+    readers: Mutex<HashMap<RepoSlug, Arc<dyn ConditionalRead>>>,
+}
+
+impl HostRepoReaders {
+    fn register(&self, repo: &RepoSlug, reader: Arc<dyn ConditionalRead>) {
+        self.readers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(repo.clone(), reader);
+    }
+}
+
+impl RepoReaders for HostRepoReaders {
+    fn reader_for(&self, repo: &RepoSlug) -> Result<Arc<dyn ConditionalRead>, InboxError> {
+        self.readers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(repo)
+            .cloned()
+            .ok_or_else(|| {
+                InboxError::Unavailable(format!(
+                    "no project has registered a credential for {}/{}",
+                    repo.owner, repo.name
+                ))
+            })
+    }
 }
 
 /// Which subscribed sessions are live: the host's snapshot, taken before each step, and the
@@ -109,6 +147,8 @@ impl GhApi for HostGh {
 /// Builds a project's poller from its row on this host.
 struct HostTrunkSource {
     host: DaemonSessionHost,
+    inbox: Arc<GithubInbox>,
+    readers: Arc<HostRepoReaders>,
 }
 
 /// The GitHub token `subject`'s vault holds for the project's account, read from the project's
@@ -132,31 +172,40 @@ fn project_account_token(
 }
 
 impl HostTrunkSource {
+    /// Register how `repo` is read for this project, and answer the feed that reads it through the
+    /// inbox.
     fn feed_for(
         &self,
         row: &tddy_projects::project_storage::ProjectData,
         subscription: &TrunkSubscription,
+        repo: &RepoSlug,
     ) -> Result<Arc<dyn TrunkFeed>, String> {
-        if row.local_gh {
+        let reader: Arc<dyn ConditionalRead> = if row.local_gh {
             let hostname = tddy_accounts::local_gh::github_hostname_of(&row.git_url)
                 .map_err(|e| e.to_string())?;
-            return Ok(Arc::new(GhCliTrunkFeed::new(Arc::new(HostGh {
+            Arc::new(GhCliConditionalRead::new(Arc::new(HostGh {
                 cli: self.host.github_cli.clone(),
                 os_user: subscription.os_user.clone(),
                 hostname,
-            }))));
-        }
-        let subject = subscription
-            .github_subject
-            .clone()
-            .ok_or_else(|| "the session's GitHub user is unknown".to_string())?;
-        // Resolved now, so a project with no usable account is left unwatched at once, and again
-        // on every read, so a token rotated in the vault is picked up without a re-subscribe.
-        project_account_token(&self.host, subscription, &subject)?;
-        let (host, subscription) = (self.host.clone(), subscription.clone());
-        Ok(Arc::new(RestTrunkFeed::new(Arc::new(move || {
-            project_account_token(&host, &subscription, &subject).map_err(TrunkReadError)
-        }))))
+            })))
+        } else {
+            let subject = subscription
+                .github_subject
+                .clone()
+                .ok_or_else(|| "the session's GitHub user is unknown".to_string())?;
+            // Resolved now, so a project with no usable account is left unwatched at once, and again
+            // on every read, so a token rotated in the vault is picked up without a re-subscribe.
+            project_account_token(&self.host, subscription, &subject)?;
+            let (host, subscription) = (self.host.clone(), subscription.clone());
+            Arc::new(RestConditionalRead::new(
+                GITHUB_API_BASE,
+                Arc::new(move || {
+                    project_account_token(&host, &subscription, &subject).map_err(TrunkReadError)
+                }),
+            ))
+        };
+        self.readers.register(repo, reader);
+        Ok(Arc::new(InboxTrunkFeed::new(Arc::clone(&self.inbox))))
     }
 }
 
@@ -193,18 +242,12 @@ impl TrunkSource for HostTrunkSource {
             .split_once('/')
             .map_or(trunk_ref.as_str(), |(_, branch)| branch)
             .to_string();
-        let feed = self.feed_for(&row, subscription)?;
-        Ok((
-            TrunkPoller::new(
-                feed,
-                RepoSlug {
-                    owner: repo.0,
-                    name: repo.1,
-                },
-                branch,
-            ),
-            trunk_ref,
-        ))
+        let repo = RepoSlug {
+            owner: repo.0,
+            name: repo.1,
+        };
+        let feed = self.feed_for(&row, subscription, &repo)?;
+        Ok((TrunkPoller::new(feed, repo, branch), trunk_ref))
     }
 }
 
@@ -217,13 +260,25 @@ impl DaemonSessionHost {
         bus: Arc<crate::session_notifications::SessionNotificationBus>,
     ) -> Self {
         let liveness = Arc::new(HostLiveness::default());
-        let source = Arc::new(HostTrunkSource { host: self.clone() });
+        let readers = Arc::new(HostRepoReaders::default());
+        let inbox = Arc::new(GithubInbox::new(
+            Arc::clone(&readers) as Arc<dyn RepoReaders>
+        ));
+        let source = Arc::new(HostTrunkSource {
+            host: self.clone(),
+            inbox: Arc::clone(&inbox),
+            readers,
+        });
         let watcher = Arc::new(TrunkWatcher::new(
             source,
             Arc::clone(&liveness) as Arc<dyn SubscriberLiveness>,
             bus,
         ));
-        self.trunk_watching = Some(Arc::new(TrunkWatching { watcher, liveness }));
+        self.trunk_watching = Some(Arc::new(TrunkWatching {
+            watcher,
+            liveness,
+            inbox,
+        }));
         self
     }
 
@@ -279,6 +334,7 @@ impl DaemonSessionHost {
                     .unwrap_or_else(|e| e.into_inner()) = host.live_sessions().await;
                 watching.liveness.forget_expired_starts();
                 let now = tddy_daemon_kernel::now_unix_ms();
+                watching.inbox.step(now).await;
                 let wait = watching
                     .watcher
                     .step(now)

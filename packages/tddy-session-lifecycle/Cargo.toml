@@ -39,6 +39,7 @@ tddy-model-registry = { path = "../tddy-model-registry" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-coding-subagent = { path = "../tddy-coding-subagent" }
 tddy-github = { path = "../tddy-github" }
+tddy-github-inbox = { path = "../tddy-github-inbox" }
 # Defines `PrStackHandler`, which session start names for the stack paths it serves.
 tddy-pr-stack = { path = "../tddy-pr-stack" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }

@@ -14221,6 +14221,7 @@ dependencies = [
  "tddy-demo-vm-service",
  "tddy-discovery",
  "tddy-github",
+ "tddy-github-inbox",
  "tddy-host-service",
  "tddy-livekit",
  "tddy-livekit-testkit",
