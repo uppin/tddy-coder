@@ -9,6 +9,7 @@
 //! that implements it.
 
 pub mod assess;
+pub mod commit_flow;
 pub mod docs;
 pub mod git_ops;
 pub mod inbox_reads;

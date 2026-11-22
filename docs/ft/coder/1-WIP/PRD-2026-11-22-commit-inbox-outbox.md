@@ -7,7 +7,7 @@
 ## Affected Features
 
 - **Primary Feature**: work queues (feature doc renamed by n3)
-- [Session PR inspector](../../web/1-WIP/PRD-2026-11-22-session-pr-tabs.md) (n4) — the PR view gains two tabs
+- Session PR inspector — the PR view of `#workqueue` 4/14 (`feature/workqueue/session-pr-tabs`, #1005) gains two tabs
 
 ## Summary
 

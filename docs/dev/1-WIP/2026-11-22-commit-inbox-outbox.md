@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — git subprocess adapter seam with temp-repo integration tests, a cache, more than one crate and a web extension, proto additions
 **Stack**: `#workqueue` 11/14 — branch `feature/workqueue/commit-inbox-outbox`, base `feature/workqueue/waves-line`
+**PR**: [#1012](https://github.com/uppin/tddy-coder/pull/1012)
 
 ## Initial Discovery
 
@@ -63,8 +64,20 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: `commit_flow`'s types and signatures, the git
-helper signatures, tool and RPC definitions, the new tabs' test ids, and the failing tests below.
+Published (pass 2, commit 2):
+
+- `tddy_pr_stack::commit_flow::{CommitFlow (new, fetch, own_commits, inbox, outbox, cache_hits),
+  ItemBranch, FlowCommit, CommitSource, Prediction, InboxEntry, OutboxEntry, CommitFlowError}` — over
+  items already resolved with their line parent (n9's `LineEndpoint`), so the tests need no GitHub
+- `tddy_tool_engine::work_item_commit_flow_tools::{WORK_ITEM_INBOX, WORK_ITEM_OUTBOX,
+  work_item_commit_flow_tool_defs}`
+- `tddy-workspace-web`: `PullRequestInboxTab`, `PullRequestOutboxTab` (shells, props-driven; `/green`
+  mounts them in n4's PR view — n4's component is not touched here)
+- The PRD's reference to n4 is by branch and PR (it linked n4's PRD by path in pass 1)
+- The failing tests below. The `GetWorkItemInbox` / `GetWorkItemOutbox` RPCs and row counts are `/green`'s.
+
+`inbox(item)` covers **every** line ancestor (`⋃ origin/<item>..origin/<a>`), not just the parent: a
+commit pushed to n1 is in n3's inbox before n2 has taken it.
 
 ## Green wave
 
@@ -148,20 +161,23 @@ daemon tool test; Cypress component spec for the tabs.
 
 ## Acceptance Tests
 
-`packages/tddy-work-queue/tests/commit_flow_acceptance.rs`:
-- [ ] `a_commit_pushed_to_an_ancestor_after_the_cut_is_in_the_items_inbox_attributed_to_it`
-- [ ] `an_items_outbox_equals_its_successors_inbox_entries_from_it`
-- [ ] `one_commit_can_be_clean_for_one_item_and_conflicting_for_the_next`
-- [ ] `a_conflicting_prediction_names_the_files`
-- [ ] `trunk_commits_are_an_external_source_listed_first`
-- [ ] `the_analysis_changes_no_local_branch_index_or_worktree`
-- [ ] `unchanged_tips_answer_from_the_cache`
+`packages/tddy-pr-stack/tests/commit_flow_acceptance.rs` (real repos; crate renamed by n3):
+- [x] `a_commit_pushed_to_an_ancestor_after_the_cut_is_in_the_items_inbox_attributed_to_it`
+- [x] `an_items_outbox_equals_its_successors_inbox_entries_from_it`
+- [x] `one_commit_can_be_clean_for_one_item_and_conflicting_for_the_next`
+- [x] `an_items_own_commits_are_those_beyond_its_line_parent` (the conflicting prediction naming the files is asserted in `one_commit_can_be_clean…`)
+- [x] `trunk_commits_are_an_external_source_listed_first`
+- [x] `the_analysis_changes_no_local_branch_index_or_worktree`
+- [x] `unchanged_tips_answer_from_the_cache`
 
-`packages/tddy-daemon-rpc/tests/work_item_commit_flow_acceptance.rs`:
-- [ ] `work_item_inbox_returns_entries_with_sources_and_predictions`
+`packages/tddy-tool-engine/tests/work_item_commit_flow_tools.rs`:
+- [x] `the_inbox_and_outbox_tools_each_take_an_item`
 
-`packages/tddy-session-web/cypress/component/PullRequestInboxOutboxAcceptance.cy.tsx`:
-- [ ] `the PR view of an item shows Inbox and Outbox tabs with sources and conflict markers`
+`packages/tddy-workspace-web/cypress/component/PullRequestInboxOutboxAcceptance.cy.tsx`:
+- [x] `the inbox lists each commit with its source and a conflict marker naming the files`
+- [x] `the outbox lists, per successor, what it lacks`
+
+The tool's daemon path is `/green`'s, in the daemon-rpc stack suites.
 
 ## Decisions & Trade-offs
 
@@ -188,10 +204,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
