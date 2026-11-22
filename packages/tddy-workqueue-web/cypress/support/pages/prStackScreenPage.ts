@@ -67,60 +67,60 @@ export const prStackScreenPage = {
     byTestId(TEST_IDS.prStackPlannedPrList, { timeout: 5000, ...options }),
 
   /** A single planned-PR row for the given stack node id. */
-  workItemRow: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackPlannedPrRow(nodeId), { timeout: 5000, ...options }),
+  workItemRow: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackPlannedPrRow(itemId), { timeout: 5000, ...options }),
 
   /** The node ids of every rendered planned-PR row, in DOM order. */
   workItemRowNodeIds: (): Cypress.Chainable<string[]> =>
     prStackScreenPage
       .workItemList()
-      .find("[data-testid^='pr-stack-planned-pr-row-']")
+      .find("[data-testid^='work-item-row-']")
       .then(($rows) =>
-        [...$rows].map((el) => el.getAttribute("data-testid")!.replace("pr-stack-planned-pr-row-", "")),
+        [...$rows].map((el) => el.getAttribute("data-testid")!.replace("work-item-row-", "")),
       ),
 
   /** The "Start session" CTA on an unspawned planned-PR row. */
-  startSessionBtn: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackStartSessionBtn(nodeId), { timeout: 5000, ...options }),
+  startSessionBtn: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackStartSessionBtn(itemId), { timeout: 5000, ...options }),
 
   /** The status chip on an already-spawned planned-PR row. */
-  statusChip: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackStatusChip(nodeId), { timeout: 5000, ...options }),
+  statusChip: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackStatusChip(itemId), { timeout: 5000, ...options }),
 
   /** The action-needed internal-status badge on a planned-PR row (e.g. "needs-repoint"). */
-  internalStatusBadge: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackInternalStatusBadge(nodeId), { timeout: 5000, ...options }),
+  internalStatusBadge: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackInternalStatusBadge(itemId), { timeout: 5000, ...options }),
 
   /** The in-progress indicator on a row whose branch is owned by a live session. */
-  inProgressBadge: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackInProgressBadge(nodeId), { timeout: 5000, ...options }),
+  inProgressBadge: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackInProgressBadge(itemId), { timeout: 5000, ...options }),
 
   /** The GitHub PR number rendered as a link to the PR for a row. */
-  prLink: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackPrLink(nodeId), { timeout: 5000, ...options }),
+  prLink: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackPrLink(itemId), { timeout: 5000, ...options }),
 
   /** The GitHub PR state label (open/merged/closed/draft) for a row. */
-  prState: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackPrState(nodeId), { timeout: 5000, ...options }),
+  prState: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackPrState(itemId), { timeout: 5000, ...options }),
 
   /** The Repoint control on a row whose predecessor has merged. */
-  repointBtn: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackRepointBtn(nodeId), { timeout: 5000, ...options }),
+  repointBtn: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackRepointBtn(itemId), { timeout: 5000, ...options }),
 
   /** The on-disk worktree indicator for a row (resolved by branch via QueryBranch). */
-  worktree: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackWorktree(nodeId), { timeout: 5000, ...options }),
+  worktree: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackWorktree(itemId), { timeout: 5000, ...options }),
 
   /**
    * The control that opens the child session a row is bound to — the status chip made clickable.
    * Absent when neither the plan's recorded child nor the branch's owner is a known session.
    */
-  sessionRef: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackSession(nodeId), { timeout: 5000, ...options }),
+  sessionRef: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackSession(itemId), { timeout: 5000, ...options }),
 
   /** Open the child session a row is bound to. */
-  openBoundSession(nodeId: string) {
-    byTestId(prStackSession(nodeId)).click();
+  openBoundSession(itemId: string) {
+    byTestId(prStackSession(itemId)).click();
   },
 
   // ---------------------------------------------------------------------------
@@ -128,49 +128,49 @@ export const prStackScreenPage = {
   // ---------------------------------------------------------------------------
 
   /** A row's header control — clicking it expands or collapses that row's detail. */
-  rowToggle: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackRowToggle(nodeId), { timeout: 5000, ...options }),
+  rowToggle: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackRowToggle(itemId), { timeout: 5000, ...options }),
 
   /** A row's detail body. Always mounted; hidden rather than unmounted while collapsed. */
-  rowDetails: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackRowDetails(nodeId), { timeout: 5000, ...options }),
+  rowDetails: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackRowDetails(itemId), { timeout: 5000, ...options }),
 
   /** The planner-assigned node id, shown in the row's detail. */
-  nodeIdLabel: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackNodeId(nodeId), { timeout: 5000, ...options }),
+  nodeIdLabel: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackNodeId(itemId), { timeout: 5000, ...options }),
 
   /** The titles of the nodes this row is stacked on, shown in its detail. */
-  parents: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackParents(nodeId), { timeout: 5000, ...options }),
+  parents: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackParents(itemId), { timeout: 5000, ...options }),
 
   /** The recipe the row's child session runs, shown in its detail. */
-  childRecipe: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackChildRecipe(nodeId), { timeout: 5000, ...options }),
+  childRecipe: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackChildRecipe(itemId), { timeout: 5000, ...options }),
 
   /** The bound child session's id, shown in the row's detail. */
-  childSession: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackChildSession(nodeId), { timeout: 5000, ...options }),
+  childSession: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackChildSession(itemId), { timeout: 5000, ...options }),
 
   /** The child session's last-recorded workflow state, shown in the row's detail. */
-  childState: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackChildState(nodeId), { timeout: 5000, ...options }),
+  childState: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackChildState(itemId), { timeout: 5000, ...options }),
 
   /** Expand a row to reveal its detail. */
-  expandRow(nodeId: string) {
-    byTestId(prStackRowToggle(nodeId)).click();
+  expandRow(itemId: string) {
+    byTestId(prStackRowToggle(itemId)).click();
   },
 
   /**
    * Assert the row header names the detail body it reveals: its `aria-controls` must resolve to that
    * row's own detail container, rather than merely being present.
    */
-  expectRowToggleControlsDetails(nodeId: string) {
+  expectRowToggleControlsDetails(itemId: string) {
     prStackScreenPage
-      .rowToggle(nodeId)
+      .rowToggle(itemId)
       .invoke("attr", "aria-controls")
       .should("be.a", "string")
       .then((controlsId) => {
-        cy.get(`#${controlsId}`).should("have.attr", "data-testid", prStackRowDetails(nodeId));
+        cy.get(`#${controlsId}`).should("have.attr", "data-testid", prStackRowDetails(itemId));
       });
   },
 
@@ -179,75 +179,75 @@ export const prStackScreenPage = {
   // ---------------------------------------------------------------------------
 
   /** Move a row one position earlier in the persisted order. */
-  moveUpBtn: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackMoveUpBtn(nodeId), { timeout: 5000, ...options }),
+  moveUpBtn: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackMoveUpBtn(itemId), { timeout: 5000, ...options }),
 
   /** Move a row one position later in the persisted order. */
-  moveDownBtn: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackMoveDownBtn(nodeId), { timeout: 5000, ...options }),
+  moveDownBtn: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackMoveDownBtn(itemId), { timeout: 5000, ...options }),
 
   /** Click a row's move-up control. */
-  clickMoveUp(nodeId: string) {
-    byTestId(prStackMoveUpBtn(nodeId)).click();
+  clickMoveUp(itemId: string) {
+    byTestId(prStackMoveUpBtn(itemId)).click();
   },
 
   /** Click a row's move-down control. */
-  clickMoveDown(nodeId: string) {
-    byTestId(prStackMoveDownBtn(nodeId)).click();
+  clickMoveDown(itemId: string) {
+    byTestId(prStackMoveDownBtn(itemId)).click();
   },
 
   /** The daemon's reason for refusing or failing a reorder, shown outside the collapse boundary. */
-  reorderError: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackReorderError(nodeId), { timeout: 5000, ...options }),
+  reorderError: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackReorderError(itemId), { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------
   // Standing against the base branch
   // ---------------------------------------------------------------------------
 
   /** How many commits the row's branch is behind its base. */
-  baseBehind: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackBaseBehind(nodeId), { timeout: 5000, ...options }),
+  baseBehind: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseBehind(itemId), { timeout: 5000, ...options }),
 
   /** The row's branch contains every commit on its base. */
-  baseInSync: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackBaseInSync(nodeId), { timeout: 5000, ...options }),
+  baseInSync: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseInSync(itemId), { timeout: 5000, ...options }),
 
   /** Merging the base into the row's branch would conflict. */
-  baseConflicts: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackBaseConflicts(nodeId), { timeout: 5000, ...options }),
+  baseConflicts: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseConflicts(itemId), { timeout: 5000, ...options }),
 
   /** The base comparison could not be made — distinct from a clean result. */
-  baseSyncUnavailable: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackBaseSyncUnavailable(nodeId), { timeout: 5000, ...options }),
+  baseSyncUnavailable: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseSyncUnavailable(itemId), { timeout: 5000, ...options }),
 
   /** The conflicting paths, in the row's detail. */
-  baseConflictPaths: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackBaseConflictPaths(nodeId), { timeout: 5000, ...options }),
+  baseConflictPaths: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseConflictPaths(itemId), { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------
   // Pulling the base into the row's branch
   // ---------------------------------------------------------------------------
 
   /** Pull the base in by merging it — the default strategy. */
-  syncMergeBtn: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackSyncMergeBtn(nodeId), { timeout: 5000, ...options }),
+  syncMergeBtn: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackSyncMergeBtn(itemId), { timeout: 5000, ...options }),
 
   /** Pull the base in by rebasing the branch onto it. */
-  syncRebaseBtn: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackSyncRebaseBtn(nodeId), { timeout: 5000, ...options }),
+  syncRebaseBtn: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackSyncRebaseBtn(itemId), { timeout: 5000, ...options }),
 
   /** The daemon's reason for refusing or failing a pull, shown outside the collapse boundary. */
-  syncError: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackSyncError(nodeId), { timeout: 5000, ...options }),
+  syncError: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackSyncError(itemId), { timeout: 5000, ...options }),
 
   /** Click a row's merge-from-base control. */
-  clickSyncMerge(nodeId: string) {
-    byTestId(prStackSyncMergeBtn(nodeId)).click();
+  clickSyncMerge(itemId: string) {
+    byTestId(prStackSyncMergeBtn(itemId)).click();
   },
 
   /** Click a row's rebase-onto-base control. */
-  clickSyncRebase(nodeId: string) {
-    byTestId(prStackSyncRebaseBtn(nodeId)).click();
+  clickSyncRebase(itemId: string) {
+    byTestId(prStackSyncRebaseBtn(itemId)).click();
   },
 
   /** The prompt shown when a pull targets a worktree holding uncommitted work. */
@@ -277,39 +277,39 @@ export const prStackScreenPage = {
   },
 
   /** The branch a row's planned PR owns — a branch that exists. */
-  branchName: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackBranch(nodeId), { timeout: 5000, ...options }),
+  branchName: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBranch(itemId), { timeout: 5000, ...options }),
 
   /** The row's planned branch name (`branch_suggestion`), rendered distinctly from an owned branch. */
-  plannedBranchName: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackPlannedBranch(nodeId), { timeout: 5000, ...options }),
+  plannedBranchName: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackPlannedBranch(itemId), { timeout: 5000, ...options }),
 
   /** The base branch a row's child worktree would be branched from. */
-  baseBranch: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackBaseBranch(nodeId), { timeout: 5000, ...options }),
+  baseBranch: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseBranch(itemId), { timeout: 5000, ...options }),
 
   /** The warning listing every reason a row's spawn may not succeed — shown beside its marked CTA. */
-  startWarning: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackStartWarning(nodeId), { timeout: 5000, ...options }),
+  startWarning: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackStartWarning(itemId), { timeout: 5000, ...options }),
 
   /**
    * The alert icon on a blocked row's Start-session button. The button itself stays pressable — a
    * blocker is advice, not a refusal — so this icon is what marks the difference.
    */
-  startSessionBlockedIcon: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackStartSessionBlockedIcon(nodeId), { timeout: 5000, ...options }),
+  startSessionBlockedIcon: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackStartSessionBlockedIcon(itemId), { timeout: 5000, ...options }),
 
   /** The inline error shown on a row whose repoint the daemon refused. */
-  repointError: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackRepointError(nodeId), { timeout: 5000, ...options }),
+  repointError: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackRepointError(itemId), { timeout: 5000, ...options }),
 
   /** The "PR status unavailable" indicator — the lookup could not be performed. */
-  prUnavailable: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackPrUnavailable(nodeId), { timeout: 5000, ...options }),
+  prUnavailable: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackPrUnavailable(itemId), { timeout: 5000, ...options }),
 
   /** Click the Repoint control for a row. */
-  clickRepoint(nodeId: string) {
-    byTestId(prStackRepointBtn(nodeId)).click();
+  clickRepoint(itemId: string) {
+    byTestId(prStackRepointBtn(itemId)).click();
   },
 
   // ---------------------------------------------------------------------------
@@ -337,8 +337,8 @@ export const prStackScreenPage = {
     byTestId(TEST_IDS.prStackAddPlannedPrBranchSuggestionInput, { timeout: 5000, ...options }),
 
   /** An ancestor checkbox for the given existing planned-PR node id. */
-  addWorkItemAncestorCheckbox: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackAddPlannedPrAncestorCheckbox(nodeId), { timeout: 5000, ...options }),
+  addWorkItemAncestorCheckbox: (itemId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackAddPlannedPrAncestorCheckbox(itemId), { timeout: 5000, ...options }),
 
   /** Submit button for the add-planned-PR form. */
   addWorkItemSubmitBtn: (options?: Parameters<typeof cy.get>[1]) =>
@@ -375,8 +375,8 @@ export const prStackScreenPage = {
         .clear()
         .type(options.branchSuggestion);
     }
-    for (const nodeId of options.ancestorNodeIds ?? []) {
-      byTestId(prStackAddPlannedPrAncestorCheckbox(nodeId)).click();
+    for (const itemId of options.ancestorNodeIds ?? []) {
+      byTestId(prStackAddPlannedPrAncestorCheckbox(itemId)).click();
     }
   },
 

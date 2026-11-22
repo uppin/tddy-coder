@@ -256,7 +256,7 @@ fn a_host_owning_the_project(id: &'static str, peers: &Arc<InProcessPeers>) -> H
         .unwrap();
     let stacks = host.projects_dir().join(THE_PROJECT).join("stacks");
     std::fs::create_dir_all(&stacks).unwrap();
-    std::fs::write(stacks.join("stack-1.yaml"), "queue_id: stack-1\n").unwrap();
+    std::fs::write(stacks.join("stack-1.yaml"), "stack_id: stack-1\n").unwrap();
     host
 }
 

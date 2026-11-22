@@ -2099,7 +2099,7 @@ state:
     - state: Green
       at: '2026-07-01T10:05:00Z'
 recipe: pr-stack
-queue_id: {}
+stack_id: {}
 ",
                 record.queue_id
             ),
@@ -2319,7 +2319,7 @@ state:
     - state: Green
       at: '2026-07-01T10:05:00Z'
 recipe: pr-stack
-queue_id: {}
+stack_id: {}
 ",
                 record.queue_id
             ),

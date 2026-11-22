@@ -16,7 +16,7 @@ import { openProjectStackView } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
 } from "../support/rpc/prStackFixtures";
@@ -71,8 +71,8 @@ beforeEach(() => {
 
 it("shows the on-disk worktree path for a node whose branch has a worktree", () => {
   // Given — n1 owns feature/x/n1, resolved to a worktree on disk
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -94,8 +94,8 @@ it("shows the on-disk worktree path for a node whose branch has a worktree", () 
 
 it("shows no worktree indicator when the branch has no worktree on disk", () => {
   // Given — n1's branch resolves with no worktree
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -114,8 +114,8 @@ it("shows no worktree indicator when the branch has no worktree on disk", () => 
 
 it("marks a row in progress when QueryBranch resolves an active session for its branch", () => {
   // Given — n1's branch resolves to an active child session
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -135,8 +135,8 @@ it("marks a row in progress when QueryBranch resolves an active session for its 
 
 it("shows no in-progress indicator when QueryBranch resolves no session for the branch", () => {
   // Given — n1's branch resolves to no session
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -155,8 +155,8 @@ it("shows no in-progress indicator when QueryBranch resolves no session for the 
 
 it("shows the GitHub PR number as a link resolved by QueryBranch", () => {
   // Given
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -180,8 +180,8 @@ it("shows the GitHub PR number as a link resolved by QueryBranch", () => {
 it("updates the resolution on the polling interval without user action", () => {
   // Given — the branch has no worktree on the first poll and one on every subsequent poll
   cy.clock();
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
   let polls = 0;
   openStackView({

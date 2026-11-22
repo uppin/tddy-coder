@@ -151,7 +151,7 @@ fn the_backend_module_no_longer_re_exports_the_workflow_vocabulary() {
 #[test]
 fn the_changeset_splits_into_its_four_concerns() {
     // Given the four modules the split produces
-    let modules = ["stack", "model", "io", "merge"];
+    let modules = ["work_queue", "model", "io", "merge"];
 
     // When each is looked for
     let absent: Vec<&str> = modules
