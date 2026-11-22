@@ -67,6 +67,8 @@ describe("SessionInspectorInactiveDaemonSourced — inspector reads bytes/last-r
     // When — the user selects the inactive row and opens the inspector
     sessionsDrawerPage.drawerItem(INACTIVE_SESSION.sessionId as string).click();
     sessionsDrawerPage.inspectorToggle().click();
+    // The counters live on Details; a session now opens on its PR or Worktree tab.
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorDetailsTab().should("have.attr", "aria-selected", "true");
 
     // Then — the inspector Details tab shows the daemon-sourced byte counters and last-received line

@@ -76,8 +76,9 @@ export function SessionPullRequestTab({ client, sessionToken, projectId, session
               <p>No checks.</p>
             ) : (
               <ul className="flex flex-col gap-1">
-                {view.checks.map((check) => (
-                  <CheckRow key={check.name} check={check} nowMs={nowMs} />
+                {view.checks.map((check, index) => (
+                  // Two runs may share a name (a matrix job), so the name alone is not a key.
+                  <CheckRow key={`${index}-${check.name}`} check={check} nowMs={nowMs} />
                 ))}
               </ul>
             )}

@@ -319,7 +319,8 @@ impl WorktreeServiceImpl {
             return Err(Status::not_found("session not found"));
         }
         if crate::target_worktrees::target_session_in(&session_dir).is_some() {
-            // TODO(n4 session-pr-tabs): no target-side sync-state reader exists yet.
+            // TODO: no target-side sync-state reader yet —
+            // docs/dev/todo/2026-11-22-target-session-inspector-has-no-sync-state-or-pr.md
             return Ok(Response::new(WorktreeSyncState {
                 unavailable_reason: "a target session's worktree sync state is not available"
                     .to_string(),
@@ -939,8 +940,8 @@ impl WorktreeService for WorktreeServiceImpl {
         }
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         if crate::target_worktrees::target_session_in(&session_dir).is_some() {
-            // TODO(n4 session-pr-tabs): a target session's branch lives on another host; its PR is
-            // not read from here.
+            // TODO: a target session's branch lives on another host; its PR is not read from here —
+            // docs/dev/todo/2026-11-22-target-session-inspector-has-no-sync-state-or-pr.md
             let view = SessionPullRequestView {
                 unavailable_reason: "a target session's pull request is not available".to_string(),
                 ..Default::default()

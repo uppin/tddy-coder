@@ -201,11 +201,14 @@ fn dirty_files(worktree: &Path) -> Result<Vec<DirtyFile>, WorktreeSyncError> {
     Ok(files)
 }
 
-fn fetch_upstream(worktree: &Path, upstream: &str) -> Result<(), WorktreeSyncError> {
-    let (remote, _) = upstream
-        .split_once('/')
-        .ok_or_else(|| WorktreeSyncError(format!("unrecognised upstream {upstream:?}")))?;
-    git_stdout(worktree, &["fetch", "--quiet", remote]).map(|_| ())
+/// Fetch the remote `branch` tracks, as git records it (`branch.<branch>.remote`), rather than parsed
+/// out of the upstream's name: a remote's name may contain `/`, and a local upstream's remote is `.`.
+fn fetch_upstream(worktree: &Path, branch: &str) -> Result<(), WorktreeSyncError> {
+    let remote = git_stdout(
+        worktree,
+        &["config", "--get", &format!("branch.{branch}.remote")],
+    )?;
+    git_stdout(worktree, &["fetch", "--quiet", remote.trim()]).map(|_| ())
 }
 
 /// Read `worktree`'s sync state after fetching its upstream (remote-tracking refs only).
@@ -223,7 +226,7 @@ pub fn read_sync_state(worktree: &Path) -> Result<SyncState, WorktreeSyncError> 
             dirty_files,
         });
     };
-    fetch_upstream(worktree, &upstream)?;
+    fetch_upstream(worktree, &branch)?;
     let local_is_contained = is_ancestor(worktree, "HEAD", &upstream)?;
     let upstream_is_contained = is_ancestor(worktree, &upstream, "HEAD")?;
     let status = match (local_is_contained, upstream_is_contained) {

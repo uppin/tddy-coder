@@ -16,7 +16,7 @@ function CommitLines({ lines, testId }: { lines: WorktreeCommitLine[]; testId: s
     <ul className="flex flex-col gap-0.5">
       {lines.map((line) => (
         <li key={line.sha} data-testid={`${testId}-${line.sha}`}>
-          <code className="text-foreground">{line.sha}</code> {line.subject}
+          <code className="text-foreground">{line.sha.slice(0, 7)}</code> {line.subject}
         </li>
       ))}
     </ul>

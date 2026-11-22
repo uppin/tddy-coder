@@ -221,6 +221,17 @@ fn concerns(event: &InboxEvent, branch: &str, pr: Option<&(u64, String)>) -> boo
     }
 }
 
+/// What the operator reads when the inbox could not produce the view.
+fn inbox_failure_text(error: &InboxError) -> String {
+    match error {
+        InboxError::Unavailable(why) => format!("GitHub could not be read: {why}"),
+        InboxError::RateLimited { reset_at_unix_s } => {
+            format!("GitHub's rate limit is spent until {reset_at_unix_s} (Unix time)")
+        }
+        InboxError::NotFound => "GitHub does not know this repository or pull request".to_string(),
+    }
+}
+
 /// The view as the stream sends it: a failed read is reported on the view, and the watch goes on.
 async fn current_view(
     inbox: &GithubInbox,
@@ -232,7 +243,7 @@ async fn current_view(
         Err(error) => {
             let view = SessionPullRequestView {
                 head_branch: branch.to_string(),
-                unavailable_reason: format!("{error:?}"),
+                unavailable_reason: inbox_failure_text(&error),
                 ..Default::default()
             };
             (view, None)
