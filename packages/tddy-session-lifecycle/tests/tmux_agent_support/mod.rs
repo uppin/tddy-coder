@@ -51,9 +51,9 @@ pub async fn a_daemon_with_a_private_tmux() -> TmuxAgentDaemon {
 pub enum AgentTemperament {
     /// Reads its pane until it closes.
     HoldsItsPane,
-    /// Ignores SIGHUP and never touches its pane, so nothing a tmux kill does ends it: only a
+    /// Ignores SIGHUP and never reads its pane, so nothing a tmux kill does ends it: only a
     /// signal sent to its own pid does.
-    IgnoresHangupAndHoldsNoTerminal,
+    IgnoresHangupAndNeverReadsItsPane,
 }
 
 pub async fn a_daemon_whose_agent(temperament: AgentTemperament) -> TmuxAgentDaemon {
@@ -73,8 +73,11 @@ pub async fn a_daemon_whose_agent(temperament: AgentTemperament) -> TmuxAgentDae
         .recording_env_to(&environment, &["CLAUDE_CODE_NO_FLICKER"])
         .appending_argv_to(&launches);
     let stub = match temperament {
-        AgentTemperament::IgnoresHangupAndHoldsNoTerminal => {
-            stub.then_running("exec sleep 120 </dev/null >/dev/null 2>&1")
+        AgentTemperament::IgnoresHangupAndNeverReadsItsPane => {
+            // The pane's terminal stays its stdin/stdout/stderr: a process that closed every slave
+            // end would make tmux see its pty close on Linux and destroy the session at once,
+            // before the test has a session to delete.
+            stub.then_running("exec sleep 120")
         }
         AgentTemperament::HoldsItsPane => stub.then_reading_stdin(),
     }

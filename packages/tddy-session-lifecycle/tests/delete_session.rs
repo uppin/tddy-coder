@@ -140,12 +140,12 @@ async fn terminates_active_session_then_removes_directory() {
 }
 
 /// Acceptance: deleting a tmux-run session ends its agent even when the agent ignores the SIGHUP a
-/// tmux kill sends and never touches its pane — the kill alone would leave it running.
+/// tmux kill sends and never reads its pane — the kill alone would leave it running.
 #[tokio::test]
 #[serial_test::serial]
 async fn deleting_a_tmux_run_session_whose_agent_ignores_sighup_leaves_no_agent() {
     // Given a running tmux-run session whose agent survives its tmux session's end
-    let daemon = a_daemon_whose_agent(AgentTemperament::IgnoresHangupAndHoldsNoTerminal).await;
+    let daemon = a_daemon_whose_agent(AgentTemperament::IgnoresHangupAndNeverReadsItsPane).await;
     let (session_id, name) = daemon.a_running_tmux_session().await;
     let agent = daemon.agent_pid_of(&session_id);
 
@@ -170,7 +170,7 @@ async fn deleting_a_tmux_run_session_whose_agent_ignores_sighup_leaves_no_agent(
 #[serial_test::serial]
 async fn a_pane_pid_whose_start_time_changed_is_never_signalled() {
     // Given a running tmux-run session whose roster records a start its pane process does not have
-    let daemon = a_daemon_whose_agent(AgentTemperament::IgnoresHangupAndHoldsNoTerminal).await;
+    let daemon = a_daemon_whose_agent(AgentTemperament::IgnoresHangupAndNeverReadsItsPane).await;
     let (session_id, name) = daemon.a_running_tmux_session().await;
     let pane_process = daemon.agent_pid_of(&session_id);
     let _cleanup = KilledOnDrop(pane_process);
