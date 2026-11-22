@@ -592,6 +592,18 @@ environment the `claude-cli` launch produces:
   whenever the terminal reports its end. A target that answers no probe within the window plus that
   allowance, with its terminal still up, fails the start — the agent is neither judged alive nor
   left running — with an error that names the bound and leaves no session (`#target-parity` 5/7). An unreachable target fails it with the shell's reason and leaves no session. A
+  target's agent is **not required on the daemon's host** (`#tab-hardening` 4/4): a start or resume
+  on a target reads the agent's spec and runs its **bare command** (`claude`, `agent`) found on the
+  target login's `PATH`; the agent's own binary is never looked up on this host, so a daemon host with
+  no copy of it starts and resumes a session on a target that has one. Only the tools the daemon runs
+  itself — the `tddy-tools` its hooks and relays name — are still resolved on this host. Before the
+  prelude and any worktree is cut, one call through the remote-shell port asks the target's own login
+  shell for the command (`command -v`, from the login's own directory — a start has no worktree there
+  yet, and a resume whose worktree is gone must be told so by its launch): an agent the target lacks
+  fails the start or resume `FAILED_PRECONDITION` naming the command, and an unreachable target
+  `UNAVAILABLE` with the transport's words, with nothing cloned, cut or recorded. One extra round trip
+  per start and resume (about 6–8 s on a Coder workspace). The probe is pinned on a stand-in target
+  only ([todo](../../dev/todo/2026-11-16-coder-hosts-never-run-against-a-real-deployment.md)). A
   target combined with a managed codebase, a sandbox, a split placement or the project-home main
   is refused with the reason, as is a target named together with `ssh_config_host`. A file the
   agent's argv names in the session's directory on the daemon's host (its appended system prompt)

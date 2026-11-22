@@ -94,6 +94,7 @@ pub mod tab_jail_agent;
 pub mod tab_jail_launch;
 pub mod tab_target_shell;
 pub mod target_shells;
+mod target_start_agent;
 pub mod target_trust;
 mod tmux_agent_end;
 pub mod tmux_main_roster;

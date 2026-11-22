@@ -35,11 +35,13 @@ use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 mod agent_registry_support;
 mod agent_run_support;
 mod cli_harness_support;
+mod host_without_agent_support;
 use agent_registry_support::{builtin_yaml_as, AJailGuard};
 use cli_harness_support::{
     a_daemon_config, create_test_repo_with_origin, current_os_user, register_project, session_host,
     VALID_TOKEN,
 };
+use host_without_agent_support::take_the_agent_off_the_host;
 
 const TEST_PROJECT_ID: &str = "coder-target-project";
 /// The agent: `claude.yaml` under this id, so its sessions launch through the generic CLI path.
@@ -183,6 +185,13 @@ fn a_daemon_reaching_a_running_workspace() -> ADaemonWithAWorkspace {
     a_daemon_reaching(AWorkspace::running())
 }
 
+/// A daemon whose host has no copy of the agent, reaching a running workspace that has it.
+fn a_daemon_without_the_agent_reaching_a_running_workspace() -> ADaemonWithAWorkspace {
+    let daemon = a_daemon_reaching_a_running_workspace();
+    daemon.this_host_has_no_agent();
+    daemon
+}
+
 fn a_daemon_reaching_a_stopped_workspace() -> ADaemonWithAWorkspace {
     a_daemon_reaching(AWorkspace::stopped())
 }
@@ -283,6 +292,11 @@ fn refusal(status: tddy_rpc::Status) -> (Code, String) {
 }
 
 impl ADaemonWithAWorkspace {
+    /// Take the agent off this daemon's host: its `PATH` keeps `tddy-tools` and nothing else.
+    fn this_host_has_no_agent(&self) {
+        take_the_agent_off_the_host(&self.sessions_base, SESSION_TYPE, AGENT_ID);
+    }
+
     /// Start a session in the workspace. A start that was refused answers its code and message.
     async fn start_in_the_workspace(&self) -> Result<String, (Code, String)> {
         self.service
@@ -622,5 +636,28 @@ async fn a_resume_of_a_session_whose_agent_is_still_running_is_refused() {
     assert_eq!(
         (daemon.agent_runs(), started[0].is_alive()),
         (started.clone(), true)
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_coder_target_session_starts_without_the_agent_on_the_daemon_host() {
+    // Given a running workspace whose login `PATH` has the agent, and a daemon host with no copy
+    // of it
+    let daemon = a_daemon_without_the_agent_reaching_a_running_workspace();
+
+    // When
+    let started = daemon.start_in_the_workspace().await;
+
+    // Then it starts, and the workspace's own agent runs in the session's worktree there, the
+    // session naming the workspace
+    let session_id = started.expect("a start in a workspace needs no agent on the daemon's host");
+    let runs = daemon.runs_in_the_workspace(&session_id, 1).await;
+    assert_eq!(
+        (runs[0].cwd.clone(), daemon.recorded_target_of(&session_id)),
+        (
+            daemon.workspace.worktree_of(&session_id),
+            Some(the_recorded_coder_target())
+        )
     );
 }

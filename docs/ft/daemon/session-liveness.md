@@ -370,9 +370,10 @@ agent for), and Telegram's list, branch-owner scan and delete.
 - **A target's agent must be on the target's login `PATH`.** A target agent tab runs the spec's bare command and
   is probed for it first, so a target without the agent fails the tab, naming the command, instead of opening a
   terminal that exits `127`. The probe is pinned on a stand-in target only, not against a real Coder deployment
-  ([todo](../../dev/todo/2026-11-16-coder-hosts-never-run-against-a-real-deployment.md)). The session-**start**
-  half — a start on a target still resolves the agent on the daemon's host first — is a separate decision:
-  [a start on a target requires the agent on the daemon's host](../../dev/todo/2026-11-19-a-target-start-requires-the-agent-on-the-daemon-host.md).
+  ([todo](../../dev/todo/2026-11-16-coder-hosts-never-run-against-a-real-deployment.md)). The session **start**
+  and **resume** do the same since `#tab-hardening` 4/4: the daemon's host needs no copy of the agent, and the
+  probe runs before the worktree is cut
+  ([Claude CLI session § Agent on a target](claude-cli-session.md#the-generic-cli-spec-launch-serves-claudes-needs)).
 - opencode, muse and warp tabs reopen fresh, not in their conversation (`TODO(opencode-cli)`,
   `TODO(muse-cli)`, `TODO(warp-cli)` on `tab_conversation_is_resumable`).
 - The sandboxed resume path calls the same restore but has no test of its own: its jail harness is the

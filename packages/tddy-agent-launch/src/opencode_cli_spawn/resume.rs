@@ -14,8 +14,7 @@ use crate::cli_session_pointer::removing_session_pointer_on_exit;
 use crate::cursor_from_spec::node_launcher_of;
 use crate::effort_launch::effort_launch;
 use crate::harness_from_spec::{
-    harness_template_params, resolve_session_agent, resume_token_adapter, CliSessionAgent,
-    CliSessionType, HarnessLaunch,
+    harness_template_params, resume_token_adapter, CliSessionAgent, CliSessionType, HarnessLaunch,
 };
 use crate::opencode_cli_spawn::harness_launch::{
     launch, HarnessRemote, HarnessRun, HarnessSession, HarnessSpecLaunch,
@@ -56,7 +55,7 @@ impl crate::launch_ports::LaunchSessions {
         // Resolved before anything is re-wired: a Coder target whose vault has been locked
         // since the start refuses the resume here, and the session is kept as it was.
         let target_shell = self.resumed_target_shell(req, &metadata)?;
-        let session_agent = resolve_session_agent(&self.coding_agents, kind.clone())?;
+        let session_agent = self.agent_to_launch(kind.clone(), &target_shell).await?;
         let identity = self.host.session_identity(
             os_user,
             &req.session_id,

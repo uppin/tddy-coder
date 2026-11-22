@@ -103,6 +103,11 @@ keeps the meaning above — agent local, tools remote — and the two fields are
 on a start. Session targets are specified in
 [claude-cli-session.md](claude-cli-session.md#the-generic-cli-spec-launch-serves-claudes-needs).
 
+The agent is the **target's own**: a start or resume reads its spec and runs its bare command from the
+target login's `PATH`, so the daemon's host needs no copy of the agent. Before the worktree is cut the
+target's login shell is asked for that command; a target without it fails the start or resume
+`FAILED_PRECONDITION`, naming the command, and an unreachable one `UNAVAILABLE`.
+
 A target session's **secondary tabs** open on the target as well: a shell tab "On target" runs the target
 user's login shell in the session's worktree there, and an agent tab "On target" runs the agent there by its
 bare command, through the same remote shell; each is recorded and restored as such — see [Session liveness § A target session's tabs](session-liveness.md#a-target-sessions-tabs).
