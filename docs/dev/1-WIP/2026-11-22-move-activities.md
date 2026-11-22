@@ -125,10 +125,10 @@ with that entry.
 
 ## Scope
 
-- [ ] Split `project_notification_log.rs`
-- [ ] Source, kind and payload in every registry
-- [ ] Publishing from UI and tool move paths
-- [ ] Owner self-watch; own moves do not wake
+- [x] Split `project_notification_log.rs`
+- [x] Source, kind and payload in every registry
+- [x] Publishing from UI and tool move paths
+- [x] Owner self-watch; own moves do not wake
 - [ ] Docs updated through the wrap
 
 ## Technical Changes
@@ -148,10 +148,10 @@ As listed under Affected Packages.
 
 ## Implementation Milestones
 
-- [ ] Log split (no behaviour change)
-- [ ] Source/kind/payload registries
-- [ ] Publishing on moves
-- [ ] Watch rules + monitor
+- [x] Log split (no behaviour change)
+- [x] Source/kind/payload registries
+- [x] Publishing on moves
+- [x] Watch rules + monitor
 
 ## Testing Plan
 
@@ -171,7 +171,7 @@ watch answer), mirroring `trunk_watch_acceptance.rs` and `session_watches_unit.r
 (`watch_matches` is crate-private).
 
 `packages/tddy-daemon-rpc/tests/work_queue_tools_acceptance.rs` (extended):
-- [ ] `an_owner_watching_work_queue_is_woken_by_a_user_move_from_the_queue_view`
+- [ ] `an_owner_watching_work_queue_is_woken_by_a_user_move_from_the_queue_view` — not written in [G]: the file does not exist on n5; covered meanwhile by `move_activity` unit tests (daemon-rpc) and the matcher tests; a daemon-level test is left for [W]/a human
 
 `packages/tddy-session-activity/tests/session_watches_unit.rs` (existing):
 - [ ] `the_kinds_are_named_as_the_tools_name_them` (now 9)
@@ -187,7 +187,11 @@ watch answer), mirroring `trunk_watch_acceptance.rs` and `session_watches_unit.r
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- Own-agent moves are published with kind `Activity` (recorded, never matched by the owner's self-watch);
+  moves by anyone else are `AttentionRequired`. The actor is carried by the kind, not a record field,
+  to avoid touching ~127 `SessionNotification` literals. A future record field could replace it.
+- Tool path publishes for `work_item_set_parents` only; the queue RPC path publishes for `ReorderWorkItem`
+  (session-keyed and address-keyed). `RepointWorkItem` changes a base, not parents — not published.
 
 ## Refactoring Needed
 
@@ -207,7 +211,7 @@ _(populated by validation)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
