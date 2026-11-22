@@ -211,9 +211,8 @@ fn refresh_internal_statuses(env: &OpEnv, github: &GithubSource) -> Result<(), S
     let record = env.record()?;
     let gh = github.client()?;
     let default = github.default_branch()?;
-    // The spawn-request markers of a node not yet started live in the session that planned the
-    // stack.
-    let planner_dir = unified_session_dir_path(&env.sessions_base, &record.created_by_session_id);
+    // The spawn-request markers of a node not yet started live in the session that owns the queue.
+    let planner_dir = unified_session_dir_path(&env.sessions_base, record.owner_session_id());
     let views = assemble_views(
         &planner_dir,
         &env.sessions_base,

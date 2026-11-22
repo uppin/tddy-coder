@@ -77,9 +77,8 @@ tokio = { version = "1", features = ["macros", "rt", "time"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-workflow = { path = "../tddy-workflow" }
-# `work_queue_json_from_store` runs the startup stack migration sweep over a legacy session. A
-# dev-dependency only: tddy-work-queue depends on nothing that depends on this crate.
-tddy-work-queue = { path = "../tddy-work-queue" }
+# `stack_plan_json_from_store` seeds a session's work queue through the changeset fixtures.
+tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 # The session-metadata builder for `session_reader`'s liveness tests. Depends on nothing that
 # depends on this crate.
 tddy-testing-commons = { path = "../tddy-testing-commons" }

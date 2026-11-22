@@ -9,6 +9,8 @@ import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { VncService } from "tddy-client-web/gen/vnc_pb";
 import { ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
+import { WorkQueueView } from "tddy-workqueue-web";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import {
   isDormantInspectorTabName,
@@ -168,9 +170,13 @@ export function SessionInspectorDrawer({
   // session is stopped. A live session's transcript is the Agent Activity sidebar's. A request for it
   // on a live session degrades to Details, and is honoured again if the session stops.
   const activityAvailable = canResumeSession(session);
+  // The Work queue tab exists only for a session that owns a queue; a request for it on any other
+  // session degrades to Details.
+  const workQueueAvailable = session?.ownsWorkQueue === true;
   const tab: InspectorTab =
     (!mediaAvailable && isMediaInspectorTabName(requestedTab)) ||
-    (!activityAvailable && isDormantInspectorTabName(requestedTab))
+    (!activityAvailable && isDormantInspectorTabName(requestedTab)) ||
+    (!workQueueAvailable && requestedTab === "work-queue")
       ? "details"
       : requestedTab;
   const setTab = useCallback(
@@ -191,6 +197,7 @@ export function SessionInspectorDrawer({
           requestSessionsRefresh();
         }
       : undefined;
+  const workQueueClient = useHttpClient(WorkQueueService);
   const vncClient = useHttpClient(VncService);
   const screenSharingClient = useHttpClient(ScreenSharingService);
 
@@ -219,6 +226,7 @@ export function SessionInspectorDrawer({
           onChange={setTab}
           mediaAvailable={mediaAvailable}
           activityAvailable={activityAvailable}
+          workQueueAvailable={workQueueAvailable}
         />
       )}
 
@@ -300,6 +308,21 @@ export function SessionInspectorDrawer({
               client={activityClient}
               sessionToken={sessionToken ?? ""}
               sessionId={session.sessionId}
+            />
+          </ScrollArea>
+        ) : tab === "work-queue" ? (
+          <ScrollArea className="flex-1 min-h-0">
+            {/* The queue is the session's own: its id is the session's (`#workqueue` 5/14). */}
+            <WorkQueueView
+              address={{
+                projectId: session.projectId,
+                queueId: session.sessionId,
+                daemonInstanceId: session.daemonInstanceId,
+              }}
+              workQueueClient={workQueueClient}
+              sessionToken={sessionToken ?? ""}
+              sessions={sessions}
+              onOpenSession={onSwitchPeer}
             />
           </ScrollArea>
         ) : tab === "pr" ? (

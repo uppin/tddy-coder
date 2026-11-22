@@ -83,10 +83,10 @@ impl GithubPrApi for MockGithubPrApi {
 
 fn init_orchestrator_with_stack(session_dir: &std::path::Path, nodes: Vec<WorkItem>) {
     let cs = Changeset {
-        stack: Some(WorkQueue { version: 1, nodes }),
         ..Default::default()
     };
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(session_dir, cs);
+    let cs_stack = Some(WorkQueue { version: 1, nodes });
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(session_dir, cs, cs_stack.clone());
 }
 
 // ---------------------------------------------------------------------------

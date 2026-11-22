@@ -18,17 +18,14 @@ import { SessionShell } from "./sessionShell";
 import {
   parseSessionsProjectNew,
   parseSessionsProjectSettings,
-  parseSessionsProjectStack,
   sessionsDrawerPathForSession,
   sessionsProjectNewPath,
   sessionsProjectSettingsPath,
-  sessionsProjectQueuePath,
   SESSIONS_DRAWER_ROUTE,
   SESSIONS_NEW_ROUTE,
 } from "tddy-client-web";
 import { useNavigationPort } from "tddy-client-web";
 import { ActiveTabMemoryProvider } from "./lib/ActiveTabMemory";
-import { WorkQueueView, type WorkQueueAddress } from "tddy-workqueue-web";
 import type { WorkQueueSummary } from "tddy-client-web/gen/work_queue_pb";
 import { resolveShortcutsForSession } from "tddy-terminal-web";
 import { AGENT_CLI_LAUNCH, knownSessionLaunch } from "tddy-session-create-web";
@@ -156,7 +153,6 @@ export function SessionsDrawerScreen({
   // The stack view's address: the route carries project and stack, the owning host comes from the
   // drawer's `ListProjectWorkQueues` row — resolved here by listing the route's project, unless the
   // row that was clicked already handed its address over.
-  const [workQueueAddress, setStackAddress] = useState<WorkQueueAddress | null>(null);
   // Default closed on mobile (the open 280px panel would cover the main pane);
   // open on desktop.
   const [sessionListOpen, setSessionListOpen] = useState(() => !detectIsMobile());
@@ -314,7 +310,6 @@ export function SessionsDrawerScreen({
 
   const {
     handleUnknownHome,
-    handleChildSessionStarted,
     handleCreateSession,
     handleNewOrchestrator,
     handleOpenProjectStack,
@@ -329,7 +324,6 @@ export function SessionsDrawerScreen({
     navigate,
     isMobile,
     setSessionListOpen,
-    setStackAddress,
     setUnknownSession,
     addOptimisticSession,
     selectedInstanceId,
@@ -415,23 +409,9 @@ export function SessionsDrawerScreen({
           <SessionsDrawerDetailPane
             location={location}
             setup={setup}
-            workQueueAddress={workQueueAddress}
-            setStackAddress={setStackAddress}
-            workQueueClient={drawerClients.workQueueClient}
             sessionToken={sessionToken}
             sortedSessions={sortedSessions}
-            sessionMetadataBySessionId={sessionMetadataBySessionId}
             projects={projects}
-            onSelectSession={handleSelectSession}
-            onChildSessionStarted={handleChildSessionStarted}
-            viewClients={{
-              client: drawerClients.client ?? undefined,
-              projectClient: drawerClients.projectClient ?? undefined,
-              catalogClient: drawerClients.catalogClient ?? undefined,
-              sessionFilesClient: drawerClients.sessionFilesClient ?? undefined,
-              worktreeClient: drawerClients.worktreeClient ?? undefined,
-              taskClient: drawerClients.taskClient ?? undefined,
-            }}
             selectedInstanceId={selectedInstanceId ?? ""}
             onSessionCreated={handleSessionCreated}
             onStartMainFor={(projectId, host, spec) => startProjectHome(projectId, host, spec)}

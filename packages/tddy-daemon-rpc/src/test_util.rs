@@ -32,13 +32,12 @@ use tddy_service::proto::project::{
     SetProjectOrchestratorDefaultsRequest, SetProjectOrchestratorDefaultsResponse,
 };
 use tddy_service::proto::work_queue::{
-    AddWorkItemRequest, AddWorkItemResponse, CreateWorkQueueRequest, CreateWorkQueueResponse,
-    GetPrStatusRequest, GetPrStatusResponse, GetWorkQueueRequest, GetWorkQueueResponse,
-    LinkWorkItemRequest, LinkWorkItemResponse, ListProjectWorkQueuesRequest,
-    ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
-    RepointWorkItemRequest, RepointWorkItemResponse, ResolveWorkItemBaseRequest,
-    ResolveWorkItemBaseResponse, WorkQueueService,
+    AddWorkItemRequest, AddWorkItemResponse, GetPrStatusRequest, GetPrStatusResponse,
+    GetWorkQueueRequest, GetWorkQueueResponse, LinkWorkItemRequest, LinkWorkItemResponse,
+    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest,
+    ReorderWorkItemResponse, RepointWorkItemRequest, RepointWorkItemResponse,
+    ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse, WorkQueueService,
 };
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_worktree_service::stream::MpscResultStream;
@@ -496,16 +495,6 @@ impl WorkQueueService for TestDaemon {
         self.handlers
             .work_queue_service()
             .get_work_queue(request)
-            .await
-    }
-
-    async fn create_work_queue(
-        &self,
-        request: Request<CreateWorkQueueRequest>,
-    ) -> Result<Response<CreateWorkQueueResponse>, Status> {
-        self.handlers
-            .work_queue_service()
-            .create_work_queue(request)
             .await
     }
 }

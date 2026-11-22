@@ -68,6 +68,11 @@ impl LaunchSessions {
                 .map_err(|e| Status::internal(format!("cannot clear the paused mark: {e}")))?;
         }
         self.fast_forward_a_resumed_orchestrators_home(os_user, &metadata)?;
+        // An orchestrator that predates the work queue receives its empty queue when it next runs
+        // (`#workqueue` 5/14); any other session is left as it is.
+        crate::svc_start_session_core::give_the_session_its_queue(&session_dir, false).map_err(
+            |e| Status::internal(format!("cannot create the session's work queue: {e}")),
+        )?;
 
         // How the session resumes is read from the session type it records, as this host declares
         // it: every CLI agent through the one spec-driven launch, a no-agent session by re-provisioning

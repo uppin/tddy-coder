@@ -107,10 +107,9 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     taskClient,
   } = props;
 
-  // "New stack" (`#orchestrators` 12/12, B9): the stack this view acts on after the operator
-  // creates one — created by address, then planned PRs are added to it by that address.
-  const [createdAddress, setCreatedAddress] = useState<WorkQueueAddress | null>(null);
-  const address = createdAddress ?? openedAddress;
+  // The queue this view acts on: its owning session's (`#workqueue` 5/14). A queue is created only
+  // when its session starts, so the view never makes one.
+  const address = openedAddress;
 
   const [workQueueJson, setWorkQueueJson] = useState("");
   const [createdBySessionId, setCreatedBySessionId] = useState("");
@@ -354,24 +353,6 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     });
   };
 
-  const handleNewStack = async () => {
-    if (!workQueueClient) return;
-    const res = await workQueueClient.createWorkQueue({
-      sessionToken,
-      projectId: address.projectId,
-      title: "",
-      daemonInstanceId: address.daemonInstanceId,
-    });
-    if (!res.stack) return;
-    setCreatedAddress({
-      projectId: res.stack.projectId,
-      queueId: res.stack.queueId,
-      daemonInstanceId: res.stack.daemonInstanceId,
-    });
-    setWorkQueueJson("");
-    setIsAddingPlannedPr(true);
-  };
-
   return (
     <div
       data-testid="work-queue-view"
@@ -379,14 +360,6 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
       className="flex-1 min-h-0 flex flex-col overflow-hidden"
     >
       <div className="flex-shrink-0 flex justify-end gap-2 p-3 pb-0">
-        <Button
-          data-testid="work-queue-new-btn"
-          size="sm"
-          variant="outline"
-          onClick={() => void handleNewStack()}
-        >
-          New stack
-        </Button>
         <Button
           data-testid="work-item-add-btn"
           size="sm"

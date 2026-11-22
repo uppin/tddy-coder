@@ -3,7 +3,6 @@
 //! Data and the accessors that read it. Nothing here touches the filesystem — [`super::io`]
 //! does that, and [`super::merge`] derives a session's next move from what is stored here.
 
-use super::work_queue::WorkQueue;
 use std::collections::BTreeMap;
 use tddy_workflow::ids::WorkflowState;
 
@@ -85,14 +84,6 @@ pub struct Changeset {
     /// User-selected chain-PR base ref (`origin/...`) when opted in; omitted when using default resolution only.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub worktree_integration_base_ref: Option<String>,
-    /// PR-stack DAG; present only on an orchestrator session. Omitted for normal sessions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stack: Option<WorkQueue>,
-    /// The PR stack this orchestrator session planned, by its id in the project's stack store
-    /// (`<projects dir>/<project_id>/stacks/<queue_id>.yaml`). Replaces [`Self::stack`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "stack_id")]
-    pub work_queue_id: Option<String>,
     /// Back-reference from a CHILD session to its orchestrating session.
     /// Distinct from `previous_session_id` in `.session.yaml` (the base-branch source, which
     /// in a DAG may be a sibling node, not the orchestrator).
@@ -314,8 +305,6 @@ impl Default for Changeset {
             workflow: None,
             effective_worktree_integration_base_ref: None,
             worktree_integration_base_ref: None,
-            stack: None,
-            work_queue_id: None,
             orchestrator_session_id: None,
             orchestrator_daemon_instance_id: None,
         }

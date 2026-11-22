@@ -65,9 +65,13 @@ fn push_branch(repo: &Path, branch: &str) {
     git(repo, &["checkout", "master"]);
 }
 
-fn write_parent_changeset(sessions_base: &Path, session_id: &str, cs: Changeset) {
+fn write_parent_changeset(
+    sessions_base: &Path,
+    session_id: &str,
+    (cs, stack): (Changeset, Option<WorkQueue>),
+) {
     let dir = unified_session_dir_path(sessions_base, session_id);
-    write_changeset_with_stack(&dir, cs);
+    write_changeset_with_stack(&dir, cs, stack);
 }
 
 fn a_materialized_node(node_id: &str, branch: &str, parents: &[&str]) -> WorkItem {
@@ -121,17 +125,19 @@ fn resolve_chain_base_ref_returns_stack_node_base_for_pr_stack_orchestrator_pare
     write_parent_changeset(
         &sessions_base,
         orchestrator_id,
-        Changeset {
-            recipe: Some("pr-stack".to_string()),
-            stack: Some(WorkQueue {
+        (
+            Changeset {
+                recipe: Some("pr-stack".to_string()),
+                ..Changeset::default()
+            },
+            Some(WorkQueue {
                 version: 1,
                 nodes: vec![
                     a_materialized_node("bottom", parent_branch, &[]),
                     a_planned_child_node("child", child_branch, &["bottom"]),
                 ],
             }),
-            ..Changeset::default()
-        },
+        ),
     );
 
     // When
@@ -167,14 +173,16 @@ fn resolve_chain_base_ref_returns_none_for_branchless_pr_stack_orchestrator() {
     write_parent_changeset(
         &sessions_base,
         "orchestrator-1",
-        Changeset {
-            recipe: Some("pr-stack".to_string()),
-            stack: Some(WorkQueue {
+        (
+            Changeset {
+                recipe: Some("pr-stack".to_string()),
+                ..Changeset::default()
+            },
+            Some(WorkQueue {
                 version: 1,
                 nodes: vec![],
             }),
-            ..Changeset::default()
-        },
+        ),
     );
 
     // When
@@ -209,12 +217,14 @@ fn resolve_chain_base_ref_errors_for_branchless_code_session_parent() {
     write_parent_changeset(
         &sessions_base,
         "code-session-1",
-        Changeset {
-            recipe: Some("tdd".to_string()),
-            stack: None,
-            branch: None,
-            ..Changeset::default()
-        },
+        (
+            Changeset {
+                recipe: Some("tdd".to_string()),
+                branch: None,
+                ..Changeset::default()
+            },
+            None,
+        ),
     );
 
     // When
@@ -318,17 +328,19 @@ fn spawn_work_queue_parent_takes_precedence_over_persisted_field() {
     write_parent_changeset(
         &sessions_base,
         orchestrator_id,
-        Changeset {
-            recipe: Some("pr-stack".to_string()),
-            stack: Some(WorkQueue {
+        (
+            Changeset {
+                recipe: Some("pr-stack".to_string()),
+                ..Changeset::default()
+            },
+            Some(WorkQueue {
                 version: 1,
                 nodes: vec![
                     a_materialized_node("bottom", parent_branch, &[]),
                     a_planned_child_node("child", child_branch, &["bottom"]),
                 ],
             }),
-            ..Changeset::default()
-        },
+        ),
     );
 
     // When — both work_queue_parent and a persisted field are supplied.
@@ -371,17 +383,19 @@ fn bases_a_child_on_the_node_named_by_id_when_the_operator_renamed_its_branch() 
     write_parent_changeset(
         &sessions_base,
         "orchestrator-1",
-        Changeset {
-            recipe: Some("pr-stack".to_string()),
-            stack: Some(WorkQueue {
+        (
+            Changeset {
+                recipe: Some("pr-stack".to_string()),
+                ..Changeset::default()
+            },
+            Some(WorkQueue {
                 version: 1,
                 nodes: vec![
                     a_materialized_node("bottom", parent_branch, &[]),
                     a_planned_child_node("child", "feature/stack/child", &["bottom"]),
                 ],
             }),
-            ..Changeset::default()
-        },
+        ),
     );
 
     // When
@@ -419,17 +433,19 @@ fn bases_a_child_on_the_node_named_by_id_when_the_branch_still_matches_it() {
     write_parent_changeset(
         &sessions_base,
         "orchestrator-1",
-        Changeset {
-            recipe: Some("pr-stack".to_string()),
-            stack: Some(WorkQueue {
+        (
+            Changeset {
+                recipe: Some("pr-stack".to_string()),
+                ..Changeset::default()
+            },
+            Some(WorkQueue {
                 version: 1,
                 nodes: vec![
                     a_materialized_node("bottom", parent_branch, &[]),
                     a_planned_child_node("child", child_branch, &["bottom"]),
                 ],
             }),
-            ..Changeset::default()
-        },
+        ),
     );
 
     // When
@@ -468,17 +484,19 @@ fn resolves_no_base_for_a_node_id_the_plan_does_not_hold() {
     write_parent_changeset(
         &sessions_base,
         "orchestrator-1",
-        Changeset {
-            recipe: Some("pr-stack".to_string()),
-            stack: Some(WorkQueue {
+        (
+            Changeset {
+                recipe: Some("pr-stack".to_string()),
+                ..Changeset::default()
+            },
+            Some(WorkQueue {
                 version: 1,
                 nodes: vec![
                     a_materialized_node("bottom", parent_branch, &[]),
                     a_planned_child_node("child", child_branch, &["bottom"]),
                 ],
             }),
-            ..Changeset::default()
-        },
+        ),
     );
 
     // When — the branch would match `child`, but the id names a node that is not in the plan

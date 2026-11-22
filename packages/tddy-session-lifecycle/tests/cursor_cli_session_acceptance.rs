@@ -758,11 +758,14 @@ fn an_orchestrator_that_planned(
     std::fs::create_dir_all(&session_dir).expect("create the orchestrator's session dir");
     tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         &session_dir,
-        tddy_core::changeset::Changeset {
-            branch: Some("main".to_string()),
-            repo_path: Some(repo.to_string_lossy().into_owned()),
-            recipe: Some("pr-stack".to_string()),
-            stack: Some(tddy_core::changeset::WorkQueue {
+        (
+            tddy_core::changeset::Changeset {
+                branch: Some("main".to_string()),
+                repo_path: Some(repo.to_string_lossy().into_owned()),
+                recipe: Some("pr-stack".to_string()),
+                ..Default::default()
+            },
+            Some(tddy_core::changeset::WorkQueue {
                 version: 1,
                 nodes: vec![tddy_core::changeset::WorkItem {
                     node_id: node_id.to_string(),
@@ -778,8 +781,7 @@ fn an_orchestrator_that_planned(
                     display_order: None,
                 }],
             }),
-            ..Default::default()
-        },
+        ),
     );
 }
 

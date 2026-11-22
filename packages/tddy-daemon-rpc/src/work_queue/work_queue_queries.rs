@@ -9,9 +9,9 @@ use std::path::Path;
 use tddy_core::changeset::WorkItem;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{
-    AddWorkItemRequest, AddWorkItemResponse, CreateWorkQueueRequest, CreateWorkQueueResponse,
-    GetWorkQueueRequest, GetWorkQueueResponse, ListProjectWorkQueuesRequest,
-    ListProjectWorkQueuesResponse, UnreachableWorkQueueHost, WorkQueueAddress, WorkQueueSummary,
+    AddWorkItemRequest, AddWorkItemResponse, GetWorkQueueRequest, GetWorkQueueResponse,
+    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, UnreachableWorkQueueHost,
+    WorkQueueAddress, WorkQueueSummary,
 };
 
 impl WorkQueueRpcHandler {
@@ -241,49 +241,6 @@ impl WorkQueueRpcHandler {
         Ok(Response::new(GetWorkQueueResponse {
             summary: Some(summary),
             work_queue_json,
-        }))
-    }
-
-    /// `CreateWorkQueue`: a new, empty stack in this host's store for the project, forwarded
-    /// to the daemon `daemon_instance_id` names when that is a peer (`#orchestrators` 12/12, B9).
-    /// The same `WorkQueueStore::create_titled` path `work_queue_create` uses; created by no
-    /// session, so the record names none.
-    pub(super) async fn create_work_queue_rpc(
-        &self,
-        request: Request<CreateWorkQueueRequest>,
-    ) -> Result<Response<CreateWorkQueueResponse>, Status> {
-        let req = request.into_inner();
-        let os_user = self.authenticated_os_user(&req.session_token)?;
-        if req.project_id.trim().is_empty() {
-            return Err(Status::invalid_argument("project_id is required"));
-        }
-        if let Some(answered) = self
-            .forward_addressed::<_, CreateWorkQueueResponse>(
-                "CreateWorkQueue",
-                &req.daemon_instance_id,
-                &req,
-            )
-            .await?
-        {
-            return Ok(Response::new(answered));
-        }
-        let sessions_base = self.sessions_base(&os_user)?;
-        let store = self.stack_store(&sessions_base);
-        let title = (!req.title.trim().is_empty()).then(|| req.title.clone());
-        let record = store
-            .create_titled(
-                req.project_id.trim(),
-                "",
-                title,
-                tddy_core::changeset::WorkQueue::default(),
-            )
-            .map_err(store_status)?;
-        Ok(Response::new(CreateWorkQueueResponse {
-            stack: Some(WorkQueueAddress {
-                project_id: record.project_id.clone(),
-                queue_id: record.queue_id.clone(),
-                daemon_instance_id: self.local_instance_id(),
-            }),
         }))
     }
 }

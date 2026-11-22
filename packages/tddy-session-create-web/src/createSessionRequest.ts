@@ -90,6 +90,8 @@ export interface CreateSessionFormValues {
   sandbox: boolean;
   /** Run the agent inside tmux on the host. Sent as `run_in_tmux` for every CLI harness type. */
   runInTmux?: boolean;
+  /** Start the session with a work queue it owns (`StartSessionRequest.with_work_queue`). */
+  withWorkQueue?: boolean;
   managedCodebase: boolean;
   sandboxedCodebase: boolean;
   isSplitCodebase: boolean;
@@ -219,6 +221,7 @@ export function buildStartSessionRequest(
     ...cliAgentChoices(form, features),
     sandbox,
     runInTmux: runInTmuxChoice(form),
+    withWorkQueue: form.withWorkQueue ?? false,
     managedCodebase: features.managedWorkflow ? managedCodebase : false,
     // The third placement. Choosing it cleared the two above and the codebase host in the form,
     // so they go out cleared here without being restated — the request says what the screen says.

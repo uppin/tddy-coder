@@ -24,6 +24,11 @@ interface InspectorTabsProps {
    * session's transcript is the Agent Activity sidebar's, so its strip has no Activity tab.
    */
   activityAvailable: boolean;
+  /**
+   * Whether the session owns a work queue (`SessionEntry.owns_work_queue`), so the Work queue tab is
+   * offered. A session without one has no such tab.
+   */
+  workQueueAvailable: boolean;
 }
 
 export function InspectorTabs({
@@ -31,6 +36,7 @@ export function InspectorTabs({
   onChange,
   mediaAvailable,
   activityAvailable,
+  workQueueAvailable,
 }: InspectorTabsProps) {
   return (
     <div className="flex border-b border-border flex-shrink-0">
@@ -96,6 +102,20 @@ export function InspectorTabs({
       >
         Usage
       </button>
+      {workQueueAvailable && (
+        <button
+          data-testid="sessions-inspector-tab-work-queue"
+          aria-selected={value === "work-queue"}
+          onClick={() => onChange("work-queue")}
+          className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+            value === "work-queue"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Work queue
+        </button>
+      )}
       <button
         data-testid="sessions-inspector-tab-pr"
         aria-selected={value === "pr"}

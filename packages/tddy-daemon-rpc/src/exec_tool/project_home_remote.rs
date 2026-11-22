@@ -35,12 +35,7 @@ use tddy_tool_engine::project_home_tools::{
 };
 use tddy_tool_engine::session_file_tools::is_session_file_tool;
 use tddy_tool_engine::work_item_git_tools::is_stack_git_tool;
-use tddy_tool_engine::work_queue_tools::caller_records::{
-    forwarded_stack_caller_role, stack_bound_to_session_here,
-};
-use tddy_tool_engine::work_queue_tools::{
-    is_stack_tool, is_stack_tool_offered_to, WorkQueueCaller, WorkQueueCallerRole,
-};
+use tddy_tool_engine::work_queue_tools::{is_stack_tool, WorkQueueCaller};
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
 use tddy_worktree_service::session_target::{CodebaseHalf, HomeCaller};
 
@@ -89,34 +84,13 @@ impl ExecToolRpcHandler {
             )));
         }
         if is_stack_tool(&req.tool_name) || is_stack_git_tool(&req.tool_name) {
-            // The owner's row is confirmed first; the role is then decided per tool family from
-            // that row and this host's own store, which holds the stack a node is bound to.
-            let bound =
-                stack_bound_to_session_here(&sessions_base, &home.project_id, &home.session_id)
-                    .map_err(|e| {
-                        Status::permission_denied(format!("the stack tools are refused: {e}"))
-                    })?;
-            let role =
-                forwarded_stack_caller_role(&listed_role, bound.as_deref()).ok_or_else(|| {
-                    Status::permission_denied(format!(
-                    "tool {} is served only to an orchestrator session, or a session bound to a \
-                     node of a stack held here, and daemon {owner} reports session {} is neither",
-                    req.tool_name, req.session_id
-                ))
-                })?;
+            // The owner's row is confirmed; what the session may do is decided here, per queue,
+            // from the queue this host holds — never from its role (`#workqueue` 5/14).
             let caller = WorkQueueCaller {
                 session_id: home.session_id,
                 project_id: home.project_id,
-                role,
             };
             if is_stack_tool(&req.tool_name) {
-                if !is_stack_tool_offered_to(&caller.role, &req.tool_name) {
-                    return Err(Status::permission_denied(format!(
-                        "tool {} is not offered to a session bound to a node of a stack: it may \
-                         read its stack's status and its pull requests only",
-                        req.tool_name
-                    )));
-                }
                 return Ok(Some(
                     self.serve_stack_tool_for_caller_held_elsewhere(
                         req,
@@ -126,14 +100,6 @@ impl ExecToolRpcHandler {
                     )
                     .await,
                 ));
-            }
-            // The stack git tools still require an orchestrator role, forwarded or not.
-            if !matches!(caller.role, WorkQueueCallerRole::Orchestrator { .. }) {
-                return Err(Status::permission_denied(format!(
-                    "tool {} is served only to an orchestrator session, and daemon {owner} \
-                     reports session {} is not one",
-                    req.tool_name, req.session_id
-                )));
             }
             return Ok(Some(
                 self.serve_stack_git_tool_for_caller_held_elsewhere(

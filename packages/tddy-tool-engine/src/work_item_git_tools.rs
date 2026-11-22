@@ -1,10 +1,10 @@
 //! The PR-stack git tools, run by the daemon in each node's own worktree (`#orchestrators` 10/11).
 //!
 //! The siblings of the plan and read tools ([`crate::work_queue_tools`], `#orchestrators` 7/11): the
-//! same `queue_id` addressing, the same [`WorkQueueCaller`] classification and the same forwarding of
+//! same `queue_id` addressing, the same access to the addressed queue and the same forwarding of
 //! a call naming another host with [`TARGET_DAEMON_INSTANCE_ID`] — but every one of these six
-//! changes git or a pull request, so they are offered to an **orchestrator** alone, never to a node
-//! of a stack.
+//! changes git or a pull request, so they are offered to the **owner** of a queue alone, never to a
+//! session it merely addresses.
 //!
 //! | Tool | Git, on the daemon | GitHub, as the project's account |
 //! |---|---|---|
@@ -26,7 +26,8 @@ use serde_json::{json, Value};
 
 use crate::catalog::ToolDef;
 use crate::project_home_tools::{tool_def, TARGET_DAEMON_INSTANCE_ID};
-use crate::work_queue_tools::{WorkQueueCaller, WorkQueueCallerRole, STACK_ID};
+use crate::work_queue_access::WorkQueueAccess;
+use crate::work_queue_tools::{WorkQueueCaller, STACK_ID};
 use crate::ToolOutcome;
 
 pub const PR_MERGE: &str = "work_item_merge";
@@ -51,22 +52,10 @@ pub fn is_stack_git_tool(name: &str) -> bool {
     WORK_ITEM_GIT_TOOL_NAMES.contains(&name)
 }
 
-/// Whether `role` is offered (and served) the stack git tool `tool_name`: an orchestrator every
-/// one, a node of a stack none.
-pub fn is_stack_git_tool_offered_to(role: &WorkQueueCallerRole, tool_name: &str) -> bool {
-    matches!(role, WorkQueueCallerRole::Orchestrator { .. }) && is_stack_git_tool(tool_name)
-}
-
-/// The stack git tools `role` is offered, in [`WORK_ITEM_GIT_TOOL_NAMES`] order; none for a session
-/// with no stack role and none for a node.
-pub fn work_item_git_tools_offered_to(role: Option<&WorkQueueCallerRole>) -> Vec<ToolDef> {
-    let Some(role) = role else {
-        return Vec::new();
-    };
-    stack_git_tool_defs()
-        .into_iter()
-        .filter(|tool| is_stack_git_tool_offered_to(role, &tool.name))
-        .collect()
+/// Whether a session with `access` is offered (and served) the stack git tool `tool_name`: the
+/// owner every one, an addressed session none.
+pub fn is_stack_git_tool_offered_to(access: WorkQueueAccess, tool_name: &str) -> bool {
+    access == WorkQueueAccess::Owner && is_stack_git_tool(tool_name)
 }
 
 /// One stack git operation on a node of the addressed stack, its arguments parsed and checked.
@@ -106,6 +95,14 @@ pub enum WorkItemGitOp {
 /// A call naming another host was forwarded before it got here.
 #[async_trait]
 pub trait WorkItemGitToolPort: Send + Sync {
+    /// What `caller` may do with the queue `queue_id` (a session id) on this host, or the refusal
+    /// naming why it has none (see [`crate::work_queue_tools::WorkQueueToolPort::access_to`]).
+    async fn access_to(
+        &self,
+        caller: &WorkQueueCaller,
+        queue_id: &str,
+    ) -> Result<WorkQueueAccess, String>;
+
     /// Run `op` on `queue_id` of `caller`'s project for `caller`, answering the tool's JSON. An
     /// unknown stack or node, a node refused a rebase (dirty worktree, running session) and a git or
     /// GitHub failure are the error, each naming what was refused.
@@ -189,7 +186,7 @@ fn node_object(properties: Value, required: &[&str]) -> Value {
     let mut properties = properties;
     properties[STACK_ID] = json!({
         "type": "string",
-        "description": "The stack, as work_queue_list or work_queue_create answers its queue_id. The calling session's own stack (the one its changeset names) when omitted."
+        "description": "The work queue, as work_queue_list answers its queue_id — the id of the session that owns it. The calling session's own queue when omitted."
     });
     properties[TARGET_DAEMON_INSTANCE_ID] = json!({
         "type": "string",
@@ -277,11 +274,16 @@ async fn run_stack_git(
     let op = work_item_git_op_of(tool_name, args)?;
     let queue_id =
         crate::work_queue_tools::addressed_stack_id(caller, tool_name, named.as_deref())?
-            .ok_or_else(|| {
-                format!(
-            "{tool_name}: name the stack with queue_id — this session owns no stack to default to"
-        )
-            })?;
+            .ok_or_else(|| format!("{tool_name}: name the work queue with queue_id"))?;
+    let access = port
+        .access_to(caller, &queue_id)
+        .await
+        .map_err(|why| format!("{tool_name}: {why}"))?;
+    if !is_stack_git_tool_offered_to(access, tool_name) {
+        return Err(format!(
+            "{tool_name}: only the session that owns work queue {queue_id} may change it"
+        ));
+    }
     port.run_stack_git_op(caller, &queue_id, op)
         .await
         .map_err(|why| format!("{tool_name}: {why}"))
@@ -295,73 +297,44 @@ mod tests {
 
     use super::*;
 
-    const OWN_STACK: &str = "stack-own";
+    const OWN_STACK: &str = "orch";
     const OTHER_STACK: &str = "stack-other";
 
     fn an_orchestrator_owning_a_stack() -> WorkQueueCaller {
         WorkQueueCaller {
             session_id: "orch".to_string(),
             project_id: "proj".to_string(),
-            role: WorkQueueCallerRole::Orchestrator {
-                own_stack_id: Some(OWN_STACK.to_string()),
-            },
-        }
-    }
-
-    fn a_node() -> WorkQueueCallerRole {
-        WorkQueueCallerRole::WorkItem {
-            queue_id: OWN_STACK.to_string(),
         }
     }
 
     // ── who is offered them ───────────────────────────────────────────────────────────────────
 
     #[test]
-    fn an_orchestrator_is_offered_every_git_tool() {
-        // Given an orchestrator
-        let role = an_orchestrator_owning_a_stack().role;
+    fn the_owner_is_offered_every_git_tool_and_an_addressed_session_none() {
+        // When each git tool is checked for each access
+        let offered = |access| -> Vec<&str> {
+            WORK_ITEM_GIT_TOOL_NAMES
+                .into_iter()
+                .filter(|tool| is_stack_git_tool_offered_to(access, tool))
+                .collect()
+        };
 
-        // When the git tools it is offered are listed
-        let offered: Vec<String> = work_item_git_tools_offered_to(Some(&role))
-            .into_iter()
-            .map(|def| def.name)
-            .collect();
-
-        // Then it is offered all six, in advertised order
+        // Then the owner has all six, in advertised order, and an addressed session none
         assert_eq!(
-            offered,
-            WORK_ITEM_GIT_TOOL_NAMES.map(str::to_string).to_vec()
+            (
+                offered(WorkQueueAccess::Owner),
+                offered(WorkQueueAccess::Addressed)
+            ),
+            (WORK_ITEM_GIT_TOOL_NAMES.to_vec(), Vec::<&str>::new())
         );
     }
 
     #[test]
-    fn a_node_of_a_stack_is_offered_no_git_tool() {
-        // Given a session bound to a node of a stack
-        let role = a_node();
-
-        // When each git tool is checked for it
-        let offered: Vec<&str> = WORK_ITEM_GIT_TOOL_NAMES
-            .into_iter()
-            .filter(|tool| is_stack_git_tool_offered_to(&role, tool))
-            .collect();
-
-        // Then none is offered
-        assert_eq!(offered, Vec::<&str>::new());
-        assert_eq!(work_item_git_tools_offered_to(Some(&role)), Vec::new());
-    }
-
-    #[test]
-    fn a_session_with_no_stack_role_is_offered_no_git_tool() {
-        assert_eq!(work_item_git_tools_offered_to(None), Vec::new());
-    }
-
-    #[test]
-    fn a_plan_tool_is_not_a_git_tool_an_orchestrator_is_offered_here() {
-        // Given an orchestrator
-        let role = an_orchestrator_owning_a_stack().role;
-
-        // Then this family serves only its own six names
-        assert!(!is_stack_git_tool_offered_to(&role, "work_item_add"));
+    fn a_plan_tool_is_not_a_git_tool_the_owner_is_offered_here() {
+        assert!(!is_stack_git_tool_offered_to(
+            WorkQueueAccess::Owner,
+            "work_item_add"
+        ));
     }
 
     // ── definitions ───────────────────────────────────────────────────────────────────────────
@@ -421,6 +394,14 @@ mod tests {
 
     #[async_trait]
     impl WorkItemGitToolPort for RecordingPort {
+        async fn access_to(
+            &self,
+            _caller: &WorkQueueCaller,
+            _queue_id: &str,
+        ) -> Result<WorkQueueAccess, String> {
+            Ok(WorkQueueAccess::Owner)
+        }
+
         async fn run_stack_git_op(
             &self,
             _caller: &WorkQueueCaller,

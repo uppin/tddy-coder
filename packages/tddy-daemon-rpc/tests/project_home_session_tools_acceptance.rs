@@ -551,7 +551,6 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
             "RefreshWorktreeDiskUsage",
             "NotifyOperator",
             "work_queue_list",
-            "work_queue_create",
             "work_queue_status",
             "work_pr_read",
             "work_pr_search",

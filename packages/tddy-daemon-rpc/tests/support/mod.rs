@@ -30,8 +30,7 @@ use tddy_service::proto::session::{
 };
 use tddy_service::proto::tasks::{CancelTaskRequest, CancelTaskResponse};
 use tddy_service::proto::work_queue::{
-    AddWorkItemRequest, CreateWorkQueueRequest, GetWorkQueueRequest, ListProjectWorkQueuesRequest,
-    WorkQueueService,
+    AddWorkItemRequest, GetWorkQueueRequest, ListProjectWorkQueuesRequest, WorkQueueService,
 };
 use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_activity::session_notifications::{
@@ -193,13 +192,6 @@ impl PeerForwarder for InProcessPeers {
                 let req = GetWorkQueueRequest::decode(body.as_slice()).unwrap();
                 daemon
                     .get_work_queue(arriving_from_a_peer(req))
-                    .await
-                    .map(|r| r.into_inner().encode_to_vec())
-            }
-            (WORK_QUEUE_SERVICE, "CreateWorkQueue") => {
-                let req = CreateWorkQueueRequest::decode(body.as_slice()).unwrap();
-                daemon
-                    .create_work_queue(arriving_from_a_peer(req))
                     .await
                     .map(|r| r.into_inner().encode_to_vec())
             }

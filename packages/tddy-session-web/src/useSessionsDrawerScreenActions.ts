@@ -5,7 +5,6 @@ import {
   sessionsDrawerPathForSession,
   sessionsProjectNewPath,
   sessionsProjectSettingsPath,
-  sessionsProjectQueuePath,
   SESSIONS_DRAWER_ROUTE,
   SESSIONS_NEW_ROUTE,
 } from "tddy-client-web";
@@ -14,7 +13,6 @@ import type { HostConnection } from "tddy-client-web/connections/types";
 import { requestSessionsRefresh } from "./lib/sessionsRefreshBridge";
 import { useEnsureProjectHome } from "./useEnsureProjectHome";
 import type { useProjectHomeSetup } from "./useProjectHomeSetup";
-import type { WorkQueueAddress } from "tddy-workqueue-web";
 
 /**
  * The sessions drawer screen's actions (`#orchestrators` 12/12, B10): navigation and creation
@@ -24,7 +22,6 @@ export function useSessionsDrawerScreenActions(input: {
   navigate: (path: string) => void;
   isMobile: boolean;
   setSessionListOpen: (open: boolean) => void;
-  setStackAddress: (address: WorkQueueAddress) => void;
   setUnknownSession: (unknown: boolean) => void;
   addOptimisticSession: (entry: import("tddy-client-web/gen/session_pb").SessionEntry) => void;
   selectedInstanceId: string | null;
@@ -45,7 +42,6 @@ export function useSessionsDrawerScreenActions(input: {
     navigate,
     isMobile,
     setSessionListOpen,
-    setStackAddress,
     setUnknownSession,
     addOptimisticSession,
     selectedInstanceId,
@@ -98,15 +94,17 @@ export function useSessionsDrawerScreenActions(input: {
     if (isMobile) setSessionListOpen(false);
     navigate(sessionsProjectNewPath(projectId));
   };
+  // A project's work queue opens in its owning session's inspector, on the Work queue tab: a queue's
+  // id is its session's (`#workqueue` 5/14).
   const handleOpenProjectStack = (summary: WorkQueueSummary) => {
-    if (!summary.address) return;
-    setStackAddress({
-      projectId: summary.address.projectId,
-      queueId: summary.address.queueId,
-      daemonInstanceId: summary.address.daemonInstanceId,
-    });
+    const owner = summary.address?.queueId;
+    if (!owner) return;
     if (isMobile) setSessionListOpen(false);
-    navigate(sessionsProjectQueuePath(summary.address.projectId, summary.address.queueId));
+    handleSelectSession(owner);
+    navigationPort.navigate({
+      path: sessionsDrawerPathForSession(owner),
+      params: { inspector: "work-queue" },
+    });
   };
   const handleCancelCreate = () => navigate(SESSIONS_DRAWER_ROUTE);
   const handleSessionCreated = (sessionId: string) => {

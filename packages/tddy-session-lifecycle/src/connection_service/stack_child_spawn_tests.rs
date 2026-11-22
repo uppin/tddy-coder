@@ -144,18 +144,18 @@ impl Orchestrator {
         tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
             &dir,
             Changeset {
-                stack: Some(WorkQueue {
-                    version: 1,
-                    nodes: vec![WorkItem {
-                        node_id: NODE_ID.to_string(),
-                        title: NODE_TITLE.to_string(),
-                        description: NODE_DESCRIPTION.to_string(),
-                        branch_suggestion: Some("feature/token-store".to_string()),
-                        ..Default::default()
-                    }],
-                }),
                 ..Changeset::default()
             },
+            Some(WorkQueue {
+                version: 1,
+                nodes: vec![WorkItem {
+                    node_id: NODE_ID.to_string(),
+                    title: NODE_TITLE.to_string(),
+                    description: NODE_DESCRIPTION.to_string(),
+                    branch_suggestion: Some("feature/token-store".to_string()),
+                    ..Default::default()
+                }],
+            }),
         );
     }
 

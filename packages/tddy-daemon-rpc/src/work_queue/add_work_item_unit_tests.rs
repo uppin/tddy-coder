@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use super::WorkQueueRpcHandler;
-use tddy_core::changeset::{read_changeset, Changeset};
+use tddy_core::changeset::Changeset;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
@@ -67,39 +67,29 @@ fn make_unit_connection(sessions_base: std::path::PathBuf) -> DaemonSessionHost 
 }
 
 fn write_unit_changeset(session_dir: &std::path::Path, recipe: Option<&str>) {
-    write_unit_changeset_named(session_dir, recipe, None);
+    let changeset = Changeset {
+        recipe: recipe.map(str::to_string),
+        ..Changeset::default()
+    };
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(session_dir, changeset, None);
 }
 
-fn write_unit_changeset_named(
+/// Give the session a work queue it owns (the shape `require_a_stack` admits).
+fn write_unit_changeset_naming_a_store_stack(
+    _sessions_base: &std::path::Path,
     session_dir: &std::path::Path,
+    _session_id: &str,
     recipe: Option<&str>,
-    queue_id: Option<&str>,
 ) {
     let changeset = Changeset {
         recipe: recipe.map(str::to_string),
-        work_queue_id: queue_id.map(str::to_string),
         ..Changeset::default()
     };
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(session_dir, changeset);
-}
-
-/// Seed a stack record in the host's store for `session_id`'s project and name it in the
-/// session's changeset (the shape `require_a_stack` admits).
-fn write_unit_changeset_naming_a_store_stack(
-    sessions_base: &std::path::Path,
-    session_dir: &std::path::Path,
-    session_id: &str,
-    recipe: Option<&str>,
-) {
-    let store = tddy_core::work_queue_store::WorkQueueStore::new(sessions_base.join("projects"));
-    let record = store
-        .create(
-            "proj-test",
-            session_id,
-            tddy_core::changeset::WorkQueue::default(),
-        )
-        .expect("seed a stack record");
-    write_unit_changeset_named(session_dir, recipe, Some(&record.queue_id));
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
+        session_dir,
+        changeset,
+        Some(tddy_core::changeset::WorkQueue::default()),
+    );
 }
 
 fn a_request(session_id: &str, title: &str) -> Request<AddWorkItemRequest> {
@@ -116,7 +106,7 @@ fn a_request(session_id: &str, title: &str) -> Request<AddWorkItemRequest> {
 }
 
 /// A session whose changeset `recipe` is `"tdd"` and which names no stack must be refused
-/// before its stack is ever touched, naming `work_queue_create`.
+/// before its stack is ever touched, saying the session has no work queue.
 #[tokio::test]
 async fn add_work_item_rejects_a_session_whose_recipe_is_not_pr_stack() {
     // Given — a plain "tdd" session, not a pr-stack orchestrator
@@ -134,14 +124,14 @@ async fn add_work_item_rejects_a_session_whose_recipe_is_not_pr_stack() {
     let err = result.expect_err("a session naming no stack must be refused");
     assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
     assert!(
-        err.message().contains("work_queue_create"),
-        "the refusal must name work_queue_create, got: {}",
+        err.message().contains("has no work queue"),
+        "the refusal must say the session has no work queue, got: {}",
         err.message()
     );
-    let loaded = read_changeset(&session_dir).unwrap();
-    assert!(
-        loaded.work_queue_id.is_none(),
-        "the rejected session must not gain a stack"
+    assert_eq!(
+        tddy_core::changeset::read_session_stack(&session_dir).unwrap(),
+        None,
+        "the rejected session must not gain a queue"
     );
 }
 
@@ -164,8 +154,8 @@ async fn add_work_item_rejects_a_session_with_no_recipe_set() {
     let err = result.expect_err("a session naming no stack must be refused");
     assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
     assert!(
-        err.message().contains("work_queue_create"),
-        "the refusal must name work_queue_create, got: {}",
+        err.message().contains("has no work queue"),
+        "the refusal must say the session has no work queue, got: {}",
         err.message()
     );
 }
@@ -189,8 +179,8 @@ async fn add_work_item_rejects_a_pr_stack_recipe_session_that_names_no_stack() {
     let err = result.expect_err("a session naming no stack must be refused, whatever its recipe");
     assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
     assert!(
-        err.message().contains("work_queue_create"),
-        "the refusal must name work_queue_create, got: {}",
+        err.message().contains("has no work queue"),
+        "the refusal must say the session has no work queue, got: {}",
         err.message()
     );
 }

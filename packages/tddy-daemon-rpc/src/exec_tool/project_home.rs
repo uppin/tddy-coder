@@ -305,12 +305,12 @@ impl ExecToolRpcHandler {
                     .unwrap_or_else(|| empty_coding_agents()),
             ),
         );
-        // A project-home session's catalogue already carries the stack tools; a session bound to a
-        // node of a stack is offered the two reads, which only its own records can tell.
+        // A project-home session's catalogue already carries the work tools; any other session is
+        // offered them by the queue it owns or is addressed by, which only its own records can tell.
         if session_tool_role(&metadata) != SessionToolRole::ProjectHome {
             let caller = work_queue_caller_of(&sessions_base, session_id)?;
             tools.extend(stack_and_git_tools_offered_to(
-                caller.as_ref().map(|c| &c.role),
+                caller.map(|(_, access)| access),
             ));
         }
         Ok(tools)

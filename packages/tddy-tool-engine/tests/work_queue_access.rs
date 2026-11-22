@@ -5,10 +5,10 @@
 use pretty_assertions::assert_eq;
 use tddy_core::changeset::{WorkItem, WorkQueue};
 use tddy_tool_engine::work_item_git_tools::WORK_ITEM_GIT_TOOL_NAMES;
-use tddy_tool_engine::work_queue_tools::{PR_READ, PR_STACK_CREATE, PR_STACK_STATUS, WORK_QUEUE_TOOL_NAMES};
 use tddy_tool_engine::work_queue_access::{
     work_queue_access_of, work_queue_tools_offered_to, WorkQueueAccess,
 };
+use tddy_tool_engine::work_queue_tools::{PR_READ, PR_STACK_STATUS, WORK_QUEUE_TOOL_NAMES};
 
 fn a_queue_linking(sessions: &[&str]) -> WorkQueue {
     WorkQueue {
@@ -76,7 +76,6 @@ fn the_owner_is_offered_every_work_tool_except_creation() {
     let expected: Vec<String> = WORK_QUEUE_TOOL_NAMES
         .iter()
         .chain(WORK_ITEM_GIT_TOOL_NAMES.iter())
-        .filter(|name| **name != PR_STACK_CREATE)
         .map(|name| name.to_string())
         .collect();
     assert_eq!(offered, expected);

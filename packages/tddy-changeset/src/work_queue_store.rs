@@ -1,57 +1,68 @@
-//! PR stacks as project records: `<projects dir>/<project_id>/stacks/<queue_id>.yaml`.
+//! Work queues addressed by id — **the id of a queue is the id of the session that owns it**
+//! (`#workqueue` 5/14).
 //!
-//! A stack belongs to the project it was planned in, not to the session that planned it, so any
-//! session of that project can address it by id. The session that planned it keeps only a
-//! reference — [`crate::changeset::Changeset::queue_id`].
+//! The queues themselves live in their owning sessions' directories
+//! ([`crate::session_work_queue::SessionWorkQueues`]); this view reads and updates one by that id and
+//! lists a project's, for the callers (RPC handlers, the agent tools, the session listing) that hold a
+//! `(project_id, queue_id)` pair. It creates nothing: a queue exists only because its session was
+//! started with one.
 //!
-//! Every write is a read-modify-write of one record under a per-stack lock (an in-process mutex
-//! keyed by the record's path) finished by an atomic rename, so two writers to the same stack both
-//! land and a reader never sees a half-written record.
+//! Every write is a read-modify-write of one record under a per-record lock finished by an atomic
+//! rename, so two writers to the same queue both land and a reader never sees a half-written record.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 use crate::changeset::WorkQueue;
+use crate::session_work_queue::{SessionWorkQueueError, SessionWorkQueueRecord, SessionWorkQueues};
 
-/// One stack as the project holds it.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+/// One queue as its owning session holds it.
+#[derive(Debug, Clone, PartialEq)]
 pub struct WorkQueueRecord {
-    /// A UUIDv7, assigned by [`WorkQueueStore::create`].
-    #[serde(rename = "stack_id")]
+    /// The owning session's id — the queue's address.
     pub queue_id: String,
     pub project_id: String,
-    /// The session that planned the stack (or, for a migrated one, the session whose changeset
-    /// carried it). The migration sweep keys on it so a rerun never creates a duplicate.
-    pub created_by_session_id: String,
     pub created_at_unix_ms: u64,
-    /// What the stack is for, as `work_queue_create` named it (`#orchestrators` 7/11). Absent from a
-    /// record written before titles existed, or created without one; such a record still reads.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// What the queue is for. Absent when it was never titled.
     pub title: Option<String>,
     pub stack: WorkQueue,
+}
+
+impl WorkQueueRecord {
+    /// The session that owns the queue (and is its id).
+    pub fn owner_session_id(&self) -> &str {
+        &self.queue_id
+    }
+
+    fn of(record: SessionWorkQueueRecord) -> Self {
+        Self {
+            queue_id: record.owner_session_id,
+            project_id: record.project_id,
+            created_at_unix_ms: record.created_at_unix_ms,
+            title: record.title,
+            stack: record.queue,
+        }
+    }
 }
 
 /// Why a store operation was refused or failed.
 #[derive(Debug, thiserror::Error)]
 pub enum WorkQueueStoreError {
-    /// The project id cannot name a single directory under the projects dir (empty, `.`, `..`, or
-    /// carrying a path separator), so it is refused rather than joined onto the path.
+    /// The project id cannot name a single directory (empty, `.`, `..`, or carrying a path separator).
     #[error("project id {0:?} cannot name a directory")]
     InvalidProjectId(String),
-    /// The stack id cannot name a single file under the project's `stacks/` directory.
-    #[error("stack id {0:?} cannot name a file")]
+    /// The queue id cannot name a session directory.
+    #[error("queue id {0:?} cannot name a session")]
     InvalidStackId(String),
-    /// No record `queue_id` exists under `project_id`.
-    #[error("project {project_id:?} holds no stack {queue_id:?}")]
+    /// `queue_id` owns no queue of `project_id` on this host.
+    #[error("project {project_id:?} holds no work queue {queue_id:?}")]
     NotFound {
         project_id: String,
         queue_id: String,
     },
     /// A record exists but does not parse.
-    #[error("stack record {path}: {message}")]
+    #[error("work queue record {path}: {message}")]
     Malformed { path: PathBuf, message: String },
-    #[error("stack store I/O on {path}: {source}")]
+    #[error("work queue store I/O on {path}: {source}")]
     Io {
         path: PathBuf,
         #[source]
@@ -59,428 +70,109 @@ pub enum WorkQueueStoreError {
     },
 }
 
-/// The PR stacks of every project on this host, rooted at the host's projects directory
-/// (`<sessions_base>/projects`).
+/// The work queues of every session on this host, by queue id, under one sessions base
+/// (`<base>/sessions/<id>/work-queue.yaml`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkQueueStore {
-    projects_dir: PathBuf,
+    sessions_base: PathBuf,
 }
 
 impl WorkQueueStore {
-    /// A store over `projects_dir`. Nothing is created until a stack is.
-    pub fn new(projects_dir: impl Into<PathBuf>) -> Self {
+    /// A store over `sessions_base` — the directory holding `sessions/` and `projects/`.
+    pub fn new(sessions_base: impl Into<PathBuf>) -> Self {
         Self {
-            projects_dir: projects_dir.into(),
+            sessions_base: sessions_base.into(),
         }
     }
 
-    /// The directory this store is rooted at.
-    pub fn projects_dir(&self) -> &Path {
-        &self.projects_dir
+    /// The host's projects directory, beside the sessions the queues live in.
+    pub fn projects_dir(&self) -> PathBuf {
+        self.sessions_base.join("projects")
     }
 
-    /// Store `stack` as a new record of `project_id`, planned by `created_by_session_id`, under a
-    /// fresh stack id. Returns the record as written.
-    pub fn create(
-        &self,
-        project_id: &str,
-        created_by_session_id: &str,
-        stack: WorkQueue,
-    ) -> Result<WorkQueueRecord, WorkQueueStoreError> {
-        self.create_titled(project_id, created_by_session_id, None, stack)
+    fn queues(&self) -> SessionWorkQueues {
+        SessionWorkQueues::new(self.sessions_base.join("sessions"))
     }
 
-    /// [`Self::create`], with the record titled `title` (`#orchestrators` 7/11).
-    pub fn create_titled(
-        &self,
-        project_id: &str,
-        created_by_session_id: &str,
-        title: Option<String>,
-        stack: WorkQueue,
-    ) -> Result<WorkQueueRecord, WorkQueueStoreError> {
-        let stacks_dir = self.stacks_dir(project_id)?;
-        let queue_id = uuid::Uuid::now_v7().to_string();
-        let record = WorkQueueRecord {
-            queue_id,
-            project_id: project_id.to_string(),
-            created_by_session_id: created_by_session_id.to_string(),
-            created_at_unix_ms: now_unix_ms(),
-            title,
-            stack,
-        };
-        let path = record_path(&stacks_dir, &record.queue_id);
-        with_record_lock(&path, || write_record(&path, &record))?;
-        Ok(record)
-    }
-
-    /// The record `queue_id` of `project_id`.
+    /// The queue `queue_id` owns, when it belongs to `project_id`.
     pub fn read(
         &self,
         project_id: &str,
         queue_id: &str,
     ) -> Result<WorkQueueRecord, WorkQueueStoreError> {
-        let stacks_dir = self.stacks_dir(project_id)?;
-        let path = self.existing_record_path(&stacks_dir, project_id, queue_id)?;
-        read_record(&path, project_id, queue_id)
+        check_project(project_id)?;
+        let not_found = || WorkQueueStoreError::NotFound {
+            project_id: project_id.to_string(),
+            queue_id: queue_id.to_string(),
+        };
+        let record = self
+            .queues()
+            .read(queue_id)
+            .map_err(|e| store_error(e, queue_id))?
+            .filter(|record| record.project_id == project_id)
+            .ok_or_else(not_found)?;
+        Ok(WorkQueueRecord::of(record))
     }
 
-    /// Apply `f` to the stack of record `queue_id` and write it back, serialized against every
-    /// other writer of that stack in this process. Returns the record as written.
+    /// Apply `f` to the queue `queue_id` owns and write it back. Returns the record as written.
     pub fn update(
         &self,
         project_id: &str,
         queue_id: &str,
         f: impl FnOnce(&mut WorkQueue),
     ) -> Result<WorkQueueRecord, WorkQueueStoreError> {
-        let stacks_dir = self.stacks_dir(project_id)?;
-        let path = self.existing_record_path(&stacks_dir, project_id, queue_id)?;
-        with_record_lock(&path, || {
-            let mut record = read_record(&path, project_id, queue_id)?;
-            f(&mut record.stack);
-            write_record(&path, &record)?;
-            Ok(record)
-        })
+        // Refuses a queue of another project before anything is written.
+        self.read(project_id, queue_id)?;
+        let record = self
+            .queues()
+            .update(queue_id, f)
+            .map_err(|e| store_error(e, queue_id))?;
+        Ok(WorkQueueRecord::of(record))
     }
 
-    /// Every stack record of `project_id`, sorted by `queue_id`. A project with no `stacks/`
-    /// directory has none.
+    /// Every queue owned by a session of `project_id` on this host, sorted by queue id.
     pub fn list(&self, project_id: &str) -> Result<Vec<WorkQueueRecord>, WorkQueueStoreError> {
-        let stacks_dir = self.stacks_dir(project_id)?;
-        let entries = match std::fs::read_dir(&stacks_dir) {
-            Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => {
-                return Err(WorkQueueStoreError::Io {
-                    path: stacks_dir,
-                    source,
-                })
-            }
-        };
-        let mut stack_ids = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(|source| WorkQueueStoreError::Io {
-                path: stacks_dir.clone(),
-                source,
-            })?;
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if let Some(queue_id) = name.strip_suffix(".yaml") {
-                stack_ids.push(queue_id.to_string());
-            }
-        }
-        stack_ids.sort();
-        stack_ids
-            .iter()
-            .map(|queue_id| read_record(&record_path(&stacks_dir, queue_id), project_id, queue_id))
-            .collect()
-    }
-
-    /// `<projects dir>/<project_id>/stacks`, after `project_id` is checked to name one directory.
-    fn stacks_dir(&self, project_id: &str) -> Result<PathBuf, WorkQueueStoreError> {
-        if !names_one_path_segment(project_id) {
-            return Err(WorkQueueStoreError::InvalidProjectId(
-                project_id.to_string(),
-            ));
-        }
-        Ok(self.projects_dir.join(project_id).join("stacks"))
-    }
-
-    fn existing_record_path(
-        &self,
-        stacks_dir: &Path,
-        project_id: &str,
-        queue_id: &str,
-    ) -> Result<PathBuf, WorkQueueStoreError> {
-        if !names_one_path_segment(queue_id) {
-            return Err(WorkQueueStoreError::InvalidStackId(queue_id.to_string()));
-        }
-        let path = record_path(stacks_dir, queue_id);
-        if !path.is_file() {
-            return Err(WorkQueueStoreError::NotFound {
-                project_id: project_id.to_string(),
-                queue_id: queue_id.to_string(),
-            });
-        }
-        Ok(path)
-    }
-}
-
-/// A non-empty id that is neither `.` nor `..` and carries no path separator.
-fn names_one_path_segment(id: &str) -> bool {
-    !id.is_empty() && id != "." && id != ".." && !id.contains(['/', '\\', '\0'])
-}
-
-fn record_path(stacks_dir: &Path, queue_id: &str) -> PathBuf {
-    stacks_dir.join(format!("{queue_id}.yaml"))
-}
-
-fn now_unix_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-/// The in-process lock of one record, shared by every store handle in this process.
-fn with_record_lock<T>(path: &Path, f: impl FnOnce() -> T) -> T {
-    static LOCKS: std::sync::OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
-        std::sync::OnceLock::new();
-    let lock = {
-        let mut locks = LOCKS
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        Arc::clone(locks.entry(path.to_path_buf()).or_default())
-    };
-    let _held = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    f()
-}
-
-fn read_record(
-    path: &Path,
-    project_id: &str,
-    queue_id: &str,
-) -> Result<WorkQueueRecord, WorkQueueStoreError> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err(WorkQueueStoreError::NotFound {
-                project_id: project_id.to_string(),
-                queue_id: queue_id.to_string(),
-            })
-        }
-        Err(source) => {
-            return Err(WorkQueueStoreError::Io {
-                path: path.to_path_buf(),
-                source,
-            })
-        }
-    };
-    serde_yaml::from_str(&text).map_err(|e| WorkQueueStoreError::Malformed {
-        path: path.to_path_buf(),
-        message: e.to_string(),
-    })
-}
-
-fn write_record(path: &Path, record: &WorkQueueRecord) -> Result<(), WorkQueueStoreError> {
-    let text = serde_yaml::to_string(record).map_err(|e| WorkQueueStoreError::Malformed {
-        path: path.to_path_buf(),
-        message: e.to_string(),
-    })?;
-    tddy_session_store::atomic_file::write_atomic(path, text).map_err(|source| {
-        WorkQueueStoreError::Io {
-            path: path.to_path_buf(),
-            source,
-        }
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::changeset::WorkItem;
-    use rstest::rstest;
-
-    fn a_one_node_stack() -> WorkQueue {
-        WorkQueue {
-            version: 1,
-            nodes: vec![WorkItem {
-                node_id: "n1".to_string(),
-                title: "PR n1".to_string(),
-                ..WorkItem::default()
-            }],
-        }
-    }
-
-    fn a_store() -> (tempfile::TempDir, WorkQueueStore) {
-        let root = tempfile::tempdir().expect("temp projects dir");
-        let store = WorkQueueStore::new(root.path().join("projects"));
-        (root, store)
-    }
-
-    #[rstest]
-    #[case::empty("")]
-    #[case::current_dir(".")]
-    #[case::parent_dir("..")]
-    #[case::nested("proj/inner")]
-    #[case::backslash("proj\\inner")]
-    fn a_project_id_that_names_no_single_directory_is_refused(#[case] project_id: &str) {
-        // Given
-        let (_root, store) = a_store();
-
-        // When
-        let refused = store.list(project_id);
-
-        // Then
-        assert!(
-            matches!(&refused, Err(WorkQueueStoreError::InvalidProjectId(id)) if id == project_id),
-            "expected InvalidProjectId({project_id:?}), got {refused:?}"
-        );
-    }
-
-    #[rstest]
-    #[case::parent_dir("..")]
-    #[case::nested("../other")]
-    #[case::empty("")]
-    fn a_stack_id_that_names_no_single_file_is_refused(#[case] queue_id: &str) {
-        // Given
-        let (_root, store) = a_store();
-
-        // When
-        let refused = store.read("proj-auth", queue_id);
-
-        // Then
-        assert!(
-            matches!(&refused, Err(WorkQueueStoreError::InvalidStackId(id)) if id == queue_id),
-            "expected InvalidStackId({queue_id:?}), got {refused:?}"
-        );
-    }
-
-    #[test]
-    fn reading_a_stack_the_project_does_not_hold_is_not_found() {
-        // Given
-        let (_root, store) = a_store();
-
-        // When
-        let missing = store.read("proj-auth", "0190a000-0000-7000-8000-000000000000");
-
-        // Then
-        assert!(
-            matches!(
-                &missing,
-                Err(WorkQueueStoreError::NotFound { project_id, queue_id })
-                    if project_id == "proj-auth"
-                        && queue_id == "0190a000-0000-7000-8000-000000000000"
-            ),
-            "expected NotFound, got {missing:?}"
-        );
-    }
-
-    #[test]
-    fn updating_a_stack_the_project_does_not_hold_creates_nothing() {
-        // Given
-        let (_root, store) = a_store();
-
-        // When
-        let missing = store.update(
-            "proj-auth",
-            "0190a000-0000-7000-8000-000000000000",
-            |stack| stack.version = 9,
-        );
-
-        // Then
-        assert!(
-            matches!(&missing, Err(WorkQueueStoreError::NotFound { .. })),
-            "expected NotFound, got {missing:?}"
-        );
-        assert!(
-            !store.projects_dir().join("proj-auth").exists(),
-            "a refused update must not create the project's directory"
-        );
-    }
-
-    #[test]
-    fn a_project_without_stacks_lists_none() {
-        // Given
-        let (_root, store) = a_store();
-
-        // When
-        let listed = store.list("proj-auth").expect("list");
-
-        // Then
-        assert_eq!(listed, Vec::<WorkQueueRecord>::new());
-    }
-
-    #[test]
-    fn two_creates_in_one_project_get_distinct_ids() {
-        // Given
-        let (_root, store) = a_store();
-
-        // When
-        let first = store
-            .create("proj-auth", "sess-a", a_one_node_stack())
-            .expect("create first");
-        let second = store
-            .create("proj-auth", "sess-a", a_one_node_stack())
-            .expect("create second");
-
-        // Then
-        assert_ne!(first.queue_id, second.queue_id);
-    }
-
-    #[test]
-    fn an_update_returns_and_persists_the_changed_stack() {
-        // Given
-        let (_root, store) = a_store();
-        let created = store
-            .create("proj-auth", "sess-a", a_one_node_stack())
-            .expect("create");
-
-        // When
-        let updated = store
-            .update("proj-auth", &created.queue_id, |stack| {
-                stack.nodes[0].title = "Renamed".to_string();
-            })
-            .expect("update");
-
-        // Then — the returned record is the stored one, and only the stack changed
-        let read = store.read("proj-auth", &created.queue_id).expect("read");
-        assert_eq!(read, updated);
-        assert_eq!(
-            WorkQueueRecord {
-                stack: a_one_node_stack(),
-                ..read
-            },
-            created
-        );
-        assert_eq!(updated.stack.nodes[0].title, "Renamed");
-    }
-
-    #[test]
-    fn a_record_that_does_not_parse_is_reported_malformed() {
-        // Given
-        let (_root, store) = a_store();
-        let created = store
-            .create("proj-auth", "sess-a", a_one_node_stack())
-            .expect("create");
-        let path = store
-            .projects_dir()
-            .join("proj-auth")
-            .join("stacks")
-            .join(format!("{}.yaml", created.queue_id));
-        std::fs::write(&path, "stack: [this is not a record").expect("corrupt the record");
-
-        // When
-        let read = store.read("proj-auth", &created.queue_id);
-
-        // Then
-        assert!(
-            matches!(&read, Err(WorkQueueStoreError::Malformed { path: p, .. }) if *p == path),
-            "expected Malformed at {}, got {read:?}",
-            path.display()
-        );
-    }
-
-    #[test]
-    fn an_update_leaves_no_temporary_file_beside_the_record() {
-        // Given
-        let (_root, store) = a_store();
-        let created = store
-            .create("proj-auth", "sess-a", a_one_node_stack())
-            .expect("create");
-
-        // When
-        store
-            .update("proj-auth", &created.queue_id, |stack| stack.version = 2)
-            .expect("update");
-
-        // Then — the atomic rename consumed its temporary
-        let stacks_dir = store.projects_dir().join("proj-auth").join("stacks");
-        let mut names: Vec<String> = std::fs::read_dir(&stacks_dir)
-            .expect("read stacks dir")
-            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+        check_project(project_id)?;
+        let mut records: Vec<WorkQueueRecord> = self
+            .queues()
+            .list_for_project(project_id)
+            .map_err(|e| store_error(e, ""))?
+            .into_iter()
+            .map(WorkQueueRecord::of)
             .collect();
-        names.sort();
-        assert_eq!(names, vec![format!("{}.yaml", created.queue_id)]);
+        records.sort_by(|a, b| a.queue_id.cmp(&b.queue_id));
+        Ok(records)
+    }
+}
+
+fn check_project(project_id: &str) -> Result<(), WorkQueueStoreError> {
+    let one_segment = !project_id.is_empty()
+        && project_id != "."
+        && project_id != ".."
+        && !project_id.contains(['/', '\\', '\0']);
+    if one_segment {
+        Ok(())
+    } else {
+        Err(WorkQueueStoreError::InvalidProjectId(
+            project_id.to_string(),
+        ))
+    }
+}
+
+fn store_error(error: SessionWorkQueueError, queue_id: &str) -> WorkQueueStoreError {
+    match error {
+        SessionWorkQueueError::InvalidSessionId(id) => WorkQueueStoreError::InvalidStackId(id),
+        SessionWorkQueueError::NoQueue { session_id } => WorkQueueStoreError::NotFound {
+            project_id: String::new(),
+            queue_id: session_id,
+        },
+        SessionWorkQueueError::AlreadyExists { session_id } => WorkQueueStoreError::Malformed {
+            path: Path::new(&session_id).to_path_buf(),
+            message: format!("queue {queue_id} already exists"),
+        },
+        SessionWorkQueueError::Malformed { path, message } => {
+            WorkQueueStoreError::Malformed { path, message }
+        }
+        SessionWorkQueueError::Io { path, source } => WorkQueueStoreError::Io { path, source },
     }
 }

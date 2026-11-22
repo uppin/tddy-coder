@@ -110,14 +110,11 @@ pub fn resolve_chain_integration_base_ref_from_parent_session(
     Ok(origin_ref)
 }
 
-/// True when the parent session is a pr-stack orchestrator — a planning session carrying a
-/// planned stack, by `queue_id`, and therefore no git branch of its own.
+/// True when the parent session owns a work queue — a planning session and therefore no git branch
+/// of its own.
 pub fn parent_owns_a_work_queue(sessions_base: &Path, parent_session_id: &str) -> bool {
     let parent_dir = unified_session_dir_path(sessions_base, parent_session_id);
-    match read_changeset(&parent_dir) {
-        Ok(cs) => cs.work_queue_id.is_some(),
-        Err(_) => false,
-    }
+    matches!(tddy_changeset::read_session_stack(&parent_dir), Ok(Some(_)))
 }
 
 /// Locate the planned stack node a child spawn belongs to: the node `work_item_id` names, or —

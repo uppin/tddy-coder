@@ -30,6 +30,8 @@ export interface CreateSessionCliFieldsProps {
   setSandbox: (sandbox: boolean) => void;
   /** The "Run the agent in tmux" control, built by the pane (the one every CLI harness shows). */
   runInTmuxToggle: ReactNode;
+  /** The "With work queue" control: start the session with a queue it owns (`#workqueue` 5/14). */
+  workQueueToggle: ReactNode;
   applyPlacement: (toggled: CodebasePlacementChoice, on: boolean) => void;
   sandboxedCodebase: boolean;
   sandboxedCodebaseUnavailableReason: string | null;
@@ -80,6 +82,7 @@ export function CreateSessionCliFields({
   sandbox,
   setSandbox,
   runInTmuxToggle,
+  workQueueToggle,
   applyPlacement,
   sandboxedCodebase,
   sandboxedCodebaseUnavailableReason,
@@ -200,6 +203,8 @@ export function CreateSessionCliFields({
           Not offered on the project's home session: that start spec does not carry the choice, so
           a checked box there would be dropped without a word. */}
       {!placementFixed && runInTmuxToggle}
+
+      {workQueueToggle}
 
       <div>
         <label className={labelClass} htmlFor="create-session-initial-prompt">

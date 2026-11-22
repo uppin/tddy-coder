@@ -14,6 +14,9 @@
 
 use std::path::{Path, PathBuf};
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use serde::{Deserialize, Serialize};
 
 use crate::changeset::WorkQueue;
@@ -100,14 +103,26 @@ impl SessionWorkQueues {
         project_id: &str,
         created_at_unix_ms: u64,
     ) -> Result<SessionWorkQueueRecord, SessionWorkQueueError> {
-        // TODO(n5 session-work-queue): implement
-        let _ = (
-            &self.sessions_dir,
-            session_id,
-            project_id,
-            created_at_unix_ms,
-        );
-        todo!("TODO(n5): implement SessionWorkQueues::create_for_session")
+        let path = self.queue_path(session_id)?;
+        with_record_lock(&path, || {
+            if path.exists() {
+                return Err(SessionWorkQueueError::AlreadyExists {
+                    session_id: session_id.to_string(),
+                });
+            }
+            let record = SessionWorkQueueRecord {
+                owner_session_id: session_id.to_string(),
+                project_id: project_id.to_string(),
+                created_at_unix_ms,
+                title: None,
+                queue: WorkQueue {
+                    version: 1,
+                    nodes: Vec::new(),
+                },
+            };
+            write_record(&path, &record)?;
+            Ok(record)
+        })
     }
 
     /// `session_id`'s queue, or `None` when it owns none.
@@ -115,9 +130,7 @@ impl SessionWorkQueues {
         &self,
         session_id: &str,
     ) -> Result<Option<SessionWorkQueueRecord>, SessionWorkQueueError> {
-        // TODO(n5 session-work-queue): implement
-        let _ = session_id;
-        todo!("TODO(n5): implement SessionWorkQueues::read")
+        read_record(&self.queue_path(session_id)?)
     }
 
     /// Change `session_id`'s queue under its record lock; `NoQueue` when it owns none.
@@ -126,9 +139,15 @@ impl SessionWorkQueues {
         session_id: &str,
         change: F,
     ) -> Result<SessionWorkQueueRecord, SessionWorkQueueError> {
-        // TODO(n5 session-work-queue): implement
-        let _ = (session_id, change);
-        todo!("TODO(n5): implement SessionWorkQueues::update")
+        let path = self.queue_path(session_id)?;
+        with_record_lock(&path, || {
+            let mut record = read_record(&path)?.ok_or_else(|| SessionWorkQueueError::NoQueue {
+                session_id: session_id.to_string(),
+            })?;
+            change(&mut record.queue);
+            write_record(&path, &record)?;
+            Ok(record)
+        })
     }
 
     /// Every queue owned by a session of `project_id` on this host.
@@ -136,24 +155,109 @@ impl SessionWorkQueues {
         &self,
         project_id: &str,
     ) -> Result<Vec<SessionWorkQueueRecord>, SessionWorkQueueError> {
-        // TODO(n5 session-work-queue): implement
-        let _ = project_id;
-        todo!("TODO(n5): implement SessionWorkQueues::list_for_project")
+        let entries = match std::fs::read_dir(&self.sessions_dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(SessionWorkQueueError::Io {
+                    path: self.sessions_dir.clone(),
+                    source,
+                })
+            }
+        };
+        let mut found = Vec::new();
+        for entry in entries.flatten() {
+            if let Some(record) = read_record(&entry.path().join(WORK_QUEUE_FILE))? {
+                if record.project_id == project_id {
+                    found.push(record);
+                }
+            }
+        }
+        Ok(found)
+    }
+
+    fn queue_path(&self, session_id: &str) -> Result<PathBuf, SessionWorkQueueError> {
+        let one_segment = !session_id.is_empty()
+            && session_id != "."
+            && session_id != ".."
+            && !session_id.contains(['/', '\\', '\0']);
+        if !one_segment {
+            return Err(SessionWorkQueueError::InvalidSessionId(
+                session_id.to_string(),
+            ));
+        }
+        Ok(self.sessions_dir.join(session_id).join(WORK_QUEUE_FILE))
     }
 }
 
 /// Whether a session starts with a queue: asked for ("with work queue"), or an orchestrator start.
 /// The only role-aware rule of the work queue; access never reads a role.
 pub fn starts_with_work_queue(with_work_queue: bool, session_role: Option<&str>) -> bool {
-    // TODO(n5 session-work-queue): implement
-    let _ = (with_work_queue, session_role);
-    todo!("TODO(n5): implement starts_with_work_queue")
+    with_work_queue || session_role.is_some_and(crate::session_metadata::is_orchestrator_role)
 }
 
 /// Delete the pre-queue project stack records (`<projects_dir>/*/stacks/`, records and `.op.json`
 /// journals). Returns how many project `stacks` directories were removed; idempotent.
 pub fn drop_old_project_stack_records(projects_dir: &Path) -> std::io::Result<usize> {
-    // TODO(n5 session-work-queue): implement
-    let _ = projects_dir;
-    todo!("TODO(n5): implement drop_old_project_stack_records")
+    let entries = match std::fs::read_dir(projects_dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    let mut dropped = 0;
+    for entry in entries {
+        let stacks = entry?.path().join("stacks");
+        if stacks.is_dir() {
+            std::fs::remove_dir_all(&stacks)?;
+            dropped += 1;
+        }
+    }
+    Ok(dropped)
+}
+
+fn read_record(path: &Path) -> Result<Option<SessionWorkQueueRecord>, SessionWorkQueueError> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(SessionWorkQueueError::Io {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+    };
+    serde_yaml::from_str(&text)
+        .map(Some)
+        .map_err(|e| SessionWorkQueueError::Malformed {
+            path: path.to_path_buf(),
+            message: e.to_string(),
+        })
+}
+
+fn write_record(path: &Path, record: &SessionWorkQueueRecord) -> Result<(), SessionWorkQueueError> {
+    let text = serde_yaml::to_string(record).map_err(|e| SessionWorkQueueError::Malformed {
+        path: path.to_path_buf(),
+        message: e.to_string(),
+    })?;
+    tddy_session_store::atomic_file::write_atomic(path, text).map_err(|source| {
+        SessionWorkQueueError::Io {
+            path: path.to_path_buf(),
+            source,
+        }
+    })
+}
+
+/// The in-process lock of one record, shared by every handle in this process.
+fn with_record_lock<T>(path: &Path, f: impl FnOnce() -> T) -> T {
+    static LOCKS: std::sync::OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
+        std::sync::OnceLock::new();
+    let lock = {
+        let mut locks = LOCKS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(locks.entry(path.to_path_buf()).or_default())
+    };
+    let _held = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    f()
 }

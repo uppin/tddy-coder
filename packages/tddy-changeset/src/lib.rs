@@ -12,7 +12,6 @@ pub mod elapsed_format;
 pub mod orchestration_mark;
 pub mod pending_question;
 pub mod session_activity;
-pub mod session_work_queue;
 pub mod session_agent;
 pub mod session_context;
 pub mod session_display_name;
@@ -23,6 +22,7 @@ pub mod session_metadata;
 pub mod session_participant_metadata;
 pub mod session_provider_account;
 pub mod session_target;
+pub mod session_work_queue;
 pub mod source_path;
 pub mod tab_roster;
 #[cfg(any(test, feature = "test-support"))]
@@ -45,8 +45,8 @@ pub use changeset::{
     QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use changeset::{
-    link_work_item_to_session, read_session_stack, read_stack_of, sync_stack_node_from_child,
-    update_stack_atomic, PrInternalStatus, WorkItem, WorkQueue,
+    link_work_item_to_session, read_session_stack, sync_stack_node_from_child, update_stack_atomic,
+    PrInternalStatus, WorkItem, WorkQueue,
 };
 pub use elapsed_format::format_elapsed_compact;
 pub use orchestration_mark::{clear_a_paused_mark, OrchestrationMark, OrchestrationMarkKind};

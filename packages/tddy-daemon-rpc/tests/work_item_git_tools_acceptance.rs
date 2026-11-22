@@ -39,6 +39,7 @@ use support::{
 };
 use tddy_core::changeset::{read_changeset, write_changeset, GithubPrStatus, WorkItem, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_core::session_work_queue::SessionWorkQueues;
 use tddy_core::work_queue_store::WorkQueueStore;
 use tddy_core::WorkflowError;
 use tddy_daemon_rpc::exec_tool::work_queue_tools::{WorkQueueGithub, WorkQueueGithubClients};
@@ -323,7 +324,7 @@ impl Host {
     }
 
     fn stacks(&self) -> WorkQueueStore {
-        WorkQueueStore::new(self.sessions.path().join("projects"))
+        WorkQueueStore::new(self.sessions.path())
     }
 
     /// The project's main repository on this host: the checkout its session worktrees hang off.
@@ -384,19 +385,23 @@ impl Host {
         write_projects(&projects_dir, &rows).unwrap();
     }
 
-    /// A stack of the project held by this host, planned by `created_by`, its nodes `planned`.
-    fn holds_a_stack(&self, created_by: &str, planned: Vec<WorkItem>) -> String {
-        self.stacks()
-            .create(
-                THIS_PROJECT,
-                created_by,
-                WorkQueue {
+    /// A work queue of the project held by this host, owned by the session `owner`, its items
+    /// `planned`. A queue's id is its owner's; answers it. A second call for the same owner
+    /// replaces that queue's items.
+    fn holds_a_stack(&self, owner: &str, planned: Vec<WorkItem>) -> String {
+        let queues = SessionWorkQueues::new(self.sessions.path().join("sessions"));
+        if queues.read(owner).unwrap().is_none() {
+            queues.create_for_session(owner, THIS_PROJECT, 0).unwrap();
+        }
+        queues
+            .update(owner, |queue| {
+                *queue = WorkQueue {
                     version: 1,
                     nodes: planned,
-                },
-            )
-            .unwrap()
-            .queue_id
+                }
+            })
+            .unwrap();
+        owner.to_string()
     }
 
     fn node_of(&self, queue_id: &str, node_id: &str) -> WorkItem {

@@ -1,11 +1,12 @@
-//! PRD acceptance: the session list's `work_queue_json` reads the stack from the project's stack
-//! store, so the PR-stack screen lists the same planned PRs before and after the startup migration.
+//! PRD acceptance: the session list's `work_queue_json` reads the queue the session owns, and is empty
+//! for a session that owns none (`#workqueue` 5/14).
 //!
 //! Feature: docs/ft/coder/pr-stacking.md § Where a stack lives.
 
 use std::path::{Path, PathBuf};
 
 use pretty_assertions::assert_eq;
+use tddy_changeset::work_queue_fixtures::seed_session_stack;
 use tddy_coding_agent_specs::CodingAgentRegistry;
 use tddy_core::changeset::{write_changeset, Changeset, WorkItem, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
@@ -13,7 +14,6 @@ use tddy_core::session_metadata::{
     write_initial_tool_session_metadata, InitialToolSessionMetadataOpts,
 };
 use tddy_session_activity::session_list_enrichment::session_list_status_from_session_dir;
-use tddy_work_queue::queue_migration::migrate_session_stacks;
 
 fn a_node(node_id: &str, parents: &[&str]) -> WorkItem {
     WorkItem {
@@ -42,16 +42,13 @@ impl AHost {
         self.root.path()
     }
 
-    fn projects_dir(&self) -> PathBuf {
-        self.root.path().join("projects")
-    }
-
-    /// A pr-stack orchestrator written before stacks moved to the project.
-    fn with_a_legacy_orchestrator(
+    /// A session; it owns `stack` as its queue when `owns_queue`.
+    fn with_a_session(
         &self,
         session_id: &str,
         project_id: &str,
         stack: WorkQueue,
+        owns_queue: bool,
     ) -> PathBuf {
         let dir = unified_session_dir_path(self.sessions_base(), session_id);
         std::fs::create_dir_all(&dir).expect("session dir");
@@ -66,10 +63,12 @@ impl AHost {
         .expect("write .session.yaml");
         let changeset = Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(stack),
             ..Changeset::default()
         };
         write_changeset(&dir, &changeset).expect("write changeset.yaml");
+        if owns_queue {
+            seed_session_stack(&dir, stack);
+        }
         dir
     }
 }
@@ -92,12 +91,10 @@ fn a_legacy_stack() -> WorkQueue {
 }
 
 #[test]
-fn an_unmigrated_session_lists_no_stack_plan() {
-    // Given — a legacy orchestrator the startup sweep has not reached: only the sweep reads the
-    // legacy field
+fn a_session_owning_no_queue_lists_no_stack_plan() {
+    // Given
     let host = a_host();
-    let session =
-        host.with_a_legacy_orchestrator("sess-orchestrator", "proj-auth", a_legacy_stack());
+    let session = host.with_a_session("sess-plain", "proj-auth", a_legacy_stack(), false);
 
     // When
     let listed = the_listed_stack_plan_json(&session);
@@ -107,16 +104,13 @@ fn an_unmigrated_session_lists_no_stack_plan() {
 }
 
 #[test]
-fn a_migrated_sessions_list_reports_the_stack_plan_it_carried_before_migration() {
-    // Given — a legacy orchestrator, and the JSON its own stack serializes to
+fn a_session_owning_a_queue_lists_it() {
+    // Given
     let host = a_host();
-    let legacy_stack = a_legacy_stack();
-    let expected = serde_json::to_string(&legacy_stack).expect("serialize the legacy stack");
-    let session = host.with_a_legacy_orchestrator("sess-orchestrator", "proj-auth", legacy_stack);
+    let queue = a_legacy_stack();
+    let expected = serde_json::to_string(&queue).expect("serialize the queue");
+    let session = host.with_a_session("sess-owner", "proj-auth", queue, true);
 
-    // When
-    migrate_session_stacks(host.sessions_base(), &host.projects_dir());
-
-    // Then
+    // When / Then
     assert_eq!(the_listed_stack_plan_json(&session), expected);
 }

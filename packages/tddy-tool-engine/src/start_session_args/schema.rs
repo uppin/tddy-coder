@@ -186,6 +186,10 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
         string("The session's name, as the operator will see it called in the web UI and in Telegram alerts — one line, at most 80 characters. Omit for a session called by its worktree or goal; rename it later with RenameSession. Refused for a tool session type."),
     );
     offer(
+        "with_work_queue",
+        boolean("Start the session with an empty work queue it owns — a plan of work items the session and the sessions its items link to can read and (the owner) change with the work_ tools. A queue is created only here: a session started without it has none. An orchestrator session gets one without asking."),
+    );
+    offer(
         "specialized_agents",
         json!({
             "type": "array",

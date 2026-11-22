@@ -76,17 +76,13 @@ impl SessionListStatusDisplay {
 /// the session has none or on a read or serialization failure (logged, never propagated as an
 /// error — enrichment is best-effort display data).
 ///
-/// The stack is the project's record the changeset's `queue_id` names. A changeset still carrying
-/// the pre-store `stack` and no id — a session the daemon's startup sweep has not reached — lists
-/// no stack: only the sweep reads that field.
+/// The queue is the one the session owns (`<session dir>/work-queue.yaml`, `#workqueue` 5/14); a
+/// session that owns none lists none.
 ///
 /// Public because `tddy-daemon-rpc`'s PR-stack family reuses it to serialize its responses'
 /// `work_queue_json` in the exact wire shape `PrStackScreen` already knows how to parse.
-pub fn work_queue_json_for_changeset(session_dir: &Path, changeset: &Changeset) -> String {
-    if changeset.work_queue_id.is_none() {
-        return String::new();
-    }
-    let stack = match tddy_core::changeset::read_stack_of(session_dir, changeset) {
+pub fn work_queue_json_for_changeset(session_dir: &Path, _changeset: &Changeset) -> String {
+    let stack = match tddy_core::changeset::read_session_stack(session_dir) {
         Ok(Some(stack)) => stack,
         Ok(None) => return String::new(),
         Err(e) => {
@@ -105,6 +101,18 @@ pub fn work_queue_json_for_changeset(session_dir: &Path, changeset: &Changeset) 
         );
         String::new()
     })
+}
+
+/// The id of the queue the session at `session_dir` owns — its own session id — or empty when it
+/// owns none.
+fn owned_queue_id(session_dir: &Path) -> String {
+    match tddy_core::changeset::read_session_stack(session_dir) {
+        Ok(Some(_)) => session_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
 }
 
 fn parse_rfc3339_utc(s: &str) -> Option<DateTime<Utc>> {
@@ -181,7 +189,7 @@ pub fn session_list_status_from_session_dir(
     let session_type = meta.session_type.as_deref().unwrap_or_default();
     if runs_no_workflow(agents, session_type) {
         let changeset = read_changeset(session_dir).ok();
-        return Ok(cli_harness_row(&meta, session_type, changeset));
+        return Ok(cli_harness_row(session_dir, &meta, session_type, changeset));
     }
 
     let Some(changeset) = read_or_log("changeset.yaml", session_dir, read_changeset(session_dir))
@@ -265,7 +273,7 @@ fn state_only_row(
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
         work_queue_json: work_queue_json_for_changeset(session_dir, changeset),
-        queue_id: changeset.work_queue_id.clone().unwrap_or_default(),
+        queue_id: owned_queue_id(session_dir),
         branch: changeset.branch.clone().unwrap_or_default(),
     }
 }
@@ -305,12 +313,13 @@ fn workflow_row(
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
         work_queue_json: work_queue_json_for_changeset(session_dir, changeset),
-        queue_id: changeset.work_queue_id.clone().unwrap_or_default(),
+        queue_id: owned_queue_id(session_dir),
         branch: changeset.branch.clone().unwrap_or_default(),
     }
 }
 
 fn cli_harness_row(
+    session_dir: &Path,
     meta: &tddy_core::SessionMetadata,
     session_type: &str,
     changeset: Option<Changeset>,
@@ -331,10 +340,7 @@ fn cli_harness_row(
             .and_then(|c| c.recipe.clone())
             .unwrap_or_default(),
         work_queue_json: String::new(),
-        queue_id: changeset
-            .as_ref()
-            .and_then(|c| c.work_queue_id.clone())
-            .unwrap_or_default(),
+        queue_id: owned_queue_id(session_dir),
         branch: changeset.and_then(|c| c.branch).unwrap_or_default(),
     }
 }
@@ -377,6 +383,7 @@ pub fn apply_session_list_status_to_proto(
     entry.activity_status = status.activity_status;
     entry.orchestrator_session_id = status.orchestrator_session_id;
     entry.work_queue_json = status.work_queue_json;
+    entry.owns_work_queue = !status.queue_id.is_empty();
     entry.work_queue_id = status.queue_id;
     entry.branch = status.branch;
     entry.pending_elicitation =
@@ -2054,20 +2061,19 @@ state:
         let session_dir = dir.path().join("sessions").join("orch-sess-stack-1");
         let session_dir = session_dir.as_path();
         fs::create_dir_all(session_dir).unwrap();
-        let record = tddy_core::work_queue_store::WorkQueueStore::new(dir.path().join("projects"))
-            .create(
-                "proj-stack-json",
-                "orch-sess-stack-1",
-                tddy_core::changeset::WorkQueue {
-                    version: 1,
-                    nodes: vec![tddy_core::changeset::WorkItem {
-                        node_id: "n1".to_string(),
-                        title: "Add token store".to_string(),
-                        ..Default::default()
-                    }],
-                },
-            )
-            .unwrap();
+        let record = a_queue_owned_by(
+            dir.path(),
+            "proj-stack-json",
+            "orch-sess-stack-1",
+            tddy_core::changeset::WorkQueue {
+                version: 1,
+                nodes: vec![tddy_core::changeset::WorkItem {
+                    node_id: "n1".to_string(),
+                    title: "Add token store".to_string(),
+                    ..Default::default()
+                }],
+            },
+        );
 
         fs::write(
             session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
@@ -2101,9 +2107,7 @@ state:
     - state: Green
       at: '2026-07-01T10:05:00Z'
 recipe: pr-stack
-stack_id: {}
 ",
-                record.queue_id
             ),
         )
         .unwrap();
@@ -2181,13 +2185,28 @@ state:
         );
     }
 
-    /// A session of project `proj-stack-id` in `<dir>/sessions/<session_id>`, whose changeset names
-    /// `queue_id` when one is given (`#orchestrators` 9/11).
-    fn a_session_naming_a_stack(
+    /// Give `session_id` a work queue holding `queue` (`#workqueue` 5/14) and read it back as the
+    /// store addresses it.
+    fn a_queue_owned_by(
         dir: &Path,
+        project_id: &str,
         session_id: &str,
-        queue_id: Option<&str>,
-    ) -> std::path::PathBuf {
+        queue: tddy_core::changeset::WorkQueue,
+    ) -> tddy_core::work_queue_store::WorkQueueRecord {
+        let session_dir = dir.join("sessions").join(session_id);
+        fs::create_dir_all(&session_dir).unwrap();
+        let queues = tddy_core::session_work_queue::SessionWorkQueues::new(dir.join("sessions"));
+        queues
+            .create_for_session(session_id, project_id, 0)
+            .unwrap();
+        queues.update(session_id, |q| *q = queue).unwrap();
+        tddy_core::work_queue_store::WorkQueueStore::new(dir)
+            .read(project_id, session_id)
+            .unwrap()
+    }
+
+    /// A session of project `proj-stack-id` in `<dir>/sessions/<session_id>`, owning no queue.
+    fn a_session_naming_a_stack(dir: &Path, session_id: &str) -> std::path::PathBuf {
         let session_dir = dir.join("sessions").join(session_id);
         fs::create_dir_all(&session_dir).unwrap();
         fs::write(
@@ -2199,10 +2218,7 @@ state:
         .unwrap();
         tddy_core::changeset::write_changeset(
             &session_dir,
-            &tddy_core::changeset::Changeset {
-                work_queue_id: queue_id.map(str::to_string),
-                ..tddy_core::changeset::Changeset::default()
-            },
+            &tddy_core::changeset::Changeset::default(),
         )
         .unwrap();
         session_dir
@@ -2214,15 +2230,13 @@ state:
     fn apply_session_list_status_names_the_stack_the_changeset_references() {
         // Given
         let dir = tempdir().unwrap();
-        let record = tddy_core::work_queue_store::WorkQueueStore::new(dir.path().join("projects"))
-            .create(
-                "proj-stack-id",
-                "orch-names-a-stack",
-                tddy_core::changeset::WorkQueue::default(),
-            )
-            .unwrap();
-        let session_dir =
-            a_session_naming_a_stack(dir.path(), "orch-names-a-stack", Some(&record.queue_id));
+        let record = a_queue_owned_by(
+            dir.path(),
+            "proj-stack-id",
+            "orch-names-a-stack",
+            tddy_core::changeset::WorkQueue::default(),
+        );
+        let session_dir = a_session_naming_a_stack(dir.path(), "orch-names-a-stack");
         let mut entry = ProtoSessionEntry {
             session_id: "orch-names-a-stack".to_string(),
             ..ProtoSessionEntry::default()
@@ -2245,7 +2259,7 @@ state:
     fn apply_session_list_status_leaves_the_stack_id_empty_without_a_stack() {
         // Given
         let dir = tempdir().unwrap();
-        let session_dir = a_session_naming_a_stack(dir.path(), "plain-session", None);
+        let session_dir = a_session_naming_a_stack(dir.path(), "plain-session");
         let mut entry = ProtoSessionEntry {
             session_id: "plain-session".to_string(),
             work_queue_id: "left-over-from-a-previous-listing".to_string(),
@@ -2274,20 +2288,19 @@ state:
         let session_dir = dir.path().join("sessions").join("orch-proto-stack-sess");
         let session_dir = session_dir.as_path();
         fs::create_dir_all(session_dir).unwrap();
-        let record = tddy_core::work_queue_store::WorkQueueStore::new(dir.path().join("projects"))
-            .create(
-                "proj-proto-stack",
-                "orch-proto-stack-sess",
-                tddy_core::changeset::WorkQueue {
-                    version: 1,
-                    nodes: vec![tddy_core::changeset::WorkItem {
-                        node_id: "n1".to_string(),
-                        title: "Root PR".to_string(),
-                        ..Default::default()
-                    }],
-                },
-            )
-            .unwrap();
+        let record = a_queue_owned_by(
+            dir.path(),
+            "proj-proto-stack",
+            "orch-proto-stack-sess",
+            tddy_core::changeset::WorkQueue {
+                version: 1,
+                nodes: vec![tddy_core::changeset::WorkItem {
+                    node_id: "n1".to_string(),
+                    title: "Root PR".to_string(),
+                    ..Default::default()
+                }],
+            },
+        );
 
         fs::write(
             session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
@@ -2321,9 +2334,7 @@ state:
     - state: Green
       at: '2026-07-01T10:05:00Z'
 recipe: pr-stack
-stack_id: {}
 ",
-                record.queue_id
             ),
         )
         .unwrap();

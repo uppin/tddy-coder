@@ -7,7 +7,7 @@
 //! - Neither touches a session that names no stack (`require_a_stack`, `#orchestrators` 12/12
 //!   B9). Without that guard any `session_id` belonging to the same user would have its
 //!   `changeset.yaml` rewritten with a stack it never had, which is why the refusal — naming
-//!   `work_queue_create` — is pinned for both legs rather than once.
+//!   the no-queue refusal — is pinned for both legs rather than once.
 //! - A missing `node_id`, a missing `base_branch` and a `direction` that is neither `up` nor `down`
 //!   are `invalid_argument`: the caller sent something unusable, and guessing a node or a direction
 //!   would move a row the operator never pointed at.
@@ -182,15 +182,15 @@ impl Orchestrator {
             Changeset {
                 recipe: Some("pr-stack".to_string()),
                 repo_path: repo_path.map(|p| p.to_string_lossy().into_owned()),
-                stack: Some(WorkQueue {
-                    version: 1,
-                    nodes: vec![
-                        a_started_node(FIRST_NODE, FIRST_BRANCH, 0),
-                        a_planned_node(SECOND_NODE, 1),
-                    ],
-                }),
                 ..Changeset::default()
             },
+            Some(WorkQueue {
+                version: 1,
+                nodes: vec![
+                    a_started_node(FIRST_NODE, FIRST_BRANCH, 0),
+                    a_planned_node(SECOND_NODE, 1),
+                ],
+            }),
         );
         self
     }
@@ -418,7 +418,7 @@ async fn reordering_a_session_that_names_no_stack_is_refused() {
     // Then — a session that names no stack must not be given one by a reorder
     assert_refused(result)
         .with_code(Code::FailedPrecondition)
-        .naming("work_queue_create");
+        .naming("has no work queue");
 }
 
 #[tokio::test]
@@ -482,7 +482,7 @@ async fn pulling_into_a_session_that_names_no_stack_is_refused() {
     // Then — the pull reads a node out of a stack, and a session that names none has no branch to move
     assert_refused(result)
         .with_code(Code::FailedPrecondition)
-        .naming("work_queue_create");
+        .naming("has no work queue");
 }
 
 #[tokio::test]

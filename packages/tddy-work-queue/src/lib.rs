@@ -16,7 +16,6 @@ pub mod item_ops;
 pub mod merge_repoint;
 pub mod op_journal;
 pub mod pr_insight;
-pub mod queue_migration;
 pub mod rpc;
 
 pub use rpc::WORK_QUEUE_SERVICE;

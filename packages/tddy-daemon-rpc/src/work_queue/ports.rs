@@ -13,13 +13,12 @@ use tddy_projects::project_storage;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::types::BranchSession;
 use tddy_service::proto::work_queue::{
-    AddWorkItemRequest, AddWorkItemResponse, CreateWorkQueueRequest, CreateWorkQueueResponse,
-    GetPrStatusRequest, GetPrStatusResponse, GetWorkQueueRequest, GetWorkQueueResponse,
-    LinkWorkItemRequest, LinkWorkItemResponse, ListProjectWorkQueuesRequest,
-    ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
-    RepointWorkItemRequest, RepointWorkItemResponse, ResolveWorkItemBaseRequest,
-    ResolveWorkItemBaseResponse,
+    AddWorkItemRequest, AddWorkItemResponse, GetPrStatusRequest, GetPrStatusResponse,
+    GetWorkQueueRequest, GetWorkQueueResponse, LinkWorkItemRequest, LinkWorkItemResponse,
+    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest,
+    ReorderWorkItemResponse, RepointWorkItemRequest, RepointWorkItemResponse,
+    ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse,
 };
 use tddy_session_lifecycle::connection_service::{
     local_gh_github_token, project_github_token, resolve_os_user, spawn_blocking_with_timeout,
@@ -857,13 +856,6 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         request: Request<GetWorkQueueRequest>,
     ) -> Result<Response<GetWorkQueueResponse>, Status> {
         self.get_work_queue_rpc(request).await
-    }
-
-    async fn create_work_queue(
-        &self,
-        request: Request<CreateWorkQueueRequest>,
-    ) -> Result<Response<CreateWorkQueueResponse>, Status> {
-        self.create_work_queue_rpc(request).await
     }
 }
 

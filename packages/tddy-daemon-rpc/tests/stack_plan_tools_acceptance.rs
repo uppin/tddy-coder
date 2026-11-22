@@ -36,6 +36,7 @@ use support::{
 };
 use tddy_core::changeset::{read_changeset, write_changeset, GithubPrStatus, WorkItem, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_core::session_work_queue::SessionWorkQueues;
 use tddy_core::work_queue_store::{WorkQueueRecord, WorkQueueStore};
 use tddy_core::WorkflowError;
 use tddy_daemon_rpc::exec_tool::work_queue_tools::{WorkQueueGithub, WorkQueueGithubClients};
@@ -215,7 +216,7 @@ impl Host {
 
     /// This host's stack store — the one the daemon serves the tools over.
     fn stacks(&self) -> WorkQueueStore {
-        WorkQueueStore::new(self.sessions.path().join("projects"))
+        WorkQueueStore::new(self.sessions.path())
     }
 
     /// The project's row names the GitHub repository and acts as the host's `gh` login.
@@ -235,27 +236,24 @@ impl Host {
         write_projects(&projects_dir, &rows).unwrap();
     }
 
-    /// A stack of the project held by this host, planned by `created_by`, with `titles` as its
-    /// root nodes `n1`, `n2`, ….
-    fn holds_a_stack(&self, created_by: &str, titles: &[&str]) -> String {
-        self.stacks()
-            .create(THIS_PROJECT, created_by, a_stack_of(titles))
-            .unwrap()
-            .queue_id
+    /// A work queue of the project held by this host, owned by `owner` (a session of it), with
+    /// `titles` as its root items `n1`, `n2`, …. A queue's id is its owner's. Answers that id.
+    fn holds_a_stack(&self, owner: &str, titles: &[&str]) -> String {
+        let queues = SessionWorkQueues::new(self.sessions.path().join("sessions"));
+        queues
+            .create_for_session(owner, THIS_PROJECT, 0)
+            .expect("the owner gets its queue");
+        queues
+            .update(owner, |queue| *queue = a_stack_of(titles))
+            .expect("the queue is filled");
+        owner.to_string()
     }
 
-    /// An orchestrator of the project on this host whose own stack — the one its changeset names —
-    /// has `titles` as its nodes. No recipe is involved. Answers the session and its stack.
+    /// An orchestrator of the project on this host that owns a queue with `titles` as its items.
+    /// Answers the session and its queue's id (the same).
     async fn an_orchestrator_owning_a_stack_of(&self, titles: &[&str]) -> (String, String) {
         let session_id = a_workspace_in(&self.daemon, THIS_PROJECT).await;
         let queue_id = self.holds_a_stack(&session_id, titles);
-        let dir = self.session_dir(&session_id);
-        let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
-        meta.session_role = Some("orchestrator".to_string());
-        tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
-        let mut changeset = read_changeset(&dir).unwrap_or_default();
-        changeset.work_queue_id = Some(queue_id.clone());
-        write_changeset(&dir, &changeset).unwrap();
         (session_id, queue_id)
     }
 
@@ -482,9 +480,8 @@ fn pair(node_id: &str, title: &str) -> (String, String) {
     (node_id.to_string(), title.to_string())
 }
 
-const EVERY_STACK_TOOL: [&str; 11] = [
+const EVERY_STACK_TOOL: [&str; 10] = [
     "work_queue_list",
-    "work_queue_create",
     "work_queue_status",
     "work_pr_read",
     "work_pr_search",
@@ -503,28 +500,18 @@ fn names(names: &[&str]) -> Vec<String> {
 // ── the tests ────────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn main_creates_a_stack_adds_planned_prs_and_reads_its_status_from_a_read_only_session() {
-    // Given main, a read-only session of the project
+async fn main_plans_on_its_own_queue_and_reads_its_status_from_a_read_only_session() {
+    // Given main, a read-only session of the project, that owns a work queue (made at its start)
     let world = a_world().await;
     let a = &world.a;
+    let queue_id = a.holds_a_stack(&world.main, &[]);
 
-    // When it creates a titled stack, plans two PRs on it, reads its status and lists the stacks
-    let created = a
-        .answer_to(
-            &world.main,
-            "work_queue_create",
-            json!({ "title": "Orchestrator sessions" }),
-        )
-        .await;
-    let queue_id = created["queue_id"]
-        .as_str()
-        .expect("a queue_id")
-        .to_string();
+    // When it plans two items on it, reads its status and lists the queues, naming none
     let first = a
         .answer_to(
             &world.main,
             "work_item_add",
-            json!({ "queue_id": queue_id, "title": "Store", "description": "the store" }),
+            json!({ "title": "Store", "description": "the store" }),
         )
         .await;
     let first_id = first["node_id"].as_str().expect("a node_id").to_string();
@@ -532,7 +519,6 @@ async fn main_creates_a_stack_adds_planned_prs_and_reads_its_status_from_a_read_
         &world.main,
         "work_item_add",
         json!({
-            "queue_id": queue_id,
             "title": "Tools",
             "description": "the tools",
             "parents": [first_id],
@@ -540,28 +526,18 @@ async fn main_creates_a_stack_adds_planned_prs_and_reads_its_status_from_a_read_
     )
     .await;
     let status = a
-        .answer_to(
-            &world.main,
-            "work_queue_status",
-            json!({ "queue_id": queue_id }),
-        )
+        .answer_to(&world.main, "work_queue_status", json!({}))
         .await;
     let listed = a.answer_to(&world.main, "work_queue_list", json!({})).await;
 
-    // Then main is offered every stack tool, the project's store holds the titled stack main
-    // created with both planned PRs, the status lists them, and the list shows the title
+    // Then main is offered every work tool, its queue holds both items, the status lists them, and
+    // the list shows the queue by its owner's id
     assert_eq!(
         a.work_queue_tools_offered_to(&world.main).await,
         names(&EVERY_STACK_TOOL)
     );
     let record = a.stacks().read(THIS_PROJECT, &queue_id).unwrap();
-    assert_eq!(
-        (
-            record.created_by_session_id.as_str(),
-            record.title.as_deref()
-        ),
-        (world.main.as_str(), Some("Orchestrator sessions"))
-    );
+    assert_eq!(record.owner_session_id(), world.main.as_str());
     assert_eq!(
         nodes_of(&record),
         vec![node("n1", "Store", &[]), node("n2", "Tools", &["n1"]),]
@@ -573,11 +549,72 @@ async fn main_creates_a_stack_adds_planned_prs_and_reads_its_status_from_a_read_
     assert_eq!(
         listed["stacks"]
             .as_array()
-            .expect("a list answer lists stacks")
+            .expect("a list answer lists queues")
             .iter()
-            .map(|s| (s["queue_id"].clone(), s["title"].clone()))
+            .map(|s| (s["queue_id"].clone(), s["owner_session_id"].clone()))
             .collect::<Vec<_>>(),
-        vec![(json!(queue_id), json!("Orchestrator sessions"))]
+        vec![(json!(queue_id), json!(world.main))]
+    );
+}
+
+#[tokio::test]
+async fn a_session_whose_role_is_orchestrator_but_owns_no_queue_is_offered_no_work_tool() {
+    // Given an orchestrator-role session that was never given a queue (access never reads a role)
+    let world = a_world().await;
+    let a = &world.a;
+    let session = a_workspace_in(&a.daemon, THIS_PROJECT).await;
+    let dir = a.session_dir(&session);
+    let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
+    meta.session_role = Some("orchestrator".to_string());
+    tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
+
+    // When it is listed its tools and calls one
+    let refusal = a
+        .call_as(&session, "work_queue_list", json!({}))
+        .await
+        .expect_err("a session with no queue is refused the work tools");
+
+    // Then none is offered, and the call is refused as permission denied
+    assert_eq!(
+        a.work_queue_tools_offered_to(&session).await,
+        Vec::<String>::new()
+    );
+    assert_eq!(refusal.code(), Code::PermissionDenied, "{refusal:?}");
+}
+
+#[tokio::test]
+async fn addressing_a_session_that_owns_no_queue_is_refused_with_the_hint() {
+    // Given main, owning a queue, and an ordinary session with none
+    let world = a_world().await;
+    let a = &world.a;
+    a.holds_a_stack(&world.main, &["Store"]);
+    let plain = a_workspace_in(&a.daemon, THIS_PROJECT).await;
+
+    // When main reads the status of the plain session's queue
+    let answer = a
+        .call_as(
+            &world.main,
+            "work_queue_status",
+            json!({ "queue_id": plain }),
+        )
+        .await
+        .expect("a no-queue refusal is the tool's answer");
+
+    // Then it is refused, naming the session and how a queue comes to exist
+    assert!(answer.is_error, "{}", answer.result_json);
+    assert!(
+        answer
+            .error_message
+            .contains(&format!("session {plain} has no work queue")),
+        "{}",
+        answer.error_message
+    );
+    assert!(
+        answer
+            .error_message
+            .contains(tddy_core::session_work_queue::NO_WORK_QUEUE_HINT),
+        "{}",
+        answer.error_message
     );
 }
 
@@ -614,34 +651,21 @@ async fn a_session_acts_on_its_own_stack_without_naming_it() {
 }
 
 #[tokio::test]
-async fn a_stack_owned_by_another_host_is_read_and_edited_through_forwarding() {
-    // Given a stack of the project held by host-b, and main on host-a
+async fn a_queue_held_by_another_host_that_addresses_main_is_read_through_forwarding_not_edited() {
+    // Given a queue held by host-b, owned by a session there, whose item n1 links main (on host-a)
     let world = a_world().await;
-    let queue_id = world.b.holds_a_stack(&world.main, &["Store"]);
-
-    // When main lists host-b's stacks, plans a PR on that stack and reads its status, naming host-b
-    let listed = world
-        .a
-        .answer_to(
-            &world.main,
-            "work_queue_list",
-            json!({ "daemon_instance_id": HOST_B }),
-        )
-        .await;
+    let owner_on_b = a_workspace_in(&world.b.daemon, THIS_PROJECT).await;
+    let queue_id = world.b.holds_a_stack(&owner_on_b, &["Store"]);
+    world.a.holds_a_stack(&world.main, &[]);
     world
-        .a
-        .answer_to(
-            &world.main,
-            "work_item_add",
-            json!({
-                "queue_id": queue_id,
-                "daemon_instance_id": HOST_B,
-                "title": "Tools",
-                "description": "the tools",
-                "parents": ["n1"],
-            }),
-        )
-        .await;
+        .b
+        .stacks()
+        .update(THIS_PROJECT, &queue_id, |stack| {
+            stack.nodes[0].session_id = Some(world.main.clone());
+        })
+        .unwrap();
+
+    // When main reads its status and tries to plan on it, naming host-b
     let status = world
         .a
         .answer_to(
@@ -650,35 +674,30 @@ async fn a_stack_owned_by_another_host_is_read_and_edited_through_forwarding() {
             json!({ "queue_id": queue_id, "daemon_instance_id": HOST_B }),
         )
         .await;
+    let planning = world
+        .a
+        .call_as(
+            &world.main,
+            "work_item_add",
+            json!({
+                "queue_id": queue_id,
+                "daemon_instance_id": HOST_B,
+                "title": "Tools",
+                "description": "the tools",
+            }),
+        )
+        .await
+        .expect("a refusal on the holding host is the tool's answer");
 
-    // Then each call was forwarded to host-b, which listed and edited its own record — host-a holds
-    // no stack
-    let listed_stacks: Vec<(String, String)> = listed["stacks"]
-        .as_array()
-        .expect("a list answer lists stacks")
-        .iter()
-        .map(|s| {
-            (
-                s["queue_id"].as_str().unwrap().to_string(),
-                s["daemon_instance_id"].as_str().unwrap().to_string(),
-            )
-        })
-        .collect();
-    assert_eq!(listed_stacks, vec![(queue_id.clone(), HOST_B.to_string())]);
-    assert_eq!(
-        world.b.nodes_of(&queue_id),
-        vec![node("n1", "Store", &[]), node("n2", "Tools", &["n1"])]
-    );
-    assert_eq!(
-        status_nodes(&status),
-        vec![pair("n1", "Store"), pair("n2", "Tools")]
-    );
-    assert_eq!(world.a.stacks().list(THIS_PROJECT).unwrap(), Vec::new());
+    // Then host-b answered the status of the queue it holds, refused the write, and left it as it was
+    assert_eq!(status_nodes(&status), vec![pair("n1", "Store")]);
+    assert!(planning.is_error, "{}", planning.result_json);
+    assert_eq!(world.b.nodes_of(&queue_id), vec![node("n1", "Store", &[])]);
     assert_eq!(
         world
             .peers
             .times_asked(HOST_B, EXEC_TOOL_SERVICE, "ExecuteTool"),
-        3
+        2
     );
 }
 
@@ -877,17 +896,17 @@ async fn a_stack_node_session_on_another_host_reads_its_stack_where_the_stack_is
             json!({ "queue_id": own_stack, "title": "More", "description": "more" }),
         )
         .await
-        .expect_err("a node may not plan its stack");
+        .expect("a refusal on the holding host is the tool's answer");
 
-    // Then host-a answers the status of the stack it holds, refuses the write as permission denied,
-    // and its stack is untouched
+    // Then host-a answers the status of the stack it holds, refuses the write, and its stack is
+    // untouched
     assert!(!status.is_error, "{}", status.error_message);
     let status: Value = serde_json::from_str(&status.result_json).expect("the answer is JSON");
     assert_eq!(
         status_nodes(&status),
         vec![pair("n1", "Store"), pair("n2", "Tools")]
     );
-    assert_eq!(planning.code(), Code::PermissionDenied, "{planning:?}");
+    assert!(planning.is_error, "{}", planning.result_json);
     assert_eq!(
         world.a.nodes_of(&own_stack),
         vec![node("n1", "Store", &[]), node("n2", "Tools", &[])]
@@ -912,8 +931,13 @@ async fn a_session_on_another_host_bound_to_no_node_there_is_refused_the_stack_r
             json!({ "queue_id": own_stack }),
         )
         .await
-        .expect_err("a session bound to no node of a stack is not served it");
+        .expect("a refusal on the holding host is the tool's answer");
 
-    // Then host-a refuses it as permission denied
-    assert_eq!(refusal.code(), Code::PermissionDenied, "{refusal:?}");
+    // Then host-a refuses it, saying the queue is not the session's
+    assert!(refusal.is_error, "{}", refusal.result_json);
+    assert!(
+        refusal.error_message.contains("is not this session's"),
+        "{}",
+        refusal.error_message
+    );
 }

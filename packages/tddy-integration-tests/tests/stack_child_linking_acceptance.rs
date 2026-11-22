@@ -80,7 +80,9 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
             current: WorkflowState::new("StackPlanned"),
             ..Changeset::default().state
         },
-        stack: Some(WorkQueue {
+        ..Changeset::default()
+    };
+    let orch_cs_stack = Some(WorkQueue {
             version: 1,
             nodes: vec![WorkItem {
                 node_id: "n1".into(),
@@ -95,10 +97,8 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
                 internal_status: None,
                 display_order: None,
             }],
-        }),
-        ..Changeset::default()
-    };
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, orch_cs);
+        });
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, orch_cs, orch_cs_stack.clone());
 
     let child_id = "018fbbbb-0002-7000-bbbb-000000000002";
     let child_dir = unified_session_dir_path(&sessions_home, child_id);
@@ -136,7 +136,9 @@ fn link_work_item_sets_session_id_and_branch() {
 
     let cs = Changeset {
         name: Some("orch".into()),
-        stack: Some(WorkQueue {
+        ..Changeset::default()
+    };
+    let cs_stack = Some(WorkQueue {
             version: 1,
             nodes: vec![WorkItem {
                 node_id: "n1".into(),
@@ -151,10 +153,8 @@ fn link_work_item_sets_session_id_and_branch() {
                 internal_status: None,
                 display_order: None,
             }],
-        }),
-        ..Changeset::default()
-    };
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, cs);
+        });
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, cs, cs_stack.clone());
 
     // When
     link_work_item_to_session(

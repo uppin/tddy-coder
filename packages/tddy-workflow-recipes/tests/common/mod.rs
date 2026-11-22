@@ -75,9 +75,8 @@ pub fn write_stack(dir: &Path, nodes: Vec<WorkItem>) {
     tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         dir,
         Changeset {
-            stack: Some(WorkQueue { version: 1, nodes }),
             ..Changeset::default()
-        },
+        }, Some(WorkQueue { version: 1, nodes }),
     );
 }
 

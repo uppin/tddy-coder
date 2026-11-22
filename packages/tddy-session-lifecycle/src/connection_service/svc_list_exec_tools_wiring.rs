@@ -121,7 +121,7 @@ pub(crate) fn list_exec_tools_from_jail(
                     Status::permission_denied(format!("the stack tools are refused: {e}"))
                 })?;
             tools.extend(
-                stack_and_git_tools_offered_to(caller.as_ref().map(|c| &c.role))
+                stack_and_git_tools_offered_to(caller.map(|(_, access)| access))
                     .into_iter()
                     .map(|tool| ToolDef {
                         name: tool.name,

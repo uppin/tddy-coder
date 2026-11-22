@@ -209,7 +209,6 @@ mod tests {
                 "RefreshWorktreeDiskUsage",
                 "NotifyOperator",
                 "work_queue_list",
-                "work_queue_create",
                 "work_queue_status",
                 "work_pr_read",
                 "work_pr_search",

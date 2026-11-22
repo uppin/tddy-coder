@@ -239,18 +239,20 @@ fn a_host_that_owns_the_orchestrator() -> ADaemonInTheCommonRoom {
         a_session(
             data_dir,
             ORCHESTRATOR_SESSION,
-            Changeset {
-                recipe: Some("pr-stack".to_string()),
-                repo_path: Some(repo.display().to_string()),
-                stack: Some(WorkQueue {
+            (
+                Changeset {
+                    recipe: Some("pr-stack".to_string()),
+                    repo_path: Some(repo.display().to_string()),
+                    ..Changeset::default()
+                },
+                Some(WorkQueue {
                     version: 1,
                     nodes: vec![
                         a_materialized_node("token-store", PARENT_NODE_BRANCH),
                         a_planned_node("middleware", CHILD_BRANCH, &["token-store"]),
                     ],
                 }),
-                ..Changeset::default()
-            },
+            ),
         );
     })
 }
@@ -262,12 +264,15 @@ fn a_host_that_owns_the_parent_code_session() -> ADaemonInTheCommonRoom {
         a_session(
             data_dir,
             ORCHESTRATOR_SESSION,
-            Changeset {
-                recipe: Some("tdd".to_string()),
-                branch: Some(PARENT_NODE_BRANCH.to_string()),
-                repo_path: Some(repo.display().to_string()),
-                ..Changeset::default()
-            },
+            (
+                Changeset {
+                    recipe: Some("tdd".to_string()),
+                    branch: Some(PARENT_NODE_BRANCH.to_string()),
+                    repo_path: Some(repo.display().to_string()),
+                    ..Changeset::default()
+                },
+                None,
+            ),
         );
     })
 }
@@ -278,15 +283,17 @@ fn a_host_whose_orchestrator_planned_no_such_branch() -> ADaemonInTheCommonRoom 
         a_session(
             data_dir,
             ORCHESTRATOR_SESSION,
-            Changeset {
-                recipe: Some("pr-stack".to_string()),
-                repo_path: Some(repo.display().to_string()),
-                stack: Some(WorkQueue {
+            (
+                Changeset {
+                    recipe: Some("pr-stack".to_string()),
+                    repo_path: Some(repo.display().to_string()),
+                    ..Changeset::default()
+                },
+                Some(WorkQueue {
                     version: 1,
                     nodes: vec![a_materialized_node("token-store", PARENT_NODE_BRANCH)],
                 }),
-                ..Changeset::default()
-            },
+            ),
         );
     })
 }
@@ -313,9 +320,13 @@ fn a_planned_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> W
     }
 }
 
-fn a_session(data_dir: &Path, session_id: &str, changeset: Changeset) {
+fn a_session(
+    data_dir: &Path,
+    session_id: &str,
+    (changeset, stack): (Changeset, Option<WorkQueue>),
+) {
     let dir = unified_session_dir_path(data_dir, session_id);
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&dir, changeset);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&dir, changeset, stack);
 }
 
 /// A repository with a real `origin/master` and `branch` pushed to it: the base resolver fetches the

@@ -58,7 +58,9 @@ fn sync_stack_node_reflects_child_state_and_pr_status() {
     // Orchestrator: n1 linked to child_id, child_state not yet mirrored
     let orch_cs = Changeset {
         name: Some("orchestrator".into()),
-        stack: Some(WorkQueue {
+        ..Changeset::default()
+    };
+    let orch_cs_stack = Some(WorkQueue {
             version: 1,
             nodes: vec![WorkItem {
                 node_id: "n1".into(),
@@ -73,10 +75,8 @@ fn sync_stack_node_reflects_child_state_and_pr_status() {
                 internal_status: None,
                 display_order: None,
             }],
-        }),
-        ..Changeset::default()
-    };
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, orch_cs);
+        });
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, orch_cs, orch_cs_stack.clone());
 
     // When
     sync_stack_node_from_child(&orch_dir, &sessions_home, "n1")
@@ -121,7 +121,9 @@ fn update_stack_atomic_applies_mutation_and_writes_back() {
 
     let cs = Changeset {
         name: Some("orch".into()),
-        stack: Some(WorkQueue {
+        ..Changeset::default()
+    };
+    let cs_stack = Some(WorkQueue {
             version: 1,
             nodes: vec![WorkItem {
                 node_id: "n1".into(),
@@ -136,10 +138,8 @@ fn update_stack_atomic_applies_mutation_and_writes_back() {
                 internal_status: None,
                 display_order: None,
             }],
-        }),
-        ..Changeset::default()
-    };
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, cs);
+        });
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, cs, cs_stack.clone());
 
     // When — mutate the stack atomically
     update_stack_atomic(&orch_dir, |stack| {

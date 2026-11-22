@@ -4,8 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use tddy_changeset::changeset::{
-    read_changeset, write_changeset, Changeset, GithubPrStatus, PrInternalStatus, WorkItem,
-    WorkQueue,
+    read_changeset, GithubPrStatus, PrInternalStatus, WorkItem, WorkQueue,
 };
 
 fn scratch(label: &str) -> PathBuf {
@@ -67,19 +66,13 @@ fn stack_roundtrip_linear_and_dag() {
             },
         ],
     };
-    let cs = Changeset {
-        name: Some("PR stack roundtrip".into()),
-        stack: Some(stack),
-        ..Changeset::default()
-    };
 
-    // When
-    write_changeset(&dir, &cs).unwrap();
-    let loaded = read_changeset(&dir).unwrap();
+    // When — the queue is written and read the way a session's record carries it
+    let loaded_stack: WorkQueue =
+        serde_yaml::from_str(&serde_yaml::to_string(&stack).unwrap()).unwrap();
     let _ = fs::remove_dir_all(&dir);
 
     // Then
-    let loaded_stack = loaded.stack.expect("stack must survive serde roundtrip");
     assert_eq!(loaded_stack.version, 1);
     assert_eq!(loaded_stack.nodes.len(), 3);
     let n1 = loaded_stack.node("n1").expect("n1 must exist");
@@ -227,23 +220,13 @@ fn internal_status_roundtrips_through_changeset_yaml() {
             display_order: None,
         }],
     };
-    let cs = Changeset {
-        stack: Some(stack),
-        ..Changeset::default()
-    };
 
     // When
-    write_changeset(&dir, &cs).unwrap();
-    let loaded = read_changeset(&dir).unwrap();
+    let loaded: WorkQueue = serde_yaml::from_str(&serde_yaml::to_string(&stack).unwrap()).unwrap();
     let _ = fs::remove_dir_all(&dir);
 
     // Then
-    let node = loaded
-        .stack
-        .expect("stack must survive roundtrip")
-        .node("n2")
-        .cloned()
-        .expect("n2 must exist");
+    let node = loaded.node("n2").cloned().expect("n2 must exist");
     let status = node
         .internal_status
         .expect("internal_status must survive the serde roundtrip");
@@ -257,45 +240,26 @@ fn internal_status_roundtrips_through_changeset_yaml() {
 
 #[test]
 fn a_node_without_internal_status_key_reads_as_none() {
-    // Given — a stack-node YAML written before this field existed (no `internal_status:` key)
-    let dir = scratch("internal-status-legacy");
+    // Given — a node YAML written before this field existed (no `internal_status:` key)
     let legacy_yaml = r#"
-name: legacy stack session
 version: 1
-models: {}
-sessions: []
-state:
-  current: StackPlanned
-  updated_at: "2024-01-01T00:00:00Z"
-  history: []
-artifacts: {}
-discovery: null
-stack:
-  version: 1
-  nodes:
-    - node_id: n1
-      title: Add token store
-      description: ""
-      branch_suggestion: feature/auth/token-store
-      branch: null
-      session_id: null
-      parents: []
-      pr_status: null
-      child_state: null
+nodes:
+  - node_id: n1
+    title: Add token store
+    description: ""
+    branch_suggestion: feature/auth/token-store
+    branch: null
+    session_id: null
+    parents: []
+    pr_status: null
+    child_state: null
 "#;
-    fs::write(dir.join("changeset.yaml"), legacy_yaml.trim()).unwrap();
 
     // When
-    let cs = read_changeset(&dir).unwrap();
-    let _ = fs::remove_dir_all(&dir);
+    let queue: WorkQueue = serde_yaml::from_str(legacy_yaml.trim()).unwrap();
 
     // Then
-    let node = cs
-        .stack
-        .expect("stack present")
-        .node("n1")
-        .cloned()
-        .expect("n1 present");
+    let node = queue.node("n1").cloned().expect("n1 present");
     assert!(
         node.internal_status.is_none(),
         "a node YAML without internal_status: must deserialize with internal_status = None"
@@ -303,8 +267,8 @@ stack:
 }
 
 #[test]
-fn legacy_changeset_without_stack_reads_as_none() {
-    // Given — YAML without a `stack:` key (simulates pre-feature changeset)
+fn a_changeset_still_carrying_the_removed_stack_key_reads_without_it() {
+    // Given — YAML written when a changeset held the stack (`#workqueue` 5/14 dropped it)
     let dir = scratch("legacy");
     let legacy_yaml = r#"
 name: legacy session
@@ -317,16 +281,17 @@ state:
   history: []
 artifacts: {}
 discovery: null
+stack:
+  version: 1
+  nodes: []
+stack_id: 0190b000-0000-7000-8000-0000000000aa
 "#;
     fs::write(dir.join("changeset.yaml"), legacy_yaml.trim()).unwrap();
 
     // When
-    let cs = read_changeset(&dir).unwrap();
+    let cs = read_changeset(&dir).expect("the removed keys are ignored, not refused");
     let _ = fs::remove_dir_all(&dir);
 
     // Then
-    assert!(
-        cs.stack.is_none(),
-        "legacy changeset without stack: key must deserialize with stack = None"
-    );
+    assert_eq!(cs.name.as_deref(), Some("legacy session"));
 }

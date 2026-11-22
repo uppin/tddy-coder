@@ -150,7 +150,6 @@ mod tests {
                 "mcp__tddy-tools__CheckoutSessionWorktree",
                 "mcp__tddy-tools__CleanSessionWorktree",
                 "mcp__tddy-tools__work_queue_list",
-                "mcp__tddy-tools__work_queue_create",
                 "mcp__tddy-tools__work_queue_status",
                 "mcp__tddy-tools__work_pr_read",
                 "mcp__tddy-tools__work_pr_search",

@@ -27,13 +27,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use tddy_core::changeset::WorkQueue;
 use tddy_core::work_queue_store::{WorkQueueRecord, WorkQueueStore};
 use tddy_github::pr_api::{GithubPrApi, GithubPrInsightApi, RealGithubPrApi};
 use tddy_host_service::GithubCli;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
+use tddy_tool_engine::work_queue_access::WorkQueueAccess;
 use tddy_tool_engine::work_queue_tools::{
     execute_stack_tool, is_stack_tool_offered_to, WorkQueueCaller, WorkQueueOp, WorkQueueScope,
     WorkQueueToolPort,
@@ -68,15 +68,13 @@ impl WorkQueueGithubClients for RealWorkQueueGithubClients {
     }
 }
 
-/// The stack role of `session_id` on this host, read from its `.session.yaml` role, its changeset's
-/// `queue_id` and `orchestrator_session_id`, and —
-/// for a session that names an orchestrator — that orchestrator's stack record; `None` for a session
-/// offered no stack tool. A session whose records cannot be read is refused: its role cannot be
-/// known.
+/// `session_id` as a caller on this host, with the access its records give it (it owns a queue, or an
+/// item of one links to it); `None` for a session offered no work tool. A session whose records
+/// cannot be read is refused: its access cannot be known.
 pub(super) fn work_queue_caller_of(
     sessions_base: &Path,
     session_id: &str,
-) -> Result<Option<WorkQueueCaller>, Status> {
+) -> Result<Option<(WorkQueueCaller, WorkQueueAccess)>, Status> {
     tddy_tool_engine::work_queue_tools::caller_records::work_queue_caller_from_records(
         sessions_base,
         session_id,
@@ -93,16 +91,16 @@ impl ExecToolRpcHandler {
         sessions_base: &Path,
     ) -> Result<ExecuteToolResponse, Status> {
         let tool = &req.tool_name;
-        let caller = work_queue_caller_of(sessions_base, &req.session_id)?.ok_or_else(|| {
+        let (caller, access) = work_queue_caller_of(sessions_base, &req.session_id)?.ok_or_else(|| {
             Status::permission_denied(format!(
-                "tool {tool} is served only to an orchestrator session, or a session bound to a \
-                 node of its orchestrator's stack"
+                "tool {tool} is served only to a session that owns a work queue, or one an item of a \
+                 work queue links to"
             ))
         })?;
-        if !is_stack_tool_offered_to(&caller.role, tool) {
+        if !is_stack_tool_offered_to(access, tool) {
             return Err(Status::permission_denied(format!(
-                "tool {tool} is not offered to a session bound to a node of a stack: it may read \
-                 its stack's status and its pull requests only"
+                "tool {tool} is not offered to a session that is only addressed by a work queue: it \
+                 may read a queue's status and its pull requests only"
             )));
         }
         let response = match self.served_on_target_host(req).await? {
@@ -141,7 +139,7 @@ impl ExecToolRpcHandler {
         sessions_base: &Path,
     ) -> DaemonStackTools {
         DaemonStackTools {
-            store: WorkQueueStore::new(sessions_base.join("projects")),
+            store: WorkQueueStore::new(sessions_base),
             sessions_base: sessions_base.to_path_buf(),
             os_user,
             daemon_instance_id: tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(
@@ -200,23 +198,16 @@ impl WorkQueueToolPort for DaemonStackTools {
         self.store.list(project_id).map_err(|e| e.to_string())
     }
 
-    async fn create_stack(
+    async fn access_to(
         &self,
         caller: &WorkQueueCaller,
-        title: Option<&str>,
-    ) -> Result<WorkQueueRecord, String> {
-        // Never the caller's own stack: its changeset is not touched.
-        self.store
-            .create_titled(
-                &caller.project_id,
-                &caller.session_id,
-                title.map(str::to_string),
-                WorkQueue {
-                    version: 1,
-                    nodes: Vec::new(),
-                },
-            )
-            .map_err(|e| e.to_string())
+        queue_id: &str,
+    ) -> Result<WorkQueueAccess, String> {
+        tddy_tool_engine::work_queue_tools::caller_records::access_to_queue_here(
+            &self.sessions_base,
+            caller,
+            queue_id,
+        )
     }
 
     async fn run_stack_op(&self, scope: &WorkQueueScope, op: WorkQueueOp) -> Result<Value, String> {
@@ -244,13 +235,12 @@ impl WorkQueueToolPort for DaemonStackTools {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use tddy_changeset::work_queue_fixtures::{a_stack_host, queue_id_of, A_PROJECT};
+    use tddy_changeset::work_queue_fixtures::{a_stack_host, A_PROJECT};
     use tddy_core::changeset::{Changeset, WorkItem, WorkQueue};
-    use tddy_tool_engine::work_queue_tools::WorkQueueCallerRole;
 
     use super::*;
 
-    fn a_stack_planning(child: Option<&str>) -> WorkQueue {
+    fn a_queue_linking(child: Option<&str>) -> WorkQueue {
         WorkQueue {
             version: 1,
             nodes: vec![WorkItem {
@@ -262,99 +252,52 @@ mod tests {
         }
     }
 
-    fn with_role(dir: &Path, role: &str) {
-        let mut meta = tddy_core::read_session_metadata(dir).unwrap();
-        meta.session_role = Some(role.to_string());
-        tddy_core::session_metadata::write_session_metadata(dir, &meta).unwrap();
-    }
-
     #[test]
-    fn an_orchestrator_role_session_is_classified_an_orchestrator_of_its_project() {
-        // Given main's session of a project
+    fn a_session_owning_a_queue_is_its_owner_whatever_its_role() {
+        // Given a session with no orchestrator role that owns a queue
         let host = a_stack_host();
-        let dir = host.session("main", Changeset::default());
-        with_role(&dir, "project-home");
+        host.orchestrator("owner", a_queue_linking(None));
 
-        // When it is classified
-        let caller = work_queue_caller_of(host.base(), "main").unwrap();
+        // When it is read
+        let caller = work_queue_caller_of(host.base(), "owner").unwrap();
 
-        // Then it is an orchestrator of its project
+        // Then it is the owner of its project's queue
         assert_eq!(
             caller,
-            Some(WorkQueueCaller {
-                session_id: "main".to_string(),
-                project_id: A_PROJECT.to_string(),
-                role: WorkQueueCallerRole::Orchestrator { own_stack_id: None },
-            })
+            Some((
+                WorkQueueCaller {
+                    session_id: "owner".to_string(),
+                    project_id: A_PROJECT.to_string(),
+                },
+                WorkQueueAccess::Owner
+            ))
         );
     }
 
     #[test]
-    fn an_orchestrator_is_classified_owning_the_stack_its_changeset_names() {
-        // Given an orchestrator-role session whose stack the project's store holds
+    fn an_orchestrator_role_session_owning_no_queue_has_no_access() {
+        // Given a project-home session that owns no queue (access never reads the role)
         let host = a_stack_host();
-        let dir = host.orchestrator("orch", a_stack_planning(None));
-        with_role(&dir, "orchestrator");
-        let own = queue_id_of(&dir).expect("the changeset names its stack");
+        let dir = host.session("main", Changeset::default());
+        let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
+        meta.session_role = Some("project-home".to_string());
+        tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
 
-        // When it is classified
-        let caller = work_queue_caller_of(host.base(), "orch").unwrap();
+        // When it is read
+        let caller = work_queue_caller_of(host.base(), "main").unwrap();
 
-        // Then it is an orchestrator owning that stack
-        assert_eq!(
-            caller.map(|c| c.role),
-            Some(WorkQueueCallerRole::Orchestrator {
-                own_stack_id: Some(own)
-            })
-        );
-    }
-
-    #[test]
-    fn a_pr_stack_session_with_no_orchestrator_role_is_classified_with_no_stack_role() {
-        // Given a pr-stack recipe session (no role) whose changeset names its stack
-        let host = a_stack_host();
-        host.orchestrator("orch", a_stack_planning(None));
-
-        // When it is classified
-        let caller = work_queue_caller_of(host.base(), "orch").unwrap();
-
-        // Then the recipe and the stack give it no stack role
+        // Then it has none
         assert_eq!(caller, None);
     }
 
     #[test]
-    fn a_session_its_orchestrators_stack_binds_is_classified_a_node_of_that_stack() {
-        // Given an orchestrator whose node n1 is bound to a child session naming it
-        let host = a_stack_host();
-        let orch = host.orchestrator("orch", a_stack_planning(Some("child")));
-        with_role(&orch, "orchestrator");
-        let queue_id = queue_id_of(&orch).unwrap();
-        host.session(
-            "child",
-            Changeset {
-                orchestrator_session_id: Some("orch".to_string()),
-                ..Changeset::default()
-            },
-        );
-
-        // When the child is classified
-        let caller = work_queue_caller_of(host.base(), "child").unwrap();
-
-        // Then it is a node of that stack
-        assert_eq!(
-            caller.map(|c| c.role),
-            Some(WorkQueueCallerRole::WorkItem { queue_id })
-        );
-    }
-
-    #[test]
-    fn a_session_with_no_record_is_refused_rather_than_classified_ordinary() {
+    fn a_session_with_no_record_is_refused_rather_than_read_as_ordinary() {
         // Given a session id with nothing on disk
         let host = a_stack_host();
 
-        // When it is classified
+        // When it is read
         let refusal =
-            work_queue_caller_of(host.base(), "ghost").expect_err("its role cannot be known");
+            work_queue_caller_of(host.base(), "ghost").expect_err("its access cannot be known");
 
         // Then it is refused as permission denied, naming the session
         assert_eq!(refusal.code(), tddy_rpc::Code::PermissionDenied);
