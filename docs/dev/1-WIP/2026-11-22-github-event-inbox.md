@@ -16,9 +16,10 @@
 
 - **tddy-github-inbox** (new): `GithubInbox`, the per-repo feed, the row cache, invalidations, single-flight, subscriptions
 - **tddy-github**: conditional transport (`ConditionalRead` — status, ETag, poll interval, rate-limit headers) over REST and over `gh api -i`; `CheckRun` gains `id`, `status`, `started_at`, `completed_at`, `details_url`; repository events and updated-PR sweep reads
-- **tddy-session-activity**: `trunk_watch` takes commits from the inbox
-- **tddy-session-lifecycle**: `svc_trunk_watch_wiring.rs` builds the inbox's credential source instead of a per-project feed
-- **tddy-daemon**: runtime mounts the inbox (`runtime/mount.rs`)
+- ~~**tddy-session-activity**: `trunk_watch` takes commits from the inbox~~ — unchanged: `TrunkPoller` keeps its semantics and is handed an `InboxTrunkFeed`
+- **tddy-session-lifecycle**: `svc_trunk_watch_wiring.rs` builds the inbox (one per host), registers each project's reader (`HostRepoReaders`) and steps the inbox in the trunk-watch task
+- ~~**tddy-daemon**: runtime mounts the inbox (`runtime/mount.rs`)~~ — not needed: the trunk-watch wiring owns the inbox until a second consumer (n4/n6) needs it hoisted
+- **tddy-daemon-rpc**, **tddy-workflow-recipes**: test fixtures only — `CheckRun` literals take `..CheckRun::default()`
 - ~~**tddy-daemon-rpc**: `pr_stack/pr_status.rs` (QueryBranch / GetPrStatus PR leg) and `exec_tool/stack_tools/ops.rs` (`status`) read through the inbox~~ — moved to n6 (#1007) by the operator's decision: it needs repo→project credential plumbing into `PrStackRpcHandler` (the inbox reads with a project's registered credential, `pr_status_for_caller` has a login-keyed token and only `repo_root`) and a sync→async adapter for `GithubPrApi` in the `ports.rs` area
 
 ## Related Feature Documentation
@@ -141,8 +142,8 @@ No new browser stream here; recorded for n4, which adds one.
 
 ## Scope
 
-- [ ] `tddy-github-inbox` crate: feed task per repo, row cache with ETags, invalidations, single-flight, kind-filtered subscriptions, rate-limit pacing
-- [ ] Conditional transport over REST and `gh api -i`; richer `CheckRun`
+- [x] `tddy-github-inbox` crate: feed task per repo, row cache with ETags, invalidations, single-flight, kind-filtered subscriptions, rate-limit pacing
+- [x] Conditional transport over REST and `gh api -i`; richer `CheckRun`
 - [x] Trunk watch on the inbox's branch-commits row
 - [ ] ~~`QueryBranch`/`GetPrStatus` PR leg and stack `status` through the inbox~~ — moved to n6 (#1007) by the operator's decision: it needs repo→project credential plumbing into `PrStackRpcHandler` (the inbox reads with a project's registered credential, `pr_status_for_caller` has a login-keyed token and only `repo_root`) and a sync→async adapter for `GithubPrApi` in the `ports.rs` area
 - [ ] Docs updated through the wrap
@@ -178,10 +179,10 @@ via the pending-check poll (the events feed does not carry them).
 ### Delta
 
 - New crate `packages/tddy-github-inbox` (`feed.rs`, `rows.rs`, `in_flight.rs`, `subscriptions.rs`, `pacing.rs`).
-- `tddy-github`: `conditional.rs` (REST + `gh`), `repo_events.rs`, `check_runs.rs`.
-- `trunk_watch.rs`: `TrunkPoller` reads `branch_commits` through the inbox; `TrunkSource` builds from
-  the inbox handle.
-- `pr_status.rs`, `stack_tools/ops.rs`: PR lookups through the inbox.
+- `tddy-github`: `conditional.rs` (REST + `gh`), `check_runs.rs`, `pr_json.rs` (PR-family JSON parsing). The
+  events-feed parsing lives in the inbox's `feed.rs`, not a `tddy-github` `repo_events.rs`.
+- `svc_trunk_watch_wiring.rs`: `HostTrunkSource` hands `TrunkPoller` an `InboxTrunkFeed`; `trunk_watch.rs` is unchanged.
+- ~~`pr_status.rs`, `stack_tools/ops.rs`: PR lookups through the inbox.~~ — moved to n6 (#1007).
 
 ## Implementation Milestones
 
@@ -253,7 +254,31 @@ _(populated by validation)_
 
 ## Validation Results
 
-_(populated by validation)_
+`/validate-changes` 2026-11-22 at `49847cbed` (base `feature/workqueue/remove-pr-stack-recipe` @ `ebed2e85c`, unmoved;
+`origin/<base>..HEAD` = this PR's 6 commits only).
+
+**Builds / gates (scoped):** `cargo build -p tddy-github -p tddy-github-inbox -p tddy-session-lifecycle` ✅ clean ·
+`cargo clippy` same three `--all-targets -D warnings` ✅ · `cargo test -p tddy-github-inbox -p tddy-github` ✅ (all suites
+pass, inbox acceptance 10/10, conditional-over-HTTP 4/4) · `tddy-session-lifecycle --test orchestrator_session_acceptance`
+✅ 8/8 · `tddy-session-activity --test trunk_watch_acceptance` ✅ 6/6.
+
+**Stack boundary:** Responsibility delivered (PR-leg/stack status moved to n6 by operator decision); no `## Dependencies`
+symbols; no `todo!`/`unimplemented!` left; diff holds only this PR's files; no parent-owned file deleted.
+
+**Findings:**
+- ⚠️ `pr_api.rs` duplicates `pr_json.rs`/`check_runs.rs` parsing (`get_pr`, `list_check_runs`, `list_reviews`,
+  `list_review_comments`, `list_issue_comments`) and grew 22 lines against its oversized-file record → delegate (wrap).
+- ⚠️ `HostRepoReaders` keeps the credential of the project that subscribed **last** for a repository and never forgets
+  one: two projects of one repo with different accounts read with whichever registered last. Same-repo reads, but
+  across accounts → record (wrap).
+- ⚠️ Test gaps: `PushEvent` → `BranchCommits`/`PrForHead` invalidation, the updated-pulls sweep, `inbox_error` mapping
+  (403/429 → `RateLimited`) and `HostRepoReaders` have no test.
+- ℹ️ Row reads (`RepoInbox::read`) use the system clock while `step(now)` uses the injected one; the crate doc says
+  time is never read from a clock. Consistent in production (`step` is fed `now_unix_ms()`); doc to be corrected.
+- ℹ️ The events feed reads one page (100); a burst over 100 events between polls loses pushes (PR rows are caught by
+  the sweep, branch-commits rows by the 30 s feedless TTL only while nobody subscribes).
+- ℹ️ `InboxTrunkFeed` drops `X-Poll-Interval`; `step`'s `next_step_at_unix_ms` is ignored by the trunk-watch loop —
+  harmless while the trunk watch is the only consumer (no subscribers, so `step` reads nothing).
 
 ## TODO
 
@@ -268,8 +293,8 @@ _(populated by validation)_
 - [x] TDD Green — implement with quality code (n2's scope; the PR-leg and stack-status migrations moved to n6 #1007)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
