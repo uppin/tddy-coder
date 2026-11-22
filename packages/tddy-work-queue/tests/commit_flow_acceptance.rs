@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use pretty_assertions::assert_eq;
-use tddy_pr_stack::commit_flow::{CommitFlow, CommitSource, ItemBranch, Prediction};
-use tddy_pr_stack::lineage::LineEndpoint;
+use tddy_work_queue::commit_flow::{CommitFlow, CommitSource, ItemBranch, Prediction};
+use tddy_work_queue::lineage::LineEndpoint;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")

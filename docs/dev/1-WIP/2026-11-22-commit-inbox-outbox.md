@@ -66,7 +66,7 @@ implementing one here collides with the PR that owns it.
 
 Published (pass 2, commit 2):
 
-- `tddy_pr_stack::commit_flow::{CommitFlow (new, fetch, own_commits, inbox, outbox, cache_hits),
+- `tddy_work_queue::commit_flow::{CommitFlow (new, fetch, own_commits, inbox, outbox, cache_hits),
   ItemBranch, FlowCommit, CommitSource, Prediction, InboxEntry, OutboxEntry, CommitFlowError}` — over
   items already resolved with their line parent (n9's `LineEndpoint`), so the tests need no GitHub
 - `tddy_tool_engine::work_item_commit_flow_tools::{WORK_ITEM_INBOX, WORK_ITEM_OUTBOX,
@@ -78,6 +78,12 @@ Published (pass 2, commit 2):
 
 `inbox(item)` covers **every** line ancestor (`⋃ origin/<item>..origin/<a>`), not just the parent: a
 commit pushed to n1 is in n3's inbox before n2 has taken it.
+
+## Stack note (temporary)
+
+This branch is rebased onto n9 lineage-graph (`a3c8b3491`), which itself skips n7/n8 for now. n10's
+contract is **not** on this branch: rebase onto n10 before n11's [W]. n10's surfaces are not
+implemented here.
 
 ## Green wave
 
@@ -107,7 +113,7 @@ reserved and planned after the pipelines drain.
 
 ## Prerequisites
 
-### ⚠ DURING — `tddy-pr-stack/src/git_ops.rs` (renamed by n3) at 468 production lines
+### ⚠ DURING — `tddy-work-queue/src/git_ops.rs` at 468 production lines
 
 New git reads go in their own module.
 
@@ -161,7 +167,7 @@ daemon tool test; Cypress component spec for the tabs.
 
 ## Acceptance Tests
 
-`packages/tddy-pr-stack/tests/commit_flow_acceptance.rs` (real repos; crate renamed by n3):
+`packages/tddy-work-queue/tests/commit_flow_acceptance.rs` (real repos):
 - [x] `a_commit_pushed_to_an_ancestor_after_the_cut_is_in_the_items_inbox_attributed_to_it`
 - [x] `an_items_outbox_equals_its_successors_inbox_entries_from_it`
 - [x] `one_commit_can_be_clean_for_one_item_and_conflicting_for_the_next`
