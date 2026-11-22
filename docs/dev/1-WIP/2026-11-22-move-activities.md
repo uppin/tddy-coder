@@ -7,6 +7,12 @@
 **Stack**: `#workqueue` 8/14 — branch `feature/workqueue/move-activities`, base `feature/workqueue/badges-labels`
 **PR**: [#1009](https://github.com/uppin/tddy-coder/pull/1009)
 
+## Stack note (temporary)
+
+This branch is rebased onto n5's green (`origin/feature/workqueue/session-work-queue`) and **temporarily skips
+n6's and n7's plan and contract commits**, so PR #1009's diff against n7's branch looks wrong until n6 and n7 are
+green and this branch is rebased onto n7. That rebase happens before n8's [W]; n8 is not done until it does.
+
 ## Initial Discovery
 
 [2026-11-22-move-activities-initial-discovery.md](./2026-11-22-move-activities-initial-discovery.md)
