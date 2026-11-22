@@ -384,7 +384,8 @@ const SECRET: &str = "s3cret-token";
 /// A machine behind a stand-in `ssh` first on this process's `PATH`: it runs the remote command
 /// here, with the machine's `/home/dev` mapped under its own directory — except `git fetch` and
 /// `git clone`, which it fails as a target that cannot reach its remote does, the way a real one
-/// echoes the URL it could not reach.
+/// echoes the URL it could not reach — and the agent probe (`command -v`), which it answers as a
+/// target that has the agent does, so a start reaches the remote calls these tests are about.
 struct AMachineWhoseRemoteIsUnreachable {
     /// The stand-in `claude` this host resolves its agent to: a start on a target resolves the
     /// agent here before it runs the target's own, and the start fails before either runs.
@@ -412,6 +413,10 @@ case "$command" in
   *"git clone"*)
     echo "fatal: unable to access 'https://bot:{SECRET}@example.com/acme/repo.git/': Could not resolve host" >&2
     exit 128;;
+  *"command -v "*)
+    # The agent probe of a start on a target: the machine's login shell finds its agent.
+    echo "/usr/local/bin/claude"
+    exit 0;;
 esac
 command=$(printf '%s' "$command" | /usr/bin/sed 's#/home/dev#{root}/home/dev#g')
 export HOME='{root}'

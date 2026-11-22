@@ -483,6 +483,13 @@ async fn a_cancelled_held_hover_is_never_answered() {
 
     // When the pane cancels it — the pointer left — and the index then becomes ready
     session.sends(a_cancel_of(7)).await;
+    // A probe answers at once while the index loads, and frames are served in order: its answer is
+    // what says the cancel was applied, before the index reports ready for it to race with.
+    session.sends(a_probe(9)).await;
+    assert_eq!(
+        session.next_reply().await,
+        answered(9, a_probe_answer(Definability::Unknown, vec![]))
+    );
     index.reports(the_index_is_ready());
     session.progress_until_ready().await;
 
