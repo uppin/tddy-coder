@@ -238,7 +238,8 @@ are daemon exec tools in `tddy-tool-engine::work_item_link_tools`, offered to th
 - **A refused edit writes nothing**: every link edit is applied to a copy under the queue's record lock.
 
 **Live checks on the row.** `StreamWorkQueueStatus` answers, per item, its PR's state and the count of
-its checks at the PR's head that are running, failed and succeeded — a snapshot when the view opens, then
+its checks at the PR's head that are running, failed and succeeded, with each run (name, status,
+conclusion, times, details link) for the row's expanded list — a snapshot when the view opens, then
 a new one whenever the daemon's GitHub inbox reports a PR or checks change in the queue's repository. One
 stream per open queue view, never per row, and the browser never polls GitHub. An item whose PR or checks
 the inbox cannot read has no summary, rather than zeros. The stream is served only by the host that holds

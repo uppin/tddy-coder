@@ -23,7 +23,8 @@ the web app or on LiveKit.
   ([pr-stacking.md § Opening a session's work queue](../coder/pr-stacking.md#opening-a-sessions-work-queue)).
 - An expanded work-item row assigns an existing PR by number, removes it, links a session from the
   session list and unlinks one; a refusal is shown inline on that row. An item with an assigned PR
-  shows its checks' running, failed and succeeded counts, kept live by the queue's
+  shows its checks' running, failed and succeeded counts and, expanded, each check as the session PR
+  tab's `CheckRow` (this package depends on `tddy-workspace-web` for it), kept live by the queue's
   `StreamWorkQueueStatus` — never polled
   ([pr-stacking.md § An item's assigned PR and linked sessions](../coder/pr-stacking.md#an-items-assigned-pr-and-linked-sessions-added-2026-11-22)).
 

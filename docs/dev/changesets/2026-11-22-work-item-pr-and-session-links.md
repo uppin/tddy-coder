@@ -9,7 +9,8 @@ unassign, link, unlink — are daemon exec tools for the queue's owner (`work_it
 row's controls. The PR's head branch becomes the item's branch; a different recorded branch is refused,
 naming both. A linked session is Addressed by the queue. `StreamWorkQueueStatus` pushes each item's PR
 state and check counts (running, failed, succeeded) from the GitHub inbox — a snapshot, then one per
-`Pr`/`Checks` event in the queue's repository; the row shows them for a PR'ed item.
+`Pr`/`Checks` event in the queue's repository; the row shows them for a PR'ed item, and lists each run with n4's `CheckRow` when expanded
+(`tddy-workqueue-web` now depends on `tddy-workspace-web`).
 
 Moved here from n2 by the operator: `GetPrStatus` / `QueryBranch`'s PR leg (previously the caller's
 login-keyed token over `repo_root`) and `work_queue_status` (previously the synchronous `GithubPrApi`)
@@ -19,7 +20,8 @@ rewritten async.
 Packages: tddy-changeset, tddy-work-queue, tddy-service, tddy-tool-engine, tddy-daemon-rpc, tddy-tools,
 tddy-agent-launch, tddy-workqueue-web, tddy-client-web (and generated TS in tddy-rust-typescript-tests).
 
-Wrap cleanups: `WorkQueueView.tsx` split (512 → 432 lines, link state into `useWorkItemLinksState.ts`);
+Wrap gaps closed: `pull_number_for_node` prefers the assigned PR; the expanded check rows (planned,
+missing at green) — `WorkItemStatus.checks`. Wrap cleanups: `WorkQueueView.tsx` split (512 → 432 lines, link state into `useWorkItemLinksState.ts`);
 `WorkQueueHandler`'s new methods made required; `ItemLinkError` gained `Display` (the tools had answered
 its `Debug`); the stream's snapshot moved to `inbox_reads::work_queue_status_view`, and a queue deleted
 mid-view ends the stream with the store's reason.
