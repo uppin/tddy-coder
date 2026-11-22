@@ -7,6 +7,16 @@
 **Stack**: `#workqueue` 14/14 — branch `feature/workqueue/land-propagate`, base `feature/workqueue/schedules`
 **PR**: [#1015](https://github.com/uppin/tddy-coder/pull/1015)
 
+## Stack note (temporary)
+
+Planned on n13 and rebased (2026-11-23) onto n13's green head `dda3c4668` while the line skips n7, n8
+and n12 (n13 sits on n11 on n10 on n9). **Rebase onto n13's wrapped head before n14's [W].**
+
+- `tddy_session_activity::work_queue_activity::WorkQueueChange` is n8's enum and does not exist on this
+  lineage: the contract commit's edit to it was left out, and the four variants
+  (`Landed`, `Propagated`, `Refused`, `ScheduleFired`) land when n8 joins the line.
+- n12 (leak/linearity) is not on this lineage; the engines consume nothing from it.
+
 ## Initial Discovery
 
 [2026-11-22-land-propagate-initial-discovery.md](./2026-11-22-land-propagate-initial-discovery.md)
@@ -71,15 +81,15 @@ implementing one here collides with the PR that owns it.
 
 Published (pass 2, commit 2):
 
-- `tddy_pr_stack::engine::{QueueGit, QueueGithub, LocalBranchState, EngineError, EngineRefusal,
+- `tddy_work_queue::engine::{QueueGit, QueueGithub, LocalBranchState, EngineError, EngineRefusal,
   PropagateRequest, Propagated, propagate, LandItem, LandReport, land}`
-- `tddy_pr_stack::schedule_runner::{FireSchedule, ScheduleRunner (new, on_change, is_armed)}` — in the
-  stack crate rather than daemon-rpc, so its exactly-once tests need no daemon harness; the daemon
+- `tddy_work_queue::schedule_runner::{FireSchedule, ScheduleRunner (new, on_change, is_armed)}` — in the
+  work-queue crate rather than daemon-rpc, so its exactly-once tests need no daemon harness; the daemon
   drives it from inbox events and queue changes
 - `tddy_session_activity::work_queue_activity::WorkQueueChange::{Landed, Propagated, Refused,
   ScheduleFired}` (n8's enum, extended as n8's Boundaries planned)
 - `tddy_tool_engine::work_queue_land_tools::{WORK_ITEM_PROPAGATE, WORK_QUEUE_LAND, work_queue_land_tool_defs}`
-- `tddy-prstack-web`: `LandWaves`, `PropagationRefusal` (shells)
+- `tddy-workqueue-web`: `LandWaves`, `PropagationRefusal` (shells)
 - The failing tests below. The git/GitHub adapters of the two ports, the fold-in of
   `work_item_merge` / `work_item_repoint`, the RPCs and deleting the moved recipe functions are `/green`'s.
 
@@ -122,9 +132,9 @@ final measurement in the change history.
 Its repoint silent-failure paths (empty `expected_sha`, invented merge base, force-push failure only
 warned) must not survive into the engine: each becomes a named refusal. Narrowed at wrap.
 
-### ⚠ DURING — [complexity-repoint-repoint-planned-pr-node.md](../../../packages/tddy-pr-stack/docs/code-issues/complexity-repoint-repoint-planned-pr-node.md)
+### ⚠ DURING — [complexity-repoint-repoint-planned-pr-node.md](../../../packages/tddy-work-queue/docs/code-issues/complexity-repoint-repoint-planned-pr-node.md)
 
-`repoint_work_item` (renamed by n3) is called by `work_item_repoint` today; folding it into the engine
+`repoint_work_item` is called by `work_item_repoint` today; folding it into the engine
 should retire it — measured at wrap.
 
 ### ⚠ DURING — `git_work.rs` (430) and `stack_git_tools.rs` (432) near budget
@@ -179,7 +189,7 @@ integration test proves `work_item_merge` now repoints successors.
 
 ## Acceptance Tests
 
-`packages/tddy-pr-stack/tests/land_propagate_engine_acceptance.rs` (port doubles; crate renamed by n3):
+`packages/tddy-work-queue/tests/land_propagate_engine_acceptance.rs`:
 - [x] `propagating_a_clean_inbox_rebases_onto_the_parent_tip_and_pushes_with_lease`
 - [x] `a_dirty_unpushed_unpulled_or_diverged_branch_refuses_naming_state_and_actions`
 - [x] `force_does_not_override_the_local_branch_gate`
@@ -191,7 +201,7 @@ integration test proves `work_item_merge` now repoints successors.
 
 - [x] `merging_one_item_propagates_its_successors` (what `work_item_merge` does through `land`)
 
-`packages/tddy-pr-stack/tests/schedule_runner_acceptance.rs`:
+`packages/tddy-work-queue/tests/schedule_runner_acceptance.rs`:
 - [x] `an_armed_merge_fires_once_when_its_last_condition_turns_met_and_disarms`
 - [x] `concurrent_events_fire_a_schedule_exactly_once`
 
@@ -201,7 +211,7 @@ integration test proves `work_item_merge` now repoints successors.
 Activities on landings and refusals reaching the owner need n8's publisher; `/green` proves it in
 `work_queue_activity_acceptance.rs` with the new variants.
 
-`packages/tddy-prstack-web/cypress/component/WorkQueueLandPropagateAcceptance.cy.tsx` (renamed by n3):
+`packages/tddy-workqueue-web/cypress/component/WorkQueueLandPropagateAcceptance.cy.tsx`:
 - [x] `Land wave asks for the wave range and shows the result per item`
 - [x] `a refused propagation shows the state and the actions that would fix it`
 
