@@ -17,7 +17,7 @@
 | 2026-09-18 | 121 | 8 | 11 | 3 | first detection |
 | 2026-09-22 | 121 | 8 | 11 | 3 | unchanged — #496 touched `bridge.rs` (moved `pr_number_from_status_url` out, `use` of the new crate) but not this function; it stays recipe-side |
 | 2026-11-12 | 120 | 8 | 11 | 3 | touched by #879 (`#orchestrators` 2/11): the dependent's branch is read through `read_session_stack` (−1 line); no logic change |
-| 2026-11-22 | 120 | 8 | 11 | 3 | moved verbatim by #1002 to `tddy-work-queue/src/merge_repoint.rs`; the function has no production caller now (backlog: *Stack helpers with no production caller*) |
+| 2026-11-22 | 120 | 8 | 11 | 3 | moved verbatim by #1002 to `tddy-pr-stack/src/merge_repoint.rs`; the function has no production caller now (backlog: *Stack helpers with no production caller*) |
 
 ## What the tool found
 

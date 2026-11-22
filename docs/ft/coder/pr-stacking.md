@@ -13,6 +13,18 @@ A session recorded with the retired `pr-stack` workflow recipe (or its aliases `
 
 The design extends the existing single-level session chaining mechanism (see [Git integration base ref — Session chaining](git-integration-base-ref.md)) to a full ordered graph, closes the Telegram-only gap by exposing transport-agnostic spawn helpers and CLI flags, and adds a uniform progress-tracking contract that all child sessions satisfy via host-level hooks rather than agent promises.
 
+## Vocabulary — work items and work queues
+
+A planned PR is a **work item** and the container that holds them is a **work queue**. Every surface
+uses these names: the `work_queue.WorkQueueService` RPCs (`AddWorkItem`, `RepointWorkItem`,
+`ReorderWorkItem`, `ResolveWorkItemBase`, `LinkWorkItem`, `ListProjectWorkQueues`, `GetWorkQueue`,
+`CreateWorkQueue`; `GetPrStatus`, `QueryBranch` and `PullBaseIntoBranch` describe PRs and branches and
+keep their names), the agent tools (`work_queue_*`, `work_item_*`, `work_pr_read` / `work_pr_search` /
+`work_pr_comments`), the `tddy-work-queue` crate, the `tddy-workqueue-web` package and the
+`/sessions/project/:projectId/queue/:queueId` route. Old tool and RPC names are unknown: no alias is
+kept. Data written before the rename loads unchanged — the store directory (`stacks/`) and the YAML keys
+(`stack_id`, `stack`, `node_id`) keep their spelling on disk.
+
 ## Session YAML enrichment
 
 Two new optional fields are added to `Changeset` in `tddy-core`. Both are additive (`Option` + `serde default`) and are forward/backward safe because `Changeset` carries no `deny_unknown_fields` guard.
