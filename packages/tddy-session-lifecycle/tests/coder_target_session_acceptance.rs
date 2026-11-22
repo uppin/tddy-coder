@@ -35,11 +35,13 @@ use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 mod agent_registry_support;
 mod agent_run_support;
 mod cli_harness_support;
+mod host_without_agent_support;
 use agent_registry_support::{builtin_yaml_as, AJailGuard};
 use cli_harness_support::{
-    a_daemon_config, coding_agents_over, create_test_repo_with_origin, current_os_user,
-    register_project, session_host, VALID_TOKEN,
+    a_daemon_config, create_test_repo_with_origin, current_os_user, register_project, session_host,
+    VALID_TOKEN,
 };
+use host_without_agent_support::take_the_agent_off_the_host;
 
 const TEST_PROJECT_ID: &str = "coder-target-project";
 /// The agent: `claude.yaml` under this id, so its sessions launch through the generic CLI path.
@@ -292,15 +294,7 @@ fn refusal(status: tddy_rpc::Status) -> (Code, String) {
 impl ADaemonWithAWorkspace {
     /// Take the agent off this daemon's host: its `PATH` keeps `tddy-tools` and nothing else.
     fn this_host_has_no_agent(&self) {
-        let command = SESSION_TYPE.strip_suffix("-cli").unwrap_or(SESSION_TYPE);
-        std::fs::remove_file(self.sessions_base.join("tool-bin").join(command))
-            .expect("the agent installed on the host is removed");
-        assert!(
-            coding_agents_over(&self.sessions_base)
-                .resolve(AGENT_ID, None)
-                .is_err(),
-            "the daemon's host must not resolve the agent for this test"
-        );
+        take_the_agent_off_the_host(&self.sessions_base, SESSION_TYPE, AGENT_ID);
     }
 
     /// Start a session in the workspace. A start that was refused answers its code and message.

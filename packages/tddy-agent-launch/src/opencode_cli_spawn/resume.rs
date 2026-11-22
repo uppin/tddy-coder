@@ -55,9 +55,7 @@ impl crate::launch_ports::LaunchSessions {
         // Resolved before anything is re-wired: a Coder target whose vault has been locked
         // since the start refuses the resume here, and the session is kept as it was.
         let target_shell = self.resumed_target_shell(req, &metadata)?;
-        let session_agent = self
-            .agent_where_it_runs(kind.clone(), target_shell.as_deref())
-            .await?;
+        let session_agent = self.agent_to_launch(kind.clone(), &target_shell).await?;
         let identity = self.host.session_identity(
             os_user,
             &req.session_id,

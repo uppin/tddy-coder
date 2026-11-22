@@ -109,7 +109,7 @@ impl LaunchSessions {
     /// `warp-cli`), launched from its spec: refused over a managed codebase or, when sandboxed, on a
     /// placement its spec excludes; its agent settled where it runs before anything is cut —
     /// resolved on this host, or for a start on a target read from its spec and asked of the target
-    /// ([`Self::agent_where_it_runs`]); then the shared CLI prelude, and the agent in its jail when
+    /// ([`Self::agent_to_launch`]); then the shared CLI prelude, and the agent in its jail when
     /// the session is sandboxed or in a PTY when it is not.
     pub(super) async fn start_cli_harness(
         &self,
@@ -122,9 +122,7 @@ impl LaunchSessions {
         // Settled first, with nothing of the start created: the managed-codebase refusal reads the
         // agent's spec, and a target without the agent fails the start before any worktree is cut.
         let target_shell = self.start_target_shell(req)?;
-        let session_agent = self
-            .agent_where_it_runs(kind.clone(), target_shell.as_deref())
-            .await?;
+        let session_agent = self.agent_to_launch(kind.clone(), &target_shell).await?;
         refuse_an_unsupported_cli_session_start(&session_agent.agent.spec, kind.name, req)?;
         if req.sandbox {
             self.require_sandbox_placement(kind.name)?;

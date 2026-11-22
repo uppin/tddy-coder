@@ -75,16 +75,16 @@ impl LaunchSessions {
     /// its spec without a host binary ([`resolve_session_agent_for_target`]) and then asked of the
     /// target ([`require_the_agent_on_the_target`]). A start settles it before its prelude and its
     /// worktree cut, a resume before it re-wires anything.
-    pub(crate) async fn agent_where_it_runs(
+    pub(crate) async fn agent_to_launch(
         &self,
         kind: CliSessionType,
-        target: Option<&dyn RemoteShell>,
+        target: &Option<Arc<dyn RemoteShell>>,
     ) -> Result<CliSessionAgent, Status> {
         let Some(shell) = target else {
             return resolve_session_agent(&self.coding_agents, kind);
         };
         let session_agent = resolve_session_agent_for_target(&self.coding_agents, kind)?;
-        require_the_agent_on_the_target(shell, &session_agent).await?;
+        require_the_agent_on_the_target(&**shell, &session_agent).await?;
         Ok(session_agent)
     }
 

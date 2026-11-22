@@ -10,7 +10,7 @@ a file the successors also modify is recorded, not split. Production lines are c
 
 | File | Before → after | Record |
 |---|---|---|
-| `packages/tddy-session-lifecycle/src/test_util.rs` | 484 → 578 (crossed 500); 578 → 556 in #990, which moved its tool hosts out (still over; #991 and #992 also edit it) | `packages/tddy-session-lifecycle/docs/code-issues/oversized-file-test-util.md` |
+| `packages/tddy-session-lifecycle/src/test_util.rs` | 484 → 578 (crossed 500); 578 → 556 in #990, which moved its tool hosts out (still over; #991 and #992 do not edit it — the stack is done, so the split is free to go ahead as a follow-up) | `packages/tddy-session-lifecycle/docs/code-issues/oversized-file-test-util.md` |
 | `packages/tddy-daemon-sandbox/src/sandbox_session.rs` | 885 → 924 | closed in #991, see below (record deleted) |
 | `packages/tddy-daemon-rpc/src/pr_stack/ports.rs` | 878 → 880 | `…/oversized-file-pr-stack-ports.md` (row added) |
 | `packages/tddy-telegram-control/src/telegram_session_control/chaining_and_listing.rs` | 521 → 527 | `…/oversized-file-telegram-session-control-chaining-and-listing.md` (row added) |

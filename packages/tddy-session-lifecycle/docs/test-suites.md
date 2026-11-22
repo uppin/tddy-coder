@@ -46,6 +46,11 @@ the agent, the chat minted there, no host path handed over) is `tddy-agent-launc
 lacks is `FAILED_PRECONDITION` naming it (the fake's login `PATH` is its agents directory plus `/usr/bin:/bin`, so this
 host's copy never answers), and a terminal this host cannot spawn is `INTERNAL`
 (`target_shells_whose_client_this_host_lacks`); `resume_tab_roster_acceptance` drops such an agent tab on Resume with that reason.
+`remote_target_session_acceptance` and `coder_target_session_acceptance` pin the **session** start and resume the same
+way (`#tab-hardening` 4/4): a start and a resume succeed on a daemon host with no copy of the agent
+(`tests/host_without_agent_support/`, which removes it from the host's `tool-bin`), and a target whose login `PATH`
+lacks the agent fails the start `FAILED_PRECONDITION` naming it, with nothing cloned on the target, no agent run and
+no session recorded here.
 
 ## Writing one
 

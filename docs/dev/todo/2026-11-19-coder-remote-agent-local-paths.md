@@ -181,7 +181,7 @@ exit=1
 | L8 route config env | none | none |
 | §3 Coder stderr | none. #948 (`start-visibility`, merged) added the record and `stderr_tail` but took stderr as the CLI reports it | none |
 | §4 stale `'HEAD'` base | none. `#remote-shell` 10/11 (#926) made the cut honour the branch intent but left the `"HEAD"` default | none |
-| Host must also have the agent binary | — | `2026-11-19-a-target-start-requires-the-agent-on-the-daemon-host.md` (related: a target start still resolves host paths first) |
+| Host must also have the agent binary | — | resolved by `#tab-hardening` 4/4 (#992): a target start and resume run the target's own agent, probed first; the todo entry is deleted — see `docs/dev/changesets/2026-11-21-target-start-agent.md` |
 | Hook follower unverified on real Coder | — | `2026-11-16-coder-hosts-never-run-against-a-real-deployment.md` (still open; this start never reached the agent) |
 | Why the tests missed it | — | `2026-11-16-remote-shell-test-fixtures-are-duplicated.md` (related: the stand-in target shares the host's filesystem) |
 
