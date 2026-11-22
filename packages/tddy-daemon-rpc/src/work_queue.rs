@@ -72,6 +72,7 @@ mod add_work_item_unit_tests;
 
 mod annotations;
 pub use annotations::parse_tone;
+pub(crate) mod commit_flow;
 mod lineage;
 mod links;
 #[cfg(test)]

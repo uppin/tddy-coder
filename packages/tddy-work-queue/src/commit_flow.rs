@@ -334,3 +334,70 @@ fn chain_of<'a>(queue: &'a [ItemBranch], item_id: &str) -> Result<Chain<'a>, Com
         }
     }
 }
+
+/// The queue's items that own a branch, each with its line parent. An item whose line edge is unknown
+/// (cyclic or dangling planned parents) is left out.
+pub fn item_branches(
+    queue: &tddy_core::changeset::WorkQueue,
+    line: &[(String, LineEndpoint)],
+) -> Vec<ItemBranch> {
+    queue
+        .nodes
+        .iter()
+        .filter_map(|item| {
+            let branch = item.branch.clone()?;
+            let (_, line_parent) = line.iter().find(|(id, _)| *id == item.node_id)?;
+            Some(ItemBranch {
+                item_id: item.node_id.clone(),
+                branch,
+                line_parent: line_parent.clone(),
+            })
+        })
+        .collect()
+}
+
+/// One item's counts for its queue row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemCounts {
+    pub item_id: String,
+    pub inbox: usize,
+    pub outbox: usize,
+    /// Inbox commits predicted to conflict.
+    pub conflicts: usize,
+}
+
+impl CommitFlow {
+    /// Every item's counts, from the same cached reads the item views use.
+    pub fn counts(&self, queue: &[ItemBranch]) -> Result<Vec<ItemCounts>, CommitFlowError> {
+        queue
+            .iter()
+            .map(|item| {
+                let inbox = self.inbox(queue, &item.item_id)?;
+                Ok(ItemCounts {
+                    item_id: item.item_id.clone(),
+                    outbox: self.outbox(queue, &item.item_id)?.len(),
+                    conflicts: inbox
+                        .iter()
+                        .filter(|e| matches!(e.prediction, Prediction::Conflicts(_)))
+                        .count(),
+                    inbox: inbox.len(),
+                })
+            })
+            .collect()
+    }
+}
+
+/// The one [`CommitFlow`] of a clone, so its cache outlives a request.
+pub fn shared_for(repo_dir: &std::path::Path) -> std::sync::Arc<CommitFlow> {
+    use std::sync::{Arc, OnceLock};
+    static FLOWS: OnceLock<Mutex<HashMap<PathBuf, Arc<CommitFlow>>>> = OnceLock::new();
+    let mut flows = FLOWS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .expect("flows lock");
+    Arc::clone(
+        flows
+            .entry(repo_dir.to_path_buf())
+            .or_insert_with(|| Arc::new(CommitFlow::new(repo_dir))),
+    )
+}

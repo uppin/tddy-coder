@@ -480,7 +480,7 @@ fn pair(node_id: &str, title: &str) -> (String, String) {
     (node_id.to_string(), title.to_string())
 }
 
-const EVERY_STACK_TOOL: [&str; 20] = [
+const EVERY_STACK_TOOL: [&str; 22] = [
     "work_queue_list",
     "work_queue_status",
     "work_pr_read",
@@ -501,6 +501,8 @@ const EVERY_STACK_TOOL: [&str; 20] = [
     "work_queue_set_dependencies",
     "work_queue_graph",
     "work_queue_waves",
+    "work_item_inbox",
+    "work_item_outbox",
 ];
 
 fn names(names: &[&str]) -> Vec<String> {

@@ -12,16 +12,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{
-    AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, ClearWorkItemBadgeRequest,
-    GetPrStatusRequest, GetPrStatusResponse, GetWorkQueueGraphRequest, GetWorkQueueRequest,
+    AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, ClearWorkItemBadgeRequest, GetPrStatusRequest, GetPrStatusResponse, GetWorkItemCommitFlowRequest, GetWorkQueueGraphRequest, GetWorkQueueRequest,
     GetWorkQueueResponse, GetWorkQueueWavesRequest, LinkWorkItemRequest, LinkWorkItemResponse,
     LinkWorkItemSessionRequest, ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse,
     PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
     ReorderWorkItemRequest, ReorderWorkItemResponse, RepointWorkItemRequest,
     RepointWorkItemResponse, ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse,
-    SetWorkItemBadgeRequest, SetWorkItemLabelsRequest, SetWorkQueueDependenciesRequest,
-    StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest, UnlinkWorkItemSessionRequest,
-    WorkItemLinksResponse, WorkQueueGraphResponse, WorkQueueService, WorkQueueStatusView,
+    SetWorkItemBadgeRequest, SetWorkItemLabelsRequest, SetWorkQueueDependenciesRequest, StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest, UnlinkWorkItemSessionRequest, WorkItemInboxResponse, WorkItemLinksResponse, WorkItemOutboxResponse, WorkQueueCommitCountsResponse, WorkQueueGraphResponse, WorkQueueService, WorkQueueStatusView,
     WorkQueueWavesResponse,
 };
 
@@ -185,6 +182,30 @@ pub trait WorkQueueHandler: Send + Sync {
         _request: Request<GetWorkQueueWavesRequest>,
     ) -> Result<Response<WorkQueueWavesResponse>, Status> {
         Err(Status::unimplemented("GetWorkQueueWaves"))
+    }
+
+    /// `#workqueue` 11/14: the commits an item is missing, with sources and conflict predictions.
+    async fn get_work_item_inbox(
+        &self,
+        _request: Request<GetWorkItemCommitFlowRequest>,
+    ) -> Result<Response<WorkItemInboxResponse>, Status> {
+        Err(Status::unimplemented("GetWorkItemInbox"))
+    }
+
+    /// `#workqueue` 11/14: what an item owes each successor.
+    async fn get_work_item_outbox(
+        &self,
+        _request: Request<GetWorkItemCommitFlowRequest>,
+    ) -> Result<Response<WorkItemOutboxResponse>, Status> {
+        Err(Status::unimplemented("GetWorkItemOutbox"))
+    }
+
+    /// `#workqueue` 11/14: every item's inbox, outbox and conflict counts, for the queue rows.
+    async fn get_work_queue_commit_counts(
+        &self,
+        _request: Request<GetWorkQueueGraphRequest>,
+    ) -> Result<Response<WorkQueueCommitCountsResponse>, Status> {
+        Err(Status::unimplemented("GetWorkQueueCommitCounts"))
     }
 
     /// `#workqueue` 6/14: the queue's PR state and check counts, live from the GitHub inbox.
@@ -354,6 +375,27 @@ impl<H: WorkQueueHandler + 'static> WorkQueueService for WorkQueueServiceImpl<H>
         request: Request<GetWorkQueueWavesRequest>,
     ) -> Result<Response<WorkQueueWavesResponse>, Status> {
         self.host.get_work_queue_waves(request).await
+    }
+
+    async fn get_work_item_inbox(
+        &self,
+        request: Request<GetWorkItemCommitFlowRequest>,
+    ) -> Result<Response<WorkItemInboxResponse>, Status> {
+        self.host.get_work_item_inbox(request).await
+    }
+
+    async fn get_work_item_outbox(
+        &self,
+        request: Request<GetWorkItemCommitFlowRequest>,
+    ) -> Result<Response<WorkItemOutboxResponse>, Status> {
+        self.host.get_work_item_outbox(request).await
+    }
+
+    async fn get_work_queue_commit_counts(
+        &self,
+        request: Request<GetWorkQueueGraphRequest>,
+    ) -> Result<Response<WorkQueueCommitCountsResponse>, Status> {
+        self.host.get_work_queue_commit_counts(request).await
     }
 }
 

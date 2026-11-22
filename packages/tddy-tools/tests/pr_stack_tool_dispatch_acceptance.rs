@@ -26,6 +26,7 @@ use serial_test::serial;
 use tddy_tool_engine::work_item_annotation_tools::WORK_ITEM_ANNOTATION_TOOL_NAMES;
 use tddy_tool_engine::work_item_git_tools::WORK_ITEM_GIT_TOOL_NAMES;
 use tddy_tool_engine::work_item_link_tools::WORK_ITEM_LINK_TOOL_NAMES;
+use tddy_tool_engine::work_item_commit_flow_tools::WORK_ITEM_COMMIT_FLOW_TOOL_NAMES;
 use tddy_tool_engine::work_queue_lineage_tools::WORK_QUEUE_LINEAGE_TOOL_NAMES;
 use tddy_tool_engine::work_queue_tools::WORK_QUEUE_TOOL_NAMES;
 use tddy_tool_engine::work_queue_waves_tools::WORK_QUEUE_WAVES_TOOL_NAMES;
@@ -44,6 +45,7 @@ fn registered_tool_names() -> Vec<String> {
         .chain(WORK_ITEM_ANNOTATION_TOOL_NAMES.iter())
         .chain(WORK_QUEUE_LINEAGE_TOOL_NAMES.iter())
         .chain(WORK_QUEUE_WAVES_TOOL_NAMES.iter())
+        .chain(WORK_ITEM_COMMIT_FLOW_TOOL_NAMES.iter())
         .chain(WORK_ITEM_GIT_TOOL_NAMES.iter())
         .map(|name| name.to_string())
         .collect();
@@ -54,6 +56,7 @@ fn registered_tool_names() -> Vec<String> {
             + WORK_ITEM_ANNOTATION_TOOL_NAMES.len()
             + WORK_QUEUE_LINEAGE_TOOL_NAMES.len()
             + WORK_QUEUE_WAVES_TOOL_NAMES.len()
+            + WORK_ITEM_COMMIT_FLOW_TOOL_NAMES.len()
             + WORK_ITEM_GIT_TOOL_NAMES.len(),
         "every registered PR-stack name must be gathered, or these tests have nothing left to \
          check; registry: {names:?}"

@@ -706,6 +706,29 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         request: Request<tddy_service::proto::work_queue::GetWorkQueueWavesRequest>,
     ) -> Result<Response<tddy_service::proto::work_queue::WorkQueueWavesResponse>, Status> {
         self.get_work_queue_waves_rpc(request).await
+
+    }
+
+    async fn get_work_item_inbox(
+        &self,
+        request: Request<tddy_service::proto::work_queue::GetWorkItemCommitFlowRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemInboxResponse>, Status> {
+        self.get_work_item_inbox_rpc(request).await
+    }
+
+    async fn get_work_item_outbox(
+        &self,
+        request: Request<tddy_service::proto::work_queue::GetWorkItemCommitFlowRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemOutboxResponse>, Status> {
+        self.get_work_item_outbox_rpc(request).await
+    }
+
+    async fn get_work_queue_commit_counts(
+        &self,
+        request: Request<tddy_service::proto::work_queue::GetWorkQueueGraphRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkQueueCommitCountsResponse>, Status>
+    {
+        self.get_work_queue_commit_counts_rpc(request).await
     }
 
     /// Take a base branch's commits into a planned node's branch, inside that node's own worktree,

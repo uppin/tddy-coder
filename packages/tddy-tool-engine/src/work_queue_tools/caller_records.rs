@@ -287,6 +287,7 @@ mod tests {
             .chain(crate::work_item_annotation_tools::WORK_ITEM_ANNOTATION_TOOL_NAMES.iter())
             .chain(crate::work_queue_lineage_tools::WORK_QUEUE_LINEAGE_TOOL_NAMES.iter())
             .chain(crate::work_queue_waves_tools::WORK_QUEUE_WAVES_TOOL_NAMES.iter())
+            .chain(crate::work_item_commit_flow_tools::WORK_ITEM_COMMIT_FLOW_TOOL_NAMES.iter())
             .chain(WORK_ITEM_GIT_TOOL_NAMES.iter())
             .map(|name| name.to_string())
             .collect();

@@ -91,23 +91,8 @@ impl WorkQueueRpcHandler {
         {
             return Ok(Response::new(answered));
         }
-        let sessions_base = self.sessions_base(&call.os_user)?;
-        let store = self.stack_store(&sessions_base);
-        let record = store
-            .read(&call.address.project_id, &call.address.queue_id)
-            .map_err(store_status)?;
-        let queue = record.stack;
-        let integration_base =
-            tddy_projects::project_storage::effective_integration_base_ref_for_project(
-                &store.projects_dir(),
-                &call.address.project_id,
-            )
-            .map_err(|e| {
-                Status::failed_precondition(format!(
-                    "the project's trunk could not be resolved: {e:#}"
-                ))
-            })?;
-        let trunk = lineage::trunk_branch_of(&integration_base);
+        let (sessions_base, queue, trunk) = self.read_queue_and_trunk(&call)?;
+        let trunk = trunk.as_str();
         let site = self.pull_requests.site_for_session(
             &call.os_user,
             &call.address.queue_id,
@@ -135,6 +120,30 @@ impl WorkQueueRpcHandler {
             ),
         };
         Ok(Response::new(response))
+    }
+
+    /// The sessions base, the queue as stored and its trunk branch — what every lineage read starts from.
+    pub(super) fn read_queue_and_trunk(
+        &self,
+        call: &super::links::LinkCall,
+    ) -> Result<(std::path::PathBuf, tddy_core::changeset::WorkQueue, String), Status> {
+        let sessions_base = self.sessions_base(&call.os_user)?;
+        let store = self.stack_store(&sessions_base);
+        let record = store
+            .read(&call.address.project_id, &call.address.queue_id)
+            .map_err(store_status)?;
+        let integration_base =
+            tddy_projects::project_storage::effective_integration_base_ref_for_project(
+                &store.projects_dir(),
+                &call.address.project_id,
+            )
+            .map_err(|e| {
+                Status::failed_precondition(format!(
+                    "the project's trunk could not be resolved: {e:#}"
+                ))
+            })?;
+        let trunk = lineage::trunk_branch_of(&integration_base).to_string();
+        Ok((sessions_base, record.stack, trunk))
     }
 
     /// The GitHub stack the queue's first item with a branch sits in, read through the host's `gh`

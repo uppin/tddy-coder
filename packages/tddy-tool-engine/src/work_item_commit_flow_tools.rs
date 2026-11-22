@@ -9,6 +9,9 @@ use crate::project_home_tools::{tool_def, TARGET_DAEMON_INSTANCE_ID};
 pub const WORK_ITEM_INBOX: &str = "work_item_inbox";
 pub const WORK_ITEM_OUTBOX: &str = "work_item_outbox";
 
+/// The two tools, in the order they are advertised.
+pub const WORK_ITEM_COMMIT_FLOW_TOOL_NAMES: [&str; 2] = [WORK_ITEM_INBOX, WORK_ITEM_OUTBOX];
+
 /// Both take `item_id` (and the optional queue).
 pub fn work_item_commit_flow_tool_defs() -> Vec<ToolDef> {
     let schema = json!({
