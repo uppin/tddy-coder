@@ -478,6 +478,62 @@ mod tests {
         }
     }
 
+    // ── annotation tools (`#workqueue` 7/14) ──────────────────────────────────────────────────
+
+    fn parsed(tool: &str, args: serde_json::Value) -> Result<WorkQueueOp, String> {
+        work_queue_op_of(tool, serde_json::from_value(args).expect("args"))
+    }
+
+    #[test]
+    fn the_annotation_tools_parse_into_their_ops() {
+        assert_eq!(
+            (
+                parsed(
+                    WORK_ITEM_SET_LABELS,
+                    json!({ "item_id": "n1", "labels": ["api", "ui"] })
+                ),
+                parsed(
+                    WORK_ITEM_SET_BADGE,
+                    json!({ "item_id": "n1", "key": "qa", "text": "ok", "tone": "success" })
+                ),
+                parsed(
+                    WORK_ITEM_CLEAR_BADGE,
+                    json!({ "item_id": "n1", "key": "qa" })
+                ),
+            ),
+            (
+                Ok(WorkQueueOp::SetLabels {
+                    item_id: "n1".to_string(),
+                    labels: vec!["api".to_string(), "ui".to_string()],
+                }),
+                Ok(WorkQueueOp::SetBadge {
+                    item_id: "n1".to_string(),
+                    key: "qa".to_string(),
+                    text: "ok".to_string(),
+                    tone: "success".to_string(),
+                }),
+                Ok(WorkQueueOp::ClearBadge {
+                    item_id: "n1".to_string(),
+                    key: "qa".to_string(),
+                }),
+            )
+        );
+    }
+
+    #[test]
+    fn a_badge_without_its_tone_is_refused_naming_the_argument() {
+        let refused = parsed(
+            WORK_ITEM_SET_BADGE,
+            json!({ "item_id": "n1", "key": "qa", "text": "ok" }),
+        )
+        .expect_err("a tone is required");
+
+        assert!(
+            refused.contains("tone"),
+            "refusal names the argument: {refused}"
+        );
+    }
+
     // ── addressing ────────────────────────────────────────────────────────────────────────────
 
     #[test]
