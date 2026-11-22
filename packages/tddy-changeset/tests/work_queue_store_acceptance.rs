@@ -219,7 +219,7 @@ fn a_record_written_without_a_title_still_reads() {
     std::fs::create_dir_all(&stacks_dir).unwrap();
     std::fs::write(
         stacks_dir.join("stack-old.yaml"),
-        "queue_id: stack-old\nproject_id: proj-auth\ncreated_by_session_id: sess-planner\ncreated_at_unix_ms: 1\nstack:\n  version: 1\n  nodes: []\n",
+        "stack_id: stack-old\nproject_id: proj-auth\ncreated_by_session_id: sess-planner\ncreated_at_unix_ms: 1\nstack:\n  version: 1\n  nodes: []\n",
     )
     .unwrap();
 
@@ -241,7 +241,7 @@ fn a_record_written_before_the_rename_still_loads() {
     std::fs::create_dir_all(&stacks).unwrap();
     std::fs::write(
         stacks.join("0190-stack.yaml"),
-        "queue_id: 0190-stack\n\
+        "stack_id: 0190-stack\n\
          project_id: proj-1\n\
          created_by_session_id: sess-1\n\
          created_at_unix_ms: 1795000000000\n\
