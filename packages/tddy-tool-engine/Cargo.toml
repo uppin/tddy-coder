@@ -43,6 +43,8 @@ futures-util = "0.3"
 libc = "0.2"
 
 [dev-dependencies]
+# `work_item_link_tools.rs` links a session through the stack crate's own operation.
+tddy-work-queue = { path = "../tddy-work-queue" }
 prost = "0.13"
 prost-types = "0.13"
 futures-util = "0.3"

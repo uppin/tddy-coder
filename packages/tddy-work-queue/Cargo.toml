@@ -8,6 +8,8 @@ description = "The PR-stack data model and its git/GitHub operations"
 tddy-core = { path = "../tddy-core" }
 tddy-git = { path = "../tddy-git" }
 tddy-github = { path = "../tddy-github" }
+# `inbox_reads`: PR status, queue status and checks read through the daemon's GitHub inbox.
+tddy-github-inbox = { path = "../tddy-github-inbox" }
 # `docs::node_doc_paths` resolves the session artifacts root from it.
 tddy-workflow = { path = "../tddy-workflow" }
 # `rpc` holds the `work_queue.WorkQueueService` handler trait, adapter and transport entry.
@@ -26,3 +28,4 @@ tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 tempfile = "3"
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros"] }

@@ -14625,6 +14625,7 @@ dependencies = [
  "tddy-session-lifecycle",
  "tddy-task",
  "tddy-testing-commons",
+ "tddy-work-queue",
  "tddy-workflow",
  "tddy-worktree-service",
  "tempfile",
@@ -14893,10 +14894,12 @@ dependencies = [
  "tddy-core",
  "tddy-git",
  "tddy-github",
+ "tddy-github-inbox",
  "tddy-rpc",
  "tddy-service",
  "tddy-workflow",
  "tempfile",
+ "tokio",
  "uuid",
 ]
 

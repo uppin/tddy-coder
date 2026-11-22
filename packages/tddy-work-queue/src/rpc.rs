@@ -12,12 +12,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{
-    AddWorkItemRequest, AddWorkItemResponse, GetPrStatusRequest, GetPrStatusResponse,
+    AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, GetPrStatusRequest, GetPrStatusResponse,
     GetWorkQueueRequest, GetWorkQueueResponse, LinkWorkItemRequest, LinkWorkItemResponse,
     ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest,
     PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest,
     ReorderWorkItemResponse, RepointWorkItemRequest, RepointWorkItemResponse,
-    ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse, WorkQueueService,
+    ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse, UnassignWorkItemPrRequest,
+    UnlinkWorkItemSessionRequest, LinkWorkItemSessionRequest, WorkItemLinksResponse, WorkQueueService,
 };
 
 /// The coordinate family P is served on — `work_queue.WorkQueueService`.
@@ -79,6 +80,41 @@ pub trait WorkQueueHandler: Send + Sync {
         &self,
         request: Request<GetWorkQueueRequest>,
     ) -> Result<Response<GetWorkQueueResponse>, Status>;
+    /// `#workqueue` 6/14: assign an existing PR to a work item.
+    async fn assign_work_item_pr(
+        &self,
+        _request: Request<AssignWorkItemPrRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        // TODO(n6 pr-and-session-link): implement in the daemon's handler.
+        Err(Status::unimplemented("TODO(n6): AssignWorkItemPr"))
+    }
+
+    /// `#workqueue` 6/14: remove a work item's assigned PR.
+    async fn unassign_work_item_pr(
+        &self,
+        _request: Request<UnassignWorkItemPrRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        // TODO(n6 pr-and-session-link): implement in the daemon's handler.
+        Err(Status::unimplemented("TODO(n6): UnassignWorkItemPr"))
+    }
+
+    /// `#workqueue` 6/14: link a tddy session to a work item.
+    async fn link_work_item_session(
+        &self,
+        _request: Request<LinkWorkItemSessionRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        // TODO(n6 pr-and-session-link): implement in the daemon's handler.
+        Err(Status::unimplemented("TODO(n6): LinkWorkItemSession"))
+    }
+
+    /// `#workqueue` 6/14: unlink a tddy session from a work item.
+    async fn unlink_work_item_session(
+        &self,
+        _request: Request<UnlinkWorkItemSessionRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        // TODO(n6 pr-and-session-link): implement in the daemon's handler.
+        Err(Status::unimplemented("TODO(n6): UnlinkWorkItemSession"))
+    }
 }
 
 /// Thin `WorkQueueService` adapter over a [`WorkQueueHandler`].
@@ -163,6 +199,33 @@ impl<H: WorkQueueHandler + 'static> WorkQueueService for WorkQueueServiceImpl<H>
         request: Request<GetWorkQueueRequest>,
     ) -> Result<Response<GetWorkQueueResponse>, Status> {
         self.host.get_work_queue(request).await
+    }
+    async fn assign_work_item_pr(
+        &self,
+        request: Request<AssignWorkItemPrRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.host.assign_work_item_pr(request).await
+    }
+
+    async fn unassign_work_item_pr(
+        &self,
+        request: Request<UnassignWorkItemPrRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.host.unassign_work_item_pr(request).await
+    }
+
+    async fn link_work_item_session(
+        &self,
+        request: Request<LinkWorkItemSessionRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.host.link_work_item_session(request).await
+    }
+
+    async fn unlink_work_item_session(
+        &self,
+        request: Request<UnlinkWorkItemSessionRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.host.unlink_work_item_session(request).await
     }
 }
 

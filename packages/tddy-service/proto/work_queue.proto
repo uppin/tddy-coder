@@ -66,6 +66,13 @@ service WorkQueueService {
   // One work queue by its address, served by the daemon that holds its owning session — forwarded
   // there when the address names another host.
   rpc GetWorkQueue(GetWorkQueueRequest) returns (GetWorkQueueResponse);
+
+  // `#workqueue` 6/14: an existing PR, and tddy sessions, linked to a work item. Each answers the queue
+  // after the change (same wire shape as `GetWorkQueueResponse.work_queue_json`).
+  rpc AssignWorkItemPr(AssignWorkItemPrRequest) returns (WorkItemLinksResponse);
+  rpc UnassignWorkItemPr(UnassignWorkItemPrRequest) returns (WorkItemLinksResponse);
+  rpc LinkWorkItemSession(LinkWorkItemSessionRequest) returns (WorkItemLinksResponse);
+  rpc UnlinkWorkItemSession(UnlinkWorkItemSessionRequest) returns (WorkItemLinksResponse);
 }
 
 // Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
@@ -439,3 +446,38 @@ message GetWorkQueueResponse {
   // existing `parseWorkQueue`.
   string work_queue_json = 2;
 }
+
+// `#workqueue` 6/14 — work-item links.
+message AssignWorkItemPrRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  uint64 pull_number = 4;
+}
+
+message UnassignWorkItemPrRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+}
+
+message LinkWorkItemSessionRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  string session_id = 4;
+  // The daemon holding `session_id`; empty for the queue's own host.
+  string daemon_instance_id = 5;
+}
+
+message UnlinkWorkItemSessionRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  string session_id = 4;
+}
+
+message WorkItemLinksResponse {
+  string work_queue_json = 1;
+}
+

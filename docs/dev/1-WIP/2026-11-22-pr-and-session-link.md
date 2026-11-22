@@ -3,8 +3,9 @@
 **Date**: 2026-11-22
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Complexity**: 4 — more than one crate and two web packages, proto additions (four RPCs, one stream), a stream fed by n2's subscriptions
+**Complexity**: 5 — re-scored in pass 2: more than one crate and two web packages, proto additions, a stream fed by n2's subscriptions, **plus** the two migrations moved here from n2 (repo → project credential plumbing into the queue RPC handler, a sync → async rewrite of the status path)
 **Stack**: `#workqueue` 6/14 — branch `feature/workqueue/pr-and-session-link`, base `feature/workqueue/session-work-queue`
+**PR**: [#1007](https://github.com/uppin/tddy-coder/pull/1007)
 
 ## Initial Discovery
 
@@ -40,6 +41,14 @@ Exploration 3 §4A.4: one `session_id` per item, no PR number, PR recovered from
 - `StreamWorkQueueStatus` — per item: PR state and check summary, pushed on inbox events for the
   queue's repository (kinds `Pr`, `Checks`).
 - Counting linked sessions in n5's `Addressed` access.
+- **Moved here from n2 by the operator (2026-11-22):**
+  - `pr_status_for_caller` (daemon-rpc; login-keyed token, `repo_root` only) reads PR status through the
+    inbox — `tddy_pr_stack::inbox_reads::pr_status_view_through_inbox` — which needs repo → project
+    credential plumbing into the queue RPC handler (`PrStackRpcHandler`; the inbox's `RepoReaders`
+    registered per project the way the trunk watch's `HostRepoReaders` is).
+  - The queue status path (`work_queue_status` / `pr_stack_status` → `assess::assemble_views` over the
+    synchronous `GithubPrApi`) reads through the inbox — `inbox_reads::assemble_views_through_inbox`, an
+    async rewrite, not a blocking adapter.
 - `WorkItemChecksSummary` and the row controls.
 
 ## Boundaries
@@ -57,13 +66,33 @@ implementing one here collides with the PR that owns it.
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
 | `n2` github-event-inbox (#1003) | `GithubInbox::{subscribe, pr, checks_at}`, `EventKind::{Pr, Checks}` | the status stream subscribes and reads | call GitHub directly or cache anything itself |
-| `n4` session-pr-tabs (#1005) | `CheckRow` (web) | reused for expanded checks | change it |
+| `n4` session-pr-tabs (#1005) | `CheckRow` (web, in `tddy-workspace-web`) | reused for expanded checks (`tddy-prstack-web` adds a dependency on `tddy-workspace-web`) | change it |
 | `n5` session-work-queue (#1006) | session-keyed queue, `WorkQueueAccess`, addressing by session | new ops follow n5's access; linked sessions join `Addressed` | change the store key, creation or the refusal |
+
+**Sequencing (pass 2):** `inbox_reads_acceptance.rs` keeps n2's real inbox (reading through it is the
+point; n2 is green). `a_session_linked_to_an_item_is_addressed_by_its_queue` calls n5's
+`work_queue_access_of` and so goes green only after n5 is green.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: the two item fields, four tool definitions,
-proto RPCs and stream, item-op signatures, web component test ids, and the failing tests below.
+Published (pass 2, commit 2):
+
+- Proto (`pr_stack.proto`, renamed by n3): `AssignWorkItemPr`, `UnassignWorkItemPr`, `LinkWorkItemSession`,
+  `UnlinkWorkItemSession` (→ `WorkItemLinksResponse`); `PrStackHandler` gains them with default bodies
+  answering `unimplemented`, the service adapter and the test daemon forward them; TS regenerated.
+- `tddy_pr_stack::stack_ops::item_links::{AssignedPr, LinkedSession, ItemLinkError, assign_pr, unassign_pr,
+  link_session, unlink_session, assigned_pr_of, linked_sessions_of}` — pure operations on a queue.
+- `tddy_pr_stack::inbox_reads::{pr_status_view_through_inbox, assemble_views_through_inbox,
+  item_check_summaries, ItemCheckSummary}`.
+- `tddy_tool_engine::work_item_link_tools::{WORK_ITEM_ASSIGN_PR, WORK_ITEM_UNASSIGN_PR,
+  WORK_ITEM_LINK_SESSION, WORK_ITEM_UNLINK_SESSION, WORK_ITEM_LINK_TOOL_NAMES, work_item_link_tool_defs}`.
+- `tddy-prstack-web`: `WorkItemChecksSummary` (shell).
+- The failing tests below.
+
+Not in the contract, `/green`'s: the item fields themselves (~80 struct literals across ~30 files
+construct `StackNode` without `..Default`, many of them n1's and n3's — the accessors above are the
+published way to read links); `StreamWorkQueueStatus` (a server stream needs an associated stream type in
+two implementors); the credential plumbing into the RPC handler.
 
 ## Green wave
 
@@ -139,17 +168,31 @@ by a scripted GitHub; Cypress component specs for the row.
 
 ## Acceptance Tests
 
-`packages/tddy-daemon-rpc/tests/work_item_links_acceptance.rs`:
-- [ ] `the_agent_assigns_an_existing_pr_to_an_item`
-- [ ] `assigning_a_pr_on_another_branch_than_the_items_is_refused_naming_both`
-- [ ] `a_linked_session_reads_the_queue_of_its_item`
-- [ ] `unlinking_removes_only_the_named_session`
-- [ ] `the_status_stream_pushes_a_completed_check_for_a_prd_item`
+`packages/tddy-pr-stack/tests/item_links_unit.rs`:
+- [x] `assigning_an_existing_pr_records_it_and_its_branch_on_the_item`
+- [x] `assigning_a_pr_on_another_branch_than_the_items_is_refused_naming_both`
+- [x] `unassigning_removes_the_pr_and_keeps_the_branch`
+- [x] `linking_a_session_twice_links_it_once`
+- [x] `unlinking_removes_only_the_named_session`
+- [x] `a_link_on_an_unknown_item_is_refused`
+
+`packages/tddy-pr-stack/tests/inbox_reads_acceptance.rs` (a real inbox over a scripted GitHub that counts requests):
+- [x] `a_second_reader_of_a_branchs_pr_status_makes_no_github_request` — pins the `pr_status_for_caller` migration
+- [x] `the_queue_status_reads_each_items_pr_through_the_inbox_once` — pins the status-path migration
+- [x] `a_prd_item_summarises_its_running_failed_and_succeeded_checks`
+
+`packages/tddy-tool-engine/tests/work_item_link_tools.rs`:
+- [x] `the_link_tools_are_defined_in_order`
+- [x] `the_link_tools_take_an_item_and_a_pr_or_a_session`
+- [x] `a_session_linked_to_an_item_is_addressed_by_its_queue` — extends n5's `work_queue_access_of`
+
+The daemon tool and RPC paths (owner-only writes, the handler using the inbox with the project's
+credential) are `/green`'s to prove in the daemon-rpc stack suites.
 
 `packages/tddy-workqueue-web/cypress/component/WorkItemLinksAcceptance.cy.tsx`:
-- [ ] `the user assigns a PR to an item from its row`
-- [ ] `the user links a session to an item from its row`
-- [ ] `a PR'ed item shows running, failed and succeeded check counts`
+- [x] `the user assigns a PR to an item from its row`
+- [x] `the user links a session to an item from its row`
+- [x] `a PR'ed item shows running, failed and succeeded check counts`
 
 ## Decisions & Trade-offs
 
@@ -176,10 +219,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
