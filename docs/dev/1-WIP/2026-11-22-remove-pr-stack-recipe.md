@@ -5,6 +5,7 @@
 **Type**: Feature (removal)
 **Complexity**: 4 — more than one package (≈20, web and Rust), a proto change (field 31 reserved), code moved between crates under live daemon tools, a test-coverage re-point
 **Stack**: `#workqueue` 1/14 — branch `feature/workqueue/remove-pr-stack-recipe`, base `master`
+**PR**: [#1002](https://github.com/uppin/tddy-coder/pull/1002)
 
 ## Initial Discovery
 
@@ -72,11 +73,13 @@ None — this is a root node, cut from `master`.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: the moved module surface in `tddy-pr-stack`
-(`internal_status::{derive_internal_status, reconcile_internal_status}`, `op_journal::{StackOpJournal,
-MergePhase, recover_in_flight_stack_op}`, `merge_repoint::{execute_stack_merge,
-execute_stack_repoint}`, `PR_STACK_PLAN_MD_BASENAME`) as moved code, `reserved 31` in `session.proto`,
-and the failing acceptance tests below. `/green` then deletes the recipe surfaces in this PR.
+Published (pass 2, commit 2): **the failing acceptance tests below — no new surface.** A removal node
+owns no symbol a child compiles against, and the helper moves cannot be published early as re-exports:
+`tddy-pr-stack` cannot depend on `tddy-workflow-recipes` (the recipes crate depends on it), so the move
+*is* the implementation. `/green` moves `internal_status`, the merge journal (`StackOpJournal`,
+`MergePhase`, `recover_in_flight_stack_op`), `execute_stack_merge`/`execute_stack_repoint` and
+`PR_STACK_PLAN_MD_BASENAME` into `tddy-pr-stack`, reserves field 31, and deletes the recipe surfaces.
+Children (n3) depend on that **behaviour**, not on a published signature.
 
 ## Green wave
 
@@ -205,32 +208,34 @@ re-pointed row specs. No e2e is added; the PrStack e2e is deleted with the scree
 ## Acceptance Tests
 
 `packages/tddy-workflow-recipes/tests/recipe_catalogue_acceptance.rs`:
-- [ ] `no_recipe_name_resolves_to_a_stack_recipe` — `pr-stack`, `plan-pr-stack`, `orchestrate-pr-stack` all give the unknown-recipe error
-- [ ] `the_supported_recipe_list_names_no_stack_recipe`
-- [ ] `the_recipes_crate_holds_no_stack_module` (replaces `pr_stack_crate_shape.rs`)
+- [x] `no_recipe_name_resolves_to_a_stack_recipe` — `pr-stack`, `plan-pr-stack`, `orchestrate-pr-stack` all give the unknown-recipe error
+- [x] `the_supported_recipe_list_names_no_stack_recipe`
+- [x] `the_recipes_crate_holds_no_stack_module` (replaces `pr_stack_crate_shape.rs`)
 
 `packages/tddy-coder/src/run.rs` (unit):
-- [ ] `the_recipe_flag_offers_no_stack_recipe`
-- [ ] `the_cli_has_no_stack_seed_flag`
+- [x] `the_recipe_flag_offers_no_stack_recipe`
+- [x] `the_cli_has_no_stack_seed_flag`
 
-`packages/tddy-agent-launch/tests/legacy_stack_recipe_resume_acceptance.rs`:
-- [ ] `resuming_a_session_recorded_with_the_removed_stack_recipe_is_refused_naming_it`
+`packages/tddy-agent-launch/src/svc_resume_sandboxed_cli_harness_session.rs` (unit, `legacy_stack_recipe_tests`):
+- [x] `resuming_a_session_recorded_with_the_removed_stack_recipe_is_refused_naming_it` — drives the
+  private `recorded_managed_recipe` the resume path calls, so no daemon harness is needed
 
-`packages/tddy-session-activity/tests/legacy_stack_recipe_listing_acceptance.rs`:
-- [ ] `a_session_recorded_with_the_removed_stack_recipe_still_lists`
+Listing is not given a test: Exploration 4 shows no listing path resolves the recipe, so a listing
+test would pass before and after (a guard, not a red test). The session-web spec below covers
+opening such a session.
 
 `packages/tddy-tool-engine/tests/start_session_schema.rs`:
-- [ ] `start_session_offers_no_stack_base_session_argument`
+- [x] `start_session_offers_no_stack_base_session_argument`
 
 `packages/tddy-service/tests/session_proto_reserved_fields.rs`:
-- [ ] `start_session_request_reserves_the_removed_stack_seed_field`
+- [x] `start_session_request_reserves_the_removed_stack_seed_field`
 
 `packages/tddy-session-create-web/cypress/component/CreateSessionRecipeChoicesAcceptance.cy.tsx`:
-- [ ] `the recipe dropdown offers no PR stack recipe`
-- [ ] `the start form shows no stack base-session picker for any recipe`
+- [x] `the recipe dropdown offers no PR stack recipe`
+- [x] `the start form shows no stack base-session picker for any recipe`
 
 `packages/tddy-session-web/cypress/component/LegacyStackRecipeSessionAcceptance.cy.tsx`:
-- [ ] `a session recorded with the removed stack recipe opens in the workflow chat view`
+- [x] `a session recorded with the removed stack recipe opens in the workflow chat view`
 
 Regression guards that must stay green unchanged: the three daemon-rpc stack suites above,
 `tddy-pr-stack/tests/stack_migration_sweep_acceptance.rs`, `tddy-daemon/tests/startup_stack_migration_acceptance.rs`,
@@ -246,6 +251,29 @@ Regression guards that must stay green unchanged: the three daemon-rpc stack sui
   (`PlannedPrList`/`PlannedPrRow*` are shared). Specs of behaviour only `PrStackScreen` had (the chat
   pane, the presenter room, plan-panel toggles) are deleted, listed here when `/green` makes the cut.
 - **Field 31 is reserved**, never reused.
+- **`session-web/cypress/component/PrStackInspectorAcceptance.cy.tsx`** drives a `pr-stack` session's
+  screen and is deleted with it (found in pass 2).
+- **Code issues claimed by this PR** (pass 2): `squatting-pr-stack-data-model.md` and
+  `misplaced-tests-github-rest-client.md` now carry `**Claimed by:** #1002`.
+
+## Contract (pass 2)
+
+Commit 2 adds the failing acceptance tests only (see `## Draft PR contract`). Red at commit time, each
+failing on this node's own missing work:
+
+| Test | Package | Fails because |
+|---|---|---|
+| `recipe_catalogue_acceptance` ×3 | tddy-workflow-recipes | the names still resolve, are still listed, the modules still exist |
+| `the_recipe_flag_offers_no_stack_recipe`, `the_cli_has_no_stack_seed_flag` | tddy-coder (lib) | clap still accepts them |
+| `resuming_a_session_recorded_with_the_removed_stack_recipe_is_refused_naming_it` | tddy-agent-launch (lib) | the recipe still resolves |
+| `start_session_offers_no_stack_base_session_argument` | tddy-tool-engine | the schema still offers it |
+| `start_session_request_reserves_the_removed_stack_seed_field` | tddy-service | field 31 still declared |
+| `CreateSessionRecipeChoicesAcceptance` ×2 | tddy-session-create-web (Cypress) | `pr-stack` offered; picker shown |
+| `LegacyStackRecipeSessionAcceptance` ×1 | tddy-session-web (Cypress) | `PrStackScreen` still claims the session |
+
+`recipe_value_parser_accepts_pr_stack_recipes` (tddy-coder) asserts the opposite and is deleted by
+`/green`. Baseline before the tests: `cargo check -p tddy-workflow-recipes -p tddy-tool-engine -p
+tddy-service -p tddy-coder --tests` clean.
 
 ## Technical Debt & Production Readiness
 
@@ -265,10 +293,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

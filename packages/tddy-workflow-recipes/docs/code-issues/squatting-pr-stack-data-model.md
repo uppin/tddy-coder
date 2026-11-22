@@ -6,9 +6,9 @@
 **Metrics:** **~4,280 lines** · **79 of ~190** cross-crate references to this crate · **12** consumer crates
 **Restructure:** required — extract to a new `tddy-pr-stack`
 **Status:** Open — partially fixed 2026-09-22 by #496 (the code moved to `tddy-pr-stack`; no consumer was switched to it, so every consumer still compiles every recipe to reach it)
-**Claimed by:** — unclaimed. #496 delivered the extraction it claimed and releases the remainder, which its `## Boundaries` ruled out ("does not edit any of the external reference sites")
+**Claimed by:** #1002 — `#workqueue 1/14` (deletes the recipe modules and repoints every remaining consumer at the stack crate). Earlier: #496 delivered the extraction it claimed and released the remainder, which its `## Boundaries` ruled out ("does not edit any of the external reference sites")
 **Supersedes:** a backlog entry filed first as a TODO, `2026-09-15-stack-progress-contract-acceptance-tests-only-tddy-core` — same finding; a standing measurement belongs in this record. #498 resolved and deleted that entry when it moved the suite to `packages/tddy-core/tests/` (see `docs/dev/changesets/2026-09-19-carve-test-homes.md`); the squatting measurement below is unaffected
-**Lands after:** #488, #489, #490, #498, #491, #492, #493, #494, #495 — **the stack tip**
+**Lands after:** — (`#workqueue` 1/14 is the stack root; earlier: #488–#495, merged)
 
 ## Measurement history
 

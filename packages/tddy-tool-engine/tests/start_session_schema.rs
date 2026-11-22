@@ -393,3 +393,21 @@ fn new_branch_name_says_an_agent_requiring_one_refuses_it_empty() {
         "{description}"
     );
 }
+
+/// `#workqueue` 1/14: the `pr-stack` recipe is removed, and with it the start option that seeded a
+/// stack from an existing session's branch. `StartSession` no longer offers it.
+#[test]
+fn start_session_offers_no_stack_base_session_argument() {
+    // When
+    let schema = schema();
+
+    // Then
+    let offered = schema["properties"]
+        .as_object()
+        .expect("properties")
+        .contains_key("pr_stack_base_session_id");
+    assert!(
+        !offered,
+        "StartSession still offers pr_stack_base_session_id, the removed stack seed"
+    );
+}

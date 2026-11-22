@@ -1546,3 +1546,14 @@ Fixtures: `tddy-changeset/src/stack_fixtures.rs` (`a_stack_host`, `stack_id_of`,
 - **Finding:** no listing path (`tddy-session-activity`, `tddy-session-lifecycle`) resolves the recipe;
   `session_list_enrichment::stack_plan_json_for_changeset` keys on `stack_id`. A legacy recipe name
   breaks resume and placement only — which is what the resume-refusal test pins.
+
+## Exploration 5 — pass 2: where resume resolves a recorded recipe
+
+- `rg -n 'resolve_workflow_recipe|workflow_recipe_and_manifest' packages/tddy-agent-launch/src/{placement.rs,cli_agent_steps/resumed_wiring.rs,svc_resume_sandboxed_cli_harness_session.rs}`
+  → `placement.rs:201`, `svc_resume_sandboxed_cli_harness_session.rs:68` (`recorded_managed_recipe`,
+  maps the error to `invalid_argument`), `resumed_wiring.rs:83`.
+- **Finding:** once the names leave `recipe_resolve.rs`, resume refuses through
+  `unknown_workflow_recipe_error`, which names the requested recipe; the unit test pins that through
+  `recorded_managed_recipe`.
+- Cypress: a `should("not.exist")` assertion right after mount passes vacuously before the form renders;
+  the create-session spec waits for the recipe control first.

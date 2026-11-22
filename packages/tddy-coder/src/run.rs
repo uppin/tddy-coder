@@ -4828,6 +4828,35 @@ mod recipe_value_parser_tests {
             );
         }
     }
+
+    /// `#workqueue` 1/14: the `pr-stack` recipe and its aliases are removed, so `--recipe` refuses
+    /// every one of their names (this supersedes the acceptance test above, which `/green` deletes).
+    #[test]
+    fn the_recipe_flag_offers_no_stack_recipe() {
+        for recipe in ["pr-stack", "plan-pr-stack", "orchestrate-pr-stack"] {
+            // When
+            let coder = CoderArgs::try_parse_from(["tddy-coder", "--recipe", recipe]);
+            let demo = DemoArgs::try_parse_from(["tddy-demo", "--recipe", recipe]);
+
+            // Then
+            assert!(coder.is_err(), "tddy-coder still accepts --recipe {recipe}");
+            assert!(demo.is_err(), "tddy-demo still accepts --recipe {recipe}");
+        }
+    }
+
+    /// `#workqueue` 1/14: seeding a stack from an existing session's branch goes with the recipe.
+    #[test]
+    fn the_cli_has_no_stack_seed_flag() {
+        // When
+        let parsed =
+            CoderArgs::try_parse_from(["tddy-coder", "--stack-seed-base-session", "a-session"]);
+
+        // Then
+        assert!(
+            parsed.is_err(),
+            "tddy-coder still accepts --stack-seed-base-session"
+        );
+    }
 }
 
 #[cfg(test)]

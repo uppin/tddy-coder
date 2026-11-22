@@ -6,6 +6,8 @@
 **Metrics:** 3 test binaries · 283 lines · every `use tddy_workflow_recipes::…` in them names a facade over `tddy_github`
 **Restructure:** required — `move_test_binary_to_crate` (or `git mv`), `/code-restructuring` territory
 **Status:** Open
+**Claimed by:** #1002 — `#workqueue 1/14` (the suites move to `tddy-github` when `orchestrate_pr_stack::github` is deleted)
+**Lands after:** — (stack root)
 
 ## Measurement history
 
