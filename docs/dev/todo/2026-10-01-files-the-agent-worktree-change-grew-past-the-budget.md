@@ -11,7 +11,7 @@ lines". That did not hold everywhere. Production lines, re-measured 2026-10-01 a
 | `packages/tddy-sandbox-runner/src/runner.rs` | 2,611 → 2,639 | `packages/tddy-sandbox-runner/docs/code-issues/oversized-file-runner.md` |
 | `packages/tddy-sandbox-runner/src/host_relay.rs` | 939 → 949 (no record before) | `packages/tddy-sandbox-runner/docs/code-issues/oversized-file-host-relay.md` (new) |
 | `packages/tddy-session-agents/src/session_agent_clone.rs` | 1,158 (not edited here; no record before) | `packages/tddy-session-agents/docs/code-issues/oversized-file-session-agent-clone.md` (new) |
-| `packages/tddy-daemon-sandbox/src/sandbox_session.rs` | 916 → 917 | `packages/tddy-daemon-sandbox/docs/code-issues/oversized-file-sandbox-session.md` |
+| `packages/tddy-daemon-sandbox/src/sandbox_session.rs` | 916 → 917 | (record deleted in #991: the file was split to 416 production lines) |
 | `packages/tddy-session-lifecycle/src/workspace_tool_sandbox.rs` | 737 → 739 | `packages/tddy-session-lifecycle/docs/code-issues/oversized-file-workspace-tool-sandbox.md` |
 | `packages/tddy-discovery/src/roster/conversation.rs` | 522 → 526 | `packages/tddy-discovery/docs/code-issues/oversized-file-conversation.md` |
 
