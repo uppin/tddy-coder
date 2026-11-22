@@ -21,6 +21,9 @@ serde = { version = "1", features = ["derive"] }
 # `op_journal` persists the merge journal as JSON; `merge_repoint` names each journalled operation.
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
+# `rpc::WorkQueueStatusStream`: the channel-backed stream the status RPC answers with.
+tokio = { version = "1", features = ["sync"] }
+futures-util = "0.3"
 
 [dev-dependencies]
 # `work_queue_fixtures`: the sessions layout a PR stack lives in.
@@ -28,4 +31,4 @@ tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 tempfile = "3"
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "macros", "sync"] }

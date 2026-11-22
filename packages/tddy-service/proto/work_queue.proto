@@ -73,6 +73,9 @@ service WorkQueueService {
   rpc UnassignWorkItemPr(UnassignWorkItemPrRequest) returns (WorkItemLinksResponse);
   rpc LinkWorkItemSession(LinkWorkItemSessionRequest) returns (WorkItemLinksResponse);
   rpc UnlinkWorkItemSession(UnlinkWorkItemSessionRequest) returns (WorkItemLinksResponse);
+  // `#workqueue` 6/14: the queue's PR state and check counts per item — a snapshot, then a new one
+  // whenever the daemon's GitHub inbox reports a change to a PR or its checks. No browser polls.
+  rpc StreamWorkQueueStatus(StreamWorkQueueStatusRequest) returns (stream WorkQueueStatusView);
 }
 
 // Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
@@ -481,3 +484,24 @@ message WorkItemLinksResponse {
   string work_queue_json = 1;
 }
 
+
+message StreamWorkQueueStatusRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+}
+
+message WorkQueueStatusView {
+  repeated WorkItemStatus items = 1;
+  // Why the queue's GitHub state could not be read at all (no inbox, no credential); empty otherwise.
+  string unavailable_reason = 2;
+}
+
+// One item's PR (by branch, or the assigned PR) and, when it has one, its checks at the head.
+message WorkItemStatus {
+  string item_id = 1;
+  PrStatusView pr = 2;
+  bool has_checks = 3;
+  uint32 checks_running = 4;
+  uint32 checks_failed = 5;
+  uint32 checks_succeeded = 6;
+}

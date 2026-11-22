@@ -67,4 +67,5 @@ mod add_work_item_unit_tests;
 mod links;
 #[cfg(test)]
 mod repoint_github_token_unit_tests;
+mod status_stream;
 mod work_queue_queries;

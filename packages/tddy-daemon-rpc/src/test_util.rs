@@ -498,6 +498,18 @@ impl WorkQueueService for TestDaemon {
             .await
     }
 
+    type StreamWorkQueueStatusStream = tddy_work_queue::rpc::WorkQueueStatusStream;
+
+    async fn stream_work_queue_status(
+        &self,
+        request: Request<tddy_service::proto::work_queue::StreamWorkQueueStatusRequest>,
+    ) -> Result<Response<Self::StreamWorkQueueStatusStream>, Status> {
+        self.handlers
+            .work_queue_service()
+            .stream_work_queue_status(request)
+            .await
+    }
+
     async fn assign_work_item_pr(
         &self,
         request: Request<tddy_service::proto::work_queue::AssignWorkItemPrRequest>,

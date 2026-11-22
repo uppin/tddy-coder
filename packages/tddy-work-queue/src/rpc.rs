@@ -18,9 +18,40 @@ use tddy_service::proto::work_queue::{
     ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
     QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
     RepointWorkItemRequest, RepointWorkItemResponse, ResolveWorkItemBaseRequest,
-    ResolveWorkItemBaseResponse, UnassignWorkItemPrRequest, UnlinkWorkItemSessionRequest,
-    WorkItemLinksResponse, WorkQueueService,
+    ResolveWorkItemBaseResponse, StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest,
+    UnlinkWorkItemSessionRequest, WorkItemLinksResponse, WorkQueueService, WorkQueueStatusView,
 };
+
+/// The frames of `StreamWorkQueueStatus`: a channel the handler's task feeds, ended when either side
+/// goes away.
+pub struct WorkQueueStatusStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<Result<WorkQueueStatusView, Status>>,
+}
+
+impl From<tokio::sync::mpsc::UnboundedReceiver<Result<WorkQueueStatusView, Status>>>
+    for WorkQueueStatusStream
+{
+    fn from(rx: tokio::sync::mpsc::UnboundedReceiver<Result<WorkQueueStatusView, Status>>) -> Self {
+        Self { rx }
+    }
+}
+
+impl futures_util::Stream for WorkQueueStatusStream {
+    type Item = Result<WorkQueueStatusView, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.rx.poll_recv(cx)
+    }
+}
+
+impl std::fmt::Debug for WorkQueueStatusStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WorkQueueStatusStream")
+    }
+}
 
 /// The coordinate family P is served on — `work_queue.WorkQueueService`.
 pub const WORK_QUEUE_SERVICE: &str = "work_queue.WorkQueueService";
@@ -116,6 +147,14 @@ pub trait WorkQueueHandler: Send + Sync {
         // TODO(n6 pr-and-session-link): implement in the daemon's handler.
         Err(Status::unimplemented("TODO(n6): UnlinkWorkItemSession"))
     }
+
+    /// `#workqueue` 6/14: the queue's PR state and check counts, live from the GitHub inbox.
+    async fn stream_work_queue_status(
+        &self,
+        _request: Request<StreamWorkQueueStatusRequest>,
+    ) -> Result<Response<WorkQueueStatusStream>, Status> {
+        Err(Status::unimplemented("StreamWorkQueueStatus"))
+    }
 }
 
 /// Thin `WorkQueueService` adapter over a [`WorkQueueHandler`].
@@ -132,6 +171,15 @@ impl<H> WorkQueueServiceImpl<H> {
 
 #[async_trait]
 impl<H: WorkQueueHandler + 'static> WorkQueueService for WorkQueueServiceImpl<H> {
+    type StreamWorkQueueStatusStream = WorkQueueStatusStream;
+
+    async fn stream_work_queue_status(
+        &self,
+        request: Request<StreamWorkQueueStatusRequest>,
+    ) -> Result<Response<Self::StreamWorkQueueStatusStream>, Status> {
+        self.host.stream_work_queue_status(request).await
+    }
+
     async fn add_work_item(
         &self,
         request: Request<AddWorkItemRequest>,

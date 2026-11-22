@@ -209,7 +209,36 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
 
   // `#workqueue` 6/14: link or unlink a PR or a session; every call answers the queue after the change.
   const [linkErrorByItemId, setLinkErrorByItemId] = useState<Record<string, string>>({});
-  const [checksByItemId] = useState<Readonly<Record<string, ItemChecks>>>({});
+  const [checksByItemId, setChecksByItemId] = useState<Readonly<Record<string, ItemChecks>>>({});
+  // Live check counts: the daemon pushes a snapshot, then one per GitHub inbox change — never polled.
+  useEffect(() => {
+    if (!workQueueClient?.streamWorkQueueStatus) return;
+    const abort = new AbortController();
+    (async () => {
+      try {
+        for await (const view of workQueueClient.streamWorkQueueStatus(
+          { sessionToken, queue: address },
+          { signal: abort.signal },
+        )) {
+          const next: Record<string, ItemChecks> = {};
+          for (const item of view.items) {
+            if (item.hasChecks) {
+              next[item.itemId] = {
+                running: item.checksRunning,
+                failed: item.checksFailed,
+                succeeded: item.checksSucceeded,
+              };
+            }
+          }
+          setChecksByItemId(next);
+        }
+      } catch {
+        // Keep the counts shown; a dropped stream must not blank them.
+      }
+    })();
+    return () => abort.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workQueueClient, sessionToken, address.projectId, address.queueId, address.daemonInstanceId]);
   const runLinkCall = async (
     itemId: string,
     call: () => Promise<{ workQueueJson: string }>,
