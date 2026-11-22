@@ -89,7 +89,17 @@ async fn a_daemon_recording_exec_calls() -> (String, Arc<Mutex<Vec<ExecuteToolRe
 async fn an_exec_call_names_the_conversation_the_launch_named_and_none_otherwise() {
     // Given
     let (daemon_url, recorded) = a_daemon_recording_exec_calls().await;
-    std::env::remove_var("TDDY_SANDBOX_TOOL_IPC");
+    // Every transport that outranks the HTTP relay goes, or a run inside a real session (whose own
+    // environment exports its daemon's socket) sends these calls to that daemon instead.
+    for transport in [
+        "TDDY_SANDBOX_TOOL_IPC",
+        "TDDY_REMOTE_DAEMON_SOCKET",
+        "TDDY_REMOTE_LIVEKIT_URL",
+        "TDDY_REMOTE_LIVEKIT_ROOM",
+        "TDDY_REMOTE_LIVEKIT_TOKEN",
+    ] {
+        std::env::remove_var(transport);
+    }
     std::env::set_var("TDDY_REMOTE_DAEMON_URL", &daemon_url);
     std::env::set_var("TDDY_REMOTE_SESSION_ID", "1780828020298-dispatch");
     std::env::set_var(CONVERSATION_ENV, "conv-clone");
