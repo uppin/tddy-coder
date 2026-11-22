@@ -150,7 +150,9 @@ fn poll_without_reaping(pid: u32) -> Option<ChildExit> {
 /// An error when `pid` is not an unreaped child of this process — it was reaped meanwhile, so its
 /// status is wherever its reaper recorded it.
 pub fn wait_without_reaping(pid: u32) -> std::io::Result<ChildExit> {
-    waitid_exit(pid, 0).map(|exit| exit.expect("a blocking waitid reports the child"))
+    waitid_exit(pid, 0)?.ok_or_else(|| {
+        std::io::Error::other("a blocking waitid returned without a child to report")
+    })
 }
 
 /// Wait until `state`'s runner exits, without reaping it and holding no lock across the wait; record

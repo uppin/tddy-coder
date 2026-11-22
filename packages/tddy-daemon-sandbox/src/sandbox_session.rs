@@ -5,16 +5,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use tddy_rpc::Status;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use crate::jail_exit_watch::{watch_jail_exit, JailBridge, JailEnded, JailProcess};
+pub use crate::jail_host_bridge::*;
+pub use crate::runner_paths::*;
+pub use crate::runner_spawn::*;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tddy_sandbox::{MountSpec, SandboxContextDir, SandboxError, SandboxPlan};
-use tddy_service::proto::exec_tools::ExecuteToolResponse;
-use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
+use tddy_sandbox::{SandboxContextDir, SandboxError};
 use tddy_task::ChildExit;
 use tddy_task::TerminalCapture;
 use tokio::sync::watch;
@@ -120,13 +120,18 @@ impl SandboxSessionState {
         if let Some(mut process) = self.lock_process().take() {
             process.kill_and_reap();
         }
+        self.record_exit(exit);
+        Some(exit)
+    }
+
+    /// Record how the runner ended, once: the first exit recorded stands.
+    fn record_exit(&self, exit: ChildExit) {
         self.exit_tx.send_if_modified(|current| {
             current.is_none() && {
                 *current = Some(exit);
                 true
             }
         });
-        Some(exit)
     }
 
     fn lock_process(&self) -> std::sync::MutexGuard<'_, Option<JailProcess>> {
@@ -154,15 +159,10 @@ impl SandboxSessionState {
         {
             bridge.abort();
         }
-        self.exit_tx.send_if_modified(|current| {
-            current.is_none() && {
-                *current = Some(exit.unwrap_or(ChildExit {
-                    code: None,
-                    signal: None,
-                }));
-                true
-            }
-        });
+        self.record_exit(exit.unwrap_or(ChildExit {
+            code: None,
+            signal: None,
+        }));
     }
 }
 
@@ -325,352 +325,6 @@ pub async fn wait_for_sandbox_ready(
     }
 }
 
-/// Bridge a sandboxed process's piped stdio (spawned with `--stdio` in its argv — see
-/// `tddy_sandbox_darwin::spawn_plan`) into an RPC endpoint, hosting `service` for inbound calls
-/// (none exist in the current `SandboxService` protocol: the runner never initiates calls into
-/// the daemon, only sends frames within the bidi `SessionChannel` the daemon itself calls) and
-/// returning a client for calling into the runner. Spawns the endpoint's read/dispatch/write loop
-/// on the current tokio runtime; the returned `JoinHandle` completes when the pipe closes (the
-/// sandboxed process exits).
-///
-/// Does not return until the endpoint's read loop has started, so the first client frame cannot
-/// race a peer that has not yet entered its dispatch loop (the stdio attach flake exercised by
-/// `in_jail_conversation_acceptance`).
-pub async fn bridge_sandbox_stdio<S: tddy_rpc::RpcService>(
-    handle: &mut tddy_sandbox::SandboxHandle,
-    service: S,
-) -> Result<(Arc<tddy_stdio::StdioRpcClient>, tokio::task::JoinHandle<()>), String> {
-    use std::os::fd::OwnedFd;
-
-    let (stdin, stdout) = handle
-        .take_stdio()
-        .ok_or_else(|| "sandbox process was not spawned with piped stdio (--stdio)".to_string())?;
-    let sender = tokio::net::unix::pipe::Sender::from_owned_fd(OwnedFd::from(stdin))
-        .map_err(|e| format!("wrap sandbox stdin as async pipe: {e}"))?;
-    let receiver = tokio::net::unix::pipe::Receiver::from_owned_fd(OwnedFd::from(stdout))
-        .map_err(|e| format!("wrap sandbox stdout as async pipe: {e}"))?;
-    let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
-        receiver,
-        sender,
-        service,
-        tddy_rpc::RequestTransport::Pipe,
-    );
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-    let endpoint = endpoint.signal_start_ready(ready_tx);
-    let run_handle = tokio::spawn(async move { endpoint.run().await });
-    ready_rx
-        .await
-        .map_err(|_| "sandbox stdio endpoint exited before its read loop started".to_string())?;
-    Ok((client, run_handle))
-}
-
-/// TCP dialer for the in-jail gRPC server (macOS Seatbelt path; Linux uses AF_UNIX).
-#[cfg(not(target_os = "linux"))]
-async fn connect_sandbox_client(
-    ready_marker: &Path,
-) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
-    let port_str = std::fs::read_to_string(ready_marker).map_err(|e| e.to_string())?;
-    let port: u16 = port_str
-        .trim()
-        .parse::<u16>()
-        .map_err(|e: std::num::ParseIntError| e.to_string())?;
-    let endpoint = format!("http://127.0.0.1:{port}");
-    SandboxServiceClient::connect(endpoint)
-        .await
-        .map_err(|e| format!("connect sandbox grpc: {e}"))
-}
-
-/// Tool handler that runs MCP tool calls in the session worktree via `tddy_tool_engine`.
-struct DaemonToolHandler {
-    worktree: PathBuf,
-    task_registry: tddy_task::TaskRegistry,
-    /// Extra env applied to spawned shell commands — for a managed session this carries the
-    /// per-session `TDDY_SOCKET` (+ `PATH`) so host-side `tddy-tools transition` reaches the
-    /// session's `WorkflowController`.
-    session_env: Arc<Vec<(String, String)>>,
-    /// Unified session directory holding `agent-activity.jsonl`, so every in-jail tool call is
-    /// recorded as a `running` then terminal row for the web Agent Activity pane.
-    session_dir: PathBuf,
-    /// Live hub the recorded rows are published to for `StreamSessionActivity` subscribers.
-    agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
-}
-
-#[async_trait]
-impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
-    async fn execute(
-        &self,
-        session_id: &str,
-        conversation_id: &str,
-        tool_name: &str,
-        args_json: &str,
-    ) -> ExecuteToolResponse {
-        // A running row before execution, then a terminal row from the outcome. The durable log is
-        // best-effort — a write failure is logged and never blocks the tool call (mirrors
-        // tool_call_log handling in the ExecuteTool path).
-        let call_id = uuid::Uuid::new_v4().to_string();
-        let input = tddy_core::agent_activity::parse_activity_json(args_json);
-        // What this call is credited with, for scoping its delta — AC2 of
-        // `docs/ft/daemon/session-worktree-sync.md`. The same for both rows, because they describe
-        // one call: what it declared is in its input, and the outcome cannot add to it.
-        let declared_paths =
-            tddy_core::agent_activity::declared_paths(tool_name, &input, &self.worktree);
-        let running = tddy_core::agent_activity::AgentActivityRecord {
-            call_id: call_id.clone(),
-            tool_name: tool_name.to_string(),
-            input: input.clone(),
-            status: tddy_core::agent_activity::STATUS_RUNNING.to_string(),
-            result: serde_json::Value::Null,
-            error_message: String::new(),
-            started_unix_ms: tddy_daemon_kernel::now_unix_ms(),
-            completed_unix_ms: 0,
-            source: "sandbox".to_string(),
-            // AC1 of the same document. Read from the filesystem, not by spawning `git rev-parse`:
-            // this runs on every in-jail tool call. An unresolvable HEAD stamps an empty string
-            // rather than a fabricated sha.
-            head_commit: tddy_core::git_head::read_head_commit(&self.worktree),
-            // The covering tick is the session room's poll loop to attribute; `0` is the wire's
-            // "no tick has covered it yet".
-            activity_seq: 0,
-            changed_paths: declared_paths.clone(),
-        };
-        self.record_agent_activity(session_id, &running);
-
-        let outcome =
-            crate::conversation_tool::execute_in_conversation(crate::conversation_tool::ToolCall {
-                worktree: &self.worktree,
-                conversation_id,
-                tool_name,
-                args_json,
-                registry: &self.task_registry,
-                session_id,
-                env: &self.session_env,
-            })
-            .await;
-
-        let status = if outcome.is_error {
-            tddy_core::agent_activity::STATUS_ERROR
-        } else {
-            tddy_core::agent_activity::STATUS_COMPLETED
-        };
-        let terminal = tddy_core::agent_activity::AgentActivityRecord {
-            call_id,
-            tool_name: tool_name.to_string(),
-            input,
-            status: status.to_string(),
-            result: tddy_core::agent_activity::parse_activity_json(&outcome.result_json),
-            error_message: outcome.error_message.clone(),
-            started_unix_ms: running.started_unix_ms,
-            completed_unix_ms: tddy_daemon_kernel::now_unix_ms(),
-            source: "sandbox".to_string(),
-            // Read again rather than copied from the `running` row: the call that just finished may
-            // have been a `Bash` that committed, and this row is a record of where the checkout
-            // stood when *it* was written.
-            head_commit: tddy_core::git_head::read_head_commit(&self.worktree),
-            activity_seq: 0,
-            changed_paths: declared_paths,
-        };
-        self.record_agent_activity(session_id, &terminal);
-
-        ExecuteToolResponse {
-            result_json: outcome.result_json,
-            is_error: outcome.is_error,
-            error_message: outcome.error_message,
-            job_id: outcome.job_id,
-            job_running: outcome.job_running,
-        }
-    }
-}
-
-impl DaemonToolHandler {
-    /// Append an agent-activity row and publish it live; a persistence failure is non-fatal.
-    ///
-    // TODO(session-worktree-sync): also broadcast the row on the session room's `session.activity`
-    // topic, as `ReportAgentActivity` does — AC4/AC5 of `docs/ft/daemon/session-worktree-sync.md`.
-    // An in-jail MCP tool call reaches the durable log and the live hub but not the room, so a
-    // participant mirroring a sandboxed session sees its edits only on the next poll tick. Doing it
-    // needs `SessionRoomRegistry` threaded through `dial_and_bridge` into this handler.
-    fn record_agent_activity(
-        &self,
-        session_id: &str,
-        record: &tddy_core::agent_activity::AgentActivityRecord,
-    ) {
-        if let Err(e) = tddy_core::agent_activity::append_agent_activity(&self.session_dir, record)
-        {
-            log::warn!(
-                target: "tddy_daemon_sandbox::sandbox_session",
-                "agent_activity: failed to persist {} row for session {}: {}",
-                record.status,
-                session_id,
-                e
-            );
-        }
-        self.agent_activity_hub.publish(session_id, record.clone());
-    }
-}
-
-/// Dial the in-jail gRPC server over the platform's transport: loopback TCP on macOS (port from
-/// the ready marker), AF_UNIX on Linux (a netns-isolated cgroups jail can't be reached over
-/// loopback TCP — a UDS on the shared filesystem can).
-#[cfg(target_os = "linux")]
-pub async fn connect_sandbox_session_client(
-    _ready_marker: &Path,
-    grpc_socket: &Path,
-) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
-    tddy_sandbox_runner::connect_sandbox_client_uds(grpc_socket)
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[cfg(not(target_os = "linux"))]
-pub async fn connect_sandbox_session_client(
-    ready_marker: &Path,
-    _grpc_socket: &Path,
-) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
-    connect_sandbox_client(ready_marker).await
-}
-
-/// The runner never initiates calls into the daemon over the stdio-served `SessionChannel` — it
-/// only sends frames within the bidi call the daemon itself opens. This exists purely to satisfy
-/// [`bridge_sandbox_stdio`]'s hosting requirement; any inbound request here is a bug.
-pub struct NoCallbackSandboxService;
-
-#[async_trait]
-impl tddy_rpc::RpcService for NoCallbackSandboxService {
-    async fn handle_rpc(
-        &self,
-        service: &str,
-        method: &str,
-        _message: &tddy_rpc::RpcMessage,
-    ) -> tddy_rpc::RpcResult {
-        tddy_rpc::RpcResult::Unary(Err(Status::unimplemented(format!(
-            "tddy-daemon hosts no callback service, got {service}/{method}"
-        ))))
-    }
-}
-
-/// Dial the sandboxed runner over its stdio-served `SessionChannel` and drive the host side via
-/// the shared relay. PTY output fans into the broadcast channel (live subscribers) and the
-/// rolling capture buffer (late subscribers); tool calls run in `worktree_path`. Returns the tasks
-/// that do it, for the jail's state to stop with the jail
-/// ([`JailBridge`](crate::jail_exit_watch::JailBridge)).
-///
-/// The relay admits every host the jail asks to tunnel to; [`dial_and_bridge_with_egress`] holds it
-/// to a policy.
-#[allow(clippy::too_many_arguments)]
-pub async fn dial_and_bridge(
-    session_id: &str,
-    worktree_path: PathBuf,
-    handle: &mut tddy_sandbox::SandboxHandle,
-    task_registry: tddy_task::TaskRegistry,
-    stdout_tx: broadcast::Sender<Bytes>,
-    capture: Arc<StdMutex<TerminalCapture>>,
-    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
-    session_env: Arc<Vec<(String, String)>>,
-    session_dir: PathBuf,
-    agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
-    rpc_handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler>,
-) -> Result<crate::jail_exit_watch::JailBridge, String> {
-    dial_and_bridge_with_egress(
-        session_id,
-        worktree_path,
-        handle,
-        task_registry,
-        stdout_tx,
-        capture,
-        stdin_rx,
-        session_env,
-        session_dir,
-        agent_activity_hub,
-        rpc_handler,
-        tddy_sandbox_runner::EgressGuard::unrestricted(session_id),
-    )
-    .await
-}
-
-/// [`dial_and_bridge`] with the jail's egress policy enforced on the host relay's `TunnelOpen`s,
-/// independently of the in-jail shim: a jailed process that speaks the relay protocol directly is
-/// refused here too (`#agent-tools 3/12`).
-#[allow(clippy::too_many_arguments)]
-pub async fn dial_and_bridge_with_egress(
-    session_id: &str,
-    worktree_path: PathBuf,
-    handle: &mut tddy_sandbox::SandboxHandle,
-    task_registry: tddy_task::TaskRegistry,
-    stdout_tx: broadcast::Sender<Bytes>,
-    capture: Arc<StdMutex<TerminalCapture>>,
-    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
-    session_env: Arc<Vec<(String, String)>>,
-    session_dir: PathBuf,
-    agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
-    rpc_handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler>,
-    egress: tddy_sandbox_runner::EgressGuard,
-) -> Result<crate::jail_exit_watch::JailBridge, String> {
-    log::info!(
-        target: "tddy_daemon_sandbox::sandbox_session",
-        "opening sandbox SessionChannel for session {session_id}"
-    );
-
-    let (client, endpoint) = bridge_sandbox_stdio(handle, NoCallbackSandboxService).await?;
-    let stdio_client = tddy_sandbox_runner::StdioSandboxClient::new(client);
-
-    // Output and the jail's size changes arrive on one channel, in order: a size change read apart
-    // from the output around it would reinterpret that output at the wrong grid.
-    let (events_tx, events_rx) = mpsc::unbounded_channel();
-    // `HostRelayConfig::new` requires a byte sink; with events set the relay never writes to it.
-    let (term_tx, _unused_bytes_sink) = mpsc::unbounded_channel::<Bytes>();
-    let forwarder =
-        forward_jail_terminal_events(events_rx, Arc::clone(&capture), stdout_tx.clone());
-
-    let handler = DaemonToolHandler {
-        worktree: worktree_path,
-        task_registry,
-        session_env,
-        session_dir,
-        agent_activity_hub,
-    };
-    let relay = tddy_sandbox_runner::run_host_relay_with_rpc(
-        stdio_client,
-        handler,
-        rpc_handler,
-        tddy_sandbox_runner::HostRelayConfig::new(session_id, term_tx)
-            .with_terminal_events(events_tx)
-            .with_egress(egress),
-        stdin_rx,
-    )
-    .await?;
-    Ok(crate::jail_exit_watch::JailBridge::new(
-        endpoint, relay, forwarder,
-    ))
-}
-
-/// Feed a jailed terminal's reported events into its capture and live broadcast: output is appended
-/// and broadcast under the capture lock (the sequence point a snapshot depends on), and a size
-/// change resizes the capture's screen model at the same point in the stream, so snapshots of a
-/// jailed terminal are serialized at the jail's real grid. Runs until `events` closes.
-pub fn forward_jail_terminal_events(
-    mut events: mpsc::UnboundedReceiver<tddy_sandbox_runner::HostTerminalEvent>,
-    capture: Arc<StdMutex<TerminalCapture>>,
-    stdout_tx: broadcast::Sender<Bytes>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        while let Some(event) = events.recv().await {
-            match event {
-                tddy_sandbox_runner::HostTerminalEvent::Output(chunk) => {
-                    if let Ok(mut cap) = capture.lock() {
-                        cap.append(&chunk);
-                        let _ = stdout_tx.send(chunk);
-                    }
-                }
-                tddy_sandbox_runner::HostTerminalEvent::Resized { cols, rows } => {
-                    if let Ok(mut cap) = capture.lock() {
-                        cap.resize(rows, cols);
-                    }
-                }
-            }
-        }
-    })
-}
-
 /// Map [`SandboxError`] to gRPC status for StartSession failures.
 pub fn sandbox_error_to_status(err: SandboxError) -> Status {
     match err {
@@ -732,147 +386,6 @@ pub fn prepare_context_dir_with_subagent(
         .map_err(|e| e.to_string())
 }
 
-/// Resolve the `tddy-tools` binary for sandbox MCP and hook wiring.
-///
-/// Priority: explicit config → `CARGO_BIN_EXE_tddy-tools` (cargo test) → sibling of
-/// `current_exe()` (handles integration tests living in `target/debug/deps/`) → `"tddy-tools"`.
-pub fn resolve_tddy_tools_path(configured: Option<&str>) -> String {
-    if let Some(path) = configured.filter(|s| !s.trim().is_empty()) {
-        return path.to_string();
-    }
-    if let Ok(bin) = std::env::var("CARGO_BIN_EXE_tddy-tools") {
-        if !bin.trim().is_empty() {
-            return bin;
-        }
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(mut bin_dir) = exe.parent().map(|p| p.to_path_buf()) {
-            if bin_dir.file_name().and_then(|n| n.to_str()) == Some("deps") {
-                bin_dir.pop();
-            }
-            let candidate = bin_dir.join("tddy-tools");
-            if candidate.is_file() {
-                return candidate.to_string_lossy().into_owned();
-            }
-        }
-        if let Some(parent) = exe.parent() {
-            let sibling = parent.join("tddy-tools");
-            if sibling.is_file() {
-                return sibling.to_string_lossy().into_owned();
-            }
-        }
-    }
-    "tddy-tools".to_string()
-}
-
-/// Resolve the `tddy-sandbox-runner` binary for in-jail sandbox sessions.
-///
-/// Priority: `CARGO_BIN_EXE_tddy-sandbox-runner` (cargo test) → sibling of
-/// `current_exe()` → `"tddy-sandbox-runner"`.
-pub fn resolve_sandbox_runner_path() -> String {
-    if let Ok(bin) = std::env::var("CARGO_BIN_EXE_tddy-sandbox-runner") {
-        if !bin.trim().is_empty() {
-            return bin;
-        }
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(mut bin_dir) = exe.parent().map(|p| p.to_path_buf()) {
-            if bin_dir.file_name().and_then(|n| n.to_str()) == Some("deps") {
-                bin_dir.pop();
-            }
-            let candidate = bin_dir.join("tddy-sandbox-runner");
-            if candidate.is_file() {
-                return candidate.to_string_lossy().into_owned();
-            }
-        }
-        if let Some(parent) = exe.parent() {
-            let sibling = parent.join("tddy-sandbox-runner");
-            if sibling.is_file() {
-                return sibling.to_string_lossy().into_owned();
-            }
-        }
-    }
-    "tddy-sandbox-runner".to_string()
-}
-
-#[cfg(target_os = "macos")]
-pub fn detect_allow_read_paths() -> Vec<PathBuf> {
-    tddy_sandbox_darwin::detect_allow_read_paths()
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn detect_allow_read_paths() -> Vec<PathBuf> {
-    vec![]
-}
-
-fn push_parent_allow_path(paths: &mut Vec<PathBuf>, binary: &str) {
-    let path = Path::new(binary);
-    if !path.is_absolute() {
-        return;
-    }
-    if let Some(parent) = path.parent() {
-        if !paths.iter().any(|existing| existing == parent) {
-            paths.push(parent.to_path_buf());
-        }
-    }
-}
-
-/// Paths from `otool -L` needed to load a Mach-O binary inside Seatbelt.
-#[cfg(target_os = "macos")]
-fn detect_binary_load_paths(binary: &str) -> Vec<PathBuf> {
-    let Ok(output) = std::process::Command::new("otool")
-        .args(["-L", binary])
-        .output()
-    else {
-        return vec![];
-    };
-    if !output.status.success() {
-        return vec![];
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut paths = Vec::new();
-    for line in text.lines().skip(1) {
-        let lib = line.split_whitespace().next().unwrap_or("");
-        if lib.is_empty() || !lib.starts_with('/') {
-            continue;
-        }
-        let lib_path = Path::new(lib);
-        if let Some(parent) = lib_path.parent() {
-            if !paths.iter().any(|existing| existing == parent) {
-                paths.push(parent.to_path_buf());
-            }
-        }
-    }
-    paths
-}
-
-#[cfg(not(target_os = "macos"))]
-fn detect_binary_load_paths(_binary: &str) -> Vec<PathBuf> {
-    vec![]
-}
-
-fn canonical_binary_path(binary: &str) -> Option<PathBuf> {
-    let path = Path::new(binary);
-    if path.is_absolute() {
-        std::fs::canonicalize(path).ok()
-    } else {
-        std::env::current_dir().ok()?.join(path).canonicalize().ok()
-    }
-}
-
-/// Toolchain paths plus the parent dir of the sandbox-runner binary (the argv's first entry). What
-/// the process the runner execs needs to read comes from its tool definition, not from its argv.
-pub fn build_allow_read_paths(runner_argv: &[String]) -> Vec<PathBuf> {
-    let mut paths = detect_allow_read_paths();
-    if let Some(tool) = runner_argv.first() {
-        if let Some(path) = canonical_binary_path(tool) {
-            push_parent_allow_path(&mut paths, &path.to_string_lossy());
-            paths.extend(detect_binary_load_paths(&path.to_string_lossy()));
-        }
-    }
-    paths
-}
-
 /// Pick an ephemeral loopback TCP port on the host (for Seatbelt allow-listing before spawn).
 pub fn pick_free_loopback_port() -> Result<u16, String> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
@@ -901,143 +414,10 @@ pub fn terminate_sandbox_process(pid: u32) {
 #[cfg(not(unix))]
 pub fn terminate_sandbox_process(_pid: u32) {}
 
-/// Parameters for spawning `tddy-sandbox-runner` inside Seatbelt.
-pub struct SandboxRunnerSpawn {
-    pub project_root: PathBuf,
-    pub scratch_dir: PathBuf,
-    pub egress_dir: PathBuf,
-    pub profile_path: PathBuf,
-    pub runner_argv: Vec<String>,
-    pub env: std::collections::BTreeMap<String, String>,
-    pub loopback_allow_ports: Vec<u16>,
-    pub ipc_socket: Option<PathBuf>,
-    /// Host directories made available inside the jail (e.g. the project repo, or the persistent
-    /// claude home). Empty for the daemon's remote-codebase sessions.
-    pub mounts: Vec<MountSpec>,
-    /// Host `$HOME` used by the recipe to auto-copy `.claude/.credentials.json` into the jail each
-    /// session. `None` disables that per-session copy — required when a **persistent** claude home
-    /// is mounted and seeded separately (a re-copy would clobber the jail's refreshed OAuth token).
-    pub host_home: Option<PathBuf>,
-    /// cgroup v2 delegation parameters from daemon config (Linux cgroups backend only; the macOS and
-    /// QEMU backends ignore it). Defaults to an empty [`tddy_sandbox::CgroupConfig`], letting the
-    /// backend derive the delegated base at runtime.
-    pub cgroup: tddy_sandbox::CgroupConfig,
-    /// The provider route the jailed agent runs on, when the session runs on a provider account.
-    /// Its environment and secrets reach the agent child through [`build_sandbox_plan`]. `None` for
-    /// the harness's own vendor, and for a jail that hosts no agent.
-    pub route: Option<tddy_core::provider_route::HarnessRoute>,
-    /// The directory the jail keeps read-only to the runner ([`SandboxPlan::context_dir`]).
-    pub context_dir: Option<PathBuf>,
-    /// The runner speaks RPC over its stdio ([`SandboxPlan::stdio`]).
-    pub stdio: bool,
-}
-
-/// Assemble the explicit [`SandboxPlan`] for a runner spawn via `tddy-sandbox-recipes`.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, SandboxError> {
-    use tddy_sandbox_recipes::{build_runner_plan, RunnerPlanRequest};
-
-    let mut plan = build_runner_plan(RunnerPlanRequest {
-        project_root: params.project_root,
-        scratch_dir: params.scratch_dir,
-        egress_dir: params.egress_dir,
-        profile_path: params.profile_path,
-        runner_argv: params.runner_argv.clone(),
-        env: params.env,
-        loopback_allow_ports: params.loopback_allow_ports,
-        ipc_socket: params.ipc_socket,
-        mounts: params.mounts,
-        recipe: None,
-        host_home: params.host_home,
-        route: params.route,
-        context_dir: params.context_dir,
-        stdio: params.stdio,
-    })?;
-    plan.cgroup = params.cgroup;
-    #[cfg(target_os = "macos")]
-    let plan = {
-        let mut plan = plan;
-        merge_allow_read_paths_into_plan(&mut plan, &params.runner_argv);
-        plan
-    };
-    Ok(plan)
-}
-
-#[cfg(target_os = "macos")]
-fn merge_allow_read_paths_into_plan(plan: &mut SandboxPlan, runner_argv: &[String]) {
-    use tddy_sandbox::builder::{ReadReason, ReadSpec};
-    for path in build_allow_read_paths(runner_argv) {
-        let spec = ReadSpec::subpath(&path, ReadReason::BinaryDeps).executable();
-        if !plan
-            .reads
-            .iter()
-            .any(|r| r.host == spec.host && r.kind == spec.kind)
-        {
-            plan.reads.push(spec);
-        }
-    }
-}
-
-/// When set to `qemu`, [`spawn_sandbox_runner`] and [`crate::sandbox_action::spawn_confined_plan`]
-/// route to [`tddy_sandbox_qemu::spawn_plan`] instead of the per-OS default (Seatbelt on macOS,
-/// cgroups+namespaces on Linux). Unset (or any other value) leaves existing per-OS dispatch
-/// unchanged — this is an explicit opt-in, not a fallback.
-pub fn qemu_backend_requested() -> bool {
-    std::env::var("TDDY_SANDBOX_BACKEND").as_deref() == Ok("qemu")
-}
-
-/// Spawn an already-assembled [`SandboxPlan`] on this host's backend: Seatbelt on macOS,
-/// cgroups + namespaces on Linux, or the QEMU VM backend when explicitly requested.
-///
-/// The seam for a caller that builds its own plan rather than a runner spawn's
-/// ([`crate::workspace_tool_sandbox::build_workspace_tool_plan`] does, because a workspace tool
-/// jail holds a different recipe and a different mount set).
-#[cfg(target_os = "macos")]
-pub fn spawn_sandbox_plan(plan: SandboxPlan) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
-    if qemu_backend_requested() {
-        return tddy_sandbox_qemu::spawn_plan(plan);
-    }
-    tddy_sandbox_darwin::spawn_plan(plan)
-}
-
-#[cfg(target_os = "linux")]
-pub fn spawn_sandbox_plan(plan: SandboxPlan) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
-    if qemu_backend_requested() {
-        return tddy_sandbox_qemu::spawn_plan(plan);
-    }
-    tddy_sandbox_cgroups::spawn_plan(plan)
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub fn spawn_sandbox_plan(_plan: SandboxPlan) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
-    Err(SandboxError::Unsupported {
-        platform: std::env::consts::OS.to_string(),
-        message: "platform sandboxes are not available on this OS".to_string(),
-    })
-}
-
-/// Spawn sandbox-runner inside the platform jail (Seatbelt on macOS, cgroups + namespaces on
-/// Linux, or the QEMU VM backend when requested).
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-pub fn spawn_sandbox_runner(
-    params: SandboxRunnerSpawn,
-) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
-    spawn_sandbox_plan(build_sandbox_plan(params)?)
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub fn spawn_sandbox_runner(
-    _params: SandboxRunnerSpawn,
-) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
-    Err(SandboxError::Unsupported {
-        platform: std::env::consts::OS.to_string(),
-        message: "platform sandboxes are not available on this OS".to_string(),
-    })
-}
-
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::jail_host_bridge::DaemonToolHandler;
     use std::process::{Command, Stdio};
 
     fn sandbox_runner_binary() -> PathBuf {

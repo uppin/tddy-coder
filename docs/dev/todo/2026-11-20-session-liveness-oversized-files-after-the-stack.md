@@ -11,7 +11,7 @@ a file the successors also modify is recorded, not split. Production lines are c
 | File | Before → after | Record |
 |---|---|---|
 | `packages/tddy-session-lifecycle/src/test_util.rs` | 484 → 578 (crossed 500); 578 → 556 in #990, which moved its tool hosts out (still over; #991 and #992 also edit it) | `packages/tddy-session-lifecycle/docs/code-issues/oversized-file-test-util.md` |
-| `packages/tddy-daemon-sandbox/src/sandbox_session.rs` | 885 → 924 | `…/oversized-file-sandbox-session.md` (row added) |
+| `packages/tddy-daemon-sandbox/src/sandbox_session.rs` | 885 → 924 | closed in #991, see below (record deleted) |
 | `packages/tddy-daemon-rpc/src/pr_stack/ports.rs` | 878 → 880 | `…/oversized-file-pr-stack-ports.md` (row added) |
 | `packages/tddy-telegram-control/src/telegram_session_control/chaining_and_listing.rs` | 521 → 527 | `…/oversized-file-telegram-session-control-chaining-and-listing.md` (row added) |
 | `packages/tddy-telegram-control/src/telegram_session_control/pickers.rs` | 627 → 628 | `…/oversized-file-telegram-session-control-pickers.md` (row added) |
@@ -32,6 +32,14 @@ The "In sandbox" / "On host" and "On target" / "On this host" group pairs of
 `packages/tddy-session-web/src/NewTerminalMenu.tsx` are one `WrappedKindGroups` component now (items are
 `MenuKindItem`; the test ids are unchanged and the two menu specs are untouched). `NewTerminalMenu.tsx` went
 473 → 424 production lines.
+
+## Closed in #991 (`#tab-hardening` 3/4): `sandbox_session.rs`
+
+`packages/tddy-daemon-sandbox/src/sandbox_session.rs` was 938 production lines at #990 and 1,037 with #991's death
+watch wiring. #991 (no other `#tab-hardening` node edits it) moved three clusters out unchanged, re-exported from
+`sandbox_session` so no path moved: `jail_host_bridge.rs` (360), `runner_paths.rs` (146) and `runner_spawn.rs` (144).
+The file is **416** production lines; its `oversized-file` record was deleted on that measurement.
+`dial_and_bridge`'s 12 parameters remain, in `heavy-params-jail-host-bridge-dial-and-bridge.md`.
 
 ## Closed in #967 (`#session-liveness` 8/8): `restore_tabs/roster.rs`
 

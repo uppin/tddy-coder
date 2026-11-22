@@ -39,9 +39,12 @@ pub mod action_service;
 pub mod build_action_sandbox;
 mod conversation_tool;
 pub mod jail_exit_watch;
+mod jail_host_bridge;
 #[cfg(all(test, unix))]
 mod jail_test_support;
 mod main_recording;
+mod runner_paths;
+mod runner_spawn;
 pub mod sandbox_action;
 pub mod sandbox_plan_builder;
 pub mod sandbox_runtime;
