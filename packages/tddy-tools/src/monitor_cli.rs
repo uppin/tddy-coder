@@ -126,8 +126,14 @@ impl MonitorLine {
     }
 }
 
-/// The `timeout_ms` of each stream call: the tool's cap, so a call is held as long as it allows.
-const WAIT_TIMEOUT_MS: u64 = 20_000;
+/// The `timeout_ms` of each stream call: the tool's default window, a minute. A monitor prints
+/// each batch the moment its call returns, so the window only sets how often an idle stream calls
+/// again; over LiveKit the transport clamps it further.
+const WAIT_TIMEOUT_MS: u64 = 60_000;
+
+/// The `max_events` of each stream call: every event waiting, up to the most one answer carries —
+/// a monitor prints them all, so the tool's default of one would only add round trips.
+const WAIT_MAX_EVENTS: u64 = 50;
 
 /// How long past a stream call's `timeout_ms` the monitor waits for its answer before it calls
 /// the call lapsed and stops (docs/dev/todo: no LiveKit RPC call has a client-side deadline).
@@ -158,6 +164,7 @@ async fn stream(args: &MonitorArgs) -> Result<i32, String> {
         let mut call = serde_json::json!({
             "watch_ids": watch_ids,
             "timeout_ms": WAIT_TIMEOUT_MS,
+            "max_events": WAIT_MAX_EVENTS,
         });
         if let Some(stream_id) = &stream_id {
             call["stream_id"] = Value::String(stream_id.clone());

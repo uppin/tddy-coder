@@ -4,9 +4,10 @@ use crate::session_watches::a_watch_has_delivered;
 use crate::session_watches::delivery::apply_delivery;
 use crate::session_watches::delivery::end_expired;
 use crate::session_watches::delivery::end_finished;
+use crate::session_watches::delivery::DeliveryScope;
 use crate::session_watches::delivery::WatchDelivery;
 use crate::session_watches::inbox_position_of;
-use crate::session_watches::matcher::watch_matches;
+use crate::session_watches::matcher::watch_owes;
 use crate::session_watches::matcher::WatchFilter;
 use crate::session_watches::refuse_a_bad_ttl;
 use crate::session_watches::stream::STREAM_LEASE_GRACE;
@@ -14,6 +15,7 @@ use crate::session_watches::ListedWatch;
 use crate::session_watches::ProjectWatches;
 use crate::session_watches::SessionWatch;
 use crate::session_watches::SessionWatchStore;
+use crate::session_watches::WatchOptions;
 use crate::session_watches::WatchOwner;
 use crate::session_watches::MAX_LIVE_WATCHES;
 use crate::session_watches::SESSION_WATCHES_FILE;
@@ -63,8 +65,8 @@ impl SessionWatchStore {
         })
     }
 
-    /// A new watch for `owner`, matching `filter` for `ttl`, starting at the log's head — so it
-    /// sees only what happens after it. Refused, saying what to do, for a `ttl` of zero or above
+    /// A new watch for `owner`, matching `filter` and delivering as `options` say for `ttl`,
+    /// starting at the log's head — so it sees only what happens after it. Refused, saying what to do, for a `ttl` of zero or above
     /// [`MAX_WATCH_TTL_SECS`], a filter that selects no session, a filter with no kind, or an owner
     /// already holding [`MAX_LIVE_WATCHES`]. Whether the owner may watch the sessions it names is
     /// the caller's to decide first.
@@ -72,6 +74,7 @@ impl SessionWatchStore {
         &self,
         owner: &WatchOwner,
         filter: WatchFilter,
+        options: WatchOptions,
         ttl: Duration,
         log: &ProjectNotificationLog,
         now_unix_ms: u64,
@@ -112,6 +115,8 @@ impl SessionWatchStore {
                 .saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX)),
             position: head,
             created_seq: head,
+            wake_when_idle: options.wake_when_idle,
+            acked_above: Default::default(),
         };
         state.watches.push(watch.clone());
         if let Err(e) = self.persist(&owner.project_id, &state) {
@@ -143,7 +148,7 @@ impl SessionWatchStore {
                 let inbox = inbox_position_of(&state, owner);
                 let waiting = records
                     .iter()
-                    .filter(|record| watch_matches(watch, record, inbox))
+                    .filter(|record| watch_owes(watch, record, inbox))
                     .count();
                 ListedWatch {
                     watch: watch.clone(),
@@ -153,13 +158,15 @@ impl SessionWatchStore {
             .collect()
     }
 
-    /// `owner`'s watch `watch_id` with its expiry moved to `ttl` from now. Refused for a watch
-    /// that is not `owner`'s, has ended, or a `ttl` out of bounds.
+    /// `owner`'s watch `watch_id` with its expiry moved to `ttl` from now, and its
+    /// [`SessionWatch::wake_when_idle`] set to `wake_when_idle` when that is `Some`. Refused for a
+    /// watch that is not `owner`'s, has ended, or a `ttl` out of bounds.
     pub async fn renew(
         &self,
         owner: &WatchOwner,
         watch_id: &str,
         ttl: Duration,
+        wake_when_idle: Option<bool>,
         now_unix_ms: u64,
     ) -> Result<SessionWatch, String> {
         refuse_a_bad_ttl(ttl)?;
@@ -179,6 +186,9 @@ impl SessionWatchStore {
         };
         state.watches[index].expires_at_unix_ms =
             now_unix_ms.saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX));
+        if let Some(wake_when_idle) = wake_when_idle {
+            state.watches[index].wake_when_idle = wake_when_idle;
+        }
         let renewed = state.watches[index].clone();
         self.persist(&owner.project_id, &state)
             .map_err(|e| format!("the renewal was not kept: {e}"))?;
@@ -218,18 +228,26 @@ impl SessionWatchStore {
         let project = self.project_of(&owner.project_id);
         let mut state = project.lock().await;
         let streamed = self.streamed_watch_ids(owner, now_unix_ms);
-        let delivery = apply_delivery(&mut state, owner, log, now_unix_ms, &streamed);
+        let delivery = apply_delivery(
+            &mut state,
+            owner,
+            log,
+            now_unix_ms,
+            &streamed,
+            DeliveryScope::Every,
+        );
         if !delivery.is_empty() {
             self.persist_best_effort(&owner.project_id, &state);
         }
         delivery
     }
 
-    /// Hand `owner`'s waiting delivery to `deliver`, and advance past it only if `deliver`
-    /// succeeds (`#activity-wake` 3/3): a wake whose paste failed delivers nothing, and what was
-    /// waiting waits on. `Ok(true)` when something was delivered, `Ok(false)` when nothing was
+    /// Hand what `owner`'s **waking** watches ([`SessionWatch::wake_when_idle`]) have waiting to
+    /// `deliver`, and advance past it only if `deliver` succeeds (`#activity-wake` 3/3): a wake
+    /// whose paste failed delivers nothing, and what was waiting waits on. A quiet watch's events
+    /// and endings are never handed here; they wait for a stream or a tool answer. `Ok(true)` when something was delivered, `Ok(false)` when nothing was
     /// waiting (and `deliver` was not called); `Err` with `deliver`'s refusal, nothing moved.
-    pub async fn deliver_with<F, Fut>(
+    pub async fn deliver_wake_with<F, Fut>(
         &self,
         owner: &WatchOwner,
         log: &ProjectNotificationLog,
@@ -244,7 +262,14 @@ impl SessionWatchStore {
         let mut state = project.lock().await;
         let before = state.clone();
         let streamed = self.streamed_watch_ids(owner, now_unix_ms);
-        let delivery = apply_delivery(&mut state, owner, log, now_unix_ms, &streamed);
+        let delivery = apply_delivery(
+            &mut state,
+            owner,
+            log,
+            now_unix_ms,
+            &streamed,
+            DeliveryScope::Waking,
+        );
         if delivery.is_empty() {
             return Ok(false);
         }
@@ -263,6 +288,24 @@ impl SessionWatchStore {
                 Err(e)
             }
         }
+    }
+
+    /// Whether `owner` holds a watch that wakes it when idle and has not ended at `now_unix_ms`.
+    pub async fn has_live_waking_watches(
+        &self,
+        owner: &WatchOwner,
+        log: &ProjectNotificationLog,
+        now_unix_ms: u64,
+    ) -> bool {
+        let project = self.project_of(&owner.project_id);
+        let mut state = project.lock().await;
+        if end_finished(&mut state, owner, log, now_unix_ms) {
+            self.persist_best_effort(&owner.project_id, &state);
+        }
+        state
+            .watches
+            .iter()
+            .any(|watch| &watch.owner == owner && watch.wake_when_idle)
     }
 
     /// Whether `owner` holds a watch that has not ended at `now_unix_ms`.

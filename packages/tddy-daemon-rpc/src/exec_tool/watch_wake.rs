@@ -8,6 +8,11 @@
 //! pastes [`wake_text`] into its main terminal — the paste `SendSessionMessage` makes — through a
 //! delivery committed only when the paste succeeds.
 //!
+//! The wake is **opt-in per watch**: only an orchestrator holding a live watch created (or
+//! renewed) with `wake_when_idle` concerns the waker, and a wake carries only those watches' events
+//! and endings. Every other watch's events wait for `WaitSessionWatchEvents`, a monitor, or the next
+//! tool answer — an injected turn interleaves with what the operator is typing.
+//!
 //! Feature: docs/ft/daemon/project-concept.md#watching-sessions
 
 use std::collections::HashMap;
@@ -276,7 +281,7 @@ impl ExecToolRpcHandler {
                 session_id: session.session_id,
                 os_user: cue.os_user.clone(),
             };
-            if watches.has_live_watches(&owner, log, now).await {
+            if watches.has_live_waking_watches(&owner, log, now).await {
                 concerned.push(owner);
             }
         }
@@ -309,7 +314,7 @@ impl ExecToolRpcHandler {
 
     /// The submit key a wake ends with for a session of `metadata`'s type, or `None` when its
     /// agent takes no terminal turn this host can send.
-    fn wake_submit_key(
+    pub(in crate::exec_tool) fn wake_submit_key(
         &self,
         metadata: &tddy_core::SessionMetadata,
         session_id: &str,
@@ -349,7 +354,7 @@ impl ExecToolRpcHandler {
         };
         let pasted = Arc::new(AtomicBool::new(false));
         let outcome = watches
-            .deliver_with(owner, log, tddy_daemon_kernel::now_unix_ms(), |delivery| {
+            .deliver_wake_with(owner, log, tddy_daemon_kernel::now_unix_ms(), |delivery| {
                 let terminals = self.project_home_host.terminals.clone();
                 let session_id = owner.session_id.clone();
                 let pasted = Arc::clone(&pasted);

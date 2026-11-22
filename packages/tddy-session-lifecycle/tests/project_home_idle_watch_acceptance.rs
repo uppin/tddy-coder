@@ -19,7 +19,7 @@ use project_home_support::{
 use tddy_service::proto::session::StartSessionRequest;
 use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_activity::session_watches::{
-    SessionWatchStore, WatchFilter, WatchKind, WatchOwner,
+    SessionWatchStore, WatchFilter, WatchKind, WatchOptions, WatchOwner,
 };
 
 const ELEVEN_MINUTES: Duration = Duration::from_secs(11 * 60);
@@ -92,6 +92,7 @@ impl World {
                     started_by_me: true,
                     kinds: WatchKind::ALL.to_vec(),
                 },
+                WatchOptions::default(),
                 ttl,
                 &self.log,
                 now_unix_ms(),

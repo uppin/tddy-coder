@@ -27,7 +27,7 @@ use tddy_session_activity::session_notifications::{
     SessionNotification, SessionNotificationBus, SessionNotificationKind, SessionNotificationSource,
 };
 use tddy_session_activity::session_watches::{
-    SessionWatchStore, WatchFilter, WatchKind, WatchOwner,
+    SessionWatchStore, WatchFilter, WatchKind, WatchOptions, WatchOwner,
 };
 
 const PROJECT: &str = "project-a";
@@ -86,6 +86,7 @@ impl AHost {
                     started_by_me: false,
                     kinds: vec![WatchKind::Message],
                 },
+                WatchOptions::default(),
                 AN_HOUR,
                 &self.log,
                 NOW,
@@ -108,6 +109,7 @@ impl AHost {
             .create(
                 &the_child(),
                 WatchFilter::inbox_of(CHILD),
+                WatchOptions::default(),
                 AN_HOUR,
                 &self.log,
                 NOW,

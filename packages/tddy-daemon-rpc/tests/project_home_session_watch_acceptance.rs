@@ -564,16 +564,16 @@ async fn a_session_that_is_not_an_orchestrator_is_refused_the_watch_tools() {
 }
 
 #[tokio::test]
-async fn an_orchestrator_whose_agent_takes_no_turn_is_refused_naming_the_agent() {
+async fn an_orchestrator_whose_agent_takes_no_turn_is_refused_a_waking_watch_naming_the_agent() {
     // Given an orchestrator whose agent declares no turn input
     let world = a_world().await;
     records_session_type(&world.a, &world.orchestrator, "codex-cli");
 
-    // When it creates a watch
+    // When it creates a watch that would wake it when idle
     let refusal = creating_as(
         &world,
         &world.orchestrator,
-        json!({ "session_ids": [world.child], "ttl_seconds": AN_HOUR }),
+        json!({ "session_ids": [world.child], "ttl_seconds": AN_HOUR, "wake_when_idle": true }),
     )
     .await;
 
@@ -582,6 +582,29 @@ async fn an_orchestrator_whose_agent_takes_no_turn_is_refused_naming_the_agent()
         refusal.contains("agent codex declares no turn_input"),
         "the refusal {refusal:?} does not name the agent"
     );
+}
+
+#[tokio::test]
+async fn an_orchestrator_whose_agent_takes_no_turn_may_hold_a_watch_that_does_not_wake() {
+    // Given an orchestrator whose agent declares no turn input
+    let world = a_world().await;
+    records_session_type(&world.a, &world.orchestrator, "codex-cli");
+
+    // When it creates a watch with no word on the wake
+    let answer = world
+        .calls(
+            CREATE_SESSION_WATCH,
+            json!({ "session_ids": [world.child], "ttl_seconds": AN_HOUR }),
+        )
+        .await;
+
+    // Then the watch is created, and says it does not wake: its events wait to be collected
+    assert!(
+        !answer.is_error,
+        "the watch was refused: {}",
+        answer.error_message
+    );
+    assert_eq!(result_of(&answer)["wake_when_idle"], json!(false));
 }
 
 #[tokio::test]

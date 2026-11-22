@@ -171,13 +171,19 @@ impl World {
         self.call_as(&self.orchestrator, tool, args).await
     }
 
-    /// A watch `caller` created over the child's permission prompts, for an hour.
+    /// A watch `caller` created over the child's permission prompts, for an hour, opting into the
+    /// wake: what a stream holds must reach neither the wake nor a tool answer.
     async fn a_watch_of_the_childs_prompts_by(&self, caller: &str) -> String {
         let answer = self
             .call_as(
                 caller,
                 CREATE_SESSION_WATCH,
-                json!({ "session_ids": [self.child], "kinds": ["permission"], "ttl_seconds": 3_600 }),
+                json!({
+                    "session_ids": [self.child],
+                    "kinds": ["permission"],
+                    "ttl_seconds": 3_600,
+                    "wake_when_idle": true
+                }),
             )
             .await;
         assert!(

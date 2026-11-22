@@ -40,8 +40,14 @@ fn the_home() -> HomeCaller {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Asked {
     Create(WatchRequest),
-    Renew { watch_id: String, ttl_seconds: u64 },
-    Cancel { watch_id: String },
+    Renew {
+        watch_id: String,
+        ttl_seconds: u64,
+        wake_when_idle: Option<bool>,
+    },
+    Cancel {
+        watch_id: String,
+    },
 }
 
 #[derive(Default)]
@@ -69,10 +75,12 @@ impl ProjectHomeWatchPort for FakeWatches {
         _: &HomeCaller,
         watch_id: &str,
         ttl_seconds: u64,
+        wake_when_idle: Option<bool>,
     ) -> Result<Value, String> {
         self.asked.lock().unwrap().push(Asked::Renew {
             watch_id: watch_id.to_string(),
             ttl_seconds,
+            wake_when_idle,
         });
         Ok(json!({ "watch_id": watch_id }))
     }
@@ -199,7 +207,63 @@ async fn create_hands_the_port_what_was_asked_with_every_kind_by_default() {
             started_by_me: false,
             kinds: WATCH_KINDS.iter().map(|k| k.to_string()).collect(),
             ttl_seconds: 600,
+            wake_when_idle: false,
         })]
+    );
+}
+
+#[tokio::test]
+async fn create_hands_the_port_a_wake_the_call_opts_into() {
+    // Given
+    let host = FakeWatches::default();
+
+    // When a watch is created asking to wake its orchestrator when idle
+    let outcome = calling(
+        &host,
+        CREATE_SESSION_WATCH,
+        json!({ "session_ids": ["s-1"], "ttl_seconds": 600, "wake_when_idle": true }),
+    )
+    .await;
+
+    // Then the port is asked for a waking watch
+    assert!(!outcome.is_error, "{}", outcome.error_message);
+    assert_eq!(
+        host.asked(),
+        vec![Asked::Create(WatchRequest {
+            session_ids: vec!["s-1".to_string()],
+            started_by_me: false,
+            kinds: WATCH_KINDS.iter().map(|k| k.to_string()).collect(),
+            ttl_seconds: 600,
+            wake_when_idle: true,
+        })]
+    );
+}
+
+#[test]
+fn create_and_renew_offer_an_optional_wake_off_by_default() {
+    // Given the two tools' schemas
+    let defs = project_home_watch_tool_defs();
+    let schema_of = |name: &str| -> Value {
+        let def = defs
+            .iter()
+            .find(|def| def.name == name)
+            .expect("the tool is defined");
+        serde_json::from_str(&def.input_schema_json).unwrap()
+    };
+
+    // When their wake_when_idle property is read
+    let [create, renew] = [CREATE_SESSION_WATCH, RENEW_SESSION_WATCH]
+        .map(|name| schema_of(name)["properties"]["wake_when_idle"].clone());
+
+    // Then both offer a boolean that defaults to off, and neither requires it
+    assert_eq!(
+        (create["type"].clone(), create["default"].clone()),
+        (json!("boolean"), json!(false))
+    );
+    assert_eq!(renew["type"], json!("boolean"));
+    assert_eq!(
+        schema_of(RENEW_SESSION_WATCH)["required"],
+        json!(["watch_id", "ttl_seconds"])
     );
 }
 
@@ -224,6 +288,10 @@ async fn create_is_refused_before_the_port_for_bad_arguments() {
         (
             json!({ "session_ids": ["s-1"], "kinds": ["everything"], "ttl_seconds": 600 }),
             "everything",
+        ),
+        (
+            json!({ "session_ids": ["s-1"], "ttl_seconds": 600, "wake_when_idle": "yes" }),
+            "wake_when_idle",
         ),
     ];
 
@@ -254,13 +322,20 @@ async fn renew_and_cancel_name_the_watch_to_the_port() {
         json!({ "watch_id": "w-1", "ttl_seconds": 60 }),
     )
     .await;
+    let woken = calling(
+        &host,
+        RENEW_SESSION_WATCH,
+        json!({ "watch_id": "w-1", "ttl_seconds": 60, "wake_when_idle": true }),
+    )
+    .await;
     let cancelled = calling(&host, CANCEL_SESSION_WATCH, json!({ "watch_id": "w-1" })).await;
 
     // Then
     assert!(
-        !renewed.is_error && !cancelled.is_error,
-        "{} {}",
+        !renewed.is_error && !woken.is_error && !cancelled.is_error,
+        "{} {} {}",
         renewed.error_message,
+        woken.error_message,
         cancelled.error_message
     );
     assert_eq!(
@@ -269,6 +344,12 @@ async fn renew_and_cancel_name_the_watch_to_the_port() {
             Asked::Renew {
                 watch_id: "w-1".to_string(),
                 ttl_seconds: 60,
+                wake_when_idle: None,
+            },
+            Asked::Renew {
+                watch_id: "w-1".to_string(),
+                ttl_seconds: 60,
+                wake_when_idle: Some(true),
             },
             Asked::Cancel {
                 watch_id: "w-1".to_string(),

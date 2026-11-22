@@ -12,7 +12,7 @@
 //!
 //! Feature: docs/ft/daemon/project-concept.md#watching-sessions
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -25,8 +25,11 @@ mod delivery;
 pub(crate) mod matcher;
 mod store;
 mod stream;
+pub mod stream_call;
 
-pub use stream::{StreamBatch, StreamRefusal, StreamedEvent, STREAM_LEASE_GRACE};
+pub use crate::session_watches::stream_call::StreamPick;
+pub use crate::session_watches::stream_call::StreamRefusal;
+pub use stream::{StreamBatch, StreamedEvent, STREAM_LEASE_GRACE};
 
 /// The longest a watch lives without being renewed: 24 hours.
 pub const MAX_WATCH_TTL_SECS: u64 = 86_400;
@@ -34,6 +37,11 @@ pub const MAX_WATCH_TTL_SECS: u64 = 86_400;
 pub const MAX_LIVE_WATCHES: usize = 16;
 /// How many matched events one delivery carries; the rest wait for the next.
 pub const MAX_EVENTS_PER_ANSWER: usize = 50;
+
+// A `WaitSessionWatchEvents` call's `max_events` is bounded by the tool before it reaches the store.
+const _: () = assert!(
+    MAX_EVENTS_PER_ANSWER == tddy_tool_engine::project_home_watch_stream_tools::MAX_EVENTS_PER_WAIT
+);
 
 /// What a store keeps per project, under the project's directory.
 pub const SESSION_WATCHES_FILE: &str = "session-watches.json";
@@ -50,6 +58,15 @@ pub struct WatchOwner {
 
 pub use crate::session_watches::matcher::WatchFilter;
 
+/// How a watch delivers, besides what it matches.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WatchOptions {
+    /// Whether an idle orchestrator is sent a `[tddy watch]` turn carrying what this watch matched.
+    /// Off by default: the events wait for the orchestrator to collect them — through
+    /// `WaitSessionWatchEvents`, a monitor, or the next tool answer.
+    pub wake_when_idle: bool,
+}
+
 /// One watch, as the store keeps it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionWatch {
@@ -64,6 +81,15 @@ pub struct SessionWatch {
     /// however far delivery has since advanced `position`.
     #[serde(default)]
     pub created_seq: u64,
+    /// Whether this watch's events are delivered to its idle orchestrator as a turn
+    /// ([`WatchOptions::wake_when_idle`]). A watch kept before the option existed does not wake.
+    #[serde(default)]
+    pub wake_when_idle: bool,
+    /// The `seq`s past [`Self::position`] already handed and acknowledged: what a stream call that
+    /// picked a subset of the matched records acknowledged, while an earlier record it did not
+    /// pick holds the position back. Never handed again; pruned as the position passes them.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub acked_above: BTreeSet<u64>,
 }
 
 /// One live watch as `ListSessionWatches` shows it: the watch, and how many matched events wait.
@@ -76,11 +102,14 @@ pub struct ListedWatch {
 pub use crate::session_watches::delivery::{WatchDelivery, WatchEnd, WatchEndReason};
 use crate::session_watches::matcher::watch_matches;
 
-/// A watch that ended and has not been reported yet, and whose it was.
+/// A watch that ended and has not been reported yet, whose it was, and whether it woke its owner
+/// — an ending the wake reports only for a watch that did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct PendingEnd {
     owner: WatchOwner,
     end: WatchEnd,
+    #[serde(default)]
+    wake_when_idle: bool,
 }
 
 /// The watches of one project, as kept in memory and on disk. Its fields are the watch module's
@@ -189,7 +218,7 @@ pub(crate) fn inbox_position_of(state: &ProjectWatches, owner: &WatchOwner) -> u
 }
 
 /// Whether a live watch of `owner` in `state` matches `record` and has already been handed it —
-/// its position at or past the record. What a read skips, so a message is delivered once across
+/// its position at or past the record, or the record acknowledged above it. What a read skips, so a message is delivered once across
 /// the reader's watches and its reads (`crate::session_messages`).
 pub(crate) fn a_watch_has_delivered(
     state: &ProjectWatches,
@@ -199,7 +228,7 @@ pub(crate) fn a_watch_has_delivered(
 ) -> bool {
     state.watches.iter().any(|watch| {
         &watch.owner == owner
-            && watch.position >= record.seq
+            && (watch.position >= record.seq || watch.acked_above.contains(&record.seq))
             && watch_matches(watch, record, owner_inbox_position)
     })
 }

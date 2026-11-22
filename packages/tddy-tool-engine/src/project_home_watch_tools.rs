@@ -2,9 +2,11 @@
 //! orchestrator watches the sessions it can see (`#activity-wake` 2/3).
 //!
 //! A watch selects sessions — by id, or every session the caller started — and kinds of event, and
-//! lives for a required time to live of at most 24 hours. Every tool answer the orchestrator then
-//! receives on this host carries, under `watchEvents`, what its watches matched since the last
-//! answer; the daemon attaches it, not these tools.
+//! lives for a required time to live of at most 24 hours. The orchestrator waits for what it
+//! matched with `WaitSessionWatchEvents`; otherwise every tool answer it receives on this host
+//! carries, under `watchEvents`, what its watches matched since the last answer — the daemon
+//! attaches it, not these tools. Only a watch created (or renewed) with `wake_when_idle` makes the
+//! daemon send its idle orchestrator a turn.
 //!
 //! The watches themselves are `tddy_session_activity::session_watches`'. That crate sits above
 //! this one, so the port speaks in JSON values and plain arguments.
@@ -62,6 +64,9 @@ pub struct WatchRequest {
     /// Every kind when the call named none.
     pub kinds: Vec<String>,
     pub ttl_seconds: u64,
+    /// Whether an idle orchestrator is sent a turn carrying what the watch matched; off unless the
+    /// call sets it.
+    pub wake_when_idle: bool,
 }
 
 /// What the tools need from the daemon: this host's watches, for the caller.
@@ -83,14 +88,16 @@ pub trait ProjectHomeWatchPort: ProjectHomePort {
         Err(NO_SESSION_WATCHES.to_string())
     }
 
-    /// `home`'s watch `watch_id` renewed for `ttl_seconds`, as JSON.
+    /// `home`'s watch `watch_id` renewed for `ttl_seconds`, as JSON — its wake turned on or off when
+    /// `wake_when_idle` is `Some`, kept as it was when `None`.
     async fn renew_watch(
         &self,
         home: &HomeCaller,
         watch_id: &str,
         ttl_seconds: u64,
+        wake_when_idle: Option<bool>,
     ) -> Result<Value, String> {
-        let _ = (home, watch_id, ttl_seconds);
+        let _ = (home, watch_id, ttl_seconds, wake_when_idle);
         Err(NO_SESSION_WATCHES.to_string())
     }
 
@@ -116,7 +123,7 @@ pub fn project_home_watch_tool_defs() -> Vec<ToolDef> {
     vec![
         tool_def(
             CREATE_SESSION_WATCH,
-            "Watch sessions of this project you can see, on this host: from now on, every tool answer you receive carries `watchEvents` with what they did since your last answer — a question or a permission prompt (with the request_id AnswerSessionQuestion / AnswerSessionPermission take), a finished turn, a wait for input, an agent's notification, or a session ending — each event once. Name sessions by session_ids, or set started_by_me for every session you started, or both. Your own session is never watched, except for kind trunk_commit: a new commit on the project's remote trunk (or a force-push rewriting it), which every live orchestrator of the project receives as its own activity. While you are idle with events waiting, you are sent a turn listing them. Answers the watch with its watch_id and expires_at_unix_ms.",
+            "Watch sessions of this project you can see, on this host: a question or a permission prompt (with the request_id AnswerSessionQuestion / AnswerSessionPermission take), a finished turn, a wait for input, an agent's notification, or a session ending — each event delivered once. Wait for them with WaitSessionWatchEvents (or `tddy-tools monitor` under Monitor); otherwise they ride on your next tool answer as `watchEvents`. Name sessions by session_ids, or set started_by_me for every session you started, or both. Your own session is never watched, except for kind trunk_commit: a new commit on the project's remote trunk (or a force-push rewriting it), which every live orchestrator of the project receives as its own activity. A watch does not interrupt you: only with wake_when_idle is a turn listing its events typed into your conversation while you are idle — set it only when you must be woken and will not be waiting. Answers the watch with its watch_id, wake_when_idle and expires_at_unix_ms.",
             json!({
                 "type": "object",
                 "properties": {
@@ -134,7 +141,12 @@ pub fn project_home_watch_tool_defs() -> Vec<ToolDef> {
                         "items": { "type": "string", "enum": WATCH_KINDS },
                         "description": "Which events; default every kind."
                     },
-                    "ttl_seconds": ttl.clone()
+                    "ttl_seconds": ttl.clone(),
+                    "wake_when_idle": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Type a turn listing this watch's events into your conversation while you are idle. Default false: events wait for WaitSessionWatchEvents or your next tool answer. Injected turns interleave with what the operator types, so set it only when you must be woken."
+                    }
                 },
                 "required": ["ttl_seconds"],
                 "additionalProperties": false
@@ -147,10 +159,17 @@ pub fn project_home_watch_tool_defs() -> Vec<ToolDef> {
         ),
         tool_def(
             RENEW_SESSION_WATCH,
-            "Renew one of your session watches: it now expires ttl_seconds from now (at most 86400).",
+            "Renew one of your session watches: it now expires ttl_seconds from now (at most 86400). wake_when_idle turns its idle wake on or off; omit it to keep the watch's choice.",
             json!({
                 "type": "object",
-                "properties": { "watch_id": watch_id.clone(), "ttl_seconds": ttl },
+                "properties": {
+                    "watch_id": watch_id.clone(),
+                    "ttl_seconds": ttl,
+                    "wake_when_idle": {
+                        "type": "boolean",
+                        "description": "Turn the idle wake on (true) or off (false); omit to keep it as it is."
+                    }
+                },
                 "required": ["watch_id", "ttl_seconds"],
                 "additionalProperties": false
             }),
@@ -198,8 +217,13 @@ async fn answer(
         CREATE_SESSION_WATCH => port.create_watch(home, create_request(&args)?).await,
         LIST_SESSION_WATCHES => port.list_watches(home).await,
         RENEW_SESSION_WATCH => {
-            port.renew_watch(home, &watch_id_argument(&args)?, ttl_argument(&args)?)
-                .await
+            port.renew_watch(
+                home,
+                &watch_id_argument(&args)?,
+                ttl_argument(&args)?,
+                wake_argument(&args)?,
+            )
+            .await
         }
         _ => port.cancel_watch(home, &watch_id_argument(&args)?).await,
     }
@@ -254,6 +278,7 @@ fn create_request(args: &Value) -> Result<WatchRequest, String> {
         started_by_me,
         kinds,
         ttl_seconds,
+        wake_when_idle: wake_argument(args)?.unwrap_or(false),
     })
 }
 
@@ -273,6 +298,15 @@ fn ttl_argument(args: &Value) -> Result<u64, String> {
         ));
     }
     Ok(ttl)
+}
+
+/// `wake_when_idle`: `Some` when the call names it, `None` when it does not.
+fn wake_argument(args: &Value) -> Result<Option<bool>, String> {
+    match args.get("wake_when_idle") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(wake)) => Ok(Some(*wake)),
+        Some(other) => Err(format!("wake_when_idle must be true or false, not {other}")),
+    }
 }
 
 /// `watch_id`: the watch the call names, as `CreateSessionWatch` returned it.
