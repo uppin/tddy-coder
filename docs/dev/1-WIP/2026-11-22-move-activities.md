@@ -7,12 +7,6 @@
 **Stack**: `#workqueue` 8/14 — branch `feature/workqueue/move-activities`, base `feature/workqueue/badges-labels`
 **PR**: [#1009](https://github.com/uppin/tddy-coder/pull/1009)
 
-## Stack note (temporary)
-
-This branch is rebased onto n5's green (`origin/feature/workqueue/session-work-queue`) and **temporarily skips
-n6's and n7's plan and contract commits**, so PR #1009's diff against n7's branch looks wrong until n6 and n7 are
-green and this branch is rebased onto n7. That rebase happens before n8's [W]; n8 is not done until it does.
-
 ## Initial Discovery
 
 [2026-11-22-move-activities-initial-discovery.md](./2026-11-22-move-activities-initial-discovery.md)
@@ -170,8 +164,10 @@ watch answer), mirroring `trunk_watch_acceptance.rs` and `session_watches_unit.r
 "No other session's watch matches the queue" goes into `session_watches_unit.rs` with the variant
 (`watch_matches` is crate-private).
 
-`packages/tddy-daemon-rpc/tests/work_queue_tools_acceptance.rs` (extended):
-- [ ] `an_owner_watching_work_queue_is_woken_by_a_user_move_from_the_queue_view` — not written in [G]: the file does not exist on n5; covered meanwhile by `move_activity` unit tests (daemon-rpc) and the matcher tests; a daemon-level test is left for [W]/a human
+`packages/tddy-daemon-rpc/tests/project_home_session_watch_acceptance.rs` (extended — it already holds the
+self-watch rules and the host with a log and watches; the planned `work_queue_tools_acceptance.rs` never existed):
+- [x] `an_owner_watching_work_queue_is_woken_by_a_user_move_from_the_queue_view` — a `ReorderWorkItem` on the
+  owner's queue rides the owner's next answer as a `work_queue` event naming the operator
 
 `packages/tddy-session-activity/tests/session_watches_unit.rs` (existing):
 - [ ] `the_kinds_are_named_as_the_tools_name_them` (now 9)

@@ -680,3 +680,82 @@ async fn an_ordinary_session_is_not_offered_the_watch_tools() {
         ]
     );
 }
+
+/// The orchestrator's queue, holding `n1` then `n2`, and its address.
+fn a_queue_of(world: &World, owner: &str) -> tddy_service::proto::work_queue::WorkQueueAddress {
+    use tddy_core::changeset::{WorkItem, WorkQueue};
+    let queues = tddy_core::session_work_queue::SessionWorkQueues::new(
+        world.a.sessions.path().join("sessions"),
+    );
+    queues
+        .create_for_session(owner, THIS_PROJECT, 0)
+        .expect("the owner gets its queue");
+    let item = |id: &str| WorkItem {
+        node_id: id.to_string(),
+        title: format!("Item {id}"),
+        ..WorkItem::default()
+    };
+    queues
+        .update(owner, |queue| {
+            *queue = WorkQueue {
+                version: 1,
+                nodes: vec![item("n1"), item("n2")],
+            }
+        })
+        .expect("the queue is filled");
+    tddy_service::proto::work_queue::WorkQueueAddress {
+        project_id: THIS_PROJECT.to_string(),
+        queue_id: owner.to_string(),
+        daemon_instance_id: HOST_A.to_string(),
+    }
+}
+
+#[tokio::test]
+async fn an_owner_watching_work_queue_is_woken_by_a_user_move_from_the_queue_view() {
+    use tddy_service::proto::work_queue::{ReorderWorkItemRequest, WorkQueueService as _};
+
+    // Given an orchestrator watching its own queue's moves
+    let world = a_world().await;
+    let orchestrator = world.orchestrator.clone();
+    let address = a_queue_of(&world, &orchestrator);
+    world
+        .watches(json!({ "session_ids": [orchestrator], "kinds": ["work_queue"] }))
+        .await;
+
+    // When the operator moves n2 up from the queue view
+    world
+        .a
+        .daemon
+        .reorder_work_item(Request::direct(ReorderWorkItemRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: String::new(),
+            item_id: "n2".to_string(),
+            direction: "up".to_string(),
+            stack: Some(address),
+        }))
+        .await
+        .expect("the move is served");
+
+    // Then the orchestrator's next answer carries the move, naming the operator who made it
+    let events = world.next_answers_watch_events().await;
+    let delivered: Vec<(String, String, String)> = events["events"]
+        .as_array()
+        .expect("events were delivered")
+        .iter()
+        .map(|event| {
+            (
+                event["session_id"].as_str().unwrap_or("").to_string(),
+                event["source"].as_str().unwrap_or("").to_string(),
+                event["text"].as_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        delivered,
+        vec![(
+            orchestrator,
+            "work_queue".to_string(),
+            "Work item Item n2 (n2) moved from position 2 to 1, by testuser".to_string(),
+        )]
+    );
+}
