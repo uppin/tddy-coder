@@ -15,6 +15,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+
+use crate::terminal_variables::set_terminal_variables;
 use tddy_task::{TaskBody, TaskChannel, TaskContext, TaskHandle, TaskId, TaskRegistry, TaskStatus};
 
 use crate::exit_status::ExitCodeInOutput;
@@ -72,12 +74,6 @@ pub enum PtyEnvBase {
     /// which stand over any the `env` names — an agent, whose whole environment the caller built
     /// from the allow-list (`tddy_agent_backend::agent_env`).
     Cleared,
-}
-
-/// The variables naming the terminal a PTY child runs in.
-fn set_terminal_variables(cmd: &mut CommandBuilder) {
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
 }
 
 /// Work to finish when a process has exited and its output is complete, run with the task's id

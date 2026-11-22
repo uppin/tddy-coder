@@ -26,6 +26,7 @@
 //!
 //! Feature doc: docs/ft/daemon/session-notifications.md, docs/ft/daemon/project-concept.md.
 
+mod evicted_messages;
 mod storage;
 
 use std::collections::{HashMap, VecDeque};
@@ -178,6 +179,8 @@ struct ProjectState {
     /// The lines the project's file holds, which is rewritten once it has grown past twice the
     /// window.
     lines_on_disk: usize,
+    /// The messages the window has evicted: what a reader's `lost` counts.
+    evicted_messages: evicted_messages::EvictedMessages,
 }
 
 impl Project {
@@ -188,12 +191,14 @@ impl Project {
             .max()
             .unwrap_or(0);
         let skip = records.len().saturating_sub(PROJECT_NOTIFICATION_CAPACITY);
-        let window = records.into_iter().skip(skip).collect();
+        let (window, evicted_messages) =
+            evicted_messages::EvictedMessages::split_restored(records, skip);
         Self {
             state: Mutex::new(ProjectState {
                 window,
                 newest_seq,
                 lines_on_disk,
+                evicted_messages,
             }),
             arrived: Notify::new(),
         }
@@ -475,10 +480,7 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
             storage::append(&path, &held)?;
             state.newest_seq = held.record.seq;
             state.lines_on_disk += 1;
-            state.window.push_back(held);
-            if state.window.len() > PROJECT_NOTIFICATION_CAPACITY {
-                state.window.pop_front();
-            }
+            state.keep_in_window(held);
             if state.lines_on_disk > 2 * PROJECT_NOTIFICATION_CAPACITY {
                 match storage::rewrite(&path, state.window.iter()) {
                     Ok(()) => state.lines_on_disk = state.window.len(),

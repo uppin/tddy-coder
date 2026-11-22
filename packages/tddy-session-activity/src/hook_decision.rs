@@ -61,10 +61,44 @@ pub fn question_decision_json(
     answer: &AwaitQuestionAnswerResponse,
     tool_input: &serde_json::Value,
 ) -> Option<String> {
+    question_decision_json_for("PreToolUse", answer, tool_input)
+}
+
+/// [`question_decision_json`] for the hook `hook_event_name` that holds the question: Claude reads a
+/// decision only in its own hook's shape.
+///
+/// A question is held by the waiting `PreToolUse` hook first; when that hold ends unanswered,
+/// Claude fires `PermissionRequest` for the same call, whose waiting hook holds it again. Its
+/// decision is `{"behavior": "allow", "updatedInput": …}` — the same input with `answers`, which
+/// runs the tool as if the person had answered. Any other event hands nothing over.
+#[must_use]
+pub fn question_decision_json_for(
+    hook_event_name: &str,
+    answer: &AwaitQuestionAnswerResponse,
+    tool_input: &serde_json::Value,
+) -> Option<String> {
     if AwaitQuestionOutcome::try_from(answer.outcome) != Ok(AwaitQuestionOutcome::Answered) {
         return None;
     }
-    encode_question_decision(tool_input, &answer.answers)
+    match hook_event_name {
+        "PreToolUse" => encode_question_decision(tool_input, &answer.answers),
+        "PermissionRequest" => {
+            let updated_input = answered_input(tool_input, &answer.answers)?;
+            Some(
+                serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PermissionRequest",
+                        "decision": {
+                            "behavior": "allow",
+                            "updatedInput": updated_input,
+                        },
+                    }
+                })
+                .to_string(),
+            )
+        }
+        _ => None,
+    }
 }
 
 /// The decision JSON that hands `answers` to Claude for the call whose input is `tool_input`, or
@@ -86,6 +120,25 @@ pub fn encode_question_decision(
     tool_input: &serde_json::Value,
     answers: &[QuestionAnswer],
 ) -> Option<String> {
+    let updated_input = answered_input(tool_input, answers)?;
+    Some(
+        serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": updated_input,
+            }
+        })
+        .to_string(),
+    )
+}
+
+/// `tool_input` with the `answers` map Claude reads (see [`encode_question_decision`]), or `None`
+/// when nothing can be handed over.
+fn answered_input(
+    tool_input: &serde_json::Value,
+    answers: &[QuestionAnswer],
+) -> Option<serde_json::Map<String, serde_json::Value>> {
     if answers.is_empty() {
         return None;
     }
@@ -111,16 +164,7 @@ pub fn encode_question_decision(
         "answers".to_string(),
         serde_json::Value::Object(by_question),
     );
-    Some(
-        serde_json::json!({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "allow",
-                "updatedInput": updated_input,
-            }
-        })
-        .to_string(),
-    )
+    Some(updated_input)
 }
 
 #[cfg(test)]

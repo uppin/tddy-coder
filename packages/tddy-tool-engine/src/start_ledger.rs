@@ -399,10 +399,12 @@ fn apply_ending(record: &mut StartLedgerRecord, ending: Ending) {
         } => {
             record.state = StartState::Succeeded;
             record.session_id = Some(session_id);
-            // The session's listing names them when there is one; otherwise the record keeps what
-            // the start reported when it cut its worktree.
-            record.branch = branch.or(record.branch.take());
-            record.worktree = worktree.or(record.worktree.take());
+            // The session's listing names them when there is one; otherwise — no listing, or one
+            // that names none (an empty string is no branch) — the record keeps what the start
+            // reported when it cut its worktree.
+            let named = |value: Option<String>| value.filter(|value| !value.is_empty());
+            record.branch = named(branch).or(record.branch.take());
+            record.worktree = named(worktree).or(record.worktree.take());
             record.display_name = display_name;
         }
         Ending::Failed(message) => {

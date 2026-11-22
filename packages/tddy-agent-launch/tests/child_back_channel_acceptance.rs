@@ -147,15 +147,14 @@ fn a_claude_child_on_a_target_reports_through_its_hook_log_not_natively() {
     ));
     let guidance = back_channel_guidance(ORCHESTRATOR, &channel);
 
-    // Then it appends a message line to its hook log, with the very command its hooks use
+    // Then it appends a message line to its hook log, with the very command its hooks use, run by
+    // a POSIX `sh` so its login shell cannot change how the piped report is read
+    let hook_command =
+        tddy_core::remote_hook_command(tddy_core::REMOTE_MESSAGE_EVENT, HOOK_TOKEN, HOOK_LOG);
     assert_eq!(
         channel,
         BackChannel::HookLog {
-            command: tddy_core::remote_hook_command(
-                tddy_core::REMOTE_MESSAGE_EVENT,
-                HOOK_TOKEN,
-                HOOK_LOG
-            )
+            command: format!("sh -c '{}'", hook_command.replace('\'', r"'\''"))
         }
     );
     assert!(

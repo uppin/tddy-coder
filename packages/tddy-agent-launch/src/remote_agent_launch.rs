@@ -61,14 +61,19 @@ pub use crate::remote_agent_launch::target_tab::{
 const TARGET_BASE_ENV: &str = r#"HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}""#;
 
 /// `argv` run through the target's login shell under `env -i`: the target expands its own base
-/// set ([`TARGET_BASE_ENV`]), then exactly `env`, then the agent is found by `argv[0]` on the
-/// target's `PATH`:
+/// set ([`TARGET_BASE_ENV`]), the agent is told the terminal it draws on
+/// ([`tddy_pty::terminal_variables::TERMINAL_VARIABLES`] — the one the daemon's PTY emulates, as a local agent
+/// is told; `env -i` would otherwise leave it none, and an agent with no `TERM` draws without
+/// colour), then exactly `env`, then the agent is found by `argv[0]` on the target's `PATH`:
 ///
 /// ```text
-/// exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" K='\''V'\'' … '\''<agent>'\'' …'
+/// exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" TERM='\''xterm-256color'\'' COLORTERM='\''truecolor'\'' K='\''V'\'' … '\''<agent>'\'' …'
 /// ```
 pub fn target_login_exec(argv: &[String], env: &[(String, String)]) -> String {
     let mut inner = format!("exec env -i {TARGET_BASE_ENV}");
+    for (name, value) in tddy_pty::terminal_variables::TERMINAL_VARIABLES {
+        inner.push_str(&format!(" {name}={}", shell_single_quote(value)));
+    }
     for (name, value) in env {
         inner.push_str(&format!(" {name}={}", shell_single_quote(value)));
     }
@@ -599,10 +604,11 @@ mod tests {
         let command = remote_agent_command(worktree, "s1", &argv, &env);
 
         // Then the target's login shell runs `env -i` with the base set expanded there (`HOME`,
-        // `PATH`, `TMPDIR`), then only the explicit environment, then the bare command
+        // `PATH`, `TMPDIR`), the terminal the daemon's PTY emulates, then only the explicit
+        // environment, then the bare command
         assert_eq!(
             command,
-            r#"cd '/home/dev/repo/.worktrees/s1' && mkdir -p .tddy/agents && printf %s "$$" > '.tddy/agents/s1.pid' && exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" ANTHROPIC_MODEL='\''opus'\'' '\''claude'\'' '\''--model'\'' '\''opus'\'''"#
+            r#"cd '/home/dev/repo/.worktrees/s1' && mkdir -p .tddy/agents && printf %s "$$" > '.tddy/agents/s1.pid' && exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" TERM='\''xterm-256color'\'' COLORTERM='\''truecolor'\'' ANTHROPIC_MODEL='\''opus'\'' '\''claude'\'' '\''--model'\'' '\''opus'\'''"#
         );
     }
 
@@ -617,6 +623,24 @@ mod tests {
 
         // Then the agent ran in that worktree
         assert_eq!(printed.trim_end(), worktree.to_string_lossy());
+    }
+
+    /// Findings: docs/dev/changesets/2026-11-22-coder-target-back-channel.md, problem 6
+    /// — on 2026-11-22 the Coder probe's terminal had no colour run at all (`ReadSessionTerminal`
+    /// `styles: []` on every row) while the local probe's had them: `env -i` leaves the agent no
+    /// `TERM`, so Claude Code renders monochrome. The local route's PTY names its terminal
+    /// (`tddy_pty::runtime::set_terminal_variables`); the target's agent must be told the same.
+    #[test]
+    fn the_agent_on_a_target_is_told_the_terminal_it_draws_on() {
+        // Given an agent that prints the terminal it was told it runs in
+        let (_dir, worktree) = a_worktree_named("worktree");
+        let argv = strings(&["/bin/sh", "-c", r#"printf '%s|%s' "$TERM" "$COLORTERM""#]);
+
+        // When its remote command is run by a shell
+        let printed = printed_by(&remote_agent_command(&worktree, "s1", &argv, &[]));
+
+        // Then it is the terminal the daemon's PTY emulates, colours included
+        assert_eq!(printed, "xterm-256color|truecolor");
     }
 
     #[test]
@@ -671,13 +695,16 @@ mod tests {
         seen.sort_unstable();
 
         // Then the agent has the target's `HOME`, `PATH` and `TMPDIR`, as the target's login
-        // shell expanded them, and the one variable the command carries, and nothing of the login
+        // shell expanded them, the terminal the daemon's PTY emulates, and the one variable the
+        // command carries, and nothing of the login
         assert_eq!(
             seen,
             vec![
+                "COLORTERM=truecolor",
                 "HOME=/home/target",
                 "PATH=/usr/bin:/bin",
                 "ROUTE_BASE_URL=https://route.example",
+                "TERM=xterm-256color",
                 "TMPDIR=/target/tmp",
             ]
         );

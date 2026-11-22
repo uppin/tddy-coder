@@ -17,3 +17,14 @@ crate depends on it.
 
 A host document attached by reference is read through `ReadHostDocument` with the scope `types.proto` defines
 once (`HostDocumentScope`), which `connection.proto` and `session_files.proto` both import.
+
+## Naming the attachments in the first prompt
+
+`attachment_prompt::attachments_prompt_line(materialized, home)` names every attachment that
+**materialized** by the path its agent reads it at: `AttachmentHome::SessionDir` — the absolute path
+under `<session dir>/artifacts/attachments/` — for an agent on this host, and
+`AttachmentHome::TargetWorktree` — `.tddy/attachments/<basename>` (`TARGET_ATTACHMENTS_DIR`),
+relative to the worktree — for one on a target, whose start copies the files there
+(`tddy-agent-launch` `remote_attachments`). `tddy_session_split::attached_initial_prompt` appends the
+line to a CLI start's first prompt, after the stack changeset line. Before it, nothing told an agent
+its attachments existed.

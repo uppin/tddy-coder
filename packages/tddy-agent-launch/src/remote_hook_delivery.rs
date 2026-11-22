@@ -120,6 +120,7 @@ impl ActivityHookSink {
                 request_id,
                 permission_suggestions: line.payload.get("permission_suggestions").cloned(),
                 question_input: line.question_input(),
+                event: line.event.clone(),
                 window_ends: crate::remote_hook_answer::hook_window_end(*answer_wait_secs),
             },
         ));

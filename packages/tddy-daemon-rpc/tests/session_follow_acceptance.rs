@@ -67,11 +67,14 @@ fn a_call(seq: u64) -> AgentActivityRecord {
         completed_unix_ms: 1_700_000_000_500 + seq,
         source: "claude-cli".to_string(),
         head_commit: String::new(),
-        activity_seq: seq,
+        // As `ReportAgentActivity` persists every row: no tick of a session room has covered it.
+        activity_seq: 0,
         changed_paths: Vec::new(),
     }
 }
 
+/// Record one finished call per `seq`, one row each — so each call's `log_seq`, the line of its row
+/// in the log, is its `seq`.
 fn record_calls(host: &Host, session_id: &str, seqs: std::ops::RangeInclusive<u64>) {
     let dir = session_dir(host, session_id);
     for seq in seqs {
@@ -103,12 +106,13 @@ impl World {
     }
 }
 
+/// The `log_seq` of every item of an activity page: where each call's latest row is in the log.
 fn activity_seqs(page: &serde_json::Value) -> Vec<u64> {
     page["items"]
         .as_array()
         .expect("an items array")
         .iter()
-        .map(|item| item["activity_seq"].as_u64().unwrap())
+        .map(|item| item["log_seq"].as_u64().unwrap())
         .collect()
 }
 

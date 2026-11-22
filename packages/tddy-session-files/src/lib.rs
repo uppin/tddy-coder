@@ -27,6 +27,7 @@
 //! something else on the way out.
 
 pub mod attachment_progress;
+pub mod attachment_prompt;
 pub mod context_files;
 pub mod context_sync;
 pub mod host_documents;

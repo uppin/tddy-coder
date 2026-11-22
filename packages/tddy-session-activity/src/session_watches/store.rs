@@ -299,8 +299,13 @@ impl SessionWatchStore {
         let mut state = project.lock().await;
         let ended_some = end_finished(&mut state, recipient, log, now_unix_ms);
         let position = inbox_position_of(&state, recipient);
-        let (records, lost) =
-            log.records_after(&recipient.project_id, &recipient.os_user, start_seq);
+        let (records, _) = log.records_after(&recipient.project_id, &recipient.os_user, start_seq);
+        let lost = log.messages_lost_after(
+            &recipient.project_id,
+            &recipient.os_user,
+            &recipient.session_id,
+            start_seq,
+        );
         let mut handed: Vec<InboxMessage> = Vec::new();
         let mut newest = position;
         let mut has_more = false;

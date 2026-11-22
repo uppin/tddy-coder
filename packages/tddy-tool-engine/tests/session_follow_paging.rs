@@ -2,35 +2,48 @@
 //! cursor returns exactly what is new (`#start-parity` 6/9).
 
 use pretty_assertions::assert_eq;
-use tddy_core::agent_activity::AgentActivityRecord;
+use tddy_core::agent_activity::{
+    append_agent_activity, read_all_sequenced_agent_activity, AgentActivityRecord,
+    SequencedActivity,
+};
 use tddy_tool_engine::session_follow::{
     page_activity, session_follow_tool_defs, truncate_transcript_text, FOLLOW_PAGE_DEFAULT,
     FOLLOW_PAGE_MAX, READ_SESSION_ACTIVITY, READ_SESSION_TRANSCRIPT, TRANSCRIPT_ITEM_MAX_BYTES,
 };
 
-fn a_call(seq: u64, status: &str) -> AgentActivityRecord {
+/// The row of call `n`, as `ReportAgentActivity` persists it: no session-room tick has covered it,
+/// so its `activity_seq` is 0 — which is why paging is by `log_seq`, never by it.
+fn a_row(n: u64, status: &str) -> AgentActivityRecord {
     AgentActivityRecord {
-        call_id: format!("call-{seq}"),
+        call_id: format!("call-{n}"),
         tool_name: "Bash".to_string(),
-        input: serde_json::json!({ "command": format!("echo {seq}") }),
+        input: serde_json::json!({ "command": format!("echo {n}") }),
         status: status.to_string(),
         result: serde_json::Value::Null,
         error_message: String::new(),
-        started_unix_ms: 1_000 + seq,
-        completed_unix_ms: 2_000 + seq,
+        started_unix_ms: 1_000 + n,
+        completed_unix_ms: 2_000 + n,
         source: "claude-cli".to_string(),
         head_commit: String::new(),
-        activity_seq: seq,
+        activity_seq: 0,
         changed_paths: Vec::new(),
     }
 }
 
-fn calls(seqs: std::ops::RangeInclusive<u64>) -> Vec<AgentActivityRecord> {
+/// Call `seq`, whose latest row is line `seq` of the log.
+fn a_call(seq: u64, status: &str) -> SequencedActivity {
+    SequencedActivity {
+        log_seq: seq,
+        record: a_row(seq, status),
+    }
+}
+
+fn calls(seqs: std::ops::RangeInclusive<u64>) -> Vec<SequencedActivity> {
     seqs.map(|seq| a_call(seq, "completed")).collect()
 }
 
-fn seqs(page: &[AgentActivityRecord]) -> Vec<u64> {
-    page.iter().map(|r| r.activity_seq).collect()
+fn seqs(page: &[SequencedActivity]) -> Vec<u64> {
+    page.iter().map(|call| call.log_seq).collect()
 }
 
 #[test]
@@ -52,7 +65,7 @@ fn activity_pages_forward_without_repeats_or_gaps() {
     let together: Vec<u64> = [first.items, second.items, third.items]
         .concat()
         .iter()
-        .map(|r| r.activity_seq)
+        .map(|call| call.log_seq)
         .collect();
     assert_eq!(together, (1..=250).collect::<Vec<_>>());
 }
@@ -167,4 +180,105 @@ fn both_tools_state_the_paging_contract_in_their_schemas() {
         );
         assert_eq!(schema["required"], serde_json::json!(["session_id"]));
     }
+}
+
+/// A session's log, read as `ReadSessionActivity` reads it.
+struct ASessionLog(tempfile::TempDir);
+
+impl ASessionLog {
+    fn new() -> Self {
+        Self(tempfile::tempdir().unwrap())
+    }
+
+    /// The hooks record `row`.
+    fn records(&self, row: &AgentActivityRecord) -> &Self {
+        append_agent_activity(self.0.path(), row).unwrap();
+        self
+    }
+
+    fn calls(&self) -> Vec<SequencedActivity> {
+        read_all_sequenced_agent_activity(self.0.path()).unwrap()
+    }
+}
+
+fn call_ids_and_statuses(page: &[SequencedActivity]) -> Vec<(String, String)> {
+    page.iter()
+        .map(|call| (call.record.call_id.clone(), call.record.status.clone()))
+        .collect()
+}
+
+/// Findings: docs/dev/changesets/2026-11-22-coder-target-back-channel.md, problem 2
+/// — every persisted row carries `activity_seq` 0, so paging by it answered `next_cursor: "0"` and
+/// then nothing, forever.
+#[test]
+fn a_poll_from_the_last_cursor_returns_the_calls_hooks_recorded_since() {
+    // Given the calls a session's hooks recorded, read once
+    let log = ASessionLog::new();
+    for n in 1..=3 {
+        log.records(&a_row(n, "completed"));
+    }
+    let read = page_activity(&log.calls(), "", None, &[]).unwrap();
+    assert_eq!(read.items.len(), 3);
+
+    // When two more calls are recorded and the follower polls from where it stopped
+    log.records(&a_row(4, "completed"))
+        .records(&a_row(5, "completed"));
+    let poll = page_activity(&log.calls(), &read.next_cursor, None, &[]).unwrap();
+
+    // Then it gets exactly those two
+    assert_eq!(
+        call_ids_and_statuses(&poll.items),
+        vec![
+            ("call-4".to_string(), "completed".to_string()),
+            ("call-5".to_string(), "completed".to_string())
+        ],
+        "next_cursor was {:?}",
+        read.next_cursor
+    );
+}
+
+#[test]
+fn a_call_read_while_running_is_returned_again_once_it_finishes() {
+    // Given a call read while it was still running
+    let log = ASessionLog::new();
+    log.records(&a_row(1, "running"));
+    let read = page_activity(&log.calls(), "", None, &[]).unwrap();
+
+    // When its completion is recorded, and the follower polls
+    log.records(&a_row(1, "completed"));
+    let poll = page_activity(&log.calls(), &read.next_cursor, None, &[]).unwrap();
+
+    // Then the poll hands the call over again, finished
+    assert_eq!(
+        call_ids_and_statuses(&poll.items),
+        vec![("call-1".to_string(), "completed".to_string())]
+    );
+}
+
+#[test]
+fn successive_pages_of_hook_recorded_calls_advance_the_cursor() {
+    // Given more hook-recorded calls than one page holds
+    let log = ASessionLog::new();
+    for n in 1..=5 {
+        log.records(&a_row(n, "completed"));
+    }
+
+    // When read two at a time
+    let first = page_activity(&log.calls(), "", Some(2), &[]).unwrap();
+    let second = page_activity(&log.calls(), &first.next_cursor, Some(2), &[]).unwrap();
+
+    // Then the second page continues where the first stopped, under a cursor of its own
+    assert_eq!(
+        (
+            call_ids_and_statuses(&second.items)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            second.next_cursor != first.next_cursor,
+        ),
+        (vec!["call-3".to_string(), "call-4".to_string()], true),
+        "cursors: {:?} then {:?}",
+        first.next_cursor,
+        second.next_cursor
+    );
 }

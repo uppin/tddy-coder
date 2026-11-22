@@ -164,11 +164,13 @@ async fn try_run_session_hook(args: SessionHookArgs) -> anyhow::Result<()> {
             .unwrap_or_default();
         let tool_name = parsed.as_ref().and_then(|ev| ev.tool_name.as_deref());
         if !request_id.is_empty() {
+            // A question is answered in the shape of the hook holding it — `PreToolUse` first,
+            // then `PermissionRequest` once that hold has ended — never as a permission.
             let decision = match (hook_event_name, tool_name) {
-                ("PermissionRequest", _) => await_decision(&args, &stdin_buf, request_id).await?,
-                ("PreToolUse", Some(ASK_USER_QUESTION_TOOL)) => {
-                    await_question_decision(&args, &stdin_buf, request_id).await?
+                (event @ ("PreToolUse" | "PermissionRequest"), Some(ASK_USER_QUESTION_TOOL)) => {
+                    await_question_decision(&args, &stdin_buf, request_id, event).await?
                 }
+                ("PermissionRequest", _) => await_decision(&args, &stdin_buf, request_id).await?,
                 _ => None,
             };
             if let Some(decision) = decision {

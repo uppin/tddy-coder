@@ -108,6 +108,10 @@
             # and their daemon acceptance tests drive a real tmux on a private socket — declared so
             # CI has it rather than relying on one that happens to be on a developer's PATH.
             pkgs.tmux
+            # A Coder workspace's (and a macOS host's) login shell: the target back-channel suite
+            # (`tddy-agent-launch` tests/target_back_channel_shell_acceptance.rs) runs a child's
+            # report command under zsh, which runs a pipeline's last element in the current shell.
+            pkgs.zsh
             pkgs.bun
             pkgs.nodejs_20
             pkgs.util-linux

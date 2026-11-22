@@ -10,6 +10,7 @@ pub mod exit_status;
 pub mod registry;
 pub mod resize;
 pub mod runtime;
+pub mod terminal_variables;
 
 pub use bytes::{self, Bytes};
 pub use exit_status::ExitCodeInOutput;
