@@ -2,7 +2,7 @@
 //! dependency edges, cycles refused.
 
 use pretty_assertions::assert_eq;
-use tddy_core::changeset::{WorkQueue, WorkItem};
+use tddy_core::changeset::{WorkItem, WorkQueue};
 use tddy_work_queue::lineage::{
     dependencies_of, line_endpoint_of_base, planned_line_parent, set_dependencies, DependencyEdge,
     LineEndpoint, LineageError,

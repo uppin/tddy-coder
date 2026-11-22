@@ -32,6 +32,49 @@ pub enum LineEndpoint {
     External(String),
 }
 
+impl LineEndpoint {
+    /// The wire's kind of this endpoint: `item`, `trunk` or `external`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Item(_) => "item",
+            Self::Trunk(_) => "trunk",
+            Self::External(_) => "external",
+        }
+    }
+
+    /// The item id, or the branch name.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Item(name) | Self::Trunk(name) | Self::External(name) => name,
+        }
+    }
+}
+
+/// A queue's whole lineage: each item's line endpoint and the stored dependency edges.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueGraph {
+    pub line: Vec<(String, LineEndpoint)>,
+    pub dependencies: Vec<DependencyEdge>,
+}
+
+impl std::fmt::Display for LineageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoSuchItem(id) => write!(f, "item '{id}' not found"),
+            Self::Cycle(path) => write!(
+                f,
+                "these dependencies would close a cycle: {}",
+                path.join(" -> ")
+            ),
+        }
+    }
+}
+
+/// The trunk's branch name from the project's integration base ref (`origin/main` → `main`).
+pub fn trunk_branch_of(integration_base_ref: &str) -> &str {
+    tddy_git::local_branch_name_for_remote(integration_base_ref, "origin")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LineageError {
     NoSuchItem(String),
@@ -101,6 +144,32 @@ pub async fn line_edges_through_inbox(
         }
     }
     edges
+}
+
+/// Every item's planned line endpoint — what the line shows when no PR can be read.
+pub fn planned_line_edges(queue: &WorkQueue, trunk: &str) -> Vec<(String, LineEndpoint)> {
+    queue
+        .nodes
+        .iter()
+        .filter_map(|item| {
+            planned_line_parent(queue, &item.node_id, trunk)
+                .ok()
+                .map(|endpoint| (item.node_id.clone(), endpoint))
+        })
+        .collect()
+}
+
+/// The queue's lineage: line edges through the inbox, dependency edges as stored.
+pub async fn queue_graph(
+    inbox: &GithubInbox,
+    repo: &RepoSlug,
+    queue: &WorkQueue,
+    trunk: &str,
+) -> QueueGraph {
+    QueueGraph {
+        line: line_edges_through_inbox(inbox, repo, queue, trunk).await,
+        dependencies: dependencies_of(queue),
+    }
 }
 
 /// Replace what `item_id` needs; refused when an item is unknown or the edges would close a cycle.

@@ -579,4 +579,24 @@ impl WorkQueueService for TestDaemon {
             .clear_work_item_badge(request)
             .await
     }
+
+    async fn set_work_queue_dependencies(
+        &self,
+        request: Request<tddy_service::proto::work_queue::SetWorkQueueDependenciesRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .set_work_queue_dependencies(request)
+            .await
+    }
+
+    async fn get_work_queue_graph(
+        &self,
+        request: Request<tddy_service::proto::work_queue::GetWorkQueueGraphRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkQueueGraphResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .get_work_queue_graph(request)
+            .await
+    }
 }

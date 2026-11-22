@@ -687,6 +687,20 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         self.clear_work_item_badge_rpc(request).await
     }
 
+    async fn set_work_queue_dependencies(
+        &self,
+        request: Request<tddy_service::proto::work_queue::SetWorkQueueDependenciesRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.set_work_queue_dependencies_rpc(request).await
+    }
+
+    async fn get_work_queue_graph(
+        &self,
+        request: Request<tddy_service::proto::work_queue::GetWorkQueueGraphRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkQueueGraphResponse>, Status> {
+        self.get_work_queue_graph_rpc(request).await
+    }
+
     /// Take a base branch's commits into a planned node's branch, inside that node's own worktree,
     /// and push the result.
     ///
