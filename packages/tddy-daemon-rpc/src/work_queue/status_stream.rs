@@ -6,10 +6,8 @@ use super::project_stacks::{store_status, work_queue_target, WorkQueueTarget};
 use super::WorkQueueRpcHandler;
 use tddy_github_inbox::EventKind;
 use tddy_rpc::{Request, Response, Status};
-use tddy_service::proto::work_queue::{
-    PrStatusView, StreamWorkQueueStatusRequest, WorkItemStatus, WorkQueueStatusView,
-};
-use tddy_work_queue::inbox_reads::{item_check_summaries, pr_status_view_through_inbox};
+use tddy_service::proto::work_queue::{StreamWorkQueueStatusRequest, WorkQueueStatusView};
+use tddy_work_queue::inbox_reads::work_queue_status_view;
 use tddy_work_queue::rpc::WorkQueueStatusStream;
 
 impl WorkQueueRpcHandler {
@@ -58,37 +56,15 @@ impl WorkQueueRpcHandler {
             .subscribe(&site.repo, &[EventKind::Pr, EventKind::Checks]);
         tokio::spawn(async move {
             loop {
-                let Ok(record) = store.read(&address.project_id, &address.queue_id) else {
-                    return;
+                // A queue deleted while it is viewed ends the stream with the store's reason.
+                let record = match store.read(&address.project_id, &address.queue_id) {
+                    Ok(record) => record,
+                    Err(error) => {
+                        let _ = tx.send(Err(store_status(error)));
+                        return;
+                    }
                 };
-                let summaries = item_check_summaries(&site.inbox, &site.repo, &record.stack).await;
-                let mut items = Vec::new();
-                for item in &record.stack.nodes {
-                    let branch = item
-                        .pr
-                        .as_ref()
-                        .map(|pr| pr.head_branch.as_str())
-                        .or(item.branch.as_deref());
-                    let pr = match branch {
-                        Some(branch) => {
-                            pr_status_view_through_inbox(&site.inbox, &site.repo, branch).await
-                        }
-                        None => PrStatusView::default(),
-                    };
-                    let checks = summaries.iter().find(|s| s.item_id == item.node_id);
-                    items.push(WorkItemStatus {
-                        item_id: item.node_id.clone(),
-                        pr: Some(pr),
-                        has_checks: checks.is_some(),
-                        checks_running: checks.map_or(0, |c| c.running),
-                        checks_failed: checks.map_or(0, |c| c.failed),
-                        checks_succeeded: checks.map_or(0, |c| c.succeeded),
-                    });
-                }
-                let view = WorkQueueStatusView {
-                    items,
-                    unavailable_reason: String::new(),
-                };
+                let view = work_queue_status_view(&site.inbox, &site.repo, &record.stack).await;
                 if tx.send(Ok(view)).is_err() {
                     return;
                 }

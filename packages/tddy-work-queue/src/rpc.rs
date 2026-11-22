@@ -115,46 +115,32 @@ pub trait WorkQueueHandler: Send + Sync {
     /// `#workqueue` 6/14: assign an existing PR to a work item.
     async fn assign_work_item_pr(
         &self,
-        _request: Request<AssignWorkItemPrRequest>,
-    ) -> Result<Response<WorkItemLinksResponse>, Status> {
-        // TODO(n6 pr-and-session-link): implement in the daemon's handler.
-        Err(Status::unimplemented("TODO(n6): AssignWorkItemPr"))
-    }
+        request: Request<AssignWorkItemPrRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status>;
 
     /// `#workqueue` 6/14: remove a work item's assigned PR.
     async fn unassign_work_item_pr(
         &self,
-        _request: Request<UnassignWorkItemPrRequest>,
-    ) -> Result<Response<WorkItemLinksResponse>, Status> {
-        // TODO(n6 pr-and-session-link): implement in the daemon's handler.
-        Err(Status::unimplemented("TODO(n6): UnassignWorkItemPr"))
-    }
+        request: Request<UnassignWorkItemPrRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status>;
 
     /// `#workqueue` 6/14: link a tddy session to a work item.
     async fn link_work_item_session(
         &self,
-        _request: Request<LinkWorkItemSessionRequest>,
-    ) -> Result<Response<WorkItemLinksResponse>, Status> {
-        // TODO(n6 pr-and-session-link): implement in the daemon's handler.
-        Err(Status::unimplemented("TODO(n6): LinkWorkItemSession"))
-    }
+        request: Request<LinkWorkItemSessionRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status>;
 
     /// `#workqueue` 6/14: unlink a tddy session from a work item.
     async fn unlink_work_item_session(
         &self,
-        _request: Request<UnlinkWorkItemSessionRequest>,
-    ) -> Result<Response<WorkItemLinksResponse>, Status> {
-        // TODO(n6 pr-and-session-link): implement in the daemon's handler.
-        Err(Status::unimplemented("TODO(n6): UnlinkWorkItemSession"))
-    }
+        request: Request<UnlinkWorkItemSessionRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status>;
 
     /// `#workqueue` 6/14: the queue's PR state and check counts, live from the GitHub inbox.
     async fn stream_work_queue_status(
         &self,
-        _request: Request<StreamWorkQueueStatusRequest>,
-    ) -> Result<Response<WorkQueueStatusStream>, Status> {
-        Err(Status::unimplemented("StreamWorkQueueStatus"))
-    }
+        request: Request<StreamWorkQueueStatusRequest>,
+    ) -> Result<Response<WorkQueueStatusStream>, Status>;
 }
 
 /// Thin `WorkQueueService` adapter over a [`WorkQueueHandler`].

@@ -28,6 +28,27 @@ pub enum ItemLinkError {
     },
 }
 
+impl std::fmt::Display for ItemLinkError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoSuchItem(item) => write!(f, "item '{item}' not found"),
+            Self::BranchMismatch {
+                item_branch,
+                pr_branch,
+            } => write!(
+                f,
+                "the pull request is on branch '{pr_branch}', but the item records branch \
+                 '{item_branch}' — assign a PR on the item's own branch"
+            ),
+            Self::NotLinked { session_id } => {
+                write!(f, "session {session_id} is not linked to the item")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ItemLinkError {}
+
 fn item_mut<'q>(
     queue: &'q mut WorkQueue,
     item_id: &str,

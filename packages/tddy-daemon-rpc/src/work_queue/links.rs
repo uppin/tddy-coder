@@ -16,19 +16,14 @@ use tddy_service::proto::work_queue::{
 };
 use tddy_work_queue::item_ops::item_links::{self, ItemLinkError};
 
+/// A refused link edit as the RPC status its kind calls for, worded by the error itself.
 fn link_refusal(error: ItemLinkError) -> Status {
+    let message = error.to_string();
     match error {
-        ItemLinkError::NoSuchItem(item) => Status::not_found(format!("item '{item}' not found")),
-        ItemLinkError::BranchMismatch {
-            item_branch,
-            pr_branch,
-        } => Status::failed_precondition(format!(
-            "the pull request is on branch '{pr_branch}', but the item records branch \
-             '{item_branch}' — assign a PR on the item's own branch"
-        )),
-        ItemLinkError::NotLinked { session_id } => {
-            Status::not_found(format!("session {session_id} is not linked to the item"))
+        ItemLinkError::NoSuchItem(_) | ItemLinkError::NotLinked { .. } => {
+            Status::not_found(message)
         }
+        ItemLinkError::BranchMismatch { .. } => Status::failed_precondition(message),
     }
 }
 

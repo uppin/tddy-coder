@@ -23,6 +23,7 @@ use super::github::GithubSource;
 use super::shape::{work_pr_comments_json, work_pr_read_json, work_pr_search_json};
 
 /// The stack an operation acts on, and where the host keeps it.
+#[derive(Clone)]
 pub(super) struct OpEnv {
     pub(super) store: WorkQueueStore,
     pub(super) project_id: String,
@@ -238,7 +239,7 @@ fn edit_links(
         })
         .map_err(|e| format!("link: {e}"))?;
     if let Some(error) = refused {
-        return Err(format!("{error:?}"));
+        return Err(error.to_string());
     }
     let stack = env.stack()?;
     Ok(json!({

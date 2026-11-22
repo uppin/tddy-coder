@@ -243,13 +243,7 @@ impl DaemonStackTools {
     }
 
     async fn refresh_through_inbox(&self, env: &OpEnv, github: GithubSource) -> Result<(), String> {
-        let project_id = env.project_id.clone();
-        let read_env = OpEnv {
-            store: env.store.clone(),
-            project_id: env.project_id.clone(),
-            queue_id: env.queue_id.clone(),
-            sessions_base: env.sessions_base.clone(),
-        };
+        let read_env = env.clone();
         let inputs = tokio::task::spawn_blocking(move || ops::refresh_inputs(&read_env, &github))
             .await
             .map_err(|e| format!("the status refresh failed to finish: {e}"))??;
@@ -258,7 +252,7 @@ impl DaemonStackTools {
             .site_for_session(
                 &self.os_user,
                 &self.caller_session_id,
-                &project_id,
+                &env.project_id,
                 &self.session_token,
             )
             .map_err(|status| status.message().to_string())?;
@@ -271,12 +265,7 @@ impl DaemonStackTools {
         )
         .await
         .map_err(|e| format!("assemble views: {e}"))?;
-        let persist_env = OpEnv {
-            store: env.store.clone(),
-            project_id: env.project_id.clone(),
-            queue_id: env.queue_id.clone(),
-            sessions_base: env.sessions_base.clone(),
-        };
+        let persist_env = env.clone();
         let default_branch = inputs.default_branch;
         tokio::task::spawn_blocking(move || {
             ops::persist_derived_statuses(&persist_env, &views, &default_branch)

@@ -144,3 +144,20 @@ fn a_link_on_an_unknown_item_is_refused() {
     // Then
     assert_eq!(refused, Err(ItemLinkError::NoSuchItem("n9".to_string())));
 }
+
+#[test]
+fn an_item_with_an_assigned_pr_is_addressed_by_that_pr_number() {
+    // Given — an item whose recorded status URL names another PR than the one assigned to it
+    let mut queue = a_queue_with(&[("n1", None)]);
+    queue.nodes[0].pr_status = Some(tddy_core::changeset::GithubPrStatus {
+        url: Some("https://github.com/acme/app/pull/3".to_string()),
+        ..Default::default()
+    });
+    assign_pr(&mut queue, "n1", pr_7_on("feat/one")).expect("assigned");
+
+    // When
+    let number = tddy_work_queue::pr_insight::pull_number_for_node(&queue, "n1");
+
+    // Then — the assigned PR wins
+    assert_eq!(number, Ok(7));
+}

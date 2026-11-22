@@ -9,7 +9,7 @@ use std::path::Path;
 use tddy_core::changeset::{resolve_stack_node_branch, WorkQueue};
 use tddy_github::pr_api::{CheckStatus, PrState};
 use tddy_github_inbox::{GithubInbox, InboxError, RepoSlug};
-use tddy_service::proto::work_queue::PrStatusView;
+use tddy_service::proto::work_queue::{PrStatusView, WorkItemStatus, WorkQueueStatusView};
 
 use crate::assess::{self, NodeView};
 
@@ -125,6 +125,41 @@ pub async fn item_check_summaries(
         summaries.push(summary);
     }
     summaries
+}
+
+/// One snapshot of `StreamWorkQueueStatus`: every item's PR state (its assigned PR's head branch, else
+/// its own branch) and, for a PR'ed item, its check counts.
+pub async fn work_queue_status_view(
+    inbox: &GithubInbox,
+    repo: &RepoSlug,
+    queue: &WorkQueue,
+) -> WorkQueueStatusView {
+    let summaries = item_check_summaries(inbox, repo, queue).await;
+    let mut items = Vec::with_capacity(queue.nodes.len());
+    for item in &queue.nodes {
+        let branch = item
+            .pr
+            .as_ref()
+            .map(|pr| pr.head_branch.as_str())
+            .or(item.branch.as_deref());
+        let pr = match branch {
+            Some(branch) => pr_status_view_through_inbox(inbox, repo, branch).await,
+            None => PrStatusView::default(),
+        };
+        let checks = summaries.iter().find(|s| s.item_id == item.node_id);
+        items.push(WorkItemStatus {
+            item_id: item.node_id.clone(),
+            pr: Some(pr),
+            has_checks: checks.is_some(),
+            checks_running: checks.map_or(0, |c| c.running),
+            checks_failed: checks.map_or(0, |c| c.failed),
+            checks_succeeded: checks.map_or(0, |c| c.succeeded),
+        });
+    }
+    WorkQueueStatusView {
+        items,
+        unavailable_reason: String::new(),
+    }
 }
 
 fn pr_state_label(state: PrState) -> &'static str {
