@@ -12,14 +12,18 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{
-    AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, ClearWorkItemBadgeRequest, GetPrStatusRequest, GetPrStatusResponse, GetWorkItemCommitFlowRequest, GetWorkQueueGraphRequest, GetWorkQueueRequest,
-    GetWorkQueueResponse, GetWorkQueueWavesRequest, LinkWorkItemRequest, LinkWorkItemResponse,
-    LinkWorkItemSessionRequest, ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse,
-    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
-    ReorderWorkItemRequest, ReorderWorkItemResponse, RepointWorkItemRequest,
-    RepointWorkItemResponse, ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse,
-    SetWorkItemBadgeRequest, SetWorkItemLabelsRequest, SetWorkQueueDependenciesRequest, StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest, UnlinkWorkItemSessionRequest, WorkItemInboxResponse, WorkItemLinksResponse, WorkItemOutboxResponse, WorkQueueCommitCountsResponse, WorkQueueGraphResponse, WorkQueueService, WorkQueueStatusView,
-    WorkQueueWavesResponse,
+    AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, ClearWorkItemBadgeRequest,
+    GetPrStatusRequest, GetPrStatusResponse, GetWorkItemCommitFlowRequest,
+    GetWorkQueueGraphRequest, GetWorkQueueRequest, GetWorkQueueResponse, GetWorkQueueWavesRequest,
+    LinkWorkItemRequest, LinkWorkItemResponse, LinkWorkItemSessionRequest,
+    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest,
+    ReorderWorkItemResponse, RepointWorkItemRequest, RepointWorkItemResponse,
+    ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse, SetWorkItemBadgeRequest,
+    SetWorkItemLabelsRequest, SetWorkQueueDependenciesRequest, StreamWorkQueueStatusRequest,
+    UnassignWorkItemPrRequest, UnlinkWorkItemSessionRequest, WorkItemInboxResponse,
+    WorkItemLinksResponse, WorkItemOutboxResponse, WorkQueueCommitCountsResponse,
+    WorkQueueGraphResponse, WorkQueueService, WorkQueueStatusView, WorkQueueWavesResponse,
 };
 
 /// The frames of `StreamWorkQueueStatus`: a channel the handler's task feeds, ended when either side

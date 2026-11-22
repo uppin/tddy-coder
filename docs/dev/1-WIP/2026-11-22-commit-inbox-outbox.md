@@ -79,12 +79,6 @@ Published (pass 2, commit 2):
 `inbox(item)` covers **every** line ancestor (`⋃ origin/<item>..origin/<a>`), not just the parent: a
 commit pushed to n1 is in n3's inbox before n2 has taken it.
 
-## Stack note (temporary)
-
-This branch is rebased onto n9 lineage-graph (`a3c8b3491`), which itself skips n7/n8 for now. n10's
-contract is **not** on this branch: rebase onto n10 before n11's [W]. n10's surfaces are not
-implemented here.
-
 ## Green wave
 
 **Wave:** 6 of 8

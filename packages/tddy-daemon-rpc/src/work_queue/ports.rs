@@ -706,7 +706,6 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         request: Request<tddy_service::proto::work_queue::GetWorkQueueWavesRequest>,
     ) -> Result<Response<tddy_service::proto::work_queue::WorkQueueWavesResponse>, Status> {
         self.get_work_queue_waves_rpc(request).await
-
     }
 
     async fn get_work_item_inbox(
