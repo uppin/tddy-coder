@@ -91,11 +91,21 @@ blockers lead: n1 (12 transitive dependents) before n2 (8); n3 (10) before n4 (3
 and n8 (0 each); n10 and n11 (2 each — tie, kept in plan order) before n12 (0). The sweep node is
 reserved and planned after the pipelines drain.
 
+## Green progress (paused at G:resume)
+
+Done and pushed: the `waves` module (6 unit tests), the `work_queue_waves` tool definition (1 test),
+`WaveLanes` (2 Cypress tests).
+
+Remains, and stays in this node: the `GetWorkQueueWaves` RPC, `WorkItemStatus.{wave, binding_needs}`,
+the proto and closed lists, the daemon-rpc handler, the tool-path wiring, and routing
+`waves::cycle_among` through n9's `detect_cycle` (`TODO(n9)`). It waits for n9's green
+(`lineage::dependencies_of` and `detect_cycle` are still stubs); resume then: rebase onto n9, finish.
+
 ## Scope
 
-- [ ] `waves` module
+- [x] `waves` module
 - [ ] Tool, RPC, status fields
-- [ ] Wave lanes, readiness, line-check banner
+- [x] Wave lanes, readiness, line-check banner
 - [ ] Docs updated through the wrap
 
 ## Technical Changes
@@ -115,9 +125,9 @@ As listed under Affected Packages.
 
 ## Implementation Milestones
 
-- [ ] `waves` module with unit tests
+- [x] `waves` module with unit tests
 - [ ] Tool + RPC + status
-- [ ] Web lanes
+- [x] Web lanes
 
 ## Testing Plan
 
@@ -173,7 +183,7 @@ _(populated by validation)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [ ] TDD Green — implement with quality code (partial, see Green progress)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
