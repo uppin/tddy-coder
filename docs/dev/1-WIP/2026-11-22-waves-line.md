@@ -33,13 +33,6 @@ Derived waves, blockers-first line, binding readiness and a line check over n9's
 Exploration 3 §4B.5: waves exist only in `tddy-build/src/graph.rs::waves` (not reusable across crates
 as-is); the queue has `topo_order`, `display_order`, `assess::decide_next_action`.
 
-## Stack note (temporary)
-
-This branch skips n7 and n8: it sits on n9's green (`a3c8b3491`), which is itself cut from n6's green,
-because n10's real dependency is n9. In the line it sits on n8 and n7, whose implementations are not done;
-their contract commits are not carried here. The branch is rebased onto n8 before n10's [W]. Remove this
-note then.
-
 ## Responsibility
 
 - The `waves` module and its five functions.
