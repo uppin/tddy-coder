@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 5 — git and GitHub mutations behind ports, ordering semantics (wave order, verify before next), a concurrent daemon runner firing schedules exactly once, fold-in of two existing tools, more than one crate
 **Stack**: `#workqueue` 14/14 — branch `feature/workqueue/land-propagate`, base `feature/workqueue/schedules`
+**PR**: [#1015](https://github.com/uppin/tddy-coder/pull/1015)
 
 ## Initial Discovery
 
@@ -68,9 +69,19 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: the engines' entry points and refusal types,
-both ports, `ScheduleRunner`'s interface, two tool and RPC definitions, the `WorkQueueChange` variants,
-web action test ids, and the failing tests below.
+Published (pass 2, commit 2):
+
+- `tddy_pr_stack::engine::{QueueGit, QueueGithub, LocalBranchState, EngineError, EngineRefusal,
+  PropagateRequest, Propagated, propagate, LandItem, LandReport, land}`
+- `tddy_pr_stack::schedule_runner::{FireSchedule, ScheduleRunner (new, on_change, is_armed)}` — in the
+  stack crate rather than daemon-rpc, so its exactly-once tests need no daemon harness; the daemon
+  drives it from inbox events and queue changes
+- `tddy_session_activity::work_queue_activity::WorkQueueChange::{Landed, Propagated, Refused,
+  ScheduleFired}` (n8's enum, extended as n8's Boundaries planned)
+- `tddy_tool_engine::work_queue_land_tools::{WORK_ITEM_PROPAGATE, WORK_QUEUE_LAND, work_queue_land_tool_defs}`
+- `tddy-prstack-web`: `LandWaves`, `PropagationRefusal` (shells)
+- The failing tests below. The git/GitHub adapters of the two ports, the fold-in of
+  `work_item_merge` / `work_item_repoint`, the RPCs and deleting the moved recipe functions are `/green`'s.
 
 ## Green wave
 
@@ -168,26 +179,31 @@ integration test proves `work_item_merge` now repoints successors.
 
 ## Acceptance Tests
 
-`packages/tddy-work-queue/tests/propagate_engine_acceptance.rs`:
-- [ ] `propagating_a_clean_inbox_rebases_onto_the_parent_tip_and_pushes_with_lease`
-- [ ] `a_dirty_unpushed_unpulled_or_diverged_branch_refuses_naming_state_and_actions`
-- [ ] `force_does_not_override_the_local_branch_gate`
-- [ ] `a_predicted_conflict_refuses_unless_forced`
-- [ ] `a_changed_line_parent_retargets_the_pr_base`
+`packages/tddy-pr-stack/tests/land_propagate_engine_acceptance.rs` (port doubles; crate renamed by n3):
+- [x] `propagating_a_clean_inbox_rebases_onto_the_parent_tip_and_pushes_with_lease`
+- [x] `a_dirty_unpushed_unpulled_or_diverged_branch_refuses_naming_state_and_actions`
+- [x] `force_does_not_override_the_local_branch_gate`
+- [x] `a_predicted_conflict_refuses_unless_forced`
+- [x] `a_changed_line_parent_retargets_the_pr_base`
 
-`packages/tddy-work-queue/tests/land_engine_acceptance.rs`:
-- [ ] `landing_two_waves_merges_in_derived_line_order_and_propagates_successors_between_merges`
-- [ ] `landing_stops_at_the_first_item_whose_conditions_are_not_met_and_names_it`
+- [x] `landing_two_waves_merges_in_derived_line_order_and_propagates_successors_between_merges`
+- [x] `landing_stops_at_the_first_item_whose_conditions_are_not_met_and_names_it`
 
-`packages/tddy-daemon-rpc/tests/work_queue_schedule_runner_acceptance.rs`:
-- [ ] `an_armed_merge_fires_once_when_its_last_condition_turns_met_and_disarms`
-- [ ] `concurrent_events_fire_a_schedule_exactly_once`
-- [ ] `work_item_merge_repoints_the_merged_items_successors`
-- [ ] `each_landing_and_refusal_reaches_the_owner_as_a_work_queue_activity`
+- [x] `merging_one_item_propagates_its_successors` (what `work_item_merge` does through `land`)
 
-`packages/tddy-workqueue-web/cypress/component/WorkQueueLandPropagateAcceptance.cy.tsx`:
-- [ ] `Land wave asks for the wave range and shows the result per item`
-- [ ] `a refused propagation shows the state and the actions that would fix it`
+`packages/tddy-pr-stack/tests/schedule_runner_acceptance.rs`:
+- [x] `an_armed_merge_fires_once_when_its_last_condition_turns_met_and_disarms`
+- [x] `concurrent_events_fire_a_schedule_exactly_once`
+
+`packages/tddy-tool-engine/tests/work_queue_land_tools.rs`:
+- [x] `propagate_takes_an_item_and_land_takes_a_wave_range`
+
+Activities on landings and refusals reaching the owner need n8's publisher; `/green` proves it in
+`work_queue_activity_acceptance.rs` with the new variants.
+
+`packages/tddy-prstack-web/cypress/component/WorkQueueLandPropagateAcceptance.cy.tsx` (renamed by n3):
+- [x] `Land wave asks for the wave range and shows the result per item`
+- [x] `a refused propagation shows the state and the actions that would fix it`
 
 ## Decisions & Trade-offs
 
@@ -217,10 +233,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

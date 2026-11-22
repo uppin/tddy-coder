@@ -45,6 +45,7 @@ pub mod work_item_commit_flow_tools;
 pub mod work_item_git_tools;
 pub mod work_item_link_tools;
 pub mod work_queue_access;
+pub mod work_queue_land_tools;
 pub mod work_queue_lineage_tools;
 pub mod work_queue_schedule_tools;
 pub mod work_queue_tools;

@@ -20,3 +20,4 @@ export {
   type WorkItemChainHealthProps,
 } from "./WorkItemChainHealth";
 export { SchedulesPanel, toScheduleViewModel, type ScheduleViewModel, type ScheduleConditionView } from "./SchedulesPanel";
+export { LandWaves, PropagationRefusal, type LandResultView } from "./LandAndPropagate";

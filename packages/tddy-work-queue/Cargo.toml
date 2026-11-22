@@ -32,4 +32,4 @@ tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 tempfile = "3"
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }
-tokio = { version = "1", features = ["rt", "macros", "sync"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
