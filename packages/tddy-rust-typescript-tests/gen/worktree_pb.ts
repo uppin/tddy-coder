@@ -10,7 +10,343 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file worktree.proto.
  */
 export const file_worktree: GenFile = /*@__PURE__*/
-  fileDesc("Cg53b3JrdHJlZS5wcm90bxIId29ya3RyZWUiYAocQ2FsY3VsYXRlV29ya3RyZWVTaXplUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCSI8Ch1DYWxjdWxhdGVXb3JrdHJlZVNpemVSZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIlgKFENsZWFuV29ya3RyZWVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJIjQKFUNsZWFuV29ya3RyZWVSZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJInIKHExpc3RXb3JrdHJlZURpcmVjdG9yeVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhUKDXdvcmt0cmVlX3BhdGgYAyABKAkSEAoIcmVsX3BhdGgYBCABKAkiTAodTGlzdFdvcmt0cmVlRGlyZWN0b3J5UmVzcG9uc2USKwoHZW50cmllcxgBIAMoCzIaLndvcmt0cmVlLldvcmt0cmVlRGlyRW50cnkiXAoeTGlzdFdvcmt0cmVlc0ZvclByb2plY3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIPCgdyZWZyZXNoGAMgASgIIksKH0xpc3RXb3JrdHJlZXNGb3JQcm9qZWN0UmVzcG9uc2USKAoJd29ya3RyZWVzGAEgAygLMhUud29ya3RyZWUuV29ya3RyZWVSb3cibQoXUmVhZFdvcmt0cmVlRmlsZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhUKDXdvcmt0cmVlX3BhdGgYAyABKAkSEAoIcmVsX3BhdGgYBCABKAkiVgoYUmVhZFdvcmt0cmVlRmlsZVJlc3BvbnNlEhQKDGNvbnRlbnRfdXRmOBgBIAEoCRIRCgl0cnVuY2F0ZWQYAiABKAgSEQoJYnl0ZV9zaXplGAMgASgEIlkKFVJlbW92ZVdvcmt0cmVlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCSI1ChZSZW1vdmVXb3JrdHJlZVJlc3BvbnNlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiXgodUmVzdG9yZVNlc3Npb25Xb3JrdHJlZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhIKCnNlc3Npb25faWQYAyABKAkiVAoeUmVzdG9yZVNlc3Npb25Xb3JrdHJlZVJlc3BvbnNlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCSJgChpTdHJlYW1Xb3JrdHJlZVN0YXRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFwoPcmVjYWxjdWxhdGVfYWxsGAMgASgIIkQKEFdvcmt0cmVlRGlyRW50cnkSDAoEbmFtZRgBIAEoCRIOCgZpc19kaXIYAiABKAgSEgoKc2l6ZV9ieXRlcxgDIAEoBCI6ChFXb3JrdHJlZUZpbGVDaHVuaxIMCgRkYXRhGAEgASgMEhcKD3RvdGFsX2J5dGVfc2l6ZRgCIAEoBCKKAgoLV29ya3RyZWVSb3cSDAoEcGF0aBgBIAEoCRIUCgxicmFuY2hfbGFiZWwYAiABKAkSEgoKZGlza19ieXRlcxgDIAEoBBIVCg1jaGFuZ2VkX2ZpbGVzGAQgASgNEhMKC2xpbmVzX2FkZGVkGAUgASgDEhUKDWxpbmVzX3JlbW92ZWQYBiABKAMSGgoSdXBkYXRlZF9hdF91bml4X21zGAcgASgDEg0KBXN0YWxlGAggASgIEjEKC3NpemVfc3RhdHVzGAkgASgOMhwud29ya3RyZWUuV29ya3RyZWVTaXplU3RhdHVzEiIKGnNpemVfY2FsY3VsYXRlZF9hdF91bml4X21zGAogASgDImUKEldvcmt0cmVlU3RhdHNFdmVudBInCghzbmFwc2hvdBgBIAMoCzIVLndvcmt0cmVlLldvcmt0cmVlUm93EiYKB3VwZGF0ZWQYAiABKAsyFS53b3JrdHJlZS5Xb3JrdHJlZVJvdyqgAQoSV29ya3RyZWVTaXplU3RhdHVzEiQKIFdPUktUUkVFX1NJWkVfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHQoZV09SS1RSRUVfU0laRV9TVEFUVVNfTk9ORRABEiQKIFdPUktUUkVFX1NJWkVfU1RBVFVTX0NBTENVTEFUSU5HEAISHwobV09SS1RSRUVfU0laRV9TVEFUVVNfQ0FDSEVEEAMy/QYKD1dvcmt0cmVlU2VydmljZRJuChdMaXN0V29ya3RyZWVzRm9yUHJvamVjdBIoLndvcmt0cmVlLkxpc3RXb3JrdHJlZXNGb3JQcm9qZWN0UmVxdWVzdBopLndvcmt0cmVlLkxpc3RXb3JrdHJlZXNGb3JQcm9qZWN0UmVzcG9uc2USUwoOUmVtb3ZlV29ya3RyZWUSHy53b3JrdHJlZS5SZW1vdmVXb3JrdHJlZVJlcXVlc3QaIC53b3JrdHJlZS5SZW1vdmVXb3JrdHJlZVJlc3BvbnNlElsKE1N0cmVhbVdvcmt0cmVlU3RhdHMSJC53b3JrdHJlZS5TdHJlYW1Xb3JrdHJlZVN0YXRzUmVxdWVzdBocLndvcmt0cmVlLldvcmt0cmVlU3RhdHNFdmVudDABEmgKFUNhbGN1bGF0ZVdvcmt0cmVlU2l6ZRImLndvcmt0cmVlLkNhbGN1bGF0ZVdvcmt0cmVlU2l6ZVJlcXVlc3QaJy53b3JrdHJlZS5DYWxjdWxhdGVXb3JrdHJlZVNpemVSZXNwb25zZRJQCg1DbGVhbldvcmt0cmVlEh4ud29ya3RyZWUuQ2xlYW5Xb3JrdHJlZVJlcXVlc3QaHy53b3JrdHJlZS5DbGVhbldvcmt0cmVlUmVzcG9uc2USawoWUmVzdG9yZVNlc3Npb25Xb3JrdHJlZRInLndvcmt0cmVlLlJlc3RvcmVTZXNzaW9uV29ya3RyZWVSZXF1ZXN0Gigud29ya3RyZWUuUmVzdG9yZVNlc3Npb25Xb3JrdHJlZVJlc3BvbnNlEmgKFUxpc3RXb3JrdHJlZURpcmVjdG9yeRImLndvcmt0cmVlLkxpc3RXb3JrdHJlZURpcmVjdG9yeVJlcXVlc3QaJy53b3JrdHJlZS5MaXN0V29ya3RyZWVEaXJlY3RvcnlSZXNwb25zZRJZChBSZWFkV29ya3RyZWVGaWxlEiEud29ya3RyZWUuUmVhZFdvcmt0cmVlRmlsZVJlcXVlc3QaIi53b3JrdHJlZS5SZWFkV29ya3RyZWVGaWxlUmVzcG9uc2USWgoWU3RyZWFtUmVhZFdvcmt0cmVlRmlsZRIhLndvcmt0cmVlLlJlYWRXb3JrdHJlZUZpbGVSZXF1ZXN0Ghsud29ya3RyZWUuV29ya3RyZWVGaWxlQ2h1bmswAWIGcHJvdG8z");
+  fileDesc("Cg53b3JrdHJlZS5wcm90bxIId29ya3RyZWUiVwoWU2Vzc2lvbldvcmt0cmVlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCSIyChJXb3JrdHJlZUNvbW1pdExpbmUSCwoDc2hhGAEgASgJEg8KB3N1YmplY3QYAiABKAkiMQoRV29ya3RyZWVEaXJ0eUZpbGUSDAoEcGF0aBgBIAEoCRIOCgZjaGFuZ2UYAiABKAkitQIKEVdvcmt0cmVlU3luY1N0YXRlEg4KBmJyYW5jaBgBIAEoCRIQCgh1cHN0cmVhbRgCIAEoCRIsCgZzdGF0dXMYAyABKA4yHC53b3JrdHJlZS5Xb3JrdHJlZVN5bmNTdGF0dXMSLgoIdW5wdXNoZWQYBCADKAsyHC53b3JrdHJlZS5Xb3JrdHJlZUNvbW1pdExpbmUSLgoIdW5wdWxsZWQYBSADKAsyHC53b3JrdHJlZS5Xb3JrdHJlZUNvbW1pdExpbmUSMAoLZGlydHlfZmlsZXMYBiADKAsyGy53b3JrdHJlZS5Xb3JrdHJlZURpcnR5RmlsZRIQCghjYW5fcHVsbBgHIAEoCBIQCghjYW5fcHVzaBgIIAEoCBIaChJ1bmF2YWlsYWJsZV9yZWFzb24YCSABKAkigwEKEFB1bGxSZXF1ZXN0Q2hlY2sSDAoEbmFtZRgBIAEoCRIOCgZzdGF0dXMYAiABKAkSEgoKY29uY2x1c2lvbhgDIAEoCRISCgpzdGFydGVkX2F0GAQgASgJEhQKDGNvbXBsZXRlZF9hdBgFIAEoCRITCgtkZXRhaWxzX3VybBgGIAEoCSKOAQoSUHVsbFJlcXVlc3RDb21tZW50EgoKAmlkGAEgASgEEhYKDmluX3JlcGx5X3RvX2lkGAIgASgEEg4KBmF1dGhvchgDIAEoCRIMCgRib2R5GAQgASgJEhIKCmNyZWF0ZWRfYXQYBSABKAkSDAoEcGF0aBgGIAEoCRIUCgxyZXZpZXdfc3RhdGUYByABKAkiVgoRUHVsbFJlcXVlc3RDb21taXQSCwoDc2hhGAEgASgJEg8KB3N1YmplY3QYAiABKAkSDgoGYXV0aG9yGAMgASgJEhMKC2F1dGhvcmVkX2F0GAQgASgJIrMCChZTZXNzaW9uUHVsbFJlcXVlc3RWaWV3Eg4KBmV4aXN0cxgBIAEoCBIOCgZudW1iZXIYAiABKAQSCwoDdXJsGAMgASgJEg0KBXRpdGxlGAQgASgJEg0KBXN0YXRlGAUgASgJEhMKC2Jhc2VfYnJhbmNoGAYgASgJEhMKC2hlYWRfYnJhbmNoGAcgASgJEioKBmNoZWNrcxgIIAMoCzIaLndvcmt0cmVlLlB1bGxSZXF1ZXN0Q2hlY2sSLgoIY29tbWVudHMYCSADKAsyHC53b3JrdHJlZS5QdWxsUmVxdWVzdENvbW1lbnQSLAoHY29tbWl0cxgKIAMoCzIbLndvcmt0cmVlLlB1bGxSZXF1ZXN0Q29tbWl0EhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgLIAEoCSJgChxDYWxjdWxhdGVXb3JrdHJlZVNpemVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJIjwKHUNhbGN1bGF0ZVdvcmt0cmVlU2l6ZVJlc3BvbnNlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiWAoUQ2xlYW5Xb3JrdHJlZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhUKDXdvcmt0cmVlX3BhdGgYAyABKAkiNAoVQ2xlYW5Xb3JrdHJlZVJlc3BvbnNlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkicgocTGlzdFdvcmt0cmVlRGlyZWN0b3J5UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCRIQCghyZWxfcGF0aBgEIAEoCSJMCh1MaXN0V29ya3RyZWVEaXJlY3RvcnlSZXNwb25zZRIrCgdlbnRyaWVzGAEgAygLMhoud29ya3RyZWUuV29ya3RyZWVEaXJFbnRyeSJcCh5MaXN0V29ya3RyZWVzRm9yUHJvamVjdFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEg8KB3JlZnJlc2gYAyABKAgiSwofTGlzdFdvcmt0cmVlc0ZvclByb2plY3RSZXNwb25zZRIoCgl3b3JrdHJlZXMYASADKAsyFS53b3JrdHJlZS5Xb3JrdHJlZVJvdyJtChdSZWFkV29ya3RyZWVGaWxlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCRIQCghyZWxfcGF0aBgEIAEoCSJWChhSZWFkV29ya3RyZWVGaWxlUmVzcG9uc2USFAoMY29udGVudF91dGY4GAEgASgJEhEKCXRydW5jYXRlZBgCIAEoCBIRCglieXRlX3NpemUYAyABKAQiWQoVUmVtb3ZlV29ya3RyZWVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJIjUKFlJlbW92ZVdvcmt0cmVlUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJeCh1SZXN0b3JlU2Vzc2lvbldvcmt0cmVlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCSJUCh5SZXN0b3JlU2Vzc2lvbldvcmt0cmVlUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJImAKGlN0cmVhbVdvcmt0cmVlU3RhdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIXCg9yZWNhbGN1bGF0ZV9hbGwYAyABKAgiRAoQV29ya3RyZWVEaXJFbnRyeRIMCgRuYW1lGAEgASgJEg4KBmlzX2RpchgCIAEoCBISCgpzaXplX2J5dGVzGAMgASgEIjoKEVdvcmt0cmVlRmlsZUNodW5rEgwKBGRhdGEYASABKAwSFwoPdG90YWxfYnl0ZV9zaXplGAIgASgEIooCCgtXb3JrdHJlZVJvdxIMCgRwYXRoGAEgASgJEhQKDGJyYW5jaF9sYWJlbBgCIAEoCRISCgpkaXNrX2J5dGVzGAMgASgEEhUKDWNoYW5nZWRfZmlsZXMYBCABKA0SEwoLbGluZXNfYWRkZWQYBSABKAMSFQoNbGluZXNfcmVtb3ZlZBgGIAEoAxIaChJ1cGRhdGVkX2F0X3VuaXhfbXMYByABKAMSDQoFc3RhbGUYCCABKAgSMQoLc2l6ZV9zdGF0dXMYCSABKA4yHC53b3JrdHJlZS5Xb3JrdHJlZVNpemVTdGF0dXMSIgoac2l6ZV9jYWxjdWxhdGVkX2F0X3VuaXhfbXMYCiABKAMiZQoSV29ya3RyZWVTdGF0c0V2ZW50EicKCHNuYXBzaG90GAEgAygLMhUud29ya3RyZWUuV29ya3RyZWVSb3cSJgoHdXBkYXRlZBgCIAEoCzIVLndvcmt0cmVlLldvcmt0cmVlUm93KusBChJXb3JrdHJlZVN5bmNTdGF0dXMSJAogV09SS1RSRUVfU1lOQ19TVEFUVVNfVU5TUEVDSUZJRUQQABIgChxXT1JLVFJFRV9TWU5DX1NUQVRVU19JTl9TWU5DEAESIQodV09SS1RSRUVfU1lOQ19TVEFUVVNfVU5QVVNIRUQQAhIhCh1XT1JLVFJFRV9TWU5DX1NUQVRVU19VTlBVTExFRBADEiEKHVdPUktUUkVFX1NZTkNfU1RBVFVTX0RJVkVSR0VEEAQSJAogV09SS1RSRUVfU1lOQ19TVEFUVVNfVU5QVUJMSVNIRUQQBSqgAQoSV29ya3RyZWVTaXplU3RhdHVzEiQKIFdPUktUUkVFX1NJWkVfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHQoZV09SS1RSRUVfU0laRV9TVEFUVVNfTk9ORRABEiQKIFdPUktUUkVFX1NJWkVfU1RBVFVTX0NBTENVTEFUSU5HEAISHwobV09SS1RSRUVfU0laRV9TVEFUVVNfQ0FDSEVEEAMy1AkKD1dvcmt0cmVlU2VydmljZRJuChdMaXN0V29ya3RyZWVzRm9yUHJvamVjdBIoLndvcmt0cmVlLkxpc3RXb3JrdHJlZXNGb3JQcm9qZWN0UmVxdWVzdBopLndvcmt0cmVlLkxpc3RXb3JrdHJlZXNGb3JQcm9qZWN0UmVzcG9uc2USUwoOUmVtb3ZlV29ya3RyZWUSHy53b3JrdHJlZS5SZW1vdmVXb3JrdHJlZVJlcXVlc3QaIC53b3JrdHJlZS5SZW1vdmVXb3JrdHJlZVJlc3BvbnNlElsKE1N0cmVhbVdvcmt0cmVlU3RhdHMSJC53b3JrdHJlZS5TdHJlYW1Xb3JrdHJlZVN0YXRzUmVxdWVzdBocLndvcmt0cmVlLldvcmt0cmVlU3RhdHNFdmVudDABEmgKFUNhbGN1bGF0ZVdvcmt0cmVlU2l6ZRImLndvcmt0cmVlLkNhbGN1bGF0ZVdvcmt0cmVlU2l6ZVJlcXVlc3QaJy53b3JrdHJlZS5DYWxjdWxhdGVXb3JrdHJlZVNpemVSZXNwb25zZRJQCg1DbGVhbldvcmt0cmVlEh4ud29ya3RyZWUuQ2xlYW5Xb3JrdHJlZVJlcXVlc3QaHy53b3JrdHJlZS5DbGVhbldvcmt0cmVlUmVzcG9uc2USawoWUmVzdG9yZVNlc3Npb25Xb3JrdHJlZRInLndvcmt0cmVlLlJlc3RvcmVTZXNzaW9uV29ya3RyZWVSZXF1ZXN0Gigud29ya3RyZWUuUmVzdG9yZVNlc3Npb25Xb3JrdHJlZVJlc3BvbnNlEmgKFUxpc3RXb3JrdHJlZURpcmVjdG9yeRImLndvcmt0cmVlLkxpc3RXb3JrdHJlZURpcmVjdG9yeVJlcXVlc3QaJy53b3JrdHJlZS5MaXN0V29ya3RyZWVEaXJlY3RvcnlSZXNwb25zZRJZChBSZWFkV29ya3RyZWVGaWxlEiEud29ya3RyZWUuUmVhZFdvcmt0cmVlRmlsZVJlcXVlc3QaIi53b3JrdHJlZS5SZWFkV29ya3RyZWVGaWxlUmVzcG9uc2USWgoWU3RyZWFtUmVhZFdvcmt0cmVlRmlsZRIhLndvcmt0cmVlLlJlYWRXb3JrdHJlZUZpbGVSZXF1ZXN0Ghsud29ya3RyZWUuV29ya3RyZWVGaWxlQ2h1bmswARJVChRHZXRXb3JrdHJlZVN5bmNTdGF0ZRIgLndvcmt0cmVlLlNlc3Npb25Xb3JrdHJlZVJlcXVlc3QaGy53b3JrdHJlZS5Xb3JrdHJlZVN5bmNTdGF0ZRJNCgxQdWxsV29ya3RyZWUSIC53b3JrdHJlZS5TZXNzaW9uV29ya3RyZWVSZXF1ZXN0Ghsud29ya3RyZWUuV29ya3RyZWVTeW5jU3RhdGUSTQoMUHVzaFdvcmt0cmVlEiAud29ya3RyZWUuU2Vzc2lvbldvcmt0cmVlUmVxdWVzdBobLndvcmt0cmVlLldvcmt0cmVlU3luY1N0YXRlEmAKGFN0cmVhbVNlc3Npb25QdWxsUmVxdWVzdBIgLndvcmt0cmVlLlNlc3Npb25Xb3JrdHJlZVJlcXVlc3QaIC53b3JrdHJlZS5TZXNzaW9uUHVsbFJlcXVlc3RWaWV3MAFiBnByb3RvMw");
+
+/**
+ * A session addressed for its worktree's inspector tabs.
+ *
+ * @generated from message worktree.SessionWorktreeRequest
+ */
+export type SessionWorktreeRequest = Message<"worktree.SessionWorktreeRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * @generated from field: string session_id = 3;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message worktree.SessionWorktreeRequest.
+ * Use `create(SessionWorktreeRequestSchema)` to create a new message.
+ */
+export const SessionWorktreeRequestSchema: GenMessage<SessionWorktreeRequest> = /*@__PURE__*/
+  messageDesc(file_worktree, 0);
+
+/**
+ * @generated from message worktree.WorktreeCommitLine
+ */
+export type WorktreeCommitLine = Message<"worktree.WorktreeCommitLine"> & {
+  /**
+   * @generated from field: string sha = 1;
+   */
+  sha: string;
+
+  /**
+   * @generated from field: string subject = 2;
+   */
+  subject: string;
+};
+
+/**
+ * Describes the message worktree.WorktreeCommitLine.
+ * Use `create(WorktreeCommitLineSchema)` to create a new message.
+ */
+export const WorktreeCommitLineSchema: GenMessage<WorktreeCommitLine> = /*@__PURE__*/
+  messageDesc(file_worktree, 1);
+
+/**
+ * @generated from message worktree.WorktreeDirtyFile
+ */
+export type WorktreeDirtyFile = Message<"worktree.WorktreeDirtyFile"> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * `modified` / `staged` / `untracked` / `deleted` / `renamed`.
+   *
+   * @generated from field: string change = 2;
+   */
+  change: string;
+};
+
+/**
+ * Describes the message worktree.WorktreeDirtyFile.
+ * Use `create(WorktreeDirtyFileSchema)` to create a new message.
+ */
+export const WorktreeDirtyFileSchema: GenMessage<WorktreeDirtyFile> = /*@__PURE__*/
+  messageDesc(file_worktree, 2);
+
+/**
+ * @generated from message worktree.WorktreeSyncState
+ */
+export type WorktreeSyncState = Message<"worktree.WorktreeSyncState"> & {
+  /**
+   * @generated from field: string branch = 1;
+   */
+  branch: string;
+
+  /**
+   * `origin/<branch>`, or empty when unpublished.
+   *
+   * @generated from field: string upstream = 2;
+   */
+  upstream: string;
+
+  /**
+   * @generated from field: worktree.WorktreeSyncStatus status = 3;
+   */
+  status: WorktreeSyncStatus;
+
+  /**
+   * @generated from field: repeated worktree.WorktreeCommitLine unpushed = 4;
+   */
+  unpushed: WorktreeCommitLine[];
+
+  /**
+   * @generated from field: repeated worktree.WorktreeCommitLine unpulled = 5;
+   */
+  unpulled: WorktreeCommitLine[];
+
+  /**
+   * @generated from field: repeated worktree.WorktreeDirtyFile dirty_files = 6;
+   */
+  dirtyFiles: WorktreeDirtyFile[];
+
+  /**
+   * @generated from field: bool can_pull = 7;
+   */
+  canPull: boolean;
+
+  /**
+   * @generated from field: bool can_push = 8;
+   */
+  canPush: boolean;
+
+  /**
+   * Why the state could not be read (e.g. a target session's worktree); empty when it was.
+   *
+   * @generated from field: string unavailable_reason = 9;
+   */
+  unavailableReason: string;
+};
+
+/**
+ * Describes the message worktree.WorktreeSyncState.
+ * Use `create(WorktreeSyncStateSchema)` to create a new message.
+ */
+export const WorktreeSyncStateSchema: GenMessage<WorktreeSyncState> = /*@__PURE__*/
+  messageDesc(file_worktree, 3);
+
+/**
+ * @generated from message worktree.PullRequestCheck
+ */
+export type PullRequestCheck = Message<"worktree.PullRequestCheck"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * `queued` / `in_progress` / `completed`.
+   *
+   * @generated from field: string status = 2;
+   */
+  status: string;
+
+  /**
+   * @generated from field: string conclusion = 3;
+   */
+  conclusion: string;
+
+  /**
+   * @generated from field: string started_at = 4;
+   */
+  startedAt: string;
+
+  /**
+   * @generated from field: string completed_at = 5;
+   */
+  completedAt: string;
+
+  /**
+   * @generated from field: string details_url = 6;
+   */
+  detailsUrl: string;
+};
+
+/**
+ * Describes the message worktree.PullRequestCheck.
+ * Use `create(PullRequestCheckSchema)` to create a new message.
+ */
+export const PullRequestCheckSchema: GenMessage<PullRequestCheck> = /*@__PURE__*/
+  messageDesc(file_worktree, 4);
+
+/**
+ * @generated from message worktree.PullRequestComment
+ */
+export type PullRequestComment = Message<"worktree.PullRequestComment"> & {
+  /**
+   * @generated from field: uint64 id = 1;
+   */
+  id: bigint;
+
+  /**
+   * 0 for a thread's first comment.
+   *
+   * @generated from field: uint64 in_reply_to_id = 2;
+   */
+  inReplyToId: bigint;
+
+  /**
+   * @generated from field: string author = 3;
+   */
+  author: string;
+
+  /**
+   * @generated from field: string body = 4;
+   */
+  body: string;
+
+  /**
+   * @generated from field: string created_at = 5;
+   */
+  createdAt: string;
+
+  /**
+   * Empty for a conversation (issue-level) comment.
+   *
+   * @generated from field: string path = 6;
+   */
+  path: string;
+
+  /**
+   * A review's state (`APPROVED`, `CHANGES_REQUESTED`, …) when this entry is a review.
+   *
+   * @generated from field: string review_state = 7;
+   */
+  reviewState: string;
+};
+
+/**
+ * Describes the message worktree.PullRequestComment.
+ * Use `create(PullRequestCommentSchema)` to create a new message.
+ */
+export const PullRequestCommentSchema: GenMessage<PullRequestComment> = /*@__PURE__*/
+  messageDesc(file_worktree, 5);
+
+/**
+ * @generated from message worktree.PullRequestCommit
+ */
+export type PullRequestCommit = Message<"worktree.PullRequestCommit"> & {
+  /**
+   * @generated from field: string sha = 1;
+   */
+  sha: string;
+
+  /**
+   * @generated from field: string subject = 2;
+   */
+  subject: string;
+
+  /**
+   * @generated from field: string author = 3;
+   */
+  author: string;
+
+  /**
+   * @generated from field: string authored_at = 4;
+   */
+  authoredAt: string;
+};
+
+/**
+ * Describes the message worktree.PullRequestCommit.
+ * Use `create(PullRequestCommitSchema)` to create a new message.
+ */
+export const PullRequestCommitSchema: GenMessage<PullRequestCommit> = /*@__PURE__*/
+  messageDesc(file_worktree, 6);
+
+/**
+ * @generated from message worktree.SessionPullRequestView
+ */
+export type SessionPullRequestView = Message<"worktree.SessionPullRequestView"> & {
+  /**
+   * False when the session's branch has no PR (the stream still stays open for one to appear).
+   *
+   * @generated from field: bool exists = 1;
+   */
+  exists: boolean;
+
+  /**
+   * @generated from field: uint64 number = 2;
+   */
+  number: bigint;
+
+  /**
+   * @generated from field: string url = 3;
+   */
+  url: string;
+
+  /**
+   * @generated from field: string title = 4;
+   */
+  title: string;
+
+  /**
+   * `open` / `draft` / `merged` / `closed`.
+   *
+   * @generated from field: string state = 5;
+   */
+  state: string;
+
+  /**
+   * @generated from field: string base_branch = 6;
+   */
+  baseBranch: string;
+
+  /**
+   * @generated from field: string head_branch = 7;
+   */
+  headBranch: string;
+
+  /**
+   * @generated from field: repeated worktree.PullRequestCheck checks = 8;
+   */
+  checks: PullRequestCheck[];
+
+  /**
+   * @generated from field: repeated worktree.PullRequestComment comments = 9;
+   */
+  comments: PullRequestComment[];
+
+  /**
+   * @generated from field: repeated worktree.PullRequestCommit commits = 10;
+   */
+  commits: PullRequestCommit[];
+
+  /**
+   * @generated from field: string unavailable_reason = 11;
+   */
+  unavailableReason: string;
+};
+
+/**
+ * Describes the message worktree.SessionPullRequestView.
+ * Use `create(SessionPullRequestViewSchema)` to create a new message.
+ */
+export const SessionPullRequestViewSchema: GenMessage<SessionPullRequestView> = /*@__PURE__*/
+  messageDesc(file_worktree, 7);
 
 /**
  * @generated from message worktree.CalculateWorktreeSizeRequest
@@ -39,7 +375,7 @@ export type CalculateWorktreeSizeRequest = Message<"worktree.CalculateWorktreeSi
  * Use `create(CalculateWorktreeSizeRequestSchema)` to create a new message.
  */
 export const CalculateWorktreeSizeRequestSchema: GenMessage<CalculateWorktreeSizeRequest> = /*@__PURE__*/
-  messageDesc(file_worktree, 0);
+  messageDesc(file_worktree, 8);
 
 /**
  * @generated from message worktree.CalculateWorktreeSizeResponse
@@ -61,7 +397,7 @@ export type CalculateWorktreeSizeResponse = Message<"worktree.CalculateWorktreeS
  * Use `create(CalculateWorktreeSizeResponseSchema)` to create a new message.
  */
 export const CalculateWorktreeSizeResponseSchema: GenMessage<CalculateWorktreeSizeResponse> = /*@__PURE__*/
-  messageDesc(file_worktree, 1);
+  messageDesc(file_worktree, 9);
 
 /**
  * @generated from message worktree.CleanWorktreeRequest
@@ -91,7 +427,7 @@ export type CleanWorktreeRequest = Message<"worktree.CleanWorktreeRequest"> & {
  * Use `create(CleanWorktreeRequestSchema)` to create a new message.
  */
 export const CleanWorktreeRequestSchema: GenMessage<CleanWorktreeRequest> = /*@__PURE__*/
-  messageDesc(file_worktree, 2);
+  messageDesc(file_worktree, 10);
 
 /**
  * @generated from message worktree.CleanWorktreeResponse
@@ -113,7 +449,7 @@ export type CleanWorktreeResponse = Message<"worktree.CleanWorktreeResponse"> & 
  * Use `create(CleanWorktreeResponseSchema)` to create a new message.
  */
 export const CleanWorktreeResponseSchema: GenMessage<CleanWorktreeResponse> = /*@__PURE__*/
-  messageDesc(file_worktree, 3);
+  messageDesc(file_worktree, 11);
 
 /**
  * @generated from message worktree.ListWorktreeDirectoryRequest
@@ -149,7 +485,7 @@ export type ListWorktreeDirectoryRequest = Message<"worktree.ListWorktreeDirecto
  * Use `create(ListWorktreeDirectoryRequestSchema)` to create a new message.
  */
 export const ListWorktreeDirectoryRequestSchema: GenMessage<ListWorktreeDirectoryRequest> = /*@__PURE__*/
-  messageDesc(file_worktree, 4);
+  messageDesc(file_worktree, 12);
 
 /**
  * @generated from message worktree.ListWorktreeDirectoryResponse
@@ -168,7 +504,7 @@ export type ListWorktreeDirectoryResponse = Message<"worktree.ListWorktreeDirect
  * Use `create(ListWorktreeDirectoryResponseSchema)` to create a new message.
  */
 export const ListWorktreeDirectoryResponseSchema: GenMessage<ListWorktreeDirectoryResponse> = /*@__PURE__*/
-  messageDesc(file_worktree, 5);
+  messageDesc(file_worktree, 13);
 
 /**
  * @generated from message worktree.ListWorktreesForProjectRequest
@@ -197,7 +533,7 @@ export type ListWorktreesForProjectRequest = Message<"worktree.ListWorktreesForP
  * Use `create(ListWorktreesForProjectRequestSchema)` to create a new message.
  */
 export const ListWorktreesForProjectRequestSchema: GenMessage<ListWorktreesForProjectRequest> = /*@__PURE__*/
-  messageDesc(file_worktree, 6);
+  messageDesc(file_worktree, 14);
 
 /**
  * @generated from message worktree.ListWorktreesForProjectResponse
@@ -214,7 +550,7 @@ export type ListWorktreesForProjectResponse = Message<"worktree.ListWorktreesFor
  * Use `create(ListWorktreesForProjectResponseSchema)` to create a new message.
  */
 export const ListWorktreesForProjectResponseSchema: GenMessage<ListWorktreesForProjectResponse> = /*@__PURE__*/
-  messageDesc(file_worktree, 7);
+  messageDesc(file_worktree, 15);
 
 /**
  * @generated from message worktree.ReadWorktreeFileRequest
@@ -248,7 +584,7 @@ export type ReadWorktreeFileRequest = Message<"worktree.ReadWorktreeFileRequest"
  * Use `create(ReadWorktreeFileRequestSchema)` to create a new message.
  */
 export const ReadWorktreeFileRequestSchema: GenMessage<ReadWorktreeFileRequest> = /*@__PURE__*/
-  messageDesc(file_worktree, 8);
+  messageDesc(file_worktree, 16);
 
 /**
  * @generated from message worktree.ReadWorktreeFileResponse
@@ -279,7 +615,7 @@ export type ReadWorktreeFileResponse = Message<"worktree.ReadWorktreeFileRespons
  * Use `create(ReadWorktreeFileResponseSchema)` to create a new message.
  */
 export const ReadWorktreeFileResponseSchema: GenMessage<ReadWorktreeFileResponse> = /*@__PURE__*/
-  messageDesc(file_worktree, 9);
+  messageDesc(file_worktree, 17);
 
 /**
  * @generated from message worktree.RemoveWorktreeRequest
@@ -308,7 +644,7 @@ export type RemoveWorktreeRequest = Message<"worktree.RemoveWorktreeRequest"> & 
  * Use `create(RemoveWorktreeRequestSchema)` to create a new message.
  */
 export const RemoveWorktreeRequestSchema: GenMessage<RemoveWorktreeRequest> = /*@__PURE__*/
-  messageDesc(file_worktree, 10);
+  messageDesc(file_worktree, 18);
 
 /**
  * @generated from message worktree.RemoveWorktreeResponse
@@ -330,7 +666,7 @@ export type RemoveWorktreeResponse = Message<"worktree.RemoveWorktreeResponse"> 
  * Use `create(RemoveWorktreeResponseSchema)` to create a new message.
  */
 export const RemoveWorktreeResponseSchema: GenMessage<RemoveWorktreeResponse> = /*@__PURE__*/
-  messageDesc(file_worktree, 11);
+  messageDesc(file_worktree, 19);
 
 /**
  * @generated from message worktree.RestoreSessionWorktreeRequest
@@ -359,7 +695,7 @@ export type RestoreSessionWorktreeRequest = Message<"worktree.RestoreSessionWork
  * Use `create(RestoreSessionWorktreeRequestSchema)` to create a new message.
  */
 export const RestoreSessionWorktreeRequestSchema: GenMessage<RestoreSessionWorktreeRequest> = /*@__PURE__*/
-  messageDesc(file_worktree, 12);
+  messageDesc(file_worktree, 20);
 
 /**
  * @generated from message worktree.RestoreSessionWorktreeResponse
@@ -388,7 +724,7 @@ export type RestoreSessionWorktreeResponse = Message<"worktree.RestoreSessionWor
  * Use `create(RestoreSessionWorktreeResponseSchema)` to create a new message.
  */
 export const RestoreSessionWorktreeResponseSchema: GenMessage<RestoreSessionWorktreeResponse> = /*@__PURE__*/
-  messageDesc(file_worktree, 13);
+  messageDesc(file_worktree, 21);
 
 /**
  * @generated from message worktree.StreamWorktreeStatsRequest
@@ -418,7 +754,7 @@ export type StreamWorktreeStatsRequest = Message<"worktree.StreamWorktreeStatsRe
  * Use `create(StreamWorktreeStatsRequestSchema)` to create a new message.
  */
 export const StreamWorktreeStatsRequestSchema: GenMessage<StreamWorktreeStatsRequest> = /*@__PURE__*/
-  messageDesc(file_worktree, 14);
+  messageDesc(file_worktree, 22);
 
 /**
  * One entry in a single directory level of a session's worktree.
@@ -452,7 +788,7 @@ export type WorktreeDirEntry = Message<"worktree.WorktreeDirEntry"> & {
  * Use `create(WorktreeDirEntrySchema)` to create a new message.
  */
 export const WorktreeDirEntrySchema: GenMessage<WorktreeDirEntry> = /*@__PURE__*/
-  messageDesc(file_worktree, 15);
+  messageDesc(file_worktree, 23);
 
 /**
  * One frame of StreamReadWorktreeFile. `data` is raw file bytes with no encoding applied at any
@@ -480,7 +816,7 @@ export type WorktreeFileChunk = Message<"worktree.WorktreeFileChunk"> & {
  * Use `create(WorktreeFileChunkSchema)` to create a new message.
  */
 export const WorktreeFileChunkSchema: GenMessage<WorktreeFileChunk> = /*@__PURE__*/
-  messageDesc(file_worktree, 16);
+  messageDesc(file_worktree, 24);
 
 /**
  * @generated from message worktree.WorktreeRow
@@ -544,7 +880,7 @@ export type WorktreeRow = Message<"worktree.WorktreeRow"> & {
  * Use `create(WorktreeRowSchema)` to create a new message.
  */
 export const WorktreeRowSchema: GenMessage<WorktreeRow> = /*@__PURE__*/
-  messageDesc(file_worktree, 17);
+  messageDesc(file_worktree, 25);
 
 /**
  * One event on the StreamWorktreeStats server stream. The first event carries the full snapshot;
@@ -569,7 +905,50 @@ export type WorktreeStatsEvent = Message<"worktree.WorktreeStatsEvent"> & {
  * Use `create(WorktreeStatsEventSchema)` to create a new message.
  */
 export const WorktreeStatsEventSchema: GenMessage<WorktreeStatsEvent> = /*@__PURE__*/
-  messageDesc(file_worktree, 18);
+  messageDesc(file_worktree, 26);
+
+/**
+ * @generated from enum worktree.WorktreeSyncStatus
+ */
+export enum WorktreeSyncStatus {
+  /**
+   * @generated from enum value: WORKTREE_SYNC_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: WORKTREE_SYNC_STATUS_IN_SYNC = 1;
+   */
+  IN_SYNC = 1,
+
+  /**
+   * @generated from enum value: WORKTREE_SYNC_STATUS_UNPUSHED = 2;
+   */
+  UNPUSHED = 2,
+
+  /**
+   * @generated from enum value: WORKTREE_SYNC_STATUS_UNPULLED = 3;
+   */
+  UNPULLED = 3,
+
+  /**
+   * @generated from enum value: WORKTREE_SYNC_STATUS_DIVERGED = 4;
+   */
+  DIVERGED = 4,
+
+  /**
+   * The branch has no upstream yet.
+   *
+   * @generated from enum value: WORKTREE_SYNC_STATUS_UNPUBLISHED = 5;
+   */
+  UNPUBLISHED = 5,
+}
+
+/**
+ * Describes the enum worktree.WorktreeSyncStatus.
+ */
+export const WorktreeSyncStatusSchema: GenEnum<WorktreeSyncStatus> = /*@__PURE__*/
+  enumDesc(file_worktree, 0);
 
 /**
  * Lifecycle of a worktree's on-disk size calculation (docs/ft/web/worktree-disk-usage-streaming.md).
@@ -608,7 +987,7 @@ export enum WorktreeSizeStatus {
  * Describes the enum worktree.WorktreeSizeStatus.
  */
 export const WorktreeSizeStatusSchema: GenEnum<WorktreeSizeStatus> = /*@__PURE__*/
-  enumDesc(file_worktree, 0);
+  enumDesc(file_worktree, 1);
 
 /**
  * @generated from service worktree.WorktreeService
@@ -702,6 +1081,45 @@ export const WorktreeService: GenService<{
     methodKind: "server_streaming";
     input: typeof ReadWorktreeFileRequestSchema;
     output: typeof WorktreeFileChunkSchema;
+  },
+  /**
+   * The session inspector's Worktree tab (`#workqueue` 4/14): dirty files and the branch's relation to
+   * its upstream, and the two actions that relation offers. Pull is fast-forward only; Push never forces.
+   *
+   * @generated from rpc worktree.WorktreeService.GetWorktreeSyncState
+   */
+  getWorktreeSyncState: {
+    methodKind: "unary";
+    input: typeof SessionWorktreeRequestSchema;
+    output: typeof WorktreeSyncStateSchema;
+  },
+  /**
+   * @generated from rpc worktree.WorktreeService.PullWorktree
+   */
+  pullWorktree: {
+    methodKind: "unary";
+    input: typeof SessionWorktreeRequestSchema;
+    output: typeof WorktreeSyncStateSchema;
+  },
+  /**
+   * @generated from rpc worktree.WorktreeService.PushWorktree
+   */
+  pushWorktree: {
+    methodKind: "unary";
+    input: typeof SessionWorktreeRequestSchema;
+    output: typeof WorktreeSyncStateSchema;
+  },
+  /**
+   * The session inspector's PR tab (`#workqueue` 4/14): the PR whose head is the session's branch, its
+   * checks, conversation and commits — a snapshot, then a new one whenever the daemon's GitHub inbox
+   * reports a change to any of them. No browser reads GitHub.
+   *
+   * @generated from rpc worktree.WorktreeService.StreamSessionPullRequest
+   */
+  streamSessionPullRequest: {
+    methodKind: "server_streaming";
+    input: typeof SessionWorktreeRequestSchema;
+    output: typeof SessionPullRequestViewSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_worktree, 0);

@@ -21,8 +21,9 @@ use tddy_service::proto::worktree::{
     CleanWorktreeResponse, ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse,
     ListWorktreesForProjectRequest, ListWorktreesForProjectResponse, ReadWorktreeFileRequest,
     ReadWorktreeFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
-    RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse, StreamWorktreeStatsRequest,
-    WorktreeDirEntry, WorktreeFileChunk, WorktreeRow, WorktreeService, WorktreeStatsEvent,
+    RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse, SessionPullRequestView,
+    SessionWorktreeRequest, StreamWorktreeStatsRequest, WorktreeDirEntry, WorktreeFileChunk,
+    WorktreeRow, WorktreeService, WorktreeStatsEvent, WorktreeSyncState,
 };
 use tddy_task::IdleTimeoutTracker;
 
@@ -827,5 +828,41 @@ impl WorktreeService for WorktreeServiceImpl {
             ok: true,
             message: String::new(),
         }))
+    }
+
+    // `#workqueue` 4/14 — the session inspector's Worktree and PR tabs. The bodies live in
+    // `worktree_sync` and `pull_request_view`; the handlers resolve the session and call them.
+    type StreamSessionPullRequestStream = MpscResultStream<SessionPullRequestView>;
+
+    async fn get_worktree_sync_state(
+        &self,
+        _request: Request<SessionWorktreeRequest>,
+    ) -> Result<Response<WorktreeSyncState>, Status> {
+        // TODO(n4 session-pr-tabs): implement — resolve the session's worktree, `read_sync_state`.
+        Err(Status::unimplemented("TODO(n4): GetWorktreeSyncState"))
+    }
+
+    async fn pull_worktree(
+        &self,
+        _request: Request<SessionWorktreeRequest>,
+    ) -> Result<Response<WorktreeSyncState>, Status> {
+        // TODO(n4 session-pr-tabs): implement — `pull_fast_forward`.
+        Err(Status::unimplemented("TODO(n4): PullWorktree"))
+    }
+
+    async fn push_worktree(
+        &self,
+        _request: Request<SessionWorktreeRequest>,
+    ) -> Result<Response<WorktreeSyncState>, Status> {
+        // TODO(n4 session-pr-tabs): implement — `push_branch`.
+        Err(Status::unimplemented("TODO(n4): PushWorktree"))
+    }
+
+    async fn stream_session_pull_request(
+        &self,
+        _request: Request<SessionWorktreeRequest>,
+    ) -> Result<Response<Self::StreamSessionPullRequestStream>, Status> {
+        // TODO(n4 session-pr-tabs): implement — `watch_pull_request` over the daemon's inbox.
+        Err(Status::unimplemented("TODO(n4): StreamSessionPullRequest"))
     }
 }

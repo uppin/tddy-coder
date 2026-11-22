@@ -436,6 +436,12 @@ message SessionEntry {
   // sandboxed session's new tab opens "In sandbox" by default, in a jail of its own, or "On host"
   // (`StartTerminalSessionRequest.wrappers`).
   bool sandbox = 41;
+  // The pull request whose head is this session's branch, as the daemon's GitHub inbox has it cached
+  // (`#workqueue` 4/14). 0 when none is known — the listing never waits on GitHub; a cold branch is
+  // read in the background and the next listing carries it.
+  uint64 pr_number = 42;
+  // `open` / `draft` / `merged` / `closed`, beside `pr_number`; empty when `pr_number` is 0.
+  string pr_state = 43;
 }
 
 // A machine a session's agent runs on that the serving daemon reaches through a remote shell, with

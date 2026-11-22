@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 5 — proto change (two `SessionEntry` fields, a streaming RPC, three worktree RPCs), several crates and two web packages, a stream fed by n2's subscriptions, git mutations (pull, push) on a live worktree
 **Stack**: `#workqueue` 4/14 — branch `feature/workqueue/session-pr-tabs`, base `feature/workqueue/workitem-rename`
+**PR**: [#1005](https://github.com/uppin/tddy-coder/pull/1005)
 
 ## Initial Discovery
 
@@ -66,11 +67,31 @@ implementing one here collides with the PR that owns it.
 | `n2` github-event-inbox (#1003) | `GithubInbox::{subscribe, pr_for_head, checks_at, comments, pr_commits}`, `EventKind`, richer `CheckRun` | the PR stream subscribes and reads rows; listing reads cached `pr_for_head` | call GitHub directly, add a cache, change row keys or the check-run shape |
 | `n3` workitem-rename (#1004) | renamed vocabulary (line predecessor only) | — | — |
 
+**Sequencing (pass 2):** `pull_request_view_acceptance.rs` keeps n2's real inbox — reading through it is
+the point — so those five tests pass only once n2 is green (`a_cached_branch_summarises…` reaches n2's
+`pr_for_head` in its Given). `worktree_sync_acceptance.rs` and both Cypress specs need nothing of n2.
+
 ## Draft PR contract
 
-The first push of this PR, before its implementation: the proto additions, the daemon handler
-signatures, `worktree_sync`'s public functions, `defaultInspectorTab`, the empty web components with
-their test ids, and the failing tests below.
+Published (pass 2, commit 2):
+
+- **Proto**: `SessionEntry.pr_number` (42), `pr_state` (43); on `WorktreeService`:
+  `GetWorktreeSyncState`, `PullWorktree`, `PushWorktree` (`SessionWorktreeRequest` → `WorktreeSyncState`)
+  and `StreamSessionPullRequest` (→ stream `SessionPullRequestView`, with `PullRequestCheck`,
+  `PullRequestComment`, `PullRequestCommit`). TS regenerated in both copies.
+- **`tddy-worktree-service`**: `worktree_sync::{SyncState, SyncStatus, CommitLine, DirtyFile, DirtyChange,
+  WorktreeSyncError, read_sync_state, pull_fast_forward, push_branch}` and
+  `pull_request_view::{PullRequestSummary, pull_request_summary, pull_request_view, watch_pull_request,
+  PullRequestWatch}` (`todo!("TODO(n4): …")`); `WorktreeServiceImpl` answers the four RPCs
+  `unimplemented` until `/green`.
+- **Web**: `tddy-workspace-web` exports `SessionPullRequestTab`, `CheckRow`, `CommitList` (shells);
+  `tddy-session-web/src/defaultInspectorTab.ts` (`defaultInspectorTab`, throws until `/green` — not yet
+  wired into the drawer).
+- The failing tests below.
+
+`/green` must also update two existing assertions this node changes on purpose:
+`SessionInspectorAcceptance` "Details is selected by default" and `SessionInspectorUrlStateAcceptance`
+"choosing an inspector tab… landing on the Details tab".
 
 ## Green wave
 
@@ -173,31 +194,36 @@ As listed under Affected Packages. New RPCs are registered in `unbundle_service_
 
 ## Acceptance Tests
 
-`packages/tddy-worktree-service/tests/worktree_sync_acceptance.rs`:
-- [ ] `a_clean_branch_level_with_its_upstream_is_in_sync`
-- [ ] `local_commits_not_on_the_upstream_are_unpushed_and_listed`
-- [ ] `upstream_commits_not_local_are_unpulled_and_listed`
-- [ ] `both_sides_ahead_is_diverged_and_offers_neither_pull_nor_push`
-- [ ] `a_branch_with_no_upstream_is_unpublished_and_offers_push`
-- [ ] `dirty_files_include_modified_staged_and_untracked_paths`
-- [ ] `pull_fast_forwards_and_refuses_when_not_fast_forwardable`
+`packages/tddy-worktree-service/tests/worktree_sync_acceptance.rs` (real repos: a bare origin, the session clone, a second clone):
+- [x] `a_clean_branch_level_with_its_upstream_is_in_sync`
+- [x] `local_commits_not_on_the_upstream_are_unpushed_and_listed`
+- [x] `upstream_commits_not_local_are_unpulled_and_listed`
+- [x] `both_sides_ahead_is_diverged_and_offers_neither_pull_nor_push`
+- [x] `a_branch_with_no_upstream_is_unpublished_and_offers_push`
+- [x] `dirty_files_include_modified_staged_and_untracked_paths`
+- [x] `pull_fast_forwards_and_refuses_when_not_fast_forwardable`
+- [x] `push_publishes_an_unpublished_branch_and_leaves_it_in_sync`
 
-`packages/tddy-daemon-rpc/tests/session_pull_request_stream_acceptance.rs`:
-- [ ] `a_session_whose_branch_has_a_pr_lists_its_number_and_state`
-- [ ] `the_stream_sends_the_pr_its_checks_comments_and_commits`
-- [ ] `a_completed_check_reaches_the_open_stream`
-- [ ] `ten_open_streams_of_one_pr_share_the_inbox_reads`
+`packages/tddy-worktree-service/tests/pull_request_view_acceptance.rs` (an inbox over a scripted GitHub —
+the handler lives in `tddy-worktree-service`, so these stay out of `tddy-daemon-rpc`'s test build):
+- [x] `the_view_carries_the_pr_its_checks_conversation_and_commits`
+- [x] `a_branch_without_a_pr_is_a_view_that_does_not_exist`
+- [x] `a_cold_branch_has_no_summary_and_makes_no_request` — what listing calls; it never waits on GitHub
+- [x] `a_cached_branch_summarises_its_pr_number_and_state`
+- [x] `a_completed_check_reaches_an_open_watch`
 
-`packages/tddy-session-web/cypress/component/SessionInspectorPullRequestTabAcceptance.cy.tsx`:
-- [ ] `a session with a PR opens its inspector on the PR tab`
-- [ ] `a session without a PR opens its inspector on the Worktree tab`
-- [ ] `an inspector param naming details still opens Details`
-- [ ] `checks show running with elapsed time and completed with conclusion`
-- [ ] `review comments are threaded under their first comment`
+"Ten open streams share the inbox reads" is n2's `repeated_reads_of_an_unchanged_pr_for_head_row_make_no_further_requests`.
 
-`packages/tddy-web/cypress/component/SessionWorktreeTabAcceptance.cy.tsx` (existing, extended):
-- [ ] `lists dirty files and names the sync state`
-- [ ] `offers Pull only when unpulled and Push only when unpushed`
+`packages/tddy-session-web/cypress/component/SessionInspectorPullRequestTabAcceptance.cy.tsx` (in-memory backend):
+- [x] `a session with a PR opens its inspector on the PR tab`
+- [x] `a session without a PR opens its inspector on the Worktree tab`
+- [x] `an inspector param naming details still opens Details`
+- [x] `checks show running with elapsed time and completed with conclusion`
+- [x] `review comments are threaded under their first comment`
+
+`packages/tddy-workspace-web/cypress/component/SessionWorktreeTabSyncStateAcceptance.cy.tsx` (the component's own package):
+- [x] `lists dirty files and names the sync state`
+- [x] `offers Pull only when unpulled and Push only when unpushed`
 
 ## Decisions & Trade-offs
 
@@ -207,6 +233,11 @@ As listed under Affected Packages. New RPCs are registered in `unbundle_service_
 - **Default tab (operator amendment, 2026-11-22):** Work queue when the session owns one (n5), else PR,
   else Worktree. Nothing here or in n5 checks a role.
 - **No Commit action** — committing in a live agent worktree from the UI races the agent.
+- **RPCs on `WorktreeService`, not a new proto file** (pass 2): all four serve the session inspector and
+  `WorktreeService` already addresses sessions; a new file meant codegen registration in four places.
+- **PR view components in `tddy-workspace-web`** (pass 2), beside `SessionWorktreeTab`: n6's work-item
+  rows reuse `CheckRow`, and the queue package cannot depend on `tddy-session-web` (it is a dependency
+  of it).
 - Splitting this node into a PR-tab node and a Worktree-tab node remains possible if review size
   demands it; they share the default-tab rule, which is why they were planned together.
 
@@ -228,10 +259,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

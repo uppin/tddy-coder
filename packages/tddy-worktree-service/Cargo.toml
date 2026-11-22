@@ -21,6 +21,8 @@ serde_json = "1"
 serde_yaml = "0.9"
 tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "process", "io-util"] }
 tddy-core = { path = "../tddy-core" }
+# The PR tab reads GitHub only through the daemon's inbox (`#workqueue` 4/14).
+tddy-github-inbox = { path = "../tddy-github-inbox" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-task = { path = "../tddy-task" }

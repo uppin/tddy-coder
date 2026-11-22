@@ -10,6 +10,7 @@ pub mod base_sync_cache;
 pub mod branch_intent;
 pub mod branch_owner;
 pub mod home_worktree;
+pub mod pull_request_view;
 pub use tddy_projects::{project_provision, project_storage};
 pub mod remote_git_service;
 pub mod session_git_ops;
@@ -18,6 +19,7 @@ pub mod target_worktree_stats;
 pub mod target_worktrees;
 pub mod worktree_files;
 pub mod worktree_measurement;
+pub mod worktree_sync;
 pub mod worktrees;
 
 pub mod service;
