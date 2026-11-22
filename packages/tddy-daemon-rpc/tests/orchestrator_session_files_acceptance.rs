@@ -7,11 +7,12 @@
 
 use std::path::{Path, PathBuf};
 
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_rpc::test_util::{test_service, TestDaemon};
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
-use tddy_session_lifecycle::test_util::TEST_TOKEN;
+use tddy_session_lifecycle::test_util::{test_config, TEST_TOKEN};
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a3a";
 
@@ -179,11 +180,13 @@ async fn a_written_session_file_answers_with_the_attachment_that_hands_it_to_a_c
         )
         .await;
 
-    // Then the answer carries the StartSession attachment for it: its session artifact under files/
+    // Then the answer carries the StartSession attachment for it: its session artifact under files/,
+    // held by this daemon
     assert_eq!(
         result_of(&written)["attachment"],
         serde_json::json!({
             "basename": "brief.md",
+            "daemon_instance_id": local_instance_id_for_config(&test_config()),
             "scope": "HOST_DOCUMENT_SCOPE_SESSION_ARTIFACT",
             "session_id": project.orchestrator,
             "relative_path": "files/brief.md"

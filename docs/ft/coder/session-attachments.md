@@ -252,7 +252,7 @@ An orchestrator session (`project-home` main or `orchestrator`) can write its ow
 - A name is one flat file name: 1 to 128 bytes, no `/`, `\`, NUL or `..`, no leading `.`. Content is text, at most 1 MiB. Anything else is refused naming why, and nothing is written. A write is atomic (a hidden temporary, then a rename), so a reader never sees a half file.
 - Both answers carry `attachment`: the exact `StartSession` `attachments[]` entry for the file — `HOST_DOCUMENT_SCOPE_SESSION_ARTIFACT`, the orchestrator's session id and `files/<name>`. No new attachment source exists: the file is a session artifact, so `StartSession` copies it into the child's `artifacts/attachments/` as it does any host document, and the child never reads the orchestrator's directory.
 - A worker session is refused both tools (`permission_denied`); the write is a session-directory write, not a worktree write, so it needs no grant.
-- Served on the host that holds the orchestrator; there is no peer forwarding yet.
+- The attachment names the daemon that holds the file (`daemon_instance_id`), so a `StartSession` on any eligible host fetches it from there (`ReadHostDocument`). A call that reaches a daemon not holding the calling orchestrator is confirmed at its owner and served there, so the file always lands in the orchestrator's own session directory; a worker is still refused, from any host. The base-freshness tools are not forwarded.
 
 Tools: [project-concept.md § Project-home tools](../daemon/project-concept.md). Store: `tddy_session_files::session_files::SessionFileStore`.
 
