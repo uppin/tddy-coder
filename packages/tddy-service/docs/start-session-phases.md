@@ -70,9 +70,13 @@ ledger) folds them into the start's log; a relay passes them on unchanged.
 
 ## `StartWorktreeReady`
 
-`worktree_ready` (field 8) is `StartWorktreeReady { string branch; string worktree; }`, sent once a start
-on a target has cut its worktree there: from that event on, the branch and the checkout exist on the
-target whether or not the start goes on to succeed.
+`worktree_ready` (field 8) is `StartWorktreeReady { string branch; string worktree; string base_commit;
+uint32 base_behind; }`, sent once a start has cut its worktree, on this host or on a target: from that
+event on, the branch and the checkout exist whether or not the start goes on to succeed.
+`base_commit` is the commit the worktree was cut from and `base_behind` how many commits its upstream
+had that it did not when it was cut; both are empty and zero when the start cut from no base. A start
+ledger records them only when `base_commit` is not empty, so a record never claims a commit of `""`
+is zero behind.
 
 ## `StartKeepAlive`
 

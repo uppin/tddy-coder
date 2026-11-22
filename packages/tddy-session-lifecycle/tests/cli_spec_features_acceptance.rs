@@ -186,10 +186,14 @@ async fn a_copy_of_claude_yaml_under_another_id_as_a_project_home_main_records_i
     );
 }
 
+/// The commit the stub ssh target reports its fresh clone's `HEAD` at.
+const A_REMOTE_CUT_COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+
 /// A stub `ssh` first on this process's `PATH` for as long as it lives: every call appends its
 /// remote command and its stdin to `<log>/calls`, and runs nothing — except the target's home
-/// query, which it answers as a real target would. With `slot_writes_hang`, a call that writes a
-/// file (`cat > …`) never returns.
+/// query and the two git reads of the cut's base (`rev-parse HEAD`, and `rev-list --count` behind
+/// its upstream), which it answers as a real target's fresh clone would: a commit, zero behind.
+/// With `slot_writes_hang`, a call that writes a file (`cat > …`) never returns.
 struct AnSshTarget {
     log: tempfile::TempDir,
     _bin: tempfile::TempDir,
@@ -213,12 +217,15 @@ alias="$1"; shift
 remote="$*"
 {hang}
 case "$remote" in *'$HOME'*) printf 'TDDY_REMOTE_HOME_BEGIN:%s:TDDY_REMOTE_HOME_END\n' '/home/dev'; exit 0 ;; esac
+case "$remote" in *"'rev-parse' 'HEAD'"*) printf '%s\n' '{cut_commit}'; exit 0 ;; esac
+case "$remote" in *"'rev-list' '--count'"*) printf '0\n'; exit 0 ;; esac
 printf 'CALL %s %s\n' "$alias" "$remote" >> "{log}/calls"
 /bin/cat >> "{log}/calls"
 printf '\nEND\n' >> "{log}/calls"
 exit 0
 "#,
             log = log.path().display(),
+            cut_commit = A_REMOTE_CUT_COMMIT,
         );
         let ssh = bin.path().join("ssh");
         std::fs::write(&ssh, script).unwrap();

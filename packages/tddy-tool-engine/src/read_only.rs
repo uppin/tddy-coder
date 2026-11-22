@@ -29,6 +29,7 @@ pub fn is_project_home_allowed_tool(name: &str) -> bool {
         || crate::stack_git_tools::is_stack_git_tool(name)
         || crate::session_message_tools::is_session_message_tool(name)
         || crate::session_file_tools::is_session_file_tool(name)
+        || crate::base_freshness_tools::is_base_freshness_tool(name)
 }
 
 /// The prefix `claude` gives a tool served by the `tddy-tools` MCP server.
@@ -167,6 +168,8 @@ mod tests {
                 // An orchestrator's own files (`#orchestra` 3/9).
                 "mcp__tddy-tools__WriteSessionFile",
                 "mcp__tddy-tools__ListSessionFiles",
+                "mcp__tddy-tools__CheckBaseFreshness",
+                "mcp__tddy-tools__RefreshHome",
             ]
         );
     }

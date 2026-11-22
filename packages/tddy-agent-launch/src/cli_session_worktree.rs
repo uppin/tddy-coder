@@ -152,14 +152,16 @@ async fn cut_worktree(
         let recorded = recorded_by(shell.clone(), progress);
         remote_worktree_through(start, git_url, &recorded, worktree_base_ref, progress).await?
     } else if start.ssh_alias.is_empty() {
-        tddy_session_split::service_util::create_session_worktree(
+        let cut = tddy_session_split::service_util::create_session_worktree(
             start.timeout,
             start.cut_label,
             repo_root,
             start.session_dir,
             worktree_base_ref,
         )
-        .await?
+        .await?;
+        announce_local_cut(&cut, progress)?;
+        cut
     } else {
         remote_worktree(start, git_url, worktree_base_ref, progress).await?
     };
@@ -172,6 +174,18 @@ async fn cut_worktree(
     )
     .await?;
     Ok(wt)
+}
+
+/// Report the local cut at `worktree` — its branch, and the commit it was cut from — to the start's
+/// progress.
+fn announce_local_cut(worktree: &Path, progress: &AttachmentProgressSink) -> Result<(), Status> {
+    use tddy_worktree_service::base_freshness::{branch_of_worktree, CutBase};
+    let base = CutBase::of_worktree(worktree)
+        .map_err(|e| Status::internal(format!("reading the cut's base commit failed: {e}")))?;
+    let branch = branch_of_worktree(worktree)
+        .map_err(|e| Status::internal(format!("reading the cut's branch failed: {e}")))?;
+    progress.worktree_ready(&branch, &worktree.to_string_lossy(), &base);
+    Ok(())
 }
 
 /// The session's checkout on the ssh target `start.ssh_alias`, cloned from `git_url`.
@@ -322,8 +336,50 @@ async fn remote_worktree_through(
             tddy_remote_shell::scrub_credentials(&error.to_string())
         ))
     })?;
-    progress.worktree_ready(&checkout.branch, &checkout.worktree);
+    let base = remote_cut_base(shell, &checkout.worktree).await?;
+    progress.worktree_ready(&checkout.branch, &checkout.worktree, &base);
     Ok(PathBuf::from(checkout.worktree))
+}
+
+/// The commit the remote worktree at `worktree` was cut from and how far behind its upstream it
+/// is, read through the target's shell with the invocations the local cut runs.
+async fn remote_cut_base(
+    shell: &dyn tddy_remote_shell::RemoteShell,
+    worktree: &str,
+) -> Result<tddy_worktree_service::base_freshness::CutBase, Status> {
+    use tddy_worktree_service::base_freshness::{CUT_BASE_BEHIND_ARGS, CUT_BASE_COMMIT_ARGS};
+    let quote = |value: &str| format!("'{}'", value.replace('\'', "'\\''"));
+    let quoted = quote(worktree);
+    let run = |args: &[&str]| {
+        let quoted_args: Vec<String> = args.iter().map(|arg| quote(arg)).collect();
+        tddy_remote_shell::ExecRequest::new(format!("git -C {quoted} {}", quoted_args.join(" ")))
+    };
+    let head = shell
+        .exec(run(&CUT_BASE_COMMIT_ARGS))
+        .await
+        .map_err(|e| Status::internal(format!("reading the cut's base commit failed: {e}")))?;
+    if head.status != 0 {
+        return Err(Status::internal(format!(
+            "reading the cut's base commit failed: {}",
+            String::from_utf8_lossy(&head.stderr).trim()
+        )));
+    }
+    // A branch with no upstream has no remote tip to be behind: the command fails and it is zero.
+    let behind = match shell.exec(run(&CUT_BASE_BEHIND_ARGS)).await {
+        Ok(out) if out.status == 0 => {
+            let count = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            count.parse().map_err(|_| {
+                Status::internal(format!(
+                    "reading the cut's base commit failed: unreadable behind count: {count}"
+                ))
+            })?
+        }
+        _no_upstream => 0,
+    };
+    Ok(tddy_worktree_service::base_freshness::CutBase {
+        commit: String::from_utf8_lossy(&head.stdout).trim().to_string(),
+        behind,
+    })
 }
 
 fn spawned_branch(
@@ -398,7 +454,8 @@ mod remote_cut_tests {
     /// The home probe is answered as a pty-merging transport delivers it: the shell's
     /// start marker, then the probe's sentinels around the home (they spell exactly what
     /// `remote_checkout_root` prints around `$HOME`). The cut's base probe is answered with
-    /// `origin/master` between the sentinels `tddy-git`'s `remote_checkout` prints around it.
+    /// `origin/master` between the sentinels `tddy-git`'s `remote_checkout` prints around it. The cut's
+    /// base probes are answered with a commit and two commits behind.
     fn a_workspace() -> InMemoryShell {
         let shell = InMemoryShell::new("coder.remote-dev");
         shell.answers_when(|request| {
@@ -407,6 +464,18 @@ mod remote_cut_tests {
                     b"TDDY_REMOTE_BASE_BEGIN:origin/master:TDDY_REMOTE_BASE_END\n".to_vec(),
                 )
             })
+        });
+        shell.answers_when(|request| {
+            request
+                .command
+                .contains("'rev-parse' 'HEAD'")
+                .then(|| ExecOutput::succeeded(b"4ba506396\n".to_vec()))
+        });
+        shell.answers_when(|request| {
+            request
+                .command
+                .contains("'rev-list' '--count'")
+                .then(|| ExecOutput::succeeded(b"2\n".to_vec()))
         });
         shell.answers_when(|request| {
             request.command.contains("$HOME").then(|| {
@@ -543,6 +612,59 @@ mod remote_cut_tests {
             "the generated branch from the changeset is cut:\n{run}"
         );
     }
+    #[tokio::test]
+    async fn a_target_cut_reports_the_commit_it_was_cut_from_and_how_far_behind_it_was() {
+        // Given a start on a target whose cut worktree is at a commit two behind its upstream
+        let session_dir = tempfile::tempdir().expect("session dir");
+        let sessions_base = tempfile::tempdir().expect("sessions base");
+        let tddy_data = tempfile::tempdir().expect("tddy data");
+        let workspace = a_workspace();
+        let start = CliWorktreeStart {
+            session_type: "claude-cli",
+            cut_label: "cut the session worktree",
+            session_id: SESSION,
+            session_dir: session_dir.path(),
+            sessions_base: sessions_base.path(),
+            tddy_data_dir: tddy_data.path(),
+            os_user: "testdev",
+            project_id: "proj-1",
+            repo_path: "",
+            branch_worktree_intent: "new_branch_from_base",
+            new_branch_name: "feature/hooks",
+            selected_integration_base_ref: "origin/main",
+            selected_branch_to_work_on: "",
+            create_remote_branch: false,
+            intent: tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+            timeout: Duration::from_secs(5),
+            ssh_alias: "",
+            shell: Some(Arc::new(workspace.clone())),
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // When the checkout is cut on the target
+        remote_worktree_through(
+            &start,
+            QAPE_HQ,
+            &workspace,
+            Some("origin/main".to_string()),
+            &tddy_session_files::attachment_progress::AttachmentProgressSink::streaming(tx),
+        )
+        .await
+        .expect("the cut succeeds");
+
+        // Then the start reported its worktree ready with the base it was cut from
+        let mut ready = None;
+        while let Ok(event) = rx.try_recv() {
+            if let Some(tddy_service::proto::session::start_session_event::Event::WorktreeReady(
+                worktree_ready,
+            )) = event.expect("no failure").event
+            {
+                ready = Some((worktree_ready.base_commit, worktree_ready.base_behind));
+            }
+        }
+        assert_eq!(ready, Some(("4ba506396".to_string(), 2)));
+    }
+
     /// The base the target's `git worktree add -b` was given: its last argument, unquoted.
     fn the_base_the_target_cut_from(workspace: &InMemoryShell) -> Option<String> {
         workspace

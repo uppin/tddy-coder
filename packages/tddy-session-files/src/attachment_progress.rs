@@ -117,7 +117,12 @@ impl AttachmentProgressSink {
 
     /// Reports that the start cut its worktree: its branch and checkout exist from here on. A
     /// closed receiver is ignored.
-    pub fn worktree_ready(&self, branch: &str, worktree: &str) {
+    pub fn worktree_ready(
+        &self,
+        branch: &str,
+        worktree: &str,
+        base: &tddy_worktree_service::base_freshness::CutBase,
+    ) {
         let Some(tx) = self.tx.as_ref() else {
             return;
         };
@@ -126,6 +131,8 @@ impl AttachmentProgressSink {
                 tddy_service::proto::session::StartWorktreeReady {
                     branch: branch.to_string(),
                     worktree: worktree.to_string(),
+                    base_commit: base.commit.clone(),
+                    base_behind: base.behind,
                 },
             )),
         }));

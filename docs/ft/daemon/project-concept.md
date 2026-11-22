@@ -236,6 +236,22 @@ orchestrator?" gate asks one predicate, `tddy_changeset::session_metadata::is_or
   ([Reporting to the orchestrator](#reporting-to-the-orchestrator)).
 - A forwarded tool call from an orchestrator on another host is served as one from main is.
 
+#### Keeping the base fresh
+
+The home worktree is fast-forwarded when an orchestrator starts and resumes, and after that it stays
+where it was. An orchestrator that plans from it checks the base itself:
+
+- **`CheckBaseFreshness`** fetches the project's trunk (its integration base ref) and reports the home
+  worktree's commit, the remote tip, and how many commits the home is ahead and behind.
+- **`RefreshHome`** fetches and fast-forwards the home to the tip. It only ever fast-forwards: a home
+  with commits of its own is refused and left as it was.
+- Both act on the **caller's own** home worktree and take no argument; a worker session is refused.
+  Nothing polls the remote: the orchestrator decides when to look.
+- **Every start an orchestrator makes records its base.** The start's worktree-ready event carries the
+  commit the worktree was cut from and how far behind its upstream that commit was at cut time, and
+  `GetSessionStart` reports both. This is reporting only: a start from a stale base is not refused.
+  A session started on an existing branch, which is cut from no base, has neither.
+
 `SessionService.EnsureProjectHomeSession(project_id, daemon_instance_id, start?)` owns its lifecycle
 and answers `{ session, outcome }`. Without `start` it reaches the recorded main:
 
@@ -410,6 +426,8 @@ role's (see [Messages between sessions](#messages-between-sessions)).
 | `ReadSessionMessages` | `after_message_id?`, `limit?` (50 by default and at most) | `{messages, lost, has_more}`: the messages addressed to the caller that it has not read yet, oldest first, each once; answering them advances its inbox position. See [Messages between sessions](#messages-between-sessions) |
 | `WriteSessionFile` | `name`, `content` | `{name, size_bytes, modified_unix_ms, attachment}`: writes a text file (at most 1 MiB; `name` one flat file name, at most 128 bytes, no `/`, no `..`, no leading `.`) into the caller's **own** session's files, replacing one of that name. `attachment` is the entry to put in `StartSession`'s `attachments[]` to hand the file to the session it starts, which gets a copy. Orchestrator roles only; see [Session attachments § Session files an orchestrator writes](../coder/session-attachments.md#session-files-an-orchestrator-writes) |
 | `ListSessionFiles` | — | `{files: [{name, size_bytes, modified_unix_ms, attachment}]}`: the caller's session files, by name |
+| `CheckBaseFreshness` | — | `{trunk_ref, home_commit, remote_tip, ahead, behind, fetched_at_unix_ms}`: fetches the project's trunk from its remote, then reports where the caller's own home worktree stands against the tip — `behind` is what landed since its commit, not since the last fetch. Orchestrator roles only; see [Keeping the base fresh](#keeping-the-base-fresh) |
+| `RefreshHome` | — | the same answer after fetching and fast-forwarding the caller's home worktree to the trunk tip. A home with commits of its own is refused, the error naming where it stands, and left untouched. Orchestrator roles only |
 | `WaitProjectNotifications` | `cursor?`, `timeout_ms?` (at most 20000, the default), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, timed_out, lost?}`: returns at once when the project's notification log holds records after `cursor`, otherwise holds until one arrives or `timeout_ms` passes. Without a cursor it waits for the next new record. See [Waiting for notifications](#waiting-for-notifications) |
 | `ReadProjectNotifications` | `cursor?`, `limit?` (50 by default, at most 200), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, clamped_to?, lost?}`: up to `limit` records after `cursor`, oldest first, without waiting; without a cursor, the newest page. See [Waiting for notifications](#waiting-for-notifications) |
 | `CreateSessionWatch` | `session_ids?`, `started_by_me?`, `kinds?`, `ttl_seconds` (required, 1 to 86400) | `{watch_id, session_ids, started_by_me, kinds, created_at_unix_ms, expires_at_unix_ms}`: a watch over the sessions it names, or every session the caller started, for the kinds named (all seven when none: `question`, `permission`, `turn_finished`, `waiting_for_input`, `agent_notification`, `ended`, `message`). The kind `message` alone with no session selected is the caller's inbox watch — the one watch a session that is not an orchestrator may hold. See [Watching sessions](#watching-sessions) |
@@ -513,7 +531,7 @@ owns, an invalid option) is the tool's `is_error` result naming why, not a handl
 
 | Tool | Arguments | Answers |
 |---|---|---|
-| `GetSessionStart` | `start_id` | the start's record: `state` (`running`, `succeeded`, `failed`, `cancelled`), its current `step` `{step, status}`, `clone_progress` `{stage, percent}`, and once it succeeded its `session_id`, `branch`, `worktree` and `display_name` (as the host running it lists them; for a split session, its codebase half's branch and worktree as the codebase host lists that half; `display_name` is `null` for an unnamed session), or once it failed or was cancelled, `error`; and `remote_calls`, the start's log of what it ran on a target (see below) |
+| `GetSessionStart` | `start_id` | the start's record: `state` (`running`, `succeeded`, `failed`, `cancelled`), its current `step` `{step, status}`, `clone_progress` `{stage, percent}`, and once it succeeded its `session_id`, `branch`, `worktree`, `display_name`, `base_commit` and `base_behind` (as the host running it lists them; for a split session, its codebase half's branch and worktree as the codebase host lists that half; `display_name` is `null` for an unnamed session; `base_commit` is the commit the worktree was cut from and `base_behind` how many commits its upstream was ahead of it when it was cut, both `null` for a start that cut from no base — see [Keeping the base fresh](#keeping-the-base-fresh)), or once it failed or was cancelled, `error`; and `remote_calls`, the start's log of what it ran on a target (see below) |
 | `CancelSessionStart` | `start_id` | returns at once; the start's host is sent `CancelTask` (locally, or forwarded to the peer running it), and the record reads `cancelled` once the stream has ended. A start that is no longer running is refused naming its state |
 
 - **The start ledger.** A background consumer on the orchestrator's host drains the start's stream

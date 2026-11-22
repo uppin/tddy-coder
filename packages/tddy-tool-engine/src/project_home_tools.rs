@@ -5,7 +5,7 @@
 //! |---|---|
 //! | `ListProjectSessions` | every other session of the project on every host, with its host, status and worktree |
 //! | `StartSession` | starts a session in the project with any New-session option, on any eligible host, linked to the caller as its orchestrator ([`crate::start_session_args`]); it returns a handle at once ([`crate::start_ledger`]) |
-//! | `GetSessionStart` | a start's state, step, and on success its session, branch and worktree, or its failure |
+//! | `GetSessionStart` | a start's state, step, and on success its session, branch, worktree and the base commit it was cut from, or its failure |
 //! | `CancelSessionStart` | cancels a start still running, on whichever host runs it |
 //! | `DescribeSessionStartOptions` | the agents, models, provider routes, SSH hosts, subagents, branches and stack parents a start may choose on a host ([`crate::start_options`]) |
 //! | `ReadSessionWorktree` | reads a file or lists a directory in a target session's worktree |
