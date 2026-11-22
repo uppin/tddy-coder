@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 3 — one answer field plus joining an existing cross-host route; two-daemon acceptance tests over the in-memory peer world
+**PR**: [#996](https://github.com/uppin/tddy-coder/pull/996)
 **Stack**: `#orchestra` 10/11 — branch `feature/orchestra/session-files-cross-host`, base `feature/orchestra/orchestrator-prompt`
 
 ## Initial Discovery
@@ -75,12 +76,15 @@ The attachment works from any host; a session-file call lands in the caller's ow
 ## Acceptance Tests
 
 `packages/tddy-daemon-rpc/tests/session_files_cross_host_acceptance.rs` (two in-memory daemons, `support::{a_host, InProcessPeers, HOST_A, HOST_B}`):
-- [ ] `the_written_files_attachment_names_the_orchestrators_daemon`
-- [ ] `a_session_file_call_sent_to_another_host_lands_in_the_orchestrators_own_session`
-- [ ] `a_worker_sessions_session_file_call_is_refused_from_another_host`
+- [ ] `the_written_files_attachment_names_the_orchestrators_daemon` — 🔴 red: `DaemonSessionFiles::holding_daemon` unimplemented
+- [ ] `a_session_file_call_sent_to_another_host_lands_in_the_orchestrators_own_session` — 🔴 red: host-b refuses with `FailedPrecondition: session not found` (the session-file tools are not on the caller-held-elsewhere route)
+- [x] `a_worker_sessions_session_file_call_is_refused_from_another_host` — guard, green before and after: host-b already refuses a session it does not hold; the new route must keep refusing a worker after confirming at its owner
 
 Unit — `packages/tddy-tool-engine/src/session_file_tools.rs`:
-- [ ] `a_session_files_attachment_names_the_daemon_that_holds_it`
+- [ ] `a_session_files_attachment_names_the_daemon_that_holds_it` — 🔴 red: `attachment_for` unimplemented
+- [ ] `the_attachment_parses_as_a_start_session_attachment` (existing) — 🔴 red until `attachment_for` is implemented
+
+Contract surface: `attachment_for(caller, holding_daemon, name)` and `SessionFilePort::holding_daemon()`, both `TODO(session-files-cross-host)`.
 
 ## Decisions & Trade-offs
 
@@ -104,10 +108,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (pre-approved: "finish the remaining ones without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

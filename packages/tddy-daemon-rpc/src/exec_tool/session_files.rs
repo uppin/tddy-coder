@@ -63,6 +63,11 @@ impl SessionFilePort for DaemonSessionFiles {
             .map(|files| files.into_iter().map(entry_of).collect())
             .map_err(|e| format!("session files could not be listed: {e}"))
     }
+
+    fn holding_daemon(&self) -> String {
+        // TODO(session-files-cross-host): implement — this daemon's instance id.
+        unimplemented!("DaemonSessionFiles::holding_daemon")
+    }
 }
 
 impl ExecToolRpcHandler {

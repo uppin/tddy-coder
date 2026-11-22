@@ -93,16 +93,19 @@ pub trait SessionFilePort: Send + Sync {
         &self,
         caller: &HomeCaller,
     ) -> Result<Vec<SessionFileEntry>, String>;
+
+    /// The daemon that holds `caller`'s session files — its instance id, as the eligible-daemon
+    /// roster names it. An attachment names it so a session started on another host fetches the
+    /// file from here (`#orchestra` 10/11).
+    fn holding_daemon(&self) -> String;
 }
 
-/// The `StartSession` `attachments[]` entry that attaches `caller`'s session file `name`.
-pub fn attachment_for(caller: &HomeCaller, name: &str) -> Value {
-    json!({
-        "basename": name,
-        "scope": "HOST_DOCUMENT_SCOPE_SESSION_ARTIFACT",
-        "session_id": caller.session_id,
-        "relative_path": format!("files/{name}"),
-    })
+/// The `StartSession` `attachments[]` entry that attaches `caller`'s session file `name`, held by
+/// the daemon `holding_daemon` — named, so the entry works from a start on any host.
+pub fn attachment_for(caller: &HomeCaller, holding_daemon: &str, name: &str) -> Value {
+    // TODO(session-files-cross-host): implement — the entry names `holding_daemon`.
+    let _ = (caller, holding_daemon, name);
+    unimplemented!("attachment_for")
 }
 
 /// Run a session-file tool for `caller`. A refusal comes back as an `is_error` outcome naming it;
@@ -130,7 +133,8 @@ pub async fn execute_session_file_tool(
             match port.write_session_file(caller, args).await {
                 Ok(entry) => {
                     let mut answer = entry_json(&entry);
-                    answer["attachment"] = attachment_for(caller, &entry.name);
+                    answer["attachment"] =
+                        attachment_for(caller, &port.holding_daemon(), &entry.name);
                     ToolOutcome::ok(answer.to_string())
                 }
                 Err(message) => ToolOutcome::err(format!("{tool_name}: {message}")),
@@ -142,7 +146,8 @@ pub async fn execute_session_file_tool(
                     .iter()
                     .map(|entry| {
                         let mut file = entry_json(entry);
-                        file["attachment"] = attachment_for(caller, &entry.name);
+                        file["attachment"] =
+                            attachment_for(caller, &port.holding_daemon(), &entry.name);
                         file
                     })
                     .collect();
@@ -176,13 +181,14 @@ mod tests {
     }
 
     #[test]
-    fn a_session_files_attachment_is_its_session_artifact_under_files() {
-        let attachment = attachment_for(&the_orchestrator(), "brief.md");
+    fn a_session_files_attachment_names_the_daemon_that_holds_it() {
+        let attachment = attachment_for(&the_orchestrator(), "host-a", "brief.md");
 
         assert_eq!(
             attachment,
             json!({
                 "basename": "brief.md",
+                "daemon_instance_id": "host-a",
                 "scope": "HOST_DOCUMENT_SCOPE_SESSION_ARTIFACT",
                 "session_id": "01a1fdd8-dea7-7e70-9945-d66127579ec2",
                 "relative_path": "files/brief.md"
@@ -192,7 +198,7 @@ mod tests {
 
     #[test]
     fn the_attachment_parses_as_a_start_session_attachment() {
-        let attachment = attachment_for(&the_orchestrator(), "brief.md");
+        let attachment = attachment_for(&the_orchestrator(), "host-a", "brief.md");
 
         let parsed: Result<crate::start_session_args::HostDocumentAttachment, _> =
             serde_json::from_value(attachment);
