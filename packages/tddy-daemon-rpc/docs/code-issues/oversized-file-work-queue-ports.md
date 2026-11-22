@@ -24,6 +24,7 @@
 | 2026-11-20 | 878 → 880 | **Regressed by 2** in #958 (`#session-liveness` 1/4): two `let live = self.terminals.live_sessions().await;` reads, one before each of the two branch-owner scans (`QueryBranch`, `PullBaseIntoBranch`). Not split: the file is stack-shared with n2–n4 of that stack |
 | 2026-11-22 | 880 → 876 | **Touched, slightly better** in #1002 (`#workqueue` 1/14): the stack calls name `tddy_pr_stack` / `tddy_github` directly instead of the recipe facades. Not split: the file is stack-shared with later `#workqueue` nodes |
 | 2026-11-22 | 876 | **Moved, not changed in size** by #1004 (`#workqueue` 3/14): `pr_stack/ports.rs` → `work_queue/ports.rs`, 876 production lines at n2's tip `d8cae27aa` and after the rename |
+| 2026-11-22 | 860 → 860 | **Touched, unchanged** by #1007 (`#workqueue` 6/14): four delegating one-liners for the link RPCs plus `stream_work_queue_status`, offset by moving `ReorderWorkItem`'s body to `work_queue_queries.rs`; the link handlers live in `work_queue/links.rs` and the stream in `work_queue/status_stream.rs`. Not split: unchanged size, alert-only, and stack-shared |
 
 ## What would close it — candidate seams (not proven)
 
