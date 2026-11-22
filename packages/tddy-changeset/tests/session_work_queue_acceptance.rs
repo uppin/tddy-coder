@@ -192,3 +192,26 @@ fn old_project_stack_records_and_journals_are_dropped() {
         "other project data stays"
     );
 }
+
+#[test]
+fn a_queues_operation_journal_sits_beside_it_and_survives_the_upgrade_drop() {
+    // Given a session that owns a queue
+    let host = AHost::with_sessions(&[("orch", "proj-a")]);
+    let queues = host.queues();
+    queues.create_for_session("orch", "proj-a", T0).unwrap();
+
+    // When its operation journal is placed, and the old project stack records are dropped
+    let journal = queues.op_journal_path("orch").unwrap();
+    drop_old_project_stack_records(&host.root.path().join("projects")).unwrap();
+
+    // Then the journal is in the owning session's directory, beside the queue, where the drop never reaches
+    assert_eq!(
+        journal,
+        host.root
+            .path()
+            .join("sessions")
+            .join("orch")
+            .join(tddy_changeset::session_work_queue::WORK_QUEUE_OP_JOURNAL_FILE)
+    );
+    assert!(queues.op_journal_path("../escape").is_err());
+}

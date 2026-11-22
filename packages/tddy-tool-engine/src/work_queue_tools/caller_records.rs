@@ -124,7 +124,8 @@ pub fn with_work_tools_offered_to(
     access: Option<WorkQueueAccess>,
 ) -> Vec<ToolDef> {
     catalogue.retain(|tool| {
-        !super::is_stack_tool(&tool.name) && !crate::work_item_git_tools::is_stack_git_tool(&tool.name)
+        !super::is_stack_tool(&tool.name)
+            && !crate::work_item_git_tools::is_stack_git_tool(&tool.name)
     });
     catalogue.extend(stack_and_git_tools_offered_to(access));
     catalogue

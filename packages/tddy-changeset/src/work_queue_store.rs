@@ -133,6 +133,14 @@ impl WorkQueueStore {
         Ok(WorkQueueRecord::of(record))
     }
 
+    /// Where the queue `queue_id` journals an in-flight merge or repoint: beside it, in its owning
+    /// session's directory.
+    pub fn op_journal_path(&self, queue_id: &str) -> Result<PathBuf, WorkQueueStoreError> {
+        self.queues()
+            .op_journal_path(queue_id)
+            .map_err(|e| store_error(e, ""))
+    }
+
     /// Every queue owned by a session of `project_id` on this host, sorted by queue id.
     pub fn list(&self, project_id: &str) -> Result<Vec<WorkQueueRecord>, WorkQueueStoreError> {
         check_project(project_id)?;

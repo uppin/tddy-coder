@@ -1069,10 +1069,9 @@ export type SessionEntry = Message<"session.SessionEntry"> & {
   orchestrationMark?: OrchestrationMark;
 
   /**
-   * The id, in its project's stack store, of the PR stack this session's changeset names
-   * (`Changeset.work_queue_id`); empty when it names none (`#orchestrators` 9/11). With `project_id` and
-   * `daemon_instance_id` it is the stack's address (`work_queue.WorkQueueAddress`), which is how the
-   * PR-stack chat screen loads and edits its plan.
+   * The id of the work queue this session owns — its own session id — or empty when it owns none
+   * (`#workqueue` 5/14). With `project_id` and `daemon_instance_id` it is the queue's address
+   * (`work_queue.WorkQueueAddress`), which is how the web loads and edits its plan.
    *
    * @generated from field: string work_queue_id = 38;
    */

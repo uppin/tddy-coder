@@ -1169,38 +1169,20 @@ async fn spawn_child_from_main_starts_the_nodes_session_linked_to_main() {
 }
 
 #[tokio::test]
-async fn the_six_tools_act_on_a_stack_owned_by_another_host() {
-    // Given a stack held by host-b, its node sessions and worktrees on host-b: n1 and n2 with open
-    // PRs, n3 stacked on n1 with an open PR, n4 stacked on n3, n5 conflicting with its base, and a
-    // planned n6; main is on host-a, where nothing of the stack is
+async fn the_six_tools_naming_another_hosts_queue_are_decided_there_and_refused_to_a_session_it_only_addresses(
+) {
+    // Given a queue held by host-b, owned by a session there, whose n1 links main (on host-a, which
+    // holds no queue): a queue lives on its owner's host, so main is only addressed by it
+    // (`#workqueue` 5/14)
     let world = a_world().await;
     let b = &world.b;
     let queue_id = b.holds_a_stack(
-        &world.main,
-        vec![
-            planned("n1", &[]),
-            planned("n2", &[]),
-            planned("n3", &["n1"]),
-            planned("n4", &["n3"]),
-            planned("n5", &[]),
-            planned_on("n6", "feature/alpha/n6"),
-        ],
+        "owner-on-b",
+        vec![planned("n1", &[]), planned("n2", &["n1"])],
     );
-    let n1 = b.a_node_session(&world.main, &queue_id, "n1", None).await;
-    b.a_node_session(&world.main, &queue_id, "n2", None).await;
-    let n3 = b
-        .a_node_session(&world.main, &queue_id, "n3", Some(&n1.branch))
-        .await;
-    let n4 = b
-        .a_node_session(&world.main, &queue_id, "n4", Some(&n3.branch))
-        .await;
-    let n5 = b.a_node_session(&world.main, &queue_id, "n5", None).await;
-    n5.changes_the_conflicting_file();
-    b.node_has_an_open_pr(&world.github, &queue_id, "n1", 41);
-    b.node_has_an_open_pr(&world.github, &queue_id, "n2", 42);
-    b.node_has_an_open_pr(&world.github, &queue_id, "n3", 43);
-    world.the_default_branch_moves_on(b, CONFLICTING_FILE, "the base's version\n");
-    let base_tip = world.remote_tip(b, DEFAULT_BRANCH);
+    b.update_node(&queue_id, "n1", |node| {
+        node.session_id = Some(world.main.clone())
+    });
     let on_b = |args: Value| {
         let mut args = args;
         args["queue_id"] = json!(queue_id);
@@ -1208,84 +1190,42 @@ async fn the_six_tools_act_on_a_stack_owned_by_another_host() {
         args
     };
 
-    // When main runs each of the six on that stack, naming host-b
-    let merged = world
-        .main_calls("work_item_merge", on_b(json!({ "node_id": "n1" })))
-        .await;
-    let closed = world
-        .main_calls("work_item_close", on_b(json!({ "node_id": "n2" })))
-        .await;
-    let repointed = world
-        .main_calls("work_item_repoint", on_b(json!({ "node_id": "n3" })))
-        .await;
-    let moved = world
-        .main_calls(
+    // When main runs each of the six on that queue, naming host-b
+    let mut answers = Vec::new();
+    for (tool, args) in [
+        ("work_item_merge", json!({ "node_id": "n1" })),
+        ("work_item_close", json!({ "node_id": "n1" })),
+        ("work_item_repoint", json!({ "node_id": "n2" })),
+        (
             "work_item_set_parents",
-            on_b(json!({ "node_id": "n4", "parents": [] })),
-        )
-        .await;
-    let conflicts = world
-        .main_calls(
-            "work_item_resolve_conflicts",
-            on_b(json!({ "node_id": "n5" })),
-        )
-        .await;
-    let spawned = world
-        .main_calls(
+            json!({ "node_id": "n2", "parents": [] }),
+        ),
+        ("work_item_resolve_conflicts", json!({ "node_id": "n2" })),
+        (
             "work_item_spawn_session",
-            on_b(json!({ "node_id": "n6", "session_type": "workspace" })),
-        )
-        .await;
-
-    // Then every call was answered by host-b ...
-    for answer in [&merged, &closed, &repointed, &moved, &conflicts, &spawned] {
-        answer.assert_answered();
+            json!({ "node_id": "n2", "session_type": "workspace" }),
+        ),
+    ] {
+        answers.push(world.main_calls(tool, on_b(args)).await);
     }
+
+    // Then host-a forwarded every call without deciding it, and host-b refused each one, as only the
+    // queue's owner may change it ...
     assert_eq!(
         world
             .peers
             .times_asked(HOST_B, EXEC_TOOL_SERVICE, "ExecuteTool"),
         6
     );
-    // ... GitHub merged #41, closed #42 and retargeted #43 ...
+    for answer in &answers {
+        answer.assert_refused_saying(&format!(
+            "only the session that owns work queue {queue_id} may change it"
+        ));
+    }
+    // ... GitHub was never asked to act, and host-b's queue is as it was
     assert_eq!(
         (world.github.merged(), world.github.closed()),
-        (vec![41], vec![42])
+        (Vec::<u64>::new(), Vec::<u64>::new())
     );
-    assert!(world
-        .github
-        .base_changes()
-        .contains(&(43, DEFAULT_BRANCH.to_string())));
-    // ... host-b's worktrees were rebased and pushed to host-b's remote ...
-    assert!(n3.contains(&base_tip), "n3 is rebased onto {base_tip}");
-    assert_eq!(world.remote_tip(b, &n3.branch), n3.head());
-    assert!(n4.contains(&base_tip), "n4 is rebased onto {base_tip}");
-    assert_eq!(b.node_of(&queue_id, "n4").parents, Vec::<String>::new());
-    // ... host-b's plan records the merge, the close and n5's conflicts ...
-    assert_eq!(
-        (
-            phase_of(&b.node_of(&queue_id, "n1")),
-            phase_of(&b.node_of(&queue_id, "n2")),
-            internal_status_of(&b.node_of(&queue_id, "n5")),
-        ),
-        (
-            Some("merged".to_string()),
-            Some("closed".to_string()),
-            Some("has-conflicts".to_string())
-        )
-    );
-    assert_eq!(
-        conflicts_in(&conflicts.assert_answered()),
-        vec![CONFLICTING_FILE.to_string()]
-    );
-    // ... n6's session was started on host-b, linked to main ...
-    let child = spawned.assert_answered()["session_id"]
-        .as_str()
-        .expect("the answer names the started session")
-        .to_string();
-    let n6 = world.until_the_node_is_bound(b, &queue_id, "n6").await;
-    assert_eq!(n6.session_id.as_deref(), Some(child.as_str()));
-    assert_eq!(b.orchestrator_of(&child), Some(world.main.clone()));
-    // ... and host-a holds no stack
-    assert_eq!(world.a.stacks().list(THIS_PROJECT).unwrap(), Vec::new());
+    assert_eq!(b.node_of(&queue_id, "n2").parents, vec!["n1".to_string()]);
 }

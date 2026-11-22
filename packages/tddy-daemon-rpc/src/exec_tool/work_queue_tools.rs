@@ -90,6 +90,12 @@ impl ExecToolRpcHandler {
         req: &ExecuteToolRequest,
         sessions_base: &Path,
     ) -> Result<ExecuteToolResponse, Status> {
+        if let Some(answered) = self
+            .forwarded_to_the_queues_host(req, sessions_base)
+            .await?
+        {
+            return Ok(answered);
+        }
         let tool = &req.tool_name;
         let (caller, access) = work_queue_caller_of(sessions_base, &req.session_id)?.ok_or_else(|| {
             Status::permission_denied(format!(
@@ -113,6 +119,29 @@ impl ExecToolRpcHandler {
         };
         record_call(sessions_base, req, &response);
         Ok(response)
+    }
+
+    /// Forward `req` whole to the host its `daemon_instance_id` names when it names a queue there
+    /// (`names_a_queue_on_another_host`), recording the call: that host decides the caller's access
+    /// from the queue it holds, which this host has no record of (`#workqueue` 5/14). `None` for any
+    /// other call, which this host checks itself.
+    pub(super) async fn forwarded_to_the_queues_host(
+        &self,
+        req: &ExecuteToolRequest,
+        sessions_base: &Path,
+    ) -> Result<Option<ExecuteToolResponse>, Status> {
+        let here = tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&self.config);
+        if !tddy_tool_engine::work_queue_access::names_a_queue_on_another_host(
+            &req.args_json,
+            &here,
+        ) {
+            return Ok(None);
+        }
+        let Some(answered) = self.served_on_target_host(req).await? else {
+            return Ok(None);
+        };
+        record_call(sessions_base, req, &answered);
+        Ok(Some(answered))
     }
 
     /// Serve a stack tool called by a session another host holds — forwarded here by that host,

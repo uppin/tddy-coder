@@ -64,7 +64,7 @@ login rather than a vault account ([per-project GitHub identity](github-identity
 ## Storage
 
 - **Projects registry:** `~/.tddy/projects/projects.yaml` (list of projects).
-- **PR stacks:** `<projects dir>/<project_id>/stacks/<queue_id>.yaml`, one record per stack the project holds, beside the registry. A stack belongs to its project, not to the session that planned it. See [PR stacking § Where a stack lives](../coder/pr-stacking.md#where-a-stack-lives).
+- **Work queues:** not project records. A work queue belongs to the session that owns it and lives in that session's directory (`<sessions>/<session_id>/work-queue.yaml`); a project's queues are its sessions' queues. See [PR stacking § Where a stack lives](../coder/pr-stacking.md#where-a-stack-lives).
 - **Clone location (default):** `{home}/{repos_base_path}/{name}/` where `repos_base_path` comes from daemon config (default: `repos`).
 - **Optional override:** `CreateProject` may set **`user_relative_path`** (POSIX path relative to the user’s home, e.g. `Code/my-app` or `~/Code/my-app`). When set, the clone destination is that path instead of `{repos_base}/{name}/`.
 
@@ -218,6 +218,9 @@ orchestrator?" gate asks one predicate, `tddy_changeset::session_metadata::is_or
   minted for (the token's `session_id` claim, [session tokens](../../../packages/tddy-github/docs/session-token.md)),
   never a session the request names; an agent token proving no session is refused. Every other
   agent is refused `PERMISSION_DENIED`.
+- **Owns a work queue from its start**, as main does: an orchestrator-role start creates the session's
+  empty work queue without `with_work_queue` — the one place a role decides anything about work
+  queues ([PR stacking § Where a stack lives](../coder/pr-stacking.md#where-a-stack-lives)).
 - **Placed as main is**: on the project's home worktree, managed, no branch, on this host, after the
   same refusals as main's spec (a placement field → `INVALID_ARGUMENT` naming it; an agent without
   `project_home_main` → `FAILED_PRECONDITION`). `sandbox` is refused too: a jailed session gets none
@@ -451,11 +454,11 @@ own worktree.
 
 ### Project-home tools
 
-A session holding an orchestrator role is also offered the eleven stack plan and read tools
-(`work_queue_list`, `work_queue_create`, `work_queue_status`, `work_pr_read`, `work_pr_search`, `work_pr_comments`,
-`work_item_add`, `work_item_update`, `work_item_delete`, `work_item_set_status`, `work_item_adopt`) as daemon
-exec tools addressing a project stack by `queue_id`; a session bound to a node of a stack is
-offered `work_queue_status` and `work_pr_read` for its stack alone. See
+The work tools (`work_queue_*`, `work_pr_*`, `work_item_*`) are offered by **work queue access, not
+by role**: the session that owns a queue is offered all of them, a session an item of a queue links to
+is offered `work_queue_status` and `work_pr_read`, and any other session — an orchestrator that owns
+no queue included — none. An orchestrator-role session owns a queue from its start, so main and every
+orchestrator have them in practice. See
 [PR stacking § PR-management tools](../../coder/pr-stacking.md#pr-management-tools).
 
 The exec tools below give the read-only main its reach over **its own project's** sessions. Only a

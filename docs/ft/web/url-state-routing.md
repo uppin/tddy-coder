@@ -58,7 +58,7 @@ with a real session.
 | Param | Applies to | Values | Meaning |
 |-------|-----------|--------|---------|
 | `host` | every path | daemon instance id | The selected daemon |
-| `inspector` | `#/sessions/:id` | `details` `activity` `tools` `agents` `usage` `pr` `worktree` `files` `vnc` `screen-sharing` | Inspector open, on that tab. **Absent ⇒ closed.** Opening it without naming a tab writes the session's default: `pr` when it has a pull request, else `worktree` |
+| `inspector` | `#/sessions/:id` | `details` `activity` `tools` `agents` `usage` `work-queue` `pr` `worktree` `files` `vnc` `screen-sharing` | Inspector open, on that tab. **Absent ⇒ closed.** Opening it without naming a tab writes the session's default: `work-queue` when it owns a work queue, else `pr` when it has a pull request, else `worktree`. `work-queue` on a session that owns none degrades to Details |
 | `full` | `#/sessions/:id` with `inspector` | `1` | Inspector expanded rather than docked |
 | `code` | `#/sessions/:id` | `1` | Worktree Code split pane open |
 | `channel` | `#/tasks/:taskId` | channel id | Selected task-output channel tab |

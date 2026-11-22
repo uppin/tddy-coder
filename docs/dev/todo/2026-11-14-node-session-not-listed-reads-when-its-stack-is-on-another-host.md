@@ -29,3 +29,15 @@ the cross-host case.
 ## Developer decision
 
 **Deferred by the developer at the #orchestrators TODO gate, 2026-11-14.** Cross-host listing gaps were accepted earlier in the stack; this one stays open until a peer lookup of node bindings is wanted.
+
+## Narrowed by `#workqueue` 5/14 (PR #1006), 2026-11-22
+
+Queues are now owned by sessions, and access follows the queue. The **serving** half is complete: a
+call naming a queue on another host is forwarded by the caller's own host without a local check, and
+the holding host serves `work_queue_status` and `work_pr_read` to a session an item of that queue links
+to (`stack_plan_tools_acceptance::a_queue_held_by_another_host_that_addresses_main_is_read_through_forwarding_not_edited`,
+with no queue of the caller's own). The **listing** gap above is unchanged: the caller's host reads
+only its own sessions' queues (`caller_records::work_queue_caller_from_records`), so a session linked
+only by a queue on another host is listed no work tool by its own host's `ListExecTools`. Closing it
+still means asking peers for the queues that link the session, or recording the link on the session.
+

@@ -1040,14 +1040,14 @@ export const WorkItemCountsSchema: GenMessage<WorkItemCounts> = /*@__PURE__*/
  */
 export type WorkQueueSummary = Message<"work_queue.WorkQueueSummary"> & {
   /**
-   * Where the stack lives — the address every other request about it carries.
+   * Where the queue lives — the address every other request about it carries.
    *
    * @generated from field: work_queue.WorkQueueAddress address = 1;
    */
   address?: WorkQueueAddress;
 
   /**
-   * What the stack is for, as it was created with; empty for a stack created without a title.
+   * What the queue is for; empty for a queue that was never titled.
    *
    * @generated from field: string title = 2;
    */
@@ -1059,14 +1059,14 @@ export type WorkQueueSummary = Message<"work_queue.WorkQueueSummary"> & {
   nodeCounts?: WorkItemCounts;
 
   /**
-   * The sessions on the owning host whose changeset names this stack.
+   * The session on the owning host that owns this queue (its `queue_id`).
    *
    * @generated from field: repeated string referencing_session_ids = 4;
    */
   referencingSessionIds: string[];
 
   /**
-   * The session that planned the stack (or, for a migrated one, the session that carried it).
+   * The session that owns the queue — the same id as its `queue_id` (`#workqueue` 5/14).
    *
    * @generated from field: string created_by_session_id = 5;
    */
@@ -1300,9 +1300,9 @@ export const WorkQueueService: GenService<{
     output: typeof LinkWorkItemResponseSchema;
   },
   /**
-   * A project's PR stacks on every host that holds the project (`#orchestrators` 9/11). The daemon
-   * the call arrives on answers from its own project stack store and asks each eligible peer for
-   * its own; a peer that does not answer is named in `unreachable_hosts`, never silently dropped.
+   * A project's work queues on every host that holds the project — one per owning session
+   * (`#workqueue` 5/14). The daemon the call arrives on answers from its own sessions' queues and
+   * asks each eligible peer for its own; a peer that does not answer is named in `unreachable_hosts`, never silently dropped.
    * See docs/ft/coder/pr-stacking.md.
    *
    * @generated from rpc work_queue.WorkQueueService.ListProjectWorkQueues
@@ -1313,8 +1313,8 @@ export const WorkQueueService: GenService<{
     output: typeof ListProjectWorkQueuesResponseSchema;
   },
   /**
-   * One project stack by its address, served by the daemon whose store holds it — forwarded there
-   * when the address names another host (`#orchestrators` 9/11).
+   * One work queue by its address, served by the daemon that holds its owning session — forwarded
+   * there when the address names another host.
    *
    * @generated from rpc work_queue.WorkQueueService.GetWorkQueue
    */

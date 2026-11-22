@@ -123,11 +123,17 @@ reserved and planned after the pipelines drain.
 
 ## Prerequisites
 
-### ✅ RESOLVED HERE — [2026-11-14-node-session-not-listed-reads-when-its-stack-is-on-another-host.md](../todo/2026-11-14-node-session-not-listed-reads-when-its-stack-is-on-another-host.md)
+### ⚠ DURING (narrowed, kept) — [2026-11-14-node-session-not-listed-reads-when-its-stack-is-on-another-host.md](../todo/2026-11-14-node-session-not-listed-reads-when-its-stack-is-on-another-host.md)
 
-Access is decided from the addressed queue's own host (the owning session's daemon, forwarded by
-`daemon_instance_id`) rather than from the caller's local store, which is what the entry asks.
-Confirmed or narrowed at wrap.
+Planned as resolved; re-read at wrap and **downgraded**. The serving half is done here: a call naming a
+queue on another host is forwarded unchecked and decided by the holding host against that queue. The
+entry's subject, the **listing** gap, stays — a session's own host reads only its own sessions' queues.
+The entry was narrowed to say so, not deleted.
+
+### 🆕 Recorded here — [2026-11-22-work-item-git-tools-reach-only-the-queue-owners-host.md](../todo/2026-11-22-work-item-git-tools-reach-only-the-queue-owners-host.md)
+
+With queues on their owners' hosts, the git tools reach only that host's worktrees; recommendation:
+leave until n9/n14 reshape multi-host items.
 
 ### ⚠ DURING — [2026-07-26-pr-stack-status-polling-and-stack-hygiene.md](../todo/2026-07-26-pr-stack-status-polling-and-stack-hygiene.md)
 
@@ -280,6 +286,29 @@ Green deviations from the plan, each deliberate:
 - **`session_participant_metadata_acceptance` (3 tests) fails on this node's base too** — #workqueue 3/14's
   scripted rename changed the test's expected key to `work_item_id` while the serde wire key stayed
   `stack_node_id`. Assigned to n3; not touched here. Same for `session-activity` `context_docs` ×3.
+
+- **A call naming a queue on another host is forwarded without the caller's host checking it**
+  (fixed at wrap, `#workqueue` 6/14 found it on the [G] head: `work_item_git_tools_acceptance::the_six_tools_act_on_a_stack_owned_by_another_host`
+  failed `PermissionDenied: work_item_merge is served only to a session that owns a work queue`).
+  The test was right and the code wrong: `run_stack_tool` / `run_stack_git_tool` checked the caller's
+  access against **its own host's** records before forwarding, which contradicts the rule above that a
+  call acting on a queue is gated where the queue is held. It refused every cross-host queue call from a
+  session holding no queue locally — the git test's owner, and a session only addressed by a queue on
+  another host. [G] had hidden the second case by giving main an unneeded local queue in
+  `a_queue_held_by_another_host_that_addresses_main_is_read_through_forwarding_not_edited`; that line is
+  removed. Now `names_a_queue_on_another_host` (tool-engine) sends such a call straight to
+  `served_on_target_host`, and the holding host decides by `access_to`. A call naming no queue keeps the
+  caller-host check, since nobody re-checks it downstream. The git test itself could not stay as written:
+  its fixture stored main's queue on host-b, and under n5 a queue *is* a file in its owner's session
+  directory, so host-b then believed it held main (`sessions/<main>/` existed) and failed on the missing
+  `.session.yaml`. An owner's queue is always on the owner's own host, so its git calls never cross
+  hosts. The test is rewritten to the cross-host case that exists:
+  `the_six_tools_naming_another_hosts_queue_are_decided_there_and_refused_to_a_session_it_only_addresses`
+  — host-a forwards all six undecided, and host-b refuses each to main, which the queue only
+  addresses. The six tools' own behaviour stays covered by the file's local tests. Driving items whose
+  worktrees sit on another host is the 🆕 backlog entry under Prerequisites.
+- **The merge journal lives beside the queue** (`<sessions>/<queue_id>/work-queue.op.json`,
+  `WorkQueueStore::op_journal_path`), not under `<projects>/<id>/stacks/`, which the startup sweep deletes.
 
 **Wrap verdict on the two green deviations ([W], 2026-11-22):** both stay, no TODO.
 - `queue_id` = the owning session's id is an invariant, not a placeholder: a queue has no identity apart

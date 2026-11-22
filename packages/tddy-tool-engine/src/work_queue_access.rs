@@ -50,3 +50,49 @@ pub fn work_queue_tools_offered_to(access: Option<WorkQueueAccess>) -> Vec<ToolD
         .filter(|tool| is_stack_git_tool_offered_to(access, &tool.name));
     plan.chain(git).collect()
 }
+
+/// Whether a work-tool call (`args_json`) names a queue (`queue_id`) held by **another host**
+/// (`daemon_instance_id` set and not `local_daemon_instance_id`). Such a call is forwarded to that
+/// host without the caller's own host checking its access: access is decided where the queue is held,
+/// against that queue, and the caller's own host holds no record of it. A call that names no queue —
+/// a listing, a search, a read by pull number — is checked by the caller's own host, because the host
+/// it is forwarded to does not check it again.
+pub fn names_a_queue_on_another_host(args_json: &str, local_daemon_instance_id: &str) -> bool {
+    let Ok(args) = serde_json::from_str::<serde_json::Value>(args_json) else {
+        return false;
+    };
+    let named = |key: &str| {
+        args.get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    };
+    named("queue_id").is_some()
+        && named("daemon_instance_id").is_some_and(|host| host != local_daemon_instance_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::names_a_queue_on_another_host;
+
+    #[test]
+    fn a_call_naming_a_queue_on_another_host_is_left_to_that_host() {
+        assert!(names_a_queue_on_another_host(
+            r#"{"queue_id":"owner","daemon_instance_id":"host-b"}"#,
+            "host-a"
+        ));
+    }
+
+    #[test]
+    fn a_call_naming_no_queue_or_this_host_is_checked_here() {
+        for args in [
+            r#"{"daemon_instance_id":"host-b"}"#,
+            r#"{"queue_id":" ","daemon_instance_id":"host-b"}"#,
+            r#"{"queue_id":"owner","daemon_instance_id":"host-a"}"#,
+            r#"{"queue_id":"owner"}"#,
+            "",
+        ] {
+            assert!(!names_a_queue_on_another_host(args, "host-a"), "{args}");
+        }
+    }
+}

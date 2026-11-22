@@ -652,11 +652,11 @@ async fn a_session_acts_on_its_own_stack_without_naming_it() {
 
 #[tokio::test]
 async fn a_queue_held_by_another_host_that_addresses_main_is_read_through_forwarding_not_edited() {
-    // Given a queue held by host-b, owned by a session there, whose item n1 links main (on host-a)
+    // Given a queue held by host-b, owned by a session there, whose item n1 links main (on host-a,
+    // which owns no queue and holds no record of the one on host-b)
     let world = a_world().await;
     let owner_on_b = a_workspace_in(&world.b.daemon, THIS_PROJECT).await;
     let queue_id = world.b.holds_a_stack(&owner_on_b, &["Store"]);
-    world.a.holds_a_stack(&world.main, &[]);
     world
         .b
         .stacks()

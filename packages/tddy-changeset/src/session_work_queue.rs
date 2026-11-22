@@ -24,6 +24,9 @@ use crate::changeset::WorkQueue;
 /// The file a session's queue is stored in, inside the session directory.
 pub const WORK_QUEUE_FILE: &str = "work-queue.yaml";
 
+/// The in-flight operation journal of a session's queue, beside the queue in the session directory.
+pub const WORK_QUEUE_OP_JOURNAL_FILE: &str = "work-queue.op.json";
+
 /// How a queue comes to exist — the tail of every "no queue" refusal.
 pub const NO_WORK_QUEUE_HINT: &str =
     "a queue is created when a session is started with a work queue";
@@ -174,6 +177,13 @@ impl SessionWorkQueues {
             }
         }
         Ok(found)
+    }
+
+    /// Where `session_id`'s queue journals an in-flight merge or repoint, beside the queue.
+    pub fn op_journal_path(&self, session_id: &str) -> Result<PathBuf, SessionWorkQueueError> {
+        Ok(self
+            .queue_path(session_id)?
+            .with_file_name(WORK_QUEUE_OP_JOURNAL_FILE))
     }
 
     fn queue_path(&self, session_id: &str) -> Result<PathBuf, SessionWorkQueueError> {

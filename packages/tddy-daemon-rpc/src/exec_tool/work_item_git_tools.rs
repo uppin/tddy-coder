@@ -20,8 +20,8 @@
 //!   the caller, and binds the node to the started session;
 //! - `work_item_merge` / `work_item_close` reach GitHub as the project's account.
 //!
-//! A merge keeps its crash-safety journal: beside the stack
-//! (`<projects>/<project_id>/stacks/<queue_id>.op.json`) for an operation an orchestrator started.
+//! A merge keeps its crash-safety journal beside the queue, in its owning session's directory
+//! (`<sessions>/<queue_id>/work-queue.op.json`).
 //!
 //! Feature doc: docs/ft/coder/pr-stacking.md § Merge and repoint.
 
@@ -62,6 +62,12 @@ impl ExecToolRpcHandler {
         req: &ExecuteToolRequest,
         sessions_base: &Path,
     ) -> Result<ExecuteToolResponse, Status> {
+        if let Some(answered) = self
+            .forwarded_to_the_queues_host(req, sessions_base)
+            .await?
+        {
+            return Ok(answered);
+        }
         let tool = &req.tool_name;
         let (caller, access) =
             work_queue_caller_of(sessions_base, &req.session_id)?.ok_or_else(|| {
