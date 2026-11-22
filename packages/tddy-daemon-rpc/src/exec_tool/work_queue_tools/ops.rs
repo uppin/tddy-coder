@@ -18,16 +18,16 @@ use tddy_work_queue::item_ops::{
     add_work_item, adopt_pr_as_work_item, delete_work_item, sync_node_to_github_pr,
     update_work_item, AddWorkItemInput, StoredWorkQueue, UpdateWorkItemInput, WorkQueueHome,
 };
-use tddy_work_queue::lineage;
 use tddy_work_queue::pr_insight::{self, PrSearchInput};
-use tddy_work_queue::waves;
 
 use super::github::GithubSource;
 use super::shape::{work_pr_comments_json, work_pr_read_json, work_pr_search_json};
 
 mod lineage_ops;
+mod waves_ops;
 pub(super) use lineage_ops::graph_json;
 use lineage_ops::set_dependencies;
+use waves_ops::{queue_waves_of, waves_answer};
 
 /// The stack an operation acts on, and where the host keeps it.
 #[derive(Clone)]
@@ -293,32 +293,6 @@ fn edit_annotations(
     }))
 }
 
-/// `work_queue_waves`' answer: the waves, the derived line, each item's binding needs and the first
-/// item the queue's own order steps back at. A cycle in the stored edges is the error, naming it.
-fn waves_answer(stack: &WorkQueue) -> Result<Value, String> {
-    let derived = queue_waves_of(stack).map_err(|e| e.to_string())?;
-    Ok(json!({
-        "waves": derived.waves.iter().enumerate().map(|(index, items)| json!({
-            "wave": index + 1, "items": items,
-        })).collect::<Vec<_>>(),
-        "derived_line": derived.derived_line,
-        "readiness": derived.readiness.iter().map(|(item, waits_on)| json!({
-            "item_id": item, "waits_on": waits_on,
-        })).collect::<Vec<_>>(),
-        "out_of_order_at": derived.out_of_order_at,
-    }))
-}
-
-/// [`waves::queue_waves`] over a stored queue: its items in order and its stored dependency edges.
-fn queue_waves_of(stack: &WorkQueue) -> Result<waves::QueueWaves, lineage::LineageError> {
-    let items: Vec<String> = stack.nodes.iter().map(|n| n.node_id.clone()).collect();
-    waves::queue_waves(
-        &items,
-        &lineage::dependencies_of(stack),
-        &waves::merged_items(stack),
-    )
-}
-
 /// Apply a link `edit` to the queue under its record lock; a refused edit writes nothing and is the
 /// error, and the answer is the item's links as stored.
 fn edit_links(
@@ -363,17 +337,7 @@ pub(super) fn status_answer(env: &OpEnv, refresh_error: Option<String>) -> Resul
         .nodes
         .iter()
         .map(|n| {
-            let wave = derived.as_ref().map_or(0, |d| {
-                d.waves
-                    .iter()
-                    .position(|wave| wave.contains(&n.node_id))
-                    .map_or(0, |index| index + 1)
-            });
-            let binding_needs = derived
-                .as_ref()
-                .and_then(|d| d.readiness.iter().find(|(id, _)| *id == n.node_id))
-                .map(|(_, needs)| needs.clone())
-                .unwrap_or_default();
+            let (wave, binding_needs) = waves_ops::wave_and_needs(derived.as_ref(), &n.node_id);
             json!({
                 "wave": wave,
                 "binding_needs": binding_needs,

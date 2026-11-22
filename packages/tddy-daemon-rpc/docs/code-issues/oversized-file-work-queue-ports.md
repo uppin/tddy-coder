@@ -28,6 +28,7 @@
 | 2026-11-22 | 880 → 876 | **Touched, slightly better** in #1002 (`#workqueue` 1/14): the stack calls name `tddy_pr_stack` / `tddy_github` directly instead of the recipe facades. Not split: the file is stack-shared with later `#workqueue` nodes |
 | 2026-11-22 | 876 | **Moved, not changed in size** by #1004 (`#workqueue` 3/14): `pr_stack/ports.rs` → `work_queue/ports.rs`, 876 production lines at n2's tip `d8cae27aa` and after the rename |
 | 2026-11-23 | 881 → 895 | **Regressed by 14** in #1010 (`#workqueue` 9/14): delegating one-liners for `SetWorkQueueDependencies` and `GetWorkQueueGraph`; the handlers live in `work_queue/lineage.rs`. Not split: stack-shared (n5–n8 edited it, n10+ will), deferred to the post-stack sweep |
+| 2026-11-23 | 896 → 903 | **Regressed by 7** in #1011 (`#workqueue` 10/14): the `GetWorkQueueWaves` delegating one-liner; the handler lives in `work_queue/waves.rs`. Not split: stack-shared (n11–n14 edit it), deferred to the post-stack sweep |
 
 ## What would close it — candidate seams (not proven)
 

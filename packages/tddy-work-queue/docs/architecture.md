@@ -105,6 +105,14 @@ with `line_endpoint_of_base` (`LineEndpoint::{Item, Trunk, External}`); `planned
 `needs` (refusing unknown items and cycles, `LineageError`), `dependencies_of` flattens them to sorted
 `DependencyEdge`s, `detect_cycle` returns the closing path. Line edges are never stored.
 
+### `waves.rs` — waves, the derived line and readiness *(added 2026-11-23)*
+
+Pure over the queue's items (in order) and its dependency edges: `waves` (cycle → `LineageError::Cycle` via
+`detect_cycle`), `derive_line`, `transitive_dependents`, `readiness` (binding needs minus the `done` items),
+`line_check`, and `queue_waves`, which derives them in one pass for the RPC, the tool and the status.
+`merged_items` names the items the stored record says have landed; the status stream adds the inbox's live
+merged PRs before calling `queue_waves`.
+
 ### `rpc.rs` — the PR-stack RPC family
 
 The one transport-facing module: family P's handler trait, its service adapter and its transport

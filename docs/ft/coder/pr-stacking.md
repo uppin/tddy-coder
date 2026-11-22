@@ -301,6 +301,26 @@ chain, dependency edges dashed, an external base as an endpoint outside the queu
 the view opens and after each queue edit; a retarget on GitHub shows on the next read
 (`docs/dev/todo/2026-11-23-work-queue-graph-is-not-live.md`).
 
+### Waves, the derived line and readiness *(added 2026-11-23)*
+
+From a queue's dependency edges tddy derives — and never stores — three things:
+
+- **Waves** — wave 1 is every item that needs nothing; wave k is every item whose needs all sit in waves
+  below k. An item with no needs is wave 1 wherever it sits. Edges that close a cycle report the cycle
+  instead of waves.
+- **The derived line** — the waves concatenated; inside a wave the blockers lead (most transitive
+  dependents first, ties in the queue's own order). It is the order a branch chain should have.
+- **Readiness** — an item's *binding* needs: the unmet ones in the wave immediately below it (deeper needs
+  are met before those, so naming them would misreport the block). A need whose item has **merged** — the
+  stored PR status or derived status says merged, or the live PR read through the inbox does — is met: it
+  leaves the list and the item may read "ready". A merged item keeps its wave.
+- **Line check** — whether the queue's own order steps back a wave, and the first item out of place.
+
+`work_queue_waves` (owner tool) and `GetWorkQueueWaves` answer all four; `work_queue_status` and
+`StreamWorkQueueStatus` carry each item's `wave` (0 when the edges close a cycle) and `binding_needs`. The
+Work queue tab draws the items in wave lanes with their readiness text and a banner naming the first item
+out of place (`WaveLanes`). Nothing here reorders a branch or a PR.
+
 ### GitHub API surface
 
 `GithubPrApi` trait (real implementation + mock transport for tests): `get_open_pr`, `merge_pr(number)`, `patch_pr_base(number, new_base)`, `create_pr(head, base, title, body)`, and `close_pr(number)`. Backed by shared curl helpers `curl_github_patch_json`, `curl_github_post_json`, and `curl_github_put_json` in `github_rest_common.rs`.
