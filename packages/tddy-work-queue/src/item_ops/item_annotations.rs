@@ -38,7 +38,7 @@ fn item_mut<'q>(
         .ok_or_else(|| AnnotationError::NoSuchItem(item_id.to_string()))
 }
 
-/// Replace `item_id`'s labels with `labels` (deduplicated, in the given order).
+/// Replace `item_id`'s labels with `labels` (trimmed, blanks dropped, deduplicated, in the given order).
 pub fn set_labels(
     queue: &mut WorkQueue,
     item_id: &str,
@@ -47,6 +47,10 @@ pub fn set_labels(
     let item = item_mut(queue, item_id)?;
     let mut unique: Vec<String> = Vec::with_capacity(labels.len());
     for label in labels {
+        let label = label.trim().to_string();
+        if label.is_empty() {
+            continue;
+        }
         if label.chars().count() > MAX_LABEL_LEN {
             return Err(AnnotationError::TooLong {
                 limit: MAX_LABEL_LEN,

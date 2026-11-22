@@ -240,6 +240,16 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
     }
 }
 
+/// A refused annotation edit as the tool reports it — the same words the RPC uses.
+fn annotation_refusal_message(error: item_annotations::AnnotationError) -> String {
+    use item_annotations::AnnotationError::{NoSuchItem, TooLong, TooMany};
+    match error {
+        NoSuchItem(item) => format!("item '{item}' not found"),
+        TooMany { limit } => format!("too many: the limit is {limit}"),
+        TooLong { limit } => format!("too long: the limit is {limit} characters"),
+    }
+}
+
 /// Apply an annotation `edit` to the queue under its record lock; a refused edit writes nothing and
 /// is the error, and the answer is the item's labels and badges as stored.
 fn edit_annotations(
@@ -258,7 +268,7 @@ fn edit_annotations(
         })
         .map_err(|e| format!("annotate: {e}"))?;
     if let Some(error) = refused {
-        return Err(format!("{error:?}"));
+        return Err(annotation_refusal_message(error));
     }
     let stack = env.stack()?;
     Ok(json!({

@@ -157,9 +157,12 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     () => [...new Set(nodes.flatMap((node) => node.labels))].sort(),
     [nodes],
   );
+  // A chosen label nobody carries any more (removed meanwhile) filters nothing: the control would
+  // otherwise hide with the list still emptied by it.
+  const activeLabel = everyLabel.includes(labelFilter) ? labelFilter : "";
   const shownNodes = useMemo(
-    () => (labelFilter ? nodes.filter((node) => node.labels.includes(labelFilter)) : nodes),
-    [nodes, labelFilter],
+    () => (activeLabel ? nodes.filter((node) => node.labels.includes(activeLabel)) : nodes),
+    [nodes, activeLabel],
   );
   const branchQueries = useMemo(
     () => buildBranchQueries(nodes, defaultBranch),
@@ -401,7 +404,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
           <select
             id="work-queue-label-filter"
             data-testid="work-queue-label-filter"
-            value={labelFilter}
+            value={activeLabel}
             onChange={(event) => setLabelFilter(event.target.value)}
             className="rounded border border-border bg-background px-2 py-1"
           >
