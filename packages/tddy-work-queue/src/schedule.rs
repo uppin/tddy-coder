@@ -92,17 +92,158 @@ pub struct ScheduleSnapshot {
     pub worktree: WorktreeVerdict,
 }
 
+fn condition(name: &'static str, state: ConditionState, detail: impl Into<String>) -> Condition {
+    Condition {
+        name,
+        state,
+        detail: detail.into(),
+    }
+}
+
+fn checks_condition(verdict: ChecksVerdict, whose: &str) -> Condition {
+    let (state, detail) = match verdict {
+        ChecksVerdict::Green => (ConditionState::Met, format!("{whose} checks are green")),
+        ChecksVerdict::Pending => (
+            ConditionState::Waiting,
+            format!("{whose} checks are running"),
+        ),
+        ChecksVerdict::Failed => (ConditionState::Blocked, format!("{whose} checks failed")),
+        ChecksVerdict::NotOurs => (
+            ConditionState::Met,
+            format!("{whose} has no checks of ours"),
+        ),
+    };
+    condition("checks", state, detail)
+}
+
+fn merge_conditions(skip_review: bool, snapshot: &ScheduleSnapshot) -> Vec<Condition> {
+    let order = if snapshot.base_is_trunk {
+        condition("order", ConditionState::Met, "its base is the trunk")
+    } else {
+        condition(
+            "order",
+            ConditionState::Waiting,
+            "its base is an open item that has to merge first",
+        )
+    };
+    let current = if snapshot.inbox_conflicting > 0 {
+        condition(
+            "current",
+            ConditionState::Blocked,
+            format!(
+                "{} inbox commit(s) are predicted to conflict",
+                snapshot.inbox_conflicting
+            ),
+        )
+    } else if snapshot.inbox_clean > 0 {
+        condition(
+            "current",
+            ConditionState::Waiting,
+            format!("{} inbox commit(s) still to take", snapshot.inbox_clean),
+        )
+    } else {
+        condition("current", ConditionState::Met, "the inbox is empty")
+    };
+    let review = match snapshot.review {
+        ReviewVerdict::Approved => condition("review", ConditionState::Met, "approved"),
+        ReviewVerdict::ChangesRequested => {
+            condition("review", ConditionState::Blocked, "changes were requested")
+        }
+        ReviewVerdict::Pending if skip_review && snapshot.own_checks == ChecksVerdict::Green => {
+            condition(
+                "review",
+                ConditionState::Met,
+                "review skipped, checks are green",
+            )
+        }
+        ReviewVerdict::Pending => condition("review", ConditionState::Waiting, "awaiting approval"),
+    };
+    vec![
+        order,
+        current,
+        checks_condition(snapshot.own_checks, "its own"),
+        review,
+    ]
+}
+
+fn propagate_conditions(snapshot: &ScheduleSnapshot) -> Vec<Condition> {
+    let taking = snapshot.inbox_clean + snapshot.inbox_conflicting;
+    let inbox = if taking > 0 {
+        condition(
+            "inbox",
+            ConditionState::Met,
+            format!("{taking} commit(s) to take"),
+        )
+    } else {
+        condition("inbox", ConditionState::Waiting, "nothing to take yet")
+    };
+    let conflicts = if snapshot.inbox_conflicting > 0 {
+        condition(
+            "conflicts",
+            ConditionState::Blocked,
+            format!(
+                "{} commit(s) are predicted to conflict",
+                snapshot.inbox_conflicting
+            ),
+        )
+    } else {
+        condition("conflicts", ConditionState::Met, "no predicted conflicts")
+    };
+    let worktree = match snapshot.worktree {
+        WorktreeVerdict::Clean => condition(
+            "worktree",
+            ConditionState::Met,
+            "nothing uncommitted or unpushed",
+        ),
+        WorktreeVerdict::Dirty => {
+            condition("worktree", ConditionState::Blocked, "uncommitted changes")
+        }
+        WorktreeVerdict::Unpushed => {
+            condition("worktree", ConditionState::Blocked, "unpushed commits")
+        }
+    };
+    vec![
+        inbox,
+        conflicts,
+        checks_condition(snapshot.base_checks, "the base's"),
+        worktree,
+    ]
+}
+
 /// Evaluate `schedule` against `snapshot`.
 pub fn evaluate(schedule: &Schedule, snapshot: &ScheduleSnapshot) -> ScheduleView {
-    // TODO(n13 schedules): implement
-    let _ = (schedule, snapshot);
-    todo!("TODO(n13): implement evaluate")
+    let conditions = match &schedule.kind {
+        ScheduleKind::Merge { skip_review } => merge_conditions(*skip_review, snapshot),
+        ScheduleKind::Propagate => propagate_conditions(snapshot),
+    };
+    let status = conditions
+        .iter()
+        .map(|c| c.state)
+        .max()
+        .unwrap_or(ConditionState::Met);
+    let held_up_on = [ConditionState::Blocked, ConditionState::Waiting]
+        .into_iter()
+        .find_map(|state| conditions.iter().find(|c| c.state == state))
+        .map(|c| c.name);
+    ScheduleView {
+        schedule: schedule.clone(),
+        conditions,
+        status,
+        held_up_on,
+    }
 }
 
 /// Merges for every item of a wave that has an open PR, bottom-up (`items` in line order with whether
 /// each has an open, unmerged PR). `armed_at` is left empty for the caller to stamp.
 pub fn schedule_wave(items: &[(String, bool)], skip_review: bool, armed_by: &str) -> Vec<Schedule> {
-    // TODO(n13 schedules): implement
-    let _ = (items, skip_review, armed_by);
-    todo!("TODO(n13): implement schedule_wave")
+    items
+        .iter()
+        .filter(|(_, has_open_pr)| *has_open_pr)
+        .map(|(item_id, _)| Schedule {
+            item_id: item_id.clone(),
+            kind: ScheduleKind::Merge { skip_review },
+            armed_at: String::new(),
+            armed_by: armed_by.to_string(),
+        })
+        .collect()
 }
