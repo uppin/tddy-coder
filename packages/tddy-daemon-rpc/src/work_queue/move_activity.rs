@@ -20,7 +20,7 @@ pub(crate) struct MovedQueue<'a> {
 }
 
 /// Publish the reorder of `item_id` between `before` and `after`, when it changed position.
-pub(crate) fn publish_reorder(
+pub(crate) async fn publish_reorder(
     bus: Option<&Arc<SessionNotificationBus>>,
     queue: &MovedQueue<'_>,
     item_id: &str,
@@ -45,11 +45,12 @@ pub(crate) fn publish_reorder(
             to: to as u32,
         },
         actor,
-    );
+    )
+    .await;
 }
 
 /// Publish the parents of `item_id` changing from `before` to `after`, when they changed.
-pub(crate) fn publish_parents_changed(
+pub(crate) async fn publish_parents_changed(
     bus: Option<&Arc<SessionNotificationBus>>,
     queue: &MovedQueue<'_>,
     item_id: &str,
@@ -68,10 +69,11 @@ pub(crate) fn publish_parents_changed(
         stack,
         WorkQueueChange::ParentsChanged { before, after },
         actor,
-    );
+    )
+    .await;
 }
 
-fn publish(
+async fn publish(
     bus: Option<&Arc<SessionNotificationBus>>,
     queue: &MovedQueue<'_>,
     item_id: &str,
@@ -80,18 +82,20 @@ fn publish(
     actor: Actor,
 ) {
     let Some(bus) = bus else { return };
-    WorkQueueActivities::new(Arc::clone(bus)).publish_move(&WorkQueueEvent {
-        queue_session_id: queue.queue_session_id.to_string(),
-        project_id: queue.project_id.to_string(),
-        os_user: queue.os_user.to_string(),
-        item_id: item_id.to_string(),
-        item_title: stack
-            .node(item_id)
-            .map(|node| node.title.clone())
-            .unwrap_or_default(),
-        change,
-        actor,
-    });
+    WorkQueueActivities::new(Arc::clone(bus))
+        .publish_move(&WorkQueueEvent {
+            queue_session_id: queue.queue_session_id.to_string(),
+            project_id: queue.project_id.to_string(),
+            os_user: queue.os_user.to_string(),
+            item_id: item_id.to_string(),
+            item_title: stack
+                .node(item_id)
+                .map(|node| node.title.clone())
+                .unwrap_or_default(),
+            change,
+            actor,
+        })
+        .await;
 }
 
 #[cfg(test)]
@@ -120,9 +124,10 @@ mod tests {
         }
     }
 
-    fn published(
-        run: impl FnOnce(Option<&Arc<SessionNotificationBus>>, &MovedQueue<'_>),
-    ) -> Vec<(SessionNotificationKind, String, String)> {
+    async fn published<F>(run: F) -> Vec<(SessionNotificationKind, String, String)>
+    where
+        F: AsyncFnOnce(Option<&Arc<SessionNotificationBus>>, &MovedQueue<'_>),
+    {
         let recorded = Arc::new(RecordingSessionNotificationSubscriber::new());
         let bus = Arc::new(SessionNotificationBus::new().with_subscriber(Arc::clone(&recorded)));
         run(
@@ -132,7 +137,8 @@ mod tests {
                 project_id: "proj-1",
                 os_user: "dev",
             },
-        );
+        )
+        .await;
         recorded
             .received()
             .into_iter()
@@ -140,9 +146,9 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn a_reorder_by_the_user_wakes_the_queues_owner() {
-        let moved = published(|bus, queue| {
+    #[tokio::test]
+    async fn a_reorder_by_the_user_wakes_the_queues_owner() {
+        let moved = published(async |bus, queue| {
             publish_reorder(
                 bus,
                 queue,
@@ -153,7 +159,9 @@ mod tests {
                     login: "octocat".to_string(),
                 },
             )
-        });
+            .await
+        })
+        .await;
 
         assert_eq!(moved.len(), 1, "{moved:?}");
         let (kind, session, text) = &moved[0];
@@ -167,9 +175,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_move_that_changed_nothing_publishes_nothing() {
-        let moved = published(|bus, queue| {
+    #[tokio::test]
+    async fn a_move_that_changed_nothing_publishes_nothing() {
+        let moved = published(async |bus, queue| {
             let same = a_queue_of(&["n1", "n2"]);
             publish_reorder(
                 bus,
@@ -178,7 +186,8 @@ mod tests {
                 &same,
                 &same,
                 Actor::User { login: "x".into() },
-            );
+            )
+            .await;
             publish_parents_changed(
                 bus,
                 queue,
@@ -188,15 +197,17 @@ mod tests {
                 Actor::Agent {
                     session_id: "other".to_string(),
                 },
-            );
-        });
+            )
+            .await;
+        })
+        .await;
 
         assert_eq!(moved, vec![]);
     }
 
-    #[test]
-    fn the_owners_own_agent_changing_parents_is_recorded_without_waking_it() {
-        let moved = published(|bus, queue| {
+    #[tokio::test]
+    async fn the_owners_own_agent_changing_parents_is_recorded_without_waking_it() {
+        let moved = published(async |bus, queue| {
             publish_parents_changed(
                 bus,
                 queue,
@@ -207,7 +218,9 @@ mod tests {
                     session_id: OWNER.to_string(),
                 },
             )
-        });
+            .await
+        })
+        .await;
 
         assert_eq!(moved.len(), 1, "{moved:?}");
         assert_eq!(moved[0].0, SessionNotificationKind::Activity);

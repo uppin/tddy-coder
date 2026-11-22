@@ -73,7 +73,7 @@ impl WorkQueueRpcHandler {
     }
 
     /// Move a node in the stack at `address`, in this host's store.
-    pub(super) fn reorder_work_item_in_store(
+    pub(super) async fn reorder_work_item_in_store(
         &self,
         sessions_base: &Path,
         address: &WorkQueueAddress,
@@ -137,7 +137,8 @@ impl WorkQueueRpcHandler {
                 tddy_session_activity::work_queue_activity::Actor::User {
                     login: actor_login.to_string(),
                 },
-            );
+            )
+            .await;
         }
         serde_json::to_string(&updated.stack).map_err(|e| Status::internal(e.to_string()))
     }
@@ -286,13 +287,15 @@ impl WorkQueueRpcHandler {
         let sessions_base = sessions_base_for_user(&os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         if let WorkQueueTarget::Address(address) = &target {
-            let work_queue_json = self.reorder_work_item_in_store(
-                &sessions_base,
-                address,
-                req.item_id.trim(),
-                req.direction.trim(),
-                (&github_user, &os_user),
-            )?;
+            let work_queue_json = self
+                .reorder_work_item_in_store(
+                    &sessions_base,
+                    address,
+                    req.item_id.trim(),
+                    req.direction.trim(),
+                    (&github_user, &os_user),
+                )
+                .await?;
             return Ok(Response::new(ReorderWorkItemResponse { work_queue_json }));
         }
         let WorkQueueTarget::Session(session_id) = &target else {
@@ -326,7 +329,8 @@ impl WorkQueueRpcHandler {
                 &before,
                 &moved,
                 tddy_session_activity::work_queue_activity::Actor::User { login: github_user },
-            );
+            )
+            .await;
         }
 
         // The same serializer `ListSessions` enrichment uses, so the response's `work_queue_json` is

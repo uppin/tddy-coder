@@ -33,10 +33,10 @@ fn the_user() -> Actor {
 }
 
 /// The work-queue activities published, as (session, source, text).
-fn published_by(event: &WorkQueueEvent) -> Vec<(String, String, String)> {
+async fn published_by(event: &WorkQueueEvent) -> Vec<(String, String, String)> {
     let recorded = Arc::new(RecordingSessionNotificationSubscriber::new());
     let bus = Arc::new(SessionNotificationBus::new().with_subscriber(Arc::clone(&recorded)));
-    WorkQueueActivities::new(bus).publish_move(event);
+    WorkQueueActivities::new(bus).publish_move(event).await;
     recorded
         .received()
         .into_iter()
@@ -44,13 +44,14 @@ fn published_by(event: &WorkQueueEvent) -> Vec<(String, String, String)> {
         .collect()
 }
 
-#[test]
-fn a_user_reorder_becomes_an_activity_of_the_queue_owner() {
+#[tokio::test]
+async fn a_user_reorder_becomes_an_activity_of_the_queue_owner() {
     // When
     let published = published_by(&a_move(
         WorkQueueChange::Reordered { from: 2, to: 0 },
         the_user(),
-    ));
+    ))
+    .await;
 
     // Then
     assert_eq!(published.len(), 1, "one activity: {published:?}");
@@ -61,8 +62,8 @@ fn a_user_reorder_becomes_an_activity_of_the_queue_owner() {
     }
 }
 
-#[test]
-fn a_parents_change_names_the_parents_before_and_after() {
+#[tokio::test]
+async fn a_parents_change_names_the_parents_before_and_after() {
     // When
     let published = published_by(&a_move(
         WorkQueueChange::ParentsChanged {
@@ -72,7 +73,8 @@ fn a_parents_change_names_the_parents_before_and_after() {
         Actor::Agent {
             session_id: OWNER.to_string(),
         },
-    ));
+    ))
+    .await;
 
     // Then
     let text = &published[0].2;

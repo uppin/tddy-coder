@@ -61,7 +61,7 @@ impl WorkQueueActivities {
     ///
     /// Its kind carries [`wakes_owner`]: `AttentionRequired` for a move anyone but the owner's own
     /// agent made, `Activity` — recorded, never delivered — for one its own agent made.
-    pub fn publish_move(&self, event: &WorkQueueEvent) {
+    pub async fn publish_move(&self, event: &WorkQueueEvent) {
         let kind = if wakes_owner(event) {
             SessionNotificationKind::AttentionRequired
         } else {
@@ -81,26 +81,7 @@ impl WorkQueueActivities {
             message: None,
             at_unix_ms: tddy_daemon_kernel::now_unix_ms(),
         };
-        self.deliver(notification);
-    }
-
-    /// Hand `notification` to the bus without making the caller wait for its subscribers: spawned
-    /// on the caller's runtime when it has one (a daemon handler), else run to completion here (a
-    /// plain thread). A move is published after it succeeded, so nothing waits on the answer.
-    fn deliver(&self, notification: SessionNotification) {
-        let bus = Arc::clone(&self.bus);
-        match tokio::runtime::Handle::try_current() {
-            Ok(runtime) => {
-                runtime.spawn(async move { bus.publish(notification).await });
-            }
-            Err(_) => match tokio::runtime::Builder::new_current_thread().build() {
-                Ok(runtime) => runtime.block_on(bus.publish(notification)),
-                Err(e) => log::warn!(
-                    target: "tddy_session_activity::work_queue_activity",
-                    "a work-queue move could not be published: {e}"
-                ),
-            },
-        }
+        self.bus.publish(notification).await;
     }
 }
 

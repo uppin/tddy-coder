@@ -168,7 +168,7 @@ impl DaemonStackGitTools {
     /// Tell the queue's owner that `node_id`'s parents changed, when they did (`#workqueue` 8/14).
     /// `before` is the queue as it was before the change; a queue that cannot be read again says
     /// nothing, the change itself having succeeded.
-    fn announce_parents_changed(
+    async fn announce_parents_changed(
         &self,
         caller: &WorkQueueCaller,
         queue_id: &str,
@@ -199,7 +199,8 @@ impl DaemonStackGitTools {
             tddy_session_activity::work_queue_activity::Actor::Agent {
                 session_id: caller.session_id.clone(),
             },
-        );
+        )
+        .await;
     }
 
     async fn run_blocking(
@@ -487,7 +488,8 @@ impl WorkItemGitToolPort for DaemonStackGitTools {
                         },
                     )
                     .await?;
-                self.announce_parents_changed(caller, queue_id, &node_id, before);
+                self.announce_parents_changed(caller, queue_id, &node_id, before)
+                    .await;
                 Ok(answer)
             }
         }
