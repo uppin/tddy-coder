@@ -141,7 +141,9 @@ impl std::fmt::Display for AnswerRefusal {
             }
             Self::UnknownRequest { request_id } => write!(
                 f,
-                "no permission request '{request_id}' is pending on that session"
+                "no request '{request_id}' is pending on that session: nothing waits for its \
+                 answer any more (the session may be asking it again under a new request_id; \
+                 ReadSessionActivity names it)"
             ),
             Self::NotAPermission { request_id, kind } => write!(
                 f,

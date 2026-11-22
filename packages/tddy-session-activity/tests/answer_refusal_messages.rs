@@ -47,15 +47,19 @@ fn a_second_answer_names_who_answered_first() {
     );
 }
 
+/// A request is unknown both when it never was and when its hook stopped waiting — for a question
+/// as for a permission, so the refusal names neither kind (the 2026-11-22 refusal of a question
+/// called it a permission request) and says what to do instead.
 #[test]
-fn an_unknown_request_names_it() {
+fn an_unknown_request_names_it_without_calling_it_a_permission() {
     let refusal = AnswerRefusal::UnknownRequest {
         request_id: "req-nope".to_string(),
     };
 
     assert_eq!(
         refusal.to_string(),
-        "no permission request 'req-nope' is pending on that session"
+        "no request 'req-nope' is pending on that session: nothing waits for its answer any more \
+         (the session may be asking it again under a new request_id; ReadSessionActivity names it)"
     );
 }
 

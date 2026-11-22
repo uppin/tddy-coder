@@ -30,7 +30,7 @@ pub(super) async fn session_activity(
             .map_err(|e| anyhow::anyhow!("reading the session's record failed: {e}"))?;
         Ok(SessionActivity {
             display_name: metadata.display_name,
-            records: tddy_core::agent_activity::read_all_agent_activity(&session_dir)?,
+            records: tddy_core::agent_activity::read_all_sequenced_agent_activity(&session_dir)?,
             pending_question: tddy_core::pending_question::read_pending_question(&session_dir)?,
         })
     })

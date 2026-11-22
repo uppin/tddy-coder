@@ -337,8 +337,30 @@ async fn remote_worktree_through(
         ))
     })?;
     let base = remote_cut_base(shell, &checkout.worktree).await?;
+    record_the_cut_branch(start.session_dir, &checkout.branch)?;
+    crate::remote_attachments::copy_attachments_to_target(
+        shell,
+        start.session_dir,
+        &checkout.worktree,
+    )
+    .await?;
     progress.worktree_ready(&checkout.branch, &checkout.worktree, &base);
     Ok(PathBuf::from(checkout.worktree))
+}
+
+/// Record the branch a target cut made in the session's changeset, as a local cut records the one it
+/// made: the session is listed with it, and the start's record keeps it once the start succeeds.
+/// Only the branch: the changeset's `worktree` and `repo_path` name a checkout on this host, and a
+/// target's is not one.
+fn record_the_cut_branch(session_dir: &Path, branch: &str) -> Result<(), Status> {
+    let mut changeset = tddy_core::read_changeset(session_dir)
+        .map_err(|e| Status::internal(format!("reading the session's changeset failed: {e}")))?;
+    changeset.branch = Some(branch.to_string());
+    tddy_core::write_changeset(session_dir, &changeset).map_err(|e| {
+        Status::internal(format!(
+            "recording the branch {branch} in the session's changeset failed: {e}"
+        ))
+    })
 }
 
 /// The commit the remote worktree at `worktree` was cut from and how far behind its upstream it
@@ -456,6 +478,15 @@ mod remote_cut_tests {
     /// `remote_checkout_root` prints around `$HOME`). The cut's base probe is answered with
     /// `origin/master` between the sentinels `tddy-git`'s `remote_checkout` prints around it. The cut's
     /// base probes are answered with a commit and two commits behind.
+    /// A session directory holding the changeset every start writes before its worktree is cut
+    /// (`write_initial_changeset`), which the cut records its branch in.
+    fn a_session_dir_with_its_changeset() -> tempfile::TempDir {
+        let session_dir = tempfile::tempdir().expect("session dir");
+        tddy_core::write_changeset(session_dir.path(), &tddy_core::Changeset::default())
+            .expect("the start's changeset is written");
+        session_dir
+    }
+
     fn a_workspace() -> InMemoryShell {
         let shell = InMemoryShell::new("coder.remote-dev");
         shell.answers_when(|request| {
@@ -500,7 +531,7 @@ mod remote_cut_tests {
     #[tokio::test]
     async fn a_target_checkout_is_cut_under_the_targets_home_from_the_requested_branch_and_base() {
         // Given a start on a Coder target asking for feature/hooks off origin/main
-        let session_dir = tempfile::tempdir().expect("session dir");
+        let session_dir = a_session_dir_with_its_changeset();
         let sessions_base = tempfile::tempdir().expect("sessions base");
         let tddy_data = tempfile::tempdir().expect("tddy data");
         let workspace = a_workspace();
@@ -611,11 +642,98 @@ mod remote_cut_tests {
             run.contains("worktree add -b 'claude-cli/01a1b2c3'"),
             "the generated branch from the changeset is cut:\n{run}"
         );
+        // And the changeset records it, as a local cut records the branch it made: the session is
+        // listed with it, and `GetSessionStart` keeps it after the start succeeds (findings:
+        // docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Defect 3a)
+        let recorded = tddy_core::read_changeset(session_dir.path())
+            .expect("the changeset reads")
+            .branch;
+        assert_eq!(recorded.as_deref(), Some("claude-cli/01a1b2c3"));
+    }
+
+    /// Findings: docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Gap 5
+    /// — an agent on a target cannot read the daemon host's session directory, where the start
+    /// materialized its attachments.
+    #[tokio::test]
+    async fn a_target_cut_copies_the_sessions_attachments_into_its_worktree() {
+        // Given a start on a target whose session holds an attachment
+        let session_dir = tempfile::tempdir().expect("session dir");
+        let sessions_base = tempfile::tempdir().expect("sessions base");
+        let tddy_data = tempfile::tempdir().expect("tddy data");
+        tddy_core::write_changeset(
+            session_dir.path(),
+            &tddy_core::Changeset {
+                workflow: Some(tddy_core::ChangesetWorkflow {
+                    branch_worktree_intent: Some(
+                        tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+                    ),
+                    new_branch_name: Some("feature/probe".to_string()),
+                    ..tddy_core::ChangesetWorkflow::default()
+                }),
+                ..tddy_core::Changeset::default()
+            },
+        )
+        .expect("the changeset the start resolved is written");
+        let attachments = tddy_workflow::session_attachments_root(session_dir.path());
+        std::fs::create_dir_all(&attachments).unwrap();
+        std::fs::write(attachments.join("attachment-probe.md"), b"# Probe\n").unwrap();
+        let workspace = a_workspace();
+        workspace.answers_when(|request| {
+            request
+                .command
+                .contains("info/exclude")
+                .then(|| ExecOutput::succeeded(Vec::new()))
+        });
+        let start = CliWorktreeStart {
+            session_type: "claude-cli",
+            cut_label: "cut the session worktree",
+            session_id: SESSION,
+            session_dir: session_dir.path(),
+            sessions_base: sessions_base.path(),
+            tddy_data_dir: tddy_data.path(),
+            os_user: "testdev",
+            project_id: "proj-1",
+            repo_path: "",
+            branch_worktree_intent: "",
+            new_branch_name: "",
+            selected_integration_base_ref: "",
+            selected_branch_to_work_on: "",
+            create_remote_branch: false,
+            intent: tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+            timeout: Duration::from_secs(5),
+            ssh_alias: "",
+            shell: Some(Arc::new(workspace.clone())),
+        };
+
+        // When the checkout is cut on the target
+        let worktree = remote_worktree_through(
+            &start,
+            QAPE_HQ,
+            &workspace,
+            Some("origin/master".to_string()),
+            &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
+        )
+        .await
+        .expect("the cut succeeds");
+
+        // Then the attachment is in the worktree, where the first prompt names it, kept out of git
+        let copy = worktree.join(".tddy/attachments/attachment-probe.md");
+        assert_eq!(
+            workspace.file(&copy.to_string_lossy()),
+            Some(b"# Probe\n".to_vec())
+        );
+        assert!(
+            workspace
+                .commands_run()
+                .iter()
+                .any(|command| command.contains("'/.tddy/attachments/'")),
+            "the copy is git-excluded"
+        );
     }
     #[tokio::test]
     async fn a_target_cut_reports_the_commit_it_was_cut_from_and_how_far_behind_it_was() {
         // Given a start on a target whose cut worktree is at a commit two behind its upstream
-        let session_dir = tempfile::tempdir().expect("session dir");
+        let session_dir = a_session_dir_with_its_changeset();
         let sessions_base = tempfile::tempdir().expect("sessions base");
         let tddy_data = tempfile::tempdir().expect("tddy data");
         let workspace = a_workspace();
@@ -683,7 +801,7 @@ mod remote_cut_tests {
     #[tokio::test]
     async fn a_target_start_naming_no_base_is_cut_from_the_projects_fetched_main_branch() {
         // Given a workspace whose clone holds origin/master, and a start naming no base
-        let session_dir = tempfile::tempdir().expect("session dir");
+        let session_dir = a_session_dir_with_its_changeset();
         let sessions_base = tempfile::tempdir().expect("sessions base");
         let tddy_data = tempfile::tempdir().expect("tddy data");
         let project_checkout = tempfile::tempdir().expect("this host's checkout");

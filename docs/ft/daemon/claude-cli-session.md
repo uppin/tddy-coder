@@ -869,9 +869,13 @@ questions) is an empty file, and Claude shows its own question dialog. The catch
 The log carries one event no hooks adapter installs: **`TddyMessage`**
 (`tddy_core::REMOTE_MESSAGE_EVENT`), the line a child of an orchestrator reports to it with, since a
 target has no `tddy-tools`. The child pipes `{"text": "<report>"}` into
-`remote_hook_command("TddyMessage", <hook token>, ".tddy/hooks.log")`, the command its back-channel
-guidance spells out, and the follower posts the text to the orchestrator as a session message
-([Project concept § Reporting to the orchestrator](project-concept.md#reporting-to-the-orchestrator)).
+`sh -c '<remote_hook_command("TddyMessage", <hook token>, ".tddy/hooks.log")>'`, the command its
+back-channel guidance spells out, and the follower posts the text to the orchestrator as a session
+message ([Project concept § Reporting to the orchestrator](project-concept.md#reporting-to-the-orchestrator)).
+The explicit `sh` matters: a hook reads its payload as its own stdin, but the child's command is the
+last element of a pipeline, and zsh — a Coder workspace's login shell — runs that element in the
+current shell, so the command's `$(cat …)` read nothing and the report reached the log empty. A line
+the follower drops (wrong token, unknown event, a payload that is not JSON) is logged with why.
 
 ### The transcript holds what was said
 

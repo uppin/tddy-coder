@@ -329,7 +329,7 @@ async fn follow_log(
                 &mut streamed,
                 &mut offset,
                 &mut pending,
-                &hook_token,
+                (&log_path, &hook_token),
                 &sink,
                 &dropped,
             )
@@ -339,12 +339,13 @@ async fn follow_log(
     }
 }
 
-/// Read one opened stream to its end, delivering every whole line it carries.
+/// Read one opened stream to its end, delivering every whole line it carries. `log` is the followed
+/// log's path and the session's hook token.
 async fn read_stream(
     streamed: &mut tddy_remote_shell::StreamedExec,
     offset: &mut u64,
     pending: &mut Vec<u8>,
-    hook_token: &str,
+    log: (&str, &str),
     sink: &Arc<dyn HookSink>,
     dropped: &AtomicU64,
 ) {
@@ -355,16 +356,17 @@ async fn read_stream(
             Ok(read) => {
                 *offset += read as u64;
                 pending.extend_from_slice(&chunk[..read]);
-                deliver_whole_lines(pending, hook_token, sink, dropped).await;
+                deliver_whole_lines(pending, log, sink, dropped).await;
             }
         }
     }
 }
 
-/// Deliver every newline-terminated line in `pending`, keeping a trailing partial line there.
+/// Deliver every newline-terminated line in `pending`, keeping a trailing partial line there. A line
+/// that is not a hook is counted and logged with why — never with its content, which is untrusted.
 async fn deliver_whole_lines(
     pending: &mut Vec<u8>,
-    hook_token: &str,
+    (log_path, hook_token): (&str, &str),
     sink: &Arc<dyn HookSink>,
     dropped: &AtomicU64,
 ) {
@@ -377,8 +379,9 @@ async fn deliver_whole_lines(
         let text = String::from_utf8_lossy(&line);
         match HookLine::parse(&text, hook_token) {
             Ok(hook) => sink.deliver(hook).await,
-            Err(_) => {
+            Err(error) => {
                 dropped.fetch_add(1, Ordering::SeqCst);
+                log::warn!("remote hook log {log_path}: a line was dropped: {error}");
             }
         }
     }

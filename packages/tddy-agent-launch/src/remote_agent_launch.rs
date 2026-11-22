@@ -61,14 +61,19 @@ pub use crate::remote_agent_launch::target_tab::{
 const TARGET_BASE_ENV: &str = r#"HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}""#;
 
 /// `argv` run through the target's login shell under `env -i`: the target expands its own base
-/// set ([`TARGET_BASE_ENV`]), then exactly `env`, then the agent is found by `argv[0]` on the
-/// target's `PATH`:
+/// set ([`TARGET_BASE_ENV`]), the agent is told the terminal it draws on
+/// ([`tddy_pty::runtime::TERMINAL_VARIABLES`] — the one the daemon's PTY emulates, as a local agent
+/// is told; `env -i` would otherwise leave it none, and an agent with no `TERM` draws without
+/// colour), then exactly `env`, then the agent is found by `argv[0]` on the target's `PATH`:
 ///
 /// ```text
-/// exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" K='\''V'\'' … '\''<agent>'\'' …'
+/// exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" TERM='\''xterm-256color'\'' COLORTERM='\''truecolor'\'' K='\''V'\'' … '\''<agent>'\'' …'
 /// ```
 pub fn target_login_exec(argv: &[String], env: &[(String, String)]) -> String {
     let mut inner = format!("exec env -i {TARGET_BASE_ENV}");
+    for (name, value) in tddy_pty::runtime::TERMINAL_VARIABLES {
+        inner.push_str(&format!(" {name}={}", shell_single_quote(value)));
+    }
     for (name, value) in env {
         inner.push_str(&format!(" {name}={}", shell_single_quote(value)));
     }
@@ -599,10 +604,11 @@ mod tests {
         let command = remote_agent_command(worktree, "s1", &argv, &env);
 
         // Then the target's login shell runs `env -i` with the base set expanded there (`HOME`,
-        // `PATH`, `TMPDIR`), then only the explicit environment, then the bare command
+        // `PATH`, `TMPDIR`), the terminal the daemon's PTY emulates, then only the explicit
+        // environment, then the bare command
         assert_eq!(
             command,
-            r#"cd '/home/dev/repo/.worktrees/s1' && mkdir -p .tddy/agents && printf %s "$$" > '.tddy/agents/s1.pid' && exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" ANTHROPIC_MODEL='\''opus'\'' '\''claude'\'' '\''--model'\'' '\''opus'\'''"#
+            r#"cd '/home/dev/repo/.worktrees/s1' && mkdir -p .tddy/agents && printf %s "$$" > '.tddy/agents/s1.pid' && exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" TERM='\''xterm-256color'\'' COLORTERM='\''truecolor'\'' ANTHROPIC_MODEL='\''opus'\'' '\''claude'\'' '\''--model'\'' '\''opus'\'''"#
         );
     }
 

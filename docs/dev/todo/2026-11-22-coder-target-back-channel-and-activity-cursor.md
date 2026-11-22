@@ -10,8 +10,15 @@ log `~/.tddy/logs/daemon`, the session's directory, the project log
 `~/.tddy/projects/51777f55-…/notifications.jsonl`, and the remote worktree over `coder ssh`.
 Branch: `investigate/coder-target-back-channel`.
 
-Each defect below names its root cause, the failing test that pins it (red, not fixed on this
-branch), the proposed fix and the blast radius.
+Each defect below names its root cause, the failing test that pins it, the fix and the blast radius.
+
+**Status (2026-11-22, same branch):** fixed — 1a, 1b, 1c, 2a (as decided: `log_seq`, below), 2b, 3a,
+3b, 5, 6 and 7. Gap 4 closed as by-design. Still open, as TODOs: the live re-run under *What would
+close this file*; and the stack-child changeset line
+(`stack_doc_attachments::attached_changeset_prompt_line`) still names its file
+`artifacts/attachments/<name>`, relative to the session directory rather than the agent's working
+directory — gap 5's line now names every attachment by a readable path beside it, but that older
+line was left as it is (TODO: point it at the same path, or drop it in favour of gap 5's line).
 
 ## Defect 1 — a target child's `TddyMessage` reports are lost
 
@@ -228,10 +235,62 @@ the daemon's PTY emulates, as the local route names it; no inheritance from the 
 **Blast radius:** every agent launched on a target (main agent, agent tabs, one-shots through
 `target_login_exec`); the exact-string test of the remote command changes.
 
+## Gap 7 — an orchestrator's answer to an `AskUserQuestion` is accepted and then dropped
+
+Seen on this investigation's own session (`01a201d3-2776-7133-86de-8d6cfbc56349`, local claude-cli,
+answer wait 120 s): one `AskUserQuestion` call produced **two** pending questions. `c100748f-…` was
+recorded at `1795327906168` by the waiting `PreToolUse` hook; nobody answered it within the 120 s
+hold, so the hook printed nothing. At `1795328026661` — **120.49 s later**, when that hook returned —
+`35121368-…` was recorded for the same call. The orchestrator then answered `c100748f` and was told
+`no permission request 'c100748f-…' is pending on that session`. It answered `35121368` at
+`1795328144828`, the answer was accepted, but Claude kept showing its own dialog until the answers
+were typed into the terminal.
+
+### Root cause
+
+- **7a. Claude fires `PermissionRequest` for the question once `PreToolUse` lets it through.** That
+  hook also waits (`--await-answer`, `PermissionRequest` matcher). `pending_question_record`
+  (`packages/tddy-session-activity/src/pending_question_record.rs:41`) derives a record's kind from
+  the **tool**, so the `PermissionRequest` of `AskUserQuestion` is recorded as a new `select`
+  question, replacing the first in the session's single pending slot, and the daemon holds it as a
+  question (`service/question_answers.rs`, `wait_for_question`).
+- **7b. The answer is then mapped as a permission.** The hook chooses its decision by **event**:
+  `tddy-tools` `session_hook.rs` sends every `PermissionRequest` to `await_decision` →
+  `permission_decision_json` (`packages/tddy-session-activity/src/hook_decision.rs:22`), which maps
+  only `allow_*`/`reject_*` option ids. A question's answer has none, so it returns `None`, nothing
+  is printed, and Claude shows its dialog. `AnswerSessionQuestion` has already reported success.
+  The target path has the same split: `HookLine::question_input`
+  (`packages/tddy-agent-launch/src/remote_hook_answer.rs:56`) is set only for `PreToolUse`.
+- **7c. The refusal names the wrong thing.** `AnswerRefusal::UnknownRequest`
+  (`packages/tddy-session-activity/src/answers.rs:142`) always says "permission request", also for
+  a question whose hook has stopped waiting.
+- The Coder probe's answer arrived inside the first `PreToolUse` window, which is why it worked
+  there.
+
+### Fix
+
+A `PermissionRequest` of a question tool hands the answers over as Claude's `PermissionRequest`
+decision `{"behavior": "allow", "updatedInput": <tool_input with answers>}` — the same
+`updatedInput` the `PreToolUse` decision carries — on both the local hook and the target's answer
+writer. `UnknownRequest` says "question" or "request" neutrally. **Blast radius:** the hook's decision
+for questions only; permissions are unchanged.
+
+### `other` beside a single-choice selection — intended
+
+`validate_question_answers` (`packages/tddy-session-activity/src/answers/question.rs:118`) refuses a
+single-choice answer with both a label and `other` ("give one answer, not 2"). This is intended: it
+is Claude's single-choice dialog, where "Other" *replaces* a choice, and Claude's answer for a
+single-choice question is one string. An orchestrator that wants to add a note picks `other` alone
+and writes the choice into it, or sends the note as a session message.
+
 ## Decisions (operator, 2026-11-22)
 
-- **Defect 2a**: B — a persisted per-row sequence, a new field beside `activity_seq` (which keeps
-  its tick/delta meaning).
+- **Defect 2a**: B — a persisted per-row sequence beside `activity_seq` (which keeps its
+  tick/delta meaning). Built as `SequencedActivity::log_seq` (`tddy-changeset`): the 1-based line of
+  a call's latest row in the append-only `agent-activity.jsonl`. The log persists it — no counter to
+  keep or recover, no race between concurrent appends, and existing rows are numbered with no
+  migration — and a call's completion row moves it forward, so a poll hands it over again finished.
+  `ReadSessionActivity` items carry `log_seq`; `next_cursor` is the last one's.
 - **zsh**: declared in the dev shell (`flake.nix`, beside `pkgs.tmux`) so CI runs the defect-1 test.
 - **Gap 4**: by-design (above).
 - Fixes for 1, 2, 3, 5 and 6 land on this branch.

@@ -3,23 +3,29 @@
 
 use prost::Message as _;
 use tddy_service::proto::activity::{AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse};
-use tddy_session_activity::hook_decision::question_decision_json;
+use tddy_session_activity::hook_decision::question_decision_json_for;
 
 use super::{exchange, SessionHookArgs};
 
 /// Ask the daemon for the orchestrator's answers to the `AskUserQuestion` `request_id`, waiting at
-/// most `--await-timeout-secs`, and map them to Claude's decision JSON (`#home-inbox` 8/9).
+/// most `--await-timeout-secs`, and map them to the decision JSON of `hook_event_name`, the hook
+/// holding the question (`#home-inbox` 8/9).
 pub(super) async fn await_question_decision(
     args: &SessionHookArgs,
     stdin_json: &str,
     request_id: String,
+    hook_event_name: &str,
 ) -> anyhow::Result<Option<String>> {
     let answer = await_answer(args, request_id, String::new()).await?;
     let tool_input = serde_json::from_str::<serde_json::Value>(stdin_json)
         .ok()
         .and_then(|event| event.get("tool_input").cloned())
         .unwrap_or(serde_json::Value::Null);
-    Ok(question_decision_json(&answer, &tool_input))
+    Ok(question_decision_json_for(
+        hook_event_name,
+        &answer,
+        &tool_input,
+    ))
 }
 
 /// The `AwaitQuestionAnswer` exchange for `request_id`: the daemon's answer, once it gives one.

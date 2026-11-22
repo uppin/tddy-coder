@@ -103,12 +103,22 @@ pub fn back_channel_for(inputs: &BackChannelInputs<'_>) -> BackChannel {
     }
 }
 
+/// The hook-log channel: [`tddy_core::remote_hook_command`] for the message event, run by an explicit
+/// POSIX `sh`.
+///
+/// The agent runs the guidance's line in its own login shell, and the line pipes the report into
+/// the command. A hook's command reads its payload as its own stdin, but here the command is the
+/// last element of a pipeline, and zsh — a Coder workspace's and macOS's login shell — runs that
+/// element in the current shell, expanding the command's `$(cat …)` before stdin is the pipe: the
+/// report reached the log empty and was dropped. Under `sh -c` the command's stdin is the pipe in
+/// every shell.
 fn hook_log_channel(hook_token: &str, hook_log_path: &str) -> BackChannel {
+    let command =
+        tddy_core::remote_hook_command(tddy_core::REMOTE_MESSAGE_EVENT, hook_token, hook_log_path);
     BackChannel::HookLog {
-        command: tddy_core::remote_hook_command(
-            tddy_core::REMOTE_MESSAGE_EVENT,
-            hook_token,
-            hook_log_path,
+        command: format!(
+            "sh -c {}",
+            crate::remote_hook_follower::shell_quote(&command)
         ),
     }
 }

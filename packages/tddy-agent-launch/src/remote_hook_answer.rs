@@ -31,6 +31,9 @@ pub(crate) struct HeldHook {
     /// The held call's `tool_input` when it is an `AskUserQuestion`: the hook's answer is then a
     /// question decision, not a permission one.
     pub question_input: Option<serde_json::Value>,
+    /// The hook event holding the call (`PreToolUse`, `PermissionRequest`): a question decision is
+    /// written in that hook's shape, the only one Claude reads from it.
+    pub event: String,
     /// When the hook has certainly stopped polling for its answer (see [`hook_window_end`]).
     pub window_ends: tokio::time::Instant,
 }
@@ -50,11 +53,12 @@ pub(crate) fn hook_window_end(answer_wait_secs: u64) -> tokio::time::Instant {
 }
 
 impl crate::remote_hook_follower::HookLine {
-    /// The `tool_input` of a hook line that is a question — a `PreToolUse` of `AskUserQuestion`.
-    /// Kept beside the hold rather than in `remote_hook_follower.rs`, which is over its length
-    /// budget (`docs/code-issues/oversized-file-remote-hook-follower.md`).
+    /// The `tool_input` of a hook line that holds a question — a `PreToolUse` of `AskUserQuestion`,
+    /// or the `PermissionRequest` Claude fires for it once that hook's hold has ended. Kept beside
+    /// the hold rather than in `remote_hook_follower.rs`, which is over its length budget
+    /// (`docs/code-issues/oversized-file-remote-hook-follower.md`).
     pub(crate) fn question_input(&self) -> Option<serde_json::Value> {
-        (self.event == "PreToolUse"
+        (matches!(self.event.as_str(), "PreToolUse" | "PermissionRequest")
             && self.payload.get("tool_name").and_then(|t| t.as_str()) == Some("AskUserQuestion"))
         .then(|| {
             self.payload
@@ -92,8 +96,10 @@ pub(crate) async fn hold_and_answer(
             match delivery.await_question_answer(request).await {
                 Ok(answer) => match &question_input {
                     Some(tool_input) => {
-                        tddy_session_activity::hook_decision::question_decision_json(
-                            &answer, tool_input,
+                        tddy_session_activity::hook_decision::question_decision_json_for(
+                            &hook.event,
+                            &answer,
+                            tool_input,
                         )
                     }
                     None => tddy_session_activity::hook_decision::permission_decision_json(

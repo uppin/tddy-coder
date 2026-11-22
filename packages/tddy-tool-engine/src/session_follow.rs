@@ -6,9 +6,10 @@
 //! [`FOLLOW_PAGE_MAX`] — a larger one is clamped and the answer says so), and answers `items`,
 //! `next_cursor` and `has_more`.
 //!
-//! - **Activity** pages forward through `agent-activity.jsonl` by `activity_seq`, so a poll from
-//!   the last `next_cursor` returns exactly what happened since. Its answer also carries the
-//!   question the session is waiting on, if any.
+//! - **Activity** pages forward through `agent-activity.jsonl` by each call's `log_seq` — the line
+//!   of its latest row in that append-only log — so a poll from the last `next_cursor` returns
+//!   exactly what happened since: the calls made since, and the calls that finished since. Its
+//!   answer also carries the question the session is waiting on, if any.
 //! - **Transcript** pages the frames the web's Activities view pages (`GetAcpReplayPage`), newest
 //!   first; an item longer than [`TRANSCRIPT_ITEM_MAX_BYTES`] is cut and marked, and asking again
 //!   with its `tool_call_id` returns it whole (`GetAcpToolCallDetail`).
@@ -17,7 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tddy_core::agent_activity::AgentActivityRecord;
+use tddy_core::agent_activity::SequencedActivity;
 use tddy_core::pending_question::PendingQuestion;
 use tddy_worktree_service::session_target::{HomeCaller, SessionTarget};
 
@@ -54,7 +55,7 @@ pub struct FollowPage<T> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActivityPage {
     #[serde(flatten)]
-    pub page: FollowPage<AgentActivityRecord>,
+    pub page: FollowPage<SequencedActivity>,
     /// The question the session is waiting on, if it is waiting.
     pub pending_question: Option<PendingQuestion>,
     /// The name the session was given, or `null` for an unnamed session — so an orchestrator
@@ -81,8 +82,8 @@ pub struct TranscriptItem {
 /// it waits on, and the name it was given.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SessionActivity {
-    /// Every call, coalesced by `call_id`, in first-seen order — not the capped tail.
-    pub records: Vec<AgentActivityRecord>,
+    /// Every call, coalesced by `call_id`, with its place in the log — not the capped tail.
+    pub records: Vec<SequencedActivity>,
     pub pending_question: Option<PendingQuestion>,
     /// The name the session was given (`RenameSession`), or `None` for an unnamed session.
     pub display_name: Option<String>,
@@ -116,30 +117,31 @@ pub fn parse_cursor(cursor: &str) -> Result<Option<u64>, String> {
     })
 }
 
-/// The page of `records` after `cursor` (an `activity_seq`; empty for the first), keeping only the
-/// `statuses` asked for (all when empty).
+/// The page of `records` after `cursor` (a `log_seq`; empty for the first), keeping only the
+/// `statuses` asked for (all when empty), oldest row first.
 ///
-/// `next_cursor` is the last returned call's `activity_seq`, so a poll from it returns exactly what
-/// happened after; on an empty page it is `cursor` unchanged.
+/// `next_cursor` is the last returned call's `log_seq`, so a poll from it returns exactly what
+/// happened after — a call made since, or one whose completion was recorded since; on an empty page
+/// it is `cursor` unchanged.
 pub fn page_activity(
-    records: &[AgentActivityRecord],
+    records: &[SequencedActivity],
     cursor: &str,
     limit: Option<usize>,
     statuses: &[String],
-) -> Result<FollowPage<AgentActivityRecord>, String> {
+) -> Result<FollowPage<SequencedActivity>, String> {
     let after = parse_cursor(cursor)?;
     let (size, clamped_to) = page_size(limit);
-    let mut matching: Vec<&AgentActivityRecord> = records
+    let mut matching: Vec<&SequencedActivity> = records
         .iter()
-        .filter(|r| after.is_none_or(|seq| r.activity_seq > seq))
-        .filter(|r| statuses.is_empty() || statuses.contains(&r.status))
+        .filter(|call| after.is_none_or(|seq| call.log_seq > seq))
+        .filter(|call| statuses.is_empty() || statuses.contains(&call.record.status))
         .collect();
-    matching.sort_by_key(|r| r.activity_seq);
+    matching.sort_by_key(|call| call.log_seq);
     let has_more = matching.len() > size;
-    let items: Vec<AgentActivityRecord> = matching.into_iter().take(size).cloned().collect();
+    let items: Vec<SequencedActivity> = matching.into_iter().take(size).cloned().collect();
     let next_cursor = items
         .last()
-        .map(|r| r.activity_seq.to_string())
+        .map(|call| call.log_seq.to_string())
         .unwrap_or_else(|| cursor.trim().to_string());
     Ok(FollowPage {
         items,

@@ -273,28 +273,61 @@ pub fn read_agent_activity(session_dir: &Path) -> io::Result<Vec<AgentActivityRe
 /// first-seen order. For a reader that pages through the whole history rather than showing its tail
 /// (`ReadSessionActivity`).
 pub fn read_all_agent_activity(session_dir: &Path) -> io::Result<Vec<AgentActivityRecord>> {
+    Ok(read_all_sequenced_agent_activity(session_dir)?
+        .into_iter()
+        .map(|call| call.record)
+        .collect())
+}
+
+/// One call of a session's activity, coalesced, with where its latest row sits in the log.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SequencedActivity {
+    /// The 1-based line of the call's **latest** row in `agent-activity.jsonl`. The log is only ever
+    /// appended to, so the number is the row's lasting position: unique, rising with every row, the
+    /// same on every read — and it needs no counter, so rows written before it existed are numbered
+    /// too. A call's later row (its completion) moves it forward, so a reader paging by it sees the
+    /// call again, finished. Not [`AgentActivityRecord::activity_seq`], the session room's tick,
+    /// which several calls share.
+    pub log_seq: u64,
+    #[serde(flatten)]
+    pub record: AgentActivityRecord,
+}
+
+/// [`read_all_agent_activity`] with each call's [`SequencedActivity::log_seq`].
+///
+/// Rows are coalesced by `call_id` field by field: a later row supersedes what it reports — status,
+/// result, error, completion, provenance, attribution — but not what it leaves unset. A
+/// `PostToolUse` row carries no start time and may carry no input, so the call keeps its
+/// `PreToolUse` row's.
+pub fn read_all_sequenced_agent_activity(session_dir: &Path) -> io::Result<Vec<SequencedActivity>> {
     let path = session_dir.join(AGENT_ACTIVITY_FILENAME);
     if !path.exists() {
         return Ok(Vec::new());
     }
     let contents = std::fs::read_to_string(&path)?;
 
-    // Coalesce by `call_id`: a later row supersedes the earlier one, while first-seen order of
-    // call_ids is preserved.
     let mut order: Vec<String> = Vec::new();
-    let mut by_call: HashMap<String, AgentActivityRecord> = HashMap::new();
+    let mut by_call: HashMap<String, SequencedActivity> = HashMap::new();
     for (i, line) in contents.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
+        let log_seq = i as u64 + 1;
         match serde_json::from_str::<AgentActivityRecord>(trimmed) {
-            Ok(record) => {
-                if !by_call.contains_key(&record.call_id) {
-                    order.push(record.call_id.clone());
+            Ok(record) => match by_call.get_mut(&record.call_id) {
+                Some(call) => {
+                    call.record = superseded(&call.record, record);
+                    call.log_seq = log_seq;
                 }
-                by_call.insert(record.call_id.clone(), record);
-            }
+                None => {
+                    order.push(record.call_id.clone());
+                    by_call.insert(
+                        record.call_id.clone(),
+                        SequencedActivity { log_seq, record },
+                    );
+                }
+            },
             Err(e) => {
                 log::warn!(
                     "agent_activity: skipping malformed line {} in {}: {}",
@@ -306,11 +339,28 @@ pub fn read_all_agent_activity(session_dir: &Path) -> io::Result<Vec<AgentActivi
         }
     }
 
-    let records = order
+    Ok(order
         .into_iter()
         .filter_map(|call_id| by_call.remove(&call_id))
-        .collect();
-    Ok(records)
+        .collect())
+}
+
+/// `later`, a call's newer row, over `earlier`: what `later` leaves unset (no start time, no input)
+/// is kept from `earlier`.
+fn superseded(earlier: &AgentActivityRecord, later: AgentActivityRecord) -> AgentActivityRecord {
+    AgentActivityRecord {
+        started_unix_ms: if later.started_unix_ms == 0 {
+            earlier.started_unix_ms
+        } else {
+            later.started_unix_ms
+        },
+        input: if later.input.is_null() {
+            earlier.input.clone()
+        } else {
+            later.input
+        },
+        ..later
+    }
 }
 
 // ---------------------------------------------------------------------------

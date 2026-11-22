@@ -874,7 +874,7 @@ agents can do:
 |---|---|
 | On the orchestrator's host, both agents declaring native peer messaging (`coding_agent.peer_name`: Claude Code) | Claude Code's own peer messaging, addressed to the orchestrator's **peer name** |
 | Any other child on the orchestrator's host | `tddy-tools send --to <orchestrator session id> "<report>"` |
-| On a Coder or SSH target (no tddy software there) | a `TddyMessage` line appended to the worktree's `.tddy/hooks.log`: `echo '{"text": "<report>"}' \| <command>`, the exact command — with its hook token and log path — given in the guidance |
+| On a Coder or SSH target (no tddy software there) | a `TddyMessage` line appended to the worktree's `.tddy/hooks.log`: `echo '{"text": "<report>"}' \| sh -c '<command>'`, the exact command — with its hook token and log path — given in the guidance. It runs under an explicit POSIX `sh`, so the target's login shell (zsh on Coder workspaces and macOS) cannot change how the piped report is read |
 
 - **Peer names.** A session of an agent declaring `peer_name` is launched under
   `tddy-<session id>` (`claude --name …`) when it is an orchestrator (`is_orchestrator_role`) or a
