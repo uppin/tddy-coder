@@ -20,6 +20,7 @@ nine lines with every RPC the family gains.
 |---|---|---|
 | 2026-11-22 | 500 → 552 | **Crossed the budget** in #1007 (`#workqueue` 6/14): forwarders for `AssignWorkItemPr`, `UnassignWorkItemPr`, `LinkWorkItemSession`, `UnlinkWorkItemSession` and `StreamWorkQueueStatus`. Not split: the file is stack-shared — #1004 (n3) and #1006 (n5) edited it, and every later `#workqueue` node's branch does — so the stack-branch rule defers the split to the post-stack sweep |
 | 2026-11-22 | 552 → 582 | **Grew by 30** in #1008 (`#workqueue` 7/14): forwarders for `SetWorkItemLabels`, `SetWorkItemBadge` and `ClearWorkItemBadge`. Not split: stack-shared with every later `#workqueue` node, so the stack-branch rule defers the split to the post-stack sweep |
+| 2026-11-23 | 582 → 602 | **Regressed by 20** in #1010 (`#workqueue` 9/14): forwarders for `SetWorkQueueDependencies` and `GetWorkQueueGraph`. Not split: stack-shared, deferred to the post-stack sweep |
 
 ## What would close it — candidate seam (not proven)
 

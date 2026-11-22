@@ -18,11 +18,14 @@ use tddy_work_queue::item_ops::{
     add_work_item, adopt_pr_as_work_item, delete_work_item, sync_node_to_github_pr,
     update_work_item, AddWorkItemInput, StoredWorkQueue, UpdateWorkItemInput, WorkQueueHome,
 };
-use tddy_work_queue::lineage;
 use tddy_work_queue::pr_insight::{self, PrSearchInput};
 
 use super::github::GithubSource;
 use super::shape::{work_pr_comments_json, work_pr_read_json, work_pr_search_json};
+
+mod lineage_ops;
+pub(super) use lineage_ops::graph_json;
+use lineage_ops::set_dependencies;
 
 /// The stack an operation acts on, and where the host keeps it.
 #[derive(Clone)]
@@ -285,51 +288,6 @@ fn edit_annotations(
             .map(|b| json!({ "key": b.key, "text": b.text, "tone": b.tone }))
             .collect::<Vec<_>>(),
     }))
-}
-
-/// `work_queue_set_dependencies`: replace what `item_id` needs under the record lock; a refused edit
-/// (unknown item, a cycle) writes nothing and is the error.
-fn set_dependencies(env: &OpEnv, item_id: &str, needs: Vec<String>) -> Result<Value, String> {
-    let mut refused = None;
-    env.home()?
-        .update_stack(|queue| {
-            let mut edited = queue.clone();
-            match lineage::set_dependencies(&mut edited, item_id, needs) {
-                Ok(()) => *queue = edited,
-                Err(error) => refused = Some(error),
-            }
-        })
-        .map_err(|e| format!("set dependencies: {e}"))?;
-    if let Some(error) = refused {
-        return Err(error.to_string());
-    }
-    Ok(json!({
-        "item_id": item_id,
-        "dependencies": dependencies_json(&lineage::dependencies_of(&env.stack()?)),
-    }))
-}
-
-pub(super) fn dependencies_json(edges: &[lineage::DependencyEdge]) -> Value {
-    Value::Array(
-        edges
-            .iter()
-            .map(|edge| json!({ "from": edge.from, "to": edge.to }))
-            .collect(),
-    )
-}
-
-/// `work_queue_graph`'s answer: each item's line edge and the stored dependency edges.
-pub(super) fn graph_json(graph: &lineage::QueueGraph, unavailable_reason: Option<&str>) -> Value {
-    let mut answer = json!({
-        "line_edges": graph.line.iter().map(|(item_id, endpoint)| json!({
-            "item_id": item_id, "kind": endpoint.kind(), "endpoint": endpoint.name(),
-        })).collect::<Vec<_>>(),
-        "dependencies": dependencies_json(&graph.dependencies),
-    });
-    if let Some(reason) = unavailable_reason {
-        answer["unavailable_reason"] = json!(reason);
-    }
-    answer
 }
 
 /// Apply a link `edit` to the queue under its record lock; a refused edit writes nothing and is the
