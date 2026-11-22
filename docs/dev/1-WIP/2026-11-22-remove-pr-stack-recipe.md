@@ -1,7 +1,7 @@
 # Changeset: Remove the pr-stack workflow recipe
 
 **Date**: 2026-11-22
-**Status**: 🚧 In Progress — green phase
+**Status**: 🚧 In Progress — validated, wrapping
 **Type**: Feature (removal)
 **Complexity**: 4 — more than one package (≈20, web and Rust), a proto change (field 31 reserved), code moved between crates under live daemon tools, a test-coverage re-point
 **Stack**: `#workqueue` 1/14 — branch `feature/workqueue/remove-pr-stack-recipe`, base `master`
@@ -111,7 +111,10 @@ reserved and planned after the pipelines drain.
 
 ### ✅ RESOLVED HERE — [2026-11-14-retire-stack-child-spawn-handler.md](../todo/2026-11-14-retire-stack-child-spawn-handler.md)
 
-`StackChildSpawnHandler` and its binding are deleted with the recipe.
+`StackChildSpawnHandler` and its binding are deleted with the recipe; at validation the rest of the seam
+went too — the `ChildSpawnHandler` trait, the `SpawnChild` wire arm and `SpawnChildRequestWire` (`tddy-toolcall`), and the
+handler plumbing through `tddy-cli-sessions` and `tddy-agent-launch` (`SpawnChildOk`, shared with `spawn-conversation`, is
+now `SpawnConversationOk`).
 
 ### ✅ RESOLVED HERE — [2026-08-29-stack-progress-json-is-documented-as-a-host-guarantee-but-nothing-writ.md](../todo/2026-08-29-stack-progress-json-is-documented-as-a-host-guarantee-but-nothing-writ.md)
 
@@ -155,13 +158,13 @@ The flaking suite is deleted with `StackChildSpawnHandler`; the entry closes if 
 
 ## Scope
 
-- [ ] Recipe, aliases, goals, goal schemas and every recipe-name list entry removed
-- [ ] `PrStackScreen` and its private modules removed; legacy-recipe sessions open in the workflow chat view
-- [ ] Stack base-session seeding removed end to end; `StartSessionRequest` field 31 reserved
-- [ ] `StackChildSpawnHandler` removed
-- [ ] Surviving helpers moved into `tddy-pr-stack`; consumers repointed
-- [ ] Resume of a legacy-recipe session refused with the recipe named
-- [ ] Planned-PR row specs re-pointed at `ProjectStackView`
+- [x] Recipe, aliases, goals, goal schemas and every recipe-name list entry removed
+- [x] `PrStackScreen` and its private modules removed; legacy-recipe sessions open in the workflow chat view
+- [x] Stack base-session seeding removed end to end; `StartSessionRequest` field 31 reserved
+- [x] `StackChildSpawnHandler` removed
+- [x] Surviving helpers moved into `tddy-pr-stack`; consumers repointed
+- [x] Resume of a legacy-recipe session refused with the recipe named
+- [x] Planned-PR row specs re-pointed at `ProjectStackView`
 - [ ] Feature and package docs updated through the wrap
 
 ## Technical Changes
@@ -191,12 +194,12 @@ only ways to plan or drive a stack are `ProjectStackView` and the `pr_*` tools.
 
 ## Implementation Milestones
 
-- [ ] Move the surviving helpers into `tddy-pr-stack`; daemon-rpc and session-files compile against them
-- [ ] Delete the recipe modules and goal schemas; regenerate goal registry and manifest
-- [ ] Delete seed plumbing CLI → spawn → daemon → proto (reserve 31) → MCP schema → web
-- [ ] Delete `PrStackScreen` and private modules; route legacy-recipe sessions to the workflow chat view
-- [ ] Re-point surviving planned-PR row specs at `ProjectStackView`; delete the rest with a list in this changeset
-- [ ] Resume refusal names the removed recipe
+- [x] Move the surviving helpers into `tddy-pr-stack`; daemon-rpc and session-files compile against them
+- [x] Delete the recipe modules and goal schemas; regenerate goal registry and manifest
+- [x] Delete seed plumbing CLI → spawn → daemon → proto (reserve 31) → MCP schema → web
+- [x] Delete `PrStackScreen` and private modules; route legacy-recipe sessions to the workflow chat view
+- [x] Re-point surviving planned-PR row specs at `ProjectStackView`; delete the rest with a list in this changeset
+- [x] Resume refusal names the removed recipe
 
 ## Testing Plan
 
@@ -346,15 +349,82 @@ tddy-service -p tddy-coder --tests` clean.
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- No `TODO`/`FIXME` left by this change. The one `/green` added (`svc_start_claude_cli_session.rs`: "nothing binds a
+  `ChildSpawnHandler` any more") was closed at validation by retiring the seam.
+- Debug-level diagnostics added on the remote probe path (kept on purpose, see *Operator items* 3).
 
 ## Refactoring Needed
 
-_(populated by validation)_
+Applied at validation (commit `f463c1ce4`):
+
+- **Dead seam retired**: `ChildSpawnHandler` / `SpawnChild` / `SpawnChildRequestWire` / `with_child_spawn_handler` and the
+  `child_spawn_handler` parameter of `start_session_toolcall_listener`, `set_up_managed_workflow`, `resume_managed_workflow`,
+  `prepare_managed_workflow_inner`, `ManagedWiring`; `managed_spawn_handlers` → `managed_spawn_handler`. Stale `spawn-child`
+  wording reworded in `svc_pr_status_for_caller.rs`, `stack_parent.rs`, `conversation_spawn_wiring_tests.rs`.
+- **Vacuous assertions**: `PrStackSessionNavigationAcceptance` and `WorkflowChatViewRoutingAcceptance` asserted that
+  `pr-stack-screen` "should not exist" — a test id nothing renders any more, so always true. The first now asserts the
+  project stack view is gone; the second drops the redundant line.
+- **Dead test handles**: `prStackScreen`, `prStackPlannedPrPanel{,Toggle,Close}` ids (in `tddy-web`, `tddy-session-web`,
+  `tddy-prstack-web` `testIds.ts`) and their page-object helpers (`screen`, `plannedPrPanel*`, `togglePlannedPrPanel`,
+  `expectPanel*`).
+- **Dead code**: `tddy-session-create-web` `utils/stackParents.ts` (+ test, + index export) — `stackParentCandidates` had no
+  caller once the parent picker was deleted.
+- Stale `useAgentChat` TODO about `PrStackScreen`; import order in `CreateSessionPane.tsx`.
+
+## Operator items (W stage, 2026-11-22)
+
+1. **`tddy-tools` `clone_placement_exec_dispatch_acceptance` — FIXED (test-side, `4f4d19644`).** The index-out-of-bounds
+   at `:112` came from the environment, not the code: inside a tddy session `TDDY_REMOTE_DAEMON_SOCKET` is set, and
+   `detect_session_tool_transport` ranks the daemon socket above the HTTP relay, so both exec calls went to the session's
+   real daemon and the recording listener got none. The test now removes every transport that outranks the relay
+   (sandbox IPC, daemon socket, LiveKit). Red → green verified in this worktree.
+2. **`tddy-tools-cli` `notify_cli_acceptance` isolation — FIXED (`4f4d19644`).** `tddy-tools` adopted the worktree's
+   `.tddy/session.json` found upward from the package directory. Every run now starts in `std::env::temp_dir()`, as
+   `rename_session_cli_acceptance` already does. Original: 5/6 fail inside this worktree; fixed: 6/6 pass.
+   (A separate 10 s stall seen once was macOS holding a fresh exec at `_dyld_start` under heavy local load, not this.)
+3. **`tddy-agent-launch` `coder_agent_launch_acceptance::a_hook_fired_in_a_coder_workspace_reaches_the_daemon`
+   (`AgentNeverAnswered` after 60 s) — CAUSE FOUND AND FIXED (`fd77cb878`).**
+   - *Instrumentation* (kept, debug level): every liveness probe logs its bound and answer
+     (`tddy_agent_launch::remote_agent_launch`); every Coder one-shot logs when its `coder` client exited and when stdout
+     and stderr each ended (`tddy_remote_shell::coder`).
+   - *Reproduction*: 160 full-suite runs (8–16 in parallel, with CPU burners, then with fresh-script exec loops loading
+     the security scan) did not hang natively; every probe's client exit and both pipe ends landed within microseconds.
+     `AgentNeverAnswered after 60.4 s` = 400 ms window + a 60 s probe bound, i.e. one `kill -0` one-shot that could not
+     end before its deadline although its client was done — a pipe held open by another process.
+   - *Cause*: the one-shot wrapper's watchdog `( sleep N; kill … ) >/dev/null 2>&1 &` inherited **fd 3, the command's own
+     stderr**. When the command ends in milliseconds the wrapper TERMs the watchdog's group; a TERM that lands while the
+     watchdog is forking its `sleep` misses that child, which then holds stderr open for `sleep {deadline}` — the whole
+     60 s. The same holds on a real workspace (the pty stays open, `coder ssh` lingers).
+   - *Fix*: the watchdog closes fd 3 (`3>&-`). Pinned by `one_shot::tests::a_watchdog_that_outlives_the_command_holds_none_of_its_output`,
+     which makes the survival certain (`TERM` ignored): 8.07 s red → under 1 s green. Not a timeout change.
 
 ## Validation Results
 
-_(populated by validation)_
+Base: `master` @ `d3c23a7` (rebased once at the start of W; clean, no conflicts). Leak check: `origin/master..HEAD` is
+this PR's commits only.
+
+| Check | Result |
+|-------|--------|
+| Changeset items | ✅ all implemented; no item silently dropped |
+| `## Responsibility` | ✅ no stubs; the one TODO `/green` left was resolved |
+| `## Dependencies` / `## Boundaries` | ✅ root node; nothing renamed, store and gating untouched |
+| Diff only this PR's files | ✅ |
+
+Scoped verification (local, this worktree):
+
+- `cargo check --all-targets`: `tddy-remote-shell`, `tddy-toolcall`, `tddy-cli-sessions`, `tddy-agent-launch` — clean
+- `cargo test`: `tddy-toolcall` (all), `tddy-cli-sessions` (all), `tddy-remote-shell` (all, 71), `tddy-agent-launch --lib`
+  (403) + `coder_agent_launch_acceptance` (6) + `remote_agent_launch_acceptance` (13), `tddy-session-lifecycle`
+  `managed_workflow_github_token` + `managed_workflow_transition`, `tddy-tools` `clone_placement_exec_dispatch_acceptance`,
+  `tddy-tools-cli` `notify_cli_acceptance` (6) + `rename_session_cli_acceptance` (4) — all pass
+- Cypress: session-web `PrStackSessionNavigationAcceptance`, `WorkflowChatViewRoutingAcceptance`,
+  `LegacyStackRecipeSessionAcceptance` (9/9); session-create-web `CreateSessionPane`, `CreateSessionRecipeChoicesAcceptance`
+  (25/25); prstack-web `PlannedPrListStartSessionDirectMountAcceptance` (2/2); `bun test` session-create-web + prstack-web
+  (240/240)
+- Everything else: CI.
+
+Risk: low. Removal plus verbatim moves; the one behavioural change outside the removal is the watchdog's fd 3, a strict
+narrowing of what it holds.
 
 ## TODO
 
@@ -366,12 +436,12 @@ _(populated by validation)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
 - [ ] Refactor test issues
