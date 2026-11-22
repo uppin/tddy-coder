@@ -89,6 +89,26 @@ fn dependency_edges_are_stored_on_the_queue() {
 }
 
 #[test]
+fn a_need_named_twice_is_stored_once_in_the_order_first_given() {
+    // Given
+    let mut queue = a_queue();
+
+    // When — n1 is named again after n2
+    set_dependencies(
+        &mut queue,
+        "n3",
+        vec!["n1".to_string(), "n2".to_string(), "n1".to_string()],
+    )
+    .expect("set");
+
+    // Then
+    assert_eq!(
+        queue.node("n3").map(|item| item.needs.clone()),
+        Some(vec!["n1".to_string(), "n2".to_string()])
+    );
+}
+
+#[test]
 fn a_dependency_set_closing_a_cycle_is_refused_naming_the_cycle() {
     // Given
     let mut queue = a_queue();

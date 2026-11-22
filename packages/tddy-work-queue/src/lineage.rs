@@ -57,6 +57,18 @@ pub struct QueueGraph {
     pub dependencies: Vec<DependencyEdge>,
 }
 
+/// The trunk's branch name from the project's integration base ref (`origin/main` → `main`).
+pub fn trunk_branch_of(integration_base_ref: &str) -> &str {
+    tddy_git::local_branch_name_for_remote(integration_base_ref, "origin")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LineageError {
+    NoSuchItem(String),
+    /// The edges would close this cycle (item ids, first repeated last).
+    Cycle(Vec<String>),
+}
+
 impl std::fmt::Display for LineageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -68,18 +80,6 @@ impl std::fmt::Display for LineageError {
             ),
         }
     }
-}
-
-/// The trunk's branch name from the project's integration base ref (`origin/main` → `main`).
-pub fn trunk_branch_of(integration_base_ref: &str) -> &str {
-    tddy_git::local_branch_name_for_remote(integration_base_ref, "origin")
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LineageError {
-    NoSuchItem(String),
-    /// The edges would close this cycle (item ids, first repeated last).
-    Cycle(Vec<String>),
 }
 
 /// Which endpoint a PR based on `base_branch` hangs from, in `queue` with trunk `trunk`.
@@ -185,8 +185,11 @@ pub fn set_dependencies(
     if let Some(unknown) = needs.iter().find(|need| queue.node(need).is_none()) {
         return Err(LineageError::NoSuchItem(unknown.clone()));
     }
-    let mut needs = needs;
-    needs.dedup();
+    let mut seen = BTreeSet::new();
+    let needs: Vec<String> = needs
+        .into_iter()
+        .filter(|need| seen.insert(need.clone()))
+        .collect();
     let mut candidate = queue.clone();
     if let Some(item) = candidate.nodes.iter_mut().find(|n| n.node_id == item_id) {
         item.needs = needs;

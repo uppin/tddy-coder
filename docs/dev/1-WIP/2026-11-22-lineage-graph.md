@@ -204,11 +204,31 @@ binary (with and without the extension); Cypress component spec for the graph.
 
 ## Refactoring Needed
 
-_(populated by validation)_
+None outstanding — the two validation findings below were fixed in place.
 
 ## Validation Results
 
-_(populated by validation)_
+2026-11-23, after the rebase onto n8 (`9fc41129b`). Stack gate: base `feature/workqueue/move-activities`,
+`origin/<base>..HEAD` holds only n9's commits; the diff touches only files this changeset claims.
+
+| Check | Result |
+|---|---|
+| Responsibility delivered | ✅ — no stubs (`TODO(`/`todo!`/`unimplemented!` absent) |
+| Dependencies not implemented here | ✅ — inbox, PR assignment and move activities consumed, not built |
+| Boundaries | ✅ — no waves/readiness, no GitHub writes, `parents` unchanged |
+| Build | ✅ `cargo check --all-targets` on changeset, work-queue, github, tool-engine, service, agent-launch, daemon-rpc, tools |
+| Clippy `-D warnings` | ✅ work-queue, github, tool-engine, daemon-rpc |
+| Tests (scoped) | ✅ tddy-work-queue, tddy-tool-engine, tddy-github `gh_stack_membership`, tddy-service `unbundle_service_split`, tddy-tools `pr_stack_tool_dispatch_acceptance`, tddy-daemon-rpc lib + lineage/stack-plan/project-home acceptance; Cypress `WorkQueueGraphAcceptance` 2/2 |
+
+Findings, all fixed:
+- ⚠️ `set_dependencies` deduplicated with `Vec::dedup`, which keeps non-adjacent repeats → order-preserving
+  dedup; test `a_need_named_twice_is_stored_once_in_the_order_first_given`.
+- ℹ️ `Display for LineageError` sat above the enum → moved below it.
+- ℹ️ Rebase onto n7/n8: the owner's tool-list tests now include n7's annotation tools (link → annotation →
+  lineage, the catalogue's order).
+
+Risks accepted: `gh_stack_membership` runs `gh stack view` without a timeout (an optional read off the runtime's
+threads; a hung `gh` delays only the graph answer).
 
 ## TODO
 
