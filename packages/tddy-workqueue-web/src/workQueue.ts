@@ -43,6 +43,18 @@ export interface WorkItem {
   pr: AssignedPr | null;
   /** The tddy sessions linked to this item, in link order (`#workqueue` 6/14). */
   linkedSessions: LinkedSession[];
+  /** Free-form tags on this item (`#workqueue` 7/14); the queue view filters by them. */
+  labels: string[];
+  /** Keyed markers with a short text and a tone (`#workqueue` 7/14). */
+  badges: WorkItemBadge[];
+}
+
+export type BadgeTone = "info" | "success" | "warning" | "danger";
+
+export interface WorkItemBadge {
+  key: string;
+  text: string;
+  tone: BadgeTone;
 }
 
 export interface AssignedPr {
@@ -77,6 +89,8 @@ interface WireStackNode {
   display_order?: number | null;
   pr?: { number: number; url: string; head_branch: string } | null;
   linked_sessions?: { session_id: string; daemon_instance_id?: string }[];
+  labels?: string[];
+  badges?: WorkItemBadge[];
 }
 
 interface WireStack {
@@ -113,6 +127,8 @@ export function parseWorkQueue(workQueueJson: string | undefined | null): Stack 
       sessionId: linked.session_id,
       daemonInstanceId: linked.daemon_instance_id ?? "",
     })),
+    labels: n.labels ?? [],
+    badges: n.badges ?? [],
   }));
   return { version: parsed.version ?? 0, nodes };
 }

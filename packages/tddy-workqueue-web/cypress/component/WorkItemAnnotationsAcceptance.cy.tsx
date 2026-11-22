@@ -10,34 +10,34 @@ import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
-import { ProjectStackView } from "../../src";
-import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
+import { WorkQueueView } from "../../src";
+import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
-const THE_QUEUE = { projectId: "proj-annotations", stackId: "0190d000-0000-7000-8000-0000000000aa", daemonInstanceId: "" };
+const THE_QUEUE = { projectId: "proj-annotations", queueId: "0190d000-0000-7000-8000-0000000000aa", daemonInstanceId: "" };
 
 const API_ITEM = {
-  ...aPlannedNode({ nodeId: "n1", title: "Wire the API", displayOrder: 0 }),
+  ...aPlannedNode({ itemId: "n1", title: "Wire the API", displayOrder: 0 }),
   labels: ["api", "needs-review"],
   badges: [{ key: "qa", text: "passed", tone: "success" }],
   internalStatus: { kind: "needs-repoint", source: "derived" },
 };
 const UI_ITEM = {
-  ...aPlannedNode({ nodeId: "n2", title: "Draw the view", displayOrder: 1 }),
+  ...aPlannedNode({ itemId: "n2", title: "Draw the view", displayOrder: 1 }),
   labels: ["ui"],
   badges: [],
 };
 
 function mountTheQueue() {
-  const backend = anInMemoryRpcBackend().onUnary(PrStackService.method.getProjectStack, () =>
-    create(PrStackService.method.getProjectStack.output, {
-      stackPlanJson: aStackPlanJson(1, [API_ITEM as never, UI_ITEM as never]),
+  const backend = anInMemoryRpcBackend().onUnary(WorkQueueService.method.getWorkQueue, () =>
+    create(WorkQueueService.method.getWorkQueue.output, {
+      workQueueJson: aWorkQueueJson(1, [API_ITEM as never, UI_ITEM as never]),
     }),
   );
   cy.mountWithClients(
-    <ProjectStackView
+    <WorkQueueView
       address={THE_QUEUE}
-      prStackClient={createClient(PrStackService, backend.transport())}
+      workQueueClient={createClient(WorkQueueService, backend.transport())}
       sessionToken="fake-token"
     />,
     backend,
