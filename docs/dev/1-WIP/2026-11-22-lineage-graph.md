@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — more than one crate, a proto addition, graph validation (cycles) and a read over n2's inbox, a graph-drawing web component, an optional external CLI probe
 **Stack**: `#workqueue` 9/14 — branch `feature/workqueue/lineage-graph`, base `feature/workqueue/move-activities`
+**PR**: [#1010](https://github.com/uppin/tddy-coder/pull/1010)
 
 ## Initial Discovery
 
@@ -12,7 +13,7 @@
 
 ## Affected Packages
 
-- **tddy-changeset**: `WorkQueue.dependencies`, `DependencyEdge { from, to }`
+- **tddy-changeset**: `WorkItem.needs` (the stored dependency edges, one list per item), `DependencyEdge { from, to }`
 - **tddy-work-queue**: `lineage` module — `LineEndpoint::{Item, Trunk, External}`, `line_parent_of`, `detect_cycle` (names the closing path), `set_dependencies`
 - **tddy-github**: `gh stack` membership probe through the host's `gh` (optional; absent extension = `None`)
 - **tddy-service**: `work_queue.proto` `SetWorkQueueDependencies`, `GetWorkQueueGraph`; closed lists
@@ -35,9 +36,15 @@ refusal; both drawn and returned to agents.
 Exploration 3 §4A.4 (`parents` is the only edge; `topo_order` ignores dangling parents) and §3 (no
 `gh stack` call anywhere). Exploration 2 §4A: PR base branches are in `PrDetail.base_branch`.
 
+## Stack note (temporary)
+
+This branch skips n7 and n8: it is cut from n6's green (`472d1947b`), because n9's real dependency is n6.
+In the line it sits on n8 and n7, whose implementations are not done; their contract commits are not
+carried here. The branch is rebased onto n8 before n9's [W]. Remove this note then.
+
 ## Responsibility
 
-- `DependencyEdge`, `WorkQueue.dependencies`, `set_dependencies`, `detect_cycle`.
+- `DependencyEdge`, `WorkItem.needs` (the stored dependency edges, one list per item), `set_dependencies`, `detect_cycle`.
 - `LineEndpoint` and `line_parent_of(item)` — the single source of line edges for n10–n14.
 - `work_queue_set_dependencies`, `work_queue_graph`, their RPCs.
 - The `gh stack` membership probe.
@@ -63,9 +70,18 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: `DependencyEdge`, `LineEndpoint`,
-`line_parent_of`, `detect_cycle` signatures, two tool definitions and RPCs, the graph component's test
-ids, and the failing tests below.
+Published (pass 2, commit 2):
+
+- `tddy_work_queue::lineage::{DependencyEdge, LineEndpoint (Item, Trunk, External), LineageError,
+  line_endpoint_of_base, planned_line_parent, line_edges_through_inbox, set_dependencies,
+  dependencies_of, detect_cycle}` — `line_parent_of` is `line_edges_through_inbox` (every item at once,
+  PR base through the inbox, else the planned base)
+- `tddy_tool_engine::work_queue_lineage_tools::{WORK_QUEUE_SET_DEPENDENCIES, WORK_QUEUE_GRAPH,
+  WORK_QUEUE_LINEAGE_TOOL_NAMES, work_queue_lineage_tool_defs}`
+- `tddy_github::gh_stack::gh_stack_membership` (optional probe)
+- `tddy-workqueue-web`: `WorkQueueGraph` (shell, props-driven)
+- The failing tests below. The `SetWorkQueueDependencies` / `GetWorkQueueGraph` RPCs are `/green`'s
+  (the handler-default pattern of n6/n7); the graph component is tested on its props.
 
 ## Green wave
 
@@ -123,7 +139,7 @@ The new field and validation go in a new module, not into the item file.
 ```
 line edge(item)  = endpoint(PR.base_branch)  — Item(k) if some item's branch, Trunk(b) if the trunk, External(b) otherwise
                  = planned(parents)           — when the item has no PR
-dependency edges = WorkQueue.dependencies     — stored, acyclic
+dependency edges = WorkItem.needs          — stored, acyclic
 ```
 
 ### Delta
@@ -145,21 +161,27 @@ binary (with and without the extension); Cypress component spec for the graph.
 
 ## Acceptance Tests
 
-`packages/tddy-work-queue/tests/lineage_unit.rs`:
-- [ ] `a_pr_based_on_another_items_branch_has_a_line_edge_from_that_item`
-- [ ] `a_pr_based_on_the_trunk_has_a_trunk_endpoint`
-- [ ] `a_pr_based_on_a_branch_outside_the_queue_has_an_external_endpoint`
-- [ ] `an_item_without_a_pr_shows_its_planned_base`
-- [ ] `a_dependency_set_closing_a_cycle_is_refused_naming_the_cycle`
+`packages/tddy-work-queue/tests/lineage_unit.rs` (crate renamed `tddy-work-queue` by n3):
+- [x] `a_pr_based_on_another_items_branch_has_a_line_edge_from_that_item`
+- [x] `a_pr_based_on_the_trunk_has_a_trunk_endpoint`
+- [x] `a_pr_based_on_a_branch_outside_the_queue_has_an_external_endpoint`
+- [x] `an_item_without_a_pr_shows_its_planned_base`
+- [x] `dependency_edges_are_stored_on_the_queue`
+- [x] `a_dependency_set_closing_a_cycle_is_refused_naming_the_cycle`
+- [x] `a_dependency_on_an_unknown_item_is_refused`
 
-`packages/tddy-daemon-rpc/tests/work_queue_lineage_acceptance.rs`:
-- [ ] `retargeting_a_pr_on_github_moves_its_line_edge_without_a_queue_write`
-- [ ] `the_graph_carries_both_edge_kinds`
-- [ ] `without_the_gh_stack_extension_the_graph_has_no_membership_and_nothing_else_missing`
+`packages/tddy-work-queue/tests/lineage_through_inbox_acceptance.rs` (real inbox, scripted GitHub):
+- [x] `retargeting_a_pr_on_github_moves_its_line_edge_without_a_queue_write`
+
+`packages/tddy-tool-engine/tests/work_queue_lineage_tools.rs`:
+- [x] `the_lineage_tools_are_defined_and_setting_dependencies_takes_an_item_and_its_needs`
+
+`packages/tddy-github/tests/gh_stack_membership.rs`:
+- [x] `without_the_gh_stack_extension_there_is_no_membership`
 
 `packages/tddy-workqueue-web/cypress/component/WorkQueueGraphAcceptance.cy.tsx`:
-- [ ] `line edges and dependency edges are drawn distinguishably`
-- [ ] `an external base is drawn as an endpoint outside the queue`
+- [x] `line edges and dependency edges are drawn distinguishably`
+- [x] `an external base is drawn as an endpoint outside the queue`
 
 ## Decisions & Trade-offs
 
@@ -188,10 +210,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
