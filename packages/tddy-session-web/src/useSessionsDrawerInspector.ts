@@ -40,8 +40,13 @@ export function useSessionsDrawerInspector() {
    * not step through states nobody chose; a plain push for a click.
    */
   const applyInspectorState = useCallback(
-    (next: InspectorDrawerState, options?: { replace?: boolean; tab?: InspectorTabName }) => {
-      const tab = options?.tab ?? inspectorTab;
+    (
+      next: InspectorDrawerState,
+      options?: { replace?: boolean; tab?: InspectorTabName; defaultTab?: InspectorTabName },
+    ) => {
+      // The tab named, else the URL's own, else the session's default (what an opening lands on).
+      const tab =
+        options?.tab ?? (isInspectorTabName(inspectorTabParam) ? inspectorTab : options?.defaultTab ?? inspectorTab);
       setParams(
         next === "closed"
           ? { [PARAM_INSPECTOR]: null, [PARAM_FULL]: null }
@@ -49,7 +54,7 @@ export function useSessionsDrawerInspector() {
         options,
       );
     },
-    [inspectorTab, setParams],
+    [inspectorTab, inspectorTabParam, setParams],
   );
 
   // A tab name the inspector does not have would render a blank panel — normalise it away.
@@ -59,10 +64,10 @@ export function useSessionsDrawerInspector() {
     }
   }, [inspectorTabParam, setParams]);
 
-  const handleInspectorToggle = () => {
+  const handleInspectorToggle = (defaultTab?: InspectorTabName) => {
     const prevState = { open: inspectorState !== "closed", expanded: inspectorState === "expanded" };
     const next = nextInspectorState(prevState, { type: "toggle" });
-    applyInspectorState(next.open ? (next.expanded ? "expanded" : "open") : "closed");
+    applyInspectorState(next.open ? (next.expanded ? "expanded" : "open") : "closed", { defaultTab });
   };
 
   const handleInspectorClose = () => applyInspectorState("closed");

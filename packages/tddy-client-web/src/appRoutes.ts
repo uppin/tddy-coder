@@ -242,6 +242,7 @@ export const INSPECTOR_TAB_NAMES = [
   "tools",
   "agents",
   "usage",
+  "pr",
   "worktree",
   "files",
   "vnc",

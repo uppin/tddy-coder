@@ -21,7 +21,8 @@ import { useAppLocation } from "tddy-client-web";
 import { SessionAgentRosterPane } from "./SessionAgentRosterPane";
 import { SessionToolsTab } from "./SessionToolsTab";
 import { SessionUsageTab } from "./SessionUsageTab";
-import { SessionWorktreeTab } from "tddy-workspace-web";
+import { SessionPullRequestTab, SessionWorktreeTab } from "tddy-workspace-web";
+import { defaultInspectorTab } from "./defaultInspectorTab";
 import { SessionFilesTab } from "./SessionFilesTab";
 import { SessionInspectorActivityTab } from "./SessionInspectorActivityTab";
 import { canResumeSession } from "./sessionBaseView";
@@ -135,7 +136,13 @@ export function SessionInspectorDrawer({
   // normalises the param itself, so the two never disagree for long.
   const { location, setParams } = useAppLocation();
   const tabParam = location.params[PARAM_INSPECTOR] ?? "";
-  const requestedTab: InspectorTab = isInspectorTabName(tabParam) ? tabParam : "details";
+  // No param: the session's default tab (PR when it has one, else Worktree). A name the inspector does
+  // not have degrades to Details.
+  const requestedTab: InspectorTab = isInspectorTabName(tabParam)
+    ? tabParam
+    : tabParam === "" && session
+      ? defaultInspectorTab(session)
+      : "details";
 
   // The one media decision in this drawer: the tab strip, the panel dispatch and the fallback below
   // all read it, so the strip cannot offer a tab the dispatch would refuse to render.
@@ -292,6 +299,15 @@ export function SessionInspectorDrawer({
             <SessionUsageTab
               client={activityClient}
               sessionToken={sessionToken ?? ""}
+              sessionId={session.sessionId}
+            />
+          </ScrollArea>
+        ) : tab === "pr" ? (
+          <ScrollArea className="flex-1 min-h-0">
+            <SessionPullRequestTab
+              client={worktreeClient ?? null}
+              sessionToken={sessionToken ?? ""}
+              projectId={session.projectId}
               sessionId={session.sessionId}
             />
           </ScrollArea>

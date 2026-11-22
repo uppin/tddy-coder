@@ -10,7 +10,6 @@ export interface DefaultTabFacts {
   prNumber: bigint;
 }
 
-export function defaultInspectorTab(_session: DefaultTabFacts): InspectorTabName {
-  // TODO(n4 session-pr-tabs): implement — "pr" when prNumber > 0, else "worktree".
-  throw new Error("TODO(n4): implement defaultInspectorTab");
+export function defaultInspectorTab(session: DefaultTabFacts): InspectorTabName {
+  return session.prNumber > 0n ? "pr" : "worktree";
 }
