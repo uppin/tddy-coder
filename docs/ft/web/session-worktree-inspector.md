@@ -1,14 +1,17 @@
 # Session Worktree — Disk stats + lifecycle actions in the Inspector
 
-**Component:** `SessionInspectorDrawer` → new **Worktree** tab (`packages/tddy-session-web/src/`)
-**Updated:** 2026-07-23
+**Component:** `SessionWorktreeTab` (`packages/tddy-workspace-web/src/worktrees/`), mounted by
+`SessionInspectorDrawer` (`packages/tddy-session-web/src/`)
+**Updated:** 2026-11-22
 **Status:** Implemented
 
 ## Overview
 
-Add a **Worktree** tab to the Session Inspector that shows the **selected session's own git
-worktree**: its on-disk size (with the changed-file / +/− line summary already computed for the
-worktrees manager), plus three lifecycle actions scoped to that one worktree:
+The Session Inspector's **Worktree** tab shows the **selected session's own git worktree**. It shows
+the branch's relation to its upstream, with the unpushed and unpulled commits, the dirty files, and
+**Pull** / **Push** when they apply (see [Sync state](#sync-state)). It also shows the worktree's
+on-disk size and the changed-file / +/− line summary the worktrees manager computes. Three lifecycle
+actions are scoped to that one worktree:
 
 1. **Clear** — `git clean -fdx` inside the worktree (drops untracked + gitignored files, e.g.
    `target/`, `node_modules/`, to reclaim disk without deleting the worktree or its tracked work).
@@ -25,9 +28,9 @@ invented.
 
 ## Which worktree
 
-The tab is keyed off the session's `repoPath` (`SessionEntry.repo_path`, already surfaced in the
-Details tab) and the resolved `projectId` (`SessionMainPane` computes it today). The tab shows the
-stats row from `ListWorktreesForProject` whose `path` equals the session's `repoPath`.
+The tab is keyed off the session's `repoPath` (`SessionEntry.repo_path`, also shown on the Details
+tab) and the resolved `projectId`. The tab shows the stats row from the project's
+`StreamWorktreeStats` whose `path` equals the session's `repoPath`.
 
 - **Present** (a matching row exists): render size / branch / changed-files / ±lines and the
   **Clear** + **Delete** actions.
@@ -37,18 +40,43 @@ stats row from `ListWorktreesForProject` whose `path` equals the session's `repo
 Missing-ness is derived on the client from the list response; no new "missing" flag is added to the
 `WorktreeRow` proto.
 
-## Disk stats — caching + periodic refresh
+## Disk stats — streamed
 
-Stats reuse the existing cache-backed `ListWorktreesForProject` RPC (see
-[Worktrees manager](worktrees.md)); no new stats endpoint or streaming RPC is added.
+Stats ride `WorktreeService.StreamWorktreeStats` for the session's project, the same stream as the
+[disk usage view](worktree-disk-usage-streaming.md). The first frame is a snapshot of every worktree
+with its lazy size status. After that, one frame arrives per worktree as its size finishes
+(`Calculating → Cached`). **Refresh** calls the unary `CalculateWorktreeSize` for this worktree, and
+the result arrives on the open stream. A failed stream or recalculation shows as an error beside the
+last good row and never as a loading state that does not end.
 
-- **On tab open:** call `ListWorktreesForProject` with `refresh: false` — serves the last cached
-  snapshot instantly (no `git diff` / directory walk on the hot path).
-- **Every 10 minutes** while the tab is mounted: call with `refresh: true`, which runs
-  `refresh_stats_for_project` on the daemon (one `git worktree list` + per-worktree size/diff) and
-  returns fresh rows. A **Refresh** button triggers the same `refresh: true` path on demand.
-- The 10-minute cadence is a **client-side timer** in the stats hook. It runs only while the tab is
-  open; closing the inspector stops it.
+## Sync state
+
+Opening the tab reads `WorktreeService.GetWorktreeSyncState` for the session. The answer has:
+
+- **Sync** — the branch's relation to its upstream (`origin/<branch>`), decided by ancestry in both
+  directions after a fetch of the branch's recorded remote, so a merge commit counts as containing
+  what it merged:
+
+  | Status | When | Offers |
+  |---|---|---|
+  | In sync | each contains the other | — |
+  | Unpushed | local commits the upstream lacks | **Push** |
+  | Unpulled | upstream commits the branch lacks | **Pull** |
+  | Diverged | both | neither |
+  | Unpublished | the branch has no upstream | **Push** (sets the upstream) |
+
+- **Unpushed commits** / **Unpulled commits** — oldest first, short sha and subject.
+- **Dirty files** — every path `git status` reports (untracked files included), each with its change:
+  `modified`, `staged`, `untracked`, `deleted` or `renamed`.
+
+**Pull** (`PullWorktree`) only fast-forwards and is refused when it cannot. **Push** (`PushWorktree`)
+never forces. Both answer the state after the operation, and the tab shows it. A failed read or
+action shows its git error, with the last good state left in place. The tab has no Commit action,
+because committing in a live agent's worktree from the UI would race the agent.
+
+For a **target session** the section shows the reason the state is unavailable. A target-side reader
+does not exist yet
+([backlog](../../dev/todo/2026-11-22-target-session-inspector-has-no-sync-state-or-pr.md)).
 
 ## Actions
 
@@ -114,36 +142,28 @@ target that cannot be reached, or does not answer within the daemon's request ti
 row **stale with no numbers**, never missing. **Refresh** (`CalculateWorktreeSize` of the target
 path) measures it on the target again, and the new row reaches the project's open streams.
 
-## Streaming design — no new streaming endpoint
+## Wire
 
-Unlike the [Usage tab](session-usage-inspector.md), worktree stats do **not** ride a server stream:
-the data is expensive (git + directory walk) and changes slowly, so it stays on the cache +
-client-poll model the worktrees manager already established. The two new RPCs (`CleanWorktree`,
-`RestoreSessionWorktree`) are unary, mirroring `RemoveWorktree`.
+All of the tab's RPCs are on `worktree.WorktreeService`.
 
 ```protobuf
-service ConnectionService {
-  // … existing …
+service WorktreeService {
+  rpc StreamWorktreeStats(StreamWorktreeStatsRequest) returns (stream WorktreeStatsEvent);
+  rpc CalculateWorktreeSize(CalculateWorktreeSizeRequest) returns (CalculateWorktreeSizeResponse);
+  rpc RemoveWorktree(RemoveWorktreeRequest) returns (RemoveWorktreeResponse);
   rpc CleanWorktree(CleanWorktreeRequest) returns (CleanWorktreeResponse);
   rpc RestoreSessionWorktree(RestoreSessionWorktreeRequest) returns (RestoreSessionWorktreeResponse);
+  rpc GetWorktreeSyncState(SessionWorktreeRequest) returns (WorktreeSyncState);
+  rpc PullWorktree(SessionWorktreeRequest) returns (WorktreeSyncState);
+  rpc PushWorktree(SessionWorktreeRequest) returns (WorktreeSyncState);
 }
 
-message CleanWorktreeRequest {
-  string session_token = 1;
-  string project_id = 2;
-  string worktree_path = 3;  // must appear in git worktree list; primary refused
-}
-message CleanWorktreeResponse { bool ok = 1; string message = 2; }
-
-message RestoreSessionWorktreeRequest {
-  string session_token = 1;
-  string project_id = 2;
-  string session_id = 3;     // resolves the session dir / persisted changeset
-}
-message RestoreSessionWorktreeResponse {
-  bool ok = 1;
-  string message = 2;
-  string worktree_path = 3;  // recreated worktree path
+message SessionWorktreeRequest { string session_token = 1; string project_id = 2; string session_id = 3; }
+message WorktreeSyncState {
+  string branch = 1;  string upstream = 2;  WorktreeSyncStatus status = 3;
+  repeated WorktreeCommitLine unpushed = 4;  repeated WorktreeCommitLine unpulled = 5;
+  repeated WorktreeDirtyFile dirty_files = 6;
+  bool can_pull = 7;  bool can_push = 8;  string unavailable_reason = 9;
 }
 ```
 
@@ -151,8 +171,14 @@ message RestoreSessionWorktreeResponse {
 
 ```
 ┌──────────────────────────────────────────────┐
-│ Details | Tools | Usage | Worktree | VNC | …  │
+│ … | Usage | PR | Worktree | Files | VNC | …   │
 ├──────────────────────────────────────────────┤
+│ Sync       Unpushed (origin/feature/x)         │
+│ Unpushed commits                               │
+│   1a2b3c4 the PR tab                           │
+│ Dirty files                                    │
+│   src/a.ts modified                            │
+│ [ Push ]                                       │
 │ Worktree   .worktrees/feat-x   [feature/x]     │
 │ Size       1.2 GB              Refresh ⟳       │
 │ Changed    7 files   +240 −18                  │
@@ -170,31 +196,26 @@ missing state:
 
 ## Frontend
 
-- `useSessionWorktreeStats(client, sessionToken, projectId, repoPath)` — mirrors `useHostStats`'s
-  client-build + effect shape, but **polls** (`ListWorktreesForProject`, `refresh:false` on mount,
-  `refresh:true` on a 10-minute `setInterval`) instead of subscribing to a stream. Returns the
-  matching `WorktreeRow | null` (null ⇒ missing), a `loading` flag, and a `refresh()` callback.
-- `SessionWorktreeTab` — renders the stats rows + Clear/Delete (two-step confirm) or the Restore
-  missing-state; calls `cleanWorktree` / `removeWorktree` / `restoreSessionWorktree` on
-  `useDaemonClient(ConnectionService)` and reloads on success. Reuses `formatDiskBytes` (extracted
-  from `WorktreesAppPage` into a shared `worktreeStatsFormat.ts`).
-- `InspectorTab` gains `"worktree"`; `InspectorTabs` gains a Worktree button;
-  `SessionInspectorDrawer` renders `SessionWorktreeTab` for that tab.
+- `useSessionWorktreeStats(client, sessionToken, projectId, repoPath)` subscribes to
+  `StreamWorktreeStats` and selects the session's row. It returns that row (`null` means missing),
+  its size status, `loading`, `error` and `refresh()`.
+- `useWorktreeSyncState(client, sessionToken, projectId, sessionId)` reads the sync state. It returns
+  `state`, `error` and `acting`, plus `pull()` / `push()`.
+- `SessionWorktreeTab` renders `WorktreeSyncSection` (status, commits, dirty files, Pull/Push), then
+  the stats rows with Clear/Delete (each confirmed in two steps) or, in the missing state, Restore.
 
 ## Scope
 
-- **In scope:** Worktree tab; `useSessionWorktreeStats` (cache + 10-min poll); Clear
-  (`CleanWorktree` + `clean_worktree_under_repo`); Delete (reuse `RemoveWorktree`); Restore
-  (`RestoreSessionWorktree` reusing session-worktree setup); two-step confirms; cache invalidation
-  on clear/restore.
-- **Out of scope:** clearing/removing the **primary** worktree; a background daemon refresh loop
-  (client-poll only); routing worktree RPCs to remote hosts (local daemon only, same as the
-  manager); a server-streamed per-worktree stats feed; USD/space projections.
+- **In scope:** sync state with Pull (fast-forward only) and Push (never forced); streamed disk
+  stats; Clear, Delete and Restore, each with its target-session form; two-step confirms.
+- **Out of scope:** committing from the UI; force push; clearing or removing the **primary**
+  worktree; the sync state of a target session.
 
 ## Related documentation
 
 - [Web Worktrees manager](worktrees.md) — project-wide list, `ListWorktreesForProject`,
   `RemoveWorktree`, `WorktreeStatsCache`.
-- [Session Usage inspector](session-usage-inspector.md) — sibling Inspector tab (streaming variant).
+- [Session PR inspector](session-pr-inspector.md) — the sibling PR tab, and the default-tab rule.
+- [Session Usage inspector](session-usage-inspector.md) — sibling Inspector tab.
 - [Session drawer](session-drawer.md) — inspector host + docked mode.
 - Daemon package: [worktrees module](../../../packages/tddy-worktree-service/docs/worktrees.md).

@@ -571,8 +571,13 @@ Adds to `src/components/ui/`:
 
 Two of the strip's tabs are described here:
 
-- **Details** (default) — the existing metadata + controls section described above.
+- **Details** — the metadata + controls section described above.
 - **Tools** — per-session tool-call log and an inline invoke panel.
+
+With no tab named in the URL, opening the inspector lands on **PR** when the session's branch has a
+pull request (`SessionEntry.pr_number`), otherwise on **Worktree**. A tab the URL names always wins.
+See [session-pr-inspector.md § Default tab](session-pr-inspector.md#default-tab) and
+[session-worktree-inspector.md](session-worktree-inspector.md).
 
 The rest of the strip is listed under the `inspector` param in
 [url-state-routing.md](url-state-routing.md#params).
