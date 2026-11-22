@@ -68,7 +68,12 @@ impl WorkQueueRpcHandler {
     ) -> Result<Response<WorkItemLinksResponse>, Status> {
         let req = request.into_inner();
         let call = match self
-            .annotation_call("SetWorkItemLabels", &req.session_token, req.queue.as_ref(), &req)
+            .annotation_call(
+                "SetWorkItemLabels",
+                &req.session_token,
+                req.queue.as_ref(),
+                &req,
+            )
             .await?
         {
             Ok(call) => call,
@@ -89,7 +94,12 @@ impl WorkQueueRpcHandler {
     ) -> Result<Response<WorkItemLinksResponse>, Status> {
         let req = request.into_inner();
         let call = match self
-            .annotation_call("SetWorkItemBadge", &req.session_token, req.queue.as_ref(), &req)
+            .annotation_call(
+                "SetWorkItemBadge",
+                &req.session_token,
+                req.queue.as_ref(),
+                &req,
+            )
             .await?
         {
             Ok(call) => call,
@@ -114,7 +124,12 @@ impl WorkQueueRpcHandler {
     ) -> Result<Response<WorkItemLinksResponse>, Status> {
         let req = request.into_inner();
         let call = match self
-            .annotation_call("ClearWorkItemBadge", &req.session_token, req.queue.as_ref(), &req)
+            .annotation_call(
+                "ClearWorkItemBadge",
+                &req.session_token,
+                req.queue.as_ref(),
+                &req,
+            )
             .await?
         {
             Ok(call) => call,

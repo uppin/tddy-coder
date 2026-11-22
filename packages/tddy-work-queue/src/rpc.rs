@@ -13,14 +13,13 @@ use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{
     AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, ClearWorkItemBadgeRequest,
-    GetPrStatusRequest,
-    GetPrStatusResponse, GetWorkQueueRequest, GetWorkQueueResponse, LinkWorkItemRequest,
-    LinkWorkItemResponse, LinkWorkItemSessionRequest, ListProjectWorkQueuesRequest,
-    ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
-    RepointWorkItemRequest, RepointWorkItemResponse, ResolveWorkItemBaseRequest,
-    ResolveWorkItemBaseResponse, SetWorkItemBadgeRequest, SetWorkItemLabelsRequest,
-    StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest,
+    GetPrStatusRequest, GetPrStatusResponse, GetWorkQueueRequest, GetWorkQueueResponse,
+    LinkWorkItemRequest, LinkWorkItemResponse, LinkWorkItemSessionRequest,
+    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest,
+    ReorderWorkItemResponse, RepointWorkItemRequest, RepointWorkItemResponse,
+    ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse, SetWorkItemBadgeRequest,
+    SetWorkItemLabelsRequest, StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest,
     UnlinkWorkItemSessionRequest, WorkItemLinksResponse, WorkQueueService, WorkQueueStatusView,
 };
 

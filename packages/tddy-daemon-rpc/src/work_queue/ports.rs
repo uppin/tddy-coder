@@ -21,8 +21,9 @@ use tddy_service::proto::work_queue::{
     ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse,
 };
 use tddy_service::proto::work_queue::{
-    AssignWorkItemPrRequest, LinkWorkItemSessionRequest, UnassignWorkItemPrRequest,
-    UnlinkWorkItemSessionRequest, WorkItemLinksResponse, ClearWorkItemBadgeRequest, SetWorkItemBadgeRequest, SetWorkItemLabelsRequest,
+    AssignWorkItemPrRequest, ClearWorkItemBadgeRequest, LinkWorkItemSessionRequest,
+    SetWorkItemBadgeRequest, SetWorkItemLabelsRequest, UnassignWorkItemPrRequest,
+    UnlinkWorkItemSessionRequest, WorkItemLinksResponse,
 };
 use tddy_session_lifecycle::connection_service::{
     local_gh_github_token, project_github_token, resolve_os_user, spawn_blocking_with_timeout,
