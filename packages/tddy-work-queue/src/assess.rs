@@ -624,6 +624,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         let mock_gh = NoneOpenMockGh;
 
@@ -691,6 +692,7 @@ mod tests {
                 display_order: None,
                 ..Default::default()
             }],
+            ..Default::default()
         };
         let mock_gh = NoneOpenMockGh;
 
@@ -730,6 +732,7 @@ mod tests {
                 display_order: None,
                 ..Default::default()
             }],
+            ..Default::default()
         };
         let gh = AlwaysOpenMockGh {
             pr_number: 7,
@@ -785,6 +788,7 @@ mod tests {
                 display_order: None,
                 ..Default::default()
             }],
+            ..Default::default()
         };
 
         let mock_gh = AlwaysOpenMockGh {

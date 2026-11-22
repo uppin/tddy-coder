@@ -13,21 +13,10 @@
 //! else the first waiting one. No `threads` condition: resolved review-thread state is GraphQL-only
 //! (operator, 2026-11-22: a recorded TODO).
 
-/// What a schedule fires.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ScheduleKind {
-    Merge { skip_review: bool },
-    Propagate,
-}
+use tddy_core::changeset::WorkQueue;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Schedule {
-    pub item_id: String,
-    pub kind: ScheduleKind,
-    /// ISO-8601, stamped by whoever arms it; empty until then.
-    pub armed_at: String,
-    pub armed_by: String,
-}
+/// A schedule as stored on the queue (`tddy_changeset`'s), re-exported as the evaluator's input.
+pub use tddy_core::changeset::{Schedule, ScheduleKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConditionState {
@@ -246,4 +235,133 @@ pub fn schedule_wave(items: &[(String, bool)], skip_review: bool, armed_by: &str
             armed_by: armed_by.to_string(),
         })
         .collect()
+}
+
+/// Why arming, disarming or reading schedules was refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScheduleError {
+    NoSuchItem(String),
+    /// Nothing is armed on the item.
+    NotArmed(String),
+}
+
+impl std::fmt::Display for ScheduleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoSuchItem(id) => write!(f, "item '{id}' not found"),
+            Self::NotArmed(id) => write!(f, "item '{id}' has no armed merge or propagation"),
+        }
+    }
+}
+
+impl std::error::Error for ScheduleError {}
+
+/// Arm `kind` on `item_id`, replacing what was armed there. `armed_at` is the caller's clock.
+pub fn arm(
+    queue: &mut WorkQueue,
+    item_id: &str,
+    kind: ScheduleKind,
+    armed_at: &str,
+    armed_by: &str,
+) -> Result<Schedule, ScheduleError> {
+    if queue.node(item_id).is_none() {
+        return Err(ScheduleError::NoSuchItem(item_id.to_string()));
+    }
+    let schedule = Schedule {
+        item_id: item_id.to_string(),
+        kind,
+        armed_at: armed_at.to_string(),
+        armed_by: armed_by.to_string(),
+    };
+    queue.schedules.retain(|s| s.item_id != item_id);
+    queue.schedules.push(schedule.clone());
+    Ok(schedule)
+}
+
+/// Disarm `item_id`.
+pub fn disarm(queue: &mut WorkQueue, item_id: &str) -> Result<(), ScheduleError> {
+    let before = queue.schedules.len();
+    queue.schedules.retain(|s| s.item_id != item_id);
+    if queue.schedules.len() == before {
+        return Err(ScheduleError::NotArmed(item_id.to_string()));
+    }
+    Ok(())
+}
+
+/// Arm a merge on each item of `wave` that `has_open_pr` says is open, bottom-up (the wave's items in
+/// line order). Returns the schedules armed.
+pub fn arm_wave(
+    queue: &mut WorkQueue,
+    wave_items: &[String],
+    has_open_pr: impl Fn(&str) -> bool,
+    skip_review: bool,
+    armed_at: &str,
+    armed_by: &str,
+) -> Result<Vec<Schedule>, ScheduleError> {
+    if let Some(unknown) = wave_items.iter().find(|id| queue.node(id).is_none()) {
+        return Err(ScheduleError::NoSuchItem(unknown.clone()));
+    }
+    let items: Vec<(String, bool)> = wave_items
+        .iter()
+        .map(|id| (id.clone(), has_open_pr(id)))
+        .collect();
+    let mut armed = Vec::new();
+    for planned in schedule_wave(&items, skip_review, armed_by) {
+        armed.push(arm(
+            queue,
+            &planned.item_id,
+            planned.kind,
+            armed_at,
+            armed_by,
+        )?);
+    }
+    Ok(armed)
+}
+
+/// One check run as the verdict reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunOutcome {
+    Running,
+    Passed,
+    Failed,
+}
+
+/// The verdict over a head commit's check runs. No runs is `Pending`, never green: nothing reported
+/// is not "all passed". A failed run outranks a running one.
+pub fn checks_verdict(runs: &[RunOutcome]) -> ChecksVerdict {
+    if runs.is_empty() || runs.iter().all(|r| *r == RunOutcome::Running) {
+        return ChecksVerdict::Pending;
+    }
+    if runs.contains(&RunOutcome::Failed) {
+        return ChecksVerdict::Failed;
+    }
+    if runs.contains(&RunOutcome::Running) {
+        return ChecksVerdict::Pending;
+    }
+    ChecksVerdict::Green
+}
+
+/// The verdict over a PR's reviews (`(author, GitHub state)` in submission order): each author's
+/// latest approving or change-requesting review counts (`COMMENTED` changes nothing, `DISMISSED`
+/// withdraws). Any outstanding change request wins over approvals.
+pub fn review_verdict<'a>(reviews: impl IntoIterator<Item = (&'a str, &'a str)>) -> ReviewVerdict {
+    let mut latest: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+    for (author, state) in reviews {
+        match state {
+            "APPROVED" | "CHANGES_REQUESTED" => {
+                latest.insert(author, state);
+            }
+            "DISMISSED" => {
+                latest.remove(author);
+            }
+            _ => {}
+        }
+    }
+    if latest.values().any(|s| *s == "CHANGES_REQUESTED") {
+        ReviewVerdict::ChangesRequested
+    } else if latest.values().any(|s| *s == "APPROVED") {
+        ReviewVerdict::Approved
+    } else {
+        ReviewVerdict::Pending
+    }
 }

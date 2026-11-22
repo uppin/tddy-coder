@@ -121,6 +121,7 @@ impl SessionWorkQueues {
                 queue: WorkQueue {
                     version: 1,
                     nodes: Vec::new(),
+                    ..Default::default()
                 },
             };
             write_record(&path, &record)?;

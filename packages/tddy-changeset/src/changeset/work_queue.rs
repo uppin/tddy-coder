@@ -19,6 +19,33 @@ pub struct WorkQueue {
     pub version: u32,
     #[serde(default)]
     pub nodes: Vec<WorkItem>,
+    /// Armed merges and propagations (`#workqueue` 13/14) — at most one per item. Evaluated live,
+    /// fired by `#workqueue` 14/14.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub schedules: Vec<Schedule>,
+}
+
+/// What a schedule fires.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ScheduleKind {
+    Merge {
+        #[serde(default)]
+        skip_review: bool,
+    },
+    Propagate,
+}
+
+/// A merge or propagation armed on a work item.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Schedule {
+    pub item_id: String,
+    pub kind: ScheduleKind,
+    /// ISO-8601, stamped by whoever arms it; empty until then.
+    #[serde(default)]
+    pub armed_at: String,
+    #[serde(default)]
+    pub armed_by: String,
 }
 
 /// A single node in the PR-stack DAG.

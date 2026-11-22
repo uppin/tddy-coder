@@ -19,6 +19,7 @@ fn a_queue_with(items: &[(&str, Option<&str>)]) -> WorkQueue {
                 ..WorkItem::default()
             })
             .collect(),
+        ..Default::default()
     }
 }
 

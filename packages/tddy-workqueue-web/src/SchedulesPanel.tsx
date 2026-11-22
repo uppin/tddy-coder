@@ -19,7 +19,44 @@ export interface ScheduleViewModel {
   conditions: ScheduleConditionView[];
 }
 
-export function SchedulesPanel(_props: { schedules: ScheduleViewModel[] }) {
-  // TODO(n13 schedules): implement
-  return null;
+function ConditionRow({ itemId, condition }: { itemId: string; condition: ScheduleConditionView }) {
+  return (
+    <li
+      data-testid={`work-queue-schedule-${itemId}-${condition.name}`}
+      data-state={condition.state}
+    >
+      <strong>{condition.name}</strong> — {condition.detail}
+    </li>
+  );
+}
+
+export function SchedulesPanel({ schedules }: { schedules: ScheduleViewModel[] }) {
+  if (schedules.length === 0) {
+    return <div data-testid="work-queue-schedules-empty">No armed merges or propagations.</div>;
+  }
+  return (
+    <section data-testid="work-queue-schedules">
+      {schedules.map((schedule) => (
+        <div
+          key={schedule.itemId}
+          data-testid={`work-queue-schedule-${schedule.itemId}`}
+          data-status={schedule.status}
+        >
+          <h4>
+            {schedule.itemId} — {schedule.kind}
+          </h4>
+          {schedule.heldUpOn ? (
+            <div data-testid={`work-queue-schedule-${schedule.itemId}-held-up-on`}>
+              held up on {schedule.heldUpOn}
+            </div>
+          ) : null}
+          <ul>
+            {schedule.conditions.map((condition) => (
+              <ConditionRow key={condition.name} itemId={schedule.itemId} condition={condition} />
+            ))}
+          </ul>
+        </div>
+      ))}
+    </section>
+  );
 }

@@ -189,6 +189,7 @@ mod tests {
         WorkQueue {
             version: 1,
             nodes: node_ids.iter().map(|id| a_planned_node(id)).collect(),
+            ..Default::default()
         }
     }
 

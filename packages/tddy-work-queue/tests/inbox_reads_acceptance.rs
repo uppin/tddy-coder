@@ -114,6 +114,7 @@ fn a_queue_on(branches: &[(&str, &str)]) -> WorkQueue {
                 ..WorkItem::default()
             })
             .collect(),
+        ..Default::default()
     }
 }
 
