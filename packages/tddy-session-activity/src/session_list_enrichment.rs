@@ -1948,8 +1948,8 @@ state:
     #[test]
     fn an_attachment_copied_into_a_session_surfaces_on_the_proto_entry_with_the_attachment_kind() {
         // Given — a bugfix session with one attached document
-        let session = a_session_with_recipe("bugfix")
-            .with_attachment("requirements.md", "# Requirements\n");
+        let session =
+            a_session_with_recipe("bugfix").with_attachment("requirements.md", "# Requirements\n");
 
         // When — list enrichment builds the proto row the web reads
         let entry = session.enriched_entry();
