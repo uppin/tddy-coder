@@ -2,7 +2,7 @@
  * Acceptance (`#workqueue` 5/14): the New Session form offers "With work queue"; checking it starts the
  * session with a queue it owns (`StartSessionRequest.with_work_queue`).
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-session-work-queue.md
+ * Feature doc: docs/ft/coder/pr-stacking.md § Where a stack lives
  */
 
 import { aClientsPortDouble } from "tddy-client-web/testkit";

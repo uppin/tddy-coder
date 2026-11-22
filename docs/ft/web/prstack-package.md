@@ -17,12 +17,10 @@ the web app or on LiveKit.
 - PR-stack behaviour is as before ([pr-stacking.md](../coder/pr-stacking.md),
   [pr-stack-live-status.md](../coder/pr-stack-live-status.md),
   [session-drawer.md § PR-Stack Chat Screen](session-drawer.md)).
-- The stack view (`WorkQueueView`) carries a **"New stack"** action: it calls
-  `CreateWorkQueue` for the view's project, then acts on the created stack's address —
-  planned PRs are added to the new stack by that address. A stack is made explicitly this way,
-  never as a side effect of a session's first planned-PR write; a `session_id`-addressed
-  mutation from a session naming no stack is refused and points at `work_queue_create` or this
-  action ([pr-stacking.md § Opening a project stack by id](../coder/pr-stacking.md#opening-a-project-stack-by-id)).
+- The queue view (`WorkQueueView`) shows one session's own work queue, addressed by that session's
+  id, and creates no queue: a queue exists only because its session was started with one, and a
+  `session_id`-addressed mutation from a session that owns none is refused with the hint
+  ([pr-stacking.md § Opening a session's work queue](../coder/pr-stacking.md#opening-a-sessions-work-queue)).
 
 ## Acceptance criteria
 

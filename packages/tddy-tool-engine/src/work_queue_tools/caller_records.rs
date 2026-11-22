@@ -7,7 +7,7 @@
 //! daemon's `ListExecTools` (`tddy-daemon-rpc`) and the jail bridge's (`tddy-session-lifecycle`)
 //! offer a session the same tools, and the daemon serving a call checks the same access.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-session-work-queue.md.
+//! Feature doc: docs/ft/coder/pr-stacking.md § Where a stack lives.
 
 use std::path::Path;
 

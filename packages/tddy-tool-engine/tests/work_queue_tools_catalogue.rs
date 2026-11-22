@@ -3,7 +3,7 @@
 //! no role does. The daemon offers and serves the same set: `tddy-daemon-rpc`'s
 //! `stack_plan_tools_acceptance.rs` drives it end to end.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-session-work-queue.md.
+//! Feature doc: docs/ft/coder/pr-stacking.md § Where a stack lives.
 
 use pretty_assertions::assert_eq;
 use tddy_tool_engine::work_queue_access::{work_queue_tools_offered_to, WorkQueueAccess};

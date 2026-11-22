@@ -5,7 +5,7 @@
  *
  * Test ids and the queue RPC (`WorkQueueService`) are `#workqueue` 3/14's names.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-session-work-queue.md
+ * Feature doc: docs/ft/coder/pr-stacking.md § Where a stack lives
  */
 
 import React from "react";
