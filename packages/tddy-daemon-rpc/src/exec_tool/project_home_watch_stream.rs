@@ -2,9 +2,11 @@
 //!
 //! The tool ([`tddy_tool_engine::project_home_watch_stream_tools`]) streams the caller's session
 //! watches, `tddy_session_activity::session_watches`, for its project and OS user: each call
-//! acknowledges what the stream printed, renews its lease and answers the next batch — at once when
-//! one waits, otherwise held until the notification bus records something for the caller's project
-//! or the call's timeout passes, as `WaitProjectNotifications` is.
+//! acknowledges what the stream printed, renews its lease and answers the next batch of what it
+//! picks. It answers once it holds `max_events` events, `settle_ms` after its first event when that
+//! is set, at once when there is a `lost` count or an ended watch to report, or when its window —
+//! `timeout_ms` — elapses; while it waits it re-takes its batch whenever the notification bus
+//! records something for the caller's project, and on a renewal tick that keeps the lease.
 
 use std::time::Duration;
 
@@ -14,7 +16,7 @@ use tddy_session_activity::project_notification_log::{
     record_json, ProjectNotificationLog, ProjectNotificationScope,
 };
 use tddy_session_activity::session_watches::{
-    SessionWatchStore, StreamBatch, WatchKind, WatchOwner,
+    SessionWatchStore, StreamBatch, StreamPick, WatchKind, WatchOwner,
 };
 use tddy_tool_engine::project_home_inbox_tools::NO_NOTIFICATION_LOG;
 use tddy_tool_engine::project_home_watch_stream_tools::{
@@ -34,6 +36,9 @@ const RENEW_TICK: Duration = Duration::from_millis(100);
 /// One `WaitSessionWatchEvents` call over this host's watches and log, held for `owner` — whose
 /// answer excludes its own session's records while it waits. Shared by the port the project-home
 /// role serves and by a session's own inbox watch (`#activity-wake` 5/5).
+///
+/// The call acknowledges once, on its first take: what a later take of the same call hands, the
+/// caller has not seen until this call answers.
 pub(super) async fn hold_and_take(
     watches: &SessionWatchStore,
     log: &ProjectNotificationLog,
@@ -42,28 +47,47 @@ pub(super) async fn hold_and_take(
     request: WatchStreamRequest,
 ) -> Result<Value, String> {
     let deadline = Instant::now() + Duration::from_millis(request.timeout_ms);
+    let settle = Duration::from_millis(request.settle_ms);
+    let pick = StreamPick {
+        kinds: request
+            .kinds
+            .iter()
+            .map(|name| WatchKind::parse(name).ok_or_else(|| format!("unknown kind {name}")))
+            .collect::<Result<Vec<_>, _>>()?,
+        session_ids: request.session_ids.clone(),
+        max_events: request.max_events,
+    };
     let mut stream_id = request.stream_id.clone();
+    let mut ack_seq = request.ack_seq;
+    let mut settles_at: Option<Instant> = None;
     loop {
         let batch = watches
-            .take_stream_batch(
+            .take_stream_batch_picking(
                 &owner,
                 stream_id.as_deref(),
                 &request.watch_ids,
-                request.ack_seq,
+                ack_seq.take(),
+                &pick,
                 log,
                 tddy_daemon_kernel::now_unix_ms(),
             )
             .await
             .map_err(|refusal| refusal.to_string())?;
         stream_id = Some(batch.stream_id.clone());
-        let has_batch = !batch.events.is_empty() || batch.lost > 0 || !batch.ended.is_empty();
         let now = Instant::now();
-        if has_batch || request.timeout_ms == 0 || now >= deadline {
+        if settles_at.is_none() && !settle.is_zero() && !batch.events.is_empty() {
+            settles_at = Some(now + settle);
+        }
+        let holds_enough = batch.events.len() >= request.max_events;
+        let has_news = batch.lost > 0 || !batch.ended.is_empty();
+        let settled = settles_at.is_some_and(|at| now >= at);
+        if holds_enough || has_news || settled || now >= deadline {
             return batch_json(batch);
         }
         // Hold until the log records something for the caller's project, or the renewal
         // tick: re-taking the batch then renews the lease while the call is held.
-        let remaining = deadline.saturating_duration_since(now);
+        let until = settles_at.map_or(deadline, |at| at.min(deadline));
+        let remaining = until.saturating_duration_since(now);
         let scope = ProjectNotificationScope {
             project_id: owner.project_id.clone(),
             os_user: owner.os_user.clone(),

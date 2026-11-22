@@ -100,6 +100,18 @@ pub struct WatchFilter {
     pub kinds: Vec<WatchKind>,
 }
 
+/// Whether `watch` still owes `record`: the record is past the watch's position, was not already
+/// handed and acknowledged above it ([`SessionWatch::acked_above`]), and the watch matches it.
+pub(super) fn watch_owes(
+    watch: &SessionWatch,
+    record: &ProjectNotificationRecord,
+    owner_inbox_position: u64,
+) -> bool {
+    record.seq > watch.position
+        && !watch.acked_above.contains(&record.seq)
+        && watch_matches(watch, record, owner_inbox_position)
+}
+
 /// Whether `watch` matches `record`, `owner_inbox_position` being the `seq` up to which the
 /// watch's owner has read the messages addressed to it. Its session is named, or it started the
 /// session, and the record is of a kind it asks for, and it is never the owner's own session —
@@ -181,6 +193,8 @@ mod trunk_commit_tests {
             expires_at_unix_ms: u64::MAX,
             position: 0,
             created_seq: 0,
+            wake_when_idle: false,
+            acked_above: Default::default(),
         }
     }
 

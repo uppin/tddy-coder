@@ -2,6 +2,7 @@ use crate::project_notification_log::ProjectNotificationLog;
 use crate::project_notification_log::ProjectNotificationRecord;
 use crate::session_watches::inbox_position_of;
 use crate::session_watches::matcher::watch_matches;
+use crate::session_watches::matcher::watch_owes;
 use crate::session_watches::PendingEnd;
 use crate::session_watches::ProjectWatches;
 use crate::session_watches::SessionWatch;
@@ -84,33 +85,54 @@ pub(super) fn end_reason(
     None
 }
 
-/// Compute `owner`'s delivery from `state` and advance it past what the delivery hands over:
-/// positions move past the delivered records (and past what the log evicted), and the watches
-/// that ended are taken to be reported. Shared by `take_delivery`, which commits at once, and
-/// `deliver_with`, which rolls `state` back when its delivery is refused.
+/// Which of an owner's watches a delivery hands over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DeliveryScope {
+    /// Every watch: a tool answer's `watchEvents`.
+    Every,
+    /// Only the watches that wake their owner when idle ([`SessionWatch::wake_when_idle`]): the
+    /// wake's turn.
+    Waking,
+}
+
+impl DeliveryScope {
+    fn covers(self, wake_when_idle: bool) -> bool {
+        match self {
+            DeliveryScope::Every => true,
+            DeliveryScope::Waking => wake_when_idle,
+        }
+    }
+}
+
+/// Compute `owner`'s delivery over the watches `scope` covers from `state` and advance it past what
+/// the delivery hands over: positions move past the delivered records (and past what the log
+/// evicted), and the watches that ended are taken to be reported. Shared by `take_delivery`, which
+/// commits at once, and `deliver_wake_with`, which rolls `state` back when its delivery is refused.
 pub(super) fn apply_delivery(
     state: &mut ProjectWatches,
     owner: &WatchOwner,
     log: &ProjectNotificationLog,
     now_unix_ms: u64,
     streamed: &HashSet<String>,
+    scope: DeliveryScope,
 ) -> WatchDelivery {
     end_finished(state, owner, log, now_unix_ms);
     // A watch a stream's lease holds is skipped entirely: its events are the stream's alone,
     // and its position is the stream's to advance.
+    let delivers = |watch: &SessionWatch| {
+        &watch.owner == owner
+            && !streamed.contains(&watch.watch_id)
+            && scope.covers(watch.wake_when_idle)
+    };
     let inbox = inbox_position_of(state, owner);
     let mut matched: BTreeMap<u64, ProjectNotificationRecord> = BTreeMap::new();
     let mut lost = 0_u64;
     let mut scans: Vec<(String, u64, u64)> = Vec::new();
-    for watch in state
-        .watches
-        .iter()
-        .filter(|watch| &watch.owner == owner && !streamed.contains(&watch.watch_id))
-    {
+    for watch in state.watches.iter().filter(|watch| delivers(watch)) {
         let (records, watch_lost) =
             log.records_after(&owner.project_id, &owner.os_user, watch.position);
         lost = lost.max(watch_lost);
-        for record in records.iter().filter(|r| watch_matches(watch, r, inbox)) {
+        for record in records.iter().filter(|r| watch_owes(watch, r, inbox)) {
             matched.entry(record.seq).or_insert_with(|| record.clone());
         }
         scans.push((watch.watch_id.clone(), watch.position, watch_lost));
@@ -121,11 +143,7 @@ pub(super) fn apply_delivery(
         .cloned()
         .collect();
     let delivered: HashSet<u64> = events.iter().map(|r| r.seq).collect();
-    for watch in state
-        .watches
-        .iter_mut()
-        .filter(|watch| &watch.owner == owner && !streamed.contains(&watch.watch_id))
-    {
+    for watch in state.watches.iter_mut().filter(|watch| delivers(watch)) {
         let mut position = watch.position;
         if let Some((_, _, watch_lost)) = scans.iter().find(|(id, _, _)| id == &watch.watch_id) {
             position = position.max(watch.position.saturating_add(*watch_lost));
@@ -137,10 +155,14 @@ pub(super) fn apply_delivery(
             position = position.max(record.seq);
         }
         watch.position = position;
+        watch.acked_above.retain(|seq| *seq > position);
     }
     let mut ended = Vec::new();
     state.ended.retain(|pending| {
-        if &pending.owner == owner && !streamed.contains(&pending.end.watch_id) {
+        if &pending.owner == owner
+            && !streamed.contains(&pending.end.watch_id)
+            && scope.covers(pending.wake_when_idle)
+        {
             ended.push(pending.end.clone());
             false
         } else {
@@ -173,6 +195,7 @@ pub(super) fn end_finished(
                         watch_id: watch.watch_id.clone(),
                         reason,
                     },
+                    wake_when_idle: watch.wake_when_idle,
                 });
                 moved = true;
                 continue;
@@ -200,6 +223,7 @@ pub(super) fn end_expired(
                     watch_id: watch.watch_id.clone(),
                     reason: WatchEndReason::Expired,
                 },
+                wake_when_idle: watch.wake_when_idle,
             });
             moved = true;
             continue;

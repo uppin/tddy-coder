@@ -24,7 +24,7 @@ use tddy_session_activity::session_notifications::{
     RecordingSessionNotificationSubscriber, SessionNotificationBus,
 };
 use tddy_session_activity::session_watches::{
-    SessionWatchStore, WatchFilter, WatchKind, WatchOwner,
+    SessionWatchStore, WatchFilter, WatchKind, WatchOptions, WatchOwner,
 };
 use tddy_session_activity::trunk_watch::{
     SubscriberLiveness, TrunkSource, TrunkSubscription, TrunkWatcher,
@@ -344,6 +344,7 @@ async fn an_orchestrators_self_watch_delivers_its_new_trunk_commit_and_no_inbox_
                 started_by_me: false,
                 kinds: vec![WatchKind::TrunkCommit],
             },
+            WatchOptions::default(),
             Duration::from_secs(3_600),
             &log,
             0,

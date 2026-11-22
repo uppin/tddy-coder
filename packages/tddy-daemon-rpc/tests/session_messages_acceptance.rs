@@ -214,13 +214,19 @@ impl World {
             .unwrap_or_default()
     }
 
-    /// A watch of the orchestrator over the messages the sessions it started send, for an hour.
+    /// A watch of the orchestrator over the messages the sessions it started send, for an hour,
+    /// waking it when it is idle.
     async fn the_orchestrator_watches_what_its_sessions_send(&self) {
         let answer = self
             .call_as(
                 &self.orchestrator,
                 CREATE_SESSION_WATCH,
-                json!({ "started_by_me": true, "kinds": ["message"], "ttl_seconds": 3_600 }),
+                json!({
+                    "started_by_me": true,
+                    "kinds": ["message"],
+                    "ttl_seconds": 3_600,
+                    "wake_when_idle": true
+                }),
             )
             .await;
         assert!(
@@ -724,5 +730,42 @@ async fn a_session_without_turn_input_reads_its_messages() {
             Value::Null,
             json!("Rebase on main, please."),
         )]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_sessions_own_message_watch_wakes_it_only_when_asked_and_only_if_it_takes_a_turn() {
+    // Given a claude session and a codex session the orchestrator started
+    let world = a_world().await;
+    records_a_running_claude_session(&world.a, &world.child);
+    let codex = a_workspace_in(&world.a.daemon, THIS_PROJECT).await;
+    records_its_orchestrator(&world.a, &codex, &world.orchestrator);
+    records_a_session_taking_no_turn(&world.a, &codex);
+    let own_messages = json!({ "kinds": ["message"] });
+
+    // When the claude session creates its message watch with no word on the wake, and again
+    // asking for it; and the codex session asks for it too
+    let quiet = world.watches_with(&world.child, own_messages.clone()).await;
+    let mut waking_args = own_messages.clone();
+    waking_args["wake_when_idle"] = json!(true);
+    let waking = world.watches_with(&world.child, waking_args.clone()).await;
+    let refused = world
+        .asks_for_a_watch(&codex, waking_args)
+        .await
+        .expect("the codex session's watch call is served");
+
+    // Then the first does not wake, the second does, and the codex session is refused saying why
+    assert_eq!(
+        (
+            result_of(&quiet)["wake_when_idle"].clone(),
+            result_of(&waking)["wake_when_idle"].clone()
+        ),
+        (json!(false), json!(true))
+    );
+    assert!(
+        refused.is_error && refused.error_message.contains("wake_when_idle"),
+        "the codex session's waking watch was answered {} {:?}",
+        refused.result_json,
+        refused.error_message
     );
 }

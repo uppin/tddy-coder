@@ -58,7 +58,8 @@ struct World {
 }
 
 /// One host whose orchestrator — the project's main, a claude-cli session with a recording
-/// stand-in on its main terminal — watches its child's permission prompts.
+/// stand-in on its main terminal — watches its child's permission prompts with a watch that opts
+/// into the wake.
 async fn a_world() -> World {
     let peers = Arc::new(InProcessPeers::default());
     let (a, bus) = a_host_waking_orchestrators(HOST_A, &peers, TIMINGS);
@@ -81,7 +82,12 @@ async fn a_world() -> World {
     let created = world
         .calls(
             "CreateSessionWatch",
-            json!({ "session_ids": [world.child], "kinds": ["permission"], "ttl_seconds": 3_600 }),
+            json!({
+                "session_ids": [world.child],
+                "kinds": ["permission"],
+                "ttl_seconds": 3_600,
+                "wake_when_idle": true
+            }),
         )
         .await;
     assert!(!created.0, "the watch was refused: {}", created.1);

@@ -174,6 +174,20 @@ impl ATooledSession {
     }
 }
 
+impl ATooledSession {
+    /// The `(timeout_ms, max_events)` of every stream call, in order.
+    fn stream_windows(&self) -> Vec<(Value, Value)> {
+        self.state
+            .lock()
+            .expect("the stand-in's state")
+            .calls
+            .iter()
+            .filter(|(tool, _)| tool == WAIT_SESSION_WATCH_EVENTS)
+            .map(|(_, args)| (args["timeout_ms"].clone(), args["max_events"].clone()))
+            .collect()
+    }
+}
+
 impl Drop for ATooledSession {
     fn drop(&mut self) {
         self.serving.abort();
@@ -496,6 +510,24 @@ async fn monitor_with_watch_continues_from_the_acknowledged_position() {
             the_line_for(8, "req-8", "wants to run Bash: cargo fmt"),
             an_ended_line("w-1"),
         ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn monitor_holds_each_call_a_minute_and_takes_every_waiting_event() {
+    // Given a watch whose stream ends at once
+    let session = ATooledSession::streaming(vec![a_batch(Vec::new(), &["w-1"], 0)]);
+
+    // When the orchestrator attaches a monitor to it
+    let ran = monitor(&session, &["--watch", "w-1"]).await;
+
+    // Then its call waits a minute and returns every waiting event in one batch, as a monitor
+    // prints them all — not the tool's default of one
+    assert_eq!(
+        session.stream_windows(),
+        vec![(json!(60_000), json!(50))],
+        "stderr: {}",
+        ran.stderr
     );
 }
 

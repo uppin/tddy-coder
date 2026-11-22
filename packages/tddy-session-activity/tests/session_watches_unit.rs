@@ -22,7 +22,7 @@ use tddy_session_activity::session_notifications::{
     SessionNotification, SessionNotificationBus, SessionNotificationKind, SessionNotificationSource,
 };
 use tddy_session_activity::session_watches::{
-    SessionWatchStore, WatchEnd, WatchEndReason, WatchFilter, WatchKind, WatchOwner,
+    SessionWatchStore, WatchEnd, WatchEndReason, WatchFilter, WatchKind, WatchOptions, WatchOwner,
     MAX_EVENTS_PER_ANSWER,
 };
 
@@ -76,6 +76,29 @@ impl AHost {
                     session_ids: session_ids.iter().map(|s| s.to_string()).collect(),
                     started_by_me: false,
                     kinds: kinds.to_vec(),
+                },
+                WatchOptions::default(),
+                AN_HOUR,
+                &self.log,
+                NOW,
+            )
+            .await
+            .expect("the watch is created")
+            .watch_id
+    }
+
+    /// A watch like [`Self::watch`] that wakes its orchestrator when idle: what the wake delivers.
+    async fn waking_watch(&self, session_ids: &[&str], kinds: &[WatchKind]) -> String {
+        self.watches
+            .create(
+                &the_orchestrator(),
+                WatchFilter {
+                    session_ids: session_ids.iter().map(|s| s.to_string()).collect(),
+                    started_by_me: false,
+                    kinds: kinds.to_vec(),
+                },
+                WatchOptions {
+                    wake_when_idle: true,
                 },
                 AN_HOUR,
                 &self.log,
@@ -460,13 +483,13 @@ fn a_status_notification_carries_the_status_it_was_raised_for() {
 async fn a_failed_delivery_moves_no_position() {
     // Given a watch with a finished turn waiting
     let host = AHost::of_one_project();
-    host.watch(&[CHILD], &WatchKind::ALL).await;
+    host.waking_watch(&[CHILD], &WatchKind::ALL).await;
     host.publishes(a_finished_turn(CHILD, "turn 1")).await;
 
     // When a delivery is handed to a paste that fails
     let outcome = host
         .watches
-        .deliver_with(&the_orchestrator(), &host.log, NOW, |delivery| async move {
+        .deliver_wake_with(&the_orchestrator(), &host.log, NOW, |delivery| async move {
             assert_eq!(texts(&delivery.events), vec!["turn 1"]);
             Err("the terminal is gone".to_string())
         })
@@ -481,7 +504,7 @@ async fn a_failed_delivery_moves_no_position() {
 async fn a_successful_delivery_moves_positions_as_take_delivery_does() {
     // Given a watch with a finished turn waiting
     let host = AHost::of_one_project();
-    host.watch(&[CHILD], &WatchKind::ALL).await;
+    host.waking_watch(&[CHILD], &WatchKind::ALL).await;
     host.publishes(a_finished_turn(CHILD, "turn 1")).await;
 
     // When a delivery is handed to a paste that succeeds
@@ -489,7 +512,7 @@ async fn a_successful_delivery_moves_positions_as_take_delivery_does() {
     let outcome = {
         let seen = Arc::clone(&seen);
         host.watches
-            .deliver_with(&the_orchestrator(), &host.log, NOW, |delivery| async move {
+            .deliver_wake_with(&the_orchestrator(), &host.log, NOW, |delivery| async move {
                 seen.lock().unwrap().extend(texts(&delivery.events));
                 Ok(())
             })
@@ -508,12 +531,12 @@ async fn a_successful_delivery_moves_positions_as_take_delivery_does() {
 async fn nothing_waiting_never_calls_the_delivery() {
     // Given a watch with nothing waiting
     let host = AHost::of_one_project();
-    host.watch(&[CHILD], &WatchKind::ALL).await;
+    host.waking_watch(&[CHILD], &WatchKind::ALL).await;
 
     // When a delivery is attempted
     let outcome = host
         .watches
-        .deliver_with(&the_orchestrator(), &host.log, NOW, |_| async {
+        .deliver_wake_with(&the_orchestrator(), &host.log, NOW, |_| async {
             panic!("an empty delivery was handed over")
         })
         .await;

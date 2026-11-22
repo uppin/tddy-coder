@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_activity::session_watches::{
-    SessionWatch, SessionWatchStore, WatchFilter, WatchKind, WatchOwner,
+    SessionWatch, SessionWatchStore, WatchFilter, WatchKind, WatchOptions, WatchOwner,
 };
 use tddy_tool_engine::project_home_inbox_tools::NO_NOTIFICATION_LOG;
 use tddy_tool_engine::project_home_watch_tools::{
@@ -49,7 +49,7 @@ impl DaemonProjectHome {
     }
 
     /// Refuse a caller whose agent no turn can be sent to, worded as `SendSessionMessage` words
-    /// it: a watch promises the successor's wake, which such an agent cannot take.
+    /// it: a watch with `wake_when_idle` promises a wake, which such an agent cannot take.
     fn refuse_an_agent_that_takes_no_turn(&self, home: &HomeCaller) -> Result<(), String> {
         let caller = SessionTarget {
             session_id: home.session_id.clone(),
@@ -102,6 +102,7 @@ pub(super) fn watch_json(watch: &SessionWatch, waiting: Option<usize>) -> Value 
             .iter()
             .map(|kind| kind.as_str())
             .collect::<Vec<_>>(),
+        "wake_when_idle": watch.wake_when_idle,
         "created_at_unix_ms": watch.created_at_unix_ms,
         "expires_at_unix_ms": watch.expires_at_unix_ms,
     });
@@ -123,7 +124,9 @@ impl ProjectHomeWatchPort for DaemonProjectHome {
         home: &HomeCaller,
         request: WatchRequest,
     ) -> Result<Value, String> {
-        self.refuse_an_agent_that_takes_no_turn(home)?;
+        if request.wake_when_idle {
+            self.refuse_an_agent_that_takes_no_turn(home)?;
+        }
         // The one self-watch: the orchestrator's own trunk activity (`#orchestra` 5/9).
         let own_trunk_watch = request.kinds == [WatchKind::TrunkCommit.as_str()];
         for session_id in &request.session_ids {
@@ -145,6 +148,9 @@ impl ProjectHomeWatchPort for DaemonProjectHome {
                     session_ids: request.session_ids,
                     started_by_me: request.started_by_me,
                     kinds,
+                },
+                WatchOptions {
+                    wake_when_idle: request.wake_when_idle,
                 },
                 Duration::from_secs(request.ttl_seconds),
                 self.watch_log()?,
@@ -172,6 +178,7 @@ impl ProjectHomeWatchPort for DaemonProjectHome {
         home: &HomeCaller,
         watch_id: &str,
         ttl_seconds: u64,
+        wake_when_idle: Option<bool>,
     ) -> Result<Value, String> {
         let watch = self
             .watches()?
@@ -179,6 +186,7 @@ impl ProjectHomeWatchPort for DaemonProjectHome {
                 &self.owner_of(home),
                 watch_id,
                 Duration::from_secs(ttl_seconds),
+                wake_when_idle,
                 now_unix_ms(),
             )
             .await?;

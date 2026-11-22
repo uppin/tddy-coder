@@ -2,7 +2,7 @@
 //! (`#activity-wake` 4/5).
 //!
 //! A stream reads the same watches and positions as [`SessionWatchStore::take_delivery`] and
-//! [`SessionWatchStore::deliver_with`], so it must hold a watch exclusively while it runs. It does
+//! [`SessionWatchStore::deliver_wake_with`], so it must hold a watch exclusively while it runs. It does
 //! so with a **lease**: held while a stream keeps calling, renewed by each call, kept in memory
 //! only, and lapsing [`STREAM_LEASE_GRACE`] after the last call. While a watch is streamed the two
 //! other deliveries skip it.
@@ -14,9 +14,16 @@
 //! A stream's position advances only on **acknowledgement**: the next call's `ack_seq` says what
 //! the process printed, so a batch it received but never printed is handed again.
 //!
+//! A call may **pick** a subset of what its watches matched ([`StreamPick`]): at most
+//! `max_events`, of some kinds, of some sessions. Acknowledgement is exact: `ack_seq` acknowledges
+//! the records the stream's latest answer handed, up to that seq, and nothing else. A watch's
+//! position advances to just before the first record it still owes, and the acknowledged records
+//! past it are kept in [`SessionWatch::acked_above`] — so what a pick left out stays pending, and
+//! what was acknowledged is never handed again.
+//!
 //! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-17-session-watch-monitor.md
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use super::{SessionWatchStore, WatchOwner, MAX_EVENTS_PER_ANSWER};
@@ -24,7 +31,8 @@ use crate::project_notification_log::{ProjectNotificationLog, ProjectNotificatio
 use crate::session_watches::delivery::end_finished;
 use crate::session_watches::delivery::end_reason;
 use crate::session_watches::delivery::WatchEnd;
-use crate::session_watches::matcher::watch_matches;
+use crate::session_watches::matcher::watch_owes;
+use crate::session_watches::{SessionWatch, WatchKind};
 
 /// How long a watch stays streamed after a stream's last call returned: the monitor's turnaround
 /// between two calls, with margin. A stream that stops calling hands its watches back to tool
@@ -56,6 +64,27 @@ pub struct StreamBatch {
     /// The `ack_seq` the next call presents once these events are printed: the newest handed
     /// `seq`, or the acknowledged position when nothing was handed.
     pub next_ack_seq: u64,
+}
+
+/// What one stream call picks from what its watches matched: at most `max_events` records, of
+/// `kinds` (every kind when empty), of `session_ids` (every session when empty). What it does not
+/// pick stays pending for a later call — it is neither handed nor acknowledged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamPick {
+    pub kinds: Vec<super::WatchKind>,
+    pub session_ids: Vec<String>,
+    pub max_events: usize,
+}
+
+impl Default for StreamPick {
+    /// Everything the watches matched, up to [`MAX_EVENTS_PER_ANSWER`].
+    fn default() -> Self {
+        Self {
+            kinds: Vec::new(),
+            session_ids: Vec::new(),
+            max_events: MAX_EVENTS_PER_ANSWER,
+        }
+    }
 }
 
 /// Why a stream call was refused. Nothing moves on a refusal: no position, no lease.
@@ -127,6 +156,30 @@ impl SessionWatchStore {
         stream_id: Option<&str>,
         watch_ids: &[String],
         ack_seq: Option<u64>,
+        log: &ProjectNotificationLog,
+        now_unix_ms: u64,
+    ) -> Result<StreamBatch, StreamRefusal> {
+        self.take_stream_batch_picking(
+            owner,
+            stream_id,
+            watch_ids,
+            ack_seq,
+            &StreamPick::default(),
+            log,
+            now_unix_ms,
+        )
+        .await
+    }
+
+    /// [`Self::take_stream_batch`], handing only what `pick` picks.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn take_stream_batch_picking(
+        &self,
+        owner: &WatchOwner,
+        stream_id: Option<&str>,
+        watch_ids: &[String],
+        ack_seq: Option<u64>,
+        pick: &StreamPick,
         log: &ProjectNotificationLog,
         now_unix_ms: u64,
     ) -> Result<StreamBatch, StreamRefusal> {
@@ -276,16 +329,34 @@ impl SessionWatchStore {
             });
         }
 
-        // Advance only on acknowledgement, and persist what moved.
+        // Advance only on acknowledgement — of what this stream's latest answer handed — and
+        // persist what moved.
         let mut changed = ended_moved;
         if let Some(ack_seq) = ack_seq {
+            let inbox = super::inbox_position_of(&state, owner);
             for watch in state
                 .watches
                 .iter_mut()
                 .filter(|watch| &watch.owner == owner && live_ids.contains(&watch.watch_id))
             {
-                if ack_seq > watch.position {
-                    watch.position = ack_seq;
+                let latest_batch = if starting {
+                    None
+                } else {
+                    leases_snapshot.get(&watch.watch_id).filter(|lease| {
+                        &lease.owner == owner && lease.stream_id == effective_stream_id
+                    })
+                };
+                let acknowledged = latest_batch
+                    .map(|lease| {
+                        lease
+                            .latest_batch
+                            .iter()
+                            .copied()
+                            .filter(|seq| *seq <= ack_seq && *seq > watch.position)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                if acknowledge(watch, &acknowledged, ack_seq, log, inbox) {
                     changed = true;
                 }
             }
@@ -314,7 +385,7 @@ impl SessionWatchStore {
             let inbox = super::inbox_position_of(&state, owner);
             for record in records
                 .iter()
-                .filter(|record| watch_matches(watch, record, inbox))
+                .filter(|record| watch_owes(watch, record, inbox) && pick.picks(record))
             {
                 let event = matched.entry(record.seq).or_insert_with(|| StreamedEvent {
                     record: record.clone(),
@@ -325,8 +396,10 @@ impl SessionWatchStore {
                 }
             }
         }
-        let events: Vec<StreamedEvent> =
-            matched.into_values().take(MAX_EVENTS_PER_ANSWER).collect();
+        let events: Vec<StreamedEvent> = matched
+            .into_values()
+            .take(pick.max_events.clamp(1, MAX_EVENTS_PER_ANSWER))
+            .collect();
         let max_position = live_ids
             .iter()
             .filter_map(|watch_id| {
@@ -360,6 +433,11 @@ impl SessionWatchStore {
                     .copied()
                     .unwrap_or(0)
                     .max(next_ack_seq);
+                let latest_batch = events
+                    .iter()
+                    .filter(|event| event.watch_ids.contains(watch_id))
+                    .map(|event| event.record.seq)
+                    .collect();
                 leases.by_watch.insert(
                     watch_id.clone(),
                     Lease {
@@ -367,6 +445,7 @@ impl SessionWatchStore {
                         stream_id: effective_stream_id.clone(),
                         lease_until_unix_ms: now_unix_ms.saturating_add(grace_ms),
                         handed,
+                        latest_batch,
                     },
                 );
             }
@@ -412,13 +491,59 @@ impl SessionWatchStore {
     }
 }
 
-/// One watch's lease: the stream holding it, when the lease lapses, and what it was handed.
+/// One watch's lease: the stream holding it, when the lease lapses, the newest `seq` it was
+/// handed, and the `seq`s of this watch's records in the stream's latest answer — what its next
+/// `ack_seq` may acknowledge.
 #[derive(Debug, Clone)]
 pub(super) struct Lease {
     pub(super) owner: WatchOwner,
     pub(super) stream_id: String,
     pub(super) lease_until_unix_ms: u64,
     pub(super) handed: u64,
+    pub(super) latest_batch: BTreeSet<u64>,
+}
+
+impl StreamPick {
+    /// Whether this pick takes `record`: of a picked kind, from a picked session.
+    fn picks(&self, record: &ProjectNotificationRecord) -> bool {
+        let kind_picked = self.kinds.is_empty()
+            || WatchKind::of(record).is_some_and(|kind| self.kinds.contains(&kind));
+        let session_picked =
+            self.session_ids.is_empty() || self.session_ids.contains(&record.session_id);
+        kind_picked && session_picked
+    }
+}
+
+/// Acknowledge `acknowledged` — records of `watch` a stream was handed, up to `ack_seq` — and
+/// advance the watch's position as far as it may: up to `ack_seq`, but to just before the first
+/// record past it the watch still owes. The acknowledged records past the new position are kept in
+/// [`SessionWatch::acked_above`]. Whether anything moved.
+fn acknowledge(
+    watch: &mut SessionWatch,
+    acknowledged: &[u64],
+    ack_seq: u64,
+    log: &ProjectNotificationLog,
+    inbox: u64,
+) -> bool {
+    let before = (watch.position, watch.acked_above.clone());
+    watch.acked_above.extend(acknowledged.iter().copied());
+    let (records, _) = log.records_after(
+        &watch.owner.project_id,
+        &watch.owner.os_user,
+        watch.position,
+    );
+    let first_owed = records
+        .iter()
+        .take_while(|record| record.seq <= ack_seq)
+        .find(|record| watch_owes(watch, record, inbox))
+        .map(|record| record.seq);
+    let position = match first_owed {
+        Some(seq) => seq.saturating_sub(1).max(watch.position),
+        None => ack_seq.max(watch.position),
+    };
+    watch.position = position;
+    watch.acked_above.retain(|seq| *seq > position);
+    (watch.position, &watch.acked_above) != (before.0, &before.1)
 }
 
 /// The in-memory leases of every stream on this host.

@@ -11,12 +11,14 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 use tddy_agent_launch::conversation_spawn::session_tool_role;
+use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_activity::session_watches::{
-    SessionWatchStore, WatchFilter, WatchOwner, MAX_WATCH_TTL_SECS,
+    SessionWatchStore, WatchFilter, WatchOptions, WatchOwner, MAX_WATCH_TTL_SECS,
 };
+use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
 use tddy_tool_engine::project_home_tools::SessionToolRole;
 use tddy_tool_engine::project_home_watch_stream_tools::{
     is_project_home_watch_stream_tool, request_from as watch_stream_request, WatchStreamRequest,
@@ -154,6 +156,10 @@ impl ExecToolRpcHandler {
                 )))
             }
         };
+        let wake_when_idle = match self.wake_asked_for(&args, owner) {
+            Ok(wake) => wake.unwrap_or(false),
+            Err(refusal) => return Ok(outcome_err(format!("{CREATE_SESSION_WATCH}: {refusal}"))),
+        };
         let (watches, log) = match self.inbox_parts() {
             Ok(parts) => parts,
             Err(refusal) => return Ok(outcome_err(refusal)),
@@ -162,6 +168,7 @@ impl ExecToolRpcHandler {
             .create(
                 owner,
                 WatchFilter::inbox_of(&owner.session_id),
+                WatchOptions { wake_when_idle },
                 std::time::Duration::from_secs(ttl_seconds),
                 log,
                 tddy_daemon_kernel::now_unix_ms(),
@@ -236,6 +243,10 @@ impl ExecToolRpcHandler {
         } else {
             None
         };
+        let wake_when_idle = match self.wake_asked_for(&args, owner) {
+            Ok(wake) => wake,
+            Err(refusal) => return Ok(outcome_err(format!("{}: {refusal}", req.tool_name))),
+        };
         let (watches, _log) = match self.inbox_parts() {
             Ok(parts) => parts,
             Err(refusal) => return Ok(outcome_err(refusal)),
@@ -248,6 +259,7 @@ impl ExecToolRpcHandler {
                     owner,
                     &watch_id,
                     std::time::Duration::from_secs(ttl_seconds),
+                    wake_when_idle,
                     tddy_daemon_kernel::now_unix_ms(),
                 )
                 .await
@@ -262,6 +274,33 @@ impl ExecToolRpcHandler {
             Ok(answer) => Ok(outcome_ok(answer)),
             Err(refusal) => Ok(outcome_err(format!("{}: {refusal}", req.tool_name))),
         }
+    }
+
+    /// The `wake_when_idle` a call names — `None` when it names none — refused when it is not a
+    /// boolean, or asks for a wake `owner`'s agent cannot take: no terminal turn this host can
+    /// send.
+    fn wake_asked_for(&self, args: &Value, owner: &WatchOwner) -> Result<Option<bool>, String> {
+        let wake = match args.get("wake_when_idle") {
+            None | Some(Value::Null) => return Ok(None),
+            Some(Value::Bool(wake)) => *wake,
+            Some(other) => {
+                return Err(format!("wake_when_idle must be true or false, not {other}"))
+            }
+        };
+        if wake {
+            let takes_a_turn = sessions_base_for_user(&owner.os_user, Some(&self.tddy_data_dir))
+                .map(|base| unified_session_dir_path(&base, &owner.session_id))
+                .and_then(|dir| tddy_core::read_session_metadata(&dir).ok())
+                .and_then(|metadata| self.wake_submit_key(&metadata, &owner.session_id))
+                .is_some();
+            if !takes_a_turn {
+                return Err(
+                    "your agent takes no turn this host can send, so no watch can wake it: leave wake_when_idle off and wait with WaitSessionWatchEvents"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(Some(wake))
     }
 
     /// `WaitSessionWatchEvents` over the caller's own watches, held by #934's loop.

@@ -51,6 +51,24 @@ fn the_prompt_sends_coding_work_through_sessions_it_starts_and_follows() {
 }
 
 #[test]
+fn the_prompt_waits_for_watch_events_and_opts_into_the_idle_wake_only_when_needed() {
+    // When
+    let prompt = project_home_prompt(ORCHESTRATOR);
+
+    // Then it says to wait with WaitSessionWatchEvents or a monitor, with a window and a count,
+    // and that a watch wakes it only when it sets wake_when_idle
+    for needed in [
+        "WaitSessionWatchEvents",
+        "tddy-tools monitor",
+        "max_events",
+        "timeout_ms",
+        "wake_when_idle",
+    ] {
+        assert!(prompt.contains(needed), "the prompt does not name {needed}");
+    }
+}
+
+#[test]
 fn the_prompt_has_children_report_progress_and_status_over_their_back_channel() {
     // When
     let prompt = project_home_prompt(ORCHESTRATOR);

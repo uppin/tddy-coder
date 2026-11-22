@@ -20,8 +20,8 @@ use tddy_session_activity::session_notifications::{
     SessionNotification, SessionNotificationBus, SessionNotificationKind, SessionNotificationSource,
 };
 use tddy_session_activity::session_watches::{
-    SessionWatchStore, StreamBatch, StreamRefusal, WatchFilter, WatchKind, WatchOwner,
-    STREAM_LEASE_GRACE,
+    SessionWatchStore, StreamBatch, StreamRefusal, WatchFilter, WatchKind, WatchOptions,
+    WatchOwner, STREAM_LEASE_GRACE,
 };
 
 const PROJECT: &str = "project-a";
@@ -59,7 +59,8 @@ impl AHost {
         }
     }
 
-    /// A watch of the orchestrator over the child's permission prompts.
+    /// A watch of the orchestrator over the child's permission prompts, which wakes it when idle:
+    /// what a stream holds must reach neither the wake nor a tool answer.
     async fn a_watch_of_the_childs_prompts(&self) -> String {
         self.watches
             .create(
@@ -68,6 +69,9 @@ impl AHost {
                     session_ids: vec![CHILD.to_string()],
                     started_by_me: false,
                     kinds: vec![WatchKind::Permission],
+                },
+                WatchOptions {
+                    wake_when_idle: true,
                 },
                 AN_HOUR,
                 &self.log,
@@ -261,7 +265,7 @@ async fn take_delivery_skips_a_streamed_watch() {
 }
 
 #[tokio::test]
-async fn deliver_with_skips_a_streamed_watch() {
+async fn deliver_wake_with_skips_a_streamed_watch() {
     // Given a watch a stream holds, and a prompt it matched
     let host = AHost::of_one_project();
     let watch_id = host.a_watch_of_the_childs_prompts().await;
@@ -273,7 +277,7 @@ async fn deliver_with_skips_a_streamed_watch() {
     let seen = Arc::clone(&called);
     let delivered = host
         .watches
-        .deliver_with(&the_orchestrator(), &host.log, NOW + 1, |_| async move {
+        .deliver_wake_with(&the_orchestrator(), &host.log, NOW + 1, |_| async move {
             seen.store(true, Ordering::SeqCst);
             Ok(())
         })

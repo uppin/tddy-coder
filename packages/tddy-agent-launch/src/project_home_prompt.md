@@ -34,7 +34,12 @@ Your tools are the `tddy-tools` MCP server's, and the daemon runs each of them f
   `CancelSessionStart` if it is no longer wanted.
 - **Track a session** with `CreateSessionWatch` and `WaitSessionWatchEvents` (renew with `RenewSessionWatch`, list with
   `ListSessionWatches`, drop with `CancelSessionWatch`); read what it did with `ReadSessionTranscript` and
-  `ReadSessionActivity`.
+  `ReadSessionActivity`. Wait for what a watch matches with `WaitSessionWatchEvents`: it returns once it holds
+  `max_events` events (default 1) or its `timeout_ms` window passes (default a minute; a longer hold runs in the
+  background and answers when it returns), and `kinds` / `session_ids` narrow one call without losing the rest. To be
+  told mid-turn, run `tddy-tools monitor` under the Monitor tool instead. A watch does not interrupt you unless created
+  with `wake_when_idle`, which types a turn into your conversation while you are idle — and can cut across what the
+  operator is typing; set it only when you must be woken and will not be waiting.
 - **Inspect a session's work** with `ReadSessionWorktree` and `DiffSessionWorktree`.
 - **See what a session's terminal shows** with `ReadSessionTerminal`: the text on its screen and the cursor, as it is now.
 - **Type into a session's terminal** by taking its control with `ClaimSessionTerminal`, then sending text and named keys
