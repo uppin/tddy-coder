@@ -495,11 +495,11 @@ role's (see [Messages between sessions](#messages-between-sessions)).
 | `RefreshHome` | — | the same answer after fetching and fast-forwarding the caller's home worktree to the trunk tip. A home with commits of its own is refused, the error naming where it stands, and left untouched. Orchestrator roles only |
 | `WaitProjectNotifications` | `cursor?`, `timeout_ms?` (at most 20000, the default), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, timed_out, lost?}`: returns at once when the project's notification log holds records after `cursor`, otherwise holds until one arrives or `timeout_ms` passes. Without a cursor it waits for the next new record. See [Waiting for notifications](#waiting-for-notifications) |
 | `ReadProjectNotifications` | `cursor?`, `limit?` (50 by default, at most 200), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, clamped_to?, lost?}`: up to `limit` records after `cursor`, oldest first, without waiting; without a cursor, the newest page. See [Waiting for notifications](#waiting-for-notifications) |
-| `CreateSessionWatch` | `session_ids?`, `started_by_me?`, `kinds?`, `ttl_seconds` (required, 1 to 86400) | `{watch_id, session_ids, started_by_me, kinds, created_at_unix_ms, expires_at_unix_ms}`: a watch over the sessions it names, or every session the caller started, for the kinds named (every kind when none: `question`, `permission`, `turn_finished`, `waiting_for_input`, `agent_notification`, `ended`, `message`, `trunk_commit`). The kind `message` alone with no session selected is the caller's inbox watch — the one watch a session that is not an orchestrator may hold. See [Watching sessions](#watching-sessions) |
+| `CreateSessionWatch` | `session_ids?`, `started_by_me?`, `kinds?`, `ttl_seconds` (required, 1 to 86400), `wake_when_idle?` (default `false`) | `{watch_id, session_ids, started_by_me, kinds, wake_when_idle, created_at_unix_ms, expires_at_unix_ms}`: a watch over the sessions it names, or every session the caller started, for the kinds named (every kind when none: `question`, `permission`, `turn_finished`, `waiting_for_input`, `agent_notification`, `ended`, `message`, `trunk_commit`). The kind `message` alone with no session selected is the caller's inbox watch — the one watch a session that is not an orchestrator may hold. See [Watching sessions](#watching-sessions) |
 | `ListSessionWatches` | — | `{watches}`: the caller's live watches, each with its filter, expiry and how many matched events wait (`waiting`) |
-| `RenewSessionWatch` | `watch_id`, `ttl_seconds` (required, 1 to 86400) | the watch, expiring `ttl_seconds` from now |
+| `RenewSessionWatch` | `watch_id`, `ttl_seconds` (required, 1 to 86400), `wake_when_idle?` | the watch, expiring `ttl_seconds` from now; `wake_when_idle` turns its idle wake on or off, kept when omitted |
 | `CancelSessionWatch` | `watch_id` | `{watch_id, cancelled: true}`: the watch ends; nothing more is delivered for it |
-| `WaitSessionWatchEvents` | `watch_ids`, `ack_seq?`, `stream_id?`, `timeout_ms?` (at most 20000) | `{stream_id, events, lost, ended, next_ack_seq}`: the next batch of the caller's streamed watches, held until one matches or `timeout_ms` passes. Each event is `{seq, watch_ids, kind, session_id, session, summary, request_id?, record}`, its `summary` worded as a wake words it. A watch's position advances only past the `ack_seq` a later call presents. See [Watching sessions](#watching-sessions) |
+| `WaitSessionWatchEvents` | `watch_ids`, `ack_seq?`, `stream_id?`, `timeout_ms?` (default 60000, at most 1800000), `max_events?` (default 1, at most 50), `settle_ms?` (default 0, at most 5000), `kinds?`, `session_ids?` | `{stream_id, events, lost, ended, next_ack_seq}`: the next batch of what the caller's watches matched and the call picks, held until it holds `max_events`, `settle_ms` after its first event, or `timeout_ms` passes; what it does not pick stays pending. Each event is `{seq, watch_ids, kind, session_id, session, summary, request_id?, record}`, its `summary` worded as a wake words it. A watch's position advances only past what the `ack_seq` a later call presents acknowledges. See [Watching sessions](#watching-sessions) |
 | `NotifyOperator` | `title`, `body_markdown`, `level?` (`info` (default), `success`, `warning`, `error`), `sound?` | `{published: true}`: notifies the operator in the agent's own words, as `tddy-tools notify` does for a session with a shell — one `AGENT` attention notification on every surface (Telegram, the desktop). The title is 1 to 200 characters after trimming and the body at most 2,000; either over its limit, or an unknown `level`, is refused saying why, never truncated. No session argument: the daemon publishes for the calling session alone, with the `hook_token` its `.session.yaml` records, through `ActivityService.ReportOperatorNotification` in process; the token never appears in the answer. A main that is not `claude-cli` / `cursor-cli`, or records no hook token, is refused naming the tool and why. See [Session notifications § A session with no shell](session-notifications.md#a-session-with-no-shell-notifyoperator) |
 | `SetSessionMark` | `session_id`, `mark` (`paused`, `blocked`, `done` or `none`), `note?`, `daemon_instance_id?` | `{session_id, mark, note, set_by, at_unix_ms}`: records the mark in the session's `.session.yaml` (`orchestration_mark`), listed as `SessionEntry.orchestration_mark` and shown as a badge on the session's drawer row, the note on hover. `paused` also stops the session, as `TerminateSession` does; any resume clears a `paused` mark. `blocked` and `done` only mark. `none` removes the mark |
 | `RenameSession` | `session_id`, `display_name`, `daemon_instance_id?` | `{session_id, display_name}`: what the web UI's rename does — records the name in the session's `.session.yaml` (`display_name`), from then on its label on its drawer row and its Telegram alerts, and what `ListProjectSessions` and `ReadSessionActivity` report. Trimmed; an empty `display_name` clears it (answered as `null`); over 80 characters or with a control character is refused saying why, before anything is written. A running session keeps running. See [Session names](../web/session-drawer.md#session-names) |
@@ -988,9 +988,10 @@ an agent wrote it a notification.
 
 ### Watching sessions
 
-A watch is a filter over the project notification log with its own position in it, so an
-orchestrator learns what its sessions did on whatever tool call it makes next instead of holding a
-wait open.
+A watch is a filter over the project notification log with its own position in it. An
+orchestrator collects what its watches matched by waiting with `WaitSessionWatchEvents` (or a
+`tddy-tools monitor` under `Monitor`), or on whatever tool call it makes next. A watch never
+interrupts it unless it opts into the idle wake.
 
 - **Creation.** `CreateSessionWatch` names sessions by `session_ids`, or every session the caller
   started with `started_by_me`, or both — at least one of the two, except the **inbox watch**,
@@ -1001,7 +1002,9 @@ wait open.
   prompt), an `agent_notification`, an `ended` (`session_ended`), a `message`, or a `trunk_commit`
   (the caller's own, see [Watching the trunk](#watching-the-trunk)). `ttl_seconds` is
   required, from 1 to 86400 (24 hours); `RenewSessionWatch` restarts it for one of the caller's
-  watches. One orchestrator holds at most 16 live watches.
+  watches. `wake_when_idle` (default `false`) opts the watch into the idle wake (below);
+  `RenewSessionWatch` turns it on or off, and keeps it when the call names none. Every watch answer
+  carries it. One orchestrator holds at most 16 live watches.
 - **Visibility.** A watch sees exactly what the inbox tools see: the caller's project and operating-system
   user, on this host, never the caller's own session. A `session_ids` entry with no session record
   here, or one of another project, is refused naming the session; naming the caller's own session is
@@ -1012,9 +1015,9 @@ wait open.
   ([Messages between sessions](#messages-between-sessions)); every other watch tool call from such a
   session is still denied. An
   orchestrator whose agent declares no `turn_input` — or one whose `turn_input` is `acp_prompt` — is
-  refused naming the agent, in the words `SendSessionMessage` uses: a watch promises a wake that such
-  an agent cannot take. (The inbox watch is exempt: it need not paste — its holder reads what it
-  holds.)
+  refused a watch with `wake_when_idle`, naming the agent, in the words `SendSessionMessage` uses: it
+  promises a wake that such an agent cannot take. A watch without the wake is created for it. An
+  inbox watch asking for the wake is refused the same way when its holder's agent takes no turn.
 - **Delivery.** Every tool answer the orchestrator receives on this host whose result is a JSON
   object gains a `watchEvents` key when something is waiting:
   `{events, lost, ended}` — the records its watches matched since the last answer, oldest first, at
@@ -1030,34 +1033,52 @@ wait open.
   kept per project at `<data dir>/projects/<project_id>/session-watches.json`, whole-file atomically
   rewritten on every change, so a watch and its position survive a daemon restart and the
   orchestrator's `/clear`.
+- **Waiting for events.** `WaitSessionWatchEvents` streams the caller's watches: it waits in a
+  **window** and returns at the first of — `max_events` events held (default 1, so the first event
+  returns at once; at most 50, which is also the most one answer carries); `settle_ms` after its
+  first event (default 0, no settle; at most 5000), to take a burst in one answer; a `lost` count or
+  an ended watch to report; or `timeout_ms` elapsing (default 60000, a minute; at most 1800000, 30
+  minutes — as long as `Monitor` runs one command). Claude Code moves a tool call held past about
+  two minutes to the background as a task whose answer arrives when it returns, so a long hold does
+  not block the agent. Over LiveKit the call is still clamped to the remote block ceiling (20 s).
+  `kinds` and `session_ids` narrow one call to a subset of what its watches cover; what it does not
+  pick stays pending — neither returned nor acknowledged — for a later call, another stream, or a
+  tool answer once the stream's lease lapses. The first call starts a stream and is answered its
+  `stream_id`; each later call presents it with `ack_seq`, the `next_ack_seq` of the answer it acted
+  on, which acknowledges exactly what that answer handed. A watch's position advances only past
+  what was acknowledged, stopping before the first record it still owes, and an acknowledged record
+  is never handed again, across restarts. While a stream keeps calling, it holds its watches under
+  a lease (15 s past its last call): their events ride on no tool answer and wake nobody. When the
+  lease lapses, what was never acknowledged returns to both. A new stream on the owner's own watch
+  takes it over at once, resuming from the last acknowledged position; the superseded stream is
+  refused from its next call. A watch nobody resumes ends at its TTL.
 - **Streaming to a monitor.** `tddy-tools monitor` streams a watch to a process — one JSON object
   per stdout line, for Claude Code's `Monitor` tool to turn into notifications. Without `--watch`
   it creates a watch through `CreateSessionWatch` and prints a `watch` line; with `--watch <id>`
   (repeatable) it attaches to existing watches; with `--kinds message` and no `--session` or
   `--started-by-me` it creates the caller's inbox watch, which any session may stream. It then
-  loops `WaitSessionWatchEvents`: each event is printed as an `event` line — a matched message as
-  a `message` line carrying its text whole
-  ([Messages between sessions](#messages-between-sessions)) — (compact, or with the full log record under `--full`),
-  `lost` and
-  `ended` are printed as they come, and the next call acknowledges the batch with the last printed
-  `seq`. It exits 0 once every streamed watch has ended, and non-zero after an `error` line on any
-  refusal, transport error or per-call deadline lapse (`timeout_ms` + 10 s). While a stream keeps
-  calling, it holds its watches under a lease (15 s past its last call): their events ride on no
-  tool answer and wake nobody. When the lease lapses, what was never acknowledged returns to both.
-  A new monitor on the owner's own watch takes the stream over at once, resuming from the last
-  acknowledged position; the superseded stream is refused from its next call. A watch nobody
-  resumes ends at its TTL.
-- **Waking an idle orchestrator.** An orchestrator that is idle is sent one turn carrying what its
-  watches matched, instead of waiting for its next tool call. Idle means its main terminal is live,
+  loops `WaitSessionWatchEvents` with a one-minute window, taking up to 50 events a call: each event
+  is printed as an `event` line — a matched message as a `message` line carrying its text whole
+  ([Messages between sessions](#messages-between-sessions)) — (compact, or with the full log record
+  under `--full`), `lost` and `ended` are printed as they come, and the next call acknowledges the
+  batch. It exits 0 once every streamed watch has ended, and non-zero after an `error` line on any
+  refusal, transport error or per-call deadline lapse (`timeout_ms` + 10 s).
+- **Waking an idle orchestrator (opt-in).** Only a watch created or renewed with `wake_when_idle`
+  wakes: an orchestrator holding one that is idle is sent one turn carrying what its waking watches
+  matched, instead of waiting for its next tool call. The wake is off by default because an injected
+  turn lands in the operator's conversation and can cut across what they are typing; wait with
+  `WaitSessionWatchEvents` instead, and opt in only when the orchestrator must be woken and will not
+  be waiting. Idle means its main terminal is live,
   it waits on no question of its own (an idle prompt records none), and its reported status is `Done`, `WaitingForInput`,
   `Started` or `Ended` (no status counts as `Started`); `Running` and `ExecutingTool` are mid-turn
-  and are not woken. The turn is one pasted `[tddy watch]` message listing each event with its
-  session, kind and `request_id`, plus anything lost and the watches that ended. A burst is
+  and are not woken. The turn is one pasted `[tddy watch]` message listing each event of its waking
+  watches with its session, kind and `request_id`, plus anything lost and the waking watches that
+  ended. A burst is
   coalesced by a 2-second settle, and two wakes of one orchestrator are at least 30 seconds apart.
   The events in a wake count as delivered, so they do not ride on a later tool answer; a paste
   that fails delivers nothing, and what was waiting waits for the next chance. A busy orchestrator
   is woken once its turn ends with events still waiting. A stopped orchestrator is never started
-  by a wake.
+  by a wake. A watch kept before `wake_when_idle` existed does not wake.
 
 #### Watching the trunk
 
@@ -1087,7 +1108,8 @@ refresh its home before it starts more work.
   (<author>)`.
 - **Reading it.** An orchestrator reads its trunk activity through a watch of its own session with
   the kind `trunk_commit` alone: on its next tool answer, through `WaitSessionWatchEvents` /
-  `tddy-tools monitor`, or as a wake when it is idle. The records are its own, so
+  `tddy-tools monitor`, or — when the watch opts in with `wake_when_idle` — as a wake when it is
+  idle. The records are its own, so
   `ReadProjectNotifications` / `WaitProjectNotifications` never list them — to itself or to another
   orchestrator — and no operator surface shows them
   ([Session notifications](session-notifications.md)).

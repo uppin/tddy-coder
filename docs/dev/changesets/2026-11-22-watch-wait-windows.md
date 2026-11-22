@@ -1,6 +1,6 @@
-# Watch events: an opt-in idle wake and windowed waits
+# 2026-11-22 — Watch events: an opt-in idle wake and windowed waits
 
-**Type:** Feature change
+**Type:** Feature change · PR [#1017](https://github.com/uppin/tddy-coder/pull/1017)
 **Packages:** `tddy-session-activity`, `tddy-tool-engine`, `tddy-daemon-rpc`, `tddy-tools`,
 `tddy-agent-launch`
 **Feature:** [docs/ft/daemon/project-concept.md § Watching sessions](../../ft/daemon/project-concept.md#watching-sessions)
@@ -61,6 +61,16 @@ whatever was waiting, all at once, with no way to narrow it.
 The orchestrator's launch prompt and the tool descriptions say to wait with
 `WaitSessionWatchEvents` (or `tddy-tools monitor` under `Monitor`) rather than rely on injected
 turns, and to opt into the idle wake only when it is really needed.
+
+## Restructuring
+
+`/pr-wrap`'s file-length gate found `tddy-session-activity/src/session_watches/stream.rs` grown past
+the 500-production-line budget (428 → 553). One engine-driven `move_item` (`tddy-tools restructure`,
+`check --deep` clean, compile-gated apply) moved `StreamPick` and `StreamRefusal` with their trait
+impls into a new `session_watches::stream_call` module (`reexport: none`; the crate's
+`session_watches::{StreamPick, StreamRefusal}` re-exports stay): `stream.rs` 553 → 491,
+`stream_call.rs` 70. The private `impl StreamPick { fn picks }` and `fn acknowledge` stay in
+`stream.rs`, so nothing was widened.
 
 ## Tests
 

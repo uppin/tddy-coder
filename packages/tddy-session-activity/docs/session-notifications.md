@@ -184,28 +184,41 @@ notification log and a required TTL of at most 24 hours (`MAX_WATCH_TTL_SECS` = 
   whole file atomically rewritten (write, sync, rename, sync the directory) on every change and
   read once at open; an unreadable file is an error. Keyed by the orchestrator's session id, which
   `/clear` keeps.
-- `deliver_with(owner, log, now, deliver)` computes the same delivery as `take_delivery` but
+- **The wake is opt-in.** `SessionWatch.wake_when_idle` (`WatchOptions` at `create`, `Some` at
+  `renew` turns it on or off; serde default `false`, so a watch kept before the option existed does
+  not wake). `deliver_wake_with(owner, log, now, deliver)` computes the delivery of the owner's
+  **waking** watches alone — their events and their endings (a pending end carries the flag) — and
   advances positions and removes ended watches only when `deliver` succeeds; on failure nothing
   moves and nothing is persisted, so a wake whose paste failed delivers nothing and what was
-  waiting waits on. Nothing waiting never calls `deliver`.
-- **Streaming to a monitor.** `SessionWatchStore::take_stream_batch(owner, stream_id, watch_ids,
-  ack_seq, log, now)` (`#activity-wake` 4/5) hands an orchestrator's watch events to a process —
-  `tddy-tools monitor` — instead of to tool answers or a wake. A `stream_id` of `None` starts a
-  stream; the batch carries the id every later call presents. Under the project lock it first
-  advances each named watch's position to `ack_seq` (refused, `StreamRefusal`, when `ack_seq` is
-  past what was handed or names a watch the stream does not hold), renews the stream's lease, and
-  answers the matched records after the new position (union by `seq`, oldest first, at most 50),
-  the `lost` count and the ended watches — without advancing past them, so a batch the caller
-  received but did not acknowledge is handed again. A new stream of the watch's own orchestrator
-  takes the watch over at once and resumes from the last acknowledged position; the superseded
-  stream is refused (`Superseded`) from its next call. A watch counts as streamed while a lease is
-  held: the lease is in memory only, renewed by each call and lapsed `STREAM_LEASE_GRACE` (15 s;
-  `with_stream_lease_grace` sets it) after the last one. Both `take_delivery` and `deliver_with`
-  skip a streamed watch entirely, so while it streams — and for the grace after each call — its
-  events reach the monitor alone and return to answers and the wake when the lease lapses. The
-  lease map and the acknowledgement live in `session_watches/stream.rs`.
-- `has_live_watches(owner, log, now)` is the live check the wake and the auto-stop hold call;
-  this crate only answers it.
+  waiting waits on. Nothing waiting never calls `deliver`. A quiet watch's events and endings wait
+  for a stream or `take_delivery`.
+- **Streaming.** `SessionWatchStore::take_stream_batch(owner, stream_id, watch_ids, ack_seq, log,
+  now)` (`#activity-wake` 4/5) hands an orchestrator's watch events to a caller of
+  `WaitSessionWatchEvents` — the agent itself or `tddy-tools monitor` — instead of to tool answers
+  or a wake; `take_stream_batch_picking(…, pick, …)` hands only what a `StreamPick` picks: at most
+  `max_events` (clamped to 1–50), of `kinds`, of `session_ids` (each empty for all). A `stream_id`
+  of `None` starts a stream; the batch carries the id every later call presents. Under the project
+  lock it first acknowledges — refused, `StreamRefusal`, when `ack_seq` is past what was handed or
+  names a watch the stream does not hold — renews the stream's lease, and answers the picked records
+  each watch still owes (union by `seq`, oldest first), the `lost` count and the ended watches,
+  without advancing past them, so a batch the caller received but did not acknowledge is handed
+  again. A new stream of the watch's own orchestrator takes the watch over at once and resumes from
+  the last acknowledged position; the superseded stream is refused (`Superseded`) from its next
+  call. A watch counts as streamed while a lease is held: the lease is in memory only, renewed by
+  each call and lapsed `STREAM_LEASE_GRACE` (15 s; `with_stream_lease_grace` sets it) after the
+  last one. Both `take_delivery` and `deliver_wake_with` skip a streamed watch entirely.
+- **Exact acknowledgement.** A lease remembers the `seq`s of its watch's records in the stream's
+  **latest** answer; `ack_seq` acknowledges those up to it, and nothing else. The watch's position
+  then advances to `ack_seq`, but stops just before the first record past it the watch still owes,
+  and the acknowledged records past the new position go to `SessionWatch.acked_above` (persisted,
+  pruned as the position passes them). A watch **owes** a record (`watch_owes`) past its position,
+  not in `acked_above`, that it matches — the test every delivery, `list`'s `waiting` and the
+  inbox's already-delivered check use. So a record a pick left out stays pending for a later call,
+  another stream or a tool answer, and an acknowledged one is never handed again, across restarts.
+  The lease map and the acknowledgement live in `session_watches/stream.rs`; `StreamPick` and
+  `StreamRefusal` in `session_watches/stream_call.rs`.
+- `has_live_waking_watches(owner, log, now)` is the waker's live check; `has_live_watches` answers
+  for any watch. This crate only answers them.
 
 ## The trunk watch (`trunk_watch`)
 
