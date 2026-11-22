@@ -695,13 +695,16 @@ mod tests {
         seen.sort_unstable();
 
         // Then the agent has the target's `HOME`, `PATH` and `TMPDIR`, as the target's login
-        // shell expanded them, and the one variable the command carries, and nothing of the login
+        // shell expanded them, the terminal the daemon's PTY emulates, and the one variable the
+        // command carries, and nothing of the login
         assert_eq!(
             seen,
             vec![
+                "COLORTERM=truecolor",
                 "HOME=/home/target",
                 "PATH=/usr/bin:/bin",
                 "ROUTE_BASE_URL=https://route.example",
+                "TERM=xterm-256color",
                 "TMPDIR=/target/tmp",
             ]
         );
