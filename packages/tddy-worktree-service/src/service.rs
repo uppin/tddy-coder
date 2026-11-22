@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use tddy_daemon_kernel::config::DaemonConfig;
@@ -28,6 +28,7 @@ use tddy_service::proto::worktree::{
 use tddy_task::IdleTimeoutTracker;
 
 use crate::project_storage;
+use crate::pull_request_view::{watch_pull_request, SessionPullRequests};
 use crate::service_helpers::{
     blocking_within, map_clean_worktree_error, map_remove_worktree_error,
     proto_worktree_size_status, sync_state_to_proto, worktree_row_from_diff,
@@ -83,6 +84,9 @@ pub struct WorktreeServiceImpl {
     target_shells: Arc<dyn crate::target_worktrees::TargetShells>,
     /// Target rows measured outside a stream — see [`crate::target_worktree_stats`].
     target_row_bus: Arc<crate::target_worktree_stats::TargetRowBus>,
+    /// Where a session's PRs are read, bound once the host that owns the inbox exists — see
+    /// [`Self::attach_pull_requests`].
+    pull_requests: Arc<OnceLock<Arc<dyn SessionPullRequests>>>,
 }
 
 impl WorktreeServiceImpl {
@@ -103,6 +107,7 @@ impl WorktreeServiceImpl {
             idle_tracker: None,
             target_shells: Arc::new(crate::target_worktrees::NoTargetShells),
             target_row_bus: Arc::default(),
+            pull_requests: Arc::default(),
             tddy_data_dir,
             user_resolver,
             config,
@@ -124,6 +129,19 @@ impl WorktreeServiceImpl {
     ) -> Self {
         self.target_shells = shells;
         self
+    }
+
+    /// Read sessions' PRs through `pull_requests` (`#workqueue` 4/14). Bound after construction
+    /// because the host that owns the inbox is built after this service; shared by every clone, and
+    /// bound once.
+    ///
+    /// # Panics
+    /// When called a second time — the wiring is one decision, not a replaceable setting.
+    pub fn attach_pull_requests(&self, pull_requests: Arc<dyn SessionPullRequests>) {
+        assert!(
+            self.pull_requests.set(pull_requests).is_ok(),
+            "the PR source is attached once"
+        );
     }
 
     /// Count worktree RPCs as activity for relay mode's idle timer.
@@ -909,11 +927,59 @@ impl WorktreeService for WorktreeServiceImpl {
 
     async fn stream_session_pull_request(
         &self,
-        _request: Request<SessionWorktreeRequest>,
+        request: Request<SessionWorktreeRequest>,
     ) -> Result<Response<Self::StreamSessionPullRequestStream>, Status> {
-        // TODO(n4 session-pr-tabs): the service holds no `GithubInbox` yet and nothing maps a
-        // session's project to its `RepoSlug`; `pull_request_view::watch_pull_request` is ready for
-        // the handler once the daemon wires both in.
-        Err(Status::unimplemented("TODO(n4): StreamSessionPullRequest"))
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let os_user = self.authorize(&req.session_token)?;
+        let session_id = req.session_id.trim();
+        let session_dir = self.session_dir_for(&os_user, session_id)?;
+        if !session_dir.is_dir() {
+            return Err(Status::not_found("session not found"));
+        }
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        if crate::target_worktrees::target_session_in(&session_dir).is_some() {
+            // TODO(n4 session-pr-tabs): a target session's branch lives on another host; its PR is
+            // not read from here.
+            let view = SessionPullRequestView {
+                unavailable_reason: "a target session's pull request is not available".to_string(),
+                ..Default::default()
+            };
+            let _ = tx.send(Ok(view));
+            return Ok(Response::new(MpscResultStream::from(rx)));
+        }
+        let pull_requests = self
+            .pull_requests
+            .get()
+            .ok_or_else(|| Status::failed_precondition("this daemon reads no pull requests"))?;
+        let metadata = tddy_core::read_session_metadata(&session_dir)
+            .map_err(|e| Status::internal(format!("session metadata: {e}")))?;
+        let branch = tddy_core::read_changeset(&session_dir)
+            .map_err(|e| Status::internal(format!("session changeset: {e}")))?
+            .branch
+            .ok_or_else(|| Status::failed_precondition("the session records no branch"))?;
+        let site = pull_requests.site_for_session(
+            &os_user,
+            session_id,
+            &metadata.project_id,
+            &req.session_token,
+        )?;
+
+        let mut watch = watch_pull_request(site.inbox, site.repo, branch);
+        tokio::spawn(async move {
+            loop {
+                // Ends with the client, not only at its next view: a dropped watch stops the
+                // inbox subscription behind it.
+                let view = tokio::select! {
+                    () = tx.closed() => return,
+                    view = watch.next() => view,
+                };
+                let Some(view) = view else { return };
+                if tx.send(Ok(view)).is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(Response::new(MpscResultStream::from(rx)))
     }
 }

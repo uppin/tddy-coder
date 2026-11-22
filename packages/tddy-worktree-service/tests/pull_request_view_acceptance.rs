@@ -9,9 +9,15 @@ use async_trait::async_trait;
 use pretty_assertions::assert_eq;
 use tddy_github::conditional::{ConditionalAnswer, ConditionalRead, GithubReadError};
 use tddy_github_inbox::{paths, GithubInbox, InboxError, RepoReaders, RepoSlug};
+use tddy_rpc::{Request, Status};
+use tddy_service::proto::session::SessionEntry;
+use tddy_service::proto::worktree::{SessionWorktreeRequest, WorktreeService};
 use tddy_worktree_service::pull_request_view::{
-    pull_request_summary, pull_request_view, watch_pull_request, PullRequestSummary,
+    apply_cached_pull_request, pull_request_summary, pull_request_view, watch_pull_request,
+    PullRequestSite, PullRequestSummary, SessionPullRequests,
 };
+use tddy_worktree_service::test_util::{current_os_user, test_service, TEST_TOKEN};
+use tokio_stream::StreamExt;
 
 const T0: u64 = 1_795_000_000_000;
 const A_MINUTE: u64 = 60_000;
@@ -249,5 +255,120 @@ async fn a_completed_check_reaches_an_open_watch() {
             next.checks[0].conclusion.as_str()
         ),
         ("in_progress", "completed", "success")
+    );
+}
+
+/// The host's side of the PR port, over an inbox the test scripted: every project is `acme/app`.
+struct ProjectsOfAcmeApp(Arc<GithubInbox>);
+
+impl SessionPullRequests for ProjectsOfAcmeApp {
+    fn site_for_session(
+        &self,
+        _os_user: &str,
+        _session_id: &str,
+        _project_id: &str,
+        _session_token: &str,
+    ) -> Result<PullRequestSite, Status> {
+        Ok(PullRequestSite {
+            inbox: self.0.clone(),
+            repo: the_repo(),
+        })
+    }
+
+    fn cached_summary(
+        &self,
+        _os_user: &str,
+        _project_id: &str,
+        branch: &str,
+    ) -> Option<PullRequestSummary> {
+        pull_request_summary(&self.0, &the_repo(), branch)
+    }
+}
+
+/// A session directory under `data_dir` whose changeset records `branch`.
+fn a_session_on_branch(data_dir: &std::path::Path, session_id: &str, branch: &str) {
+    let session_dir = data_dir.join("sessions").join(session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    std::fs::write(
+        session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+        format!(
+            "session_id: {session_id}\nproject_id: proj-1\ncreated_at: '2026-11-22T10:00:00Z'\nupdated_at: '2026-11-22T10:00:00Z'\nstatus: active\n"
+        ),
+    )
+    .unwrap();
+    tddy_core::write_changeset(
+        &session_dir,
+        &tddy_core::Changeset {
+            branch: Some(branch.to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn the_stream_sends_the_view_of_the_pr_on_the_sessions_branch() {
+    // Given — a session on `feat/one`, whose PR the daemon's inbox can read
+    let data_dir = tempfile::tempdir().unwrap();
+    a_session_on_branch(data_dir.path(), "sess-1", "feat/one");
+    let github = Arc::new(a_github_with_one_pr());
+    let service = test_service(data_dir.path().to_path_buf(), &current_os_user());
+    service.attach_pull_requests(Arc::new(ProjectsOfAcmeApp(an_inbox_over(&github))));
+
+    // When
+    let mut stream = service
+        .stream_session_pull_request(Request::direct(SessionWorktreeRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: "sess-1".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .expect("the stream")
+        .into_inner();
+    let first = stream
+        .next()
+        .await
+        .expect("a first view")
+        .expect("an ok view");
+
+    // Then
+    assert_eq!(
+        (first.exists, first.number, first.head_branch.as_str()),
+        (true, 7, "feat/one")
+    );
+}
+
+#[tokio::test]
+async fn a_listed_session_carries_the_cached_pr_of_its_branch() {
+    // Given — the inbox has read `feat/one`'s PR, and nothing of `feat/none`
+    let repo = the_repo();
+    let github =
+        Arc::new(a_github_with_one_pr().answering(paths::pulls_for_head(&repo, "feat/none"), "[]"));
+    let inbox = an_inbox_over(&github);
+    inbox
+        .pr_for_head(&repo, "feat/one")
+        .await
+        .expect("pr for head");
+    let port = ProjectsOfAcmeApp(inbox);
+    let listed = |branch: &str| SessionEntry {
+        project_id: "proj-1".to_string(),
+        branch: branch.to_string(),
+        ..Default::default()
+    };
+    let (mut with_pr, mut without_pr) = (listed("feat/one"), listed("feat/none"));
+
+    // When
+    apply_cached_pull_request(&port, "os-user", &mut with_pr);
+    apply_cached_pull_request(&port, "os-user", &mut without_pr);
+
+    // Then
+    assert_eq!(
+        (
+            with_pr.pr_number,
+            with_pr.pr_state.as_str(),
+            without_pr.pr_number,
+            without_pr.pr_state.as_str()
+        ),
+        (7, "open", 0, "")
     );
 }

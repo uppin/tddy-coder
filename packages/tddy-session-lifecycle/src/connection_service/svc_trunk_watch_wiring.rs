@@ -27,6 +27,11 @@ use tddy_session_activity::trunk_watch::{
     SubscriberLiveness, TrunkSource, TrunkSubscription, TrunkWatcher,
 };
 
+use tddy_rpc::Status;
+use tddy_worktree_service::pull_request_view::{
+    pull_request_summary, PullRequestSite, PullRequestSummary, SessionPullRequests,
+};
+
 use super::session_acting_identity::SessionAccountAccess;
 use super::DaemonSessionHost;
 
@@ -44,6 +49,8 @@ pub(crate) struct TrunkWatching {
     watcher: Arc<TrunkWatcher>,
     liveness: Arc<HostLiveness>,
     inbox: Arc<GithubInbox>,
+    /// Registers how a repository is read, for the trunk watch and for a session's PR view alike.
+    source: Arc<HostTrunkSource>,
 }
 
 /// The transport that reads each repository, registered as projects are subscribed. A repository
@@ -171,6 +178,18 @@ fn project_account_token(
         .map_err(|refusal| refusal.to_string())
 }
 
+/// The GitHub repository `row`'s remote names.
+fn repo_of_project(row: &tddy_projects::project_storage::ProjectData) -> Result<RepoSlug, String> {
+    owner_repo_from_remote_url(&row.git_url)
+        .and_then(|slug| {
+            slug.split_once('/').map(|(owner, name)| RepoSlug {
+                owner: owner.to_string(),
+                name: name.to_string(),
+            })
+        })
+        .ok_or_else(|| format!("{} names no github.com repository", row.git_url))
+}
+
 impl HostTrunkSource {
     /// Register how `repo` is read for this project, and answer the feed that reads it through the
     /// inbox.
@@ -222,12 +241,7 @@ impl TrunkSource for HostTrunkSource {
                 &subscription.project_id,
             )
             .ok_or_else(|| "the project's row cannot be read".to_string())?;
-        let repo = owner_repo_from_remote_url(&row.git_url)
-            .and_then(|slug| {
-                slug.split_once('/')
-                    .map(|(owner, name)| (owner.to_string(), name.to_string()))
-            })
-            .ok_or_else(|| format!("{} names no github.com repository", row.git_url))?;
+        let repo = repo_of_project(&row)?;
         let projects_dir = tddy_daemon_kernel::user_paths::projects_path_for_user(
             &subscription.os_user,
             Some(self.host.tddy_data_dir()),
@@ -242,10 +256,6 @@ impl TrunkSource for HostTrunkSource {
             .split_once('/')
             .map_or(trunk_ref.as_str(), |(_, branch)| branch)
             .to_string();
-        let repo = RepoSlug {
-            owner: repo.0,
-            name: repo.1,
-        };
         let feed = self.feed_for(&row, subscription, &repo)?;
         Ok((TrunkPoller::new(feed, repo, branch), trunk_ref))
     }
@@ -270,7 +280,7 @@ impl DaemonSessionHost {
             readers,
         });
         let watcher = Arc::new(TrunkWatcher::new(
-            source,
+            Arc::clone(&source) as Arc<dyn TrunkSource>,
             Arc::clone(&liveness) as Arc<dyn SubscriberLiveness>,
             bus,
         ));
@@ -278,6 +288,7 @@ impl DaemonSessionHost {
             watcher,
             liveness,
             inbox,
+            source,
         }));
         self
     }
@@ -346,5 +357,52 @@ impl DaemonSessionHost {
                 tokio::time::sleep(wait).await;
             }
         }))
+    }
+}
+
+impl SessionPullRequests for DaemonSessionHost {
+    fn site_for_session(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        project_id: &str,
+        session_token: &str,
+    ) -> Result<PullRequestSite, Status> {
+        let watching = self
+            .trunk_watching
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("this daemon has no GitHub inbox"))?;
+        let row = self
+            .project_row(os_user, session_id, project_id)
+            .ok_or_else(|| Status::not_found("the session's project cannot be read"))?;
+        let repo = repo_of_project(&row).map_err(Status::failed_precondition)?;
+        let subscription = TrunkSubscription {
+            project_id: project_id.to_string(),
+            os_user: os_user.to_string(),
+            session_id: session_id.to_string(),
+            github_subject: (self.user_resolver())(session_token),
+        };
+        watching
+            .source
+            .feed_for(&row, &subscription, &repo)
+            .map_err(Status::failed_precondition)?;
+        Ok(PullRequestSite {
+            inbox: Arc::clone(&watching.inbox),
+            repo,
+        })
+    }
+
+    fn cached_summary(
+        &self,
+        os_user: &str,
+        project_id: &str,
+        branch: &str,
+    ) -> Option<PullRequestSummary> {
+        let watching = self.trunk_watching.as_ref()?;
+        let (_, row) =
+            super::service_util::find_registered_project(&self.tddy_data_dir, os_user, project_id)
+                .ok()?;
+        let repo = repo_of_project(&row).ok()?;
+        pull_request_summary(&watching.inbox, &repo, branch)
     }
 }

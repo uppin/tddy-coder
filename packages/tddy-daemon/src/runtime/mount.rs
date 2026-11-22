@@ -95,6 +95,12 @@ impl BuildContext {
             .with_session_watches(Arc::clone(&shared.session_watches))
             .with_trunk_watch(Arc::clone(&shared.session_notification_bus));
         let hosted = self.install_session_host(connection_impl);
+        // The host owns the GitHub inbox the session inspector's PR tab reads through; the worktree
+        // service is built before it, so the source is attached now.
+        served
+            .worktree_service_impl
+            .attach_pull_requests(Arc::clone(&hosted.connection_arc)
+                as Arc<dyn tddy_worktree_service::pull_request_view::SessionPullRequests>);
         // The project-home tools answer host questions from the daemon's wired host
         // service — the one `HostService` is served from, with its Coder vaults — so an
         // orchestrator's start lists and resolves the derived hosts this daemon reaches

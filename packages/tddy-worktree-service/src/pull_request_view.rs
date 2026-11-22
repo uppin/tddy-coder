@@ -6,10 +6,42 @@ use std::sync::Arc;
 
 use tddy_github::pr_api::{CheckRun, CheckStatus, PrState};
 use tddy_github_inbox::{EventKind, GithubInbox, InboxError, InboxEvent, RepoSlug, RowKey};
+use tddy_rpc::Status;
+use tddy_service::proto::session::SessionEntry;
 use tddy_service::proto::worktree::{
     PullRequestCheck, PullRequestComment, PullRequestCommit, SessionPullRequestView,
 };
 use tokio::sync::mpsc;
+
+/// The inbox a session's PRs are read through, and the repository they live in.
+#[derive(Clone)]
+pub struct PullRequestSite {
+    pub inbox: Arc<GithubInbox>,
+    pub repo: RepoSlug,
+}
+
+/// How the daemon locates a session's PRs: the host owns the inbox, the project rows and the
+/// credentials a repository is read with, so this crate asks it through this port.
+pub trait SessionPullRequests: Send + Sync {
+    /// The inbox and repository of `project_id`, with the repository registered to be read as the
+    /// caller. A project that names no GitHub repository, or has no usable account, is refused.
+    fn site_for_session(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        project_id: &str,
+        session_token: &str,
+    ) -> Result<PullRequestSite, Status>;
+
+    /// What is cached of `branch`'s PR in `project_id`, without any request. `None` when nothing is
+    /// cached, the branch has no PR, or the project names no GitHub repository.
+    fn cached_summary(
+        &self,
+        os_user: &str,
+        project_id: &str,
+        branch: &str,
+    ) -> Option<PullRequestSummary>;
+}
 
 /// What a session listing shows of its branch's PR.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +63,23 @@ pub fn pull_request_summary(
         number: pr.number,
         state: state_name(pr.state).to_string(),
     })
+}
+
+/// Fill `entry`'s PR from what the inbox has cached for its branch — number and state, or nothing.
+/// A listing calls this per session, so it never waits on GitHub; an entry whose branch has no
+/// cached PR (or that has no branch or project) is left without one.
+pub fn apply_cached_pull_request(
+    pull_requests: &dyn SessionPullRequests,
+    os_user: &str,
+    entry: &mut SessionEntry,
+) {
+    if entry.branch.is_empty() || entry.project_id.is_empty() {
+        return;
+    }
+    if let Some(summary) = pull_requests.cached_summary(os_user, &entry.project_id, &entry.branch) {
+        entry.pr_number = summary.number;
+        entry.pr_state = summary.state;
+    }
 }
 
 fn state_name(state: PrState) -> &'static str {
