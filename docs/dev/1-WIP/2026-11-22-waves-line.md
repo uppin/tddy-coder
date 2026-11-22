@@ -69,7 +69,7 @@ Published (pass 2, commit 2):
   — pure over `(items in queue order, &[DependencyEdge])`, so the tests use only n9's types, not its
   behaviour (`wave_of` is a lookup in `waves`' result)
 - `tddy_tool_engine::work_queue_waves_tools::{WORK_QUEUE_WAVES, work_queue_waves_tool_def}`
-- `tddy-prstack-web`: `WaveLanes` (shell, props-driven; it covers the line-check banner)
+- `tddy-workqueue-web`: `WaveLanes` (shell, props-driven; it covers the line-check banner)
 - The failing tests below. The `GetWorkQueueWaves` RPC and the status fields are `/green`'s.
 
 ## Green wave
