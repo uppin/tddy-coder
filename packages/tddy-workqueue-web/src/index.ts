@@ -10,3 +10,4 @@ export { WorkItemAnnotationControls } from "./WorkItemAnnotationControls";
 export { WorkItemAnnotations, type WorkItemAnnotationsProps } from "./WorkItemAnnotations";
 export { WorkQueueGraph, type WorkQueueGraphProps, type GraphLineEndpoint } from "./WorkQueueGraph";
 export { WorkQueueGraphPanel, type WorkQueueGraphPanelProps } from "./WorkQueueGraphPanel";
+export { WaveLanes, type WaveLanesProps } from "./WaveLanes";

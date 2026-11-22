@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 3 — a pure algorithm module with unit tests, one tool/RPC and a status field, web lanes; more than one package but no new I/O
 **Stack**: `#workqueue` 10/14 — branch `feature/workqueue/waves-line`, base `feature/workqueue/lineage-graph`
+**PR**: [#1011](https://github.com/uppin/tddy-coder/pull/1011)
 
 ## Initial Discovery
 
@@ -55,13 +56,19 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: the `waves` module's signatures, the tool and
-RPC definitions, the status fields, web test ids, and the failing tests below.
+Published (pass 2, commit 2):
+
+- `tddy_pr_stack::waves::{waves, derive_line, transitive_dependents, readiness, line_check, LineCheck}`
+  — pure over `(items in queue order, &[DependencyEdge])`, so the tests use only n9's types, not its
+  behaviour (`wave_of` is a lookup in `waves`' result)
+- `tddy_tool_engine::work_queue_waves_tools::{WORK_QUEUE_WAVES, work_queue_waves_tool_def}`
+- `tddy-prstack-web`: `WaveLanes` (shell, props-driven; it covers the line-check banner)
+- The failing tests below. The `GetWorkQueueWaves` RPC and the status fields are `/green`'s.
 
 ## Green wave
 
 **Wave:** 6 of 8
-**Greenable independently:** no — every test builds a queue with n9's edges
+**Greenable independently:** yes once n9's types are in its base — the functions take the edges as input (pass 2), so no test needs n9's behaviour
 **Concurrent with:** n11 commit-inbox-outbox, n12 leak-linearity
 **Blocks:** n13 schedules (`schedule_wave` and the merge `order` condition)
 
@@ -119,20 +126,22 @@ fixtures); one daemon integration test for the tool; a Cypress component spec fo
 
 ## Acceptance Tests
 
-`packages/tddy-work-queue/tests/waves_unit.rs`:
-- [ ] `an_item_with_no_needs_is_wave_one_wherever_it_sits`
-- [ ] `inside_a_wave_the_item_with_most_transitive_dependents_leads`
-- [ ] `ties_keep_the_queues_order`
-- [ ] `readiness_names_only_needs_in_the_wave_immediately_below`
-- [ ] `a_line_that_steps_back_a_wave_is_out_of_order_at_its_first_offender`
-- [ ] `a_cycle_reports_the_cycle_instead_of_waves`
+`packages/tddy-pr-stack/tests/waves_unit.rs` (crate renamed `tddy-work-queue` by n3):
+- [x] `an_item_with_no_needs_is_wave_one_wherever_it_sits`
+- [x] `inside_a_wave_the_item_with_most_transitive_dependents_leads`
+- [x] `ties_keep_the_queues_order`
+- [x] `readiness_names_only_needs_in_the_wave_immediately_below`
+- [x] `a_line_that_steps_back_a_wave_is_out_of_order_at_its_first_offender`
+- [x] `a_cycle_reports_the_cycle_instead_of_waves`
 
-`packages/tddy-daemon-rpc/tests/work_queue_waves_acceptance.rs`:
-- [ ] `work_queue_status_carries_each_items_wave_and_binding_needs`
+`packages/tddy-tool-engine/tests/work_queue_waves_tools.rs`:
+- [x] `work_queue_waves_is_defined_and_needs_no_argument`
+
+Status carrying each item's wave and binding needs is proved in the daemon-rpc stack suite by `/green`.
 
 `packages/tddy-workqueue-web/cypress/component/WorkQueueWavesAcceptance.cy.tsx`:
-- [ ] `items are drawn in wave lanes with their readiness`
-- [ ] `an out-of-order line shows the banner naming the first item out of place`
+- [x] `items are drawn in wave lanes with their readiness`
+- [x] `an out-of-order line shows the banner naming the first item out of place`
 
 ## Decisions & Trade-offs
 
@@ -160,10 +169,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
