@@ -1,3 +1,5 @@
+import { useState, type ReactNode } from "react";
+
 export interface CreateSessionWorkQueueToggleProps {
   withWorkQueue: boolean;
   setWithWorkQueue: (withWorkQueue: boolean) => void;
@@ -25,4 +27,15 @@ export function CreateSessionWorkQueueToggle({
       </label>
     </div>
   );
+}
+
+/** The form's "With work queue" choice and its control, unchecked until the user checks it. */
+export function useWorkQueueToggle(): { withWorkQueue: boolean; workQueueToggle: ReactNode } {
+  const [withWorkQueue, setWithWorkQueue] = useState(false);
+  return {
+    withWorkQueue,
+    workQueueToggle: (
+      <CreateSessionWorkQueueToggle withWorkQueue={withWorkQueue} setWithWorkQueue={setWithWorkQueue} />
+    ),
+  };
 }

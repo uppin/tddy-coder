@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { CreateSessionRunInTmuxToggle } from "./CreateSessionRunInTmuxToggle";
-import { CreateSessionWorkQueueToggle } from "./CreateSessionWorkQueueToggle";
+import { useWorkQueueToggle } from "./CreateSessionWorkQueueToggle";
 import {
   registerSessionTypeOptions,
   sessionLaunchOf,
@@ -199,7 +199,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     setSessionType,
   });
 
-  const [withWorkQueue, setWithWorkQueue] = useState(false);
+  const { withWorkQueue, workQueueToggle } = useWorkQueueToggle();
 
   const { asOrchestrator, orchestratorField } = useCreateSessionOrchestrator(
     sessionAgent,
@@ -391,13 +391,6 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
 
   // One "Run the agent in tmux" control for every CLI harness type: claude-cli places it in its own
   // fields, the other harnesses in the block below.
-  const workQueueToggle = (
-    <CreateSessionWorkQueueToggle
-      withWorkQueue={withWorkQueue}
-      setWithWorkQueue={setWithWorkQueue}
-    />
-  );
-
   const runInTmuxToggle = (
     <CreateSessionRunInTmuxToggle
       runInTmux={runInTmux}

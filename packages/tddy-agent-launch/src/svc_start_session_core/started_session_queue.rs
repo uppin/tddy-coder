@@ -28,7 +28,7 @@ pub(crate) fn give_the_session_its_queue(
     let created_at_unix_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+        .map_err(|e| format!("the system clock is before the Unix epoch: {e}"))?;
     match SessionWorkQueues::new(sessions_dir).create_for_session(
         &session_id,
         &metadata.project_id,

@@ -27,9 +27,10 @@ export type WorkQueueAddress = Pick<WireWorkQueueAddress, "projectId" | "queueId
 
 export interface WorkQueueViewProps {
   /**
-   * The stack to show, as the drawer's Stacks row listed it (`ListProjectWorkQueues`): every request the
-   * view makes carries this address, and the daemon it names serves them — forwarded there by
-   * whichever daemon the view's clients reach.
+   * The queue to show — its owning session's (`queue_id` is that session's id, `#workqueue` 5/14):
+   * every request the view makes carries this address, and the daemon it names serves them —
+   * forwarded there by whichever daemon the view's clients reach. A queue is created only when its
+   * session starts, so the view never makes one.
    */
   address: WorkQueueAddress;
   /** `work_queue.WorkQueueService` — `GetWorkQueue`, `QueryBranch` and every planned-PR control. */
@@ -90,7 +91,7 @@ function unpushedPullReason(baseBranch: string, branch: string, pushError: strin
  */
 export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
   const {
-    address: openedAddress,
+    address,
     workQueueClient,
     sessionToken = "",
     sessions = [],
@@ -107,9 +108,6 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     taskClient,
   } = props;
 
-  // The queue this view acts on: its owning session's (`#workqueue` 5/14). A queue is created only
-  // when its session starts, so the view never makes one.
-  const address = openedAddress;
 
   const [workQueueJson, setWorkQueueJson] = useState("");
   const [createdBySessionId, setCreatedBySessionId] = useState("");

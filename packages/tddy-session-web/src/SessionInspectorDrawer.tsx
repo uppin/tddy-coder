@@ -9,11 +9,7 @@ import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { VncService } from "tddy-client-web/gen/vnc_pb";
 import { ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
-import type { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
-import type { ProjectService, ProjectEntry } from "tddy-client-web/gen/project_pb";
-import type { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import type { TaskService } from "tddy-client-web/gen/tasks_pb";
-import { WorkQueueView } from "tddy-workqueue-web";
+import { SessionWorkQueueTab, type SessionWorkQueueTabInputs } from "./SessionWorkQueueTab";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import {
   isDormantInspectorTabName,
@@ -45,7 +41,8 @@ import { requestSessionsRefresh } from "./lib/sessionsRefreshBridge";
 
 export type InspectorDrawerState = "closed" | "open" | "expanded";
 
-interface SessionInspectorDrawerProps {
+/** The Work queue tab's own inputs are [`SessionWorkQueueTabInputs`]. */
+interface SessionInspectorDrawerProps extends SessionWorkQueueTabInputs {
   state: InspectorDrawerState;
   session: SessionEntry | null;
   /** The drawer's full session list — the Agents tab folds this session's subagents out of it. */
@@ -71,17 +68,6 @@ interface SessionInspectorDrawerProps {
    * deletes a session's uploads through.
    */
   sessionFilesClient?: Client<typeof SessionFilesService>;
-  /** The Work queue tab's Start-session dialog reads the project registry, the catalog and the start's
-   *  task through these, on the same host as `client`. The dialog is offered only with all of them. */
-  projectClient?: Client<typeof ProjectService>;
-  catalogClient?: Client<typeof CatalogService>;
-  taskClient?: Client<typeof TaskService>;
-  /** The projects the drawer lists — the Work queue tab reads its project's default branch from them. */
-  projects?: ProjectEntry[];
-  /** `work_queue.WorkQueueService` on the selected daemon — the Work queue tab's queue is read and edited through it. */
-  workQueueClient?: Client<typeof WorkQueueService>;
-  sessionMetadataBySessionId?: React.ComponentProps<typeof WorkQueueView>["sessionMetadataBySessionId"];
-  onChildSessionStarted?: React.ComponentProps<typeof WorkQueueView>["onChildSessionStarted"];
   sessionToken?: string;
   /**
    * The connection to the host that owns this session, or `null` when nothing can reach it.
@@ -138,13 +124,6 @@ export function SessionInspectorDrawer({
   execToolClient,
   worktreeClient,
   sessionFilesClient,
-  projectClient,
-  catalogClient,
-  taskClient,
-  projects = [],
-  workQueueClient,
-  sessionMetadataBySessionId,
-  onChildSessionStarted,
   sessionToken,
   hostConnection,
   room = null,
@@ -152,6 +131,7 @@ export function SessionInspectorDrawer({
   buildSessionExecToolClient,
   onInsertPathIntoTerminal,
   onSwitchPeer,
+  ...workQueueTabInputs
 }: SessionInspectorDrawerProps) {
   const [pendingDelete, setPendingDelete] = useState(false);
   // The active tab lives in the URL (`?inspector=<tab>`) so a shared link opens on the same tab.
@@ -159,7 +139,7 @@ export function SessionInspectorDrawer({
   // normalises the param itself, so the two never disagree for long.
   const { location, setParams } = useAppLocation();
   const tabParam = location.params[PARAM_INSPECTOR] ?? "";
-  // No param: the session's default tab (PR when it has one, else Worktree). A name the inspector does
+  // No param: the session's default tab (Work queue when it owns one, else PR, else Worktree). A name the inspector does
   // not have degrades to Details.
   const requestedTab: InspectorTab = isInspectorTabName(tabParam)
     ? tabParam
@@ -332,28 +312,15 @@ export function SessionInspectorDrawer({
           </ScrollArea>
         ) : tab === "work-queue" ? (
           <ScrollArea className="flex-1 min-h-0">
-            {/* The queue is the session's own: its id is the session's (`#workqueue` 5/14). */}
-            <WorkQueueView
-              address={{
-                projectId: session.projectId,
-                queueId: session.sessionId,
-                daemonInstanceId: session.daemonInstanceId,
-              }}
-              workQueueClient={workQueueClient}
+            <SessionWorkQueueTab
+              {...workQueueTabInputs}
+              session={session}
               sessionToken={sessionToken ?? ""}
               sessions={sessions}
-              defaultBranch={
-                projects.find((project) => project.projectId === session.projectId)?.mainBranchRef ?? ""
-              }
               onOpenSession={onSwitchPeer}
-              sessionMetadataBySessionId={sessionMetadataBySessionId}
-              onChildSessionStarted={onChildSessionStarted}
               client={client}
-              projectClient={projectClient}
-              catalogClient={catalogClient}
               sessionFilesClient={sessionFilesClient}
               worktreeClient={worktreeClient}
-              taskClient={taskClient}
             />
           </ScrollArea>
         ) : tab === "pr" ? (

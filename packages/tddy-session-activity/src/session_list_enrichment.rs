@@ -72,46 +72,57 @@ impl SessionListStatusDisplay {
     }
 }
 
-/// Serialize a session's PR stack to JSON for the `work_queue_json` proto field; empty string when
-/// the session has none or on a read or serialization failure (logged, never propagated as an
-/// error — enrichment is best-effort display data).
+/// Serialize the work queue a session owns to JSON for the `work_queue_json` proto field; empty
+/// string when the session owns none or on a read or serialization failure (logged, never
+/// propagated as an error — enrichment is best-effort display data).
 ///
-/// The queue is the one the session owns (`<session dir>/work-queue.yaml`, `#workqueue` 5/14); a
-/// session that owns none lists none.
+/// The queue is the one the session owns (`<session dir>/work-queue.yaml`, `#workqueue` 5/14).
 ///
-/// Public because `tddy-daemon-rpc`'s PR-stack family reuses it to serialize its responses'
-/// `work_queue_json` in the exact wire shape `PrStackScreen` already knows how to parse.
-pub fn work_queue_json_for_changeset(session_dir: &Path, _changeset: &Changeset) -> String {
+/// Public because `tddy-daemon-rpc`'s work-queue family reuses it to serialize its responses'
+/// `work_queue_json` in the exact wire shape the web already knows how to parse.
+pub fn work_queue_json_of(session_dir: &Path) -> String {
+    owned_queue(session_dir).json
+}
+
+/// The queue a session owns, as a listing row shows it — read once per row.
+struct OwnedQueue {
+    /// The queue's id — the owning session's own — or empty when it owns none.
+    queue_id: String,
+    /// The queue as JSON, or empty (see [`work_queue_json_of`]).
+    json: String,
+}
+
+fn owned_queue(session_dir: &Path) -> OwnedQueue {
+    let none = || OwnedQueue {
+        queue_id: String::new(),
+        json: String::new(),
+    };
     let stack = match tddy_core::changeset::read_session_stack(session_dir) {
         Ok(Some(stack)) => stack,
-        Ok(None) => return String::new(),
+        Ok(None) => return none(),
         Err(e) => {
             log::warn!(
                 target: "tddy_daemon::session_list_enrichment",
-                "work_queue_json_for_changeset: failed to read the stack of {}: {e}",
+                "failed to read the work queue of {}: {e}",
                 session_dir.display()
             );
-            return String::new();
+            return none();
         }
     };
-    serde_json::to_string(&stack).unwrap_or_else(|e| {
+    let json = serde_json::to_string(&stack).unwrap_or_else(|e| {
         log::warn!(
             target: "tddy_daemon::session_list_enrichment",
-            "work_queue_json_for_changeset: failed to serialize stack: {e}"
+            "failed to serialize the work queue of {}: {e}",
+            session_dir.display()
         );
         String::new()
-    })
-}
-
-/// The id of the queue the session at `session_dir` owns — its own session id — or empty when it
-/// owns none.
-fn owned_queue_id(session_dir: &Path) -> String {
-    match tddy_core::changeset::read_session_stack(session_dir) {
-        Ok(Some(_)) => session_dir
+    });
+    OwnedQueue {
+        queue_id: session_dir
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default(),
-        _ => String::new(),
+        json,
     }
 }
 
@@ -260,6 +271,7 @@ fn state_only_row(
     workflow_state: String,
     elapsed_display: String,
 ) -> SessionListStatusDisplay {
+    let queue = owned_queue(session_dir);
     SessionListStatusDisplay {
         workflow_goal: "—".to_string(),
         workflow_state,
@@ -272,8 +284,8 @@ fn state_only_row(
             .clone()
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
-        work_queue_json: work_queue_json_for_changeset(session_dir, changeset),
-        queue_id: owned_queue_id(session_dir),
+        work_queue_json: queue.json,
+        queue_id: queue.queue_id,
         branch: changeset.branch.clone().unwrap_or_default(),
     }
 }
@@ -300,6 +312,7 @@ fn workflow_row(
         elapsed_display
     );
 
+    let queue = owned_queue(session_dir);
     SessionListStatusDisplay {
         workflow_goal,
         workflow_state,
@@ -312,8 +325,8 @@ fn workflow_row(
             .clone()
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
-        work_queue_json: work_queue_json_for_changeset(session_dir, changeset),
-        queue_id: owned_queue_id(session_dir),
+        work_queue_json: queue.json,
+        queue_id: queue.queue_id,
         branch: changeset.branch.clone().unwrap_or_default(),
     }
 }
@@ -340,7 +353,7 @@ fn cli_harness_row(
             .and_then(|c| c.recipe.clone())
             .unwrap_or_default(),
         work_queue_json: String::new(),
-        queue_id: owned_queue_id(session_dir),
+        queue_id: owned_queue(session_dir).queue_id,
         branch: changeset.and_then(|c| c.branch).unwrap_or_default(),
     }
 }

@@ -10,7 +10,7 @@
 //! Every write is a read-modify-write of one record under a per-record lock finished by an atomic
 //! rename, so two writers to the same queue both land and a reader never sees a half-written record.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::changeset::WorkQueue;
 use crate::session_work_queue::{SessionWorkQueueError, SessionWorkQueueRecord, SessionWorkQueues};
@@ -68,6 +68,9 @@ pub enum WorkQueueStoreError {
         #[source]
         source: std::io::Error,
     },
+    /// Any other refusal of the session-keyed store, as it gave it.
+    #[error(transparent)]
+    Queue(SessionWorkQueueError),
 }
 
 /// The work queues of every session on this host, by queue id, under one sessions base
@@ -108,7 +111,7 @@ impl WorkQueueStore {
         let record = self
             .queues()
             .read(queue_id)
-            .map_err(|e| store_error(e, queue_id))?
+            .map_err(|e| store_error(e, project_id))?
             .filter(|record| record.project_id == project_id)
             .ok_or_else(not_found)?;
         Ok(WorkQueueRecord::of(record))
@@ -126,7 +129,7 @@ impl WorkQueueStore {
         let record = self
             .queues()
             .update(queue_id, f)
-            .map_err(|e| store_error(e, queue_id))?;
+            .map_err(|e| store_error(e, project_id))?;
         Ok(WorkQueueRecord::of(record))
     }
 
@@ -136,7 +139,7 @@ impl WorkQueueStore {
         let mut records: Vec<WorkQueueRecord> = self
             .queues()
             .list_for_project(project_id)
-            .map_err(|e| store_error(e, ""))?
+            .map_err(|e| store_error(e, project_id))?
             .into_iter()
             .map(WorkQueueRecord::of)
             .collect();
@@ -159,20 +162,18 @@ fn check_project(project_id: &str) -> Result<(), WorkQueueStoreError> {
     }
 }
 
-fn store_error(error: SessionWorkQueueError, queue_id: &str) -> WorkQueueStoreError {
+/// `error` as this view's, for a call about `project_id`.
+fn store_error(error: SessionWorkQueueError, project_id: &str) -> WorkQueueStoreError {
     match error {
         SessionWorkQueueError::InvalidSessionId(id) => WorkQueueStoreError::InvalidStackId(id),
         SessionWorkQueueError::NoQueue { session_id } => WorkQueueStoreError::NotFound {
-            project_id: String::new(),
+            project_id: project_id.to_string(),
             queue_id: session_id,
-        },
-        SessionWorkQueueError::AlreadyExists { session_id } => WorkQueueStoreError::Malformed {
-            path: Path::new(&session_id).to_path_buf(),
-            message: format!("queue {queue_id} already exists"),
         },
         SessionWorkQueueError::Malformed { path, message } => {
             WorkQueueStoreError::Malformed { path, message }
         }
         SessionWorkQueueError::Io { path, source } => WorkQueueStoreError::Io { path, source },
+        other @ SessionWorkQueueError::AlreadyExists { .. } => WorkQueueStoreError::Queue(other),
     }
 }

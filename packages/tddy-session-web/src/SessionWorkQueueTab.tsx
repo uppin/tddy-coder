@@ -1,0 +1,60 @@
+import type React from "react";
+import type { Client } from "@connectrpc/connect";
+import type { SessionEntry } from "tddy-client-web/gen/session_pb";
+import type { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
+import type { ProjectService, ProjectEntry } from "tddy-client-web/gen/project_pb";
+import type { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import type { TaskService } from "tddy-client-web/gen/tasks_pb";
+import { WorkQueueView } from "tddy-workqueue-web";
+
+type WorkQueueViewProps = React.ComponentProps<typeof WorkQueueView>;
+
+/** What the inspector's Work queue tab needs beyond the clients every inspector tab shares. */
+export interface SessionWorkQueueTabInputs {
+  /** The Work queue tab's Start-session dialog reads the project registry, the catalog and the start's
+   *  task through these, on the same host as `client`. The dialog is offered only with all of them. */
+  projectClient?: Client<typeof ProjectService>;
+  catalogClient?: Client<typeof CatalogService>;
+  taskClient?: Client<typeof TaskService>;
+  /** The projects the drawer lists — the Work queue tab reads its project's default branch from them. */
+  projects?: ProjectEntry[];
+  /** `work_queue.WorkQueueService` on the selected daemon — the Work queue tab's queue is read and edited through it. */
+  workQueueClient?: Client<typeof WorkQueueService>;
+  sessionMetadataBySessionId?: WorkQueueViewProps["sessionMetadataBySessionId"];
+  onChildSessionStarted?: WorkQueueViewProps["onChildSessionStarted"];
+}
+
+export interface SessionWorkQueueTabProps extends SessionWorkQueueTabInputs {
+  /** The session whose own work queue the tab shows. */
+  session: SessionEntry;
+  sessions: WorkQueueViewProps["sessions"];
+  sessionToken: string;
+  onOpenSession?: WorkQueueViewProps["onOpenSession"];
+  client: WorkQueueViewProps["client"];
+  sessionFilesClient: WorkQueueViewProps["sessionFilesClient"];
+  worktreeClient: WorkQueueViewProps["worktreeClient"];
+}
+
+/**
+ * The inspector's Work queue tab (`#workqueue` 5/14): the session's own queue — its id is the
+ * session's — shown in the queue view, addressed at the daemon that holds the session.
+ */
+export function SessionWorkQueueTab({
+  session,
+  projects = [],
+  ...rest
+}: SessionWorkQueueTabProps) {
+  return (
+    <WorkQueueView
+      address={{
+        projectId: session.projectId,
+        queueId: session.sessionId,
+        daemonInstanceId: session.daemonInstanceId,
+      }}
+      defaultBranch={
+        projects.find((project) => project.projectId === session.projectId)?.mainBranchRef ?? ""
+      }
+      {...rest}
+    />
+  );
+}

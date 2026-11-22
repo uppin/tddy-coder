@@ -97,7 +97,7 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         // Re-read the just-updated changeset and reuse the same serializer as `ListSessions`
         // enrichment so the response's `work_queue_json` is byte-for-byte the same wire shape
         // `PrStackScreen`'s `parseWorkQueue` already knows how to read.
-        let work_queue_json = work_queue_json_of(&session_dir)?;
+        let work_queue_json = session_list_enrichment::work_queue_json_of(&session_dir);
 
         log::info!(
             "AddWorkItem: success session_id={} node_id={} title={:?}",
@@ -466,7 +466,7 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         // `ReorderWorkItem` answer with, so a caller that renders the plan reuses `parseWorkQueue`
         // and does not re-read what this call already knows.
         Ok(Response::new(LinkWorkItemResponse {
-            work_queue_json: work_queue_json_of(&session_dir)?,
+            work_queue_json: session_list_enrichment::work_queue_json_of(&session_dir),
         }))
     }
 
@@ -608,7 +608,7 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         // Re-read the just-updated changeset and reuse the same serializer as `ListSessions`
         // enrichment so the response's `work_queue_json` is the exact wire shape `PrStackScreen`
         // already knows how to parse.
-        let work_queue_json = work_queue_json_of(&session_dir)?;
+        let work_queue_json = session_list_enrichment::work_queue_json_of(&session_dir);
         Ok(Response::new(RepointWorkItemResponse { work_queue_json }))
     }
 
@@ -661,7 +661,7 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
 
         // The same serializer `ListSessions` enrichment uses, so the response's `work_queue_json` is
         // the exact wire shape `PrStackScreen`'s `parseWorkQueue` already reads.
-        let work_queue_json = work_queue_json_of(&session_dir)?;
+        let work_queue_json = session_list_enrichment::work_queue_json_of(&session_dir);
         Ok(Response::new(ReorderWorkItemResponse { work_queue_json }))
     }
 
@@ -857,13 +857,4 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
     ) -> Result<Response<GetWorkQueueResponse>, Status> {
         self.get_work_queue_rpc(request).await
     }
-}
-
-/// The session's stack as `work_queue_json`, through the serializer `ListSessions` enrichment uses.
-fn work_queue_json_of(dir: &std::path::Path) -> Result<String, Status> {
-    // The queue is the session's own (`work-queue.yaml`); the session need have no changeset.
-    Ok(session_list_enrichment::work_queue_json_for_changeset(
-        dir,
-        &tddy_core::changeset::Changeset::default(),
-    ))
 }

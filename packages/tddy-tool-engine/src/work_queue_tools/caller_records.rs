@@ -116,6 +116,20 @@ pub fn stack_and_git_tools_offered_to(access: Option<WorkQueueAccess>) -> Vec<To
     crate::work_queue_access::work_queue_tools_offered_to(access)
 }
 
+/// `catalogue` — a session's role catalogue — with its work tools replaced by those `access` offers:
+/// what a session's `ListExecTools` answers on the daemon and in its jail alike. The role chose the
+/// catalogue; the work tools follow the queue alone.
+pub fn with_work_tools_offered_to(
+    mut catalogue: Vec<ToolDef>,
+    access: Option<WorkQueueAccess>,
+) -> Vec<ToolDef> {
+    catalogue.retain(|tool| {
+        !super::is_stack_tool(&tool.name) && !crate::work_item_git_tools::is_stack_git_tool(&tool.name)
+    });
+    catalogue.extend(stack_and_git_tools_offered_to(access));
+    catalogue
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -273,5 +287,32 @@ mod tests {
             .collect();
         assert_eq!(owner, every);
         assert_eq!(addressed, vec!["work_queue_status", "work_pr_read"]);
+    }
+
+    #[test]
+    fn a_catalogue_keeps_its_other_tools_and_only_the_work_tools_its_access_offers() {
+        // Given a role catalogue carrying a non-work tool and every work tool
+        let other = ToolDef {
+            name: "ListSessions".to_string(),
+            description: String::new(),
+            input_schema_json: String::new(),
+        };
+        let catalogue: Vec<ToolDef> = std::iter::once(other)
+            .chain(stack_and_git_tools_offered_to(Some(WorkQueueAccess::Owner)))
+            .collect();
+
+        // When the work tools are replaced for an addressed session, and for one with no access
+        let addressed = names(with_work_tools_offered_to(
+            catalogue.clone(),
+            Some(WorkQueueAccess::Addressed),
+        ));
+        let none = names(with_work_tools_offered_to(catalogue, None));
+
+        // Then the other tool stays and only the access's work tools remain
+        assert_eq!(
+            addressed,
+            vec!["ListSessions", "work_queue_status", "work_pr_read"]
+        );
+        assert_eq!(none, vec!["ListSessions"]);
     }
 }

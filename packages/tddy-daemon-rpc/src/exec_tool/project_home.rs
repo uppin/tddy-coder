@@ -85,7 +85,7 @@ use tddy_tool_engine::session_file_tools::is_session_file_tool;
 use tddy_tool_engine::session_message_tools::is_session_message_tool;
 use tddy_tool_engine::start_ledger::StartLedger;
 use tddy_tool_engine::work_item_git_tools::is_stack_git_tool;
-use tddy_tool_engine::work_queue_tools::caller_records::stack_and_git_tools_offered_to;
+use tddy_tool_engine::work_queue_tools::caller_records::with_work_tools_offered_to;
 use tddy_tool_engine::work_queue_tools::is_stack_tool;
 use tddy_worktree_service::session_target::HomeCaller;
 use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
@@ -295,7 +295,7 @@ impl ExecToolRpcHandler {
                 "session {session_id}: cannot read its record to tell which tools it is offered ({e})"
             ))
         })?;
-        let mut tools = session_offered_catalog_for(
+        let catalogue = session_offered_catalog_for(
             session_tool_role(&metadata),
             &start_choices(
                 &self.peer_routing,
@@ -305,17 +305,8 @@ impl ExecToolRpcHandler {
                     .unwrap_or_else(|| empty_coding_agents()),
             ),
         );
-        // The work tools are offered by the queue a session owns or is addressed by, never by its
-        // role: a project-home session's catalogue lists them, and keeps only those its queue gives it.
-        tools.retain(|tool| {
-            !tddy_tool_engine::work_queue_tools::is_stack_tool(&tool.name)
-                && !tddy_tool_engine::work_item_git_tools::is_stack_git_tool(&tool.name)
-        });
-        let caller = work_queue_caller_of(&sessions_base, session_id)?;
-        tools.extend(stack_and_git_tools_offered_to(
-            caller.map(|(_, access)| access),
-        ));
-        Ok(tools)
+        let access = work_queue_caller_of(&sessions_base, session_id)?.map(|(_, access)| access);
+        Ok(with_work_tools_offered_to(catalogue, access))
     }
 
     /// The OS user `session_token` maps to, as the start path resolves it.

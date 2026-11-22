@@ -13,7 +13,7 @@ use tddy_service::proto::exec_tools::{ListExecToolsRequest, ListExecToolsRespons
 use tddy_tool_engine::project_home_tools::session_offered_catalog_for;
 use tddy_tool_engine::start_session_args::{HostChoice, StartChoices};
 use tddy_tool_engine::work_queue_tools::caller_records::{
-    stack_and_git_tools_offered_to, work_queue_caller_from_records,
+    with_work_tools_offered_to, work_queue_caller_from_records,
 };
 
 /// What `StartSession`'s schema offers on this daemon: every eligible host on `routing`'s roster,
@@ -105,33 +105,21 @@ pub(crate) fn list_exec_tools_from_jail(
         ))
     })?;
     let role = tddy_agent_launch::conversation_spawn::session_tool_role(&metadata);
-    let mut tools: Vec<ToolDef> = session_offered_catalog_for(role, choices)
-        .into_iter()
-        .map(|tool| ToolDef {
-            name: tool.name,
-            description: tool.description,
-            input_schema_json: tool.input_schema_json,
-        })
-        .collect();
-    // The work tools are offered by the queue a session owns or is addressed by, never by its role: a
-    // project-home session's catalogue lists them, and keeps only those its queue gives it.
-    tools.retain(|tool| {
-        !tddy_tool_engine::work_queue_tools::is_stack_tool(&tool.name)
-            && !tddy_tool_engine::work_item_git_tools::is_stack_git_tool(&tool.name)
-    });
-    if let Some(sessions_base) = bound.sessions_base() {
-        let caller = work_queue_caller_from_records(sessions_base, &bound.session_id)
-            .map_err(|e| Status::permission_denied(format!("the stack tools are refused: {e}")))?;
-        tools.extend(
-            stack_and_git_tools_offered_to(caller.map(|(_, access)| access))
-                .into_iter()
-                .map(|tool| ToolDef {
-                    name: tool.name,
-                    description: tool.description,
-                    input_schema_json: tool.input_schema_json,
-                }),
-        );
-    }
+    let access = match bound.sessions_base() {
+        Some(sessions_base) => work_queue_caller_from_records(sessions_base, &bound.session_id)
+            .map_err(|e| Status::permission_denied(format!("the stack tools are refused: {e}")))?
+            .map(|(_, access)| access),
+        None => None,
+    };
+    let tools: Vec<ToolDef> =
+        with_work_tools_offered_to(session_offered_catalog_for(role, choices), access)
+            .into_iter()
+            .map(|tool| ToolDef {
+                name: tool.name,
+                description: tool.description,
+                input_schema_json: tool.input_schema_json,
+            })
+            .collect();
     Ok(ListExecToolsResponse { tools }.encode_to_vec())
 }
 
