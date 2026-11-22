@@ -14,7 +14,7 @@
 @source "../../tddy-client-web/src";
 @source "../../tddy-hosts-web/src";
 @source "../../tddy-livekit-web/src";
-@source "../../tddy-prstack-web/src";
+@source "../../tddy-workqueue-web/src";
 @source "../../tddy-rpc-playground-web/src";
 @source "../../tddy-session-create-web/src";
 @source "../../tddy-session-web/src";
