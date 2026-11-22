@@ -6,6 +6,7 @@ pub mod provider;
 pub mod real;
 pub mod session_token_v2;
 pub mod stub;
+pub mod trunk_feed;
 
 pub use auth_service::{
     AuthServiceImpl, LoginAdmission, AVATAR_URL_METADATA, FREE_WRONG_PASSPHRASES,

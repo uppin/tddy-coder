@@ -511,6 +511,34 @@ async fn creating_a_watch_is_refused_with_what_to_do() {
 }
 
 #[tokio::test]
+async fn an_orchestrator_may_watch_its_own_trunk_activity_and_nothing_else_of_itself() {
+    // Given an orchestrator
+    let world = a_world().await;
+    let orchestrator = world.orchestrator.clone();
+
+    // When it watches its own session for trunk commits only
+    let answer = world
+        .call_as(
+            &orchestrator,
+            CREATE_SESSION_WATCH,
+            json!({ "session_ids": [orchestrator], "kinds": ["trunk_commit"], "ttl_seconds": AN_HOUR }),
+        )
+        .await;
+
+    // Then the watch is created
+    assert!(!answer.is_error, "{}", answer.error_message);
+
+    // And a self-watch of any other kind is still refused
+    let refusal = creating_as(
+        &world,
+        &orchestrator,
+        json!({ "session_ids": [orchestrator], "kinds": ["trunk_commit", "ended"], "ttl_seconds": AN_HOUR }),
+    )
+    .await;
+    assert!(refusal.contains("own session"), "{refusal}");
+}
+
+#[tokio::test]
 async fn a_session_that_is_not_an_orchestrator_is_refused_the_watch_tools() {
     // Given an ordinary session of the project
     let world = a_world().await;

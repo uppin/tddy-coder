@@ -157,6 +157,35 @@ pub fn a_home_daemon_with_coding_agents(
     )
 }
 
+/// [`a_home_daemon`] over a project whose remote is on GitHub and read through the host's `gh`, on a
+/// daemon that watches the trunks of its orchestrators' projects (`#orchestra` 5/9). Nothing is
+/// polled: the watch's driving task is never started, so only its subscriptions are observable.
+// Used by the orchestrator suite; the others include this module too.
+#[allow(dead_code)]
+pub fn a_home_daemon_watching_trunks(repo: &Path) -> HomeDaemon {
+    build_home_daemon(
+        repo,
+        "    main_branch_ref: origin/main\n",
+        "",
+        "",
+        true,
+        |host, data| {
+            let projects_dir = data.join("projects");
+            let mut rows = tddy_projects::project_storage::read_projects(&projects_dir)
+                .expect("the registry reads");
+            for row in &mut rows {
+                row.git_url = "https://github.com/acme/app.git".to_string();
+                row.local_gh = true;
+            }
+            tddy_projects::project_storage::write_projects(&projects_dir, &rows)
+                .expect("the registry is written");
+            host.with_trunk_watch(Arc::new(
+                tddy_session_activity::session_notifications::SessionNotificationBus::new(),
+            ))
+        },
+    )
+}
+
 fn build_home_daemon(
     repo: &Path,
     main_branch_ref_line: &str,

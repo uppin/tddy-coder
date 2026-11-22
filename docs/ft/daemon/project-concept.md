@@ -430,7 +430,7 @@ role's (see [Messages between sessions](#messages-between-sessions)).
 | `RefreshHome` | — | the same answer after fetching and fast-forwarding the caller's home worktree to the trunk tip. A home with commits of its own is refused, the error naming where it stands, and left untouched. Orchestrator roles only |
 | `WaitProjectNotifications` | `cursor?`, `timeout_ms?` (at most 20000, the default), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, timed_out, lost?}`: returns at once when the project's notification log holds records after `cursor`, otherwise holds until one arrives or `timeout_ms` passes. Without a cursor it waits for the next new record. See [Waiting for notifications](#waiting-for-notifications) |
 | `ReadProjectNotifications` | `cursor?`, `limit?` (50 by default, at most 200), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, clamped_to?, lost?}`: up to `limit` records after `cursor`, oldest first, without waiting; without a cursor, the newest page. See [Waiting for notifications](#waiting-for-notifications) |
-| `CreateSessionWatch` | `session_ids?`, `started_by_me?`, `kinds?`, `ttl_seconds` (required, 1 to 86400) | `{watch_id, session_ids, started_by_me, kinds, created_at_unix_ms, expires_at_unix_ms}`: a watch over the sessions it names, or every session the caller started, for the kinds named (all seven when none: `question`, `permission`, `turn_finished`, `waiting_for_input`, `agent_notification`, `ended`, `message`). The kind `message` alone with no session selected is the caller's inbox watch — the one watch a session that is not an orchestrator may hold. See [Watching sessions](#watching-sessions) |
+| `CreateSessionWatch` | `session_ids?`, `started_by_me?`, `kinds?`, `ttl_seconds` (required, 1 to 86400) | `{watch_id, session_ids, started_by_me, kinds, created_at_unix_ms, expires_at_unix_ms}`: a watch over the sessions it names, or every session the caller started, for the kinds named (every kind when none: `question`, `permission`, `turn_finished`, `waiting_for_input`, `agent_notification`, `ended`, `message`, `trunk_commit`). The kind `message` alone with no session selected is the caller's inbox watch — the one watch a session that is not an orchestrator may hold. See [Watching sessions](#watching-sessions) |
 | `ListSessionWatches` | — | `{watches}`: the caller's live watches, each with its filter, expiry and how many matched events wait (`waiting`) |
 | `RenewSessionWatch` | `watch_id`, `ttl_seconds` (required, 1 to 86400) | the watch, expiring `ttl_seconds` from now |
 | `CancelSessionWatch` | `watch_id` | `{watch_id, cancelled: true}`: the watch ends; nothing more is delivered for it |
@@ -907,17 +907,19 @@ wait open.
 
 - **Creation.** `CreateSessionWatch` names sessions by `session_ids`, or every session the caller
   started with `started_by_me`, or both — at least one of the two, except the **inbox watch**,
-  which selects no session and is the caller's own (below). `kinds` names which of the seven kinds
-  match (all seven when none is named): a `question` or `permission` prompt, a `turn_finished`
+  which selects no session and is the caller's own (below). `kinds` names which of the eight kinds
+  match (all of them when none is named): a `question` or `permission` prompt, a `turn_finished`
   (`Done`), a `waiting_for_input` (`WaitingForInput` with no question — an activity-status record
   carrying a question matches nothing, since its `pending_question` record already announced that
-  prompt), an `agent_notification`, an `ended` (`session_ended`), or a `message`. `ttl_seconds` is
+  prompt), an `agent_notification`, an `ended` (`session_ended`), a `message`, or a `trunk_commit`
+  (the caller's own, see [Watching the trunk](#watching-the-trunk)). `ttl_seconds` is
   required, from 1 to 86400 (24 hours); `RenewSessionWatch` restarts it for one of the caller's
   watches. One orchestrator holds at most 16 live watches.
 - **Visibility.** A watch sees exactly what the inbox tools see: the caller's project and operating-system
   user, on this host, never the caller's own session. A `session_ids` entry with no session record
   here, or one of another project, is refused naming the session; naming the caller's own session is
-  refused saying why. A caller that is not an orchestrator is refused by the role guard — except its
+  refused saying why — except a watch of the kind `trunk_commit` alone, which is how an orchestrator
+  watches its own trunk activity. A caller that is not an orchestrator is refused by the role guard — except its
   **inbox watch**, the one watch any session may hold: `CreateSessionWatch` with the kind `message`
   alone and no session selected, matching the messages addressed to it
   ([Messages between sessions](#messages-between-sessions)); every other watch tool call from such a
@@ -969,6 +971,44 @@ wait open.
   that fails delivers nothing, and what was waiting waits for the next chance. A busy orchestrator
   is woken once its turn ends with events still waiting. A stopped orchestrator is never started
   by a wake.
+
+#### Watching the trunk
+
+The daemon watches each project's remote trunk (its main branch ref, e.g. `origin/main`) for its
+orchestrators, so a running orchestrator learns within about a minute that the trunk moved and can
+refresh its home before it starts more work.
+
+- **Who is subscribed.** Every orchestrator-role session (`project-home` main and `orchestrator`) is
+  subscribed when it starts and when it resumes. No other session ever is.
+- **One poller per project.** However many orchestrators of a project run, the daemon polls its
+  trunk once per interval, and stops polling as soon as no subscribed session is live: a stopped,
+  ended or deleted session is dropped within seconds, the project's poller with its last subscriber.
+- **The read.** The trunk's newest 100 commits are read **conditionally**, with the ETag of the
+  last answer, so an unchanged trunk costs a free `304`. The next poll waits out GitHub's
+  `X-Poll-Interval` (60 s when it names none), and at least 60 s after a failed read. Every 15
+  minutes the read ignores its ETag. The first answer is a baseline: nothing already on the trunk is
+  reported.
+- **Identity.** A **Local gh** project is read through the host's `gh api -i`, as the session's OS
+  user ([Local gh](#local-gh)); `gh` exits non-zero on a `304`, which is read as "not modified".
+  Any other project is read through the REST API with the project's GitHub account, from the vault
+  of the GitHub user who started or resumed the first subscribed orchestrator; the token is read
+  again on every poll, so one rotated in the vault is used from the next poll on.
+- **What an orchestrator receives.** Each new commit becomes one `trunk_commit` activity on every
+  subscribed orchestrator — a record of **its own session** in the project notification log, one
+  line `origin/main: <short sha> <subject> (<author>)`, oldest first. A tip that does not descend
+  from the one last seen is reported once as `origin/main was rewritten: <old> -> <new> <subject>
+  (<author>)`.
+- **Reading it.** An orchestrator reads its trunk activity through a watch of its own session with
+  the kind `trunk_commit` alone: on its next tool answer, through `WaitSessionWatchEvents` /
+  `tddy-tools monitor`, or as a wake when it is idle. The records are its own, so
+  `ReadProjectNotifications` / `WaitProjectNotifications` never list them — to itself or to another
+  orchestrator — and no operator surface shows them
+  ([Session notifications](session-notifications.md)).
+- **Not refreshed for it.** The watch reports; refreshing the home worktree stays the
+  orchestrator's decision.
+- **Known limitations.** Only `github.com` remotes are watched; a project on GitHub Enterprise or
+  elsewhere is logged and left unwatched. A burst of more than 100 commits between two polls is
+  reported as a rewrite, since the last tip seen is outside the window read.
 
 ### Following a session
 

@@ -16,6 +16,7 @@ use tddy_rpc::Response;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use tddy_core::session_metadata::is_orchestrator_role;
 
 use crate::svc_start_session_core::CliStart;
 
@@ -140,6 +141,15 @@ impl LaunchSessions {
                 .await?
         };
         self.announce_worktree_ready(&sessions_base, &session_id);
+        // A started orchestrator watches its project's trunk (`#orchestra` 5/9).
+        if is_orchestrator_role(req.session_role.trim()) {
+            self.host.orchestrator_running(
+                os_user,
+                req.project_id.trim(),
+                &session_id,
+                &req.session_token,
+            );
+        }
         Ok(started)
     }
 

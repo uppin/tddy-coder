@@ -78,24 +78,29 @@ impl LaunchSessions {
             metadata.tool.as_deref(),
         )?;
         if let SessionLaunch::AgentCli(kind) = launch {
+            // A resumed orchestrator watches its project's trunk again (`#orchestra` 5/9).
+            let orchestrator_project = metadata
+                .session_role
+                .as_deref()
+                .is_some_and(tddy_core::session_metadata::is_orchestrator_role)
+                .then(|| metadata.project_id.clone());
             // A sandboxed session resumes in its jail and never on the host's PTY.
-            if metadata.sandbox == Some(true) {
-                return bridge_conn_resume_response(
-                    self.resume_sandboxed_cli_harness(kind, os_user, &req, &session_dir, metadata)
-                        .await,
+            let resumed = if metadata.sandbox == Some(true) {
+                self.resume_sandboxed_cli_harness(kind, os_user, &req, &session_dir, metadata)
+                    .await
+            } else {
+                self.resume_cli_harness(kind, os_user, &req, &sessions_base, &session_dir, metadata)
+                    .await
+            };
+            if let (Ok(_), Some(project_id)) = (&resumed, orchestrator_project) {
+                self.host.orchestrator_running(
+                    os_user,
+                    &project_id,
+                    &req.session_id,
+                    &req.session_token,
                 );
             }
-            return bridge_conn_resume_response(
-                self.resume_cli_harness(
-                    kind,
-                    os_user,
-                    &req,
-                    &sessions_base,
-                    &session_dir,
-                    metadata,
-                )
-                .await,
-            );
+            return bridge_conn_resume_response(resumed);
         }
 
         // --- no-agent branch: re-provision jail when sandboxed, no LiveKit ---

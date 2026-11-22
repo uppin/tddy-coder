@@ -139,4 +139,14 @@ impl LaunchHost for DaemonSessionHost {
     ) -> SessionIdentity {
         DaemonSessionHost::session_identity(self, os_user, session_id, project_id, session_token)
     }
+
+    fn orchestrator_running(
+        &self,
+        os_user: &str,
+        project_id: &str,
+        session_id: &str,
+        session_token: &str,
+    ) {
+        self.subscribe_orchestrator_to_trunk(os_user, project_id, session_id, session_token);
+    }
 }
