@@ -2,9 +2,11 @@
 //! own example: n1 → n2, n3, n4, n5; n2 → n4; n5 → n6, n7, n8 (`a → b`: b needs a).
 
 use pretty_assertions::assert_eq;
+use tddy_core::changeset::{GithubPrStatus, PrInternalStatus, WorkItem, WorkQueue};
 use tddy_work_queue::lineage::{DependencyEdge, LineageError};
 use tddy_work_queue::waves::{
-    derive_line, line_check, readiness, transitive_dependents, waves, LineCheck,
+    derive_line, line_check, merged_items, queue_waves, readiness, transitive_dependents, waves,
+    LineCheck,
 };
 
 fn ids(values: &[&str]) -> Vec<String> {
@@ -115,4 +117,71 @@ fn a_cycle_reports_the_cycle_instead_of_waves() {
 
     // Then
     assert!(matches!(result, Err(LineageError::Cycle(_))), "{result:?}");
+}
+
+#[test]
+fn a_landed_need_is_met_so_the_item_no_longer_waits_on_it() {
+    // Given — n4 needs n1 and n2; n2 has merged
+    let (items, edges) = the_example();
+
+    // When
+    let derived = queue_waves(&items, &edges, &ids(&["n2"])).expect("queue waves");
+    let n4 = derived
+        .readiness
+        .iter()
+        .find(|(item, _)| item == "n4")
+        .map(|(_, waits_on)| waits_on.clone());
+
+    // Then — met needs leave readiness; the waves themselves stay structural
+    assert_eq!(
+        (n4, derived.waves[1].clone()),
+        (Some(Vec::<String>::new()), ids(&["n2", "n3", "n5"]))
+    );
+}
+
+#[test]
+fn an_unlanded_need_still_blocks() {
+    // Given — nothing merged
+    let (items, edges) = the_example();
+
+    // When
+    let derived = queue_waves(&items, &edges, &[]).expect("queue waves");
+    let n4 = derived.readiness.iter().find(|(item, _)| item == "n4");
+
+    // Then
+    assert_eq!(n4, Some(&("n4".to_string(), ids(&["n2"]))));
+}
+
+fn item(id: &str) -> WorkItem {
+    WorkItem {
+        node_id: id.to_string(),
+        title: id.to_string(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn an_item_whose_stored_pr_or_status_says_merged_has_landed() {
+    // Given — n1's PR merged, n2's derived status is merged, n3 is open, n4 has neither
+    let mut queue = WorkQueue::default();
+    let mut n1 = item("n1");
+    n1.pr_status = Some(GithubPrStatus {
+        phase: "merged".to_string(),
+        ..Default::default()
+    });
+    let mut n2 = item("n2");
+    n2.internal_status = Some(PrInternalStatus {
+        kind: "merged".to_string(),
+        note: None,
+        source: "derived".to_string(),
+    });
+    let mut n3 = item("n3");
+    n3.pr_status = Some(GithubPrStatus {
+        phase: "open".to_string(),
+        ..Default::default()
+    });
+    queue.nodes = vec![n1, n2, n3, item("n4")];
+
+    // When / Then
+    assert_eq!(merged_items(&queue), ids(&["n1", "n2"]));
 }

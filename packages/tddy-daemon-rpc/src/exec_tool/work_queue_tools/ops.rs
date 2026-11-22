@@ -312,7 +312,11 @@ fn waves_answer(stack: &WorkQueue) -> Result<Value, String> {
 /// [`waves::queue_waves`] over a stored queue: its items in order and its stored dependency edges.
 fn queue_waves_of(stack: &WorkQueue) -> Result<waves::QueueWaves, lineage::LineageError> {
     let items: Vec<String> = stack.nodes.iter().map(|n| n.node_id.clone()).collect();
-    waves::queue_waves(&items, &lineage::dependencies_of(stack))
+    waves::queue_waves(
+        &items,
+        &lineage::dependencies_of(stack),
+        &waves::merged_items(stack),
+    )
 }
 
 /// Apply a link `edit` to the queue under its record lock; a refused edit writes nothing and is the

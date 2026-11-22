@@ -11,6 +11,8 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use tddy_core::changeset::WorkQueue;
+
 use crate::lineage::{detect_cycle, DependencyEdge, LineageError};
 
 /// Whether a line keeps the waves non-decreasing.
@@ -81,12 +83,18 @@ pub struct QueueWaves {
 /// [`waves`], [`derive_line`], every item's [`readiness`] and the [`line_check`] of the queue's own
 /// order (`items`), for what `GetWorkQueueWaves`, `work_queue_waves` and the status share.
 ///
-/// No item is treated as done: readiness is structural — what each item needs from the wave below.
-pub fn queue_waves(items: &[String], edges: &[DependencyEdge]) -> Result<QueueWaves, LineageError> {
+/// `done` are the items already landed (see [`merged_items`]): a need in `done` is met, so it is not
+/// among an item's binding needs. Waves and the derived line stay structural — a merged item keeps its
+/// wave; only what is *left to wait for* shrinks.
+pub fn queue_waves(
+    items: &[String],
+    edges: &[DependencyEdge],
+    done: &[String],
+) -> Result<QueueWaves, LineageError> {
     let layers = waves(items, edges)?;
     let readiness = items
         .iter()
-        .map(|item| Ok((item.clone(), readiness(items, edges, item, &[])?)))
+        .map(|item| Ok((item.clone(), readiness(items, edges, item, done)?)))
         .collect::<Result<Vec<_>, LineageError>>()?;
     let out_of_order_at = match line_check(items, edges, items)? {
         LineCheck::InOrder => None,
@@ -98,6 +106,25 @@ pub fn queue_waves(items: &[String], edges: &[DependencyEdge]) -> Result<QueueWa
         readiness,
         out_of_order_at,
     })
+}
+
+/// The items of `queue` that have landed, as the stored record says: a merged PR (`pr_status`) or a
+/// derived `merged` internal status. The status stream adds what the inbox reads live.
+pub fn merged_items(queue: &WorkQueue) -> Vec<String> {
+    queue
+        .nodes
+        .iter()
+        .filter(|item| {
+            item.pr_status
+                .as_ref()
+                .is_some_and(|status| status.phase == "merged")
+                || item
+                    .internal_status
+                    .as_ref()
+                    .is_some_and(|status| status.kind == "merged")
+        })
+        .map(|item| item.node_id.clone())
+        .collect()
 }
 
 /// The derived line: waves concatenated, blockers first inside each wave, ties in queue order.

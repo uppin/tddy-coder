@@ -38,8 +38,12 @@ impl WorkQueueRpcHandler {
             .iter()
             .map(|item| item.node_id.clone())
             .collect();
-        let derived = waves::queue_waves(&items, &lineage::dependencies_of(&record.stack))
-            .map_err(lineage_refusal)?;
+        let derived = waves::queue_waves(
+            &items,
+            &lineage::dependencies_of(&record.stack),
+            &waves::merged_items(&record.stack),
+        )
+        .map_err(lineage_refusal)?;
         Ok(Response::new(WorkQueueWavesResponse {
             waves: derived
                 .waves
