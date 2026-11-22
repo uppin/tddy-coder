@@ -2,7 +2,7 @@
 //! (asked for, or any orchestrator start), and the pre-queue project stack records dropped on upgrade.
 
 use pretty_assertions::assert_eq;
-use tddy_changeset::changeset::StackNode;
+use tddy_changeset::changeset::WorkItem;
 use tddy_changeset::session_work_queue::{
     drop_old_project_stack_records, starts_with_work_queue, SessionWorkQueueError,
     SessionWorkQueues, NO_WORK_QUEUE_HINT, WORK_QUEUE_FILE,
@@ -35,11 +35,11 @@ impl AHost {
     }
 }
 
-fn an_item(id: &str) -> StackNode {
-    StackNode {
+fn an_item(id: &str) -> WorkItem {
+    WorkItem {
         node_id: id.to_string(),
         title: format!("item {id}"),
-        ..StackNode::default()
+        ..WorkItem::default()
     }
 }
 

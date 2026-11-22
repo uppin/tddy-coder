@@ -2,16 +2,14 @@
 //! *work item* in a *work queue* — with no alias kept for an old `pr_*` name. This file reads only the
 //! catalogue and the packages directory, so it compiles the same before and after the rename.
 //!
-//! n5 (`#workqueue` 5/14) removes `work_queue_create` (a queue is created at session start) and
-//! updates the list below when it does.
+//! `#workqueue` 5/14 removed `work_queue_create`: a queue is created only at session start.
 
 use std::path::Path;
 
 use tddy_tool_engine::project_home_tools::project_home_offered_catalog;
 
-const EVERY_WORK_QUEUE_TOOL: [&str; 17] = [
+const EVERY_WORK_QUEUE_TOOL: [&str; 16] = [
     "work_queue_list",
-    "work_queue_create",
     "work_queue_status",
     "work_pr_read",
     "work_pr_search",

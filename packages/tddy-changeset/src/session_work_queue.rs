@@ -9,14 +9,14 @@
 //! The project stack records that preceded this (`<data>/projects/<project_id>/stacks/`) are **dropped**
 //! on upgrade, not migrated (operator decision, 2026-11-22): [`drop_old_project_stack_records`].
 //!
-//! The queue's items are today's `Stack`/`StackNode` (renamed `WorkQueue`/`WorkItem` by `#workqueue`
+//! The queue is a `WorkQueue` of `WorkItem`s (named by `#workqueue`
 //! 3/14); this module's own names are final.
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::Stack;
+use crate::changeset::WorkQueue;
 
 /// The file a session's queue is stored in, inside the session directory.
 pub const WORK_QUEUE_FILE: &str = "work-queue.yaml";
@@ -33,7 +33,7 @@ pub struct SessionWorkQueueRecord {
     pub created_at_unix_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    pub queue: Stack,
+    pub queue: WorkQueue,
 }
 
 #[derive(Debug)]
@@ -121,7 +121,7 @@ impl SessionWorkQueues {
     }
 
     /// Change `session_id`'s queue under its record lock; `NoQueue` when it owns none.
-    pub fn update<F: FnOnce(&mut Stack)>(
+    pub fn update<F: FnOnce(&mut WorkQueue)>(
         &self,
         session_id: &str,
         change: F,

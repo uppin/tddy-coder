@@ -3,14 +3,13 @@
  * inspector and opens on it; a session without one shows no such tab. No rule here reads a role —
  * the fixtures below are plain sessions.
  *
- * Test ids are the final ones (`#workqueue` 3/14's map: `work-item-…`, `work-queue-…`). The queue RPC is
- * stubbed under today's generated name; `/green` follows `#workqueue` 3/14's rename when it rebases.
+ * Test ids and the queue RPC (`WorkQueueService`) are `#workqueue` 3/14's names.
  *
  * PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-session-work-queue.md
  */
 
 import React from "react";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -46,13 +45,13 @@ const PLAIN_SESSION = aSession("plain-session-0000-0000-0000-000000000002", fals
 function aBackendServing(sessions: ReturnType<typeof aSession>[]) {
   const added: string[] = [];
   const backend = aSessionsDrawerBackend(sessions)
-    .onUnary(PrStackService.method.getProjectStack, () => ({
-      stackPlanJson: JSON.stringify({ version: 1, nodes: [] }),
+    .onUnary(WorkQueueService.method.getWorkQueue, () => ({
+      workQueueJson: JSON.stringify({ version: 1, nodes: [] }),
     }))
-    .onUnary(PrStackService.method.addPlannedPr, (req) => {
+    .onUnary(WorkQueueService.method.addWorkItem, (req) => {
       added.push(req.title);
       return {
-        stackPlanJson: JSON.stringify({
+        workQueueJson: JSON.stringify({
           version: 1,
           nodes: [{ node_id: "n1", title: req.title, description: req.description, parents: [] }],
         }),

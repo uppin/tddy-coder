@@ -3,23 +3,23 @@
 //! functions take no role at all.
 
 use pretty_assertions::assert_eq;
-use tddy_core::changeset::{Stack, StackNode};
-use tddy_tool_engine::stack_git_tools::STACK_GIT_TOOL_NAMES;
-use tddy_tool_engine::stack_tools::{PR_READ, PR_STACK_CREATE, PR_STACK_STATUS, STACK_TOOL_NAMES};
+use tddy_core::changeset::{WorkItem, WorkQueue};
+use tddy_tool_engine::work_item_git_tools::WORK_ITEM_GIT_TOOL_NAMES;
+use tddy_tool_engine::work_queue_tools::{PR_READ, PR_STACK_CREATE, PR_STACK_STATUS, WORK_QUEUE_TOOL_NAMES};
 use tddy_tool_engine::work_queue_access::{
     work_queue_access_of, work_queue_tools_offered_to, WorkQueueAccess,
 };
 
-fn a_queue_linking(sessions: &[&str]) -> Stack {
-    Stack {
+fn a_queue_linking(sessions: &[&str]) -> WorkQueue {
+    WorkQueue {
         version: 1,
         nodes: sessions
             .iter()
             .enumerate()
-            .map(|(i, session)| StackNode {
+            .map(|(i, session)| WorkItem {
                 node_id: format!("n{}", i + 1),
                 session_id: Some(session.to_string()),
-                ..StackNode::default()
+                ..WorkItem::default()
             })
             .collect(),
     }
@@ -73,9 +73,9 @@ fn the_owner_is_offered_every_work_tool_except_creation() {
     let offered = names(Some(WorkQueueAccess::Owner));
 
     // Then
-    let expected: Vec<String> = STACK_TOOL_NAMES
+    let expected: Vec<String> = WORK_QUEUE_TOOL_NAMES
         .iter()
-        .chain(STACK_GIT_TOOL_NAMES.iter())
+        .chain(WORK_ITEM_GIT_TOOL_NAMES.iter())
         .filter(|name| **name != PR_STACK_CREATE)
         .map(|name| name.to_string())
         .collect();

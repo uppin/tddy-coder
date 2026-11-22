@@ -6,7 +6,7 @@
 //! The tool names are today's constants (renamed by `#workqueue` 3/14); the creation tool is no longer
 //! offered — a queue is created only at session start.
 
-use tddy_core::changeset::Stack;
+use tddy_core::changeset::WorkQueue;
 
 use crate::catalog::ToolDef;
 
@@ -20,7 +20,7 @@ pub enum WorkQueueAccess {
 }
 
 /// `caller`'s access to the queue `owner` owns, `None` when it has none.
-pub fn work_queue_access_of(caller: &str, owner: &str, queue: &Stack) -> Option<WorkQueueAccess> {
+pub fn work_queue_access_of(caller: &str, owner: &str, queue: &WorkQueue) -> Option<WorkQueueAccess> {
     // TODO(n5 session-work-queue): implement
     let _ = (caller, owner, queue);
     todo!("TODO(n5): implement work_queue_access_of")
