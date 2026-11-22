@@ -7,17 +7,16 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use tddy_agent_launch::conversation_spawn::session_tool_role;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_session_files::session_files::{SessionFile, SessionFileStore};
-use tddy_tool_engine::project_home_tools::SessionToolRole;
 use tddy_tool_engine::session_file_tools::{
     execute_session_file_tool, SessionFileEntry, SessionFilePort, WriteSessionFileArgs,
 };
 use tddy_worktree_service::session_target::HomeCaller;
 
+use super::project_home::caller::orchestrator_caller;
 use super::ExecToolRpcHandler;
 
 /// [`SessionFilePort`] over one session directory of this host.
@@ -93,28 +92,4 @@ impl ExecToolRpcHandler {
             job_running: outcome.job_running,
         })
     }
-}
-
-/// The calling session and its project, from its own record; refused unless it is an orchestrator.
-fn orchestrator_caller(
-    sessions_base: &Path,
-    session_id: &str,
-    tool_name: &str,
-) -> Result<HomeCaller, Status> {
-    let session_dir =
-        tddy_core::session_lifecycle::unified_session_dir_path(sessions_base, session_id);
-    let metadata = tddy_core::read_session_metadata(&session_dir).map_err(|e| {
-        Status::permission_denied(format!(
-            "tool {tool_name} is refused: cannot read session {session_id}'s role ({e})"
-        ))
-    })?;
-    if session_tool_role(&metadata) != SessionToolRole::ProjectHome {
-        return Err(Status::permission_denied(format!(
-            "tool {tool_name} is served only to an orchestrator session"
-        )));
-    }
-    Ok(HomeCaller {
-        session_id: session_id.to_string(),
-        project_id: metadata.project_id,
-    })
 }

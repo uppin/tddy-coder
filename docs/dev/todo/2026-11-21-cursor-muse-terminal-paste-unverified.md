@@ -2,6 +2,7 @@
 
 **Category:** Verification gap
 **Source:** `#orchestra` 7/9 (PR #985), wrap
+**Consent:** the developer chose to defer this on 2026-11-22 at the `#orchestra` stack's TODO gate.
 
 `cursor.yaml` and `muse.yaml` now declare `turn_input: { kind: terminal_paste, submit_key: Enter }`,
 so `SendSessionMessage` pastes into their TUI and presses Enter, as it does for Claude. The tests

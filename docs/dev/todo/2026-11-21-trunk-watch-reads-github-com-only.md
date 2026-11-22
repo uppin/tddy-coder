@@ -2,6 +2,7 @@
 
 **Category:** Feature gap (left by `#orchestra` 5/9, #983)
 **Source:** `packages/tddy-session-lifecycle/src/connection_service/svc_trunk_watch_wiring.rs` (`HostTrunkSource::poller_for`), `packages/tddy-github/src/trunk_feed.rs` (`RestTrunkFeed`)
+**Consent:** the developer chose to defer this on 2026-11-22 at the `#orchestra` stack's TODO gate.
 
 An orchestrator of a project whose remote is not on `github.com` — GitHub Enterprise, or any other host —
 gets no `trunk_commit` activities. `poller_for` takes the repository from `owner_repo_from_remote_url`,

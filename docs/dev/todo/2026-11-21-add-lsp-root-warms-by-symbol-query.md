@@ -2,6 +2,7 @@
 
 **Category:** Technical debt (left by `#orchestra` 8/9, #986)
 **Source:** `packages/tddy-daemon-rpc/src/exec_tool/lsp_roots.rs` (`warm`)
+**Consent:** the developer chose to defer this on 2026-11-22 at the `#orchestra` stack's TODO gate.
 
 `AddLspRoot` starts loading an added root's index by sending an empty `LspSymbols` query through the
 registered `LspExecutor` (`tddy_core::toolcall::lsp::lsp_executor()`), on a blocking task, and ignores

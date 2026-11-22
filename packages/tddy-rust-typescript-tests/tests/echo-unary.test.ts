@@ -11,6 +11,7 @@ import { create } from "@bufbuild/protobuf";
 import { EchoService, EchoRequestSchema } from "../gen/test/echo_service_pb";
 import { spawn, type ChildProcess } from "child_process";
 import * as fs from "fs";
+import * as net from "net";
 import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
@@ -32,7 +33,20 @@ function findWebBundle(): string {
   throw new Error("Web bundle not found. Run: bun run build");
 }
 
-const PORT = 8887;
+/** Ask the OS for a free TCP port (bind :0, read it, release). Avoids hardcoded-port collisions. */
+async function getFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+const PORT = await getFreePort();
 const baseUrl = process.env.CONNECTRPC_BASE_URL ?? `http://127.0.0.1:${PORT}/rpc`;
 const externalServer = !!process.env.CONNECTRPC_BASE_URL;
 

@@ -9,17 +9,15 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use tddy_agent_launch::conversation_spawn::session_tool_role;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_tool_engine::base_freshness_tools::{execute_base_freshness_tool, BaseFreshnessPort};
-use tddy_tool_engine::project_home_tools::SessionToolRole;
 use tddy_worktree_service::base_freshness::{base_freshness, refresh_home, BaseFreshness};
 use tddy_worktree_service::session_target::HomeCaller;
 
-use super::project_home::caller::record_call;
+use super::project_home::caller::{orchestrator_caller, record_call};
 use super::ExecToolRpcHandler;
 
 /// [`BaseFreshnessPort`] over this host: the caller's home worktree and its project's trunk.
@@ -61,30 +59,6 @@ impl BaseFreshnessPort for DaemonBaseFreshness {
             .map_err(|e| e.to_string())?
             .map_err(|refusal| refusal.to_string())
     }
-}
-
-/// The calling session and its project, when its record names an orchestrator role; anything else
-/// is refused.
-pub(super) fn orchestrator_caller(
-    sessions_base: &Path,
-    session_id: &str,
-    tool_name: &str,
-) -> Result<HomeCaller, Status> {
-    let dir = unified_session_dir_path(sessions_base, session_id);
-    let metadata = tddy_core::read_session_metadata(&dir).map_err(|e| {
-        Status::permission_denied(format!(
-            "tool {tool_name} is refused: cannot read session {session_id}'s record ({e})"
-        ))
-    })?;
-    if session_tool_role(&metadata) != SessionToolRole::ProjectHome {
-        return Err(Status::permission_denied(format!(
-            "tool {tool_name} is served only to an orchestrator session"
-        )));
-    }
-    Ok(HomeCaller {
-        session_id: session_id.to_string(),
-        project_id: metadata.project_id,
-    })
 }
 
 impl ExecToolRpcHandler {

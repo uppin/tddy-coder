@@ -2767,6 +2767,43 @@ mod tests {
         NEXT_REV.fetch_add(1, Ordering::SeqCst)
     }
 
+    /// The variables a remote route to the daemon is configured through. A test run inside a
+    /// tddy session inherits them, and the transport then exists where the test expects none.
+    const REMOTE_ROUTE_VARS: [&str; 4] = [
+        "TDDY_REMOTE_SESSION_ID",
+        "TDDY_REMOTE_SESSION_TOKEN",
+        "TDDY_REMOTE_DAEMON_URL",
+        "TDDY_REMOTE_DAEMON_SOCKET",
+    ];
+
+    /// Clears [`REMOTE_ROUTE_VARS`] until dropped, then restores what each held. Callers are
+    /// `#[serial]`, so no other test reads the environment meanwhile.
+    struct WithoutARemoteRoute(Vec<(&'static str, Option<std::ffi::OsString>)>);
+
+    impl WithoutARemoteRoute {
+        fn new() -> Self {
+            let saved = REMOTE_ROUTE_VARS
+                .iter()
+                .map(|&name| (name, std::env::var_os(name)))
+                .collect();
+            for name in REMOTE_ROUTE_VARS {
+                std::env::remove_var(name);
+            }
+            Self(saved)
+        }
+    }
+
+    impl Drop for WithoutARemoteRoute {
+        fn drop(&mut self) {
+            for (name, value) in self.0.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+
     /// An agent whose turn loop runs somewhere this process holds no def for — which is every
     /// roster agent in a split session, where `tddy-tools` lives in the jail and the defs do not.
     fn a_session_with_one_remotely_routed_agent(agent_id: &str) {
@@ -2820,6 +2857,7 @@ mod tests {
     #[serial]
     async fn a_system_prompt_for_a_remotely_routed_agent_is_carried_rather_than_refused() {
         // Given a session whose only agent is run by another daemon
+        let _route = WithoutARemoteRoute::new();
         a_session_with_one_remotely_routed_agent("Gemma@ws-01");
 
         // When a conversation with it is opened under a prompt of the caller's own
@@ -2844,6 +2882,7 @@ mod tests {
     #[serial]
     async fn a_blank_system_prompt_for_a_remotely_routed_agent_is_refused_naming_it() {
         // Given a session whose only agent is run by another daemon
+        let _route = WithoutARemoteRoute::new();
         a_session_with_one_remotely_routed_agent("Gemma@ws-02");
 
         // When a conversation with it is opened under a prompt of nothing but spaces

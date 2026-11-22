@@ -3,6 +3,7 @@
 **Category:** Known defect — `tddy-code-restructuring` engine
 **Source:** `/pr-wrap` step 3.5 on `#orchestra` 2/9 (PR #980), the split of
 `tddy-agent-launch/src/remote_hook_follower.rs`
+**Consent:** the developer chose to defer this on 2026-11-22 at the `#orchestra` stack's TODO gate.
 
 ## What happened
 
@@ -76,3 +77,7 @@ Module-file resolution honours `#[path = "…"]`, relative to the declaring file
 does. Only modules the plan touches are resolved strictly. Add the reproduction above as an engine
 test. Then the `TODO(restructure-path-attr)` markers can be removed, and a re-run of
 `restructure verify` over those commits can confirm the hand moves.
+
+## Recorded instance — `#orchestra` sweep (#999), 2026-11-22
+
+Moving `tddy_daemon_rpc::exec_tool::base_freshness::orchestrator_caller` into `tddy_daemon_rpc::exec_tool::project_home::caller` (`move_item`, `reexport: none`) was refused by `restructure check --deep`: "plan is malformed: `mod project_stacks_unit_tests;` leads to neither `project_stacks_unit_tests.rs` nor `project_stacks_unit_tests/mod.rs` in packages/tddy-daemon-rpc/src/pr_stack/project_stacks". The module is declared at `pr_stack/project_stacks.rs` with `#[path = "project_stacks_unit_tests.rs"]`. The developer consented to a hand move (2026-11-22), done as part of the sweep.

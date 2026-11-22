@@ -8,6 +8,30 @@ use tddy_tool_engine::project_home_tools::{
 };
 use tddy_worktree_service::session_target::HomeCaller;
 
+/// The calling session and its project, when its record names an orchestrator role; anything else
+/// is refused.
+pub(in crate::exec_tool) fn orchestrator_caller(
+    sessions_base: &Path,
+    session_id: &str,
+    tool_name: &str,
+) -> Result<HomeCaller, Status> {
+    let dir = unified_session_dir_path(sessions_base, session_id);
+    let metadata = tddy_core::read_session_metadata(&dir).map_err(|e| {
+        Status::permission_denied(format!(
+            "tool {tool_name} is refused: cannot read session {session_id}'s record ({e})"
+        ))
+    })?;
+    if session_tool_role(&metadata) != SessionToolRole::ProjectHome {
+        return Err(Status::permission_denied(format!(
+            "tool {tool_name} is served only to an orchestrator session"
+        )));
+    }
+    Ok(HomeCaller {
+        session_id: session_id.to_string(),
+        project_id: metadata.project_id,
+    })
+}
+
 /// Refuse `tool_name` unless `session_id` is a project-home session — or a session that spawns
 /// conversations calling one of its five tools ([`is_conversation_spawner_tool`]) — and name that
 /// session's project, with the role that admitted it. The role is the session's own record, not
