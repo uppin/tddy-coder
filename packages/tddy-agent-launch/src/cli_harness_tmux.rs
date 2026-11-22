@@ -18,13 +18,13 @@ use tddy_cli_sessions::cli_session_manager::{
     exit_hook_capture, CliSessionManager, ExitHook, MainExit,
 };
 use tddy_cli_sessions::tmux::{
-    agent_tmux_session_name, capture_final_screen, kill_tmux_session, pane_pid, pane_state,
-    start_agent_tmux_session, PaneState,
+    agent_tmux_session_name, capture_final_screen, kill_tmux_session, kill_tmux_session_logged,
+    pane_pid, pane_pid_and_start, pane_state, start_agent_tmux_session, PaneState,
 };
 use tddy_rpc::Status;
 
+use crate::claude_cli_tmux::in_tmux_blocking;
 pub use crate::claude_cli_tmux::TmuxLaunched;
-use crate::claude_cli_tmux::{in_tmux_blocking, stop_tmux_session_of_failed_start};
 use crate::cli_resume_token::resume_token_recorder;
 
 /// What a tmux-run harness is launched with.
@@ -132,21 +132,35 @@ async fn attach_and_record_main(
     {
         Ok(handle) => handle,
         Err(error) => {
-            stop_tmux_session_of_failed_start(os_user, name).await;
+            kill_tmux_session_logged(os_user, name, "a start that failed").await;
             return Err(Status::internal(format!(
                 "failed to attach the main terminal to tmux session {name:?}: {error}"
             )));
         }
     };
+    let start = in_tmux_blocking({
+        let (user, session) = (os_user.to_string(), name.to_string());
+        move || pane_pid_and_start(&user, &session)
+    })
+    .await?
+    .map(|(_pid, start)| start);
+    // An agent whose start cannot be read is recorded without one: a delete then checks the start
+    // it reads before the kill. The failure is logged, not hidden.
+    let start = match start {
+        Ok(start) => Some(start),
+        Err(error) => {
+            log::warn!(
+                "the start of tmux session {name:?}'s agent could not be read, so it is recorded without one: {error}"
+            );
+            None
+        }
+    };
     if let Err(error) =
-        // TODO(tab-hygiene): the pane process's start, read with its pid (`pane_pid_and_start`)
-        crate::tmux_main_roster::record_tmux_main(
-            manager, roster_dir, kind, name, os_user, None,
-        )
-        .await
+        crate::tmux_main_roster::record_tmux_main(manager, roster_dir, kind, name, os_user, start)
+            .await
     {
         // An unrecorded main could not be re-attached by the next daemon.
-        stop_tmux_session_of_failed_start(os_user, name).await;
+        kill_tmux_session_logged(os_user, name, "a start that failed").await;
         return Err(Status::internal(format!(
             "failed to record the main terminal's tmux run: {error:#}"
         )));

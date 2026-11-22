@@ -286,6 +286,7 @@ fn run_spawn(req: &SpawnRequest, on_exit: Option<crate::child_exit::OnExit>) -> 
         session,
         req.repo_path
     );
+    let gate = crate::child_signal::ReapGate::new();
     let result = spawner::spawn_as_user_reporting(
         &req.os_user,
         &req.tool_path,
@@ -300,8 +301,13 @@ fn run_spawn(req: &SpawnRequest, on_exit: Option<crate::child_exit::OnExit>) -> 
             req.startup_grace_period_ms,
             req.startup_poll_interval_ms,
         ),
+        gate.clone(),
         on_exit,
     );
+    #[cfg(unix)]
+    if let Ok(result) = &result {
+        crate::child_signal::worker_gates::hold(result.pid, gate);
+    }
     log::info!(
         "spawn_worker: spawn_as_user returned session_id={}",
         session

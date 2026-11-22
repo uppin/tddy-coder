@@ -54,3 +54,11 @@ no support module), and the copies in `tddy-remote-shell/tests/support` and
 `tddy-agent-launch` moved out of `coder_agent_launch_acceptance.rs` into `tests/coder_workspace_support`,
 shared by that suite and `target_shell_tab_acceptance` (one body, not two; the target tab's `-l` login shell
 is a branch of it). The lifecycle `coder_target_session` copy is still separate and still differs.
+
+**Narrowed 2026-11-21 (`#tab-hardening` 2/4, #990):** `AnAgentRun` and the run-file reader moved to
+`tddy-session-lifecycle/tests/agent_run_support`, shared by `coder_target_session` and
+`remote_target_session`. What remains has drifted or would close a dependency cycle: the stand-in coder
+`AWorkspace` (lifecycle `coder_target_session` vs `tddy-agent-launch/tests/coder_workspace_support`, bodies
+differ across two crates), agent-launch's `ATarget`s (different call logs), the stub-agent families (run
+lines, trap and banner differ), and the copies in `tddy-remote-shell/tests/support` and
+`tddy-agent-launch/src/remote_agent_launch.rs` (a `tddy-testing-commons` dev-dependency there risks a cycle).

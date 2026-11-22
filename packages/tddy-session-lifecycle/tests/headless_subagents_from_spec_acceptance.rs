@@ -16,9 +16,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tddy_test_hosts::a_tool_host;
 
 use pretty_assertions::assert_eq;
-use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::load_agent_registry;
 use tddy_coding_subagent::launcher::close_headless_conversation;
@@ -35,29 +35,6 @@ const SESSION_ID: &str = "1780828020298-coding";
 /// Where the launch's tool server resolves `tddy-tools` to.
 const TDDY_TOOLS_PATH: &str = "/opt/tddy/bin/tddy-tools";
 const MINTED_TOKEN: &str = "minted-agent-token";
-
-/// A host with nothing of the real machine: the env it is given, and executable files.
-struct AFixtureHost {
-    env: BTreeMap<String, String>,
-}
-
-impl ToolHost for AFixtureHost {
-    fn env_var(&self, name: &str) -> Option<String> {
-        self.env.get(name).cloned()
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        Vec::new()
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
-}
 
 /// Stub `agent`, `codex` and `oz` CLIs and a stub `tddy-tools`, in one directory. Each CLI records
 /// its argv (one entry per line) to `<name>.argv`; `agent` copies the worktree's
@@ -220,14 +197,14 @@ fn a_launcher_with_coding_agents(
 ) -> DaemonCodingAgentLauncher {
     let registry =
         load_agent_registry(&tddy_data_dir.join("tools")).expect("the agent registry loads");
-    let host = AFixtureHost {
-        env: BTreeMap::from([
+    let host = a_tool_host()
+        .with_envs(BTreeMap::from([
             ("TDDY_CURSOR_AGENT".to_string(), stubs.binary("agent")),
             ("TDDY_CODEX_CLI".to_string(), stubs.binary("codex")),
             ("TDDY_OZ_CLI".to_string(), stubs.binary("oz")),
             ("TDDY_TOOLS_BINARY".to_string(), stubs.binary("tddy-tools")),
-        ]),
-    };
+        ]))
+        .build();
     DaemonCodingAgentLauncher::with_identity(
         the_daemons_own_identity(),
         Arc::new(|_| Ok(None)),

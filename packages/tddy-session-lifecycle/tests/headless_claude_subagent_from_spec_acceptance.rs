@@ -13,9 +13,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tddy_test_hosts::a_tool_host;
 
 use pretty_assertions::assert_eq;
-use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::load_agent_registry;
 use tddy_coding_subagent::{CodingAgentDef, CodingAgentLaunch, CodingAgentLauncher};
@@ -32,29 +32,6 @@ const SESSION_ID: &str = "1780828020298-coding";
 const TDDY_TOOLS_PATH: &str = "/opt/tddy/bin/tddy-tools";
 const MINTED_TOKEN: &str = "minted-agent-token";
 const APPROVAL_TOOL: &str = "mcp__tddy-tools__approval_prompt";
-
-/// A host with nothing of the real machine: the env it is given, and executable files.
-struct AFixtureHost {
-    env: BTreeMap<String, String>,
-}
-
-impl ToolHost for AFixtureHost {
-    fn env_var(&self, name: &str) -> Option<String> {
-        self.env.get(name).cloned()
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        Vec::new()
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
-}
 
 /// A stub `claude` in its own directory: records its argv (one entry per line) and the MCP config
 /// it was handed, then prints one stream-json turn.
@@ -158,8 +135,8 @@ fn a_headless_claude_launch(worktree: &Path) -> CodingAgentLaunch {
 fn a_launcher_with_coding_agents(data_dir: &Path, stub: &AStubClaude) -> DaemonCodingAgentLauncher {
     let tools = data_dir.join("tools");
     let registry = load_agent_registry(&tools).expect("the agent registry loads");
-    let host = AFixtureHost {
-        env: BTreeMap::from([
+    let host = a_tool_host()
+        .with_envs(BTreeMap::from([
             (
                 "TDDY_CLAUDE_BINARY".to_string(),
                 stub.binary().to_string_lossy().into_owned(),
@@ -168,8 +145,8 @@ fn a_launcher_with_coding_agents(data_dir: &Path, stub: &AStubClaude) -> DaemonC
                 "TDDY_TOOLS_BINARY".to_string(),
                 stub.tddy_tools().to_string_lossy().into_owned(),
             ),
-        ]),
-    };
+        ]))
+        .build();
     DaemonCodingAgentLauncher::with_identity(
         the_daemons_own_identity(),
         Arc::new(|_| Ok(None)),

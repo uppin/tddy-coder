@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use tddy_cli_sessions::cli_session_manager::ProcessTabHolder;
 use tddy_spawn::child_exit::SpawnedTool;
-use tddy_spawn::child_signal::Signalled;
+use tddy_spawn::child_signal::{Signalled, ToolSignal};
 use tddy_task::{exit_channel, ExitReceiver};
 
 /// How long a child that was asked to stop gets before it is killed — the grace the supervisor's
@@ -60,19 +60,26 @@ pub(crate) fn observe(exit: ExitReceiver) -> (ExitReceiver, EndedFlag) {
 }
 
 impl ToolBackend {
-    /// The holder of a child `pid` this backend started; `ended` is [`observe`]'s flag for it.
-    pub(crate) fn holder(&self, pid: u32, ended: EndedFlag) -> Arc<dyn ProcessTabHolder> {
+    /// The holder of a child `pid` this backend started; `ended` is [`observe`]'s flag for it, and
+    /// `signal` the spawn's way of signalling a child the daemon or its worker is the parent of
+    /// (`None` for a supervised child, which the supervisor signals).
+    pub(crate) fn holder(
+        &self,
+        pid: u32,
+        ended: EndedFlag,
+        signal: Option<ToolSignal>,
+    ) -> Arc<dyn ProcessTabHolder> {
         match self {
             Self::Supervisor { socket_path } => Arc::new(SupervisedChild {
                 socket_path: socket_path.clone(),
                 pid,
             }),
-            // TODO(tab-hygiene): deliver through the spawn's `ToolSignal`, not `kill(2)` of the pid
             Self::Owned => Arc::new(OwnedChild {
                 pid,
                 ended,
-                deliver: Arc::new(move |signal| {
-                    deliver(pid, signal).map(|()| Signalled::Delivered)
+                deliver: Arc::new(move |number| match &signal {
+                    Some(signal) => signal.send(number),
+                    None => anyhow::bail!("the spawn of child {pid} gave no way to signal it"),
                 }),
             }),
         }
@@ -120,24 +127,10 @@ impl OwnedChild {
         self.ended.load(Ordering::SeqCst)
     }
 
-    /// Send `signal` through the seam: `Ok(())` once it reached the child.
-    fn deliver(&self, signal: i32) -> anyhow::Result<()> {
-        match (self.deliver)(signal)? {
-            Signalled::Delivered => Ok(()),
-            // TODO(tab-hygiene): implement — the backend found the child ended
-            Signalled::ChildEnded => todo!(),
-        }
+    /// Send `signal` through the seam, and say whether it reached the child.
+    fn deliver(&self, signal: i32) -> anyhow::Result<Signalled> {
+        (self.deliver)(signal)
     }
-}
-
-fn deliver(pid: u32, signal: i32) -> anyhow::Result<()> {
-    // SAFETY: `kill` only inspects the pid table. The pid is the child's own, and the caller has
-    // checked that its holder has not reported the child's end, so it has not been recycled.
-    if unsafe { libc::kill(pid as libc::pid_t, signal) } == 0 {
-        return Ok(());
-    }
-    let error = std::io::Error::last_os_error();
-    anyhow::bail!("kill({pid}, {signal}): {error}")
 }
 
 #[async_trait::async_trait]
@@ -147,14 +140,18 @@ impl ProcessTabHolder for OwnedChild {
         if self.has_ended() {
             return Ok(());
         }
-        self.deliver(libc::SIGTERM)?;
+        if self.deliver(libc::SIGTERM)? == Signalled::ChildEnded {
+            // The backend had already reaped it: nothing left to wait out, nothing to kill.
+            return Ok(());
+        }
         let (pid, ended, deliver) = (self.pid, Arc::clone(&self.ended), Arc::clone(&self.deliver));
         tokio::spawn(async move {
             tokio::time::sleep(STOP_GRACE).await;
             if !ended.load(Ordering::SeqCst) {
                 log::warn!("tool child pid={pid} outlived its grace period; killing it");
-                if let Err(error) = deliver(libc::SIGKILL) {
-                    log::warn!("tool child pid={pid} could not be killed: {error}");
+                match deliver(libc::SIGKILL) {
+                    Ok(_) => {}
+                    Err(error) => log::warn!("tool child pid={pid} could not be killed: {error}"),
                 }
             }
         });
@@ -165,7 +162,10 @@ impl ProcessTabHolder for OwnedChild {
         if self.has_ended() {
             anyhow::bail!("the child has ended");
         }
-        self.deliver(signal)
+        match self.deliver(signal)? {
+            Signalled::Delivered => Ok(()),
+            Signalled::ChildEnded => anyhow::bail!("the child has ended"),
+        }
     }
 }
 

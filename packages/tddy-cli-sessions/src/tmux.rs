@@ -394,9 +394,13 @@ pub fn pane_pid(os_user: &str, name: &str) -> Result<u32, TmuxError> {
 /// when that process started ([`crate::process_start::process_start`]) — read together, so a
 /// signal sent to the pid later can first check it still names the same process.
 pub fn pane_pid_and_start(os_user: &str, name: &str) -> Result<(u32, ProcessStart), TmuxError> {
-    let _ = (os_user, name);
-    // TODO(tab-hygiene): implement
-    todo!()
+    let pid = pane_pid(os_user, name)?;
+    let start = crate::process_start::process_start(pid).ok_or_else(|| {
+        TmuxError::new(format!(
+            "the pane process {pid} of session {name:?} has no start time: it is gone"
+        ))
+    })?;
+    Ok((pid, start))
 }
 
 /// Kill tmux session `name` of `os_user` on the blocking pool. The caller is already failing or
@@ -406,9 +410,22 @@ pub fn pane_pid_and_start(os_user: &str, name: &str) -> Result<(u32, ProcessStar
 /// The one copy of what `claude_cli_tmux::stop_tmux_session_of_failed_start` and
 /// `recorded_tabs::kill_tmux_session_blocking` each did (`#tab-hardening` 2/4).
 pub async fn kill_tmux_session_logged(os_user: &str, name: &str, why: &str) {
-    let _ = (os_user, name, why);
-    // TODO(tab-hygiene): implement
-    todo!()
+    let (user, session) = (os_user.to_string(), name.to_string());
+    match tokio::task::spawn_blocking(move || kill_tmux_session(&user, &session)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            log::warn!(
+                target: "tddy_daemon::tmux",
+                "could not stop tmux session {name:?} of {os_user} ({why}): {error}"
+            )
+        }
+        Err(error) => {
+            log::warn!(
+                target: "tddy_daemon::tmux",
+                "the stop of tmux session {name:?} of {os_user} ({why}) did not finish: {error}"
+            )
+        }
+    }
 }
 
 /// The `=`-prefixed target that names exactly `name`, not a session whose name it starts with.

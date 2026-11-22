@@ -110,6 +110,8 @@ tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 # `test_util::coding_agents_with_binaries` hosts the fixture binaries behind a `ToolHost` (`#agent-tools 19/19`);
 # the `claude_cli_from_spec_acceptance.rs` suite resolves against one too.
 tddy-actions = { path = "../tddy-actions" }
+# `test_util` (a public module) and the suites' `ToolHost` fixture; it carries no sandbox crates.
+tddy-test-hosts = { path = "../tddy-test-hosts" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

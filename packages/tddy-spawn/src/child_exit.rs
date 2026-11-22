@@ -60,16 +60,34 @@ fn report_wait(
     on_exit(pid, exit);
 }
 
+/// Wait for `child` without reaping it, then mark it ended and reap it under `gate`'s lock, so a
+/// signal either went out while the pid was still the child's or is refused ([`crate::child_signal`]).
+/// A wait that failed marks it ended all the same: a pid nobody can wait for is not one to signal.
+fn reap_after_marking_ended(
+    child: &mut std::process::Child,
+    pid: u32,
+    gate: &ReapGate,
+) -> std::io::Result<std::process::ExitStatus> {
+    #[cfg(unix)]
+    if let Err(e) = crate::child_signal::wait_without_reaping(pid) {
+        log::warn!("waiting for pid={pid} without reaping it failed: {e}");
+    }
+    #[cfg(not(unix))]
+    let _ = pid;
+    gate.mark_ended_then_reap(|| child.wait())
+}
+
 /// Reap `child` on a thread of its own, log how it ended, and hand that end to `on_exit`. The
 /// thread is the child's only waiter, so its wait is what makes the end exact.
 pub(crate) fn reap_in_background(
     mut child: std::process::Child,
     session_id: String,
     pid: u32,
+    gate: ReapGate,
     on_exit: Option<OnExit>,
 ) {
     std::thread::spawn(move || {
-        let waited = child.wait();
+        let waited = reap_after_marking_ended(&mut child, pid, &gate);
         match &waited {
             Ok(status) => {
                 log::info!("child exited session_id={session_id} pid={pid} status={status}")
@@ -117,6 +135,7 @@ pub fn spawn_tool_as_user(
     startup: StartupWatch,
 ) -> anyhow::Result<SpawnedTool> {
     let (holder, exit) = exit_channel();
+    let gate = ReapGate::new();
     let result = spawner::spawn_as_user_reporting(
         os_user,
         tool_path,
@@ -128,12 +147,12 @@ pub fn spawn_tool_as_user(
         child_log_format,
         coder_log_config_yaml,
         startup,
+        gate.clone(),
         Some(Box::new(move |_pid, end| holder.send(end))),
     )?;
-    // TODO(tab-hygiene): the gate the child's reaper holds, handed to `spawn_as_user_reporting`
     let signal = Some(ToolSignal::Direct {
         pid: result.pid,
-        gate: ReapGate::new(),
+        gate,
     });
     Ok(SpawnedTool {
         result,

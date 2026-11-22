@@ -23,8 +23,7 @@ use tddy_actions::tool::ToolHost;
 /// is empty, so a test names every input resolution reads.
 #[must_use]
 pub fn a_tool_host() -> AToolHostBuilder {
-    // TODO(tab-hygiene): implement
-    todo!()
+    AToolHostBuilder::default()
 }
 
 /// Builds an [`AToolHost`]; see [`a_tool_host`].
@@ -38,10 +37,9 @@ impl AToolHostBuilder {
     /// Set the environment variable `name` to `value`. An empty value reads as unset, as
     /// [`ToolHost::env_var`] reads one.
     #[must_use]
-    pub fn with_env(self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        let _ = (name, value);
-        // TODO(tab-hygiene): implement
-        todo!()
+    pub fn with_env(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.insert(name.into(), value.into());
+        self
     }
 
     /// Set every `(name, value)` of `vars`, as [`Self::with_env`] sets one.
@@ -51,33 +49,30 @@ impl AToolHostBuilder {
         K: Into<String>,
         V: Into<String>,
     {
-        let _ = vars.into_iter().map(|(k, v)| (k.into(), v.into()));
-        // TODO(tab-hygiene): implement
-        todo!()
+        vars.into_iter()
+            .fold(self, |builder, (name, value)| builder.with_env(name, value))
     }
 
     /// `$HOME`: [`Self::with_env`] for `HOME`.
     #[must_use]
     pub fn with_home(self, home: impl AsRef<Path>) -> Self {
-        let _ = home;
-        // TODO(tab-hygiene): implement
-        todo!()
+        self.with_env("HOME", home.as_ref().display().to_string())
     }
 
     /// Append `dirs` to `PATH`, in search order.
     #[must_use]
-    pub fn with_path<P: Into<PathBuf>>(self, dirs: impl IntoIterator<Item = P>) -> Self {
-        let _ = dirs.into_iter().map(Into::into);
-        // TODO(tab-hygiene): implement
-        todo!()
+    pub fn with_path<P: Into<PathBuf>>(mut self, dirs: impl IntoIterator<Item = P>) -> Self {
+        self.path.extend(dirs.into_iter().map(Into::into));
+        self
     }
 
     /// The host.
     #[must_use]
     pub fn build(self) -> AToolHost {
-        let _ = (self.env, self.path);
-        // TODO(tab-hygiene): implement
-        todo!()
+        AToolHost {
+            env: self.env,
+            path: self.path,
+        }
     }
 }
 
@@ -92,27 +87,25 @@ pub struct AToolHost {
 
 impl ToolHost for AToolHost {
     fn env_var(&self, name: &str) -> Option<String> {
-        let _ = (name, &self.env);
-        // TODO(tab-hygiene): implement
-        todo!()
+        self.env
+            .get(name)
+            .filter(|value| !value.is_empty())
+            .cloned()
     }
 
     fn path_dirs(&self) -> Vec<PathBuf> {
-        let _ = &self.path;
-        // TODO(tab-hygiene): implement
-        todo!()
+        self.path.clone()
     }
 
     fn is_executable_file(&self, path: &Path) -> bool {
-        let _ = path;
-        // TODO(tab-hygiene): implement
-        todo!()
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path)
+            .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
     }
 
     fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        let _ = path;
-        // TODO(tab-hygiene): implement
-        todo!()
+        std::fs::canonicalize(path)
     }
 }
 

@@ -13,7 +13,9 @@ use std::path::Path;
 
 use tddy_cli_sessions::cli_session_manager::{CliSessionManager, MAIN_TERMINAL_ID};
 use tddy_cli_sessions::process_start::ProcessStart;
-use tddy_core::tab_roster::{read_tab_roster, LaunchNode, TabEntry, HARNESS_PROPERTY, TMUX_KIND};
+use tddy_core::tab_roster::{
+    read_tab_roster, LaunchNode, TabEntry, HARNESS_PROPERTY, START_PROPERTY, TMUX_KIND,
+};
 use tddy_core::SessionMetadata;
 
 /// Record that `session_dir`'s main runs agent `harness` in tmux session `tmux_session`, as
@@ -27,12 +29,15 @@ pub(crate) async fn record_tmux_main(
     os_user: &str,
     start: Option<ProcessStart>,
 ) -> anyhow::Result<()> {
-    // TODO(tab-hygiene): record `start` on the tmux node as `START_PROPERTY`
-    let _ = start;
+    let mut tmux = LaunchNode::tmux(tmux_session, os_user);
+    if let Some(start) = start {
+        tmux.properties
+            .insert(START_PROPERTY.to_string(), start.epoch_secs().to_string());
+    }
     let main = TabEntry::new(
         MAIN_TERMINAL_ID,
         vec![
-            LaunchNode::tmux(tmux_session, os_user),
+            tmux,
             LaunchNode::new(
                 tddy_core::tab_roster::AGENT_KIND,
                 [(HARNESS_PROPERTY, harness)],
@@ -46,9 +51,21 @@ pub(crate) async fn record_tmux_main(
 /// `None` for a session whose roster has no tmux main, or whose tmux main was recorded without a
 /// start. A start that is not a number of seconds is an error, never read as none.
 pub fn recorded_tmux_main_start(session_dir: &Path) -> anyhow::Result<Option<ProcessStart>> {
-    let _ = session_dir;
-    // TODO(tab-hygiene): implement
-    todo!()
+    let roster = read_tab_roster(session_dir)?;
+    let Some(recorded) = roster
+        .tabs
+        .iter()
+        .filter(|tab| tab.terminal_id == MAIN_TERMINAL_ID)
+        .flat_map(|tab| &tab.launch)
+        .find(|node| node.kind == TMUX_KIND)
+        .and_then(|node| node.properties.get(START_PROPERTY))
+    else {
+        return Ok(None);
+    };
+    let secs = recorded.parse::<u64>().map_err(|error| {
+        anyhow::anyhow!("the tmux main's recorded agent start {recorded:?} is not seconds: {error}")
+    })?;
+    Ok(Some(ProcessStart::from_epoch_secs(secs)))
 }
 
 /// Whether the session in `session_dir` ran its main in tmux: its roster says so, or — for a
@@ -65,7 +82,7 @@ pub(crate) fn main_ran_in_tmux(
 
 #[cfg(test)]
 mod tests {
-    use tddy_core::tab_roster::{write_tab_roster, TabRoster, START_PROPERTY};
+    use tddy_core::tab_roster::{write_tab_roster, TabRoster};
 
     use super::*;
 

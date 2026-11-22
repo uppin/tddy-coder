@@ -100,9 +100,22 @@ fn run_clone(
 /// [`crate::child_signal::Signalled::ChildEnded`] once the reaper has marked it ended, and an error
 /// for a pid this worker never spawned.
 fn signal_child(pid: u32, signal: i32) -> WorkerResponse {
-    let _ = (pid, signal);
-    // TODO(tab-hygiene): implement
-    todo!()
+    #[cfg(unix)]
+    {
+        match crate::child_signal::ToolSignal::send_from_worker(pid, signal) {
+            Ok(outcome) => WorkerResponse::Signalled { outcome },
+            Err(e) => WorkerResponse::Error {
+                message: e.to_string(),
+            },
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, signal);
+        WorkerResponse::Error {
+            message: "signalling a child is not supported here".to_string(),
+        }
+    }
 }
 
 /// Report that the child spawned for request `id` ended, from the thread that reaped it.

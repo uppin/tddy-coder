@@ -68,9 +68,14 @@ impl SpawnClient {
         pid: u32,
         signal: i32,
     ) -> anyhow::Result<crate::child_signal::Signalled> {
-        let _ = (pid, signal);
-        // TODO(tab-hygiene): implement
-        todo!()
+        match self.request(WorkerRequest::Signal { pid, signal }, |_| {}, None)? {
+            WorkerResponse::Signalled { outcome } => Ok(outcome),
+            WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
+            WorkerResponse::SpawnOk { .. } => {
+                Err(anyhow::anyhow!("unexpected spawn_ok for signal"))
+            }
+            WorkerResponse::CloneOk => Err(anyhow::anyhow!("unexpected clone_ok for signal")),
+        }
     }
 
     pub fn clone_repo(&self, req: CloneRequest) -> anyhow::Result<()> {

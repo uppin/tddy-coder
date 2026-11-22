@@ -24,9 +24,18 @@ impl ProcessStart {
 /// When the process `pid` started, or `None` when no process has that pid.
 #[must_use]
 pub fn process_start(pid: u32) -> Option<ProcessStart> {
-    let _ = pid;
-    // TODO(tab-hygiene): implement
-    todo!()
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+
+    let pid = Pid::from_u32(pid);
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    system
+        .process(pid)
+        .map(|process| ProcessStart::from_epoch_secs(process.start_time()))
 }
 
 #[cfg(test)]

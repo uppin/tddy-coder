@@ -15,6 +15,8 @@ import {
 import { nextTmuxSessionName } from "./tmuxSessionName";
 import { SANDBOX_WRAPPER_KIND, TARGET_WRAPPER_KIND, TMUX_WRAPPER_KIND } from "./useSessionTerminals";
 import type { TmuxMenuState } from "./useTmuxSessions";
+import { MenuKindItem } from "./MenuKindItem";
+import { WrappedKindGroups } from "./WrappedKindGroups";
 
 interface NewTerminalMenuProps {
   /** The session's type: a tool session offers bash only. Unset offers every harness. */
@@ -154,6 +156,10 @@ export function NewTerminalMenu({
     ? []
     : cliSessionTypeOptions(knownSessionTypes()).map(({ id }) => id);
   const menuKinds = [BASH_KIND, ...agentKinds];
+  const chooseKind = (kind: string, wrappers?: readonly string[]) => {
+    setMenuOpen(false);
+    onOpen(kind, undefined, wrappers);
+  };
 
   return (
     <div ref={newTabRef} className="flex-shrink-0">
@@ -188,63 +194,33 @@ export function NewTerminalMenu({
               className="min-w-[10rem] rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md"
             >
               {offersSandbox ? (
-                <>
-                  <ul role="group" aria-label="In sandbox" data-testid="sessions-terminal-tab-new-menu">
-                    {menuKinds.map((kind) => (
-                      <MenuKindItem
-                        key={kind}
-                        kind={kind}
-                        testId={`sessions-terminal-tab-new-in-sandbox-${kind}`}
-                        onChoose={() => {
-                          setMenuOpen(false);
-                          onOpen(kind, undefined, [SANDBOX_WRAPPER_KIND]);
-                        }}
-                      />
-                    ))}
-                  </ul>
-                  <ul role="group" aria-label="On host" className="mt-1 border-t border-border pt-1">
-                    {menuKinds.map((kind) => (
-                      <MenuKindItem
-                        key={kind}
-                        kind={kind}
-                        testId={`sessions-terminal-tab-new-on-host-${kind}`}
-                        onChoose={() => {
-                          setMenuOpen(false);
-                          onOpen(kind);
-                        }}
-                      />
-                    ))}
-                  </ul>
-                </>
+                <WrappedKindGroups
+                  kinds={menuKinds}
+                  wrapped={{
+                    label: "In sandbox",
+                    testIdPrefix: "sessions-terminal-tab-new-in-sandbox",
+                    wrapper: SANDBOX_WRAPPER_KIND,
+                  }}
+                  unwrapped={{
+                    label: "On host",
+                    testIdPrefix: "sessions-terminal-tab-new-on-host",
+                  }}
+                  onChoose={chooseKind}
+                />
               ) : offersTarget ? (
-                <>
-                  <ul role="group" aria-label="On target" data-testid="sessions-terminal-tab-new-menu">
-                    {menuKinds.map((kind) => (
-                      <MenuKindItem
-                        key={kind}
-                        kind={kind}
-                        testId={`sessions-terminal-tab-new-on-target-${kind}`}
-                        onChoose={() => {
-                          setMenuOpen(false);
-                          onOpen(kind, undefined, [TARGET_WRAPPER_KIND]);
-                        }}
-                      />
-                    ))}
-                  </ul>
-                  <ul role="group" aria-label="On this host" className="mt-1 border-t border-border pt-1">
-                    {menuKinds.map((kind) => (
-                      <MenuKindItem
-                        key={kind}
-                        kind={kind}
-                        testId={`sessions-terminal-tab-new-on-this-host-${kind}`}
-                        onChoose={() => {
-                          setMenuOpen(false);
-                          onOpen(kind);
-                        }}
-                      />
-                    ))}
-                  </ul>
-                </>
+                <WrappedKindGroups
+                  kinds={menuKinds}
+                  wrapped={{
+                    label: "On target",
+                    testIdPrefix: "sessions-terminal-tab-new-on-target",
+                    wrapper: TARGET_WRAPPER_KIND,
+                  }}
+                  unwrapped={{
+                    label: "On this host",
+                    testIdPrefix: "sessions-terminal-tab-new-on-this-host",
+                  }}
+                  onChoose={chooseKind}
+                />
               ) : (
                 <ul role="group" data-testid="sessions-terminal-tab-new-menu">
                   {menuKinds.map((kind) => (
@@ -309,31 +285,6 @@ export function NewTerminalMenu({
           )
         : null}
     </div>
-  );
-}
-
-/** One item of a "+" menu group: the terminal kind's label, opening it when chosen. */
-function MenuKindItem({
-  kind,
-  testId,
-  onChoose,
-}: {
-  kind: string;
-  testId: string;
-  onChoose: () => void;
-}) {
-  return (
-    <li role="none">
-      <button
-        type="button"
-        role="menuitem"
-        data-testid={testId}
-        onClick={onChoose}
-        className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
-      >
-        {terminalKindLabel(kind)}
-      </button>
-    </li>
   );
 }
 

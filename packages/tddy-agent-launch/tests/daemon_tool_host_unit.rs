@@ -12,41 +12,12 @@
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tddy_test_hosts::a_tool_host;
 
 use pretty_assertions::assert_eq;
-use tddy_actions::tool::{ToolError, ToolHost};
+use tddy_actions::tool::ToolError;
 use tddy_agent_launch::host_coding_agents::daemon_tool_host;
 use tddy_agent_launch::spec_launch::{HostCodingAgents, SpecLaunchError};
-
-/// A host whose environment is `HOME` and `TDDY_TOOLS_BINARY` alone, whose `PATH` is `path`, over
-/// the real filesystem.
-struct AFixtureHost {
-    home: PathBuf,
-    tddy_tools: PathBuf,
-    path: Vec<PathBuf>,
-}
-
-impl ToolHost for AFixtureHost {
-    fn env_var(&self, name: &str) -> Option<String> {
-        match name {
-            "HOME" => Some(self.home.to_string_lossy().into_owned()),
-            "TDDY_TOOLS_BINARY" => Some(self.tddy_tools.to_string_lossy().into_owned()),
-            _ => None,
-        }
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        self.path.clone()
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
-}
 
 /// A machine laid out under one temporary root: a `$HOME`, a `tddy-tools`, and whatever `PATH`
 /// directories a test adds.
@@ -106,11 +77,13 @@ impl AMachine {
                 .expect("the built-in agents load");
         HostCodingAgents::new(
             registry,
-            daemon_tool_host(Arc::new(AFixtureHost {
-                home: self.home.clone(),
-                tddy_tools: self.tddy_tools.clone(),
-                path: self.path.clone(),
-            })),
+            daemon_tool_host(Arc::new(
+                a_tool_host()
+                    .with_home(&self.home)
+                    .with_env("TDDY_TOOLS_BINARY", self.tddy_tools.to_string_lossy())
+                    .with_path(self.path.clone())
+                    .build(),
+            )),
         )
     }
 

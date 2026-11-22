@@ -26,10 +26,10 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tddy_test_hosts::a_tool_host;
 
 use futures_util::StreamExt;
 use tddy_accounts::{endpoints_for, preset, ProviderAccount};
-use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::CodingAgentRegistry;
 use tddy_core::pending_question::{write_pending_question, PendingQuestion};
@@ -420,31 +420,6 @@ impl Drop for AJailGuard {
     }
 }
 
-/// A host with a declared `PATH` and `$HOME` over the real filesystem — nothing of the real
-/// machine's `PATH`, `$HOME` or `TDDY_*` variables reaches resolution.
-struct AFixtureHost {
-    path: Vec<PathBuf>,
-    home: PathBuf,
-}
-
-impl ToolHost for AFixtureHost {
-    fn env_var(&self, name: &str) -> Option<String> {
-        (name == "HOME").then(|| self.home.to_string_lossy().into_owned())
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        self.path.clone()
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
-}
-
 /// A daemon whose `<tddyhome>/tools` holds the files a test dropped in.
 pub struct ARegistryDaemon {
     pub service: Arc<DaemonSessionHost>,
@@ -627,10 +602,12 @@ fn a_running_daemon(
     };
     let host = host.with_coding_agents(Arc::new(HostCodingAgents::new(
         registry.tools().clone(),
-        Arc::new(AFixtureHost {
-            path: vec![stub_bin.to_path_buf()],
-            home: host_home.to_path_buf(),
-        }),
+        Arc::new(
+            a_tool_host()
+                .with_path(vec![stub_bin.to_path_buf()])
+                .with_home(host_home)
+                .build(),
+        ),
     )));
     let service = Arc::new(host);
     service.install_sandbox_rpc_bridge();

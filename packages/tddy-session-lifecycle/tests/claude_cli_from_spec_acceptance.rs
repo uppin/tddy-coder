@@ -18,9 +18,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tddy_test_hosts::a_tool_host;
 
 use pretty_assertions::assert_eq;
-use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::{builtin_specs, load_agent_registry};
 use tddy_core::session_metadata::{read_session_metadata, write_session_metadata, SessionMetadata};
@@ -164,32 +164,6 @@ impl RecordedLaunch {
     }
 }
 
-/// A host with a declared environment and `PATH`, over the real filesystem — nothing of the real
-/// machine's `PATH` or `TDDY_*_BINARY` variables reaches resolution.
-struct AFixtureHost {
-    path: Vec<PathBuf>,
-    env: BTreeMap<String, String>,
-}
-
-impl ToolHost for AFixtureHost {
-    fn env_var(&self, name: &str) -> Option<String> {
-        self.env.get(name).cloned()
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        self.path.clone()
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
-}
-
 /// A `<tddyhome>` whose `tools/` directory a test may write overrides into.
 struct ATddyHome {
     dir: tempfile::TempDir,
@@ -251,10 +225,12 @@ impl ATddyHome {
         let registry = load_agent_registry(&self.tools()).expect("the agent registry loads");
         Arc::new(HostCodingAgents::new(
             registry,
-            Arc::new(AFixtureHost {
-                path: vec![stubs.path()],
-                env,
-            }),
+            Arc::new(
+                a_tool_host()
+                    .with_path(vec![stubs.path()])
+                    .with_envs(env)
+                    .build(),
+            ),
         ))
     }
 }

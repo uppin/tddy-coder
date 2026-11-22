@@ -170,7 +170,7 @@ fn write_env_echo_script(dir: &std::path::Path) -> std::path::PathBuf {
 /// session is re-wired with the orchestration prompt and per-session socket).
 fn write_argv_and_env_script(dir: &std::path::Path) -> std::path::PathBuf {
     let script_path = dir.join("stub_claude_argv_env.sh");
-    std::fs::write(
+    tddy_testing_commons::remote_target::write_executable(
         &script_path,
         concat!(
             "#!/bin/sh\n",
@@ -180,9 +180,7 @@ fn write_argv_and_env_script(dir: &std::path::Path) -> std::path::PathBuf {
             "sock=$(sed -n 's/.*\"TDDY_SOCKET\": *\"\\([^\"]*\\)\".*/\\1/p' \"$cfg\" 2>/dev/null)\n",
             "echo \"ENVDUMP TDDY_SOCKET=[$sock]\"\n",
         ),
-    )
-    .unwrap();
-    make_executable(&script_path);
+    );
     script_path
 }
 

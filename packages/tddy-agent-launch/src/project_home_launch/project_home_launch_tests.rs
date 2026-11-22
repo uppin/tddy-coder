@@ -1,11 +1,11 @@
 //! Unit tests: a main launched from the `claude` spec is handed its tool set through the spec's
 //! slots, and gets what the hand-built launch gave it.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
+use tddy_test_hosts::a_tool_host;
 
 use pretty_assertions::assert_eq;
-use tddy_actions::tool::{ProcessToolHost, ToolHost};
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
@@ -18,30 +18,6 @@ use crate::spec_launch::{launch_host_pty, HostCodingAgents, HostPtySession};
 const A_MAIN: &str = "01a16dc6-ab4c-7dc3-844e-baca4514f86e";
 /// What the stub `claude` prints once it has recorded its argv.
 const LAUNCHED: &str = "STUB LAUNCHED";
-
-/// A host whose whole `PATH` is `dir`, so the `claude` spec and its `tddy-tools` dep resolve to the
-/// stubs there and nothing of the real machine.
-struct AStubPathHost {
-    dir: PathBuf,
-}
-
-impl ToolHost for AStubPathHost {
-    fn env_var(&self, _name: &str) -> Option<String> {
-        None
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        vec![self.dir.clone()]
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        ProcessToolHost.is_executable_file(path)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        ProcessToolHost.canonicalize(path)
-    }
-}
 
 fn an_executable(path: &Path, script: &str) {
     use std::os::unix::fs::PermissionsExt;
@@ -78,9 +54,7 @@ async fn a_main_launched_from_the_claude_spec_gets_its_tool_flags_and_mcp_file_f
     let empty_tools_dir = tempfile::tempdir().unwrap();
     let agents = HostCodingAgents::new(
         tddy_coding_agent_specs::load_agent_registry(empty_tools_dir.path()).unwrap(),
-        Arc::new(AStubPathHost {
-            dir: stub_dir.clone(),
-        }),
+        Arc::new(a_tool_host().with_path([stub_dir.clone()]).build()),
     );
     let config = DaemonConfig::default();
     let data_dir = tempfile::tempdir().unwrap();

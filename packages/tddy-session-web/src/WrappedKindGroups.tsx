@@ -1,3 +1,6 @@
+import React from "react";
+import { MenuKindItem } from "./MenuKindItem";
+
 /** One group of {@link WrappedKindGroups}: its aria-label and the prefix of its items' test ids. */
 export interface KindGroup {
   /** The group's `aria-label` — "In sandbox", "On host", "On target", "On this host". */
@@ -24,7 +27,29 @@ export interface WrappedKindGroupsProps {
  * and "On host" for a sandboxed session, "On target" and "On this host" for a target session: the
  * same kinds twice, the first group's wrapped, the second's not (`#tab-hardening` 2/4).
  */
-export function WrappedKindGroups(_props: WrappedKindGroupsProps): never {
-  // TODO(tab-hygiene): implement
-  throw new Error("WrappedKindGroups is not implemented yet (TODO(tab-hygiene))");
+export function WrappedKindGroups({ kinds, wrapped, unwrapped, onChoose }: WrappedKindGroupsProps) {
+  return (
+    <>
+      <ul role="group" aria-label={wrapped.label} data-testid="sessions-terminal-tab-new-menu">
+        {kinds.map((kind) => (
+          <MenuKindItem
+            key={kind}
+            kind={kind}
+            testId={`${wrapped.testIdPrefix}-${kind}`}
+            onChoose={() => onChoose(kind, [wrapped.wrapper])}
+          />
+        ))}
+      </ul>
+      <ul role="group" aria-label={unwrapped.label} className="mt-1 border-t border-border pt-1">
+        {kinds.map((kind) => (
+          <MenuKindItem
+            key={kind}
+            kind={kind}
+            testId={`${unwrapped.testIdPrefix}-${kind}`}
+            onChoose={() => onChoose(kind)}
+          />
+        ))}
+      </ul>
+    </>
+  );
 }

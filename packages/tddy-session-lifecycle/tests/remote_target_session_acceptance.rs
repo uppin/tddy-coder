@@ -10,6 +10,7 @@
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-15-remote-shell-ssh-agent-launch.md.
 
+use agent_run_support::{read_agent_runs, AnAgentRun};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +30,7 @@ use tddy_task::TaskStatus;
 use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 
 mod agent_registry_support;
+mod agent_run_support;
 mod cli_harness_support;
 use agent_registry_support::{builtin_yaml_as, AJailGuard};
 use cli_harness_support::{
@@ -49,25 +51,6 @@ const AGENT_EXIT_STATUS: i32 = 7;
 
 /// A safety net for an agent to be observed on the target, not a prediction of how long it takes.
 const OBSERVE: Duration = Duration::from_secs(20);
-
-/// One run of the stub agent, as it recorded it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AnAgentRun {
-    pid: i32,
-    cwd: PathBuf,
-    args: Vec<String>,
-}
-
-impl AnAgentRun {
-    fn is_a_resume(&self) -> bool {
-        self.args.iter().any(|arg| arg == "--resume")
-    }
-
-    fn is_alive(&self) -> bool {
-        // SAFETY: signal 0 only probes whether the pid still exists.
-        unsafe { libc::kill(self.pid, 0) == 0 }
-    }
-}
 
 /// A stub agent: appends one line per run — its pid, its working directory and its arguments — to
 /// `runs`, prints a banner, then stays up until it is hung up, or exits [`AGENT_EXIT_STATUS`] on
@@ -201,17 +184,7 @@ impl ADaemonWithATarget {
 
     /// Every run of the stub agent so far, oldest first.
     fn agent_runs(&self) -> Vec<AnAgentRun> {
-        std::fs::read_to_string(&self.runs)
-            .unwrap_or_default()
-            .lines()
-            .map(|line| line.split('\t').map(str::to_string).collect::<Vec<_>>())
-            .filter(|fields| fields.len() >= 2)
-            .map(|fields| AnAgentRun {
-                pid: fields[0].parse().expect("a run records its pid"),
-                cwd: PathBuf::from(&fields[1]),
-                args: fields[2..].to_vec(),
-            })
-            .collect()
+        read_agent_runs(&self.runs)
     }
 
     /// The runs of `session_id`'s agent on the target — in its worktree there — once there are

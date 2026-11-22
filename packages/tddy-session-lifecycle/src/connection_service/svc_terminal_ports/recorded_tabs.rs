@@ -12,8 +12,9 @@ use std::sync::Arc;
 use tddy_agent_launch::restore_tabs::{agent_launch_node, new_agent_tab, NewAgentTab};
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_cli_sessions::tmux::{
-    agent_tab_tmux_session_name, ensure_reachable, kill_tmux_session, start_agent_tmux_session,
-    tmux_attach_argv, tmux_binary, tmux_new_session_argv, tmux_session_name,
+    agent_tab_tmux_session_name, ensure_reachable, kill_tmux_session_logged,
+    start_agent_tmux_session, tmux_attach_argv, tmux_binary, tmux_new_session_argv,
+    tmux_session_name,
 };
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_core::tab_roster::{read_tab_roster, LaunchNode, TabEntry, TMUX_KIND};
@@ -241,7 +242,7 @@ impl CliManagerTerminalRoster {
             }),
             Err(error) => {
                 // The agent must not outlive a start that failed: nothing records it.
-                kill_tmux_session_blocking(os_user, &name).await;
+                kill_tmux_session_logged(os_user, &name, "a start that failed").await;
                 Err(Status::internal(format!(
                     "failed to attach a terminal to tmux session {name:?}: {error}"
                 )))
@@ -281,7 +282,7 @@ impl CliManagerTerminalRoster {
                 wrapper.property(tddy_core::tab_roster::SESSION_PROPERTY),
                 wrapper.property(tddy_core::tab_roster::OS_USER_PROPERTY),
             ) {
-                kill_tmux_session_blocking(os_user, name).await;
+                kill_tmux_session_logged(os_user, name, "a tab that closed").await;
             }
         }
         self.manager.stop_terminal(session_id, terminal_id).await;
@@ -382,20 +383,5 @@ fn wire_node(node: LaunchNode) -> WireLaunchNode {
     WireLaunchNode {
         kind: node.kind,
         properties: node.properties.into_iter().collect(),
-    }
-}
-
-/// Kill tmux session `name` of `os_user` on the blocking pool. The caller is already failing or
-/// closing, so a kill that fails is logged rather than returned.
-async fn kill_tmux_session_blocking(os_user: &str, name: &str) {
-    let (user, session) = (os_user.to_string(), name.to_string());
-    match tokio::task::spawn_blocking(move || kill_tmux_session(&user, &session)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => {
-            log::warn!("could not end tmux session {name:?} of {os_user}: {error}")
-        }
-        Err(error) => {
-            log::warn!("the end of tmux session {name:?} of {os_user} did not finish: {error}")
-        }
     }
 }

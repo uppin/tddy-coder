@@ -54,18 +54,26 @@ impl ReapGate {
         signal: i32,
         deliver: impl FnOnce(i32) -> std::io::Result<()>,
     ) -> std::io::Result<Signalled> {
-        let _ = (signal, deliver, &self.ended);
-        // TODO(tab-hygiene): implement
-        todo!()
+        let ended = self.lock();
+        if *ended {
+            return Ok(Signalled::ChildEnded);
+        }
+        deliver(signal)?;
+        Ok(Signalled::Delivered)
     }
 
     /// Mark the child ended, then run `reap` — which frees its pid — still holding the gate's lock,
     /// and hand back what `reap` returned. Called once, by the child's reaper, after it has waited
     /// for the child without reaping it ([`wait_without_reaping`]).
     pub fn mark_ended_then_reap<T>(&self, reap: impl FnOnce() -> T) -> T {
-        let _ = reap;
-        // TODO(tab-hygiene): implement
-        todo!()
+        let mut ended = self.lock();
+        *ended = true;
+        reap()
+    }
+
+    /// The lock, whose mark is a plain flag: a thread that panicked holding it left it consistent.
+    fn lock(&self) -> std::sync::MutexGuard<'_, bool> {
+        self.ended.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -74,9 +82,63 @@ impl ReapGate {
 /// (`waitid(P_PID, pid, WEXITED | WNOWAIT)`).
 #[cfg(unix)]
 pub fn wait_without_reaping(pid: u32) -> std::io::Result<()> {
-    let _ = pid;
-    // TODO(tab-hygiene): implement
-    todo!()
+    loop {
+        // SAFETY: `info` is plain data the kernel fills in; `waitid` reads nothing else of ours.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        if rc == 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
+/// `kill(2)` of `pid`, the delivery a [`ReapGate`] guards.
+#[cfg(unix)]
+fn kill_pid(pid: u32, signal: i32) -> std::io::Result<()> {
+    // SAFETY: `kill` takes two integers and touches no memory of ours.
+    if unsafe { libc::kill(pid as libc::pid_t, signal) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+/// The gates of the children a forked spawn worker holds, by pid, so a [`WorkerRequest::Signal`]
+/// finds the lock the child's reaper takes. An entry stays after its child ended — the gate then
+/// answers [`Signalled::ChildEnded`] — until a child that is given the same pid replaces it.
+#[cfg(unix)]
+pub(crate) mod worker_gates {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    use super::ReapGate;
+
+    static GATES: Mutex<Option<HashMap<u32, ReapGate>>> = Mutex::new(None);
+
+    fn table() -> std::sync::MutexGuard<'static, Option<HashMap<u32, ReapGate>>> {
+        GATES.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Remember the gate of the child `pid`.
+    pub(crate) fn hold(pid: u32, gate: ReapGate) {
+        table().get_or_insert_with(HashMap::new).insert(pid, gate);
+    }
+
+    /// The gate of the child `pid`, when this worker spawned it.
+    pub(crate) fn of(pid: u32) -> Option<ReapGate> {
+        table().as_ref().and_then(|gates| gates.get(&pid).cloned())
+    }
 }
 
 /// How the daemon signals a tool child it, or its forked spawn worker, is the parent of.
@@ -100,9 +162,22 @@ impl ToolSignal {
     /// Send `signal` to the child while its pid is still its own; [`Signalled::ChildEnded`] once
     /// its parent has marked it ended. Blocking: the worker variant waits for the worker's answer.
     pub fn send(&self, signal: i32) -> anyhow::Result<Signalled> {
-        let _ = signal;
-        // TODO(tab-hygiene): implement
-        todo!()
+        match self {
+            #[cfg(unix)]
+            Self::Direct { pid, gate } => Ok(gate.signal_with(signal, |s| kill_pid(*pid, s))?),
+            #[cfg(not(unix))]
+            Self::Direct { .. } => anyhow::bail!("signalling a child is not supported here"),
+            Self::Worker { pid, client } => client.signal_child(*pid, signal),
+        }
+    }
+
+    /// What the forked worker does for [`crate::spawn_worker::WorkerRequest::Signal`]: signal `pid`
+    /// under the gate of the child it holds.
+    #[cfg(unix)]
+    pub(crate) fn send_from_worker(pid: u32, signal: i32) -> anyhow::Result<Signalled> {
+        let gate = worker_gates::of(pid)
+            .ok_or_else(|| anyhow::anyhow!("pid {pid} is not a child of this spawn worker"))?;
+        Ok(gate.signal_with(signal, |s| kill_pid(pid, s))?)
     }
 }
 
