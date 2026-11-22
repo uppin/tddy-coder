@@ -198,8 +198,11 @@ it("updates the resolution on the polling interval without user action", () => {
     },
   });
 
-  // Then — the first poll shows no worktree (the row is there, so the poll has started)
+  // Then — the first poll has been answered, and shows no worktree. The row alone does not prove it:
+  // the row renders from the stack before the poll starts, and the poll's interval is registered with
+  // it, so a tick before the first poll would advance a clock nothing is scheduled on yet.
   prStackScreenPage.plannedPrRow("n1").should("exist");
+  cy.wrap(null).should(() => expect(polls, "QueryBranch polls answered").to.be.greaterThan(0));
   prStackScreenPage.worktree("n1").should("not.exist");
 
   // When — the poll interval elapses

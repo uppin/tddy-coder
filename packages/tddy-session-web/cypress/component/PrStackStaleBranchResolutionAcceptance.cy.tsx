@@ -178,6 +178,8 @@ function aQueryBranchWhoseSecondRoundIsWithheld(rounds: {
         withheld.push(() => resolve(answer(rounds.withheld, req.branch)));
       });
     }) satisfies QueryBranchHandler,
+    /** How many branches have had their first poll answered. */
+    firstRoundAnswered: () => answeredOnce.size,
     /** Answer every withheld call, in the order the polls were issued. */
     releaseWithheldRound: () => {
       for (const send of withheld.splice(0)) send();
@@ -200,6 +202,8 @@ it("keeps a completed pull's result when the poll it overtook finally answers", 
     ),
   );
   prStackScreenPage.expandRow("n3");
+  // The first round must be answered before the tick: the poll's interval is registered with it.
+  cy.wrap(null).should(() => expect(polls.firstRoundAnswered(), "first poll round").to.be.greaterThan(0));
   cy.tick(POLL_INTERVAL_MS);
   prStackScreenPage.clickSyncMerge("n3");
   prStackScreenPage.baseInSync("n3").should("exist");

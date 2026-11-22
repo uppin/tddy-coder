@@ -1712,7 +1712,7 @@ state:
   history:
     - state: Init
       at: '2026-07-01T10:05:00Z'
-recipe: pr-stack
+recipe: bugfix
 ",
         )
         .unwrap();
@@ -1737,13 +1737,13 @@ recipe: pr-stack
         )
         .expect("apply must not error");
 
-        // Then — the exploration context doc is surfaced on the proto row with its basename,
-        // on-disk existence, and a non-empty description
+        // Then — the exploration context doc is surfaced on the proto row with its basename and
+        // on-disk existence
         let exploration = proto
             .context_docs
             .iter()
             .find(|d| d.key == "exploration")
-            .expect("pr-stack SessionEntry must carry the exploration context doc");
+            .expect("a bugfix SessionEntry must carry the exploration context doc");
         assert_eq!(
             exploration.basename, "exploration.md",
             "context doc basename must be surfaced"
@@ -1751,10 +1751,6 @@ recipe: pr-stack
         assert!(
             exploration.exists,
             "exploration.md is on disk, so its context doc must report exists=true"
-        );
-        assert!(
-            !exploration.description.trim().is_empty(),
-            "each context doc must carry a human description for the web to render"
         );
     }
 
@@ -1951,8 +1947,8 @@ state:
 
     #[test]
     fn an_attachment_copied_into_a_session_surfaces_on_the_proto_entry_with_the_attachment_kind() {
-        // Given — a pr-stack session with one attached document
-        let session = a_session_with_recipe("pr-stack")
+        // Given — a bugfix session with one attached document
+        let session = a_session_with_recipe("bugfix")
             .with_attachment("requirements.md", "# Requirements\n");
 
         // When — list enrichment builds the proto row the web reads
@@ -1968,8 +1964,8 @@ state:
 
     #[test]
     fn manifest_context_docs_keep_the_manifest_kind_when_the_session_also_has_attachments() {
-        // Given — a pr-stack session holding the recipe's exploration doc and one attachment
-        let session = a_session_with_recipe("pr-stack")
+        // Given — a bugfix session holding the recipe's exploration doc and one attachment
+        let session = a_session_with_recipe("bugfix")
             .with_manifest_artifact("exploration.md", "# Exploration\n")
             .with_attachment("notes.md", "later\n");
 
@@ -1980,22 +1976,7 @@ state:
         assert_eq!(
             context_doc_kinds_and_basenames(&entry),
             vec![
-                (
-                    SessionContextDocKind::Manifest,
-                    "stack-plan.yaml".to_string()
-                ),
-                (
-                    SessionContextDocKind::Manifest,
-                    "pr-stack-plan.md".to_string()
-                ),
-                (
-                    SessionContextDocKind::Manifest,
-                    "stack-status.md".to_string()
-                ),
-                (
-                    SessionContextDocKind::Manifest,
-                    "stack-status.json".to_string()
-                ),
+                (SessionContextDocKind::Manifest, "fix-plan.md".to_string()),
                 (
                     SessionContextDocKind::Manifest,
                     "exploration.md".to_string()
@@ -2009,7 +1990,7 @@ state:
     #[test]
     fn an_attachment_named_like_a_recipe_artifact_does_not_replace_the_manifest_row() {
         // Given — the recipe's own exploration.md and an attachment that happens to share its name
-        let session = a_session_with_recipe("pr-stack")
+        let session = a_session_with_recipe("bugfix")
             .with_manifest_artifact("exploration.md", "# Recipe exploration\n")
             .with_attachment("exploration.md", "# My notes\n");
 

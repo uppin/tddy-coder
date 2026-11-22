@@ -73,7 +73,6 @@ fn an_existing_pr(pull_number: u64, head_branch: &str) -> AdoptedPrFacts {
     }
 }
 
-/// A plan whose `prs` array order is the reading order a re-seed adopts wholesale.
 // --- reading the order back -------------------------------------------------
 
 /// The persisted position of each named node, in the order named — so an assertion states the whole

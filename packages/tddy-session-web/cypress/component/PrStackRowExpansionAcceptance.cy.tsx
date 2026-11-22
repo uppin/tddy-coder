@@ -266,6 +266,8 @@ it("keeps a row expanded when its branch resolution changes on the poll interval
 
   openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.expandRow("n2");
+  // Both branches' first polls are answered before the tick: the poll's interval is registered with them.
+  cy.wrap(null).should(() => expect(pollCount, "QueryBranch polls answered").to.be.at.least(2));
 
   // When
   cy.tick(POLL_INTERVAL_MS);
