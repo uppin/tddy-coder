@@ -545,17 +545,20 @@ const EXEC_TOOL_METHODS: [&str; 4] = [
     "ListSessionToolCalls",
 ];
 
-const PR_STACK_METHODS: [&str; 10] = [
-    "AddPlannedPr",
+/// `#workqueue` 3/14: the stack service is the work-queue service. The list is closed — it now names
+/// `CreateWorkQueue`, which the stack list had missed (`CreateProjectStack`).
+const WORK_QUEUE_METHODS: [&str; 11] = [
+    "AddWorkItem",
     "GetPrStatus",
-    "RepointPlannedPr",
-    "ReorderPlannedPr",
+    "RepointWorkItem",
+    "ReorderWorkItem",
     "PullBaseIntoBranch",
     "QueryBranch",
-    "ResolveStackBase",
-    "LinkStackNode",
-    "ListProjectStacks",
-    "GetProjectStack",
+    "ResolveWorkItemBase",
+    "LinkWorkItem",
+    "ListProjectWorkQueues",
+    "GetWorkQueue",
+    "CreateWorkQueue",
 ];
 
 /// Families C, D, O and Q — the deliberate endpoint of the whole stack.
@@ -624,14 +627,39 @@ fn exec_tool_service_declares_every_execution_method() {
 }
 
 #[test]
-fn pr_stack_service_declares_every_stack_method() {
-    let block = service_block(&read("pr_stack.proto"), "PrStackService");
-    for method in PR_STACK_METHODS {
+fn work_queue_service_declares_every_work_queue_method() {
+    let block = service_block(&read("work_queue.proto"), "WorkQueueService");
+    for method in WORK_QUEUE_METHODS {
         assert!(
             block.contains(&format!("rpc {method}(")),
-            "pr_stack.PrStackService is missing {method}"
+            "work_queue.WorkQueueService is missing {method}"
         );
     }
+}
+
+/// `#workqueue` 3/14: no service or rpc anywhere is named for stacks or planned PRs — the container is
+/// a work queue and its entries are work items, with no aliases kept.
+#[test]
+fn no_service_is_named_for_stacks_or_planned_prs() {
+    let proto_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("proto");
+    let mut named = Vec::new();
+    for entry in std::fs::read_dir(&proto_dir).expect("the proto directory") {
+        let path = entry.expect("a proto entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("proto") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).expect("a readable proto");
+        for line in text.lines().map(str::trim_start) {
+            let declares = line.starts_with("service ") || line.starts_with("rpc ");
+            if declares && (line.contains("Stack") || line.contains("PlannedPr")) {
+                named.push(format!(
+                    "{}: {line}",
+                    path.file_name().unwrap().to_string_lossy()
+                ));
+            }
+        }
+    }
+    assert!(named.is_empty(), "still named for stacks: {named:#?}");
 }
 
 /// **The completion criterion for the whole `#unbundle` stack.**

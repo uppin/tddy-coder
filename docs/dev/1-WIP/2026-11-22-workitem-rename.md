@@ -5,6 +5,7 @@
 **Type**: Refactor
 **Complexity**: 4 — mechanical, but ~25 packages, a proto/contract change (package, service, RPC and message names), two crate/package renames, closed name lists in several crates
 **Stack**: `#workqueue` 3/14 — branch `feature/workqueue/workitem-rename`, base `feature/workqueue/github-event-inbox`
+**PR**: [#1004](https://github.com/uppin/tddy-coder/pull/1004)
 
 ## Initial Discovery
 
@@ -79,9 +80,27 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: the complete old → new symbol map (a table in
-this changeset), the renamed closed lists as **failing** catalogue/vocabulary tests (the tests below,
-asserting the new names while the code still has the old ones), and the before-baseline test counts.
+Published (pass 2, commit 2): the complete old → new symbol map (`## Before-baseline (pass 2)
+
+Test counts on this branch before the rename (`cargo test -p <pkg> -- --list`):
+
+| Package | Tests |
+|---|---|
+| tddy-pr-stack | 75 |
+| tddy-changeset | 277 (incl. the new guard) |
+| tddy-tool-engine | 320 (incl. the 3 new vocabulary tests) |
+| tddy-service | 177 (incl. the 2 replaced/new proto tests) |
+| tddy-prstack-web (Cypress) | 7 specs, 15 `it` |
+| tddy-session-web (Cypress) | 155 specs, 881 `it` (before n1's deletions) |
+
+`tddy-daemon-rpc` and `tddy-session-lifecycle` were **not** counted: listing builds every test binary
+of both, which filled the volume on 2026-11-22. `/green` counts them on its base (n2's tip) with
+`CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0` before renaming, and again after.
+
+## Symbol map` below — every name
+there is final), the renamed closed lists as **failing** vocabulary tests that read only the catalogue,
+the proto text and the packages directory (so they compile the same before and after the rename), one
+guard test for the on-disk spelling, and the before-baseline test counts.
 `/green` performs the rename in this PR, preferring rust-analyzer renames through `tddy-tools
 restructure` for Rust symbols and engine moves for the crate rename; an engine refusal is put to the
 operator before any hand edit.
@@ -177,21 +196,83 @@ still deserialize. No textual grep tests over `src/` (they trip on fixture strin
 
 ## Acceptance Tests
 
-`packages/tddy-service/tests/unbundle_service_split.rs` (existing, changed):
-- [ ] `work_queue_service_declares_every_work_queue_method` — the closed list now includes `CreateWorkQueue`
-- [ ] `no_service_is_named_for_stacks_or_planned_prs`
+`packages/tddy-service/tests/unbundle_service_split.rs` (existing; `PR_STACK_METHODS` and its test replaced):
+- [x] `work_queue_service_declares_every_work_queue_method` — the closed list now includes `CreateWorkQueue`
+- [x] `no_service_is_named_for_stacks_or_planned_prs`
 
-`packages/tddy-tool-engine/tests/work_queue_tools_catalogue.rs` (renamed from `stack_tools_catalogue.rs`):
-- [ ] `every_work_queue_tool_is_offered_under_its_work_name`
-- [ ] `no_tool_in_the_catalogue_is_named_pr_underscore`
+`packages/tddy-tool-engine/tests/work_queue_vocabulary.rs` (new; reads `project_home_offered_catalog()` and the packages dir):
+- [x] `every_work_queue_tool_is_offered_under_its_work_name`
+- [x] `no_tool_in_the_catalogue_is_named_pr_underscore` — also proves no alias is kept (an old name in
+  the catalogue fails it); `stack_tools_catalogue.rs` is renamed with the module by `/green`
+- [x] `the_crates_and_packages_carry_the_work_queue_names`
 
-`packages/tddy-daemon-rpc/tests/work_queue_tools_acceptance.rs` (renamed from `stack_plan_tools_acceptance.rs`):
-- [ ] `an_old_pr_tool_name_is_refused_as_unknown`
+`packages/tddy-changeset/tests/project_stack_store_acceptance.rs` (guard, green before and after — renamed with the module):
+- [x] `a_record_written_before_the_rename_still_loads`
 
-`packages/tddy-changeset/tests/work_queue_store_acceptance.rs` (renamed from `project_stack_store_acceptance.rs`):
-- [ ] `a_record_written_before_the_rename_still_loads`
+Web: `ProjectStackViewAcceptance.cy.tsx` → `WorkQueueViewAcceptance.cy.tsx` (same two tests, new ids) is
+part of the rename itself; its unchanged assertions are the proof.
 
-`packages/tddy-workqueue-web/cypress/component/WorkQueueViewAcceptance.cy.tsx` (renamed from `ProjectStackViewAcceptance.cy.tsx`; same two tests, new ids)
+## Symbol map
+
+Old → new; field numbers never change. Anything not listed keeps its name.
+
+**Crates, packages, files**
+
+| Old | New |
+|---|---|
+| crate `tddy-pr-stack` (`tddy_pr_stack`) | `tddy-work-queue` (`tddy_work_queue`) |
+| package `tddy-prstack-web` | `tddy-workqueue-web` |
+| `tddy-service/proto/pr_stack.proto`, `package pr_stack` | `work_queue.proto`, `package work_queue` |
+| `tddy-changeset/src/project_stack_store.rs`, `changeset/stack.rs`, `stack_fixtures.rs` | `work_queue_store.rs`, `changeset/work_queue.rs`, `work_queue_fixtures.rs` |
+| `tddy-work-queue/src/stack_ops/`, `stack_migration.rs` | `item_ops/`, `queue_migration.rs` (n5 deletes it) |
+| `tddy-daemon-rpc/src/pr_stack/`, `exec_tool/stack_tools*`, `exec_tool/stack_git_tools*` | `work_queue/`, `exec_tool/work_queue_tools*`, `exec_tool/work_item_git_tools*` |
+| `tddy-tool-engine/src/stack_tools.rs`, `stack_tools/`, `stack_git_tools.rs` | `work_queue_tools.rs`, `work_queue_tools/`, `work_item_git_tools.rs` |
+| `tddy-session-lifecycle/src/pr_stack_rpc.rs` | `work_queue_rpc.rs` |
+| `tddy-client-web/src/gen/pr_stack_pb.ts` (and the tests copy) | `work_queue_pb.ts` |
+
+**Proto** (`work_queue.WorkQueueService`)
+
+| Old | New |
+|---|---|
+| `PrStackService` | `WorkQueueService` |
+| `AddPlannedPr`, `RepointPlannedPr`, `ReorderPlannedPr` | `AddWorkItem`, `RepointWorkItem`, `ReorderWorkItem` |
+| `ResolveStackBase`, `LinkStackNode` | `ResolveWorkItemBase`, `LinkWorkItem` |
+| `ListProjectStacks`, `GetProjectStack`, `CreateProjectStack` | `ListProjectWorkQueues`, `GetWorkQueue`, `CreateWorkQueue` |
+| messages `*PlannedPr*`, `*StackNode*`, `*ProjectStack*`, `*StackBase*` (requests/responses) | same pattern: `*WorkItem*`, `*WorkItem*`, `*WorkQueue*`, `*WorkItemBase*` |
+| `StackAddress`, `StackNodeCounts`, `ProjectStackSummary`, `UnreachableStackHost` | `WorkQueueAddress`, `WorkItemCounts`, `WorkQueueSummary`, `UnreachableWorkQueueHost` |
+| fields `stack_id`, `node_id`, `stack_plan_json` | `queue_id`, `item_id`, `work_queue_json` |
+| `SessionEntry.stack_plan_json` (23), `.stack_id` (38) | `.work_queue_json`, `.work_queue_id` |
+| `StartSessionRequest.stack_parent` (15), `.stack_parent_daemon_instance_id` (36), `.stack_node_id` (37) | `.work_queue_parent`, `.work_queue_parent_daemon_instance_id`, `.work_item_id` |
+| `PR_STACK_SERVICE = "pr_stack.PrStackService"` | `WORK_QUEUE_SERVICE = "work_queue.WorkQueueService"` |
+
+**Agent tools** — the 17 in `tests/work_queue_vocabulary.rs` (`EVERY_WORK_QUEUE_TOOL`), mapped as in the PRD; argument keys `stack_id` → `queue_id`, `node_id` → `item_id`.
+
+**Rust types and functions**
+
+| Old | New |
+|---|---|
+| `Stack`, `StackNode`, `StackRecord`, `StackStoreError`, `ProjectStackStore` | `WorkQueue`, `WorkItem`, `WorkQueueRecord`, `WorkQueueStoreError`, `WorkQueueStore` |
+| `StackHome`, `StoredStack`, `SessionStackHome` | `WorkQueueHome`, `StoredWorkQueue`, `SessionWorkQueueHome` |
+| `AddPlannedPrInput`, `UpdatePlannedPrInput` | `AddWorkItemInput`, `UpdateWorkItemInput` |
+| `add_planned_pr_node`, `update_planned_pr_node`, `delete_planned_pr_node`, `move_planned_pr_node`, `repoint_planned_pr_node`, `set_stack_node_parents`, `adopt_pr_into_stack`, `link_stack_node_to_child_session` | `add_work_item`, `update_work_item`, `delete_work_item`, `move_work_item`, `repoint_work_item`, `set_work_item_parents`, `adopt_pr_as_work_item`, `link_work_item_to_session` |
+| `PrStackHandler`, `PrStackServiceImpl`, `PrStackRpcHandler` | `WorkQueueHandler`, `WorkQueueServiceImpl`, `WorkQueueRpcHandler` |
+| `StackCaller`, `StackCallerRole`, `StackScope`, `StackOp`, `StackToolPort` | `WorkQueueCaller`, `WorkQueueCallerRole`, `WorkQueueScope`, `WorkQueueOp`, `WorkQueueToolPort` |
+| `StackGitOp`, `StackGitToolPort`, `StackOpJournal` | `WorkItemGitOp`, `WorkItemGitToolPort`, `WorkQueueOpJournal` |
+| `StackTarget`, `StackGithub`, `StackGithubClients`, `RealStackGithubClients` | `WorkQueueTarget`, `WorkQueueGithub`, `WorkQueueGithubClients`, `RealWorkQueueGithubClients` |
+| `StackBaseLookup`, `StackNodeLink`, `StackParentHost`, `SpawnStackParent`, `StackParentRoute` | `WorkItemBaseLookup`, `WorkItemLink`, `WorkQueueParentHost`, `SpawnWorkQueueParent`, `WorkQueueParentRoute` |
+| `parent_is_pr_stack_orchestrator`, `pr_stack_node_for_spawn` | `parent_owns_a_work_queue`, `work_item_for_spawn` |
+| `Changeset.stack_id` | `Changeset.work_queue_id` (`#[serde(rename = "stack_id")]`; n5 removes it) |
+
+**Web**
+
+| Old | New |
+|---|---|
+| `ProjectStackView` (`ProjectStackAddress`), `PlannedPrList`, `PlannedPrRow`, `PlannedPrRowBadges`, `PlannedPrRowDetails`, `AddPlannedPrForm`, `ProjectStacksRow` | `WorkQueueView` (`WorkQueueAddress`), `WorkItemList`, `WorkItemRow`, `WorkItemRowBadges`, `WorkItemRowDetails`, `AddWorkItemForm`, `ProjectWorkQueuesRow` |
+| `stackPlan.ts` (`StackNode`, `parseStackPlan`, `orderStackNodes`, `topoSortStackNodes`), `hydrateStackNodes`, `stackChildSessions` | `workQueue.ts` (`WorkItem`, `parseWorkQueue`, `orderWorkItems`, `topoSortWorkItems`), `hydrateWorkItems`, `workItemSessions` |
+| prop `prStackClient` | `workQueueClient` |
+| test ids `pr-stack-<x>-${nodeId}`, `pr-stack-planned-pr-list`, `pr-stack-add-planned-pr-<x>`, `pr-stack-dirty-worktree-<x>` | `work-item-<x>-${itemId}`, `work-item-list`, `work-item-add-<x>`, `work-item-dirty-worktree-<x>` |
+| `project-stack-view`, `project-stack-new-stack-btn`, `sessions-drawer-project-stacks-*`, `sessions-drawer-project-stack-*` | `work-queue-view`, `work-queue-new-btn`, `sessions-drawer-project-queues-*`, `sessions-drawer-project-queue-*` |
+| route `/sessions/project/:projectId/stack/:stackId`, `PROJECT_STACK_SEGMENT = "stack"`, `sessionsProjectStackPath` | `/sessions/project/:projectId/queue/:queueId`, `PROJECT_QUEUE_SEGMENT = "queue"`, `sessionsProjectQueuePath` |
 
 ## Decisions & Trade-offs
 
@@ -222,10 +303,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

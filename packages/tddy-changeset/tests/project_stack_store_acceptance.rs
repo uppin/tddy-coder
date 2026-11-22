@@ -229,3 +229,36 @@ fn a_record_written_without_a_title_still_reads() {
     // Then — it reads, untitled
     assert_eq!((read.stack_id.as_str(), read.title), ("stack-old", None));
 }
+
+/// `#workqueue` 3/14 guard: the rename keeps the on-disk spelling — a record written before it (the
+/// `stacks/` directory, the record and node keys) still loads after it. Green renames the types this
+/// test names; the YAML below must not change.
+#[test]
+fn a_record_written_before_the_rename_still_loads() {
+    // Given — a record exactly as a pre-rename daemon wrote it
+    let root = tempfile::tempdir().expect("temp projects dir");
+    let stacks = root.path().join("projects").join("proj-1").join("stacks");
+    std::fs::create_dir_all(&stacks).unwrap();
+    std::fs::write(
+        stacks.join("0190-stack.yaml"),
+        "stack_id: 0190-stack\n\
+         project_id: proj-1\n\
+         created_by_session_id: sess-1\n\
+         created_at_unix_ms: 1795000000000\n\
+         title: The plan\n\
+         stack:\n  version: 1\n  nodes:\n  - node_id: n1\n    title: First\n    parents: []\n  - node_id: n2\n    title: Second\n    parents: [n1]\n",
+    )
+    .unwrap();
+    let store = ProjectStackStore::new(root.path().join("projects"));
+
+    // When
+    let record = store
+        .read("proj-1", "0190-stack")
+        .expect("the old record loads");
+
+    // Then
+    assert_eq!(
+        (record.title.as_deref(), node_ids(&record.stack)),
+        (Some("The plan"), vec!["n1".to_string(), "n2".to_string()])
+    );
+}
