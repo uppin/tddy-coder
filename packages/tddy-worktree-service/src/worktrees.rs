@@ -495,7 +495,7 @@ impl WorktreeSizeCalculator {
     ///
     /// Synchronously marks the worktree `Calculating` and broadcasts that update, then spawns a task
     /// that acquires one semaphore permit, runs the sizer under `spawn_blocking`, and on completion
-    /// marks it `Cached`, broadcasts, and persists. Re-enqueuing a worktree that is already
+    /// persists it, then marks it `Cached` and broadcasts. Re-enqueuing a worktree that is already
     /// `Calculating` is a no-op (the in-flight walk is reused).
     pub async fn enqueue(&self, project_id: &str, path: &Path) {
         let key = (project_id.to_string(), path.to_path_buf());
@@ -557,6 +557,17 @@ impl WorktreeSizeCalculator {
             };
             let calculated_at_unix_ms = chrono::Utc::now().timestamp_millis();
 
+            // Persist before publishing `Cached`: a reader that sees the update and opens a fresh
+            // calculator over the same root must find the size on disk.
+            persist_worktree_size(
+                &root,
+                &persist_lock,
+                &project_id,
+                &path,
+                bytes,
+                calculated_at_unix_ms,
+            );
+
             {
                 let mut guard = inner.lock().unwrap();
                 guard.states.insert(
@@ -577,14 +588,6 @@ impl WorktreeSizeCalculator {
                 }
             }
 
-            persist_worktree_size(
-                &root,
-                &persist_lock,
-                &project_id,
-                &path,
-                bytes,
-                calculated_at_unix_ms,
-            );
             debug!(
                 "WorktreeSizeCalculator: cached {:?} = {} bytes",
                 path, bytes

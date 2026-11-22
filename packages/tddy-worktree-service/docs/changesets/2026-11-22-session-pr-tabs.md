@@ -3,3 +3,5 @@
 **Type:** Feature · **Stack:** `#workqueue` 4/14 (PR #1005)
 
 New modules `worktree_sync` and `pull_request_view`, served by `GetWorktreeSyncState`, `PullWorktree`, `PushWorktree` and `StreamSessionPullRequest` from the child module `service/inspector.rs`. `WorktreeServiceImpl::attach_pull_requests` binds the `SessionPullRequests` port. `service.rs`: 831 → 897 production lines. See [worktree-service.md](../worktree-service.md#worktree-sync-state-worktree_syncrs). Full record: [`docs/dev/changesets/2026-11-22-session-pr-tabs.md`](../../../../docs/dev/changesets/2026-11-22-session-pr-tabs.md).
+
+**Fix:** `WorktreeSizeCalculator` persists a size before it publishes `Cached`. It used to publish first, so a calculator reopened on the update found no file (`a_cached_size_is_served_after_reload_without_recomputing` failed 2/5 alone). Reproducer: `a_published_cached_size_is_already_persisted_for_a_reload`.
