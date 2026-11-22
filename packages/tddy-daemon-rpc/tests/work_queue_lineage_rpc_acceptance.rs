@@ -196,3 +196,44 @@ async fn the_waves_of_a_queue_follow_its_stored_dependencies() {
         )
     );
 }
+
+#[tokio::test]
+async fn an_item_waits_on_nothing_once_the_item_it_needs_has_merged() {
+    // Given — n2 needs n1, and n1's PR has merged
+    let (host, address) = a_host_holding_a_two_item_queue();
+    set_needs(&host, &address, "n2", &["n1"])
+        .await
+        .expect("set");
+    SessionWorkQueues::new(host.sessions.path().join("sessions"))
+        .update(OWNER, |queue| {
+            queue.nodes[0].pr_status = Some(tddy_core::changeset::GithubPrStatus {
+                phase: "merged".to_string(),
+                ..Default::default()
+            });
+        })
+        .expect("n1 merged");
+
+    // When
+    let waves = host
+        .daemon
+        .get_work_queue_waves(Request::direct(GetWorkQueueWavesRequest {
+            session_token: TEST_TOKEN.to_string(),
+            queue: Some(address),
+        }))
+        .await
+        .expect("waves")
+        .into_inner();
+
+    // Then
+    assert_eq!(
+        waves
+            .readiness
+            .iter()
+            .map(|r| (r.item_id.clone(), r.waits_on.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("n1".to_string(), Vec::<String>::new()),
+            ("n2".to_string(), Vec::<String>::new())
+        ]
+    );
+}
