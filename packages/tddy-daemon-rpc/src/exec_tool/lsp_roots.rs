@@ -25,8 +25,8 @@ use tddy_tool_engine::path_access_tools::{
 };
 use tddy_worktree_service::session_target::HomeCaller;
 
-use super::base_freshness::orchestrator_caller;
 use super::path_access::DaemonPathAccess;
+use super::project_home::caller::orchestrator_caller;
 use super::project_home::caller::record_call;
 use super::ExecToolRpcHandler;
 

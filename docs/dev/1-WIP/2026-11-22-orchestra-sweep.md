@@ -57,11 +57,11 @@ None.
 
 ## Scope
 
-- [ ] `orchestrator_caller` moved **by hand** to `exec_tool/project_home/caller.rs`; `session_files.rs`'s copy removed; `lsp_roots.rs`, `path_access.rs`, `base_freshness.rs`, `session_files.rs` import it from there
-- [ ] `a_system_prompt_for_a_remotely_routed_agent_is_carried_rather_than_refused` clears `TDDY_REMOTE_*` for its duration (the pattern `tests/approval_prompt_deny_paths.rs` uses)
-- [ ] `echo-unary.test.ts` asks the OS for a free port
-- [ ] Append this refusal (`orchestrator_caller`, #999) as a recorded instance to `docs/dev/todo/2026-11-21-restructure-ignores-path-attribute-modules.md`
-- [ ] Consent recorded in: `2026-11-21-add-lsp-root-warms-by-symbol-query.md`, `2026-11-21-back-channel-for-sandboxed-and-acp-children.md`, `2026-11-21-base-freshness-tools-are-not-forwarded-to-a-peer-host.md`, `2026-11-21-cursor-muse-terminal-paste-unverified.md`, `2026-11-21-restructure-ignores-path-attribute-modules.md`, `2026-11-21-trunk-watch-reads-github-com-only.md`
+- [x] `orchestrator_caller` moved **by hand** to `exec_tool/project_home/caller.rs`; `session_files.rs`'s copy removed; `lsp_roots.rs`, `path_access.rs`, `base_freshness.rs`, `session_files.rs` import it from there
+- [x] `a_system_prompt_for_a_remotely_routed_agent_is_carried_rather_than_refused` clears `TDDY_REMOTE_*` for its duration (the pattern `tests/approval_prompt_deny_paths.rs` uses)
+- [x] `echo-unary.test.ts` asks the OS for a free port
+- [x] Append this refusal (`orchestrator_caller`, #999) as a recorded instance to `docs/dev/todo/2026-11-21-restructure-ignores-path-attribute-modules.md`
+- [x] Consent recorded in: `2026-11-21-add-lsp-root-warms-by-symbol-query.md`, `2026-11-21-back-channel-for-sandboxed-and-acp-children.md`, `2026-11-21-base-freshness-tools-are-not-forwarded-to-a-peer-host.md`, `2026-11-21-cursor-muse-terminal-paste-unverified.md`, `2026-11-21-restructure-ignores-path-attribute-modules.md`, `2026-11-21-trunk-watch-reads-github-com-only.md`
 
 ## Technical Changes
 
@@ -99,7 +99,9 @@ After: all of the above green except the 7 sandbox failures; the tddy-tools test
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+Hand steps (consented, 2026-11-22): `orchestrator_caller` cut from `base_freshness.rs` and pasted into `project_home/caller.rs` as `pub(in crate::exec_tool)` (base_freshness wording kept); unused `session_tool_role`/`SessionToolRole` imports dropped from `base_freshness.rs` and `session_files.rs`; `session_files.rs`'s private copy deleted (its refusal said "role" where the kept one says "record"; no test asserts either); `lsp_roots.rs`/`path_access.rs`/`base_freshness.rs`/`session_files.rs` import from `project_home::caller`.
+Results after: `./test -p tddy-daemon-rpc` 693 passed / 7 failed (the 7 pre-existing macOS sandbox failures) / 1 ignored; `tddy-tools --lib` 125/125, and the two remotely-routed tests pass with `TDDY_REMOTE_SESSION_ID=x` exported; clippy `-D warnings --all-targets` clean for both packages.
+`echo-unary.test.ts` now takes its port from the OS (`getFreePort`, as `packages/tddy-web/cypress.config.ts` does); not run here — it needs a built `tddy-coder` and the `tddy-web` bundle.
 
 ## Refactoring Needed
 
@@ -116,8 +118,8 @@ _(populated by validation)_
 - [x] Create changeset (this document)
 - [x] Green baseline and recorded engine refusal (no `plan.jsonl`)
 - [x] USER REVIEW — plan and baseline (developer chose the hand move, 2026-11-22)
-- [ ] Restructure (/code-restructuring)
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Restructure (/code-restructuring)
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap

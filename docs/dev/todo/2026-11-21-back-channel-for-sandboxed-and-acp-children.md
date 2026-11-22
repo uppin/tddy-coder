@@ -2,6 +2,7 @@
 
 **Category:** Deferred from `#orchestra` 2/9 (#980)
 **Source:** `/validate-changes` on `feature/orchestra/child-back-channel`
+**Consent:** the developer chose to defer this on 2026-11-22 at the `#orchestra` stack's TODO gate.
 
 `#orchestra` 2/9 gives every child of an orchestrator guidance naming its orchestrator and one back
 channel ([project concept § Reporting to the orchestrator](../../ft/daemon/project-concept.md#reporting-to-the-orchestrator)).

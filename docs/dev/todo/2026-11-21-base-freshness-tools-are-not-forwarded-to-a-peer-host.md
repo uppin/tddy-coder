@@ -2,6 +2,7 @@
 
 **Category:** Known gap
 **Source:** `#orchestra` 4/9 (PR #982), validation
+**Consent:** the developer chose to defer this on 2026-11-22 at the `#orchestra` stack's TODO gate.
 
 An orchestrator held on a host other than the one a call lands on is not served the base-freshness tools:
 `run_base_freshness_tool` answers from the local sessions base only, and there is no `daemon_instance_id`
