@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 3 — item-model fields across store, tools and a web row, a proto addition, no I/O beyond the store
 **Stack**: `#workqueue` 7/14 — branch `feature/workqueue/badges-labels`, base `feature/workqueue/pr-and-session-link`
+**PR**: [#1008](https://github.com/uppin/tddy-coder/pull/1008)
 
 ## Initial Discovery
 
@@ -57,8 +58,18 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: the item fields and types, three tool
-definitions, proto RPCs, web component test ids, and the failing tests below.
+Published (pass 2, commit 2):
+
+- `tddy_pr_stack::stack_ops::item_annotations::{BadgeTone, WorkItemBadge, AnnotationError, set_labels,
+  set_badge, clear_badge, labels_of, badges_of, MAX_LABELS_PER_ITEM, MAX_LABEL_LEN, MAX_BADGES_PER_ITEM,
+  MAX_BADGE_TEXT_LEN}` — pure operations and accessors (the item fields themselves are `/green`'s, as
+  in n6: `StackNode` literals without `..Default` span ~30 files)
+- `tddy_tool_engine::work_item_annotation_tools::{WORK_ITEM_SET_LABELS, WORK_ITEM_SET_BADGE,
+  WORK_ITEM_CLEAR_BADGE, WORK_ITEM_ANNOTATION_TOOL_NAMES, work_item_annotation_tool_defs}`
+- Proto: `SetWorkItemLabels`, `SetWorkItemBadge`, `ClearWorkItemBadge` (→ `WorkItemLinksResponse`, n6's);
+  `PrStackHandler` defaults answer `unimplemented`; TS regenerated
+- `tddy-prstack-web`: `WorkItemAnnotations` (shell)
+- The failing tests below
 
 ## Green wave
 
@@ -120,19 +131,22 @@ component specs for chips, tones and the filter.
 
 ## Acceptance Tests
 
-`packages/tddy-work-queue/tests/work_item_annotations_unit.rs`:
-- [ ] `setting_labels_replaces_the_previous_set`
-- [ ] `setting_a_badge_with_an_existing_key_replaces_it`
-- [ ] `clearing_a_badge_removes_only_that_key`
-- [ ] `an_over_limit_label_set_is_refused_naming_the_limit`
+`packages/tddy-pr-stack/tests/work_item_annotations_unit.rs` (the crate n3 renames to `tddy-work-queue`):
+- [x] `setting_labels_replaces_the_previous_set`
+- [x] `setting_a_badge_with_an_existing_key_replaces_it`
+- [x] `clearing_a_badge_removes_only_that_key`
+- [x] `an_over_limit_label_set_is_refused_naming_the_limit`
+- [x] `annotating_an_unknown_item_is_refused`
 
-`packages/tddy-daemon-rpc/tests/work_item_annotations_acceptance.rs`:
-- [ ] `the_owning_agent_labels_and_badges_an_item`
-- [ ] `a_linked_session_cannot_badge_an_item`
+`packages/tddy-tool-engine/tests/work_item_annotation_tools.rs`:
+- [x] `the_annotation_tools_are_defined_in_order`
+- [x] `a_badge_tone_is_one_of_four`
+
+The daemon tool path (owner writes; a linked session refused) is `/green`'s, in the daemon-rpc stack suites.
 
 `packages/tddy-workqueue-web/cypress/component/WorkItemAnnotationsAcceptance.cy.tsx`:
-- [ ] `labels show as chips and badges by tone, apart from the internal status badge`
-- [ ] `choosing a label filters the queue to items carrying it`
+- [x] `labels show as chips and badges by tone, apart from the internal status badge`
+- [x] `choosing a label filters the queue to items carrying it`
 
 ## Decisions & Trade-offs
 
@@ -159,10 +173,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
