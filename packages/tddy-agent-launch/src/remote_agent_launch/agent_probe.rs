@@ -8,20 +8,16 @@
 
 use std::path::Path;
 
+use tddy_core::ssh_exec::shell_single_quote;
 use tddy_remote_shell::{ExecRequest, RemoteShell};
 
 use super::RemoteLaunchError;
-
-/// `value` single-quoted for a POSIX shell, each embedded quote written `'\''`.
-fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r"'\''"))
-}
 
 /// Ask the target `shell` reaches whether its login shell, in `worktree`, finds `command` — an
 /// agent's bare command, as its spec names it (`claude`, `agent`) — with one call through the port:
 ///
 /// ```text
-/// cd '<worktree>' && exec "${SHELL:-/bin/sh}" -lc 'command -v '\''<command>'\'''
+/// cd '<worktree>' && exec "${SHELL:-/bin/sh}" -lc 'command -v '"'"'<command>'"'"''
 /// ```
 ///
 /// The worktree and the command are single-quoted for a POSIX shell, and the command is looked up

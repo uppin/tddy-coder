@@ -45,10 +45,10 @@ pub struct TargetAgentTab {
 /// target, or a worktree it does not hold, fails the tab with the shell's own reason
 /// ([`RemoteLaunchError::Shell`]) and registers nothing. Then the target's login shell is asked for
 /// the agent's bare command ([`probe_agent_on_target`]): an agent it does not find fails the tab
-/// [`RemoteLaunchError::AgentNotOnTarget`], before any terminal is started. A file `agent.argv` names in this host's
-/// session directory (`tab.session_dir`) is written into the worktree's `.tddy/` on the target and
-/// its argument rewritten to that copy, as a main's launch writes its rendered session files — so
-/// no path of this host reaches the target. Then the local PTY runs
+/// [`RemoteLaunchError::AgentNotOnTarget`], before any terminal is started. A file `agent.argv`
+/// names in this host's session directory (`tab.session_dir`) is written into the worktree's
+/// `.tddy/` on the target and its argument rewritten to that copy, as a main's launch writes its
+/// rendered session files — so no path of this host reaches the target. Then the local PTY runs
 /// [`RemoteShell::interactive`](tddy_remote_shell::RemoteShell::interactive) over
 /// `cd '<worktree>' && <target_login_exec(argv, env)>` in `tab.session_dir`, as a tab
 /// (`CliSessionManager::spawn_rendered_client_tab`), and the launch returns with it. Nothing of the

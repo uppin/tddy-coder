@@ -13,7 +13,7 @@ use crate::remote_agent_launch::RemoteLaunchError;
 const WORKTREE: &str = "/home/dev/repo/.worktrees/s1";
 
 /// What the probe of `claude` in [`WORKTREE`] runs on the target.
-const PROBE_OF_CLAUDE: &str = r#"cd '/home/dev/repo/.worktrees/s1' && exec "${SHELL:-/bin/sh}" -lc 'command -v '\''claude'\'''"#;
+const PROBE_OF_CLAUDE: &str = r#"cd '/home/dev/repo/.worktrees/s1' && exec "${SHELL:-/bin/sh}" -lc 'command -v '"'"'claude'"'"''"#;
 
 /// A reachable target named `buildbox`.
 fn a_target() -> InMemoryShell {
@@ -43,7 +43,7 @@ async fn the_probe_asks_the_targets_login_shell_for_the_command_in_the_worktree(
 async fn the_probe_single_quotes_a_worktree_holding_a_space_and_a_quote() {
     // Given a worktree whose path holds a space and a single quote
     let worktree = "/home/dev/ada's repo/.worktrees/s1";
-    let probe = r#"cd '/home/dev/ada'\''s repo/.worktrees/s1' && exec "${SHELL:-/bin/sh}" -lc 'command -v '\''claude'\'''"#;
+    let probe = r#"cd '/home/dev/ada'"'"'s repo/.worktrees/s1' && exec "${SHELL:-/bin/sh}" -lc 'command -v '"'"'claude'"'"''"#;
     let target = a_target();
     target.answers(probe, ExecOutput::succeeded("/usr/local/bin/claude\n"));
 

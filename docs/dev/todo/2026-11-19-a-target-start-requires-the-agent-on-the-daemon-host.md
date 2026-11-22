@@ -35,6 +35,11 @@ agent (`target_agent_tab` / `new_target_agent_tab`; pinned by `a_target_agent_ta
 Everything below now concerns **only a session start** on a target (`resolve_session_agent`,
 `CliSessionStart.agent`); the options are unchanged, and option 2 now has a precedent in the tab.
 
+`#tab-hardening` 1/4 (#989) adds the probe option 3 needs: `probe_agent_on_target`
+(`remote_agent_launch/agent_probe.rs`) runs `command -v <agent>` through the target's login shell and fails
+`AgentNotOnTarget` naming the command, and an agent tab now calls it. Option 3 for a start is therefore the
+helper's second caller (`#tab-hardening` 4/4), not new machinery.
+
 ## Why it exists
 
 The resolution predates targets: every start used to run on this host, so resolving the agent up

@@ -248,9 +248,23 @@ menu: **On target** (the default) or **On this host**. Both can coexist in one s
   the vault does not hold are refused `FAILED_PRECONDITION`, naming why.
 - **Reached first.** The target is entered with `cd '<worktree>'` through the port before any terminal is
   registered, so a target that resolved but cannot be reached — its transport fails to connect, or the
-  worktree cannot be entered — fails the start with the transport's own words, `UNAVAILABLE`, and records
-  nothing. A target that could not be *resolved* (a locked vault, a missing account, no recorded target or
-  worktree) stays `FAILED_PRECONDITION`: the caller can meet it.
+  worktree cannot be entered — fails the start with the transport's own words and records nothing. A target
+  that could not be *resolved* (a locked vault, a missing account, no recorded target or worktree) is
+  `FAILED_PRECONDITION`: the caller can meet it.
+- **Probed for its agent.** An agent tab — new or restored — then asks the target's own login shell for the
+  agent's bare command, in the worktree (`cd '<wt>' && exec "${SHELL:-/bin/sh}" -lc 'command -v <command>'`),
+  before any terminal is started. One extra round trip per agent tab (about 6–8 s on a Coder workspace); a shell
+  tab is not probed.
+- **One error for every target tab, shell or agent.** A failed launch reports:
+
+  | What failed | Code |
+  |---|---|
+  | The target cannot be reached — its transport, entering the worktree, the probe's own call, or the pre-trust of a start's clone (`Trust(Shell)`) | `UNAVAILABLE`, with the transport's words |
+  | This host cannot spawn the tab's local terminal | `INTERNAL` |
+  | The target's login shell does not find the agent | `FAILED_PRECONDITION`, naming the command |
+  | The target cannot be resolved, a malformed trust answer, anything else the launch refuses | `FAILED_PRECONDITION` |
+
+  Nothing is recorded in any case, and no terminal is left behind.
 - **Recorded `[target, shell]` or `[target, agent]`.** A `target` wrapper around anything that is neither the
   login shell nor an agent, or around an agent that wraps another wrapper, is `INVALID_ARGUMENT`. A
   tddy-coder participant, which reaches no target, refuses both (`FAILED_PRECONDITION`).
@@ -258,8 +272,8 @@ menu: **On target** (the default) or **On this host**. Both can coexist in one s
   on this host, where its main's client runs: the recorded worktree exists only on the target. It is
   reachable whether or not the session's main runs.
 - **Resume.** The roster restore reopens a `[target, shell]` or `[target, agent]` tab on the target under its
-  recorded id, as the caller of the resume; it is dropped, with the reason, when the target cannot be reached
-  or the vault is locked. An agent tab resumes its conversation on the target where its harness can (claude
+  recorded id, as the caller of the resume; it is dropped, with the reason, when the target cannot be reached,
+  the vault is locked, or (an agent tab) the target lacks the agent. An agent tab resumes its conversation on the target where its harness can (claude
   `--resume <id>`, cursor `--resume <chat id>`) and reopens fresh, with the reason, where it cannot or the
   record holds no conversation.
 - **Liveness.** A shell tab never counts as a live agent, on a target as anywhere. An agent tab on a target
@@ -305,10 +319,11 @@ agent for), and Telegram's list, branch-owner scan and delete.
 - **Only the tab shapes this daemon starts are restored.** `restore_plan` dispatches per node kind and a
   chain holding a kind it does not know — or a known one around something it cannot carry (a `target`
   around an agent that wraps another node) — is dropped with a reason.
-- **A target's agent must be on the target's login `PATH`.** A target agent tab runs the spec's bare command,
-  so an agent the target cannot find exits `127` inside its tab, with the transport's output visible there;
-  nothing probes for it beforehand. The session-**start** half — a start on a target still resolves the
-  agent on the daemon's host first — is a separate decision:
+- **A target's agent must be on the target's login `PATH`.** A target agent tab runs the spec's bare command and
+  is probed for it first, so a target without the agent fails the tab, naming the command, instead of opening a
+  terminal that exits `127`. The probe is pinned on a stand-in target only, not against a real Coder deployment
+  ([todo](../../dev/todo/2026-11-16-coder-hosts-never-run-against-a-real-deployment.md)). The session-**start**
+  half — a start on a target still resolves the agent on the daemon's host first — is a separate decision:
   [a start on a target requires the agent on the daemon's host](../../dev/todo/2026-11-19-a-target-start-requires-the-agent-on-the-daemon-host.md).
 - opencode, muse and warp tabs reopen fresh, not in their conversation (`TODO(opencode-cli)`,
   `TODO(muse-cli)`, `TODO(warp-cli)` on `tab_conversation_is_resumable`).
