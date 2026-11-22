@@ -585,6 +585,8 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
             "work_item_set_parents",
             "work_item_resolve_conflicts",
             "work_item_spawn_session",
+            "work_item_propagate",
+            "work_queue_land",
             "PostSessionMessage",
             "ReadSessionMessages",
             "WriteSessionFile",

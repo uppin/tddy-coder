@@ -898,14 +898,24 @@ async fn main_merges_closes_and_repoints_a_nodes_pr_from_a_read_only_session() {
 
     // Then each was answered, and GitHub was asked as the project's account to merge #41, close #42
     // and retarget #43 onto the default branch ...
-    merged.assert_answered();
+    let merged = merged.assert_answered();
     closed.assert_answered();
     repointed.assert_answered();
     assert_eq!(world.github.merged(), vec![41]);
     assert_eq!(world.github.closed(), vec![42]);
+    // ... the merge itself propagated n3 (the engine lands n1, then rebases what sat on it onto the
+    // default branch and retargets #43), and the explicit repoint of n3 retargeted it again
+    assert_eq!(
+        merged["propagated"][0]["item_id"],
+        json!("n3"),
+        "{merged}"
+    );
     assert_eq!(
         world.github.base_changes(),
-        vec![(43, DEFAULT_BRANCH.to_string())]
+        vec![
+            (43, DEFAULT_BRANCH.to_string()),
+            (43, DEFAULT_BRANCH.to_string())
+        ]
     );
     assert!(world
         .github
@@ -1229,4 +1239,118 @@ async fn the_six_tools_naming_another_hosts_queue_are_decided_there_and_refused_
         (Vec::<u64>::new(), Vec::<u64>::new())
     );
     assert_eq!(b.node_of(&queue_id, "n2").parents, vec!["n1".to_string()]);
+}
+
+#[tokio::test]
+async fn propagate_rebases_a_node_onto_its_line_parent_and_pushes_with_lease_retargeting_its_pr() {
+    // Given a stack on host-a: n2 a root with an open PR, the default branch moved on since it forked
+    let world = a_world().await;
+    let a = &world.a;
+    let queue_id = a.holds_a_stack(&world.main, vec![planned("n2", &[])]);
+    let n2 = a.a_node_session(&world.main, &queue_id, "n2", None).await;
+    a.node_has_an_open_pr(&world.github, &queue_id, "n2", 42);
+    world.the_default_branch_moves_on(a, "base.txt", "moved on\n");
+    let base_tip = world.remote_tip(a, DEFAULT_BRANCH);
+
+    // When main propagates n2
+    let propagated = world
+        .main_calls(
+            "work_item_propagate",
+            json!({ "queue_id": queue_id, "item_id": "n2" }),
+        )
+        .await;
+
+    // Then it is answered naming what it took, n2 sits on the moved base in its own worktree and on
+    // the remote, and #42's base was retargeted onto the default branch
+    let answer = propagated.assert_answered();
+    assert_eq!(answer["propagated"], json!(true), "{answer}");
+    assert!(n2.contains(&base_tip), "n2 is rebased onto {base_tip}");
+    assert_eq!(world.remote_tip(a, &n2.branch), n2.head());
+    assert_eq!(
+        world.github.base_changes(),
+        vec![(42, DEFAULT_BRANCH.to_string())]
+    );
+}
+
+#[tokio::test]
+async fn propagate_refuses_a_dirty_branch_naming_state_and_action_and_force_does_not_override() {
+    // Given n2 with an uncommitted file, the default branch moved on
+    let world = a_world().await;
+    let a = &world.a;
+    let queue_id = a.holds_a_stack(&world.main, vec![planned("n2", &[])]);
+    let n2 = a.a_node_session(&world.main, &queue_id, "n2", None).await;
+    a.node_has_an_open_pr(&world.github, &queue_id, "n2", 42);
+    std::fs::write(n2.path.join("work-in-progress.txt"), "not committed\n").unwrap();
+    world.the_default_branch_moves_on(a, "base.txt", "moved on\n");
+    let tip = n2.head();
+
+    // When main propagates it, plain and forced
+    let plain = world
+        .main_calls(
+            "work_item_propagate",
+            json!({ "queue_id": queue_id, "item_id": "n2" }),
+        )
+        .await;
+    let forced = world
+        .main_calls(
+            "work_item_propagate",
+            json!({ "queue_id": queue_id, "item_id": "n2", "force": true }),
+        )
+        .await;
+
+    // Then both are refused naming the state and the action that fixes it, and nothing moved
+    for refused in [&plain, &forced] {
+        refused.assert_refused_saying("Dirty").assert_refused_saying("commit");
+    }
+    assert_eq!(n2.head(), tip);
+    assert_eq!(world.github.base_changes(), Vec::new());
+}
+
+#[tokio::test]
+async fn landing_waves_stops_at_the_first_item_whose_conditions_are_not_met_and_names_it() {
+    // Given n1 with an open PR and n3 stacked on it, no CI or review facts the daemon can read
+    let world = a_world().await;
+    let a = &world.a;
+    let queue_id = a.holds_a_stack(
+        &world.main,
+        vec![planned("n1", &[]), planned("n3", &["n1"])],
+    );
+    a.a_node_session(&world.main, &queue_id, "n1", None).await;
+    a.a_node_session(&world.main, &queue_id, "n3", None).await;
+    a.node_has_an_open_pr(&world.github, &queue_id, "n1", 41);
+    a.node_has_an_open_pr(&world.github, &queue_id, "n3", 43);
+
+    // When main lands wave 1 (the queue records no dependencies, so both items are in it)
+    let landed = world
+        .main_calls(
+            "work_queue_land",
+            json!({ "queue_id": queue_id, "from_wave": 1, "to_wave": 1 }),
+        )
+        .await;
+
+    // Then it stops at n1, naming it and the condition holding it, and merged nothing
+    let answer = landed.assert_answered();
+    assert_eq!(answer["stopped_at"]["item_id"], json!("n1"), "{answer}");
+    assert_eq!(answer["landed"], json!([]), "{answer}");
+    assert_eq!(world.github.merged(), Vec::<u64>::new());
+}
+
+#[tokio::test]
+async fn landing_a_wave_range_the_queue_does_not_have_is_refused() {
+    // Given a one-wave queue
+    let world = a_world().await;
+    let queue_id = world
+        .a
+        .holds_a_stack(&world.main, vec![planned("n1", &[])]);
+
+    // When main lands waves 1 to 3
+    let landed = world
+        .main_calls(
+            "work_queue_land",
+            json!({ "queue_id": queue_id, "from_wave": 1, "to_wave": 3 }),
+        )
+        .await;
+
+    // Then it is refused naming the missing wave
+    landed.assert_refused_saying("wave 3 does not exist");
 }

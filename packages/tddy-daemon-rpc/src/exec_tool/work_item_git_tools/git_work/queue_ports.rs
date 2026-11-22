@@ -139,6 +139,11 @@ impl QueueGit for DaemonQueueWorld<'_> {
     }
 
     async fn rebase_onto(&self, branch: &str, onto: &str) -> Result<(), EngineError> {
+        if let Some(session_id) = self.env.is_running(self.item_on(branch)?) {
+            return Err(failed(format!(
+                "session {session_id} is running: stop it before its branch is rebased"
+            )));
+        }
         let base_ref = self.remote_ref(onto);
         let worktree = self.worktree_of(branch)?;
         let old_base = tddy_work_queue::git_ops::merge_base(&worktree, branch, &base_ref)
