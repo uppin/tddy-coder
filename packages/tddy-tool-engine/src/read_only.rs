@@ -31,6 +31,8 @@ pub fn is_project_home_allowed_tool(name: &str) -> bool {
         || crate::session_file_tools::is_session_file_tool(name)
         || crate::base_freshness_tools::is_base_freshness_tool(name)
         || crate::path_access_tools::is_path_access_tool(name)
+        || crate::lsp_root_tools::is_orchestrator_lsp_tool(name)
+        || crate::lsp_root_tools::is_lsp_root_tool(name)
 }
 
 /// The prefix `claude` gives a tool served by the `tddy-tools` MCP server.
@@ -173,6 +175,15 @@ mod tests {
                 "mcp__tddy-tools__CheckBaseFreshness",
                 "mcp__tddy-tools__RefreshHome",
                 "mcp__tddy-tools__RequestPathAccess",
+                // An orchestrator's LSP queries and roots (`#orchestra` 8/9).
+                "mcp__tddy-tools__LspDiagnostics",
+                "mcp__tddy-tools__LspDefinition",
+                "mcp__tddy-tools__LspReferences",
+                "mcp__tddy-tools__LspHover",
+                "mcp__tddy-tools__LspSymbols",
+                "mcp__tddy-tools__AddLspRoot",
+                "mcp__tddy-tools__RemoveLspRoot",
+                "mcp__tddy-tools__ListLspRoots",
             ]
         );
     }

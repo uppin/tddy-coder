@@ -416,6 +416,25 @@ reason is refused before anything is asked.
 - Requests are held in memory by the daemon that runs the orchestrator, which is the one serving its
   pane; the two RPCs are not routed to a peer.
 
+#### LSP roots
+
+An orchestrator-role session is offered `LspDiagnostics`, `LspDefinition`, `LspReferences`, `LspHover`
+and `LspSymbols` whatever its launch signalled, each with an optional absolute `root`: the worktree the
+call queries. No `root` means its home worktree; a root inside its [read reach](#read-reach), or one it
+added, is queried as named; any other root is refused with a message naming `AddLspRoot`.
+
+- **`AddLspRoot { root, reason }`** records a root in the session's `<session_dir>/lsp-roots.json` and
+  starts loading its index in the background. A root inside reach is added at once; one outside it is
+  first put to the operator as a read request, the same request as `RequestPathAccess` with the root as
+  its path, and added only on Allow. Adding a root twice keeps the first record.
+- **`RemoveLspRoot { root }`** drops a root this session added, with no request; a root it did not add
+  is refused. Nothing is stopped explicitly: the index unloads the root's server through its idle
+  reaping once no session queries it, so a root another session still uses is never stopped from here.
+- **`ListLspRoots`** lists the roots the session added, oldest first.
+
+The roots live as long as the session and survive a resume. A conversation's `Lsp*` calls stay on its
+own worktree.
+
 ### Project-home tools
 
 A session holding an orchestrator role is also offered the eleven stack plan and read tools

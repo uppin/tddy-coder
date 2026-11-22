@@ -1,5 +1,6 @@
 use crate::base_freshness_tools::base_freshness_tool_defs;
 use crate::catalog::{tool_catalog, ToolDef};
+use crate::lsp_root_tools::{lsp_root_tool_defs, orchestrator_lsp_tool_defs};
 use crate::path_access_tools::request_path_access_tool_def;
 use crate::project_home_answer_tools::{
     project_home_answer_tool_defs, ANSWER_SESSION_PERMISSION, ANSWER_SESSION_QUESTION,
@@ -197,6 +198,8 @@ pub(crate) fn project_home_catalog_with(start_schema: Value) -> Vec<ToolDef> {
         .chain(session_file_tool_defs())
         .chain(base_freshness_tool_defs())
         .chain([request_path_access_tool_def()])
+        .chain(orchestrator_lsp_tool_defs())
+        .chain(lsp_root_tool_defs())
         .collect()
 }
 

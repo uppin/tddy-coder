@@ -38,7 +38,7 @@ use super::ExecToolRpcHandler;
 
 /// [`PathAccessPort`] over this host: the caller's reach, the request store and the notification
 /// bus.
-struct DaemonPathAccess {
+pub(super) struct DaemonPathAccess {
     os_user: String,
     sessions_base: PathBuf,
     /// The caller's read reach, built for this call.
@@ -177,6 +177,26 @@ impl PathAccessPort for DaemonPathAccess {
 }
 
 impl ExecToolRpcHandler {
+    /// The [`PathAccessPort`] over this host for `req`'s orchestrator caller, whose home worktree is
+    /// `worktree_root`, with its read reach built now.
+    pub(super) async fn path_access_port(
+        &self,
+        req: &ExecuteToolRequest,
+        sessions_base: &Path,
+        worktree_root: &Path,
+    ) -> Result<DaemonPathAccess, Status> {
+        let session_dir = unified_session_dir_path(sessions_base, &req.session_id);
+        Ok(DaemonPathAccess {
+            os_user: self.os_user_of(&req.session_token)?,
+            sessions_base: sessions_base.to_path_buf(),
+            reach: self
+                .orchestrator_read_reach(&req.session_token, session_dir, worktree_root)
+                .await?,
+            requests: self.project_home_host.path_access.clone(),
+            bus: self.project_home_host.notification_bus.clone(),
+        })
+    }
+
     /// Serve `req`'s `RequestPathAccess` for an orchestrator caller whose home worktree is
     /// `worktree_root`, and record the call.
     pub(super) async fn run_path_access_tool(
@@ -186,16 +206,9 @@ impl ExecToolRpcHandler {
         worktree_root: &Path,
     ) -> Result<ExecuteToolResponse, Status> {
         let caller = orchestrator_caller(sessions_base, &req.session_id, &req.tool_name)?;
-        let session_dir = unified_session_dir_path(sessions_base, &req.session_id);
-        let port = DaemonPathAccess {
-            os_user: self.os_user_of(&req.session_token)?,
-            sessions_base: sessions_base.to_path_buf(),
-            reach: self
-                .orchestrator_read_reach(&req.session_token, session_dir, worktree_root)
-                .await?,
-            requests: self.project_home_host.path_access.clone(),
-            bus: self.project_home_host.notification_bus.clone(),
-        };
+        let port = self
+            .path_access_port(req, sessions_base, worktree_root)
+            .await?;
         let outcome = execute_path_access_tool(&port, &caller, &req.args_json).await;
         let response = ExecuteToolResponse {
             result_json: outcome.result_json,
