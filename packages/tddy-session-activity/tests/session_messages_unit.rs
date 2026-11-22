@@ -18,7 +18,7 @@ use pretty_assertions::assert_eq;
 use project_notification_log_support::{a_log_over, write_session};
 use tddy_daemon_kernel::session_notification::SessionMessage;
 use tddy_session_activity::project_notification_log::{
-    ProjectNotificationLog, ProjectNotificationRecord,
+    ProjectNotificationLog, ProjectNotificationRecord, PROJECT_NOTIFICATION_CAPACITY,
 };
 use tddy_session_activity::session_messages::{
     refuse_a_bad_message_text, InboxMessage, InboxRead, MAX_MESSAGE_BYTES,
@@ -263,6 +263,30 @@ async fn the_inbox_position_advances_past_what_is_read() {
             vec!["m-3".to_string()],
             newest,
         )
+    );
+}
+
+/// Findings: docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Defect 1c
+/// — on 2026-11-22 an orchestrator that had never read its inbox was answered `lost: 934`, then
+/// `lost: 935`: every activity record the project log had evicted, none of them a message to it.
+#[tokio::test]
+async fn a_read_counts_as_lost_only_evicted_messages_addressed_to_the_reader() {
+    // Given a project busy enough that its log evicted records — none of them messages — before
+    // the child's one message to the orchestrator, which never read its inbox
+    let host = AHost::of_one_project();
+    for _ in 0..PROJECT_NOTIFICATION_CAPACITY + 5 {
+        host.bus.publish(a_notification_of(CHILD)).await;
+    }
+    host.the_child_messages_the_orchestrator("m-1", "Step 1 done.")
+        .await;
+
+    // When the orchestrator reads its messages
+    let read = host.reads_the_messages_of(&the_orchestrator(), NOW).await;
+
+    // Then it gets the message, and nothing addressed to it was lost
+    assert_eq!(
+        (message_ids_of(&read.messages), read.lost),
+        (vec!["m-1".to_string()], 0)
     );
 }
 

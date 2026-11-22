@@ -619,6 +619,24 @@ mod tests {
         assert_eq!(printed.trim_end(), worktree.to_string_lossy());
     }
 
+    /// Findings: docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Gap 6
+    /// — on 2026-11-22 the Coder probe's terminal had no colour run at all (`ReadSessionTerminal`
+    /// `styles: []` on every row) while the local probe's had them: `env -i` leaves the agent no
+    /// `TERM`, so Claude Code renders monochrome. The local route's PTY names its terminal
+    /// (`tddy_pty::runtime::set_terminal_variables`); the target's agent must be told the same.
+    #[test]
+    fn the_agent_on_a_target_is_told_the_terminal_it_draws_on() {
+        // Given an agent that prints the terminal it was told it runs in
+        let (_dir, worktree) = a_worktree_named("worktree");
+        let argv = strings(&["/bin/sh", "-c", r#"printf '%s|%s' "$TERM" "$COLORTERM""#]);
+
+        // When its remote command is run by a shell
+        let printed = printed_by(&remote_agent_command(&worktree, "s1", &argv, &[]));
+
+        // Then it is the terminal the daemon's PTY emulates, colours included
+        assert_eq!(printed, "xterm-256color|truecolor");
+    }
+
     #[test]
     fn an_environment_value_with_a_quote_survives_the_remote_shell() {
         // Given a value holding both quotes, a variable reference and a command separator

@@ -168,3 +168,65 @@ fn both_tools_state_the_paging_contract_in_their_schemas() {
         assert_eq!(schema["required"], serde_json::json!(["session_id"]));
     }
 }
+
+/// A call as `ReportAgentActivity` persists it today: no poll tick has covered it, so its
+/// `activity_seq` is `NO_TICK` (0) — and on a session with no LiveKit room (a Coder or SSH target,
+/// whose worktree is not on the daemon's host) no tick ever will. Every one of the 38,290 rows on
+/// the 2026-11-22 probe host carried 0.
+///
+/// Findings: docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Defect 2a.
+fn a_call_as_hooks_persist_it(n: u64) -> AgentActivityRecord {
+    AgentActivityRecord {
+        activity_seq: 0,
+        ..a_call(n, "completed")
+    }
+}
+
+#[test]
+fn a_poll_from_the_last_cursor_returns_the_calls_hooks_recorded_since() {
+    // Given the calls a session's hooks recorded, read once
+    let mut records: Vec<AgentActivityRecord> = (1..=3).map(a_call_as_hooks_persist_it).collect();
+    let read = page_activity(&records, "", None, &[]).unwrap();
+    assert_eq!(read.items.len(), 3);
+
+    // When two more calls are recorded and the follower polls from where it stopped
+    records.extend((4..=5).map(a_call_as_hooks_persist_it));
+    let poll = page_activity(&records, &read.next_cursor, None, &[]).unwrap();
+
+    // Then it gets exactly those two
+    assert_eq!(
+        poll.items
+            .iter()
+            .map(|r| r.call_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["call-4", "call-5"],
+        "next_cursor was {:?}",
+        read.next_cursor
+    );
+}
+
+#[test]
+fn successive_pages_of_hook_recorded_calls_advance_the_cursor() {
+    // Given more hook-recorded calls than one page holds
+    let records: Vec<AgentActivityRecord> = (1..=5).map(a_call_as_hooks_persist_it).collect();
+
+    // When read two at a time
+    let first = page_activity(&records, "", Some(2), &[]).unwrap();
+    let second = page_activity(&records, &first.next_cursor, Some(2), &[]).unwrap();
+
+    // Then the second page continues where the first stopped, under a cursor of its own
+    assert_eq!(
+        (
+            second
+                .items
+                .iter()
+                .map(|r| r.call_id.as_str())
+                .collect::<Vec<_>>(),
+            second.next_cursor != first.next_cursor,
+        ),
+        (vec!["call-3", "call-4"], true),
+        "cursors: {:?} then {:?}",
+        first.next_cursor,
+        second.next_cursor
+    );
+}
