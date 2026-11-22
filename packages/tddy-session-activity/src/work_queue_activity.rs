@@ -8,7 +8,11 @@
 
 use std::sync::Arc;
 
-use crate::session_notifications::SessionNotificationBus;
+use tddy_daemon_kernel::session_notification::{
+    SessionNotificationKind, SessionNotificationSource,
+};
+
+use crate::session_notifications::{SessionNotification, SessionNotificationBus};
 
 /// What changed about one item's position.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,18 +58,75 @@ impl WorkQueueActivities {
     }
 
     /// Publish `event` as an activity of `event.queue_session_id`.
+    ///
+    /// Its kind carries [`wakes_owner`]: `AttentionRequired` for a move anyone but the owner's own
+    /// agent made, `Activity` — recorded, never delivered — for one its own agent made.
     pub fn publish_move(&self, event: &WorkQueueEvent) {
-        // TODO(n8 move-activities): implement — a `SessionNotificationSource::WorkQueue` notification
-        // (added with every registry the trunk-commit precedent lists) whose text names the item, the
-        // change and the actor.
-        let _ = (&self.bus, event);
-        todo!("TODO(n8): implement WorkQueueActivities::publish_move")
+        let kind = if wakes_owner(event) {
+            SessionNotificationKind::AttentionRequired
+        } else {
+            SessionNotificationKind::Activity
+        };
+        let notification = SessionNotification {
+            session_id: event.queue_session_id.clone(),
+            os_user: event.os_user.clone(),
+            label: event.queue_session_id.clone(),
+            kind,
+            source: SessionNotificationSource::WorkQueue,
+            text: describe(event),
+            agent: None,
+            question: None,
+            ended: None,
+            activity_status: None,
+            message: None,
+            at_unix_ms: tddy_daemon_kernel::now_unix_ms(),
+        };
+        self.deliver(notification);
+    }
+
+    /// Hand `notification` to the bus without making the caller wait for its subscribers: spawned
+    /// on the caller's runtime when it has one (a daemon handler), else run to completion here (a
+    /// plain thread). A move is published after it succeeded, so nothing waits on the answer.
+    fn deliver(&self, notification: SessionNotification) {
+        let bus = Arc::clone(&self.bus);
+        match tokio::runtime::Handle::try_current() {
+            Ok(runtime) => {
+                runtime.spawn(async move { bus.publish(notification).await });
+            }
+            Err(_) => match tokio::runtime::Builder::new_current_thread().build() {
+                Ok(runtime) => runtime.block_on(bus.publish(notification)),
+                Err(e) => log::warn!(
+                    target: "tddy_session_activity::work_queue_activity",
+                    "a work-queue move could not be published: {e}"
+                ),
+            },
+        }
     }
 }
 
 /// Whether `event` wakes its queue's owner: every move except one its own agent made.
 pub fn wakes_owner(event: &WorkQueueEvent) -> bool {
-    // TODO(n8 move-activities): implement
-    let _ = event;
-    todo!("TODO(n8): implement wakes_owner")
+    !matches!(&event.actor, Actor::Agent { session_id } if session_id == &event.queue_session_id)
+}
+
+/// The one line a move is announced as, positions 1-based as the queue's view shows them.
+fn describe(event: &WorkQueueEvent) -> String {
+    let actor = match &event.actor {
+        Actor::User { login } => login.clone(),
+        Actor::Agent { session_id } => format!("session {session_id}"),
+    };
+    let change = match &event.change {
+        WorkQueueChange::Reordered { from, to } => {
+            format!("moved from position {} to {}", from + 1, to + 1)
+        }
+        WorkQueueChange::ParentsChanged { before, after } => format!(
+            "parents changed from [{}] to [{}]",
+            before.join(", "),
+            after.join(", ")
+        ),
+    };
+    format!(
+        "Work item {} ({}) {change}, by {actor}",
+        event.item_title, event.item_id
+    )
 }

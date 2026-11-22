@@ -45,8 +45,8 @@ pub mod session_reader;
 pub mod session_watches;
 pub mod streams;
 pub mod trunk_watch;
-pub mod work_queue_activity;
 pub mod user_sessions_path;
+pub mod work_queue_activity;
 
 pub use crate::service::ports::ActivityPorts;
 pub use crate::service::ports::DeltaLookup;

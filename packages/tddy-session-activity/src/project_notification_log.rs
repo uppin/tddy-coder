@@ -154,7 +154,7 @@ struct Held {
 
 impl Held {
     fn visible_to(&self, scope: &ProjectNotificationScope) -> bool {
-        // A message or a trunk commit is one session's own, read through its watches — never an
+        // A message, a trunk commit or a queue move is one session's own, read through its watches — never an
         // operator notification (`#activity-wake` 5/5, `#orchestra` 5/9).
         self.os_user == scope.os_user
             && !self.record.source.is_a_sessions_own()
@@ -386,9 +386,12 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
     }
 
     fn wants(&self, notification: &SessionNotification) -> bool {
-        // A trunk commit is activity, but kept: an orchestrator's self-watch reads it here.
+        // A trunk commit or a queue move is activity, but kept: its owner's self-watch reads it here.
         notification.kind == SessionNotificationKind::AttentionRequired
-            || notification.source == SessionNotificationSource::TrunkCommit
+            || matches!(
+                notification.source,
+                SessionNotificationSource::TrunkCommit | SessionNotificationSource::WorkQueue
+            )
     }
 
     async fn deliver(&self, notification: &SessionNotification) -> anyhow::Result<()> {

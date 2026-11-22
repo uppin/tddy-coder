@@ -148,6 +148,7 @@ impl ExecToolRpcHandler {
                 .get()
                 .cloned()
                 .unwrap_or_else(|| Arc::new(super::work_queue_tools::RealWorkQueueGithubClients)),
+            notification_bus: self.project_home_host.notification_bus.clone(),
         })
     }
 }
@@ -164,6 +165,43 @@ fn response_of(outcome: ToolOutcome) -> ExecuteToolResponse {
 }
 
 impl DaemonStackGitTools {
+    /// Tell the queue's owner that `node_id`'s parents changed, when they did (`#workqueue` 8/14).
+    /// `before` is the queue as it was before the change; a queue that cannot be read again says
+    /// nothing, the change itself having succeeded.
+    fn announce_parents_changed(
+        &self,
+        caller: &WorkQueueCaller,
+        queue_id: &str,
+        node_id: &str,
+        before: Option<tddy_core::work_queue_store::WorkQueueRecord>,
+    ) {
+        let Some(before) = before else { return };
+        let Ok(after) = self.store.read(&caller.project_id, queue_id) else {
+            return;
+        };
+        let parents_of = |record: &tddy_core::work_queue_store::WorkQueueRecord| {
+            record
+                .stack
+                .node(node_id)
+                .map(|node| node.parents.clone())
+                .unwrap_or_default()
+        };
+        crate::work_queue::move_activity::publish_parents_changed(
+            self.notification_bus.as_ref(),
+            &crate::work_queue::move_activity::MovedQueue {
+                queue_session_id: after.owner_session_id(),
+                project_id: &caller.project_id,
+                os_user: &self.os_user,
+            },
+            node_id,
+            (parents_of(&before), parents_of(&after)),
+            &after.stack,
+            tddy_session_activity::work_queue_activity::Actor::Agent {
+                session_id: caller.session_id.clone(),
+            },
+        );
+    }
+
     async fn run_blocking(
         &self,
         caller: &WorkQueueCaller,
@@ -366,6 +404,9 @@ pub(super) struct DaemonStackGitTools {
     identity: SessionAccountAccess,
     github_cli: GithubCli,
     github: Arc<dyn WorkQueueGithubClients>,
+    /// Where a move of a work item is published for its queue's owner (`#workqueue` 8/14).
+    notification_bus:
+        Option<Arc<tddy_session_activity::session_notifications::SessionNotificationBus>>,
 }
 
 #[async_trait]
@@ -435,12 +476,19 @@ impl WorkItemGitToolPort for DaemonStackGitTools {
                 .await
             }
             WorkItemGitOp::SetParents { node_id, parents } => {
-                self.run_blocking(
-                    caller,
-                    queue_id,
-                    git_work::GitWork::SetParents { node_id, parents },
-                )
-                .await
+                let before = self.store.read(&caller.project_id, queue_id).ok();
+                let answer = self
+                    .run_blocking(
+                        caller,
+                        queue_id,
+                        git_work::GitWork::SetParents {
+                            node_id: node_id.clone(),
+                            parents,
+                        },
+                    )
+                    .await?;
+                self.announce_parents_changed(caller, queue_id, &node_id, before);
+                Ok(answer)
             }
         }
     }

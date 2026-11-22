@@ -246,6 +246,8 @@ impl OperatorChannel for TelegramDaemonHooks {
                 SessionNotificationSource::Message => false,
                 // A trunk commit is its orchestrator's own activity (`#orchestra` 5/9).
                 SessionNotificationSource::TrunkCommit => false,
+                // A queue move is its owner's own activity (`#workqueue` 8/14).
+                SessionNotificationSource::WorkQueue => false,
                 SessionNotificationSource::AgentToolCall | SessionNotificationSource::Presenter => {
                     false
                 }

@@ -2,6 +2,7 @@
 
 mod branch_legs;
 mod guards;
+pub(crate) mod move_activity;
 mod ports;
 mod pr_status;
 mod project_stacks;
@@ -36,6 +37,10 @@ pub struct WorkQueueRpcHandler {
     /// The host's GitHub inbox and the project credentials it reads a repository with
     /// (`#workqueue` 6/14): PR status, the status stream and an assigned PR are read through it.
     pull_requests: Arc<dyn tddy_worktree_service::pull_request_view::SessionPullRequests>,
+    /// Where a move of a work item is published for its queue's owner (`#workqueue` 8/14); `None`
+    /// on a host with no bus.
+    notification_bus:
+        Option<Arc<tddy_session_activity::session_notifications::SessionNotificationBus>>,
 }
 
 impl WorkQueueRpcHandler {
@@ -52,6 +57,7 @@ impl WorkQueueRpcHandler {
             peer_routing: host.peer_routing(),
             terminals: host.terminal_sessions(),
             pull_requests: Arc::new(host.clone()),
+            notification_bus: host.session_notification_bus(),
         }
     }
 }

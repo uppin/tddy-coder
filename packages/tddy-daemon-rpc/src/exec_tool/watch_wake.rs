@@ -97,6 +97,8 @@ impl SessionNotificationSubscriber for WakeTrigger {
             // An idle orchestrator watching its own trunk is woken by a new commit (`#orchestra`
             // 5/9).
             || notification.source == SessionNotificationSource::TrunkCommit
+            // An idle owner watching its queue is woken by a move (`#workqueue` 8/14).
+            || notification.source == SessionNotificationSource::WorkQueue
     }
 
     async fn deliver(&self, notification: &SessionNotification) -> anyhow::Result<()> {

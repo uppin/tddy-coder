@@ -79,6 +79,7 @@ impl WorkQueueRpcHandler {
         address: &WorkQueueAddress,
         node_id: &str,
         direction: &str,
+        (actor_login, os_user): (&str, &str),
     ) -> Result<String, Status> {
         let up = match direction {
             "up" => true,
@@ -90,6 +91,7 @@ impl WorkQueueRpcHandler {
             }
         };
         let store = self.stack_store(sessions_base);
+        let before = store.read(&address.project_id, &address.queue_id).ok();
         let updated = store
             .update(&address.project_id, &address.queue_id, |stack| {
                 tddy_work_queue::item_ops::assign_missing_display_order(stack);
@@ -120,6 +122,22 @@ impl WorkQueueRpcHandler {
         // An unknown node is refused rather than silently left unmoved.
         if updated.stack.node(node_id).is_none() {
             return Err(Status::not_found(format!("node '{node_id}' not found")));
+        }
+        if let Some(before) = before {
+            super::move_activity::publish_reorder(
+                self.notification_bus.as_ref(),
+                &super::move_activity::MovedQueue {
+                    queue_session_id: updated.owner_session_id(),
+                    project_id: &address.project_id,
+                    os_user,
+                },
+                node_id,
+                &before.stack,
+                &updated.stack,
+                tddy_session_activity::work_queue_activity::Actor::User {
+                    login: actor_login.to_string(),
+                },
+            );
         }
         serde_json::to_string(&updated.stack).map_err(|e| Status::internal(e.to_string()))
     }
@@ -254,7 +272,7 @@ impl WorkQueueRpcHandler {
         request: Request<ReorderWorkItemRequest>,
     ) -> Result<Response<ReorderWorkItemResponse>, Status> {
         let req = request.into_inner();
-        let os_user = self.authenticated_os_user(&req.session_token)?;
+        let (github_user, os_user) = self.authenticated_user(&req.session_token)?;
         let target = work_queue_target(req.stack.as_ref(), &req.session_id)?;
         if let Some(answered) = self
             .forward_if_addressed::<_, ReorderWorkItemResponse>("ReorderWorkItem", &target, &req)
@@ -273,6 +291,7 @@ impl WorkQueueRpcHandler {
                 address,
                 req.item_id.trim(),
                 req.direction.trim(),
+                (&github_user, &os_user),
             )?;
             return Ok(Response::new(ReorderWorkItemResponse { work_queue_json }));
         }
@@ -284,12 +303,31 @@ impl WorkQueueRpcHandler {
         let session_dir = unified_session_dir_path(&sessions_base, session_id);
         require_a_stack(&session_dir)?;
 
-        tddy_work_queue::item_ops::move_work_item(
+        let before = tddy_core::changeset::read_session_stack(&session_dir)
+            .ok()
+            .flatten();
+        let moved = tddy_work_queue::item_ops::move_work_item(
             &session_dir,
             req.item_id.trim(),
             req.direction.trim(),
         )
         .map_err(Status::invalid_argument)?;
+        if let (Some(before), Ok(metadata)) =
+            (before, tddy_core::read_session_metadata(&session_dir))
+        {
+            super::move_activity::publish_reorder(
+                self.notification_bus.as_ref(),
+                &super::move_activity::MovedQueue {
+                    queue_session_id: session_id,
+                    project_id: &metadata.project_id,
+                    os_user: &os_user,
+                },
+                req.item_id.trim(),
+                &before,
+                &moved,
+                tddy_session_activity::work_queue_activity::Actor::User { login: github_user },
+            );
+        }
 
         // The same serializer `ListSessions` enrichment uses, so the response's `work_queue_json` is
         // the exact wire shape `PrStackScreen`'s `parseWorkQueue` already reads.

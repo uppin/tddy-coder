@@ -46,14 +46,21 @@ pub enum SessionNotificationSource {
     /// ref, the commit and its subject. Not for the operator: the drawer, Telegram and the desktop
     /// skip it.
     TrunkCommit,
+    /// A work item of the session's own queue was moved — reordered, or given other parents
+    /// (`#workqueue` 8/14). The notification's `session_id` is the queue's owner, so it is the
+    /// owner's own activity; `text` is one line naming the item, the change and who made it. Its
+    /// `kind` says whether to wake the owner: `AttentionRequired` for a move anyone but the owner's
+    /// own agent made, `Activity` for one its own agent made (recorded, never delivered). Not for
+    /// the operator: the drawer, Telegram and the desktop skip it.
+    WorkQueue,
 }
 
 impl SessionNotificationSource {
     /// Whether a notification of this source belongs to one session rather than to the operator: a
-    /// message is its recipient's, a trunk commit its orchestrator's. The operator surfaces (the
+    /// message is its recipient's, a trunk commit its orchestrator's, a queue move its owner's. The operator surfaces (the
     /// drawer, Telegram, the desktop, `ReadProjectNotifications`) skip it.
     pub fn is_a_sessions_own(self) -> bool {
-        matches!(self, Self::Message | Self::TrunkCommit)
+        matches!(self, Self::Message | Self::TrunkCommit | Self::WorkQueue)
     }
 }
 
