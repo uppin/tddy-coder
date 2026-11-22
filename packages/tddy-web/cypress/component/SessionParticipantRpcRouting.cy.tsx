@@ -107,6 +107,8 @@ describe("SessionParticipantRpcRouting — session-scoped RPCs target the sessio
     );
     sessionsDrawerPage.drawerItem(INACTIVE_SESSION.sessionId).click();
     // Inspector auto-opens for inactive sessions on select — no toggle needed.
+    // The action buttons live on Details; a session without a PR opens on Worktree.
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorDeleteBtn(INACTIVE_SESSION.sessionId).click();
     sessionsDrawerPage.inspectorDeleteConfirm(INACTIVE_SESSION.sessionId).click();
 
