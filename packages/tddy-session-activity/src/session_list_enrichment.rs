@@ -2103,8 +2103,7 @@ pid: 42
 
         fs::write(
             session_dir.join("changeset.yaml"),
-            format!(
-                r"version: 1
+            r"version: 1
 models:
   tdd: opus
 sessions:
@@ -2121,7 +2120,6 @@ state:
       at: '2026-07-01T10:05:00Z'
 recipe: pr-stack
 ",
-            ),
         )
         .unwrap();
 
@@ -2330,8 +2328,7 @@ pid: 77
 
         fs::write(
             session_dir.join("changeset.yaml"),
-            format!(
-                r"version: 1
+            r"version: 1
 models:
   tdd: opus
 sessions:
@@ -2348,7 +2345,6 @@ state:
       at: '2026-07-01T10:05:00Z'
 recipe: pr-stack
 ",
-            ),
         )
         .unwrap();
 
