@@ -7,7 +7,7 @@
 //! git's own `worktree list`, so filesystem access can never escape a real checkout.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,10 +30,13 @@ use tddy_task::IdleTimeoutTracker;
 use crate::project_storage;
 use crate::service_helpers::{
     blocking_within, map_clean_worktree_error, map_remove_worktree_error,
-    proto_worktree_size_status, worktree_row_from_diff,
+    proto_worktree_size_status, sync_state_to_proto, worktree_row_from_diff,
 };
 use crate::stream::{worktree_file_frames, MpscResultStream, MpscWorktreeStatsStream};
 use crate::target_worktrees::TargetSession;
+use crate::worktree_sync::{
+    pull_fast_forward, push_branch, read_sync_state, SyncState, WorktreeSyncError,
+};
 use crate::worktrees::{
     self, WorktreeDiffRow, WorktreeSizeCalculator, WorktreeSizeStatus, WorktreeStatsCache,
     DAEMON_SIZE_WALK_PERMITS,
@@ -281,6 +284,45 @@ impl WorktreeServiceImpl {
 
     pub(crate) fn request_timeout(&self) -> Duration {
         self.config.spawn_worker_request_timeout()
+    }
+
+    /// Run a sync-state read or action in session `req.session_id`'s own worktree, off the async
+    /// runtime and under the request deadline. A target session's worktree lives on another host:
+    /// it answers with the reason it is unavailable rather than an error.
+    async fn session_sync(
+        &self,
+        op_label: &'static str,
+        req: SessionWorktreeRequest,
+        action: fn(&Path) -> Result<SyncState, WorktreeSyncError>,
+    ) -> Result<Response<WorktreeSyncState>, Status> {
+        let os_user = self.authorize(&req.session_token)?;
+        let session_dir = self.session_dir_for(&os_user, req.session_id.trim())?;
+        if !session_dir.is_dir() {
+            return Err(Status::not_found("session not found"));
+        }
+        if crate::target_worktrees::target_session_in(&session_dir).is_some() {
+            // TODO(n4 session-pr-tabs): no target-side sync-state reader exists yet.
+            return Ok(Response::new(WorktreeSyncState {
+                unavailable_reason: "a target session's worktree sync state is not available"
+                    .to_string(),
+                ..Default::default()
+            }));
+        }
+        let worktree = tddy_core::read_session_metadata(&session_dir)
+            .map_err(|e| Status::internal(format!("session metadata: {e}")))?
+            .repo_path
+            .map(PathBuf::from)
+            .ok_or_else(|| Status::failed_precondition("session has no worktree"))?;
+        if !worktree.is_dir() {
+            return Err(Status::failed_precondition(
+                "the session's worktree is not on disk",
+            ));
+        }
+        let state = blocking_within(self.request_timeout(), op_label, move || {
+            action(&worktree).map_err(|e| anyhow::anyhow!(e.0))
+        })
+        .await?;
+        Ok(Response::new(sync_state_to_proto(state)))
     }
 }
 
@@ -836,33 +878,42 @@ impl WorktreeService for WorktreeServiceImpl {
 
     async fn get_worktree_sync_state(
         &self,
-        _request: Request<SessionWorktreeRequest>,
+        request: Request<SessionWorktreeRequest>,
     ) -> Result<Response<WorktreeSyncState>, Status> {
-        // TODO(n4 session-pr-tabs): implement — resolve the session's worktree, `read_sync_state`.
-        Err(Status::unimplemented("TODO(n4): GetWorktreeSyncState"))
+        self.record_rpc_activity();
+        self.session_sync(
+            "GetWorktreeSyncState",
+            request.into_inner(),
+            read_sync_state,
+        )
+        .await
     }
 
     async fn pull_worktree(
         &self,
-        _request: Request<SessionWorktreeRequest>,
+        request: Request<SessionWorktreeRequest>,
     ) -> Result<Response<WorktreeSyncState>, Status> {
-        // TODO(n4 session-pr-tabs): implement — `pull_fast_forward`.
-        Err(Status::unimplemented("TODO(n4): PullWorktree"))
+        self.record_rpc_activity();
+        self.session_sync("PullWorktree", request.into_inner(), pull_fast_forward)
+            .await
     }
 
     async fn push_worktree(
         &self,
-        _request: Request<SessionWorktreeRequest>,
+        request: Request<SessionWorktreeRequest>,
     ) -> Result<Response<WorktreeSyncState>, Status> {
-        // TODO(n4 session-pr-tabs): implement — `push_branch`.
-        Err(Status::unimplemented("TODO(n4): PushWorktree"))
+        self.record_rpc_activity();
+        self.session_sync("PushWorktree", request.into_inner(), push_branch)
+            .await
     }
 
     async fn stream_session_pull_request(
         &self,
         _request: Request<SessionWorktreeRequest>,
     ) -> Result<Response<Self::StreamSessionPullRequestStream>, Status> {
-        // TODO(n4 session-pr-tabs): implement — `watch_pull_request` over the daemon's inbox.
+        // TODO(n4 session-pr-tabs): the service holds no `GithubInbox` yet and nothing maps a
+        // session's project to its `RepoSlug`; `pull_request_view::watch_pull_request` is ready for
+        // the handler once the daemon wires both in.
         Err(Status::unimplemented("TODO(n4): StreamSessionPullRequest"))
     }
 }

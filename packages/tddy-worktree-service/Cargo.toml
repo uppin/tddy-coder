@@ -23,6 +23,8 @@ tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "proc
 tddy-core = { path = "../tddy-core" }
 # The PR tab reads GitHub only through the daemon's inbox (`#workqueue` 4/14).
 tddy-github-inbox = { path = "../tddy-github-inbox" }
+# The PR, check-run and state types the inbox's rows are made of.
+tddy-github = { path = "../tddy-github" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-task = { path = "../tddy-task" }
@@ -51,4 +53,3 @@ tddy-livekit = { path = "../tddy-livekit" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 axum = "0.8"
 tddy-connectrpc = { path = "../tddy-connectrpc" }
-tddy-github = { path = "../tddy-github" }
