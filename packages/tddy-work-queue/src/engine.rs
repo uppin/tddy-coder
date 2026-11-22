@@ -94,15 +94,80 @@ pub struct Propagated {
     pub commits_taken: u32,
 }
 
+impl From<EngineError> for EngineRefusal {
+    fn from(error: EngineError) -> Self {
+        EngineRefusal::Failed(error.0)
+    }
+}
+
+impl std::fmt::Display for EngineRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EngineRefusal::LocalBranch { state, actions } => write!(
+                f,
+                "local branch is {state:?}; {} first",
+                actions.join(", then ")
+            ),
+            EngineRefusal::Preflight { condition, detail } => write!(f, "{condition}: {detail}"),
+            EngineRefusal::Failed(why) => write!(f, "{why}"),
+        }
+    }
+}
+
+/// The actions that bring a local branch level with its remote, in order.
+fn actions_for(state: LocalBranchState) -> Vec<&'static str> {
+    match state {
+        LocalBranchState::InSync => Vec::new(),
+        LocalBranchState::Dirty => vec!["commit"],
+        LocalBranchState::Unpushed | LocalBranchState::Unpublished => vec!["push"],
+        LocalBranchState::Unpulled => vec!["pull"],
+        LocalBranchState::Diverged => vec!["pull", "push"],
+    }
+}
+
 /// Propagate one item.
 pub async fn propagate(
     git: &dyn QueueGit,
     gh: &dyn QueueGithub,
     request: &PropagateRequest,
 ) -> Result<Propagated, EngineRefusal> {
-    // TODO(n14 land-propagate): implement
-    let _ = (git, gh, request);
-    todo!("TODO(n14): implement propagate")
+    git.fetch().await?;
+    let state = git.local_branch_state(&request.branch).await?;
+    if state != LocalBranchState::InSync {
+        return Err(EngineRefusal::LocalBranch {
+            state,
+            actions: actions_for(state),
+        });
+    }
+    if !request.base_checks_green {
+        return Err(EngineRefusal::Preflight {
+            condition: "checks",
+            detail: format!("the checks on `{}` are not green", request.onto),
+        });
+    }
+    if !request.force {
+        let conflicts = git
+            .predicted_conflicts(&request.branch, &request.onto)
+            .await?;
+        if !conflicts.is_empty() {
+            return Err(EngineRefusal::Preflight {
+                condition: "conflicts",
+                detail: format!("rebasing would conflict in {}", conflicts.join(", ")),
+            });
+        }
+    }
+    let commits_taken = git.inbox_count(&request.branch, &request.onto).await?;
+    let expected = git.tip(&request.branch).await?;
+    git.rebase_onto(&request.branch, &request.onto).await?;
+    git.push_with_lease(&request.branch, &expected).await?;
+    if let (Some(number), Some(base)) = (request.pr_number, request.retarget_to.as_deref()) {
+        gh.retarget(number, base).await?;
+    }
+    Ok(Propagated {
+        item_id: request.item_id.clone(),
+        onto: request.onto.clone(),
+        commits_taken,
+    })
 }
 
 /// One item of the line to land, with its merge conditions already evaluated (n13).
@@ -127,8 +192,32 @@ pub struct LandReport {
 }
 
 /// Land `line` (derived-line order, the requested waves only).
+///
+/// Each item is merged, then each successor is propagated onto the new base before the next item is
+/// taken; the first item that cannot land (or whose successor cannot be propagated) ends the run.
 pub async fn land(git: &dyn QueueGit, gh: &dyn QueueGithub, line: &[LandItem]) -> LandReport {
-    // TODO(n14 land-propagate): implement
-    let _ = (git, gh, line);
-    todo!("TODO(n14): implement land")
+    let mut report = LandReport::default();
+    for item in line {
+        if let Some((condition, detail)) = &item.held_up_on {
+            report.stopped_at = Some((item.item_id.clone(), format!("{condition}: {detail}")));
+            return report;
+        }
+        match gh.merge(item.pr_number).await {
+            Ok(sha) => report.landed.push((item.item_id.clone(), sha)),
+            Err(error) => {
+                report.stopped_at = Some((item.item_id.clone(), error.0));
+                return report;
+            }
+        }
+        for successor in &item.successors {
+            match propagate(git, gh, successor).await {
+                Ok(done) => report.propagated.push(done),
+                Err(refusal) => {
+                    report.stopped_at = Some((successor.item_id.clone(), refusal.to_string()));
+                    return report;
+                }
+            }
+        }
+    }
+    report
 }
