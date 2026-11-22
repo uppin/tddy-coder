@@ -185,6 +185,7 @@ describe("the selected session's actions", () => {
     sessionsDrawerPage.drawerItem(DORMANT_ELSEWHERE.sessionId).click();
 
     // When
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorResumeBtn(DORMANT_ELSEWHERE.sessionId).click();
 
     // Then
@@ -197,6 +198,7 @@ describe("the selected session's actions", () => {
     sessionsDrawerPage.drawerItem(DORMANT_ELSEWHERE.sessionId).click();
 
     // When
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorDeleteBtn(DORMANT_ELSEWHERE.sessionId).click();
     sessionsDrawerPage.inspectorDeleteConfirm(DORMANT_ELSEWHERE.sessionId).click();
 
@@ -222,6 +224,7 @@ describe("the selected session's actions", () => {
     sessionsDrawerPage.inspectorToggle().click();
 
     // When
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorTerminateBtn(LIVE_ELSEWHERE.sessionId).click();
 
     // Then
@@ -239,6 +242,7 @@ describe("the selected session's actions", () => {
     sessionsDrawerPage.drawerItem(DORMANT.sessionId).click();
 
     // When
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorResumeBtn(DORMANT.sessionId).click();
 
     // Then — the daemon's words, without the transport's `[code]`
@@ -256,6 +260,7 @@ describe("the selected session's actions", () => {
     sessionsDrawerPage.drawerItem(DORMANT.sessionId).click();
 
     // When
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorDeleteBtn(DORMANT.sessionId).click();
     sessionsDrawerPage.inspectorDeleteConfirm(DORMANT.sessionId).click();
 

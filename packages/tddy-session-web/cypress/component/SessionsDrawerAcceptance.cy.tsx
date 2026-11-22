@@ -265,6 +265,7 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
     sessionsDrawerPage.inspectorToggle().click();
+    sessionsDrawerPage.inspectorDetailsTab().click();
 
     // Then — inspector shows metadata and resume button; terminal container absent
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
@@ -284,6 +285,7 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
 
     // Then — verify the request was made with the correct session id

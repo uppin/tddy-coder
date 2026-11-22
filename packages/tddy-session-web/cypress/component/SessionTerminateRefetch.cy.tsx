@@ -78,6 +78,7 @@ describe("SessionsDrawerScreen — Terminate refetches the session list", () => 
     mountAndSelect(backend);
 
     // When — Terminate is clicked and SignalSession succeeds
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorTerminateBtn(CONNECTED_SESSION.sessionId).click();
     cy.wrap(backend).should((b) => {
       const calls = b.callsTo(SessionService.method.signalSession);
@@ -106,6 +107,7 @@ describe("SessionsDrawerScreen — Terminate refetches the session list", () => 
     mountAndSelect(backend);
 
     // When — Terminate is clicked but SignalSession fails ("process is not alive")
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorTerminateBtn(CONNECTED_SESSION.sessionId).click();
     cy.wrap(backend).should((b) => {
       expect(b.callsTo(SessionService.method.signalSession)).to.have.length(1);
