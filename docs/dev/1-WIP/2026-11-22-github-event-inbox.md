@@ -222,7 +222,9 @@ migrations are proved by their existing suites (`trunk_watch_acceptance.rs` 6,
 - **The trunk watch keeps the commits list as its source** — the 2026-11-21 trunk-watch changeset
   recorded "the commits list, not the events feed". The inbox serves that list as a conditional
   `branch_commits` row and invalidates it on `PushEvent`; the events feed drives PR, comment and push
-  invalidations. Reported to the operator as a premise check; open until they confirm.
+  invalidations. **Decided by the operator (2026-11-22):** the trunk watch subscribes to a cached
+  conditional commits row per repository and branch; the events feed drives PR, check and comment
+  invalidations.
 - **In-memory cache** — restart costs one unconditional read per row; persistence can follow if
   restarts prove costly.
 - **A new crate** rather than growing `tddy-github` (whose `pr_api.rs` is already over budget).
