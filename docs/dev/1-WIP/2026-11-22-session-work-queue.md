@@ -183,11 +183,11 @@ As listed under Affected Packages. Daemon start: `rm -r <data>/projects/*/stacks
 
 ## Implementation Milestones
 
-- [ ] Store re-key + record; removal of legacy fields, migration and fallbacks
-- [ ] Start option end to end (proto, MCP schema, form) + implicit orchestrator queue
-- [ ] Access model + listing + execution gates + refusal
-- [ ] RPC addressing by session; drawer row; tab; default precedence
-- [ ] Upgrade deletion of old records
+- [x] Store re-key + record; removal of legacy fields, migration and fallbacks
+- [x] Start option end to end (proto, MCP schema, form) + implicit orchestrator queue
+- [x] Access model + listing + execution gates + refusal
+- [x] RPC addressing by session (address `queue_id` = owning session id — see Technical Debt); drawer row; tab; default precedence
+- [x] Upgrade deletion of old records
 
 ## Testing Plan
 
@@ -270,19 +270,76 @@ Green deviations from the plan, each deliberate:
 - **A call acting on no queue** (`work_queue_list`, `work_pr_search`, a read by pull number) is gated by the
   caller's own host on what its own records offer (owner: every tool; addressed: the two reads); a call that
   acts on a queue is gated on the host holding it, by that queue (`access_to`).
-- **The project-home session's tool catalogue still lists the work tools statically**; executing them is
-  gated by queue ownership, so a project-home session that owns no queue is refused with the hint.
+- **Every catalogue offers the work tools by access** (corrected at validation — an earlier note here said
+  the project-home catalogue listed them statically; `468308ebf` replaced that): both `ListExecTools`
+  paths, the daemon's (`exec_tool/project_home.rs`) and the jail's (`svc_list_exec_tools_wiring.rs`), strip
+  the work tools from the role catalogue and add back only what the session's queue access offers.
+- **A forwarded call that acts on no queue** (`project_home_remote.rs`) is not re-gated on the serving host:
+  the caller's own host already gated it with `work_queue_caller_of` before `served_on_target_host`
+  forwarded it. A call that acts on a queue is re-gated there by `access_to`.
 - **`session_participant_metadata_acceptance` (3 tests) fails on this node's base too** — #workqueue 3/14's
   scripted rename changed the test's expected key to `work_item_id` while the serde wire key stayed
-  `stack_node_id`. Not touched here.
+  `stack_node_id`. Assigned to n3; not touched here. Same for `session-activity` `context_docs` ×3.
+
+**Wrap verdict on the two green deviations ([W], 2026-11-22):** both stay, no TODO.
+- `queue_id` = the owning session's id is an invariant, not a placeholder: a queue has no identity apart
+  from its session. Renaming the field to `session_id` would churn every request, both generated TS
+  clients and the nine nodes above this one without changing behaviour. Documented in `work_queue.proto`
+  and the feature doc.
+- `WorkQueueStore` is the project-scoped adapter: it refuses a queue of another project, which
+  `SessionWorkQueues` (addressed by session alone) does not. Its error mapping is tidied at wrap (see
+  Refactoring Needed).
 
 ## Refactoring Needed
 
-_(populated by validation)_
+From validation (each Minor; applied in `/pr-wrap`):
+
+1. `work_queue_store.rs` `store_error`: `AlreadyExists` becomes a fake `Malformed` whose path is a session
+   id, and `NoQueue` becomes `NotFound` with an empty `project_id`. The view never creates and always reads
+   before it updates, so neither should be reachable. Map them honestly.
+2. `session_list_enrichment.rs`: `work_queue_json_for_changeset(_changeset)` ignores its changeset (both
+   callers in daemon-rpc pass `Changeset::default()`), and each listed owner's `work-queue.yaml` is read
+   twice (`owned_queue_id` + the JSON). Drop the parameter and read once per row.
+3. Duplicated "strip the work tools, add back by access" block in `exec_tool/project_home.rs` and
+   `svc_list_exec_tools_wiring.rs` → one tool-engine helper.
+4. `WorkQueueView.tsx`: `const address = openedAddress;` is a leftover alias from the removed "New
+   stack" state.
+5. `started_session_queue.rs`: `SystemTime … .unwrap_or(0)` stamps a queue at the epoch on a clock
+   error, a silent fallback. Propagate the error instead.
 
 ## Validation Results
 
-_(populated by validation)_
+**Stack gate:** base `feature/workqueue/session-pr-tabs` at `c1b47919e` (n4's head); `origin/<base>..HEAD`
+holds only n5's 8 commits. Already current, no rebase.
+
+**Boundary:** every Scope item is implemented. No `## Dependencies` symbol is implemented here. Nothing from
+n6–n14 crept in: no item fields, activities, lineage or schedules. Removing `queue_migration.rs` and its
+sweep test is planned (Responsibility: "removing the migration sweep").
+
+**Risk review (per area):**
+- tddy-changeset — `SessionWorkQueues` validates the session id as one path segment and uses a per-record
+  in-process lock plus an atomic rename. `list_for_project` fails the whole project listing on one
+  malformed queue file (Info; same behaviour as the store it replaces).
+- tddy-tool-engine / tddy-daemon-rpc — the access model reads no role. The local gate takes the caller's
+  best access over the project's queues. `run` / the git tools re-check the queue they address via
+  `access_to`. The refusal and its hint reach the caller (`addressing_a_session_that_owns_no_queue_is_refused_with_the_hint`).
+- tddy-agent-launch — the queue is created after the start and on resume (orchestrators that predate the
+  queue). A failure to create it fails the start's answer rather than leaving a session without its queue.
+- tddy-daemon — startup deletes `<data>/projects/*/stacks/`; idempotent; an error is logged, not fatal.
+- Web — the tab is gated on `ownsWorkQueue`; a `?inspector=work-queue` on a session without a queue
+  degrades to Details. The drawer's project row opens the owning session's tab.
+- Security: no secrets; session/queue ids are validated as path segments before touching disk.
+
+**Scoped gates ([W], local, scoped — the full workspace is CI's):**
+- `cargo test -p tddy-daemon --test startup_stack_migration_acceptance` — 1/1 ✅
+- `cargo test -p tddy-agent-launch --lib` — 394/394 ✅
+- `cargo test -p tddy-session-lifecycle --lib --test cursor_cli_session_acceptance --test unified_worktree_base_acceptance` — 186 + 13 + 5 ✅ (the sandbox cursor test needs `tddy-sandbox-runner` built and on `PATH`; it fails with exit 127 otherwise — environment, not this PR)
+- `cargo test -p tddy-workflow-recipes` over the 11 targets using the queue fixtures — all ✅
+
+**Gaps CI found (run 45057590141 on `763de8017`), fixed back in implementation:**
+- rustfmt diffs in 4 test files this PR touched → formatted (`cargo fmt --all --check` clean).
+- `pr_stack_branch_link_acceptance` relied on the removed first-write creation → its orchestrator now owns
+  its (empty) queue, as its start would have given it.
 
 ## TODO
 
@@ -294,11 +351,11 @@ _(populated by validation)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
+- [x] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)

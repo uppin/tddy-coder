@@ -8,15 +8,16 @@
 //!
 //! PRD: docs/ft/coder/pr-stack-live-status.md § capability 1.
 
-use tddy_core::changeset::Changeset;
+use tddy_core::changeset::{Changeset, WorkQueue};
 use tddy_work_queue::item_ops::{add_work_item, AddWorkItemInput};
 
 #[test]
 fn a_manually_added_planned_pr_keeps_its_branch_name_as_a_suggestion_only() {
-    // Given — a fresh orchestrator session with no stack yet
+    // Given — a fresh orchestrator session whose work queue, created at its start, is still empty
     let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     tddy_core::changeset::write_changeset(dir, &Changeset::default()).unwrap();
+    tddy_changeset::work_queue_fixtures::seed_session_stack(dir, WorkQueue::default());
 
     // When — a planned PR is added with a branch suggestion
     let node = add_work_item(

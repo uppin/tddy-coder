@@ -76,7 +76,8 @@ pub fn write_stack(dir: &Path, nodes: Vec<WorkItem>) {
         dir,
         Changeset {
             ..Changeset::default()
-        }, Some(WorkQueue { version: 1, nodes }),
+        },
+        Some(WorkQueue { version: 1, nodes }),
     );
 }
 
