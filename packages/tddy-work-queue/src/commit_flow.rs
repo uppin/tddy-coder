@@ -10,7 +10,11 @@
 //! listed first; `prediction` = `git merge-tree --write-tree` of the commit onto `origin/<item>` with the
 //! commit's parent as merge base.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use crate::lineage::LineEndpoint;
 
@@ -60,23 +64,41 @@ pub struct OutboxEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitFlowError(pub String);
 
+impl std::fmt::Display for CommitFlowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for CommitFlowError {}
+
 /// Commit analysis over one clone (the queue owner's worktree), cached by remote tips.
 pub struct CommitFlow {
     repo_dir: PathBuf,
+    inbox_cache: Mutex<HashMap<String, Vec<InboxEntry>>>,
+    hits: AtomicU64,
+}
+
+/// What an inbox read covers: the item, its line ancestors nearest first, and the base they end at.
+struct Chain<'a> {
+    item: &'a ItemBranch,
+    ancestors: Vec<&'a ItemBranch>,
+    base: &'a LineEndpoint,
 }
 
 impl CommitFlow {
     pub fn new(repo_dir: impl Into<PathBuf>) -> Self {
         Self {
             repo_dir: repo_dir.into(),
+            inbox_cache: Mutex::new(HashMap::new()),
+            hits: AtomicU64::new(0),
         }
     }
 
     /// `git fetch origin --prune` — remote-tracking refs only.
     pub fn fetch(&self) -> Result<(), CommitFlowError> {
-        // TODO(n11 commit-inbox-outbox): implement
-        let _ = &self.repo_dir;
-        todo!("TODO(n11): implement CommitFlow::fetch")
+        self.git(&["fetch", "origin", "--prune", "--quiet"])
+            .map(|_| ())
     }
 
     /// `item_id`'s own commits beyond its line parent, oldest first.
@@ -85,9 +107,9 @@ impl CommitFlow {
         queue: &[ItemBranch],
         item_id: &str,
     ) -> Result<Vec<FlowCommit>, CommitFlowError> {
-        // TODO(n11 commit-inbox-outbox): implement
-        let _ = (queue, item_id);
-        todo!("TODO(n11): implement CommitFlow::own_commits")
+        let item = find_item(queue, item_id)?;
+        let parent = parent_branch(queue, item)?;
+        self.commits_in(&format!("origin/{}..origin/{}", parent, item.branch))
     }
 
     /// `item_id`'s inbox: trunk/external sources first, then items nearest first; oldest first within.
@@ -96,9 +118,18 @@ impl CommitFlow {
         queue: &[ItemBranch],
         item_id: &str,
     ) -> Result<Vec<InboxEntry>, CommitFlowError> {
-        // TODO(n11 commit-inbox-outbox): implement
-        let _ = (queue, item_id);
-        todo!("TODO(n11): implement CommitFlow::inbox")
+        let chain = chain_of(queue, item_id)?;
+        let key = self.cache_key(&chain)?;
+        if let Some(cached) = self.inbox_cache.lock().expect("cache lock").get(&key) {
+            self.hits.fetch_add(1, Ordering::Relaxed);
+            return Ok(cached.clone());
+        }
+        let entries = self.read_inbox(&chain)?;
+        self.inbox_cache
+            .lock()
+            .expect("cache lock")
+            .insert(key, entries.clone());
+        Ok(entries)
     }
 
     /// `item_id`'s outbox: per successor, the commits it lacks that `item_id` carries.
@@ -107,14 +138,199 @@ impl CommitFlow {
         queue: &[ItemBranch],
         item_id: &str,
     ) -> Result<Vec<OutboxEntry>, CommitFlowError> {
-        // TODO(n11 commit-inbox-outbox): implement
-        let _ = (queue, item_id);
-        todo!("TODO(n11): implement CommitFlow::outbox")
+        find_item(queue, item_id)?;
+        let mut out = Vec::new();
+        for successor in queue
+            .iter()
+            .filter(|i| i.line_parent == LineEndpoint::Item(item_id.to_string()))
+        {
+            for entry in self.inbox(queue, &successor.item_id)? {
+                if entry.source == CommitSource::Item(item_id.to_string()) {
+                    out.push(OutboxEntry {
+                        successor: successor.item_id.clone(),
+                        commit: entry.commit,
+                    });
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// How many reads were answered from the cache (unchanged tips).
     pub fn cache_hits(&self) -> u64 {
-        // TODO(n11 commit-inbox-outbox): implement
-        todo!("TODO(n11): implement CommitFlow::cache_hits")
+        self.hits.load(Ordering::Relaxed)
+    }
+
+    /// The remote tips every ancestry range of the chain is read at, as the cache key.
+    fn cache_key(&self, chain: &Chain<'_>) -> Result<String, CommitFlowError> {
+        let mut parts = vec![chain.item.item_id.clone()];
+        let branches = std::iter::once(chain.item.branch.as_str())
+            .chain(chain.ancestors.iter().map(|a| a.branch.as_str()))
+            .chain(std::iter::once(chain.base.name()));
+        for branch in branches {
+            parts.push(format!("{branch}={}", self.tip(branch)?));
+        }
+        Ok(parts.join(" "))
+    }
+
+    fn read_inbox(&self, chain: &Chain<'_>) -> Result<Vec<InboxEntry>, CommitFlowError> {
+        let item_ref = format!("origin/{}", chain.item.branch);
+        let mut seen = std::collections::HashSet::new();
+        let mut from_items = Vec::new();
+        for ancestor in &chain.ancestors {
+            let range = format!("{item_ref}..origin/{}", ancestor.branch);
+            let source = CommitSource::Item(ancestor.item_id.clone());
+            from_items.extend(self.entries_in(&range, &source, &item_ref, &mut seen)?);
+        }
+        let base_source = match chain.base {
+            LineEndpoint::External(name) => CommitSource::External(name.clone()),
+            other => CommitSource::Trunk(other.name().to_string()),
+        };
+        let range = format!("{item_ref}..origin/{}", chain.base.name());
+        let mut entries = self.entries_in(&range, &base_source, &item_ref, &mut seen)?;
+        entries.extend(from_items);
+        Ok(entries)
+    }
+
+    fn entries_in(
+        &self,
+        range: &str,
+        source: &CommitSource,
+        item_ref: &str,
+        seen: &mut std::collections::HashSet<String>,
+    ) -> Result<Vec<InboxEntry>, CommitFlowError> {
+        let mut entries = Vec::new();
+        for commit in self.commits_in(range)? {
+            if !seen.insert(commit.sha.clone()) {
+                continue;
+            }
+            let prediction = self.predict(item_ref, &commit.sha)?;
+            entries.push(InboxEntry {
+                commit,
+                source: source.clone(),
+                prediction,
+            });
+        }
+        Ok(entries)
+    }
+
+    /// Whether `commit` merges onto `item_ref` (with its own parent as the merge base) and where not.
+    fn predict(&self, item_ref: &str, commit: &str) -> Result<Prediction, CommitFlowError> {
+        let base = format!("--merge-base={commit}^");
+        let out = self.git_output(&[
+            "merge-tree",
+            "--write-tree",
+            "--name-only",
+            &base,
+            item_ref,
+            commit,
+        ])?;
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        match out.status.code() {
+            Some(0) => Ok(Prediction::Clean),
+            Some(1) => Ok(Prediction::Conflicts(
+                stdout
+                    .lines()
+                    .skip(1)
+                    .take_while(|l| !l.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+            )),
+            _ => Err(CommitFlowError(format!(
+                "git merge-tree {commit} onto {item_ref}: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ))),
+        }
+    }
+
+    fn commits_in(&self, range: &str) -> Result<Vec<FlowCommit>, CommitFlowError> {
+        let out = self.git(&[
+            "log",
+            "--reverse",
+            "--topo-order",
+            "--format=%H%x1f%s",
+            range,
+        ])?;
+        Ok(out
+            .lines()
+            .filter_map(|l| l.split_once('\u{1f}'))
+            .map(|(sha, subject)| FlowCommit {
+                sha: sha.to_string(),
+                subject: subject.to_string(),
+            })
+            .collect())
+    }
+
+    fn tip(&self, branch: &str) -> Result<String, CommitFlowError> {
+        self.git(&["rev-parse", "--verify", &format!("origin/{branch}")])
+            .map(|s| s.trim().to_string())
+    }
+
+    fn git(&self, args: &[&str]) -> Result<String, CommitFlowError> {
+        let out = self.git_output(args)?;
+        if !out.status.success() {
+            return Err(CommitFlowError(format!(
+                "git {}: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    fn git_output(&self, args: &[&str]) -> Result<std::process::Output, CommitFlowError> {
+        Command::new("git")
+            .args(args)
+            .current_dir(&self.repo_dir)
+            .output()
+            .map_err(|e| CommitFlowError(format!("git {}: {e}", args.join(" "))))
+    }
+}
+
+fn find_item<'a>(
+    queue: &'a [ItemBranch],
+    item_id: &str,
+) -> Result<&'a ItemBranch, CommitFlowError> {
+    queue
+        .iter()
+        .find(|i| i.item_id == item_id)
+        .ok_or_else(|| CommitFlowError(format!("item '{item_id}' not found")))
+}
+
+/// The branch an item's own commits are counted from: its line parent's branch.
+fn parent_branch<'a>(
+    queue: &'a [ItemBranch],
+    item: &'a ItemBranch,
+) -> Result<&'a str, CommitFlowError> {
+    match &item.line_parent {
+        LineEndpoint::Item(id) => find_item(queue, id).map(|p| p.branch.as_str()),
+        other => Ok(other.name()),
+    }
+}
+
+fn chain_of<'a>(queue: &'a [ItemBranch], item_id: &str) -> Result<Chain<'a>, CommitFlowError> {
+    let item = find_item(queue, item_id)?;
+    let mut ancestors = Vec::new();
+    let mut at = item;
+    loop {
+        match &at.line_parent {
+            LineEndpoint::Item(id) => {
+                let parent = find_item(queue, id)?;
+                if ancestors.len() > queue.len() {
+                    return Err(CommitFlowError(format!(
+                        "item '{item_id}' is on a line cycle"
+                    )));
+                }
+                ancestors.push(parent);
+                at = parent;
+            }
+            base => {
+                return Ok(Chain {
+                    item,
+                    ancestors,
+                    base,
+                })
+            }
+        }
     }
 }
