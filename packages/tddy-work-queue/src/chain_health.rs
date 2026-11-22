@@ -3,7 +3,7 @@
 //! **linearity** — whether the item contains its line parent's tip.
 //!
 //! Pure. Inputs: PR commit lists from the inbox (n2's `pr_commits`), the behind count from git
-//! (`tddy_core::base_sync::count_divergence` over remote tips) and the PR's `mergeable` from the inbox.
+//! (`tddy_session_worktree::base_sync::count_divergence` over remote tips) and the PR's `mergeable` from the inbox.
 
 use tddy_github_inbox::PrCommit;
 
@@ -31,15 +31,34 @@ pub enum LineState {
 /// The commits of `own` that belong to an ancestor — `ancestors` are each line ancestor's branch and
 /// PR commits, **nearest first**.
 pub fn leaks(own: &[PrCommit], ancestors: &[(String, Vec<PrCommit>)]) -> Vec<Leak> {
-    // TODO(n12 leak-linearity): implement
-    let _ = (own, ancestors);
-    todo!("TODO(n12): implement leaks")
+    own.iter()
+        .filter_map(|commit| {
+            ancestors
+                .iter()
+                .find(|(_, theirs)| theirs.iter().any(|c| is_same_work(c, commit)))
+                .map(|(branch, _)| Leak {
+                    sha: commit.sha.clone(),
+                    ancestor: branch.clone(),
+                })
+        })
+        .collect()
+}
+
+/// The same SHA, or a rebased copy: same author, author date and subject.
+fn is_same_work(a: &PrCommit, b: &PrCommit) -> bool {
+    a.sha == b.sha
+        || (a.author_name == b.author_name
+            && a.author_date == b.author_date
+            && a.subject == b.subject)
 }
 
 /// The line state from how far behind its parent the item is (`None`: no reading) and its PR's
 /// `mergeable`.
 pub fn line_state(behind_by: Option<u32>, mergeable: Option<bool>) -> LineState {
-    // TODO(n12 leak-linearity): implement
-    let _ = (behind_by, mergeable);
-    todo!("TODO(n12): implement line_state")
+    match (behind_by, mergeable) {
+        (None, _) => LineState::Unknown,
+        (Some(0), _) => LineState::Linear,
+        (Some(by), Some(false)) => LineState::Conflicting { by },
+        (Some(by), _) => LineState::Behind { by },
+    }
 }
