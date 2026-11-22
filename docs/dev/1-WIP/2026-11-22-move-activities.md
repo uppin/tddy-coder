@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — more than one crate (kernel, session-activity, daemon-rpc, tool-engine, tools, telegram), a new activity source with ordering into the notification log, a restructure of an at-budget file first
 **Stack**: `#workqueue` 8/14 — branch `feature/workqueue/move-activities`, base `feature/workqueue/badges-labels`
+**PR**: [#1009](https://github.com/uppin/tddy-coder/pull/1009)
 
 ## Initial Discovery
 
@@ -62,9 +63,15 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: the source and kind variants, `WorkQueueEvent`,
-`WATCH_KINDS` entry, and the failing tests below (with the log split done as a restructure in the same
-push, so the source arm lands in the split module).
+Published (pass 2, commit 2): `tddy_session_activity::work_queue_activity::{WorkQueueEvent,
+WorkQueueChange (Reordered, ParentsChanged), Actor (User, Agent), WorkQueueActivities::{new, publish_move},
+wakes_owner}` and the failing tests below.
+
+**Not in the contract, `/green`'s:** the `SessionNotificationSource::WorkQueue` and `WatchKind::WorkQueue`
+variants. Adding a variant forces every exhaustive match across the ~12 registries (kernel, log, DTO,
+streams, telegram, watch wake, admission, `WATCH_KINDS`, monitor) to change — implementation, not
+surface — and the log must be split first (the ⛔ prerequisite). The tests reach the source and kind by
+name (`"WorkQueue"`, `"work_queue"`) so they compile before the variants exist.
 
 ## Green wave
 
@@ -149,10 +156,13 @@ watch answer), mirroring `trunk_watch_acceptance.rs` and `session_watches_unit.r
 ## Acceptance Tests
 
 `packages/tddy-session-activity/tests/work_queue_activity_acceptance.rs`:
-- [ ] `a_user_reorder_becomes_an_activity_of_the_queue_owner`
-- [ ] `a_parents_change_names_the_parents_before_and_after`
-- [ ] `the_owners_watch_is_not_matched_by_its_own_agents_move`
-- [ ] `no_other_sessions_watch_matches_the_queue`
+- [x] `a_user_reorder_becomes_an_activity_of_the_queue_owner`
+- [x] `a_parents_change_names_the_parents_before_and_after`
+- [x] `the_owners_own_moves_do_not_wake_it_and_anyone_elses_do`
+- [x] `the_work_queue_watch_kind_is_named_work_queue`
+
+"No other session's watch matches the queue" goes into `session_watches_unit.rs` with the variant
+(`watch_matches` is crate-private).
 
 `packages/tddy-daemon-rpc/tests/work_queue_tools_acceptance.rs` (extended):
 - [ ] `an_owner_watching_work_queue_is_woken_by_a_user_move_from_the_queue_view`
@@ -187,10 +197,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
