@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 3 — two pure checks with unit tests, inputs over existing seams (inbox, git), status fields and two chips
 **Stack**: `#workqueue` 12/14 — branch `feature/workqueue/leak-linearity`, base `feature/workqueue/commit-inbox-outbox`
+**PR**: [#1013](https://github.com/uppin/tddy-coder/pull/1013)
 
 ## Initial Discovery
 
@@ -53,12 +54,18 @@ implementing one here collides with the PR that owns it.
 |---|---|---|---|
 | `n2` github-event-inbox (#1003) | `GithubInbox::{pr_commits, pr}` (incl. `mergeable`) | leak inputs and the conflicting verdict | add a compare row or read GitHub directly |
 | `n9` lineage-graph (#1010) | `line_parent_of`, line ancestors | which ancestors to compare against; which parent tip | compute line edges |
-| `n11` commit-inbox-outbox (#1012) | git remote-tip reads | containment of the parent tip | change `commit_flow` |
+| `n11` commit-inbox-outbox (#1012) | line predecessor only (corrected in pass 2: n12 consumes nothing of n11) | — | use or change `commit_flow` |
+
+The behind count comes from the existing `tddy_core::base_sync::count_divergence` over remote tips, not
+from n11 (pass 1 wrongly listed n11's reads here; that would have been an n11 → n12 edge and moved n12
+to wave 7).
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: `chain_health`'s signatures and types, status
-fields, chip test ids, and the failing tests below.
+Published (pass 2, commit 2): `tddy_work_queue::chain_health::{Leak, LineState, leaks, line_state}` — pure
+(`line_state(behind_by: Option<u32>, mergeable: Option<bool>)`; the caller reads the behind count with
+`base_sync::count_divergence`); `tddy-workqueue-web`'s `WorkItemChainHealth` (shell); and the failing tests
+below. Status fields and their assembly are `/green`'s.
 
 ## Green wave
 
@@ -121,24 +128,24 @@ one daemon status test with an inbox over a scripted GitHub and a temp repo; Cyp
 ## Acceptance Tests
 
 `packages/tddy-work-queue/tests/chain_health_unit.rs`:
-- [ ] `a_commit_with_an_ancestors_sha_is_leaked_from_it`
-- [ ] `a_rebased_copy_with_the_same_author_date_and_subject_is_leaked`
-- [ ] `the_nearest_ancestor_carrying_a_commit_is_named`
-- [ ] `an_item_containing_its_parents_tip_is_linear`
-- [ ] `an_item_missing_parent_commits_is_behind_by_their_count`
-- [ ] `behind_and_unmergeable_is_conflicting`
-- [ ] `a_merged_or_planned_parent_gives_unknown`
+- [x] `a_commit_with_an_ancestors_sha_is_leaked_from_it`
+- [x] `a_rebased_copy_with_the_same_author_date_and_subject_is_leaked`
+- [x] `the_nearest_ancestor_carrying_a_commit_is_named`
+- [x] `an_item_containing_its_parents_tip_is_linear`
+- [x] `an_item_missing_parent_commits_is_behind_by_their_count`
+- [x] `behind_and_unmergeable_is_conflicting`
+- [x] `a_merged_or_planned_parent_gives_unknown`
 
-`packages/tddy-daemon-rpc/tests/work_queue_chain_health_acceptance.rs`:
-- [ ] `work_queue_status_carries_leaks_and_line_state`
+Status carrying both verdicts is proved by `/green` in the daemon-rpc stack suite.
 
 `packages/tddy-workqueue-web/cypress/component/WorkItemChainHealthAcceptance.cy.tsx`:
-- [ ] `rows show a leak chip naming the ancestor and a linearity chip`
+- [x] `rows show a leak chip naming the ancestor and a linearity chip`
 
 ## Decisions & Trade-offs
 
 - **Containment from git, not a GitHub compare** — keeps n2's inbox surface unchanged (no row kind
-  added outside its owner) and reuses n11's remote-tip reads.
+  added outside its owner) and uses the existing `base_sync::count_divergence`, so n12 needs nothing
+  of n11.
 - **Rebased copies count as leaks** (author + author date + subject) — a rebase changes the SHA but
   not the fact that the work belongs to the ancestor.
 
@@ -160,10 +167,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
@@ -180,3 +187,9 @@ _(populated by validation)_
 - [ ] Final validation (/validate-changes)
 - [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+
+## Stack note (temporary)
+
+This branch is rebased onto n11 commit-inbox-outbox (`dcb2f3c55`, itself on n10 on n9's green, which skip
+n7/n8 for now). n9, n12's real dependency, is contained. It is rebased onto n11's **wrapped** head before
+n12's [W]. Remove this note then. n11's surfaces are not implemented here.

@@ -9,6 +9,7 @@
 //! that implements it.
 
 pub mod assess;
+pub mod chain_health;
 pub mod commit_flow;
 pub mod docs;
 pub mod git_ops;
