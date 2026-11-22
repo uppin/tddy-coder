@@ -3,7 +3,7 @@
  * internal-status badge, and the queue view filters by a chosen label. Items carry `labels` and
  * `badges` in the queue JSON.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-badges-labels.md
+ * Feature: docs/ft/coder/pr-stacking.md § Labels and badges on a work item
  */
 
 import React from "react";
