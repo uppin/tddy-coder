@@ -19,6 +19,7 @@
 | 2026-11-05 | 2646 → 2647 | **regressed** by one line in #821 (`#agent-tools` 15/19): `create_backend`'s claude/cursor/codex arms build `SpecHeadlessBackend` through `headless_backend_from_spec`; measured against `origin/feature/agent-tools/cli-spec-features` (`4552a851c`). Not split: restructuring deferred to the `#agent-tools` sweep node (n20); n16 replaces `create_backend` |
 | 2026-11-11 | +20 | declared-session-types: +20 production lines against HEAD~1 (`declared_tool_session_type` and the three `.session.yaml` writes recording it); absolute count not re-derived on this record's baseline. **Regressed, kept open** |
 | 2026-11-11 | 2531 → 2478 | **better, not clean** in #891 (`#usage-binding 2/5`): the session usage watcher's spawn, `SESSION_USAGE_POLL_INTERVAL` and `resolve_agent_home_dir` deleted — the daemon now streams every session's usage. Measured to the first `#[cfg(test)]` on the PR's merge-base `21998a355` and HEAD |
+| 2026-11-22 | 2482 → 2359 | **better, not clean** in #1002 (`#workqueue` 1/14): `--stack-seed-base-session`, `seed_stack_and_enter_orchestrate` and `seed_pr_stack_from_base_session_if_requested` deleted with the pr-stack recipe. Measured to the first `#[cfg(test)]` on the PR's merge-base `d3c23a7` and HEAD |
 
 ## What would close it — designed seams
 

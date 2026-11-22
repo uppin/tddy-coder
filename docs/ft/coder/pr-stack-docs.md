@@ -1,29 +1,27 @@
 # PR-stack documents — per-PR PRD and changeset, attached to the child session
 
-A `pr-stack` orchestrator today plans a stack and hands each child session two strings: the node's
-`title` and its `description` (`PrStackScreen.tsx:254`, `connection_service.rs`). Everything the
-orchestrator learned while planning — the code-discovery map in `exploration.md`, the shape of the
-stack in `pr-stack-plan.md`, and above all *where this PR stops and the next one starts* — stays on
-the orchestrator and never reaches the agent that has to build the thing.
-
-This feature gives every planned PR **two authored documents** on the orchestrator, and **attaches
-them to the child session** at spawn:
+A planned PR can carry **two authored documents** on the session that owns its stack, and a child
+session started for that PR can receive them as attachments:
 
 | Document | Answers |
 |---|---|
 | `PRD.md` | What this PR delivers — behaviour, API surface, acceptance criteria |
 | `changeset.md` | How, and **where the edges are** — responsibility, boundaries, what each dependency delivers, and the draft-PR contract |
 
-The shared stack-level document is the **existing** `pr-stack-plan.md`. It is generated from
-`stack-plan.yaml` on every plan write and is not replaced or supplemented by a new epic document:
-the plan *is* the stack-level doc, and a hand-authored twin of it could only drift.
+The shared stack-level document is `pr-stack-plan.md` (`tddy_pr_stack::docs::PR_STACK_PLAN_MD_BASENAME`),
+beside them under the orchestrator session's `artifacts/`.
+
+**What is shipped and what is not.** The layout, the listing, the attachment builder
+(`tddy_session_files::stack_doc_attachments::stack_doc_attachments`) and the daemon's prompt rule are
+shipped. No workflow goal authors the documents, and neither the stack view's Start-session dialog nor
+`pr_spawn_child` attaches them on its own: a child receives them when its start names them as
+attachments. Wiring an attaching spawn path is a backlog item.
 
 ## Why boundaries belong in a per-PR document
 
-The [PR boundary contract](pr-stacking.md#pr-boundary-contract-every-node-is-self-contained) already
-tells the planning agent to cut vertical slices. It is carried in the `analyze-stack` and
-`write-stack-plan` system prompts and shapes *planning*. Nothing carries it into *building*: the
-child agent implementing `n3` has never seen the contract, does not know that `n2` is already adding
+The [PR boundary contract](pr-stacking.md#pr-boundary-contract-every-node-is-self-contained) tells
+whoever plans a stack to cut vertical slices. It shapes *planning*. Nothing carries it into
+*building* unless a document does: the child agent implementing `n3` has never seen the contract, does not know that `n2` is already adding
 the trait it is about to add, and has no way to find out. Two children building the same abstraction
 in parallel is the failure this feature exists to prevent, and it is not a planning failure — the
 plan can be perfect and the duplication still happens.
@@ -51,8 +49,8 @@ Documents live on the **orchestrator session**, under its artifacts root:
 
 ```
 {orchestrator_session_dir}/artifacts/
-  stack-plan.yaml         <- moved here (see "Artifact path correction")
-  pr-stack-plan.md        <- moved here; the shared stack-level document
+  stack-plan.yaml
+  pr-stack-plan.md        <- the shared stack-level document
   exploration.md
   stack-status.md
   stack-status.json
@@ -79,72 +77,9 @@ is accepted and silently dropped because `StackNode` has nowhere to put it
 (`tddy-pr-stack/src/stack_ops/nodes.rs:20-25`). A helper resolves the pair of paths and reports
 which exist; if a node ever needs to point somewhere else, the field is additive then.
 
-## The `write-stack-docs` goal
+## Required headings in `changeset.md`
 
-The pipeline gains a fourth goal:
-
-```
-analyze-stack --GoTo--> write-stack-plan --GoTo--> write-stack-docs --GoTo--> orchestrate
-```
-
-Docs are authored in **their own goal**, not folded into the `write-stack-plan` submit. The plan is
-cheap, re-runnable and refined constantly through chat; the documents are expensive and mostly
-stable. Sharing one submit would mean every "actually, split `n2` in two" rewrote every document in
-the stack, and would put a plan the host can validate structurally behind a payload it cannot.
-
-- **`write-stack-docs`** — `PermissionHint::ReadOnly`, `goal_requires_tddy_tools_submit` returns
-  `true` for it. Like `write-stack-plan`, it is a **registered goal**: an entry in `goals.json`, a
-  proto, and a generated JSON schema, so a wrong-shaped payload fails with the offending paths
-  rather than at a parse error inside the hook, and `tddy-tools get-schema write-stack-docs`
-  answers.
-
-  *This was not the original design.* The goal was first built on the premise that pr-stack goals
-  carry no schemas — true when it was written, and made false by
-  [#411](../../dev/changesets/), which registered `write-stack-plan` after finding that a submit
-  naming a goal with no schema was acknowledged without ever being routed. The prompt also told the
-  agent to submit **YAML**; `tddy-tools submit` parses JSON. Every test drove the hook directly with
-  a hand-written string, so the suite was green while the real flow could not work. Both are
-  corrected, and the prompt's own example is pinned against the registered schema so the two cannot
-  drift apart again.
-
-### Submit payload
-
-Delivered by `tddy-tools submit --goal write-stack-docs --data-stdin`, so the body is **JSON** —
-`prd` and `changeset` are JSON strings holding markdown, newlines escaped:
-
-```json
-{
-  "goal": "write-stack-docs",
-  "version": 1,
-  "docs": [
-    {
-      "node_id": "token-store",
-      "prd": "# token-store — Auth token store\n\nWhat this PR delivers.\n",
-      "changeset": "# Changeset: token-store\n\n## Responsibility\n...\n"
-    }
-  ]
-}
-```
-
-The hook parses it with `serde_yaml`, as `write-stack-plan` does — JSON is a YAML subset, so one
-parser serves both, and the schema is what pins the shape. The example above is the one the system
-prompt shows, and it is submitted through the real CLI by
-`packages/tddy-tools/tests/stack_docs_submit_contract_acceptance.rs`: a prompt that starts
-describing a payload `submit` refuses fails that test rather than a live session.
-
-### Validation (`validate_stack_docs`)
-
-A rejected submit writes **nothing**, matching every other stack writer.
-
-| Rule | Why |
-|---|---|
-| Every `node_id` resolves to a node in the persisted stack | a document for a node that does not exist is a planning error surfacing late |
-| Every node in the stack has an entry | a node with no boundaries document is precisely the duplicate-development hazard; a partial pass is refused rather than half-written |
-| `prd` and `changeset` are non-blank | an empty file reads as "no boundaries" rather than "not written yet" |
-| `changeset` carries all four required headings | see below |
-
-The four required headings in `changeset.md` are checked **structurally** — the host asserts the
-headings are present, not that their contents are correct:
+Every per-PR changeset carries four headings (`tddy_pr_stack::docs`):
 
 ```
 ## Responsibility        what this PR owns
@@ -153,45 +88,15 @@ headings are present, not that their contents are correct:
 ## Draft PR contract     what lands first (API + failing tests) to unblock dependents
 ```
 
-This is a deliberate middle ground and the line is worth stating. The [PR boundary
-contract](pr-stacking.md#pr-boundary-contract-every-node-is-self-contained) is **not** validated,
-because distinguishing a vertical slice from a layer split needs the diff the node has yet to
-produce, and any check reduces to a keyword heuristic. "Does this document have a `## Boundaries`
-heading" needs no semantics at all. Presence is mechanically checkable and worth enforcing; content
-stays prompt-carried and human-reviewed.
-
-### State table
-
-| State | Goal |
-|---|---|
-| `Init` \| `AnalyzeStack` | `analyze-stack` |
-| `WriteStackPlan` | `write-stack-plan` |
-| `StackPlanned` | `write-stack-docs` *(was `orchestrate`)* |
-| `StackDocsWritten` *(new)* | `orchestrate` |
-| `failed` | `None` |
-
-`status_for_session`: `StackPlanned | StackDocsWritten | orchestrate → "Active"`.
-
-**A seeded stack starts at `StackDocsWritten`, not `StackPlanned`.** Seeding
-(`seed_stack_with_base_session`) binds one node to a session whose work already exists and may
-already be underway; a retroactive PRD for it would document a decision nobody is about to make.
-`tddy-coder`'s seeding path therefore writes `STATE_STACK_DOCS_WRITTEN` where it previously wrote
-`STATE_STACK_PLANNED`, preserving the documented behaviour that a seeded orchestrator comes up
-straight in `orchestrate` ([pr-stacking.md § Seeding the
-stack](pr-stacking.md#seeding-the-stack-from-an-existing-session-added-2026-08-13)). The recipes
-crate owns both constants; the coder writes them.
-
-**A plan refinement re-runs the docs pass.** `after_write_stack_plan` re-seeds the stack on
-every refinement turn and then sets state to `StackPlanned` — which now routes to
-`write-stack-docs`, so the operator's next turn regenerates the documents before returning to
-`orchestrate`. This interrupts the chat deliberately: a refined plan carrying stale boundary
-documents is exactly the hazard the feature exists to prevent, and documents that silently describe
-a previous plan are worse than none. `write-stack-docs` is idempotent and rewrites every node.
+They are a content convention: the [PR boundary
+contract](pr-stacking.md#pr-boundary-contract-every-node-is-self-contained) is not validated, because
+distinguishing a vertical slice from a layer split needs the diff the node has yet to produce.
 
 ## Attaching documents to the child session
 
-At spawn a child receives four attachments, materialized into its
-`artifacts/attachments/` by the existing `materialize_session_attachments` path:
+`stack_doc_attachments(orchestrator_session_dir, orchestrator_session_id, daemon_instance_id, node_id)`
+builds the four attachments a child of `node_id` is started with, materialized into its
+`artifacts/attachments/` by the `materialize_session_attachments` path:
 
 | Source on the orchestrator | Destination basename |
 |---|---|
@@ -215,19 +120,9 @@ files by design — "a recipe artifact and an attachment may share a basename"
 ([session-attachments.md](session-attachments.md)) — and attachment writes cannot escape the
 `attachments/` subdirectory.
 
-**A missing document is skipped, not fatal.** A node started before its docs pass ran attaches
-whatever exists. Starting early is sometimes correct, and failing the spawn would make the docs pass
-a hard prerequisite for all work. The operator is told which documents were unavailable.
-
-### Both spawn paths attach
-
-A child must not differ by how it was started, so both paths build the same attachment list from one
-helper:
-
-- **Agent** — `StackChildSpawnHandler::spawn_child` (`connection_service.rs`), reached by the
-  `pr_spawn_child` tool. It already reads the orchestrator's changeset and session metadata, so it
-  has everything the helper needs.
-- **Web** — the Start-session dialog opened from a planned-PR row (`PrStackScreen.tsx:233-256`).
+**A missing document is skipped, not fatal.** A node started before its documents exist attaches
+whatever does. Starting early is sometimes correct, and failing the spawn would make the documents a
+hard prerequisite for all work.
 
 ### The child is told the documents are there
 
@@ -247,26 +142,11 @@ basename: a `SESSION_ARTIFACT` ref whose `relative_path` is exactly `prs/<node_i
 operator who attaches a file of their own called `changeset.md` gets no line — matching on the
 destination would have fired for them the moment the dialog path was wired.
 
-Four seams launch an agent after materializing attachments, and all four apply it: the agent path
-(`StackChildSpawnHandler::spawn_child`), the claude-cli and cursor-cli branches of
-`start_session_core` (the dialog path), and `spawn_split_agent`. The last is reachable because the
-Start-session dialog offers a codebase host (`create-session-codebase-host-select`), so a
-split-placement pr-stack child would otherwise have kept exactly the inconsistency this closes — but
-it is **not covered by a test**, since exercising it needs a peer daemon. The other three are, by
-tests verified through mutation: removing the call, or the attachments, fails them.
+Every seam that launches an agent after materializing attachments applies it: the claude-cli and
+cursor-cli branches of `start_session_core`, and `spawn_split_agent`. The split seam is **not
+covered by a test**, since exercising it needs a peer daemon.
 
 Workspace and tool sessions ignore `initial_prompt` entirely and are untouched.
-
-### Auto-attachment in the Start-session dialog
-
-The dialog shows the four documents as **pre-populated attachment rows, which the operator can
-remove**. `CreateSessionInitialValues` (`CreateSessionPane.tsx:67-116`) gains an `attachments` entry
-and `useSessionAttachments` accepts initial rows; removal already exists (`removeAttachment`).
-
-Pre-populated-and-removable rather than fixed, because the rows are a *default*, not an invariant:
-an operator restarting an orphaned node whose child already holds the documents should not be forced
-to re-attach them. Rendering them as ordinary rows also means the existing list, rename and
-drop-zone behaviour applies unchanged.
 
 ## Listing per-PR documents
 
@@ -294,22 +174,6 @@ That derivation cannot express `prs/n1/PRD.md`, and it duplicates knowledge the 
 The picker reads `relative_path` instead. The field is additive and the derivation stays as the
 fallback for a server that does not send it.
 
-## Artifact path correction
-
-`stack-plan.yaml` and `pr-stack-plan.md` are written to the **session root**
-(`pr_stack/hooks.rs:333,337`), while `exploration.md` and the two `stack-status.*` files go under
-`artifacts/`. Every reader but one resolves manifest basenames under `artifacts/` only —
-`context_docs_for_session` (`session_context_docs.rs:76`), `read_session_context_doc_utf8` (`:167`)
-and `resolve_host_document`'s `SESSION_ARTIFACT` root (`host_documents.rs:105`) — so both files
-report `exists: false` in `context_docs` today and cannot be referenced as host documents at all.
-The exception is `build_context_header` (`tddy-workflow-engine/src/workflow/mod.rs:265-279`), which probes
-`artifacts/<name>` and falls back to the session root as `"legacy session root"` — which is why the
-orchestrator agent's own context header finds them and nothing else does.
-
-Both move under `artifacts/`. This is a prerequisite: attaching `pr-stack-plan.md` to a child
-requires a `SESSION_ARTIFACT` ref that resolves. `build_context_header`'s existing fallback means
-orchestrators created before this change keep working with no migration.
-
 ## Out of scope
 
 - **Creating GitHub draft PRs.** The draft-PR contract is document content; `GithubPrApi` is unchanged.
@@ -318,12 +182,12 @@ orchestrators created before this change keep working with no migration.
 - **Attaching to an already-running session.** Attachments are supplied only at `StartSession`;
   there is no attach-after-start RPC. A child spawned before this ships does not retroactively
   receive documents.
-- **Per-node document regeneration on demand.** `write-stack-docs` rewrites the whole stack. A
-  `pr_write_node_docs` tool for one node is a natural follow-up.
+- **Authoring the documents.** No goal or tool writes `prs/<node_id>/`; a `pr_write_node_docs` tool is a
+  natural follow-up.
 
 ## Related
 
-- [PR stacking](pr-stacking.md) — the recipe, the stack data model, the PR-management tools, the PR boundary contract
+- [PR stacking](pr-stacking.md) — the stack data model, the PR-management tools, the PR boundary contract
 - [Session attachments](session-attachments.md) — the `artifacts/attachments/` store and its guards
 - [Exploration artifact](exploration-artifact.md) — the code-discovery map, one of the attached documents
 - [Session layout](session-layout.md) — session directory structure and artifact paths

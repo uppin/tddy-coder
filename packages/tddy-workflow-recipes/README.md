@@ -48,38 +48,21 @@ the parent reaches them by path (`before::before_red(…)`), which is why it dec
 (artifact I/O), `permissions.rs` and `approval_policy.rs` (per-goal tool allowlists),
 `session_artifact_manifest.rs`, `recipe_resolve.rs`, and one module per
 recipe family: `tdd`, `tdd_small`, `bugfix`, `grill_me`, `review`, `free_prompting`, `merge_pr`,
-`plan_pr_stack`, `pr_stack`, `orchestrate_pr_stack`, `feature_start_slash`.
+`feature_start_slash`. No recipe plans or drives a PR stack.
 
 ## The GitHub REST client lives in `tddy-github`
 
-`github_rest_common.rs`, `github_pr.rs` and `orchestrate_pr_stack/github.rs` moved to
+`github_rest_common.rs`, `github_pr.rs` and the PR client moved to
 [`tddy-github`](../tddy-github/) — `tddy_github::github_rest_common`, `tddy_github::github_pr` and
 `tddy_github::pr_api`. A REST client belongs in the crate named after the service, not in a
 workflow-recipes crate.
 
-The three old paths are kept here as one-line `pub use` facades, so
-`tddy_workflow_recipes::github_pr::…` and `crate::orchestrate_pr_stack::github::…` keep resolving and
-no caller was edited. Write new code against `tddy_github` directly.
+`github_rest_common.rs` and `github_pr.rs` are kept here as one-line `pub use` facades, so
+`tddy_workflow_recipes::github_pr::…` keeps resolving. Write new code against `tddy_github` directly.
 
 ## The PR-stack data model lives in `tddy-pr-stack`
 
-The stack operations (every writer of `Changeset.stack`, and the node↔branch↔pull-request syncs),
-the per-PR documents, and the `assess`, `git_ops` and `pr_insight` modules live in
-[`tddy-pr-stack`](../tddy-pr-stack/) — see its
-[architecture](../tddy-pr-stack/docs/architecture.md). None of it is a recipe. Consumers that reach
-it through the re-exports below still compile every recipe to do so, until they name
-`tddy_pr_stack` directly — see
-[`squatting-pr-stack-data-model`](docs/code-issues/squatting-pr-stack-data-model.md).
-
-What is here is recipe-side by nature:
-
-- `PrStackRecipe`, its `WorkflowRecipe` and `SessionArtifactManifest` impls, `pr_stack/{hooks,bridge}.rs`.
-- `reseed_stack_from_plan_if_unspawned` — it names `plan_pr_stack`, which is mutually referenced with
-  `pr_stack`.
-- `orchestrate_pr_stack/bridge.rs` (`seed_orchestrator_stack_from_plan` names `plan_pr_stack`) and so
-  `orchestrate_pr_stack/actions.rs`, whose tasks call the bridge's merge and repoint.
-
-Every historical path resolves: `pr_stack` glob re-exports `tddy_pr_stack::stack_ops` and re-exports
-`docs`; `orchestrate_pr_stack` re-exports `assess`, `git_ops` and `pr_insight` at their historical
-visibilities; `orchestrate_pr_stack::bridge::pr_number_from_status_url` re-exports the function from
-`tddy_pr_stack::pr_insight`. Write new code against `tddy_pr_stack` directly.
+Every stack operation, the per-PR documents, the merge journal and the merge/repoint execution live
+in [`tddy-pr-stack`](../tddy-pr-stack/) — see its [architecture](../tddy-pr-stack/docs/architecture.md).
+This crate holds no stack module (`tests/recipe_catalogue_acceptance.rs`); it depends on
+`tddy-pr-stack` only for its acceptance suites, which name `tddy_pr_stack` directly.

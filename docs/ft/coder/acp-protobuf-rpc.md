@@ -56,7 +56,7 @@ at both `WorkflowComplete` and the free-prompting turn boundary (signalled by
 `useAcpSession` (in `packages/tddy-chat-web/src/`) is the ACP counterpart of
 `useAgentChat`, returning the identical `UseAgentChatResult`. `AgentChat` selects it via an `acp`
 prop; both render the same UI (shared `AgentChatView`) and ride the same LiveKit room. **The
-pr-stack chat (`PrStackChat`) uses ACP** (`acp`), at full behavior parity with the old `TddyRemote`
+workflow chat (`WorkflowChatScreen`) uses ACP** (`acp`), at full behavior parity with the old `TddyRemote`
 path — goal/activity/system bubbles, single- and multi-select clarifications, "other" free-text
 answers, streaming, and error banners all work, via the tddy conventions below. The chat's "Export"
 button (both transports) downloads a timestamped plain-text transcript that merges messages and

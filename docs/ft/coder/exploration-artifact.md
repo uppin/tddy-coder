@@ -91,18 +91,6 @@ but they are not persisted as a reusable artifact either.
    instructed via its system prompt to also write `exploration.md` into the session artifacts
    directory with the same content structure as R2.3.
 
-### R7 — pr-stack
-
-1. The `pr-stack` recipe's planning phase (`analyze-stack` → `write-stack-plan`) produces
-   `exploration.md`. The `write-stack-plan` submit (`StackPlanOutput`) gains the same optional
-   `exploration` string property; the host writes `artifacts/exploration.md` from it (non-blank
-   gate, same as R2.2), alongside the existing `stack-plan.yaml` and `pr-stack-plan.md`.
-2. `PrStackRecipe`'s manifest registers `("exploration", "exploration.md")`.
-3. The interactive `orchestrate` goal is the consuming step: its prompt is preceded by the
-   `<context-reminder>` header (`before_task` → `prepend_context_header`), so `exploration.md`
-   (and the other on-disk stack artifacts) is advertised to the operator agent. No header is
-   injected when no such file exists. See [pr-stacking.md](pr-stacking.md).
-
 ## Non-goals
 
 - No structured (JSON/YAML) exploration format — `exploration.md` is markdown for both humans and
@@ -110,8 +98,6 @@ but they are not persisted as a reusable artifact either.
 - No staleness tracking/invalidation of line references as the code changes (agents are expected
   to treat references as starting points, not guarantees).
 - No changes to recipes without a planning/discovery phase (merge-pr, review, free-prompting).
-  (pr-stack **is** in scope as of 2026-07-24 — it has an `analyze-stack` → `write-stack-plan`
-  planning phase; see R7.)
 - No FastContext/discovery-subagent integration in this changeset (see Future Considerations).
 
 ## Acceptance Criteria
@@ -131,14 +117,6 @@ but they are not persisted as a reusable artifact either.
       Diagrams (mermaid), Documentation, and Conventions & Gotchas guidance.
 - [x] tdd, tdd_small, bugfix, and grill-me manifests register `("exploration", "exploration.md")`.
 - [x] The grill-me create-plan system prompt instructs writing `exploration.md`.
-- [x] `StackPlanOutput` accepts an optional `exploration` field (present → `Some`, absent → `None`).
-- [x] After pr-stack `write-stack-plan` completes with a non-blank `exploration`,
-      `artifacts/exploration.md` is written; a blank/absent field writes no file, and
-      `stack-plan.yaml` + `pr-stack-plan.md` are still persisted.
-- [x] The pr-stack `PrStackRecipe` manifest registers `("exploration", "exploration.md")`.
-- [x] The pr-stack `write-stack-plan` system prompt documents the optional `exploration` field.
-- [x] The pr-stack `orchestrate` prompt starts with a `<context-reminder>` header listing
-      `exploration.md` when it exists, and no header when no docs exist.
 
 ## Testing Plan
 

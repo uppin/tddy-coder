@@ -1,13 +1,10 @@
-//! Assess task: reads the stack DAG + child session states + GitHub PR states,
-//! then decides the next orchestrator action.
+//! The stack read model: the stack DAG + child session states + GitHub PR states, assembled into
+//! one view per node, and the next action they call for.
 
 use std::path::Path;
 
-use async_trait::async_trait;
 use tddy_core::changeset::Stack;
-use tddy_core::workflow::context::Context;
 use tddy_core::workflow::ids::WorkflowState;
-use tddy_core::workflow::task::{NextAction, Task, TaskResult};
 
 use tddy_github::pr_api::GithubPrApi;
 
@@ -262,122 +259,6 @@ fn workflow_state_to_child_phase(state: &tddy_core::workflow::ids::WorkflowState
         "Done" | "End" => ChildPhase::ReadyForPr,
         "Failed" | "Error" => ChildPhase::Failed(state.to_string()),
         _ => ChildPhase::Building,
-    }
-}
-
-/// The assess Task: reads stack, calls assemble_views + decide_next_action, returns GoTo.
-pub struct AssessTask {}
-
-impl AssessTask {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Default for AssessTask {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl Task for AssessTask {
-    fn id(&self) -> &str {
-        "assess"
-    }
-
-    async fn run(
-        &self,
-        context: Context,
-    ) -> Result<TaskResult, Box<dyn std::error::Error + Send + Sync>> {
-        use tddy_core::changeset::read_changeset;
-
-        let session_dir = context
-            .get_sync::<std::path::PathBuf>("session_dir")
-            .ok_or("assess: session_dir not set in context")?;
-        // sessions_root = sessions_base (two levels above session_dir: .../sessions/{id}/ → ...)
-        let sessions_root = session_dir
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| session_dir.clone());
-
-        let changeset = read_changeset(&session_dir)?;
-        let stack =
-            tddy_core::changeset::read_stack_of(&session_dir, &changeset)?.unwrap_or_default();
-        let default_branch = context
-            .get_sync::<String>("default_branch")
-            .unwrap_or_else(|| "master".to_string());
-        let repo_root = changeset
-            .repo_path
-            .clone()
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| session_dir.clone());
-        // Derive "owner/repo" from the git remote URL so GitHub API calls use the
-        // correct namespace (changeset.repo_path is a filesystem path, not owner/repo).
-        let github_owner_repo = {
-            let remote_url = std::process::Command::new("git")
-                .current_dir(&repo_root)
-                .args(["remote", "get-url", "origin"])
-                .output()
-                .ok()
-                .and_then(|o| {
-                    if o.status.success() {
-                        Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_default();
-            tddy_github::pr_api::owner_repo_from_remote_url(&remote_url)
-                .unwrap_or_else(|| context.get_sync::<String>("repo").unwrap_or_default())
-        };
-
-        // The project's account, asked of the session's host the first time a node's PR is looked
-        // up — so a stack no node of which owns a branch asks for nothing — and never read from the
-        // environment. With no host to ask, or a refusal, the task fails with the host's reason.
-        let gh = tddy_github::pr_api::RealGithubPrApi::asking_the_session_host(&github_owner_repo);
-
-        let views = assemble_views(&session_dir, &sessions_root, &stack, &gh, &default_branch)?;
-        let autonomous_merge = context
-            .get_sync::<bool>("autonomous_merge")
-            .unwrap_or(false);
-        let approved: std::collections::HashSet<String> = context
-            .get_sync::<Vec<String>>("approved_nodes")
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-
-        let action = decide_next_action(&views, autonomous_merge, &approved);
-
-        let next_state = match &action {
-            OrchestratorAction::Spawn { node_ids } => {
-                context.set_sync("spawn_node_ids", node_ids.clone());
-                "spawn"
-            }
-            OrchestratorAction::Merge { node_id, pr_number } => {
-                context.set_sync("merge_node_id", node_id.clone());
-                context.set_sync("merge_pr_number", *pr_number);
-                "merge"
-            }
-            OrchestratorAction::Wait { reason } => {
-                context.set_sync("wait_reason", reason.clone());
-                "wait"
-            }
-            OrchestratorAction::MarkFailed { node_id, reason } => {
-                context.set_sync("failed_node_id", node_id.clone());
-                context.set_sync("failed_reason", reason.clone());
-                "failed"
-            }
-            OrchestratorAction::Done => "done",
-        };
-
-        Ok(TaskResult {
-            response: format!("assess → {next_state}"),
-            next_action: NextAction::GoTo(next_state.to_string()),
-            task_id: self.id().to_string(),
-            status_message: None,
-        })
     }
 }
 

@@ -101,7 +101,13 @@ clocks that agree to within the connect time. The watchdog needs nothing beyond 
 `timeout` is not on every workspace. It signals with `kill -s TERM -- -<pgid>`, the one form both
 dash (the usual workspace `/bin/sh`) and bash accept; `kill -TERM -- -<pgid>` fails in dash and
 leaves the watchdog holding the connection open. Job-control notices go to `/dev/null`, with the
-command keeping the original stderr as fd 3.
+command keeping the original stderr as fd 3. The watchdog itself holds none of the command's output
+(`>/dev/null 2>&1 3>&-`): when the command ends the wrapper `TERM`s the watchdog's group, and a
+`TERM` that lands while the watchdog is forking its `sleep` misses that `sleep` — which, holding an
+output, would keep the call open until its deadline.
+
+Each one-shot logs, at debug level (`tddy_remote_shell::coder`), when its `coder` client exited and
+when stdout and stderr each ended — the timings that tell a held pipe from a slow command.
 
 `exec_streamed` does **not** use the pty. It runs the host's OpenSSH client with
 `-o ProxyCommand='<coder> ssh --stdio --disable-autostart <workspace>'` and the fixed host token

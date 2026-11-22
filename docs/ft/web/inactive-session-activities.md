@@ -41,14 +41,12 @@ The main pane's base view is chosen by session liveness, on top of the existing 
 
 | Session | Base view |
 |---|---|
-| `recipe == "pr-stack"` | `PrStackScreen` (planned PRs) — regardless of liveness |
 | tool session, `recipe != ""` | `WorkflowChatScreen` — regardless of liveness |
 | any other session, **inactive** | **Tab strip** with the greyed recorded output in its Agent tab |
 | any other session, active | Terminal (mounted runtimes) |
 
-Workflow views own their own chrome and their own content, and both remain meaningful when the
-session is dormant — `PrStackScreen` renders the planned-PR stack from persisted state, and
-`WorkflowChatScreen` is already a transcript. Neither is replaced. The stopped strip takes over
+The workflow view owns its own chrome and content, and remains meaningful when the session is
+dormant — `WorkflowChatScreen` is already a transcript. It is not replaced. The stopped strip takes over
 exactly one surface: the terminal base view, where an active session shows its agent's terminal.
 
 ### The greyed Agent tab

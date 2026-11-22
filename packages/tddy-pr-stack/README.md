@@ -23,10 +23,10 @@ and the `pr_*` stack tools, which call everything below.
 | `internal_status.rs` | `derive_internal_status`, `reconcile_internal_status` |
 | `op_journal.rs` | the crash-safe merge journal: `StackOpJournal`, `MergePhase`, `recover_in_flight_stack_op` |
 | `merge_repoint.rs` | `execute_stack_merge`, `execute_stack_repoint` |
-| `assess.rs` | `AssessTask`, node views, `decide_next_action`, `effective_base_ref` |
+| `assess.rs` | node views, `decide_next_action`, `effective_base_ref` |
 | `git_ops.rs` | rebase / merge-base / force-push / commit / push helpers |
 | `pr_insight.rs` | read-side shaping for the PR-inspection tools; `pr_number_from_status_url` |
 | `rpc.rs` | `PrStackHandler`, `PrStackServiceImpl`, `build_pr_stack_entry`, `PR_STACK_SERVICE` (also at the crate root) |
 
-Dependencies, the seam tests, each module's surface and what stays recipe-side:
+Dependencies, the seam tests and each module's surface:
 [docs/architecture.md](docs/architecture.md).

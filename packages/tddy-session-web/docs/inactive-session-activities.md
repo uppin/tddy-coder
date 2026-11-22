@@ -8,7 +8,7 @@ Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft
 
 **`sessionBaseViewMode(session, hasWorkflowView) → "workflow" | "activities" | "terminal"`** — pure, so the rule is pinned without React.
 
-- A **workflow view wins outright**. `PrStackScreen` renders planned PRs from persisted stack state and `WorkflowChatScreen` is already a transcript; both stay meaningful when the session is dormant, so the Activities view replaces exactly one surface — the terminal.
+- A **workflow view wins outright**. `WorkflowChatScreen` is already a transcript and stays meaningful when the session is dormant, so the Activities view replaces exactly one surface — the terminal.
 - Otherwise a **dormant** session (`connectionStatusForSession === "disconnected"`) yields `"activities"`.
 - The workflow branch short-circuits **ahead of** the null-session check; `sessionBaseViewMode(null, true)` is `"workflow"`. Pinned by a test so it is not left to reading order.
 

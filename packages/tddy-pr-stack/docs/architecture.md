@@ -9,9 +9,8 @@ syncs that keep a node's branch and pull request in line with its place in the s
 behaviour is specified in [pr-stacking.md](../../../docs/ft/coder/pr-stacking.md) and
 [pr-stack-docs.md](../../../docs/ft/coder/pr-stack-docs.md).
 
-None of it is a workflow recipe. The `pr-stack` recipe (`PrStackRecipe`), its hooks and the
-plan→stack bridges live in [`tddy-workflow-recipes`](../../tddy-workflow-recipes/README.md), which
-depends on this crate and re-exports every item from its historical path.
+None of it is a workflow recipe, and no workflow recipe drives a stack: stacks are planned and driven
+through the project stack view and the daemon's `pr_*` tools.
 
 ## Dependencies
 
@@ -24,25 +23,13 @@ depends on this crate and re-exports every item from its historical path.
 | `tddy-rpc` | `Request`, `Response`, `Status`, `ServiceEntry` — the `rpc` module's handler signatures and transport entry |
 | `tddy-service` | the generated `pr_stack` proto types and the `PrStackService` server trait `PrStackServiceImpl` implements. Already reachable through `tddy-github`, so the edge adds no cycle |
 
-External: `log`, `async-trait`, `serde`. Dev-only: `tempfile`, `rstest`.
+External: `log`, `async-trait`, `serde`, `serde_json` (the merge journal), `uuid` (a journalled operation's id). Dev-only: `tempfile`, `rstest`.
 
-**It must never depend on `tddy-workflow-recipes`.** That crate depends on this one to re-export it,
-so a dependency back is a cycle. The seam is asserted by
-`packages/tddy-workflow-recipes/tests/pr_stack_crate_shape.rs`:
+**It must never depend on `tddy-workflow-recipes`.** That crate's acceptance suites still exercise
+this one (a dev-dependency), and `recipe_catalogue_acceptance::the_recipes_crate_holds_no_stack_module`
+asserts the recipes crate holds no stack module of its own.
 
-| Test | Asserts |
-|---|---|
-| `the_stack_crate_depends_on_what_the_moved_code_names` | the manifest declares `tddy-core`, `tddy-git`, `tddy-github` |
-| `the_stack_crate_does_not_depend_on_the_recipes_it_left` | the manifest does not declare `tddy-workflow-recipes` |
-| `the_stack_crate_names_nothing_recipe_side` | no production source here, at any depth, names `plan_pr_stack`, `::writer` or `::parser` |
-| `the_recipe_stays_with_the_recipes` | `pr_stack/mod.rs` in `tddy-workflow-recipes` still declares `PrStackRecipe` and `impl WorkflowRecipe for PrStackRecipe` |
-| `the_plan_to_stack_bridge_stays_behind` | the same file still declares `pub fn reseed_stack_from_plan_if_unspawned` |
-
-The last two guard the cuts that make the seam acyclic: moving `PrStackRecipe` would make this crate
-depend on the workflow machinery, and moving `reseed_stack_from_plan_if_unspawned` would drag
-`plan_pr_stack`, which is mutually referenced with the recipe-side `pr_stack` module.
-
-**It must never depend on `tddy-session-lifecycle` either.** The lifecycle crate names
+**It must never depend on `tddy-session-lifecycle`.** The lifecycle crate names
 `PrStackHandler` from here so that it can reach the PR-stack family without depending on the crate
 that implements it (`tddy-daemon-rpc`); a dependency back would be a cycle.
 `packages/tddy-daemon-rpc/tests/rpc_handlers_shape.rs` asserts it:
@@ -74,17 +61,15 @@ fixtures the concern modules' tests share.
 | `nodes.rs` | `add_planned_pr_node`, `update_planned_pr_node`, `delete_planned_pr_node`, `set_stack_node_parents`, with `AddPlannedPrInput`, `UpdatePlannedPrInput`, `DeletedNode` |
 | `repoint.rs` | `repoint_planned_pr_node`; `realign_node_to_effective_base` (`pub(super)`) — the rebase / force-push / PR re-target that `set_stack_node_parents` shares with a repoint |
 | `adopt.rs` | `adopt_pr_as_stack_node`, `adopt_pr_into_stack`, `sync_node_to_github_pr`, `AdoptedPrFacts`. An adopted draft PR records `pr_status.phase = "open"` |
-| `seed.rs` | base-session seeding: `check_stack_seed_base`, `check_stack_seed_not_self`, `seed_stack_with_base_session`, `SeededBase`, `StackSeedBaseRefusal` |
 | `pull_base.rs` | `pull_base_into_node_branch`, `BaseSyncStrategy`, `PullBaseReport` |
 
-`AddPlannedPrInput::child_recipe` is accepted for symmetry with the stack plan's `PlannedPr` and not
-stored: `StackNode` has no field to carry it.
+`AddPlannedPrInput::child_recipe` is accepted and not stored: `StackNode` has no field to carry it.
 
 ### `docs.rs` — per-PR documents
 
-The payload the `write-stack-docs` goal submits (`StackDocsOutput`, `NodeDocs`), its validator
-(`validate_stack_docs`, which checks the `REQUIRED_CHANGESET_HEADINGS`), the writer
-(`write_stack_docs`), and the path convention (`node_doc_paths` →
+A pass of document pairs (`StackDocsOutput`, `NodeDocs`), its validator (`validate_stack_docs`, which
+checks the `REQUIRED_CHANGESET_HEADINGS`), the writer (`write_stack_docs`), the stack-plan basename
+(`PR_STACK_PLAN_MD_BASENAME`), and the path convention (`node_doc_paths` →
 `<artifacts root>/prs/<node_id>/{PRD.md,changeset.md}`). Paths are derived from `node_id`, not
 recorded on `StackNode`.
 
@@ -93,8 +78,7 @@ recorded on `StackNode`.
 `assemble_views` reads the stack DAG, the child sessions' states and the GitHub PR states into one
 `NodeView` per node (`ChildPhase`, `PrLiveStatus`); `effective_base_ref` resolves a node's base as its
 nearest unmerged ancestor's branch, else the default branch; `decide_next_action` returns an
-`OrchestratorAction`. `AssessTask` is the graph task wrapper. The `pr_*` tools in `tddy-tools` call
-these on demand.
+`OrchestratorAction`. The daemon's `pr_stack_status` calls `assemble_views` and `effective_base_ref`.
 
 ### `git_ops.rs` — git helpers for stack syncs
 
@@ -143,41 +127,25 @@ sorted; the sweep logs a summary and each session it left alone or could not mov
 calls it at startup (`runtime/mount_host.rs`) over its data directory; the body lives here because
 the daemon crate is wiring only. See [pr-stacking.md § Where a stack lives](../../../docs/ft/coder/pr-stacking.md#where-a-stack-lives).
 
-## What stays in `tddy-workflow-recipes`
+### `internal_status.rs`, `op_journal.rs`, `merge_repoint.rs`
 
-| Item | Why it is recipe-side |
-|---|---|
-| `PrStackRecipe`, its `WorkflowRecipe` and `SessionArtifactManifest` impls, `STATE_STACK_PLANNED`, `STATE_STACK_DOCS_WRITTEN` | the recipe and its states; the manifest impl names `writer::EXPLORATION_BASENAME` |
-| `pr_stack/{hooks,bridge}.rs` | recipe hooks and bridges; both name `plan_pr_stack`, and the hooks call `writer::write_exploration_file` |
-| `reseed_stack_from_plan_if_unspawned` | calls `plan_pr_stack::{validate_stack_plan, planned_prs_into_stack_nodes}` |
-| `orchestrate_pr_stack/bridge.rs` | `seed_orchestrator_stack_from_plan` names `plan_pr_stack` |
-| `orchestrate_pr_stack/actions.rs` | `MergeTask` / `RepointTask` call `bridge::{execute_stack_merge, execute_stack_repoint}` |
-| `orchestrate_pr_stack/{hooks,transient,pr_actions,internal_status}.rs`, `plan_pr_stack/` | orchestration glue and the plan parser |
-
-The re-exports that keep every historical path resolving:
-
-| In `tddy-workflow-recipes` | Re-exports |
-|---|---|
-| `pr_stack/mod.rs` | `pub use tddy_pr_stack::docs;` · `pub use tddy_pr_stack::stack_ops::*;` |
-| `orchestrate_pr_stack/mod.rs` | `use tddy_pr_stack::assess;` · `pub(crate) use tddy_pr_stack::git_ops;` · `pub use tddy_pr_stack::pr_insight;` |
-| `orchestrate_pr_stack/bridge.rs` | `pub use tddy_pr_stack::pr_insight::pr_number_from_status_url;` |
-
-New code names `tddy_pr_stack` directly. Consumers that still reach the data model through
-`tddy_workflow_recipes::{pr_stack,orchestrate_pr_stack}` compile every recipe to do so; that
-remainder is tracked in
-[`squatting-pr-stack-data-model`](../../tddy-workflow-recipes/docs/code-issues/squatting-pr-stack-data-model.md).
+`internal_status`: `derive_internal_status` / `reconcile_internal_status` — a node's action-needed
+signal, which the daemon's `pr_stack_status` writes back. `op_journal`: `StackOpJournal`,
+`MergePhase` and the journal file's read / write / delete, plus `recover_in_flight_stack_op`.
+`merge_repoint`: `execute_stack_merge` (journalled merge of one node) and `execute_stack_repoint`
+(rebase and PR-base patch of each dependent). The daemon's `pr_merge` journals through
+`StackOpJournal` beside the stack; `recover_in_flight_stack_op`, `execute_stack_merge` and
+`execute_stack_repoint` have no production caller today (see the backlog entry *Stack helpers with no
+production caller*).
 
 ## Tests
 
-The crate's unit tests live beside the code (63 in total, in `stack_ops/{nodes,adopt}.rs`,
-`docs.rs`, `assess.rs`, `git_ops.rs`, `pr_insight.rs`), sharing fixtures from `stack_ops/mod.rs`'s
-test module. The seam tests above live in `tddy-workflow-recipes`, alongside the recipe-side
-acceptance suites that exercise these operations through the re-exported paths.
+The crate's unit tests live beside the code (`stack_ops/{nodes,adopt}.rs`, `docs.rs`, `assess.rs`,
+`git_ops.rs`, `pr_insight.rs`, `rpc.rs`), sharing fixtures from `stack_ops/mod.rs`'s test module.
+Acceptance suites that exercise these operations still live in `tddy-workflow-recipes/tests/`, naming
+`tddy_pr_stack` directly.
 
 ## GitHub credential
 
-`AssessTask` builds its client with `RealGithubPrApi::asking_the_session_host`, which asks the session
-host for the token the first time a node that owns a branch has its PR looked up; a stack none of whose
-nodes owns a branch asks for nothing, and a refusal fails the task with the host's reason
-([workflow-recipes](../../tddy-workflow-recipes/docs/github-on-demand.md)). Nothing here reads a token
-from the environment.
+Every function here that reaches GitHub takes its `GithubPrApi` from the caller; the daemon builds it
+with the project account's token. Nothing here reads a token from the environment.

@@ -1,6 +1,7 @@
 # complexity: execute_stack_repoint
 
-**Location:** `packages/tddy-workflow-recipes/src/orchestrate_pr_stack/bridge.rs:110` — `execute_stack_repoint`
+**Location:** `packages/tddy-pr-stack/src/merge_repoint.rs:69` — `execute_stack_repoint`
+**Moved:** 2026-11-22 by #1002 (`#workqueue` 1/14) from `packages/tddy-workflow-recipes/src/orchestrate_pr_stack/bridge.rs`, unchanged
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **121 lines** · **nesting depth 8** · 6 parameters · 11 branch/match lines · 3 early exits
@@ -16,6 +17,7 @@
 | 2026-09-18 | 121 | 8 | 11 | 3 | first detection |
 | 2026-09-22 | 121 | 8 | 11 | 3 | unchanged — #496 touched `bridge.rs` (moved `pr_number_from_status_url` out, `use` of the new crate) but not this function; it stays recipe-side |
 | 2026-11-12 | 120 | 8 | 11 | 3 | touched by #879 (`#orchestrators` 2/11): the dependent's branch is read through `read_session_stack` (−1 line); no logic change |
+| 2026-11-22 | 120 | 8 | 11 | 3 | moved verbatim by #1002 to `tddy-pr-stack/src/merge_repoint.rs`; the function has no production caller now (backlog: *Stack helpers with no production caller*) |
 
 ## What the tool found
 
