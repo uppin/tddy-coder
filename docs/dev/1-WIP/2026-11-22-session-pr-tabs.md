@@ -141,12 +141,12 @@ Same drawer; untouched.
 
 ## Scope
 
-- [ ] `SessionEntry` PR fields from the inbox cache
-- [ ] `StreamSessionPullRequest` over the inbox
-- [ ] Worktree sync state + Pull/Push RPCs and git implementation
-- [ ] PR tab (status, checks, comments, commits)
-- [ ] Worktree tab sections and actions
-- [ ] Default tab PR → Worktree
+- [x] `SessionEntry` PR fields from the inbox cache
+- [x] `StreamSessionPullRequest` over the inbox
+- [x] Worktree sync state + Pull/Push RPCs and git implementation
+- [x] PR tab (status, checks, comments, commits)
+- [x] Worktree tab sections and actions
+- [x] Default tab PR → Worktree
 - [ ] Docs updated through the wrap
 
 ## Technical Changes
@@ -178,11 +178,11 @@ As listed under Affected Packages. New RPCs are registered in `unbundle_service_
 
 ## Implementation Milestones
 
-- [ ] `worktree_sync` git reads + pull/push, temp-repo tests
-- [ ] Worktree RPCs + handlers + peer forwarding
-- [ ] `SessionEntry` PR enrichment from the inbox cache
-- [ ] PR stream handler over inbox subscriptions
-- [ ] Web: PR tab, Worktree sections, default tab
+- [x] `worktree_sync` git reads + pull/push, temp-repo tests
+- [x] Worktree RPCs + handlers (no peer forwarding needed: the handlers serve the session's own host; a target session answers `unavailable_reason`)
+- [x] `SessionEntry` PR enrichment from the inbox cache
+- [x] PR stream handler over inbox subscriptions
+- [x] Web: PR tab, Worktree sections, default tab
 
 ## Testing Plan
 
@@ -247,11 +247,26 @@ _(populated during development)_
 
 ## Refactoring Needed
 
-_(populated by validation)_
+Recorded by `/validate-changes` (2026-11-22), for `/pr-wrap`:
+
+- `TODO(n4 session-pr-tabs)` in `service.rs` (`session_sync`, `stream_session_pull_request`) names this node, so the tag means nothing once this node lands. Move it to a `docs/dev/todo/` entry, "target sessions have no sync-state reader or PR stream", and point the code at that entry. Per Boundaries, the gap stays a recorded TODO and is not built here.
+- `worktree_sync::fetch_upstream` takes the remote from `@{upstream}` split at the first `/`. It should read `branch.<b>.remote`, because a remote name can contain `/` and a local upstream (`.`) has no slash.
+- `pull_request_view::current_view` reports an inbox failure with `{error:?}`. That is Debug text shown to the operator; use Display.
+- `CheckRow` is keyed by `check.name`. Two runs with the same name (matrix jobs) collide on the React key.
+- `WorktreeSyncSection` prints the full 40-character sha, where `CommitList` prints 7.
 
 ## Validation Results
 
-_(populated by validation)_
+**`/validate-changes` 2026-11-22** (head `13612b20a`, base `feature/workqueue/workitem-rename` @ `3e369137a`)
+
+- Stack gate: already on the parent tip. Leak check is clean: 9 commits, all this node's.
+- Boundary: no inbox change (n2), no Inbox/Outbox tabs, no work-queue precedence, no commit, no force push, no GitHub mutation. Target sessions report `unavailable_reason` as the Boundaries require.
+- 🆕 Added: `tests/unbundle_service_split.rs` `WORKTREE_METHODS` now names the four new RPCs. The changeset's Delta called for this and `/green` had not done it.
+- Scoped runs (local):
+  - `tddy-worktree-service`: `--lib` 31/31, `worktree_sync_acceptance` 8/8, `pull_request_view_acceptance` 7/7.
+  - `tddy-service --test unbundle_service_split`: 27/29. The 2 failures (`work_queue_service_declares_every_work_queue_method`, `no_service_is_named_for_stacks_or_planned_prs`) are n3's vocabulary contract tests and go green with n3's rename. They are not this node's.
+- Not run locally, because disk fell below the 15 GiB floor: `tddy-daemon` clippy and the 12 drawer/inspector Cypress specs. CI covers both.
+- Risks: Warning ×1 (the upstream remote parse); Info ×4 (above).
 
 ## TODO
 
@@ -263,11 +278,11 @@ _(populated by validation)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
+- [x] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
