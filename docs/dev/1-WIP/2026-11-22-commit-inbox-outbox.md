@@ -124,10 +124,10 @@ item's worktree.
 
 ## Scope
 
-- [ ] `commit_flow` with attribution and per-item predictions
-- [ ] SHA-keyed cache
-- [ ] Two tools + RPCs + row counts
-- [ ] PR view Inbox / Outbox tabs
+- [x] `commit_flow` with attribution and per-item predictions
+- [x] SHA-keyed cache
+- [x] Two tools + RPCs + row counts
+- [x] PR view Inbox / Outbox tabs
 - [ ] Docs updated through the wrap
 
 ## Technical Changes
@@ -154,10 +154,10 @@ As listed under Affected Packages.
 
 ## Implementation Milestones
 
-- [ ] Git reads + prediction against temp repos
-- [ ] `commit_flow` + cache
-- [ ] Tools + RPCs + row counts
-- [ ] PR view tabs
+- [x] Git reads + prediction against temp repos
+- [x] `commit_flow` + cache
+- [x] Tools + RPCs + row counts
+- [x] PR view tabs
 
 ## Testing Plan
 
@@ -183,7 +183,16 @@ daemon tool test; Cypress component spec for the tabs.
 - [x] `the inbox lists each commit with its source and a conflict marker naming the files`
 - [x] `the outbox lists, per successor, what it lacks`
 
-The tool's daemon path is `/green`'s, in the daemon-rpc stack suites.
+`packages/tddy-daemon-rpc/tests/work_queue_commit_flow_rpc_acceptance.rs` (real branches, bare origin; planned bases stand in, said in `unavailable_reason`):
+- [x] `an_items_inbox_lists_what_an_ancestor_pushed_after_the_cut_attributed_to_it`
+- [x] `an_items_outbox_lists_what_each_successor_lacks`
+- [x] `the_queue_rows_counts_cover_every_item_with_a_branch`
+- [x] `an_item_without_a_branch_or_an_unknown_item_is_refused_naming_why`
+
+`packages/tddy-workspace-web/cypress/component/SessionPullRequestFlowTabsAcceptance.cy.tsx` (the drawer's PR arm mounts `SessionPullRequestFlowTabs`; n4's `SessionPullRequestTab` is untouched) and `packages/tddy-workqueue-web/cypress/component/WorkItemCommitCountsAcceptance.cy.tsx` (queue-row counts):
+- [x] inbox and outbox read through the queue for a linked session; the PR alone for an unlinked one; counts and conflict marker on the row
+
+The tools' closed lists (catalogue, admission, read-only, access, dispatch) carry `work_item_inbox` / `work_item_outbox`; the tools' daemon path (`commit_flow_through_inbox`) shares `work_queue::commit_flow` with the RPCs and has no suite of its own yet.
 
 ## Decisions & Trade-offs
 

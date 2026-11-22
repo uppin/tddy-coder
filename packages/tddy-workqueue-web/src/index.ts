@@ -9,5 +9,6 @@ export { WorkItemLinksContext, type WorkItemLinks, type LinkableSession, type It
 export { WorkItemAnnotationControls } from "./WorkItemAnnotationControls";
 export { WorkItemAnnotations, type WorkItemAnnotationsProps } from "./WorkItemAnnotations";
 export { WorkQueueGraph, type WorkQueueGraphProps, type GraphLineEndpoint } from "./WorkQueueGraph";
+export { WorkItemCommitCounts, WorkItemCommitCountsContext, type ItemCommitCounts } from "./workItemCommitCounts";
 export { WorkQueueGraphPanel, type WorkQueueGraphPanelProps } from "./WorkQueueGraphPanel";
 export { WaveLanes, type WaveLanesProps } from "./WaveLanes";

@@ -22,6 +22,7 @@ import { resolveRepointTarget } from "./startBlockers";
 import { CreateSessionDialog, remoteTrackingName, type CreateSessionInitialValues } from "tddy-session-create-web";
 import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
 import { baseBranchChoice } from "./baseBranchChoice";
+import { WorkItemCommitCountsContext, useWorkQueueCommitCounts } from "./workItemCommitCounts";
 import { WorkItemLinksContext } from "./workItemLinks";
 import { useWorkItemLinksState } from "./useWorkItemLinksState";
 
@@ -144,6 +145,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
   }, [workQueueClient, sessionToken, address.projectId, address.queueId, address.daemonInstanceId]);
 
   const stack = useMemo(() => parseWorkQueue(workQueueJson), [workQueueJson]);
+  const commitCounts = useWorkQueueCommitCounts(workQueueClient, sessionToken, address, workQueueJson);
   const childSessions = useMemo(
     () => workItemSessions(sessions, sessionMetadataBySessionId),
     [sessions, sessionMetadataBySessionId],
@@ -419,6 +421,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         </div>
       )}
       <WorkItemLinksContext.Provider value={workItemLinks}>
+      <WorkItemCommitCountsContext.Provider value={commitCounts}>
       <WorkItemList
         nodes={shownNodes}
         onStartSession={handleStartSession}
@@ -439,6 +442,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         orchestratorSessionId={createdBySessionId}
         branchQueries={branchQueries}
       />
+      </WorkItemCommitCountsContext.Provider>
       </WorkItemLinksContext.Provider>
       <WorkQueueGraphPanel
         workQueueClient={workQueueClient}

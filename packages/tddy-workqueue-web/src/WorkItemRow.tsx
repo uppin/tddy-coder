@@ -5,6 +5,7 @@ import type { BranchResolution } from "tddy-client-web/gen/work_queue_pb";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 import { isNodeOrphaned } from "./isNodeOrphaned";
 import type { StackChildSession } from "./workItemSessions";
+import { WorkItemCommitCounts } from "./workItemCommitCounts";
 import { WorkItemRowBadges } from "./WorkItemRowBadges";
 import { WorkItemRowDetails } from "./WorkItemRowDetails";
 import type { StartBlocker } from "./startBlockers";
@@ -248,6 +249,7 @@ export function WorkItemRow({
           workItem={workItem}
           baseSync={baseSync}
         />
+        <WorkItemCommitCounts itemId={node.itemId} />
         {canRepoint && (
           <Button
             data-testid={`work-item-repoint-${node.itemId}`}
