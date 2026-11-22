@@ -67,7 +67,7 @@ impl WorkQueueRpcHandler {
         let pull_requests = std::sync::Arc::clone(&self.pull_requests);
         let session_token = req.session_token.clone();
         let os_user_for_schedules = os_user.clone();
-        let git_env_source = self.git_env_source();
+        let git_env_source = self.git_env_source(&req.session_token);
         let repo_root = tddy_core::repo_root_for_session(
             &tddy_core::session_lifecycle::unified_session_dir_path(
                 &sessions_base,
@@ -132,17 +132,19 @@ impl WorkQueueRpcHandler {
                         .await;
                         // A schedule whose conditions all hold fires, once (`#workqueue` 14/14).
                         super::land::fire_met_in_background(
-                            super::land::DaemonFireSchedule {
-                                source: git_env_source.clone(),
-                                store: store.clone(),
-                                sessions_base: sessions_base.clone(),
-                                os_user: os_user.clone(),
-                                address: address.clone(),
-                                session_token: session_token.clone(),
-                            },
+                            super::land::DaemonFireSchedule::through_engines(
+                                git_env_source.clone(),
+                                store.clone(),
+                                sessions_base.clone(),
+                                os_user.clone(),
+                                address.clone(),
+                            ),
                             views.clone(),
                         );
-                        views.into_iter().map(super::schedules::status_view).collect()
+                        views
+                            .into_iter()
+                            .map(super::schedules::status_view)
+                            .collect()
                     }
                     Err(reason) => super::schedules::unreadable_views(&record.stack, reason),
                 };

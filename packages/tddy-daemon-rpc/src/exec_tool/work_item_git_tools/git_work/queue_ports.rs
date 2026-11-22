@@ -86,7 +86,8 @@ impl<'a> DaemonQueueWorld<'a> {
 #[async_trait]
 impl QueueGit for DaemonQueueWorld<'_> {
     async fn fetch(&self) -> Result<(), EngineError> {
-        self.git_in_repo(&["fetch", "--quiet", &self.remote]).map(drop)
+        self.git_in_repo(&["fetch", "--quiet", &self.remote])
+            .map(drop)
     }
 
     async fn local_branch_state(&self, branch: &str) -> Result<LocalBranchState, EngineError> {
@@ -107,7 +108,9 @@ impl QueueGit for DaemonQueueWorld<'_> {
             "--count",
             &format!("{branch}...{remote_ref}"),
         ])?;
-        let mut numbers = counts.split_whitespace().map(|n| n.parse::<u32>().unwrap_or(0));
+        let mut numbers = counts
+            .split_whitespace()
+            .map(|n| n.parse::<u32>().unwrap_or(0));
         let (ahead, behind) = (numbers.next().unwrap_or(0), numbers.next().unwrap_or(0));
         Ok(match (ahead, behind) {
             (0, 0) => LocalBranchState::InSync,
@@ -184,7 +187,12 @@ impl QueueGit for DaemonQueueWorld<'_> {
             &identity,
         )
         .map(drop)
-        .map_err(|e| failed(format!("force-push of {branch} to {} failed: {e}", self.remote)))
+        .map_err(|e| {
+            failed(format!(
+                "force-push of {branch} to {} failed: {e}",
+                self.remote
+            ))
+        })
     }
 }
 

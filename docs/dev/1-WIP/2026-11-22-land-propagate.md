@@ -143,12 +143,12 @@ The fold-in shrinks them; new code goes in the engine modules.
 
 ## Scope
 
-- [ ] Propagate engine with local-branch gate and pre-flight
-- [ ] Land engine (wave order, propagate successors, verify, stop at first failure)
-- [ ] Schedule runner (exactly once)
-- [ ] Two tools + RPCs + web actions; merge/repoint folded in
-- [ ] Activities for landings, propagations, refusals, firings
-- [ ] Old merge/repoint paths deleted
+- [x] Propagate engine with local-branch gate and pre-flight
+- [x] Land engine (wave order, propagate successors, verify, stop at first failure)
+- [x] Schedule runner (exactly once)
+- [x] Two tools + RPCs + web actions; merge/repoint folded in
+- [ ] Activities for landings, propagations, refusals, firings — **blocked on n8** (`WorkQueueChange` is not on this lineage; see the stack note)
+- [x] Old merge/repoint paths deleted
 - [ ] Docs updated through the wrap
 
 ## Technical Changes
@@ -227,7 +227,14 @@ Activities on landings and refusals reaching the owner need n8's publisher; `/gr
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- The direct tools (`work_item_merge`, `work_item_repoint`, `work_item_propagate`) are explicit acts and
+  do not evaluate n13's schedule conditions; `work_queue_land` and every firing schedule do.
+- **Daemon driver**: one watcher per queue with schedules, subscribed to the GitHub inbox's PR, checks,
+  comment and push events (no polling); arming or disarming evaluates at once. It carries the
+  credentials of whoever armed and does not survive a daemon restart (re-armed by the next arming or by
+  an open queue status stream). A firing's refusal is logged; surfacing it as `Refused` waits for n8.
+- `RepointWorkItem` (the web's plan-level repoint RPC) still runs `item_ops::repoint_work_item`; only the
+  tools were folded onto the engine. The 1/14 TODO named in the brief is not in this tree.
 
 ## Refactoring Needed
 
@@ -247,7 +254,7 @@ _(populated by validation)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

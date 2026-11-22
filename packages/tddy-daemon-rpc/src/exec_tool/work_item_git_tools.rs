@@ -477,8 +477,12 @@ impl WorkItemGitToolPort for DaemonStackGitTools {
                 .await
             }
             WorkItemGitOp::Propagate { item_id, force } => {
-                self.run_blocking(caller, queue_id, git_work::GitWork::Propagate { item_id, force })
-                    .await
+                self.run_blocking(
+                    caller,
+                    queue_id,
+                    git_work::GitWork::Propagate { item_id, force },
+                )
+                .await
             }
             WorkItemGitOp::Land { from_wave, to_wave } => {
                 let held_up = self

@@ -4,8 +4,6 @@ use tddy_core::changeset::PrInternalStatus;
 
 use std::path::PathBuf;
 
-
-
 use super::node_of;
 
 use serde_json::{json, Value};

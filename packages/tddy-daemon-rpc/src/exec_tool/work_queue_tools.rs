@@ -190,6 +190,7 @@ impl ExecToolRpcHandler {
             pull_requests: Arc::clone(&self.project_home_host.pull_requests),
             caller_session_id: req.session_id.clone(),
             session_token: req.session_token.clone(),
+            terminals: self.project_home_host.terminals.clone(),
         }
     }
 }
@@ -223,6 +224,8 @@ pub(super) struct DaemonStackTools {
     pull_requests: Arc<dyn SessionPullRequests>,
     caller_session_id: String,
     session_token: String,
+    /// The live terminals, which say whether an item's session is running.
+    terminals: tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore,
 }
 
 impl DaemonStackTools {
@@ -467,7 +470,13 @@ impl DaemonStackTools {
             trunk,
             armed_by: &self.os_user,
         };
-        match op {
+        let changes_schedules = matches!(
+            op,
+            WorkQueueOp::Schedule { .. }
+                | WorkQueueOp::ScheduleWave { .. }
+                | WorkQueueOp::Unschedule { .. }
+        );
+        let answered = match op {
             WorkQueueOp::Schedule {
                 item_id,
                 kind,
@@ -490,7 +499,34 @@ impl DaemonStackTools {
                 .map(|(views, reason)| json::schedules(views, &reason)),
             _ => return Err("not a schedule operation".to_string()),
         }
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+        if changes_schedules && answered.is_ok() {
+            // `#workqueue` 14/14: what is already met fires now, and the queue is watched from here on.
+            crate::work_queue::schedule_watch::after_arming(
+                crate::work_queue::schedule_watch::WatchInputs {
+                    source: crate::work_queue::land::GitEnvSource {
+                        identity: self.identity.clone(),
+                        github_cli: self.github_cli.clone(),
+                        clients: Arc::clone(&self.github),
+                        terminals: self.terminals.clone(),
+                    },
+                    pull_requests: Arc::clone(&self.pull_requests),
+                    store: self.store.clone(),
+                    sessions_base: self.sessions_base.clone(),
+                    os_user: self.os_user.clone(),
+                    address: tddy_service::proto::work_queue::WorkQueueAddress {
+                        project_id: env.project_id.clone(),
+                        queue_id: queue_id
+                            .clone()
+                            .unwrap_or_else(|| self.caller_session_id.clone()),
+                        daemon_instance_id: self.daemon_instance_id.clone(),
+                    },
+                    session_token: self.session_token.clone(),
+                },
+            )
+            .await;
+        }
+        answered
     }
 
     async fn refresh_through_inbox(&self, env: &OpEnv, github: GithubSource) -> Result<(), String> {

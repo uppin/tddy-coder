@@ -74,11 +74,12 @@ mod add_work_item_unit_tests;
 mod annotations;
 pub use annotations::parse_tone;
 pub(crate) mod commit_flow;
+pub(crate) mod land;
 mod lineage;
-mod land;
 mod links;
 #[cfg(test)]
 mod repoint_github_token_unit_tests;
+pub(crate) mod schedule_watch;
 pub(crate) mod schedules;
 mod status_stream;
 mod waves;

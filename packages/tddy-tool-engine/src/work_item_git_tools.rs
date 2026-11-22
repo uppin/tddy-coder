@@ -27,7 +27,9 @@ use serde_json::{json, Value};
 use crate::catalog::ToolDef;
 use crate::project_home_tools::{tool_def, TARGET_DAEMON_INSTANCE_ID};
 use crate::work_queue_access::WorkQueueAccess;
-use crate::work_queue_land_tools::{work_queue_land_tool_defs, WORK_ITEM_PROPAGATE, WORK_QUEUE_LAND};
+use crate::work_queue_land_tools::{
+    work_queue_land_tool_defs, WORK_ITEM_PROPAGATE, WORK_QUEUE_LAND,
+};
 use crate::work_queue_tools::{WorkQueueCaller, STACK_ID};
 use crate::ToolOutcome;
 

@@ -905,11 +905,7 @@ async fn main_merges_closes_and_repoints_a_nodes_pr_from_a_read_only_session() {
     assert_eq!(world.github.closed(), vec![42]);
     // ... the merge itself propagated n3 (the engine lands n1, then rebases what sat on it onto the
     // default branch and retargets #43), and the explicit repoint of n3 retargeted it again
-    assert_eq!(
-        merged["propagated"][0]["item_id"],
-        json!("n3"),
-        "{merged}"
-    );
+    assert_eq!(merged["propagated"][0]["item_id"], json!("n3"), "{merged}");
     assert_eq!(
         world.github.base_changes(),
         vec![
@@ -1300,7 +1296,9 @@ async fn propagate_refuses_a_dirty_branch_naming_state_and_action_and_force_does
 
     // Then both are refused naming the state and the action that fixes it, and nothing moved
     for refused in [&plain, &forced] {
-        refused.assert_refused_saying("Dirty").assert_refused_saying("commit");
+        refused
+            .assert_refused_saying("Dirty")
+            .assert_refused_saying("commit");
     }
     assert_eq!(n2.head(), tip);
     assert_eq!(world.github.base_changes(), Vec::new());
@@ -1339,9 +1337,7 @@ async fn landing_waves_stops_at_the_first_item_whose_conditions_are_not_met_and_
 async fn landing_a_wave_range_the_queue_does_not_have_is_refused() {
     // Given a one-wave queue
     let world = a_world().await;
-    let queue_id = world
-        .a
-        .holds_a_stack(&world.main, vec![planned("n1", &[])]);
+    let queue_id = world.a.holds_a_stack(&world.main, vec![planned("n1", &[])]);
 
     // When main lands waves 1 to 3
     let landed = world

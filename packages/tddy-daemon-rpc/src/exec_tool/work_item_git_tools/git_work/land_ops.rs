@@ -78,16 +78,18 @@ pub(crate) fn propagate_item(
     let trunk = env.default_branch(world.project());
     let onto = match onto {
         Some(named) => named.to_string(),
-        None => env.effective_base(world.queue(), item_id, world.remote(), &trunk).0,
+        None => {
+            env.effective_base(world.queue(), item_id, world.remote(), &trunk)
+                .0
+        }
     };
     let request = request_for(&world, item_id, &onto, force).map_err(EngineRefusal::Failed)?;
     drive(propagate(&world, &world, &request))
 }
 
 pub(crate) fn propagate_tool(env: &GitEnv, item_id: &str, force: bool) -> Result<Value, String> {
-    let done = propagate_item(env, item_id, None, force).map_err(|refusal| {
-        format!("{item_id} was not propagated — {refusal}")
-    })?;
+    let done = propagate_item(env, item_id, None, force)
+        .map_err(|refusal| format!("{item_id} was not propagated — {refusal}"))?;
     Ok(json!({
         "propagated": true,
         "item_id": done.item_id,
@@ -205,11 +207,7 @@ pub(crate) fn merge_item(env: &GitEnv, item_id: &str) -> Result<Value, String> {
 }
 
 /// The items of waves `from..=to` in derived line order, merged ones left out.
-fn items_in_waves(
-    world: &DaemonQueueWorld<'_>,
-    from: u32,
-    to: u32,
-) -> Result<Vec<String>, String> {
+fn items_in_waves(world: &DaemonQueueWorld<'_>, from: u32, to: u32) -> Result<Vec<String>, String> {
     let queue = world.queue();
     let ids: Vec<String> = queue.nodes.iter().map(|n| n.node_id.clone()).collect();
     let derived = queue_waves(&ids, &dependencies_of(queue)).map_err(|e| e.to_string())?;

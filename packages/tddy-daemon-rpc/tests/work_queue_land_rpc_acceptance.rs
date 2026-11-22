@@ -71,6 +71,10 @@ async fn landing_a_backwards_or_zero_based_wave_range_is_refused() {
             .expect_err("the range is invalid");
 
         // Then
-        assert_eq!(refused.code(), Code::InvalidArgument, "{from_wave}..{to_wave}");
+        assert_eq!(
+            refused.code(),
+            Code::InvalidArgument,
+            "{from_wave}..{to_wave}"
+        );
     }
 }
