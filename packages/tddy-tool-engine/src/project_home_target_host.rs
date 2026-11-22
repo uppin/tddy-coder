@@ -7,7 +7,7 @@ use crate::project_home_lifecycle_tools::{
     SET_SESSION_MARK,
 };
 use crate::project_home_terminal_tools::{
-    CLAIM_SESSION_TERMINAL, READ_SESSION_TERMINAL, SEND_SESSION_KEYS,
+    CLAIM_SESSION_TERMINAL, READ_SESSION_TERMINAL, RELEASE_SESSION_TERMINAL, SEND_SESSION_KEYS,
 };
 use crate::project_home_terminate::TERMINATE_SESSION;
 use crate::project_home_tools::DIFF_SESSION_WORKTREE;
@@ -50,6 +50,7 @@ pub fn is_project_home_target_tool(name: &str) -> bool {
             | READ_SESSION_TERMINAL
             | CLAIM_SESSION_TERMINAL
             | SEND_SESSION_KEYS
+            | RELEASE_SESSION_TERMINAL
             | ANSWER_SESSION_PERMISSION
             | ANSWER_SESSION_QUESTION
             | WAIT_PROJECT_NOTIFICATIONS

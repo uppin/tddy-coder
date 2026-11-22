@@ -93,6 +93,16 @@ impl DaemonSessionHost {
         )))
     }
 
+    /// Every agent end on this host from now on, so a holder of per-session state outside the
+    /// terminal manager (a project-home's terminal claims) forgets a session that ended
+    /// (`#orchestra` 7/9).
+    #[must_use]
+    pub fn agent_ends(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<tddy_cli_sessions::cli_session_manager::AgentEnd> {
+        self.cli_manager.agent_ends()
+    }
+
     /// The jailed sessions this daemon runs, as the terminal surface resolves them.
     ///
     /// Public for the same reason [`Self::terminal_session_service`] is: a jail's PTY is reached
@@ -296,6 +306,12 @@ impl TerminalControl for CliManagerTerminalControl {
             .current_control(session_id)
             .await
             .map(|lease| lease.holder_screen_id)
+    }
+
+    async fn release(&self, session_id: &str, control_token: &str) -> bool {
+        self.manager
+            .release_control(session_id, control_token)
+            .await
     }
 
     fn subscribe(&self) -> broadcast::Receiver<ControlChange> {

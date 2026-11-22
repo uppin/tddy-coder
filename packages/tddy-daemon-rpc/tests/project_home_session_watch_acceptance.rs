@@ -567,7 +567,7 @@ async fn a_session_that_is_not_an_orchestrator_is_refused_the_watch_tools() {
 async fn an_orchestrator_whose_agent_takes_no_turn_is_refused_naming_the_agent() {
     // Given an orchestrator whose agent declares no turn input
     let world = a_world().await;
-    records_session_type(&world.a, &world.orchestrator, "cursor-cli");
+    records_session_type(&world.a, &world.orchestrator, "codex-cli");
 
     // When it creates a watch
     let refusal = creating_as(
@@ -579,7 +579,7 @@ async fn an_orchestrator_whose_agent_takes_no_turn_is_refused_naming_the_agent()
 
     // Then it is refused, naming the agent and why
     assert!(
-        refusal.contains("agent cursor declares no turn_input"),
+        refusal.contains("agent codex declares no turn_input"),
         "the refusal {refusal:?} does not name the agent"
     );
 }

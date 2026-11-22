@@ -15,6 +15,9 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use tddy_session_lifecycle::cli_session_manager::AgentEnd;
+use tokio::sync::broadcast::{self, error::TryRecvError};
+
 /// Whose claim an entry is: the calling home session, as its owner confirms it, and the session
 /// whose terminal it claimed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -30,9 +33,21 @@ pub struct HomeTerminalClaimKey {
 #[derive(Default)]
 pub struct HomeTerminalLeases {
     tokens: Mutex<HashMap<HomeTerminalClaimKey, String>>,
+    /// The agent ends of this host, read before every access: a session that ended takes every
+    /// claim on it with it (`#orchestra` 7/9). `None` for a table that follows no host.
+    ends: Mutex<Option<broadcast::Receiver<AgentEnd>>>,
 }
 
 impl HomeTerminalLeases {
+    /// A table that forgets a session's claims when `ends` announces that its agent ended.
+    #[must_use]
+    pub fn following(ends: broadcast::Receiver<AgentEnd>) -> Self {
+        Self {
+            tokens: Mutex::default(),
+            ends: Mutex::new(Some(ends)),
+        }
+    }
+
     /// Remember `control_token` as `key`'s, replacing an earlier one.
     pub fn remember(&self, key: HomeTerminalClaimKey, control_token: String) {
         self.tokens().insert(key, control_token);
@@ -44,10 +59,83 @@ impl HomeTerminalLeases {
         self.tokens().get(key).cloned()
     }
 
+    /// Forget `key`'s token, returning it: its home released the claim (`#orchestra` 7/9).
+    pub fn forget(&self, key: &HomeTerminalClaimKey) -> Option<String> {
+        self.tokens().remove(key)
+    }
+
+    /// Forget every token held on `target_session_id`'s terminal: the session ended.
+    pub fn forget_target(&self, target_session_id: &str) {
+        drop_claims_on(&mut self.tokens(), target_session_id);
+    }
+
     /// The map, locked. Each method is one insert or one lookup, so a panic on another thread
     /// while it held the lock cannot leave the map half-updated: a poisoned lock is read through
     /// rather than turned into a panic of the daemon's own.
+    ///
+    /// The ends announced since the last access are applied first, so no read sees a claim on a
+    /// session that has ended. A subscriber that lagged missed ends it cannot name; the stale
+    /// token it leaves is harmless, since every use verifies the token against the live lease.
     fn tokens(&self) -> MutexGuard<'_, HashMap<HomeTerminalClaimKey, String>> {
-        self.tokens.lock().unwrap_or_else(PoisonError::into_inner)
+        let mut tokens = self.tokens.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut ends = self.ends.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(ends) = ends.as_mut() {
+            loop {
+                match ends.try_recv() {
+                    Ok(end) => drop_claims_on(&mut tokens, &end.session_id),
+                    Err(TryRecvError::Lagged(_)) => {}
+                    Err(TryRecvError::Empty | TryRecvError::Closed) => break,
+                }
+            }
+        }
+        tokens
+    }
+}
+
+/// Remove every claim on `target_session_id`'s terminal from `tokens`.
+fn drop_claims_on(tokens: &mut HashMap<HomeTerminalClaimKey, String>, target_session_id: &str) {
+    tokens.retain(|key, _| key.target_session_id != target_session_id);
+}
+
+#[cfg(test)]
+mod release_tests {
+    use super::*;
+
+    fn a_claim(caller: &str, target: &str) -> HomeTerminalClaimKey {
+        HomeTerminalClaimKey {
+            caller_daemon_instance_id: "host-a".to_string(),
+            caller_session_id: caller.to_string(),
+            target_session_id: target.to_string(),
+        }
+    }
+
+    #[test]
+    fn forgetting_a_claim_returns_its_token_and_leaves_none() {
+        let leases = HomeTerminalLeases::default();
+        leases.remember(a_claim("home", "child"), "token-1".to_string());
+
+        let forgotten = leases.forget(&a_claim("home", "child"));
+
+        assert_eq!(forgotten.as_deref(), Some("token-1"));
+        assert_eq!(leases.token_of(&a_claim("home", "child")), None);
+    }
+
+    #[test]
+    fn an_ended_session_takes_every_claim_on_it_with_it() {
+        let leases = HomeTerminalLeases::default();
+        leases.remember(a_claim("home", "child"), "token-1".to_string());
+        leases.remember(a_claim("other-home", "child"), "token-2".to_string());
+        leases.remember(a_claim("home", "sibling"), "token-3".to_string());
+
+        leases.forget_target("child");
+
+        assert_eq!(
+            (
+                leases.token_of(&a_claim("home", "child")),
+                leases.token_of(&a_claim("other-home", "child")),
+                leases.token_of(&a_claim("home", "sibling")).as_deref(),
+            ),
+            (None, None, Some("token-3"))
+        );
     }
 }

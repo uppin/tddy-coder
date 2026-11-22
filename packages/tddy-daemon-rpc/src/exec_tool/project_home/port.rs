@@ -6,9 +6,11 @@ use crate::exec_tool::project_home_start_options::{describe_start_options, Start
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tddy_agent_launch::back_channel::native_peer_name_of;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{ListSessionsRequest, Signal};
+use tddy_tool_engine::delivery_route::{delivery_route_for, DeliveryInputs};
 use tddy_tool_engine::project_home_tools::{
     ListProjectSessionsResult, ListedSession, ProjectHomePort,
 };
@@ -62,11 +64,24 @@ impl ProjectHomePort for DaemonProjectHome {
             .await
             .map_err(|status| anyhow::anyhow!(status.message().to_string()))?
             .into_inner();
+        let agents = self.launch.coding_agents.agents();
+        let orchestrator_is_native_peer = listed
+            .sessions
+            .iter()
+            .find(|s| s.session_id == home_session_id)
+            .and_then(|home| agents.for_session_type(&home.session_type))
+            .is_some_and(|agent| agent.peer_name().is_some());
         Ok(listed
             .sessions
             .into_iter()
             .filter(|s| s.project_id == project_id && s.session_id != home_session_id)
             .map(|s| ListedSession {
+                delivery_route: Some(delivery_route_for(&DeliveryInputs {
+                    peer_name: &native_peer_name_of(&s.session_id),
+                    agent: agents.for_session_type(&s.session_type),
+                    on_target: s.target.is_some() || !s.ssh_config_host.is_empty(),
+                    orchestrator_is_native_peer,
+                })),
                 display_name: Some(s.display_name).filter(|name| !name.is_empty()),
                 agent_status: if s.activity_status.is_empty() {
                     s.status

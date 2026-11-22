@@ -73,6 +73,31 @@ impl CliSessionManager {
         }
     }
 
+    /// Give up `session_id`'s lease when `control_token` is the current one, leaving the session
+    /// uncontrolled and broadcasting the change; `false`, and nothing changed, when it is not
+    /// (`#orchestra` 7/9).
+    pub async fn release_control(&self, session_id: &str, control_token: &str) -> bool {
+        let mut control = self.control.write().await;
+        match control.get(session_id) {
+            Some(lease) if lease.control_token == control_token => {
+                control.remove(session_id);
+                drop(control);
+                // An empty holder is how the change reads "nobody controls it".
+                let _ = self.control_tx.send(ControlChangeEvent {
+                    session_id: session_id.to_string(),
+                    holder_screen_id: String::new(),
+                });
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Drop `session_id`'s lease, whoever holds it: the session ended, so nobody controls it.
+    pub async fn forget_control(&self, session_id: &str) {
+        self.control.write().await.remove(session_id);
+    }
+
     /// Return the current control lease for `session_id`, or `None` if uncontrolled.
     pub async fn current_control(&self, session_id: &str) -> Option<ControlLeaseInfo> {
         let control = self.control.read().await;
@@ -85,5 +110,69 @@ impl CliSessionManager {
     /// `holder_screen_id`. The displaced screen should render the "Claim terminal" CTA.
     pub fn subscribe_control(&self) -> broadcast::Receiver<ControlChangeEvent> {
         self.control_tx.subscribe()
+    }
+}
+
+#[cfg(test)]
+mod release_tests {
+    use super::*;
+
+    async fn a_held_lease(manager: &CliSessionManager, screen: &str) -> String {
+        match manager.claim_control("child", screen, true).await {
+            ClaimOutcome::Granted { control_token } => control_token,
+            ClaimOutcome::Denied { holder_screen_id } => {
+                panic!("denied; held by {holder_screen_id}")
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn the_holder_releases_and_the_session_is_uncontrolled() {
+        let manager = CliSessionManager::new();
+        let token = a_held_lease(&manager, "project-home:home").await;
+
+        let released = manager.release_control("child", &token).await;
+
+        assert!(released);
+        assert!(manager.current_control("child").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn after_a_release_another_screen_claims_without_stealing() {
+        let manager = CliSessionManager::new();
+        let token = a_held_lease(&manager, "project-home:home").await;
+        manager.release_control("child", &token).await;
+
+        let claim = manager.claim_control("child", "browser-1", false).await;
+
+        assert!(matches!(claim, ClaimOutcome::Granted { .. }), "{claim:?}");
+    }
+
+    #[tokio::test]
+    async fn a_stale_token_releases_nothing() {
+        let manager = CliSessionManager::new();
+        let stale = a_held_lease(&manager, "project-home:home").await;
+        a_held_lease(&manager, "browser-1").await;
+
+        let released = manager.release_control("child", &stale).await;
+
+        assert!(!released);
+        assert_eq!(
+            manager
+                .current_control("child")
+                .await
+                .map(|l| l.holder_screen_id),
+            Some("browser-1".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn forgetting_an_ended_sessions_lease_leaves_it_uncontrolled() {
+        let manager = CliSessionManager::new();
+        a_held_lease(&manager, "browser-1").await;
+
+        manager.forget_control("child").await;
+
+        assert!(manager.current_control("child").await.is_none());
     }
 }

@@ -18,7 +18,7 @@ use crate::project_home_lifecycle_tools::{
 use crate::project_home_notify_tools::{notify_operator_tool_def, NOTIFY_OPERATOR};
 use crate::project_home_terminal_tools::{
     project_home_terminal_tool_defs, CLAIM_SESSION_TERMINAL, READ_SESSION_TERMINAL,
-    SEND_SESSION_KEYS,
+    RELEASE_SESSION_TERMINAL, SEND_SESSION_KEYS,
 };
 use crate::project_home_terminate::{terminate_session_tool_def, TERMINATE_SESSION};
 use crate::project_home_tools::DIFF_SESSION_WORKTREE;
@@ -73,6 +73,7 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | READ_SESSION_TERMINAL
             | CLAIM_SESSION_TERMINAL
             | SEND_SESSION_KEYS
+            | RELEASE_SESSION_TERMINAL
             | ANSWER_SESSION_PERMISSION
             | ANSWER_SESSION_QUESTION
             | WAIT_PROJECT_NOTIFICATIONS

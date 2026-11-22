@@ -54,6 +54,9 @@ extensions:
     # agent's name. Unknown words are refused at load. No `ask_user_question`: Muse's `PreToolUse`
     # never fires for `request_user_input`, so no hook of ours can carry a structured answer back.
     capabilities: [hooks]
+    # How a new turn reaches a running session (`SendSessionMessage`, `#orchestra` 7/9): pasted into
+    # the TUI, then submitted with Enter, as an operator would.
+    turn_input: { kind: terminal_paste, submit_key: Enter }
     models:
       default: muse-spark-1.3
       curated:

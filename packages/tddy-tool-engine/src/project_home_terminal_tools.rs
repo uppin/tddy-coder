@@ -34,6 +34,27 @@ use crate::ToolOutcome;
 pub const READ_SESSION_TERMINAL: &str = "ReadSessionTerminal";
 pub const CLAIM_SESSION_TERMINAL: &str = "ClaimSessionTerminal";
 pub const SEND_SESSION_KEYS: &str = "SendSessionKeys";
+/// Give back a terminal this session claimed (`#orchestra` 7/9).
+pub const RELEASE_SESSION_TERMINAL: &str = "ReleaseSessionTerminal";
+
+/// [`RELEASE_SESSION_TERMINAL`]'s definition.
+pub fn release_session_terminal_tool_def() -> ToolDef {
+    tool_def(
+        RELEASE_SESSION_TERMINAL,
+        "Give back control of a session's main terminal that you took with ClaimSessionTerminal, so a person watching the session can take control without stealing it. Releasing is for your own claim only: a terminal you never claimed, or whose control a person has taken since, is refused naming why, and nothing changes. Answers released: true. After a release SendSessionKeys is refused until you claim again.",
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "The session of this project whose terminal to give back, as ListProjectSessions reports it."
+                },
+                TARGET_DAEMON_INSTANCE_ID: target_host_property()
+            },
+            "required": ["session_id"]
+        }),
+    )
+}
 
 /// The screen id a project-home session holds a terminal's control lease under.
 ///
@@ -44,11 +65,14 @@ fn project_home_screen_id(home: &HomeCaller) -> String {
 }
 
 /// Whether `name` is one of the terminal tools: [`READ_SESSION_TERMINAL`],
-/// [`CLAIM_SESSION_TERMINAL`] or [`SEND_SESSION_KEYS`].
+/// [`CLAIM_SESSION_TERMINAL`], [`SEND_SESSION_KEYS`] or [`RELEASE_SESSION_TERMINAL`].
 pub fn is_project_home_terminal_tool(name: &str) -> bool {
     matches!(
         name,
-        READ_SESSION_TERMINAL | CLAIM_SESSION_TERMINAL | SEND_SESSION_KEYS
+        READ_SESSION_TERMINAL
+            | CLAIM_SESSION_TERMINAL
+            | SEND_SESSION_KEYS
+            | RELEASE_SESSION_TERMINAL
     )
 }
 
@@ -92,7 +116,7 @@ fn terminal_keys_tool_defs() -> Vec<ToolDef> {
     vec![
         tool_def(
             CLAIM_SESSION_TERMINAL,
-            "Take control of a session's main terminal so SendSessionKeys can type into it. Taking control takes it from whoever holds it: a person watching the session in the browser drops to watch-only and sees that you took control, and they take it back by claiming it themselves. Claim only when you mean to act, and never to fight a person for control. Control stays yours until a person takes it; there is no release. Answers holder, the screen id you now hold it under.",
+            "Take control of a session's main terminal so SendSessionKeys can type into it. Taking control takes it from whoever holds it: a person watching the session in the browser drops to watch-only and sees that you took control, and they take it back by claiming it themselves. Claim only when you mean to act, and never to fight a person for control. Control stays yours until a person takes it or you give it back with ReleaseSessionTerminal. Answers holder, the screen id you now hold it under.",
             json!({
                 "type": "object",
                 "properties": {
@@ -129,6 +153,7 @@ fn terminal_keys_tool_defs() -> Vec<ToolDef> {
                 "required": ["session_id"]
             }),
         ),
+        release_session_terminal_tool_def(),
     ]
 }
 
@@ -159,6 +184,20 @@ pub trait ProjectHomeTerminalPort: ProjectHomePort {
         screen_id: &str,
         bytes: Vec<u8>,
     ) -> Result<(), String>;
+
+    /// Give back `target`'s terminal lease that `screen_id` holds, forgetting its token. An error
+    /// names why nothing was released: this session never claimed it, or another screen holds it
+    /// now (`#orchestra` 7/9).
+    ///
+    /// The default refuses, so a port that holds no claims need not name it.
+    async fn release_terminal(
+        &self,
+        target: &SessionTarget,
+        screen_id: &str,
+    ) -> Result<(), String> {
+        let _ = (target, screen_id);
+        Err("this host holds no terminal claims".to_string())
+    }
 }
 
 #[derive(Deserialize)]
@@ -334,8 +373,9 @@ fn run_answer(run: &StyleRun) -> Value {
     answer
 }
 
-/// Run [`CLAIM_SESSION_TERMINAL`] or [`SEND_SESSION_KEYS`] for `home`: resolve the target, then take
-/// or use the lease under [`project_home_screen_id`]. `args` is the call's parsed argument object.
+/// Run [`CLAIM_SESSION_TERMINAL`], [`SEND_SESSION_KEYS`] or [`RELEASE_SESSION_TERMINAL`] for `home`:
+/// resolve the target, then take, use or give back the lease under [`project_home_screen_id`].
+/// `args` is the call's parsed argument object.
 async fn execute_terminal_keys_tool(
     port: &dyn ProjectHomeTerminalPort,
     home: &HomeCaller,
@@ -345,7 +385,38 @@ async fn execute_terminal_keys_tool(
     if tool_name == CLAIM_SESSION_TERMINAL {
         return claim_session_terminal(port, home, args).await;
     }
+    if tool_name == RELEASE_SESSION_TERMINAL {
+        return release_session_terminal(port, home, args).await;
+    }
     send_session_keys(port, home, args).await
+}
+
+/// `ReleaseSessionTerminal`: give back the lease this home session claimed on the target. Answers
+/// `{released: true}`; a claim it does not hold is refused with the port's reason.
+async fn release_session_terminal(
+    port: &dyn ProjectHomeTerminalPort,
+    home: &HomeCaller,
+    args: Value,
+) -> ToolOutcome {
+    let args: SessionArgs = match serde_json::from_value(args) {
+        Ok(a) => a,
+        Err(e) => {
+            return ToolOutcome::err(format!(
+                "{RELEASE_SESSION_TERMINAL}: invalid arguments: {e}"
+            ))
+        }
+    };
+    let target = match resolve_target(port, home, &args.session_id).await {
+        Ok(t) => t,
+        Err(outcome) => return outcome,
+    };
+    match port
+        .release_terminal(&target, &project_home_screen_id(home))
+        .await
+    {
+        Ok(()) => ToolOutcome::ok(json!({ "released": true }).to_string()),
+        Err(e) => ToolOutcome::err(format!("{RELEASE_SESSION_TERMINAL}: {e}")),
+    }
 }
 
 /// `ClaimSessionTerminal`: take the target's control lease for this home session. Answers

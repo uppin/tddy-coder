@@ -87,6 +87,8 @@ pub(crate) struct DetachWatch {
     /// Where an agent end is announced — read by both announcing sites: a main ending with its
     /// agent (`main_ended`) and a detached agent whose tmux session is gone (`start`).
     agent_ends: super::agent_end::AgentEndSender,
+    /// The control leases, so an ended agent's session is left uncontrolled.
+    control: super::ControlRegistry,
 }
 
 impl DetachWatch {
@@ -251,10 +253,12 @@ impl DetachWatch {
         }
     }
 
-    /// The cleanup of a session whose agent ended: its managed workflow and its exposure.
+    /// The cleanup of a session whose agent ended: its managed workflow, its exposure and its
+    /// control lease.
     async fn drop_agent_state(&self, session_id: &str) {
         self.managed_workflows.write().await.remove(session_id);
         self.exposed_terminals.write().await.remove(session_id);
+        self.control.write().await.remove(session_id);
     }
 }
 
@@ -353,6 +357,7 @@ impl CliSessionManager {
             terminal_id: MAIN_TERMINAL_ID.to_string(),
             interval: self.detach_watch_interval,
             agent_ends: self.agent_end_tx.clone(),
+            control: Arc::clone(&self.control),
         }
     }
 

@@ -121,12 +121,12 @@ fn records_its_orchestrator(host: &Host, started: &str, orchestrator: &str) {
     tddy_core::write_changeset(&dir, &changeset).unwrap();
 }
 
-/// `session_id` is a cursor-cli session: its agent declares no `turn_input`, so no turn can be
+/// `session_id` is a codex-cli session: its agent declares no `turn_input`, so no turn can be
 /// pasted into it.
-fn records_a_cursor_session(host: &Host, session_id: &str) {
+fn records_a_session_taking_no_turn(host: &Host, session_id: &str) {
     let dir = session_dir(host, session_id);
     let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
-    meta.session_type = Some("cursor-cli".to_string());
+    meta.session_type = Some("codex-cli".to_string());
     tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
 }
 
@@ -705,9 +705,9 @@ async fn a_sessions_own_message_watch_carries_the_messages_addressed_to_it() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_session_without_turn_input_reads_its_messages() {
-    // Given a cursor-cli session the orchestrator started, which no turn can be pasted into
+    // Given a codex-cli session the orchestrator started, which no turn can be pasted into
     let world = a_world().await;
-    records_a_cursor_session(&world.a, &world.child);
+    records_a_session_taking_no_turn(&world.a, &world.child);
 
     // When the orchestrator sends it a message, and it reads its messages
     let message_id = world
