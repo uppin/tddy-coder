@@ -6,87 +6,84 @@ use super::WorkQueueRpcHandler;
 use tddy_session_lifecycle::connection_service::spawn_blocking_with_timeout;
 
 impl WorkQueueRpcHandler {
-    /// PR status for one branch, resolved with the calling operator's own GitHub credential.
+    /// The inbox and repository `target`'s PR reads go through, with the project's credential
+    /// registered for the repository (`#workqueue` 6/14). `Err` carries the operator-facing reason the
+    /// reads cannot be made — no project, no GitHub remote, no usable account, no inbox on this
+    /// daemon — which [`Self::pr_status_for_caller`] reports as *unavailable*.
+    pub(crate) fn pr_site_for_target(
+        &self,
+        os_user: &str,
+        session_token: &str,
+        sessions_base: &std::path::Path,
+        target: &super::project_stacks::WorkQueueTarget,
+    ) -> Result<tddy_worktree_service::pull_request_view::PullRequestSite, String> {
+        use super::project_stacks::WorkQueueTarget;
+        let (session_id, project_id) = match target {
+            WorkQueueTarget::Address(address) => {
+                (address.queue_id.clone(), address.project_id.clone())
+            }
+            WorkQueueTarget::Session(session_id) => {
+                let session_dir = self
+                    .session_dir_for_target(sessions_base, target)
+                    .map_err(|status| status.message().to_string())?;
+                let metadata = tddy_core::read_session_metadata(&session_dir)
+                    .map_err(|e| format!("the session's project cannot be read: {e}"))?;
+                (session_id.clone(), metadata.project_id)
+            }
+        };
+        self.pull_requests
+            .site_for_session(os_user, &session_id, &project_id, session_token)
+            .map_err(|status| status.message().to_string())
+    }
+
+    /// PR status for one branch, read through the daemon's GitHub inbox as the project's account —
+    /// a second reader of the same branch costs no GitHub request.
     ///
     /// `repo_root` is `None` when no file in the session directory records a checkout (see
     /// [`tddy_core::repo_root_for_session`]) — an unknown repository, not a repository without PRs.
+    /// `site` is [`Self::pr_site_for_target`]'s answer.
     ///
     /// Never fails: a lookup that cannot be performed degrades this one field to *unavailable* (D8),
     /// and stub/demo authentication resolves to an empty result (D12) — so the enclosing RPC keeps
     /// returning its other legs instead of collapsing into an error the web discards wholesale.
     pub(crate) async fn pr_status_for_caller(
         &self,
-        github_login: &str,
+        site: Result<tddy_worktree_service::pull_request_view::PullRequestSite, String>,
         repo_root: Option<&std::path::Path>,
         branch: &str,
     ) -> tddy_service::proto::work_queue::PrStatusView {
-        use tddy_github::pr_api::PrLookupOutcome;
         use tddy_service::proto::work_queue::PrStatusView;
-        use tddy_session_lifecycle::github_pr_credentials::{
-            pr_lookup_for_caller, retained_github_token, PrLookup,
-        };
 
-        // Both ways of failing to name a GitHub repository leave the lookup un-performable, so they
-        // are *unavailable* with a reason — reporting `exists = false` would claim the branch has no
-        // PR when in fact nothing was ever asked (D8).
-        let Some(repo_root) = repo_root else {
+        // A missing checkout leaves the lookup un-performable, so it is *unavailable* with a reason —
+        // reporting `exists = false` would claim the branch has no PR when in fact nothing was ever
+        // asked (D8).
+        if repo_root.is_none() {
             return pr_status_unavailable(
                 branch,
                 "no checkout is recorded for this session, so its GitHub repository is unknown"
                     .to_string(),
             );
-        };
-        let Some(owner_repo) = owner_repo_from_repo_root(repo_root) else {
-            return pr_status_unavailable(
-                branch,
-                format!(
-                    "no GitHub repository could be resolved from the origin remote of {}",
-                    repo_root.display()
-                ),
-            );
-        };
+        }
+        // A demo never reaches GitHub, so stub mode answers first whatever the project's account says.
         let stub_mode = self
             .config
             .github
             .as_ref()
             .and_then(|g| g.stub)
             .unwrap_or(false);
-        // A vault that exists but cannot be read right now is *unavailable* with its own reason —
-        // but a demo never reaches GitHub, so stub mode answers first whatever the vault says.
-        let stored = match retained_github_token(self.credential_vaults.as_deref(), github_login) {
-            Err(reason) if !stub_mode => return pr_status_unavailable(branch, reason),
-            Err(_) => None,
-            Ok(stored) => stored,
-        };
-        let token = match pr_lookup_for_caller(stub_mode, stored.as_deref()) {
-            PrLookup::Empty => return PrStatusView::default(),
-            PrLookup::Unavailable(reason) => return pr_status_unavailable(branch, reason),
-            PrLookup::Perform(token) => token,
-        };
-
-        let head_branch = branch.to_string();
-        let outcome = tokio::task::spawn_blocking(move || {
-            use tddy_github::pr_api::GithubPrApi;
-            tddy_github::pr_api::RealGithubPrApi::with_token(owner_repo, token)
-                .get_pr_by_head(&head_branch)
-        })
-        .await;
-
-        match outcome {
-            Ok(PrLookupOutcome::Found(pr)) => PrStatusView {
-                exists: true,
-                number: pr.number,
-                url: pr.url,
-                state: pr_state_label(pr.state).to_string(),
-                unavailable: false,
-                unavailable_reason: String::new(),
-            },
-            Ok(PrLookupOutcome::NotFound) => PrStatusView::default(),
-            Ok(PrLookupOutcome::Unavailable(reason)) => pr_status_unavailable(branch, reason),
-            Err(join_error) => pr_status_unavailable(
-                branch,
-                format!("the PR lookup did not complete: {join_error}"),
-            ),
+        if stub_mode {
+            return PrStatusView::default();
+        }
+        match site {
+            Ok(site) => {
+                tddy_work_queue::inbox_reads::pr_status_view_through_inbox(
+                    &site.inbox,
+                    &site.repo,
+                    branch,
+                )
+                .await
+            }
+            Err(reason) => pr_status_unavailable(branch, reason),
         }
     }
 
@@ -176,16 +173,5 @@ fn pr_status_unavailable(
         unavailable: true,
         unavailable_reason: reason,
         ..Default::default()
-    }
-}
-
-/// GitHub PR state → the lowercase label carried on the `PrStatusView.state` wire field.
-fn pr_state_label(state: tddy_github::pr_api::PrState) -> &'static str {
-    use tddy_github::pr_api::PrState;
-    match state {
-        PrState::Open => "open",
-        PrState::Merged => "merged",
-        PrState::Closed => "closed",
-        PrState::Draft => "draft",
     }
 }

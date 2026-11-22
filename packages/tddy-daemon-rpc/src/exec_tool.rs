@@ -70,6 +70,10 @@ pub struct ExecToolRpcHandler {
 /// The host resources only the project-home tools use, held together so the handler stays within
 /// its field budget.
 pub(crate) struct ProjectHomeHost {
+    /// The GitHub inbox and the project credentials it reads with — `work_queue_status` reads PRs
+    /// through it (`#workqueue` 6/14).
+    pub(crate) pull_requests:
+        Arc<dyn tddy_worktree_service::pull_request_view::SessionPullRequests>,
     /// The vaults a project-home git tool reads a target's GitHub identity from (`#project-home` 7/7).
     pub(crate) credential_vaults: Option<Arc<SessionVaults>>,
     pub(crate) github_cli: GithubCli,
@@ -157,6 +161,7 @@ impl ExecToolRpcHandler {
                 session_watches: host.session_watches(),
                 activity: Arc::new(host.activity_service()),
                 work_queue_github: Arc::new(OnceLock::new()),
+                pull_requests: Arc::new(host.clone()),
             },
         }
     }

@@ -1,5 +1,6 @@
 use crate::work_queue::project_stacks::next_free_node_id;
 use crate::work_queue::project_stacks::referencing_sessions_by_stack;
+use crate::work_queue::project_stacks::require_a_stack;
 use crate::work_queue::project_stacks::store_status;
 use crate::work_queue::project_stacks::summary_of;
 use crate::work_queue::project_stacks::work_queue_target;
@@ -7,12 +8,15 @@ use crate::work_queue::project_stacks::WorkQueueTarget;
 use crate::work_queue::WorkQueueRpcHandler;
 use std::path::Path;
 use tddy_core::changeset::WorkItem;
+use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{
     AddWorkItemRequest, AddWorkItemResponse, GetWorkQueueRequest, GetWorkQueueResponse,
-    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, UnreachableWorkQueueHost,
-    WorkQueueAddress, WorkQueueSummary,
+    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, ReorderWorkItemRequest,
+    ReorderWorkItemResponse, UnreachableWorkQueueHost, WorkQueueAddress, WorkQueueSummary,
 };
+use tddy_session_lifecycle::session_list_enrichment;
+use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
 
 impl WorkQueueRpcHandler {
     /// Append a planned PR to the stack at `address`, in this host's store.
@@ -242,5 +246,54 @@ impl WorkQueueRpcHandler {
             summary: Some(summary),
             work_queue_json,
         }))
+    }
+    /// `ReorderWorkItem`: move one work item up or down the operator's reading order (the body of the
+    /// handler's method, kept here so `ports.rs` does not grow).
+    pub(super) async fn reorder_work_item_rpc(
+        &self,
+        request: Request<ReorderWorkItemRequest>,
+    ) -> Result<Response<ReorderWorkItemResponse>, Status> {
+        let req = request.into_inner();
+        let os_user = self.authenticated_os_user(&req.session_token)?;
+        let target = work_queue_target(req.stack.as_ref(), &req.session_id)?;
+        if let Some(answered) = self
+            .forward_if_addressed::<_, ReorderWorkItemResponse>("ReorderWorkItem", &target, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+        if req.item_id.trim().is_empty() {
+            return Err(Status::invalid_argument("node_id is required"));
+        }
+        let sessions_base = sessions_base_for_user(&os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        if let WorkQueueTarget::Address(address) = &target {
+            let work_queue_json = self.reorder_work_item_in_store(
+                &sessions_base,
+                address,
+                req.item_id.trim(),
+                req.direction.trim(),
+            )?;
+            return Ok(Response::new(ReorderWorkItemResponse { work_queue_json }));
+        }
+        let WorkQueueTarget::Session(session_id) = &target else {
+            unreachable!("work_queue_target yields an address or a session")
+        };
+        validate_session_id_segment(session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        require_a_stack(&session_dir)?;
+
+        tddy_work_queue::item_ops::move_work_item(
+            &session_dir,
+            req.item_id.trim(),
+            req.direction.trim(),
+        )
+        .map_err(Status::invalid_argument)?;
+
+        // The same serializer `ListSessions` enrichment uses, so the response's `work_queue_json` is
+        // the exact wire shape `PrStackScreen`'s `parseWorkQueue` already reads.
+        let work_queue_json = session_list_enrichment::work_queue_json_of(&session_dir);
+        Ok(Response::new(ReorderWorkItemResponse { work_queue_json }))
     }
 }

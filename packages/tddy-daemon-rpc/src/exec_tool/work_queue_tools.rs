@@ -39,6 +39,7 @@ use tddy_tool_engine::work_queue_tools::{
     WorkQueueToolPort,
 };
 use tddy_tool_engine::ToolOutcome;
+use tddy_worktree_service::pull_request_view::SessionPullRequests;
 
 use super::project_home::caller::record_call;
 use super::ExecToolRpcHandler;
@@ -186,6 +187,9 @@ impl ExecToolRpcHandler {
                 .get()
                 .cloned()
                 .unwrap_or_else(|| Arc::new(RealWorkQueueGithubClients)),
+            pull_requests: Arc::clone(&self.project_home_host.pull_requests),
+            caller_session_id: req.session_id.clone(),
+            session_token: req.session_token.clone(),
         }
     }
 }
@@ -215,6 +219,71 @@ pub(super) struct DaemonStackTools {
     /// The `gh` a Local gh project's token is asked of.
     github_cli: GithubCli,
     github: Arc<dyn WorkQueueGithubClients>,
+    /// The inbox and project credentials a queue's status is read through (`#workqueue` 6/14).
+    pull_requests: Arc<dyn SessionPullRequests>,
+    caller_session_id: String,
+    session_token: String,
+}
+
+impl DaemonStackTools {
+    /// `work_queue_status`: refresh every node's derived status from the PRs the daemon's GitHub inbox
+    /// holds — one inbox read per branch, never a request of its own — and answer the nodes. A
+    /// refresh that could not be made is `refresh_error` in the answer, never hidden.
+    async fn status_through_inbox(
+        &self,
+        env: OpEnv,
+        github: GithubSource,
+    ) -> Result<Value, String> {
+        let refresh = self.refresh_through_inbox(&env, github).await;
+        let refresh_error = refresh.err();
+        // The store's locks are blocking.
+        tokio::task::spawn_blocking(move || ops::status_answer(&env, refresh_error))
+            .await
+            .map_err(|e| format!("the stack operation failed to finish: {e}"))?
+    }
+
+    async fn refresh_through_inbox(&self, env: &OpEnv, github: GithubSource) -> Result<(), String> {
+        let project_id = env.project_id.clone();
+        let read_env = OpEnv {
+            store: env.store.clone(),
+            project_id: env.project_id.clone(),
+            queue_id: env.queue_id.clone(),
+            sessions_base: env.sessions_base.clone(),
+        };
+        let inputs = tokio::task::spawn_blocking(move || ops::refresh_inputs(&read_env, &github))
+            .await
+            .map_err(|e| format!("the status refresh failed to finish: {e}"))??;
+        let site = self
+            .pull_requests
+            .site_for_session(
+                &self.os_user,
+                &self.caller_session_id,
+                &project_id,
+                &self.session_token,
+            )
+            .map_err(|status| status.message().to_string())?;
+        let views = tddy_work_queue::inbox_reads::assemble_views_through_inbox(
+            &inputs.planner_dir,
+            &env.sessions_base,
+            &inputs.stack,
+            &site.inbox,
+            &site.repo,
+        )
+        .await
+        .map_err(|e| format!("assemble views: {e}"))?;
+        let persist_env = OpEnv {
+            store: env.store.clone(),
+            project_id: env.project_id.clone(),
+            queue_id: env.queue_id.clone(),
+            sessions_base: env.sessions_base.clone(),
+        };
+        let default_branch = inputs.default_branch;
+        tokio::task::spawn_blocking(move || {
+            ops::persist_derived_statuses(&persist_env, &views, &default_branch)
+        })
+        .await
+        .map_err(|e| format!("the status refresh failed to finish: {e}"))?
+    }
 }
 
 #[async_trait]
@@ -254,6 +323,9 @@ impl WorkQueueToolPort for DaemonStackTools {
             github_cli: self.github_cli.clone(),
             clients: Arc::clone(&self.github),
         };
+        if matches!(op, WorkQueueOp::Status) {
+            return self.status_through_inbox(env, github).await;
+        }
         // The store's locks, git and GitHub are all blocking.
         tokio::task::spawn_blocking(move || ops::run(&env, &github, op))
             .await

@@ -11,7 +11,6 @@ use tddy_core::changeset::{PrInternalStatus, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::work_queue_store::{WorkQueueRecord, WorkQueueStore};
 use tddy_tool_engine::work_queue_tools::{PrAddress, WorkQueueOp};
-use tddy_work_queue::assess::assemble_views;
 use tddy_work_queue::internal_status::{derive_internal_status, reconcile_internal_status};
 use tddy_work_queue::item_ops::{
     add_work_item, adopt_pr_as_work_item, delete_work_item, sync_node_to_github_pr,
@@ -70,7 +69,11 @@ impl OpEnv {
 /// Run `op` on the stack `env` names, reaching GitHub through `github` when the operation needs it.
 pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result<Value, String> {
     match op {
-        WorkQueueOp::Status => status(env, github),
+        // `work_queue_status` reads GitHub through the inbox and so runs async, ahead of this blocking
+        // dispatcher: see `DaemonStackTools::run_stack_op`.
+        WorkQueueOp::Status => {
+            Err("work_queue_status is served through the GitHub inbox".to_string())
+        }
         WorkQueueOp::ReadPr { pr, include_files } => {
             let number = env.pull_number(&pr)?;
             let gh = github.client()?;
@@ -175,10 +178,9 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
     }
 }
 
-/// Read the stack, refresh derived internal statuses from live GitHub and child state, and answer
-/// the node summaries. A refresh failure is surfaced as `refresh_error`, never hidden.
-fn status(env: &OpEnv, github: &GithubSource) -> Result<Value, String> {
-    let refresh_error = refresh_internal_statuses(env, github).err();
+/// Answer the node summaries of the stack as stored — read after the statuses were refreshed, so the
+/// answer reflects what is stored. A refresh failure is surfaced as `refresh_error`, never hidden.
+pub(super) fn status_answer(env: &OpEnv, refresh_error: Option<String>) -> Result<Value, String> {
     // Read after the possible persist, so the answer reflects what is stored.
     let stack = env.stack()?;
     let nodes: Vec<Value> = stack
@@ -206,22 +208,34 @@ fn status(env: &OpEnv, github: &GithubSource) -> Result<Value, String> {
     Ok(out)
 }
 
-/// Assemble live views, derive internal statuses, and persist them (override-wins).
-fn refresh_internal_statuses(env: &OpEnv, github: &GithubSource) -> Result<(), String> {
+/// What a status refresh needs from the stored queue before it reads GitHub: the queue, the directory
+/// holding the spawn-request markers of a node not yet started (the owning session's), and the
+/// project's default branch.
+pub(super) struct RefreshInputs {
+    pub(super) stack: WorkQueue,
+    pub(super) planner_dir: PathBuf,
+    pub(super) default_branch: String,
+}
+
+pub(super) fn refresh_inputs(env: &OpEnv, github: &GithubSource) -> Result<RefreshInputs, String> {
     let record = env.record()?;
-    let gh = github.client()?;
-    let default = github.default_branch()?;
+    let default_branch = github.default_branch()?;
     // The spawn-request markers of a node not yet started live in the session that owns the queue.
     let planner_dir = unified_session_dir_path(&env.sessions_base, record.owner_session_id());
-    let views = assemble_views(
-        &planner_dir,
-        &env.sessions_base,
-        &record.stack,
-        &*gh,
-        &default,
-    )
-    .map_err(|e| format!("assemble views: {e}"))?;
-    let derived = derive_internal_status(&views, &default);
+    Ok(RefreshInputs {
+        stack: record.stack,
+        planner_dir,
+        default_branch,
+    })
+}
+
+/// Derive internal statuses from the assembled `views` and persist them (override-wins).
+pub(super) fn persist_derived_statuses(
+    env: &OpEnv,
+    views: &[tddy_work_queue::assess::NodeView],
+    default_branch: &str,
+) -> Result<(), String> {
+    let derived = derive_internal_status(views, default_branch);
     env.home()?
         .update_stack(|stack| {
             for (node_id, derived) in &derived {
