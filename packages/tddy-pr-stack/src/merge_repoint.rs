@@ -1,62 +1,21 @@
-//! Bridges plan-pr-stack output into an orchestrate-pr-stack session.
-//!
-//! After a `plan-pr-stack` session completes and writes `stack-plan.yaml`, the operator
-//! creates an `orchestrate-pr-stack` session. On the first `assess` tick the orchestrator
-//! calls [`seed_orchestrator_stack_from_plan`] lazily: if the stack is absent but
-//! `stack-plan.yaml` exists in the session dir, this function reads, validates, and persists
-//! the plan as `Stack` nodes on the orchestrator changeset.
+//! Merge and repoint execution for a stack's planned PRs: the journalled merge of one node, and the
+//! rebase and PR-base patch of each dependent.
 
 use std::path::Path;
 
 use tddy_core::WorkflowError;
+use tddy_github::pr_api::GithubPrApi;
 
-use crate::plan_pr_stack::StackPlanOutput;
-
-/// Moved to [`tddy_pr_stack::pr_insight`] with the PR-inspection reads that need it; kept at this
-/// path so existing callers keep working.
-pub use tddy_pr_stack::pr_insight::pr_number_from_status_url;
-
-/// Seed the orchestrator's stack from a completed `StackPlanOutput`.
-///
-/// Reads the plan (passed directly — callers read `stack-plan.yaml` and parse it), validates
-/// it, converts to `StackNode`s, and atomically persists the `Stack` on the orchestrator.
-/// No-ops if the plan is empty; returns `Err` on validation failure or write failure.
-pub fn seed_orchestrator_stack_from_plan(
-    orchestrator_session_dir: &Path,
-    plan: &StackPlanOutput,
-) -> Result<(), WorkflowError> {
-    if plan.prs.is_empty() {
-        return Ok(());
-    }
-    // Validate before touching disk.
-    crate::plan_pr_stack::validate_stack_plan(plan).map_err(|e| {
-        WorkflowError::ChangesetInvalid(format!("seed_orchestrator_stack_from_plan: {e}"))
-    })?;
-
-    let nodes = crate::plan_pr_stack::planned_prs_into_stack_nodes(&plan.prs);
-    tddy_core::changeset::update_stack_atomic(orchestrator_session_dir, |stack| {
-        crate::pr_stack::assign_missing_display_order(stack);
-        if stack.nodes.is_empty() {
-            stack.version = plan.version;
-            stack.nodes = nodes.clone();
-        }
-        // Idempotent: if nodes already populated, don't overwrite.
-    })
-}
+use crate::pr_insight::pr_number_from_status_url;
 
 /// Execute a single stack-node merge: write journal, call GithubPrApi::merge_pr, mark node merged.
-///
-/// This is the core logic of `MergeTask::run`, extracted for direct testability without
-/// constructing a `Context`.
 pub fn execute_stack_merge(
     orchestrator_session_dir: &Path,
     node_id: &str,
     pr_number: u64,
-    gh: &dyn crate::orchestrate_pr_stack::github::GithubPrApi,
+    gh: &dyn GithubPrApi,
 ) -> Result<String, WorkflowError> {
-    use crate::orchestrate_pr_stack::transient::{
-        write_stack_op_journal, MergePhase, StackOpJournal,
-    };
+    use crate::op_journal::{write_stack_op_journal, MergePhase, StackOpJournal};
     use tddy_core::changeset::{update_stack_atomic, GithubPrStatus};
 
     // 1. Write journal with Planned phase so crash recovery can resume.
@@ -103,23 +62,6 @@ pub fn execute_stack_merge(
     Ok(sha)
 }
 
-/// Whether [`execute_stack_repoint`] over `dependents` can reach GitHub: some dependent owns a
-/// branch, so there is a PR to re-target. A dependent that is not in the stack, or owns no branch,
-/// is skipped by the repoint before any GitHub call.
-pub fn repoint_reaches_github(
-    orchestrator_session_dir: &Path,
-    dependents: &[String],
-) -> Result<bool, WorkflowError> {
-    let stack =
-        tddy_core::changeset::read_session_stack(orchestrator_session_dir)?.unwrap_or_default();
-    Ok(dependents.iter().any(|dependent| {
-        stack
-            .nodes
-            .iter()
-            .any(|node| &node.node_id == dependent && node.branch.is_some())
-    }))
-}
-
 /// Repoint all dependents of a merged node: rebase+force-push each branch, patch GitHub PR base.
 ///
 /// Advances the journal through `RepointingDependent { idx }` phases, deletes it on completion.
@@ -130,10 +72,10 @@ pub fn execute_stack_repoint(
     merged_node_id: &str,
     dependents: &[String],
     default_branch: &str,
-    gh: &dyn crate::orchestrate_pr_stack::github::GithubPrApi,
+    gh: &dyn GithubPrApi,
 ) -> Result<(), WorkflowError> {
-    use crate::orchestrate_pr_stack::git_ops::{force_push_with_lease, merge_base, rebase_onto};
-    use crate::orchestrate_pr_stack::transient::{
+    use crate::git_ops::{force_push_with_lease, merge_base, rebase_onto};
+    use crate::op_journal::{
         delete_stack_op_journal, write_stack_op_journal, MergePhase, StackOpJournal,
     };
     use tddy_core::changeset::{read_session_stack, update_stack_atomic, GithubPrStatus};

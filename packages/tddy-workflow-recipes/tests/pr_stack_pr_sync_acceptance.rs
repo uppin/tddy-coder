@@ -17,7 +17,7 @@
 mod common;
 
 use common::{a_planned_node, an_insight_github, an_open_node, assert_rejected, write_stack};
-use tddy_workflow_recipes::pr_stack::sync_node_to_github_pr;
+use tddy_pr_stack::stack_ops::sync_node_to_github_pr;
 
 const BRANCH_N1: &str = "feature/stack/n1";
 const PR_OF_N1: u64 = 42;

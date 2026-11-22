@@ -345,8 +345,6 @@ fn telegram_spawn_options<'a>(
         recipe: inputs.recipe.as_deref(),
         stack_parent: None,
         stack_node_id: None,
-        // A Telegram spawn names no PR-stack base session: it has no orchestrator to seed.
-        stack_seed_base_session: None,
         model: None,
         // No host-session socket: the socket answers a session's `github_token` and
         // `spawn_conversation` from a registration the daemon's own session host makes at start

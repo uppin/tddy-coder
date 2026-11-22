@@ -83,7 +83,7 @@ pub(crate) fn worktree_leg(
 /// Untracked files are deliberately excluded: git refuses loudly rather than clobbering one, and
 /// counting them would leave the pull control permanently blocked in any worktree an agent works in.
 fn worktree_dirty_paths(worktree: &std::path::Path) -> Vec<String> {
-    tddy_workflow_recipes::orchestrate_pr_stack::worktree_is_clean(worktree).unwrap_or_else(|e| {
+    tddy_pr_stack::git_ops::worktree_is_clean(worktree).unwrap_or_else(|e| {
         log::warn!(
             "QueryBranch: could not read the state of the worktree at {}: {e}",
             worktree.display()

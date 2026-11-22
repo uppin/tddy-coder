@@ -20,11 +20,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tddy_pr_stack::docs::{NODE_CHANGESET_BASENAME, NODE_DOCS_SUBDIR, NODE_PRD_BASENAME};
 use tddy_rpc::Status;
 use tddy_workflow::{session_artifacts_root, SESSION_ATTACHMENTS_SUBDIR};
-use tddy_workflow_recipes::pr_stack::{
-    NODE_CHANGESET_BASENAME, NODE_DOCS_SUBDIR, NODE_PRD_BASENAME,
-};
 use tddy_workflow_recipes::{workflow_recipe_and_manifest_from_cli_name, SessionArtifactManifest};
 
 use crate::session_attachments::list_session_attachments;
@@ -307,14 +305,6 @@ mod tests {
         artifacts
     }
 
-    /// Finds the context doc with the given manifest `key`, failing with a clear message otherwise.
-    fn find_doc<'a>(docs: &'a [ContextDoc], key: &str) -> &'a ContextDoc {
-        docs.iter().find(|d| d.key == key).unwrap_or_else(|| {
-            let keys: Vec<&str> = docs.iter().map(|d| d.key.as_str()).collect();
-            panic!("expected a context doc with key {key:?}, got keys {keys:?}");
-        })
-    }
-
     /// Attaches a document to the session through the production store.
     fn attach_document(session_dir: &Path, basename: &str, contents: &str) {
         let sources = tempfile::tempdir().expect("create sources dir");
@@ -349,7 +339,6 @@ mod tests {
         fn assert_basename(&self, expected: &str) -> &Self;
         fn assert_path(&self, expected: &Path) -> &Self;
         fn assert_exists(&self, expected: bool) -> &Self;
-        fn assert_has_description(&self) -> &Self;
         fn assert_description(&self, expected: &str) -> &Self;
         fn assert_kind(&self, expected: ContextDocKind) -> &Self;
         fn assert_size_bytes(&self, expected: u64) -> &Self;
@@ -374,17 +363,6 @@ mod tests {
             assert_eq!(
                 self.exists, expected,
                 "context doc {:?} on-disk existence",
-                self.key
-            );
-            self
-        }
-
-        // Exact wording is a copy decision finalized in green; at this layer the contract is only
-        // that every listed doc carries a non-empty human description.
-        fn assert_has_description(&self) -> &Self {
-            assert!(
-                !self.description.trim().is_empty(),
-                "context doc {:?} must carry a non-empty description",
                 self.key
             );
             self
@@ -432,44 +410,6 @@ mod tests {
     // ---- tests ----------------------------------------------------------------------------
 
     #[test]
-    fn context_docs_for_a_pr_stack_session_lists_manifest_docs_with_descriptions_and_absolute_paths(
-    ) {
-        // Given — a pr-stack session whose artifacts/ holds the exploration doc and the stack-plan
-        // YAML, but not the rendered pr-stack-plan.md
-        let session = tempfile::tempdir().unwrap();
-        let artifacts = artifacts_dir_in(session.path());
-        fs::write(
-            artifacts.join("exploration.md"),
-            "# Exploration\n- src/lib.rs:1\n",
-        )
-        .unwrap();
-        fs::write(artifacts.join("stack-plan.yaml"), "version: 1\nnodes: []\n").unwrap();
-
-        // When — enumerating the recipe's context docs for that session
-        let docs = context_docs_for_session("pr-stack", session.path());
-
-        // Then — each manifest doc is listed with its basename, a human description, an absolute
-        // artifacts/ path, and an existence flag reflecting what is on disk
-        find_doc(&docs, "exploration")
-            .assert_basename("exploration.md")
-            .assert_path(&artifacts.join("exploration.md"))
-            .assert_exists(true)
-            .assert_has_description();
-
-        find_doc(&docs, "stack_plan")
-            .assert_basename("stack-plan.yaml")
-            .assert_path(&artifacts.join("stack-plan.yaml"))
-            .assert_exists(true)
-            .assert_has_description();
-
-        find_doc(&docs, "stack_plan_md")
-            .assert_basename("pr-stack-plan.md")
-            .assert_path(&artifacts.join("pr-stack-plan.md"))
-            .assert_exists(false)
-            .assert_has_description();
-    }
-
-    #[test]
     fn reading_an_allowlisted_context_doc_returns_its_utf8_contents() {
         // Given — the exploration doc on disk under artifacts/
         let session = tempfile::tempdir().unwrap();
@@ -478,7 +418,7 @@ mod tests {
         fs::write(artifacts.join("exploration.md"), golden).unwrap();
 
         // When — reading it by its allowlisted basename
-        let content = read_session_context_doc_utf8("pr-stack", session.path(), "exploration.md")
+        let content = read_session_context_doc_utf8("bugfix", session.path(), "exploration.md")
             .expect("an allowlisted context doc must be readable");
 
         // Then — the exact bytes come back
@@ -493,7 +433,7 @@ mod tests {
         fs::write(artifacts.join(".env"), "SECRET=x\n").unwrap();
 
         // When — attempting to read it through the context-doc surface
-        let result = read_session_context_doc_utf8("pr-stack", session.path(), ".env");
+        let result = read_session_context_doc_utf8("bugfix", session.path(), ".env");
 
         // Then — the read is refused
         assert_permission_denied(result);
@@ -501,12 +441,12 @@ mod tests {
 
     #[test]
     fn reading_a_traversal_path_is_permission_denied() {
-        // Given — a pr-stack session with an artifacts/ dir
+        // Given — a bugfix session with an artifacts/ dir
         let session = tempfile::tempdir().unwrap();
         artifacts_dir_in(session.path());
 
         // When — a traversal basename tries to escape the artifacts root
-        let result = read_session_context_doc_utf8("pr-stack", session.path(), "../../secret");
+        let result = read_session_context_doc_utf8("bugfix", session.path(), "../../secret");
 
         // Then — the read is refused
         assert_permission_denied(result);
@@ -516,22 +456,19 @@ mod tests {
 
     #[test]
     fn context_docs_list_the_manifest_docs_first_then_the_attachments() {
-        // Given — a pr-stack session with one attached document
+        // Given — a bugfix session with one attached document
         let session = tempfile::tempdir().unwrap();
         artifacts_dir_in(session.path());
         attach_document(session.path(), "notes.md", "meeting notes\n");
 
         // When
-        let docs = context_docs_for_session("pr-stack", session.path());
+        let docs = context_docs_for_session("bugfix", session.path());
 
         // Then — the recipe's manifest docs keep their order and precede the attachment
         assert_eq!(
             kinds_and_basenames(&docs),
             vec![
-                (ContextDocKind::Manifest, "stack-plan.yaml".to_string()),
-                (ContextDocKind::Manifest, "pr-stack-plan.md".to_string()),
-                (ContextDocKind::Manifest, "stack-status.md".to_string()),
-                (ContextDocKind::Manifest, "stack-status.json".to_string()),
+                (ContextDocKind::Manifest, "fix-plan.md".to_string()),
                 (ContextDocKind::Manifest, "exploration.md".to_string()),
                 (ContextDocKind::Attachment, "notes.md".to_string()),
             ]
@@ -540,13 +477,13 @@ mod tests {
 
     #[test]
     fn an_attachment_context_doc_carries_its_basename_as_key_with_a_size_and_a_description() {
-        // Given — a pr-stack session with one attached document
+        // Given — a bugfix session with one attached document
         let session = tempfile::tempdir().unwrap();
         artifacts_dir_in(session.path());
         attach_document(session.path(), "notes.md", "meeting notes\n");
 
         // When
-        let docs = context_docs_for_session("pr-stack", session.path());
+        let docs = context_docs_for_session("bugfix", session.path());
 
         // Then — the attachment is keyed by its basename and describes a file that is on disk
         find_doc_of_kind(&docs, ContextDocKind::Attachment, "notes.md")
@@ -594,13 +531,13 @@ mod tests {
 
     #[test]
     fn a_present_manifest_context_doc_reports_its_on_disk_size() {
-        // Given — a pr-stack session whose artifacts/ holds exploration.md
+        // Given — a bugfix session whose artifacts/ holds exploration.md
         let session = tempfile::tempdir().unwrap();
         let artifacts = artifacts_dir_in(session.path());
         fs::write(artifacts.join("exploration.md"), "# Exploration\n").unwrap();
 
         // When
-        let docs = context_docs_for_session("pr-stack", session.path());
+        let docs = context_docs_for_session("bugfix", session.path());
 
         // Then — the present doc reports its byte size
         find_doc_of_kind(&docs, ContextDocKind::Manifest, "exploration")
@@ -610,28 +547,28 @@ mod tests {
 
     #[test]
     fn an_absent_manifest_context_doc_reports_zero_size_bytes() {
-        // Given — a pr-stack session whose artifacts/ does not hold stack-plan.yaml
+        // Given — a bugfix session whose artifacts/ does not hold fix-plan.md
         let session = tempfile::tempdir().unwrap();
         artifacts_dir_in(session.path());
 
         // When
-        let docs = context_docs_for_session("pr-stack", session.path());
+        let docs = context_docs_for_session("bugfix", session.path());
 
         // Then — the missing doc reports zero size
-        find_doc_of_kind(&docs, ContextDocKind::Manifest, "stack_plan")
+        find_doc_of_kind(&docs, ContextDocKind::Manifest, "fix_plan")
             .assert_exists(false)
             .assert_size_bytes(0);
     }
 
     #[test]
     fn reading_an_attachment_basename_through_the_context_doc_reader_is_permission_denied() {
-        // Given — a pr-stack session with an attached document
+        // Given — a bugfix session with an attached document
         let session = tempfile::tempdir().unwrap();
         artifacts_dir_in(session.path());
         attach_document(session.path(), "notes.md", "meeting notes\n");
 
         // When — the manifest-only reader is asked for it
-        let result = read_session_context_doc_utf8("pr-stack", session.path(), "notes.md");
+        let result = read_session_context_doc_utf8("bugfix", session.path(), "notes.md");
 
         // Then — refused: attachments may be binary, so they are listed but not read here
         assert_permission_denied(result);

@@ -15,7 +15,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
-use tddy_workflow_recipes::orchestrate_pr_stack::github::{
+use tddy_github::pr_api::{
     CheckRun, GithubPrApi, GithubPrInsightApi, PrDetail, PrFile, PrIssueComment, PrLookupOutcome,
     PrRef, PrReview, PrReviewComment, PrSearchHit, PrSearchQuery, PrState, PrView,
 };

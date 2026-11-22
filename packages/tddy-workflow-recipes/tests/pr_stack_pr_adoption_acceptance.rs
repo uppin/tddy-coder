@@ -20,8 +20,8 @@ use common::{
     write_stack, REPO,
 };
 use rstest::rstest;
-use tddy_workflow_recipes::orchestrate_pr_stack::github::PrState;
-use tddy_workflow_recipes::pr_stack::adopt_pr_into_stack;
+use tddy_github::pr_api::PrState;
+use tddy_pr_stack::stack_ops::adopt_pr_into_stack;
 
 const ADOPTED_BRANCH: &str = "feature/written-elsewhere";
 const BASE: &str = "master";
@@ -63,12 +63,10 @@ fn an_adopted_node_records_the_prs_live_state_as_its_phase(
     let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![]);
-    let gh = an_insight_github().with_pr(
-        tddy_workflow_recipes::orchestrate_pr_stack::github::PrDetail {
-            state: live_state,
-            ..a_pr(PR, ADOPTED_BRANCH, BASE)
-        },
-    );
+    let gh = an_insight_github().with_pr(tddy_github::pr_api::PrDetail {
+        state: live_state,
+        ..a_pr(PR, ADOPTED_BRANCH, BASE)
+    });
 
     // When
     let node = adopt_pr_into_stack(dir, PR, vec![], &gh).expect("adopting should succeed");

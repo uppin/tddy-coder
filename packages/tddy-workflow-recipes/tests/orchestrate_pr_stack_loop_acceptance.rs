@@ -2,7 +2,7 @@
 //! node when ready; returns Wait in operator-gated mode.
 
 use tddy_core::workflow::ids::WorkflowState;
-use tddy_workflow_recipes::orchestrate_pr_stack::{
+use tddy_pr_stack::assess::{
     decide_next_action, ChildPhase, NodeView, OrchestratorAction, PrLiveStatus,
 };
 

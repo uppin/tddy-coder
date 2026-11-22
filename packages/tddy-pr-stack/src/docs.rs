@@ -27,6 +27,10 @@ pub const NODE_PRD_BASENAME: &str = "PRD.md";
 /// The technical document: responsibility, boundaries, dependencies, draft-PR contract.
 pub const NODE_CHANGESET_BASENAME: &str = "changeset.md";
 
+/// The human-readable rendering of a stack plan. A persisted artifact name, so it is renamed only
+/// with a migration.
+pub const PR_STACK_PLAN_MD_BASENAME: &str = "pr-stack-plan.md";
+
 /// Sections every per-PR changeset must carry.
 ///
 /// `Dependencies` is what prevents duplicate development — it names, per parent, what that PR

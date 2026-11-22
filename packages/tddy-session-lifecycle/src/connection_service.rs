@@ -303,14 +303,13 @@ pub use tddy_session_split::{
 };
 
 pub use tddy_agent_launch::{
-    child_spawn_handler, claude_cli_spawn, conversation_spawn, conversation_spawn_handler,
-    conversation_worktree_op, family_proto_bridge, hooks_and_urls, host_session_socket,
-    jail_relaunch, launch_ports, managed_launch, session_acting_identity,
-    session_coordinate_handlers, session_worktree_observer, stack_child_spawn, stack_parent,
-    stack_seed_validation, svc_ensure_project_available_for_start, svc_index_workspace_worktree,
-    svc_pr_status_for_caller, svc_relaunch_sandboxed_runner, svc_resume_claude_cli_session,
-    svc_start_claude_cli_session, svc_start_sandboxed_claude_cli_session, svc_start_session_core,
-    worktree_source,
+    claude_cli_spawn, conversation_spawn, conversation_spawn_handler, conversation_worktree_op,
+    family_proto_bridge, hooks_and_urls, host_session_socket, jail_relaunch, launch_ports,
+    managed_launch, session_acting_identity, session_coordinate_handlers,
+    session_worktree_observer, stack_parent, svc_ensure_project_available_for_start,
+    svc_index_workspace_worktree, svc_pr_status_for_caller, svc_relaunch_sandboxed_runner,
+    svc_resume_claude_cli_session, svc_start_claude_cli_session,
+    svc_start_sandboxed_claude_cli_session, svc_start_session_core, worktree_source,
 };
 
 mod svc_launch_delegators;
@@ -336,9 +335,6 @@ pub use tddy_session_agents::coding_agent::{
 pub use svc_resolve_listed_worktree::resolvable_agent_defs;
 
 mod terminal_bridge_impl;
-
-#[cfg(test)]
-pub(crate) use stack_child_spawn::*;
 
 /// The deadline a split session's own context read is bounded by.
 ///
@@ -465,8 +461,6 @@ mod daemon_rpc_handler;
 mod svc_demo_vm_ports;
 pub use crate::connection_service::demo_vm_service::DemoVmServiceImpl;
 
-pub use stack_seed_validation::*;
-
 #[cfg(test)]
 mod signal_session_unit_tests;
 
@@ -550,12 +544,12 @@ pub use tddy_daemon_kernel::daemon_hook_urls;
 /// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
-/// A conversation or pr-stack child runs its parent session's agent (`#agent-tools 17/19`).
+/// A conversation child runs its parent session's agent (`#agent-tools 17/19`).
 #[cfg(test)]
 mod stack_child_spawn_agent_tests;
-/// The spawn *wiring*, both ways in: a child of a planned PR must come up holding the
-/// orchestrator's documents and knowing to read its boundaries — whether the orchestrator agent
-/// spawned it through `pr_spawn_child` or the operator started it from the Start-session dialog.
+/// The spawn *wiring*: a child of a planned PR must come up holding the orchestrator's documents
+/// and knowing to read its boundaries when the operator starts it from the Start-session dialog,
+/// and a conversation the agent spawns must commit as the account its orchestrator's owner holds.
 ///
 /// These drive real spawns. A git worktree is cut, the daemon's own attachment materializer runs,
 /// and a stub standing in for `claude` records the command line it was handed — so deleting the

@@ -6,9 +6,8 @@
 
 use std::collections::HashMap;
 
-use tddy_workflow_recipes::orchestrate_pr_stack::{
-    derive_internal_status, ChildPhase, NodeView, PrLiveStatus,
-};
+use tddy_pr_stack::assess::{ChildPhase, NodeView, PrLiveStatus};
+use tddy_pr_stack::internal_status::derive_internal_status;
 
 fn a_node_view(node_id: &str, branch: &str, parents: &[&str], pr: PrLiveStatus) -> NodeView {
     NodeView {

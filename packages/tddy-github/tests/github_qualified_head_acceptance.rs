@@ -12,7 +12,7 @@
 //!
 //! PRD: docs/ft/coder/pr-stack-live-status.md (C3, D9).
 
-use tddy_workflow_recipes::orchestrate_pr_stack::github::qualified_head;
+use tddy_github::pr_api::qualified_head;
 
 #[test]
 fn qualifies_a_bare_branch_with_the_repository_owner() {

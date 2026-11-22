@@ -630,11 +630,6 @@ pub struct Args {
     /// Defaults to stack_parent when omitted.
     /// Sets `previous_session_id`. TODO: wire worktree integration base via spawn_chain_child_worktree.
     pub stack_base: Option<String>,
-
-    /// Existing session whose branch seeds this `pr-stack` orchestrator's stack as its single root
-    /// node, entering the `orchestrate` operator loop instead of the planning phase. A failed seed
-    /// fails session start — see [`seed_stack_and_enter_orchestrate`].
-    pub stack_seed_base_session: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -810,8 +805,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`, `pr-stack` (legacy aliases `plan-pr-stack`, `orchestrate-pr-stack` still accepted). Must match [`WorkflowRecipe::name`].
-    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr", "pr-stack", "plan-pr-stack", "orchestrate-pr-stack"])]
+    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`. Must match [`WorkflowRecipe::name`].
+    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr"])]
     pub recipe: Option<String>,
 
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
@@ -871,11 +866,6 @@ pub struct CoderArgs {
     /// Sets `previous_session_id`. TODO: wire worktree integration base via spawn_chain_child_worktree.
     #[arg(long)]
     pub stack_base: Option<String>,
-
-    /// Existing session whose branch seeds this `pr-stack` orchestrator's stack as its single root
-    /// node. The session then starts in the `orchestrate` operator loop; a failed seed fails start.
-    #[arg(long, value_name = "id")]
-    pub stack_seed_base_session: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -1021,8 +1011,8 @@ pub struct DemoArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`, `pr-stack` (legacy aliases `plan-pr-stack`, `orchestrate-pr-stack` still accepted).
-    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr", "pr-stack", "plan-pr-stack", "orchestrate-pr-stack"])]
+    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`.
+    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr"])]
     pub recipe: Option<String>,
 }
 
@@ -1117,7 +1107,6 @@ impl From<CoderArgs> for Args {
             stack_parent: a.stack_parent,
             stack_node_id: a.stack_node_id,
             stack_base: a.stack_base,
-            stack_seed_base_session: a.stack_seed_base_session,
         }
     }
 }
@@ -1176,7 +1165,6 @@ impl From<DemoArgs> for Args {
             stack_parent: None,
             stack_node_id: None,
             stack_base: None,
-            stack_seed_base_session: None,
         }
     }
 }
@@ -1376,9 +1364,6 @@ pub fn run_with_args(
     if let Some(ref a) = args.agent {
         verify_tddy_tools_available(a)?;
     }
-    // Before any mode starts its workflow: a seeded orchestrator must own its root node and its
-    // `StackPlanned` state before the start goal is resolved from the changeset.
-    seed_pr_stack_from_base_session_if_requested(args)?;
     if args.daemon {
         return run_daemon(args, shutdown, host);
     }
@@ -1668,114 +1653,6 @@ fn spawn_session_catalog_populate(
             let _ = status.wait_for(tddy_task::TaskStatus::is_terminal).await;
         });
     });
-}
-
-/// Seed this orchestrator's stack from an existing session's branch and enter the `orchestrate`
-/// operator loop.
-///
-/// The session that owns a `changeset.yaml` is the process that writes it, which is why this runs
-/// here rather than in the daemon that spawned it.
-///
-/// A failure writes nothing: the seed refuses before touching the changeset, and the state update
-/// only follows a seed that succeeded. There is no unseeded fallback — an orchestrator with an empty
-/// stack is a different session from the one the operator asked for, and it would come up looking
-/// successful.
-///
-/// The state recorded is [`tddy_workflow_recipes::pr_stack::STATE_STACK_PLANNED`], so the start goal
-/// resolves to `orchestrate` rather than the planning phase. Not a preference: the seeded node owns a
-/// branch from the moment it exists, and `reseed_stack_from_plan_if_unspawned` refuses a plan once any
-/// node owns a branch or a session — so a seeded orchestrator that ran `write-stack-plan` would have
-/// its plan **rejected**. The state is written here, and not by the seeding function, because the
-/// recipes crate owns the stack while the coder owns its workflow state.
-pub fn seed_stack_and_enter_orchestrate(
-    session_dir: &Path,
-    sessions_root: &Path,
-    base_session_id: &str,
-) -> Result<(), String> {
-    const OP: &str = "seed_stack_and_enter_orchestrate";
-
-    tddy_workflow_recipes::pr_stack::seed_stack_with_base_session(
-        session_dir,
-        sessions_root,
-        base_session_id,
-    )?;
-
-    // Re-read: the seed wrote the stack itself, so a snapshot taken before it would write back a
-    // changeset that never held the node just appended.
-    let mut cs = read_changeset(session_dir)
-        .map_err(|e| format!("{OP}: failed to re-read the seeded changeset: {e}"))?;
-    // A seeded node is bound to a session whose work already exists and may be under way, so the
-    // docs pass does not apply to it: a retroactive PRD documents a decision nobody is about to
-    // make. Recording `StackDocsWritten` rather than `StackPlanned` is what keeps a seeded
-    // orchestrator coming up straight in `orchestrate`, now that `StackPlanned` routes to
-    // `write-stack-docs`.
-    tddy_core::changeset::update_state(
-        &mut cs,
-        tddy_core::workflow::ids::WorkflowState::new(
-            tddy_workflow_recipes::pr_stack::STATE_STACK_DOCS_WRITTEN,
-        ),
-    );
-    tddy_core::changeset::write_changeset_atomic(session_dir, &cs)
-        .map_err(|e| format!("{OP}: failed to record the workflow state: {e}"))
-}
-
-/// Seed the stack when `--stack-seed-base-session` was passed, before the workflow resolves its
-/// start goal.
-///
-/// The flag is only meaningful for the `pr-stack` orchestrator — no other recipe owns a stack — so
-/// naming a base session alongside any other recipe is **refused** rather than ignored: dropping it
-/// would start a session that looks seeded and is not.
-///
-/// An absent or blank flag is the pre-existing path and writes nothing at all: a session that was not
-/// asked to seed must reach its recipe's own start goal (`analyze-stack`) with no changeset touched.
-/// Blank counts as absent because the daemon fills the flag from a proto3 string field.
-///
-/// A **refused** seed writes nothing either, which is why the base-session preconditions
-/// ([`tddy_workflow_recipes::pr_stack::check_stack_seed_base`] and `check_stack_seed_not_self`) are
-/// checked before `ensure_changeset_recipe` creates the changeset a tool session does not have yet: a
-/// session directory left holding `{recipe: pr-stack, state: Init}` by a refused start resumes as an
-/// ordinary *unseeded* orchestrator.
-pub fn seed_pr_stack_from_base_session_if_requested(args: &Args) -> anyhow::Result<()> {
-    let Some(base_session_id) = args
-        .stack_seed_base_session
-        .as_deref()
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-    else {
-        return Ok(());
-    };
-    let recipe = recipe_arc_for_args(args)?;
-    if recipe.name() != "pr-stack" {
-        anyhow::bail!(
-            "--stack-seed-base-session is only supported for the `pr-stack` recipe, but this \
-             session runs `{}`",
-            recipe.name()
-        );
-    }
-    let session_dir = args
-        .session_dir
-        .as_ref()
-        .context("session directory for --stack-seed-base-session")?;
-    let sessions_root = resolve_tddy_data_dir(args);
-    // Every precondition is checked before the changeset is created, not after. `ensure_changeset_recipe`
-    // below *writes* `changeset.yaml` when the session has none, and a refused seed that left one
-    // behind would resume as an ordinary **unseeded** orchestrator — a session that looks like the one
-    // the operator asked for and is not. The writer checks the same rules again (it is reachable
-    // without this gate); what only this order can guarantee is that a refusal writes nothing.
-    tddy_workflow_recipes::pr_stack::check_stack_seed_not_self(
-        session_dir,
-        &sessions_root,
-        base_session_id,
-    )
-    .map_err(|reason| anyhow::anyhow!("{reason}"))?;
-    tddy_workflow_recipes::pr_stack::check_stack_seed_base(&sessions_root, base_session_id)
-        .map_err(|refusal| anyhow::anyhow!("{refusal}"))?;
-    // The stack lives in `changeset.yaml`, which a tool session's own workflow would otherwise not
-    // create until its first goal runs.
-    tddy_core::changeset::ensure_changeset_recipe(session_dir, recipe.name())
-        .map_err(|e| anyhow::anyhow!("prepare changeset for stack seeding: {e}"))?;
-    seed_stack_and_enter_orchestrate(session_dir, &sessions_root, base_session_id)
-        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> anyhow::Result<()> {
@@ -4237,7 +4114,6 @@ mod resume_session_config_tests {
             stack_parent: None,
             stack_node_id: None,
             stack_base: None,
-            stack_seed_base_session: None,
         };
 
         merge_session_coder_config_for_resume(&mut args, &tmp).expect("merge");
@@ -4312,7 +4188,6 @@ mod resume_session_identity_tests {
             stack_parent: None,
             stack_node_id: None,
             stack_base: None,
-            stack_seed_base_session: None,
         };
 
         assign_default_session_id(&mut args);
@@ -4388,7 +4263,6 @@ mod session_dir_sync_tests {
             stack_parent: None,
             stack_node_id: None,
             stack_base: None,
-            stack_seed_base_session: None,
         };
 
         sync_session_dir_from_args(&mut args, &tmp).expect("apply");
@@ -4480,7 +4354,6 @@ mod changeset_agent_resume_tests {
             stack_parent: None,
             stack_node_id: None,
             stack_base: None,
-            stack_seed_base_session: None,
         };
 
         apply_agent_from_changeset_if_needed(&mut args).expect("apply");
@@ -4589,7 +4462,6 @@ mod post_tui_workflow_exit_tests {
             stack_parent: None,
             stack_node_id: None,
             stack_base: None,
-            stack_seed_base_session: None,
         }
     }
 
@@ -4805,32 +4677,8 @@ mod recipe_value_parser_tests {
     use crate::run::{CoderArgs, DemoArgs};
     use clap::Parser;
 
-    /// `recipe_value_parser_accepts_pr_stack_recipes` — `CoderArgs` and `DemoArgs` must accept
-    /// `plan-pr-stack` and `orchestrate-pr-stack` as valid `--recipe` values.
-    ///
-    /// Currently the value_parser on both structs lists only 7 values and omits both PR-stack
-    /// recipe names, so this test fails until the parser lists are expanded (Layer 3 green phase).
-    #[test]
-    fn recipe_value_parser_accepts_pr_stack_recipes() {
-        for recipe in ["plan-pr-stack", "orchestrate-pr-stack"] {
-            let result = CoderArgs::try_parse_from(["tddy-coder", "--recipe", recipe]);
-            assert!(
-                result.is_ok(),
-                "CoderArgs should accept --recipe {recipe}; got: {:?}",
-                result.err()
-            );
-
-            let result = DemoArgs::try_parse_from(["tddy-demo", "--recipe", recipe]);
-            assert!(
-                result.is_ok(),
-                "DemoArgs should accept --recipe {recipe}; got: {:?}",
-                result.err()
-            );
-        }
-    }
-
     /// `#workqueue` 1/14: the `pr-stack` recipe and its aliases are removed, so `--recipe` refuses
-    /// every one of their names (this supersedes the acceptance test above, which `/green` deletes).
+    /// every one of their names.
     #[test]
     fn the_recipe_flag_offers_no_stack_recipe() {
         for recipe in ["pr-stack", "plan-pr-stack", "orchestrate-pr-stack"] {

@@ -402,7 +402,6 @@ github:
             stack_parent: None,
             stack_node_id: None,
             stack_base: None,
-            stack_seed_base_session: None,
             tddy_data_dir: Some(cli_base.clone()),
         };
         // When
@@ -466,7 +465,6 @@ github:
             stack_parent: None,
             stack_node_id: None,
             stack_base: None,
-            stack_seed_base_session: None,
             tddy_data_dir: None,
         };
         // When
@@ -533,7 +531,6 @@ github:
             stack_parent: None,
             stack_node_id: None,
             stack_base: None,
-            stack_seed_base_session: None,
             tddy_data_dir: None,
         };
         // When
@@ -597,7 +594,6 @@ github:
             stack_parent: None,
             stack_node_id: None,
             stack_base: None,
-            stack_seed_base_session: None,
             tddy_data_dir: None,
         };
         // When
@@ -728,7 +724,6 @@ log:
             stack_parent: None,
             stack_node_id: None,
             stack_base: None,
-            stack_seed_base_session: None,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);

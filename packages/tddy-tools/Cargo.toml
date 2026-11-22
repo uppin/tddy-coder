@@ -71,6 +71,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport", "
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [dev-dependencies]
+# `github_credential`'s test-only client: the GitHub REST client a token is asked for on behalf of.
+tddy-github = { path = "../tddy-github" }
 # `stack_fixtures`: the sessions layout a PR stack lives in.
 tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 # `workspace_exec_tool_names`: the exec vocabulary the router tests walk.

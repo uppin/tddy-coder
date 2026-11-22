@@ -3,8 +3,6 @@ use std::path::Path;
 
 use tddy_core::{write_session_github_source, SessionGithubSource};
 
-use crate::stack_seed_validation::validate_stack_seed_base_session;
-
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_split::service_util;
 
@@ -450,25 +448,6 @@ impl LaunchSessions {
             )
             .await?;
         }
-        Ok(())
-    }
-
-    pub(super) fn validate_stack_seed_against_project(
-        &self,
-        req: &StartSessionRequest,
-        os_user: &str,
-        sessions_base: std::path::PathBuf,
-        project_id: &str,
-    ) -> Result<(), Status> {
-        let (_, project) =
-            service_util::find_registered_project(&self.tddy_data_dir, os_user, project_id)?;
-        validate_stack_seed_base_session(
-            &sessions_base,
-            &req.recipe,
-            &req.pr_stack_base_session_id,
-            Path::new(&project.main_repo_path),
-        )
-        .map_err(tddy_service::to_rpc_status)?;
         Ok(())
     }
 }

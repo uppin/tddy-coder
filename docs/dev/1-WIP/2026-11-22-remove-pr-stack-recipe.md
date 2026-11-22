@@ -1,7 +1,7 @@
 # Changeset: Remove the pr-stack workflow recipe
 
 **Date**: 2026-11-22
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — green phase
 **Type**: Feature (removal)
 **Complexity**: 4 — more than one package (≈20, web and Rust), a proto change (field 31 reserved), code moved between crates under live daemon tools, a test-coverage re-point
 **Stack**: `#workqueue` 1/14 — branch `feature/workqueue/remove-pr-stack-recipe`, base `master`
@@ -255,6 +255,75 @@ Regression guards that must stay green unchanged: the three daemon-rpc stack sui
   screen and is deleted with it (found in pass 2).
 - **Code issues claimed by this PR** (pass 2): `squatting-pr-stack-data-model.md` and
   `misplaced-tests-github-rest-client.md` now carry `**Claimed by:** #1002`.
+
+## Deleted tests and files (green)
+
+Every entry tested a surface this node removes. Tests of a surviving helper were kept, their imports
+repointed, their assertions unchanged.
+
+**Rust — whole files deleted**
+
+- `tddy-workflow-recipes/tests/`: `orchestrate_pr_stack_bridge_acceptance` (the plan→stack seed),
+  `orchestrate_pr_stack_github_on_demand` (the recipe's engine tasks), `plan_pr_stack_acceptance`
+  (the plan goal's parser), `pr_management_actions_acceptance` (the recipe's `pr_actions`),
+  `pr_stack_artifact_paths_acceptance`, `pr_stack_docs_acceptance`, `pr_stack_docs_validation_acceptance`,
+  `pr_stack_free_prompting_acceptance`, `pr_stack_seeding_acceptance`, `pr_stack_store_resume_acceptance`
+  (the recipe's hooks and graph), `pr_stack_base_session_seed_acceptance` (`seed_stack_with_base_session`),
+  `pr_stack_crate_shape` (replaced by `recipe_catalogue_acceptance`)
+- `tddy-coder/tests/pr_stack_seed_start_acceptance.rs` (`--stack-seed-base-session`)
+- `tddy-tools-cli/tests/stack_docs_submit_contract_acceptance.rs` (the `write-stack-docs` goal)
+
+**Rust — tests deleted from files that stay**
+
+- `tddy-workflow-recipes`: `a_planned_pr_from_the_agent_plan_keeps_its_branch_name_as_a_suggestion_only`
+  (`pr_stack_branch_link_acceptance`), `reseeding_an_unspawned_plan_renumbers_from_the_new_plan_order`
+  (`pr_stack_display_order_acceptance`), the three `resolver_*pr_stack*` alias tests in `recipe_resolve.rs`,
+  the two tests in `approval_policy.rs`
+- `tddy-coder` `run.rs`: `recipe_value_parser_accepts_pr_stack_recipes`
+- `tddy-tools-cli` `submit_goal_routing_acceptance`: the three `write-stack-plan` schema cases
+- `tddy-tool-engine/tests/start_options.rs`: the stack parents, stack bases and no-project-base cases;
+  `tddy-daemon-rpc/tests/start_options_acceptance.rs`: `the_sessions_that_can_seed_a_stack_on_this_host_are_offered`
+- `tddy-session-lifecycle`: `tests/pr_stack_base_session_spawn_acceptance.rs` is now `tests/pr_stack_spawn_args.rs`,
+  keeping the `--stack-parent` and `--stack-node-id` cases and dropping every seed case (forwarding, the
+  pre-spawn refusals, the repository checks, the `StartSession` field check); `stack_child_spawn_tests.rs` loses the four
+  `a_child_the_agent_spawned_*` cases; `stack_child_spawn_agent_tests.rs` loses the two `StackChildSpawnHandler` cases (the
+  no-coding-agents refusal is re-pointed at the conversation handler)
+- Moved, not deleted: `github_pr_acceptance`, `github_qualified_head_acceptance` and `pr_status_view_acceptance`
+  now live in `tddy-github/tests/`; the `PR_STACK_SERVICE` value assertion now lives in `tddy-pr-stack/src/rpc.rs`
+
+**Web — specs deleted (behaviour only the removed screen, chat or picker had)**
+
+- `tddy-session-create-web`: `CreateSessionPrStackBaseSessionAcceptance`, `stackParentsParity` (and its
+  `stack-parent-candidates.json` fixture), the `CreateSessionPane` "stack parent picker" suite (6), three re-parenting cases in
+  `CreateSessionStackNodeIdAcceptance` (the form no longer offers a parent picker; the node id still travels with
+  the `stackParent` the caller opens it for), two seed cases in `CreateSessionRequestBuilder`, the `stackBaseSessionCandidates`
+  suite in `stackParents.test.ts`
+- `tddy-session-web`: `PrStackChatAcceptance`, `PrStackChatElicitationAcceptance`, `PrStackChatFeedbackAcceptance`,
+  `PrStackChatSilentFailureAcceptance`, `PrStackChatStreamingAcceptance`, `PrStackChatSystemMessagesAcceptance`,
+  `PrStackChatWorkflowErrorAcceptance` (the chat pane), `PrStackInspectorAcceptance`, `PrStackViewRoutingAcceptance`,
+  `PrStackPlannedPrPanelAcceptance` (the panel toggles), `PrStackStartSessionDocAttachmentsAcceptance` (the screen's dialog
+  attached documents; `ProjectStackView`'s start dialog does not), the `pr-stack` case in `WorkflowChatViewRoutingAcceptance`
+  and `WorktreeCodePaneAcceptance`, two dormant-session cases in `InactiveSessionActivitiesAcceptance`, one `attachClaim` case,
+  and the orchestrator case in `SessionsDrawerProjectStacksAcceptance` (the stack view case is untouched)
+- `tddy-prstack-web`: `PrStackChatConnectingOverlayAcceptance`, `PrStackChatDirectMountAcceptance`,
+  `PrStackScreenDirectMountAcceptance`, `prStackOrchestrators.test.ts`
+- `tddy-web`: `PrStackChatNoRoomAcceptance`, `PrStackChatTokenFailureAcceptance`, `PrStackPresenterRoomAcceptance`,
+  e2e `pr-stack-chat-response.cy.ts`, its `startDaemonForPrStack` / `startPrStackSession` tasks and the
+  `cypress:e2e:prstack` script, `support/pages/prStackScreenPage.ts`
+- `tddy-storybook`: `PlannedPrPanel.stories.tsx` (`storyPlacement.test.ts` no longer expects a `tddy-prstack-web` story)
+
+**Web — re-pointed at `ProjectStackView`** (the sessions drawer at a stack's route over `GetProjectStack`, assertions unchanged):
+`PlannedPrRowInternalStatusAcceptance` and the `PrStack*Acceptance` row specs in `tddy-session-web` that were
+driven through a `recipe: "pr-stack"` session, and `PlannedPrListStartSessionDirectMountAcceptance` in `tddy-prstack-web`.
+
+## Deletions beyond the plan
+
+- `tddy-tool-engine` `StartOptions.stack_parents` / `pr_stack_base_candidates` and `CandidateSession`: their only
+  source was `PR_STACK_RECIPES`, which the plan deletes.
+- `tddy-session-create-web`: the "PR stack parent" picker (`CreateSessionStackParentSelect`) and `useCreateSessionStack`, for the
+  same reason; `initialValues.stackParent` / `stackNodeId` still reach the request, and the host that owns the parent is
+  still found from the session list.
+- `tddy-pr-stack` `repoint_reaches_github`: its only caller was the deleted engine task.
 
 ## Contract (pass 2)
 

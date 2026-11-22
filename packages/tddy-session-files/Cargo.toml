@@ -32,10 +32,12 @@ tddy-core = { path = "../tddy-core" }
 # `artifact_paths::list_session_attachments` — where a session keeps the documents it was started
 # with (`session_attachments.rs`, `session_context_docs.rs`, `stack_doc_attachments.rs`).
 tddy-workflow = { path = "../tddy-workflow" }
-# The recipe manifests `session_context_docs.rs` projects into context docs, and the PR-stack
-# basenames `stack_doc_attachments.rs` offers a child: `pr_stack::{NODE_PRD_BASENAME, …}`,
-# `plan_pr_stack::PR_STACK_PLAN_MD_BASENAME`, `writer::EXPLORATION_BASENAME`.
+# The recipe manifests `session_context_docs.rs` projects into context docs, and the exploration
+# basename `stack_doc_attachments.rs` offers a child: `writer::EXPLORATION_BASENAME`.
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+# The per-PR document basenames `session_context_docs.rs` lists and `stack_doc_attachments.rs`
+# offers a child: `docs::{NODE_PRD_BASENAME, …, PR_STACK_PLAN_MD_BASENAME}`.
+tddy-pr-stack = { path = "../tddy-pr-stack" }
 # `async_trait` on the generated `SessionFilesService` trait the service implements.
 async-trait = "0.1"
 # `spawn_blocking` for the hashing and reading passes, the unbounded channels behind the four

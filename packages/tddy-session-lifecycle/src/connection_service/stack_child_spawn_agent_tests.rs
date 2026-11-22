@@ -1,11 +1,11 @@
-//! A conversation or pr-stack child runs its parent session's agent (`#agent-tools 17/19`).
+//! A conversation child runs its parent session's agent (`#agent-tools 17/19`).
 //!
-//! Feature doc: `docs/ft/daemon/session-agent-roster.md`. The `pr_spawn_child` and
-//! `spawn_conversation` tools name no agent, so the child takes the one its orchestrator's
+//! Feature doc: `docs/ft/daemon/session-agent-roster.md`. The `spawn_conversation` tool names no
+//! agent, so the child takes the one its orchestrator's
 //! `.session.yaml` records — resolved through the host's installed coding agents, never a claude
 //! default — and a host with no coding agents refuses the child `FAILED_PRECONDITION`.
 //!
-//! The handlers are the real ones, wired as a pr-stack or grill-me start wires them, over the real
+//! The handler is the real one, wired as a grill-me start wires it, over the real
 //! `DaemonSessionHost`. Its coding agents are the built-in specs on a fixture host whose `PATH`
 //! holds a stub for each built-in binary (`claude`, `agent`) and `tddy-tools`; each stub appends
 //! its own name to one log when it is launched, so a test reads which agent the child ran.
@@ -17,7 +17,7 @@ use tddy_test_hosts::a_tool_host;
 
 use super::session_acting_identity::SessionAccountAccess;
 use super::*;
-use tddy_core::toolcall::{ChildSpawnHandler, ConversationSpawnHandler};
+use tddy_core::toolcall::ConversationSpawnHandler;
 use tddy_core::{Stack, StackNode};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_testing_commons::wait::eventually;
@@ -198,23 +198,6 @@ impl AnOrchestrator {
         );
     }
 
-    /// The handler the `pr_spawn_child` tool reaches, wired as a pr-stack start wires it.
-    fn child_spawn_handler(&self) -> StackChildSpawnHandler {
-        StackChildSpawnHandler {
-            stack_parent_host: Arc::new(self.service.launch_sessions()),
-            service: self.service.launch_sessions(),
-            config: self.config.clone(),
-            tddy_data_dir: self.sessions_base().to_path_buf(),
-            cli_manager: Arc::clone(&self.service.cli_manager),
-            os_user: self.os_user.clone(),
-            project_id: TEST_PROJECT_ID.to_string(),
-            sessions_base: self.sessions_base().to_path_buf(),
-            orchestrator_session_id: ORCHESTRATOR_SESSION_ID.to_string(),
-            orchestrator_session_dir: self.session_dir(ORCHESTRATOR_SESSION_ID),
-            account_access: SessionAccountAccess::new(None, Arc::new(|_| None), VALID_TOKEN),
-        }
-    }
-
     /// The handler the `spawn_conversation` tool reaches, wired as a grill-me start wires it.
     fn conversation_spawn_handler(&self) -> GrillMeConversationSpawnHandler {
         GrillMeConversationSpawnHandler {
@@ -322,28 +305,6 @@ fn register_project(projects_dir: &Path, repo: &Path) {
 // ── The child's agent is the parent's ────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn a_pr_stack_child_of_a_cursor_cli_session_starts_a_cursor_cli_child() {
-    // Given — a cursor-cli pr-stack orchestrator on a host with the built-in coding agents
-    let orchestrator = an_orchestrator_of("cursor-cli", "pr-stack", HostAgents::TheBuiltins);
-
-    // When — its agent spawns the planned node, naming no agent
-    let child = orchestrator
-        .child_spawn_handler()
-        .spawn_child(NODE_ID)
-        .await
-        .expect("the planned node spawns a child");
-
-    // Then — the child is a cursor-cli session, and Cursor's binary is what ran
-    assert_eq!(
-        (
-            orchestrator.session_type_of(&child),
-            orchestrator.the_agent_launched().await,
-        ),
-        (Some("cursor-cli".to_string()), "agent".to_string())
-    );
-}
-
-#[tokio::test]
 async fn a_conversation_child_of_a_cursor_cli_session_starts_a_cursor_cli_child() {
     // Given — a cursor-cli grill-me orchestrator on a host with the built-in coding agents
     let orchestrator = an_orchestrator_of("cursor-cli", "grill-me", HostAgents::TheBuiltins);
@@ -366,16 +327,16 @@ async fn a_conversation_child_of_a_cursor_cli_session_starts_a_cursor_cli_child(
 }
 
 #[tokio::test]
-async fn a_host_without_coding_agents_refuses_a_pr_stack_child_failed_precondition_spawning_nothing(
+async fn a_host_without_coding_agents_refuses_a_conversation_child_failed_precondition_spawning_nothing(
 ) {
-    // Given — a cursor-cli pr-stack orchestrator on a host given no coding agents, beside a claude
+    // Given — a cursor-cli grill-me orchestrator on a host given no coding agents, beside a claude
     // stub that must not be run in their place
-    let orchestrator = an_orchestrator_of("cursor-cli", "pr-stack", HostAgents::None);
+    let orchestrator = an_orchestrator_of("cursor-cli", "grill-me", HostAgents::None);
 
     // When
     let refused = orchestrator
-        .child_spawn_handler()
-        .spawn_child(NODE_ID)
+        .conversation_spawn_handler()
+        .spawn_conversation("Implement the token store.", Some("token-store"), None)
         .await;
 
     // Then — refused naming the session type no spec launches; no child session, no agent launched

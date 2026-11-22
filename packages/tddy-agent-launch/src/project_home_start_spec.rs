@@ -139,7 +139,6 @@ pub(crate) fn on_home_worktree(
         stack_parent: String::new(),
         stack_parent_daemon_instance_id: String::new(),
         stack_node_id: String::new(),
-        pr_stack_base_session_id: String::new(),
         ..spec
     }
 }

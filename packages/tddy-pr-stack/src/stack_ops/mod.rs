@@ -1,11 +1,6 @@
 //! The PR-stack operations: every writer of a session's `Changeset.stack`, and the git/GitHub
 //! syncs that keep a node's branch and pull request in line with it.
 //!
-//! Moved out of `tddy-workflow-recipes`' `pr_stack` module, which still re-exports all of it from
-//! its historical path; the `pr-stack` recipe itself, its hooks, and the plan→stack bridge
-//! (`reseed_stack_from_plan_if_unspawned`) stay there.
-
-//!
 //! Split by concern; every public item is re-exported here, so `tddy_pr_stack::stack_ops::*` is the
 //! one path callers name.
 
@@ -20,7 +15,6 @@ mod nodes;
 mod order;
 mod pull_base;
 mod repoint;
-mod seed;
 
 pub use adopt::{
     adopt_pr_as_stack_node, adopt_pr_into_stack, sync_node_to_github_pr, AdoptedPrFacts,
@@ -32,10 +26,6 @@ pub use nodes::{
 pub use order::{assign_missing_display_order, move_planned_pr_node};
 pub use pull_base::{pull_base_into_node_branch, BaseSyncStrategy, PullBaseReport};
 pub use repoint::repoint_planned_pr_node;
-pub use seed::{
-    check_stack_seed_base, check_stack_seed_not_self, seed_stack_with_base_session, SeededBase,
-    StackSeedBaseRefusal,
-};
 
 use order::next_display_order;
 

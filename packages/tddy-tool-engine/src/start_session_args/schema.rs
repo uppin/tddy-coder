@@ -152,10 +152,6 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
         string("The planned pr-stack node this session materializes, on `stack_parent`'s stack. Empty derives it from the branch."),
     );
     offer(
-        "pr_stack_base_session_id",
-        string("With the `pr-stack` recipe: an existing session whose branch seeds the new stack as its single root node. Empty leaves the stack for the agent to plan."),
-    );
-    offer(
         "sandbox",
         boolean(
             "Run the session's agent (or, for `workspace`, its tools) inside a platform sandbox.",

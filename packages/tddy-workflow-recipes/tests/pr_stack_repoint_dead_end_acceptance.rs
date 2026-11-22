@@ -24,10 +24,8 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
-use tddy_workflow_recipes::orchestrate_pr_stack::github::{
-    GithubPrApi, PrLookupOutcome, PrRef, PrState, PrView,
-};
-use tddy_workflow_recipes::pr_stack::repoint_planned_pr_node;
+use tddy_github::pr_api::{GithubPrApi, PrLookupOutcome, PrRef, PrState, PrView};
+use tddy_pr_stack::stack_ops::repoint_planned_pr_node;
 
 const DEFAULT_BRANCH: &str = "master";
 /// The merged predecessor's branch — deleted from `origin` once its PR landed.

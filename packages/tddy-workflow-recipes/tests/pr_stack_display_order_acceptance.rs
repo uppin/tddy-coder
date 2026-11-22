@@ -26,11 +26,9 @@ use std::path::Path;
 
 use common::{a_planned_node, assert_rejected, node_ids, parents_of, stack_of, write_stack};
 use tddy_core::changeset::StackNode;
-use tddy_workflow_recipes::plan_pr_stack::{PlannedPr, StackPlanOutput};
-use tddy_workflow_recipes::pr_stack::{
+use tddy_pr_stack::stack_ops::{
     add_planned_pr_node, adopt_pr_as_stack_node, delete_planned_pr_node, move_planned_pr_node,
-    reseed_stack_from_plan_if_unspawned, update_planned_pr_node, AddPlannedPrInput, AdoptedPrFacts,
-    UpdatePlannedPrInput,
+    update_planned_pr_node, AddPlannedPrInput, AdoptedPrFacts, UpdatePlannedPrInput,
 };
 
 const UP: &str = "up";
@@ -76,25 +74,6 @@ fn an_existing_pr(pull_number: u64, head_branch: &str) -> AdoptedPrFacts {
 }
 
 /// A plan whose `prs` array order is the reading order a re-seed adopts wholesale.
-fn a_plan(prs: Vec<PlannedPr>) -> StackPlanOutput {
-    StackPlanOutput {
-        version: 2,
-        exploration: None,
-        prs,
-    }
-}
-
-fn a_planned_pr(node_id: &str, parents: &[&str]) -> PlannedPr {
-    PlannedPr {
-        node_id: node_id.to_string(),
-        title: format!("{node_id} title"),
-        description: format!("{node_id} description"),
-        branch_suggestion: Some(format!("feature/stack/{node_id}")),
-        parents: parents.iter().map(|p| p.to_string()).collect(),
-        child_recipe: None,
-    }
-}
-
 // --- reading the order back -------------------------------------------------
 
 /// The persisted position of each named node, in the order named — so an assertion states the whole
@@ -289,36 +268,6 @@ fn deleting_a_row_leaves_the_orders_of_the_survivors_alone() {
     // would move a row the operator never touched.
     assert_eq!(orders_of(dir, &["n1", "n3"]), vec![Some(0), Some(2)]);
     assert_eq!(node_ids(dir), vec!["n1".to_string(), "n3".to_string()]);
-}
-
-#[test]
-fn reseeding_an_unspawned_plan_renumbers_from_the_new_plan_order() {
-    // Given — a two-row stack, neither node spawned, numbered 0 and 1
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
-    let dir = tmp.path();
-    write_stack(
-        dir,
-        vec![
-            at_order(a_planned_node("n1", &[]), 0),
-            at_order(a_planned_node("n2", &["n1"]), 1),
-        ],
-    );
-
-    // When — the agent re-emits the plan with the two entries the other way round in the array,
-    // while the dependency between them is unchanged
-    reseed_stack_from_plan_if_unspawned(
-        dir,
-        &a_plan(vec![a_planned_pr("n2", &["n1"]), a_planned_pr("n1", &[])]),
-    )
-    .expect("re-seeding an unspawned stack should succeed");
-
-    // Then — a re-seed replaces the plan, so it replaces the reading order too, and it takes the
-    // plan's array order rather than re-deriving one from the parents
-    assert_eq!(
-        orders_of(dir, &["n2", "n1"]),
-        vec![Some(0), Some(1)],
-        "a re-seeded stack must read in the new plan's array order"
-    );
 }
 
 #[test]

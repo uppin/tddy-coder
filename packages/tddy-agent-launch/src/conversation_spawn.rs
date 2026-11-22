@@ -10,8 +10,7 @@ use std::sync::Arc;
 use crate::session_acting_identity::SessionAccountAccess;
 
 /// Whether a managed session running `recipe_name` binds a `spawn-conversation` handler on its
-/// toolcall listener. Only the grill-me recipe does — a plain TDD session has nothing to hand off,
-/// and the PR-stack orchestrator uses `spawn-child` (resolving a planned node) instead.
+/// toolcall listener. Only the grill-me recipe does — a plain TDD session has nothing to hand off.
 pub(crate) fn recipe_enables_conversation_spawn(recipe_name: &str) -> bool {
     recipe_name == "grill-me"
 }
@@ -69,15 +68,14 @@ pub(crate) fn conversation_branch_slug(prompt: &str) -> String {
 /// Per-session [`ConversationSpawnHandler`] for a managed session (grill-me): spawns a brand-new
 /// interactive claude-cli conversation on a fresh worktree, tagged with the calling session as its
 /// orchestrator, reusing the same [`spawn_claude_cli_session_inner`] the `StartSession` RPC uses.
-/// The generic sibling of [`StackChildSpawnHandler`] — it takes a free-form prompt instead of
-/// resolving a planned PR-stack node id, and the spawned conversation is itself unmanaged.
+/// It takes a free-form prompt, and the spawned conversation is itself unmanaged.
 pub struct GrillMeConversationSpawnHandler {
     /// The start path `start_conversation` runs a conversation's start through — the same one a
     /// `StartSession` call takes, so a conversation can be any session type on any eligible host
     /// (`#start-parity` 9/9).
     pub service: crate::launch_ports::LaunchSessions,
     /// Resolves each spawned conversation's base off the orchestrator, which is a session of *this*
-    /// daemon. Held for the same reason [`StackChildSpawnHandler::stack_parent_host`] is.
+    /// daemon, so the resolution never leaves the host.
     pub stack_parent_host: Arc<dyn StackParentHost>,
     pub config: DaemonConfig,
     pub tddy_data_dir: PathBuf,
@@ -92,6 +90,6 @@ pub struct GrillMeConversationSpawnHandler {
     /// the model at spawn time and supplies it here so `spawn_conversation` can still inherit one.
     pub model_override: Option<String>,
     /// What the orchestrator's own start read its owner's vault with — the same owner and project
-    /// as the conversation it spawns, see [`StackChildSpawnHandler::account_access`].
+    /// as the conversation it spawns.
     pub account_access: SessionAccountAccess,
 }

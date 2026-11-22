@@ -30,9 +30,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use common::{a_planned_node, an_open_node, assert_rejected, write_stack};
-use tddy_workflow_recipes::pr_stack::{
-    pull_base_into_node_branch, BaseSyncStrategy, PullBaseReport,
-};
+use tddy_pr_stack::stack_ops::{pull_base_into_node_branch, BaseSyncStrategy, PullBaseReport};
 
 const BASE_BRANCH: &str = "master";
 const NODE: &str = "n1";

@@ -1,7 +1,7 @@
 use super::session_acting_identity::SessionAccountAccess;
 use super::*;
 use tddy_accounts::{META_SUBJECT, META_SUBJECT_ID, PROVIDER_GITHUB};
-use tddy_core::toolcall::{ChildSpawnHandler, ConversationSpawnHandler};
+use tddy_core::toolcall::ConversationSpawnHandler;
 use tddy_core::{Stack, StackNode};
 use tddy_credentials::{
     AccountId, CredentialRecord, CredentialStore, ProviderId, SecretString, SessionVaults,
@@ -183,26 +183,6 @@ impl Orchestrator {
         )
         .expect("write changeset");
         self
-    }
-
-    /// The handler the `pr_spawn_child` tool reaches, wired exactly as
-    /// [`DaemonSessionHost::start_claude_cli_session`] wires it for a pr-stack session.
-    fn child_spawn_handler(&self) -> StackChildSpawnHandler {
-        StackChildSpawnHandler {
-            // Same clone production passes: the orchestrator is a session of this daemon, so
-            // resolving a child's base never leaves the host.
-            stack_parent_host: Arc::new(self.service.launch_sessions()),
-            service: self.service.launch_sessions(),
-            config: self.config.clone(),
-            tddy_data_dir: self.sessions_base().to_path_buf(),
-            cli_manager: Arc::clone(&self.service.cli_manager),
-            os_user: self.os_user.clone(),
-            project_id: TEST_PROJECT_ID.to_string(),
-            sessions_base: self.sessions_base().to_path_buf(),
-            orchestrator_session_id: ORCHESTRATOR_SESSION_ID.to_string(),
-            orchestrator_session_dir: self.session_dir(ORCHESTRATOR_SESSION_ID),
-            account_access: self.account_access.clone(),
-        }
     }
 
     /// The handler the `spawn_conversation` tool reaches, wired as
@@ -411,120 +391,7 @@ fn a_changeset_reading_instruction(command_line: &str) -> Option<&str> {
         .find(|line| line.contains("Read your changeset at"))
 }
 
-// ── The agent's path: `pr_spawn_child` ───────────────────────────────────────────────────
-
-#[tokio::test]
-async fn a_child_the_agent_spawned_holds_the_nodes_documents() {
-    // Given
-    let orchestrator = a_pr_stack_orchestrator()
-        .with_shared_documents()
-        .with_documents_for(NODE_ID);
-
-    // When
-    let child = orchestrator
-        .child_spawn_handler()
-        .spawn_child(NODE_ID)
-        .await
-        .expect("spawning the planned node must succeed");
-
-    // Then — materialized into the child's own attachment store, flat
-    assert_eq!(
-        orchestrator.documents_held_by(&child),
-        vec![
-            "PRD.md".to_string(),
-            "changeset.md".to_string(),
-            "exploration.md".to_string(),
-            "pr-stack-plan.md".to_string(),
-        ]
-    );
-    assert_eq!(
-        std::fs::read_to_string(
-            orchestrator
-                .session_dir(&child)
-                .join("artifacts")
-                .join(SESSION_ATTACHMENTS_SUBDIR)
-                .join("changeset.md")
-        )
-        .expect("the child's changeset must be readable"),
-        format!("# {NODE_ID} — where the edges are\n"),
-        "the child must hold its own node's boundaries, byte for byte"
-    );
-}
-
-#[tokio::test]
-async fn a_child_the_agent_spawned_is_told_to_read_its_changeset() {
-    // Given
-    let orchestrator = a_pr_stack_orchestrator()
-        .with_shared_documents()
-        .with_documents_for(NODE_ID);
-
-    // When
-    orchestrator
-        .child_spawn_handler()
-        .spawn_child(NODE_ID)
-        .await
-        .expect("spawning the planned node must succeed");
-
-    // Then — the node's brief, and where to read its boundaries before writing code
-    let command_line = orchestrator.the_agent_was_spawned_with().await;
-    assert!(
-        command_line.contains(NODE_TITLE),
-        "the child must be given its node's brief; got: {command_line:?}"
-    );
-    assert_eq!(
-        a_changeset_reading_instruction(&command_line),
-        Some("Read your changeset at artifacts/attachments/changeset.md before writing code — it states this PR's responsibility, its boundaries, and what each dependency delivers."),
-        "the child must be pointed at the changeset it actually holds"
-    );
-}
-
-#[tokio::test]
-async fn a_child_the_agent_spawned_commits_as_the_account_its_orchestrators_owner_holds() {
-    // Given an orchestrator whose owner holds the account its project is assigned
-    let orchestrator = a_pr_stack_orchestrator()
-        .with_the_project_assigned_to_an_account_its_owner_holds("acct-ada");
-
-    // When the agent spawns the planned node
-    orchestrator
-        .child_spawn_handler()
-        .spawn_child(NODE_ID)
-        .await
-        .expect("spawning the planned node must succeed");
-
-    // Then the child's agent was launched under that account's commit identity
-    let environment = orchestrator.the_agent_was_spawned_in().await;
-    assert!(
-        environment.lines().any(|l| l == "GIT_AUTHOR_NAME=ada"),
-        "the child must commit as the owner's account; got: {environment:?}"
-    );
-    assert!(
-        environment
-            .lines()
-            .any(|l| l == "GIT_COMMITTER_EMAIL=101+ada@users.noreply.github.com"),
-        "the child must carry the account's noreply address; got: {environment:?}"
-    );
-}
-
-#[tokio::test]
-async fn a_child_the_agent_spawned_is_never_handed_the_token_in_its_environment() {
-    // Given an orchestrator whose owner holds the account its project is assigned
-    let orchestrator = a_pr_stack_orchestrator()
-        .with_the_project_assigned_to_an_account_its_owner_holds("acct-ada");
-
-    // When the agent spawns the planned node
-    orchestrator
-        .child_spawn_handler()
-        .spawn_child(NODE_ID)
-        .await
-        .expect("spawning the planned node must succeed");
-
-    // Then the token is nowhere in the child's environment
-    let environment = orchestrator.the_agent_was_spawned_in().await;
-    assert!(
-        !environment.contains("ghp_ada_token"),
-        "the token must be asked for, never delivered; got: {environment:?}"
-    );
-}
+// ── The agent's path: `spawn_conversation` ───────────────────────────────────────────────
 
 #[tokio::test]
 async fn a_conversation_the_agent_spawned_commits_as_the_account_its_orchestrators_owner_holds() {

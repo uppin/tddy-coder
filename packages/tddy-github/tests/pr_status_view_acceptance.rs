@@ -7,7 +7,7 @@
 //! PRD: docs/ft/coder/pr-stack-live-status.md § capability 3.
 
 use rstest::rstest;
-use tddy_workflow_recipes::orchestrate_pr_stack::github::{pr_state_from_github, PrState};
+use tddy_github::pr_api::{pr_state_from_github, PrState};
 
 #[rstest]
 #[case::merged("closed", Some("2026-07-01T00:00:00Z"), false, PrState::Merged)]

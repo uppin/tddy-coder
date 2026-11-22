@@ -28,7 +28,6 @@ struct World {
     a: Host,
     b: Host,
     home: String,
-    on_a: String,
     _operator_home: Option<tempfile::TempDir>,
 }
 
@@ -44,12 +43,10 @@ async fn a_world_reaching_no_derived_host() -> World {
     let b = a_host(HOST_B, &peers);
     let home = a_workspace_in(&a.daemon, THIS_PROJECT).await;
     a.make_project_home(&home);
-    let on_a = a_workspace_in(&a.daemon, THIS_PROJECT).await;
     World {
         a,
         b,
         home,
-        on_a,
         _operator_home: Some(operator_home),
     }
 }
@@ -66,12 +63,10 @@ async fn a_world_with(host_a: fn(&str, &Arc<InProcessPeers>) -> Host) -> World {
     let b = a_host(HOST_B, &peers);
     let home = a_workspace_in(&a.daemon, THIS_PROJECT).await;
     a.make_project_home(&home);
-    let on_a = a_workspace_in(&a.daemon, THIS_PROJECT).await;
     World {
         a,
         b,
         home,
-        on_a,
         _operator_home: None,
     }
 }
@@ -203,24 +198,6 @@ async fn the_models_offered_are_the_catalogs_models_for_the_session_types_agent(
         .collect();
     let expected: Vec<String> = catalog.models.into_iter().map(|m| m.id).collect();
     assert_eq!(offered, expected);
-}
-
-#[tokio::test]
-async fn the_sessions_that_can_seed_a_stack_on_this_host_are_offered() {
-    // Given a session of the project on host-a, on a branch of its own and not in any stack
-    let world = a_world().await;
-
-    // When
-    let options = world.options(serde_json::json!({})).await;
-
-    // Then it is offered as a stack base
-    let bases: Vec<String> = options["pr_stack_base_candidates"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|c| c["session_id"].as_str().unwrap().to_string())
-        .collect();
-    assert!(bases.contains(&world.on_a), "{bases:?}");
 }
 
 #[tokio::test]

@@ -13561,6 +13561,7 @@ dependencies = [
  "pretty_assertions",
  "rstest 0.24.0",
  "serde",
+ "serde_json",
  "tddy-changeset",
  "tddy-core",
  "tddy-git",
@@ -13569,6 +13570,7 @@ dependencies = [
  "tddy-service",
  "tddy-workflow",
  "tempfile",
+ "uuid",
 ]
 
 [[package]]
@@ -14155,6 +14157,7 @@ dependencies = [
  "tddy-daemon-kernel",
  "tddy-host-service",
  "tddy-livekit",
+ "tddy-pr-stack",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-service",
@@ -14677,6 +14680,7 @@ dependencies = [
  "tddy-coding-agent-specs",
  "tddy-core",
  "tddy-discovery",
+ "tddy-github",
  "tddy-index-daemon",
  "tddy-lsp-executor",
  "tddy-room-client",

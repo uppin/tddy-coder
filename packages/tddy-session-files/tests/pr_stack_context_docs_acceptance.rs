@@ -40,12 +40,9 @@ impl OrchestratorSession {
     }
 
     fn with_stack_level_artifacts(self) -> Self {
-        fs::write(self.artifacts().join("stack-plan.yaml"), "version: 1\n").expect("write plan");
-        fs::write(
-            self.artifacts().join("pr-stack-plan.md"),
-            "# PR Stack Plan\n",
-        )
-        .expect("write plan md");
+        fs::write(self.artifacts().join("fix-plan.md"), "# Fix plan\n").expect("write plan");
+        fs::write(self.artifacts().join("exploration.md"), "# Exploration\n")
+            .expect("write plan md");
         self
     }
 
@@ -76,7 +73,7 @@ impl OrchestratorSession {
     }
 
     fn context_docs(&self) -> Vec<ContextDoc> {
-        context_docs_for_session("pr-stack", self.path())
+        context_docs_for_session("bugfix", self.path())
     }
 }
 
@@ -145,8 +142,8 @@ fn each_planned_prs_documents_are_listed() {
 
     // Then — stack-level rows first, then the per-PR pairs in node order
     docs.assert_lists_relative_paths(&[
-        "stack-plan.yaml",
-        "pr-stack-plan.md",
+        "fix-plan.md",
+        "exploration.md",
         "prs/n1/PRD.md",
         "prs/n1/changeset.md",
         "prs/n2/PRD.md",
@@ -187,7 +184,7 @@ fn a_stack_level_artifact_carries_its_own_basename_as_its_relative_path() {
     let docs = session.context_docs();
 
     // Then
-    docs.assert_relative_path_of("pr-stack-plan.md", "pr-stack-plan.md");
+    docs.assert_relative_path_of("exploration.md", "exploration.md");
 }
 
 #[test]
@@ -229,5 +226,5 @@ fn an_orchestrator_without_a_docs_pass_lists_only_its_stack_level_artifacts() {
     let docs = session.context_docs();
 
     // Then
-    docs.assert_lists_relative_paths(&["stack-plan.yaml", "pr-stack-plan.md"]);
+    docs.assert_lists_relative_paths(&["fix-plan.md", "exploration.md"]);
 }

@@ -8,9 +8,8 @@
 //! PRD: docs/ft/coder/pr-stacking.md § Internal PR status.
 
 use tddy_core::changeset::PrInternalStatus;
-use tddy_workflow_recipes::orchestrate_pr_stack::{
-    derive_internal_status, reconcile_internal_status, ChildPhase, NodeView, PrLiveStatus,
-};
+use tddy_pr_stack::assess::{ChildPhase, NodeView, PrLiveStatus};
+use tddy_pr_stack::internal_status::{derive_internal_status, reconcile_internal_status};
 
 /// A node view with sensible defaults — override only what a scenario cares about.
 fn a_node_view(node_id: &str, branch: &str, parents: &[&str], pr: PrLiveStatus) -> NodeView {

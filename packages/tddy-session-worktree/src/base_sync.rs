@@ -15,11 +15,10 @@
 //!   remote-branch probe already is — it can report a branch behind that has just caught up, never
 //!   the reverse.
 //!
-//! `orchestrate_pr_stack::pr_actions::pr_resolve_conflicts_action` is the workspace's other
-//! conflict detector and is **explicitly not reusable here**: it runs `git merge --no-commit
-//! --no-ff` followed by `git merge --abort`, which mutates the index and the working tree. Running
-//! it on a poll would corrupt the turn of any agent working in that worktree, and the abort would
-//! discard whatever that agent had staged.
+//! A conflict detector that runs `git merge --no-commit --no-ff` followed by `git merge --abort` is
+//! **explicitly not reusable here**: it mutates the index and the working tree. Running it on a poll
+//! would corrupt the turn of any agent working in that worktree, and the abort would discard
+//! whatever that agent had staged.
 //!
 //! Every failure is an [`Err`], never a zeroed success. A comparison that could not be made arrives
 //! byte-identical to a healthy one — nothing behind, no conflicts — so collapsing it to a default

@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use tddy_workflow_recipes::orchestrate_pr_stack::{
+use tddy_pr_stack::op_journal::{
     recover_in_flight_stack_op, write_stack_op_journal, MergePhase, StackOpJournal,
 };
 

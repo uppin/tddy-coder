@@ -4,8 +4,6 @@ use crate::conversation_spawn::recipe_enables_conversation_spawn;
 
 use std::path::Path;
 
-use crate::stack_child_spawn::StackChildSpawnHandler;
-
 use std::sync::Arc;
 
 use tddy_core::output::SESSIONS_SUBDIR;
@@ -27,10 +25,9 @@ pub(crate) type ManagedSpawnHandlers = (
 );
 
 impl LaunchSessions {
-    /// The handlers a managed session's toolcall listener is bound to: a pr-stack orchestrator's
-    /// child spawner (the agent's `pr_spawn_child` relay materializes planned nodes into child
-    /// sessions) and, for a grill-me session, the conversation spawner. Neither for any other
-    /// recipe, or for a session with none.
+    /// The handlers a managed session's toolcall listener is bound to: for a grill-me session, the
+    /// conversation spawner. No recipe binds a child spawner, and none for any other recipe, or for
+    /// a session with none.
     pub(crate) fn managed_spawn_handlers(
         &self,
         managed_recipe: &Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
@@ -40,30 +37,11 @@ impl LaunchSessions {
         sessions_base: &Path,
         session_token: &str,
     ) -> ManagedSpawnHandlers {
-        // A pr-stack orchestrator gets a child-spawn handler bound to its toolcall listener so the
-        // agent's `pr_spawn_child` relay can materialize planned nodes into child sessions.
-        let child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>> =
-            if managed_recipe
-                .as_ref()
-                .is_some_and(|r| r.name() == "pr-stack")
-            {
-                let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-                Some(Arc::new(StackChildSpawnHandler {
-                    stack_parent_host: Arc::new(self.clone()),
-                    service: self.clone(),
-                    config: self.config.clone(),
-                    tddy_data_dir: self.tddy_data_dir.clone(),
-                    cli_manager: Arc::clone(&self.cli_manager),
-                    os_user: os_user.to_string(),
-                    project_id: project_id.to_string(),
-                    sessions_base: sessions_base.to_path_buf(),
-                    orchestrator_session_id: session_id.to_string(),
-                    orchestrator_session_dir: session_dir,
-                    account_access: self.host.session_account_access(session_token),
-                }))
-            } else {
-                None
-            };
+        // TODO: nothing binds a `ChildSpawnHandler` any more — the pr-stack orchestrator that did is
+        // gone. The seam stays (the `tddy-toolcall` trait and `SpawnChild` arm, the
+        // `tddy-cli-sessions` plumbing) until its own retirement:
+        // docs/dev/todo/2026-11-14-retire-stack-child-spawn-handler.md.
+        let child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>> = None;
         // A grill-me session instead gets a conversation-spawn handler so the agent's
         // `spawn_conversation` relay can start a fresh implementation conversation.
         let conversation_spawn_handler = managed_recipe.as_ref().and_then(|recipe| {
@@ -82,8 +60,7 @@ impl LaunchSessions {
 
     /// Build the per-session [`ConversationSpawnHandler`] for a managed session when its recipe
     /// enables conversation spawning (grill-me). Returns `None` for recipes that don't (a plain TDD
-    /// session, or a PR-stack orchestrator which uses `spawn-child` instead), so `spawn_conversation`
-    /// is rejected there rather than silently spawning.
+    /// session), so `spawn_conversation` is rejected there rather than silently spawning.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn conversation_spawn_handler_for(
         &self,

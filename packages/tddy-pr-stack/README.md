@@ -5,27 +5,28 @@ The PR-stack data model and its git/GitHub operations: everything that reads or 
 defines the `pr_stack.PrStackService` handler trait, adapter and transport entry.
 
 **`tddy-pr-stack` depends on `tddy-core`, `tddy-git`, `tddy-github`, `tddy-workflow`, `tddy-rpc` and
-`tddy-service`, and must never depend on `tddy-workflow-recipes` or `tddy-session-lifecycle`.** The `pr-stack` recipe, its hooks and the plan→stack
-bridges stay there and re-export everything below from their historical paths, so a dependency back
-would be a cycle. `packages/tddy-workflow-recipes/tests/pr_stack_crate_shape.rs` asserts the seam: no
-source file here, at any depth, may name `plan_pr_stack`, `::writer` or `::parser`.
+`tddy-service`, and must never depend on `tddy-workflow-recipes` or `tddy-session-lifecycle`.** The
+`pr-stack` workflow recipe is removed; stacks are planned and driven through the project stack record
+and the `pr_*` stack tools, which call everything below.
 
 ## Module layout
 
-| Module | Owns | Historical path (still re-exported) |
-|---|---|---|
-| `stack_ops/` | every writer of `Changeset.stack` and the git/GitHub syncs around it; `mod.rs` re-exports all of it, so callers name only `stack_ops::*` | `tddy_workflow_recipes::pr_stack::*` |
-| `stack_ops/order.rs` | display order: `assign_missing_display_order`, `move_planned_pr_node` | (via `stack_ops`) |
-| `stack_ops/nodes.rs` | add / update / delete planned nodes, `set_stack_node_parents` | (via `stack_ops`) |
-| `stack_ops/repoint.rs` | `repoint_planned_pr_node` and the rebase / force-push / PR re-target it shares with `set_stack_node_parents` | (via `stack_ops`) |
-| `stack_ops/adopt.rs` | `adopt_pr_as_stack_node`, `adopt_pr_into_stack`, `sync_node_to_github_pr` | (via `stack_ops`) |
-| `stack_ops/seed.rs` | base-session seeding: `check_stack_seed_base`, `check_stack_seed_not_self`, `seed_stack_with_base_session` | (via `stack_ops`) |
-| `stack_ops/pull_base.rs` | `pull_base_into_node_branch`, `BaseSyncStrategy` | (via `stack_ops`) |
-| `docs.rs` | per-node `PRD.md` / `changeset.md` paths, writing and validation | `pr_stack::docs` |
-| `assess.rs` | `AssessTask`, node views, `decide_next_action`, `effective_base_ref` | `orchestrate_pr_stack::assess` |
-| `git_ops.rs` | rebase / merge-base / force-push / commit / push helpers | `orchestrate_pr_stack::git_ops` |
-| `pr_insight.rs` | read-side shaping for the PR-inspection tools; `pr_number_from_status_url` | `orchestrate_pr_stack::pr_insight` |
-| `rpc.rs` | `PrStackHandler`, `PrStackServiceImpl`, `build_pr_stack_entry`, `PR_STACK_SERVICE` (also at the crate root) | `tddy_session_lifecycle::pr_stack_rpc`; `PR_STACK_SERVICE` also `tddy_workflow_recipes::PR_STACK_SERVICE` |
+| Module | Owns |
+|---|---|
+| `stack_ops/` | every writer of `Changeset.stack` and the git/GitHub syncs around it; `mod.rs` re-exports all of it, so callers name only `stack_ops::*` |
+| `stack_ops/order.rs` | display order: `assign_missing_display_order`, `move_planned_pr_node` |
+| `stack_ops/nodes.rs` | add / update / delete planned nodes, `set_stack_node_parents` |
+| `stack_ops/repoint.rs` | `repoint_planned_pr_node` and the rebase / force-push / PR re-target it shares with `set_stack_node_parents` |
+| `stack_ops/adopt.rs` | `adopt_pr_as_stack_node`, `adopt_pr_into_stack`, `sync_node_to_github_pr` |
+| `stack_ops/pull_base.rs` | `pull_base_into_node_branch`, `BaseSyncStrategy` |
+| `docs.rs` | per-node `PRD.md` / `changeset.md` paths, writing and validation |
+| `internal_status.rs` | `derive_internal_status`, `reconcile_internal_status` |
+| `op_journal.rs` | the crash-safe merge journal: `StackOpJournal`, `MergePhase`, `recover_in_flight_stack_op` |
+| `merge_repoint.rs` | `execute_stack_merge`, `execute_stack_repoint` |
+| `assess.rs` | `AssessTask`, node views, `decide_next_action`, `effective_base_ref` |
+| `git_ops.rs` | rebase / merge-base / force-push / commit / push helpers |
+| `pr_insight.rs` | read-side shaping for the PR-inspection tools; `pr_number_from_status_url` |
+| `rpc.rs` | `PrStackHandler`, `PrStackServiceImpl`, `build_pr_stack_entry`, `PR_STACK_SERVICE` (also at the crate root) |
 
 Dependencies, the seam tests, each module's surface and what stays recipe-side:
 [docs/architecture.md](docs/architecture.md).

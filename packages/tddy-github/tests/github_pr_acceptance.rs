@@ -1,7 +1,7 @@
 //! PRD Testing Plan: GitHub PR tools acceptance (auth, REST payload shape, MCP discovery).
 
 use serde_json::json;
-use tddy_workflow_recipes::github_pr::{
+use tddy_github::github_pr::{
     create_pull_request, registered_github_pr_mcp_tool_names, update_pull_request,
     CreatePullRequestParams, MockGithubTransport, UpdatePullRequestParams,
     GITHUB_CREATE_PULL_REQUEST_MCP_NAME, GITHUB_UPDATE_PULL_REQUEST_MCP_NAME,

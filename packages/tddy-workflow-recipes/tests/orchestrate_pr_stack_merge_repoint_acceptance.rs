@@ -6,13 +6,9 @@ use std::sync::Mutex;
 
 use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
 use tddy_core::WorkflowError;
-use tddy_workflow_recipes::orchestrate_pr_stack::github::{
-    GithubPrApi, PrLookupOutcome, PrRef, PrState, PrView,
-};
-use tddy_workflow_recipes::orchestrate_pr_stack::transient::{
-    recover_in_flight_stack_op, MergePhase,
-};
-use tddy_workflow_recipes::orchestrate_pr_stack::{execute_stack_merge, execute_stack_repoint};
+use tddy_github::pr_api::{GithubPrApi, PrLookupOutcome, PrRef, PrState, PrView};
+use tddy_pr_stack::merge_repoint::{execute_stack_merge, execute_stack_repoint};
+use tddy_pr_stack::op_journal::{recover_in_flight_stack_op, MergePhase};
 
 // ---------------------------------------------------------------------------
 // Test-only mock of GithubPrApi

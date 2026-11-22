@@ -94,7 +94,7 @@ impl LaunchSessions {
     /// The spawn paths already write the *reverse* link (`orchestrator_session_id` in the child's
     /// changeset). Without this forward link the node owns no branch, and the stack wedges:
     /// [`tddy_core::changeset::Stack::base_ref_for_spawn`] refuses every descendant ("non-merged
-    /// parent … has no branch to base onto yet"), [`StackChildSpawnHandler`]'s duplicate-spawn guard
+    /// parent … has no branch to base onto yet"), a node's duplicate-spawn guard
     /// never trips, and the orchestrator dashboard shows no child state or PR for a running child.
     ///
     /// Called once the child's branch exists (right after worktree setup) — that is precisely the

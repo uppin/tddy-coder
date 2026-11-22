@@ -45,7 +45,6 @@ pub struct ToolSpawnPlan {
     pub recipe: Option<String>,
     pub stack_parent: Option<String>,
     pub stack_node_id: Option<String>,
-    pub stack_seed_base_session: Option<String>,
     pub model: Option<String>,
     pub host_session_socket: Option<String>,
     /// The commit identity pairs the child's agent authors under — the project's account, from
@@ -66,7 +65,6 @@ impl ToolSpawnPlan {
             recipe: self.recipe.as_deref(),
             stack_parent: self.stack_parent.as_deref(),
             stack_node_id: self.stack_node_id.as_deref(),
-            stack_seed_base_session: self.stack_seed_base_session.as_deref(),
             model: self.model.as_deref(),
             host_session_socket: self.host_session_socket.as_deref(),
             git_environment: &self.git_environment,

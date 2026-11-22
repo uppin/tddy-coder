@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use super::GitEnv;
 
 pub(crate) fn merge_node(env: &GitEnv, node_id: &str) -> Result<Value, String> {
-    use tddy_workflow_recipes::orchestrate_pr_stack::{MergePhase, StackOpJournal};
+    use tddy_pr_stack::op_journal::{MergePhase, StackOpJournal};
     let stack = env.stack()?;
     let node = node_of(&stack, node_id)?.clone();
     let gh = env.github_client()?;
