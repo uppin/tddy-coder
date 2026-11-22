@@ -134,12 +134,11 @@ async fn read_view(
     let commits = inbox.pr_commits(repo, pr.number, &pr.head_sha).await?.value;
 
     // Reviews first, then review comments (threaded by `in_reply_to_id`), then conversation comments.
-    // TODO(n4 session-pr-tabs): the inbox's `PrReview` and `PrIssueComment` carry no GitHub id, so
-    // those entries are sent with id 0 until n2 exposes one.
     let reviews = conversation
         .reviews
         .into_iter()
         .map(|review| PullRequestComment {
+            id: review.id,
             author: review.author,
             body: review.body,
             created_at: review.submitted_at,
@@ -164,6 +163,7 @@ async fn read_view(
             .issue_comments
             .into_iter()
             .map(|comment| PullRequestComment {
+                id: comment.id,
                 author: comment.author,
                 body: comment.body,
                 created_at: comment.created_at,
