@@ -4,8 +4,8 @@
 //! ignores SIGHUP and does not read its terminal survives both. So a delete reads the pane's pid
 //! and when that process started, kills the tmux session, then SIGTERMs the pid and SIGKILLs it
 //! after a grace — each only while the pid still names a process that started when the agent did.
-//! When the session recorded the agent's start (`SessionMetadata::pid_start_time`), that is the
-//! agent's start: a pane process whose start differs is not the agent the session started, and is
+//! When the session recorded the agent's start on its tmux main's roster node
+//! ([`tddy_core::tab_roster::START_PROPERTY`]), that is the agent's start: a pane process whose start differs is not the agent the session started, and is
 //! never signalled.
 
 use std::time::Duration;

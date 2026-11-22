@@ -85,7 +85,7 @@ and those crates deliberately do not grow a transport.
 | `session_agent_clone.rs` | `clone_worktree_path`, plus a re-export of `tddy_session_agents::session_agent_clone`; the function is unreferenced |
 | `session_notifications.rs` | a facade over `tddy_session_activity::session_notifications` and `session_notification_publishing` |
 | `claude_cli_session.rs`, `pr_stack_rpc.rs` | historical-path re-exports of `cli_session_manager` and `tddy_pr_stack::rpc` |
-| `test_util.rs` | the shared fixtures of the integration suites (ungated; see above) |
+| `test_util.rs` | the shared fixtures of the integration suites (ungated; see above). Its tool hosts are `tddy_test_hosts::a_tool_host()` — `tddy-test-hosts` is a normal dependency because this module is public, which is why that crate carries no sandbox dependency |
 
 ## What stays, and why
 

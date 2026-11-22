@@ -83,7 +83,7 @@ tabs:
 |---|---|---|
 | `agent` | `harness`, `conversation_id` | the agent a tab runs, and the conversation it holds (a main's conversation is `.session.yaml`'s to say) |
 | `shell` | — | the session user's login shell |
-| `tmux` | `session`, `os_user` | a tmux session the daemon created to wrap a tab |
+| `tmux` | `session`, `os_user`, and on a main's node `start` | a tmux session the daemon created to wrap a tab. A main's node also keeps `start`: when the agent its pane runs started, in whole seconds since the Unix epoch (see [Deleting a tmux-run session](#deleting-a-tmux-run-session)) |
 | `tmux-attach` | `session`, `os_user` | a client on the user's own tmux session — attached to an existing one, or started as a new one |
 | `sandbox` | — | a jail of the tab's own, around the node it wraps (see [A sandboxed session's tabs](#a-sandboxed-sessions-tabs)) |
 | `target` | — | the session's target, around the node it wraps: the machine `.session.yaml`'s `target` names, in the session's worktree there (see [A target session's tabs](#a-target-sessions-tabs)). It records no properties — the transport and the worktree are the session's, read on every start |
@@ -115,6 +115,25 @@ and the session stays live while it does. **Closing the tab** (`StopTerminalSess
 a client ending: it ends the tab's tmux session — and its agent — before the tab, and removes the roster
 entry. The web offers it as **Add agent ▸ in tmux**, and marks the tab.
 
+## Deleting a tmux-run session
+
+`tmux kill-session` sends the pane's process `SIGHUP` and closes its terminal, so an agent that ignores
+`SIGHUP` and does not read its terminal survives it. Deleting a tmux-run session therefore ends the agent
+itself, as the session's OS user:
+
+1. The pane's pid and the time that process **started** are read (the start through `sysinfo`, so the same on
+   macOS and Linux; whole seconds).
+2. The tmux session is killed. One already gone is not an error and leaves nothing to signal.
+3. The pid gets `SIGTERM`, then `SIGKILL` once a 5 s grace has passed if it is still there — **each only while
+   the pid still names a process that started when the agent did.** A pid whose start differs is another
+   process and is never signalled.
+
+The agent's start is recorded when a tmux main starts, as the `start` property of the main's `tmux` node in
+`tabs.yaml`, and that record is what the delete checks. A session whose roster kept no start (recorded by an
+older daemon, or whose start could not be read) is checked against the start read just before the kill; so is
+one whose recorded start is not a number of seconds, which is logged. Start times have a resolution of one
+second, so a pid reissued to a process that started within the same second as the agent is not told apart.
+
 ## Tool sessions as a process tab
 
 A tool session's `tddy-coder` is registered, as soon as its spawn returns, as a **process tab** of its
@@ -131,7 +150,16 @@ this status", never as a pid probe:
 
 Stopping and signalling go to the holder: `StopSession` / `SignalSession` on the supervisor, a signal
 to the child the worker or direct spawn owns. The supervisor's `SignalSession` is refused for a pid it
-never spawned. A resumed tool session registers its respawned child the same way, and the host-session
+never spawned.
+
+**A signal never reaches a recycled pid.** The thread that reaps a direct or worker child first waits for it
+without reaping it (`waitid` with `WNOWAIT`), then — under a lock — marks the child ended and reaps it. Every
+signal is sent under the same lock, after checking the mark, so it goes out either while the pid still names
+the child (alive, or a zombie nobody has reaped) or not at all: a signal to an ended child is answered "the
+child has ended", and a stop of one sends no `SIGKILL` after its grace. The forked worker is the child's parent,
+so the daemon asks it (`WorkerRequest::Signal`, answered `Signalled`) and the worker signals under the lock of
+the child it holds; the daemon signals a direct child under its own. The supervisor signals the pid it spawned
+and no other. A resumed tool session registers its respawned child the same way, and the host-session
 socket stops answering the session when the child's end is reported.
 
 ## Resume restores the roster
@@ -283,7 +311,8 @@ menu: **On target** (the default) or **On this host**. Both can coexist in one s
 ## What acts on held processes
 
 - **Delete** stops every terminal the session has (main and tabs), its process tab through its holder,
-  and its sandbox, then removes the directory. It never signals the recorded pid.
+  and its sandbox, then removes the directory. It never signals the recorded pid. A tmux-run session's
+  agent is ended as well, see [Deleting a tmux-run session](#deleting-a-tmux-run-session).
 - **`SignalSession` and the project-home `TerminateSession`** signal the session's held main agent: its
   main terminal's process, its process tab's child, or its sandbox runner. With none held they are refused
   (`FAILED_PRECONDITION`, `session has no running agent`) and nothing is signalled.
@@ -305,9 +334,6 @@ agent for), and Telegram's list, branch-owner scan and delete.
 
 - A tool session's child is not re-attached after a daemon restart: the session lists **inactive**
   until it is resumed, whether or not the child outlived the daemon.
-- For a forked worker or a direct spawn the daemon signals the child's pid itself. Between the kernel
-  reaping the child and the wait thread's report reaching the daemon the pid could in principle be
-  reissued; a signal sent in that window is not prevented. The supervisor backend has no such window.
 - A tmux-run main that outlived a daemon restart is held by nothing until it is re-attached. The
   startup pass does so when the roster, or the pre-roster fallback, names an OS user the daemon can
   serve; until then a replace cannot stop it.

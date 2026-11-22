@@ -119,3 +119,13 @@ the way the daemon defines it — it holds a main agent terminal, a stub that re
 | `resume_tab_roster_acceptance` | Resume restores every roster tab under its recorded id (stub claude, cursor with `create-chat`, opencode): a claude tab resumes its own conversation, a cursor tab its minted chat, an opencode tab reopens fresh and is reported `FRESH`; a live tmux-wrapped tab is re-attached, not relaunched, and a gone one is relaunched and resumed; a `tmux-attach` tab whose session is gone is dropped and reported; a tab live at Resume is not restarted |
 | `claude_cli_tmux_reattach_acceptance` | a tmux-run agent that outlived its daemon lists inactive until its main is re-attached, and a detached one lists active while the daemon watches it; each re-attach attempt is awaited through `reattach_finished()` rather than polled |
 | `ensure_project_home_session_acceptance::ensuring_a_main_whose_recorded_pid_names_an_unrelated_process_resumes_it` | a main whose recorded pid is a running unrelated process is resumed, not reported running |
+
+### Deleting a tmux-run session, signals to ended children (`#tab-hardening` 2/4)
+
+`delete_session` (with the tmux-agent fixture shared in `tests/tmux_agent_support/`, which `claude_cli_tmux_session_acceptance`
+uses too) drives `DeleteSession` against a **private tmux server** and a stub agent that ignores `SIGHUP` and holds no
+terminal (`exec sleep 120 </dev/null >/dev/null`), which only a signal to its own pid ends: the delete leaves no agent, a pane
+pid whose start time changed is never signalled, and a tmux-run session records when its agent started on the roster's `tmux`
+node. The old "ignores hangup" case was removed: its stub died on the closed pty, not on a signal. `tests/agent_run_support/`
+holds `AnAgentRun` and the run-file reader of `coder_target_session_acceptance` and `remote_target_session_acceptance`.
+The tool-host fixtures of every suite are `tddy_test_hosts::a_tool_host()`.

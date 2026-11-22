@@ -301,8 +301,10 @@ fn run_spawn(req: &SpawnRequest, on_exit: Option<crate::child_exit::OnExit>) -> 
             req.startup_grace_period_ms,
             req.startup_poll_interval_ms,
         ),
-        gate.clone(),
-        on_exit,
+        crate::child_exit::ChildEnd {
+            gate: gate.clone(),
+            on_exit,
+        },
     );
     #[cfg(unix)]
     if let Ok(result) = &result {

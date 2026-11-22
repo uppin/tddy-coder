@@ -19,7 +19,9 @@ fallback to a worker.
 
 | Module | Holds |
 |---|---|
-| `spawn_worker.rs` | `fork_spawn_worker`, the request types (`WorkerRequest`, `SpawnRequest`, `WorkerResponse`), `run_spawn` |
+| `spawn_worker.rs` | `fork_spawn_worker`, the request types (`WorkerRequest` — `Spawn`, `Clone`, `Signal` — `SpawnRequest`, `WorkerResponse`), `run_spawn` |
+| `child_signal.rs` | signalling a tool child without reaching a recycled pid (`#tab-hardening` 2/4): `ReapGate` (the lock the child's reaper and every signal share, and the ended mark), `wait_without_reaping` (`waitid` with `WNOWAIT`), `ToolSignal` (`Direct` under the daemon's gate, `Worker` through `WorkerRequest::Signal`), `Signalled` (`Delivered` / `ChildEnded`), and the worker's table of gates by pid |
+| `child_exit.rs` | `SpawnedTool { result, exit, signal }`, `ChildEnd` (a spawn's gate and exit report) and the reaper thread: waits without reaping, then marks ended and reaps under the gate's lock |
 | `spawn_worker/wire.rs` | `RequestId`, `WorkerEnvelope`, `WorkerLine`, `WorkerEvent` |
 | `spawn_worker/serve.rs` | the worker loop (`serve`) |
 | `spawn_worker/client.rs` | `SpawnClient`, the line router, and the fork-free seams `spawn_worker_over` / `client_over` |
@@ -29,7 +31,7 @@ fallback to a worker.
 
 Newline-delimited JSON, one line per message.
 
-- **Request** (daemon → worker): `{"id":N,"op":"spawn"|"clone","payload":…}` — a `WorkerEnvelope`, the
+- **Request** (daemon → worker): `{"id":N,"op":"spawn"|"clone"|"signal","payload":…}` — a `WorkerEnvelope`, the
   `WorkerRequest` flattened beside its id. Ids are assigned by the client from a per-client counter.
 - **Event** (worker → daemon): `{"line":"event","id":N,"event":{"kind":"started","pid":P}}` — something
   that happened to request `N` before its result. `Started { pid }` is sent as soon as a clone's `git`
@@ -37,6 +39,7 @@ Newline-delimited JSON, one line per message.
   `wait`); `Exited{pid, code, signal}` (`"kind":"exited"`), written by the worker's wait thread after a spawn request's result, for as long as it holds the child — `SpawnClient::spawn_tool` resolves the request's `ExitReceiver` with it, and a plain `spawn` drops it at debug level; `CloneProgress(GitProgress)` (`"kind":"clone_progress"`) for each throttled line of git's
   progress, all before the clone's result. See [clone-run.md](clone-run.md).
 - **Result** (worker → daemon): `{"line":"result","id":N,"response":…}` — the last line for request `N`.
+- **Signal** (`{"op":"signal","payload":{"pid":P,"signal":S}}`): the worker is the parent of the children it spawned, so only it knows whether it has reaped one. It signals `P` under the lock its reaper thread takes after marking the child ended, and answers `{"op":"signalled","outcome":"delivered"|"child_ended"}`; a pid it never spawned is an `error`. See [child_signal](#modules).
 
 Worker and daemon are one binary image (fork without exec), so there is no version skew to negotiate.
 

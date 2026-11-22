@@ -8,13 +8,13 @@
 pub struct ProcessStart(u64);
 
 impl ProcessStart {
-    /// The start a session record keeps (`SessionMetadata::pid_start_time`).
+    /// The start a tmux main's roster node keeps (`tddy_core::tab_roster::START_PROPERTY`).
     #[must_use]
     pub const fn from_epoch_secs(secs: u64) -> Self {
         Self(secs)
     }
 
-    /// Seconds since the Unix epoch, as a session record keeps them.
+    /// Seconds since the Unix epoch, as the roster keeps them.
     #[must_use]
     pub const fn epoch_secs(self) -> u64 {
         self.0

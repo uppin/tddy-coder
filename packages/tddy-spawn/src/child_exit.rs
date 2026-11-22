@@ -42,6 +42,23 @@ pub struct SpawnedTool {
 /// What a spawn's wait thread calls, once, with the child's pid and how it ended.
 pub(crate) type OnExit = Box<dyn FnOnce(u32, ChildExit) + Send>;
 
+/// What a spawn does when its child ends: the [`ReapGate`] it marks ended under before the pid is
+/// freed ([`crate::child_signal`]), and the report it hands the end to.
+pub(crate) struct ChildEnd {
+    pub(crate) gate: ReapGate,
+    pub(crate) on_exit: Option<OnExit>,
+}
+
+impl ChildEnd {
+    /// An end nobody signals through or listens for.
+    pub(crate) fn unobserved() -> Self {
+        Self {
+            gate: ReapGate::new(),
+            on_exit: None,
+        }
+    }
+}
+
 /// Hand `on_exit`, if there is one, the end `waited` reports. A wait that failed leaves the holder
 /// knowing only that the child is gone, which is reported as an end with neither code nor signal.
 fn report_wait(
@@ -83,10 +100,10 @@ pub(crate) fn reap_in_background(
     mut child: std::process::Child,
     session_id: String,
     pid: u32,
-    gate: ReapGate,
-    on_exit: Option<OnExit>,
+    end: ChildEnd,
 ) {
     std::thread::spawn(move || {
+        let ChildEnd { gate, on_exit } = end;
         let waited = reap_after_marking_ended(&mut child, pid, &gate);
         match &waited {
             Ok(status) => {
@@ -147,8 +164,10 @@ pub fn spawn_tool_as_user(
         child_log_format,
         coder_log_config_yaml,
         startup,
-        gate.clone(),
-        Some(Box::new(move |_pid, end| holder.send(end))),
+        ChildEnd {
+            gate: gate.clone(),
+            on_exit: Some(Box::new(move |_pid, end| holder.send(end))),
+        },
     )?;
     let signal = Some(ToolSignal::Direct {
         pid: result.pid,
