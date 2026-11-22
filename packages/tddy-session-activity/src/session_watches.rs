@@ -25,8 +25,11 @@ mod delivery;
 pub(crate) mod matcher;
 mod store;
 mod stream;
+pub mod stream_call;
 
-pub use stream::{StreamBatch, StreamPick, StreamRefusal, StreamedEvent, STREAM_LEASE_GRACE};
+pub use crate::session_watches::stream_call::StreamPick;
+pub use crate::session_watches::stream_call::StreamRefusal;
+pub use stream::{StreamBatch, StreamedEvent, STREAM_LEASE_GRACE};
 
 /// The longest a watch lives without being renewed: 24 hours.
 pub const MAX_WATCH_TTL_SECS: u64 = 86_400;

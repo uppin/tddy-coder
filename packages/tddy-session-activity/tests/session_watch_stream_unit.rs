@@ -19,9 +19,10 @@ use tddy_session_activity::project_notification_log::ProjectNotificationLog;
 use tddy_session_activity::session_notifications::{
     SessionNotification, SessionNotificationBus, SessionNotificationKind, SessionNotificationSource,
 };
+use tddy_session_activity::session_watches::stream_call::StreamRefusal;
 use tddy_session_activity::session_watches::{
-    SessionWatchStore, StreamBatch, StreamRefusal, WatchFilter, WatchKind, WatchOptions,
-    WatchOwner, STREAM_LEASE_GRACE,
+    SessionWatchStore, StreamBatch, WatchFilter, WatchKind, WatchOptions, WatchOwner,
+    STREAM_LEASE_GRACE,
 };
 
 const PROJECT: &str = "project-a";

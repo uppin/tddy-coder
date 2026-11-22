@@ -23,8 +23,9 @@ use tddy_session_activity::project_notification_log::{
 use tddy_session_activity::session_notifications::{
     SessionNotification, SessionNotificationBus, SessionNotificationKind, SessionNotificationSource,
 };
+use tddy_session_activity::session_watches::stream_call::StreamPick;
 use tddy_session_activity::session_watches::{
-    SessionWatchStore, StreamBatch, StreamPick, WatchFilter, WatchKind, WatchOptions, WatchOwner,
+    SessionWatchStore, StreamBatch, WatchFilter, WatchKind, WatchOptions, WatchOwner,
     STREAM_LEASE_GRACE,
 };
 
