@@ -442,6 +442,9 @@ message SessionEntry {
   uint64 pr_number = 42;
   // `open` / `draft` / `merged` / `closed`, beside `pr_number`; empty when `pr_number` is 0.
   string pr_state = 43;
+  // Whether this session owns a work queue (`#workqueue` 5/14) — the inspector shows the Work queue
+  // tab, and opens on it, exactly when it does.
+  bool owns_work_queue = 44;
 }
 
 // A machine a session's agent runs on that the serving daemon reaches through a remote shell, with
@@ -884,6 +887,9 @@ message StartSessionRequest {
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved
   // against the caller's YAML defs (or the builtin `fastcontext` def) — no caller-facing override,
   // no single-name alias. No backwards compatibility retained.
+  // `#workqueue` 5/14: start this session with an empty work queue it owns. An orchestrator start gets
+  // one without asking (the only role-aware rule of the work queue).
+  bool with_work_queue = 51;
   reserved 19, 20, 21, 22, 23;
 }
 

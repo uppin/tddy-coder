@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 5 — storage re-key and a data removal on upgrade, proto addressing change, gating rewritten from role to ownership across tool-engine and daemon-rpc, a start-path option (agent-launch, MCP schema, web form), an inspector tab
 **Stack**: `#workqueue` 5/14 — branch `feature/workqueue/session-work-queue`, base `feature/workqueue/session-pr-tabs`
+**PR**: [#1006](https://github.com/uppin/tddy-coder/pull/1006)
 
 ## Initial Discovery
 
@@ -78,10 +79,21 @@ implementing one here collides with the PR that owns it.
 
 ## Draft PR contract
 
-The first push of this PR, before its implementation: the re-keyed store's public API
-(`WorkQueueStore::{create_for_session, read, update, list_for_project}`), `WorkQueueAccess` and
-`work_queue_access_of(caller, addressed)`, the proto changes (`WorkQueueAddress`, `with_work_queue`,
-`owns_work_queue`), the refusal message constant, the web tab's test ids, and the failing tests below.
+Published (pass 2, commit 2) — written while `#workqueue` 3/14's rename is still a map, so new symbols
+use final names that are **not** in that map and references to existing symbols use today's names
+(`Stack`, `StackNode`, `PR_*` constants, `PrStackService`); `/green` renames those references per
+n3's map when it rebases onto a green n3:
+
+- `tddy_changeset::session_work_queue::{SessionWorkQueues (create_for_session, read, update,
+  list_for_project), SessionWorkQueueRecord, SessionWorkQueueError, WORK_QUEUE_FILE, NO_WORK_QUEUE_HINT,
+  starts_with_work_queue, drop_old_project_stack_records}`
+- `tddy_tool_engine::work_queue_access::{WorkQueueAccess, work_queue_access_of,
+  work_queue_tools_offered_to}` — neither function takes a role
+- Proto: `StartSessionRequest.with_work_queue` (51), `SessionEntry.owns_work_queue` (44); TS regenerated
+- The failing tests below. Session addressing on the queue RPCs (`WorkQueueAddress { session_id, … }`)
+  is `/green`'s, after n3 renames `pr_stack.proto`.
+
+`/green` also updates `#workqueue` 3/14's `work_queue_vocabulary.rs` (drops `work_queue_create`).
 
 ## Green wave
 
@@ -185,36 +197,40 @@ default precedence and the form option. A startup test for the upgrade deletion.
 
 ## Acceptance Tests
 
-`packages/tddy-changeset/tests/work_queue_store_acceptance.rs`:
-- [ ] `a_queue_is_stored_under_its_owning_session`
-- [ ] `a_session_without_a_queue_reads_as_none`
+`packages/tddy-changeset/tests/session_work_queue_acceptance.rs`:
+- [x] `a_queue_is_stored_under_its_owning_session`
+- [x] `a_session_without_a_queue_reads_as_none_and_refuses_an_update_with_the_hint`
+- [x] `a_session_creates_its_queue_once`
+- [x] `the_project_listing_finds_each_owning_sessions_queue`
+- [x] `a_session_started_with_the_option_gets_a_queue_and_one_without_it_none`
+- [x] `an_orchestrator_start_gets_a_queue_without_the_option`
+- [x] `old_project_stack_records_and_journals_are_dropped` (replaces the startup migration test; the
+  daemon's `last_run_sweep` calls it)
 
-`packages/tddy-agent-launch/tests/work_queue_at_start_acceptance.rs`:
-- [ ] `a_session_started_with_a_work_queue_owns_an_empty_queue`
-- [ ] `a_session_started_without_one_has_no_queue`
-- [ ] `an_orchestrator_start_owns_a_queue_without_the_option`
+The start path's wiring (agent-launch calls `starts_with_work_queue` then `create_for_session`) is
+proved by the rule tests plus the daemon tool tests `/green` extends; no agent-launch harness test.
 
-`packages/tddy-daemon-rpc/tests/work_queue_tools_acceptance.rs`:
-- [ ] `the_owner_adds_a_work_item_without_naming_its_queue`
-- [ ] `a_session_linked_to_an_item_reads_the_queue_and_cannot_change_it`
-- [ ] `a_work_tool_addressing_a_session_without_a_queue_is_refused_with_the_hint`
-- [ ] `work_tools_are_listed_to_queue_owners_and_addressed_sessions_only`
-- [ ] `an_orchestrator_session_cannot_write_another_sessions_queue`
-- [ ] `a_regular_session_with_a_queue_gets_every_work_tool`
-
-`packages/tddy-daemon/tests/startup_drops_old_stack_records_acceptance.rs` (replaces `startup_stack_migration_acceptance.rs`):
-- [ ] `old_project_stack_records_and_journals_are_deleted_at_startup`
+`packages/tddy-tool-engine/tests/work_queue_access.rs` (the access model, role-free by signature):
+- [x] `the_owning_session_has_full_access`
+- [x] `a_session_an_item_links_to_is_addressed`
+- [x] `any_other_session_has_no_access` (e.g. the main orchestrator on another session's queue)
+- [x] `the_owner_is_offered_every_work_tool_except_creation`
+- [x] `an_addressed_session_is_offered_the_reads_and_nobody_else_anything`
 
 `packages/tddy-tool-engine/tests/start_session_schema.rs`:
-- [ ] `start_session_offers_with_work_queue`
+- [x] `start_session_offers_with_work_queue`
+
+The daemon tool path (listing and execution gated by `WorkQueueAccess`, the refusal reaching the caller)
+is `/green`'s to prove by extending `stack_plan_tools_acceptance.rs` / `stack_git_tools_acceptance.rs`
+(renamed by n3); their harness is too heavy to build for a contract (disk, 2026-11-22).
 
 `packages/tddy-session-web/cypress/component/SessionInspectorWorkQueueTabAcceptance.cy.tsx`:
-- [ ] `a session owning a work queue shows the Work queue tab and opens on it`
-- [ ] `a session without a queue shows no Work queue tab and opens on PR or Worktree`
-- [ ] `the user adds a work item from the Work queue tab`
+- [x] `a session owning a work queue shows the Work queue tab and opens on it`
+- [x] `a session without a queue shows no Work queue tab and opens on PR or Worktree`
+- [x] `the user adds a work item from the Work queue tab`
 
 `packages/tddy-session-create-web/cypress/component/CreateSessionWorkQueueOptionAcceptance.cy.tsx`:
-- [ ] `checking With work queue starts the session with a queue`
+- [x] `checking With work queue starts the session with a queue`
 
 ## Decisions & Trade-offs
 
@@ -230,6 +246,9 @@ default precedence and the form option. A startup test for the upgrade deletion.
   session an item of the queue links to, read-only.
 - **Existing orchestrator sessions at upgrade** receive their implicit empty queue on their next start
   or resume (planner's derivation of answer (b): the same rule, applied when the session next runs).
+- **New names avoid n3's map** (pass 2): `SessionWorkQueues` / `SessionWorkQueueRecord`, not
+  `WorkQueueStore` / `WorkQueueRecord` (n3's names for the project-keyed store this node replaces), so
+  n3's rename and this node's addition never collide.
 - **Storage in the session directory** so a queue lives and dies with its session, and the owner's
   daemon is where it is read; the project listing scans its sessions.
 - **`CreateWorkQueue` and `work_queue_create` are removed**: with creation at start they would be a
@@ -255,10 +274,10 @@ _(populated by validation)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

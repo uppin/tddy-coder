@@ -12,6 +12,7 @@ pub mod elapsed_format;
 pub mod orchestration_mark;
 pub mod pending_question;
 pub mod session_activity;
+pub mod session_work_queue;
 pub mod session_agent;
 pub mod session_context;
 pub mod session_display_name;

@@ -42,6 +42,7 @@ pub mod start_session_args;
 pub mod terminal_keys;
 pub mod work_item_git_tools;
 pub mod work_queue_tools;
+pub mod work_queue_access;
 
 pub use catalog::{tool_catalog, ToolDef};
 pub use edited_region::EDITED_REGION_CONTEXT_LINES;

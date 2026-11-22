@@ -409,3 +409,17 @@ fn start_session_offers_no_stack_base_session_argument() {
         "StartSession still offers work_queue_base_session_id, the removed stack seed"
     );
 }
+
+/// `#workqueue` 5/14: a session can be started with a work queue it owns.
+#[test]
+fn start_session_offers_with_work_queue() {
+    // When
+    let schema = schema();
+
+    // Then
+    assert_eq!(
+        schema["properties"]["with_work_queue"]["type"].as_str(),
+        Some("boolean"),
+        "StartSession offers with_work_queue as a boolean"
+    );
+}
