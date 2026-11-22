@@ -1,0 +1,209 @@
+# Changeset: Moving a work item tells the queue's owner
+
+**Date**: 2026-11-22
+**Status**: 🚧 In Progress
+**Type**: Feature
+**Complexity**: 4 — more than one crate (kernel, session-activity, daemon-rpc, tool-engine, tools, telegram), a new activity source with ordering into the notification log, a restructure of an at-budget file first
+**Stack**: `#workqueue` 8/14 — branch `feature/workqueue/move-activities`, base `feature/workqueue/badges-labels`
+
+## Initial Discovery
+
+[2026-11-22-move-activities-initial-discovery.md](./2026-11-22-move-activities-initial-discovery.md)
+
+## Affected Packages
+
+- **tddy-daemon-kernel**: `SessionNotificationSource::WorkQueue`; `is_a_sessions_own` true for it
+- **tddy-session-activity**: `WatchKind::WorkQueue` (`ALL`, `as_str`, `parse`, `of`), matcher self-watch rule, log `wants`, storage DTO arms, `streams.rs` mapping (skipped by the drawer stream); split of `project_notification_log.rs` first
+- **tddy-daemon-rpc**: publishing on reorder / set-parents (RPC and tool paths); `project_home_watches.rs` self-watch admission; `watch_wake.rs` `wants`
+- **tddy-tool-engine**: `WATCH_KINDS` (8 → 9); `WorkQueueEvent` payload type
+- **tddy-tools**: `monitor` help and kinds
+- **tddy-telegram-control**: declines the kind
+
+## Related Feature Documentation
+
+- PRD: [PRD-2026-11-22-move-activities.md](../../ft/coder/1-WIP/PRD-2026-11-22-move-activities.md)
+- Wrap updates: `docs/ft/daemon/session-notifications.md`, the watches section of `project-concept.md`
+
+## Summary
+
+Reorders and parent changes publish a `work_queue` activity to the queue's owner; its agent can watch
+for them; its own moves do not wake it.
+
+## Background
+
+Exploration 3 §4D.2 lists every place a new kind touches (the `TrunkCommit` recipe); §4D.3 the
+delivery paths (tool answers, idle wake, monitor).
+
+## Responsibility
+
+- `SessionNotificationSource::WorkQueue`, `WatchKind::WorkQueue` and every registry they join.
+- `WorkQueueEvent { queue_session_id, item_id, change, actor }` with
+  `WorkQueueChange::{Reordered, ParentsChanged}` and `Actor::{User, Agent}` — the kind's payload, which
+  later nodes extend with new `WorkQueueChange` variants rather than new kinds.
+- Publishing from every move path (UI RPC and tools).
+- The owner self-watch rule and the "own moves do not wake" rule.
+- Splitting `project_notification_log.rs` (499 lines) before adding the source.
+
+## Boundaries
+
+- Moves only: adding, deleting, annotating or linking items publish nothing.
+- No web view of watches (separate TODO).
+- Land / propagate / schedule events are n14's, as new `WorkQueueChange` variants.
+
+## Dependencies
+
+What each parent PR delivers that this PR consumes. These surfaces are **theirs to create**;
+implementing one here collides with the PR that owns it.
+
+| Parent node | What it delivers | How this PR consumes it | This PR does NOT |
+|---|---|---|---|
+| `n5` session-work-queue (#1006) | session-keyed queue; owner = queue session; reorder and set-parents addressed by session | publishes after a successful move, to the owner | change access, storage or the move operations themselves |
+| `n6` pr-and-session-link (#1007), `n7` badges-labels (#1008) | line predecessors only | — | publish on link or annotation changes |
+
+## Draft PR contract
+
+The first push of this PR, before its implementation: the source and kind variants, `WorkQueueEvent`,
+`WATCH_KINDS` entry, and the failing tests below (with the log split done as a restructure in the same
+push, so the source arm lands in the split module).
+
+## Green wave
+
+**Wave:** 4 of 8
+**Greenable independently:** yes once n5 is in its base — the tests move items in n5's queue and read activities
+**Concurrent with:** n6 pr-and-session-link, n7 badges-labels
+**Blocks:** nothing in behaviour; n14 extends `WorkQueueChange`
+
+Real dependency edges (the line is n1 · n2 · n3 · … · n14; `a → b` means b needs a's behaviour):
+
+    n1 remove-pr-stack-recipe → n3 workitem-rename
+    n2 github-event-inbox     → n4 session-pr-tabs, n6 pr-and-session-link
+    n3 workitem-rename        → n5 session-work-queue
+    n4 session-pr-tabs        → n11 commit-inbox-outbox
+    n5 session-work-queue     → n6 pr-and-session-link, n7 badges-labels, n8 move-activities
+    n6 pr-and-session-link    → n9 lineage-graph
+    n9 lineage-graph          → n10 waves-line, n11 commit-inbox-outbox, n12 leak-linearity
+    n10 waves-line            → n13 schedules
+    n11 commit-inbox-outbox   → n13 schedules
+    n13 schedules             → n14 land-propagate
+
+Waves: 1 = n1, n2 · 2 = n3, n4 · 3 = n5 · 4 = n6, n7, n8 · 5 = n9 · 6 = n10, n11, n12 · 7 = n13 ·
+8 = n14 (run along the line `1 1 2 2 3 4 4 4 5 6 6 6 7 8` — never steps back). Inside each wave the
+blockers lead: n1 (12 transitive dependents) before n2 (8); n3 (10) before n4 (3); n6 (6) before n7
+and n8 (0 each); n10 and n11 (2 each — tie, kept in plan order) before n12 (0). The sweep node is
+reserved and planned after the pipelines drain.
+
+## Prerequisites
+
+### ⛔ BLOCKING — restructure `project_notification_log.rs` first
+
+`packages/tddy-session-activity/src/project_notification_log.rs` is at 499 production lines (budget
+500, Exploration 3 §4F); a new source arm takes it over. Split it (e.g. the `wants` policy and record
+mapping into their own modules) via `/code-restructuring` before adding the arm. An engine refusal goes
+to the operator before any hand move.
+
+### Related — [2026-11-16-session-watches-are-not-shown-on-the-web.md](../todo/2026-11-16-session-watches-are-not-shown-on-the-web.md)
+
+Unchanged; the new kind will appear there whenever watches get a view.
+
+### Related — [2026-11-22-coder-target-back-channel-and-activity-cursor.md](../todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md)
+
+A target-hosted owner receives the activity through the same delivery paths; live verification stays
+with that entry.
+
+## Scope
+
+- [ ] Split `project_notification_log.rs`
+- [ ] Source, kind and payload in every registry
+- [ ] Publishing from UI and tool move paths
+- [ ] Owner self-watch; own moves do not wake
+- [ ] Docs updated through the wrap
+
+## Technical Changes
+
+### State A (Current)
+
+8 watch kinds; `is_a_sessions_own` = `Message | TrunkCommit`; self-watch admitted for `trunk_commit` only (`project_home_watches.rs:128`); moves publish nothing.
+
+### State B (Target)
+
+9 kinds; `work_queue` is session-own and self-watchable; a move publishes `WorkQueueEvent` with the
+actor; `watch_matches` drops events whose actor is the watching session.
+
+### Delta
+
+As listed under Affected Packages.
+
+## Implementation Milestones
+
+- [ ] Log split (no behaviour change)
+- [ ] Source/kind/payload registries
+- [ ] Publishing on moves
+- [ ] Watch rules + monitor
+
+## Testing Plan
+
+Integration tests in `tddy-session-activity` (matcher, log) and through the daemon (move → activity →
+watch answer), mirroring `trunk_watch_acceptance.rs` and `session_watches_unit.rs`
+(`the_kinds_are_named_as_the_tools_name_them` keeps the lists in step).
+
+## Acceptance Tests
+
+`packages/tddy-session-activity/tests/work_queue_activity_acceptance.rs`:
+- [ ] `a_user_reorder_becomes_an_activity_of_the_queue_owner`
+- [ ] `a_parents_change_names_the_parents_before_and_after`
+- [ ] `the_owners_watch_is_not_matched_by_its_own_agents_move`
+- [ ] `no_other_sessions_watch_matches_the_queue`
+
+`packages/tddy-daemon-rpc/tests/work_queue_tools_acceptance.rs` (extended):
+- [ ] `an_owner_watching_work_queue_is_woken_by_a_user_move_from_the_queue_view`
+
+`packages/tddy-session-activity/tests/session_watches_unit.rs` (existing):
+- [ ] `the_kinds_are_named_as_the_tools_name_them` (now 9)
+
+## Decisions & Trade-offs
+
+- **One kind, `work_queue`, with a change enum** so later queue events (land, propagate, schedule
+  fired — n14) need no new kind and no second pass through the ~12 registries.
+- **Own moves don't wake the mover**: the activity is recorded (an audit trail) but not delivered to
+  the session whose agent made it.
+- **Moves = reorder and parents change** — the two operations that change an item's position; the
+  operator's "moves" read narrowly, so adds and deletes stay quiet.
+
+## Technical Debt & Production Readiness
+
+_(populated during development)_
+
+## Refactoring Needed
+
+_(populated by validation)_
+
+## Validation Results
+
+_(populated by validation)_
+
+## TODO
+
+- [x] Record initial discovery (`2026-11-22-move-activities-initial-discovery.md`)
+- [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
+- [x] Create/update PRD documentation
+- [x] Create changeset (this document)
+- [ ] Create failing acceptance tests
+- [ ] Run acceptance tests (verify they fail)
+- [ ] USER REVIEW — acceptance tests
+- [ ] TDD Red — write failing unit/integration tests
+- [ ] TDD Green — implement with quality code
+- [ ] Update documentation with progress
+- [ ] Repeat Red→Green→Update cycle until feature complete
+- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [ ] Validate changes (/validate-changes)
+- [ ] Refactor issues from change validation
+- [ ] USER REVIEW — development complete
+- [ ] Validate tests (/validate-tests)
+- [ ] Refactor test issues
+- [ ] Validate production readiness (/validate-prod-ready)
+- [ ] Refactor production readiness issues
+- [ ] Analyze code quality (/analyze-clean-code)
+- [ ] Refactor code quality issues
+- [ ] Final validation (/validate-changes)
+- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
