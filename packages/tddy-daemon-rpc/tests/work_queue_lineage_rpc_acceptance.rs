@@ -86,7 +86,9 @@ async fn an_items_needs_are_stored_on_the_queue_and_answered() {
     let (host, address) = a_host_holding_a_two_item_queue();
 
     // When
-    let after = set_needs(&host, &address, "n2", &["n1"]).await.expect("set");
+    let after = set_needs(&host, &address, "n2", &["n1"])
+        .await
+        .expect("set");
 
     // Then
     assert_eq!(
@@ -99,17 +101,25 @@ async fn an_items_needs_are_stored_on_the_queue_and_answered() {
 async fn a_dependency_closing_a_cycle_is_refused_naming_it_and_writes_nothing() {
     // Given — n2 already needs n1
     let (host, address) = a_host_holding_a_two_item_queue();
-    set_needs(&host, &address, "n2", &["n1"]).await.expect("set");
+    set_needs(&host, &address, "n2", &["n1"])
+        .await
+        .expect("set");
 
     // When — n1 would need n2
     let refused = set_needs(&host, &address, "n1", &["n2"])
         .await
         .expect_err("a cycle is refused");
-    let unchanged = set_needs(&host, &address, "n2", &["n1"]).await.expect("set again");
+    let unchanged = set_needs(&host, &address, "n2", &["n1"])
+        .await
+        .expect("set again");
 
     // Then
     assert_eq!(
-        (refused.code(), refused.message().contains("n1 -> n2 -> n1"), needs_of(&unchanged, 0)),
+        (
+            refused.code(),
+            refused.message().contains("n1 -> n2 -> n1"),
+            needs_of(&unchanged, 0)
+        ),
         (Code::FailedPrecondition, true, Vec::<String>::new())
     );
 }
