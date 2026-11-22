@@ -69,6 +69,17 @@ so an orchestrator's self-watch fires and an idle one is woken; Telegram, the dr
 Tddy Desktop skip it, and `ReadProjectNotifications` / `WaitProjectNotifications` never list it
 ([Project concept § Watching the trunk](project-concept.md#watching-the-trunk)).
 
+**Work-queue moves are their queue owner's.** Moving a work item — a reorder in the queue view, or an
+agent changing its parents with `work_item_set_parents` (source `work_queue`, `#workqueue` 8/14) — is
+published on the session that owns the queue, its text one line naming the item, the change and who
+made it (`Work item {title} ({id}) moved from position 2 to 1, by octocat`). A move by the operator or
+by another session's agent is `ATTENTION_REQUIRED`, so the owner's `work_queue` self-watch fires and an
+idle owner is woken; a move the owner's own agent made is `ACTIVITY` — kept in the project log, never
+delivered to it. Like trunk commits, Telegram, the drawer's stream, Tddy Desktop and
+`ReadProjectNotifications` / `WaitProjectNotifications` skip it
+([Project concept § Watching sessions](project-concept.md#watching-sessions)). Adding, deleting,
+annotating or linking an item publishes nothing.
+
 ## Agent-written notifications
 
 Every other notification is a fixed sentence the daemon writes. An agent in a daemon-launched
@@ -174,7 +185,7 @@ The stream is live-only; the **project notification log** is what a project-home
 ([Project concept § Waiting for notifications](project-concept.md#waiting-for-notifications)).
 
 - A bus subscriber on every daemon appends each `ATTENTION_REQUIRED` notification — and each
-  `trunk_commit` activity — to the log of the project its session belongs to, read from the session's record. A session of no project is skipped;
+  `trunk_commit` and `work_queue` activity — to the log of the project its session belongs to, read from the session's record. A session of no project is skipped;
   one whose owner or record cannot be resolved is a delivery failure the bus logs.
 - Each record names the orchestrator that started its session (`orchestrator_session_id`, from the
   session's changeset when the record is appended), so a reader can ask for its own sessions only.
