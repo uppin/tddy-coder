@@ -916,6 +916,7 @@ jobs:
           ./scripts/local-package-cache.test.ts
           ./scripts/nextest-windowed.test.ts
           ./scripts/nextest-e2e-archive.test.ts
+          ./scripts/vite-prebundle.test.ts
 
       - name: Check committed generated code
         run: ./dev bash scripts/generated-code.sh check

@@ -179,7 +179,7 @@ type DiagnosedOptimizer = {
   registerMissingImport: (id: string, resolved: string) => unknown;
 };
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: strips terminal colours from Vite's messages
+/** Terminal colour codes, stripped before Vite's messages are matched and copied. */
 const ANSI = /\u001b\[[0-9;]*m/g;
 
 const RELOADING = /optimized dependencies changed\. reloading/;
