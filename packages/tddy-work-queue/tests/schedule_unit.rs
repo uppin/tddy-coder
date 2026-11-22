@@ -1,7 +1,7 @@
 //! Armed merges and propagations, evaluated (`#workqueue` 13/14).
 
 use pretty_assertions::assert_eq;
-use tddy_pr_stack::schedule::{
+use tddy_work_queue::schedule::{
     evaluate, schedule_wave, ChecksVerdict, ConditionState, ReviewVerdict, Schedule, ScheduleKind,
     ScheduleSnapshot, WorktreeVerdict,
 };

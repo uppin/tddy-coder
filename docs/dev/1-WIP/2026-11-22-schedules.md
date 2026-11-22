@@ -7,6 +7,12 @@
 **Stack**: `#workqueue` 13/14 — branch `feature/workqueue/schedules`, base `feature/workqueue/leak-linearity`
 **PR**: [#1014](https://github.com/uppin/tddy-coder/pull/1014)
 
+## Stack note (temporary)
+
+This branch is rebased onto n11's head (`feature/workqueue/commit-inbox-outbox`, dcb2f3c55: n11 on n10 on
+n9), not onto n12 — n12's implementation is still in progress. n13's real dependencies are n10 (waves) and
+n11 (commit inbox). **Rebase onto n12 before n13's [W].** Remove this note then.
+
 ## Initial Discovery
 
 [2026-11-22-schedules-initial-discovery.md](./2026-11-22-schedules-initial-discovery.md)
@@ -66,12 +72,12 @@ implementing one here collides with the PR that owns it.
 
 Published (pass 2, commit 2):
 
-- `tddy_pr_stack::schedule::{Schedule, ScheduleKind, Condition, ConditionState, ScheduleView,
+- `tddy_work_queue::schedule::{Schedule, ScheduleKind, Condition, ConditionState, ScheduleView,
   ScheduleSnapshot, ChecksVerdict, ReviewVerdict, WorktreeVerdict, evaluate, schedule_wave}` — pure over a
   snapshot of the item's facts (gathering them from n2/n4/n9/n11 is `/green`'s)
 - `tddy_tool_engine::work_queue_schedule_tools::{WORK_ITEM_SCHEDULE, WORK_QUEUE_SCHEDULE_WAVE,
   WORK_ITEM_UNSCHEDULE, WORK_QUEUE_SCHEDULES, WORK_QUEUE_SCHEDULE_TOOL_NAMES, work_queue_schedule_tool_defs}`
-- `tddy-prstack-web`: `SchedulesPanel` (shell, props-driven)
+- `tddy-workqueue-web`: `SchedulesPanel` (shell, props-driven)
 - The failing tests below. Stored schedules, the RPCs and the stream payload are `/green`'s.
 
 **The `threads` condition is a TODO, accepted by the operator (2026-11-22)** — GraphQL later.
@@ -147,7 +153,7 @@ Unit tests for the evaluator over hand-built snapshots (one per condition and st
 
 ## Acceptance Tests
 
-`packages/tddy-pr-stack/tests/schedule_unit.rs` (crate renamed by n3):
+`packages/tddy-work-queue/tests/schedule_unit.rs`:
 - [x] `a_merge_on_an_item_based_on_an_open_item_waits_on_order`
 - [x] `a_clean_inbox_entry_makes_current_wait_and_a_predicted_conflict_blocks_it`
 - [x] `a_propagations_checks_condition_reads_the_bases_ci`
