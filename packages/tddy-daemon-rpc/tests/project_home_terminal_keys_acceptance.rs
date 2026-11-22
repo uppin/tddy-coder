@@ -178,7 +178,7 @@ async fn a_jailed_child_of(host: &Host, session_id: &str) -> JailedChild {
         capture: Arc::new(Mutex::new(TerminalCapture::new())),
         stdin_tx,
         ready_marker: PathBuf::from("/unused-by-the-terminal-surface"),
-        handle: an_exited_sandbox_process(),
+        handle: a_running_sandbox_process(),
         managed_workflow: None,
     }));
     host.daemon
@@ -189,12 +189,17 @@ async fn a_jailed_child_of(host: &Host, session_id: &str) -> JailedChild {
     JailedChild { stdin }
 }
 
-/// A process standing in for the jail: the state keeps the handle only so a delete can kill the
-/// tree, and nothing on the terminal surface reads it.
-fn an_exited_sandbox_process() -> tddy_sandbox::SandboxHandle {
-    let child = std::process::Command::new("true")
+/// A process standing in for the jail's runner: nothing on the terminal surface reads it, but it
+/// must keep running — a jail whose runner exited is ended by its death watch, and its terminal
+/// ends with it. Dropping the state stops it.
+fn a_running_sandbox_process() -> tddy_sandbox::SandboxHandle {
+    let child = std::process::Command::new("sleep")
+        .arg("300")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()
-        .expect("a trivial child process");
+        .expect("a stand-in runner");
     let unused = || PathBuf::from("/unused-by-the-terminal-surface");
     tddy_sandbox::SandboxHandle::new(child, unused(), unused(), unused())
 }

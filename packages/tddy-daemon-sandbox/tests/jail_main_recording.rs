@@ -25,9 +25,15 @@ async fn a_registered_jail(manager: &SandboxSessionManager) -> Arc<Mutex<Termina
     let capture = Arc::new(Mutex::new(TerminalCapture::new()));
     let (stdout_tx, _) = broadcast::channel(8);
     let (stdin_tx, _stdin_rx) = mpsc::unbounded_channel();
-    let child = std::process::Command::new("true")
+    // A runner that keeps running: a jail whose runner had exited would be ended by its death watch,
+    // and a recording of an ended jail is not what these tests drive. Dropping the state stops it.
+    let child = std::process::Command::new("sleep")
+        .arg("300")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()
-        .expect("a trivial child process");
+        .expect("a stand-in runner");
     let unused = PathBuf::from("/unused-by-the-recording");
     let state = SandboxSessionState::new(SandboxSessionStateInit {
         pid: 4242,
