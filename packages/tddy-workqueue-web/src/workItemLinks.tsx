@@ -31,6 +31,9 @@ export interface WorkItemLinks {
   onUnassignPr: (itemId: string) => void;
   onLinkSession: (itemId: string, session: LinkableSession) => void;
   onUnlinkSession: (itemId: string, sessionId: string) => void;
+  /** `#workqueue` 7/14: replace the item's labels / remove one of its badges by key. */
+  onSetLabels: (itemId: string, labels: string[]) => void;
+  onClearBadge: (itemId: string, key: string) => void;
 }
 
 export const WorkItemLinksContext = createContext<WorkItemLinks | null>(null);

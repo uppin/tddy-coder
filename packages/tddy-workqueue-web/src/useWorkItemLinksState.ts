@@ -119,5 +119,13 @@ export function useWorkItemLinksState({
       void runLinkCall(itemId, () =>
         workQueueClient.unlinkWorkItemSession({ sessionToken, queue: address, itemId, sessionId }),
       ),
+    onSetLabels: (itemId, labels) =>
+      void runLinkCall(itemId, () =>
+        workQueueClient.setWorkItemLabels({ sessionToken, queue: address, itemId, labels }),
+      ),
+    onClearBadge: (itemId, key) =>
+      void runLinkCall(itemId, () =>
+        workQueueClient.clearWorkItemBadge({ sessionToken, queue: address, itemId, key }),
+      ),
   };
 }

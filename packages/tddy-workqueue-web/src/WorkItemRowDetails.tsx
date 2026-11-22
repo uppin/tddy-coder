@@ -3,6 +3,7 @@ import { Button } from "tddy-ui-web";
 import type { BranchResolution } from "tddy-client-web/gen/work_queue_pb";
 import type { BaseSyncView, BehindBaseSyncView } from "./baseSyncStatus";
 import type { WorkItem } from "./workQueue";
+import { WorkItemAnnotationControls } from "./WorkItemAnnotationControls";
 import { WorkItemLinkControls } from "./WorkItemLinkControls";
 
 export interface WorkItemRowDetailsProps {
@@ -185,6 +186,7 @@ export function WorkItemRowDetails({
         </div>
       )}
       <WorkItemLinkControls node={node} />
+      <WorkItemAnnotationControls node={node} />
       {/* The deliberate act that changes the reading order — nothing else moves a row. Inert at
           the ends of the rendered list rather than absent, so the control does not appear and
           disappear as rows move past it. */}
