@@ -5,7 +5,9 @@
 use std::sync::Arc;
 
 use tddy_github::pr_api::{CheckRun, CheckStatus, PrState};
-use tddy_github_inbox::{EventKind, GithubInbox, InboxError, InboxEvent, RepoSlug, RowKey};
+use tddy_github_inbox::{
+    EventKind, GithubInbox, InboxError, InboxEvent, PrConversation, RepoSlug, RowKey,
+};
 use tddy_rpc::Status;
 use tddy_service::proto::session::SessionEntry;
 use tddy_service::proto::worktree::{
@@ -107,33 +109,9 @@ fn check_view(run: CheckRun) -> PullRequestCheck {
     }
 }
 
-/// `branch`'s PR view: the PR, its checks at the head, its conversation and its commits.
-pub async fn pull_request_view(
-    inbox: &GithubInbox,
-    repo: &RepoSlug,
-    branch: &str,
-) -> Result<SessionPullRequestView, InboxError> {
-    read_view(inbox, repo, branch).await.map(|(view, _)| view)
-}
-
-/// The view and the head commit its checks were read at (`None` without a PR).
-async fn read_view(
-    inbox: &GithubInbox,
-    repo: &RepoSlug,
-    branch: &str,
-) -> Result<(SessionPullRequestView, Option<String>), InboxError> {
-    let Some(pr) = inbox.pr_for_head(repo, branch).await?.value else {
-        let view = SessionPullRequestView {
-            head_branch: branch.to_string(),
-            ..Default::default()
-        };
-        return Ok((view, None));
-    };
-    let checks = inbox.checks_at(repo, &pr.head_sha).await?.value;
-    let conversation = inbox.conversation(repo, pr.number).await?.value;
-    let commits = inbox.pr_commits(repo, pr.number, &pr.head_sha).await?.value;
-
-    // Reviews first, then review comments (threaded by `in_reply_to_id`), then conversation comments.
+/// The PR's conversation as the view lists it: reviews first, then review comments (threaded by
+/// `in_reply_to_id`), then conversation comments.
+fn conversation_view(conversation: PrConversation) -> Vec<PullRequestComment> {
     let reviews = conversation
         .reviews
         .into_iter()
@@ -170,6 +148,38 @@ async fn read_view(
                 ..Default::default()
             });
 
+    reviews
+        .chain(review_comments)
+        .chain(issue_comments)
+        .collect()
+}
+
+/// `branch`'s PR view: the PR, its checks at the head, its conversation and its commits.
+pub async fn pull_request_view(
+    inbox: &GithubInbox,
+    repo: &RepoSlug,
+    branch: &str,
+) -> Result<SessionPullRequestView, InboxError> {
+    read_view(inbox, repo, branch).await.map(|(view, _)| view)
+}
+
+/// The view and the head commit its checks were read at (`None` without a PR).
+async fn read_view(
+    inbox: &GithubInbox,
+    repo: &RepoSlug,
+    branch: &str,
+) -> Result<(SessionPullRequestView, Option<String>), InboxError> {
+    let Some(pr) = inbox.pr_for_head(repo, branch).await?.value else {
+        let view = SessionPullRequestView {
+            head_branch: branch.to_string(),
+            ..Default::default()
+        };
+        return Ok((view, None));
+    };
+    let checks = inbox.checks_at(repo, &pr.head_sha).await?.value;
+    let conversation = inbox.conversation(repo, pr.number).await?.value;
+    let commits = inbox.pr_commits(repo, pr.number, &pr.head_sha).await?.value;
+
     let head_sha = pr.head_sha;
     let view = SessionPullRequestView {
         exists: true,
@@ -180,10 +190,7 @@ async fn read_view(
         base_branch: pr.base_branch,
         head_branch: pr.head_branch,
         checks: checks.into_iter().map(check_view).collect(),
-        comments: reviews
-            .chain(review_comments)
-            .chain(issue_comments)
-            .collect(),
+        comments: conversation_view(conversation),
         commits: commits
             .into_iter()
             .map(|commit| PullRequestCommit {
