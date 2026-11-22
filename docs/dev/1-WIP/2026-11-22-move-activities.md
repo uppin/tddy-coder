@@ -170,7 +170,7 @@ self-watch rules and the host with a log and watches; the planned `work_queue_to
   owner's queue rides the owner's next answer as a `work_queue` event naming the operator
 
 `packages/tddy-session-activity/tests/session_watches_unit.rs` (existing):
-- [ ] `the_kinds_are_named_as_the_tools_name_them` (now 9)
+- [x] `the_kinds_are_named_as_the_tools_name_them` (now 9)
 
 ## Decisions & Trade-offs
 
@@ -191,11 +191,24 @@ self-watch rules and the host with a log and watches; the planned `work_queue_to
 
 ## Refactoring Needed
 
-_(populated by validation)_
+None outstanding.
 
 ## Validation Results
 
-_(populated by validation)_
+`/validate-changes` (2026-11-23, [W]), base `origin/feature/workqueue/badges-labels` (c619c8ec8), leak check clean
+(only n8's commits above n7).
+
+- **Fixed — test-only branch (CRITICAL by CLAUDE.md):** `WorkQueueActivities::deliver` built a tokio runtime
+  when called off one; only the sync `#[test]`s ever reached it. `publish_move` is now `async` and awaits the
+  bus; the daemon-rpc publish chain (`publish_reorder`, `publish_parents_changed`, `reorder_work_item_in_store`,
+  `announce_parents_changed`) awaits it, and the tests are `#[tokio::test]`.
+- **Fixed — vacuous assertions:** two calls in `a_move_that_changed_nothing_publishes_nothing` were unawaited
+  futures after the change; now awaited (clippy `-D warnings` clean).
+- **Info:** `exec_tool/watch_wake.rs` is 537 lines; it was 535 at the base — not grown past 500 by this PR.
+- Builds: `cargo check --all-targets` clean on all six touched packages; clippy `-D warnings` clean on
+  tddy-session-activity, tddy-daemon-rpc.
+- Stack boundary: no n6/n7 symbol implemented here; the rebase onto n7 moved reorder publishing into n7's
+  `reorder_work_item_rpc` (`work_queue_queries.rs`), `ports.rs` left as n7 wrote it.
 
 ## TODO
 
@@ -208,11 +221,11 @@ _(populated by validation)_
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
 - [ ] Refactor test issues

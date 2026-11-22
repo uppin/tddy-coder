@@ -57,8 +57,8 @@ pub enum SessionNotificationSource {
 
 impl SessionNotificationSource {
     /// Whether a notification of this source belongs to one session rather than to the operator: a
-    /// message is its recipient's, a trunk commit its orchestrator's, a queue move its owner's. The operator surfaces (the
-    /// drawer, Telegram, the desktop, `ReadProjectNotifications`) skip it.
+    /// message is its recipient's, a trunk commit its orchestrator's, a queue move its owner's. The
+    /// operator surfaces (the drawer, Telegram, the desktop, `ReadProjectNotifications`) skip it.
     pub fn is_a_sessions_own(self) -> bool {
         matches!(self, Self::Message | Self::TrunkCommit | Self::WorkQueue)
     }
