@@ -52,7 +52,11 @@ session's follower, which writes it into the answer file the hook on the target 
 `question_decision_json(answer, tool_input)` (over `encode_question_decision`) builds the
 `AskUserQuestion` decision: `PreToolUse` `permissionDecision: "allow"` with `updatedInput` — the
 call's own input plus an `answers` map (question text → chosen labels joined with `", "`, then
-`other`). Only an `ANSWERED` wait with answers that fit the call's questions produces one; otherwise
+`other`). `question_decision_json_for(hook_event_name, answer, tool_input)` builds it in the shape
+of the hook holding the question: once the waiting `PreToolUse` hold ends unanswered, Claude fires
+`PermissionRequest` for the same call, whose waiting hook holds it again as a question — and its
+decision is `{"behavior": "allow", "updatedInput": …}`. Mapping that answer as a permission (it
+names no `allow_*` option) printed nothing and dropped it. Only an `ANSWERED` wait with answers that fit the call's questions produces one; otherwise
 `None`, and Claude shows its own dialog. It moved here from `tddy-tools` (`#target-parity` 6/7) so
 the target follower can print it too; the encoding is pinned by `tests/question_decision_unit.rs`.
 

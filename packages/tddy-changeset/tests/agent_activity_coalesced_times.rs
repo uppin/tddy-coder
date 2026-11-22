@@ -6,7 +6,7 @@
 //! `call_id`; on 2026-11-22 every finished tool call `ReadSessionActivity` answered carried
 //! `started_unix_ms: 0` — the later row replaced the earlier one whole.
 //!
-//! Findings: docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Defect 2b.
+//! Findings: docs/dev/changesets/2026-11-22-coder-target-back-channel.md, problem 2.
 
 use pretty_assertions::assert_eq;
 use tddy_changeset::agent_activity::{

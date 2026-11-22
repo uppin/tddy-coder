@@ -644,14 +644,14 @@ mod remote_cut_tests {
         );
         // And the changeset records it, as a local cut records the branch it made: the session is
         // listed with it, and `GetSessionStart` keeps it after the start succeeds (findings:
-        // docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Defect 3a)
+        // docs/dev/changesets/2026-11-22-coder-target-back-channel.md, problem 3)
         let recorded = tddy_core::read_changeset(session_dir.path())
             .expect("the changeset reads")
             .branch;
         assert_eq!(recorded.as_deref(), Some("claude-cli/01a1b2c3"));
     }
 
-    /// Findings: docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Gap 5
+    /// Findings: docs/dev/changesets/2026-11-22-coder-target-back-channel.md, problem 5
     /// — an agent on a target cannot read the daemon host's session directory, where the start
     /// materialized its attachments.
     #[tokio::test]

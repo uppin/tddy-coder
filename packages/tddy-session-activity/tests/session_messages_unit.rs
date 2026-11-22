@@ -266,7 +266,7 @@ async fn the_inbox_position_advances_past_what_is_read() {
     );
 }
 
-/// Findings: docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Defect 1c
+/// Findings: docs/dev/changesets/2026-11-22-coder-target-back-channel.md, problem 1
 /// — on 2026-11-22 an orchestrator that had never read its inbox was answered `lost: 934`, then
 /// `lost: 935`: every activity record the project log had evicted, none of them a message to it.
 #[tokio::test]

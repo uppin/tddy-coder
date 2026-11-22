@@ -26,6 +26,7 @@
 //!
 //! Feature doc: docs/ft/daemon/session-notifications.md, docs/ft/daemon/project-concept.md.
 
+mod evicted_messages;
 mod storage;
 
 use std::collections::{HashMap, VecDeque};
@@ -178,34 +179,8 @@ struct ProjectState {
     /// The lines the project's file holds, which is rewritten once it has grown past twice the
     /// window.
     lines_on_disk: usize,
-    /// The messages the window has evicted, oldest first, at most
-    /// [`PROJECT_NOTIFICATION_CAPACITY`]: what a reader's `lost` counts — the messages addressed to
-    /// it that went before it read them — which the window alone cannot say once they are gone.
-    evicted_messages: VecDeque<EvictedMessage>,
-}
-
-/// A message record the window evicted: its `seq`, and whose inbox it was addressed to.
-struct EvictedMessage {
-    seq: u64,
-    os_user: String,
-    to_session_id: String,
-}
-
-impl ProjectState {
-    /// Note that `held` left the window, when it is a message.
-    fn evicted(&mut self, held: &Held) {
-        let Some(message) = held.record.message.as_ref() else {
-            return;
-        };
-        self.evicted_messages.push_back(EvictedMessage {
-            seq: held.record.seq,
-            os_user: held.os_user.clone(),
-            to_session_id: message.to_session_id.clone(),
-        });
-        if self.evicted_messages.len() > PROJECT_NOTIFICATION_CAPACITY {
-            self.evicted_messages.pop_front();
-        }
-    }
+    /// The messages the window has evicted: what a reader's `lost` counts.
+    evicted_messages: evicted_messages::EvictedMessages,
 }
 
 impl Project {
@@ -216,20 +191,15 @@ impl Project {
             .max()
             .unwrap_or(0);
         let skip = records.len().saturating_sub(PROJECT_NOTIFICATION_CAPACITY);
-        let mut state = ProjectState {
-            newest_seq,
-            lines_on_disk,
-            ..ProjectState::default()
-        };
-        for (index, held) in records.into_iter().enumerate() {
-            if index < skip {
-                state.evicted(&held);
-            } else {
-                state.window.push_back(held);
-            }
-        }
+        let (window, evicted_messages) =
+            evicted_messages::EvictedMessages::split_restored(records, skip);
         Self {
-            state: Mutex::new(state),
+            state: Mutex::new(ProjectState {
+                window,
+                newest_seq,
+                lines_on_disk,
+                evicted_messages,
+            }),
             arrived: Notify::new(),
         }
     }
@@ -352,29 +322,6 @@ impl ProjectNotificationLog {
             .map(|held| held.record.clone())
             .collect();
         (records, lost_after(&state, seq))
-    }
-
-    /// How many messages addressed to `to_session_id` (of `os_user`, in `project_id`) after `seq`
-    /// the log evicted before they could be read: `ReadSessionMessages`' `lost`. Other evicted
-    /// records — activity, statuses, other sessions' messages — are not the reader's loss.
-    pub fn messages_lost_after(
-        &self,
-        project_id: &str,
-        os_user: &str,
-        to_session_id: &str,
-        seq: u64,
-    ) -> u64 {
-        let project = self.project(project_id);
-        let state = project.lock();
-        state
-            .evicted_messages
-            .iter()
-            .filter(|evicted| {
-                evicted.seq > seq
-                    && evicted.os_user == os_user
-                    && evicted.to_session_id == to_session_id
-            })
-            .count() as u64
     }
 
     /// The newest `seq` recorded for `project_id`, `0` for a project with none: where a watch
@@ -533,12 +480,7 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
             storage::append(&path, &held)?;
             state.newest_seq = held.record.seq;
             state.lines_on_disk += 1;
-            state.window.push_back(held);
-            if state.window.len() > PROJECT_NOTIFICATION_CAPACITY {
-                if let Some(evicted) = state.window.pop_front() {
-                    state.evicted(&evicted);
-                }
-            }
+            state.keep_in_window(held);
             if state.lines_on_disk > 2 * PROJECT_NOTIFICATION_CAPACITY {
                 match storage::rewrite(&path, state.window.iter()) {
                     Ok(()) => state.lines_on_disk = state.window.len(),

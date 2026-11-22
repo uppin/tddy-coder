@@ -5,7 +5,7 @@
 //! `branch: ""` once `succeeded`: the host listed the target session with an empty branch — a
 //! target start records none in its changeset — and the empty listing replaced the reported one.
 //!
-//! Findings: docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Defect 3.
+//! Findings: docs/dev/changesets/2026-11-22-coder-target-back-channel.md, problem 3.
 
 use std::sync::Arc;
 use std::time::Duration;

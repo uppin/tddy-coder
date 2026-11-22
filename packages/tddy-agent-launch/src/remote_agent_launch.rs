@@ -62,7 +62,7 @@ const TARGET_BASE_ENV: &str = r#"HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tm
 
 /// `argv` run through the target's login shell under `env -i`: the target expands its own base
 /// set ([`TARGET_BASE_ENV`]), the agent is told the terminal it draws on
-/// ([`tddy_pty::runtime::TERMINAL_VARIABLES`] — the one the daemon's PTY emulates, as a local agent
+/// ([`tddy_pty::terminal_variables::TERMINAL_VARIABLES`] — the one the daemon's PTY emulates, as a local agent
 /// is told; `env -i` would otherwise leave it none, and an agent with no `TERM` draws without
 /// colour), then exactly `env`, then the agent is found by `argv[0]` on the target's `PATH`:
 ///
@@ -71,7 +71,7 @@ const TARGET_BASE_ENV: &str = r#"HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tm
 /// ```
 pub fn target_login_exec(argv: &[String], env: &[(String, String)]) -> String {
     let mut inner = format!("exec env -i {TARGET_BASE_ENV}");
-    for (name, value) in tddy_pty::runtime::TERMINAL_VARIABLES {
+    for (name, value) in tddy_pty::terminal_variables::TERMINAL_VARIABLES {
         inner.push_str(&format!(" {name}={}", shell_single_quote(value)));
     }
     for (name, value) in env {
@@ -625,7 +625,7 @@ mod tests {
         assert_eq!(printed.trim_end(), worktree.to_string_lossy());
     }
 
-    /// Findings: docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Gap 6
+    /// Findings: docs/dev/changesets/2026-11-22-coder-target-back-channel.md, problem 6
     /// — on 2026-11-22 the Coder probe's terminal had no colour run at all (`ReadSessionTerminal`
     /// `styles: []` on every row) while the local probe's had them: `env -i` leaves the agent no
     /// `TERM`, so Claude Code renders monochrome. The local route's PTY names its terminal

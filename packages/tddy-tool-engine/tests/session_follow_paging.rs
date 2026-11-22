@@ -207,7 +207,7 @@ fn call_ids_and_statuses(page: &[SequencedActivity]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Findings: docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Defect 2a
+/// Findings: docs/dev/changesets/2026-11-22-coder-target-back-channel.md, problem 2
 /// — every persisted row carries `activity_seq` 0, so paging by it answered `next_cursor: "0"` and
 /// then nothing, forever.
 #[test]

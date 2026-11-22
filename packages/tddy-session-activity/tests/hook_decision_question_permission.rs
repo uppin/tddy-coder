@@ -5,7 +5,7 @@
 //! to that second hold was accepted and then mapped as a permission: it names no `allow_*` option,
 //! so nothing was printed and Claude kept its own dialog open.
 //!
-//! Findings: docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Gap 7.
+//! Findings: docs/dev/changesets/2026-11-22-coder-target-back-channel.md, problem 7.
 
 use pretty_assertions::assert_eq;
 use serde_json::{json, Value};

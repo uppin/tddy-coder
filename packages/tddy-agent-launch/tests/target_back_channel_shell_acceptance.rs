@@ -7,7 +7,7 @@
 //! `01a201cd-1cd1-7c53-8481-77991a117fac`): both of the child's reports reached `.tddy/hooks.log`
 //! as `TddyMessage\t<token>\t` with an empty payload, and the follower dropped them.
 //!
-//! Findings: docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md § Defect 1.
+//! Findings: docs/dev/changesets/2026-11-22-coder-target-back-channel.md, problem 1.
 
 use std::path::Path;
 use std::process::Command;

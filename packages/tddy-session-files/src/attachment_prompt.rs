@@ -2,7 +2,7 @@
 //!
 //! A start materializes its attachments into `<session dir>/artifacts/attachments/` before the
 //! agent launches; nothing told the agent so, and on 2026-11-22 a child's first move was `find /`
-//! (findings: `docs/dev/todo/2026-11-22-coder-target-back-channel-and-activity-cursor.md` § Gap 5).
+//! (findings: `docs/dev/changesets/2026-11-22-coder-target-back-channel.md`, problem 5).
 //! A local agent reads them where they are. An agent on a target cannot reach the daemon host's
 //! session directory, so its start copies them into its worktree there
 //! ([`TARGET_ATTACHMENTS_DIR`]) and names that path.

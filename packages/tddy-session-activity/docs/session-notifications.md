@@ -254,7 +254,12 @@ recipient reads it, and nothing here keeps a copy.
   position — or after `after_message_id`, which must name one it received (`received_message`) —
   oldest first, at most `limit` (default and cap `MAX_MESSAGES_PER_READ` = 50), advancing the
   position past what it answered under the project lock. `refuse_a_bad_message_text` holds the
-  text to non-empty and `MAX_MESSAGE_BYTES` (8 KiB).
+  text to non-empty and `MAX_MESSAGE_BYTES` (8 KiB). Its `lost` is
+  `ProjectNotificationLog::messages_lost_after`: the messages **addressed to the reader** after the
+  start that the window evicted — not every evicted record of the project. The window cannot say
+  whose a record was once it is gone, so the log notes each evicted message
+  (`project_notification_log/evicted_messages.rs`, at most `PROJECT_NOTIFICATION_CAPACITY` of them,
+  rebuilt from the file on restart).
 - **Delivered once.** `watch_matches` takes the owner's inbox position: a message addressed to the
   owner that the position has passed matches no watch; and a read
   (`read_inbox`, with `skip_watch_delivered`) skips a message a live watch of the reader whose
