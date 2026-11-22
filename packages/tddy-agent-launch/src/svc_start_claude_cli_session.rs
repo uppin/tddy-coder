@@ -18,17 +18,13 @@ use tddy_rpc::Status;
 
 use crate::session_acting_identity::SessionAccountAccess;
 
-/// A managed session's child spawner and conversation spawner, each present only for its recipe.
-pub(crate) type ManagedSpawnHandlers = (
-    Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
-    Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
-);
+/// A managed session's conversation spawner, present only for a recipe that enables it.
+pub(crate) type ManagedSpawnHandler = Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>;
 
 impl LaunchSessions {
-    /// The handlers a managed session's toolcall listener is bound to: for a grill-me session, the
-    /// conversation spawner. No recipe binds a child spawner, and none for any other recipe, or for
-    /// a session with none.
-    pub(crate) fn managed_spawn_handlers(
+    /// The spawn handler a managed session's toolcall listener is bound to: for a grill-me session,
+    /// the conversation spawner; none for any other recipe, or for a session with none.
+    pub(crate) fn managed_spawn_handler(
         &self,
         managed_recipe: &Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
         os_user: &str,
@@ -36,15 +32,10 @@ impl LaunchSessions {
         project_id: &str,
         sessions_base: &Path,
         session_token: &str,
-    ) -> ManagedSpawnHandlers {
-        // TODO: nothing binds a `ChildSpawnHandler` any more — the pr-stack orchestrator that did is
-        // gone. The seam stays (the `tddy-toolcall` trait and `SpawnChild` arm, the
-        // `tddy-cli-sessions` plumbing) until its own retirement:
-        // docs/dev/todo/2026-11-14-retire-stack-child-spawn-handler.md.
-        let child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>> = None;
-        // A grill-me session instead gets a conversation-spawn handler so the agent's
-        // `spawn_conversation` relay can start a fresh implementation conversation.
-        let conversation_spawn_handler = managed_recipe.as_ref().and_then(|recipe| {
+    ) -> ManagedSpawnHandler {
+        // A grill-me session gets a conversation-spawn handler so the agent's `spawn_conversation`
+        // relay can start a fresh implementation conversation.
+        managed_recipe.as_ref().and_then(|recipe| {
             self.conversation_spawn_handler_for(
                 recipe,
                 os_user,
@@ -54,8 +45,7 @@ impl LaunchSessions {
                 &sessions_base.join(SESSIONS_SUBDIR).join(session_id),
                 self.host.session_account_access(session_token),
             )
-        });
-        (child_spawn_handler, conversation_spawn_handler)
+        })
     }
 
     /// Build the per-session [`ConversationSpawnHandler`] for a managed session when its recipe

@@ -18,8 +18,6 @@ pub(crate) struct ManagedLaunch {
 
 /// Free-function form of [`LaunchSessions::prepare_managed_workflow`](super::launch_ports::LaunchSessions::prepare_managed_workflow) so the shared
 /// claude-cli spawn logic ([`spawn_claude_cli_session_inner`]) — which has no `self` — can reuse it.
-/// `child_spawn_handler`, when present, is bound to the managed session's toolcall listener so the
-/// agent's `pr_spawn_child` relay reaches a spawner (used for PR-stack orchestrators).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_managed_workflow_inner(
     tddy_data_dir: &Path,
@@ -30,7 +28,6 @@ pub(crate) fn prepare_managed_workflow_inner(
     prompt_dir: &Path,
     tddy_tools_path: &str,
     resume_at: Option<tddy_core::workflow::ids::GoalId>,
-    child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
     github_credential_handler: Option<Arc<dyn tddy_core::toolcall::GithubCredentialHandler>>,
 ) -> Result<ManagedLaunch, Status> {
@@ -43,7 +40,6 @@ pub(crate) fn prepare_managed_workflow_inner(
             tddy_data_dir,
             &std::env::temp_dir(),
             goal,
-            child_spawn_handler,
             conversation_spawn_handler,
             github_credential_handler,
         ),
@@ -54,7 +50,6 @@ pub(crate) fn prepare_managed_workflow_inner(
             worktree_path,
             tddy_data_dir,
             &std::env::temp_dir(),
-            child_spawn_handler,
             conversation_spawn_handler,
             github_credential_handler,
         ),

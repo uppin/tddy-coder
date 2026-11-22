@@ -20,7 +20,6 @@ export * from "./cliHarnessOptions";
 export * from "./codingAgentMetadata";
 export * from "./agentPlacementChoice";
 export * from "./AgentKindBadge";
-export * from "./utils/stackParents";
 export * from "./lib/branchNames";
 export * from "./codebasePlacement";
 export * from "./selectableAgentOptions";

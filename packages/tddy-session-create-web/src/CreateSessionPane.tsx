@@ -47,10 +47,10 @@ import { StartPassphrasePrompt } from "./StartPassphrasePrompt";
 import { useCreateSessionOrchestrator } from "./useCreateSessionOrchestrator";
 import { useStartingHost } from "./useStartingHost";
 import { useCreateSessionPaneState } from "./useCreateSessionPaneState";
-import { InlineError } from "tddy-ui-web";
 import { CreateSessionLaunchFields } from "./CreateSessionLaunchFields";
 import { useOpenOnMainSessionType } from "./useOpenOnMainSessionType";
 import { useDaemons, useSelectedDaemon } from "tddy-client-web";
+import { InlineError } from "tddy-ui-web";
 
 type BranchIntent = BranchWorktreeIntent;
 

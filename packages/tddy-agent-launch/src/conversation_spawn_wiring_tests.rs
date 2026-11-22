@@ -1,7 +1,7 @@
 use crate::conversation_spawn::recipe_enables_conversation_spawn;
 
 /// Only the grill-me recipe binds a conversation-spawn handler on its managed session; other
-/// recipes (a plain TDD session, or the PR-stack orchestrator which uses `spawn-child` instead)
+/// recipes (a plain TDD session, or a session still recorded with the removed `pr-stack` recipe)
 /// must not, so `spawn_conversation` is rejected there rather than silently spawning.
 #[test]
 fn grill_me_recipe_enables_conversation_spawn_but_others_do_not() {
@@ -16,6 +16,6 @@ fn grill_me_recipe_enables_conversation_spawn_but_others_do_not() {
     );
     assert!(
         !recipe_enables_conversation_spawn("pr-stack"),
-        "pr-stack uses spawn-child, not spawn-conversation"
+        "a legacy pr-stack session must not enable the conversation-spawn handler"
     );
 }

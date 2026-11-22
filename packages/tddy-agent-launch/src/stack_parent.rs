@@ -45,8 +45,8 @@ pub struct StackBaseLookup<'a> {
 /// Carried as one value for the same reason [`StackBaseLookup`] is: `orchestrator_session_id` alone
 /// says nothing about *which disk* holds the plan it names, and recording the link on the wrong one
 /// is exactly the bug this type exists to close. `sessions_base` is this daemon's own tree, read
-/// only on the branch-derived local path — a spawn that names no node, which is the orchestrator
-/// agent's own `spawn-child` and always runs on the orchestrator's host.
+/// only on the branch-derived local path — a spawn that names no node, which is made on the
+/// orchestrator's own host (a conversation the orchestrator spawns).
 pub struct StackNodeLink<'a> {
     /// Authenticates the write wherever it is performed. A peer verifies the same stateless token
     /// with the `livekit.api_secret` both daemons share.
@@ -102,9 +102,8 @@ pub enum SpawnStackParent<'a> {
         /// The daemon whose sessions tree holds it. Empty = this one.
         daemon_instance_id: &'a str,
         /// The planned node of that parent's stack this spawn materializes, as the surface that
-        /// started it named it. Empty when the caller named none — the orchestrator agent's own
-        /// `spawn-child`, which runs on the orchestrator's host where the node can be found from
-        /// the branch instead (D34).
+        /// started it named it. Empty when the caller named none — a spawn made on the
+        /// orchestrator's own host, where the node can be found from the branch instead (D34).
         stack_node_id: &'a str,
         /// The credential a peer verifies the forwarded question with. Empty when the parent is
         /// this daemon's own session — an agent-driven spawn is made by the orchestrator's own

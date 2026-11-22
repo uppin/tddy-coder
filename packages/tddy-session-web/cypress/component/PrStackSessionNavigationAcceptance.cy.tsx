@@ -24,6 +24,7 @@ import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
+import { projectStacksPage } from "../support/pages/projectStacksPage";
 import {
   aPlannedNode,
   aStackPlanJson,
@@ -151,9 +152,9 @@ it("opens the child session a spawned planned PR is bound to", () => {
   // When
   prStackScreenPage.openBoundSession("n1");
 
-  // Then — the app navigated: the child is selected, and its own view replaced the PR-Stack screen
+  // Then — the app navigated: the child is selected, and its own view replaced the project stack view
   sessionsDrawerPage.expectSessionSelected(RECORDED_CHILD_SESSION_ID);
-  prStackScreenPage.screen().should("not.exist");
+  projectStacksPage.stackView().should("not.exist");
 });
 
 it("shows the bound session's id in the row's detail", () => {

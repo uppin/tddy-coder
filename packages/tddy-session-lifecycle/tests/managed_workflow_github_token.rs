@@ -43,7 +43,6 @@ fn a_managed_session_whose_credential_is(credential: Option<Result<String, Strin
         tddy_data.path(),
         socket_dir.path(),
         None,
-        None,
         handler,
     )
     .expect("set_up_managed_workflow must succeed");

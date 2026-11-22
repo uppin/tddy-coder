@@ -82,5 +82,4 @@ it("opens the full-screen Workflow Chat Screen instead of the terminal for a too
   workflowChatScreenPage.chat().should("exist");
   sessionsDrawerPage.detailTerminalContainer().should("not.exist");
   prStackScreenPage.plannedPrList().should("not.exist");
-  prStackScreenPage.screen().should("not.exist");
 });

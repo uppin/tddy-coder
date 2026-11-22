@@ -251,7 +251,7 @@ impl LaunchSessions {
         // `managed_workflow` (`refuse_an_unsupported_cli_session_start`). An unknown recipe is a
         // request error, never silently ignored.
         let managed_recipe = managed_recipe_for(req)?;
-        let (child_spawn_handler, conversation_spawn_handler) = self.managed_spawn_handlers(
+        let conversation_spawn_handler = self.managed_spawn_handler(
             &managed_recipe,
             os_user,
             &start.session_id,
@@ -261,7 +261,6 @@ impl LaunchSessions {
         );
         let managed = managed_recipe.map(|recipe| crate::cli_agent_steps::ManagedWiring {
             recipe,
-            child_spawn_handler,
             conversation_spawn_handler,
         });
         Ok(managed)

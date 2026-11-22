@@ -4,7 +4,7 @@ use super::build::BuildListQuery;
 use super::{
     build_executor, store_submit_result, transition_handler, ApproveRequestWire, AskRequestWire,
     BuildListRequestWire, BuildOptions, BuildRequestWire, GithubTokenRequestWire,
-    InvokeActionRequestWire, ListActionsRequestWire, SpawnChildRequestWire, SubmitRequestWire,
+    InvokeActionRequestWire, ListActionsRequestWire, SubmitRequestWire,
     ToolCallRequest, ToolCallResponse, TransitionRelayOutcome, TransitionRequestWire,
 };
 use crate::session_actions::{
@@ -25,21 +25,9 @@ use tokio::net::UnixListener;
 /// a single connection only ever hosts this one service.
 const TOOLCALL_SERVICE_NAME: &str = "tddy.toolcall.ToolcallService";
 
-/// Per-session capability to materialize a planned-PR node into a child coding session.
-///
-/// Bound per instance on the daemon's PR-stack orchestrator listener (mirroring
-/// [`ToolcallRpcService::with_transition_handler`]). Because the socket is per-session, an
-/// orchestrator can only spawn children for its own stack. `spawn_child` returns the new child
-/// session id, or an error message surfaced verbatim to the agent.
-#[async_trait]
-pub trait ChildSpawnHandler: Send + Sync {
-    async fn spawn_child(&self, node_id: &str) -> Result<String, String>;
-}
-
 /// Per-session capability to spawn a brand-new interactive conversation on a fresh worktree.
 ///
-/// The generic sibling of [`ChildSpawnHandler`]: rather than resolving a planned PR-stack node id,
-/// it takes a free-form `prompt` (plus an optional `branch` and `base_ref`) and materializes a new
+/// It takes a free-form `prompt` (plus an optional `branch` and `base_ref`) and materializes a new
 /// coding session tagged with the calling session as its orchestrator. Bound per instance on a
 /// managed session's listener (e.g. grill-me). `spawn_conversation` returns the new child session
 /// id, or an error message surfaced verbatim to the agent.
@@ -306,8 +294,6 @@ pub struct ToolcallRpcService {
     /// registry — this is how a daemon serving many concurrent sessions routes each session's
     /// `transition` to that session's own `WorkflowController` instead of a single shared handler.
     transition_handler: Option<Arc<dyn crate::toolcall::TransitionHandler>>,
-    /// Per-instance `spawn-child` handler. Present only on a PR-stack orchestrator's listener.
-    child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
     /// Per-instance `spawn-conversation` handler. Present only on a managed session's listener
     /// (e.g. grill-me).
     conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
@@ -341,19 +327,9 @@ impl ToolcallRpcService {
             repo_root,
             tddy_data_dir,
             transition_handler,
-            child_spawn_handler: None,
             conversation_spawn_handler: None,
             github_credential_handler: None,
         }
-    }
-
-    /// Bind a per-instance `spawn-child` handler (builder-style; keeps existing constructors intact).
-    pub fn with_child_spawn_handler(
-        mut self,
-        child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
-    ) -> Self {
-        self.child_spawn_handler = child_spawn_handler;
-        self
     }
 
     /// Bind a per-instance `spawn-conversation` handler (builder-style; keeps existing
@@ -386,7 +362,6 @@ impl ToolcallRpcService {
                 | "Ask"
                 | "Approve"
                 | "Transition"
-                | "SpawnChild"
                 | "SpawnConversation"
                 | "StartConversation"
                 | "ConversationStartStatus"
@@ -411,7 +386,6 @@ impl ToolcallRpcService {
             "Ask" => self.handle_ask(request).await,
             "Approve" => self.handle_approve(request).await,
             "Transition" => self.handle_transition(request),
-            "SpawnChild" => self.handle_spawn_child(request).await,
             "SpawnConversation" => self.handle_spawn_conversation(request).await,
             "StartConversation" => self.handle_start_conversation(request).await,
             "ConversationStartStatus" => self.handle_conversation_start_status(request).await,
@@ -455,32 +429,10 @@ impl ToolcallRpcService {
         })
     }
 
-    /// spawn-child: materialize a planned-PR node into a child session via the per-instance
-    /// [`ChildSpawnHandler`]. Only bound on a PR-stack orchestrator's listener; without a handler
-    /// the verb is rejected rather than silently no-op'ing.
-    async fn handle_spawn_child(
-        &self,
-        request: serde_json::Value,
-    ) -> Result<ToolCallResponse, Status> {
-        let wire: SpawnChildRequestWire = serde_json::from_value(request)
-            .map_err(|e| Status::invalid_argument(format!("invalid spawn-child request: {e}")))?;
-        toolcall_log(&format!("[spawn-child] node_id={}", wire.node_id));
-        let Some(handler) = self.child_spawn_handler.clone() else {
-            return Ok(ToolCallResponse::Error {
-                message: "spawn-child is only available in a PR-stack orchestrator session"
-                    .to_string(),
-            });
-        };
-        Ok(match handler.spawn_child(&wire.node_id).await {
-            Ok(session_id) => ToolCallResponse::SpawnChildOk { session_id },
-            Err(message) => ToolCallResponse::Error { message },
-        })
-    }
-
     /// spawn-conversation: materialize a free-form prompt into a brand-new interactive conversation
     /// on a fresh worktree via the per-instance [`ConversationSpawnHandler`]. Only bound on a
     /// managed session's listener (e.g. grill-me); without a handler the verb is rejected rather
-    /// than silently no-op'ing. Reuses [`ToolCallResponse::SpawnChildOk`] for the success wire.
+    /// than silently no-op'ing.
     async fn handle_spawn_conversation(
         &self,
         request: serde_json::Value,
@@ -508,7 +460,7 @@ impl ToolcallRpcService {
                 )
                 .await
             {
-                Ok(session_id) => ToolCallResponse::SpawnChildOk { session_id },
+                Ok(session_id) => ToolCallResponse::SpawnConversationOk { session_id },
                 Err(message) => ToolCallResponse::Error { message },
             },
         )
@@ -1130,8 +1082,7 @@ mod tests {
     }
 
     /// A `spawn-conversation` request routes through the per-instance [`ConversationSpawnHandler`]
-    /// and returns the new child session id — the generic sibling of `spawn-child`, available to
-    /// any managed session (e.g. grill-me) rather than only a PR-stack orchestrator.
+    /// and returns the new child session id, for any managed session that binds one (e.g. grill-me).
     #[tokio::test]
     async fn toolcall_rpc_service_dispatches_spawn_conversation_via_a_bound_handler() {
         /// Answers with a fixed child id so the test can tell the bound handler was invoked.
@@ -1262,7 +1213,7 @@ mod tests {
     }
 
     /// Without a bound handler, `spawn-conversation` is refused with an actionable message rather
-    /// than silently succeeding — mirroring the `spawn-child` guard.
+    /// than silently succeeding.
     #[tokio::test]
     async fn spawn_conversation_is_rejected_when_no_handler_is_bound() {
         // Given a toolcall service with no conversation-spawn handler bound
